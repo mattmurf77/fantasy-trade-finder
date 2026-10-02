@@ -241,7 +241,8 @@ def test_evidence_schema_v1():
     assert json.loads(json.dumps(doc, sort_keys=True)) == doc
     assert (doc["schema_version"], doc["generator"], doc["generator_version"]) == (1, "value_core", "value-core-1")
     assert doc["core"]["ratio_floor"] == pytest.approx(1 / 1.2, abs=1e-4)   # default band 0.20
-    assert doc["core"]["ratio_ceiling"] == pytest.approx(1.2)
+    assert doc["core"]["ratio_ceiling"] == pytest.approx(1.1)   # gain_band 0.10: asymmetric band
+    assert doc["core"]["gain_band"] == pytest.approx(0.10)
     assert doc["core"]["budget_exhausted"] is True and doc["core"]["drops_needed"] == [0, 1]
     assert doc["weights"] == {"value": 1.0, "outlook": 1.0, "rank": 1.0,
                               "repeat_penalty": 0.15, "player_cap": 3}
@@ -275,3 +276,35 @@ def test_payload_via_trade_card_to_dict(monkeypatch):
     monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade_math.human_explanations": True})
     on = server.trade_card_to_dict(cards[0], players)
     assert on["reasons"] == ["Fair on value", "Fits their rebuild"]
+
+
+def test_partner_board_from_no_evidence_stays_at_consensus():
+    """A published board with no comparison evidence is shrunk all the way to consensus,
+    so it can never qualify a throw-in (value >= 2x market)."""
+    seed = {"o1": 1640.0}
+    none = adapter.partner_board_from(elo_ratings={"o1": 1900.0}, seed_elo=seed)
+    assert none.values["o1"] == pytest.approx(elo_to_value(1640.0))
+    voted = adapter.partner_board_from(elo_ratings={"o1": 1900.0}, seed_elo=seed,
+                                       comparison_counts={"o1": 6}, confidence_source="votes")
+    assert voted.values["o1"] > none.values["o1"]
+    assert adapter.partner_board_from(elo_ratings={}, seed_elo=seed) is None
+
+
+def test_build_snapshot_keeps_partner_boards_for_known_partners_and_assets():
+    players = {p.id: p for p in [_player("v1", "WR"), _player("o1", "WR")]}
+    opp = LeagueMember(user_id="opp", username="Opp", roster=["o1"], elo_ratings={})
+    boards = {"opp": Board({"v1": 900.0, "ghost": 1.0}, {"v1": 3}),
+              "me": Board({"o1": 900.0}, {}), "stranger": Board({"v1": 1.0}, {})}
+    snap = adapter.build_snapshot(
+        league_id="L", scoring_format="1qb_ppr", viewer_team_id="me", viewer_name="Me",
+        viewer_roster=["v1"], opponents=[opp], players=players, seed_elo={"v1": 1600.0, "o1": 1600.0},
+        lineup_slots=None, max_players=None, windows={}, partner_boards=boards)
+    assert set(snap.partner_boards) == {"opp"}
+    assert dict(snap.partner_boards["opp"].values) == {"v1": 900.0}
+    assert _snapshot_from_app().partner_boards == {}
+
+
+def test_core_config_reads_throwin_ratio():
+    assert adapter.core_config_from({}).throwin_min_ratio == 2.0
+    assert adapter.core_config_from({"vc_throwin_min_ratio": 0.5}).throwin_min_ratio == 1.0
+    assert adapter.core_config_from({"vc_throwin_min_ratio": 3}).throwin_min_ratio == 3.0

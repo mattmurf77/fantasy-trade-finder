@@ -590,8 +590,10 @@ A job served by the value core writes one row per served card through the same `
  scores:   {value, outlook, rank, priority},                  # each in [0, 1]
  effective,                # priority minus repeat penalties
  market:   {give, receive, adjusted_ratio, premium, premium_side},   # raw market sums; premium_side "give"|"receive"|null
- core:     {band, ratio_floor, ratio_ceiling, stud_premium, untouchable_min_ratio,
-            uses_untouchable, drops_needed: [viewer, partner], budget_exhausted},
+ core:     {band, gain_band, ratio_floor, ratio_ceiling, stud_premium, untouchable_min_ratio,
+            uses_untouchable, drops_needed: [viewer, partner], budget_exhausted,
+            throwin_min_ratio,
+            throwin: {id, recipient, market, recipient_value} | null},   # recipient "viewer"|"partner"
  windows:  {viewer:  {window, score, source, pf_index, standings_weight},
             partner: {…same…}},   # window contender|rebuilder|middle; source declared|inferred|default
  detail:   {value:   {delta_ln, s_delta, best_in_id, best_in_market, best_in_starter, s_piece},
@@ -600,7 +602,8 @@ A job served by the value core writes one row per served card through the same `
  assets:   [{id, side, market, personal, n}]}                 # personal/n null without a board entry
 ```
 
-- `core.band` is the **effective** band, after the client's fairness preference tightened it (if it did).
+- `core.band` (the overpay side) and `core.gain_band` (the gain side) are the **effective** bands, after the client's fairness preference tightened them (if it did). The band is asymmetric: `ratio_floor` = `1 / (1 + band)` and `ratio_ceiling` = `1 + gain_band`.
+- `core.throwin` is null unless the trade carries a throw-in: the one piece below the junk floors that its recipient values at ≥ `throwin_min_ratio` × consensus. `recipient` is `"viewer"` (valued on the viewer's board) or `"partner"` (valued on the partner's published board); `market` is its consensus value and `recipient_value` that board's value, both rounded to 0.1.
 - `drops_needed` counts the sub-floor bench players each team would have to drop to stay within roster capacity.
 - `pf_index` is null when standings were unavailable (non-Sleeper league, or the standings read failed). `source: "default"` marks a team whose window inference raised.
 - `detail` floats are rounded to 4 decimals. The schema version bumps on any key change.

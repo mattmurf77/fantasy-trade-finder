@@ -24,7 +24,18 @@ into `feat/value-core-engine`, lead-reviewed. Local Python 3.14 (no 3.12 here; C
   capture equals flag-off except `safety_policy`); default band ±10% → ±20%. Band evidence: real-trade coverage
   ±10% 20% / ±15% 33% / ±20% 38% / ±25% 39% / ±30% 44% / ±40% 52%; synthetic insult rate 0.6% / 0.8% / 1.1% / 2.8% /
   28.9% / 45.6%; recall in-pool 0.8% → 2.3% at ±20% (floor rule rejects most real trades: sub-450 throw-ins).
-  Real-league freeze blocked: production reads denied by the session permission classifier after one lookup.
+  Real-league freeze blocked at first (permission classifier); the operator then granted prod reads explicitly.
+- 2026-10-01/02 real-league bench (frozen read-only: 6 leagues incl. two 2026 "Bush League" ids, 77 seats, 10 boards;
+  file kept private outside the repo). Symmetric ±20% failed on real rosters (insult 5.6%, median given +17.1%;
+  synthetic had said 1.1%), so the band became asymmetric: pay up to 20% / take up to 10% (`vc_band` 0.20,
+  `vc_gain_band` 0.10). Default, first 30 cards: insult 0.2%, real piece back 93.2%, median value given +8.4%,
+  near-duplicates 0, repeat acquisitions 0, worst acquired-asset appearances 4 (one seat, secondary piece; verdict
+  FAIL on that guardrail only); overpays >10% on 23/2,220 cards. Throw-ins (operator rule: recipient values it
+  >= 2x market, >= 450, with evidence): 13/2,220 first-30 cards (4 to viewer, 9 to partner); before the evidence
+  requirement unpriced/unranked players produced up to 28/30 cards on one seat. An independent review found 2 bugs
+  (throw-in toggled the stud premium; shortlist cut before the junk check) and 2 risks (variant budget; thin partner
+  boards): all fixed with regression tests (`THROWIN_MIN_COMPARISONS` = 3, premium on core counts, per-pair cap,
+  separate variant budget).
 Evidence delta: unit + e2e tests and the WP3 [code-walk](../docs/plans/value-core-engine/code-walk.md); no mobile change,
 so no TestFlight checklist is due until the flag is flipped.
 

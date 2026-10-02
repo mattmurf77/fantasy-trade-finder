@@ -11,7 +11,7 @@ them. Every flag-on run patches the three network touches
 (_value_core_standings, _league_lineup_slots, _sleeper_roster_limit).
 
 Covered:
-  • registration: flag default-off and mirrored; 12 vc_* knobs seeded and
+  • registration: flag default-off and mirrored; 14 vc_* knobs seeded and
     absent from trade_service._DEFAULT_CFG;
   • flag OFF never imports backend.value_core;
   • flag ON (tester or vc_testers_only=0) serves value-core cards with a
@@ -47,10 +47,10 @@ from backend.trade_service import LeagueMember
 REPO = Path(__file__).resolve().parents[2]
 
 VC_DEFAULTS = {
-    "vc_band": 0.20, "vc_stud_premium": 0.15, "vc_untouchable_min_ratio": 1.08,
+    "vc_band": 0.20, "vc_gain_band": 0.10, "vc_stud_premium": 0.15, "vc_untouchable_min_ratio": 1.08,
     "vc_max_assets_per_side": 14.0, "vc_max_per_partner": 200.0, "vc_w_value": 1.0,
     "vc_w_outlook": 1.0, "vc_w_rank": 1.0, "vc_repeat_penalty": 0.15, "vc_player_cap": 3.0,
-    "vc_standings_weight": 0.30, "vc_testers_only": 1.0,
+    "vc_standings_weight": 0.30, "vc_testers_only": 1.0, "vc_throwin_min_ratio": 2.0,
 }
 
 
@@ -127,7 +127,7 @@ def test_flag_registered_default_off_and_mirrored():
 def test_model_config_defaults_seeded_not_in_default_cfg():
     seeded = {k: v for k, v, _d in _MODEL_CONFIG_DEFAULTS if k.startswith("vc_")}
     assert seeded == pytest.approx(VC_DEFAULTS)
-    assert len(seeded) == 12
+    assert len(seeded) == 14
     assert not [k for k in ts._DEFAULT_CFG if k.startswith("vc_")]
 
 

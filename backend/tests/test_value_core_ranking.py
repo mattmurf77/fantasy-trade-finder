@@ -163,3 +163,19 @@ def test_score_order_preserved():
               ft(s, "P", ["a1", "a3"], ["b1", "b3"]), ft(s, "P", ["a2"], ["b3", "b2"])]
     scored = ranking.score_trades(s, Request("V"), trades, RankConfig())
     assert [st.trade for st in scored] == trades
+
+
+def test_reasons_explain_the_throwin():
+    """A card carrying a throw-in says whose board values it, and by how much."""
+    import dataclasses
+    s = snap({"V": BODIES("V") + [A("x", "WR", 1000), A("vt", "WR", 200)],
+              "P": BODIES("P") + [A("y", "WR", 950), A("pt", "RB", 250)]})
+    to_viewer = dataclasses.replace(ft(s, "P", ["x"], ["y", "pt"]), throwin="pt")
+    st, req = score_one(s, to_viewer, board=Board({"pt": 575.0}, {"pt": 9}))
+    assert "Throw-in: you rank PT at 2.3× market" in ranking.card_reasons(st, s, req)
+
+    s2 = dataclasses.replace(s, partner_boards={"P": Board({"vt": 600.0}, {"vt": 30})})
+    to_partner = dataclasses.replace(ft(s2, "P", ["x", "vt"], ["y"]), throwin="vt")
+    st2, req2 = score_one(s2, to_partner)
+    assert "Throw-in: they rank VT at 3.0× market" in ranking.card_reasons(st2, s2, req2)
+    assert len(ranking.card_reasons(st2, s2, req2)) <= 3

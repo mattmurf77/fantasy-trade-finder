@@ -128,6 +128,9 @@ class LeagueSnapshot:
     rules: RosterRules
     first_round_value: float        # market value at the first_1 tier floor (tier_config.json)
     elite_value: float              # market value at the firsts_4plus tier floor
+    # team_id -> that partner's published board, confidence-shrunk toward consensus. Only
+    # partners who really ranked (server has_rankings) appear; absent = no evidence.
+    partner_boards: Mapping[str, Board] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -152,13 +155,15 @@ class Request:
 
 @dataclass(frozen=True)
 class CoreConfig:
-    band: float = 0.20
+    band: float = 0.20        # how much MORE market value the viewer may give (overpay side)
+    gain_band: float = 0.10   # how much MORE market value the viewer may receive (the partner's loss)
     stud_premium: float = 0.15
     untouchable_min_ratio: float = 1.08
     max_assets_per_side: int = 14
     max_per_partner: int = 200
     asset_floor_abs: float = 450.0
     filler_min_frac: float = 0.25
+    throwin_min_ratio: float = 2.0   # recipient's value / consensus market a throw-in needs
 
 
 @dataclass(frozen=True)
@@ -182,6 +187,8 @@ class FairTrade:
     premium_side: Side | None       # viewer side whose package was credited with the premium
     uses_untouchable: bool
     drops_needed: tuple[int, int]   # (viewer, partner) sub-floor bench drops needed to stay within max_players
+    throwin: str | None = None      # the one piece exempt from the junk rules: its recipient values it
+                                    # >= throwin_min_ratio x market (and >= the asset floor)
 
     @property
     def key(self) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
@@ -247,6 +254,8 @@ class PipelineResult:
 **The public signatures in lld.md** (§4.1, §5.1, §5.2, §5.6, §6, §7.1, §8) are part of the contract too. Change them only through the lead.
 
 **Changes to date:**
+- 2026-10-01 — throw-ins, lead-applied on the operator's rule: *"throwins are fine, but only if there is a clear throwin that the recipient values much higher than consensus (double the value)"*. `types.py` gained `LeagueSnapshot.partner_boards: Mapping[str, Board]` (default empty), `FairTrade.throwin: str | None` (default None) and `CoreConfig.throwin_min_ratio = 2.0` (seed `vc_throwin_min_ratio`, clamp [1, 10]). lld §4.1 gained `core.throwin_ok`, `MAX_THROWIN_OPTIONS = 3` and `THROWIN_MIN_COMPARISONS = 3`; lld §7.1 gained `adapter.partner_board_from` and the `partner_boards=` keyword of `adapter.build_snapshot`. A throw-in needs evidence on both sides (market > 0, and at least `THROWIN_MIN_COMPARISONS` comparisons behind the recipient's value for that player): before that rule, unranked or unpriced players produced up to 28 of 30 cards on one real seat. A review pass the same day fixed three more things: a throw-in is not a piece for the stud premium, so it never switches the premium on or off; the throw-in shortlist is cut to `MAX_THROWIN_OPTIONS` per candidate pair after the junk check, not per partner before it; and throw-in variants have their own check budget, so they never starve base pairs. Real bench (6 leagues, 77 seats, first 30 cards): throw-ins on 17 of 2,220 cards, 4 to the viewer and 13 to the partner. Tests added: core `test_throwin_to_viewer_needs_double_value`, `test_throwin_value_must_clear_the_floor`, `test_throwin_to_partner_uses_their_published_board`, `test_throwin_is_exempt_from_reducible_and_at_most_one`, `test_evaluate_trade_marks_the_explicit_throwin`, `test_throwin_needs_real_evidence_on_both_sides`, `test_throwin_never_switches_the_stud_premium`, `test_throwin_shortlist_is_cut_per_pair_after_the_junk_check`, `test_throwin_needs_three_comparisons`; ranking `test_reasons_explain_the_throwin`; adapter `test_partner_board_from_no_evidence_stays_at_consensus`, `test_build_snapshot_keeps_partner_boards_for_known_partners_and_assets`, `test_core_config_reads_throwin_ratio`. The knob count is now 14.
+- 2026-10-01 — asymmetric band, lead-applied on the operator's decision. `types.py` gained `CoreConfig.gain_band = 0.10` (seed `vc_gain_band`, clamp [0.01, 0.50]); `CoreConfig.band` (0.20) is now the **overpay** side only, and `vc_band`'s description says so. The viewer may give up to `band` more market value than they get (ratio ≥ 1/(1+band)) but may take at most `gain_band` more (ratio ≤ 1+gain_band); the client fairness preference tightens both through `effective_band`. The evidence `core` block gained `gain_band`, and `ratio_ceiling` is now 1+gain_band. Evidence on the frozen real bench (6 leagues, 77 seats, first 30 cards): symmetric ±10% gives insult 0.3% and median value given +8.8%; symmetric ±20% gives insult **5.6%** (fails the 3% guardrail) and +17.1%; pay 20% / take 10% (the default) gives insult 0.2% and +8.4%, real piece back 93.3%, 0 near-duplicates and 0 repeat acquisitions. Overpays above 10% reach only 16 of the 2,220 first-30 cards: they surface only where the viewer's rankings justify them. This supersedes the symmetric ±20% line below the same day; that recommendation rested on a synthetic insult rate (1.1%) the real leagues did not reproduce. `CFG10 = CoreConfig(band=0.10)` in `test_value_core_core.py` is now symmetric ±10% (gain_band defaults to 0.10).
 - 2026-10-01 — `types.py` `CoreConfig.band` default 0.10 → 0.20 (and the `vc_band` seed), lead-applied on the operator's decision that real trades should steer the band significantly. Evidence: ±20% covers 38% of real FFV3/Lakeview trades (±10%: 20%; ±25%: 39%); synthetic insult rate 1.1% (±25%: 2.8%, ±30%: 29%). `test_value_core_core.py` pins `CFG10 = CoreConfig(band=0.10)` because it tests band mechanics.
 - 2026-09-30 — lld §4.5 cap order (not `types.py`), lead-initiated at WP1 review: enumeration and the per-partner cap round-robin over headliners instead of biggest-first. `test_per_partner_cap_keeps_biggest_headliners` became `test_per_partner_cap_spreads_headliner_pairs`, and `test_value_core_perf.py::test_pool_spreads_across_give_headliners` was added. Reason: the biggest-first caps acted as a hidden ranking (92% of the pool gave away a top-3 asset).
 - 2026-09-30 — lld §5.6 deck variety rules + §8.2 guardrails (not `types.py`), operator request: *"I don't want to see the same iteration of a trade with a trade partner with only minor pieces swapped out... or the same trade partner with different years' draft picks"*. `deck.py` gained `idea_key`, `acquisition_key` and `partner_cap`: one card per trade idea (lower-priority versions are dropped), acquisitions shown in rounds, and a partner cap beside the per-asset cap in the first 30. The bench appearances guardrail now counts acquired assets only (`max_acquired_appearances`), and `near_duplicates` = 0 is a new guardrail. Deck tests: `test_minor_piece_swaps_are_one_idea`, `test_pick_years_are_one_idea_and_one_acquisition`, `test_each_acquisition_once_before_any_repeat` and `test_partner_cap_in_first_30` were added, and `test_lazy_equals_naive`'s reference implements all three rules. Bench tests: `test_guardrails_count_near_duplicates_and_repeat_acquisitions` was added. On the 12-seat synthetic league (first 30 cards, before → after): near-duplicates median 1.5 / max 5 → 0; repeat acquisitions median 8 / max 11 → 0; distinct acquisitions 22 → 30; the deck shrank from about 2,200 to about 1,050 ideas.
@@ -307,7 +316,7 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
 5. The complexity bounds in lld §4.6 are enforced by code: `max_checks_per_partner`, `time_budget_s`, `max_per_partner`.
 6. No logging, no I/O, no flag or config reads.
 
-**Tests: `backend/tests/test_value_core_core.py`.** Every team carries `BODIES(t)` unless stated. The default config is `CoreConfig()`.
+**Tests: `backend/tests/test_value_core_core.py`.** Every team carries `BODIES(t)` unless stated. The default config is `CFG10 = CoreConfig(band=0.10)`, a symmetric ±10% band (`gain_band` defaults to 0.10), because these tests pin band mechanics; the "outside ±10%" notes below refer to it.
 
 | Test | Fixture | Asserts |
 |---|---|---|
@@ -333,6 +342,15 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
 | `test_evaluate_trade_agrees_with_find` | the stud fixture | for every kept trade, `evaluate_trade(...).ok` and an equal `adjusted_ratio`; for the 4200+4200 package, `ok is False`, `reason == "band"`, `trade is not None` |
 | `test_evaluate_trade_rejects_foreign_ids` | — | a give id not on the viewer's team raises `ValueError` |
 | `test_unknown_viewer_raises` | — | `ValueError` |
+| `test_throwin_to_viewer_needs_double_value` | V: `a1` WR 3000 · P: `b1` WR 2600, `pw9` WR 300, `pw8` WR 280 (0.867 alone: outside ±10%) | board `pw9` = 700 (n 12, ≥ 2 × 300 and ≥ 450): trade `(("a1",), ("b1","pw9"))` with `throwin == "pw9"`, `premium_side is None` (a throw-in is not a piece for the premium) and `adjusted_ratio == approx(2900/3000)`. Board 550: no `a1` → `b1` trade. No board: no throw-in anywhere |
+| `test_throwin_value_must_clear_the_floor` | P: `b1` 2850, `pw9` 150 | board `pw9` = 400 (≥ 2 × 150 but < 450): no throw-in; 460: a `pw9` throw-in |
+| `test_throwin_to_partner_uses_their_published_board` | V: `a1` 3000, `va9` 300, `va8` 280 · P: `b1` 3500 (1.167: outside ±10%) | no `partner_boards`: nothing receives `b1` alone. `partner_boards={"P": va9 = 900, n 20}`: `(("a1","va9"), ("b1",))` with `throwin == "va9"`, `premium_side is None`, `adjusted_ratio == approx(3500/3300)` |
+| `test_throwin_is_exempt_from_reducible_and_at_most_one` | V: `a1` 3000 · P: `b1` 3000, `pw9` 250, `pw7` 260, `pw8` 280; board `pw9` 600, `pw7` 700 | `a1 → b1`, `a1 → (b1, pw7)` and `a1 → (b1, pw9)` all present; no trade carries two sub-floor pieces |
+| `test_evaluate_trade_marks_the_explicit_throwin` | the `pw9` gap league | with the board: `ok`, `trade.throwin == "pw9"`. Without: `reason == "floor"`, `trade.throwin is None` |
+| `test_throwin_needs_real_evidence_on_both_sides` | the gap league | board `pw9` = 900 with `comparisons` 0: no throw-in. `pw9` at market 0 with a ranked board: no throw-in |
+| `test_throwin_never_switches_the_stud_premium` | V: `a` 4000, `b` 3600 · P: `s` 8000, `ti` 300 (board 700, n 5) | `(("a","b"), ("s",))` absent (1.194 with the premium: too big a gain), and `(("a","b"), ("s","ti"))` absent too: the throw-in does not turn the 2-for-1 into a premium-free 2-for-2 |
+| `test_throwin_shortlist_is_cut_per_pair_after_the_junk_check` | the gap league plus P's `m1`–`m3` RBs (1100–1300) that the viewer's board also rates ≥ 2× | `(("a1",), ("b1","pw9"))` present with `throwin == "pw9"` (the bigger, non-junk RBs do not crowd it off the shortlist); `evaluate_trade` agrees |
+| `test_throwin_needs_three_comparisons` | the gap league | board `pw9` = 700 with 2 comparisons: no throw-in; with `THROWIN_MIN_COMPARISONS`: a `pw9` throw-in |
 
 **Tests: `backend/tests/test_value_core_perf.py`.**
 - **`test_fourteen_team_league_bounded`.** The fixture is generated in the test: `random.Random(11)`, 14 teams, each with 26 core players (QB 3 / RB 8 / WR 10 / TE 5) and 6 picks. Markets are `min(9500, max(100, exp(gauss(ln 1200, 1.0))))` and ages are `uniform(21, 33)`. Slots are `("QB","RB","RB","WR","WR","WR","TE","FLEX","FLEX","SUPER_FLEX")` with `max_players=30`. It asserts:
@@ -392,6 +410,7 @@ Also run `python3 -c "import backend.value_core.core"`.
 | `test_reasons_pay_over_market` | give 1100, receive 1000 | the first reason is `"You pay 9% over market"` |
 | `test_reasons_piece_fills_slot` | no board, neutral windows, receive a would-be starter named `Y` | `("Fair on value", "Y would start for you")` |
 | `test_score_order_preserved` | 5 trades | the output order equals the input order |
+| `test_reasons_explain_the_throwin` | V receives `pt` (market 250) as a throw-in, board 575; P receives `vt` (market 200) as a throw-in, `partner_boards` 600 | the reasons contain `"Throw-in: you rank PT at 2.3× market"`, then `"Throw-in: they rank VT at 3.0× market"`; never more than 3 lines |
 
 **Tests: `backend/tests/test_value_core_deck.py`.** `ScoredTrade` objects are built by hand with chosen priorities.
 
@@ -429,7 +448,7 @@ Only `types.py` from WP1 is needed.
 3. Value-core cards match lld §7.2: prefix `vc_`, `basis="consensus"`, `preserve_server_order`, `reasons`, the value bar fields.
 4. Every served card has a `deck_impressions` row carrying the §7.3 evidence and the `model_arm`/`policy_variant`/`policy_version` values.
 5. `trades_generated` carries `engine_version="value_core"`.
-6. The 12 `vc_*` keys are seeded, and none is in `trade_service._DEFAULT_CFG`, so `test_bakeoff_arm_a_golden.py:897` is untouched and passing.
+6. The 14 `vc_*` keys are seeded (12 at build, plus `vc_gain_band` and `vc_throwin_min_ratio` on 2026-10-01, §3.1), and none is in `trade_service._DEFAULT_CFG`, so `test_bakeoff_arm_a_golden.py:897` is untouched and passing.
    - The owner request hash ignores `vc_*` keys (lld §9.1e), so owner experiment units are not reshuffled on deploy.
 7. `code-walk.md` is written with real post-edit file:line citations covering the three items in scope §3.
 
@@ -466,8 +485,11 @@ def vc_stubs(monkeypatch):
 | `test_build_request_no_board` | `user_elo={}` → `board is None` |
 | `test_build_request_filters_ids` | untouchable/pin ids not in the snapshot are dropped; `pinned_give_mode="bogus"` → `"any"` |
 | `test_to_trade_cards_shape` | a hand-built `PipelineResult` with 2 entries gives 2 `TradeCard`s: `trade_id` starts `vc_`, `basis == "consensus"`, `preserve_server_order is True`, `composite_score == priority`, `give_value`/`receive_value` equal the market sums, the evidence map is keyed by `id(card)` |
-| `test_evidence_schema_v1` | the evidence dict has exactly the top-level keys in lld §7.3; `json.dumps` round-trips; `core.ratio_floor == approx(1/1.1)` |
+| `test_evidence_schema_v1` | the evidence dict has exactly the top-level keys in lld §7.3; `json.dumps` round-trips; `core.ratio_floor == approx(1/1.2)` (band 0.20), `core.ratio_ceiling == approx(1.1)` and `core.gain_band == approx(0.10)` (the asymmetric band) |
 | `test_payload_via_trade_card_to_dict` | `backend.server.trade_card_to_dict(card, players)` has `preserve_server_order: True`, `favors`/`gap` keys, and no `lane`. `reasons` is present when `FLAGS.trade_math_human_explanations` is monkeypatched on |
+| `test_partner_board_from_no_evidence_stays_at_consensus` | a published Elo of 1900 with no comparisons prices at `elo_to_value(seed)`; with 6 votes it prices higher; empty Elo → `None` |
+| `test_build_snapshot_keeps_partner_boards_for_known_partners_and_assets` | of boards for `opp`, the viewer `me` and an unknown `stranger`, only `opp` survives, cut to known asset ids; a snapshot built without `partner_boards` has `{}` |
+| `test_core_config_reads_throwin_ratio` | `{}` → 2.0; `vc_throwin_min_ratio` 0.5 → 1.0 (clamp); 3 → 3.0 |
 
 **Tests: `backend/tests/test_value_core_serving.py`.** These use `backend/tests/support/bakeoff_harness.run_capture(extra_patches=...)` (`bakeoff_harness.py:135`) plus `vc_stubs`. Every flag-on test must patch three network touches:
 - `server._value_core_standings` → `({}, 0)`;
@@ -477,14 +499,14 @@ def vc_stubs(monkeypatch):
 | Test | Asserts |
 |---|---|
 | `test_flag_registered_default_off_and_mirrored` | `"trade.value_core" in FLAG_KEYS`; `config/features.json` and `fixtures/flags/release.json` both hold `false` |
-| `test_model_config_defaults_seeded_not_in_default_cfg` | 12 `vc_*` keys in `database._MODEL_CONFIG_DEFAULTS` with the lld §3 defaults; none in `trade_service._DEFAULT_CFG` |
+| `test_model_config_defaults_seeded_not_in_default_cfg` | 14 `vc_*` keys in `database._MODEL_CONFIG_DEFAULTS` with the lld §3 defaults; none in `trade_service._DEFAULT_CFG` |
 | `test_flag_off_never_imports_value_core` | purge `backend.value_core*` from `sys.modules`; run `run_capture()` with the flag off → still not imported; `capture["status"] == "complete"` |
 | `test_flag_on_serves_value_core` | patch `server._value_core_enabled → True` and `_trade_service_mod._cfg["vc_testers_only"] = 0.0`. Every card in the job has `trade_id` starting `vc_` and `preserve_server_order`. `deck_impressions` rows have `model_arm == "value_core"` and `policy_variant == "value_core"`; `json.loads(valuation_json)["generator"] == "value_core"`. `job["final_checks_pending"] is False` |
 | `test_testers_only_gate` | flag on, `vc_testers_only = 1`, `_load_tester_allowlist → set()` → legacy path (no `vc_` cards); `→ {"user_me"}` → value-core path |
 | `test_trade_intent_stays_legacy` | flag on and `run_capture(trade_intent="consolidate")` → no `vc_` cards |
 | `test_prepared_inventory_unsupported_when_on` | `prepared_trade_runtime.supported(server, "L")` is False when `_value_core_enabled` is True; the pre-existing value when False |
 | `test_safety_signature_entry` | `"value_core" in _trade_safety_signature()` iff the flag is on |
-| `test_owner_request_hash_ignores_vc_keys` | build the same owner context twice, once with 12 extra `vc_*` keys in `context["config"]` → `_owner_selected_assignment(...)["request_hash"]` is identical |
+| `test_owner_request_hash_ignores_vc_keys` | build the same owner context twice, once with the 14 `vc_*` defaults added to `context["config"]` → `_owner_selected_assignment(...)["request_hash"]` is identical |
 | `test_standings_failure_non_fatal` | `outlook.build_league_state` raises → `_value_core_standings(...) == ({}, 0)` and a warning is logged |
 | `test_pipeline_error_falls_back_to_legacy` | `pipeline.run` raises → the error is logged, `job["status"] == "complete"`, cards come from the legacy engine (no `vc_` ids, no `value_core` impression rows). Revised 2026-10-01 (PRD Q1) |
 | `test_fallback_matches_flag_off_output` | the fallback capture equals the flag-off capture, except for the `safety_policy` job key the flag adds |
@@ -564,7 +586,7 @@ Recall cases take their lineup slots from the fixture's own `league.roster_posit
 
 | File | Content |
 |---|---|
-| `docs/config-reference.md` | **Flag:** a `trade.value_core` row with its description and rollback, near the trade flag sections (`:249`–`:337`), plus the TOC (`:80-152`). **Knobs:** a `### Value core (trade.value_core)` subsection under `## model_config keys` (`:733`) with all 12 `vc_*` keys (defaults, clamps, where read), a list of the reused keys, and the rollout lever `vc_testers_only` |
+| `docs/config-reference.md` | **Flag:** a `trade.value_core` row with its description and rollback, near the trade flag sections (`:249`–`:337`), plus the TOC (`:80-152`). **Knobs:** a `### Value core (trade.value_core)` subsection under `## model_config keys` (`:733`) with all 14 `vc_*` keys (defaults, clamps, where read), a list of the reused keys, and the rollout lever `vc_testers_only` |
 | `docs/api-reference.md` | Under `### Trade card object` (`:440`), a "Value-core cards" paragraph (lld §7.2 payload). Add a note on the `/api/trades/generate` row (`:357`): engine selection, and intent jobs stay legacy. No route changes |
 | `docs/data-dictionary.md` | `## deck_impressions` (`:490`): the value-core row values (`model_arm`/`policy_variant = "value_core"`, `policy_version = "value-core-1"`, `arm_rank`, `fairness_threshold = ratio floor`) and the `valuation_json` schema v1 (lld §7.3). Analytics list (`:1357`): `trades_generated.engine_version` gains `"value_core"` |
 | `docs/architecture.md` | New section "Value-core engine" before `## Data flow` (`:258`), summarising hld §1–§4. A Components/Backend table row (`:376`) for `backend/value_core/` and the three eval tools |
@@ -609,13 +631,14 @@ Run on `feat/value-core-engine` after all five packages have merged, from the wo
     - Surface the scope §3 structural-guard waiver.
     - Ask PRD open questions Q1–Q6.
     - Ask the operator to run `value_core_bench freeze` on the five bench leagues. The credentials are in `secrets.local.env`, and it is a prod read.
+      Done 2026-10-01: six leagues (two 2026 leagues share the name "Bush League"; both are frozen), 77 teams, 10 boards.
     - Run the bench and the blind-grade export.
 
 ## 7. Docs matrix
 
 | Doc | Trigger (CLAUDE.md) | Package |
 |---|---|---|
-| `docs/config-reference.md` | new flag + 12 `model_config` keys | WP5 |
+| `docs/config-reference.md` | new flag + 14 `model_config` keys | WP5 |
 | `docs/api-reference.md` | card payload contract (additive); generate route note | WP5 |
 | `docs/data-dictionary.md` | new `valuation_json` shape / column values; `trades_generated` prop value | WP5 |
 | `docs/architecture.md` + `living-memory/HLD.md` | new backend package and data flow | WP5 |

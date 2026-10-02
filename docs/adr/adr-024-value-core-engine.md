@@ -33,14 +33,22 @@ rebuild the suggestion engine rather than keep tuning the stack.
 
 1. **A value-only core.** For the viewer against each partner, enumerate every
    1–3 × 1–3 package and keep those inside one fairness band on consensus market
-   value (`vc_band`, ±20%, widened from ±10% on 2026-10-01 because real league
-   trades sit far wider). When one side gets the trade's single best asset with
+   value. The band is asymmetric (operator, 2026-10-01): the viewer may give up
+   to `vc_band` (20%) more market value than they get, but take at most
+   `vc_gain_band` (10%) more from the partner. On the frozen real-league bench a
+   symmetric ±20% band insulted the partner on 5.6% of first-30 cards; this one
+   on 0.2%. When one side gets the trade's single best asset with
    fewer pieces, credit it one competitor-sized stud premium,
    `vc_stud_premium × (headliner/elite)²` (up to 15%). A few legible hard rules
    replace the gate stack: asset floor, junk filler relative to the trade's
    headliner, untouchables only for an above-market return, irreducibility,
-   roster size, lineup legality. The core never sees a personal board or a
-   window.
+   roster size, lineup legality. One exception to the junk rules: a single
+   **throw-in**, a small piece its recipient values at ≥ 2× consensus
+   (`vc_throwin_min_ratio`) and at least the asset floor, with real evidence
+   behind both numbers (operator, 2026-10-01). The core never sees a window, and
+   reads a board only to qualify a throw-in: the viewer's board for a piece the
+   viewer receives, the partner's published board (real rankings only) for a
+   piece the partner receives.
 2. **A separate three-weight ranking.** Every fair trade gets a value, an outlook
    and a rank score in [0, 1]. Priority is their weighted mean, equal weights by
    default: five ranking knobs in all. The ranking orders and never drops a
@@ -98,11 +106,14 @@ goes into the existing `deck_impressions.valuation_json`, with `model_arm` and
   stamps, breaker narration, lanes, fatigue, taste, exploration wildcards,
   first-session shaping and ghost holdout.
 - **The partner is judged on consensus value and their window,** not on their
-  personal board.
+  personal board. The one exception is a throw-in they receive: their published
+  rankings must value it at double consensus or more, so a leaguemate who never
+  ranked never receives one.
 - **Precedence:** while the flag is on, value-core decks supersede the
   [ADR-022](adr-022-preference-led-bilateral.md) bilateral ordering for the jobs
   they serve.
-- **Risks:** the default band and premium are uncalibrated until the recall run;
+- **Risks:** the default premium is uncalibrated and the band was chosen on a
+  six-league bench;
   recall evidence is thin (77 reconstructable trades, no ages, only traded
   picks); trade swipes still move the user's board through the existing
   `trade_k_like` / `trade_k_pass` path.

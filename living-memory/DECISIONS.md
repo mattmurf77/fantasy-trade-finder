@@ -5,8 +5,11 @@
 2026-09-30. Operator decision after rating the deck a 5 of 10 and "probably worse than value-only
 competitors". Stop patching v2/v3/owner/bilateral (~315 knobs, ~15 stacked gates; composite score
 uncorrelated with likes, D-180). New `backend/value_core/`: the core enumerates 1–3 × 1–3 packages and keeps
-only those inside a consensus fairness band (stud premium on consolidation; hard rules: legal rosters,
-untouchables above market, no filler, no reducible pieces). The ranking layer scores each fair trade on value,
+only those inside a consensus fairness band, asymmetric since 2026-10-01 (operator): the viewer may overpay by up
+to 20% but gain at most 10%, because a symmetric ±20% band insulted the partner on 5.6% of real-bench cards (stud
+premium on consolidation; hard rules: legal rosters, untouchables above market, no filler except one throw-in its
+recipient's board values at ≥ 2× consensus with real evidence on both sides (operator, 2026-10-01), no reducible
+pieces). The ranking layer scores each fair trade on value,
 outlook (both teams' windows) and the viewer's rankings; priority is their weighted mean; the deck keeps one
 card per trade idea, rounds acquisitions, and caps partners (and any asset at 3) in the first 30. Behind
 `trade.value_core` (default off) with a testers-only lever and a logged legacy fallback on build errors (operator,

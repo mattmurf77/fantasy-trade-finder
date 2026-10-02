@@ -1566,15 +1566,17 @@ Every operator change goes through `scripts/set_knob.py` so it lands in `model_c
 
 ### Value core (flag `trade.value_core`) — `backend/value_core/adapter.py`, DB-seeded
 
-Twelve Float keys, seeded in `database._MODEL_CONFIG_DEFAULTS` and tunable live via `PUT /api/admin/config/<key>` (use `scripts/set_knob.py` so the change lands in `model_config_changes`). **None is in `trade_service._DEFAULT_CFG`**, which keeps the arm-A golden inventory untouched. The value-core job reads them from its captured config snapshot (`dict(trade_service._cfg)`); a missing key falls back to the dataclass default in `backend/value_core/types.py`. The adapter clamps every value to the range below rather than rejecting it. All are inert while `trade.value_core` is off.
+Fourteen Float keys, seeded in `database._MODEL_CONFIG_DEFAULTS` and tunable live via `PUT /api/admin/config/<key>` (use `scripts/set_knob.py` so the change lands in `model_config_changes`). **None is in `trade_service._DEFAULT_CFG`**, which keeps the arm-A golden inventory untouched. The value-core job reads them from its captured config snapshot (`dict(trade_service._cfg)`); a missing key falls back to the dataclass default in `backend/value_core/types.py`. The adapter clamps every value to the range below rather than rejecting it. All are inert while `trade.value_core` is off.
 
 | Key | Default | Clamp | Read as | Role |
 |---|---:|---|---|---|
-| `vc_band` | 0.20 | [0.01, 0.50] | `CoreConfig.band` | Half-width of the fairness band on the premium-adjusted market ratio: a trade is kept iff `1/(1+b) ≤ ratio ≤ 1+b`. The client fairness preference can only tighten it — `min(b, max(0.02, 1 − fairness_threshold))` — never loosen it. Set to 0.20 by the operator's 2026-10-01 decision: it covers 38% of real league trades (vs 20% at 0.10) with a synthetic insult rate of 1.1%; 0.25 adds almost no coverage and 0.30 pushes insults to 29%. |
+| `vc_band` | 0.20 | [0.01, 0.50] | `CoreConfig.band` | The **overpay** side of the fairness band: the most MORE market value the viewer may give than they get. A trade needs premium-adjusted ratio (receive ÷ give) `≥ 1/(1+band)`. The client fairness preference can only tighten it — `min(band, max(0.02, 1 − fairness_threshold))` — never loosen it. The 0.20 comes from real-trade recall: a ±20% band admits 38% of the reconstructable real league trades, ±10% only 20% |
+| `vc_gain_band` | 0.10 | [0.01, 0.50] | `CoreConfig.gain_band` | The **gain** side: the most MORE market value the viewer may receive, i.e. the partner's loss. A trade needs ratio `≤ 1 + gain_band`; the client preference tightens it the same way. The band is asymmetric by the operator's 2026-10-01 decision. On the frozen real-league bench (6 leagues, 77 seats, first 30 cards) pay 20% / take 10% gave a 0.2% insult rate, a +8.4% median value given and 93.3% real piece back; symmetric ±10% gave 0.3% / +8.8%, and symmetric ±20% gave 5.6% insults, failing the 3% guardrail. Overpays above 10% reached only 16 of 2,220 first-30 cards |
 | `vc_stud_premium` | 0.15 | [0.0, 0.50] | `CoreConfig.stud_premium` | Premium credited to the side that gets the trade's single best asset with fewer pieces, at an elite headliner (`firsts_4plus` tier floor). Scales as `(headliner / elite)²`: about 0.9% for a Mid 1st |
 | `vc_untouchable_min_ratio` | 1.08 | [1.0, 2.0] | `CoreConfig.untouchable_min_ratio` | A give side containing an untouchable is kept only when the adjusted return is at least this |
 | `vc_max_assets_per_side` | 14 | int [4, 20] | `CoreConfig.max_assets_per_side` | Top-N eligible assets per team used to build 1–3 asset packages (pins are always added) |
 | `vc_max_per_partner` | 200 | int [10, 1000] | `CoreConfig.max_per_partner` | Fair trades kept per partner, round-robin over (give headliner, receive headliner) pairs so no single asset dominates the pool |
+| `vc_throwin_min_ratio` | 2.0 | [1.0, 10.0] | `CoreConfig.throwin_min_ratio` | **Throw-in rule.** A piece too small for the junk rules (market below `max(asset_floor_abs, filler_min_frac × trade headliner)`) may ride along only if its **recipient's** board values it at ≥ this × consensus market **and** ≥ `asset_floor_abs`, with evidence on both sides: a consensus market above 0, and at least `core.THROWIN_MIN_COMPARISONS` (3) comparisons behind the recipient's value. The viewer's board decides a piece the viewer receives; the partner's published board (members with real rankings only) decides a piece the partner receives. At most one throw-in per trade, at most 3 pieces a side; it is exempt from the floor, filler and irreducibility rules, counts in value, lineups and roster size, and is not a piece for the stud premium. On the real bench: 17 of 2,220 first-30 cards |
 | `vc_w_value` | 1.0 | ≥ 0 | `RankConfig.w_value` | Weight of the value score |
 | `vc_w_outlook` | 1.0 | ≥ 0 | `RankConfig.w_outlook` | Weight of the outlook score (both teams' windows) |
 | `vc_w_rank` | 1.0 | ≥ 0 | `RankConfig.w_rank` | Weight of the rank score (viewer's board vs market). All three weights at 0 ⇒ treated as (1, 1, 1) |
@@ -1587,12 +1589,12 @@ Twelve Float keys, seeded in `database._MODEL_CONFIG_DEFAULTS` and tunable live 
 
 | Key | Where it lands |
 |---|---|
-| `asset_floor_abs` (450) | `CoreConfig.asset_floor_abs` — no asset below it enters a package |
-| `filler_min_frac` (0.25) | `CoreConfig.filler_min_frac` — every piece must be worth at least this share of the **trade's** headliner (stricter than `filler_ok`'s per-side headliner) |
+| `asset_floor_abs` (450) | `CoreConfig.asset_floor_abs` — no asset below it enters a package, except one qualifying throw-in (`vc_throwin_min_ratio`), whose recipient value must still clear it |
+| `filler_min_frac` (0.25) | `CoreConfig.filler_min_frac` — every piece except a throw-in must be worth at least this share of the **trade's** headliner (stricter than `filler_ok`'s per-side headliner) |
 | `shrink_pseudocount`, `user_elo_shrink`, `placement_tier_clamp` | the viewer's board shrink toward consensus (w = n/(n+4)), via `trade_service._shrink_user_elo` |
 | `infer_contender_cut` / `infer_rebuilder_cut` | the window cuts in `windows.infer_windows`, via `trade_service._c` |
 
-**Code constants, not knobs:** `core.TIME_BUDGET_S = 8.0` (enumeration stops and the partial pool is ranked and served), `core.MAX_CHECKS_PER_PARTNER = 40_000`, `core.MAX_PACKAGE_SIZE = 3`, `windows.STANDINGS_RAMP_WEEKS = 8`, `deck.PARTNER_PENALTY_FACTOR = 0.5`, `adapter.DEFAULT_LINEUP`.
+**Code constants, not knobs:** `core.TIME_BUDGET_S = 8.0` (enumeration stops and the partial pool is ranked and served), `core.MAX_CHECKS_PER_PARTNER = 40_000`, `core.MAX_PACKAGE_SIZE = 3`, `core.MAX_THROWIN_OPTIONS = 3` (qualifying throw-ins tried per side per candidate pair, biggest recipient surplus first; throw-in variants have their own check budget), `core.THROWIN_MIN_COMPARISONS = 3` (the recipient's evidence a throw-in needs), `windows.STANDINGS_RAMP_WEEKS = 8`, `deck.PARTNER_PENALTY_FACTOR = 0.5`, `adapter.DEFAULT_LINEUP`.
 
 ---
 

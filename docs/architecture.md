@@ -259,20 +259,30 @@ from implementation; see the [trial protocol](plans/owner-engine-challenger/tria
 
 `backend/value_core/` (flag `trade.value_core`, default off; testers first via
 `vc_testers_only`) is a separate deck engine for organic, pinned and
-opponent-scoped trade jobs. It splits the work into two jobs that never share
-inputs:
+opponent-scoped trade jobs. It splits the work into two jobs that share no
+inputs beyond the one throw-in check noted below:
 
 1. **Core (`core.py`), value only.** For the viewer against each partner it
    enumerates every 1–3 × 1–3 package pair and keeps the pairs inside one
-   fairness band on consensus market value (`vc_band`, ±20%). When the trade's
-   single best asset sits on the side with fewer pieces, that side is credited a
-   stud premium of `vc_stud_premium × (headliner/elite)²`. Hard rules, in order:
+   asymmetric fairness band on consensus market value: the viewer may give up
+   to `vc_band` (20%) more than they get, but take at most `vc_gain_band` (10%)
+   more. When the trade's single best asset sits on the side with fewer pieces,
+   that side is credited a stud premium of `vc_stud_premium × (headliner/elite)²`.
+   Hard rules, in order:
    asset floor, band, junk filler (relative to the trade's headliner),
    untouchables only at `vc_untouchable_min_ratio` or better, irreducibility (no
-   removable piece), roster size, lineup legality. The core sees market values,
-   rosters, roster rules, untouchables and pins only: no personal board and no
-   windows. It is bounded by an 8 s time budget, 40,000 checks per partner and
-   `vc_max_per_partner` kept trades per partner.
+   removable piece), roster size, lineup legality. The one exception to the junk
+   rules is a single **throw-in** per trade: a small piece its recipient values
+   at ≥ `vc_throwin_min_ratio` (2×) consensus market and at least the asset
+   floor, with real evidence on both sides (a consensus value, and at least
+   three comparisons behind the recipient's number). It is not a piece for the
+   stud premium. It is judged on the viewer's board for a
+   piece the viewer receives and on the partner's published board
+   (`snapshot.partner_boards`) for a piece the partner receives. Apart from that
+   check the core sees market values, rosters, roster rules, untouchables and
+   pins only: no personal board and no windows. It is bounded by an 8 s time
+   budget, 40,000 checks per partner and `vc_max_per_partner` kept trades per
+   partner.
 2. **Ranking (`windows.py`, `ranking.py`, `deck.py`), order plus variety.** Each fair
    trade gets three scores in [0, 1]. **Value** is the size of the return and
    whether a real piece comes back. **Outlook** is the fit with both teams'
@@ -294,7 +304,10 @@ inputs:
 only module that touches app objects. It turns the job's rosters, players and
 seed Elos into a `LeagueSnapshot` and `Request`: market is raw
 `elo_to_value(seed_elo)` (the calculator's number, no age multiplier) and picks
-come from the already-injected owned-pick assets. It turns the ordered
+come from the already-injected owned-pick assets. `adapter.partner_board_from`
+builds a partner's published board with the personal-market policy's symmetric
+shrink (`trade_policy.shrink_board`); the server passes one only for members
+whose Elo came from real `member_rankings` rows (`has_rankings`). It turns the ordered
 `DeckEntry` list back into ordinary `TradeCard`s plus one evidence dict per card.
 The shared dataclasses are in `types.py`.
 
@@ -307,7 +320,8 @@ it is not a preparation job, and the viewer is on the tester allowlist or
 returns, so none of the legacy stack runs for that job: no bake-off, owner arms,
 gen_v2, policy or roster gates, and no presentation layers.
 `_run_value_core_job` reads Sleeper standings (fail-soft), lineup slots and
-roster capacity, infers windows, runs the pipeline, registers the cards, removes
+roster capacity, infers windows, builds partner boards for the leaguemates who
+ranked, runs the pipeline, registers the cards, removes
 exact passes (`_project_trade_dispositions`), writes `trade_impressions` and one
 `deck_impressions` row per card with the evidence in `valuation_json`, publishes
 the snapshot and fires `trades_generated` with `engine_version = "value_core"`.

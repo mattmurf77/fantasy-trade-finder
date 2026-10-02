@@ -33,8 +33,8 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
     2. The operator's blind grade averages **≥ 4.0**.
     3. The blind grade beats the incumbent's served cards on the same bench.
     4. Two weeks of tester-only serving with no rise in trade-job errors.
-- **New `model_config` keys:** 12 keys, all Float, seeded in `database._MODEL_CONFIG_DEFAULTS` and documented in `docs/config-reference.md`. Full table in [lld.md §3](lld.md#3-configuration).
-  - Core: `vc_band`, `vc_stud_premium`, `vc_untouchable_min_ratio`, `vc_max_assets_per_side`, `vc_max_per_partner`.
+- **New `model_config` keys:** 14 keys, all Float, seeded in `database._MODEL_CONFIG_DEFAULTS` and documented in `docs/config-reference.md`. Full table in [lld.md §3](lld.md#3-configuration).
+  - Core: `vc_band` (overpay side), `vc_gain_band` (gain side), `vc_stud_premium`, `vc_untouchable_min_ratio`, `vc_max_assets_per_side`, `vc_max_per_partner`, `vc_throwin_min_ratio`. The two band sides and the throw-in ratio were added on 2026-10-01 (operator; [specs.md §3.1](specs.md#31-change-control)).
   - Ranking (the operator's "about 5 settings"): `vc_w_value`, `vc_w_outlook`, `vc_w_rank`, `vc_repeat_penalty`, `vc_player_cap`.
   - Outlook and rollout: `vc_standings_weight`, `vc_testers_only`.
   - Existing keys are reused read-only, not duplicated: `asset_floor_abs`, `filler_min_frac`, `shrink_pseudocount`, `user_elo_shrink`, `placement_tier_clamp`, `infer_contender_cut`, `infer_rebuilder_cut`.
@@ -80,7 +80,7 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
 | `docs/architecture.md` | **updated (WP5)** | New section before "Data flow" (`architecture.md:258`), plus a row in the Components/Backend table (`:376`). |
 | `living-memory/HLD.md` | **updated (WP5)** | Major Components row (`HLD.md:80-99`), plus a "Flow C′ — value-core deck" paragraph under Key Flows (`:140`). |
 | `docs/cross-client-invariants.md` | **n/a.** No constant, enum or color shared with clients changes. `basis` values stay within the existing `"consensus"`/`"divergence"` set. | — |
-| `docs/glossary.md` | **updated (WP5)** | New terms: value core, fair pool, fairness band (value core), stud premium, irreducible trade, priority, value score, outlook score, rank score, repeat penalty, trade idea, acquisition round, bench guardrails, blind grade. |
+| `docs/glossary.md` | **updated (WP5)** | New terms: value core, fair pool, fairness band (value core), gain band, throw-in (value core), stud premium, irreducible trade, priority, value score, outlook score, rank score, repeat penalty, trade idea, acquisition round, bench guardrails, blind grade. |
 | ADR or `DECISIONS.md` entry | **ADR by WP5; DECISIONS entry by the lead at integration** | `docs/adr/adr-024-value-core-engine.md` records the choices: value-only core plus a separate 3-weight ranking; the new deck bypasses the stacked legacy gates; no silent fallback. `living-memory/DECISIONS.md` gets **D-195** (grep for max+1 first). It records the operator's 2026-09-30 rebuild decision and that, while the flag is on, it supersedes D-193's ordering for value-core decks. |
 | `docs/data-dictionary.md` | **updated (WP5)** | `## deck_impressions` (`data-dictionary.md:490`): the value-core `valuation_json` v1 shape and the `model_arm`/`policy_variant`/`policy_version` values. The `trades_generated` props line (`:1357`): add `engine_version = "value_core"`. |
 | `docs/runbook.md` | **updated (WP5)** | New section "Value-core bench (freeze / run / recall / blind grade)". |

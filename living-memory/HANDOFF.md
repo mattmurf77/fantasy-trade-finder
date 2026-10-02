@@ -10,10 +10,11 @@ default band ±20%. Full local suite 7528 passed / 1 skipped; flag-off output id
 **In flight:** CI on PR #308. Package worktrees `value-core-wp1..wp5` (branches `feat/value-core-wp1..5`) are merged into the
 integration branch but NOT into `origin/main` — keep them until the branch lands, then sweep via the recovery ledger.
 
-**Blocked on:** the real-league freeze — operator approved it, but production reads were denied by the session's permission
-classifier after one lookup (league ids found; command in NEXT.md). Needs the operator to run it or allow prod reads.
+**Blocked on:** nothing technical. Next is the operator's blind grading (NEXT.md). Since 10-01: asymmetric band
+(pay 20% / take 10%), throw-in rule, real-league bench run (TEST_LEDGER 2026-10-01/02).
 
-**Don't repeat:** don't widen `vc_band` past 0.25 without new evidence (synthetic insults jump to 29% at 0.30); the e2e cap
+**Don't repeat:** don't make the band symmetric at ±20% (real-league insults 5.6%); don't trust synthetic insult numbers
+over the frozen real leagues; throw-ins must keep the evidence rule (unpriced/unranked players flood decks); the e2e cap
 invariant must include the partner cap; don't merge PR #308 before the bench + blind grades.
 
 ## Current State — 2026-09-23

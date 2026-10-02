@@ -57,12 +57,14 @@ def core_config_from(cfg: Mapping[str, float]) -> CoreConfig:
     d = CoreConfig()
     return CoreConfig(
         band=_num(cfg, "vc_band", d.band, 0.01, 0.50),
+        gain_band=_num(cfg, "vc_gain_band", d.gain_band, 0.01, 0.50),
         stud_premium=_num(cfg, "vc_stud_premium", d.stud_premium, 0.0, 0.50),
         untouchable_min_ratio=_num(cfg, "vc_untouchable_min_ratio", d.untouchable_min_ratio, 1.0, 2.0),
         max_assets_per_side=_int(cfg, "vc_max_assets_per_side", d.max_assets_per_side, 4, 20),
         max_per_partner=_int(cfg, "vc_max_per_partner", d.max_per_partner, 10, 1000),
         asset_floor_abs=_num(cfg, "asset_floor_abs", d.asset_floor_abs),
         filler_min_frac=_num(cfg, "filler_min_frac", d.filler_min_frac),
+        throwin_min_ratio=_num(cfg, "vc_throwin_min_ratio", d.throwin_min_ratio, 1.0, 10.0),
     )
 
 
@@ -103,9 +105,11 @@ def build_snapshot(*, league_id: str, scoring_format: str, viewer_team_id: str, 
                    viewer_roster: Sequence[str], opponents: Sequence[object],
                    players: Mapping[str, object], seed_elo: Mapping[str, float],
                    lineup_slots: Sequence[str] | None, max_players: int | None,
-                   windows: Mapping[str, TeamWindow]) -> LeagueSnapshot:
+                   windows: Mapping[str, TeamWindow],
+                   partner_boards: Mapping[str, Board] | None = None) -> LeagueSnapshot:
     """The viewer's team is inserted FIRST into `teams` (build_request relies on it).
-    Market is raw elo_to_value(seed) with no age preference; an unseeded asset is 0.0."""
+    Market is raw elo_to_value(seed) with no age preference; an unseeded asset is 0.0.
+    `partner_boards` (team_id -> partner_board_from(...)) is cut to known partners and assets."""
     assets: dict[str, Asset] = {}
     owner: dict[str, str] = {}
     teams: dict[str, Team] = {}
@@ -135,10 +139,36 @@ def build_snapshot(*, league_id: str, scoring_format: str, viewer_team_id: str, 
             ids.append(pid)
         teams[team_id] = Team(team_id, name, tuple(ids), other, windows.get(team_id, DEFAULT_WINDOW))
     first_round_value, elite_value = tier_values(scoring_format)
+    boards = {}
+    for team_id, b in (partner_boards or {}).items():
+        values = {a: v for a, v in b.values.items() if a in assets}
+        if str(team_id) in teams and str(team_id) != str(viewer_team_id) and values:
+            boards[str(team_id)] = Board(values, {a: b.comparisons.get(a, 0) for a in values})
     return LeagueSnapshot(
         league_id, scoring_format, assets, teams,
         RosterRules(tuple(lineup_slots or default_lineup_slots(scoring_format)), max_players),
-        first_round_value, elite_value)
+        first_round_value, elite_value, boards)
+
+
+def partner_board_from(*, elo_ratings: Mapping[str, float] | None, seed_elo: Mapping[str, float],
+                       comparison_counts: Mapping[str, int] | None = None,
+                       confidence_source: str | None = None,
+                       confidence_weights: Mapping[str, float] | None = None,
+                       confidence_sources: Mapping[str, str] | None = None) -> Board | None:
+    """A leaguemate's PUBLISHED board (call only for members whose Elo came from real
+    member_rankings rows, server has_rankings), shrunk by the personal-market policy's
+    symmetric rule: trade_policy.shrink_board with trade_policy.confidence_map. No evidence on
+    a player prices him at consensus, so a thin board can never qualify a throw-in."""
+    if not elo_ratings:
+        return None
+    from .. import trade_policy
+    conf = trade_policy.confidence_map(dict(comparison_counts or {}) or None,
+                                       source=confidence_source,
+                                       weights=dict(confidence_weights or {}) or None,
+                                       sources=dict(confidence_sources or {}) or None)
+    effective = trade_policy.shrink_board(dict(elo_ratings), dict(seed_elo), conf)
+    values = {a: elo_to_value(e) for a, e in effective.items()}
+    return Board(values=values, comparisons={a: int((comparison_counts or {}).get(a, 0)) for a in values})
 
 
 def build_request(*, snapshot: LeagueSnapshot, user_elo: Mapping[str, float] | None,
@@ -188,12 +218,24 @@ def _window(w: TeamWindow) -> dict:
             "pf_index": w.pf_index, "standings_weight": w.standings_weight}
 
 
+def _throwin_evidence(t, snapshot: LeagueSnapshot, request: Request) -> dict | None:
+    if t.throwin is None:
+        return None
+    to_viewer = t.throwin in t.receive
+    board = request.board if to_viewer else snapshot.partner_boards.get(t.partner_team_id)
+    value = board.values.get(t.throwin) if board is not None else None
+    return {"id": t.throwin, "recipient": "viewer" if to_viewer else "partner",
+            "market": round(snapshot.assets[t.throwin].market, 1),
+            "recipient_value": round(value, 1) if value is not None else None}
+
+
 def evidence(entry: DeckEntry, snapshot: LeagueSnapshot, request: Request,
              core_cfg: CoreConfig, rank_cfg: RankConfig, *, budget_exhausted: bool) -> dict:
     """deck_impressions.valuation_json, schema v1 (lld section 7.3)."""
     t = entry.scored.trade
     s = entry.scored.scores
     band = _effective_band(core_cfg.band, request.fairness_threshold)
+    gain = _effective_band(core_cfg.gain_band, request.fairness_threshold)
     board = request.board
 
     def asset_row(aid: str, side: str) -> dict:
@@ -216,11 +258,14 @@ def evidence(entry: DeckEntry, snapshot: LeagueSnapshot, request: Request,
         "market": {"give": round(t.give_market, 1), "receive": round(t.receive_market, 1),
                    "adjusted_ratio": round(t.adjusted_ratio, 4),
                    "premium": round(t.premium, 4), "premium_side": t.premium_side},
-        "core": {"band": round(band, 4), "ratio_floor": round(1 / (1 + band), 4),
-                 "ratio_ceiling": round(1 + band, 4), "stud_premium": core_cfg.stud_premium,
+        "core": {"band": round(band, 4), "gain_band": round(gain, 4),
+                 "ratio_floor": round(1 / (1 + band), 4),
+                 "ratio_ceiling": round(1 + gain, 4), "stud_premium": core_cfg.stud_premium,
                  "untouchable_min_ratio": core_cfg.untouchable_min_ratio,
                  "uses_untouchable": t.uses_untouchable, "drops_needed": list(t.drops_needed),
-                 "budget_exhausted": budget_exhausted},
+                 "budget_exhausted": budget_exhausted,
+                 "throwin_min_ratio": core_cfg.throwin_min_ratio,
+                 "throwin": _throwin_evidence(t, snapshot, request)},
         "windows": {"viewer": _window(snapshot.teams[request.viewer_team_id].window),
                     "partner": _window(snapshot.teams[t.partner_team_id].window)},
         "detail": dict(entry.scored.detail),

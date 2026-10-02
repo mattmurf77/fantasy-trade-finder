@@ -12,11 +12,12 @@ import math
 import time
 from bisect import bisect_left, bisect_right
 from itertools import combinations
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from ..power_rankings import LINEUP_SLOT_ELIGIBILITY, optimal_starter_slots
 from .types import (
     CORE_POSITIONS,
+    Board,
     CoreConfig,
     CoreDiagnostics,
     FairTrade,
@@ -27,17 +28,34 @@ from .types import (
 )
 
 __all__ = [
-    "TIME_BUDGET_S", "MAX_CHECKS_PER_PARTNER", "MAX_PACKAGE_SIZE", "PREMIUM_EXPONENT",
-    "RATIO_TOL", "REJECT_CODES", "effective_band", "stud_premium", "evaluate_trade",
-    "find_fair_trades",
+    "TIME_BUDGET_S", "MAX_CHECKS_PER_PARTNER", "MAX_PACKAGE_SIZE", "MAX_THROWIN_OPTIONS",
+    "PREMIUM_EXPONENT", "RATIO_TOL", "REJECT_CODES", "THROWIN_MIN_COMPARISONS", "effective_band",
+    "stud_premium", "throwin_ok", "evaluate_trade", "find_fair_trades",
 ]
 
 TIME_BUDGET_S = 8.0
 MAX_CHECKS_PER_PARTNER = 40_000
 MAX_PACKAGE_SIZE = 3
+MAX_THROWIN_OPTIONS = 3   # qualifying throw-ins tried per side, per candidate pair (best recipient surplus first)
+THROWIN_MIN_COMPARISONS = 3   # recipient evidence a throw-in needs: one matchup is not an opinion
 PREMIUM_EXPONENT = 2.0
 RATIO_TOL = 1e-9
 REJECT_CODES = ("floor", "band", "filler", "untouchable", "reducible", "roster_size", "lineup")
+
+
+def throwin_ok(asset_id: str, recipient_board: Board | None, *,
+               market: float, cfg: CoreConfig) -> bool:
+    """Throw-in rule (operator, 2026-10-01): a piece too small for the junk rules may ride
+    along only if its RECIPIENT values it at >= cfg.throwin_min_ratio x consensus market and
+    at least the asset floor. Evidence is required on both sides: the piece has a consensus
+    value (market > 0; an unpriced player has no "double" to clear) and the recipient really
+    ranked him (comparisons >= THROWIN_MIN_COMPARISONS; a default Elo or a single matchup is
+    not an opinion). Otherwise False."""
+    if (recipient_board is None or market <= 0 or asset_id not in recipient_board.values
+            or recipient_board.comparisons.get(asset_id, 0) < THROWIN_MIN_COMPARISONS):
+        return False
+    value = recipient_board.values[asset_id]
+    return value >= cfg.throwin_min_ratio * market and value >= cfg.asset_floor_abs
 
 
 def effective_band(band: float, fairness_threshold: float | None) -> float:
@@ -67,9 +85,10 @@ class _Ctx:
         self.pmax = cfg.stud_premium
         self.floor = cfg.asset_floor_abs
         self.frac = cfg.filler_min_frac
-        b = effective_band(cfg.band, request.fairness_threshold)
-        self.lo = 1.0 / (1.0 + b) - RATIO_TOL      # band, tolerance included
-        self.hi = 1.0 + b + RATIO_TOL
+        # Asymmetric band (operator, 2026-10-01): the viewer may overpay by up to `band` but
+        # never take more than `gain_band` from the partner. Tolerance included.
+        self.lo = 1.0 / (1.0 + effective_band(cfg.band, request.fairness_threshold)) - RATIO_TOL
+        self.hi = 1.0 + effective_band(cfg.gain_band, request.fairness_threshold) + RATIO_TOL
         self.untouchable_min = cfg.untouchable_min_ratio - RATIO_TOL
         self.untouchables = request.untouchable_ids
         self.pins = request.pinned_give_ids | request.pinned_receive_ids
@@ -79,22 +98,30 @@ class _Ctx:
 
 
 class _Package:
-    """One side of a candidate trade. `ids` must be sorted by (-market, id)."""
-    __slots__ = ("ids", "total", "top", "low", "n", "n_players", "pos", "premium",
-                 "removable", "untouchable")
+    """One side of a candidate trade. `ids` must be sorted by (-market, id). `throwin`, when
+    set, is one id in `ids` exempt from the junk rules (floor, filler, reducible): it counts
+    toward value, piece counts, positions and roster size, never toward top/low."""
+    __slots__ = ("ids", "total", "top", "low", "n", "n_core", "n_players", "n_sub", "pos",
+                 "premium", "removable", "untouchable", "throwin")
 
-    def __init__(self, ctx: _Ctx, ids: tuple[str, ...]):
+    def __init__(self, ctx: _Ctx, ids: tuple[str, ...], throwin: str | None = None):
         items = [ctx.assets[a] for a in ids]
+        core = [ctx.assets[a] for a in ids if a != throwin]
         self.ids = ids
+        self.throwin = throwin
         self.total = sum(a.market for a in items)
-        self.top = items[0].market
-        self.low = items[-1].market
+        self.top = core[0].market
+        self.low = core[-1].market
         self.n = len(ids)
+        self.n_core = len(core)   # piece count for the stud premium: a throw-in is not a piece
         self.n_players = sum(a.kind == "player" for a in items)
+        # sub-floor players leaving this side: they no longer count as the giver's droppable bench
+        self.n_sub = sum(a.kind == "player" and a.market < ctx.floor for a in items)
         self.pos = tuple(sum(a.position == p for a in items) for p in CORE_POSITIONS)
         self.premium = stud_premium(self.top, ctx.elite, ctx.pmax)   # credited if this side holds H
-        # markets of the pieces the "reducible" rule may remove: not the top, not pinned
-        self.removable = tuple(ctx.assets[a].market for a in ids[1:] if a not in ctx.pins)
+        # markets of the pieces the "reducible" rule may remove: not the top, not pinned, not the throw-in
+        self.removable = tuple(ctx.assets[a].market for a in ids[1:]
+                               if a not in ctx.pins and a != throwin)
         self.untouchable = not ctx.untouchables.isdisjoint(ids)
 
 
@@ -162,7 +189,7 @@ def _judge(ctx: _Ctx, v: _TeamState, p: _TeamState, g: _Package, r: _Package,
            ) -> tuple[str | None, float, float, str | None]:
     """The hard rules of lld 4.3 in REJECT_CODES order, viewer gives g and receives r.
     Returns (first failing code or None, adjusted_ratio, premium, premium_side)."""
-    ratio, premium, side = _price(g.total, g.n, r.total, r.n, g, r)
+    ratio, premium, side = _price(g.total, g.n_core, r.total, r.n_core, g, r)
     low = min(g.low, r.low)
     if low < ctx.floor:
         return "floor", ratio, premium, side
@@ -173,14 +200,14 @@ def _judge(ctx: _Ctx, v: _TeamState, p: _TeamState, g: _Package, r: _Package,
     if g.untouchable and ratio < ctx.untouchable_min:
         return "untouchable", ratio, premium, side
     for x in g.removable:
-        if ctx.lo <= _price(g.total - x, g.n - 1, r.total, r.n, g, r)[0] <= ctx.hi:
+        if ctx.lo <= _price(g.total - x, g.n_core - 1, r.total, r.n_core, g, r)[0] <= ctx.hi:
             return "reducible", ratio, premium, side
     for x in r.removable:
-        if ctx.lo <= _price(g.total, g.n, r.total - x, r.n - 1, g, r)[0] <= ctx.hi:
+        if ctx.lo <= _price(g.total, g.n_core, r.total - x, r.n_core - 1, g, r)[0] <= ctx.hi:
             return "reducible", ratio, premium, side
     if ctx.max_players is not None:
         dv, dp = _drops_needed(ctx, v, p, g, r)
-        if dv > v.droppable or dp > p.droppable:
+        if dv > v.droppable - g.n_sub or dp > p.droppable - r.n_sub:
             return "roster_size", ratio, premium, side
     if not (_lineup_ok(ctx, v, g, r) and _lineup_ok(ctx, p, r, g)):
         return "lineup", ratio, premium, side
@@ -191,7 +218,26 @@ def _fair_trade(ctx: _Ctx, partner_team_id: str, v: _TeamState, p: _TeamState,
                 g: _Package, r: _Package, ratio: float, premium: float,
                 side: str | None) -> FairTrade:
     return FairTrade(partner_team_id, g.ids, r.ids, g.total, r.total, ratio, premium, side,
-                     g.untouchable, _drops_needed(ctx, v, p, g, r))
+                     g.untouchable, _drops_needed(ctx, v, p, g, r), g.throwin or r.throwin)
+
+
+def _is_junk(ctx: _Ctx, market: float, headliner: float) -> bool:
+    """Too small for the junk rules in a trade headlined by `headliner`."""
+    return market < max(ctx.floor, ctx.frac * headliner)
+
+
+def _throwin_pool(ctx: _Ctx, giver: Team, board: Board | None,
+                  cfg: CoreConfig, exclude: frozenset[str]) -> list[str]:
+    """Every asset of `giver` the recipient's board qualifies as a throw-in, biggest recipient
+    surplus (value - market) first. Not capped here: whether a piece is junk depends on the
+    pair, so the MAX_THROWIN_OPTIONS cap is applied per pair after that check."""
+    if board is None:
+        return []
+    pool = [a for a in giver.asset_ids
+            if a not in exclude and a not in ctx.untouchables
+            and throwin_ok(a, board, market=ctx.assets[a].market, cfg=cfg)]
+    pool.sort(key=lambda a: (-(board.values[a] - ctx.assets[a].market), a))
+    return pool
 
 
 def _candidates(ctx: _Ctx, team: Team, exclude: frozenset[str], must: frozenset[str],
@@ -231,6 +277,27 @@ def _interleave(items: list, group_key) -> list:
     return [item for _, _, item in ranked]
 
 
+def _explicit_throwin(ctx: _Ctx, snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig,
+                      partner_team_id: str, give: Sequence[str],
+                      receive: Sequence[str]) -> str | None:
+    """For an explicit package: the one piece treated as the throw-in, if any. A candidate is
+    junk for this trade, not its side's only piece, and qualifies for its recipient (give ->
+    the partner's board, receive -> the viewer's). Several candidates: biggest surplus wins."""
+    market = lambda a: snapshot.assets[a].market
+    headliner = max(market(a) for a in (*give, *receive))
+    boards = ((give, snapshot.partner_boards.get(partner_team_id)), (receive, request.board))
+    best: tuple | None = None
+    for side, board in boards:
+        if len(side) < 2 or board is None:
+            continue
+        for a in side:
+            if _is_junk(ctx, market(a), headliner) and throwin_ok(a, board, market=market(a), cfg=cfg):
+                key = (-(board.values[a] - market(a)), a)
+                if best is None or key < best[0]:
+                    best = (key, a)
+    return best[1] if best else None
+
+
 def evaluate_trade(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig, *,
                    partner_team_id: str, give: Sequence[str],
                    receive: Sequence[str]) -> TradeVerdict:
@@ -260,8 +327,9 @@ def evaluate_trade(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig, 
         return (-snapshot.assets[a].market, a)
 
     ctx = _Ctx(snapshot, request, cfg)
-    g = _Package(ctx, tuple(sorted(give, key=order)))
-    r = _Package(ctx, tuple(sorted(receive, key=order)))
+    throwin = _explicit_throwin(ctx, snapshot, request, cfg, partner_team_id, give, receive)
+    g = _Package(ctx, tuple(sorted(give, key=order)), throwin if throwin in give else None)
+    r = _Package(ctx, tuple(sorted(receive, key=order)), throwin if throwin in receive else None)
     if g.total <= 0 or r.total <= 0:   # unpriceable: no ratio to report
         return TradeVerdict(False, "floor" if min(g.low, r.low) < ctx.floor else "band", None)
     v = _TeamState(ctx, teams[request.viewer_team_id])
@@ -329,25 +397,76 @@ def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig
         P.sort(key=lambda r: (r.total, r.ids))
         totals = [r.total for r in P]
         p = _TeamState(ctx, snapshot.teams[pid])
-        checks = 0
+        # Throw-ins (operator, 2026-10-01): the viewer's go to the partner, judged on the
+        # partner's published board; the partner's come to the viewer, judged on the viewer's.
+        partner_board = snapshot.partner_boards.get(pid)
+        give_tis = _throwin_pool(ctx, snapshot.teams[viewer_id], partner_board, cfg, frozenset())
+        recv_tis = _throwin_pool(ctx, snapshot.teams[pid], request.board, cfg,
+                                 request.not_interested_ids)
+        max_give_ti = max((assets[a].market for a in give_tis), default=0.0)
+        max_recv_ti = max((assets[a].market for a in recv_tis), default=0.0)
+        with_ti: dict[tuple, _Package] = {}
+
+        def plus(pkg: _Package, ti: str) -> _Package:
+            k = (pkg.ids, ti)
+            if k not in with_ti:
+                ids = tuple(sorted((*pkg.ids, ti), key=lambda a: (-assets[a].market, a)))
+                with_ti[k] = _Package(ctx, ids, ti)
+            return with_ti[k]
+
+        # Base pairs and throw-in variants have separate check budgets, so variants (which
+        # mostly re-dress an idea the deck keeps once) can never starve distinct base pairs.
+        checks = {"base": 0, "throwin": 0}
         fair: list[FairTrade] = []
         truncated = stop = False
         for g in V:
-            for k in range(bisect_left(totals, g.total * lo_w), bisect_right(totals, g.total * hi_w)):
-                checks += 1
-                if checks > max_checks_per_partner:
-                    truncated = stop = True
-                    break
-                if checks % 1000 == 0 and time.perf_counter() - started > time_budget_s:
-                    diag.budget_exhausted = stop = True
-                    break
+            lo_raw, hi_raw = g.total * lo_w, g.total * hi_w
+            for k in range(bisect_left(totals, lo_raw - max_recv_ti),
+                           bisect_right(totals, (g.total + max_give_ti) * hi_w)):
                 r = P[k]
-                diag.pairs_checked += 1
-                reason, ratio, premium, side = _judge(ctx, v, p, g, r)
-                if reason is None:
-                    fair.append(_fair_trade(ctx, pid, v, p, g, r, ratio, premium, side))
-                else:
-                    diag.rejected[reason] += 1
+                headliner = max(g.top, r.top)
+                variants: list[tuple[str, _Package, _Package]] = []
+                if lo_raw <= r.total <= hi_raw:
+                    variants.append(("base", g, r))
+                if g.n < MAX_PACKAGE_SIZE:
+                    tried = 0
+                    for ti in give_tis:
+                        m = assets[ti].market
+                        if tried >= MAX_THROWIN_OPTIONS:
+                            break
+                        if (ti not in g.ids and _is_junk(ctx, m, headliner)
+                                and (g.total + m) * lo_w <= r.total <= (g.total + m) * hi_w):
+                            variants.append(("throwin", plus(g, ti), r))
+                            tried += 1
+                if r.n < MAX_PACKAGE_SIZE:
+                    tried = 0
+                    for ti in recv_tis:
+                        m = assets[ti].market
+                        if tried >= MAX_THROWIN_OPTIONS:
+                            break
+                        if (ti not in r.ids and _is_junk(ctx, m, headliner)
+                                and lo_raw <= r.total + m <= hi_raw):
+                            variants.append(("throwin", g, plus(r, ti)))
+                            tried += 1
+                for kind, gg, rr in variants:
+                    checks[kind] += 1
+                    if checks[kind] > max_checks_per_partner:
+                        truncated = True
+                        if kind == "base":
+                            stop = True
+                            break
+                        continue
+                    if sum(checks.values()) % 1000 == 0 and time.perf_counter() - started > time_budget_s:
+                        diag.budget_exhausted = stop = True
+                        break
+                    diag.pairs_checked += 1
+                    reason, ratio, premium, side = _judge(ctx, v, p, gg, rr)
+                    if reason is None:
+                        fair.append(_fair_trade(ctx, pid, v, p, gg, rr, ratio, premium, side))
+                    else:
+                        diag.rejected[reason] += 1
+                if stop:
+                    break
             if stop:
                 break
         diag.fair += len(fair)

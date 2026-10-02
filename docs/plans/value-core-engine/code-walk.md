@@ -27,7 +27,7 @@ The flag-off code changes are five, and each is a no-op when the flag is off:
 | 2 | `("value_core", _value_core_enabled())` in `_trade_safety_signature` (`backend/server.py:3385`) | The comprehension keeps only enabled entries (`) if enabled]`, `backend/server.py:3386`), so the stamped `safety_policy` list and the expected lists in `_trade_running_policy_matches` (`backend/server.py:3117-3122`) and `_trade_job_is_fresh` (`backend/server.py:3509-3512`) are unchanged. |
 | 3 | `value_core_evidence=None` on `_log_deck_signal_impressions` (`backend/server.py:5085`) | The only use is guarded by `if value_core_evidence is not None:` (`backend/server.py:5538`). The one caller that passes it is `_run_value_core_job` (`backend/server.py:7546`); the legacy call (`backend/server.py:8984`) does not pass it, so legacy rows are built exactly as before. |
 | 4 | `and not server._value_core_enabled()` in `prepared_trade_runtime.supported` (`backend/prepared_trade_runtime.py:93-96`) | With the flag off, `not False` is `True`, so the conjunction equals its previous value. |
-| 5 | `not k.startswith("vc_")` in the owner request-hash config filter (`backend/server.py:15263-15267`) | Not flag-gated on purpose. The 12 `vc_*` keys seeded at `backend/database.py:3190-3201` reach `trade_service._cfg` through `reload_config()` and from there the owner context's `config`. Filtering them keeps the owner experiment's `request_hash` and its 50/50 parity exactly what they were before the deploy. |
+| 5 | `not k.startswith("vc_")` in the owner request-hash config filter (`backend/server.py:15289`) | Not flag-gated on purpose. The 14 `vc_*` keys seeded at `backend/database.py:3190-3203` reach `trade_service._cfg` through `reload_config()` and from there the owner context's `config`. Filtering them keeps the owner experiment's `request_hash` and its 50/50 parity exactly what they were before the deploy. |
 
 **The package is never imported.** `backend.value_core` is imported in exactly two places in `server.py`, both function-local:
 - `backend/server.py:7485`, inside `_run_value_core_job`;
@@ -35,7 +35,7 @@ The flag-off code changes are five, and each is a no-op when the flag is off:
 
 `_run_value_core_job` is called only from the branch at `backend/server.py:7931`, which `_value_core_live` guards. `backend/prepared_trade_runtime.py:96` calls `server._value_core_enabled()`, which imports nothing. `backend/value_core/pipeline.py:21` imports `core`, `deck` and `ranking` inside `run`, so even the flag-on import of `pipeline` does not load WP1/WP2 until the pipeline runs.
 
-**Config knobs.** None of the 12 `vc_*` keys is in `trade_service._DEFAULT_CFG`, so the arm-A inventory test (`backend/tests/test_bakeoff_arm_a_golden.py:897`) is untouched. They are seeded through `INSERT OR IGNORE` (`backend/database.py:3735`), with no schema change.
+**Config knobs.** None of the 14 `vc_*` keys is in `trade_service._DEFAULT_CFG`, so the arm-A inventory test (`backend/tests/test_bakeoff_arm_a_golden.py:897`) is untouched. They are seeded through `INSERT OR IGNORE` (`backend/database.py:3735`), with no schema change.
 
 **Accepted one-time effects, not behavior changes** (lld §9.1e). Once the rows are seeded and the flag key exists, the job cache's request signature (`_trade_request_signature`, `backend/server.py:3090-3094`) and the dark prepared-inventory dependency receipt change once, costing one regenerate. Neither changes what any user is served.
 
@@ -147,3 +147,8 @@ Each serving test was shown RED against a named sabotage of the line it guards, 
 - a silent legacy fallback;
 - not excluding `trade_intent`;
 - the wrong `engine_version`.
+
+## 2026-10-01 additions
+
+- **Partner boards for throw-ins.** `_run_value_core_job` builds `partner_boards` only for opponents with `has_rankings` (real `member_rankings` rows; members without it carry seeded noise) through `adapter.partner_board_from` (`backend/server.py:7530`), and passes them to `adapter.build_snapshot`, which keeps known partners and assets only. Line numbers elsewhere in this file date from 2026-09-30 and have shifted with the fallback and partner-board edits; the function names they cite are unchanged.
+- **Evidence.** Unit tests: `test_value_core_core.py` (throw-in rule, evidence minimum, premium on core counts, per-pair shortlist), `test_value_core_ranking.py::test_reasons_explain_the_throwin`, `test_value_core_adapter.py` (partner boards, knob clamps). Real-league bench in `living-memory/TEST_LEDGER.md` (2026-10-01).

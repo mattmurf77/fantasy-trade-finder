@@ -580,7 +580,7 @@ A job served by the value core returns cards in the same shape, serialized by th
 | `mismatch_score` | the rank score (viewer's board vs market), in [0, 1]; `0.5` when the viewer has no board |
 | `fairness_score` | `min(r, 1/r)` for `r` = receive ÷ give raw market totals |
 | `give_value` / `receive_value` / `favors` / `gap` | present, from the raw consensus market sums — the numbers the calculator shows |
-| `reasons` | 1–3 lines built from the three scores in a fixed order — value, then outlook, then rank or a "real piece" line — e.g. `"Fair on value"`, `"Fits their rebuild"`, `"You rank Chase 12 spots above market"`. Serialized only while `trade_math.human_explanations` is on, as for every card |
+| `reasons` | 1–3 lines built from the three scores in a fixed order — value, then outlook, then a throw-in line when the card carries one, then rank or a "real piece" line while a slot is free — e.g. `"Fair on value"`, `"Fits their rebuild"`, `"You rank Chase 12 spots above market"`, `"Throw-in: you rank X at 2.3× market"`. Serialized only while `trade_math.human_explanations` is on, as for every card |
 | `lane`, `narrative`, `match_context`, `tier`, `rationale`, `model_arm` | absent. With no card carrying a `lane`, clients hide the lane chips |
 | `likes_you`, `standing_offer_*`, `wildcard`, `retest`, `relaxed`, `sweetener`, `gap_sweetener`, `breaker` | never set: the value-core deck is single-source and the legacy presentation layers do not run on it |
 

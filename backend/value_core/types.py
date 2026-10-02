@@ -80,6 +80,9 @@ class LeagueSnapshot:
     rules: RosterRules
     first_round_value: float        # market value at the first_1 tier floor (tier_config.json)
     elite_value: float              # market value at the firsts_4plus tier floor
+    # team_id -> that partner's published board, confidence-shrunk toward consensus. Only
+    # partners who really ranked (server has_rankings) appear; absent = no evidence.
+    partner_boards: Mapping[str, Board] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -104,13 +107,15 @@ class Request:
 
 @dataclass(frozen=True)
 class CoreConfig:
-    band: float = 0.20
+    band: float = 0.20        # how much MORE market value the viewer may give (overpay side)
+    gain_band: float = 0.10   # how much MORE market value the viewer may receive (the partner's loss)
     stud_premium: float = 0.15
     untouchable_min_ratio: float = 1.08
     max_assets_per_side: int = 14
     max_per_partner: int = 200
     asset_floor_abs: float = 450.0
     filler_min_frac: float = 0.25
+    throwin_min_ratio: float = 2.0   # recipient's value / consensus market a throw-in needs
 
 
 @dataclass(frozen=True)
@@ -134,6 +139,8 @@ class FairTrade:
     premium_side: Side | None       # viewer side whose package was credited with the premium
     uses_untouchable: bool
     drops_needed: tuple[int, int]   # (viewer, partner) sub-floor bench drops needed to stay within max_players
+    throwin: str | None = None      # the one piece exempt from the junk rules: its recipient values it
+                                    # >= throwin_min_ratio x market (and >= the asset floor)
 
     @property
     def key(self) -> tuple[str, tuple[str, ...], tuple[str, ...]]:

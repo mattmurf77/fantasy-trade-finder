@@ -413,9 +413,21 @@ def snapshot_for_seat(league: Mapping, seat_team_id: str, *, standings_weight: f
                                 int(t.get("other_players") or 0),
                                 team_windows.get(t["team_id"], DEFAULT_WINDOW))
              for t in league["teams"]}
+    # Every other seat's frozen board, shrunk exactly as the server shrinks a partner's.
+    partner_boards = {}
+    for tid, raw in (league.get("boards") or {}).items():
+        if tid == seat_team_id or tid not in teams or not raw.get("elo"):
+            continue
+        pb = adapter.partner_board_from(
+            elo_ratings=raw["elo"], seed_elo=league.get("seed_elo") or {},
+            comparison_counts={a: int(n) for a, n in (raw.get("comparisons") or {}).items()},
+            confidence_source="votes")
+        if pb is not None:
+            values = {a: v for a, v in pb.values.items() if a in assets}
+            partner_boards[tid] = Board(values, {a: pb.comparisons.get(a, 0) for a in values})
     snapshot = LeagueSnapshot(league["league_id"], fmt, assets, teams,
                               RosterRules(tuple(league["lineup_slots"]), league.get("max_players")),
-                              first_round_value, elite_value)
+                              first_round_value, elite_value, partner_boards)
 
     board = None
     raw_board = (league.get("boards") or {}).get(seat_team_id)

@@ -30,7 +30,7 @@ Line numbers are for `origin/main` at `3bb981ed` and are approximate once other 
 | `backend/value_core/ranking.py` | WP2 | stdlib, `.types`, `backend.power_rankings` (`optimal_starters`) | Three scores, priority, card reasons |
 | `backend/value_core/deck.py` | WP2 | stdlib, `.types`, `.ranking` (`card_reasons`) | Deck assembly |
 | `backend/value_core/pipeline.py` | WP3 | `.types` at module level; `.core`, `.ranking`, `.deck` **lazily inside `run`** | One-call composition. The lazy imports let WP3's serving tests stub `run` before WP1 and WP2 land. |
-| `backend/value_core/adapter.py` | WP3 | stdlib, `.types`, `backend.trade_service` (`TradeCard`, `elo_to_value`, `value_to_elo`, `_shrink_user_elo`), `backend.ranking_service` (`RankingService`) | App objects → contract → `TradeCard` |
+| `backend/value_core/adapter.py` | WP3 | stdlib, `.types`, `backend.trade_service` (`TradeCard`, `elo_to_value`, `value_to_elo`, `_shrink_user_elo`), `backend.ranking_service` (`RankingService`), `backend.trade_policy` (`shrink_board`, `confidence_map`; imported inside `partner_board_from`) | App objects → contract → `TradeCard` |
 | `backend/eval/value_core_bench.py` | WP4 | stdlib, `backend.value_core.*`, `backend.tools.prod_analytics`, `backend.outlook.league_state`, `backend.trade_service` (`elo_to_value`), `sqlalchemy` (freeze only) | Freeze / run / guardrails |
 | `backend/eval/value_core_recall.py` | WP4 | stdlib, `backend.value_core.*`, `backend.dp_values_history`, `backend.data_loader` (`seed_elo_for_value`), `backend.pick_values` (`pick_pool_value`), `backend.trade_service` (`elo_to_value`) | Historical recall + band calibration |
 | `backend/eval/blind_grade.py` | WP4 | stdlib, `backend.tools.prod_analytics` (served card sets only) | Grade sheet export / import |
@@ -59,11 +59,13 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 
 | Key | Default | Clamp (adapter) | Maps to | Meaning |
 |---|---:|---|---|---|
-| `vc_band` | 0.20 | [0.01, 0.50] | `CoreConfig.band` | Half-width of the fairness band on the premium-adjusted ratio. A trade is kept iff 1/(1+band) ≤ ratio ≤ 1+band. 0.10 until the operator's 2026-10-01 decision (see the specs §3.1 change log). |
+| `vc_band` | 0.20 | [0.01, 0.50] | `CoreConfig.band` | The **overpay** side of the fairness band: the most MORE market value the viewer may give. A trade needs premium-adjusted ratio (receive/give) ≥ 1/(1+band). |
+| `vc_gain_band` | 0.10 | [0.01, 0.50] | `CoreConfig.gain_band` | The **gain** side: the most MORE market value the viewer may receive, i.e. the partner's loss. A trade needs ratio ≤ 1+gain_band. The band is asymmetric by the operator's 2026-10-01 decision; the real-bench evidence is in the specs §3.1 change log. |
 | `vc_stud_premium` | 0.15 | [0.0, 0.50] | `CoreConfig.stud_premium` | Premium at an elite headliner; scales as (headliner/elite)² |
 | `vc_untouchable_min_ratio` | 1.08 | [1.0, 2.0] | `CoreConfig.untouchable_min_ratio` | A give package containing an untouchable needs adjusted ratio ≥ this |
 | `vc_max_assets_per_side` | 14 | int [4, 20] | `CoreConfig.max_assets_per_side` | Top-N eligible assets per team used to build packages (pins always added) |
 | `vc_max_per_partner` | 200 | int [10, 1000] | `CoreConfig.max_per_partner` | Fair trades kept per partner |
+| `vc_throwin_min_ratio` | 2.0 | [1.0, 10.0] | `CoreConfig.throwin_min_ratio` | A piece too small for the junk rules may ride along as a **throw-in** only if its recipient's board values it at ≥ this × consensus market, and at ≥ `asset_floor_abs` (§4.3) |
 | `vc_w_value` | 1.0 | ≥ 0 | `RankConfig.w_value` | Weight of the value score |
 | `vc_w_outlook` | 1.0 | ≥ 0 | `RankConfig.w_outlook` | Weight of the outlook score |
 | `vc_w_rank` | 1.0 | ≥ 0 | `RankConfig.w_rank` | Weight of the rank score. If all three weights are 0, they become (1, 1, 1). |
@@ -79,7 +81,7 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 - `infer_contender_cut` / `infer_rebuilder_cut` (±0.08), via `trade_service._c` in `windows.py`
 
 **Code constants.** Not knobs; each is named in its module:
-- `core.py`: `TIME_BUDGET_S = 8.0`, `MAX_CHECKS_PER_PARTNER = 40_000`, `MAX_PACKAGE_SIZE = 3`, `PREMIUM_EXPONENT = 2.0`, `RATIO_TOL = 1e-9`
+- `core.py`: `TIME_BUDGET_S = 8.0`, `MAX_CHECKS_PER_PARTNER = 40_000`, `MAX_PACKAGE_SIZE = 3`, `MAX_THROWIN_OPTIONS = 3` (qualifying throw-ins tried per side, per candidate pair), `THROWIN_MIN_COMPARISONS = 3` (the recipient's evidence a throw-in needs), `PREMIUM_EXPONENT = 2.0`, `RATIO_TOL = 1e-9`
 - `ranking.py`: `DELTA_SATURATION = math.log(1.25)`, `RANK_GAP_SATURATION = 0.30`, `SIDE_THRESHOLD = 0.60`, `FAIR_PCT = 3`, `RANK_SPOTS_MIN = 5`, `YOUTH_WEIGHTS`
 - `deck.py`: `PARTNER_PENALTY_FACTOR = 0.5`, `PICK_IDEA = "PICK"`
 - `windows.py`: `STANDINGS_RAMP_WEEKS = 8`
@@ -95,9 +97,20 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 TIME_BUDGET_S = 8.0
 MAX_CHECKS_PER_PARTNER = 40_000
 MAX_PACKAGE_SIZE = 3
+MAX_THROWIN_OPTIONS = 3   # qualifying throw-ins tried per side, per candidate pair (best recipient surplus first)
+THROWIN_MIN_COMPARISONS = 3   # recipient evidence a throw-in needs: one matchup is not an opinion
 PREMIUM_EXPONENT = 2.0
 RATIO_TOL = 1e-9
 REJECT_CODES = ("floor", "band", "filler", "untouchable", "reducible", "roster_size", "lineup")
+
+
+def throwin_ok(asset_id: str, recipient_board: Board | None, *,
+               market: float, cfg: CoreConfig) -> bool:
+    """Throw-in rule: a piece too small for the junk rules may ride along only if its
+    RECIPIENT values it at >= cfg.throwin_min_ratio x consensus market and at least the
+    asset floor. Evidence is required on both sides: the piece has a consensus value
+    (market > 0) and the recipient really ranked him (comparisons >=
+    THROWIN_MIN_COMPARISONS). Otherwise False."""
 
 
 def effective_band(band: float, fairness_threshold: float | None) -> float:
@@ -137,17 +150,18 @@ For a viewer package G and a partner package R, each a tuple of asset ids:
 
 1. `give = Σ market(G)` and `receive = Σ market(R)`, both raw.
 2. **Headliner.** H is the single asset with the highest market in G ∪ R. Ties on market are broken by id ascending. If the top market value is tied *across* the two sides, set `premium = 0` and `premium_side = None`: nobody is consolidating a unique best asset.
-3. **Premium.** Let `side_H` be the side containing H, `n_H` that side's piece count and `n_other` the other side's count.
+3. **Premium.** Let `side_H` be the side containing H, `n_H` that side's piece count and `n_other` the other side's count. A throw-in (§4.3) is not counted as a piece here.
    - If `n_H < n_other`: `p = stud_premium(market(H), snapshot.elite_value, cfg.stud_premium)`, and the package on `side_H` is credited `×(1+p)`.
    - Otherwise `p = 0`.
    - `premium_side` is `"receive"` when the viewer receives H and is credited, `"give"` when the viewer gives H and is credited.
 4. `adjusted_ratio = (receive·(1+p if premium_side=="receive" else 1)) / (give·(1+p if premium_side=="give" else 1))`.
-5. **Band.** `b = effective_band(cfg.band, request.fairness_threshold)`. The trade passes iff `1/(1+b) − RATIO_TOL ≤ adjusted_ratio ≤ 1+b + RATIO_TOL`.
+5. **Band (asymmetric).** `b = effective_band(cfg.band, request.fairness_threshold)` is the overpay side and `g = effective_band(cfg.gain_band, request.fairness_threshold)` the gain side. The trade passes iff `1/(1+b) − RATIO_TOL ≤ adjusted_ratio ≤ 1+g + RATIO_TOL`: the viewer may give up to `b` more market value than they get, but take at most `g` more. The client preference tightens both sides, never loosens either.
 
-**Worked example.** `elite_value = 8457`, `band = 0.10`, `stud_premium = 0.15`.
+**Worked example.** `elite_value = 8457`, `band = 0.20`, `gain_band = 0.10`, `stud_premium = 0.15`.
 - The viewer receives an 8457 stud for two WRs worth 4200 + 4200.
-- p = 0.15, so adjusted receive = 9725.6 and ratio = 9725.6 / 8400 = 1.158. That is outside +10%, so the trade is **rejected**: the partner would be under-paid.
+- p = 0.15, so adjusted receive = 9725.6 and ratio = 9725.6 / 8400 = 1.158. That is above 1 + gain_band = 1.10, so the trade is **rejected**: the partner would be under-paid.
 - With 4600 + 4400 = 9000 given, ratio = 1.081, so the trade is **kept**. The viewer pays 6.4% raw over the stud's value.
+- The mirror trade, where the viewer **gives** the stud for the 4200 + 4200 pair, has ratio = 8400 / 9725.6 = 0.864 ≥ 1/1.2 = 0.833, so it is **kept**: the viewer may overpay by up to 20%.
 - A mid-tier headliner of 2117 (a Mid 1st) gets p = 0.15·(2117/8457)² = 0.0094, i.e. "barely any".
 
 ### 4.3 Hard rules, in order
@@ -156,15 +170,22 @@ These are applied per candidate pair in `find_fair_trades`, and identically in `
 
 | # | Code | Rule |
 |---|---|---|
-| 1 | `floor` | Every asset in G ∪ R has `market ≥ cfg.asset_floor_abs`. In `find_fair_trades` this holds by construction (candidates are pre-filtered), so it only fires in `evaluate_trade`. |
+| 1 | `floor` | Every asset in G ∪ R except the trade's throw-in has `market ≥ cfg.asset_floor_abs`. In `find_fair_trades` this holds by construction (candidates are pre-filtered, and a throw-in is added only as one), so it only fires in `evaluate_trade`. |
 | 2 | `band` | §4.2 step 5 |
-| 3 | `filler` | Every asset in G ∪ R has `market ≥ max(cfg.asset_floor_abs, cfg.filler_min_frac × market(H))`. The floor is relative to the **trade** headliner, which is stricter than `filler_ok`'s per-side headliner (`trade_service.py:2230`). |
+| 3 | `filler` | Every asset in G ∪ R except the throw-in has `market ≥ max(cfg.asset_floor_abs, cfg.filler_min_frac × market(H))`. The floor is relative to the **trade** headliner, which is stricter than `filler_ok`'s per-side headliner (`trade_service.py:2230`). |
 | 4 | `untouchable` | If G ∩ `request.untouchable_ids` ≠ ∅: `adjusted_ratio ≥ cfg.untouchable_min_ratio − RATIO_TOL`. Sets `uses_untouchable = True`. |
-| 5 | `reducible` | For each side with ≥ 2 assets, and each asset x on that side that is **not** the side's top asset and **not** in `request.pinned_give_ids ∪ request.pinned_receive_ids`: re-price the trade without x (§4.2 fully recomputed, premium included). If the result passes the band, reject: x is filler, since the trade is fair without it. |
-| 6 | `roster_size` | Only when `snapshot.rules.max_players` is not None. For each team T: `players_before(T) = #{a ∈ T.asset_ids : kind=="player"} + T.other_players`; `after = before − players_out + players_in`; `drops = max(0, after − max(max_players, before))`; `droppable(T) = #{a ∈ T.asset_ids : kind=="player" and market < cfg.asset_floor_abs}`. Sub-floor players never enter packages, so they are always "not in the trade". Reject if `drops > droppable(T)` for either team. Otherwise record `drops_needed = (drops_viewer, drops_partner)`. |
+| 5 | `reducible` | For each side with ≥ 2 assets, and each asset x on that side that is **not** the side's top asset, **not** in `request.pinned_give_ids ∪ request.pinned_receive_ids` and **not** the throw-in: re-price the trade without x (§4.2 fully recomputed, premium included). If the result passes the band, reject: x is filler, since the trade is fair without it. |
+| 6 | `roster_size` | Only when `snapshot.rules.max_players` is not None. For each team T: `players_before(T) = #{a ∈ T.asset_ids : kind=="player"} + T.other_players`; `after = before − players_out + players_in`; `drops = max(0, after − max(max_players, before))`; `droppable(T) = #{a ∈ T.asset_ids : kind=="player" and market < cfg.asset_floor_abs}`, minus the sub-floor players T gives in this trade (only a throw-in can be one): a piece leaving in the trade is not bench T can drop. Reject if `drops > droppable(T)` for either team. Otherwise record `drops_needed = (drops_viewer, drops_partner)`. |
 | 7 | `lineup` | For each team, the number of unfillable lineup slots after the trade must be ≤ the number before (§4.4). |
 
 The pins and not-interested filter are applied at package construction (§4.5), not as reject codes.
+
+**Throw-ins (operator, 2026-10-01).** *"Throwins are fine, but only if there is a clear throwin that the recipient values much higher than consensus (double the value)."* A **throw-in** is one piece that is junk for this trade, `market < max(cfg.asset_floor_abs, cfg.filler_min_frac × market(H))`, and that `throwin_ok` qualifies for its **recipient**:
+- The recipient's board values it at `≥ cfg.throwin_min_ratio × market` (2×) **and** `≥ cfg.asset_floor_abs`.
+- Evidence on both sides: `market > 0` (an unpriced player has no "double" to clear) and the recipient's board has `comparisons ≥ THROWIN_MIN_COMPARISONS` (3) for that player (a default Elo, or one or two matchups, is not an opinion).
+- **Whose board.** A throw-in the viewer receives is judged on `request.board`. A throw-in the partner receives is judged on that partner's **published** board, `snapshot.partner_boards[partner]`. A partner with no entry there (no real rankings) can never receive a throw-in.
+
+A trade carries **at most one** throw-in, and each side keeps ≤ `MAX_PACKAGE_SIZE` pieces including it. The throw-in is exempt from `floor`, `filler` and `reducible`, and it never sets a side's top or low. It still counts in the market sums (so in the band), in the positions (lineup) and in the roster sizes, and the giver no longer counts it as droppable bench. It is **not** a piece for the stud premium (§4.2 step 3, also in the `reducible` re-pricing), so adding one never switches the premium on or off. `FairTrade.throwin` names it; it is `None` otherwise. `evaluate_trade` finds the throw-in of an explicit package itself: a piece that is junk for the trade, is not its side's only piece, and qualifies for its recipient. If several qualify, the biggest recipient surplus (board value − market, then id) wins.
 
 ### 4.4 Lineup check
 
@@ -183,8 +204,9 @@ The pins and not-interested filter are applied at package construction (§4.5), 
 ### 4.5 Enumeration algorithm
 
 ```
-b      = effective_band(cfg.band, request.fairness_threshold)
-lo, hi = 1/(1+b), 1+b
+b      = effective_band(cfg.band, request.fairness_threshold)        # overpay side
+gb     = effective_band(cfg.gain_band, request.fairness_threshold)   # gain side
+lo, hi = 1/(1+b), 1+gb
 pmax   = cfg.stud_premium
 viewer = snapshot.teams[request.viewer_team_id]           # KeyError -> ValueError
 partners = [request.partner_team_id] if request.partner_team_id else sorted(t for t in teams if t != viewer)
@@ -207,15 +229,32 @@ for partner in partners (deterministic order):
     P = packages(candidates(partner, exclude=request.not_interested_ids, must=request.pinned_receive_ids))
     if request.pinned_receive_ids: P = [r for r in P if r ∩ pinned_receive ≠ ∅]; skip partner if P empty
     P sorted by (total, ids); totals = [r.total for r in P]
-    checks = 0; fair = []; truncated = False
+    # throw-in pools (§4.3), uncapped, biggest recipient surplus (value - market) first
+    give_tis = [a in viewer.asset_ids, not untouchable, throwin_ok(a, snapshot.partner_boards.get(partner))]
+    recv_tis = [a in partner.asset_ids, not untouchable, not not-interested, throwin_ok(a, request.board)]
+    max_give_ti, max_recv_ti = largest market in each pool (0 if empty)
+    checks = {base: 0, throwin: 0}; fair = []; truncated = False   # two separate check budgets
     for g in V:
         lo_raw = g.total * lo / (1+pmax);  hi_raw = g.total * hi * (1+pmax)   # widest window any premium allows
-        for r in P[bisect_left(totals, lo_raw) : bisect_right(totals, hi_raw)]:
-            checks += 1
-            if checks > max_checks_per_partner: truncated = True; stop this partner
-            if checks % 1000 == 0 and elapsed > time_budget_s: diag.budget_exhausted = True; stop all
-            verdict = rules §4.2–§4.4 on (g, r)
-            if ok: fair.append(FairTrade(...))
+        # the bisect window is widened just enough to reach pairs a throw-in can close
+        for r in P[bisect_left(totals, lo_raw - max_recv_ti) : bisect_right(totals, (g.total + max_give_ti) * hi * (1+pmax))]:
+            variants = []
+            if lo_raw <= r.total <= hi_raw: variants.append((base, g, r))
+            if len(g) < MAX_PACKAGE_SIZE:   # first MAX_THROWIN_OPTIONS of give_tis that pass, in pool order:
+                for ti in give_tis (ti not in g, junk vs max(g.top, r.top), r.total inside g+ti's raw window):
+                    variants.append((throwin, g + ti, r))   # the viewer adds a piece the partner values >= 2x
+            if len(r) < MAX_PACKAGE_SIZE:   # same cut for recv_tis
+                for ti in recv_tis (ti not in r, junk vs max(g.top, r.top), r.total + m(ti) inside g's raw window):
+                    variants.append((throwin, g, r + ti))   # the partner adds a piece the viewer values >= 2x
+            for (kind, gg, rr) in variants:                 # at most one throw-in per trade
+                checks[kind] += 1
+                if checks[kind] > max_checks_per_partner:
+                    truncated = True
+                    if kind == base: stop this partner
+                    else: skip this variant                 # throw-ins never starve base pairs
+                if sum(checks) % 1000 == 0 and elapsed > time_budget_s: diag.budget_exhausted = True; stop all
+                verdict = rules §4.2–§4.4 on (gg, rr)
+                if ok: fair.append(FairTrade(..., throwin=the added piece or None))
     if len(fair) > cfg.max_per_partner:
         fair.sort(key=(-market(H), len(give)+len(receive), abs(log(adjusted_ratio)), give, receive))
         fair = round_robin(fair, group=(give[0], receive[0]))[:cfg.max_per_partner]; truncated = True
@@ -223,6 +262,8 @@ for partner in partners (deterministic order):
     out.extend(fair)
 out.sort(key=(partner_team_id, -market(H), n_assets, abs(log(adjusted_ratio)), give, receive))
 ```
+
+**Throw-in variants.** A throw-in is tried as an add-on to each candidate pair, not as a package of its own: it can close a gap the pair alone misses (0.867 → inside the band) or sweeten a pair that is already fair. When both versions survive, they share a trade idea (§5.6) and the deck keeps the higher-priority one. The shortlist is cut per candidate pair, **after** the junk check: a bigger piece the recipient also loves is not junk in that pair, so it cannot crowd a real throw-in off the list. Throw-in variants have their own budget of `max_checks_per_partner` checks, separate from base pairs. When it runs out the partner counts as truncated, but only variants stop, so throw-ins never starve distinct base pairs.
 
 **Cap order and the value-only principle (revised by the lead, 2026-09-30).** Both caps spread across headliners instead of favoring the biggest. The viewer's packages are enumerated round-robin by headliner, so the check cap can't be spent entirely on the viewer's top assets. When the per-partner cap binds, it keeps trades round-robin over (give headliner, receive headliner) pairs, each pair in the order above. Neither step uses a preference signal. The original rule, biggest headliner first, made 92% of a 14-team pool give away one of the viewer's top 3 assets, and only 8 give assets reached the first 30 cards. With the revised rule the share is 12% and 14 give assets reach the first 30. `test_pool_spreads_across_give_headliners` pins this. The diagnostics record every truncation.
 
@@ -232,13 +273,13 @@ out.sort(key=(partner_team_id, -market(H), n_assets, abs(log(adjusted_ratio)), g
 |---|---|---|
 | Candidate assets per side | ≤ `max_assets_per_side` + pins, so 14 + 3 = 17 | `candidates()` |
 | Packages per side | ≤ C(17,1)+C(17,2)+C(17,3) = **833**; ≤ 469 without pins | `MAX_PACKAGE_SIZE = 3` |
-| Pair checks per partner | ≤ **40,000** | `max_checks_per_partner` |
-| Pair checks per league (14 teams) | ≤ 13 × 40,000 = **520,000** | the above |
+| Pair checks per partner | ≤ **40,000** base pairs, plus ≤ 40,000 throw-in variants (a separate budget; only when a board qualifies throw-ins) | `max_checks_per_partner` |
+| Pair checks per league (14 teams) | ≤ 13 × 40,000 = **520,000** base pairs (twice that with throw-in variants) | the above |
 | Per-check cost | O(1), plus ≤ 4 re-pricings (reducible), plus a lineup fill only when the fast accept fails | §4.3–§4.4 |
 | Wall clock | stops at **8 s**, checked every 1,000 checks | `time_budget_s` |
 | Output | ≤ `max_per_partner` × partners, so **≤ 2,600** for 14 teams | per-partner cap |
 
-**Expected load.** A 12-team league with about 250 packages per side after the within-package pre-prune, and a raw window of about ±27% (band ±10% × premium ≤ 15%), sees around 30 candidates per give package. That is about 7.5k checks per partner and about 80k per league: roughly 0.5–1.5 s in CPython. The perf test ([specs.md](specs.md), WP1) pins the deterministic bounds.
+**Expected load.** A 12-team league with about 250 packages per side after the within-package pre-prune, and a raw window of about ±27% (band ±10% × premium ≤ 15%), sees around 30 candidates per give package. That is about 7.5k checks per partner and about 80k per league: roughly 0.5–1.5 s in CPython. That estimate predates the asymmetric band: the default pay-20% / take-10% band moves the low edge of the raw window from about 0.79× to about 0.72× of the give total, and each pair can add up to 2 × `MAX_THROWIN_OPTIONS` throw-in variants. Those run on their own check budget (§4.5) and inside the same time budget. The perf test ([specs.md](specs.md), WP1) pins the deterministic bounds.
 
 ### 4.7 Diagnostics and logging
 
@@ -385,7 +426,7 @@ Floats are rounded to 4 decimals.
 
 ### 5.5 Card reasons: `card_reasons`
 
-The order is fixed: value, then outlook, then rank. The piece line only fills a free slot. There are at most 3 lines.
+The order is fixed: value, then outlook, then the throw-in line, then rank. The rank and piece lines only fill a free slot. There are at most 3 lines.
 
 | Slot | Condition | Text |
 |---|---|---|
@@ -394,7 +435,10 @@ The order is fixed: value, then outlook, then rank. The piece line only fills a 
 | | pct < −3 | `f"You pay {-pct}% over market"` |
 | outlook | partner side score ≥ 0.60: rebuilder / contender / middle | `"Fits their rebuild"` / `"Helps their title push"` / `"Works for their roster"` |
 | | else viewer side score ≥ 0.60: contender / rebuilder / middle | `"Upgrades your starting lineup"` / `"Adds youth for your rebuild"` / `"Works for your roster"` |
-| rank | has board, top asset set, `top_side=="receive"` and `rank_delta ≥ 5` | `f"You rank {name} {rank_delta} spots above market"` |
+| throw-in | `trade.throwin` set and received by the viewer (value from `request.board`) | `f"Throw-in: you rank {name} at {value/market:.1f}× market"`, e.g. `"Throw-in: you rank PT at 2.3× market"` |
+| | `trade.throwin` set and received by the partner (value from `snapshot.partner_boards[partner]`) | `f"Throw-in: they rank {name} at {value/market:.1f}× market"` |
+| | either, with no board value or `market ≤ 0` (defensive; `throwin_ok` rules both out) | `f"Throw-in: {name}, valued well above market by you"` / `"… by them"` |
+| rank (fill) | has board, top asset set and not the throw-in (its line already explains that player), `top_side=="receive"` and `rank_delta ≥ 5` | `f"You rank {name} {rank_delta} spots above market"` |
 | | `top_side=="give"` and `rank_delta ≤ −5` | `f"You rank {name} {-rank_delta} spots below market"` |
 | piece (fill) | `best_in_starter` | `f"{name} would start for you"` |
 | | else market(best_in) ≥ first_round_value | `"Brings back 1st-round value"` |
@@ -502,7 +546,13 @@ def build_snapshot(*, league_id: str, scoring_format: str, viewer_team_id: str, 
                    viewer_roster: Sequence[str], opponents: Sequence[object],
                    players: Mapping[str, object], seed_elo: Mapping[str, float],
                    lineup_slots: Sequence[str] | None, max_players: int | None,
-                   windows: Mapping[str, TeamWindow]) -> LeagueSnapshot: ...
+                   windows: Mapping[str, TeamWindow],
+                   partner_boards: Mapping[str, Board] | None = None) -> LeagueSnapshot: ...
+def partner_board_from(*, elo_ratings: Mapping[str, float] | None, seed_elo: Mapping[str, float],
+                       comparison_counts: Mapping[str, int] | None = None,
+                       confidence_source: str | None = None,
+                       confidence_weights: Mapping[str, float] | None = None,
+                       confidence_sources: Mapping[str, str] | None = None) -> Board | None: ...
 def build_request(*, snapshot: LeagueSnapshot, user_elo: Mapping[str, float] | None,
                   seed_elo: Mapping[str, float], confidence: Mapping[str, int] | None,
                   placements: Mapping[str, tuple[float, float]] | None,
@@ -530,7 +580,10 @@ def to_trade_cards(result: PipelineResult, snapshot: LeagueSnapshot, request: Re
 The rest of the snapshot:
 - `windows.get(team_id, DEFAULT_WINDOW)`;
 - `rules = RosterRules(tuple(lineup_slots or default_lineup_slots(fmt)), max_players)`;
-- `first_round_value, elite_value = tier_values(fmt)`.
+- `first_round_value, elite_value = tier_values(fmt)`;
+- `partner_boards`: each given board is kept only for a known team that is not the viewer, cut to asset ids in the snapshot (`comparisons` default 0 for a kept id); a board left with no values is dropped. Omitted → `{}`.
+
+**`partner_board_from`.** A leaguemate's **published** board, priced for throw-ins (§4.3). It returns `None` for an empty `elo_ratings`. Otherwise it shrinks with the personal-market policy's symmetric rule, `trade_policy.shrink_board(elo, seed_elo, trade_policy.confidence_map(comparison_counts, source=confidence_source, weights=confidence_weights, sources=confidence_sources))`, and returns `Board(values={a: elo_to_value(e)}, comparisons={a: comparison_counts.get(a, 0)})`. A player with no evidence prices at consensus, so a thin board can never qualify a throw-in. The caller passes only members whose Elo came from real `member_rankings` rows (server `has_rankings`, §9.1); the bench passes every other seat's frozen board (§8.2).
 
 **The market is raw `elo_to_value(seed)`**, with no age preference. It is the same number the calculator shows (`server.py:12726-12729`), and it means age is never double-counted (operator interview, 2026-07-17).
 
@@ -570,9 +623,10 @@ It returns the cards in `entries` order, plus `{id(card): evidence(entry, ...)}`
   "effective": 0.4548,
   "market": {"give": 5120.0, "receive": 5480.0, "adjusted_ratio": 1.0703,
              "premium": 0.0, "premium_side": null},
-  "core": {"band": 0.20, "ratio_floor": 0.8333, "ratio_ceiling": 1.20, "stud_premium": 0.15,
-           "untouchable_min_ratio": 1.08, "uses_untouchable": false, "drops_needed": [0, 1],
-           "budget_exhausted": false},
+  "core": {"band": 0.20, "gain_band": 0.10, "ratio_floor": 0.8333, "ratio_ceiling": 1.10,
+           "stud_premium": 0.15, "untouchable_min_ratio": 1.08, "uses_untouchable": false,
+           "drops_needed": [0, 1], "budget_exhausted": false, "throwin_min_ratio": 2.0,
+           "throwin": null},
   "windows": {"viewer":  {"window": "contender", "score": 0.21, "source": "inferred",
                           "pf_index": 0.33, "standings_weight": 0.1125},
               "partner": {"window": "rebuilder", "score": -0.30, "source": "declared",
@@ -585,9 +639,10 @@ It returns the cards in `entries` order, plus `{id(card): evidence(entry, ...)}`
 
 - `detail` is the `ScoredTrade.detail` of §5.4, verbatim.
 - `personal` and `n` are null when there is no board, or when the asset has no board entry.
-- `band` is the effective band.
+- `band` and `gain_band` are the effective bands, after the client's fairness preference. `ratio_floor` = 1/(1+band) and `ratio_ceiling` = 1+gain_band.
+- `throwin` is null when the trade has none. Otherwise it is `{"id", "recipient", "market", "recipient_value"}`, e.g. `{"id": "7611", "recipient": "viewer", "market": 300.0, "recipient_value": 700.0}`: `recipient` is `"viewer"` (the viewer receives it; value from `request.board`) or `"partner"` (value from the partner's published board), and `recipient_value` is that board's value for it.
 - The JSON is written with `json.dumps(..., sort_keys=True)`.
-- The schema version bumps on any key change.
+- The schema version bumps on any key change. (`core.gain_band`, `core.throwin_min_ratio` and `core.throwin` joined v1 on 2026-10-01, before the branch had served any value-core row, so v1 was not bumped.)
 
 ---
 
@@ -660,7 +715,10 @@ def snapshot_for_seat(league: Mapping, seat_team_id: str, *, standings_weight: f
                       ) -> tuple[LeagueSnapshot, Board | None]:
     """Build windows (windows.infer_windows with SimpleNamespace players from assets)
     and the snapshot from frozen data; board = shrink(boards[seat]) via
-    trade_service._shrink_user_elo(elo, seed_elo, comparisons, None) -> elo_to_value."""
+    trade_service._shrink_user_elo(elo, seed_elo, comparisons, None) -> elo_to_value.
+    Every OTHER seat's frozen board becomes snapshot.partner_boards[seat] through
+    adapter.partner_board_from(..., confidence_source="votes"), the server's partner
+    shrink, so throw-ins to partners are benched the way they are served."""
 def guardrails(entries: Sequence[DeckEntry], snapshot: LeagueSnapshot, *, top: int = 30) -> dict
 def run(frozen: Mapping, *, variants: Mapping[str, Mapping], seats: str = "all",
         engine: Callable[[LeagueSnapshot, Request, CoreConfig, RankConfig], PipelineResult] | None = None
@@ -901,10 +959,24 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
         completed_weeks=completed_weeks, declared=declared,
         standings_weight=vc_adapter.standings_weight_from(cfg))
     viewer_name = next((m.username for m in g_league.members if m.user_id == ctx.league_user_id), "You")
+    # Throw-ins to a partner need that partner's real published board (has_rankings is set
+    # only for members whose Elo came from member_rankings rows; others carry seeded noise).
+    partner_boards = {}
+    for m in opponents:
+        if getattr(m, "has_rankings", False) and m.elo_ratings:
+            pb = vc_adapter.partner_board_from(
+                elo_ratings=m.elo_ratings, seed_elo=seed_map,
+                comparison_counts=getattr(m, "comparison_counts", None),
+                confidence_source=getattr(m, "confidence_source", None) or "votes",
+                confidence_weights=getattr(m, "confidence_weights", None),
+                confidence_sources=getattr(m, "confidence_sources", None))
+            if pb is not None:
+                partner_boards[str(m.user_id)] = pb
     snapshot = vc_adapter.build_snapshot(
         league_id=league_id, scoring_format=fmt, viewer_team_id=viewer, viewer_name=viewer_name,
         viewer_roster=g_user_roster, opponents=opponents, players=players_dict, seed_elo=seed_map,
-        lineup_slots=slots, max_players=max_players, windows=windows)
+        lineup_slots=slots, max_players=max_players, windows=windows,
+        partner_boards=partner_boards)
     request = vc_adapter.build_request(
         snapshot=snapshot, user_elo=elo_map_rt, seed_elo=seed_map, confidence=confidence_counts,
         placements=placement_bands, untouchable_ids=untouchable_ids,
@@ -1033,7 +1105,7 @@ With the default `None`, no existing caller changes behavior.
                            and k != "bakeoff_owner_only"}
 ```
 
-**Why.** The 12 new `vc_*` rows enter `_trade_service_mod._cfg` after `reload_config()`. From there they reach the owner request context (`server.py:14905`), which is hashed into the owner experiment's `request_hash` and its 50/50 treatment parity (`:15110-15117`). Without this filter, merely deploying the seeded knobs would reshuffle established owner request units while the flag is **off**. That is the exact hazard the existing `owner_bilateral_enabled` pop guards against (`:15093-15095`).
+**Why.** The 14 new `vc_*` rows enter `_trade_service_mod._cfg` after `reload_config()`. From there they reach the owner request context (`server.py:14905`), which is hashed into the owner experiment's `request_hash` and its 50/50 treatment parity (`:15110-15117`). Without this filter, merely deploying the seeded knobs would reshuffle established owner request units while the flag is **off**. That is the exact hazard the existing `owner_bilateral_enabled` pop guards against (`:15093-15095`).
 
 **Other effects, accepted and documented rather than filtered.** Two other hashes of the full config change once on deploy:
 - the job cache's request signature (`server.py:3090-3094`), which costs one regenerate per key;
@@ -1056,19 +1128,21 @@ The mirror test `test_seed_ui_test_db.py:107` ignores `_`-prefixed keys. The com
 
 ### 9.4 `backend/database.py`
 
-Append these 12 rows before the closing `]` of `_MODEL_CONFIG_DEFAULTS` (`database.py:3190`):
+Append these 14 rows before the closing `]` of `_MODEL_CONFIG_DEFAULTS` (`database.py:3190`):
 ```python
-    ("vc_band",                   0.20, "value core: fairness band half-width on the premium-adjusted market ratio (kept iff 1/(1+b) <= ratio <= 1+b)"),
+    ("vc_band",                   0.20, "value core: most the viewer may OVERPAY on the premium-adjusted market ratio (ratio >= 1/(1+band)); vc_gain_band is the other side"),
+    ("vc_gain_band",              0.10, "value core: most the viewer may GAIN on the premium-adjusted market ratio (ratio <= 1+gain_band); vc_band is the overpay side"),
     ("vc_stud_premium",           0.15, "value core: consolidation premium at an elite headliner; scales with (headliner/elite)^2"),
     ("vc_untouchable_min_ratio",  1.08, "value core: an untouchable is offered only when the adjusted return is at least this"),
     ("vc_max_assets_per_side",   14.0,  "value core: top-N eligible assets per team used to build 1-3 asset packages (pins always added)"),
-    ("vc_max_per_partner",      200.0,  "value core: fair trades kept per partner, biggest headliner first"),
+    ("vc_max_per_partner",      200.0,  "value core: fair trades kept per partner, round-robin over (give, receive) headliner pairs"),
     ("vc_w_value",                1.0,  "value core ranking: weight of the value score"),
     ("vc_w_outlook",              1.0,  "value core ranking: weight of the outlook (both windows) score"),
     ("vc_w_rank",                 1.0,  "value core ranking: weight of the viewer-rankings score"),
     ("vc_repeat_penalty",         0.15, "value core ranking: priority points subtracted per prior appearance of a card's most-shown asset (partner at half rate)"),
     ("vc_player_cap",             3.0,  "value core ranking: max cards any one asset may appear in within the first 30"),
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
+    ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
 ```
 There is no schema change: `model_config` rows are seeded by `INSERT OR IGNORE` (`database.py:3723-3727`).

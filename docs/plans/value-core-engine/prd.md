@@ -29,7 +29,7 @@ The old engines stay in the code, one switch away, until the new one beats them 
 2. **G2 — Few, legible hard rules.**
    - Rosters stay legal.
    - Untouchables move only for an above-market return.
-   - No junk filler, using the operator's two floors: a rosterable absolute floor and a percentage of the headliner.
+   - No junk filler, using the operator's two floors: a rosterable absolute floor and a percentage of the headliner. The one exception is a single clear throw-in that its recipient values at double consensus or more (§5).
 3. **G3 — Ranking that is three numbers.** The priority of a card is w_value·value + w_outlook·outlook + w_rank·rankings. The weights start equal. The whole ranking layer is 5 settings.
 4. **G4 — A varied deck.** One card per trade idea: versions of a trade with the same partner and the same headliners, where only minor pieces or pick years differ, collapse to the best one. Every acquisition is shown once before any is shown twice. In the first 30 cards no partner takes more than its share and no player appears more than 3 times. Nothing else is filtered at the ranking layer: weak trades sink, they don't vanish.
 5. **G5 — Every card says why.** The card reasons come from the three scores, e.g. "Fair on value · Fits their rebuild · You rank Chase 12 spots above market".
@@ -50,14 +50,15 @@ The old engines stay in the code, one switch away, until the new one beats them 
   - the manual calculator;
   - prepared inventories. `trade.prepared_inventory` adoption is disabled while the flag is on.
 - **No likes-you injection, standing-offer stamps, breaker narration, lanes, fatigue or taste multipliers, exploration wildcards, first-session shaping or ghost-holdout withholding on value-core decks.** These layers belong to the legacy stack. Open question Q2 asks which, if any, come back.
-- **No counterparty personal boards in scoring.** The rank score uses only the viewer's board. The partner side is judged on consensus value and the partner's window, the evidence we actually have for most teams.
+- **No counterparty personal boards in scoring.** The rank score uses only the viewer's board. The partner side is judged on consensus value and the partner's window, the evidence we actually have for most teams. The one place a partner's board is read is the throw-in rule (§5): a small piece the partner receives must be one their published rankings value at double consensus or more.
 - **No new standings providers.** ESPN, MFL and Fleaflicker standings stay "not implemented" (`backend/outlook/league_state.py:295-315`), so those leagues get windows from roster age and picks only.
 - **No deletion of old engines, flags or knobs.**
 
 ## 5. User-visible behavior (flag on, user in the tester allowlist)
 
 - **The deck opens with cards from many different partners and players.** No trade idea repeats with only minor pieces or pick years swapped, and no acquisition is shown twice until every other one has been shown once. In the first 30, no single player appears more than 3 times and no partner takes more than its share (4 of 30 in a 12-team league). A repeated partner is pushed down too, at half the player rate.
-- **Every card is fair on consensus value.** The adjusted ratio sits within ±20% by default (operator decision 2026-10-01; it was ±10%). When one side gets the single best asset with fewer pieces, the other side must add a premium. That premium is up to 15% for an elite asset and near zero for mid-tier ones, which matches the operator's "tier-1 commands a huge premium, mid-tier barely any" (`docs/plans/trade-logic-interview-2026-07-17.md`).
+- **Every card is fair on consensus value, with an asymmetric band** (operator decision 2026-10-01). You may give up to 20% more market value than you get back (`vc_band`), but you never take more than 10% more from the partner (`vc_gain_band`). On the frozen real-league bench this keeps the insult rate at 0.2%; a symmetric ±20% band reached 5.6%. Overpays above 10% are rare (16 of 2,220 first-30 cards) and surface only where your rankings justify them. When one side gets the single best asset with fewer pieces, the other side must add a premium. That premium is up to 15% for an elite asset and near zero for mid-tier ones, which matches the operator's "tier-1 commands a huge premium, mid-tier barely any" (`docs/plans/trade-logic-interview-2026-07-17.md`).
+- **A small throw-in rides along only when its recipient clearly wants it.** The operator's rule: *"throwins are fine, but only if there is a clear throwin that the recipient values much higher than consensus (double the value)"*. A piece too small for the junk-filler rules may be added only if the side receiving it ranks him at 2× consensus or more (`vc_throwin_min_ratio`) and at least at the asset floor. A piece you get is judged on your board; a piece you give is judged on the partner's published rankings, so a leaguemate who never ranked can never receive one. Both need real evidence: a player with a consensus value, and at least three matchups behind the ranking. At most one throw-in per trade, still at most 3 pieces a side. The card names it, e.g. "Throw-in: you rank X at 2.3× market". On the real bench, throw-ins appear on 17 of 2,220 first-30 cards.
 - **Cards that bring back a real piece rise.** A real piece is a player who would start in your lineup, or a 1st-round-value asset. Bench swaps sink.
 - **Cards that fit both teams' windows rise.**
   - A contender is rewarded for improving its starting lineup.
@@ -72,7 +73,7 @@ The old engines stay in the code, one switch away, until the new one beats them 
   - Untouchables are only offered when you get at least 8% above market back.
   - "Not interested" players never come back to you.
   - A trade you already passed does not return. This uses the existing exact-disposition check.
-  - The fairness slider can only tighten the band. At 0.95 it narrows the band to ±5%. It can never loosen it.
+  - The fairness slider can only tighten the band. At 0.95 it narrows both sides to 5%. It can never loosen either side.
 
 ## 6. Success metrics
 
@@ -123,11 +124,11 @@ The bench also reports, without gating on them, repeat acquisitions (the same he
 - **Q3 — Starter-strength in the window.** Should the window use the #372 starter-value index? It needs `trade.outlook_composite` on, or a direct call to `starter_value_signal`. v1 uses age, picks and points-for only, as the operator named.
 - **Q4 — Blind-grade graders.** The 2026-09-30 note in the superseded plan says 1–2 testers will blind-grade alongside the operator. The export supports several sheets, one per grader. Who are they?
 - **Q5 — Trade intent. Answered 2026-10-01: intent-mode decks stay on the legacy engine.**
-- **Q6 — Bush League** has never been served a card. The freeze reads DB state directly, so it does not depend on served decks. But if the league has no `league_members` rows it cannot be benched. That needs checking at freeze time.
+- **Q6 — Bush League. Answered 2026-10-01: frozen.** It had never been served a card, but the freeze reads DB state directly. Two 2026 leagues share the name "Bush League"; both had `league_members` rows and both are in the frozen bench (6 leagues, 77 teams, 10 boards).
 
 ## 9. Risks
 
-- **The default band and premium are guesses** until the recall calibration runs. The guardrails are the tripwire. The knobs are deploy-free.
+- **The default premium is a guess, and the band rests on a small bench.** The asymmetric band was chosen on the frozen real-league bench (six leagues), not on the recall calibration. The guardrails are the tripwire. The knobs are deploy-free.
 - **Recall evidence is thin.** It covers 77 reconstructable trades from the two franchises with committed weekly rosters. Other picks held at trade time and player ages are absent from the fixtures ([lld.md §8.3](lld.md#83-real-trade-recall-backendevalvalue_core_recallpy)).
 - **Swipes still train the board.** Trade swipes still move the user's Elo through the existing `trade_k_like`/`trade_k_pass` path, as they do for legacy cards. The bake-off zeroes these knobs. The value core does not.
 - **A parallel scoreboard exists.** An uncommitted `backend/eval/deck_scoreboard.py` in the `trade-quality-scoreboard` worktree measures *served* decks with overlapping numbers. The two should share definitions: the lead decides whether it lands, and whether the bench adopts its thresholds.

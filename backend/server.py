@@ -7515,10 +7515,24 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
             completed_weeks=completed_weeks, declared=declared,
             standings_weight=vc_adapter.standings_weight_from(cfg))
         viewer_name = next((m.username for m in g_league.members if m.user_id == ctx.league_user_id), "You")
+        # Throw-ins to a partner need that partner's real published board (has_rankings is set
+        # only for members whose Elo came from member_rankings rows; others carry seeded noise).
+        partner_boards = {}
+        for m in opponents:
+            if getattr(m, "has_rankings", False) and m.elo_ratings:
+                pb = vc_adapter.partner_board_from(
+                    elo_ratings=m.elo_ratings, seed_elo=seed_map,
+                    comparison_counts=getattr(m, "comparison_counts", None),
+                    confidence_source=getattr(m, "confidence_source", None) or "votes",
+                    confidence_weights=getattr(m, "confidence_weights", None),
+                    confidence_sources=getattr(m, "confidence_sources", None))
+                if pb is not None:
+                    partner_boards[str(m.user_id)] = pb
         snapshot = vc_adapter.build_snapshot(
             league_id=league_id, scoring_format=fmt, viewer_team_id=viewer, viewer_name=viewer_name,
             viewer_roster=g_user_roster, opponents=opponents, players=players_dict, seed_elo=seed_map,
-            lineup_slots=slots, max_players=max_players, windows=windows)
+            lineup_slots=slots, max_players=max_players, windows=windows,
+            partner_boards=partner_boards)
         request = vc_adapter.build_request(
             snapshot=snapshot, user_elo=elo_map_rt, seed_elo=seed_map, confidence=confidence_counts,
             placements=placement_bands, untouchable_ids=untouchable_ids,

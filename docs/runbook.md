@@ -440,7 +440,7 @@ python -m backend.eval.value_core_bench run --frozen <PRIVATE>.json --output <NE
   [--variant NAME=overrides.json ...] [--seats all|boarded]
 ```
 
-A variant file holds `{"core": {...}, "rank": {...}, "standings_weight": x}` overrides on top of the defaults. For every league and seat the tool runs the pipeline and computes the guardrails on the first 30 cards. It writes `results.json` and one `cards-<variant>.json` blind-grade card set per variant, then prints a markdown table with one row per variant (the card count, the three pooled rates, the worst seat's acquired-asset appearances, near-duplicates and repeat acquisitions, and the verdict), followed by one `verdict <variant>: PASS|FAIL` line per variant.
+A variant file holds `{"core": {...}, "rank": {...}, "standings_weight": x}` overrides on top of the defaults (core keys are `CoreConfig` field names, e.g. `band`, `gain_band`, `throwin_min_ratio`). For every league and seat the tool runs the pipeline and computes the guardrails on the first 30 cards. Each seat's snapshot carries every other seat's frozen board as a partner board, shrunk the way the server shrinks one (`adapter.partner_board_from`), so throw-ins to partners are benched the way they are served. It writes `results.json` and one `cards-<variant>.json` blind-grade card set per variant, then prints a markdown table with one row per variant (the card count, the three pooled rates, the worst seat's acquired-asset appearances, near-duplicates and repeat acquisitions, and the verdict), followed by one `verdict <variant>: PASS|FAIL` line per variant.
 
 | Guardrail | Definition | Target |
 |---|---|---|
@@ -459,7 +459,7 @@ python -m backend.eval.value_core_recall --fixtures backend/tests/fixtures --out
   [--variant NAME=overrides.json]
 ```
 
-It rebuilds the in-season two-team trades in the committed Sleeper fixtures (FFV3 2022–2025, Lakeview 2024–2025) from the week-before rosters and dated DP values. It reports exact and close recall@10, the share of real trades that are in the fair pool, why the rest failed, and a band calibration: `recommended_band` is the band that would admit 80% of the real trades. This is a baseline, not a gate. The fixtures carry no ages and only the traded picks, so outlook is neutral here. Do not change `vc_band` from this number without the operator.
+It rebuilds the in-season two-team trades in the committed Sleeper fixtures (FFV3 2022–2025, Lakeview 2024–2025) from the week-before rosters and dated DP values. It reports exact and close recall@10, the share of real trades that are in the fair pool, why the rest failed, and a band calibration: `recommended_band` is the band that would admit 80% of the real trades. This is a baseline, not a gate. The fixtures carry no ages and only the traded picks, so outlook is neutral here. Do not change `vc_band` or `vc_gain_band` from this number without the operator. The recommendation is symmetric (it fits the absolute log ratio), while the live band is asymmetric: the viewer may overpay by up to `vc_band` but gain at most `vc_gain_band`.
 
 **4. Blind grade:**
 

@@ -147,6 +147,19 @@ def score_trades(snapshot: LeagueSnapshot, request: Request, trades: Sequence[Fa
     return out
 
 
+def _throwin_reason(t: FairTrade, snapshot: LeagueSnapshot, request: Request) -> str:
+    """Why the small piece is on the card: its recipient values it well above market."""
+    asset = snapshot.assets[t.throwin]
+    if t.throwin in t.receive:
+        board, who = request.board, "you rank"
+    else:
+        board, who = snapshot.partner_boards.get(t.partner_team_id), "they rank"
+    value = board.values.get(t.throwin) if board is not None else None
+    if value is None or asset.market <= 0:
+        return f"Throw-in: {asset.name}, valued well above market by {'you' if who == 'you rank' else 'them'}"
+    return f"Throw-in: {who} {asset.name} at {value / asset.market:.1f}× market"
+
+
 def card_reasons(scored: ScoredTrade, snapshot: LeagueSnapshot, request: Request) -> tuple[str, ...]:
     """1-3 strings, templates in §5.5."""
     t, d = scored.trade, scored.detail
@@ -169,8 +182,12 @@ def card_reasons(scored: ScoredTrade, snapshot: LeagueSnapshot, request: Request
                         "rebuilder": "Adds youth for your rebuild",
                         "middle": "Works for your roster"}[viewer["window"]])
 
+    if t.throwin is not None:
+        reasons.append(_throwin_reason(t, snapshot, request))
+
     r = d["rank"]
-    if r["has_board"] and r["top_asset"] is not None:
+    if (len(reasons) < 3 and r["has_board"] and r["top_asset"] is not None
+            and r["top_asset"] != t.throwin):   # the throw-in line already explains that player
         name = snapshot.assets[r["top_asset"]].name
         if r["top_side"] == "receive" and r["rank_delta"] >= RANK_SPOTS_MIN:
             reasons.append(f"You rank {name} {r['rank_delta']} spots above market")
