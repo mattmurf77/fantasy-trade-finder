@@ -226,7 +226,12 @@ def _fetch_json(url: str):
         return json.loads(response.read())
 
 
-def _freeze_league(conn, league_id: str, today: date, fetch_json) -> dict:
+def read_league_inputs(conn, league_id: str, today: date) -> dict:
+    """The DB half of a freeze: dialect-neutral reads on ANY SQLAlchemy connection — the app's
+    own engine or the read-only prod one. No network, no prod tooling, no writes.
+    Returns league_record's keyword arguments minus meta/state:
+    {"league_row", "members", "picks", "rankings", "players", "consensus_elo", "declared"}.
+    Raises ValueError when the league has no `leagues` row or no `league_members` rows."""
     from sqlalchemy import bindparam, text
 
     def rows(sql: str, **params) -> list[dict]:
@@ -242,8 +247,13 @@ def _freeze_league(conn, league_id: str, today: date, fetch_json) -> dict:
                    "WHERE league_id = :lid ORDER BY user_id", lid=league_id)
     if not members:
         raise ValueError(f"league {league_id} has no league_members rows; it cannot be benched")
-    picks = rows("SELECT pick_id, season, round, owner_user_id, pick_value, pool_value "
-                 "FROM draft_picks WHERE league_id = :lid AND source = 'platform' "
+    # Platform rows have `source` NULL (sync_draft_picks never sets it; database.py's
+    # _pick_source_predicate reads NULL as platform). is_traded / original_username feed the
+    # blind-grading neutral pick label (docs/plans/blind-grading/lld.md §6.2).
+    picks = rows("SELECT pick_id, season, round, owner_user_id, pick_value, pool_value, "
+                 "is_traded, original_username "
+                 "FROM draft_picks WHERE league_id = :lid "
+                 "AND (source IS NULL OR source = 'platform') "
                  "ORDER BY pick_id", lid=league_id)
     rankings = rows("SELECT user_id, player_id, elo, comparison_count FROM member_rankings "
                     "WHERE league_id = :lid AND COALESCE(scoring_format, '1qb_ppr') = :fmt "
@@ -255,8 +265,9 @@ def _freeze_league(conn, league_id: str, today: date, fetch_json) -> dict:
     players: dict[str, dict] = {}
     consensus: dict[str, float] = {}
     if ids:
-        players_sql = text("SELECT player_id, full_name, position, age, search_rank FROM players "
-                           "WHERE player_id IN :ids").bindparams(bindparam("ids", expanding=True))
+        players_sql = text("SELECT player_id, full_name, position, team, age, search_rank "
+                           "FROM players WHERE player_id IN :ids"
+                           ).bindparams(bindparam("ids", expanding=True))
         players = {str(r["player_id"]): dict(r)
                    for r in conn.execute(players_sql, {"ids": ids}).mappings()}
         history_sql = text(
@@ -268,14 +279,18 @@ def _freeze_league(conn, league_id: str, today: date, fetch_json) -> dict:
         consensus = {str(r["player_id"]): float(r["consensus_elo"])
                      for r in conn.execute(history_sql, {"fmt": fmt, "ids": ids,
                                                          "today": today.isoformat()}).mappings()}
+    return {"league_row": league_row, "members": members, "picks": picks, "rankings": rankings,
+            "players": players, "consensus_elo": consensus, "declared": declared}
+
+
+def _freeze_league(conn, league_id: str, today: date, fetch_json) -> dict:
+    inputs = read_league_inputs(conn, league_id, today)
     meta = state = None
-    if (league_row.get("platform") or "sleeper") == "sleeper":
+    if (inputs["league_row"].get("platform") or "sleeper") == "sleeper":
         from backend.outlook.league_state import SleeperLeagueState
         meta = fetch_json(SLEEPER_LEAGUE_URL.format(league_id))
         state = SleeperLeagueState(fetch=fetch_json).load(league_id)
-    return league_record(league_row=league_row, members=members, picks=picks, rankings=rankings,
-                         players=players, consensus_elo=consensus, declared=declared,
-                         meta=meta, state=state)
+    return league_record(**inputs, meta=meta, state=state)
 
 
 def freeze(*, secrets: Path, league_ids: Sequence[str], output: Path, today: date | None = None,

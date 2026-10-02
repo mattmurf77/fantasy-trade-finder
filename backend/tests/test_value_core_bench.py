@@ -1,4 +1,5 @@
-"""value_core_bench: guardrails, synthetic league, seat snapshots, run verdict, freeze.
+"""value_core_bench: guardrails, synthetic league, seat snapshots, run verdict, freeze,
+read_league_inputs (the DB half of a freeze on a plain connection; NULL-source picks are platform).
 
 WP1-WP3 modules (windows, adapter, pipeline) are stubbed through sys.modules the
 same way as WP3's vc_stubs (specs.md section 4); after integration the stubs patch
@@ -439,7 +440,10 @@ def test_freeze_reads_through_read_only_connection(monkeypatch, tmp_path):
              "owner_user_id": "u2", "pick_value": 60.0, "pool_value": 2117.0,
              "source": "platform"},
             {"pick_id": "pk2", "league_id": "1234", "season": 2027, "round": 2,
-             "owner_user_id": "u2", "pick_value": 30.0, "pool_value": 700.0, "source": "user"}])
+             "owner_user_id": "u2", "pick_value": 30.0, "pool_value": 700.0, "source": "user"},
+            # sync_draft_picks never sets `source`: a NULL-source row IS a platform pick
+            {"pick_id": "pk3", "league_id": "1234", "season": 2027, "round": 3,
+             "owner_user_id": "u1", "pick_value": 10.0, "pool_value": 600.0, "source": None}])
         conn.execute(insert(db.league_preferences_table), [
             {"user_id": "u2", "league_id": "1234", "team_outlook": "jets"}])
 
@@ -466,7 +470,7 @@ def test_freeze_reads_through_read_only_connection(monkeypatch, tmp_path):
     output = tmp_path / "frozen.json"
     summary = bench.freeze(secrets=tmp_path / "secrets.env", league_ids=["1234"], output=output,
                            today=date(2026, 9, 30), fetch_json=fetch)
-    assert summary == {"leagues": 1, "teams": 2, "assets": 3, "boards": 1,
+    assert summary == {"leagues": 1, "teams": 2, "assets": 4, "boards": 1,
                        "standings_leagues": 1}
     assert "u1" not in json.dumps(summary) and "u2" not in json.dumps(summary)
     assert fake.disposed and all(u.startswith("https://api.sleeper.app/v1/") for u in fetched)
@@ -475,6 +479,7 @@ def test_freeze_reads_through_read_only_connection(monkeypatch, tmp_path):
     (league,) = frozen["leagues"]
     assert league["assets"]["p1"]["market"] == pytest.approx(elo_to_value(1600.0))
     assert league["assets"]["pk1"]["market"] == 2117.0 and "pk2" not in league["assets"]
+    assert "pk3" in league["assets"]                      # NULL source = platform (D6 fix)
     assert league["boards"] == {"u1": {"elo": {"p2": 1650.0}, "comparisons": {"p2": 6}}}
     assert league["teams"][1]["declared_outlook"] == "jets"
     assert league["lineup_slots"] == ["QB", "RB", "WR"] and league["max_players"] == 5
@@ -482,6 +487,50 @@ def test_freeze_reads_through_read_only_connection(monkeypatch, tmp_path):
     with pytest.raises(FileExistsError):
         bench.freeze(secrets=tmp_path / "secrets.env", league_ids=["1234"], output=output,
                      fetch_json=fetch)
+
+
+def test_read_league_inputs_returns_league_record_kwargs():
+    """The DB half of a freeze on a PLAIN connection (the app's own engine, not the
+    read-only prod wrapper): no network, no prod tooling, league_record's kwargs back."""
+    from sqlalchemy import create_engine, insert
+
+    from backend import database as db
+
+    engine = create_engine("sqlite:///:memory:")
+    db.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(insert(db.leagues_table), [{
+            "sleeper_league_id": "77", "user_id": "u1", "name": "Plain", "platform": "sleeper"}])
+        conn.execute(insert(db.league_members_table), [
+            {"league_id": "77", "user_id": "u1", "username": "a", "roster_data": json.dumps(["p1"])},
+            {"league_id": "77", "user_id": "u2", "username": "b", "roster_data": json.dumps(["p2"])}])
+        conn.execute(insert(db.players_table), [
+            {"player_id": "p1", "full_name": "One", "position": "WR", "team": "KC", "age": 25},
+            {"player_id": "p2", "full_name": "Two", "position": "RB", "team": None, "age": 23}])
+        conn.execute(insert(db.player_value_history_table), [
+            {"player_id": "p1", "scoring_format": "1qb_ppr", "consensus_elo": 1600.0,
+             "snapshot_date": "2026-09-29"}])
+        conn.execute(insert(db.draft_picks_table), [
+            {"pick_id": "pk1", "league_id": "77", "season": 2027, "round": 1, "owner_user_id": "u2",
+             "is_traded": 1, "original_username": "a", "pick_value": 60.0, "pool_value": 2117.0,
+             "source": None},
+            {"pick_id": "pk2", "league_id": "77", "season": 2027, "round": 2, "owner_user_id": "u2",
+             "is_traded": 0, "original_username": None, "pick_value": 30.0, "pool_value": 700.0,
+             "source": "user"}])
+    with engine.connect() as conn:
+        inputs = bench.read_league_inputs(conn, "77", date(2026, 9, 30))
+        with pytest.raises(ValueError):
+            bench.read_league_inputs(conn, "no-such-league", date(2026, 9, 30))
+    assert set(inputs) == {"league_row", "members", "picks", "rankings", "players",
+                           "consensus_elo", "declared"}
+    assert inputs["players"]["p1"]["team"] == "KC" and inputs["players"]["p2"]["team"] is None
+    assert [pk["pick_id"] for pk in inputs["picks"]] == ["pk1"]          # NULL in, 'user' out
+    assert inputs["picks"][0]["is_traded"] == 1 and inputs["picks"][0]["original_username"] == "a"
+    assert inputs["consensus_elo"] == {"p1": 1600.0} and inputs["declared"] == {}
+    record = bench.league_record(**inputs, meta=None, state=None)
+    assert record["league_id"] == "77" and record["max_players"] is None
+    assert set(record["assets"]) == {"p1", "p2", "pk1"}
+    assert record["assets"]["p1"]["market"] == pytest.approx(elo_to_value(1600.0))
 
 
 def test_freeze_refuses_non_read_only(monkeypatch, tmp_path):
