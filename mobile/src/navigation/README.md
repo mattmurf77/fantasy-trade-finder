@@ -26,12 +26,13 @@ RootNav (Stack)
 ```
 
 ```
-TabNav (Bottom tabs — Rank · Acquire · Draft · Matches · League)
+TabNav (Bottom tabs — Rank · Acquire · [Calibration | Draft] · Matches · League)
 ├─ Rank    (Stack)  RankHome · Trios · Anchors · Tiers · QuickSetTiers ·
 │                   QuickRank · ManualRanks · RookieRanks · Trends
 ├─ Trades  (Stack)  TradesHome · TradeDeck · Portfolio · TradeCalculator
 │          ↳ tab label is "Acquire"; the route name stays `Trades`
-├─ Draft   (Stack)  DraftRoom              — renders only under flag `draft.tab`
+├─ Calibration (Stack) CalibrationHome     — renders only when `grading.blind` resolves true at mount; takes the third slot ahead of Draft
+├─ Draft   (Stack)  DraftRoom              — renders only under flag `draft.tab`, and only when Calibration is absent
 ├─ Matches (screen)
 └─ League  (Stack)  LeagueRankings (root, = LeagueSummaryScreen) · LeagueHome (= LeagueScreen)
 ```

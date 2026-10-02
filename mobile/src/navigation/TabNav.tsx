@@ -65,6 +65,7 @@ import MatchesScreen from '../screens/MatchesScreen';
 // the root-stack route is what `app/league/draft-room` resolves to, so a
 // deep link behaves identically whether or not the seasonal tab exists.
 import DraftRoomScreen from '../screens/DraftRoomScreen';
+import CalibrationScreen from '../screens/CalibrationScreen';
 import LeagueScreen from '../screens/LeagueScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import TopBar from '../components/TopBar';
@@ -638,6 +639,25 @@ function DraftStackNav() {
   );
 }
 
+// ── Calibration (docs/plans/blind-grading/) ──────────────────────────────
+// Tester-only blind grading of today's engine vs the value core (Gate 2).
+// Occupies the Draft tab's third slot (operator 2026-10-02). A TAB-stack
+// screen: it mounts NO FeedbackFAB — RootNav's global mount covers it (the
+// #196/#197 double-FAB rule; see DraftStackNav's inTabs note above).
+const CalibrationStack = createNativeStackNavigator();
+
+function CalibrationStackNav() {
+  return (
+    <CalibrationStack.Navigator screenOptions={{ headerShown: false }}>
+      <CalibrationStack.Screen
+        name="CalibrationHome"
+        component={CalibrationScreen}
+        options={chalklineHeader('Calibration')}
+      />
+    </CalibrationStack.Navigator>
+  );
+}
+
 // Chalkline tab icons — stroke SVG set from src/components/chalkline. The
 // navigator passes the active/inactive tint (ice / chalk-dim) as `color`.
 const tabIcon = (name: IconName) =>
@@ -715,6 +735,15 @@ export default function TabNav() {
   // live inside TradesStackNav. Adding a sibling touches none of them.
   const [showDraftTab] = useState(
     () => !!useFeatureFlags.getState().flags['draft.tab'],
+  );
+
+  // Calibration tab — presence decided ONCE at mount, exactly like
+  // showDraftTab: read IMPERATIVELY so a mid-session flag revalidation cannot
+  // insert or remove a tab. grading.blind ships false and reaches testers
+  // only through the calibration_rollout overlay (merged into this map by
+  // api/flags.ts). When present it takes the third slot AHEAD of Draft.
+  const [showCalibrationTab] = useState(
+    () => !!useFeatureFlags.getState().flags['grading.blind'],
   );
 
   // P0-7 — tab_selected. `from_tab` is the tab that OWNED the bar at press
@@ -837,11 +866,34 @@ export default function TabNav() {
             },
           })}
         />
-        {/* The seasonal Draft tab — third in the bar, matching the approved
-            mock's A′1 frame (Rank · Acquire · Draft · Matches · League). No
-            flare dot: Sleeper exposes no trustworthy start time, so there is
-            no countdown or urgency signal to honestly render. */}
-        {showDraftTab ? (
+        {/* Third slot: Calibration (testers) takes it ahead of the seasonal Draft
+            tab, so the bar never exceeds five tabs. */}
+        {showCalibrationTab ? (
+          <Tab.Screen
+            name="Calibration"
+            component={CalibrationStackNav}
+            options={{
+              tabBarIcon: tabIcon('check'),
+              tabBarLabel: 'Calibration',
+              tabBarAccessibilityLabel: 'Calibration',
+              tabBarButtonTestID: 'tab.calibration',
+            }}
+            listeners={({ navigation, route }) => ({
+              // Same focused-re-tap contract as the other stack tabs
+              // (PRD 01-05): pop back to the stack root.
+              tabPress: () => {
+                trackTab('calibration', navigation);
+                if (retapOn && navigation.isFocused()) {
+                  popNestedToTop(navigation, route);
+                }
+              },
+            })}
+          />
+        ) : showDraftTab ? (
+          /* The seasonal Draft tab — third in the bar, matching the approved
+             mock's A′1 frame (Rank · Acquire · Draft · Matches · League). No
+             flare dot: Sleeper exposes no trustworthy start time, so there is
+             no countdown or urgency signal to honestly render. */
           <Tab.Screen
             name="Draft"
             component={DraftStackNav}
