@@ -24,6 +24,7 @@
 | RootNav | `SleeperConnect` | `SleeperConnectScreen.tsx` |
 | RootNav | `EspnConnect` | `EspnConnectScreen.tsx` |
 | RootNav | `PremiumRankingsBrowser` | `PremiumRankingsBrowserScreen.tsx` |
+| Home tab | `Home` | `HomeScreen.tsx` (flag `nav.home_tab`) |
 | Rank tab | `RankHome` | `RankHomeScreen.tsx` |
 | Rank tab | `Trios` | `RankScreen.tsx` |
 | Rank tab | `Anchors` | `PickAnchorScreen.tsx` |

@@ -26,7 +26,8 @@ RootNav (Stack)
 ```
 
 ```
-TabNav (Bottom tabs — Rank · Acquire · Draft · Matches · League)
+TabNav (Bottom tabs — Home · Rank · Acquire · Draft · Matches · League)
+├─ Home    (screen)                        — renders only under flag `nav.home_tab`
 ├─ Rank    (Stack)  RankHome · Trios · Anchors · Tiers · QuickSetTiers ·
 │                   QuickRank · ManualRanks · RookieRanks · Trends
 ├─ Trades  (Stack)  TradesHome · TradeDeck · Portfolio · TradeCalculator

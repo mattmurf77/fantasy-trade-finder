@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-195 — Home is the launch tab for returning users; first-run users still land on Trades
+
+2026-10-02. Operator ask: a simple Home tab, first in the bottom bar, asking "What
+would you like to do today?" with four plain-text options (Rank, Find a Trade, See
+Matches, View my Leagues → the League tab). Narrows the 2026-08-28 trades-landing
+ruling: Trades is no longer the front door once a user has swiped. Operator chose to
+keep first-run users (`onboarding.trades_first` live, no first swipe) landing on
+Trades so the analyst guide is untouched. Flag `nav.home_tab` (default true, read
+once at mount) is the rollback; off ⇒ `nav.trades_landing` behavior exactly. No new
+analytics events. Mobile only. [Plan](../docs/plans/home-tab/plan.md).
+
 ## D-194 — Full prepared-inventory semantics are validated at seal, each publishing batch is revalidated
 
 2026-09-23. Owner-approved persistent cache implementation retains all offers and

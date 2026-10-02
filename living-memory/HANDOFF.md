@@ -9,3 +9,11 @@
 **Blocked on:** No approval blocker. Final local/hosted retry, merge/exact Renderdeploy, freshcanary thenall-user sweep remain. V2 branch pushed, not merged/deployed. Freshdryrun02:43UTC:7resolvedtargets/6eligibleactors,18knownleagues, explicit provider/binding gaps; no all-team coverage claim.
 
 **Don't repeat:** Preserve dirty canonical/legacy and unrelated evaluator414faade/b17cc379. No raw identity exports, fake production actions, model/offer caps. Ops /private/tmp/prepared-release-20260922.S7GrYs; freshsweepkeys. V2 rollback is flagoff; olderbinary needs private-table purge/deletionbridge. See release.md; source edits invalidate running model-hash benchmarks.
+
+## Also in flight — 2026-10-02: Home tab
+
+**Where I stopped:** Home tab built and committed on `feat/home-tab` (worktree `.claude/worktrees/home-tab`), local checks green ([TEST_LEDGER](TEST_LEDGER.md) 2026-10-02, [D-195](DECISIONS.md)). Not pushed, not merged.
+
+**Next:** operator go → push, hosted CI, merge to `main`, EAS build, run the TestFlight checklist in [scope.md](../docs/plans/home-tab/scope.md) §3. After merge: ledger the branch sha and remove the worktree.
+
+**Watch:** six tabs in the bar while `draft.tab` is on; "returning user" means first swipe done on this install, so a never-swiped or reinstalled user still lands on Trades; `app/home` is silently dropped with the flag off.
