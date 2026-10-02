@@ -1,5 +1,21 @@
 # HANDOFF
 
+## Current State — 2026-10-02 (Calibration / blind grading — stopped on usage limit)
+
+**Operator instruction:** "push live once done" — merge value-core (PR #308, flag off) then Calibration to main, turn
+`grading.blind` on for testers via the `calibration_rollout` overlay (prod write; runbook § Gate 2), EAS → TestFlight.
+`draft.tab` → false ships for everyone with the merge (operator-approved; Draft Room stays under League).
+
+**Where I stopped:** specs + lead change (background session build, §3.3) committed on `feat/blind-grading`
+(`.claude/worktrees/blind-grading`). Fable 5.1 builders: **P3 mobile DONE** (`feat/blind-grading-p3` 73a384d7, tsc/testid-lint/
+100 guards green, lead-reviewed OK); **P4 docs DONE** (`feat/blind-grading-p4` ef0a7f98); **P1 service and P2 routes were
+still running** their own full-suite checks — read their branches `feat/blind-grading-p1` / `-p2` (worktrees
+`../blind-grading-p1`/`-p2`), review, then merge P1→P2→P3→P4 into `feat/blind-grading`, run specs §6 checklist.
+`origin/main` has NOT moved since 3bb981ed (no conflicts expected).
+
+**Also owed:** re-freeze the bench leagues after P1's `_freeze_league` picks fix (Oct-1 real-league numbers excluded
+picks) and re-run the value-core bench; record TEST_LEDGER/CHANGELOG on ship; sweep worktrees via the recovery ledger.
+
 ## Current State — 2026-10-01 (value-core engine workstream)
 
 **Where I stopped:** From-scratch trade engine ([D-195](DECISIONS.md)) built on `feat/value-core-engine`
