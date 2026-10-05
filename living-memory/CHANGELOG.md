@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-10-05b — SQLAlchemy capped below 2.1; both deploys LIVE (G-073)
+
+**What:** `sqlalchemy>=2.0.0,<2.1` in `requirements.txt` (PR #311, `e30a8f47`). Render deploy `dep-db234m8m7kps73da6ftg` of `e30a8f47` went live 19:28 local; production `GET /api/feature-flags` now serves `feedback.decline_reasons: false`.
+**Why:** the deploy of #310 (`dep-db1t42jbc2fs73dom7i0`) failed at boot — SQLAlchemy 2.1.3 made psycopg v3 the default Postgres driver and the app installs psycopg2. Render kept `3bb981ed` live throughout; no outage. Render `autoDeploy` is off, so every merge needs an explicit deploy (runbook § Deploy).
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-10-05b; [G-073](GOTCHAS.md).
+
 ## 2026-10-05 — Decline reasons disabled (flag parked off, D-195)
 
 **What:** `feedback.decline_reasons` true → false in `config/features.json` + the release fixture mirror. The trade card shows the plain ✕ again and a decline is one tap through `/api/trades/swipe`. Nothing deleted: `DeclineReasonPanel`, `/api/trades/pass-reason`, `trade_pass_reasons` and the taxonomy entries stay; two pinned tests in `test_decline_reasons.py` now expect off.

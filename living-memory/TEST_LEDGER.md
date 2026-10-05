@@ -1,3 +1,14 @@
+## 2026-10-05b — SQLAlchemy pin (PR #311) and production deploy of #310 + #311
+
+Branch `fix/pin-sqlalchemy-2-0` from `origin/main` `85428813`. Hosted CI 4/4 green
+(CI installs the capped line but tests on SQLite, so it cannot prove the Postgres
+boot). The proof is the deploy: Render `dep-db234m8m7kps73da6ftg` of `e30a8f47`
+built and went `live` at 19:28 local, after `dep-db1t42jbc2fs73dom7i0` of `36bed585`
+had failed with `ModuleNotFoundError: psycopg` (build log: `sqlalchemy-2.1.3`).
+Post-deploy: production `GET /api/feature-flags` → `feedback.decline_reasons: false`.
+Device check of the one-tap decline (3 steps in the 2026-10-02 scope doc) still owed
+by the operator. Sim gate skipped per D-056 (`FTF_SKIP_SIM_GATE=1`).
+
 ## 2026-10-05 — Decline reasons disabled (`feedback.decline_reasons` off), branch evidence
 
 Branch `fix/disable-decline-reasons` (from `origin/main` `3bb981ed`). Flag flip only;
