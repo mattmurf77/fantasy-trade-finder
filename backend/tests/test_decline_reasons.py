@@ -224,7 +224,10 @@ def test_no_allowlist_gating_anywhere(harness):
         assert _row_count(eng) == 1
         served = client.get("/api/feature-flags",
                             headers={"X-Device-Id": "some_random_device"})
-        assert served.get_json()["flags"]["feedback.decline_reasons"] is True
+        # The served value is the configured one, allowlist or not (the flag
+        # is parked off since 2026-10-02 — see config/features.json).
+        assert (served.get_json()["flags"]["feedback.decline_reasons"]
+                is server.FLAGS.feedback_decline_reasons)
 
 
 def test_works_with_no_device_header_and_no_allowlist(harness):
@@ -236,15 +239,17 @@ def test_works_with_no_device_header_and_no_allowlist(harness):
     assert _row_count(eng) == 1
 
 
-def test_the_flag_ships_on_for_everyone(harness):
-    """config/features.json carries it ON, and GET /api/feature-flags serves
-    that value verbatim to every caller — the client surface and the route can
-    never disagree about whether the feature is live."""
+def test_the_flag_is_parked_off_for_everyone(harness):
+    """config/features.json carries it OFF (operator, 2026-10-02: the second
+    tap after every decline was tedious; the feature is disabled, not deleted),
+    and GET /api/feature-flags serves that value verbatim to every caller —
+    the client surface and the route can never disagree about whether the
+    feature is live. Reintroducing it = flip the key and this assertion."""
     import json as _json
     from pathlib import Path
     repo = Path(server.__file__).resolve().parents[1]
     features = _json.loads((repo / "config/features.json").read_text())
-    assert features["feedback.decline_reasons"] is True
+    assert features["feedback.decline_reasons"] is False
 
     client, _service, _svc, _eng = harness
     served = client.get("/api/feature-flags",

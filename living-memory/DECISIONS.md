@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-195 — Decline reasons parked off; a reasonless decline writes the full pass Elo signal
+
+2026-10-02. Operator: the second tap after every decline was tedious and declines
+are most dispositions; disable, do not delete. `feedback.decline_reasons` flipped
+to false (config + release fixture) — the kill switch the feature shipped with, so
+no code moved and the route, table, panel, events and tests all remain. Consequence
+chosen deliberately: with no reason to test, every decline goes through
+`/api/trades/swipe` and writes `trade_k_pass` (fit-congruence weighted), whereas
+with reasons on only `value_giving` declines did. Alternative rejected: suppressing
+Elo on all reasonless declines, which would discard the signal the operator asked
+to keep. `pass_reason_elo_suppression` stays 1.0 (inert while off). Reintroduce by
+flipping the flag back. [Scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md).
+
 ## D-194 — Full prepared-inventory semantics are validated at seal, each publishing batch is revalidated
 
 2026-09-23. Owner-approved persistent cache implementation retains all offers and
