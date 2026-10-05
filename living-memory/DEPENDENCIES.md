@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-05](#2026-10-05)
 - [2026-08-28](#2026-08-28)
 - [2026-08-15](#2026-08-15)
 - [2026-08-08](#2026-08-08)
@@ -18,6 +19,16 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-10-05
+
+### Backend: `sqlalchemy` capped below 2.1
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| `sqlalchemy` | `>=2.0.0,<2.1` (was `>=2.0.0`) | branch `fix/pin-sqlalchemy-2-0` | 2.1 defaults `postgresql://` to the psycopg v3 driver; production installs `psycopg2-binary`, so a fresh build could not boot ([G-073](GOTCHAS.md)). |
+
+- The other backend requirements are still lower-bound only; the same class of break can recur.
 
 ## 2026-08-28
 

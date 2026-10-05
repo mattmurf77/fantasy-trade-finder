@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-073 | A Render deploy fails at boot with `ModuleNotFoundError: No module named 'psycopg'` although nothing about the database changed | Backend / deploy / dependencies |
 | G-072 | An uncapped owner-only deck (~1,400 cards × ~21 KB evidence) renders as ONE ~28 MB multi-row INSERT and OOM-kills the 256 MB prod Postgres; every Find a Trade then reads "Search failed" | Backend / deck impressions / Postgres |
 | G-071 | Final policy checks can be bypassed by provisional worker snapshots | Trade engine / progressive publication |
 | G-066 | Arm C (`trade_gen_v2`) hardcodes `basis="divergence"` on every card — its consensus-path cards are mis-stamped, so any like-rate split by basis is wrong for that arm | Bake-off / analytics / basis stamp |
@@ -89,6 +90,14 @@
 Full entries below — grep the ID. Read the entry before acting; this index is a lookup aid, not the content.
 
 ---
+
+## 2026-10-05
+
+### G-073 — SQLAlchemy 2.1 switches the default Postgres driver and breaks every fresh build
+- **Symptom:** the first deploy since 2026-09-23 (a config-only flag flip) ended `update_failed`; gunicorn died importing `backend/database.py` with `ModuleNotFoundError: No module named 'psycopg'`. Render kept the previous deploy live, so production stayed up on old code.
+- **Cause:** `requirements.txt` said `sqlalchemy>=2.0.0`. SQLAlchemy 2.1.0 shipped 2026-09-24 and makes psycopg (v3) the default driver for a bare `postgresql://` URL; we install `psycopg2-binary`. The build log showed `sqlalchemy-2.1.3`. CI did not catch it because tests run on SQLite.
+- **Fix:** pin `sqlalchemy>=2.0.0,<2.1`. Moving to 2.1 later means either installing `psycopg` or rewriting the URL to `postgresql+psycopg2://` in `backend/database.py`, and testing against Postgres.
+- **Lesson:** an unpinned requirement makes every deploy a dependency upgrade. A deploy can fail for reasons unrelated to its diff — read the build log before suspecting the change.
 
 ## 2026-09-07
 
