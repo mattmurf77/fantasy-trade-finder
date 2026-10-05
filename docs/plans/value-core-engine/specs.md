@@ -648,13 +648,13 @@ Run on `feat/value-core-engine` after all five packages have merged, from the wo
 | `docs/adr/adr-024-value-core-engine.md` | non-obvious architectural decision | WP5 |
 | `docs/cross-client-invariants.md` | — n/a: no client-shared constant changes | — |
 | `docs/plans/value-core-engine/code-walk.md` | scope §3 evidence | WP3 |
-| `living-memory/DECISIONS.md` (D-195), `CHANGELOG.md`, `TEST_LEDGER.md`, `NEXT.md`/`HANDOFF.md` | session write-back | **lead** |
+| `living-memory/DECISIONS.md` (D-196), `CHANGELOG.md`, `TEST_LEDGER.md`, `NEXT.md`/`HANDOFF.md` | session write-back | **lead** |
 | `docs/plans/README.md` row for `value-core-engine/` | `docs/plans/CLAUDE.md` "add the README row" | **lead** |
 
 ## 8. Lead-only items
 
 - Add the `docs/plans/README.md` status row for `value-core-engine/`. `docs/plans/CLAUDE.md` requires it in the session that created the folder, but this spec author was restricted to writing inside this folder.
-- Add **D-195** to `living-memory/DECISIONS.md`: the 2026-09-30 rebuild decision; flag-on decks supersede the D-193 ordering. First grep for the maximum D-id.
+- Add **D-196** to `living-memory/DECISIONS.md`: the 2026-09-30 rebuild decision; flag-on decks supersede the D-193 ordering. First grep for the maximum D-id.
 - Update `living-memory/TEST_LEDGER.md` with the §6 results, and `CHANGELOG.md` on merge. Update NEXT/HANDOFF as work moves.
 - **Optional.** Add a one-line `backend/value_core/` entry to `backend/CLAUDE.md` §Subpackages. That is an operating-contract file, so it is the lead's call.
 - **Decide with the operator:**

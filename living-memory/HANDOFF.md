@@ -18,7 +18,7 @@ picks) and re-run the value-core bench; record TEST_LEDGER/CHANGELOG on ship; sw
 
 ## Current State — 2026-10-01 (value-core engine workstream)
 
-**Where I stopped:** From-scratch trade engine ([D-195](DECISIONS.md)) built on `feat/value-core-engine`
+**Where I stopped:** From-scratch trade engine ([D-196](DECISIONS.md)) built on `feat/value-core-engine`
 (worktree `.claude/worktrees/value-core-engine`), pushed; **draft PR #308 for CI only**, flag `trade.value_core` off.
 Since 09-30: deck variety rules (one card per trade idea, acquisitions in rounds, partner cap), logged legacy fallback,
 default band ±20%. Full local suite 7528 passed / 1 skipped; flag-off output identical to `3bb981ed`.

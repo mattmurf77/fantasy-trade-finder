@@ -51,7 +51,7 @@
 
 ## 2026-09-30 — Value-core engine: operator decisions, push for CI, bench on real leagues
 
-Built on `feat/value-core-engine` ([D-195](DECISIONS.md), [plan folder](../docs/plans/value-core-engine/)); flag `trade.value_core` off.
+Built on `feat/value-core-engine` ([D-196](DECISIONS.md), [plan folder](../docs/plans/value-core-engine/)); flag `trade.value_core` off.
 Draft PR #308 open for CI only (do not merge). Operator answered on 2026-10-01: fallback yes; intents and likes-you stay legacy; band ±20%.
 
 1. **Blind grades.** The real leagues are frozen (2026-10-01; private file, see TEST_LEDGER). Run `value_core_bench run` with variants, then `blind_grade export` against today's served decks, and the operator grades ~40 cards per variant (runbook § Value-core bench). *Why now:* Gate 2 — the plain core vs today's engine.

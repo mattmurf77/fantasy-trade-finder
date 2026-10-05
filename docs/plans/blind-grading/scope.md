@@ -169,7 +169,7 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
 | `docs/data-dictionary.md` | **updated (P4)** | New `## Blind grading tables` after Receipts (`data-dictionary.md:1810`). The `tab_selected` note (§1). |
 | `docs/config-reference.md` | **updated (P4)** | The `grading.blind` row (per-unit overlay, never global) next to `trade.value_core` (`config-reference.md:351`). The `draft.tab` row: now false (2026-10-02, Calibration takes the slot), still the seasonal switch. `test_rookie_ranks_editable.py:260-263` requires the words "`draft.tab`" and "seasonal" to stay. |
 | `docs/runbook.md` | **updated (P4)** | Under "Value-core bench" (`runbook.md:421`): a "Gate 2 — Calibration" subsection covering the allowlist, launching and stopping `calibration_rollout`, the report curl, and local dev (`POST /api/cron/value-snapshot` so `player_value_history` has rows) |
-| ADR or `DECISIONS.md` entry | **DECISIONS by the lead** | One entry (grep for the max D-id; `D-195` is the highest on this branch). It records the operator's 2026-10-02 decisions (Calibration tab in the Draft slot; `draft.tab` off with the code kept; tester-only via overlay plus allowlist), the §1 waiver, and D1–D8 ([prd.md §11](prd.md#11-decisions)). No ADR. |
+| ADR or `DECISIONS.md` entry | **DECISIONS by the lead** | One entry (grep for the max D-id; D-197 records it (D-195 went to decline reasons on main; value core is D-196)). It records the operator's 2026-10-02 decisions (Calibration tab in the Draft slot; `draft.tab` off with the code kept; tester-only via overlay plus allowlist), the §1 waiver, and D1–D8 ([prd.md §11](prd.md#11-decisions)). No ADR. |
 
 ## 5. Ship gate declaration
 

@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-10-05 — Decline reasons disabled (flag parked off, D-195)
+
+**What:** `feedback.decline_reasons` true → false in `config/features.json` + the release fixture mirror. The trade card shows the plain ✕ again and a decline is one tap through `/api/trades/swipe`. Nothing deleted: `DeclineReasonPanel`, `/api/trades/pass-reason`, `trade_pass_reasons` and the taxonomy entries stay; two pinned tests in `test_decline_reasons.py` now expect off.
+**Why:** operator ask 2026-10-02 — clicking twice after every decline was tedious; may be reintroduced.
+**Behaviour to know:** every decline now writes the pass Elo signal (only "value" declines did while reasons were on); the Undo toast returns on declines (`ux.swipe_undo`); decline-reason reporting gets no new data.
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-10-05; [scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md). Server-delivered flag — no iOS build.
+
 ## 2026-09-07 — Owner-only outage: paged impression insert (G-072)
 
 The owner-only activation (PR #287 `16bb6fd1`, LIVE 05:28 UTC, knobs flipped 05:29 UTC by the release session) crashed production on its first two searches: uncapped decks of 1,037 / 1,456 cards × ~21 KB evidence rows became a single ~28 MB `INSERT`, the 256 MB Postgres backend was OOM-killed twice, and exclusive mode failed the job (`owner_impression_unavailable`) → "Search failed" on every Find a Trade. Operator chose to keep owner-only live: budgets cut to 300 / 3,000 at 13:55 UTC (≈250 cards). Fix: `save_deck_impressions` pages at 100 rows per statement in one transaction (`DECK_IMPRESSION_INSERT_ROWS`), guarded by `test_deck_impressions_paging.py`. Shipped 2026-09-08 as [PR #289](https://github.com/mattmurf77/fantasy-trade-finder/pull/289) `609cb79e`, Render LIVE 02:41 UTC; both budgets restored to 4096 / 60000 at 02:41 UTC, so decks are uncapped again on the paged insert. First real uncapped search still to be confirmed in the logs. No mobile change: build 1.17.2 (150) already carries the owner contract. [Runbook row](../docs/runbook.md#common-failure-modes), [G-072](GOTCHAS.md).

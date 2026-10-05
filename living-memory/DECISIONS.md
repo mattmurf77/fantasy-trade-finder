@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-196 — Calibration: in-app blind grading in the Draft tab's slot, open to every app user
+## D-197 — Calibration: in-app blind grading in the Draft tab's slot, open to every app user
 
 2026-10-02/05. Operator decisions. Value-core Gate 2 runs inside the app as the **Calibration** tab:
 graders score ~40 shuffled cards (up to 20 from their last served current-engine deck, up to 20 built on the side by
@@ -12,7 +12,7 @@ background thread (prod runs one synchronous gunicorn worker); a deck freshness 
 users eligible); a cron-only pre-generation route builds a deck for every eligible user. The new engine's own flag
 `trade.value_core` stays off, so real Trades decks are unchanged. [Plan folder](../docs/plans/blind-grading/).
 
-## D-195 — Trade suggestions are rebuilt from scratch: a value-only core finds fair trades, three weights rank them
+## D-196 — Trade suggestions are rebuilt from scratch: a value-only core finds fair trades, three weights rank them
 
 2026-09-30. Operator decision after rating the deck a 5 of 10 and "probably worse than value-only
 competitors". Stop patching v2/v3/owner/bilateral (~315 knobs, ~15 stacked gates; composite score
@@ -30,6 +30,18 @@ switch away until the new one beats it on the bench (blind grades + guardrails +
 decks supersede the D-193 ordering. Supersedes the 2026-09-29 in-place plan's fix order
 (`docs/plans/trade-suggestion-quality/plan.md`); its bench leagues and prod-read authorization carry over.
 [Plan folder](../docs/plans/value-core-engine/), [ADR-024](../docs/adr/adr-024-value-core-engine.md).
+## D-195 — Decline reasons parked off; a reasonless decline writes the full pass Elo signal
+
+2026-10-02. Operator: the second tap after every decline was tedious and declines
+are most dispositions; disable, do not delete. `feedback.decline_reasons` flipped
+to false (config + release fixture) — the kill switch the feature shipped with, so
+no code moved and the route, table, panel, events and tests all remain. Consequence
+chosen deliberately: with no reason to test, every decline goes through
+`/api/trades/swipe` and writes `trade_k_pass` (fit-congruence weighted), whereas
+with reasons on only `value_giving` declines did. Alternative rejected: suppressing
+Elo on all reasonless declines, which would discard the signal the operator asked
+to keep. `pass_reason_elo_suppression` stays 1.0 (inert while off). Reintroduce by
+flipping the flag back. [Scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md).
 
 ## D-194 — Full prepared-inventory semantics are validated at seal, each publishing batch is revalidated
 

@@ -748,7 +748,7 @@ Run on `feat/blind-grading` after all four packages have merged, from the worktr
 ## 8. Lead-only items
 
 - **`docs/plans/README.md`:** add the status row for `blind-grading/`. This spec author was restricted to this folder.
-- **`DECISIONS.md`:** one entry. Grep for the max D-id first; `D-195` is the highest on this branch. It records:
+- **`DECISIONS.md`:** one entry. Grep for the max D-id first; D-197 records it (D-195 went to decline reasons on main; value core is D-196). It records:
   - the operator's 2026-10-02 decisions: Calibration tab in the Draft slot; `draft.tab` off with the code kept; testers only via overlay plus allowlist;
   - the scope §1 waiver;
   - the outcomes of D1–D9.
