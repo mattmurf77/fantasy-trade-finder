@@ -1,3 +1,23 @@
+## 2026-10-05 — Decline reasons disabled (`feedback.decline_reasons` off), branch evidence
+
+Branch `fix/disable-decline-reasons` (from `origin/main` `3bb981ed`). Flag flip only;
+no mobile or backend source changed. Mobile: 99/99 `check-*.js`, `npx tsc --noEmit`
+clean, `testid-lint OK`. Backend full local run: 7410 passed / 1 skipped / 3 failed in
+867s. Two failures were this change (the `onboarding-v2` and `profiles-on` flag
+fixtures must equal release plus their own surface) and are fixed; the affected files
+then pass 225/225 (`test_seed_ui_test_db`, `test_decline_reasons`,
+`test_prepared_trade_runtime`, `test_owner_batch_publication`). The third,
+`test_prepared_trade_runtime.py::test_pending_rechecks_read_guard_after_serialization`,
+passes 3/3 alone on untouched `origin/main` and alone with the change; an earlier
+stop-at-first-failure run instead tripped
+`test_owner_batch_publication.py::test_first_30_are_durable_running_and_full_inventory_keeps_order[False]`,
+which also passes alone both ways. Read: two full-run-only flakes in the
+prepared-inventory tests, unrelated to this flag — not root-caused. No fresh full run
+after the fixture fix; hosted CI on the pushed sha is the gate. Off-path proof
+(decision row, pass Elo, no-resurface bind) is the code walk in the
+[scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md). Device
+check (3 steps, same doc) not run. Sim gate skipped per D-056 (`FTF_SKIP_SIM_GATE=1`).
+
 ## 2026-09-22 — Persistent prepared trade inventory, release candidate
 
 Plan/scope preceded code. Three Astra Ultra lanes plus parent integration built
