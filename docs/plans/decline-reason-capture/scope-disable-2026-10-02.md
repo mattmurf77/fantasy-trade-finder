@@ -3,7 +3,7 @@
 **Date:** 2026-10-02
 **Entry point:** direct ask (operator: "It's becoming tedious to click through twice after every decline … shouldn't be deleted, but just disabled")
 **Builder:** Claude session, branch `fix/disable-decline-reasons`
-**Operator sign-off on waivers:** pending — the two waivers below (§1, §3 TestFlight) are surfaced in the session summary
+**Operator sign-off on waivers:** yes — 2026-10-05 ("Yes. I'm aligned. Proceed"), covering §1 (no new analytics) and §3 (no formal TestFlight checklist)
 
 ---
 

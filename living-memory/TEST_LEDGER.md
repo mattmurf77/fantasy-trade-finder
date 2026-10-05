@@ -15,7 +15,8 @@ which also passes alone both ways. Read: two full-run-only flakes in the
 prepared-inventory tests, unrelated to this flag — not root-caused. No fresh full run
 after the fixture fix; hosted CI on the pushed sha is the gate. Off-path proof
 (decision row, pass Elo, no-resurface bind) is the code walk in the
-[scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md). Device
+[scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md). Hosted CI on
+PR #310: 4/4 checks green; squash-merged as `85428813` 2026-10-05. Device
 check (3 steps, same doc) not run. Sim gate skipped per D-056 (`FTF_SKIP_SIM_GATE=1`).
 
 ## 2026-09-22 — Persistent prepared trade inventory, release candidate
