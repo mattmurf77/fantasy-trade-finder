@@ -24,9 +24,9 @@ import {
 import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 
 // Calibration — in-app blind grading of today's trade engine vs the value
-// core (docs/plans/blind-grading/, lld.md §10). Tester-only: every call 404s
-// unless `grading.blind` resolves true for this caller AND the caller is on
-// the tester allowlist, and that 404 renders here as "Not available".
+// core (docs/plans/blind-grading/, lld.md §10). Open to every app user since
+// 2026-10-05 (operator); every call 404s when `grading.blind` is off, and that
+// 404 renders here as "Not available".
 //
 // Flow (specs.md §3.3 wins over lld §10.3 where they differ):
 //   intro → Start POSTs → 202 `building` → poll GET /current every 1.5 s
@@ -74,6 +74,10 @@ const COPY = {
   intro: (league: string) =>
     `Grade up to 40 trade ideas for ${league}, one at a time. Some come from ` +
     "today's trade engine and some from the new one, shuffled — you won't know which is which.",
+  purpose:
+    'Why this exists: Calibration captures your honest reactions so we can improve the ' +
+    'trade model. Your grades are compared across both engines and used to tune which trade ' +
+    'ideas Fleeced suggests.',
   start: 'Start',
   resume: (k: number, n: number) => `Resume (${k} of ${n} answered)`,
   noLeague: 'Pick a league first.',
@@ -387,6 +391,7 @@ export default function CalibrationScreen() {
           <View style={styles.block}>
             <TickLabel>{COPY.introTitle}</TickLabel>
             <Text variant="body">{COPY.intro(league?.league_name ?? 'this league')}</Text>
+            <Text variant="bodySm" testID="calibration.purpose">{COPY.purpose}</Text>
             {open ? (
               <Button
                 testID="calibration.resume"

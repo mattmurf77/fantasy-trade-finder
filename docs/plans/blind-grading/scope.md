@@ -9,6 +9,8 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
 
 **Naming.** Users see **Calibration**. Code and storage keep `grading`: flag `grading.blind`, routes `/api/grading/*`, tables `grading_*`, service `backend/blind_grading.py`, wire module `mobile/src/api/grading.ts`.
 
+> **2026-10-05 operator update.** Calibration is open to **every app user** (the app is TestFlight-only, under ten users): `grading.blind` is true in `config/features.json` and the three flags fixtures (code default still false), and `server._calibration_allowed` returns `True`. No `calibration_rollout` overlay and no allowlist edit are needed; the flag is the kill switch. `blind_grading.MAX_DECK_AGE_DAYS` is 14 (7 left four prod users eligible; 14 leaves eight). A new cron-secret route, `POST /api/admin/grading/pregenerate`, pre-builds a session for every candidate. §0 and §2 below describe the 2026-10-02 tester-only posture as scoped; the dated change-control line in [specs.md §3.3](specs.md#33-change-control) covers all five changes and their tests.
+
 ---
 
 ## 0. User-visible behavior (what changes for whom)

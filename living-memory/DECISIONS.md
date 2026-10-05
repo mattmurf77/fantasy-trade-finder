@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-196 — Calibration: in-app blind grading in the Draft tab's slot, open to every app user
+
+2026-10-02/05. Operator decisions. Value-core Gate 2 runs inside the app as the **Calibration** tab:
+graders score ~40 shuffled cards (up to 20 from their last served current-engine deck, up to 20 built on the side by
+the value core) 1–5 with optional tags; one neutral card format, opaque ids, duplicates graded once and credited to
+both engines, engine revealed only after the last card. The **Draft tab is switched off** (`draft.tab` false; code
+kept, Rookie Draft room stays under League). Audience was testers-only on 10-02 and **opened to every app user on
+10-05** (`grading.blind` true; `_calibration_allowed` returns True; <10 users, TestFlight-only). Sessions build on a
+background thread (prod runs one synchronous gunicorn worker); a deck freshness window of 14 days (7 left only 4
+users eligible); a cron-only pre-generation route builds a deck for every eligible user. The new engine's own flag
+`trade.value_core` stays off, so real Trades decks are unchanged. [Plan folder](../docs/plans/blind-grading/).
+
 ## D-195 — Trade suggestions are rebuilt from scratch: a value-only core finds fair trades, three weights rank them
 
 2026-09-30. Operator decision after rating the deck a 5 of 10 and "probably worse than value-only

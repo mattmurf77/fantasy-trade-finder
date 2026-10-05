@@ -1,3 +1,21 @@
+## 2026-10-05 — Calibration (in-app blind grading) integrated; open to every app user
+
+Built by four Fable 5.1 package agents (P1 service/schema, P2 routes/flags, P3 mobile, P4 docs) from
+`docs/plans/blind-grading/specs.md`, merged into `feat/blind-grading` (on top of the value-core branch) and lead-reviewed.
+Lead fixes: a `building` session orphaned by a restart is re-kicked by POST (route now always calls `start_session`);
+the build thread falls back to empty league facts so a session can never stay `building`; a stale `±10%` assertion in
+`test_value_core_serving` now reads the evidence's own ratio floor (it only passed alone on a local DB seeded before
+the band change — model_config seeds are INSERT OR IGNORE). Operator 2026-10-05: open to every app user
+(`grading.blind` true, `_calibration_allowed` True), freshness 14 days, cron-only pre-generation route, purpose copy.
+- Full backend suite (local Python 3.14): **7632 passed, 1 skipped**. Grading tests: routes, service, db, e2e
+  (the e2e walks every response body and fails on any arm/engine key or value before the reveal).
+- Mobile: `npx tsc --noEmit` OK, `testid-lint` OK, all `mobile/tests/check-*.js` guards pass incl. the new
+  `check-blind-grading.js` (27 checks; four planted sabotages caught by P3).
+- Flag-off golden (`test_bakeoff_serving::test_flag_off_is_byte_identical…`) and the flag-mirror tests pass.
+- Prod eligibility (read-only, 2026-10-05): users with a qualifying current-engine deck — 7 days: 4 users / 8 pairs;
+  14 days: 8 / 16. Runtime evidence for mobile is the TestFlight checklist in
+  `docs/plans/blind-grading/code-walk-mobile.md` §9 (operator).
+
 ## 2026-09-30 — Value-core engine built on a branch (flag off)
 
 Full gates (scope/PRD/HLD/LLD/specs in `docs/plans/value-core-engine/`). Five parallel build packages merged

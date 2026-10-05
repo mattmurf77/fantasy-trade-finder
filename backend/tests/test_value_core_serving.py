@@ -179,7 +179,10 @@ def test_flag_on_serves_value_core(vc_stubs):
     for pos, row in enumerate(rows):
         assert row["model_arm"] == "value_core" and row["policy_variant"] == "value_core"
         assert row["policy_version"] == "value-core-1" and row["arm_rank"] == pos
-        assert row["fairness_threshold"] == pytest.approx(1 / 1.1, abs=1e-4)
+        # the ratio floor the card was judged with (vc_band may differ per environment: a
+        # local DB seeded before 2026-10-01 keeps 0.10 because seeds are INSERT OR IGNORE)
+        assert row["fairness_threshold"] == pytest.approx(
+            json.loads(row["valuation_json"])["core"]["ratio_floor"], abs=1e-4)
         assert row["trade_concept_id"]
         ev = json.loads(row["valuation_json"])
         assert ev["generator"] == "value_core" and ev["deck_position"] == pos

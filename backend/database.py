@@ -15297,6 +15297,30 @@ def load_grading_legacy_deck(user_id: str, league_id: str
     return job.deck_job_id, job.served_at, [dict(r) for r in rows]
 
 
+def list_grading_candidates(since_iso: str) -> list[dict]:
+    """Every (user_id, league_id) with a QUALIFYING current-engine deck row (the
+    load_grading_legacy_deck predicate) served at or after `since_iso`, where the user is
+    a member of that league (seat = user_id; co-owner seats are left to on-demand
+    creation). Each {user_id, league_id, platform}, sorted for determinism. Used by the
+    one-shot Calibration pre-generation (POST /api/admin/grading/pregenerate)."""
+    di, lm, lg = deck_impressions_table, league_members_table, leagues_table
+    with engine.connect() as conn:
+        pairs = conn.execute(
+            select(di.c.user_id, di.c.league_id).distinct()
+            .where(func.coalesce(di.c.is_ghost, 0) == 0, di.c.model_arm.isnot(None),
+                   di.c.model_arm != "value_core", di.c.source_like_impression_id.is_(None),
+                   di.c.trade_intent.is_(None), di.c.assets_json.isnot(None),
+                   di.c.served_at >= since_iso)
+        ).all()
+        members = {(str(r.league_id), str(r.user_id)) for r in conn.execute(
+            select(lm.c.league_id, lm.c.user_id)).all()}
+        platforms = {str(r.sleeper_league_id): r.platform for r in conn.execute(
+            select(lg.c.sleeper_league_id, lg.c.platform)).all()}
+    out = [{"user_id": str(u), "league_id": str(l), "platform": platforms.get(str(l))}
+           for u, l in pairs if (str(l), str(u)) in members]
+    return sorted(out, key=lambda r: (r["user_id"], r["league_id"]))
+
+
 def insert_grading_session(session: dict, cards: list[dict]) -> None:
     """One engine.begin(): insert the session row, then every card row (none while
     the session is still 'building' — specs §3.3)."""

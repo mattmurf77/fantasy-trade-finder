@@ -31,7 +31,8 @@ TAGS: tuple[str, ...] = ("overpay", "they_wont_accept", "junk_filler", "too_smal
                          "wrong_for_my_window", "wrong_for_their_window", "same_guy_again")
 PER_ARM = 20            # cards taken from each arm
 MIN_PER_ARM = 10        # fewer usable cards in an arm ⇒ refuse the session
-MAX_DECK_AGE_DAYS = 7   # the current arm's deck must be at most this old
+MAX_DECK_AGE_DAYS = 14  # the current arm's deck must be at most this old (7 -> 14 on 2026-10-02:
+                        # 7 days left only 4 users eligible in prod, 14 days 8; moved players drop anyway)
 TARGET_MEAN = 4.0       # value-core PRD §6; reported, never enforced
 
 
@@ -90,6 +91,37 @@ def start_session(*, user_id: str, league_user_id: str, league_id: str,
                    "source_json": json.dumps(source, sort_keys=True), "error_json": None}
     db.insert_grading_session(session_row, [])
     return {"session": session_view(session_row), "resumed": False, "needs_build": True}
+
+
+def pregenerate(*, now: datetime | None = None) -> dict:
+    """One-shot Calibration pre-generation (operator 2026-10-02: "generate a calibration
+    deck for all users who have downloaded the app"). FAST half only: start_session for
+    every candidate with a fresh enough current-engine deck (seat = user_id); the caller
+    builds the returned sessions in the background. Never raises per candidate.
+    Returns {"candidates", "to_build": [{session_id, user_id, league_id, platform}],
+    "resumed_open", "skipped": {code: n}}."""
+    now = now or datetime.now(timezone.utc)
+    since = (now - timedelta(days=MAX_DECK_AGE_DAYS)).isoformat()
+    candidates = db.list_grading_candidates(since)
+    to_build, resumed_open, skipped = [], 0, Counter()
+    for c in candidates:
+        try:
+            out = start_session(user_id=c["user_id"], league_user_id=c["user_id"],
+                                league_id=c["league_id"], now=now)
+        except GradingError as err:
+            skipped[err.code] += 1
+            continue
+        except Exception:
+            log.exception("blind-grading: pregenerate start failed user=%s league=%s",
+                          c["user_id"], c["league_id"])
+            skipped["error"] += 1
+            continue
+        if out["needs_build"]:
+            to_build.append({"session_id": out["session"]["session_id"], **c})
+        else:
+            resumed_open += 1
+    return {"candidates": len(candidates), "to_build": to_build,
+            "resumed_open": resumed_open, "skipped": dict(skipped)}
 
 
 def build_session(*, session_id: str, server: ServerInputs, engine: Callable | None = None,

@@ -26942,14 +26942,12 @@ from . import blind_grading as _blind_grading
 
 
 def _calibration_allowed(sess) -> bool:
-    """THE Calibration audience predicate (operator 2026-10-02: testers only).
-    Session user id OR league user id on the tester allowlist — the
-    _value_core_live rule above. Opening Calibration to everyone is
-    `return True` here (plus grading.blind on for them; prd.md FR-2)."""
-    allow = _load_tester_allowlist()
-    league_uid = sess.get("league_user_id")
-    return (str(sess.get("user_id") or "") in allow
-            or (league_uid is not None and str(league_uid) in allow))
+    """THE Calibration audience predicate. Testers only on 2026-10-02; opened to every
+    app user by the operator on 2026-10-05. To restrict it again, restore the tester
+    allowlist check (_load_tester_allowlist on sess user_id / league_user_id) here."""
+    # Operator 2026-10-05: Calibration is open to EVERY app user (under 10 users; the app
+    # is TestFlight-only). grading.blind is the on/off switch.
+    return True
 
 
 def _grading_flag_for_caller(sess) -> bool:
@@ -27030,9 +27028,15 @@ def _build_grading_session(sess: dict, league_id: str, session_id: str) -> None:
     """Background half of POST /api/grading/sessions (specs.md §3.3): the
     Sleeper reads behind ServerInputs and the value-core build both leave the
     request thread. build_session never raises; it ends the session 'open' or
-    'failed'."""
-    _blind_grading.build_session(session_id=session_id,
-                                 server=_grading_server_inputs(sess, league_id))
+    'failed'. If gathering ServerInputs itself fails, the build still runs on
+    empty league facts, so the session can never be left 'building'."""
+    try:
+        server_inputs = _grading_server_inputs(sess, league_id)
+    except Exception as err:
+        log.warning("blind-grading: server inputs failed session=%s: %s", session_id, err)
+        server_inputs = _blind_grading.ServerInputs(lineup_slots=None, max_players=None,
+                                                    standings={}, completed_weeks=0)
+    _blind_grading.build_session(session_id=session_id, server=server_inputs)
 
 
 @app.route("/api/grading/sessions", methods=["POST"])
@@ -27049,9 +27053,9 @@ def grading_create_session_route():
         return jsonify({"error": "league_not_active"}), 400
     user_id = str(sess["user_id"])
     try:
-        current = _blind_grading.current_session(user_id=user_id, league_id=league_id)["session"]
-        if current is not None and current["status"] in ("building", "open"):   # resume: no network
-            return jsonify({"session": current, "resumed": True}), 200
+        # start_session resumes a building/open session itself (a failed one starts fresh)
+        # and reports needs_build=True for a resumed 'building' row, so a build orphaned by
+        # a restart or deploy is re-kicked here; a duplicate build writes nothing.
         out = _blind_grading.start_session(
             user_id=user_id, league_user_id=_league_user_id(sess), league_id=league_id)
     except _blind_grading.GradingError as err:
@@ -27113,6 +27117,28 @@ def grading_results_route(session_id: str):
                                               session_id=session_id))
     except _blind_grading.GradingError as err:
         return _grading_error(err)
+
+
+@app.route("/api/admin/grading/pregenerate", methods=["POST"])
+def admin_grading_pregenerate_route():
+    """Cron-secret only. One-shot: build a Calibration deck for every user with a fresh
+    enough current-engine deck (operator 2026-10-02). The fast half runs here; every
+    build runs SEQUENTIALLY on one daemon thread (one sync gunicorn worker), each
+    ending open or failed. Re-running is safe: open sessions are resumed, not rebuilt."""
+    _require_cron_auth()
+    out = _blind_grading.pregenerate()
+    jobs = out["to_build"]
+    if jobs:
+        def _run_all():
+            for job in jobs:
+                sess = {"user_id": job["user_id"],
+                        "league": SimpleNamespace(platform=job.get("platform"))}
+                _build_grading_session(sess, job["league_id"], job["session_id"])
+        threading.Thread(target=_run_all, name="grading-pregenerate", daemon=True).start()
+    log.info("blind-grading: pregenerate candidates=%d building=%d open=%d skipped=%s",
+             out["candidates"], len(jobs), out["resumed_open"], out["skipped"])
+    return jsonify({"candidates": out["candidates"], "building": len(jobs),
+                    "already_open": out["resumed_open"], "skipped": out["skipped"]}), 202
 
 
 @app.route("/api/admin/grading/report")

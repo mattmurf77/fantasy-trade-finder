@@ -5,6 +5,8 @@ Companion: [scope.md](scope.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spec
 
 Users see the feature as **Calibration**. The code and data keep the `grading` name (scope.md "Naming").
 
+> **2026-10-05 operator update.** Calibration is open to **every app user** (TestFlight-only, under ten users), not testers only: `grading.blind` is true in `config/features.json` and `server._calibration_allowed` returns `True`, so no `calibration_rollout` overlay and no allowlist step are needed and the flag is the kill switch. The freshness window is 14 days (`MAX_DECK_AGE_DAYS`), not 7. The live rollout is: deploy with the flag on → `POST /api/admin/grading/pregenerate` (cron secret; builds a session for every user with a fresh deck) → read the report → kill = flag false ([runbook § Gate 2](../../runbook.md#gate-2--calibration-in-app-blind-grading)). The Calibration intro also gained a purpose line (`calibration.purpose`). §5 and §9 below are the 2026-10-02 design as written; [specs.md §3.3](specs.md#33-change-control) carries the dated change-control line.
+
 ## 1. The decision in one paragraph
 
 Testers get a **Calibration** tab in the bottom bar, in the slot the Draft tab used. There they grade trade ideas one at a time. For each idea they answer one question: **would I send this?** They answer on a scale of 1 to 5, can add reason tags, or can skip.

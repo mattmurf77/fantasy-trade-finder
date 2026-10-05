@@ -224,7 +224,7 @@ def test_catalog_values_come_from_history_and_pool(engine):
 def _needs_fresh_deck(exc, reason, usable=None):
     assert exc.code == "needs_fresh_deck" and exc.status == 409
     assert exc.detail["reason"] == reason
-    assert exc.detail["min_cards"] == 10 and exc.detail["max_age_days"] == 7
+    assert exc.detail["min_cards"] == 10 and exc.detail["max_age_days"] == bg.MAX_DECK_AGE_DAYS
     if usable is not None:
         assert exc.detail["usable"] == usable
 
@@ -240,11 +240,13 @@ def test_select_current_refuses_missing_stale_and_too_few(engine):
              "features_json": json.dumps({"partner_user_id": p})}
             for i, (p, g, r) in enumerate(CURRENT)]
     with pytest.raises(bg.GradingError) as e:
-        bg.select_current_cards("J", (NOW - timedelta(days=7, seconds=1)).isoformat(), rows, **kw)
+        bg.select_current_cards("J", (NOW - timedelta(days=bg.MAX_DECK_AGE_DAYS, seconds=1)).isoformat(),
+                                rows, **kw)
     _needs_fresh_deck(e.value, "stale")
-    # exactly 7 days old is still fresh; 9 usable rows is too few
+    # exactly MAX_DECK_AGE_DAYS old is still fresh; 9 usable rows is too few
     with pytest.raises(bg.GradingError) as e:
-        bg.select_current_cards("J", (NOW - timedelta(days=7)).isoformat(), rows[:9], **kw)
+        bg.select_current_cards("J", (NOW - timedelta(days=bg.MAX_DECK_AGE_DAYS)).isoformat(),
+                                rows[:9], **kw)
     _needs_fresh_deck(e.value, "too_few", 9)
     cards, meta = bg.select_current_cards("J", SERVED, rows, **kw)
     assert len(cards) == 20 and meta["candidates"] == 20
@@ -781,3 +783,17 @@ def test_results_and_report(engine):
     with pytest.raises(bg.GradingError) as e:
         bg.report(since="bad")
     assert (e.value.code, e.value.status) == ("invalid_since", 400)
+
+
+def test_pregenerate_starts_a_session_per_fresh_candidate(engine):
+    """Operator 2026-10-05: one Calibration deck per user with a fresh enough deck. Only
+    members with a qualifying deck inside MAX_DECK_AGE_DAYS are candidates; a re-run
+    resumes instead of duplicating."""
+    seed_current_deck(engine)                                      # u1 in L1, served 1 day ago
+    seed_current_deck(engine, job="J9", user_id="u2",
+                      served_at=(NOW - timedelta(days=bg.MAX_DECK_AGE_DAYS + 1)).isoformat())
+    out = bg.pregenerate(now=NOW)
+    assert out["candidates"] == 1 and out["skipped"] == {}
+    assert [(j["user_id"], j["league_id"]) for j in out["to_build"]] == [("u1", "L1")]
+    again = bg.pregenerate(now=NOW)                                # still building: re-kicked
+    assert [j["session_id"] for j in again["to_build"]] == [out["to_build"][0]["session_id"]]

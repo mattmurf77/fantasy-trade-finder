@@ -185,7 +185,7 @@ const listSrcFiles = (dir, out = []) => {
 // The required testID set (scope.md §3). Exactly these, no more, no fewer.
 const REQUIRED_IDS = [
   'calibration.loading', 'calibration.no-league', 'calibration.unavailable',
-  'calibration.open-acquire', 'calibration.retry', 'calibration.start',
+  'calibration.open-acquire', 'calibration.retry', 'calibration.start', 'calibration.purpose',
   'calibration.resume', 'calibration.progress', 'calibration.card',
   'calibration.grade-1', 'calibration.grade-2', 'calibration.grade-3',
   'calibration.grade-4', 'calibration.grade-5',

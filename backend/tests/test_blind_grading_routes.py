@@ -172,12 +172,14 @@ def inline_build_thread(monkeypatch):
 # (a) flags
 # ---------------------------------------------------------------------------
 
-def test_flag_registered_default_off_and_mirrored():
+def test_flag_registered_default_off_and_shipped_on_mirrored():
+    """Code default stays False (new code ships dark); config turns it on for every app user
+    (operator 2026-10-05) and the fixtures mirror that."""
     assert "grading.blind" in FLAG_KEYS
     assert DEFAULT_FLAGS["grading.blind"] is False
-    assert _json(REPO / "config/features.json")["grading.blind"] is False
+    assert _json(REPO / "config/features.json")["grading.blind"] is True
     for name in ("release", "profiles-on", "onboarding-v2"):
-        assert _json(FLAG_DIR / f"{name}.json")["grading.blind"] is False, name
+        assert _json(FLAG_DIR / f"{name}.json")["grading.blind"] is True, name
     # These carry no trade.value_core either; they get no grading.blind.
     for name in ("all-on", "release-300", "release-espn-send-off"):
         assert "grading.blind" not in _json(FLAG_DIR / f"{name}.json"), name
@@ -206,11 +208,13 @@ def test_routes_404_without_flag_for_caller(client, flag_off, allowlisted, servi
             assert (r.status_code, r.get_json()) == (404, {"error": "not_found"})
 
 
-def test_routes_404_when_not_allowlisted(client, flag_on, nobody_allowed, service_unreachable):
-    """The flag alone never opens the surface: the allowlist predicate must pass too."""
+def test_open_to_every_app_user(client, monkeypatch, flag_on, nobody_allowed):
+    """Operator 2026-10-05: Calibration is open to every app user. With grading.blind on,
+    a caller on no allowlist reaches the routes."""
+    monkeypatch.setattr(bg, "current_session", lambda **kw: {"session": None})
     with _injected(_session()):
-        for r in _hit_all(client, AUTH):
-            assert (r.status_code, r.get_json()) == (404, {"error": "not_found"})
+        r = client.get(CURRENT, headers=AUTH)
+    assert (r.status_code, r.get_json()) == (200, {"session": None})
 
 
 def test_account_overlay_resolves_flag_for_caller(client, monkeypatch, allowlisted):
@@ -277,14 +281,14 @@ def test_no_session_404(client, flag_on, allowlisted, service_unreachable):
 
 def test_calibration_allowed_is_the_single_audience_predicate(client, monkeypatch, flag_on,
                                                               nobody_allowed):
-    """Opening Calibration to everyone is `return True` in _calibration_allowed and
-    nothing else (prd.md FR-2)."""
+    """_calibration_allowed is the one audience switch: it is open (True) today, and
+    making it refuse closes every grading route (prd.md FR-2)."""
     monkeypatch.setattr(bg, "current_session", lambda **kw: {"session": None})
     with _injected(_session()):
-        assert client.get(CURRENT, headers=AUTH).status_code == 404
-    monkeypatch.setattr(server, "_calibration_allowed", lambda sess: True)
-    with _injected(_session()):
         assert client.get(CURRENT, headers=AUTH).status_code == 200
+    monkeypatch.setattr(server, "_calibration_allowed", lambda sess: False)
+    with _injected(_session()):
+        assert client.get(CURRENT, headers=AUTH).status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -311,21 +315,55 @@ def test_create_requires_an_initialized_session(client, flag_on, allowlisted, se
     assert r.get_json()["error"] == "session_not_initialized"
 
 
-@pytest.mark.parametrize("status", ["building", "open"])
-def test_create_resume_short_circuits_network(client, monkeypatch, flag_on, allowlisted, status):
-    """A building or open session is returned as-is: no Sleeper read, no service start."""
-    existing = _view(status, progress={"answered": 3, "total": 37})
-    monkeypatch.setattr(bg, "current_session", lambda **kw: {"session": existing})
+def test_create_resumes_open_session_without_building(client, monkeypatch, flag_on, allowlisted,
+                                                       inline_build_thread):
+    """An open session is returned as-is: no Sleeper read, no build thread."""
+    existing = _view("open", progress={"answered": 3, "total": 37})
+    monkeypatch.setattr(bg, "start_session",
+                        lambda **kw: {"session": existing, "resumed": True, "needs_build": False})
     for name in ("_value_core_standings", "_league_lineup_slots", "_sleeper_roster_limit"):
         monkeypatch.setattr(server, name,
                             lambda *a, _n=name, **k: pytest.fail(f"{_n} called on resume"))
-    for name in ("start_session", "build_session"):
-        monkeypatch.setattr(bg, name,
-                            lambda *a, _n=name, **k: pytest.fail(f"{_n} called on resume"))
+    monkeypatch.setattr(bg, "build_session", lambda **kw: pytest.fail("build_session on resume"))
     with _injected(_session()):
         r = client.post(SESSIONS, json={"league_id": LEAGUE}, headers=AUTH)
     assert r.status_code == 200
     assert r.get_json() == {"session": existing, "resumed": True}
+    assert inline_build_thread == []
+
+
+def test_create_rekicks_an_orphaned_building_session(client, monkeypatch, flag_on, allowlisted,
+                                                     inline_build_thread):
+    """Lead fix 2026-10-02: a session left 'building' by a restart or deploy is resumed AND
+    its build re-kicked (start_session says needs_build), so it can never stay stuck."""
+    building = _view("building")
+    monkeypatch.setattr(bg, "start_session",
+                        lambda **kw: {"session": building, "resumed": True, "needs_build": True})
+    built: list = []
+    monkeypatch.setattr(bg, "build_session", lambda **kw: built.append(kw["session_id"]))
+    monkeypatch.setattr(server, "_value_core_standings", lambda league_id, platform: ({}, 0))
+    monkeypatch.setattr(server, "_league_lineup_slots", lambda league_id: None)
+    monkeypatch.setattr(server, "_sleeper_roster_limit", lambda league_id: None)
+    monkeypatch.setattr(server, "FLAGS", SimpleNamespace(trade_preference_lists=False))
+    with _injected(_session()):
+        r = client.post(SESSIONS, json={"league_id": LEAGUE}, headers=AUTH)
+    assert r.status_code == 200
+    assert r.get_json() == {"session": building, "resumed": True}
+    assert built == [SID]
+
+
+def test_build_thread_survives_server_inputs_failure(monkeypatch):
+    """Lead fix 2026-10-02: if gathering ServerInputs raises, the build still runs on empty
+    league facts, so the session ends open or failed, never stuck 'building'."""
+    def boom(sess, league_id):
+        raise RuntimeError("sleeper down")
+    monkeypatch.setattr(server, "_grading_server_inputs", boom)
+    built: list = []
+    monkeypatch.setattr(bg, "build_session", lambda **kw: built.append(kw))
+    server._build_grading_session({"user_id": USER}, LEAGUE, SID)
+    assert len(built) == 1 and built[0]["session_id"] == SID
+    assert built[0]["server"] == bg.ServerInputs(lineup_slots=None, max_players=None,
+                                                 standings={}, completed_weeks=0)
 
 
 def test_create_does_not_resume_a_failed_session(client, monkeypatch, flag_on, allowlisted,
@@ -333,7 +371,6 @@ def test_create_does_not_resume_a_failed_session(client, monkeypatch, flag_on, a
     """§3.2: a failed session is never resumed; POST starts a fresh one."""
     failed = _view("failed", error={"code": "value_core_failed"})
     fresh = _view("building", session_id="500000000000000001")
-    monkeypatch.setattr(bg, "current_session", lambda **kw: {"session": failed})
     monkeypatch.setattr(bg, "start_session",
                         lambda **kw: {"session": fresh, "resumed": False, "needs_build": True})
     built: list = []
@@ -357,7 +394,6 @@ def test_create_returns_202_and_builds_in_background(client, monkeypatch, flag_o
     from backend.value_core.types import Standing
 
     building = _view("building")
-    monkeypatch.setattr(bg, "current_session", lambda **kw: {"session": None})
     started: list = []
 
     def start_session(**kw):
@@ -497,3 +533,36 @@ def test_admin_report_cron_secret_and_ungated(client, monkeypatch, flag_off, nob
     assert r.get_json()["filters"] == {"since": "2026-10-01", "include_open": True}
     r = client.get(f"{REPORT}?since=bad", headers={"X-Cron-Secret": "s3cr3t"})
     assert (r.status_code, r.get_json()) == (400, {"error": "invalid_since"})
+
+
+def test_admin_pregenerate_builds_every_candidate_in_one_background_thread(
+        client, monkeypatch, flag_off, nobody_allowed):
+    """Operator 2026-10-05: generate a Calibration deck for every app user. Cron-secret only;
+    the fast half answers 202 with counts, and ONE thread builds the sessions in order."""
+    monkeypatch.setattr(server, "_CRON_SECRET", "s3cr3t")
+    jobs = [{"session_id": "1", "user_id": "u1", "league_id": "L1", "platform": "sleeper"},
+            {"session_id": "2", "user_id": "u2", "league_id": "L2", "platform": "espn"}]
+    monkeypatch.setattr(bg, "pregenerate", lambda: {"candidates": 3, "to_build": jobs,
+                                                    "resumed_open": 1, "skipped": {}})
+    built: list = []
+    monkeypatch.setattr(server, "_build_grading_session",
+                        lambda sess, league_id, session_id: built.append(
+                            (sess["user_id"], sess["league"].platform, league_id, session_id)))
+    real_thread = server.threading.Thread
+    names: list = []
+
+    class _Inline(real_thread):
+        def start(self):
+            if self.name == "grading-pregenerate":
+                names.append(self.name)
+                self.run()
+            else:
+                super().start()
+
+    monkeypatch.setattr(server.threading, "Thread", _Inline)
+    assert client.post("/api/admin/grading/pregenerate").status_code == 401
+    r = client.post("/api/admin/grading/pregenerate", headers={"X-Cron-Secret": "s3cr3t"})
+    assert (r.status_code, r.get_json()) == (
+        202, {"candidates": 3, "building": 2, "already_open": 1, "skipped": {}})
+    assert names == ["grading-pregenerate"]
+    assert built == [("u1", "sleeper", "L1", "1"), ("u2", "espn", "L2", "2")]
