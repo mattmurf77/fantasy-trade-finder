@@ -142,10 +142,15 @@ def harness(mem_engine):
     server.app.config["TESTING"] = True
     client = server.app.test_client()
 
+    # These tests pin historical served_at/decision dates (2026-09-06 …), but
+    # _save_deck_outcome_safe measures impression age against the REAL clock with a
+    # 30-day cutoff, so the linked-outcome assertions started failing on 2026-10-07.
+    # Lifting the cutoff keeps them about episode logic, not about today's date.
     with patch.object(server, "_decline_reasons_enabled", lambda: True), \
          patch.object(server, "_load_tester_allowlist",
                       lambda: {f"device:{DEVICE}", ME}), \
          patch.object(server, "_deck_signal_v2_enabled", lambda: True), \
+         patch.object(server, "_DECK_OUTCOME_MAX_AGE_DAYS", 36500), \
          patch.object(server, "create_notification", MagicMock()), \
          patch.object(server, "_send_typed_push", MagicMock()):
         with server._sessions_lock:
