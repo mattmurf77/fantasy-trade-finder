@@ -502,6 +502,16 @@ curl -X POST -H "X-Cron-Secret: $CRON_SECRET" "$FTF_PROD/api/admin/grading/prege
 
 A candidate is a user with a qualifying current-engine deck served in the last 14 days (`blind_grading.MAX_DECK_AGE_DAYS`) in a league they are a member of; cards whose players have since moved are dropped regardless. The `building` sessions are built one after another on a single daemon thread (`grading-pregenerate`), each ending `open` or `failed` — allow a couple of minutes, then check with `include_open=1` below. Re-run freely: open sessions are resumed (`already_open`), building ones are re-kicked, and a duplicate build writes nothing. `skipped` counts refusals by `GradingError` code (`needs_fresh_deck`, `league_not_synced`) plus `error` for anything unexpected (logged). A user with no fresh deck is not a candidate: they open Acquire for the league, then Calibration › Start, exactly as before. Nothing else is needed on the device — Calibration › Start resumes the pre-built session.
 
+To build for a user with **no fresh deck** without waiting for them to open Acquire, name the pairs (2026-10-07) — each pair's Acquire deck is refreshed first with the weekly-replenishment path, then its session is built:
+
+```bash
+curl -X POST -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json" \
+  -d '{"targets": [{"user_id": "<sleeper id>", "league_id": "<league id>"}]}' \
+  "$FTF_PROD/api/admin/grading/pregenerate"
+```
+
+→ `202 {"targets": n}`. A refresh is a full trade job (tens of seconds each on the one worker), so keep the list short and don't deploy while it runs — a restart kills the daemon thread (re-POST to finish; open sessions are resumed). Check with `include_open=1` below; a pair that failed is logged as `blind-grading: target …`. The refreshed deck is also what the user sees in Acquire, like any weekly refresh.
+
 **3. Read the report** once the graders are done. Completed sessions only by default:
 
 ```bash

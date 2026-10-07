@@ -566,3 +566,63 @@ def test_admin_pregenerate_builds_every_candidate_in_one_background_thread(
         202, {"candidates": 3, "building": 2, "already_open": 1, "skipped": {}})
     assert names == ["grading-pregenerate"]
     assert built == [("u1", "sleeper", "L1", "1"), ("u2", "espn", "L2", "2")]
+
+
+def test_admin_pregenerate_targets_refresh_then_build_each_pair(
+        client, monkeypatch, flag_off, nobody_allowed):
+    """Operator 2026-10-07: decks for named users whose Acquire deck is stale or missing.
+    Body {"targets": [...]} skips the candidate scan; ONE thread, per pair in order,
+    refreshes the deck (_replenish_deck_for) and only then starts + builds the session.
+    A failed refresh skips that pair's session; a resumed open session is not rebuilt."""
+    monkeypatch.setattr(server, "_CRON_SECRET", "s3cr3t")
+    monkeypatch.setattr(bg, "pregenerate", lambda: pytest.fail("targets must not scan"))
+    calls: list = []
+
+    def replenish(user_id, league_id):
+        calls.append(("refresh", user_id, league_id))
+        return None if user_id == "u_fail" else (30, 0)
+
+    def start_session(*, user_id, league_user_id, league_id):
+        calls.append(("start", user_id, league_user_id, league_id))
+        return {"session": {"session_id": f"s-{user_id}"}, "resumed": user_id == "u_open",
+                "needs_build": user_id != "u_open"}
+
+    monkeypatch.setattr(server, "_replenish_deck_for", replenish)
+    monkeypatch.setattr(bg, "start_session", start_session)
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda league_id: {"platform": "mfl" if league_id == "L2" else None})
+    monkeypatch.setattr(server, "_build_grading_session",
+                        lambda sess, league_id, session_id: calls.append(
+                            ("build", sess["user_id"], sess["league"].platform, league_id,
+                             session_id)))
+    real_thread = server.threading.Thread
+    names: list = []
+
+    class _Inline(real_thread):
+        def start(self):
+            if self.name.startswith("grading-pregenerate"):
+                names.append(self.name)
+                self.run()
+            else:
+                super().start()
+
+    monkeypatch.setattr(server.threading, "Thread", _Inline)
+    url, hdr = "/api/admin/grading/pregenerate", {"X-Cron-Secret": "s3cr3t"}
+    targets = [{"user_id": "u1", "league_id": "L1"}, {"user_id": "u_fail", "league_id": "L1"},
+               {"user_id": "u_open", "league_id": "L1"}, {"user_id": "u2", "league_id": "L2"}]
+    assert client.post(url, json={"targets": targets}).status_code == 401
+    for bad in ([], "u1", [{"user_id": "u1"}], [{"user_id": "u1", "league_id": "L1"}, "x"]):
+        r = client.post(url, json={"targets": bad}, headers=hdr)
+        assert (r.status_code, r.get_json()["error"]) == (400, "invalid_body")
+    assert calls == [] and names == []
+    r = client.post(url, json={"targets": targets}, headers=hdr)
+    assert (r.status_code, r.get_json()) == (202, {"targets": 4})
+    assert names == ["grading-pregenerate-targets"]
+    assert calls == [
+        ("refresh", "u1", "L1"), ("start", "u1", "u1", "L1"),
+        ("build", "u1", None, "L1", "s-u1"),
+        ("refresh", "u_fail", "L1"),
+        ("refresh", "u_open", "L1"), ("start", "u_open", "u_open", "L1"),
+        ("refresh", "u2", "L2"), ("start", "u2", "u2", "L2"),
+        ("build", "u2", "mfl", "L2", "s-u2"),
+    ]

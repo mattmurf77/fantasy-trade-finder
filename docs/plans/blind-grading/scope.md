@@ -181,3 +181,29 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
   - the TestFlight checklist outcome.
 - **TestFlight verification:** the §3 checklist, run by the operator and logged in TEST_LEDGER. A client release is **required**: the tab and the screen are new code.
 - **Express lane declared by the operator?** **No.** This change adds schema, an API surface and a flag, and flips `draft.tab`. Full gates apply.
+
+---
+
+## Addendum 2026-10-07 — targeted pre-generation
+
+**Entry point:** direct ask ("Generate a calibration deck for bcork, mangopatti, lofman"). Their Acquire decks were missing (Bcork) or 18 days old (MangoPatti, lofman), so the bulk path skipped them. The weekly replenishment that would have refreshed them gets through about one user-league a day.
+**Change:** `POST /api/admin/grading/pregenerate` takes an optional `{"targets": [{user_id, league_id}]}`. On one daemon thread, each pair is first refreshed with `_replenish_deck_for` (the weekly-replenishment path), then `start_session` and `_build_grading_session` run. Without a body the route behaves exactly as before.
+**Operator sign-off on waivers:** not needed (no waivers below that change behavior).
+
+1. **Analytics:** (b) existing coverage. The refresh logs `trade_impressions` / `deck_impressions` with source `replenish`, the same as the weekly cron. Session creation is already visible in `grading_sessions` and the admin report. No new events.
+2. **Schema & flags:** none. No new tables, columns, flags or env vars.
+3. **Evidence:**
+   - **Unit test:** `test_blind_grading_routes.py::test_admin_pregenerate_targets_refresh_then_build_each_pair`. It covers auth, the four `invalid_body` shapes, the order "refresh → start → build" per pair, a failed refresh skipping its pair, a resumed open session not rebuilt, and the platform hand-off.
+   - **Prod proof:** `deck_replenish_log` rows plus their `deck_impressions` jobs (2026-10-04 and 2026-10-07) show the replenish path writes qualifying rows (`model_arm = owner_v2_bilateral`). Then the run for the requested users, read back via `report?include_open=1`.
+   - **TestFlight:** the requesting users open Calibration and see Start, not "Open Acquire…".
+4. **Docs:**
+
+   | Doc | Updated? |
+   |---|---|
+   | `docs/api-reference.md` | **updated**, Admin row for the pregenerate route ("Targeted mode") |
+   | `docs/runbook.md` | **updated**, § Gate 2 pre-generation (curl + caveats) |
+   | `living-memory/LLD.md`, `HLD.md`, `docs/architecture.md` | n/a: no convention, module or flow shift. It reuses existing helpers on an existing admin route |
+   | `docs/cross-client-invariants.md`, `docs/glossary.md` | n/a: no shared constant or new term |
+   | ADR / DECISIONS | n/a: no non-obvious choice. Refreshing via the replenish path, rather than relaxing `MAX_DECK_AGE_DAYS`, keeps both arms on today's values |
+
+5. **Ship gate:** CI green on the pushed sha, plus a TEST_LEDGER entry. Express lane: **no**. This changes an API contract (admin), so full gates apply.
