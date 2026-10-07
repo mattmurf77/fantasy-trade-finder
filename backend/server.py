@@ -27119,13 +27119,56 @@ def grading_results_route(session_id: str):
         return _grading_error(err)
 
 
+def _pregenerate_grading_targets(pairs: list[tuple[str, str]]) -> None:
+    """Daemon-thread half of targeted pre-generation (operator 2026-10-07). Per
+    (user_id, league_id), sequentially: refresh the Acquire deck with the weekly
+    replenishment path (_replenish_deck_for — headless session, the normal trade job,
+    impressions logged with source "replenish"), then start_session + build exactly
+    as the bulk path does. A pair that fails is logged and skipped; never raises."""
+    for user_id, league_id in pairs:
+        try:
+            if _replenish_deck_for(user_id, league_id) is None:
+                log.warning("blind-grading: target deck refresh failed user=%s league=%s",
+                            user_id, league_id)
+                continue
+            out = _blind_grading.start_session(user_id=user_id, league_user_id=user_id,
+                                               league_id=league_id)
+            if out["needs_build"]:
+                platform = (get_league_draft_context(league_id) or {}).get("platform")
+                sess = {"user_id": user_id, "league": SimpleNamespace(platform=platform)}
+                _build_grading_session(sess, league_id, out["session"]["session_id"])
+            log.info("blind-grading: target user=%s league=%s session=%s resumed=%s",
+                     user_id, league_id, out["session"]["session_id"], out["resumed"])
+        except _blind_grading.GradingError as err:
+            log.warning("blind-grading: target refused user=%s league=%s: %s",
+                        user_id, league_id, err.code)
+        except Exception:
+            log.exception("blind-grading: target failed user=%s league=%s", user_id, league_id)
+
+
 @app.route("/api/admin/grading/pregenerate", methods=["POST"])
 def admin_grading_pregenerate_route():
     """Cron-secret only. One-shot: build a Calibration deck for every user with a fresh
     enough current-engine deck (operator 2026-10-02). The fast half runs here; every
     build runs SEQUENTIALLY on one daemon thread (one sync gunicorn worker), each
-    ending open or failed. Re-running is safe: open sessions are resumed, not rebuilt."""
+    ending open or failed. Re-running is safe: open sessions are resumed, not rebuilt.
+
+    Optional body {"targets": [{"user_id", "league_id"}, ...]} (operator 2026-10-07):
+    build for exactly those pairs instead, refreshing each one's Acquire deck first, so
+    a user whose deck is missing or older than MAX_DECK_AGE_DAYS still gets one."""
     _require_cron_auth()
+    body = request.get_json(silent=True)
+    if isinstance(body, dict) and "targets" in body:
+        targets = body["targets"]
+        pairs = [(str(t.get("user_id") or "").strip(), str(t.get("league_id") or "").strip())
+                 for t in (targets if isinstance(targets, list) else []) if isinstance(t, dict)]
+        if not pairs or len(pairs) != len(targets) or not all(u and l for u, l in pairs):
+            return jsonify({"error": "invalid_body", "message":
+                            "targets must be a non-empty list of {user_id, league_id}"}), 400
+        threading.Thread(target=_pregenerate_grading_targets, args=(pairs,),
+                         name="grading-pregenerate-targets", daemon=True).start()
+        log.info("blind-grading: pregenerate targets=%d", len(pairs))
+        return jsonify({"targets": len(pairs)}), 202
     out = _blind_grading.pregenerate()
     jobs = out["to_build"]
     if jobs:
