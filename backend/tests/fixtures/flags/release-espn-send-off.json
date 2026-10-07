@@ -156,7 +156,7 @@
   "picks.assign": true,
   "picks.assign_tradeable": true,
   "draft.manual_picks": true,
-  "draft.tab": true,
+  "draft.tab": false,
   "trades.edit_full_sheet": true,
   "trades.intent_modes": true,
   "trades.sheet_targeting": true,

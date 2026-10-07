@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-09-30 — Value-core engine: operator decisions, push for CI, bench on real leagues](#2026-09-30--value-core-engine-operator-decisions-push-for-ci-bench-on-real-leagues)
 - [2026-09-08 — Feedback batch #422–#428: ship on go, run the checklist on 1.17.3, then the four follow-up candidates](#2026-09-08--feedback-batch-422428-ship-on-go-run-the-checklist-on-1173-then-the-four-follow-up-candidates)
 - [2026-09-07 — Owner-only: ship the paged insert, restore budgets, then slim per-row evidence](#2026-09-07--owner-only-ship-the-paged-insert-restore-budgets-then-slim-per-row-evidence)
 - [2026-09-07 — Team overhaul: PR review, operator D1/D9 confirmation, TestFlight checklist, then flag flip](#2026-09-07--team-overhaul-pr-review-operator-d1d9-confirmation-testflight-checklist-then-flag-flip)
@@ -47,6 +48,15 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-09-30 — Value-core engine: operator decisions, push for CI, bench on real leagues
+
+Built on `feat/value-core-engine` ([D-196](DECISIONS.md), [plan folder](../docs/plans/value-core-engine/)); flag `trade.value_core` off.
+Draft PR #308 open for CI only (do not merge). Operator answered on 2026-10-01: fallback yes; intents and likes-you stay legacy; band ±20%.
+
+1. **Blind grades.** The real leagues are frozen (2026-10-01; private file, see TEST_LEDGER). Run `value_core_bench run` with variants, then `blind_grade export` against today's served decks, and the operator grades ~40 cards per variant (runbook § Value-core bench). *Why now:* Gate 2 — the plain core vs today's engine.
+2. **CI green on PR #308 (Python 3.12).** *Why now:* the pre-ship gate; local runs are 3.14.
+3. **Open:** PRD Q3 (starter strength in the window), Q4 (blind-grade testers), Q6 (Bush League has members rows?).
 
 ## 2026-09-08 — Feedback batch #422–#428 SHIPPED: run the checklist on 1.17.3, then the follow-up candidates
 

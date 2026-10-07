@@ -82,6 +82,8 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Runtime tuning](#runtime-tuning)
 - [Presentment-rules tripwire (`trade.presentment_rules`, G6 2026-08-16)](#presentment-rules-tripwire-tradepresentment_rules-g6-2026-08-16)
 - [Negative-results memory (`trade.negmem`, 2026-08-22)](#negative-results-memory-tradenegmem-2026-08-22)
+- [Value-core bench (freeze / run / recall / blind grade)](#value-core-bench-freeze--run--recall--blind-grade)
+  - [Gate 2 — Calibration (in-app blind grading)](#gate-2--calibration-in-app-blind-grading)
 - [Debug log](#debug-log)
 - [Verified-session grace monitoring (account-auth P1)](#verified-session-grace-monitoring-account-auth-p1)
 - [Common failure modes](#common-failure-modes)
@@ -310,6 +312,7 @@ The trade engine is selected by flags in `config/features.json` (reload via `POS
 - `trade_engine.v2` — Tier 1/2 scorer in `backend/trade_service.py`
 - Tier 2 features toggle independently within v2: `trade.marginal_value`, `trade.outlook_blend`, `trade.likes_you`, `trade.fuzzy_match`, `trade.thompson_deck`, `trade.deck_diversity`
 - `trade.three_team` — 3-team cycle cards (Tier 3)
+- `trade.value_core` — the value-core engine (`backend/value_core/`). For the jobs it serves it replaces everything above, so flipping `trade_engine.*` does not change a value-core deck; its own kill steps are in [Value-core bench](#value-core-bench-freeze--run--recall--blind-grade)
 
 **Kill-switch order** (bad cards / latency / errors after a trade-engine change):
 
@@ -415,6 +418,106 @@ the [TestFlight checklist](plans/negative-results-memory/testflight-checklist.md
 whenever `m2` reads `killed (…)` or `degraded` — the M2 queries never ran. Always read that
 counter together with the `m2` annotation. Likewise `likes_net` is pre-clamp and
 readout-only: `n_decayed + likes_net` does not reconstruct the gross evidence.
+
+## Value-core bench (freeze / run / recall / blind grade)
+
+Feature docs: [`plans/value-core-engine/`](plans/value-core-engine/) · [ADR-024](adr/adr-024-value-core-engine.md) · flag and knobs in [config-reference](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off). The bench is how the value core earns wider serving. Four operator-run CLIs, run from the repo root, none wired to the server.
+
+**Private outputs (all four tools).** Every output path must not exist yet; the tools refuse to overwrite. Files are written mode `0600`. Stdout carries aggregate numbers only, never user ids. Frozen files, result dirs, card sets and grade keys hold real rosters and boards: never commit them, never paste their contents into a report, and keep them outside the repo or in a gitignored scratch dir.
+
+**1. Freeze the bench** (prod read-only; credentials from `secrets.local.env`):
+
+```bash
+python -m backend.eval.value_core_bench freeze --secrets secrets.local.env \
+  --league <ID> [--league <ID> ...] --output <PRIVATE>.json
+```
+
+It connects through `prod_analytics._connect_readonly` and asserts `SHOW transaction_read_only` returns `on` before any read, raising otherwise. It reads `leagues`, `league_members`, `draft_picks` (platform picks, top 6 per owner), `member_rankings`, `players`, `player_value_history` and `league_preferences`. Sleeper leagues also get lineup slots, roster capacity and standings from the Sleeper public API. Other platforms get the default lineup, no roster-size rule and no standings. A league with no `league_members` rows cannot be benched: check the printed summary counts (`leagues, teams, assets, boards, standings_leagues`).
+
+**2. Run variants and read the verdict:**
+
+```bash
+python -m backend.eval.value_core_bench run --frozen <PRIVATE>.json --output <NEW_DIR> \
+  [--variant NAME=overrides.json ...] [--seats all|boarded]
+```
+
+A variant file holds `{"core": {...}, "rank": {...}, "standings_weight": x}` overrides on top of the defaults (core keys are `CoreConfig` field names, e.g. `band`, `gain_band`, `throwin_min_ratio`). For every league and seat the tool runs the pipeline and computes the guardrails on the first 30 cards. Each seat's snapshot carries every other seat's frozen board as a partner board, shrunk the way the server shrinks one (`adapter.partner_board_from`), so throw-ins to partners are benched the way they are served. It writes `results.json` and one `cards-<variant>.json` blind-grade card set per variant, then prints a markdown table with one row per variant (the card count, the three pooled rates, the worst seat's acquired-asset appearances, near-duplicates and repeat acquisitions, and the verdict), followed by one `verdict <variant>: PASS|FAIL` line per variant.
+
+| Guardrail | Definition | Target |
+|---|---|---|
+| Insult rate | share of cards where the other side loses more than 20% of the raw market value it gives up | < 3%, pooled |
+| Real-piece-back share | best incoming asset starts in the viewer's post-trade lineup or is worth at least a Late 1st | ≥ 70%, pooled |
+| Median value given | median of (get − give) ÷ give | ≥ −10%, pooled |
+| Max acquired appearances | most cards any one acquired (received) asset appears in, first 30 | ≤ 3 on every seat with a card |
+| Near-duplicates | first-30 cards that repeat an earlier card's trade idea (same partner and headliners; only minor pieces or pick years differ) | 0 on every seat with a card |
+
+`PASS` needs all five. Repeat acquisitions (the same headliner, or a pick, from the same partner), `max_partner_cards` and `max_asset_appearances` (both sides) are reported per seat but not gated. On a `FAIL`, tune in a new variant file and re-run; do not move a live `vc_*` knob to try a variant. Per-seat rows in `results.json` carry the pass flags and the core diagnostics (`truncated_partners`, `budget_exhausted`, reject counts per rule), which show which rule or cap is responsible.
+
+**3. Real-trade recall** (committed fixtures, no network):
+
+```bash
+python -m backend.eval.value_core_recall --fixtures backend/tests/fixtures --output <NEW_DIR> \
+  [--variant NAME=overrides.json]
+```
+
+It rebuilds the in-season two-team trades in the committed Sleeper fixtures (FFV3 2022–2025, Lakeview 2024–2025) from the week-before rosters and dated DP values. It reports exact and close recall@10, the share of real trades that are in the fair pool, why the rest failed, and a band calibration: `recommended_band` is the band that would admit 80% of the real trades. This is a baseline, not a gate. The fixtures carry no ages and only the traded picks, so outlook is neutral here. Do not change `vc_band` or `vc_gain_band` from this number without the operator. The recommendation is symmetric (it fits the absolute log ratio), while the live band is asymmetric: the viewer may overpay by up to `vc_band` but gain at most `vc_gain_band`.
+
+**4. Blind grade:**
+
+```bash
+# incumbent's actually served cards (prod read-only)
+python -m backend.eval.blind_grade served --secrets secrets.local.env --user <ID> --league <ID> [...] --output served.json
+python -m backend.eval.blind_grade export --cards A.json --cards B.json [...] --per-variant 40 --seed 7 --output <NEW_DIR>
+python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --key <NEW_DIR>/key.private.json
+```
+
+`export` samples 40 cards per variant, merges identical trades, shuffles, and writes `grade-sheet.csv` plus `key.private.json`. The sheet names no variant, and its reasons column is blank by default (`show_reasons=False`), because engine-specific phrasing would reveal the source. Give graders the CSV only, never the key. Grades are integers 1–5 (blank = ungraded). Tags are `;`-separated from `same_guy_again`, `too_small`, `never_accept`, `wrong_my_window`, `wrong_their_window`, `junk_filler`, `overpay`. `import` rejects anything else and names the card, then writes `summary.json` next to the sheet: per-variant mean, share graded 4 or more, and tag counts. Target: mean ≥ 4.0 and clearly above the incumbent.
+
+**Kill switch.** A value-core failure while building a deck is logged (`value-core: deck build failed … falling back to the legacy engine`) and that job is finished by the legacy engine, so a rising count of that log line is the signal to act.
+
+1. **Stop it:** set `trade.value_core` to `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The safety signature changes, so the next `/api/trades/generate` runs the legacy engine and no cached value-core deck is reused.
+2. **Narrow it (deploy-free):** `vc_testers_only` → `1` with `scripts/set_knob.py` or `PUT /api/admin/config/vc_testers_only` (`X-Cron-Secret`). Serving returns to the tester allowlist only.
+
+**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. `budget_exhausted=True` means the 8 s core budget stopped enumeration and a partial pool was ranked and served. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
+
+### Gate 2 — Calibration (in-app blind grading)
+
+Feature docs: [`plans/blind-grading/`](plans/blind-grading/) · flag row in [config-reference](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off) · routes in [api-reference](api-reference.md#calibration--blind-grading-apigrading-flag-gradingblind-on-for-every-app-user) · tables in the [data dictionary](data-dictionary.md#blind-grading-tables). Step 4 above is the operator's CSV; Calibration asks the same question inside the app, of every app user, against the deck they were actually served. `grading.blind` is **on for everyone** in `config/features.json` (operator, 2026-10-05: under ten users, TestFlight-only) and `server._calibration_allowed` returns `True`, so there is no allowlist to edit and no experiment to run. Two production writes, each held for operator approval: the deploy with the flag on, and the pre-generation call.
+
+`CRON_SECRET` lives in `secrets.local.env` — read it from there, never paste it into chat.
+
+```bash
+export CRON_SECRET="$(grep -E '^CRON_SECRET=' secrets.local.env | cut -d= -f2-)"
+export FTF_PROD=https://fantasy-trade-finder.onrender.com
+```
+
+**1. Deploy with the flag on.** `grading.blind: true` in `config/features.json`, mirrored in `backend/tests/fixtures/flags/release.json`, `profiles-on.json` and `onboarding-v2.json` (`test_flag_registered_default_off_and_shipped_on_mirrored` pins the mirror; the code default in `feature_flags.py` stays false). Deploy, or `POST /api/feature-flags/reload`. Keep `trade.value_core` **false** while grading: a user being served value-core decks would fail the 14-day freshness rule, because the current arm reads only legacy-attributed rows. On the device: force-quit and relaunch — tab presence is decided once at mount from the cached map, which the background refetch then replaces, so the first launch after the flip may still show the old bar; relaunch once more. Expected bar: **Rank · Acquire · Calibration · Matches · League**.
+
+**2. Pre-generate every session** so nobody has to open Acquire first:
+
+```bash
+curl -X POST -H "X-Cron-Secret: $CRON_SECRET" "$FTF_PROD/api/admin/grading/pregenerate"
+# → 202 {"candidates": 8, "building": 6, "already_open": 2, "skipped": {}}
+```
+
+A candidate is a user with a qualifying current-engine deck served in the last 14 days (`blind_grading.MAX_DECK_AGE_DAYS`) in a league they are a member of; cards whose players have since moved are dropped regardless. The `building` sessions are built one after another on a single daemon thread (`grading-pregenerate`), each ending `open` or `failed` — allow a couple of minutes, then check with `include_open=1` below. Re-run freely: open sessions are resumed (`already_open`), building ones are re-kicked, and a duplicate build writes nothing. `skipped` counts refusals by `GradingError` code (`needs_fresh_deck`, `league_not_synced`) plus `error` for anything unexpected (logged). A user with no fresh deck is not a candidate: they open Acquire for the league, then Calibration › Start, exactly as before. Nothing else is needed on the device — Calibration › Start resumes the pre-built session.
+
+**3. Read the report** once the graders are done. Completed sessions only by default:
+
+```bash
+curl -s -H "X-Cron-Secret: $CRON_SECRET" "$FTF_PROD/api/admin/grading/report" | python3 -m json.tool
+# filters: ?since=2026-10-02   ?include_open=1
+```
+
+Read `overall.arms.value_core.mean` against `overall.arms.current.mean` (`overall.delta_mean` = value core − current), the per-arm `share_ge_4` (the share the grader would actually send) and `tag_counts` (why cards lose), and `by_grader[*].delta_mean` to see whether the verdict holds per grader or only in aggregate. Wait for **≥ 40 graded cards per arm** (about two complete sessions) before reading anything. The parent plan's bar is a value-core mean ≥ 4.0, clearly above the incumbent; the report computes no pass/fail — the verdict is the lead's and the operator's, recorded in `living-memory/DECISIONS.md`. `overall.shared` is how often both engines proposed the same trade; shared cards count for both arms and narrow the gap. Each `sessions[]` row carries its hidden `source` (deck job, engine version, config) and `counts` for audit. This route is cron-secret only and **not** flag- or audience-gated, so it stays readable after step 4.
+
+**4. Kill = flag false.** `grading.blind` → `false` in `config/features.json` (and the three fixtures that mirror it) and deploy, or an `FTF_FLAGS` override plus `POST /api/feature-flags/reload` for an immediate, deploy-free stop. Every `/api/grading/*` user route 404s at once; a stale tab shows "Calibration isn't turned on for this account" until the next launch, when it disappears. The tables, the report and the pre-generation route remain. Don't empty `config/tester_allowlist.json` for this — other surfaces share it (`POST /api/test-users`, `vc_testers_only`) and Calibration no longer reads it.
+
+**To restrict Calibration to testers again** (the 2026-10-02 posture): restore the tester-allowlist check in `server._calibration_allowed` (its docstring says how — `_load_tester_allowlist()` on the session user id / league user id), set `grading.blind` back to false, add each grader's account id to `config/tester_allowlist.json`, and deliver the flag per unit through a `calibration_rollout` experiment overlay — account unit, full-range buckets, targeting only `{"is_tester_allowlist": true}`, one `treatment` variant with `client_config.flags = {"grading.blind": true}`, launched with `override_underpowered: true`; field-by-field reasons in [lld.md §8.2](plans/blind-grading/lld.md#82-the-calibration_rollout-overlay). `server._grading_flag_for_caller` still resolves the overlay, so nothing else changes; kill in that posture = stop the experiment (routes 404 within the 60 s experiment cache).
+
+**Local dev.** `grading.blind` is on in `config/features.json`, so the routes answer with no further setup (`FTF_FLAGS='{"grading.blind": false}'` turns them off). Two prerequisites, or creation fails: run `POST /api/cron/value-snapshot` (`X-Cron-Secret`) first so `player_value_history` has today's rows — with no consensus values every market is 0 and the value core returns too few trades, which surfaces as a `failed` session with `error.code = "value_core_too_few"`; and open Acquire for the league so a legacy deck with `model_arm` set exists (`deck.signal_v2`, `suggestion.telemetry` and `trade.bakeoff` on, as in `config/features.json`).
+
+**Draft tab rollback.** `draft.tab` went false on 2026-10-02 so Calibration could take the third slot; the Draft tab's code is intact. To bring it back for everyone: `draft.tab` → `true` in `config/features.json` and the flags fixtures that mirror it (`test_rookie_ranks_editable.py` pins the mirror), deploy or `POST /api/feature-flags/reload`; it returns at each user's next launch — except while Calibration is on, which keeps the slot. The Draft Room is reachable throughout via League › Rookie draft (`draft.room`) and the Acquire mode strip's Draft chip.
 
 ## Debug log
 

@@ -3382,6 +3382,7 @@ def _trade_safety_signature(owner_state: tuple[bool, ...] | None = None,
         ("owner_include", owner_state[0]),
         ("owner_serve", owner_state[1]),
         ("owner_only", len(owner_state) > 2 and owner_state[2]),
+        ("value_core", _value_core_enabled()),
     ) if enabled]
     if owner_state[0]:
         signature.append("owner_model:" + (owner_model or _bakeoff.owner_arm()))
@@ -5081,6 +5082,7 @@ def _log_deck_signal_impressions(
     on_batch_committed=None,
     should_continue=None,
     prepare_sink=None,
+    value_core_evidence: dict | None = None,  # {id(card): evidence} — lld.md §7.3
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -5533,6 +5535,21 @@ def _log_deck_signal_impressions(
                     league_id=league_id, viewer_user_id=user_id, partner_user_id=target,
                     viewer_gives=give, viewer_receives=recv)
             row["features_json"] = features if structured_features else json.dumps(features, default=str)
+        if value_core_evidence is not None:
+            # Every row, every key: save_deck_impressions compiles its INSERT from the FIRST
+            # row's keys (the executemany rule documented at :5429-5433).
+            _vc = value_core_evidence.get(id(card))
+            row["model_arm"] = "value_core"
+            row["arm_rank"] = pos
+            row["policy_variant"] = "value_core"
+            row["policy_version"] = (_vc or {}).get("generator_version", "value-core-1")
+            row["fairness_threshold"] = ((_vc or {}).get("core") or {}).get("ratio_floor")
+            row["valuation_json"] = json.dumps(_vc, sort_keys=True) if _vc is not None else None
+            row["trade_concept_id"] = _trade_policy.trade_concept_id(
+                league_id=league_id, viewer_user_id=user_id, partner_user_id=target,
+                viewer_gives=give, viewer_receives=recv)
+            row["source_like_impression_id"] = None
+            row.setdefault("assets_json", json.dumps({"give": give, "receive": recv}))
         rows.append(row)
         if batch_limit is not None and len(rows) >= batch_limit:
             flush_batch()
@@ -7424,6 +7441,169 @@ def _capture_trade_execution(sess, user_id, league_id, scoring_format):
     )
 
 
+# ── Value-core engine (docs/plans/value-core-engine/) ────────────────────────
+def _value_core_enabled() -> bool:
+    return bool(getattr(FLAGS, "trade_value_core", False))
+
+
+def _value_core_live(*, league_id: str, user_id: str, league_user_id: str | None,
+                     trade_intent: str | None, preparation: bool) -> bool:
+    """Does THIS job run the value core? Flag off => False before any other read."""
+    if not _value_core_enabled():
+        return False
+    if league_id == "league_demo" or trade_intent or preparation:
+        return False
+    if float(_trade_service_mod._cfg.get("vc_testers_only", 1.0)) >= 1.0:
+        allow = _load_tester_allowlist()          # experiments.load_tester_allowlist (server.py:26591)
+        return str(user_id) in allow or (league_user_id is not None and str(league_user_id) in allow)
+    return True
+
+
+def _value_core_standings(league_id: str, platform: str | None) -> tuple[dict, int]:
+    """({league_user_id: Standing}, completed_weeks). Sleeper only; fail-soft to ({}, 0)."""
+    from .value_core.types import Standing
+    if (platform or "sleeper") != "sleeper":
+        return {}, 0
+    try:
+        from . import outlook as outlook_pkg
+        state = outlook_pkg.build_league_state(league_id, platform="sleeper",
+                                               fetch=_outlook_sleeper_fetch())
+    except Exception as err:
+        log.warning("value-core: standings unavailable league=%s: %s", league_id, err)
+        return {}, 0
+    return ({str(t.user_id): Standing(int(t.wins), int(t.losses), int(t.ties), float(t.points_for))
+             for t in state.teams if t.user_id}, int(state.completed_weeks or 0))
+
+
+def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_league, g_user_roster,
+                        players_dict, seed_map, elo_map_rt, confidence_counts, placement_bands,
+                        untouchable_ids, not_interested_ids, explicit_outlook, opponent_outlooks,
+                        real_user_ids, outlook_value, pinned_give, pinned_give_mode,
+                        pinned_receive, opponent_user_id, fairness_threshold, job_draft_picks):
+    """Serve one value-core deck and finish the job; return True. If building the deck
+    fails before anything is served, log it and return False so _run_trade_job falls back
+    to the legacy engine for this job (PRD Q1, operator 2026-10-01). No side effects precede
+    the fallback point."""
+    try:
+        from .value_core import adapter as vc_adapter, pipeline as vc_pipeline, windows as vc_windows
+        started = time.monotonic()
+        league_id, fmt, viewer = ctx.league_id, ctx.scoring_format, str(ctx.league_user_id)
+        cfg = dict(_trade_service_mod._cfg)
+        core_cfg, rank_cfg = vc_adapter.core_config_from(cfg), vc_adapter.rank_config_from(cfg)
+        opponents = [m for m in g_league.members if m.user_id not in {g_user_id, ctx.league_user_id}]
+        platform = getattr(g_league, "platform", None)
+        standings, completed_weeks = _value_core_standings(league_id, platform)
+        try:
+            slots = _league_lineup_slots(league_id)
+        except Exception:
+            slots = None
+        try:
+            max_players = _sleeper_roster_limit(league_id) if (platform or "sleeper") == "sleeper" else None
+        except Exception:
+            max_players = None
+        totals, grand = {}, 0.0
+        for pk in job_draft_picks():
+            owner, pv = pk.get("owner_user_id"), pk.get("pick_value") or 0.0
+            if owner:
+                totals[str(owner)] = totals.get(str(owner), 0.0) + pv
+            grand += pv
+        pick_shares = {u: t / grand for u, t in totals.items()} if grand > 0 else {}
+        rosters = {viewer: list(g_user_roster), **{str(m.user_id): list(m.roster) for m in opponents}}
+        declared = {viewer: explicit_outlook, **{str(k): v for k, v in (opponent_outlooks or {}).items()}}
+        windows = vc_windows.infer_windows(
+            team_rosters=rosters, players=players_dict, pick_shares=pick_shares, standings=standings,
+            completed_weeks=completed_weeks, declared=declared,
+            standings_weight=vc_adapter.standings_weight_from(cfg))
+        viewer_name = next((m.username for m in g_league.members if m.user_id == ctx.league_user_id), "You")
+        # Throw-ins to a partner need that partner's real published board (has_rankings is set
+        # only for members whose Elo came from member_rankings rows; others carry seeded noise).
+        partner_boards = {}
+        for m in opponents:
+            if getattr(m, "has_rankings", False) and m.elo_ratings:
+                pb = vc_adapter.partner_board_from(
+                    elo_ratings=m.elo_ratings, seed_elo=seed_map,
+                    comparison_counts=getattr(m, "comparison_counts", None),
+                    confidence_source=getattr(m, "confidence_source", None) or "votes",
+                    confidence_weights=getattr(m, "confidence_weights", None),
+                    confidence_sources=getattr(m, "confidence_sources", None))
+                if pb is not None:
+                    partner_boards[str(m.user_id)] = pb
+        snapshot = vc_adapter.build_snapshot(
+            league_id=league_id, scoring_format=fmt, viewer_team_id=viewer, viewer_name=viewer_name,
+            viewer_roster=g_user_roster, opponents=opponents, players=players_dict, seed_elo=seed_map,
+            lineup_slots=slots, max_players=max_players, windows=windows,
+            partner_boards=partner_boards)
+        request = vc_adapter.build_request(
+            snapshot=snapshot, user_elo=elo_map_rt, seed_elo=seed_map, confidence=confidence_counts,
+            placements=placement_bands, untouchable_ids=untouchable_ids,
+            not_interested_ids=not_interested_ids, pinned_give=pinned_give or (),
+            pinned_give_mode=pinned_give_mode, pinned_receive=pinned_receive or (),
+            partner_team_id=opponent_user_id, fairness_threshold=fairness_threshold)
+        result = vc_pipeline.run(snapshot, request, core_cfg, rank_cfg)
+        cards, evidence = vc_adapter.to_trade_cards(
+            result, snapshot, request, league_id=league_id, proposing_user_id=g_user_id,
+            core_cfg=core_cfg, rank_cfg=rank_cfg)
+    except Exception as vc_err:
+        log.exception("value-core: deck build failed for job %s; falling back to the legacy engine: %s",
+                      job_id, vc_err)
+        return False
+    for card in cards:
+        trade_service._trade_cards[card.trade_id] = card
+    served = _project_trade_dispositions(cards, g_user_id, league_id)
+    with _trade_jobs_lock:
+        job_source = (_trade_jobs.get(job_id) or {}).get("source")
+    try:
+        log_trade_impressions(g_user_id, league_id, served)
+    except Exception as imp_err:
+        log.warning("value-core: trade impression logging failed (non-fatal): %s", imp_err)
+    imp_by_card = {}
+    if not _job_superseded(job_id):
+        try:
+            imp_by_card = _log_deck_signal_impressions(
+                user_id=g_user_id, league_id=league_id, job_id=job_id, cards=served,
+                players_dict=players_dict, scoring_format=fmt, source=job_source, seed_map=seed_map,
+                capture={"propensity": {}, "final_key": {id(c): evidence[id(c)]["effective"]
+                                                          for c in served}},
+                value_core_evidence=evidence)
+        except Exception as sig_err:
+            log.warning("value-core: deck impression logging failed (non-fatal): %s", sig_err)
+    snapshot_rows = []
+    for card in served:
+        row = trade_card_to_dict(card, players_dict)
+        row["real_opponent"] = card.target_user_id in real_user_ids
+        row["outlook"] = outlook_value
+        if imp_by_card.get(id(card)):
+            row["impression_id"] = imp_by_card[id(card)]
+        snapshot_rows.append(row)
+    diag = result.core
+    total_ms = int((time.monotonic() - started) * 1000)
+    with _trade_jobs_lock:
+        j = _trade_jobs.get(job_id)
+        if _job_live(j):
+            j["cards"] = snapshot_rows
+            j["final_checks_pending"] = False
+            j["opponents_done"] = j["opponents_total"] = len(opponents)
+            j["value_core"] = {"fair": diag.fair, "served": len(served),
+                               "core_ms": diag.elapsed_ms, "total_ms": total_ms,
+                               "truncated_partners": diag.truncated_partners,
+                               "budget_exhausted": diag.budget_exhausted}
+    log.info("trade-job %s value_core: partners=%d packages=%d checked=%d fair=%d served=%d "
+             "truncated=%d budget_exhausted=%s core_ms=%d total_ms=%d", job_id, diag.partners,
+             diag.packages_viewer, diag.pairs_checked, diag.fair, len(served),
+             diag.truncated_partners, diag.budget_exhausted, diag.elapsed_ms, total_ms)
+    gen_ms = _finish_trade_job(job_id)
+    if gen_ms is None:
+        return True
+    try:
+        props = {"count": len(served), "gen_ms": gen_ms, "engine_version": "value_core", "lanes": {}}
+        if job_source:
+            props["deck_source"] = job_source
+        record_event(g_user_id, "trades_generated", league_id=league_id, source="api", props=props)
+    except Exception as ev_err:
+        log.warning("value-core: record_event(trades_generated) failed: %s", ev_err)
+    return True
+
+
 def _run_trade_job(
     job_id: str,
     sess_token: str,
@@ -7766,6 +7946,23 @@ def _run_trade_job(
             except Exception as pick_inj_err:
                 log.warning("trade-job: owned-pick injection failed (continuing): %s",
                             pick_inj_err)
+
+        if _value_core_live(league_id=league_id, user_id=g_user_id,
+                            league_user_id=ctx.league_user_id,
+                            trade_intent=trade_intent, preparation=preparation):
+            if _run_value_core_job(
+                job_id=job_id, ctx=ctx, service=service, trade_service=trade_service,
+                g_user_id=g_user_id, g_league=g_league, g_user_roster=g_user_roster,
+                players_dict=players_dict, seed_map=seed_map, elo_map_rt=elo_map_rt,
+                confidence_counts=confidence_counts, placement_bands=placement_bands,
+                untouchable_ids=untouchable_ids, not_interested_ids=not_interested_ids,
+                explicit_outlook=explicit_outlook, opponent_outlooks=opponent_outlooks,
+                real_user_ids=real_user_ids, outlook_value=outlook_value,
+                pinned_give=pinned_give, pinned_give_mode=pinned_give_mode,
+                pinned_receive=pinned_receive, opponent_user_id=opponent_user_id,
+                fairness_threshold=fairness_threshold, job_draft_picks=_job_draft_picks):
+                return
+            # value core failed before serving anything: this job continues on the legacy engine
 
         # F7 (flag deck.exploration) — over-generate per opponent so the
         # wildcard draw has gate-passing candidates from OUTSIDE the served
@@ -15089,6 +15286,7 @@ def _owner_selected_assignment(context, surface, *, serve, exclusive=False):
     canonical["config"] = {k: v for k, v in canonical["config"].items()
                            if not k.startswith("bakeoff_include_") and not k.startswith("bakeoff_serve_")
                            and not k.startswith("significance_")
+                           and not k.startswith("vc_")                 # value core: never reshuffle owner units
                            and k != "bakeoff_owner_only"}
     if not canonical["config"].get("owner_bilateral_enabled"):
         # Adding a dark selector must not reshuffle established v1 request units.
@@ -26732,6 +26930,228 @@ def delete_test_user_route(user_id: str):
     except Exception as e:
         log.error("test-users delete failed: %s\n%s", e, traceback.format_exc())
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── Calibration / blind grading (docs/plans/blind-grading/) ───────────────
+# Tester-only value-core Gate 2: grade value-core vs current-engine cards
+# without knowing which made them. All logic is in backend/blind_grading.py;
+# these routes gate, gather the league facts only the server has, and map
+# GradingError. They never touch trade_service, impressions or swipes.
+
+from . import blind_grading as _blind_grading
+
+
+def _calibration_allowed(sess) -> bool:
+    """THE Calibration audience predicate. Testers only on 2026-10-02; opened to every
+    app user by the operator on 2026-10-05. To restrict it again, restore the tester
+    allowlist check (_load_tester_allowlist on sess user_id / league_user_id) here."""
+    # Operator 2026-10-05: Calibration is open to EVERY app user (under 10 users; the app
+    # is TestFlight-only). grading.blind is the on/off switch.
+    return True
+
+
+def _grading_flag_for_caller(sess) -> bool:
+    """grading.blind as THIS caller's app resolves it: the global map, overlaid
+    by running-experiment client_config.flags for the caller's device unit
+    (X-Device-Id, sent by mobile/src/api/grading.ts) and account unit — the
+    per-unit resolution /api/feature-flags performs (feature_flags_route) and
+    the merge mobile/src/api/flags.ts applies. Fail closed: any resolution
+    error reads as False."""
+    if is_enabled("grading.blind"):
+        return True
+    try:
+        from . import experiments as _exp
+        device_id = (request.headers.get("X-Device-Id") or "").strip()
+        units = [f"device:{device_id}" if device_id else None,
+                 str(sess.get("user_id") or "") or None]
+        for unit in units:
+            if not unit:
+                continue
+            _, configs = _exp.resolve_for_unit(unit, None)
+            if any(((cfg or {}).get("flags") or {}).get("grading.blind") is True
+                   for cfg in configs.values()):
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _grading_gate(fn):
+    """OUTERMOST decorator (directly under @app.route): 404 before the verified
+    gates or any session work unless the caller resolves grading.blind true
+    AND passes _calibration_allowed — no existence signal (the
+    _test_users_denied posture)."""
+    @functools.wraps(fn)
+    def _wrapper(*args, **kwargs):
+        sess = _get_session(request.headers.get("X-Session-Token", ""))
+        if (sess is None or not _grading_flag_for_caller(sess)
+                or not _calibration_allowed(sess)):
+            return jsonify({"error": "not_found"}), 404
+        return fn(*args, **kwargs)
+    return _wrapper
+
+
+def _grading_error(err):
+    return jsonify({"error": err.code, **err.detail}), err.status
+
+
+def _grading_server_inputs(sess, league_id: str):
+    """League facts mirroring _run_value_core_job; every source fail-soft."""
+    g_league = sess.get("league")
+    platform = getattr(g_league, "platform", None)
+    standings, completed_weeks = _value_core_standings(league_id, platform)
+    try:
+        slots = _league_lineup_slots(league_id)
+    except Exception:
+        slots = None
+    try:
+        max_players = (_sleeper_roster_limit(league_id)
+                       if (platform or "sleeper") == "sleeper" else None)
+    except Exception:
+        max_players = None
+    untouchable, not_interested = set(), set()
+    if FLAGS.trade_preference_lists:
+        try:
+            ap = load_asset_preferences(user_id=sess["user_id"], league_id=league_id)
+            untouchable = set(ap.get("untouchables", []))
+            not_interested = set(ap.get("not_interested", []))
+        except Exception as err:
+            log.warning("blind-grading: asset prefs load failed: %s", err)
+    return _blind_grading.ServerInputs(
+        lineup_slots=tuple(slots) if slots else None, max_players=max_players,
+        standings=standings, completed_weeks=int(completed_weeks or 0),
+        untouchable_ids=frozenset(map(str, untouchable)),
+        not_interested_ids=frozenset(map(str, not_interested)))
+
+
+def _build_grading_session(sess: dict, league_id: str, session_id: str) -> None:
+    """Background half of POST /api/grading/sessions (specs.md §3.3): the
+    Sleeper reads behind ServerInputs and the value-core build both leave the
+    request thread. build_session never raises; it ends the session 'open' or
+    'failed'. If gathering ServerInputs itself fails, the build still runs on
+    empty league facts, so the session can never be left 'building'."""
+    try:
+        server_inputs = _grading_server_inputs(sess, league_id)
+    except Exception as err:
+        log.warning("blind-grading: server inputs failed session=%s: %s", session_id, err)
+        server_inputs = _blind_grading.ServerInputs(lineup_slots=None, max_players=None,
+                                                    standings={}, completed_weeks=0)
+    _blind_grading.build_session(session_id=session_id, server=server_inputs)
+
+
+@app.route("/api/grading/sessions", methods=["POST"])
+@_grading_gate
+@_gate_unverified_write
+def grading_create_session_route():
+    sess = _require_initialized_session()
+    body = request.get_json(silent=True)
+    league_id = str(body.get("league_id") or "").strip() if isinstance(body, dict) else ""
+    if not league_id:
+        return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
+    g_league = sess.get("league")
+    if g_league is None or str(g_league.league_id) != league_id:
+        return jsonify({"error": "league_not_active"}), 400
+    user_id = str(sess["user_id"])
+    try:
+        # start_session resumes a building/open session itself (a failed one starts fresh)
+        # and reports needs_build=True for a resumed 'building' row, so a build orphaned by
+        # a restart or deploy is re-kicked here; a duplicate build writes nothing.
+        out = _blind_grading.start_session(
+            user_id=user_id, league_user_id=_league_user_id(sess), league_id=league_id)
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+    session_id = out["session"]["session_id"]
+    if out.get("needs_build"):
+        # One synchronous gunicorn worker (render.yaml): a 2–12 s inline build
+        # would stall every user's request, so the slow half runs here instead.
+        threading.Thread(target=_build_grading_session, args=(dict(sess), league_id, session_id),
+                         name="grading-build", daemon=True).start()
+    log.info("blind-grading: session %s league=%s resumed=%s", session_id, league_id,
+             out["resumed"])
+    return jsonify({"session": out["session"], "resumed": out["resumed"]}), (200 if out["resumed"] else 202)
+
+
+@app.route("/api/grading/sessions/current")
+@_grading_gate
+@_gate_unverified_read
+def grading_current_session_route():
+    sess = _require_session()
+    league_id = (request.args.get("league_id") or "").strip()
+    if not league_id:
+        return jsonify({"error": "invalid_body", "message": "league_id is required"}), 400
+    return jsonify(_blind_grading.current_session(user_id=str(sess["user_id"]),
+                                                  league_id=league_id))
+
+
+@app.route("/api/grading/sessions/<session_id>/next")
+@_grading_gate
+@_gate_unverified_read
+def grading_next_card_route(session_id: str):
+    sess = _require_session()
+    try:
+        return jsonify(_blind_grading.next_card(user_id=str(sess["user_id"]),
+                                                session_id=session_id))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+
+
+@app.route("/api/grading/cards/<card_id>", methods=["POST"])
+@_grading_gate
+@_gate_unverified_write
+def grading_answer_card_route(card_id: str):
+    sess = _require_session()
+    try:
+        return jsonify(_blind_grading.answer_card(user_id=str(sess["user_id"]), card_id=card_id,
+                                                  body=request.get_json(silent=True)))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+
+
+@app.route("/api/grading/sessions/<session_id>/results")
+@_grading_gate
+@_gate_unverified_read
+def grading_results_route(session_id: str):
+    sess = _require_session()
+    try:
+        return jsonify(_blind_grading.results(user_id=str(sess["user_id"]),
+                                              session_id=session_id))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
+
+
+@app.route("/api/admin/grading/pregenerate", methods=["POST"])
+def admin_grading_pregenerate_route():
+    """Cron-secret only. One-shot: build a Calibration deck for every user with a fresh
+    enough current-engine deck (operator 2026-10-02). The fast half runs here; every
+    build runs SEQUENTIALLY on one daemon thread (one sync gunicorn worker), each
+    ending open or failed. Re-running is safe: open sessions are resumed, not rebuilt."""
+    _require_cron_auth()
+    out = _blind_grading.pregenerate()
+    jobs = out["to_build"]
+    if jobs:
+        def _run_all():
+            for job in jobs:
+                sess = {"user_id": job["user_id"],
+                        "league": SimpleNamespace(platform=job.get("platform"))}
+                _build_grading_session(sess, job["league_id"], job["session_id"])
+        threading.Thread(target=_run_all, name="grading-pregenerate", daemon=True).start()
+    log.info("blind-grading: pregenerate candidates=%d building=%d open=%d skipped=%s",
+             out["candidates"], len(jobs), out["resumed_open"], out["skipped"])
+    return jsonify({"candidates": out["candidates"], "building": len(jobs),
+                    "already_open": out["resumed_open"], "skipped": out["skipped"]}), 202
+
+
+@app.route("/api/admin/grading/report")
+def admin_grading_report_route():
+    """Cron-secret only and deliberately NOT flag- or audience-gated (prd.md D4):
+    results stay readable after calibration_rollout is stopped."""
+    _require_cron_auth()
+    try:
+        return jsonify(_blind_grading.report(
+            since=(request.args.get("since") or None),
+            include_open=request.args.get("include_open") == "1"))
+    except _blind_grading.GradingError as err:
+        return _grading_error(err)
 
 
 # ─── Account auth — Apple/Google identity anchors + in-app deletion ────────

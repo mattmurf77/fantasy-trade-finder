@@ -1,3 +1,61 @@
+## 2026-10-05 — Calibration (in-app blind grading) integrated; open to every app user
+
+Built by four Fable 5.1 package agents (P1 service/schema, P2 routes/flags, P3 mobile, P4 docs) from
+`docs/plans/blind-grading/specs.md`, merged into `feat/blind-grading` (on top of the value-core branch) and lead-reviewed.
+Lead fixes: a `building` session orphaned by a restart is re-kicked by POST (route now always calls `start_session`);
+the build thread falls back to empty league facts so a session can never stay `building`; a stale `±10%` assertion in
+`test_value_core_serving` now reads the evidence's own ratio floor (it only passed alone on a local DB seeded before
+the band change — model_config seeds are INSERT OR IGNORE). Operator 2026-10-05: open to every app user
+(`grading.blind` true, `_calibration_allowed` True), freshness 14 days, cron-only pre-generation route, purpose copy.
+- Full backend suite (local Python 3.14): **7632 passed, 1 skipped**. Grading tests: routes, service, db, e2e
+  (the e2e walks every response body and fails on any arm/engine key or value before the reveal).
+- Mobile: `npx tsc --noEmit` OK, `testid-lint` OK, all `mobile/tests/check-*.js` guards pass incl. the new
+  `check-blind-grading.js` (27 checks; four planted sabotages caught by P3).
+- Flag-off golden (`test_bakeoff_serving::test_flag_off_is_byte_identical…`) and the flag-mirror tests pass.
+- Prod eligibility (read-only, 2026-10-05): users with a qualifying current-engine deck — 7 days: 4 users / 8 pairs;
+  14 days: 8 / 16. Runtime evidence for mobile is the TestFlight checklist in
+  `docs/plans/blind-grading/code-walk-mobile.md` §9 (operator).
+
+## 2026-09-30 — Value-core engine built on a branch (flag off)
+
+Full gates (scope/PRD/HLD/LLD/specs in `docs/plans/value-core-engine/`). Five parallel build packages merged
+into `feat/value-core-engine`, lead-reviewed. Local Python 3.14 (no 3.12 here; CI is the 3.12 gate, not yet run).
+- Baseline at contract commit `315ff1e8`: 7413 passed, 1 skipped.
+- Integration branch full suite: **7522 passed, 1 skipped** (527 s); 109 new value-core tests, incl. e2e with the real engine.
+- **Flag-off identity:** `bakeoff_harness.run_capture` (default, consolidate intent, sf_tep) with `PYTHONHASHSEED=0`
+  is identical to `3bb981ed` after stripping ids/timestamps; the base is itself deterministic. With the flag off
+  `backend.value_core` is never imported (fresh-interpreter check).
+- Latency, 14-team fixture, `pipeline.run` x10: p50 1.54 s, p95 1.77 s (target p95 < 8 s).
+- Synthetic bench smoke (not the verdict): insult 0.6%, real piece back 94.2%, median value given +7.6%,
+  worst-seat appearances 4 → FAIL on the ≤3 cap only; the cap is infeasible once the viewer's ≤14 tradeable
+  assets spend their allowances (0 cap-respecting cards left when it breaks).
+- Real-trade recall (committed FFV3/Lakeview fixtures, point-in-time DP values): 64 cases / 128 orientations;
+  exact@10 0%, close@10 18%, in-pool 1.6%; rejects floor 96, band 28, filler 2; |log ratio| p50 0.32, p80 0.65.
+  Band left at ±10% pending the operator.
+- Lead fix at review: core caps round-robin over headliners (pool share giving a top-3 asset 92% → 12%).
+- Deck variety rules (operator request, same day): one card per trade idea (same partner + headliners; picks
+  collapse by year/round), acquisitions in rounds, partner cap in the first 30. Synthetic first-30, before → after:
+  near-duplicates median 1.5/max 5 → 0, repeat acquisitions median 8/max 11 → 0, distinct acquisitions 22 → 30,
+  pick repeats from one partner max 9 → 0; insult 0.6%, real piece 92%, median given +7.7%; p50 1.3 s.
+  The appearances guardrail now counts acquired assets only. Full suite after: **7527 passed, 1 skipped**.
+- 2026-10-01 operator answers: logged legacy fallback on deck-build errors (tests: fallback serves legacy cards;
+  capture equals flag-off except `safety_policy`); default band ±10% → ±20%. Band evidence: real-trade coverage
+  ±10% 20% / ±15% 33% / ±20% 38% / ±25% 39% / ±30% 44% / ±40% 52%; synthetic insult rate 0.6% / 0.8% / 1.1% / 2.8% /
+  28.9% / 45.6%; recall in-pool 0.8% → 2.3% at ±20% (floor rule rejects most real trades: sub-450 throw-ins).
+  Real-league freeze blocked at first (permission classifier); the operator then granted prod reads explicitly.
+- 2026-10-01/02 real-league bench (frozen read-only: 6 leagues incl. two 2026 "Bush League" ids, 77 seats, 10 boards;
+  file kept private outside the repo). Symmetric ±20% failed on real rosters (insult 5.6%, median given +17.1%;
+  synthetic had said 1.1%), so the band became asymmetric: pay up to 20% / take up to 10% (`vc_band` 0.20,
+  `vc_gain_band` 0.10). Default, first 30 cards: insult 0.2%, real piece back 93.2%, median value given +8.4%,
+  near-duplicates 0, repeat acquisitions 0, worst acquired-asset appearances 4 (one seat, secondary piece; verdict
+  FAIL on that guardrail only); overpays >10% on 23/2,220 cards. Throw-ins (operator rule: recipient values it
+  >= 2x market, >= 450, with evidence): 13/2,220 first-30 cards (4 to viewer, 9 to partner); before the evidence
+  requirement unpriced/unranked players produced up to 28/30 cards on one seat. An independent review found 2 bugs
+  (throw-in toggled the stud premium; shortlist cut before the junk check) and 2 risks (variant budget; thin partner
+  boards): all fixed with regression tests (`THROWIN_MIN_COMPARISONS` = 3, premium on core counts, per-pair cap,
+  separate variant budget).
+Evidence delta: unit + e2e tests and the WP3 [code-walk](../docs/plans/value-core-engine/code-walk.md); no mobile change,
+so no TestFlight checklist is due until the flag is flipped.
 ## 2026-10-05b — SQLAlchemy pin (PR #311) and production deploy of #310 + #311
 
 Branch `fix/pin-sqlalchemy-2-0` from `origin/main` `85428813`. Hosted CI 4/4 green
