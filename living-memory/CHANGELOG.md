@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-10-07b — 1.18.0 in TestFlight; targeted Calibration pre-generation (#313); ESPN picks fix (#314)
+
+- iOS 1.18.0 builds 159/160 (same commit `38b50f24`) reached TestFlight after the operator renewed the signing certificate. The Calibration tab appears; the Draft tab leaves only after a second cold launch, because flags are cached and the tabs are fixed at mount.
+- #313 (`8b646c4f`, Render `dep-db3acanlk1mc739v8lu0`): `POST /api/admin/grading/pregenerate` accepts `{"targets": [{user_id, league_id}]}`. Each pair's Acquire deck is refreshed via `_replenish_deck_for`, then its session is built. Ran for MangoPatti (FFv3), lofman (SFO + FFv3), Bcork (FFv3): 4 open sessions, 20 + 20 cards each.
+- ESPN league 11896 was refused `needs_fresh_deck`: Calibration read platform picks only, and ESPN picks are `source='user'`. Fixed in #314 (`blind_grading._league_inputs` reads source `any` when `picks.assign_tradeable` is on and the league has assigned rows).
+- Found: the weekly deck replenishment is reaped by gunicorn's 120 s timeout every day (~1 pair/day). Spun off as its own task.
+
 ## 2026-10-07 — Calibration tab + value-core engine shipped (PR #312); TestFlight build blocked on signing
 
 **What:** squash `295cd951` (PR #312). Value-core trade engine ([D-196](DECISIONS.md)) ships with `trade.value_core`

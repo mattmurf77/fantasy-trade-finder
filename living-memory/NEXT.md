@@ -51,12 +51,15 @@
 
 ## 2026-10-07 — Calibration: renew iOS signing, ship 1.18.0, collect grades, read Gate 2
 
-Shipped server-side in PR #312 ([D-196](DECISIONS.md), [D-197](DECISIONS.md)); 7 decks pre-generated.
+Shipped server-side in PR #312 ([D-196](DECISIONS.md), [D-197](DECISIONS.md)). 1.18.0 (159/160) is in TestFlight. 11 sessions pre-generated, incl. targeted ones (#313).
 
-1. **Renew the iOS distribution certificate and rebuild 1.18.0** (operator: Apple sign-in via `eas credentials`). *Why now:* nobody can see the Calibration tab until a build reaches TestFlight.
-2. **Run the TestFlight checklist** (`docs/plans/blind-grading/code-walk-mobile.md` §9). *Why now:* the only runtime evidence mobile gets.
-3. **Collect grades, then read Gate 2** (`GET /api/admin/grading/report`): does the value core grade ≥ today's engine? *Why now:* it decides whether `trade.value_core` turns on.
-4. **Re-freeze the bench leagues** (picks fix) and re-run the value-core bench. *Why now:* the 2026-10-01 real-league numbers excluded picks.
+1. ~~Renew the iOS certificate and rebuild 1.18.0~~ **DONE 2026-10-07**: builds 159/160 in TestFlight.
+2. **Merge #314, deploy, then target the ESPN league** (`{"user_id":"313560442465169408","league_id":"11896"}`). *Why now:* the operator's ESPN league can't build a Calibration deck until it lands.
+3. **Get graders onto 1.18.0.** lofman was last seen on 1.16.11 and MangoPatti on 1.17.3. Bcork has never signed in. *Why now:* their decks are built, but the tab only exists on 1.18.0.
+4. **Run the TestFlight checklist** (`docs/plans/blind-grading/code-walk-mobile.md` §9). *Why now:* the only runtime evidence mobile gets.
+5. **Collect grades, then read Gate 2** (`GET /api/admin/grading/report`): does the value core grade ≥ today's engine? *Why now:* it decides whether `trade.value_core` turns on.
+6. **Fix the weekly replenishment timeout** (spun-off task): gunicorn reaps the daily tick mid-pass, so it gets through about 1 pair/day. *Why now:* users late in the sort order never get a weekly deck.
+7. **Re-freeze the bench leagues** (picks fix) and re-run the value-core bench. `read_league_inputs` must also read ESPN `source='user'` picks (#314 fixed only the grading path). *Why now:* the 2026-10-01 real-league numbers excluded picks.
 
 ## 2026-09-08 — Feedback batch #422–#428 SHIPPED: run the checklist on 1.17.3, then the follow-up candidates
 
