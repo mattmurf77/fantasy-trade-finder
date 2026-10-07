@@ -1,3 +1,19 @@
+## 2026-10-07 — PR #312 CI green, prod deploy verified, decks generated; TestFlight build failed (signing)
+
+- CI on the final head (`fd616578`, after merging main's SQLAlchemy pin): backend-tests, mobile-typecheck,
+  web-structure, maestro-testid-lint all green. Two earlier CI reds were fixed: a machine-dependent e2e wall-clock
+  bound (now per-deck, 8 s budget) and four `test_decline_reasons` #419 tests that failed on `main` too after
+  2026-10-06 (pinned 2026-09-06 impressions vs `_DECK_OUTCOME_MAX_AGE_DAYS = 30` on the real clock; the harness now
+  lifts the cutoff).
+- Prod after `dep-db38m460tbcc7380tufg` (live 2026-10-07): flags draft.tab=false, grading.blind=true,
+  trade.value_core=false; `/api/admin/grading/report` 200 with the cron secret; `/api/grading/sessions/current`
+  without a session → 404 (gate).
+- Pre-generation: 8 candidates, 7 sessions open (20 current + 20 value-core each; one 39 with 1 shared), 1 skipped
+  `needs_fresh_deck`, 0 failed. Value-core pools 567–938 fair trades per seat.
+- EAS iOS production build 1.18.0 (158) `8457b850-…` ERRORED: XCODE_BUILD_ERROR, distribution certificate
+  (serial 429A52778FF3BA4F2D56ADC241D54BCC) "not valid for code signing … revoked or expired". No submission.
+- Mobile runtime evidence still owed: the TestFlight checklist in `docs/plans/blind-grading/code-walk-mobile.md` §9.
+
 ## 2026-10-05 — Calibration (in-app blind grading) integrated; open to every app user
 
 Built by four Fable 5.1 package agents (P1 service/schema, P2 routes/flags, P3 mobile, P4 docs) from

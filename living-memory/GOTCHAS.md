@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-074 | git reports `… is far too short to be a packfile`, `fatal: stash failed`, or fetches crawl in a clone under `~/Documents` | Tooling / git / iCloud |
 | G-073 | A Render deploy fails at boot with `ModuleNotFoundError: No module named 'psycopg'` although nothing about the database changed | Backend / deploy / dependencies |
 | G-072 | An uncapped owner-only deck (~1,400 cards × ~21 KB evidence) renders as ONE ~28 MB multi-row INSERT and OOM-kills the 256 MB prod Postgres; every Find a Trade then reads "Search failed" | Backend / deck impressions / Postgres |
 | G-071 | Final policy checks can be bypassed by provisional worker snapshots | Trade engine / progressive publication |
@@ -90,6 +91,19 @@
 Full entries below — grep the ID. Read the entry before acting; this index is a lookup aid, not the content.
 
 ---
+
+## 2026-10-07
+
+### G-074 — A clone inside the iCloud-synced Documents folder corrupts git's pack files
+
+**Symptom:** in `~/Documents/Documents - Teresa’s MacBook Air/…/Fantasy Trade Finder`, `git fetch` crawls, `git merge`
+dies with `fatal: stash failed`, and later every fetch errors with `… .pack is far too short to be a packfile` /
+`fatal: … in the commit graph file but not in the object database`.
+**Cause:** iCloud Drive's "Optimize Mac Storage" evicts or partially syncs `.git/objects/pack/*` files; git sees
+truncated packs.
+**Fix:** keep working clones OUTSIDE iCloud-synced folders. To recover, make a fresh clone elsewhere (or
+`git fetch --refetch` in a clone iCloud no longer touches); don't delete packs by hand. For a one-off merge in the
+damaged clone, `git -c merge.autoStash=false merge …` got past the stash failure.
 
 ## 2026-10-05
 

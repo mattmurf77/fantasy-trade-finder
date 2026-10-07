@@ -11,6 +11,20 @@
 
 ---
 
+## 2026-10-07 — Calibration tab + value-core engine shipped (PR #312); TestFlight build blocked on signing
+
+**What:** squash `295cd951` (PR #312). Value-core trade engine ([D-196](DECISIONS.md)) ships with `trade.value_core`
+**off** (real decks unchanged). Calibration tab ([D-197](DECISIONS.md)): in-app blind grading of today's engine vs the
+value core, in the Draft tab's slot, **open to every app user** (`grading.blind` true); `draft.tab` off (Rookie Draft
+room stays under League). Render auto-deploy is OFF for this service, so the deploy was triggered via the API:
+`dep-db38m460tbcc7380tufg` LIVE on `295cd951` (prod `/api/feature-flags`: draft.tab false, grading.blind true,
+trade.value_core false; `/api/admin/grading/report` 200). Pre-generation (`POST /api/admin/grading/pregenerate`):
+8 candidates → 7 decks built (40 cards each, one 39 with a shared trade), 1 skipped `needs_fresh_deck`, 0 failed.
+**Not shipped:** mobile 1.18.0 (EAS build 158) ERRORED — the iOS distribution certificate is revoked or expired; the
+Calibration tab reaches phones only after a new build. Also fixed on the way: a decline-reason test time bomb
+(30-day real-clock cutoff vs pinned 2026-09-06 dates) that had started failing on `main` itself.
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-10-07.
+
 ## 2026-10-05b — SQLAlchemy capped below 2.1; both deploys LIVE (G-073)
 
 **What:** `sqlalchemy>=2.0.0,<2.1` in `requirements.txt` (PR #311, `e30a8f47`). Render deploy `dep-db234m8m7kps73da6ftg` of `e30a8f47` went live 19:28 local; production `GET /api/feature-flags` now serves `feedback.decline_reasons: false`.
