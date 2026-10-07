@@ -206,6 +206,30 @@ def test_pick_label_and_null_fields(engine):
     assert TRADED_PICK in cat.holdings["u2"] and PLATFORM_PICK in cat.holdings["u1"]
 
 
+def test_assigned_picks_join_the_catalog_when_the_engine_prices_them(engine, monkeypatch):
+    """ESPN has no readable pick ownership, so its picks are source='user' rows, which the
+    engine reads (source 'any') while picks.assign_tradeable is on. Grading reads the same
+    rows, or every current-arm card holding one is dropped as unknown (prod 2026-10-07)."""
+    from backend import feature_flags
+    on = {"picks.assign_tradeable": False}
+    monkeypatch.setattr(feature_flags, "is_enabled", lambda key: on.get(key, False))
+    db._invalidate_contested("L1")
+    inputs, seat, cat = bg._league_inputs("L1", "u1", NOW)
+    assert seat == "u1" and USER_PICK not in cat.assets       # switch off: platform rows only
+    on["picks.assign_tradeable"] = True
+    inputs, _, cat = bg._league_inputs("L1", "u1", NOW)
+    assert cat.assets[USER_PICK] == {"name": "2027 3rd", "position": "PICK", "nfl_team": None,
+                                     "age": None, "value": 300}
+    assert USER_PICK in cat.holdings["u1"]
+    assert {TRADED_PICK, PLATFORM_PICK} <= set(cat.assets)    # platform rows still there
+    assert [p["pick_id"] for p in inputs["picks"]] == sorted(p["pick_id"] for p in inputs["picks"])
+    with engine.begin() as conn:                              # no assigned rows ⇒ bench read as-is
+        conn.execute(db.draft_picks_table.delete().where(db.draft_picks_table.c.source == "user"))
+    db._invalidate_contested("L1")
+    inputs, _, _ = bg._league_inputs("L1", "u1", NOW)
+    assert inputs == inputs_and_catalog()[0]
+
+
 def test_catalog_values_come_from_history_and_pool(engine):
     _, cat = inputs_and_catalog()
     assert cat.assets["p1"]["value"] == round(elo_to_value(_elo("p1")))

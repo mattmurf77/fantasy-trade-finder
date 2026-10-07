@@ -361,7 +361,13 @@ def _league_inputs(league_id: str, league_user_id: str, now: datetime
                    ) -> tuple[dict, str, Catalog]:
     """read_league_inputs on the app engine (DB only, no network) + the seat check.
     ValueError (no leagues / league_members rows) or a seat that is not a member ⇒
-    GradingError("league_not_synced", 409)."""
+    GradingError("league_not_synced", 409).
+
+    Picks: read_league_inputs reads platform rows only. A league with user-assigned
+    picks (ESPN has no readable pick ownership) gets the rows the engine reads while
+    picks.assign_tradeable is on — source 'any', contested/orphaned slots dropped
+    (server._pick_read_source) — or every card holding one is dropped as unknown."""
+    from backend import feature_flags
     from backend.eval import value_core_bench as bench
 
     try:
@@ -369,6 +375,13 @@ def _league_inputs(league_id: str, league_user_id: str, now: datetime
             inputs = bench.read_league_inputs(conn, league_id, now.date())
     except ValueError:
         raise GradingError("league_not_synced", 409) from None
+    if feature_flags.is_enabled("picks.assign_tradeable") and db.has_assigned_picks(league_id):
+        keys = ("pick_id", "season", "round", "owner_user_id", "pick_value", "pool_value",
+                "is_traded", "original_username")
+        inputs["picks"] = sorted(
+            ({k: p.get(k) for k in keys}
+             for p in db.load_draft_picks(league_id, source=db.PICK_SOURCE_ANY)),
+            key=lambda p: str(p["pick_id"]))
     seat = str(league_user_id)
     if seat not in {str(m["user_id"]) for m in inputs["members"]}:
         raise GradingError("league_not_synced", 409)

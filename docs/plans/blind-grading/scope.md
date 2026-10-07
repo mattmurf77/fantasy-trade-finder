@@ -207,3 +207,14 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
    | ADR / DECISIONS | n/a: no non-obvious choice. Refreshing via the replenish path, rather than relaxing `MAX_DECK_AGE_DAYS`, keeps both arms on today's values |
 
 5. **Ship gate:** CI green on the pushed sha, plus a TEST_LEDGER entry. Express lane: **no**. This changes an API contract (admin), so full gates apply.
+
+### Addendum 2026-10-07 (b) — ESPN picks in the catalog (bug fix)
+
+The first targeted run, for the operator's ESPN league 11896, was refused with `needs_fresh_deck` (`too_few`) even though the deck was minutes old. The cause: `read_league_inputs` reads only platform pick rows (`source` NULL/`platform`). ESPN has no readable pick ownership, so an ESPN league's picks are all `source='user'` (224 rows in 11896). Most of its current-arm cards carry a pick, so they were all dropped as unknown assets. The value-core arm saw no picks either.
+
+**Fix:** `blind_grading._league_inputs` swaps in `load_draft_picks(source='any')` (contested/orphaned slots dropped), sorted by `pick_id`, when `picks.assign_tradeable` is on **and** the league has assigned rows (`has_assigned_picks`). These are the same rows the engine reads (`server._pick_read_source`). A league with no assigned rows (every Sleeper league) gets the bench read unchanged.
+
+- **Analytics / schema / flags:** none.
+- **Evidence:** `test_blind_grading_service.py::test_assigned_picks_join_the_catalog_when_the_engine_prices_them` checks: switch off ⇒ platform only; on ⇒ the user row priced, labelled and held; no assigned rows ⇒ identical to the bench read. A read-only replay on prod job `e89f466d` (11896): 20/20 candidates usable, versus too_few before.
+- **Docs:** this addendum. api-reference n/a: no contract change, the current-arm description still holds.
+- **Not fixed here:** the offline bench (`value_core_bench.read_league_inputs` on a prod freeze) still reads platform picks only, so ESPN leagues bench without picks. This is a bench-fidelity item, logged in NEXT.
