@@ -2,6 +2,6 @@ anthropic>=0.40.0
 flask>=3.0.0
 gunicorn>=22.0.0
 psycopg2-binary>=2.9.0
-sqlalchemy>=2.0.0
+sqlalchemy>=2.0.0,<2.1   # 2.1 makes psycopg (v3) the default postgresql:// driver; we ship psycopg2 (G-073)
 Pillow>=10.0
 cryptography>=42.0.0   # Fernet encryption for Sleeper write tokens (trade.send_in_sleeper)
