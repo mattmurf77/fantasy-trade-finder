@@ -1,3 +1,12 @@
+## 2026-10-07b — Targeted pre-generation (#313) and ESPN picks fix (#314)
+
+- #313: `test_blind_grading_routes.py` 28 passed, incl. the new `test_admin_pregenerate_targets_refresh_then_build_each_pair`. Full local suite: 7598 passed, 1 skipped, with `test_rookie_scope.py` excluded. Its 6 failures reproduce on untouched `origin/main` locally (`reason: stale_player_cache` from the restored local data), so they are machine-specific. CI on the PR: 4/4 green.
+- #313 prod proof: replenish decks (`deck_replenish_log` 2026-10-04 and -07) write qualifying `deck_impressions` (`model_arm = owner_v2_bilateral`). Targeted run, 4 pairs: all `open`, 40 cards each (current 20 / value core 20, 0 dropped stale or unknown; value-core pools 513–938).
+- ESPN 11896: refused `needs_fresh_deck`. Read-only replay of job `e89f466d` with all draft_picks rows gives 20/20 usable, versus too_few on platform rows only.
+- #314: the grading service, routes, db and e2e suites, 90 passed, incl. the new `test_assigned_picks_join_the_catalog_when_the_engine_prices_them`.
+- Prod logs: `WORKER TIMEOUT` in `_run_weekly_replenishment` at ~13:33 UTC every day, 2026-10-02 through 10-07.
+- TestFlight: operator confirms the Calibration tab is visible on 1.18.0 (159). The §9 checklist is still owed.
+
 ## 2026-10-07 — PR #312 CI green, prod deploy verified, decks generated; TestFlight build failed (signing)
 
 - CI on the final head (`fd616578`, after merging main's SQLAlchemy pin): backend-tests, mobile-typecheck,
