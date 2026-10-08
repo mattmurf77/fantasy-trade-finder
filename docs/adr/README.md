@@ -59,3 +59,4 @@ Don't bother for routine code changes, bug fixes, or anything self-evident from 
 - [ADR-017 Drain Account Work Before Deleting Its Data](adr-017-account-deletion-work-leases.md)
 - [ADR-018 External Weekly Forecasts and an Independent Win Now Season Model](adr-018-win-now-external-forecasts.md)
 - [ADR-023 Attested Prepared Inventories and Bounded Publication](adr-023-attested-prepared-inventories.md)
+- [ADR-024 Value-Core Trade Engine](adr-024-value-core-engine.md)

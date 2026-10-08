@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-195 — Home is the launch tab for returning users; first-run users still land on Trades
+## D-198 — Home is the launch tab for returning users; first-run users still land on Trades
 
 2026-10-02. Operator ask: a simple Home tab, first in the bottom bar, asking "What
 would you like to do today?" with four plain-text options (Rank, Find a Trade, See
@@ -9,7 +9,50 @@ ruling: Trades is no longer the front door once a user has swiped. Operator chos
 keep first-run users (`onboarding.trades_first` live, no first swipe) landing on
 Trades so the analyst guide is untouched. Flag `nav.home_tab` (default true, read
 once at mount) is the rollback; off ⇒ `nav.trades_landing` behavior exactly. No new
-analytics events. Mobile only. [Plan](../docs/plans/home-tab/plan.md).
+analytics events. Mobile only. Landed 2026-10-08 after D-197, so the bar is Home · Rank ·
+Acquire · Calibration · Matches · League. [Plan](../docs/plans/home-tab/plan.md).
+## D-197 — Calibration: in-app blind grading in the Draft tab's slot, open to every app user
+
+2026-10-02/05. Operator decisions. Value-core Gate 2 runs inside the app as the **Calibration** tab:
+graders score ~40 shuffled cards (up to 20 from their last served current-engine deck, up to 20 built on the side by
+the value core) 1–5 with optional tags; one neutral card format, opaque ids, duplicates graded once and credited to
+both engines, engine revealed only after the last card. The **Draft tab is switched off** (`draft.tab` false; code
+kept, Rookie Draft room stays under League). Audience was testers-only on 10-02 and **opened to every app user on
+10-05** (`grading.blind` true; `_calibration_allowed` returns True; <10 users, TestFlight-only). Sessions build on a
+background thread (prod runs one synchronous gunicorn worker); a deck freshness window of 14 days (7 left only 4
+users eligible); a cron-only pre-generation route builds a deck for every eligible user. The new engine's own flag
+`trade.value_core` stays off, so real Trades decks are unchanged. [Plan folder](../docs/plans/blind-grading/).
+
+## D-196 — Trade suggestions are rebuilt from scratch: a value-only core finds fair trades, three weights rank them
+
+2026-09-30. Operator decision after rating the deck a 5 of 10 and "probably worse than value-only
+competitors". Stop patching v2/v3/owner/bilateral (~315 knobs, ~15 stacked gates; composite score
+uncorrelated with likes, D-180). New `backend/value_core/`: the core enumerates 1–3 × 1–3 packages and keeps
+only those inside a consensus fairness band, asymmetric since 2026-10-01 (operator): the viewer may overpay by up
+to 20% but gain at most 10%, because a symmetric ±20% band insulted the partner on 5.6% of real-bench cards (stud
+premium on consolidation; hard rules: legal rosters, untouchables above market, no filler except one throw-in its
+recipient's board values at ≥ 2× consensus with real evidence on both sides (operator, 2026-10-01), no reducible
+pieces). The ranking layer scores each fair trade on value,
+outlook (both teams' windows) and the viewer's rankings; priority is their weighted mean; the deck keeps one
+card per trade idea, rounds acquisitions, and caps partners (and any asset at 3) in the first 30. Behind
+`trade.value_core` (default off) with a testers-only lever and a logged legacy fallback on build errors (operator,
+2026-10-01; a deck never mixes engines); intents and likes-you stay on the legacy engine; the legacy engine stays one
+switch away until the new one beats it on the bench (blind grades + guardrails + real-trade recall). Flag-on
+decks supersede the D-193 ordering. Supersedes the 2026-09-29 in-place plan's fix order
+(`docs/plans/trade-suggestion-quality/plan.md`); its bench leagues and prod-read authorization carry over.
+[Plan folder](../docs/plans/value-core-engine/), [ADR-024](../docs/adr/adr-024-value-core-engine.md).
+## D-195 — Decline reasons parked off; a reasonless decline writes the full pass Elo signal
+
+2026-10-02. Operator: the second tap after every decline was tedious and declines
+are most dispositions; disable, do not delete. `feedback.decline_reasons` flipped
+to false (config + release fixture) — the kill switch the feature shipped with, so
+no code moved and the route, table, panel, events and tests all remain. Consequence
+chosen deliberately: with no reason to test, every decline goes through
+`/api/trades/swipe` and writes `trade_k_pass` (fit-congruence weighted), whereas
+with reasons on only `value_giving` declines did. Alternative rejected: suppressing
+Elo on all reasonless declines, which would discard the signal the operator asked
+to keep. `pass_reason_elo_suppression` stays 1.0 (inert while off). Reintroduce by
+flipping the flag back. [Scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md).
 
 ## D-194 — Full prepared-inventory semantics are validated at seal, each publishing batch is revalidated
 

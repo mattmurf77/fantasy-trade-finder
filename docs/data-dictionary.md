@@ -196,6 +196,10 @@ counterparty board disclosure or client analytics event is added.
 - [`model_config_changes`](#model_config_changes)
 - [`wrapped_events` — **FROZEN (analytics P0 cutover)**](#wrapped_events-frozen-analytics-p0-cutover)
 - [`user_events`](#user_events)
+- [Blind grading tables](#blind-grading-tables) — Calibration, value-core Gate 2
+  - [`grading_sessions`](#grading_sessions)
+  - [`grading_cards`](#grading_cards)
+  - [`tab_selected` values (`user_events`)](#tab_selected-values-user_events)
 - [Experiment engine tables (analytics platform P3)](#experiment-engine-tables-analytics-platform-p3)
   - [`experiment_layers`](#experiment_layers)
   - [`experiments`](#experiments)
@@ -562,6 +566,52 @@ exposing an unmeasured owner draft. Run-ledger writes remain best-effort and are
 not proof of exposure. The separate client `deck.signal_v2` flag must be enabled
 for the trial readout's viewed denominator.
 
+### Value-core rows (flag `trade.value_core`)
+
+A job served by the value core writes one row per served card through the same `_log_deck_signal_impressions` → `save_deck_impressions` path. It writes them whenever the value core serves, independent of `deck.signal_v2` (client view events still need that flag). No new table or column. Every row of such a job carries every key below, because `save_deck_impressions` compiles its INSERT from the first row's keys.
+
+| Column | Value on a value-core row |
+|---|---|
+| `model_arm` | `value_core`. **Not a bake-off arm**: the value core replaces the legacy stack for its job, so no other generator's cards share the deck |
+| `policy_variant` | `value_core` |
+| `policy_version` | `value-core-1` (the engine version) |
+| `arm_rank` | the served position, equal to `card_index` |
+| `base_score` | the card's priority (its `composite_score`) |
+| `final_score` | the effective priority after repeat penalties, as used by deck assembly |
+| `propensity` | `1.0`: the order is deterministic |
+| `fairness_threshold` | the ratio floor actually applied, `1 / (1 + band)` for the effective band |
+| `valuation_json` | the value-core evidence, schema v1 below |
+| `trade_concept_id` | the canonical, perspective-independent package id (same function as policy rows) |
+| `source_like_impression_id` | `null`: the value core never injects likes-you cards |
+| `assets_json` | `{"give": [asset ids], "receive": [asset ids]}` |
+
+`valuation_json` for `generator = "value_core"` is a **generator-specific schema**, like the owner-v1 one: dispatch on `generator`, never on `schema_version` alone. Written with `json.dumps(..., sort_keys=True)`:
+
+```
+{schema_version: 1, generator: "value_core", generator_version: "value-core-1",
+ deck_position,            # 0-based position in the assembled deck, before already-passed trades are removed
+ weights:  {value, outlook, rank, repeat_penalty, player_cap},
+ scores:   {value, outlook, rank, priority},                  # each in [0, 1]
+ effective,                # priority minus repeat penalties
+ market:   {give, receive, adjusted_ratio, premium, premium_side},   # raw market sums; premium_side "give"|"receive"|null
+ core:     {band, gain_band, ratio_floor, ratio_ceiling, stud_premium, untouchable_min_ratio,
+            uses_untouchable, drops_needed: [viewer, partner], budget_exhausted,
+            throwin_min_ratio,
+            throwin: {id, recipient, market, recipient_value} | null},   # recipient "viewer"|"partner"
+ windows:  {viewer:  {window, score, source, pf_index, standings_weight},
+            partner: {…same…}},   # window contender|rebuilder|middle; source declared|inferred|default
+ detail:   {value:   {delta_ln, s_delta, best_in_id, best_in_market, best_in_starter, s_piece},
+            outlook: {scale, viewer: {window, lineup_gain, future_gain, score}, partner: {…same…}},
+            rank:    {has_board, gap_rel, top_asset, top_side, rank_delta}},
+ assets:   [{id, side, market, personal, n}]}                 # personal/n null without a board entry
+```
+
+- `core.band` (the overpay side) and `core.gain_band` (the gain side) are the **effective** bands, after the client's fairness preference tightened them (if it did). The band is asymmetric: `ratio_floor` = `1 / (1 + band)` and `ratio_ceiling` = `1 + gain_band`.
+- `core.throwin` is null unless the trade carries a throw-in: the one piece below the junk floors that its recipient values at ≥ `throwin_min_ratio` × consensus. `recipient` is `"viewer"` (valued on the viewer's board) or `"partner"` (valued on the partner's published board); `market` is its consensus value and `recipient_value` that board's value, both rounded to 0.1.
+- `drops_needed` counts the sub-floor bench players each team would have to drop to stay within roster capacity.
+- `pf_index` is null when standings were unavailable (non-Sleeper league, or the standings read failed). `source: "default"` marks a team whose window inference raised.
+- `detail` floats are rounded to 4 decimals. The schema version bumps on any key change.
+
 ### Legacy F1 columns
 
 TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-discovery/prds/F1-signal-foundation.md`). One row per card in the **final served deck order**, written once per completed generation job by `server._log_deck_signal_impressions` (→ `save_deck_impressions`), **only when the flag is on**. Additive: `trade_impressions` keeps writing unchanged. Demo league excluded. The row's `impression_id` is returned per card in `/api/trades/generate` + `/status` snapshots and echoed back by flag-on clients so `deck_outcomes` rows join to it.
@@ -646,7 +696,7 @@ Scope block: `docs/plans/personal-market-policy/scope.md`. All four are NULL whi
 |---|---|---|
 | `valuation_json` | text, nullable | The frozen **serve-time** valuation snapshot (`trade_policy.build_valuation_snapshot`, `schema_version: 1`). |
 | `trade_concept_id` | str, nullable | Canonical, **perspective-independent** id for the package. |
-| `policy_variant` | str, nullable | `legacy` / `personal_market_v1` — which eligibility/ranking/deck POLICY governed the job. |
+| `policy_variant` | str, nullable | `legacy` / `personal_market_v1` / `value_core` — which eligibility/ranking/deck POLICY governed the job. |
 | `source_like_impression_id` | str, nullable | The counterparty's impression, set **only** on a card injected because they had already liked the mirror. |
 
 **`valuation_json` is an audit/replay record, not a replacement for the scalar columns beside it.** `fairness_score`, `base_score` and friends stay exactly where they are. What this adds is the half they cannot answer: the raw *and* effective values each manager's **own** board put on each side, the confidence behind them, the floors that applied, and a per-asset breakdown. `member_rankings` is replace-in-place, so without this the values behind a served card become unrecoverable the moment either manager re-ranks. Written for **served, shadow and ghost** rows alike.
@@ -1354,7 +1404,7 @@ The envelope columns (`event_id` … `experiments`) are nullable and only popula
 **event_type taxonomy** (registry: `backend/analytics_taxonomy.py` — client and server namespaces are disjoint, asserted at import):
 - Session: `signup`, `login`, `logout`, `app_open`
 - Ranking: `trio_swipe`, `tier_save` (streak event since the P0 cutover; `props.via` ∈ `tiers`/`quickset`), `ranking_complete_first_time`, `ranking_method_changed`, `ranking_reorder` (streak event since #152), `anchor_answered` (streak event since #152), `quickset_completed` (`position, players_placed, duration_ms, skipped` — fires per `via:'quickset'`-tagged tier commit, NOT per completed position; dark until the 2026-08-24 mobile fix first sent the tag, and current clients pass neither `duration_ms` nor `skipped` → null; see the [2026-08-24 addendum](business/analytics/2026-08-24-quickset-via-gap.md)), `quickrank_completed` (`position, players_ranked, duration_ms, skipped`), `swipe` (cutover twin of the legacy wrapped writer: `count, scoring_format`). Streak-qualifying set = `_RANK_STREAK_EVENTS` in `backend/database.py`: `trio_swipe`, `tier_save`, `ranking_complete_first_time`, `anchor_answered`, `ranking_reorder` — also the event set the "Ranks" leaderboard counts.
-- Trade: `match_viewed`, `match_swiped`, `trade_proposed`, `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`, `trade_match` (cutover twin: `match_id, partner_id, give, receive`), `trades_generated` (`count, gen_ms, engine_version, lanes`), `calc_trade_evaluated` (`verdict, asset_count, mode` — WAT north-star input; fires for pre-auth `device:` identities too), **`sleeper_send_succeeded`** (P0-7, 2026-08-11 — `give_n, receive_n, pick_n, from_deck, transaction_id`; `source:"api"`, `league_id` set; fired by `_record_send_success` on a successful `POST /api/trades/propose`. **Server-fired only** — it is the north-star SEND leg (`WAT_LIVE`, funnel stage 8, `FEATURE_VERTICALS["send_in_sleeper"]`) and a client-forgeable success would sit next to `trade_ratified`. The counterparty's user id deliberately never rides in props. Its two siblings `sleeper_send_attempted` / `sleeper_send_failed` are **client**-fired and, like every client event, are documented via `analytics_taxonomy.py` + the [P0-7 addendum](business/analytics/2026-08-11-p0-7-addendum.md) rather than in this list — the same treatment `guide_*` and `draft_room_*` got)
+- Trade: `match_viewed`, `match_swiped`, `trade_proposed`, `counter_sent`, `trade_accepted`, `trade_declined`, `trade_ratified`, `trade_match` (cutover twin: `match_id, partner_id, give, receive`), `trades_generated` (`count, gen_ms, engine_version, lanes`; `engine_version` ∈ `v1` / `v2` / `v3` / `value_core`, and a value-core job sends `lanes: {}`), `calc_trade_evaluated` (`verdict, asset_count, mode` — WAT north-star input; fires for pre-auth `device:` identities too), **`sleeper_send_succeeded`** (P0-7, 2026-08-11 — `give_n, receive_n, pick_n, from_deck, transaction_id`; `source:"api"`, `league_id` set; fired by `_record_send_success` on a successful `POST /api/trades/propose`. **Server-fired only** — it is the north-star SEND leg (`WAT_LIVE`, funnel stage 8, `FEATURE_VERTICALS["send_in_sleeper"]`) and a client-forgeable success would sit next to `trade_ratified`. The counterparty's user id deliberately never rides in props. Its two siblings `sleeper_send_attempted` / `sleeper_send_failed` are **client**-fired and, like every client event, are documented via `analytics_taxonomy.py` + the [P0-7 addendum](business/analytics/2026-08-11-p0-7-addendum.md) rather than in this list — the same treatment `guide_*` and `draft_room_*` got)
 - Engagement: `push_sent`, `push_opened`, `notif_pref_changed`, `league_synced`, `wrapped_viewed`, `feedback_submitted`, `asset_pref_added`, `asset_pref_removed`
 - API observability (flag `obs.api_events`, `backend/api_observability.py`): `api_call` (one outbound external HTTP call) and `api_request` (one inbound `/api/*` request). Written under the constant `user_id = 'system:api'` (never a real user; the session user rides in `props.user` on inbound rows), `platform = 'server'`, `screen` = `{service}.{endpoint}` / route pattern. Prop specs: `OBS_EVENT_PROPS` in `backend/analytics_taxonomy.py`. Successes are 1-in-N sampled (`props.sample_n`); errors always full. Aged out after `FTF_OBS_RETENTION_DAYS` (default 30) — the only `user_events` rows with a retention purge.
 - Client-fired (via `POST /api/events` only, allowlisted in `ALLOWED_CLIENT_EVENTS` in `backend/analytics_taxonomy.py`): see [cross-client-invariants.md](cross-client-invariants.md) — the allowlist is a cross-client contract.
@@ -1817,6 +1867,58 @@ Run ledger — the observability surface for a job with no UI. **TWO rows per in
 | `batch_cap` / `cap_hit` | int | The cap in force and whether it bound |
 | `remaining_resolvable` | int | Backlog that can reach a terminal row today (retry-pending excluded) |
 | `grader_version` | str | |
+
+---
+
+## Blind grading tables
+
+**Calibration** — in-app blind grading, value-core Gate 2 ([plans/blind-grading/](plans/blind-grading/), [lld.md §3](plans/blind-grading/lld.md#3-schema)). Written **only** by `backend/blind_grading.py` through the `database.py` grading helpers (`insert_grading_session`, `answer_grading_card`); read by that module's `results` / `report` and by nothing else. Sessions are created one at a time by `POST /api/grading/sessions` or in bulk by `POST /api/admin/grading/pregenerate`, whose candidate query (`list_grading_candidates`) reads `deck_impressions`, `league_members` and `leagues` — not these tables — for every user with a qualifying current-engine deck served within `blind_grading.MAX_DECK_AGE_DAYS` (14 days) in a league they belong to. No engine module imports them, and nothing in generation, ordering, impressions or swipes reads a `grading_*` table — grading leaves `deck_impressions`, `trade_impressions`, `trade_decisions`, `swipe_decisions` and `trade_service._trade_cards` untouched. Both tables are new, so `metadata.create_all` in `init_db()` creates them on SQLite and Postgres; there is no `migration_cols` entry because no existing table gains a column. No FKs, per house style — joins carry an explicit onclause.
+
+**`user_id` is the ACCOUNT id (`sess["user_id"]`) on both tables**, denormalized onto cards so account deletion and data export cover them with no join: both names sit in `accounts._ADDITIONAL_PRIVATE_TABLES`, so `accounts.delete_user_data` deletes a user's rows from both and the export includes them (`test_account_deletion_coverage.py` is parametrised over them). The export therefore shows `arms_json` to a grader who downloads their own data mid-session — an accepted residual; brief graders.
+
+**Hidden columns.** `grading_sessions.counts_json` / `source_json` and `grading_cards.arms_json` record which engine produced what. **Nothing serializes them before a session completes:** `load_next_grading_card` returns `{card_id, position, trade_json}` only; `session_view` exposes just `progress {answered, total}`; the only readers of `arms_json` are `blind_grading.results()` (completed sessions, per-arm aggregates, never per card) and `blind_grading.report()` (`X-Cron-Secret`). Adding a reader is a blinding change and goes through the plan's change control ([specs.md §3.3](plans/blind-grading/specs.md#33-change-control)).
+
+### `grading_sessions`
+
+One row per grading session: one grader, one league, up to 40 cards. A session with zero cards is never created.
+
+| Column | Type | Notes |
+|---|---|---|
+| `session_id` | str PK | Random 18-digit decimal string (`blind_grading.new_id`). Decimal on purpose: the mobile `api_request_failed` route normaliser folds digit runs to `:id`, so a failed grading call never puts a random id into analytics |
+| `user_id` | str, not null | Account id |
+| `league_id` | str, not null | |
+| `status` | str, not null | `building` \| `open` \| `completed` \| `failed`. `building` while the background thread runs the value core (`build_session`); `open` once the cards are written; `completed` when every card is answered or skipped; `failed` when the build refused — `error_json` says why. A `building` or `open` row is resumed by the next `POST /api/grading/sessions` (a `building` one also has its build re-kicked, so a restart or deploy never orphans it; `finish_grading_session_build` guards on status, so a duplicate build writes nothing). A `failed` row is never resumed: the next POST starts a new session |
+| `seed` | str, not null | Decimal of a 63-bit `secrets.randbits` int, as a String because Postgres `INTEGER` is 32-bit. Drives `random.Random(seed).shuffle` once, at build; never returned |
+| `created_at` | str, not null | ISO UTC |
+| `completed_at` | str | ISO UTC; NULL until completed |
+| `counts_json` | text (JSON), not null | **Hidden.** `{total, current, value_core, shared, current_candidates, current_dropped_stale, current_dropped_unknown, value_core_pool}` — filled by `build_session` (a placeholder before that) |
+| `source_json` | text (JSON), not null | **Hidden provenance.** `{version: "blind-grading-1", seat, scoring_format, current: {deck_job_id, served_at}, value_core: {engine_version, core, rank, standings_weight, completed_weeks, lineup_slots, max_players, pool, elapsed_ms, budget_exhausted}}` once built. While `building`, holds the current-arm trades `start_session` selected, for the background half to merge |
+| `error_json` | text (JSON) | `failed` only: `{"code": "value_core_too_few", "usable": N, "min_cards": 10}` or `{"code": "value_core_failed"}`; NULL otherwise. Surfaces as `SessionView.error` |
+
+Index: `ix_grading_sessions_user_league` (`user_id`, `league_id`, `status`) — the resume lookup.
+
+### `grading_cards`
+
+One row per card in a session, in shuffled order.
+
+| Column | Type | Notes |
+|---|---|---|
+| `card_id` | str PK | Random 18-digit decimal string. Not a trade id, so an answer can never reach `/api/trades/swipe` |
+| `session_id` | str, not null | Soft ref to `grading_sessions` |
+| `user_id` | str, not null | = the session's `user_id` (account id), for deletion / export coverage |
+| `position` | int, not null | 1-based, assigned **after** the shuffle. `UniqueConstraint(session_id, position)` = `uq_grading_card_position` |
+| `arms_json` | text (JSON), not null | **HIDDEN** `{arm: provenance}`, arm ∈ `current` \| `value_core`: `current` → `{impression_id, card_index, model_arm}`; `value_core` → `{deck_position, reasons}`. A trade both engines produced has **both** keys — one card, credited to both arms (a **shared card**) |
+| `trade_json` | text (JSON), not null | The neutral payload, served verbatim as `card.trade`: `{partner_name, give: [...], receive: [...]}`, each asset exactly `{id, name, position, nfl_team, age, value}`, sides sorted by (−value, name, id). The only producer is `blind_grading.neutral_trade`, which is never given an arm; values come from one consensus catalog (players `elo_to_value(consensus_elo)` from `player_value_history`, picks `draft_picks.pool_value`) |
+| `grade` | int | 1..5; NULL = unanswered or skipped |
+| `skipped` | int, not null, server default `0` | `1` ⇒ `grade IS NULL` and `tags_json = '[]'` |
+| `tags_json` | text (JSON), not null, server default `[]` | De-duplicated subset of the seven tags in `blind_grading.TAGS` ([cross-client-invariants § Calibration tags and scale](cross-client-invariants.md#calibration-tags-and-scale)), in `TAGS` order |
+| `graded_at` | str | ISO UTC of the latest answer — a re-grade overwrites |
+
+Index: `ix_grading_cards_session` (`session_id`). Invariants: `grade IS NOT NULL ⇒ skipped = 0`; a session is `completed` ⇔ every card has `grade IS NOT NULL OR skipped = 1`, flipped in the same transaction as the last answer (`answer_grading_card`); an answer against a non-`open` session is rejected (409 `session_completed`), never written.
+
+### `tab_selected` values (`user_events`)
+
+Calibration adds **no** event (scope waiver, plan D9); the tables above are the record and the admin report is the readout. The existing client event `tab_selected {tab, from_tab, refocus, intercepted}` (NON_INTENT) gains the value **`calibration`** in `tab` and `from_tab`, from `trackTab('calibration', …)`; `tab` is a free string, so the taxonomy is unchanged. **`draft` / `from_tab: "draft"` stop arriving while `draft.tab` is false** (off since 2026-10-02): a dashboard reading `tab = 'draft'` reads zero from that date — a real behavior change, not data loss. `screen_viewed` / `screen_left` gain the `screen` value `CalibrationHome`.
 
 ---
 

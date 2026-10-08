@@ -2793,6 +2793,49 @@ receipts_grade_runs_table = Table("receipts_grade_runs", metadata,
     Index("ix_receipts_grade_runs_run", "run_id"),
 )
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Blind grading ("Calibration" in the app) — value-core Gate 2
+# (docs/plans/blind-grading/, flag grading.blind resolved per caller)
+# ═══════════════════════════════════════════════════════════════════════════
+# Written ONLY by backend/blind_grading.py. Soft references, no FKs.
+# arms_json is HIDDEN: nothing serializes it except blind_grading.results()
+# (completed sessions, aggregates only) and the X-Cron-Secret admin report.
+# user_id is the ACCOUNT id (sess["user_id"]) on BOTH tables — denormalized
+# onto cards so account deletion/export cover them via
+# accounts._ADDITIONAL_PRIVATE_TABLES.
+# Lifecycle (specs.md §3.3): start_session inserts the row as 'building'
+# with no cards; build_session (background thread) inserts the cards and
+# flips it to 'open', or to 'failed' with error_json. counts_json is '{}'
+# until the build completes.
+grading_sessions_table = Table("grading_sessions", metadata,
+    Column("session_id",   String,  primary_key=True),  # random 18-digit decimal string
+    Column("user_id",      String,  nullable=False),    # account id
+    Column("league_id",    String,  nullable=False),
+    Column("status",       String,  nullable=False),    # 'building' | 'open' | 'completed' | 'failed'
+    Column("seed",         String,  nullable=False),    # decimal of a 63-bit int (String: PG INTEGER is 32-bit)
+    Column("created_at",   String,  nullable=False),    # ISO UTC
+    Column("completed_at", String),                     # ISO UTC; NULL until completed
+    Column("counts_json",  Text,    nullable=False),    # hidden per-arm counts (lld §6.5); '{}' while building
+    Column("source_json",  Text,    nullable=False),    # hidden provenance (lld §6.5)
+    Column("error_json",   Text),                       # failed only: {"code": ..., **detail}
+    Index("ix_grading_sessions_user_league", "user_id", "league_id", "status"),
+)
+
+grading_cards_table = Table("grading_cards", metadata,
+    Column("card_id",    String,  primary_key=True),    # random 18-digit decimal string
+    Column("session_id", String,  nullable=False),
+    Column("user_id",    String,  nullable=False),      # = the session's user_id
+    Column("position",   Integer, nullable=False),      # 1-based, shuffled order
+    Column("arms_json",  Text,    nullable=False),      # HIDDEN {arm: provenance} (lld §6.5)
+    Column("trade_json", Text,    nullable=False),      # neutral payload, served verbatim (lld §6.4)
+    Column("grade",      Integer),                      # 1..5; NULL = unanswered or skipped
+    Column("skipped",    Integer, nullable=False, server_default="0"),
+    Column("tags_json",  Text,    nullable=False, server_default="[]"),
+    Column("graded_at",  String),                       # ISO UTC of the latest answer
+    UniqueConstraint("session_id", "position", name="uq_grading_card_position"),
+    Index("ix_grading_cards_session", "session_id"),
+)
+
 # Default values seeded on first run.  Only inserted if the key doesn't
 # already exist (INSERT OR IGNORE) so manual overrides survive re-deploys.
 _MODEL_CONFIG_DEFAULTS = [
@@ -3187,6 +3230,20 @@ _MODEL_CONFIG_DEFAULTS = [
     ("policy_confidence_band_med",       0.33, "policy: trade confidence at/above which a card's confidence_band reads 'medium' (below it reads 'low')"),
     ("policy_shadow_log_cap",           40.0,  "policy: max trade_policy_shadow rows written per deck job — bounds a pathological league without hiding the treatment's rejections"),
     ("simple_player_presentment",       0.0,  "presentation: 1 enables bounded simple-player ordering after live policy; 0 preserves the existing order"),
+    ("vc_band",                   0.20, "value core: most the viewer may OVERPAY on the premium-adjusted market ratio (ratio >= 1/(1+band)); vc_gain_band is the other side"),
+    ("vc_gain_band",              0.10, "value core: most the viewer may GAIN on the premium-adjusted market ratio (ratio <= 1+gain_band); vc_band is the overpay side"),
+    ("vc_stud_premium",           0.15, "value core: consolidation premium at an elite headliner; scales with (headliner/elite)^2"),
+    ("vc_untouchable_min_ratio",  1.08, "value core: an untouchable is offered only when the adjusted return is at least this"),
+    ("vc_max_assets_per_side",   14.0,  "value core: top-N eligible assets per team used to build 1-3 asset packages (pins always added)"),
+    ("vc_max_per_partner",      200.0,  "value core: fair trades kept per partner, round-robin over (give, receive) headliner pairs"),
+    ("vc_w_value",                1.0,  "value core ranking: weight of the value score"),
+    ("vc_w_outlook",              1.0,  "value core ranking: weight of the outlook (both windows) score"),
+    ("vc_w_rank",                 1.0,  "value core ranking: weight of the viewer-rankings score"),
+    ("vc_repeat_penalty",         0.15, "value core ranking: priority points subtracted per prior appearance of a card's most-shown asset (partner at half rate)"),
+    ("vc_player_cap",             3.0,  "value core ranking: max cards any one asset may appear in within the first 30"),
+    ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
+    ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
+    ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
 ]
 
 
@@ -15194,3 +15251,240 @@ def load_league_scoring_map(league_ids: list[str]) -> dict[str, str]:
     except Exception as e:
         print(f"[load_league_scoring_map] failed: {e}")
     return out
+
+
+# ── Blind grading helpers (docs/plans/blind-grading/ lld §4) ─────────────────
+# Read and written only by backend/blind_grading.py. Every helper uses `engine`
+# and PROPAGATES exceptions: a swallowed read would masquerade as
+# needs_fresh_deck. Joins carry an explicit onclause (no FKs, house style).
+
+def load_grading_legacy_deck(user_id: str, league_id: str
+                             ) -> tuple[str | None, str | None, list[dict]]:
+    """(deck_job_id, served_at, rows) of the caller's newest deck job that has at least one
+    QUALIFYING row; (None, None, []) when none. Qualifying (hld §3.1):
+    COALESCE(is_ghost,0)=0, model_arm IS NOT NULL, model_arm <> 'value_core',
+    source_like_impression_id IS NULL, trade_intent IS NULL, assets_json IS NOT NULL.
+    Job = argmax MAX(served_at) over qualifying rows grouped by deck_job_id.
+    rows = that job's qualifying rows ORDER BY card_index, each
+    {impression_id, card_index, model_arm, assets_json, features_json} (JSON left as stored)."""
+    di = deck_impressions_table
+    qualifying = and_(
+        di.c.user_id == user_id,
+        di.c.league_id == league_id,
+        func.coalesce(di.c.is_ghost, 0) == 0,
+        di.c.model_arm.isnot(None),
+        di.c.model_arm != "value_core",
+        di.c.source_like_impression_id.is_(None),
+        di.c.trade_intent.is_(None),
+        di.c.assets_json.isnot(None),
+    )
+    with engine.connect() as conn:
+        job = conn.execute(
+            select(di.c.deck_job_id, func.max(di.c.served_at).label("served_at"))
+            .where(qualifying)
+            .group_by(di.c.deck_job_id)
+            .order_by(func.max(di.c.served_at).desc(), di.c.deck_job_id.desc())
+            .limit(1)
+        ).first()
+        if job is None:
+            return None, None, []
+        rows = conn.execute(
+            select(di.c.impression_id, di.c.card_index, di.c.model_arm,
+                   di.c.assets_json, di.c.features_json)
+            .where(qualifying, di.c.deck_job_id == job.deck_job_id)
+            .order_by(di.c.card_index)
+        ).mappings().all()
+    return job.deck_job_id, job.served_at, [dict(r) for r in rows]
+
+
+def list_grading_candidates(since_iso: str) -> list[dict]:
+    """Every (user_id, league_id) with a QUALIFYING current-engine deck row (the
+    load_grading_legacy_deck predicate) served at or after `since_iso`, where the user is
+    a member of that league (seat = user_id; co-owner seats are left to on-demand
+    creation). Each {user_id, league_id, platform}, sorted for determinism. Used by the
+    one-shot Calibration pre-generation (POST /api/admin/grading/pregenerate)."""
+    di, lm, lg = deck_impressions_table, league_members_table, leagues_table
+    with engine.connect() as conn:
+        pairs = conn.execute(
+            select(di.c.user_id, di.c.league_id).distinct()
+            .where(func.coalesce(di.c.is_ghost, 0) == 0, di.c.model_arm.isnot(None),
+                   di.c.model_arm != "value_core", di.c.source_like_impression_id.is_(None),
+                   di.c.trade_intent.is_(None), di.c.assets_json.isnot(None),
+                   di.c.served_at >= since_iso)
+        ).all()
+        members = {(str(r.league_id), str(r.user_id)) for r in conn.execute(
+            select(lm.c.league_id, lm.c.user_id)).all()}
+        platforms = {str(r.sleeper_league_id): r.platform for r in conn.execute(
+            select(lg.c.sleeper_league_id, lg.c.platform)).all()}
+    out = [{"user_id": str(u), "league_id": str(l), "platform": platforms.get(str(l))}
+           for u, l in pairs if (str(l), str(u)) in members]
+    return sorted(out, key=lambda r: (r["user_id"], r["league_id"]))
+
+
+def insert_grading_session(session: dict, cards: list[dict]) -> None:
+    """One engine.begin(): insert the session row, then every card row (none while
+    the session is still 'building' — specs §3.3)."""
+    with engine.begin() as conn:
+        conn.execute(grading_sessions_table.insert().values(**session))
+        if cards:
+            conn.execute(grading_cards_table.insert(), cards)
+
+
+def finish_grading_session_build(session_id: str, cards: list[dict], *,
+                                 counts_json: str, source_json: str) -> bool:
+    """One engine.begin(): flip the 'building' session to 'open' with its final
+    counts_json/source_json, then insert every card row. Returns False and writes
+    nothing when the session is no longer 'building' (build_session's idempotency guard)."""
+    gs = grading_sessions_table
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(gs)
+            .where(gs.c.session_id == session_id, gs.c.status == "building")
+            .values(status="open", counts_json=counts_json, source_json=source_json))
+        if not res.rowcount:
+            return False
+        if cards:
+            conn.execute(grading_cards_table.insert(), cards)
+    return True
+
+
+def fail_grading_session(session_id: str, error_json: str) -> bool:
+    """Flip a 'building' session to 'failed' with error_json. False when it was not 'building'."""
+    gs = grading_sessions_table
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(gs)
+            .where(gs.c.session_id == session_id, gs.c.status == "building")
+            .values(status="failed", error_json=error_json))
+    return bool(res.rowcount)
+
+
+def load_open_grading_session(user_id: str, league_id: str,
+                              statuses: tuple = ("building", "open")) -> dict | None:
+    """Newest session for (user_id, league_id) whose status is in `statuses`, by created_at.
+    Default: the resumable ones (specs §3.3). current_session passes every status and
+    hides a completed one itself."""
+    gs = grading_sessions_table
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(gs)
+            .where(gs.c.user_id == user_id, gs.c.league_id == league_id,
+                   gs.c.status.in_(list(statuses)))
+            .order_by(gs.c.created_at.desc(), gs.c.session_id.desc())
+            .limit(1)
+        ).mappings().first()
+    return dict(row) if row else None
+
+
+def load_grading_session(session_id: str, user_id: str | None = None) -> dict | None:
+    """The session row only when it belongs to user_id (any owner when None); else None."""
+    gs = grading_sessions_table
+    where = [gs.c.session_id == session_id]
+    if user_id is not None:
+        where.append(gs.c.user_id == user_id)
+    with engine.connect() as conn:
+        row = conn.execute(select(gs).where(*where)).mappings().first()
+    return dict(row) if row else None
+
+
+def _grading_counts(conn, session_id: str) -> tuple[int, int]:
+    """(total, remaining) — remaining = cards with grade IS NULL AND skipped = 0."""
+    gc = grading_cards_table
+    total = conn.execute(select(func.count()).select_from(gc)
+                         .where(gc.c.session_id == session_id)).scalar() or 0
+    remaining = conn.execute(select(func.count()).select_from(gc)
+                             .where(gc.c.session_id == session_id,
+                                    gc.c.grade.is_(None), gc.c.skipped == 0)).scalar() or 0
+    return int(total), int(remaining)
+
+
+def grading_progress(session_id: str) -> dict:
+    """{"answered": count(grade IS NOT NULL OR skipped=1), "total": count(*)}."""
+    with engine.connect() as conn:
+        total, remaining = _grading_counts(conn, session_id)
+    return {"answered": total - remaining, "total": total}
+
+
+def load_next_grading_card(session_id: str) -> dict | None:
+    """Lowest-position card with grade IS NULL AND skipped = 0, or None.
+    Returns {card_id, position, trade_json} — never arms_json."""
+    gc = grading_cards_table
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(gc.c.card_id, gc.c.position, gc.c.trade_json)
+            .where(gc.c.session_id == session_id, gc.c.grade.is_(None), gc.c.skipped == 0)
+            .order_by(gc.c.position)
+            .limit(1)
+        ).mappings().first()
+    return dict(row) if row else None
+
+
+def load_grading_cards(session_id: str) -> list[dict]:
+    """Every card of the session ORDER BY position, all columns (results/report only)."""
+    gc = grading_cards_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(gc).where(gc.c.session_id == session_id)
+                            .order_by(gc.c.position)).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def answer_grading_card(card_id: str, user_id: str, *, grade: int | None, skipped: bool,
+                        tags_json: str, now: str) -> dict | None:
+    """One engine.begin():
+      1. the card joined to its session, both owned by user_id → no row ⇒ None
+         (unknown or foreign card);
+      2. session status != 'open' ⇒ {"session_id", "status", "rejected": True, "answered", "total"};
+      3. UPDATE the card: grade, skipped (0/1), tags_json, graded_at = now;
+      4. remaining = count(grade IS NULL AND skipped = 0); total = count(*);
+      5. remaining == 0 ⇒ UPDATE sessions SET status='completed', completed_at=now
+         WHERE session_id = :sid AND status = 'open'.
+    Returns {"session_id", "status": "open"|"completed", "rejected": False,
+             "answered": total - remaining, "total": total}."""
+    gc, gs = grading_cards_table, grading_sessions_table
+    with engine.begin() as conn:
+        row = conn.execute(
+            select(gc.c.session_id, gs.c.status)
+            .select_from(gc.join(gs, gc.c.session_id == gs.c.session_id))
+            .where(gc.c.card_id == card_id, gc.c.user_id == user_id, gs.c.user_id == user_id)
+        ).first()
+        if row is None:
+            return None
+        sid, status = row.session_id, row.status
+        if status != "open":
+            total, remaining = _grading_counts(conn, sid)
+            return {"session_id": sid, "status": status, "rejected": True,
+                    "answered": total - remaining, "total": total}
+        conn.execute(update(gc).where(gc.c.card_id == card_id)
+                     .values(grade=grade, skipped=1 if skipped else 0,
+                             tags_json=tags_json, graded_at=now))
+        total, remaining = _grading_counts(conn, sid)
+        if remaining == 0:
+            conn.execute(update(gs)
+                         .where(gs.c.session_id == sid, gs.c.status == "open")
+                         .values(status="completed", completed_at=now))
+            status = "completed"
+    return {"session_id": sid, "status": status, "rejected": False,
+            "answered": total - remaining, "total": total}
+
+
+def load_grading_report_rows(since: str | None, include_open: bool
+                             ) -> tuple[list[dict], list[dict]]:
+    """(sessions, cards). Sessions: status = 'completed' (any status when include_open),
+    created_at >= since when given, ORDER BY created_at. Cards: every card of those sessions
+    (session_id IN (...), chunked by 500 like load_league_scoring_map)."""
+    gs, gc = grading_sessions_table, grading_cards_table
+    q = select(gs)
+    if not include_open:
+        q = q.where(gs.c.status == "completed")
+    if since:
+        q = q.where(gs.c.created_at >= since)
+    q = q.order_by(gs.c.created_at, gs.c.session_id)
+    with engine.connect() as conn:
+        sessions = [dict(r) for r in conn.execute(q).mappings()]
+        ids = [s["session_id"] for s in sessions]
+        cards: list[dict] = []
+        for start in range(0, len(ids), 500):
+            cards.extend(dict(r) for r in conn.execute(
+                select(gc).where(gc.c.session_id.in_(ids[start:start + 500]))
+                .order_by(gc.c.session_id, gc.c.position)).mappings())
+    return sessions, cards

@@ -47,7 +47,7 @@ Must be set in all of these, with the same value (`revalidateFlags` replaces the
   and pass `initialRouteName={launchTab}`.
 - Render `{showHomeTab ? <Tab.Screen name="Home" … /> : null}` as the **first** child of the navigator: `component={HomeScreen}`, `tabBarIcon: tabIcon('home')`, `tabBarButtonTestID: 'tab.home'`, `tabPress` listener calling `trackTab('home', navigation)`. No nested stack, nothing to pop or scroll.
 
-Bar becomes **Home · Rank · Acquire · Draft · Matches · League** — six tabs while `draft.tab` is on (it is). Labels are 11px so it fits, but it is the one layout risk; it is on the TestFlight checklist.
+Bar becomes **Home · Rank · Acquire · [Calibration | Draft] · Matches · League**. Rebased 2026-10-08 onto the Calibration ship (#312, D-197): the third slot is Calibration while `grading.blind` is on (it is, for every user), Draft only when Calibration is absent and `draft.tab` is on (it is off), so the bar is six tabs today with "Calibration" as the longest label. Labels are 11px so it fits, but it is the one layout risk; it is on the TestFlight checklist.
 
 ### `mobile/src/screens/HomeScreen.tsx` (new)
 

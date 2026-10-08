@@ -245,8 +245,13 @@ export function setOnSessionExpired(fn: (() => void) | null): void {
 const DEFAULT_TIMEOUT_MS = 15_000;
 const SLOW_TIMEOUT_MS = 30_000;
 // Paths documented at 5–10 s on Render's free tier (auth.ts:98–99). Matched by
-// suffix so the base-URL prefix doesn't matter.
-const SLOW_POST_PATHS = ['/api/session/init', '/api/trades/generate'];
+// suffix so the base-URL prefix doesn't matter. `/api/grading/sessions` (the
+// Calibration session start) joins them per docs/plans/blind-grading/hld.md §7:
+// the server answers 202 quickly today, but the arm selection it still does
+// inline reads one league's deck + members, and the 30 s cap keeps a slow
+// Render cold start from aborting a request whose resume rule makes a retry
+// safe. Only the POST is affected — the GET polls under this prefix are not.
+const SLOW_POST_PATHS = ['/api/session/init', '/api/trades/generate', '/api/grading/sessions'];
 
 // ── GET-only retry (INIT-12b) ─────────────────────────────────────────────
 // Retry only safe GETs on transient gateway / network errors. Paths that

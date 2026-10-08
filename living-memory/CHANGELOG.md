@@ -11,6 +11,40 @@
 
 ---
 
+## 2026-10-07b — 1.18.0 in TestFlight; targeted Calibration pre-generation (#313); ESPN picks fix (#314)
+
+- iOS 1.18.0 builds 159/160 (same commit `38b50f24`) reached TestFlight after the operator renewed the signing certificate. The Calibration tab appears; the Draft tab leaves only after a second cold launch, because flags are cached and the tabs are fixed at mount.
+- #313 (`8b646c4f`, Render `dep-db3acanlk1mc739v8lu0`): `POST /api/admin/grading/pregenerate` accepts `{"targets": [{user_id, league_id}]}`. Each pair's Acquire deck is refreshed via `_replenish_deck_for`, then its session is built. Ran for MangoPatti (FFv3), lofman (SFO + FFv3), Bcork (FFv3): 4 open sessions, 20 + 20 cards each.
+- ESPN league 11896 was refused `needs_fresh_deck`: Calibration read platform picks only, and ESPN picks are `source='user'`. Fixed in #314 (`blind_grading._league_inputs` reads source `any` when `picks.assign_tradeable` is on and the league has assigned rows).
+- Found: the weekly deck replenishment is reaped by gunicorn's 120 s timeout every day (~1 pair/day). Spun off as its own task.
+
+## 2026-10-07 — Calibration tab + value-core engine shipped (PR #312); TestFlight build blocked on signing
+
+**What:** squash `295cd951` (PR #312). Value-core trade engine ([D-196](DECISIONS.md)) ships with `trade.value_core`
+**off** (real decks unchanged). Calibration tab ([D-197](DECISIONS.md)): in-app blind grading of today's engine vs the
+value core, in the Draft tab's slot, **open to every app user** (`grading.blind` true); `draft.tab` off (Rookie Draft
+room stays under League). Render auto-deploy is OFF for this service, so the deploy was triggered via the API:
+`dep-db38m460tbcc7380tufg` LIVE on `295cd951` (prod `/api/feature-flags`: draft.tab false, grading.blind true,
+trade.value_core false; `/api/admin/grading/report` 200). Pre-generation (`POST /api/admin/grading/pregenerate`):
+8 candidates → 7 decks built (40 cards each, one 39 with a shared trade), 1 skipped `needs_fresh_deck`, 0 failed.
+**Not shipped:** mobile 1.18.0 (EAS build 158) ERRORED — the iOS distribution certificate is revoked or expired; the
+Calibration tab reaches phones only after a new build. Also fixed on the way: a decline-reason test time bomb
+(30-day real-clock cutoff vs pinned 2026-09-06 dates) that had started failing on `main` itself.
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-10-07.
+
+## 2026-10-05b — SQLAlchemy capped below 2.1; both deploys LIVE (G-073)
+
+**What:** `sqlalchemy>=2.0.0,<2.1` in `requirements.txt` (PR #311, `e30a8f47`). Render deploy `dep-db234m8m7kps73da6ftg` of `e30a8f47` went live 19:28 local; production `GET /api/feature-flags` now serves `feedback.decline_reasons: false`.
+**Why:** the deploy of #310 (`dep-db1t42jbc2fs73dom7i0`) failed at boot — SQLAlchemy 2.1.3 made psycopg v3 the default Postgres driver and the app installs psycopg2. Render kept `3bb981ed` live throughout; no outage. Render `autoDeploy` is off, so every merge needs an explicit deploy (runbook § Deploy).
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-10-05b; [G-073](GOTCHAS.md).
+
+## 2026-10-05 — Decline reasons disabled (flag parked off, D-195)
+
+**What:** `feedback.decline_reasons` true → false in `config/features.json` + the release fixture mirror. The trade card shows the plain ✕ again and a decline is one tap through `/api/trades/swipe`. Nothing deleted: `DeclineReasonPanel`, `/api/trades/pass-reason`, `trade_pass_reasons` and the taxonomy entries stay; two pinned tests in `test_decline_reasons.py` now expect off.
+**Why:** operator ask 2026-10-02 — clicking twice after every decline was tedious; may be reintroduced.
+**Behaviour to know:** every decline now writes the pass Elo signal (only "value" declines did while reasons were on); the Undo toast returns on declines (`ux.swipe_undo`); decline-reason reporting gets no new data.
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-10-05; [scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md). Server-delivered flag — no iOS build.
+
 ## 2026-09-07 — Owner-only outage: paged impression insert (G-072)
 
 The owner-only activation (PR #287 `16bb6fd1`, LIVE 05:28 UTC, knobs flipped 05:29 UTC by the release session) crashed production on its first two searches: uncapped decks of 1,037 / 1,456 cards × ~21 KB evidence rows became a single ~28 MB `INSERT`, the 256 MB Postgres backend was OOM-killed twice, and exclusive mode failed the job (`owner_impression_unavailable`) → "Search failed" on every Find a Trade. Operator chose to keep owner-only live: budgets cut to 300 / 3,000 at 13:55 UTC (≈250 cards). Fix: `save_deck_impressions` pages at 100 rows per statement in one transaction (`DECK_IMPRESSION_INSERT_ROWS`), guarded by `test_deck_impressions_paging.py`. Shipped 2026-09-08 as [PR #289](https://github.com/mattmurf77/fantasy-trade-finder/pull/289) `609cb79e`, Render LIVE 02:41 UTC; both budgets restored to 4096 / 60000 at 02:41 UTC, so decks are uncapped again on the paged insert. First real uncapped search still to be confirmed in the logs. No mobile change: build 1.17.2 (150) already carries the owner contract. [Runbook row](../docs/runbook.md#common-failure-modes), [G-072](GOTCHAS.md).

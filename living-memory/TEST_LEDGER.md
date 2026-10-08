@@ -12,6 +12,131 @@ four rows to `navigate('Rank'|'Trades'|'Matches'|'League')`; `deepLinks.ts` adds
 `app/home`. Not run: hosted CI on the branch, and the 8-step TestFlight checklist in the
 scope block (six-tab bar fit is the main thing to eyeball).
 
+2026-10-08 rebase onto the Calibration ship (#312): `main` merged into the branch (conflicts:
+DECISIONS → Home renumbered D-198, TEST_LEDGER, nav README — all kept both sides). Re-run on
+the merged tree: `tsc --noEmit` clean; `check-home-tab` 34/34; `check-blind-grading` pass;
+`check-canvas-results`, `check-rank-nav-exit` pass; testid-lint OK; release.json mirror tests
+3/3. Full pytest left to hosted CI on PR #309.
+## 2026-10-08 — ESPN picks fix (#314) live; operator's ESPN Calibration deck built
+
+- CI 4/4 green on head `3aa730c7`; merged as `4de823ad`; Render `dep-db3qilqd0e5s73b6tgfg` live 2026-10-08.
+- Targeted pre-generation for 313560442465169408 / 11896: session `open`, 40 cards (current 20 of 20 candidates, 0 dropped stale or unknown; value core 20, pool 346). 17/20 current and 16/20 value-core cards carry a PICK; before the fix the session was refused `too_few`.
+
+## 2026-10-07b — Targeted pre-generation (#313) and ESPN picks fix (#314)
+
+- #313: `test_blind_grading_routes.py` 28 passed, incl. the new `test_admin_pregenerate_targets_refresh_then_build_each_pair`. Full local suite: 7598 passed, 1 skipped, with `test_rookie_scope.py` excluded. Its 6 failures reproduce on untouched `origin/main` locally (`reason: stale_player_cache` from the restored local data), so they are machine-specific. CI on the PR: 4/4 green.
+- #313 prod proof: replenish decks (`deck_replenish_log` 2026-10-04 and -07) write qualifying `deck_impressions` (`model_arm = owner_v2_bilateral`). Targeted run, 4 pairs: all `open`, 40 cards each (current 20 / value core 20, 0 dropped stale or unknown; value-core pools 513–938).
+- ESPN 11896: refused `needs_fresh_deck`. Read-only replay of job `e89f466d` with all draft_picks rows gives 20/20 usable, versus too_few on platform rows only.
+- #314: the grading service, routes, db and e2e suites, 90 passed, incl. the new `test_assigned_picks_join_the_catalog_when_the_engine_prices_them`.
+- Prod logs: `WORKER TIMEOUT` in `_run_weekly_replenishment` at ~13:33 UTC every day, 2026-10-02 through 10-07.
+- TestFlight: operator confirms the Calibration tab is visible on 1.18.0 (159). The §9 checklist is still owed.
+
+## 2026-10-07 — PR #312 CI green, prod deploy verified, decks generated; TestFlight build failed (signing)
+
+- CI on the final head (`fd616578`, after merging main's SQLAlchemy pin): backend-tests, mobile-typecheck,
+  web-structure, maestro-testid-lint all green. Two earlier CI reds were fixed: a machine-dependent e2e wall-clock
+  bound (now per-deck, 8 s budget) and four `test_decline_reasons` #419 tests that failed on `main` too after
+  2026-10-06 (pinned 2026-09-06 impressions vs `_DECK_OUTCOME_MAX_AGE_DAYS = 30` on the real clock; the harness now
+  lifts the cutoff).
+- Prod after `dep-db38m460tbcc7380tufg` (live 2026-10-07): flags draft.tab=false, grading.blind=true,
+  trade.value_core=false; `/api/admin/grading/report` 200 with the cron secret; `/api/grading/sessions/current`
+  without a session → 404 (gate).
+- Pre-generation: 8 candidates, 7 sessions open (20 current + 20 value-core each; one 39 with 1 shared), 1 skipped
+  `needs_fresh_deck`, 0 failed. Value-core pools 567–938 fair trades per seat.
+- EAS iOS production build 1.18.0 (158) `8457b850-…` ERRORED: XCODE_BUILD_ERROR, distribution certificate
+  (serial 429A52778FF3BA4F2D56ADC241D54BCC) "not valid for code signing … revoked or expired". No submission.
+- Mobile runtime evidence still owed: the TestFlight checklist in `docs/plans/blind-grading/code-walk-mobile.md` §9.
+
+## 2026-10-05 — Calibration (in-app blind grading) integrated; open to every app user
+
+Built by four Fable 5.1 package agents (P1 service/schema, P2 routes/flags, P3 mobile, P4 docs) from
+`docs/plans/blind-grading/specs.md`, merged into `feat/blind-grading` (on top of the value-core branch) and lead-reviewed.
+Lead fixes: a `building` session orphaned by a restart is re-kicked by POST (route now always calls `start_session`);
+the build thread falls back to empty league facts so a session can never stay `building`; a stale `±10%` assertion in
+`test_value_core_serving` now reads the evidence's own ratio floor (it only passed alone on a local DB seeded before
+the band change — model_config seeds are INSERT OR IGNORE). Operator 2026-10-05: open to every app user
+(`grading.blind` true, `_calibration_allowed` True), freshness 14 days, cron-only pre-generation route, purpose copy.
+- Full backend suite (local Python 3.14): **7632 passed, 1 skipped**. Grading tests: routes, service, db, e2e
+  (the e2e walks every response body and fails on any arm/engine key or value before the reveal).
+- Mobile: `npx tsc --noEmit` OK, `testid-lint` OK, all `mobile/tests/check-*.js` guards pass incl. the new
+  `check-blind-grading.js` (27 checks; four planted sabotages caught by P3).
+- Flag-off golden (`test_bakeoff_serving::test_flag_off_is_byte_identical…`) and the flag-mirror tests pass.
+- Prod eligibility (read-only, 2026-10-05): users with a qualifying current-engine deck — 7 days: 4 users / 8 pairs;
+  14 days: 8 / 16. Runtime evidence for mobile is the TestFlight checklist in
+  `docs/plans/blind-grading/code-walk-mobile.md` §9 (operator).
+
+## 2026-09-30 — Value-core engine built on a branch (flag off)
+
+Full gates (scope/PRD/HLD/LLD/specs in `docs/plans/value-core-engine/`). Five parallel build packages merged
+into `feat/value-core-engine`, lead-reviewed. Local Python 3.14 (no 3.12 here; CI is the 3.12 gate, not yet run).
+- Baseline at contract commit `315ff1e8`: 7413 passed, 1 skipped.
+- Integration branch full suite: **7522 passed, 1 skipped** (527 s); 109 new value-core tests, incl. e2e with the real engine.
+- **Flag-off identity:** `bakeoff_harness.run_capture` (default, consolidate intent, sf_tep) with `PYTHONHASHSEED=0`
+  is identical to `3bb981ed` after stripping ids/timestamps; the base is itself deterministic. With the flag off
+  `backend.value_core` is never imported (fresh-interpreter check).
+- Latency, 14-team fixture, `pipeline.run` x10: p50 1.54 s, p95 1.77 s (target p95 < 8 s).
+- Synthetic bench smoke (not the verdict): insult 0.6%, real piece back 94.2%, median value given +7.6%,
+  worst-seat appearances 4 → FAIL on the ≤3 cap only; the cap is infeasible once the viewer's ≤14 tradeable
+  assets spend their allowances (0 cap-respecting cards left when it breaks).
+- Real-trade recall (committed FFV3/Lakeview fixtures, point-in-time DP values): 64 cases / 128 orientations;
+  exact@10 0%, close@10 18%, in-pool 1.6%; rejects floor 96, band 28, filler 2; |log ratio| p50 0.32, p80 0.65.
+  Band left at ±10% pending the operator.
+- Lead fix at review: core caps round-robin over headliners (pool share giving a top-3 asset 92% → 12%).
+- Deck variety rules (operator request, same day): one card per trade idea (same partner + headliners; picks
+  collapse by year/round), acquisitions in rounds, partner cap in the first 30. Synthetic first-30, before → after:
+  near-duplicates median 1.5/max 5 → 0, repeat acquisitions median 8/max 11 → 0, distinct acquisitions 22 → 30,
+  pick repeats from one partner max 9 → 0; insult 0.6%, real piece 92%, median given +7.7%; p50 1.3 s.
+  The appearances guardrail now counts acquired assets only. Full suite after: **7527 passed, 1 skipped**.
+- 2026-10-01 operator answers: logged legacy fallback on deck-build errors (tests: fallback serves legacy cards;
+  capture equals flag-off except `safety_policy`); default band ±10% → ±20%. Band evidence: real-trade coverage
+  ±10% 20% / ±15% 33% / ±20% 38% / ±25% 39% / ±30% 44% / ±40% 52%; synthetic insult rate 0.6% / 0.8% / 1.1% / 2.8% /
+  28.9% / 45.6%; recall in-pool 0.8% → 2.3% at ±20% (floor rule rejects most real trades: sub-450 throw-ins).
+  Real-league freeze blocked at first (permission classifier); the operator then granted prod reads explicitly.
+- 2026-10-01/02 real-league bench (frozen read-only: 6 leagues incl. two 2026 "Bush League" ids, 77 seats, 10 boards;
+  file kept private outside the repo). Symmetric ±20% failed on real rosters (insult 5.6%, median given +17.1%;
+  synthetic had said 1.1%), so the band became asymmetric: pay up to 20% / take up to 10% (`vc_band` 0.20,
+  `vc_gain_band` 0.10). Default, first 30 cards: insult 0.2%, real piece back 93.2%, median value given +8.4%,
+  near-duplicates 0, repeat acquisitions 0, worst acquired-asset appearances 4 (one seat, secondary piece; verdict
+  FAIL on that guardrail only); overpays >10% on 23/2,220 cards. Throw-ins (operator rule: recipient values it
+  >= 2x market, >= 450, with evidence): 13/2,220 first-30 cards (4 to viewer, 9 to partner); before the evidence
+  requirement unpriced/unranked players produced up to 28/30 cards on one seat. An independent review found 2 bugs
+  (throw-in toggled the stud premium; shortlist cut before the junk check) and 2 risks (variant budget; thin partner
+  boards): all fixed with regression tests (`THROWIN_MIN_COMPARISONS` = 3, premium on core counts, per-pair cap,
+  separate variant budget).
+Evidence delta: unit + e2e tests and the WP3 [code-walk](../docs/plans/value-core-engine/code-walk.md); no mobile change,
+so no TestFlight checklist is due until the flag is flipped.
+## 2026-10-05b — SQLAlchemy pin (PR #311) and production deploy of #310 + #311
+
+Branch `fix/pin-sqlalchemy-2-0` from `origin/main` `85428813`. Hosted CI 4/4 green
+(CI installs the capped line but tests on SQLite, so it cannot prove the Postgres
+boot). The proof is the deploy: Render `dep-db234m8m7kps73da6ftg` of `e30a8f47`
+built and went `live` at 19:28 local, after `dep-db1t42jbc2fs73dom7i0` of `36bed585`
+had failed with `ModuleNotFoundError: psycopg` (build log: `sqlalchemy-2.1.3`).
+Post-deploy: production `GET /api/feature-flags` → `feedback.decline_reasons: false`.
+Device check of the one-tap decline (3 steps in the 2026-10-02 scope doc) still owed
+by the operator. Sim gate skipped per D-056 (`FTF_SKIP_SIM_GATE=1`).
+
+## 2026-10-05 — Decline reasons disabled (`feedback.decline_reasons` off), branch evidence
+
+Branch `fix/disable-decline-reasons` (from `origin/main` `3bb981ed`). Flag flip only;
+no mobile or backend source changed. Mobile: 99/99 `check-*.js`, `npx tsc --noEmit`
+clean, `testid-lint OK`. Backend full local run: 7410 passed / 1 skipped / 3 failed in
+867s. Two failures were this change (the `onboarding-v2` and `profiles-on` flag
+fixtures must equal release plus their own surface) and are fixed; the affected files
+then pass 225/225 (`test_seed_ui_test_db`, `test_decline_reasons`,
+`test_prepared_trade_runtime`, `test_owner_batch_publication`). The third,
+`test_prepared_trade_runtime.py::test_pending_rechecks_read_guard_after_serialization`,
+passes 3/3 alone on untouched `origin/main` and alone with the change; an earlier
+stop-at-first-failure run instead tripped
+`test_owner_batch_publication.py::test_first_30_are_durable_running_and_full_inventory_keeps_order[False]`,
+which also passes alone both ways. Read: two full-run-only flakes in the
+prepared-inventory tests, unrelated to this flag — not root-caused. No fresh full run
+after the fixture fix; hosted CI on the pushed sha is the gate. Off-path proof
+(decision row, pass Elo, no-resurface bind) is the code walk in the
+[scope](../docs/plans/decline-reason-capture/scope-disable-2026-10-02.md). Hosted CI on
+PR #310: 4/4 checks green; squash-merged as `85428813` 2026-10-05. Device
+check (3 steps, same doc) not run. Sim gate skipped per D-056 (`FTF_SKIP_SIM_GATE=1`).
+
 ## 2026-09-22 — Persistent prepared trade inventory, release candidate
 
 Plan/scope preceded code. Three Astra Ultra lanes plus parent integration built

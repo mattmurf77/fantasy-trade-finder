@@ -27,7 +27,7 @@
 - [x] **Unit tests:** no new pytest — the flag is client-only; existing flag-fixture tests must stay green with the new key.
 - [x] **Code-walk proof:** recorded in `living-memory/TEST_LEDGER.md` with the ship entry.
 - [x] **Manual TestFlight checklist:**
-  1. Returning user (has swiped before), cold launch → app opens on **Home**; bar reads Home · Rank · Acquire · Draft · Matches · League with Home highlighted; no label is clipped or truncated on the smallest supported iPhone.
+  1. Returning user (has swiped before), cold launch → app opens on **Home**; bar reads Home · Rank · Acquire · Calibration · Matches · League with Home highlighted; no label is clipped or truncated on the smallest supported iPhone.
   2. Home shows "What would you like to do today?" and exactly four options: Rank, Find a Trade, See Matches, View my Leagues.
   3. Tap **Rank** → Rank tab opens on the usual rank surface, Rank highlighted in the bar. Tap Home in the bar → back on Home.
   4. Tap **Find a Trade** → Acquire tab (trade builder/finder). Tap **See Matches** → Matches. Tap **View my Leagues** → League tab rankings.

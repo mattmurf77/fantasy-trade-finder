@@ -1277,3 +1277,33 @@ Shared by `backend/overhaul_service.py` and `mobile/src/api/overhaul.ts` (the on
 - **Handoff mode** — `send` (Sleeper, MFL, ESPN — every platform in `overhaul_service.SEND_FLAGS`) | `copy` (any other platform, with `text`).
 - **AttemptView.provider_status** — the provider's own status word on a `proposed` attempt (`mfl_status` / `espn_status`), `null` on Sleeper; `provider_transaction_id` is `null` on MFL, which returns none.
 - **Id prefixes** — `ovh_` (overhaul **and** offer), `rm_` (roadmap), `pk_` (package), `bt_` (batch), `at_` (attempt); all 12 hex.
+
+---
+
+## Calibration tags and scale
+
+In-app blind grading — value-core Gate 2, flag `grading.blind` ([plans/blind-grading/](plans/blind-grading/)) — has one wire vocabulary shared by the service and the mobile client. **`backend/blind_grading.TAGS` and `mobile/src/api/grading.ts` `GRADING_TAGS` are the same seven strings in the same order**, and `blind_grading.validate_answer` rejects anything else with 400 `invalid_body`:
+
+| Key | Mobile label (`GRADING_TAG_LABELS`) |
+|---|---|
+| `overpay` | Overpay |
+| `they_wont_accept` | They won't accept |
+| `junk_filler` | Junk filler |
+| `too_small` | Too small |
+| `wrong_for_my_window` | Wrong for my window |
+| `wrong_for_their_window` | Wrong for their window |
+| `same_guy_again` | Same guy again |
+
+- **Scale:** `grade` is an integer **1–5** (the prompt is "Would you send this?", the ends are labelled "1 · No way" and "5 · Send it"). A bool, a string `"4"`, 0 or 6 is rejected. `{skip: true}` is the only alternative; it must travel with no tags, and `skip` counts only when it is exactly `true`. Tags are de-duplicated server-side and stored in `TAGS` order.
+- **Arm names:** `current` | `value_core` (`blind_grading.ARMS`). They appear on the wire only in `results` and the admin report, and in the client only in `components/GradingResults.tsx` (`ARM_LABEL`: "Today's engine" / "New engine"). No other response, component or copy may name one — `mobile/tests/check-blind-grading.js` and `test_blind_grading_e2e.py::test_no_response_reveals_an_arm_until_results` pin it *(verify after P1/P2/P3 merge)*.
+- **Neutral card keys:** `GradingTrade` = `{partner_name, give, receive}`; `GradingAsset` = `{id, name, position, nfl_team, age, value}` with `position` ∈ `QB` | `RB` | `WR` | `TE` | `PICK`, `nfl_team` / `age` null for a pick, `value` int or null. Exactly these — a field added on either side is a blinding change and goes through the plan's change control.
+- **Session status:** `building` | `open` | `completed` | `failed`; `SessionView.error.code` ∈ `value_core_too_few` | `value_core_failed`. Ids are 18-digit decimal strings.
+- **The CSV tool differs on purpose.** `backend/eval/blind_grade.py`'s `TAGS` still say `never_accept`, `wrong_my_window`, `wrong_their_window`; aligning it is a follow-up (plan decision D7), not drift to fix in passing.
+
+**Locations:** `backend/blind_grading.py` (`TAGS`, `ARMS`, `validate_answer`), `mobile/src/api/grading.ts` (`GradingTag`, `GRADING_TAGS`, `GRADING_TAG_LABELS`, the wire interfaces), `mobile/src/screens/CalibrationScreen.tsx` (`TAG_CHIPS` — testIDs `calibration.tag.<key>`; `GRADE_BUTTONS` — `calibration.grade-1` … `-5`), `mobile/src/components/GradingResults.tsx` (`ARM_LABEL`).
+
+### Bottom-bar third slot — Calibration or Draft, never both
+
+The mobile tab bar is **Rank · Acquire · [Calibration | Draft | —] · Matches · League** and never exceeds five tabs. The third slot is decided **once at `TabNav` mount** from the merged flag map (`useFeatureFlags.getState().flags`, never `useFlag`): `showCalibrationTab ? Calibration : showDraftTab ? Draft : null`. `grading.blind` (on for every app user) wins the slot over `draft.tab` (the seasonal switch, false since 2026-10-02), so while Calibration is on nobody has a Draft tab even in draft season, and with both flags off everyone sees four tabs. The Draft Room stays reachable from League › Rookie draft (`draft.room`) and the Acquire mode strip's Draft chip. testIDs: `tab.calibration` / `tab.draft` (the Draft `<Tab.Screen>` block survives verbatim in source, so `testid-lint.sh` keeps resolving `tab.draft`). Analytics: `tab_selected.tab` / `from_tab` gain `calibration` and stop carrying `draft` while the flag is off — `tab` is a free string, no taxonomy edit ([data dictionary](data-dictionary.md#tab_selected-values-user_events)).
+
+**Locations:** `mobile/src/navigation/TabNav.tsx` (`showCalibrationTab`, `showDraftTab`, the slot ternary), `config/features.json` + `backend/tests/fixtures/flags/*.json` (`grading.blind`, `draft.tab`), `mobile/tests/check-blind-grading.js` (assertion 6), `backend/tests/test_rookie_ranks_editable.py` (the `draft.tab` mirror and the mount-once predicate).

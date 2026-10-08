@@ -142,10 +142,15 @@ def harness(mem_engine):
     server.app.config["TESTING"] = True
     client = server.app.test_client()
 
+    # These tests pin historical served_at/decision dates (2026-09-06 …), but
+    # _save_deck_outcome_safe measures impression age against the REAL clock with a
+    # 30-day cutoff, so the linked-outcome assertions started failing on 2026-10-07.
+    # Lifting the cutoff keeps them about episode logic, not about today's date.
     with patch.object(server, "_decline_reasons_enabled", lambda: True), \
          patch.object(server, "_load_tester_allowlist",
                       lambda: {f"device:{DEVICE}", ME}), \
          patch.object(server, "_deck_signal_v2_enabled", lambda: True), \
+         patch.object(server, "_DECK_OUTCOME_MAX_AGE_DAYS", 36500), \
          patch.object(server, "create_notification", MagicMock()), \
          patch.object(server, "_send_typed_push", MagicMock()):
         with server._sessions_lock:
@@ -224,7 +229,10 @@ def test_no_allowlist_gating_anywhere(harness):
         assert _row_count(eng) == 1
         served = client.get("/api/feature-flags",
                             headers={"X-Device-Id": "some_random_device"})
-        assert served.get_json()["flags"]["feedback.decline_reasons"] is True
+        # The served value is the configured one, allowlist or not (the flag
+        # is parked off since 2026-10-02 — see config/features.json).
+        assert (served.get_json()["flags"]["feedback.decline_reasons"]
+                is server.FLAGS.feedback_decline_reasons)
 
 
 def test_works_with_no_device_header_and_no_allowlist(harness):
@@ -236,15 +244,17 @@ def test_works_with_no_device_header_and_no_allowlist(harness):
     assert _row_count(eng) == 1
 
 
-def test_the_flag_ships_on_for_everyone(harness):
-    """config/features.json carries it ON, and GET /api/feature-flags serves
-    that value verbatim to every caller — the client surface and the route can
-    never disagree about whether the feature is live."""
+def test_the_flag_is_parked_off_for_everyone(harness):
+    """config/features.json carries it OFF (operator, 2026-10-02: the second
+    tap after every decline was tedious; the feature is disabled, not deleted),
+    and GET /api/feature-flags serves that value verbatim to every caller —
+    the client surface and the route can never disagree about whether the
+    feature is live. Reintroducing it = flip the key and this assertion."""
     import json as _json
     from pathlib import Path
     repo = Path(server.__file__).resolve().parents[1]
     features = _json.loads((repo / "config/features.json").read_text())
-    assert features["feedback.decline_reasons"] is True
+    assert features["feedback.decline_reasons"] is False
 
     client, _service, _svc, _eng = harness
     served = client.get("/api/feature-flags",
