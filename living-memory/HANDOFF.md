@@ -26,10 +26,10 @@ outside iCloud. Package/ship worktrees from the old path are gone with the move;
 
 **Don't repeat:** Preserve dirty canonical/legacy and unrelated evaluator414faade/b17cc379. No raw identity exports, fake production actions, model/offer caps. Ops /private/tmp/prepared-release-20260922.S7GrYs; freshsweepkeys. V2 rollback is flagoff; olderbinary needs private-table purge/deletionbridge. See release.md; source edits invalidate running model-hash benchmarks.
 
-## Also in flight — 2026-10-02: Home tab
+## Home tab — shipped 2026-10-08
 
-**Where I stopped:** Home tab built and committed on `feat/home-tab` (worktree `.claude/worktrees/home-tab`), local checks green ([TEST_LEDGER](TEST_LEDGER.md) 2026-10-02, [D-198](DECISIONS.md)). Not pushed, not merged.
+**Where I stopped:** Home tab merged to `main` as `dd08c7c2` (PR #309, D-198); Render redeploys; iOS 1.19.0 EAS build started with `--auto-submit`. See [CHANGELOG](CHANGELOG.md) 2026-10-08 for build numbers and deploy evidence.
 
-**Next:** operator go → push, hosted CI, merge to `main`, EAS build, run the TestFlight checklist in [scope.md](../docs/plans/home-tab/scope.md) §3. After merge: ledger the branch sha and remove the worktree.
+**Next (operator):** run the 8-step TestFlight checklist in [scope.md](../docs/plans/home-tab/scope.md) §3 on 1.19.0 — the six-tab bar (Calibration is the longest label) is the one thing only a phone can prove. Two cold launches may be needed before the Home tab appears (flags are cached; tabs are fixed at mount).
 
-**Watch:** six tabs in the bar (Calibration holds the third slot, D-197); "returning user" means first swipe done on this install, so a never-swiped or reinstalled user still lands on Trades; `app/home` is silently dropped with the flag off.
+**Watch:** "returning user" = first swipe done on this install, so a never-swiped or reinstalled user still lands on Trades; `app/home` is silently dropped with the flag off.

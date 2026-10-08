@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-10-08 — Home tab shipped (#309); Render live; iOS 1.19.0 build 161 submitted
+
+**What:** a Home tab, first in the bottom bar (Home · Rank · Acquire · Calibration · Matches · League), asking "What would you like to do today?" with four plain-text options (Rank, Find a Trade, See Matches, View my Leagues → League tab). Returning users launch on Home; first-run users (`onboarding.trades_first`, no first swipe yet) still land on Trades. Flag `nav.home_tab` (default true, read once at mount) is the rollback. Mobile only; no new events, routes or schema. [D-198](DECISIONS.md), [plan + scope](../docs/plans/home-tab/).
+**Why:** operator ask 2026-10-02; held per operator until the Calibration tab (#312) landed, then merged on top of it (2026-10-08).
+**Evidence:** [TEST_LEDGER](TEST_LEDGER.md) 2026-10-02 + 2026-10-08 rebase; CI green on `693b6dc7` (backend-tests, mobile-typecheck, testid-lint, web-structure).
+**Shipped:** PR #309 squash-merged as `dd08c7c2`. Render `autoDeploy` is off, so deploy `dep-db3s12flk1mc73cmuvig` was triggered via the API — live 16:12:35Z, `/api/feature-flags` serves `nav.home_tab: true`. iOS 1.19.0 EAS build 161 (`26eddb4e`, commit `dd08c7c2`) started 16:08Z with `--auto-submit`; build FINISHED and submission `ae5df3c7` uploaded to App Store Connect (Apple processing follows).
+**Not done:** the operator's 8-step TestFlight checklist ([scope.md](../docs/plans/home-tab/scope.md) §3). Two cold launches may be needed before the tab appears (cached flags, tabs fixed at mount). The original worktree was lost to the iCloud move (G-074); the release ran from a scratchpad clone.
+
 ## 2026-10-07b — 1.18.0 in TestFlight; targeted Calibration pre-generation (#313); ESPN picks fix (#314)
 
 - iOS 1.18.0 builds 159/160 (same commit `38b50f24`) reached TestFlight after the operator renewed the signing certificate. The Calibration tab appears; the Draft tab leaves only after a second cold launch, because flags are cached and the tabs are fixed at mount.
