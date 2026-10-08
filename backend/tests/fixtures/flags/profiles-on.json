@@ -129,6 +129,7 @@
   "calc.canvas_results": false,
   "calc.results_push": true,
   "nav.trades_landing": true,
+  "nav.home_tab": true,
   "ux.sheet_guard": true,
   "ux.rank_tab_destination": true,
   "ux.retap_active_tab": true,

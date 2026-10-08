@@ -6,6 +6,7 @@ Route names rarely match file names — the route→file table and the conventio
 
 | Screen | Purpose |
 |---|---|
+| `HomeScreen` | The Home tab (flag `nav.home_tab`) and the launch tab for returning users: the line "What would you like to do today?" and four plain-text rows — Rank, Find a Trade, See Matches, View my Leagues — each a `navigation.navigate` to the `Rank` / `Trades` / `Matches` / `League` tab. No data, no state, no local `FeedbackFAB` (RootNav's global mount covers it). Rows come from one table so copy/target/testID cannot drift; pinned by `mobile/tests/check-home-tab.js` |
 | `SignInScreen` | Apple sign-in is the primary entry (`auth.accounts`); Sleeper username is the fallback. `onboarding.landing` flips Sleeper to primary with a demo escape when Sleeper is down |
 | `LeaguePickerScreen` | Pick which league to use; footer links open the ESPN/MFL/Fleaflicker league-linking sheets |
 | `LeagueScreen` | Classic league home (pushed `LeagueHome` sub-route): hero identity, Matches tiles, Explore rows, activity, contrarian, coverage, leaderboards. Adds a progress module + action row while any unlock is outstanding, and a "Draft picks" section for ESPN leagues (flag `picks.assign`) |
@@ -42,7 +43,7 @@ Route names rarely match file names — the route→file table and the conventio
 | `PickAssignmentScreen` | ESPN pick-ownership grid (flag `picks.assign`): season tabs, one-time drag-order setup, collapsible rounds, optimistic-concurrency conflict sheet on a stale write. No value entry anywhere — prices are server-computed |
 | `RecordPicksScreen` | Live off-platform pick recording (flag `draft.manual_picks`, ships OFF). ESPN hosts no rookie drafts, so once a league's picks are assigned (M-A) the ONLY way FTF learns who was actually taken is a member typing it in during the real draft — nothing else writes `recorded_picks`. Recording is **confirm, not select**: tap the player from the undrafted list, the team comes from the assignment grid's owner for the cursor's slot, the cursor auto-advances. Writes ride `api/recordedPicks`'s offline queue because live drafts happen on bad wifi |
 | `TrendsScreen` | Movers + consensus-gap view; a Rank-stack sibling reached from the rank chooser. **Deliberately not prefetched** by TabNav — its queries take runtime args |
-| `PortfolioScreen` | Roster-value portfolio; lives in the Acquire (`Trades`) stack rather than the tab bar, so the bottom nav still shows five tabs |
+| `PortfolioScreen` | Roster-value portfolio; lives in the Acquire (`Trades`) stack rather than the tab bar, so it adds no tab to the bottom nav |
 | `ProfileScreen` | Public profile, destination of the `/u/<username>` deep link |
 | `FeedbackInboxScreen` | Tester feedback inbox: the user's own notes with status, plus the share button. Reached from Settings → Test feedback. The list still shows `fixed` notes even though the FAB badge excludes them (`utils/feedbackBadge`) |
 | `LeagueJoinScreen` | Invite JOIN interstitial — destination of `<base>/app/league/join/<leagueId>?ref=<u>` while `growth.invite_join_link` is on. The LEGACY `<base>/?league=<id>&ref=<u>` form never reaches here: it has no path, so `utils/deepLinks` captures it directly into the same persisted intent. One owner per URL form; both end in the same place |

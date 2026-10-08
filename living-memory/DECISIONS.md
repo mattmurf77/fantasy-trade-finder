@@ -1,5 +1,16 @@
 # Decisions — Fantasy Trade Finder
 
+## D-198 — Home is the launch tab for returning users; first-run users still land on Trades
+
+2026-10-02. Operator ask: a simple Home tab, first in the bottom bar, asking "What
+would you like to do today?" with four plain-text options (Rank, Find a Trade, See
+Matches, View my Leagues → the League tab). Narrows the 2026-08-28 trades-landing
+ruling: Trades is no longer the front door once a user has swiped. Operator chose to
+keep first-run users (`onboarding.trades_first` live, no first swipe) landing on
+Trades so the analyst guide is untouched. Flag `nav.home_tab` (default true, read
+once at mount) is the rollback; off ⇒ `nav.trades_landing` behavior exactly. No new
+analytics events. Mobile only. Landed 2026-10-08 after D-197, so the bar is Home · Rank ·
+Acquire · Calibration · Matches · League. [Plan](../docs/plans/home-tab/plan.md).
 ## D-197 — Calibration: in-app blind grading in the Draft tab's slot, open to every app user
 
 2026-10-02/05. Operator decisions. Value-core Gate 2 runs inside the app as the **Calibration** tab:

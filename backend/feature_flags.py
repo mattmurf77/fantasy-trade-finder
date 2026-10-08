@@ -326,6 +326,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # no route reads this key; TabNav decides once at mount. Registered here
     # so the flag ships through /api/feature-flags like every other key.
     "nav.trades_landing",
+    # Home tab (2026-10-02 operator ask, docs/plans/home-tab/plan.md) — a Home
+    # tab is first in the mobile bottom bar and is the launch tab for returning
+    # users; first-run users (onboarding.trades_first live, no first swipe yet)
+    # still land on Trades. Off = no Home tab, launch falls back to the
+    # nav.trades_landing behavior. CLIENT-ONLY: no route reads this key; TabNav
+    # decides once at mount. Registered here so the flag ships through
+    # /api/feature-flags like every other key.
+    "nav.home_tab",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",

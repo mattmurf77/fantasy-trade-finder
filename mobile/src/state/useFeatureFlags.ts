@@ -95,6 +95,12 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // Rank despite the ruling. A server `false` still kill-switches on the
   // next successful revalidate.
   'nav.trades_landing': true,
+  // `nav.home_tab`: the Home tab is first in the bar and is the launch tab
+  // for returning users (docs/plans/home-tab/plan.md). Read imperatively
+  // ONCE at mount by TabNav, same as the line above and for the same reason:
+  // absent here, a fresh install's first boot would see no Home tab. A
+  // server `false` kill-switches on the next launch after a revalidate.
+  'nav.home_tab': true,
   // `calc.canvas_results`: found ideas browse inside the merged canvas.
   // 2026-08-31 operator ruling 1 (D-171): OFF — the landing is the builder
   // only and results moved to the pushed deck (`calc.results_push` below).

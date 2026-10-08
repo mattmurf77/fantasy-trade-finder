@@ -19,6 +19,7 @@ import {
   PRIMARY_METHODS,
   type ChooserMethod,
 } from './rankChooserModel';
+import HomeScreen from '../screens/HomeScreen';
 import RankScreen from '../screens/RankScreen';
 import RankHomeScreen from '../screens/RankHomeScreen';
 import PickAnchorScreen from '../screens/PickAnchorScreen';
@@ -714,6 +715,29 @@ export default function TabNav() {
       : 'Rank',
   );
 
+  // The Home tab (flag `nav.home_tab`, docs/plans/home-tab/plan.md) — first
+  // in the bar, and the launch tab for returning users. Same two contracts
+  // as `showDraftTab` below: decided ONCE at mount (a conditional
+  // <Tab.Screen> rewrites the route array) and read IMPERATIVELY (a
+  // mid-session revalidation must not insert or remove a tab, or rewrite
+  // the launch tab, under the user). Flag off ⇒ no Home tab and `launchTab`
+  // is `initialTab` — the block above, untouched, is the whole flag-off app.
+  const [showHomeTab] = useState(
+    () => !!useFeatureFlags.getState().flags['nav.home_tab'],
+  );
+  // Operator decision 2026-10-02: first-run users still land on Trades.
+  // While `onboarding.trades_first` is live and the user has not swiped yet,
+  // every analyst-guide step is scripted against the Trades screen, so the
+  // carve-out defers to `initialTab` (which is 'Trades' in that state under
+  // either `nav.trades_landing` value). Everyone else opens on Home.
+  const [launchTab] = useState(() =>
+    showHomeTab &&
+    !(onboardingEnabled('onboarding.trades_first') &&
+      !getOnboardingState().firstSwipeDone)
+      ? 'Home'
+      : initialTab,
+  );
+
   // The seasonal Draft tab — ONE FLAG, nothing else (operator decision
   // 2026-08-06: "a flag we turn on and off to display the tab"). No league
   // qualification, no snapshot, no confidence check, no platform check.
@@ -774,7 +798,7 @@ export default function TabNav() {
           inset isn't double-counted. */}
       <TopBar />
       <Tab.Navigator
-        initialRouteName={initialTab}
+        initialRouteName={launchTab}
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
@@ -787,6 +811,21 @@ export default function TabNav() {
           tabBarLabelStyle: { fontFamily: fonts.uiSemi, fontSize: 11 },
         }}
       >
+        {/* The Home tab — first in the bar (Home · Rank · Acquire · [Calibration
+            | Draft] · Matches · League). A plain screen: no nested stack to pop and
+            nothing to scroll, so the listener only reports the tap. */}
+        {showHomeTab ? (
+          <Tab.Screen
+            name="Home"
+            component={HomeScreen}
+            options={{ tabBarIcon: tabIcon('home'), tabBarButtonTestID: 'tab.home' }}
+            listeners={({ navigation }) => ({
+              tabPress: () => {
+                trackTab('home', navigation);
+              },
+            })}
+          />
+        ) : null}
         <Tab.Screen
           name="Rank"
           component={RankStackNav}
@@ -867,7 +906,7 @@ export default function TabNav() {
           })}
         />
         {/* Third slot: Calibration (testers) takes it ahead of the seasonal Draft
-            tab, so the bar never exceeds five tabs. */}
+            tab, so the bar never exceeds six tabs (five with Home off). */}
         {showCalibrationTab ? (
           <Tab.Screen
             name="Calibration"

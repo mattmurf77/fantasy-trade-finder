@@ -1,3 +1,22 @@
+## 2026-10-02 — Home tab (`nav.home_tab`), built on `feat/home-tab`, not merged
+
+Scope block and plan preceded code ([scope](../docs/plans/home-tab/scope.md)). Two build
+agents, disjoint files. Evidence (D-056, no simulator; `FTF_SKIP_SIM_GATE=1` posture):
+new structural guard `mobile/tests/check-home-tab.js` 34/34; `check-canvas-results`
+(§10 trades-landing pins) and `check-rank-nav-exit` pass; `tsc --noEmit` clean;
+testid-lint OK; `pytest backend/tests` 7413 passed / 1 skipped in 640s (release.json
+mirror test included). Code walk: `TabNav.tsx` reads `nav.home_tab` once at mount
+(`showHomeTab`), `launchTab` returns `'Home'` unless `onboarding.trades_first` is live
+with no first swipe, else the untouched `initialTab`; `HomeScreen.tsx` `OPTIONS` maps the
+four rows to `navigate('Rank'|'Trades'|'Matches'|'League')`; `deepLinks.ts` adds
+`app/home`. Not run: hosted CI on the branch, and the 8-step TestFlight checklist in the
+scope block (six-tab bar fit is the main thing to eyeball).
+
+2026-10-08 rebase onto the Calibration ship (#312): `main` merged into the branch (conflicts:
+DECISIONS → Home renumbered D-198, TEST_LEDGER, nav README — all kept both sides). Re-run on
+the merged tree: `tsc --noEmit` clean; `check-home-tab` 34/34; `check-blind-grading` pass;
+`check-canvas-results`, `check-rank-nav-exit` pass; testid-lint OK; release.json mirror tests
+3/3. Full pytest left to hosted CI on PR #309.
 ## 2026-10-08 — ESPN picks fix (#314) live; operator's ESPN Calibration deck built
 
 - CI 4/4 green on head `3aa730c7`; merged as `4de823ad`; Render `dep-db3qilqd0e5s73b6tgfg` live 2026-10-08.

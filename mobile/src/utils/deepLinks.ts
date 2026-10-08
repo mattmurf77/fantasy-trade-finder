@@ -151,6 +151,11 @@ const V2_SCREENS = {
   Main: {
     path: 'app',
     screens: {
+      // Home tab (flag `nav.home_tab`). The tab is the one route TabNav
+      // renders conditionally, so with the flag off `app/home` resolves to
+      // a route no navigator holds and the navigate is dropped — nothing
+      // emits this path, and the app is already on its launch tab.
+      Home: 'home',
       Rank: {
         path: 'rank',
         screens: {

@@ -28,7 +28,8 @@ export type IconName =
   | 'swap'
   | 'flag'
   | 'upload'
-  | 'reload';
+  | 'reload'
+  | 'home';
 
 interface Props {
   name: IconName;
@@ -101,4 +102,7 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
   // mobile-only (no web ESPN-login surface exists to mirror this glyph in
   // web/style-guide.html).
   reload: <Path d="M16 5v4h-4M16.2 9a6.3 6.3 0 10-1.6 6.4" />,
+  // Home tab (flag `nav.home_tab`) — roof + walls + door. Mobile-only: web
+  // has no tab bar, so there is no web/style-guide.html glyph to mirror.
+  home: <Path d="M3 9l7-6 7 6M5 8v9h10V8M8 17v-5h4v5" />,
 };
