@@ -1,3 +1,8 @@
+## 2026-10-08 — ESPN picks fix (#314) live; operator's ESPN Calibration deck built
+
+- CI 4/4 green on head `3aa730c7`; merged as `4de823ad`; Render `dep-db3qilqd0e5s73b6tgfg` live 2026-10-08.
+- Targeted pre-generation for 313560442465169408 / 11896: session `open`, 40 cards (current 20 of 20 candidates, 0 dropped stale or unknown; value core 20, pool 346). 17/20 current and 16/20 value-core cards carry a PICK; before the fix the session was refused `too_few`.
+
 ## 2026-10-07b — Targeted pre-generation (#313) and ESPN picks fix (#314)
 
 - #313: `test_blind_grading_routes.py` 28 passed, incl. the new `test_admin_pregenerate_targets_refresh_then_build_each_pair`. Full local suite: 7598 passed, 1 skipped, with `test_rookie_scope.py` excluded. Its 6 failures reproduce on untouched `origin/main` locally (`reason: stale_player_cache` from the restored local data), so they are machine-specific. CI on the PR: 4/4 green.

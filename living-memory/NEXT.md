@@ -54,7 +54,7 @@
 Shipped server-side in PR #312 ([D-196](DECISIONS.md), [D-197](DECISIONS.md)). 1.18.0 (159/160) is in TestFlight. 11 sessions pre-generated, incl. targeted ones (#313).
 
 1. ~~Renew the iOS certificate and rebuild 1.18.0~~ **DONE 2026-10-07**: builds 159/160 in TestFlight.
-2. **Merge #314, deploy, then target the ESPN league** (`{"user_id":"313560442465169408","league_id":"11896"}`). *Why now:* the operator's ESPN league can't build a Calibration deck until it lands.
+2. ~~Merge #314, deploy, then target the ESPN league~~ **DONE 2026-10-08**: `4de823ad` live, ESPN 11896 session open (40 cards).
 3. **Get graders onto 1.18.0.** lofman was last seen on 1.16.11 and MangoPatti on 1.17.3. Bcork has never signed in. *Why now:* their decks are built, but the tab only exists on 1.18.0.
 4. **Run the TestFlight checklist** (`docs/plans/blind-grading/code-walk-mobile.md` §9). *Why now:* the only runtime evidence mobile gets.
 5. **Collect grades, then read Gate 2** (`GET /api/admin/grading/report`): does the value core grade ≥ today's engine? *Why now:* it decides whether `trade.value_core` turns on.
