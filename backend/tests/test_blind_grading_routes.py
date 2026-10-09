@@ -616,7 +616,8 @@ def test_admin_pregenerate_targets_refresh_then_build_each_pair(
         assert (r.status_code, r.get_json()["error"]) == (400, "invalid_body")
     assert calls == [] and names == []
     r = client.post(url, json={"targets": targets}, headers=hdr)
-    assert (r.status_code, r.get_json()) == (202, {"targets": 4, "rebuild": False})
+    assert (r.status_code, r.get_json()) == (202, {"targets": 4, "rebuild": False,
+                                                    "refresh_rosters": False})
     assert names == ["grading-pregenerate-targets"]
     assert calls == [
         ("refresh", "u1", "L1"), ("start", "u1", "u1", "L1"),
@@ -648,7 +649,8 @@ def test_admin_pregenerate_targets_rebuild_retires_before_start(client, monkeypa
     monkeypatch.setattr(server.threading, "Thread", _Inline)
     body = {"targets": [{"user_id": "u1", "league_id": "L1"}], "rebuild": True}
     r = client.post("/api/admin/grading/pregenerate", json=body, headers={"X-Cron-Secret": "s3cr3t"})
-    assert (r.status_code, r.get_json()) == (202, {"targets": 1, "rebuild": True})
+    assert (r.status_code, r.get_json()) == (202, {"targets": 1, "rebuild": True,
+                                                    "refresh_rosters": False})
     assert calls == ["refresh", ("retire", "u1", "L1"), "start"]
 
 
@@ -691,3 +693,49 @@ def test_admin_add_fit_arms_route(client, monkeypatch, flag_off, nobody_allowed)
     calls.clear()
     r = client.post(url, json={"targets": [{"user_id": "u2", "league_id": "L2"}]}, headers=hdr)
     assert r.get_json() == {"sessions": 1} and [c["session_id"] for c in calls] == ["s2"]
+
+
+def test_admin_pregenerate_targets_refresh_rosters_once_per_sleeper_league(client, monkeypatch,
+                                                                         flag_off, nobody_allowed):
+    """Operator 2026-10-09: "refresh_rosters": true re-reads each Sleeper league's rosters from
+    Sleeper before the deck refresh, once per league; other platforms are left alone."""
+    monkeypatch.setattr(server, "_CRON_SECRET", "s3cr3t")
+    calls: list = []
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        lambda lid: {"platform": "mfl" if lid == "M1" else None})
+    monkeypatch.setattr(server, "_refresh_sleeper_members", lambda lid: calls.append(("roster", lid)) or 12)
+    monkeypatch.setattr(server, "_replenish_deck_for", lambda u, l: calls.append(("refresh", u, l)) or (30, 0))
+    monkeypatch.setattr(bg, "start_session", lambda **kw: {"session": {"session_id": "s"},
+                                                           "resumed": True, "needs_build": False})
+    real_thread = server.threading.Thread
+
+    class _Inline(real_thread):
+        def start(self):
+            self.run() if self.name == "grading-pregenerate-targets" else super().start()
+
+    monkeypatch.setattr(server.threading, "Thread", _Inline)
+    body = {"targets": [{"user_id": "u1", "league_id": "L1"}, {"user_id": "u2", "league_id": "L1"},
+                        {"user_id": "u3", "league_id": "M1"}], "refresh_rosters": True}
+    r = client.post("/api/admin/grading/pregenerate", json=body, headers={"X-Cron-Secret": "s3cr3t"})
+    assert r.get_json() == {"targets": 3, "rebuild": False, "refresh_rosters": True}
+    assert calls == [("roster", "L1"), ("refresh", "u1", "L1"), ("refresh", "u2", "L1"),
+                     ("refresh", "u3", "M1")]
+
+
+def test_refresh_sleeper_members_upserts_owner_rosters(monkeypatch):
+    """Rosters + users from Sleeper become league_members rows keyed by owner_id; an empty
+    response writes nothing."""
+    feeds = {"/rosters": [{"owner_id": "o1", "players": [1, "2"]}, {"owner_id": None, "players": ["3"]},
+                          {"owner_id": "o2", "players": None}],
+             "/users": [{"user_id": "o1", "display_name": "Ann"}, {"user_id": "o2", "username": "bo"}]}
+    monkeypatch.setattr(server, "_sleeper_get", lambda url, timeout=15: feeds["/" + url.rsplit("/", 1)[1]])
+    written: list = []
+    monkeypatch.setattr(server, "upsert_league_members", lambda league_id, members: written.append((league_id, members)))
+    monkeypatch.setattr(server, "_invalidate_league_members_cache", lambda lid: written.append(("inv", lid)))
+    assert server._refresh_sleeper_members("L9") == 2
+    assert written[0] == ("L9", [{"user_id": "o1", "username": "Ann", "display_name": "Ann", "player_ids": ["1", "2"]},
+                                 {"user_id": "o2", "username": "bo", "display_name": "bo", "player_ids": []}])
+    assert written[1] == ("inv", "L9")
+    feeds["/rosters"] = []
+    written.clear()
+    assert server._refresh_sleeper_members("L9") == 0 and written == []

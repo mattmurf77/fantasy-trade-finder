@@ -27119,16 +27119,47 @@ def grading_results_route(session_id: str):
         return _grading_error(err)
 
 
-def _pregenerate_grading_targets(pairs: list[tuple[str, str]], rebuild: bool = False) -> None:
+def _refresh_sleeper_members(league_id: str) -> int:
+    """Server-side roster refresh for one Sleeper league (operator 2026-10-09): rosters and
+    users from Sleeper's public API upserted into league_members in session_init's shape
+    (user_id = roster owner_id, name = the owner's display name, player_ids = every rostered
+    id incl. taxi/IR). Rosters otherwise refresh only when a member opens the league in the
+    app. Returns members written; 0 leaves the stored rows untouched."""
+    rosters = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/rosters") or []
+    users = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/users") or []
+    names = {str(u.get("user_id")): (u.get("display_name") or u.get("username") or "")
+             for u in users if isinstance(u, dict)}
+    members = [{"user_id": str(r["owner_id"]), "username": names.get(str(r["owner_id"]), ""),
+                "display_name": names.get(str(r["owner_id"]), ""),
+                "player_ids": [str(x) for x in (r.get("players") or [])]}
+               for r in rosters if isinstance(r, dict) and r.get("owner_id")]
+    if not members:
+        return 0
+    upsert_league_members(league_id=league_id, members=members)
+    _invalidate_league_members_cache(league_id)
+    return len(members)
+
+
+def _pregenerate_grading_targets(pairs: list[tuple[str, str]], rebuild: bool = False,
+                                 refresh_rosters: bool = False) -> None:
     """Daemon-thread half of targeted pre-generation (operator 2026-10-07). Per
     (user_id, league_id), sequentially: refresh the Acquire deck with the weekly
     replenishment path (_replenish_deck_for — headless session, the normal trade job,
     impressions logged with source "replenish"), then start_session + build exactly
     as the bulk path does. rebuild=True first retires the pair's unanswered building/open
     session (blind_grading.retire_unanswered), so it is rebuilt on the current engine.
+    refresh_rosters=True first re-reads a Sleeper league's rosters from Sleeper (once per
+    league per run), so a league nobody has opened lately is not built on old rosters.
     A pair that fails is logged and skipped; never raises."""
+    refreshed: set[str] = set()
     for user_id, league_id in pairs:
         try:
+            if refresh_rosters and league_id not in refreshed:
+                refreshed.add(league_id)
+                platform = (get_league_draft_context(league_id) or {}).get("platform")
+                if (platform or "sleeper") == "sleeper":
+                    log.info("blind-grading: target rosters refreshed league=%s members=%d",
+                             league_id, _refresh_sleeper_members(league_id))
             if _replenish_deck_for(user_id, league_id) is None:
                 log.warning("blind-grading: target deck refresh failed user=%s league=%s",
                             user_id, league_id)
@@ -27163,7 +27194,8 @@ def admin_grading_pregenerate_route():
     Optional body {"targets": [{"user_id", "league_id"}, ...]} (operator 2026-10-07):
     build for exactly those pairs instead, refreshing each one's Acquire deck first, so
     a user whose deck is missing or older than MAX_DECK_AGE_DAYS still gets one. With
-    "rebuild": true, each pair's unanswered building/open session is retired and rebuilt."""
+    "rebuild": true, each pair's unanswered building/open session is retired and rebuilt;
+    with "refresh_rosters": true, each Sleeper league's rosters are re-read from Sleeper first."""
     _require_cron_auth()
     body = request.get_json(silent=True)
     if isinstance(body, dict) and "targets" in body:
@@ -27174,10 +27206,12 @@ def admin_grading_pregenerate_route():
             return jsonify({"error": "invalid_body", "message":
                             "targets must be a non-empty list of {user_id, league_id}"}), 400
         rebuild = body.get("rebuild") is True
-        threading.Thread(target=_pregenerate_grading_targets, args=(pairs, rebuild),
+        refresh = body.get("refresh_rosters") is True
+        threading.Thread(target=_pregenerate_grading_targets, args=(pairs, rebuild, refresh),
                          name="grading-pregenerate-targets", daemon=True).start()
-        log.info("blind-grading: pregenerate targets=%d rebuild=%s", len(pairs), rebuild)
-        return jsonify({"targets": len(pairs), "rebuild": rebuild}), 202
+        log.info("blind-grading: pregenerate targets=%d rebuild=%s refresh_rosters=%s",
+                 len(pairs), rebuild, refresh)
+        return jsonify({"targets": len(pairs), "rebuild": rebuild, "refresh_rosters": refresh}), 202
     out = _blind_grading.pregenerate()
     jobs = out["to_build"]
     if jobs:

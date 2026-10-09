@@ -350,7 +350,7 @@ The guard is not a distributed lock — two genuinely simultaneous requests on s
 
 ## `league_members`
 
-Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`.
+Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, keyed by roster `owner_id`) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
 
 For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 
