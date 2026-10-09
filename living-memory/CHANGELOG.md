@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-10-09 — Value core v2 (D-199) shipped; 12 Calibration decks rebuilt; fit-scorecard test planned
+
+- Round 1 read (operator only, 120 cards, 3 Sleeper leagues): today's engine 2.55, value core 2.40 (target 4.0). The value core fixed junk filler (32 tags → 2) but drew 27 "overpay" tags. The strongest predictor was breaking up the user's best piece (< 70%: 13–23% would-send).
+- #315 (`73d41b89`, Render `dep-db4gnjbbc2fs73bo98kg`, live 2026-10-09 15:45 UTC): `value-core-2` adds the `breakup` (viewer side, 0.70) and `picks_for_players` (any rebuilding team) hard rules. Pregenerate targets accept `"rebuild": true` (retires unanswered sessions as `superseded`).
+- Rebuilt 12 sessions (operator ×4 incl. ESPN, 8 others): all `open`, 40 cards, value-core pools 130–663. Read round 2 with `report?since=2026-10-09T15:45:45`.
+- Operator proposed fit-first generation; plan doc "Fit Scorecard Test Plan" (claude.ai/code/artifact/8886e24e-2cb7-482e-b263-dcf7b749c1f4) awaits sign-off on the v0 multipliers.
+
 ## 2026-10-08 — Home tab shipped (#309); Render live; iOS 1.19.0 build 161 submitted
 
 **What:** a Home tab, first in the bottom bar (Home · Rank · Acquire · Calibration · Matches · League), asking "What would you like to do today?" with four plain-text options (Rank, Find a Trade, See Matches, View my Leagues → League tab). Returning users launch on Home; first-run users (`onboarding.trades_first`, no first swipe yet) still land on Trades. Flag `nav.home_tab` (default true, read once at mount) is the rollback. Mobile only; no new events, routes or schema. [D-198](DECISIONS.md), [plan + scope](../docs/plans/home-tab/).

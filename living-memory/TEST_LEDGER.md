@@ -1,3 +1,10 @@
+## 2026-10-09 — Value core v2 (#315): rules, rebuild path, replay evidence
+
+- CI 4/4 green on `3a247685`. Local full suite 7603 passed, 1 skipped (`test_rookie_scope.py` excluded: machine-local stale player cache, also failing on `main`). Value-core + grading suites 214 passed, incl. `test_breakup_viewer_keeps_best_piece`, `test_rebuilders_never_trade_picks_for_players`, `test_retire_unanswered_only_retires_untouched_sessions` and `test_admin_pregenerate_targets_rebuild_retires_before_start`.
+- Replay on graded round-1 value-core cards: breakup would remove 26 (mean 2.00), picks rule 5 (mean 2.60); the 29 kept average 2.72.
+- Replay on the operator's 4 live leagues (read-only prod, old vs new config): decks 130–479 ranked cards, 11–13 partners in the first 20, no budget hit. Rebuilder-league pools shrink ~15×, mostly the picks rule (7–9 of 12–14 teams inferred rebuilding).
+- Prod: 12 targeted rebuilds, 9 sessions retired `superseded`, 12 new `open` sessions with 40 cards each (20/20, 0 dropped). One-ESPN check: the rebuilt 11896 session has pool 130.
+
 ## 2026-10-02 — Home tab (`nav.home_tab`), built on `feat/home-tab`, not merged
 
 Scope block and plan preceded code ([scope](../docs/plans/home-tab/scope.md)). Two build
