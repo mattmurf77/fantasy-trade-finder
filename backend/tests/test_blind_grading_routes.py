@@ -650,3 +650,44 @@ def test_admin_pregenerate_targets_rebuild_retires_before_start(client, monkeypa
     r = client.post("/api/admin/grading/pregenerate", json=body, headers={"X-Cron-Secret": "s3cr3t"})
     assert (r.status_code, r.get_json()) == (202, {"targets": 1, "rebuild": True})
     assert calls == ["refresh", ("retire", "u1", "L1"), "start"]
+
+
+def test_admin_add_fit_arms_route(client, monkeypatch, flag_off, nobody_allowed):
+    """Operator 2026-10-09: cron-secret only; folds the fit arms into every OPEN session (or the
+    targets given) on one daemon thread, projections fetched once per scoring format."""
+    import backend.database as database
+    import backend.fit_engine as fe
+
+    monkeypatch.setattr(server, "_CRON_SECRET", "s3cr3t")
+    rows = [{"session_id": "s1", "user_id": "u1", "league_id": "L1",
+             "source_json": json.dumps({"scoring_format": "1qb_ppr"})},
+            {"session_id": "s2", "user_id": "u2", "league_id": "L2",
+             "source_json": json.dumps({"scoring_format": "1qb_ppr"})}]
+    monkeypatch.setattr(database, "list_open_grading_sessions", lambda: list(rows))
+    fetched: list = []
+    monkeypatch.setattr(fe, "fetch_ros_points",
+                        lambda fetch, fmt, **kw: fetched.append(fmt) or {"weeks": 13, "points": {"p": 1.0}})
+    monkeypatch.setattr(server, "get_league_draft_context", lambda league_id: {"platform": None})
+    monkeypatch.setattr(server, "_grading_server_inputs", lambda sess, league_id: "SERVER")
+    calls: list = []
+    monkeypatch.setattr(bg, "add_fit_arms", lambda **kw: calls.append(kw) or {"status": "added"})
+    real_thread = server.threading.Thread
+
+    class _Inline(real_thread):
+        def start(self):
+            self.run() if self.name == "grading-fit-arms" else super().start()
+
+    monkeypatch.setattr(server.threading, "Thread", _Inline)
+    url, hdr = "/api/admin/grading/add-fit-arms", {"X-Cron-Secret": "s3cr3t"}
+    assert client.post(url).status_code == 401
+    r = client.post(url, json={"targets": []}, headers=hdr)
+    assert (r.status_code, r.get_json()["error"]) == (400, "invalid_body")
+    assert calls == []
+    r = client.post(url, headers=hdr)
+    assert (r.status_code, r.get_json()) == (202, {"sessions": 2})
+    assert [c["session_id"] for c in calls] == ["s1", "s2"] and fetched == ["1qb_ppr"]
+    assert calls[0]["server"] == "SERVER" and calls[0]["ros_points"] == {"p": 1.0}
+    assert calls[0]["ros_meta"] == {"weeks": 13}
+    calls.clear()
+    r = client.post(url, json={"targets": [{"user_id": "u2", "league_id": "L2"}]}, headers=hdr)
+    assert r.get_json() == {"sessions": 1} and [c["session_id"] for c in calls] == ["s2"]

@@ -27,6 +27,9 @@ log = logging.getLogger(__name__)
 
 VERSION = "blind-grading-1"
 ARMS: tuple[str, ...] = ("current", "value_core")
+# Folded into open sessions after the build by add_fit_arms (operator, 2026-10-09). Not built by
+# build_session, so a session's base arms stay ARMS; summaries list them only when present.
+FIT_ARMS: tuple[str, ...] = ("fit_a", "fit_b")
 TAGS: tuple[str, ...] = ("overpay", "they_wont_accept", "junk_filler", "too_small",
                          "wrong_for_my_window", "wrong_for_their_window", "same_guy_again")
 PER_ARM = 20            # cards taken from each arm
@@ -105,6 +108,96 @@ def retire_unanswered(*, user_id: str, league_id: str) -> str | None:
                                      json.dumps({"code": "superseded"}, sort_keys=True)):
         return None
     return row["session_id"]
+
+
+def add_fit_arms(*, session_id: str, server: ServerInputs, ros_points: Mapping[str, float],
+                 ros_meta: Mapping | None = None, now: datetime | None = None) -> dict:
+    """Fold the fit arms (operator, 2026-10-09: "fold them into the existing calibration decks")
+    into one OPEN session: run fit_engine's two generators for the session's seat, merge each
+    card with an existing one of the same trade (the arm is added to its arms_json) or add it,
+    then re-shuffle every unanswered card with the new ones into the positions after the
+    answered ones, so the new arms are blind-mixed and nothing answered moves. Idempotent:
+    a session whose source already has the fit arms, or that is not open, is left alone.
+    Returns {"status": "added" | "skipped", ...counts}. Raises nothing it can catch."""
+    from backend import fit_engine as fe
+
+    row = db.load_grading_session(session_id)
+    if row is None or row["status"] != "open":
+        return {"status": "skipped", "reason": "not_open"}
+    source = json.loads(row["source_json"])
+    if any(arm in source for arm in FIT_ARMS):
+        return {"status": "skipped", "reason": "already_added"}
+    now = now or datetime.now(timezone.utc)
+    seat = source["seat"]
+    inputs, _, catalog = _league_inputs(row["league_id"], seat, now)
+    _, snapshot, request = _seat_snapshot(inputs, seat, server)
+    league = fe.build_league(snapshot)
+    grades = fe.build_grades(league, ros_points, snapshot.scoring_format)
+    new_cards: list[ArmCard] = []
+    metas: dict[str, dict] = {}
+    for arm in FIT_ARMS:
+        scorer = fe.Scorer(arm, league, request, grades if arm == "fit_b" else None)
+        trades, diag = fe.generate(snapshot, request, scorer)
+        deck = fe.assemble(trades, snapshot)
+        kept = [t for t in deck if all(i in catalog.assets for i in (*t.give, *t.receive))]
+        new_cards += [ArmCard(arm, t.partner_team_id, tuple(t.give), tuple(t.receive),
+                              {"deck_position": i, "gain_viewer": t.gain_viewer,
+                               "gain_partner": t.gain_partner})
+                      for i, t in enumerate(kept)]
+        metas[arm] = {"version": fe.VERSIONS[arm], "pool": len(trades), "cards": len(kept),
+                      "dropped_unknown": len(deck) - len(kept), "diag": diag,
+                      "ros": dict(ros_meta or {})}
+    existing = db.load_grading_cards(session_id)
+    name_to_id = {v: k for k, v in catalog.partner_names.items()}
+
+    def key_of(c: Mapping) -> tuple:
+        t = json.loads(c["trade_json"])
+        return (name_to_id.get(t["partner_name"], t["partner_name"]),
+                frozenset(a["id"] for a in t["give"]), frozenset(a["id"] for a in t["receive"]))
+
+    by_key = {key_of(c): c for c in existing}
+    arms_updates: dict[str, dict] = {}
+    fresh: dict[tuple, dict] = {}
+    for c in new_cards:
+        hit = by_key.get(c.key)
+        if hit is not None:
+            arms = arms_updates.setdefault(hit["card_id"], _as_json(hit["arms_json"]))
+            arms.setdefault(c.arm, dict(c.provenance))
+        else:
+            m = fresh.setdefault(c.key, {"partner_id": c.partner_id, "give": c.give,
+                                         "receive": c.receive, "arms": {}})
+            m["arms"].setdefault(c.arm, dict(c.provenance))
+    answered = [c for c in existing if c["grade"] is not None or c["skipped"]]
+    moving = [c["card_id"] for c in existing if not (c["grade"] is not None or c["skipped"])]
+    inserts = [{"card_id": new_id(), "session_id": session_id, "user_id": row["user_id"],
+                "arms_json": json.dumps(m["arms"], sort_keys=True),
+                "trade_json": json.dumps(neutral_trade(m["partner_id"], m["give"], m["receive"],
+                                                       catalog), sort_keys=True),
+                "grade": None, "skipped": 0, "tags_json": "[]", "graded_at": None}
+               for m in fresh.values()]
+    total = len(existing) + len(inserts)
+    taken = {int(c["position"]) for c in answered}
+    free = [p for p in range(1, total + 1) if p not in taken]
+    slots = moving + [c["card_id"] for c in inserts]
+    random.Random(int(row["seed"]) ^ 0x5F17).shuffle(slots)
+    position = dict(zip(slots, free))
+    for c in inserts:
+        c["position"] = position[c["card_id"]]
+    counts = json.loads(row["counts_json"])
+    counts.update({"total": total, **{arm: metas[arm]["cards"] for arm in FIT_ARMS},
+                   "fit_merged": sum(1 for c in new_cards if c.key in by_key)})
+    source.update(metas)
+    ok = db.fold_grading_cards(
+        session_id, inserts=inserts,
+        positions={cid: position[cid] for cid in moving},
+        arms_updates={cid: json.dumps(a, sort_keys=True) for cid, a in arms_updates.items()},
+        counts_json=json.dumps(counts, sort_keys=True), source_json=json.dumps(source, sort_keys=True))
+    if not ok:
+        return {"status": "skipped", "reason": "changed_during_fold"}
+    log.info("blind-grading: fit arms session=%s added=%d merged=%d total=%d", session_id,
+             len(inserts), counts["fit_merged"], total)
+    return {"status": "added", "inserted": len(inserts), "merged": counts["fit_merged"],
+            "total": total, **{arm: metas[arm]["cards"] for arm in FIT_ARMS}}
 
 
 def pregenerate(*, now: datetime | None = None) -> dict:
@@ -307,7 +400,7 @@ class Catalog:
 
 @dataclass(frozen=True)
 class ArmCard:
-    arm: str                          # "current" | "value_core"
+    arm: str                          # "current" | "value_core" | a FIT_ARMS arm
     partner_id: str                   # league identity (league_members.user_id)
     give: tuple[str, ...]
     receive: tuple[str, ...]
@@ -462,25 +555,11 @@ def run_value_core(inputs: Mapping, *, seat: str, server: ServerInputs,
     MIN_PER_ARM usable cards ⇒ value_core_too_few 409."""
     from backend.eval import value_core_bench as bench
     from backend.value_core import pipeline
-    from backend.value_core.types import ENGINE_VERSION, CoreConfig, RankConfig, Request
+    from backend.value_core.types import ENGINE_VERSION, CoreConfig, RankConfig
 
     core_cfg, rank_cfg = CoreConfig(), RankConfig()
     try:
-        record = bench.league_record(**inputs, meta=None, state=None)
-        if server.lineup_slots:
-            record["lineup_slots"] = list(server.lineup_slots)
-        record["max_players"] = server.max_players
-        record["standings"] = {str(uid): {"wins": s.wins, "losses": s.losses, "ties": s.ties,
-                                          "points_for": s.points_for}
-                               for uid, s in server.standings.items()}
-        record["completed_weeks"] = int(server.completed_weeks)
-        snapshot, board = bench.snapshot_for_seat(record, seat,
-                                                  standings_weight=bench.DEFAULT_STANDINGS_WEIGHT)
-        request = Request(
-            viewer_team_id=seat, board=board,
-            untouchable_ids=frozenset(i for i in server.untouchable_ids if i in snapshot.assets),
-            not_interested_ids=frozenset(i for i in server.not_interested_ids
-                                         if i in snapshot.assets))
+        record, snapshot, request = _seat_snapshot(inputs, seat, server)
         result = (engine or pipeline.run)(snapshot, request, core_cfg, rank_cfg)
         cards: list[ArmCard] = []
         dropped_unknown = 0
@@ -507,6 +586,31 @@ def run_value_core(inputs: Mapping, *, seat: str, server: ServerInputs,
             "budget_exhausted": result.core.budget_exhausted,
             "dropped_unknown": dropped_unknown}
     return cards, meta
+
+
+def _seat_snapshot(inputs: Mapping, seat: str, server: ServerInputs):
+    """(record, snapshot, request) for the seat: the bench's league_record with the serving
+    path's league facts from ServerInputs, then snapshot_for_seat. Shared by the value-core
+    arm and the fit arms, so every engine judges the same league."""
+    from backend.eval import value_core_bench as bench
+    from backend.value_core.types import Request
+
+    record = bench.league_record(**inputs, meta=None, state=None)
+    if server.lineup_slots:
+        record["lineup_slots"] = list(server.lineup_slots)
+    record["max_players"] = server.max_players
+    record["standings"] = {str(uid): {"wins": s.wins, "losses": s.losses, "ties": s.ties,
+                                      "points_for": s.points_for}
+                           for uid, s in server.standings.items()}
+    record["completed_weeks"] = int(server.completed_weeks)
+    snapshot, board = bench.snapshot_for_seat(record, seat,
+                                              standings_weight=bench.DEFAULT_STANDINGS_WEIGHT)
+    request = Request(
+        viewer_team_id=seat, board=board,
+        untouchable_ids=frozenset(i for i in server.untouchable_ids if i in snapshot.assets),
+        not_interested_ids=frozenset(i for i in server.not_interested_ids
+                                     if i in snapshot.assets))
+    return record, snapshot, request
 
 
 def neutral_trade(partner_id: str, give: Sequence[str], receive: Sequence[str],
@@ -609,7 +713,8 @@ def summarize(graded: Sequence[tuple[int, Sequence[str]]]) -> dict:
 
 
 def arm_summaries(cards: Sequence[Mapping]) -> tuple[dict, int]:
-    """({arm: {"cards", "skipped", **summarize(graded)}} for arm in ARMS, shared_count).
+    """({arm: {"cards", "skipped", **summarize(graded)}} for arm in ARMS, plus each FIT_ARMS
+    arm some card carries, shared_count).
     A card credits every arm key in its arms_json; graded = (grade, tags) for cards with a
     grade. The only reader of arms_json besides report()."""
     buckets = {arm: {"cards": 0, "skipped": 0, "graded": []} for arm in ARMS}
@@ -621,6 +726,8 @@ def arm_summaries(cards: Sequence[Mapping]) -> tuple[dict, int]:
         tags = json.loads(c["tags_json"]) if isinstance(c["tags_json"], str) else list(c["tags_json"] or [])
         for arm in arms:
             b = buckets.get(arm)
+            if b is None and arm in FIT_ARMS:
+                b = buckets[arm] = {"cards": 0, "skipped": 0, "graded": []}
             if b is None:
                 continue
             b["cards"] += 1

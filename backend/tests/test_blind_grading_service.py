@@ -838,3 +838,66 @@ def test_retire_unanswered_only_retires_untouched_sessions(engine):
     bg.answer_card(user_id="u1", card_id=card["card_id"], body={"grade": 4})
     assert bg.retire_unanswered(user_id="u1", league_id="L1") is None      # answered: kept
     assert db.load_grading_session(fresh)["status"] == "open"
+
+
+def test_add_fit_arms_folds_blind_and_keeps_answered_cards(engine, monkeypatch):
+    """Operator 2026-10-09: fold the fit arms into an OPEN session. Answered cards keep their
+    positions; unanswered + new cards are re-shuffled into the rest; a fit card equal to an
+    existing trade is merged into it (arm added); two fit arms producing the same new trade
+    share one card; idempotent; a session that is not open is left alone."""
+    from backend import fit_engine as fe
+
+    seed_current_deck(engine)
+    sid = start_and_build(engine)                                  # 39 cards, positions 1..39
+    first = [db.load_next_grading_card(sid) for _ in range(1)][0]
+    bg.answer_card(user_id="u1", card_id=first["card_id"], body={"grade": 5})
+    second = db.load_next_grading_card(sid)
+    bg.answer_card(user_id="u1", card_id=second["card_id"], body={"skip": True})
+    answered = {first["card_id"]: first["position"], second["card_id"]: second["position"]}
+
+    extra = trades_for("u1")[40:43]
+    ft = lambda t: fe.FitTrade(t[0], tuple(t[1]), tuple(t[2]), 0.2, 0.1, 0.1)
+    produced = {"fit_a": [ft(CURRENT[0]), ft(extra[0]), ft(extra[1])],
+                "fit_b": [ft(extra[0]), ft(extra[2])]}
+    monkeypatch.setattr(fe, "generate", lambda snap, req, scorer: (produced[scorer.arm], {"stub": 1}))
+    monkeypatch.setattr(fe, "assemble", lambda trades, snap, size=fe.DECK_SIZE: list(trades))
+
+    out = bg.add_fit_arms(session_id=sid, server=SERVER, ros_points={}, ros_meta={"weeks": 13}, now=NOW)
+    assert out == {"status": "added", "inserted": 3, "merged": 1, "total": 42, "fit_a": 3, "fit_b": 2}
+    cards = db.load_grading_cards(sid)
+    assert sorted(c["position"] for c in cards) == list(range(1, 43))
+    assert {c["card_id"]: c["position"] for c in cards if c["card_id"] in answered} == answered
+    by_trade = {}
+    for c in cards:
+        t = json.loads(c["trade_json"])
+        by_trade[(frozenset(a["id"] for a in t["give"]), frozenset(a["id"] for a in t["receive"]))] = c
+    key = lambda t: (frozenset(t[1]), frozenset(t[2]))
+    assert set(json.loads(by_trade[key(CURRENT[0])]["arms_json"])) == {"current", "fit_a"}
+    assert set(json.loads(by_trade[key(extra[0])]["arms_json"])) == {"fit_a", "fit_b"}
+    assert set(json.loads(by_trade[key(extra[2])]["arms_json"])) == {"fit_b"}
+    assert NEUTRAL_KEYS >= set(json.loads(by_trade[key(extra[2])]["trade_json"])["give"][0])
+    row = db.load_grading_session(sid)
+    source, counts = json.loads(row["source_json"]), json.loads(row["counts_json"])
+    assert source["fit_a"]["version"] == fe.VERSIONS["fit_a"] and source["fit_b"]["ros"] == {"weeks": 13}
+    assert (counts["total"], counts["fit_a"], counts["fit_b"], counts["fit_merged"]) == (42, 3, 2, 1)
+    arms, _ = bg.arm_summaries(cards)
+    assert list(arms) == ["current", "value_core", "fit_a", "fit_b"]
+    assert (arms["fit_a"]["cards"], arms["fit_a"]["n"], arms["fit_b"]["cards"]) == (3, 0, 2)
+    assert db.grading_progress(sid) == {"answered": 2, "total": 42}
+    # Idempotent, and never on a session that is not open.
+    assert bg.add_fit_arms(session_id=sid, server=SERVER, ros_points={}, now=NOW)["reason"] == "already_added"
+    assert db.retire_grading_session(sid, "{}") is False                  # answered: not retirable
+    assert bg.add_fit_arms(session_id="nope", server=SERVER, ros_points={}, now=NOW)["reason"] == "not_open"
+
+
+def test_fold_aborts_when_a_moving_card_was_answered(engine):
+    """The guard: a card the fold would move that got answered meanwhile -> nothing written."""
+    seed_current_deck(engine)
+    sid = start_and_build(engine)
+    card = db.load_next_grading_card(sid)
+    bg.answer_card(user_id="u1", card_id=card["card_id"], body={"grade": 2})
+    before = sorted((c["card_id"], c["position"]) for c in db.load_grading_cards(sid))
+    assert db.fold_grading_cards(sid, inserts=[], positions={card["card_id"]: 39},
+                                 arms_updates={}, counts_json="{}", source_json="{}") is False
+    assert sorted((c["card_id"], c["position"]) for c in db.load_grading_cards(sid)) == before
+    assert json.loads(db.load_grading_session(sid)["counts_json"]) != {}
