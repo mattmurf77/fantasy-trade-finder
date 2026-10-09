@@ -510,7 +510,7 @@ curl -X POST -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json
   "$FTF_PROD/api/admin/grading/pregenerate"
 ```
 
-→ `202 {"targets": n}`. A refresh is a full trade job (tens of seconds each on the one worker), so keep the list short and don't deploy while it runs — a restart kills the daemon thread (re-POST to finish; open sessions are resumed). Check with `include_open=1` below; a pair that failed is logged as `blind-grading: target …`. The refreshed deck is also what the user sees in Acquire, like any weekly refresh.
+→ `202 {"targets": n, "rebuild": false}`. After an engine change, add `"rebuild": true` to replace each pair's **unanswered** session with one built on the new engine (a session with any graded or skipped card is kept; the retired one becomes `failed` / `superseded`). Read the new engine's results with `report?since=<deploy time>`. A refresh is a full trade job (tens of seconds each on the one worker), so keep the list short and don't deploy while it runs — a restart kills the daemon thread (re-POST to finish; open sessions are resumed). Check with `include_open=1` below; a pair that failed is logged as `blind-grading: target …`. The refreshed deck is also what the user sees in Acquire, like any weekly refresh.
 
 **3. Read the report** once the graders are done. Completed sessions only by default:
 

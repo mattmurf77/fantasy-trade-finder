@@ -15359,6 +15359,23 @@ def fail_grading_session(session_id: str, error_json: str) -> bool:
     return bool(res.rowcount)
 
 
+def retire_grading_session(session_id: str, error_json: str) -> bool:
+    """Flip a 'building' or 'open' session to 'failed' with error_json, only while none of its
+    cards is answered (graded or skipped) — one guarded UPDATE, so a grader's first answer
+    and a retire cannot both win. False when it was not retirable. Targeted rebuilds only."""
+    gs, gc = grading_sessions_table, grading_cards_table
+    answered = (select(gc.c.card_id)
+                .where(gc.c.session_id == session_id,
+                       or_(gc.c.grade.isnot(None), gc.c.skipped != 0))
+                .exists())
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(gs)
+            .where(gs.c.session_id == session_id, gs.c.status.in_(["building", "open"]), ~answered)
+            .values(status="failed", error_json=error_json))
+    return bool(res.rowcount)
+
+
 def load_open_grading_session(user_id: str, league_id: str,
                               statuses: tuple = ("building", "open")) -> dict | None:
     """Newest session for (user_id, league_id) whose status is in `statuses`, by created_at.

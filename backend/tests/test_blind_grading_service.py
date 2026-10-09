@@ -336,7 +336,7 @@ def test_run_value_core_feeds_bench_snapshot_with_default_config(engine):
     assert snapshot.teams["u1"].window.pf_index is not None
     assert len(cards) == 20 and all(c.arm == "value_core" for c in cards)
     assert cards[0].provenance == {"deck_position": 0, "reasons": ["Fair on value"]}
-    assert meta["engine_version"] == "value-core-1" and meta["core"]["band"] == 0.2
+    assert meta["engine_version"] == "value-core-2" and meta["core"]["band"] == 0.2
     assert meta["pool"] == 20 and meta["elapsed_ms"] == 5 and meta["budget_exhausted"] is False
     assert meta["completed_weeks"] == 8 and meta["max_players"] == 12
     assert meta["lineup_slots"] == list(server.lineup_slots)
@@ -455,7 +455,7 @@ def test_build_session_end_to_end(engine):
     source = json.loads(session["source_json"])
     assert source["current"] == {"deck_job_id": "J1", "served_at": SERVED}
     assert source["value_core"]["core"]["band"] == 0.2
-    assert source["value_core"]["engine_version"] == "value-core-1"
+    assert source["value_core"]["engine_version"] == "value-core-2"
     assert source["seat"] == "u1" and source["version"] == "blind-grading-1"
     view = bg.current_session(user_id="u1", league_id="L1")["session"]
     assert view["status"] == "open" and view["progress"] == {"answered": 0, "total": 39}
@@ -821,3 +821,20 @@ def test_pregenerate_starts_a_session_per_fresh_candidate(engine):
     assert [(j["user_id"], j["league_id"]) for j in out["to_build"]] == [("u1", "L1")]
     again = bg.pregenerate(now=NOW)                                # still building: re-kicked
     assert [j["session_id"] for j in again["to_build"]] == [out["to_build"][0]["session_id"]]
+
+
+def test_retire_unanswered_only_retires_untouched_sessions(engine):
+    """Targeted rebuild (operator 2026-10-09): an open session nobody has answered is retired
+    as failed/superseded and the next start builds a fresh one; one answered card keeps it."""
+    seed_current_deck(engine)
+    sid = start_and_build(engine)
+    assert bg.retire_unanswered(user_id="u1", league_id="L1") == sid
+    row = db.load_grading_session(sid)
+    assert row["status"] == "failed" and json.loads(row["error_json"]) == {"code": "superseded"}
+    assert bg.retire_unanswered(user_id="u1", league_id="L1") is None      # nothing open now
+    fresh = start_and_build(engine, seed=12)
+    assert fresh != sid and db.load_grading_session(fresh)["status"] == "open"
+    card = db.load_next_grading_card(fresh)
+    bg.answer_card(user_id="u1", card_id=card["card_id"], body={"grade": 4})
+    assert bg.retire_unanswered(user_id="u1", league_id="L1") is None      # answered: kept
+    assert db.load_grading_session(fresh)["status"] == "open"

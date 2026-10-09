@@ -95,3 +95,32 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
   - the bench guardrail numbers on the frozen bench leagues, once the operator has frozen them.
 - **TestFlight verification:** the checklist in §3, run by the operator with the flag on for testers only. The outcome is logged in TEST_LEDGER.
 - **Express lane declared by the operator?** **No.** This change touches a feature-flag surface, model_config keys and the analytics payload, so full gates apply.
+
+---
+
+## Addendum 2026-10-09 — value-core-2: `breakup` and `picks_for_players`
+
+**Entry point:** direct ask. The first Calibration round was read with the operator, and the operator then asked for: *"build the best-player rule… Also add a rule that does not trade picks for players when a team is rebuilding or blow it all up outlook."* Decision record: [D-199](../../../living-memory/DECISIONS.md).
+**Operator sign-off on waivers:** not needed (no waivers).
+
+1. **Analytics:** (b) existing coverage. `CoreDiagnostics.rejected` gains the two codes (recorded in grading `source_json` / value-core evidence). Calibration's `overpay`, `wrong_for_my_window` and `they_wont_accept` tags measure the effect, read with `report?since=<deploy>`.
+2. **Schema & flags:** none. `CoreConfig` gains `breakup_min_ratio` (0.70) and `rebuilders_keep_picks` (True), both code defaults with no `model_config` knob (Calibration builds with `CoreConfig()`; serving is flag-off). `ENGINE_VERSION` becomes `value-core-2`.
+3. **Evidence:**
+   - **Unit:** `test_value_core_core.py::test_breakup_viewer_keeps_best_piece` and `::test_rebuilders_never_trade_picks_for_players`; e2e `test_run_trade_job_flag_on_real_engine` updated (its 1-for-2 is a 61% breakup); `test_blind_grading_service.py::test_retire_unanswered_only_retires_untouched_sessions`; `test_blind_grading_routes.py::test_admin_pregenerate_targets_rebuild_retires_before_start`.
+   - **Replay on graded cards:** the rules would have removed 26 (breakup, mean 2.00) + 5 (picks, mean 2.60) of 60 value-core cards; the 29 kept average 2.72.
+   - **Replay on the operator's 4 live leagues (read-only):** decks still hold 130–479 ranked cards, with 11–13 partners in the first 20. Rebuilder-league pools shrink about 15×, mostly from the picks rule (the engine infers 7–9 of 12–14 teams as rebuilders).
+4. **Docs:**
+
+   | Doc | Updated? |
+   |---|---|
+   | `lld.md` §4.3, `specs.md` §3 + changelog | **updated** |
+   | `docs/api-reference.md` | **updated**: pregenerate `rebuild` option |
+   | `docs/runbook.md` | **updated**: rebuild curl |
+   | `docs/data-dictionary.md` | **updated**: `superseded` error code; `policy_version` value |
+   | `docs/glossary.md` | **updated**: breakup rule, picks-for-players rule |
+   | DECISIONS | **D-199** |
+   | `docs/config-reference.md` | n/a: no knob added |
+   | `docs/architecture.md`, HLD, LLD (living-memory) | n/a: same module wiring and data flow |
+
+5. **Ship gate:** CI green plus a TEST_LEDGER entry. Express lane: **no**.
+

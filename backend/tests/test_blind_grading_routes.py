@@ -616,7 +616,7 @@ def test_admin_pregenerate_targets_refresh_then_build_each_pair(
         assert (r.status_code, r.get_json()["error"]) == (400, "invalid_body")
     assert calls == [] and names == []
     r = client.post(url, json={"targets": targets}, headers=hdr)
-    assert (r.status_code, r.get_json()) == (202, {"targets": 4})
+    assert (r.status_code, r.get_json()) == (202, {"targets": 4, "rebuild": False})
     assert names == ["grading-pregenerate-targets"]
     assert calls == [
         ("refresh", "u1", "L1"), ("start", "u1", "u1", "L1"),
@@ -626,3 +626,27 @@ def test_admin_pregenerate_targets_refresh_then_build_each_pair(
         ("refresh", "u2", "L2"), ("start", "u2", "u2", "L2"),
         ("build", "u2", "mfl", "L2", "s-u2"),
     ]
+
+
+def test_admin_pregenerate_targets_rebuild_retires_before_start(client, monkeypatch, flag_off,
+                                                                nobody_allowed):
+    """Operator 2026-10-09 (value-core-2): "rebuild": true retires the pair's unanswered
+    session after the deck refresh and before start_session, so the rebuild is on the new engine."""
+    monkeypatch.setattr(server, "_CRON_SECRET", "s3cr3t")
+    calls: list = []
+    monkeypatch.setattr(server, "_replenish_deck_for", lambda u, l: calls.append("refresh") or (30, 0))
+    monkeypatch.setattr(bg, "retire_unanswered",
+                        lambda *, user_id, league_id: calls.append(("retire", user_id, league_id)) or "old")
+    monkeypatch.setattr(bg, "start_session", lambda **kw: calls.append("start") or {
+        "session": {"session_id": "new"}, "resumed": False, "needs_build": False})
+    real_thread = server.threading.Thread
+
+    class _Inline(real_thread):
+        def start(self):
+            self.run() if self.name == "grading-pregenerate-targets" else super().start()
+
+    monkeypatch.setattr(server.threading, "Thread", _Inline)
+    body = {"targets": [{"user_id": "u1", "league_id": "L1"}], "rebuild": True}
+    r = client.post("/api/admin/grading/pregenerate", json=body, headers={"X-Cron-Secret": "s3cr3t"})
+    assert (r.status_code, r.get_json()) == (202, {"targets": 1, "rebuild": True})
+    assert calls == ["refresh", ("retire", "u1", "L1"), "start"]

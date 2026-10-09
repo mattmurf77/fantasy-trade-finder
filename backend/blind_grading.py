@@ -93,6 +93,20 @@ def start_session(*, user_id: str, league_user_id: str, league_id: str,
     return {"session": session_view(session_row), "resumed": False, "needs_build": True}
 
 
+def retire_unanswered(*, user_id: str, league_id: str) -> str | None:
+    """Targeted rebuild (operator 2026-10-09, after a value-core rule change): retire the pair's
+    building/open session as failed {"code": "superseded"} when none of its cards is answered,
+    so the next start_session builds a fresh one on the current engine. Returns the retired
+    session_id, or None (no such session, or someone already answered a card — kept)."""
+    row = db.load_open_grading_session(user_id, league_id)
+    if row is None:
+        return None
+    if not db.retire_grading_session(row["session_id"],
+                                     json.dumps({"code": "superseded"}, sort_keys=True)):
+        return None
+    return row["session_id"]
+
+
 def pregenerate(*, now: datetime | None = None) -> dict:
     """One-shot Calibration pre-generation (operator 2026-10-02: "generate a calibration
     deck for all users who have downloaded the app"). FAST half only: start_session for

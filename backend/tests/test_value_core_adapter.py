@@ -239,7 +239,7 @@ def test_evidence_schema_v1():
                         "weights", "scores", "effective", "market", "core", "windows",
                         "detail", "assets"}
     assert json.loads(json.dumps(doc, sort_keys=True)) == doc
-    assert (doc["schema_version"], doc["generator"], doc["generator_version"]) == (1, "value_core", "value-core-1")
+    assert (doc["schema_version"], doc["generator"], doc["generator_version"]) == (1, "value_core", "value-core-2")
     assert doc["core"]["ratio_floor"] == pytest.approx(1 / 1.2, abs=1e-4)   # default band 0.20
     assert doc["core"]["ratio_ceiling"] == pytest.approx(1.1)   # gain_band 0.10: asymmetric band
     assert doc["core"]["gain_band"] == pytest.approx(0.10)
