@@ -55,6 +55,7 @@ Shipped server-side in PR #312 ([D-196](DECISIONS.md), [D-197](DECISIONS.md)). 1
 
 1. ~~Renew the iOS certificate and rebuild 1.18.0~~ **DONE 2026-10-07**: builds 159/160 in TestFlight.
 2. ~~Merge #314, deploy, then target the ESPN league~~ **DONE 2026-10-08**: `4de823ad` live, ESPN 11896 session open (40 cards).
+2a. **Round 2 now carries four arms** (today's engine, value core v2, fit A, fit B) across 22 decks for 9 users (2026-10-09). Read with `report?since=2026-10-09T15:45:45`. The fit arms are thin (A 1–19, B 0–9 per deck); if they are too small to read, the lever is a near-mutual partner gain (D-200). Re-run `backend/eval/fit_scorecard_test.py` once round 2 has grades.
 2b. **Round 2 (value-core-2) is live**: 12 decks rebuilt 2026-10-09. Read with `report?since=2026-10-09T15:45:45`. **Then** run the fit-scorecard test once the operator signs off on its v0 multipliers (plan doc: claude.ai/code/artifact/8886e24e-2cb7-482e-b263-dcf7b749c1f4). *Why now:* it decides whether fit-first generation replaces the enumerate-then-rank design.
 3. **Get graders onto 1.18.0.** lofman was last seen on 1.16.11 and MangoPatti on 1.17.3. Bcork has never signed in. *Why now:* their decks are built, but the tab only exists on 1.18.0.
 4. **Run the TestFlight checklist** (`docs/plans/blind-grading/code-walk-mobile.md` §9). *Why now:* the only runtime evidence mobile gets.

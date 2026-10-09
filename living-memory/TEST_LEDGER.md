@@ -1,3 +1,10 @@
+## 2026-10-09b — Fit engines (#317) and roster refresh (#318): evidence
+
+- #317: CI 4/4 green on `bea27767`; local full suite 7615 passed, 1 skipped (`test_rookie_scope.py` excluded, machine-local). New tests: `test_fit_engine.py` (9), the fold-in tests (`test_add_fit_arms_folds_blind_and_keeps_answered_cards`, `test_fold_aborts_when_a_moving_card_was_answered`), `test_admin_add_fit_arms_route`; the e2e blinding test forbids the fit arm names and versions.
+- Offline fit-scorecard test (`backend/eval/fit_scorecard_test.py`, prod read-only, 99 of 120 round-1 cards scorable): Q1 AUC A 0.58 (0.63 without boards, exploratory), B 0.43 pre-registered / 0.46 as shipped (`fit-b-2`). Baselines: best-piece 0.66, value-core outlook 0.66, consensus ratio 0.36. Q2 (partner vs "they won't accept"): A 0.50, B 0.32. No approach passed.
+- #318: CI backend-tests first failed on an unrelated flaky test (`test_trade_counterparty_epochs::test_real_tier_save_revokes_job_admitted_after_early_fence_before_board_publish`, `assert 1700.0 != 1700.0`; 5/5 local passes; task spun off), green on rerun. Local full suite 7617 passed. Live check after refresh: 12/12 live owners' rosters match Sleeper in each refreshed league.
+- Prod runs: 10 fresh sessions folded (fit A 1–18, fit B 0–7); 14 targeted builds with refresh. 12 built; 1 transient DB SSL drop (BONEDEEP) built on retry; 1 skipped (operator owns no Bush League roster). Then 12 more folds. Final: 23 open sessions, 22 valid, 47–66 cards, 0 answered.
+
 ## 2026-10-09 — Value core v2 (#315): rules, rebuild path, replay evidence
 
 - CI 4/4 green on `3a247685`. Local full suite 7603 passed, 1 skipped (`test_rookie_scope.py` excluded: machine-local stale player cache, also failing on `main`). Value-core + grading suites 214 passed, incl. `test_breakup_viewer_keeps_best_piece`, `test_rebuilders_never_trade_picks_for_players`, `test_retire_unanswered_only_retires_untouched_sessions` and `test_admin_pregenerate_targets_rebuild_retires_before_start`.

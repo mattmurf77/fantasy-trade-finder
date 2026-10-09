@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-10-09b — Fit engines A + B in Calibration (#317), roster refresh (#318); 22 decks for 9 users
+
+- #317 (`9cfcac7a`): `backend/fit_engine.py`, with two fit-first scorers (A multipliers; B grades × profiles, `fit-b-2`) and one generator over `core.evaluate_trade`. `POST /api/admin/grading/add-fit-arms` folds arms `fit_a` / `fit_b` into open sessions: blind-shuffled into the unanswered positions, answered cards never move (D-200). Offline test on round 1: neither approach passed (AUC A 0.58, B 0.46 final vs best baseline 0.66). The operator chose to grade them live.
+- #318 (`d154eef1`): targeted pre-generation `"refresh_rosters": true` re-reads Sleeper rosters first (G-075). On 2026-10-09 several leagues were 6–8 weeks stale.
+- Prod: 22 valid open Calibration decks for 9 users (operator ×4, KevinLake ×8, lofman ×2, jonbonjourvi ×2, Bcork ×2, gdubs10, MangoPatti, JohnStanfield, Boston Brawlers/MFL). Each has 20 today's engine + 20 value core + fit A 1–19 + fit B 0–9 = 47–66 cards. Bcork's Bush League session is invalid: he no longer owns a team there. The operator's Bush League was skipped for the same reason. The MFL deck uses Aug 26 rosters.
+
 ## 2026-10-09 — Value core v2 (D-199) shipped; 12 Calibration decks rebuilt; fit-scorecard test planned
 
 - Round 1 read (operator only, 120 cards, 3 Sleeper leagues): today's engine 2.55, value core 2.40 (target 4.0). The value core fixed junk filler (32 tags → 2) but drew 27 "overpay" tags. The strongest predictor was breaking up the user's best piece (< 70%: 13–23% would-send).

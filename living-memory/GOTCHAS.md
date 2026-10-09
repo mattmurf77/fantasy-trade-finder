@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-075 | Server-built decks or Calibration sessions offer trades with players the partner no longer has, in leagues nobody has opened lately | Backend / league data |
 | G-074 | git reports `… is far too short to be a packfile`, `fatal: stash failed`, or fetches crawl in a clone under `~/Documents` | Tooling / git / iCloud |
 | G-073 | A Render deploy fails at boot with `ModuleNotFoundError: No module named 'psycopg'` although nothing about the database changed | Backend / deploy / dependencies |
 | G-072 | An uncapped owner-only deck (~1,400 cards × ~21 KB evidence) renders as ONE ~28 MB multi-row INSERT and OOM-kills the 256 MB prod Postgres; every Find a Trade then reads "Search failed" | Backend / deck impressions / Postgres |
@@ -91,6 +92,14 @@
 Full entries below — grep the ID. Read the entry before acting; this index is a lookup aid, not the content.
 
 ---
+
+## 2026-10-09
+
+### G-075 — Stored league rosters only refresh when a member opens that league in the app
+
+**Symptom:** targeted Calibration builds for leagues nobody had opened since August produced trades whose players had moved; against live Sleeper, 11–12 of 12 teams differed (76–139 player moves per league).
+**Cause:** `league_members` is written only by `session_init` (the client sends rosters) and the platform link/import routes. The weekly roster-history sweep runs inside daily-tick and has not written since 2026-09-08 (the tick is reaped by gunicorn's 120 s timeout during replenishment). Headless builders (`_replenish_deck_for`, Calibration) read whatever rows are stored, and stale rows of managers who left are never deleted (`upsert_league_members` only upserts).
+**Fix:** for Sleeper, run the targeted pre-generation with `"refresh_rosters": true` (`server._refresh_sleeper_members`). MFL/ESPN still need their owner to open the league. Before building for a user, check they still own a roster: an empty `roster_data` (`"[]"`), or an owner_id missing from Sleeper's `/rosters`, means they don't.
 
 ## 2026-10-07
 
