@@ -23,5 +23,5 @@ Verdict: **"You win by 0.5% · 🟢 Likely"**.
 - **Jaylin Lane (57) is pure filler** added to balance the sum — a "throw-in" with no evidence of value to the recipient (Fleeced's value core forbids filler except one evidenced throw-in; operator ruling 2026-10-01).
 - The report produced ONE idea for the chosen partner ("Trade 1"), with a partner chosen by the needs engine (dondags20 was first in "WHO TO CALL": 0-4, weakest at WR/TE — and he receives Likely + Kelce, i.e. the TE need, but the "roster need" the trade claims to address for mattmurf77 is unnamed; the dashboard said mattmurf77 has no needs).
 - "🟢 Likely" is an acceptance label with no stated basis beyond the value sum and need flags.
-- The report records **LEAGUE SETTINGS 1QB · 0.5 PPR** — DTL's reading of this Sleeper league. The chat's QB-min-2 body floor and the slot-level QB2 needs suggest a second QB slot exists; whether DTL mis-detected a superflex league is the single most important thing for the operator to confirm from Sleeper settings.
+- The report records **LEAGUE SETTINGS 1QB · 0.5 PPR** — DTL's reading of this Sleeper league, confirmed correct by the operator (1QB, 2026-10-09). The slot-level "QB2" needs elsewhere are depth labels.
 - The whole run cost 1 credit ($0.40–$0.50) for one two-team idea; "3-Team Trades" is a toggle on the generator but was "Two-team deals only" here.

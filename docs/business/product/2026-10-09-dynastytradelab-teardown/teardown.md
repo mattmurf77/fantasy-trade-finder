@@ -34,7 +34,7 @@ Credits only, no subscription: 10/$4.99 · 40/$17.99 · 75/$29.99 ($0.50 → $0.
 
 ## 5. Quality findings (judgment)
 
-1. **Possible format mis-detection on the operator's league.** Report header says "LEAGUE SETTINGS 1QB · 0.5 PPR" and every value shown is from the 1QB table, yet DTL's own needs are slot-level with QB1/QB2 and the body-floor QB minimum is 2. If Fantasy Football Version 3 is superflex, DTL priced the whole league on the wrong chart. **Operator to confirm from Sleeper settings** — this is the single most damaging thing to be able to say publicly, and the single thing we must not say without checking.
+1. **Format detection checked out.** The report header "LEAGUE SETTINGS 1QB · 0.5 PPR" matches the league (operator confirmed 2026-10-09: 1QB). DTL's QB1/QB2 need labels and the "QB min 2" body floor are generic depth slots, not evidence of superflex. The chat, however, could not see the format at all and guessed 1QB from Josh Allen's rank (reply 10) — the product knows, the chat doesn't.
 2. **Fairness = sum.** The 4-for-2 "even" trade is the exact shape Fleeced refuses (stud tax D-190, R2 pos_net_cap, filler rule in the value core).
 3. **Acceptance is a label.** "🟢 Likely" has no model behind it; the chat says so in its own words (reply 14).
 4. **Chat and product disagree** on upgrades, needs and ownership because they are fed different slices of the same data.
@@ -65,14 +65,14 @@ Credits only, no subscription: 10/$4.99 · 40/$17.99 · 75/$29.99 ($0.50 → $0.
 - **pm-pfo:** copy DTL's *manager-level needs list* ("lofman needs RB3, TE1") and *WHO TO CALL* framing into the Acquire landing / Team overhaul — it answers "who do I talk to" in one glance, which Fleeced's card deck makes the user infer.
 - **pm-pfo / eng-backend:** a *free-text trade prompt* ("don't trade my 2027 1st", "I need a RB back") as a constraint layer on the finder is cheap to spec on top of the value core's existing filters; DTL shows users will type these.
 - **pm-retention:** a league-scoped *weekly movers* panel (with owner names) is a low-cost reason to reopen the app; Fleeced has the data (consensus deltas) but no surface.
-- **mkt-brand:** positioning ammo — DTL's "built for your roster, not a static value chart" is a FantasyCalc chart with a needs layer; Fleeced's personal board + mutual-gain search is the honest version of that claim. Do **not** claim DTL mis-prices superflex until §5.1 is confirmed.
+- **mkt-brand:** positioning ammo — DTL's "built for your roster, not a static value chart" is a FantasyCalc chart with a needs layer; Fleeced's personal board + mutual-gain search is the honest version of that claim.
 - **pm-monetization:** DTL's per-action credits ($0.40–0.50, 5 free) are a data point for the paywall design; note the 3-message chat credit and free re-view of reports as friction-reducers.
-- **pm-competitor:** add DTL to the standing matrix (done in this run), re-check after the Sleeper-settings confirmation, and watch for the three-team feature and League Analyzer.
+- **pm-competitor:** add DTL to the standing matrix (done in this run); watch for the three-team feature, the League Analyzer, and whether DTL ever adds a superflex-aware league read (it has the SF table; whether it auto-selects it for SF leagues is untested).
 - **an-market:** sequential report ids (276 on 2026-10-09) as a scale datapoint; request a traffic read.
 
 ## 8. Open questions
 
-1. Is "Fantasy Football Version 3" superflex on Sleeper? (decides §5.1)
+1. ~~Is "Fantasy Football Version 3" superflex on Sleeper?~~ Resolved: 1QB (operator, 2026-10-09).
 2. What does a credit buy on "Analyze My Trade" and the 3-team mode — same report format? (not exercised: 0 credits)
 3. What does League Analysis produce, and what does it cost?
 4. Does the Fantrax path differ (OAuth vs username)?
