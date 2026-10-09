@@ -27193,6 +27193,60 @@ def admin_grading_pregenerate_route():
                     "already_open": out["resumed_open"], "skipped": out["skipped"]}), 202
 
 
+def _add_fit_arms_all(rows: list[dict]) -> None:
+    """Daemon-thread half of POST /api/admin/grading/add-fit-arms: rest-of-season projections
+    once per scoring format, then blind_grading.add_fit_arms for each open session in order.
+    A session that fails is logged and skipped; never raises."""
+    from . import fit_engine as _fit
+
+    ros: dict[str, dict] = {}
+    for row in rows:
+        sid, league_id = row["session_id"], row["league_id"]
+        try:
+            fmt = json.loads(row["source_json"]).get("scoring_format") or "1qb_ppr"
+            if fmt not in ros:
+                ros[fmt] = _fit.fetch_ros_points(lambda url: _sleeper_get(url, 20), fmt)
+            platform = (get_league_draft_context(league_id) or {}).get("platform")
+            sess = {"user_id": row["user_id"], "league": SimpleNamespace(platform=platform)}
+            try:
+                server_inputs = _grading_server_inputs(sess, league_id)
+            except Exception as err:
+                log.warning("blind-grading: fit arms server inputs failed session=%s: %s", sid, err)
+                server_inputs = _blind_grading.ServerInputs(lineup_slots=None, max_players=None,
+                                                            standings={}, completed_weeks=0)
+            out = _blind_grading.add_fit_arms(
+                session_id=sid, server=server_inputs, ros_points=ros[fmt]["points"],
+                ros_meta={k: v for k, v in ros[fmt].items() if k != "points"})
+            log.info("blind-grading: fit arms session=%s %s", sid, out)
+        except Exception:
+            log.exception("blind-grading: fit arms failed session=%s", sid)
+
+
+@app.route("/api/admin/grading/add-fit-arms", methods=["POST"])
+def admin_grading_add_fit_arms_route():
+    """Cron-secret only (operator 2026-10-09). Fold the fit_a / fit_b arms into every OPEN
+    Calibration session, or only the {"targets": [{user_id, league_id}]} given, on one daemon
+    thread (blind_grading.add_fit_arms: idempotent, answered cards never move)."""
+    _require_cron_auth()
+    from .database import list_open_grading_sessions
+
+    body = request.get_json(silent=True)
+    rows = list_open_grading_sessions()
+    if isinstance(body, dict) and "targets" in body:
+        targets = body["targets"]
+        pairs = {(str(t.get("user_id") or ""), str(t.get("league_id") or ""))
+                 for t in (targets if isinstance(targets, list) else []) if isinstance(t, dict)}
+        if not pairs or not isinstance(targets, list) or len(pairs) != len(targets):
+            return jsonify({"error": "invalid_body", "message":
+                            "targets must be a non-empty list of distinct {user_id, league_id}"}), 400
+        rows = [r for r in rows if (r["user_id"], r["league_id"]) in pairs]
+    if rows:
+        threading.Thread(target=_add_fit_arms_all, args=(rows,), name="grading-fit-arms",
+                         daemon=True).start()
+    log.info("blind-grading: add-fit-arms sessions=%d", len(rows))
+    return jsonify({"sessions": len(rows)}), 202
+
+
 @app.route("/api/admin/grading/report")
 def admin_grading_report_route():
     """Cron-secret only and deliberately NOT flag- or audience-gated (prd.md D4):

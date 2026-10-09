@@ -29,11 +29,12 @@ from .value_core import core
 from .value_core.deck import idea_key, partner_cap
 from .value_core.types import (CORE_POSITIONS, Board, CoreConfig, LeagueSnapshot, Request)
 
-FIT_VERSION = "fit-1"
 ARMS = ("fit_a", "fit_b")
+# A as pre-registered; B v2 = the 2026-10-09 veteran fix (team_value_b), operator-approved.
+VERSIONS = {"fit_a": "fit-a-1", "fit_b": "fit-b-2"}
 DECK_SIZE = 20
-CANDIDATES_PER_SIDE = 6       # top give / receive candidates per partner, by fit arbitrage
-OK_PER_PARTNER = 30           # stop evaluating a partner once this many trades pass the rules
+CANDIDATES_PER_SIDE = 12      # top give / receive candidates per partner, by fit arbitrage
+IDEAS_PER_PARTNER = 10        # stop evaluating a partner once this many distinct trade ideas pass
 ASSET_CAP = 3                 # most cards any one asset may appear in
 RATIO_PREFILTER = (0.70, 1.45)  # raw consensus receive/give window before the hard rules
 YOUNG_AGE, OLD_AGE = 24, 29
@@ -53,6 +54,7 @@ BOARD_CLAMP = (0.67, 1.5)
 B_PRIORITY = {"contender": (0.7, 0.3), "middle": (0.5, 0.5), "rebuilder": (0.2, 0.8)}  # (redraft, dynasty)
 B_NEED = {"thin": 1.1, "surplus": 0.9}
 PROFILE_GAP = 15.0            # redraft pct - dynasty pct beyond which a player is Win-now / Future
+FUTURE_MAX_AGE = 25           # Future = picks and young players; an older player with no current value is depth
 
 # Share of each flex slot credited to a position when sizing positional demand.
 FLEX_SHARE = {"FLEX": {"RB": 0.4, "WR": 0.5, "TE": 0.1},
@@ -186,7 +188,9 @@ def build_grades(league: League, ros_points: Mapping[str, float], scoring_format
     """Dynasty = market percentile over league assets. Redraft = value over replacement on
     rest-of-season projected points (replacement = the first player past the league's
     starters at that position), as a percentile over league players, then mapped onto the
-    market scale by quantile so it adds like market value. Profile from the gap."""
+    market scale by quantile so it adds like market value. Profile from the gap: Win-now when
+    redraft runs well above dynasty; Future for picks and for players <= FUTURE_MAX_AGE whose
+    dynasty runs well above redraft (rookies); else Balanced."""
     snap = league.snapshot
     league_assets = [a for a in snap.assets.values() if a.id in league.owner and a.market > 0]
     dynasty = _pct({a.id: a.market for a in league_assets})
@@ -215,7 +219,9 @@ def build_grades(league: League, ros_points: Mapping[str, float], scoring_format
             profile[a.id] = "future"
         else:
             gap = r - dynasty.get(a.id, 0.0)
-            profile[a.id] = "win_now" if gap >= PROFILE_GAP else "future" if gap <= -PROFILE_GAP else "balanced"
+            young = a.age is not None and a.age <= FUTURE_MAX_AGE
+            profile[a.id] = ("win_now" if gap >= PROFILE_GAP
+                             else "future" if gap <= -PROFILE_GAP and young else "balanced")
     redraft_pct = {a.id: (redraft.get(a.id, 0.0) if a.kind == "player" else 0.0) for a in league_assets}
     return Grades(dynasty, redraft_pct, redraft_value, profile)
 
@@ -223,9 +229,15 @@ def build_grades(league: League, ros_points: Mapping[str, float], scoring_format
 def team_value_b(league: League, grades: Grades, team_id: str, asset_id: str,
                  board: Board | None) -> float:
     """Priority blend of redraft and dynasty value, x0.9-1.1 for positional need. `board`
-    (the viewer's own) replaces consensus in the dynasty term; partners use consensus."""
+    (the viewer's own) replaces consensus in the dynasty term; partners use consensus.
+    fit-b-2 (2026-10-09, after round 1): a rebuilder gives a Win-now player no redraft
+    credit. Without it the blend valued veterans above market for rebuilders, contradicting
+    B's own rule that rebuilders sell them (b_sells)."""
     a = league.snapshot.assets[asset_id]
-    w_r, w_d = B_PRIORITY[league.window(team_id)]
+    window = league.window(team_id)
+    w_r, w_d = B_PRIORITY[window]
+    if window == "rebuilder" and grades.profile.get(asset_id) == "win_now":
+        w_r = 0.0
     dynasty = board.values.get(asset_id, a.market) if board is not None else a.market
     v = w_r * grades.redraft_value.get(asset_id, 0.0) + w_d * dynasty
     if a.kind == "player":
@@ -332,6 +344,12 @@ def core_floor() -> float:
     return _CFG.asset_floor_abs
 
 
+def _idea_head(snapshot: LeagueSnapshot, ids: Sequence[str]) -> str:
+    """A side's headliner as deck.idea_key counts it: the biggest piece, picks as "PICK"."""
+    top = min(ids, key=lambda a: (-snapshot.assets[a].market, a))   # FairTrade order: give[0]
+    return "PICK" if snapshot.assets[top].kind == "pick" else top
+
+
 def _packages(ids: Sequence[str]) -> list[tuple[str, ...]]:
     return [c for k in range(1, core.MAX_PACKAGE_SIZE + 1) for c in combinations(ids, k)]
 
@@ -339,8 +357,11 @@ def _packages(ids: Sequence[str]) -> list[tuple[str, ...]]:
 def generate(snapshot: LeagueSnapshot, request: Request, scorer: Scorer,
              cfg: CoreConfig = _CFG) -> tuple[list[FitTrade], dict]:
     """Fit-first trades for the viewer against every partner: candidate gives/receives by fit
-    edge, 1-3 x 1-3 packages, both sides must gain in their own team value, consensus ratio
-    inside RATIO_PREFILTER, then core.evaluate_trade's hard rules. Best mutual fit first."""
+    edge, 1-3 x 1-3 packages, consensus ratio inside RATIO_PREFILTER, a gain test, then
+    core.evaluate_trade's hard rules. Best mutual fit first.
+    Gain test: A needs both sides to gain (> 0). B's candidates are already profile matches
+    both ways (sells meet buys), and B values a rebuilder's Win-now veteran and an equal pick
+    alike, so B needs only that neither side loses (>= 0)."""
     viewer = request.viewer_team_id
     mk = snapshot.assets
     lo, hi = RATIO_PREFILTER
@@ -360,14 +381,18 @@ def generate(snapshot: LeagueSnapshot, request: Request, scorer: Scorer,
                 if not lo <= ratio <= hi:
                     continue
                 gv, gp = scorer.gains(pid, g, r)
-                if gv > 0 and gp > 0:
+                if (gv > 0 and gp > 0) if scorer.arm == "fit_a" else (gv >= -1e-9 and gp >= -1e-9):
                     pool.append((min(gv, gp), gv, gp, g, r))
         diag["mutual_pairs"] += len(pool)
         pool.sort(key=lambda x: (-x[0], -x[1], x[3], x[4]))
-        ok = 0
+        ideas: set = set()
         for mutual, gv, gp, g, r in pool:
-            if ok >= OK_PER_PARTNER:
+            if len(ideas) >= IDEAS_PER_PARTNER:
                 break
+            # The best version of an idea is the only one the deck can use: skip the rest unjudged.
+            pre = (pid, _idea_head(snapshot, g), _idea_head(snapshot, r))
+            if pre in ideas:
+                continue
             verdict = core.evaluate_trade(snapshot, request, cfg, partner_team_id=pid,
                                           give=list(g), receive=list(r))
             if not verdict.ok:
@@ -375,7 +400,7 @@ def generate(snapshot: LeagueSnapshot, request: Request, scorer: Scorer,
                 continue
             t = verdict.trade
             out.append(FitTrade(pid, t.give, t.receive, round(gv, 4), round(gp, 4), round(mutual, 4)))
-            ok += 1
+            ideas.add(pre)
     out.sort(key=lambda t: (-t.mutual, -t.gain_viewer, t.partner_team_id, t.give, t.receive))
     diag["pool"] = len(out)
     return out, dict(diag)

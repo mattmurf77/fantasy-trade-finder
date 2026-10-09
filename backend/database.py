@@ -15348,6 +15348,56 @@ def finish_grading_session_build(session_id: str, cards: list[dict], *,
     return True
 
 
+class _FoldAbort(Exception):
+    """Rolls back fold_grading_cards' transaction."""
+
+
+def fold_grading_cards(session_id: str, *, inserts: list[dict], positions: dict[str, int],
+                       arms_updates: dict[str, str], counts_json: str, source_json: str) -> bool:
+    """One engine.begin() for blind_grading.add_fit_arms: the session must still be 'open' and
+    none of the `positions` cards (the unanswered ones being re-shuffled) may have been answered
+    since the caller read them; else nothing is written and False is returned. Positions move in
+    two steps (negated first, then flipped) so uq_grading_card_position never sees a duplicate;
+    answered cards keep theirs, and `inserts` arrive with free final positions."""
+    gs, gc = grading_sessions_table, grading_cards_table
+    try:
+        with engine.begin() as conn:
+            res = conn.execute(update(gs)
+                               .where(gs.c.session_id == session_id, gs.c.status == "open")
+                               .values(counts_json=counts_json, source_json=source_json))
+            if not res.rowcount:
+                raise _FoldAbort()
+            if positions:
+                moved_answered = conn.execute(
+                    select(func.count()).select_from(gc)
+                    .where(gc.c.session_id == session_id, gc.c.card_id.in_(list(positions)),
+                           or_(gc.c.grade.isnot(None), gc.c.skipped != 0))).scalar()
+                if moved_answered:
+                    raise _FoldAbort()
+            for card_id, pos in positions.items():
+                conn.execute(update(gc).where(gc.c.session_id == session_id, gc.c.card_id == card_id)
+                             .values(position=-int(pos)))
+            for card_id, arms_json in arms_updates.items():
+                conn.execute(update(gc).where(gc.c.session_id == session_id, gc.c.card_id == card_id)
+                             .values(arms_json=arms_json))
+            if inserts:
+                conn.execute(gc.insert(), inserts)
+            conn.execute(update(gc).where(gc.c.session_id == session_id, gc.c.position < 0)
+                         .values(position=-gc.c.position))
+    except _FoldAbort:
+        return False
+    return True
+
+
+def list_open_grading_sessions() -> list[dict]:
+    """Every 'open' session row, oldest first (the fit-arms fold-in's work list)."""
+    gs = grading_sessions_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(gs).where(gs.c.status == "open")
+                            .order_by(gs.c.created_at, gs.c.session_id)).mappings().all()
+    return [dict(r) for r in rows]
+
+
 def fail_grading_session(session_id: str, error_json: str) -> bool:
     """Flip a 'building' session to 'failed' with error_json. False when it was not 'building'."""
     gs = grading_sessions_table

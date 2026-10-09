@@ -1,5 +1,12 @@
 # Decisions — Fantasy Trade Finder
 
+## D-200 — Fit-first approaches A and B go into Calibration despite failing the offline bar
+
+**Date:** 2026-10-09 · **Who:** operator (chose "Add A + fixed B" after seeing the failed test), lead-built.
+**Context:** The operator proposed fit-first generation; the plan doc ("Fit Scorecard Test Plan") pre-registered two scorers and pass bars, building a generator only on one that passed. On round-1 grades (99 cards, one grader), neither passed: Q1 AUC A 0.58, B 0.43, against the best existing signal (best-piece ratio) at 0.66. B had a design flaw: its 20/80 blend credited a veteran's redraft value, so rebuilders valued veterans above market, contradicting B's own sell rule.
+**Decision:** Build both generators anyway and grade them live, as Calibration arms `fit_a` / `fit_b` folded into the open value-core-2 sessions. A is as pre-registered (`fit-a-1`). B is `fit-b-2`: a rebuilder gives a Win-now player no redraft credit; Future means picks and players 25 or younger; and since B's candidates are already two-way profile matches, its gain test is "neither side loses" (A keeps "both gain"). Live grading is the out-of-sample test. The offline test was one grader and could not score B's sell/buy matching.
+**Consequences:** Fit decks are small: dry run A 1–18 and B 0–6 per deck, against the 20–30 target. Two-way fit trades that also pass the fairness rules are scarce, and same-window teams (most teams in these leagues read as rebuilders) rarely match. The app's Results screen shows only today's engine and the value core; the fit arms read in `GET /api/admin/grading/report`. If the decks are too thin to read, the lever is a near-mutual partner gain, not dropping the fairness rules.
+
 ## D-199 — Value core v2: never break up the viewer's best piece; rebuilding teams never trade picks for players
 
 **Date:** 2026-10-09 · **Who:** operator, from the first Calibration round. Lead-built.

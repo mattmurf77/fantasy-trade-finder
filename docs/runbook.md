@@ -512,6 +512,14 @@ curl -X POST -H "X-Cron-Secret: $CRON_SECRET" -H "Content-Type: application/json
 
 → `202 {"targets": n, "rebuild": false}`. After an engine change, add `"rebuild": true` to replace each pair's **unanswered** session with one built on the new engine (a session with any graded or skipped card is kept; the retired one becomes `failed` / `superseded`). Read the new engine's results with `report?since=<deploy time>`. A refresh is a full trade job (tens of seconds each on the one worker), so keep the list short and don't deploy while it runs — a restart kills the daemon thread (re-POST to finish; open sessions are resumed). Check with `include_open=1` below; a pair that failed is logged as `blind-grading: target …`. The refreshed deck is also what the user sees in Acquire, like any weekly refresh.
 
+**Fit arms (2026-10-09).** Fold the two fit-engine arms (`fit_a`, `fit_b`) into every open session, or only named pairs:
+
+```bash
+curl -X POST -H "X-Cron-Secret: $CRON_SECRET" "$FTF_PROD/api/admin/grading/add-fit-arms"
+```
+
+→ `202 {"sessions": n}`. Each session gets up to 20 cards per fit arm, merged with any identical trade and blind-shuffled into the unanswered positions; answered cards never move, and re-running skips sessions that already have the arms. Expect fewer than 20 per arm: mutual-fit trades that also pass the fairness rules are scarce (dry run 2026-10-09: A 1–18, B 0–6 per deck). Projections come from Sleeper's weekly feed; if it is down, B's redraft grades are all zero and its cards skew to dynasty value — check the `ros` block in the session's source.
+
 **3. Read the report** once the graders are done. Completed sessions only by default:
 
 ```bash
