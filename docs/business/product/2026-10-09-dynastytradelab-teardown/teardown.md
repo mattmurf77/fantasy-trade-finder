@@ -16,7 +16,7 @@ Top nav: **Buy Credits · Dashboard · Rankings · My Account ▾ (My Trade Lab,
 | Dashboard | TEAM STATUS (pentagon: QB/RB/WR/TE/FLEX, league rank "2nd") · TEAM NEEDS (BALANCED · HOLD / SPEND / TRADE BLOCK / WHO TO CALL / HOLD list / PLAYERS TO TARGET) · Lab Analyst panel · PLAYER STOCK MOVEMENT (league-wide weekly deltas with owner) · RISING FA STOCK | [dashboard-page](evidence/dashboard-page.md), screens 04–06 |
 | Trade Generator | 3 columns: YOUR TEAM (roster by position, values, weekly deltas, BLOCK/SURPLUS badges, own picks) · TRADE POOL (two sides, value difference, fairness slider, TRADE LOGIC, 3-Team toggle, TRADE PROMPT, Build My Trade / Analyze My Trade) · TRADE PARTNERS (TARGETS list; MANAGERS list with match counts → expands to that manager's roster, needs, picks incl. "(via …)" provenance) | [trade-generator-page](evidence/trade-generator-page.md), screens 03, 14–15 |
 | Rankings | 397-player FantasyCalc table, 1QB / SF/2QB toggle, position + Free Agents + Rookie filters, age (1 dp), positional rank, empty Proj column, weekly trend | [rankings-page](evidence/rankings-page.md), screens 12–13 |
-| My Trade Lab (/account/) | Teams (league dropdown, connect Sleeper/Fantrax by username) · Needs to Address · Suggested Trade Block · every manager's flagged needs · Trade History (saved reports, free to re-view) · League Analysis (separate credit product, empty state) · WooCommerce account pages | [account-and-credits](evidence/account-and-credits.md), screens 09–11, 16 |
+| My Trade Lab (/account/) | Teams (league dropdown, connect Sleeper/Fantrax by username) · Needs to Address · Suggested Trade Block · every manager's flagged needs · Trade History (saved reports, free to re-view) · League Analysis (results tab for a "League Analyzer" that has no entry point anywhere — dark) · WooCommerce account pages | [account-and-credits](evidence/account-and-credits.md), screens 09–11, 16 |
 
 ## 3. How the engine actually works (observed)
 
@@ -74,6 +74,6 @@ Credits only, no subscription: 10/$4.99 · 40/$17.99 · 75/$29.99 ($0.50 → $0.
 
 1. ~~Is "Fantasy Football Version 3" superflex on Sleeper?~~ Resolved: 1QB (operator, 2026-10-09).
 2. What does a credit buy on "Analyze My Trade" and the 3-team mode — same report format? (not exercised: 0 credits)
-3. What does League Analysis produce, and what does it cost?
+3. League Analyzer: referenced in the account hub's empty state and present in code (`analysisMode`, `generate-league`), but **no entry point exists on the site** — sitemap, menus, generator CTAs and query-param guesses all checked ([account-and-credits](evidence/account-and-credits.md)). Dark or unreleased; watch for it.
 4. Does the Fantrax path differ (OAuth vs username)?
 5. Which LLM powers the chat/generator (no disclosure found on-site; see public research).
