@@ -1,6 +1,6 @@
 # Dynasty Trade Lab (dynastytradelab.com) — competitor teardown
 
-**Started:** 2026-10-09 · **Status:** hands-on teardown written; public-research section pending (workflow) · **Owner role:** pm-competitor
+**Started:** 2026-10-09 · **Status:** complete (hands-on + public research); watch items in teardown §8 · **Owner role:** pm-competitor
 
 New entrant flagged by the operator 2026-10-09. Web-only (WordPress + custom plugin), Sleeper + Fantrax import, credit-priced ($4.99/10 · $17.99/40 · $29.99/75, 5 free), three headline features: Trade Generator (manual builder + "Find a Trade"), Lab Analyst (LLM chat over a per-request league snapshot), three-team trade finder.
 
@@ -16,7 +16,7 @@ New entrant flagged by the operator 2026-10-09. Web-only (WordPress + custom plu
 | [evidence/trade-report-generated.md](evidence/trade-report-generated.md) | The operator's generated trade report — what a credit buys |
 | [evidence/lab-analyst-chat.md](evidence/lab-analyst-chat.md) | Fifteen verbatim Lab Analyst replies (5 operator-driven, 10 agent-driven across 4 credits) with observations |
 | [evidence/screens/](evidence/screens/) | Screenshots, numbered in walkthrough order |
-| public-research.md | *(pending — workflow output: company, community, methodology claims, landscape, verified + cited)* |
+| [public-research.md](public-research.md) | Company/maker/launch (Product Hunt), site FAQ claims, privacy-policy boilerplate, community sentiment, landscape, dead ends — every claim cited |
 | [teardown.md](teardown.md) | The deliverable: surfaces, how the engine works, pricing, quality findings, FTF gap table, recommendations by owner, open questions |
 
 ## Capture method (D-056 world: no simulator; this is a web product)

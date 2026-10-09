@@ -1,10 +1,10 @@
 # Dynasty Trade Lab — competitor teardown (hands-on)
 
-**Date:** 2026-10-09 · **Source:** operator-logged-in walkthrough + 15 Lab Analyst exchanges + public-page capture (all in [evidence/](evidence/)) · **Owner role:** pm-competitor · **Public-research section:** [public-research.md](public-research.md)
+**Date:** 2026-10-09 · **Source:** operator-logged-in walkthrough + 15 Lab Analyst exchanges + public-page capture (all in [evidence/](evidence/)) + [public-research.md](public-research.md) · **Owner role:** pm-competitor
 
 ## 1. One-paragraph read
 
-Dynasty Trade Lab (DTL) is a web-only, credit-priced dynasty trade tool: connect a Sleeper or Fantrax username, and it gives you FantasyCalc values over your league, a template-driven "needs engine" (hold / spend / trade block / who to call), a trade builder + generator that scores trades as a straight value sum, and an LLM chat ("Lab Analyst") fed a per-request snapshot of the same data. The engine is thin — no consolidation premium, no partner-acceptance model, no roster-fit math beyond slot-count "needs" — and the chat is firewalled from its own product's methodology. Its strengths are packaging: a clean three-column generator, weekly value-movement surfaces, manager-level needs lists with pick provenance, free-text trade prompts, and a cheap credit model that lets a user try one real trade for free. Nothing here threatens Fleeced's core (personal Elo values + mutual-gain search + in-platform send), but three surfaces are worth copying.
+Dynasty Trade Lab (DTL) is a solo-maker (Michael Chamberlin), WordPress-built, ~2-month-old web tool launched on Product Hunt in mid-2026 (3 upvotes, 8 followers; [public-research](public-research.md) §1). It is a web-only, credit-priced dynasty trade tool: connect a Sleeper or Fantrax username, and it gives you FantasyCalc values over your league, a template-driven "needs engine" (hold / spend / trade block / who to call), a trade builder + generator that scores trades as a straight value sum, and an LLM chat ("Lab Analyst") fed a per-request snapshot of the same data. The engine is thin — no consolidation premium, no partner-acceptance model, no roster-fit math beyond slot-count "needs" — and the chat is firewalled from its own product's methodology. Its strengths are packaging: a clean three-column generator, weekly value-movement surfaces, manager-level needs lists with pick provenance, free-text trade prompts, three-team trades (the one feature its few public users praise), and a cheap credit model that lets a user try one real trade for free. Nothing here threatens Fleeced's core (personal Elo values + mutual-gain search + in-platform send), but three surfaces are worth copying.
 
 ## 2. Navigation and surfaces
 
@@ -65,10 +65,10 @@ Credits only, no subscription: 10/$4.99 · 40/$17.99 · 75/$29.99 ($0.50 → $0.
 - **pm-pfo:** copy DTL's *manager-level needs list* ("lofman needs RB3, TE1") and *WHO TO CALL* framing into the Acquire landing / Team overhaul — it answers "who do I talk to" in one glance, which Fleeced's card deck makes the user infer.
 - **pm-pfo / eng-backend:** a *free-text trade prompt* ("don't trade my 2027 1st", "I need a RB back") as a constraint layer on the finder is cheap to spec on top of the value core's existing filters; DTL shows users will type these.
 - **pm-retention:** a league-scoped *weekly movers* panel (with owner names) is a low-cost reason to reopen the app; Fleeced has the data (consensus deltas) but no surface.
-- **mkt-brand:** positioning ammo — DTL's "built for your roster, not a static value chart" is a FantasyCalc chart with a needs layer; Fleeced's personal board + mutual-gain search is the honest version of that claim.
+- **mkt-brand:** positioning ammo — DTL's "Built for Your Roster" / "not a static dynasty trade value chart" is a FantasyCalc chart with a needs layer; Fleeced's personal board + mutual-gain search is the honest version of that claim.
 - **pm-monetization:** DTL's per-action credits ($0.40–0.50, 5 free) are a data point for the paywall design; note the 3-message chat credit and free re-view of reports as friction-reducers.
 - **pm-competitor:** add DTL to the standing matrix (done in this run); watch for the three-team feature, the League Analyzer, and whether DTL ever adds a superflex-aware league read (it has the SF table; whether it auto-selects it for SF leagues is untested).
-- **an-market:** sequential report ids (276 on 2026-10-09) as a scale datapoint; request a traffic read.
+- **an-market:** sequential report ids (276 on 2026-10-09) + Product Hunt 3 upvotes / 8 followers as scale datapoints; absent from the FantasyPros Aug-2026 tools roundup; request a traffic read.
 
 ## 8. Open questions
 
@@ -76,4 +76,5 @@ Credits only, no subscription: 10/$4.99 · 40/$17.99 · 75/$29.99 ($0.50 → $0.
 2. What does a credit buy on "Analyze My Trade" and the 3-team mode — same report format? (not exercised: 0 credits)
 3. League Analyzer: referenced in the account hub's empty state and present in code (`analysisMode`, `generate-league`), but **no entry point exists on the site** — sitemap, menus, generator CTAs and query-param guesses all checked ([account-and-credits](evidence/account-and-credits.md)). Dark or unreleased; watch for it.
 4. Does the Fantrax path differ (OAuth vs username)?
-5. Which LLM powers the chat/generator (no disclosure found on-site; see public research).
+5. Which LLM powers the chat/generator — no disclosure on the site, in the privacy policy, or on Product Hunt ([public-research](public-research.md) §2).
+6. The privacy policy is partly boilerplate (claims ESPN/Yahoo OAuth and subscription tiers the product doesn't have) — worth knowing before quoting it as fact.

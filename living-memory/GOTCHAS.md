@@ -11,6 +11,7 @@
 <!-- GOTCHAS-INDEX:START -->
 | ID | Symptom | Area |
 |---|---|---|
+| G-075 | Workflow runs and background Agents stall at zero progress ("interrupted" every 10 min / "no progress for 600s") while the session cwd is the iCloud-damaged clone | Tooling / subagents |
 | G-074 | git reports `… is far too short to be a packfile`, `fatal: stash failed`, or fetches crawl in a clone under `~/Documents` | Tooling / git / iCloud |
 | G-073 | A Render deploy fails at boot with `ModuleNotFoundError: No module named 'psycopg'` although nothing about the database changed | Backend / deploy / dependencies |
 | G-072 | An uncapped owner-only deck (~1,400 cards × ~21 KB evidence) renders as ONE ~28 MB multi-row INSERT and OOM-kills the 256 MB prod Postgres; every Find a Trade then reads "Search failed" | Backend / deck impressions / Postgres |
@@ -93,6 +94,12 @@ Full entries below — grep the ID. Read the entry before acting; this index is 
 ---
 
 ## 2026-10-07
+
+### G-075 — Subagents never start while the session runs in the iCloud-damaged checkout
+
+**Symptom (2026-10-09):** two Workflow runs (14 finder agents) and four background `Agent` calls all died without a single tool call: workflow subagents showed only session attachments, then "[Request interrupted by user]" exactly 10 minutes after each start and were re-queued; plain agents ended with "Agent stalled: no progress for 600s". Earlier the same day, in a clone outside iCloud, two build agents ran fine.
+**Suspected cause (unverified):** the subagents inherit the session cwd — the `Documents - Teresa's MacBook Air` clone whose git packs iCloud truncated ([G-074](#g-074--a-clone-inside-the-icloud-synced-documents-folder-corrupts-gits-pack-files)) — and the `SessionStart` hook's git reads there never return, so the agent never reaches its first model turn.
+**Workaround:** do the work inline, or start the session from a clone outside iCloud. Lost ~45 minutes across six launches before switching to inline research.
 
 ### G-074 — A clone inside the iCloud-synced Documents folder corrupts git's pack files
 
