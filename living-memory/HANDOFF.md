@@ -33,3 +33,11 @@ outside iCloud. Package/ship worktrees from the old path are gone with the move;
 **Next (operator):** run the 8-step TestFlight checklist in [scope.md](../docs/plans/home-tab/scope.md) §3 on 1.19.0 — the six-tab bar (Calibration is the longest label) is the one thing only a phone can prove. Two cold launches may be needed before the Home tab appears (flags are cached; tabs are fixed at mount).
 
 **Watch:** "returning user" = first swipe done on this install, so a never-swiped or reinstalled user still lands on Trades; `app/home` is silently dropped with the flag off.
+
+## Also in flight — 2026-10-09: Dynasty Trade Lab competitor teardown
+
+**Where I stopped:** teardown complete on branch `docs/dtl-teardown` (clean scratchpad clone, PR open): [docs/business/product/2026-10-09-dynastytradelab-teardown/](../docs/business/product/2026-10-09-dynastytradelab-teardown/) — teardown.md, public-research.md, 8 evidence files, 16 screenshots; standing `competitor-matrix.md` created (DTL + Fleeced columns only). League confirmed 1QB by the operator, so no mis-pricing claim. Not merged.
+
+**Next:** operator reads teardown §7 (recommendations by owner) — the two worth acting on are the manager-level "who needs what / who to call" surface and a free-text trade prompt; merge the PR (docs only); enter the older teardowns (DynastyGM, DynastyDealer, RosterAudit, web-tools sweep) as matrix columns next pm-competitor run.
+
+**Watch:** DTL's League Analyzer has no entry point today (dark); 3-team mode untested (0 credits). G-075: subagents don't run from the iCloud clone — re-clone outside iCloud before the next agent-heavy session.
