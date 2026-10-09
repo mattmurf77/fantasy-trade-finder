@@ -5542,7 +5542,7 @@ def _log_deck_signal_impressions(
             row["model_arm"] = "value_core"
             row["arm_rank"] = pos
             row["policy_variant"] = "value_core"
-            row["policy_version"] = (_vc or {}).get("generator_version", "value-core-1")
+            row["policy_version"] = (_vc or {}).get("generator_version", "value-core-2")
             row["fairness_threshold"] = ((_vc or {}).get("core") or {}).get("ratio_floor")
             row["valuation_json"] = json.dumps(_vc, sort_keys=True) if _vc is not None else None
             row["trade_concept_id"] = _trade_policy.trade_concept_id(
@@ -27119,18 +27119,25 @@ def grading_results_route(session_id: str):
         return _grading_error(err)
 
 
-def _pregenerate_grading_targets(pairs: list[tuple[str, str]]) -> None:
+def _pregenerate_grading_targets(pairs: list[tuple[str, str]], rebuild: bool = False) -> None:
     """Daemon-thread half of targeted pre-generation (operator 2026-10-07). Per
     (user_id, league_id), sequentially: refresh the Acquire deck with the weekly
     replenishment path (_replenish_deck_for — headless session, the normal trade job,
     impressions logged with source "replenish"), then start_session + build exactly
-    as the bulk path does. A pair that fails is logged and skipped; never raises."""
+    as the bulk path does. rebuild=True first retires the pair's unanswered building/open
+    session (blind_grading.retire_unanswered), so it is rebuilt on the current engine.
+    A pair that fails is logged and skipped; never raises."""
     for user_id, league_id in pairs:
         try:
             if _replenish_deck_for(user_id, league_id) is None:
                 log.warning("blind-grading: target deck refresh failed user=%s league=%s",
                             user_id, league_id)
                 continue
+            if rebuild:
+                retired = _blind_grading.retire_unanswered(user_id=user_id, league_id=league_id)
+                if retired:
+                    log.info("blind-grading: target retired session %s user=%s league=%s",
+                             retired, user_id, league_id)
             out = _blind_grading.start_session(user_id=user_id, league_user_id=user_id,
                                                league_id=league_id)
             if out["needs_build"]:
@@ -27155,7 +27162,8 @@ def admin_grading_pregenerate_route():
 
     Optional body {"targets": [{"user_id", "league_id"}, ...]} (operator 2026-10-07):
     build for exactly those pairs instead, refreshing each one's Acquire deck first, so
-    a user whose deck is missing or older than MAX_DECK_AGE_DAYS still gets one."""
+    a user whose deck is missing or older than MAX_DECK_AGE_DAYS still gets one. With
+    "rebuild": true, each pair's unanswered building/open session is retired and rebuilt."""
     _require_cron_auth()
     body = request.get_json(silent=True)
     if isinstance(body, dict) and "targets" in body:
@@ -27165,10 +27173,11 @@ def admin_grading_pregenerate_route():
         if not pairs or len(pairs) != len(targets) or not all(u and l for u, l in pairs):
             return jsonify({"error": "invalid_body", "message":
                             "targets must be a non-empty list of {user_id, league_id}"}), 400
-        threading.Thread(target=_pregenerate_grading_targets, args=(pairs,),
+        rebuild = body.get("rebuild") is True
+        threading.Thread(target=_pregenerate_grading_targets, args=(pairs, rebuild),
                          name="grading-pregenerate-targets", daemon=True).start()
-        log.info("blind-grading: pregenerate targets=%d", len(pairs))
-        return jsonify({"targets": len(pairs)}), 202
+        log.info("blind-grading: pregenerate targets=%d rebuild=%s", len(pairs), rebuild)
+        return jsonify({"targets": len(pairs), "rebuild": rebuild}), 202
     out = _blind_grading.pregenerate()
     jobs = out["to_build"]
     if jobs:

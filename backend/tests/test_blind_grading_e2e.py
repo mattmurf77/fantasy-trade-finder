@@ -59,7 +59,7 @@ FORBIDDEN_KEYS = {"arm", "arms", "arms_json", "model_arm", "reasons", "engine", 
                   "source_json", "counts", "counts_json", "impression_id", "deck_job_id",
                   "trade_id", "trade_concept_id", "basis", "lane", "scores", "priority",
                   "policy_variant", "valuation_json"}
-FORBIDDEN_VALUES = {"current", "value_core", "value-core-1", "legacy", "bakeoff", "gen_v2",
+FORBIDDEN_VALUES = {"current", "value_core", "value-core-1", "value-core-2", "legacy", "bakeoff", "gen_v2",
                     "baseline"}
 TRADE_KEYS = {"partner_name", "give", "receive"}
 ASSET_KEYS = {"id", "name", "position", "nfl_team", "age", "value"}

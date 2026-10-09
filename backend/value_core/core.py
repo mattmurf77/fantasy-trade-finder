@@ -3,8 +3,8 @@
 Enumerates 1-3 x 1-3 packages between the viewer and each partner and keeps the
 fair ones: a premium-adjusted consensus-market ratio inside the band, plus the
 hard rules, applied in REJECT_CODES order. It sees market values, rosters,
-roster rules, untouchables and pins only; never a board or a team window.
-No logging, no I/O, no flag or config reads.
+roster rules, untouchables and pins; a board only for throw-ins and a team window
+only for the picks_for_players rule. No logging, no I/O, no flag or config reads.
 """
 from __future__ import annotations
 
@@ -40,7 +40,8 @@ MAX_THROWIN_OPTIONS = 3   # qualifying throw-ins tried per side, per candidate p
 THROWIN_MIN_COMPARISONS = 3   # recipient evidence a throw-in needs: one matchup is not an opinion
 PREMIUM_EXPONENT = 2.0
 RATIO_TOL = 1e-9
-REJECT_CODES = ("floor", "band", "filler", "untouchable", "reducible", "roster_size", "lineup")
+REJECT_CODES = ("floor", "band", "filler", "breakup", "picks_for_players", "untouchable", "reducible",
+                "roster_size", "lineup")
 
 
 def throwin_ok(asset_id: str, recipient_board: Board | None, *,
@@ -85,6 +86,8 @@ class _Ctx:
         self.pmax = cfg.stud_premium
         self.floor = cfg.asset_floor_abs
         self.frac = cfg.filler_min_frac
+        self.breakup = cfg.breakup_min_ratio
+        self.keep_picks = cfg.rebuilders_keep_picks
         # Asymmetric band (operator, 2026-10-01): the viewer may overpay by up to `band` but
         # never take more than `gain_band` from the partner. Tolerance included.
         self.lo = 1.0 / (1.0 + effective_band(cfg.band, request.fairness_threshold)) - RATIO_TOL
@@ -101,7 +104,7 @@ class _Package:
     """One side of a candidate trade. `ids` must be sorted by (-market, id). `throwin`, when
     set, is one id in `ids` exempt from the junk rules (floor, filler, reducible): it counts
     toward value, piece counts, positions and roster size, never toward top/low."""
-    __slots__ = ("ids", "total", "top", "low", "n", "n_core", "n_players", "n_sub", "pos",
+    __slots__ = ("ids", "total", "top", "low", "n", "n_core", "n_players", "n_picks", "n_sub", "pos",
                  "premium", "removable", "untouchable", "throwin")
 
     def __init__(self, ctx: _Ctx, ids: tuple[str, ...], throwin: str | None = None):
@@ -115,6 +118,7 @@ class _Package:
         self.n = len(ids)
         self.n_core = len(core)   # piece count for the stud premium: a throw-in is not a piece
         self.n_players = sum(a.kind == "player" for a in items)
+        self.n_picks = self.n - self.n_players
         # sub-floor players leaving this side: they no longer count as the giver's droppable bench
         self.n_sub = sum(a.kind == "player" and a.market < ctx.floor for a in items)
         self.pos = tuple(sum(a.position == p for a in items) for p in CORE_POSITIONS)
@@ -127,7 +131,7 @@ class _Package:
 
 class _TeamState:
     """Roster facts the roster-size and lineup rules need, computed once per team."""
-    __slots__ = ("players", "droppable", "count", "rows", "unfilled_before")
+    __slots__ = ("players", "droppable", "count", "rows", "unfilled_before", "rebuilding")
 
     def __init__(self, ctx: _Ctx, team: Team):
         players = [a for a in team.asset_ids if ctx.assets[a].kind == "player"]
@@ -137,6 +141,7 @@ class _TeamState:
                            for p in CORE_POSITIONS)
         self.rows = [_row(ctx, a) for a in players]
         self.unfilled_before = _unfilled(self.rows, ctx.slots)
+        self.rebuilding = ctx.keep_picks and team.window.window == "rebuilder"
 
 
 def _row(ctx: _Ctx, asset_id: str) -> dict:
@@ -197,6 +202,14 @@ def _judge(ctx: _Ctx, v: _TeamState, p: _TeamState, g: _Package, r: _Package,
         return "band", ratio, premium, side
     if low < max(ctx.floor, ctx.frac * max(g.top, r.top)):
         return "filler", ratio, premium, side
+    # Operator, 2026-10-09 (Calibration grades): the viewer never breaks up their best piece
+    # for lesser ones — the best piece back must be worth >= breakup_min_ratio of it.
+    if r.top < ctx.breakup * g.top - RATIO_TOL:
+        return "breakup", ratio, premium, side
+    # Operator, 2026-10-09: a rebuilding team (declared rebuilder / "blow it up", or
+    # inferred) never trades picks for players — either side of the trade.
+    if (v.rebuilding and g.n_picks and r.n_players) or (p.rebuilding and r.n_picks and g.n_players):
+        return "picks_for_players", ratio, premium, side
     if g.untouchable and ratio < ctx.untouchable_min:
         return "untouchable", ratio, premium, side
     for x in g.removable:

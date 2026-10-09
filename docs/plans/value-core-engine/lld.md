@@ -101,7 +101,8 @@ MAX_THROWIN_OPTIONS = 3   # qualifying throw-ins tried per side, per candidate p
 THROWIN_MIN_COMPARISONS = 3   # recipient evidence a throw-in needs: one matchup is not an opinion
 PREMIUM_EXPONENT = 2.0
 RATIO_TOL = 1e-9
-REJECT_CODES = ("floor", "band", "filler", "untouchable", "reducible", "roster_size", "lineup")
+REJECT_CODES = ("floor", "band", "filler", "breakup", "picks_for_players", "untouchable", "reducible",
+                "roster_size", "lineup")   # breakup + picks_for_players: value-core-2 (2026-10-09)
 
 
 def throwin_ok(asset_id: str, recipient_board: Board | None, *,
@@ -173,6 +174,8 @@ These are applied per candidate pair in `find_fair_trades`, and identically in `
 | 1 | `floor` | Every asset in G ∪ R except the trade's throw-in has `market ≥ cfg.asset_floor_abs`. In `find_fair_trades` this holds by construction (candidates are pre-filtered, and a throw-in is added only as one), so it only fires in `evaluate_trade`. |
 | 2 | `band` | §4.2 step 5 |
 | 3 | `filler` | Every asset in G ∪ R except the throw-in has `market ≥ max(cfg.asset_floor_abs, cfg.filler_min_frac × market(H))`. The floor is relative to the **trade** headliner, which is stricter than `filler_ok`'s per-side headliner (`trade_service.py:2230`). |
+| 3a | `breakup` | **value-core-2 (operator, 2026-10-09, from the Calibration grades).** The viewer never breaks up their best piece: `R.top ≥ cfg.breakup_min_ratio × G.top − RATIO_TOL` (0.70; `top` = the side's biggest non-throw-in piece). Viewer side only — a partner selling their best piece for several of the viewer's is left to the band and the outlook score. In the first Calibration round the cards this removes graded 2.00 (23% would-send) against 2.72 for the rest. `breakup_min_ratio = 0` disables it. |
+| 3b | `picks_for_players` | **value-core-2 (operator, 2026-10-09).** A team whose window is `rebuilder` (declared `rebuilder` or `jets` / "blow it up", or inferred) never gives a pick while receiving a player: reject when the viewer is rebuilding and G holds a pick and R a player, or the partner is rebuilding and R holds a pick and G a player. Pick-for-pick and player-for-pick are untouched. This is the one rule that reads a team window (`Team.window`); `cfg.rebuilders_keep_picks = False` disables it. |
 | 4 | `untouchable` | If G ∩ `request.untouchable_ids` ≠ ∅: `adjusted_ratio ≥ cfg.untouchable_min_ratio − RATIO_TOL`. Sets `uses_untouchable = True`. |
 | 5 | `reducible` | For each side with ≥ 2 assets, and each asset x on that side that is **not** the side's top asset, **not** in `request.pinned_give_ids ∪ request.pinned_receive_ids` and **not** the throw-in: re-price the trade without x (§4.2 fully recomputed, premium included). If the result passes the band, reject: x is filler, since the trade is fair without it. |
 | 6 | `roster_size` | Only when `snapshot.rules.max_players` is not None. For each team T: `players_before(T) = #{a ∈ T.asset_ids : kind=="player"} + T.other_players`; `after = before − players_out + players_in`; `drops = max(0, after − max(max_players, before))`; `droppable(T) = #{a ∈ T.asset_ids : kind=="player" and market < cfg.asset_floor_abs}`, minus the sub-floor players T gives in this trade (only a throw-in can be one): a piece leaving in the trade is not bench T can drop. Reject if `drops > droppable(T)` for either team. Otherwise record `drops_needed = (drops_viewer, drops_partner)`. |

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping
 
 ENGINE_ID = "value_core"
-ENGINE_VERSION = "value-core-1"
+ENGINE_VERSION = "value-core-2"   # 2: breakup + picks_for_players rules (operator, 2026-10-09)
 TOP_WINDOW = 30  # the guardrails and the per-asset cap are defined on the first 30 cards
 CORE_POSITIONS = ("QB", "RB", "WR", "TE")
 
@@ -116,6 +116,8 @@ class CoreConfig:
     asset_floor_abs: float = 450.0
     filler_min_frac: float = 0.25
     throwin_min_ratio: float = 2.0   # recipient's value / consensus market a throw-in needs
+    breakup_min_ratio: float = 0.70  # the viewer's best piece received / best piece given; below = "breakup"
+    rebuilders_keep_picks: bool = True   # a rebuilding team never gives a pick while receiving a player
 
 
 @dataclass(frozen=True)

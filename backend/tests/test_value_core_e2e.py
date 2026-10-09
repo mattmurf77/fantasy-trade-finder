@@ -97,7 +97,10 @@ def test_run_trade_job_flag_on_real_engine():
     assert all(card["trade_id"].startswith("vc_") for card in cards)
     shapes = {(tuple(sorted(a["id"] for a in card["give"])),
                tuple(sorted(a["id"] for a in card["receive"]))) for card in cards}
-    assert (("rb1",), ("rb3", "wr3")) in shapes          # the harness's fair 1-for-2
+    # The harness's value-fair 1-for-2 breaks up rb1 (rb3 is 61% of him): "breakup" since
+    # value-core-2. The 2-for-2 with the other partner is still served.
+    assert (("rb1",), ("rb3", "wr3")) not in shapes
+    assert (("rb1", "wr2"), ("rb2", "wr1")) in shapes
     rows = capture["impressions"]
     assert rows
     for row in rows:

@@ -64,8 +64,8 @@ def test_public_api():
                                  "REJECT_CODES", "THROWIN_MIN_COMPARISONS", "effective_band",
                                  "stud_premium", "throwin_ok",
                                  "evaluate_trade", "find_fair_trades"}
-    assert REJECT_CODES == ("floor", "band", "filler", "untouchable", "reducible",
-                            "roster_size", "lineup")
+    assert REJECT_CODES == ("floor", "band", "filler", "breakup", "picks_for_players",
+                            "untouchable", "reducible", "roster_size", "lineup")
 
 
 def test_one_for_one_inside_band_kept():
@@ -152,6 +152,50 @@ def test_untouchable_needs_above_market():
     assert diag.rejected["untouchable"] >= 1
     t = next(t for t in trades if (t.give, t.receive) == (("a1",), ("b2",)))
     assert t.uses_untouchable is True
+
+
+def test_breakup_viewer_keeps_best_piece():
+    """Operator 2026-10-09 (Calibration grades): the viewer's best piece received must be worth
+    >= breakup_min_ratio (0.70) of the best piece given. Viewer side only."""
+    s = snap({"V": [A("a1", "WR", 4000)] + BODIES("V"),
+              "P": [A("b1", "WR", 2600), A("b2", "WR", 1500), A("b3", "WR", 2800),
+                    A("b4", "WR", 1300)] + BODIES("P")})
+    verdict = lambda give, receive, cfg=CFG10: evaluate_trade(
+        s, Request("V"), cfg, partner_team_id="P", give=give, receive=receive)
+    assert verdict(["a1"], ["b1", "b2"]).reason == "breakup"           # 2600 = 65% of 4000
+    assert verdict(["a1"], ["b3", "b4"]).ok                            # 2800 = exactly 70%
+    assert verdict(["a1"], ["b1", "b2"], dataclasses.replace(CFG10, breakup_min_ratio=0.0)).ok
+    trades, diag = run(s)
+    assert (("a1",), ("b1", "b2")) not in pairs(trades) and diag.rejected["breakup"] >= 1
+    # The partner breaking up THEIR best piece is not this rule's business.
+    s2 = snap({"V": [A("c1", "WR", 2600), A("c2", "WR", 1500)] + BODIES("V"),
+               "P": [A("s1", "WR", 4000)] + BODIES("P")})
+    assert evaluate_trade(s2, Request("V"), CFG10, partner_team_id="P",
+                          give=["c1", "c2"], receive=["s1"]).ok
+
+
+def test_rebuilders_never_trade_picks_for_players():
+    """Operator 2026-10-09: a rebuilding team (declared rebuilder / "blow it up" -> window
+    "rebuilder", or inferred) never gives a pick while receiving a player. Either side."""
+    teams = {"V": [A("a1", "WR", 3000), A("k1", "PICK", 3000), A("vwr3", "WR", 300)] + BODIES("V"),
+             "P": [A("b1", "WR", 3100), A("q1", "PICK", 3100), A("pwr3", "WR", 300)] + BODIES("P")}
+    reb = TeamWindow("rebuilder", -1.0, "declared", None, 0.0)
+
+    def reason(windows, give, receive, cfg=CFG10):
+        return evaluate_trade(snap(teams, windows=windows), Request("V"), cfg,
+                              partner_team_id="P", give=give, receive=receive).reason
+
+    viewer, partner = {"V": reb}, {"P": reb}
+    assert reason(viewer, ["k1"], ["b1"]) == "picks_for_players"     # V gives a pick for a player
+    assert reason(viewer, ["a1"], ["q1"]) is None                    # V sells a player for a pick
+    assert reason(viewer, ["k1"], ["q1"]) is None                    # pick for pick
+    assert reason(partner, ["a1"], ["q1"]) == "picks_for_players"    # P gives a pick for a player
+    assert reason(partner, ["k1"], ["b1"]) is None
+    assert reason({}, ["k1"], ["b1"]) is None                        # middle / contender: no rule
+    off = dataclasses.replace(CFG10, rebuilders_keep_picks=False)
+    assert reason(viewer, ["k1"], ["b1"], off) is None
+    trades, diag = run(snap(teams, windows=viewer))
+    assert (("k1",), ("b1",)) not in pairs(trades) and diag.rejected["picks_for_players"] >= 1
 
 
 def test_not_interested_never_received():

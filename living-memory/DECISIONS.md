@@ -1,5 +1,12 @@
 # Decisions — Fantasy Trade Finder
 
+## D-199 — Value core v2: never break up the viewer's best piece; rebuilding teams never trade picks for players
+
+**Date:** 2026-10-09 · **Who:** operator, from the first Calibration round. Lead-built.
+**Context:** The operator graded 120 cards in 3 Sleeper leagues: today's engine averaged 2.55 and the value core 2.40, both far below the 4.0 target. The value core fixed junk filler (32 tags → 2) but drew 27 "overpay" tags, 16 of them on cards where the best piece the user gets is worth < 70% of the best piece they give. Those cards graded 2.00, against 3.44 when the user gets the best piece (today's engine). The tagged cards are not explained by the user's own board: by it, they favor the user about 1.6×.
+**Decision:** (1) `breakup`: the viewer's best piece received must be ≥ 0.70 × the best piece given (viewer side only). (2) `picks_for_players`, by the operator's words: *"does not trade picks for players when a team is rebuilding or blow it all up outlook"*. Any team whose engine window is `rebuilder` (declared rebuilder/jets, or inferred) never gives a pick while receiving a player. Both are hard rules in the core (they filter before the per-partner cap, so decks refill), and `ENGINE_VERSION` becomes `value-core-2`. Unanswered Calibration sessions built on v1 are retired and rebuilt (`"rebuild": true` on the targeted pre-generation route).
+**Consequences:** A replay on the operator's 4 live leagues shows rebuilder-league pools shrinking about 15× (mostly the picks rule: the engine infers 7–9 teams of 12–14 as rebuilders), yet the ranked decks still hold 130–479 cards with 11–13 partners in the first 20. Applying the picks rule to inferred partner rebuilders is the operator's "a team" reading. If the inference proves too eager, narrowing the partner side to declared outlooks is the lever. Partner acceptance beyond this (the partner's own board as a gate, positional need) is the next phase, measured by the existing `they_wont_accept` tag.
+
 ## D-198 — Home is the launch tab for returning users; first-run users still land on Trades
 
 2026-10-02. Operator ask: a simple Home tab, first in the bottom bar, asking "What
