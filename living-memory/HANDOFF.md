@@ -1,5 +1,21 @@
 # HANDOFF
 
+## Usage Trends — in flight 2026-10-10 (branch `feat/usage-trends`, worktree `.claude/worktrees/usage-trends`)
+
+**Where I stopped:**
+- **Backend is done and committed (`3ab9fb5b`):** `GET /api/usage-trends`, flag `usage_trends.enabled` (off), 24 tests and 6 sabotages.
+- **Mobile groundwork committed (`40a401d0`):** shared `ClaimSheet`, route, flag-gated Home row and Free Agents link, Quick Set `positionSeq`, API client + pure helpers.
+- **`UsageTrendsScreen.tsx` is NOT written yet,** so `tsc` fails on that one import. It waits on the operator's design pick.
+- Scope is [scope.md](../docs/plans/usage-trends/scope.md).
+
+**Blocked on (operator):**
+- **Design feedback** on the [review page](https://claude.ai/artifact/BKgwB3AvjZKcAu1gwyjWyw). Answers are stored in its db (`reviews/<uid>`); read them with `ArtifactData list reviews`.
+- Drafts are on the [canvas](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo). The recommendation is A + C's recap + B's tap-to-open numbers.
+
+**Don't:**
+- Don't merge or deploy until the home-engagement redesign (`design/home-engagement`, flag `nav.home_hub`) is live (operator, 2026-10-10).
+- Then rebase. Re-home the Home entry as a hub tile, keep the flag-off text row, and keep `check-home-tab.js` matching what that branch expects.
+
 ## Current State — 2026-10-07 (Calibration + value-core shipped to the backend; app build blocked)
 
 **Where I stopped:** PR #312 merged (`295cd951`) and deployed (`dep-db38m460tbcc7380tufg`, API-triggered — Render
