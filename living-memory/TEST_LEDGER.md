@@ -1,3 +1,27 @@
+## 2026-10-10 — Home hub (D-201, `nav.home_hub`): evidence
+
+Full gates (no express). Scope block before code ([scope](../docs/plans/home-engagement/scope.md)); Phase 1 foundations, then two build agents (M-Home, M-Dest) with disjoint files, integrated on `feat/home-hub`. D-056 posture: no simulator, `FTF_SKIP_SIM_GATE=1`.
+
+- **Automated, on the merged tree:** `tsc --noEmit` clean. All **105** `mobile/tests/check-*.js` pass. testid-lint OK; `test:contrast` OK.
+- **New guards:**
+  - `check-home-hub` (44 checks; 6 sabotages, each caught);
+  - `check-home-destinations` (79 checks; 9 sabotages, each caught);
+  - `check-position-split-parity` (27 checks; executes LeagueSummaryScreen's own inline split code beside `utils/positionSplit` over 16,000 randomised views; sabotage-proven 3 ways);
+  - `check-standings-order` (15 checks).
+- **Guards that had to pass unmodified, and did:** `check-home-tab`, `check-league-candidates-300`, `check-analytics-300`, `check-analytics-297-302`, `check-guide-spotlight-tracking`, `check-session-seed`, `check-outlook-bands`.
+- **Backend:** `test_analytics_taxonomy_home_hub.py` (6) is new. Full suite at Phase 1 (the only backend change: flag + taxonomy) was 7658 passed, 1 skipped. Hosted CI runs it again on the PR.
+
+**Code-walk proof:**
+1. **Home → hub.** `HomeScreen.tsx:30-31` reads `nav.home_hub` once (`useRef`) and returns `HomeHub`. The flag-off body is untouched.
+2. **Same numbers on both screens.** `HomeHub.tsx:130-131` takes splits and the ≤2-tile ice emphasis from `utils/positionSplit`. The guard holds that util equal to the screen's inline arithmetic, so Home's band is the band League rankings draws.
+3. **Sell RB from Home.** `HomeHub.tsx:162` `onSell` tracks `home_tile_tapped {tile:'sell', position, band}`, then `requestLeagueSummarySplit` (`leagueSummaryIntent.ts:64`, which stamps `seq`), then `navigate('League', {screen:'LeagueRankings'})`.
+4. **League rankings consumes the intent.** `LeagueSummaryScreen.tsx:1173` takes it on tab-root focus. `:1175` re-arms `filterSigRef`, so the existing auto-exit (`:1136`, `closeTeam('filter_change')`) closes any drill-in. It then sets Consensus / All / {RB}.
+5. **Banner and landing.** `:1210` shows the banner only while the divider is drawn (`candidatePos === position && cutAfter != null`). It renders outside the ScrollView (`:1591`). Sell calls `scrollToEnd` (`:1217`); Buy scrolls to the list `onLayout` y (`:2329`). The hold is re-applied on layout changes and released by a drag (`:1637`).
+6. **Standings.** `RootNav.tsx:839` registers `Standings` unconditionally. `StandingsScreen.tsx:74` enables the outlook query only on Projected. `:89` fires the event only on a changing tap. `:204` reuses League Summary's exported `SeasonOutlookSection`. `:256` mounts one FAB with `aboveTabBar={false}`.
+7. **Team outlook.** `HomeHub.tsx:144` navigates with `editDna:true`. `TradesScreen.tsx:1040-1042` opens the Trade DNA sheet (`trades.finder_hub` is true).
+
+**Not run:** the 15-step manual TestFlight checklist in scope §3. That is the operator's, on the new build.
+
 ## 2026-10-09b — Fit engines (#317) and roster refresh (#318): evidence
 
 - #317: CI 4/4 green on `bea27767`; local full suite 7615 passed, 1 skipped (`test_rookie_scope.py` excluded, machine-local). New tests: `test_fit_engine.py` (9), the fold-in tests (`test_add_fit_arms_folds_blind_and_keeps_answered_cards`, `test_fold_aborts_when_a_moving_card_was_answered`), `test_admin_add_fit_arms_route`; the e2e blinding test forbids the fit arm names and versions.
