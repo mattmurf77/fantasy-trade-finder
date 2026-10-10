@@ -5542,7 +5542,7 @@ def _log_deck_signal_impressions(
             row["model_arm"] = "value_core"
             row["arm_rank"] = pos
             row["policy_variant"] = "value_core"
-            row["policy_version"] = (_vc or {}).get("generator_version", "value-core-2")
+            row["policy_version"] = (_vc or {}).get("generator_version", "value-core-3")
             row["fairness_threshold"] = ((_vc or {}).get("core") or {}).get("ratio_floor")
             row["valuation_json"] = json.dumps(_vc, sort_keys=True) if _vc is not None else None
             row["trade_concept_id"] = _trade_policy.trade_concept_id(

@@ -4,7 +4,7 @@ Enumerates 1-3 x 1-3 packages between the viewer and each partner and keeps the
 fair ones: a premium-adjusted consensus-market ratio inside the band, plus the
 hard rules, applied in REJECT_CODES order. It sees market values, rosters,
 roster rules, untouchables and pins; a board only for throw-ins and a team window
-only for the picks_for_players rule. No logging, no I/O, no flag or config reads.
+only for the picks_for_players rule; the redundant rule reads lineup slots. No logging, no I/O, no flag or config reads.
 """
 from __future__ import annotations
 
@@ -40,8 +40,8 @@ MAX_THROWIN_OPTIONS = 3   # qualifying throw-ins tried per side, per candidate p
 THROWIN_MIN_COMPARISONS = 3   # recipient evidence a throw-in needs: one matchup is not an opinion
 PREMIUM_EXPONENT = 2.0
 RATIO_TOL = 1e-9
-REJECT_CODES = ("floor", "band", "filler", "breakup", "picks_for_players", "untouchable", "reducible",
-                "roster_size", "lineup")
+REJECT_CODES = ("floor", "band", "filler", "breakup", "picks_for_players", "redundant", "untouchable",
+                "reducible", "roster_size", "lineup")
 
 
 def throwin_ok(asset_id: str, recipient_board: Board | None, *,
@@ -88,6 +88,12 @@ class _Ctx:
         self.frac = cfg.filler_min_frac
         self.breakup = cfg.breakup_min_ratio
         self.keep_picks = cfg.rebuilders_keep_picks
+        self.redundancy = cfg.redundancy_min_ratio
+        # Positions a team starts only a fixed number of (operator, 2026-10-10): TE in every
+        # format; QB unless the league has a superflex slot. Value = dedicated slots (min 1).
+        superflex = "SUPER_FLEX" in self.slots
+        self.capped = {p: max(1, self.slots.count(p)) for p in ("TE", "QB")
+                       if p == "TE" or not superflex}
         # Asymmetric band (operator, 2026-10-01): the viewer may overpay by up to `band` but
         # never take more than `gain_band` from the partner. Tolerance included.
         self.lo = 1.0 / (1.0 + effective_band(cfg.band, request.fairness_threshold)) - RATIO_TOL
@@ -131,7 +137,8 @@ class _Package:
 
 class _TeamState:
     """Roster facts the roster-size and lineup rules need, computed once per team."""
-    __slots__ = ("players", "droppable", "count", "rows", "unfilled_before", "rebuilding")
+    __slots__ = ("players", "droppable", "count", "rows", "unfilled_before", "rebuilding",
+                 "capped_markets")
 
     def __init__(self, ctx: _Ctx, team: Team):
         players = [a for a in team.asset_ids if ctx.assets[a].kind == "player"]
@@ -142,6 +149,9 @@ class _TeamState:
         self.rows = [_row(ctx, a) for a in players]
         self.unfilled_before = _unfilled(self.rows, ctx.slots)
         self.rebuilding = ctx.keep_picks and team.window.window == "rebuilder"
+        # {pos: [(market, id)]} of the team's players at the capped positions (redundant rule)
+        self.capped_markets = {p: [(ctx.assets[a].market, a) for a in players
+                                   if ctx.assets[a].position == p] for p in ctx.capped}
 
 
 def _row(ctx: _Ctx, asset_id: str) -> dict:
@@ -210,6 +220,8 @@ def _judge(ctx: _Ctx, v: _TeamState, p: _TeamState, g: _Package, r: _Package,
     # inferred) never trades picks for players — either side of the trade.
     if (v.rebuilding and g.n_picks and r.n_players) or (p.rebuilding and r.n_picks and g.n_players):
         return "picks_for_players", ratio, premium, side
+    if ctx.redundancy > 0 and (_redundant(ctx, v, out=g, into=r) or _redundant(ctx, p, out=r, into=g)):
+        return "redundant", ratio, premium, side
     if g.untouchable and ratio < ctx.untouchable_min:
         return "untouchable", ratio, premium, side
     for x in g.removable:
@@ -225,6 +237,27 @@ def _judge(ctx: _Ctx, v: _TeamState, p: _TeamState, g: _Package, r: _Package,
     if not (_lineup_ok(ctx, v, g, r) and _lineup_ok(ctx, p, r, g)):
         return "lineup", ratio, premium, side
     return None, ratio, premium, side
+
+
+def _redundant(ctx: _Ctx, team: _TeamState, *, out: _Package, into: _Package) -> bool:
+    """Operator, 2026-10-10 (Calibration: McBride offered to the Bowers owner): a team does
+    not take a TE (any format) or a QB (no superflex) when it already keeps as many players
+    at that position as it starts, each worth >= redundancy_min_ratio of the incoming one.
+    Sending one back at that position frees the slot; a throw-in is never judged."""
+    for a in into.ids:
+        if a == into.throwin:
+            continue
+        asset = ctx.assets[a]
+        slots = ctx.capped.get(asset.position) if asset.kind == "player" else None
+        if slots is None:
+            continue
+        bar = ctx.redundancy * asset.market - RATIO_TOL
+        kept = sum(1 for m, i in team.capped_markets[asset.position] if i not in out.ids and m >= bar)
+        also = sum(1 for b in into.ids if b != a and b != into.throwin
+                   and ctx.assets[b].position == asset.position and ctx.assets[b].market >= bar)
+        if kept + also >= slots:
+            return True
+    return False
 
 
 def _fair_trade(ctx: _Ctx, partner_team_id: str, v: _TeamState, p: _TeamState,

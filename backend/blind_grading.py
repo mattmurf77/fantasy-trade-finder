@@ -120,6 +120,7 @@ def add_fit_arms(*, session_id: str, server: ServerInputs, ros_points: Mapping[s
     a session whose source already has the fit arms, or that is not open, is left alone.
     Returns {"status": "added" | "skipped", ...counts}. Raises nothing it can catch."""
     from backend import fit_engine as fe
+    from backend.value_core.types import ENGINE_VERSION as CORE_ENGINE_VERSION
 
     row = db.load_grading_session(session_id)
     if row is None or row["status"] != "open":
@@ -144,7 +145,8 @@ def add_fit_arms(*, session_id: str, server: ServerInputs, ros_points: Mapping[s
                               {"deck_position": i, "gain_viewer": t.gain_viewer,
                                "gain_partner": t.gain_partner})
                       for i, t in enumerate(kept)]
-        metas[arm] = {"version": fe.VERSIONS[arm], "pool": len(trades), "cards": len(kept),
+        metas[arm] = {"version": fe.VERSIONS[arm], "core_engine": CORE_ENGINE_VERSION,
+                      "pool": len(trades), "cards": len(kept),
                       "dropped_unknown": len(deck) - len(kept), "diag": diag,
                       "ros": dict(ros_meta or {})}
     existing = db.load_grading_cards(session_id)
