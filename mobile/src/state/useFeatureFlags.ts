@@ -101,6 +101,12 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // absent here, a fresh install's first boot would see no Home tab. A
   // server `false` kill-switches on the next launch after a revalidate.
   'nav.home_tab': true,
+  // `nav.home_hub`: the Home tab renders the tile hub (status rows, Buy /
+  // Sell position tiles, task tiles; docs/plans/home-engagement/scope.md).
+  // HomeScreen reads it imperatively ONCE per mount, so absent here a fresh
+  // install's first Home would be the old four rows until a revalidate.
+  // A server `false` kill-switches on the next Home mount.
+  'nav.home_hub': true,
   // `calc.canvas_results`: found ideas browse inside the merged canvas.
   // 2026-08-31 operator ruling 1 (D-171): OFF — the landing is the builder
   // only and results moved to the pushed deck (`calc.results_push` below).

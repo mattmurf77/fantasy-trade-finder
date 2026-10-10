@@ -1,0 +1,1372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home engagement lab</title>
+<style>
+  /* ── Chalkline tokens (docs/design/design-system.md, ADR-004/005) ──────
+     Mirrors mobile/src/theme/chalkline.ts + colors.ts. Fonts fall back to
+     Arial Narrow / Helvetica / Menlo: no external requests, so nothing here
+     depends on the network (house convention since mockups/candidates-300-v2).
+     APP UI drawn inside .phone obeys every prohibition: no emoji, no
+     gradients, no blur/translucent surfaces, no radius > 8px except the
+     shipped pill chips, ice = actions only, flare = informational only.
+     LAB CHROME (page furniture, the 22px bezel, dashed .ann annotation tags)
+     is not app UI and is marked as such. */
+  :root{
+    --ink-0:#0C0E11; --ink-1:#13161B; --ink-2:#1A1E25; --ink-3:#232833;
+    --line:#262C35;  --line-strong:#59647A;
+    --chalk:#ECEFF4; --chalk-dim:#97A1AE; --chalk-faint:#626C79;
+    --ice:#56D9EC; --ice-press:#3FC2D6; --on-ice:#071013;
+    --flare:#F0508C; --on-flare:#170610;
+    --pos:#22C55E; --neg:#EF4444; --warn:#F59E0B;
+    --qb:#F97316; --rb:#22C55E; --wr:#3B82F6; --te:#A855F7;
+    --t-2f:#fbbf24; --t-1f:#2dd4bf; --t-2nd:#38bdf8; --t-3rd:#f472b6; --t-3f:#e879f9;
+    --cond:'Barlow Condensed','Arial Narrow','Helvetica Neue',sans-serif;
+    --ui:'Archivo','Helvetica Neue',Helvetica,Arial,sans-serif;
+    --mono:'IBM Plex Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--ink-0);color:var(--chalk);font-family:var(--ui);
+       -webkit-font-smoothing:antialiased;padding:20px 16px 80px}
+  .wrap{max-width:1480px;margin:0 auto}
+  svg.ic{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:square;stroke-linejoin:miter}
+  svg.ic.s16{width:16px;height:16px}
+  svg.ic.s14{width:14px;height:14px}
+
+  /* ── lab chrome ─────────────────────────────────────────────────────── */
+  .navbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:16px;
+    padding:10px 12px;background:var(--ink-1);border:1px solid var(--line);border-radius:8px;
+    position:sticky;top:0;z-index:30}
+  .navbar a{font:600 11px var(--ui);letter-spacing:.06em;text-transform:uppercase;
+    color:var(--chalk-dim);text-decoration:none;border:1px solid var(--line-strong);
+    border-radius:4px;padding:6px 10px}
+  .navbar a:hover{color:var(--chalk)}
+  .navbar a.rec{border-color:var(--ice);color:var(--chalk)}
+  .note{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:16px 18px;margin-bottom:20px}
+  .note h1{font:700 26px/1.15 var(--cond);letter-spacing:.02em;text-transform:uppercase;margin:0 0 10px;
+           display:flex;align-items:center;gap:10px}
+  .note h1::before{content:"";width:16px;height:3px;background:var(--ice);flex:none}
+  .note p,.note li{font-size:13px;line-height:1.65;color:var(--chalk-dim);margin:0 0 8px}
+  .note ul{margin:0 0 8px;padding-left:18px}
+  .note b,.lede b,.legend b,td b{color:var(--chalk);font-weight:600}
+  code{font:500 12px var(--mono);color:var(--chalk);background:var(--ink-3);padding:1px 5px;border-radius:2px}
+  a{color:var(--ice)}
+  h2.sec{font:600 22px/1.2 var(--cond);letter-spacing:.03em;text-transform:uppercase;margin:44px 0 6px;
+         display:flex;align-items:center;gap:9px;scroll-margin-top:70px}
+  h2.sec::before{content:"";width:4px;height:20px;background:var(--ice);flex:none}
+  h3.sub{font:600 13px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);margin:26px 0 8px}
+  p.lede{margin:0 0 16px;font-size:13px;line-height:1.65;color:var(--chalk-dim);max-width:100ch}
+  .flag{border-radius:8px;padding:12px 16px;margin:0 0 18px;font-size:13px;line-height:1.65;
+        background:var(--ink-1);color:var(--chalk-dim)}
+  .flag.warn{border:1px solid var(--warn)} .flag.real{border:1px solid var(--pos)} .flag.ice{border:1px solid var(--ice)}
+  .flag b{color:var(--chalk)}
+  .stamp{display:inline-block;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;
+         padding:3px 8px;border-radius:2px;align-self:flex-start}
+  .stamp.capture{background:var(--pos);color:var(--on-ice)}
+  .stamp.recon{background:var(--warn);color:var(--on-ice)}
+  .stamp.prop{background:var(--ice);color:var(--on-ice)}
+  .stamp.wire{background:var(--ink-3);color:var(--chalk-dim);border:1px solid var(--line-strong)}
+  .rail{display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap}
+  .col{display:flex;flex-direction:column;gap:10px;flex:0 1 390px;min-width:0;max-width:390px}
+  .col.wide{flex:1 1 380px;max-width:640px}
+  .cap{font:500 11px/1.6 var(--mono);color:var(--chalk-faint);letter-spacing:.02em}
+  .cap b{color:var(--chalk-dim)}
+  img.shot{width:100%;max-width:390px;border:1px solid var(--line-strong);border-radius:22px;display:block}
+  .legend{font-size:12px;line-height:1.6;color:var(--chalk-dim);border-top:1px solid var(--line);padding-top:8px}
+  .legend div{margin:0 0 6px;display:flex;gap:8px}
+  .legend .k{font:600 11px var(--mono);color:var(--warn);flex:none;width:26px}
+  .legend .gap{color:var(--warn);font-weight:600}
+  .legend .ok{color:var(--pos);font-weight:600}
+  table.t{border-collapse:collapse;width:100%;font-size:12.5px;line-height:1.5;margin:6px 0 16px}
+  .tscroll{overflow-x:auto}
+  table.t th{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);
+             text-align:left;padding:8px 10px;border-bottom:1px solid var(--line-strong);white-space:nowrap}
+  table.t td{padding:8px 10px;border-bottom:1px solid var(--line);color:var(--chalk-dim);vertical-align:top}
+  td .gapt{color:var(--warn);font-weight:600} td .okt{color:var(--pos);font-weight:600}
+  /* annotation tag: LAB CHROME, never app UI */
+  .ann{position:absolute;top:-9px;right:8px;font:600 11px/1 var(--mono);color:var(--warn);background:var(--ink-0);
+       border:1px dashed var(--warn);border-radius:2px;padding:3px 5px;z-index:5;letter-spacing:.02em}
+  .fold{position:absolute;left:0;right:0;border-top:1px dashed var(--warn);z-index:6;pointer-events:none}
+  .fold span{position:absolute;right:6px;top:-17px;font:600 11px var(--mono);color:var(--warn);background:var(--ink-0);padding:1px 4px}
+
+  /* ── phone frame (lab chrome: 22px bezel) ──────────────────────────── */
+  .phone{width:100%;max-width:390px;background:var(--ink-0);border:1px solid var(--line-strong);
+         border-radius:22px;overflow:hidden;position:relative;flex:none}
+  .status{height:47px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 8px;
+          font:600 13px var(--ui);color:var(--chalk)}
+  .status .r{font:500 11px var(--mono);color:var(--chalk-dim)}
+  /* TopBar (#223/#224): 52pt; ice tick + LEAGUE micro-label + name + format tile + chevron; bell, gear */
+  .topbar{height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 12px 0 16px;border-bottom:1px solid var(--line)}
+  .tb-l{display:flex;align-items:center;gap:8px;min-width:0}
+  .tb-l .tk{width:3px;height:22px;background:var(--ice);flex:none}
+  .tb-l .nm{display:flex;flex-direction:column;min-width:0}
+  .tb-l .ml{font:600 11px/13px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-faint)}
+  .tb-l .ln{display:flex;align-items:center;gap:6px;min-width:0}
+  .tb-l .ln b{font:600 15px/19px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fmt{font:600 11px/1 var(--ui);letter-spacing:.06em;background:var(--ice);color:var(--on-ice);padding:3px 5px;border-radius:2px;flex:none}
+  .plat{font:600 11px/1 var(--ui);letter-spacing:.06em;border:1px solid var(--line-strong);color:var(--chalk-dim);padding:2px 5px;border-radius:2px;flex:none}
+  .tb-l .chev{color:var(--ice)}
+  .tb-r{display:flex;gap:4px;color:var(--chalk-dim)}
+  .tb-r span{width:40px;height:40px;display:flex;align-items:center;justify-content:center}
+  .navhdr{height:44px;display:flex;align-items:center;justify-content:center;position:relative;border-bottom:1px solid var(--line)}
+  .navhdr .t{font:600 17px var(--cond);letter-spacing:.09em;text-transform:uppercase}
+  .navhdr .back{position:absolute;left:8px;display:flex;align-items:center;gap:2px;font:500 14px var(--ui);color:var(--ice)}
+  .scr{padding:16px 16px 92px;position:relative}
+  .scr.tight{padding-bottom:20px}
+  .tabbar{height:83px;border-top:1px solid var(--line);background:var(--ink-0);display:grid;grid-template-columns:repeat(6,1fr);padding:7px 2px 0}
+  .tabbar div{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--chalk-dim);
+              font:600 11px var(--ui);min-width:0}
+  .tabbar div span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .tabbar div.on{color:var(--ice)}
+  .fab{position:absolute;right:14px;bottom:95px;width:52px;height:52px;border-radius:8px;background:var(--ink-1);
+       border:1px solid var(--line-strong);display:flex;align-items:center;justify-content:center;color:var(--chalk);z-index:4}
+
+  /* ── shared app primitives ─────────────────────────────────────────── */
+  .tick{display:flex;align-items:center;gap:8px;margin:22px 0 10px;position:relative}
+  .tick::before{content:"";width:3px;height:13px;background:var(--ice);flex:none}
+  .tick span{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .tick .rt{margin-left:auto;font:500 11px var(--mono);color:var(--chalk-faint);letter-spacing:0;text-transform:none}
+  .badge{display:inline-flex;align-items:center;font:600 11px/1 var(--ui);letter-spacing:.08em;text-transform:uppercase;
+         border:1px solid var(--line-strong);color:var(--chalk);padding:3px 6px;border-radius:2px;white-space:nowrap;flex:none}
+  .badge.you{border-color:var(--ice);color:var(--ice)}
+  .badge.fl{border-color:var(--flare);color:var(--flare)}
+  .badge.mono{font-family:var(--mono);letter-spacing:0}
+  .pchip{display:inline-flex;font:600 11px/1 var(--ui);letter-spacing:.06em;padding:3px 5px;border-radius:2px;border:1px solid;flex:none}
+  .pchip.rb{border-color:var(--rb);color:var(--chalk)} .pchip.wr{border-color:var(--wr);color:var(--chalk)}
+  .pchip.qb{border-color:var(--qb);color:var(--chalk)} .pchip.te{border-color:var(--te);color:var(--chalk)}
+  .tier{display:inline-flex;font:600 11px/1 var(--ui);padding:3px 5px;border-radius:2px;border:1px solid;color:var(--chalk);flex:none}
+  .card{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;position:relative}
+  .card.pressed{background:var(--ink-3)}
+  .btn{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;border-radius:4px;font:600 14px var(--ui);padding:0 16px}
+  .btn.pri{background:var(--ice);color:var(--on-ice)}
+  .btn.sec{border:1px solid var(--line-strong);color:var(--chalk)}
+  .btn.ghost{color:var(--chalk-dim)}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .dim{color:var(--chalk-dim)} .faint{color:var(--chalk-faint)} .fl{color:var(--flare)} .icec{color:var(--ice)}
+  .bodysm{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .body{font:400 14px/21px var(--ui);color:var(--chalk)}
+  .title{font:600 16px/22px var(--ui);color:var(--chalk)}
+  .lbl{font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+
+  /* ── BEFORE (HomeScreen.tsx @ dd08c7c2) ─────────────────────────────── */
+  .b-head{font:600 22px/26px var(--cond);letter-spacing:.66px;color:var(--chalk);margin:24px 0 12px}
+  .b-row{min-height:56px;display:flex;align-items:center;border-bottom:1px solid var(--line);font:600 16px/22px var(--ui)}
+
+  /* ── DIRECTION A — Hub ─────────────────────────────────────────────── */
+  .a-sub{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .a-title{font:700 28px/30px var(--cond);letter-spacing:.3px;margin:4px 0 12px}
+  .live{display:flex;gap:10px;align-items:flex-start;background:var(--ink-2);border:1px solid var(--line);border-radius:4px;padding:9px 12px;position:relative}
+  .live::before{content:"";width:3px;align-self:stretch;background:var(--ice);flex:none}
+  .live p{margin:0;font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .live b{font-family:var(--mono);font-weight:600;color:var(--flare)}
+  .hero{padding:16px}
+  .hero .top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .hero h4{font:600 22px/26px var(--cond);letter-spacing:.66px;text-transform:uppercase;margin:10px 0 6px}
+  .hero .why{font:400 14px/21px var(--ui);color:var(--chalk-dim);margin:0}
+  .hero .why .mono{color:var(--chalk)}
+  .hero .names{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin:12px 0 0}
+  .hero .names b{color:var(--chalk);font-weight:600}
+  .hero .cta{display:flex;align-items:center;justify-content:space-between;margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+             font:600 14px var(--ui);color:var(--ice)}
+  /* median strip: DynastyGM focus treatment (you keep colour, others grey) on League Summary's AVG-line construction */
+  .strip{margin-top:14px;position:relative;height:96px}
+  .strip .bars{position:absolute;left:0;right:0;top:0;height:64px;display:grid;grid-template-columns:repeat(12,1fr);gap:4px;align-items:end}
+  .strip .bars i{display:block;background:var(--ink-3)}
+  .strip .bars i.me{background:var(--rb)}
+  .strip .med{position:absolute;left:0;right:0;border-top:1px dashed var(--chalk-faint)}
+  .strip .medl{position:absolute;right:0;font:600 11px/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--chalk-faint);background:var(--ink-1);padding:0 0 0 4px}
+  .strip .you{position:absolute;top:68px;font:600 11px/1 var(--ui);letter-spacing:.06em;color:var(--ice)}
+  .strip .br{position:absolute;top:84px;height:8px;border:1px solid var(--line-strong);border-top:0}
+  .strip .brl{position:absolute;top:84px;font:600 11px/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;color:var(--chalk-dim);background:var(--ink-1);padding:0 4px;transform:translateY(-2px)}
+  .pos4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px}
+  .ptile{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:10px 8px 9px;min-height:88px;
+         display:flex;flex-direction:column;gap:3px;position:relative;overflow:hidden}
+  .ptile::before{content:"";position:absolute;left:0;right:0;top:0;height:3px}
+  .ptile.qb::before{background:var(--qb)} .ptile.rb::before{background:var(--rb)} .ptile.wr::before{background:var(--wr)} .ptile.te::before{background:var(--te)}
+  .ptile.cur{border-color:var(--line-strong)}
+  .ptile .p{font:600 11px/14px var(--ui);letter-spacing:.08em;color:var(--chalk-dim)}
+  .ptile .r{font:600 20px/24px var(--mono);color:var(--chalk)}
+  .ptile .r small{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .ptile .badge{align-self:flex-start;margin-top:auto}
+  .ptile .none{margin-top:auto;font:400 11px/14px var(--ui);color:var(--chalk-faint)}
+  .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .atile{padding:14px;min-height:124px;display:flex;flex-direction:column;gap:10px}
+  .atile .tp{display:flex;justify-content:space-between;align-items:flex-start}
+  .well{width:40px;height:40px;border-radius:4px;background:var(--ink-2);display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+  .atile .tt{font:600 16px/22px var(--ui)}
+  .atile .dd{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+
+  /* ── DIRECTION B — League plan (FumbleAI canvas) ───────────────────── */
+  .ctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .lens{display:flex;align-items:center;gap:6px;min-height:36px;border:1px solid var(--line-strong);border-radius:4px;padding:0 10px;font:600 14px var(--ui)}
+  .pill{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 13px;border-radius:999px;border:1.5px solid;font:600 13px var(--ui);letter-spacing:.06em}
+  .pill.qb{border-color:var(--qb);color:var(--qb)} .pill.rb{border-color:var(--rb);color:var(--rb)}
+  .pill.wr{border-color:var(--wr);color:var(--wr)} .pill.te{border-color:var(--te);color:var(--te)}
+  .pill.all{border-color:var(--line-strong);color:var(--chalk-dim)} .pill.pk{border-color:var(--line-strong);color:var(--chalk-dim)}
+  .pill.on{background:var(--ice);border-color:var(--ice);color:var(--on-ice)}
+  .pills{display:flex;gap:6px;flex-wrap:wrap}
+  .plan{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:10px}
+  .room{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:8px 8px 7px;min-height:76px;display:flex;flex-direction:column;gap:3px;position:relative;min-width:0}
+  .room .n{font:600 13px/17px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:9px}
+  .room .n .mono{color:var(--chalk-dim);font-weight:500;margin-right:4px}
+  .room .v{font:500 11px/14px var(--mono);color:var(--chalk-dim)}
+  .room .badge{align-self:flex-start;margin-top:auto}
+  .room.quiet{background:var(--ink-0);border-style:dashed}
+  .room.quiet .n,.room.quiet .v{color:var(--chalk-faint)}
+  .room.me{border:2px solid var(--ice);padding:7px 7px 6px}
+  .room .dot{position:absolute;top:8px;right:8px;width:6px;height:6px;background:var(--flare)}
+  .rule{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin:2px 0}
+  .rule i{flex:1;border-top:1px solid var(--line-strong)}
+  .rule span{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-faint);white-space:nowrap}
+  .bstrip{display:flex;align-items:center;gap:12px;padding:12px 14px;min-height:66px;margin-top:12px}
+  .bstrip .a{font:600 15px/20px var(--ui)}
+  .bstrip .b{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin-top:2px}
+  .bstrip .t{flex:1;min-width:0}
+  .q4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:10px}
+  .qt{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;min-height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;color:var(--chalk-dim);position:relative}
+  .qt span{font:600 12px var(--ui);color:var(--chalk)}
+  .qt em{position:absolute;top:6px;right:6px;font:600 11px/1 var(--mono);font-style:normal;color:var(--flare)}
+  .qt em.n{color:var(--chalk-dim)}
+  .scrim{position:absolute;inset:99px 0 0 0;background:rgba(7,9,12,0.78);z-index:7}
+  .sheet{position:absolute;left:0;right:0;bottom:0;background:var(--ink-2);border-top:1px solid var(--line);border-top-left-radius:8px;border-top-right-radius:8px;
+         z-index:8;padding:8px 16px 26px}
+  .grab{width:32px;height:4px;background:var(--line-strong);margin:0 auto 12px}
+  .sh-h{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+  .xbtn{width:32px;height:32px;border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--chalk-dim);flex:none}
+  .grp{display:flex;justify-content:space-between;align-items:center;margin:14px 0 6px}
+  .prow{display:flex;align-items:center;gap:8px;min-height:44px;border-bottom:1px solid var(--line)}
+  .prow .nm{flex:1;min-width:0;font:600 14px/20px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prow .mono{font-size:13px;color:var(--chalk)}
+
+  /* ── DIRECTION C — Partner rails ───────────────────────────────────── */
+  .c-title{font:600 22px/26px var(--cond);letter-spacing:.66px;margin:2px 0 12px}
+  .shape{display:grid;grid-template-columns:1fr 1fr;gap:0}
+  .shape > div{padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+  .shape > div + div{border-left:1px solid var(--line)}
+  .track{height:4px;background:var(--ink-3);position:relative}
+  .track i{position:absolute;left:0;top:0;bottom:0;display:block}
+  .railx{display:flex;gap:8px;overflow-x:auto;margin:0 -16px;padding:0 16px 6px;scrollbar-width:none}
+  .railx::-webkit-scrollbar{display:none}
+  .ttile{flex:0 0 158px;min-height:170px;padding:12px;display:flex;flex-direction:column;gap:5px}
+  .ttile .n{font:600 15px/20px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ttile .r{font:600 13px var(--mono)}
+  .ttile .sh{font:500 11px/16px var(--mono);color:var(--chalk-dim)}
+  .ttile .sh b{font-weight:600}
+  .ttile .go{margin-top:auto;display:flex;justify-content:space-between;align-items:center;font:600 13px var(--ui);color:var(--chalk);padding-top:8px;border-top:1px solid var(--line)}
+  .ttile .gapchip{align-self:flex-start;font:600 11px/1 var(--ui);letter-spacing:.06em;border:1px dashed var(--warn);color:var(--warn);padding:3px 5px;border-radius:2px}
+  .atx{flex:0 0 118px;min-height:104px;padding:12px;display:flex;flex-direction:column;gap:8px}
+  .atx .tt{font:600 14px/18px var(--ui)}
+  .atx .dd{font:400 12px/16px var(--ui);color:var(--chalk-dim)}
+
+  /* ── League Summary reconstruction ─────────────────────────────────── */
+  .ls-hint{font:400 13px/18px var(--ui);color:var(--chalk-dim);margin:10px 0 4px}
+  .lrow{display:flex;align-items:center;gap:8px;min-height:44px;padding:0 4px;border-bottom:1px solid var(--line)}
+  .lrow.you{background:var(--ink-2);border-bottom-color:var(--line-strong)}
+  .lrow .rk{width:24px;text-align:center;font:500 13px var(--mono);color:var(--chalk-dim);flex:none}
+  .lrow.you .rk{color:var(--ice)}
+  .lrow .nm{flex:1;min-width:0;display:flex;align-items:center;gap:6px}
+  .lrow .nm b{font:600 15px/20px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .lrow .vl{font:500 13px var(--mono);color:var(--chalk);white-space:nowrap}
+  .lrow .ch{color:var(--chalk-dim)}
+  .cut{display:flex;align-items:center;gap:8px;padding:6px 0}
+  .cut i{flex:1;border-top:1px solid var(--line-strong)}
+  .cut span{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-faint);white-space:nowrap}
+  .minichart{display:grid;grid-template-columns:repeat(12,1fr);gap:3px;align-items:end;height:70px;margin-top:10px}
+  .minichart i{display:block;background:var(--rb)}
+  .minichart i.dim{background:var(--ink-3)}
+
+  /* ── states ────────────────────────────────────────────────────────── */
+  .skel{background:var(--ink-2);height:12px;border-radius:2px}
+  .empty h4{font:600 22px/26px var(--cond);letter-spacing:.66px;text-transform:uppercase;margin:0 0 6px}
+  .states{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:20px}
+  .mini{max-width:390px}
+  .mini .scr{padding-bottom:16px}
+  @media (max-width:600px){
+    .navbar{position:static;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+    .navbar::-webkit-scrollbar{display:none}
+    .navbar a{white-space:nowrap;flex:none}
+  }
+  @media (max-width:430px){
+    body{padding:12px 16px 60px}
+    .a-title{font-size:26px;line-height:28px}
+    .scr{padding:14px 12px 92px}
+    .room .n{font-size:12px}
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- Chalkline icon set, verbatim paths from mobile/src/components/chalkline/Icon.tsx (20x20, 1.75 stroke, square caps) -->
+    <symbol id="i-home" viewBox="0 0 20 20"><path d="M3 9l7-6 7 6M5 8v9h10V8M8 17v-5h4v5"/></symbol>
+    <symbol id="i-rank" viewBox="0 0 20 20"><path d="M3 17V9M10 17V3M17 17v-6"/></symbol>
+    <symbol id="i-trade" viewBox="0 0 20 20"><path d="M3 7h11M11 3l4 4-4 4M17 13H6M9 17l-4-4 4-4"/></symbol>
+    <symbol id="i-match" viewBox="0 0 20 20"><path d="M8 12a4 4 0 010-6l2-2a4 4 0 016 6l-1 1M12 8a4 4 0 010 6l-2 2a4 4 0 01-6-6l1-1"/></symbol>
+    <symbol id="i-check" viewBox="0 0 20 20"><path d="M4 11l4 4 8-9"/></symbol>
+    <symbol id="i-crown" viewBox="0 0 20 20"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 20 20"><path d="M10 3a5 5 0 015 5v3l2 3H3l2-3V8a5 5 0 015-5zM8 17a2 2 0 004 0"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><circle cx="10" cy="10" r="5.5"/><path d="M10 2v2.5M10 15.5V18M2 10h2.5M15.5 10H18M4.3 4.3l1.8 1.8M13.9 13.9l1.8 1.8M15.7 4.3l-1.8 1.8M6.1 13.9l-1.8 1.8"/></symbol>
+    <symbol id="i-cr" viewBox="0 0 20 20"><path d="M8 4l6 6-6 6"/></symbol>
+    <symbol id="i-cl" viewBox="0 0 20 20"><path d="M12 4l-6 6 6 6"/></symbol>
+    <symbol id="i-cd" viewBox="0 0 20 20"><path d="M4 8l6 6 6-6"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 20 20"><path d="M5 3v14M5 4h9l-2 3 2 3H5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5L5 15"/></symbol>
+    <symbol id="i-reload" viewBox="0 0 20 20"><path d="M16 5v4h-4M16.2 9a6.3 6.3 0 10-1.6 6.4"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4v12M4 10h12"/></symbol>
+  </defs>
+</svg>
+
+<div class="wrap">
+
+<nav class="navbar" aria-label="Sections">
+  <a href="#dir-d" class="rec">D · Operator revision (current)</a>
+  <a href="#before">0 · Before</a>
+  <a href="#reference">1 · FumbleAI reference</a>
+  <a href="#dir-a">2 · A Hub (round 1 rec.)</a>
+  <a href="#dir-b">3 · B League plan</a>
+  <a href="#dir-c">4 · C Partner rails</a>
+  <a href="#compare">5 · Compare</a>
+  <a href="#tapthrough">6 · Tap-through</a>
+  <a href="#states">7 · States (A)</a>
+  <a href="#data">8 · Data map</a>
+  <a href="#audit">9 · Chalkline audit</a>
+</nav>
+
+<section class="note">
+  <h1>Home engagement lab</h1>
+  <p><b>Question this lab answers:</b> what should the Home tab look like so returning users see their trade opponents and get pulled into League Summary's position buyers/sellers split (flag <code>league.pos_candidates</code>)? Today almost nobody finds that split, because Home is four plain text rows.</p>
+  <p><b>Primary reference (operator):</b> the FumbleAI homeowner app's Home hub, <code>HomeApp/App/Features/Home/HomeHubView.swift</code> + <code>HomeHubCatalog.swift</code>. It asks the same question our Home asks ("What would you like to do?") and answers it with big tappable tiles that preview live counts. Every direction below is tile-based; none falls back to a link list. FumbleAI's structure is kept and re-rendered in Chalkline tokens; conflicts are listed in <a href="#audit">§9</a> and in <code>docs/plans/home-engagement/research.md</code>.</p>
+  <p><b>Provenance:</b> there is <b>no capture of Home</b>. The <code>screens/</code> library froze on 2026-08-11 (D-056) and Home shipped on 2026-10-08 (<code>dd08c7c2</code>, #309). The "before" pane is therefore a <b>labelled reconstruction</b> from <code>mobile/src/screens/HomeScreen.tsx</code> at <code>22900e02</code>. The only real capture embedded is <code>screens/mobile/league-summary/populated.png</code> (2026-08-11 build), used as the identity anchor for the League rankings tap-through. Every other app frame is a reconstruction or a proposal and is stamped as one. Interim posture per <code>mockups/CLAUDE.md</code> § "Unresolved: the embed rule vs the screen-library freeze".</p>
+  <p><b>Sample league (invented, no real handles):</b> "Gridiron Syndicate", 12 teams, SF TEP, Sleeper. You are <code>taxi_squad_tom</code>: 5th overall; QB 7th, <b>RB 2nd</b>, WR 6th, <b>TE 11th</b>. Values use the server's own label form <code>≈{n} firsts</code> (<code>backend/server.py:889-914</code>, half-first rounding). Fonts render as fallbacks; no network requests.</p>
+  <p><b>Round 2 (operator revision): <a href="#dir-d">Direction D</a> is the current candidate.</b> Built from C's page: status rows for team outlook, standings and overall rank; all four position tiles with Buy / Sell; a five-tile Get things done. Directions A–C below are the first round, unchanged.</p>
+  <p><b>Design only.</b> No <code>mobile/</code> or <code>backend/</code> code changed. The recommended direction's scope block is <code>docs/plans/home-engagement/scope.md</code>.</p>
+</section>
+
+<!-- ═══════════════════════════════ 0 · BEFORE ═══════════════════════════════ -->
+<h2 class="sec" id="before">0 · Before: Home today</h2>
+<p class="lede">One question and four text rows, each a <code>navigation.navigate</code> to a sibling tab. No data, no state (<code>HomeScreen.tsx:15-44</code>). The four destinations are already in the tab bar directly below, so the screen adds nothing a user can't already reach in one tap, and it never mentions a leaguemate.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp recon">Reconstruction from source, not a capture</span>
+    <div class="phone" aria-label="Home today, reconstructed">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="scr" style="min-height:670px">
+        <div class="b-head">What would you like to do today?</div>
+        <div class="b-row">Rank</div>
+        <div class="b-row">Find a Trade</div>
+        <div class="b-row">See Matches</div>
+        <div class="b-row">View my Leagues</div>
+      </div>
+      <div class="fab"><svg class="ic"><use href="#i-flag"/></svg></div>
+      <div class="tabbar">
+        <div class="on"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap"><b>Sources:</b> HomeScreen.tsx:15-20 (OPTIONS table: labels + targets + testIDs), :28-30 (heading, sentence case over <code>type.heading</code>), :48-56 (56pt rows, hairline <code>ink.line</code>). TopBar per components.md § Navigation (#223/#224). Tab order per TabNav.tsx:819-981 and D-198: Home · Rank · Acquire · Calibration · Matches · League (Calibration slot icon <code>check</code>, TabNav.tsx:915). FAB = RootNav's single global mount (#188). Files changed since the screen-library freeze: HomeScreen.tsx (new, dd08c7c2), TabNav.tsx, TopBar.tsx.</p>
+  </div>
+  <div class="col">
+    <span class="stamp capture">Real capture · 2026-08-11 build</span>
+    <img class="shot" src="../../screens/mobile/league-summary/populated.png" alt="Real capture of League rankings, 2026-08-11">
+    <p class="cap"><b>Chrome anchor.</b> <code>screens/mobile/league-summary/populated.png</code>: the real TopBar (ice tick, LEAGUE micro-label, ice format tile, chevron, bell, gear), the pill-shaped position chips with an ice-filled active chip, the stacked bars and the square flag FAB. Its tab bar (Rank · Acquire · Draft · Matches · League) predates Home and Calibration, and the capture predates the #300 median divider (shipped 2026-08-12). Everything drawn on this page matches this chrome.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 1 · REFERENCE ═══════════════════════════════ -->
+<h2 class="sec" id="reference">1 · The reference: FumbleAI's Home hub, as structure</h2>
+<p class="lede">Redrawn as a neutral wireframe from <code>HomeHubView.swift:62-126</code> and <code>HomeHubCatalog.swift:185-242</code>, so you can see the skeleton we kept. It is <b>not</b> FumbleAI's styling (that uses SF Pro, a <code>#1E5AA8</code> blue, 14pt radii and a blueprint-grid paper texture, none of which Chalkline allows). FumbleAI's HTML mockup (<code>docs/homeowner-app/mockups/index.html</code>) shows a different, older home: a floor-plan canvas. Direction B borrows from that one.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp wire">Wireframe of FumbleAI HomeHubView, not our UI</span>
+    <div class="phone" aria-label="FumbleAI hub structure wireframe" style="padding:18px 16px 22px">
+      <div style="display:flex;justify-content:space-between;align-items:center"><span class="bodysm">Property name · address (13 semibold)</span><span class="badge">gear 36</span></div>
+      <div style="font:700 26px/30px var(--ui);margin:8px 0">What would you like to do?</div>
+      <div class="card" style="padding:8px 10px;border-style:dashed"><span class="bodysm">Live summary: "1 chore due today · 1 overdue · $3.6k planned · 2 running low"</span></div>
+      <div class="lbl" style="margin:20px 0 8px">YOUR HOME</div>
+      <div class="card" style="padding:12px;display:flex;gap:10px;align-items:center;min-height:84px;border-style:dashed"><span class="well" style="width:52px;height:52px">52</span><div style="flex:1"><div class="title">Floor plan</div><div class="bodysm">Every floor and room at a glance</div></div><span class="badge">3 floors</span></div>
+      <div class="card" style="padding:12px;display:flex;gap:10px;align-items:center;min-height:84px;margin-top:8px;border-style:dashed"><span class="well" style="width:52px;height:52px">52</span><div style="flex:1"><div class="title">Yard &amp; Exterior</div><div class="bodysm">Add your yard to plan outside work</div></div><span class="badge">Add</span></div>
+      <div class="lbl" style="margin:20px 0 8px">GET THINGS DONE</div>
+      <div class="grid2">
+        <div class="card atile" style="border-style:dashed"><div class="tp"><span class="well">40</span><span class="badge">1 overdue</span></div><div><div class="tt">To-Dos</div><div class="dd">Chores and reminders by due date</div></div></div>
+        <div class="card atile" style="border-style:dashed"><div class="tp"><span class="well">40</span><span class="badge">3</span></div><div><div class="tt">Projects &amp; budget</div><div class="dd">2 in progress · past work</div></div></div>
+        <div class="card atile" style="border-style:dashed"><div class="tp"><span class="well">40</span><span class="badge">2 low</span></div><div><div class="tt">Record your stuff</div><div class="dd">Appliances, furniture…</div></div></div>
+        <div class="card atile" style="border-style:dashed"><div class="tp"><span class="well">40</span></div><div><div class="tt">Find something</div><div class="dd">"Where's the winter coat?"</div></div></div>
+      </div>
+    </div>
+    <p class="cap"><b>Measured in code:</b> 16pt side padding, 22pt section gap; wide cards min 84pt; grid cards min 132pt, 2 columns (1 at accessibility text sizes, HomeHubView.swift:20); 10pt gaps; badges hide at zero (HomeHubCatalog.swift:337-338). Tiles switch tabs or open the Plan tab with a lens preset via a shared store, never route params (MainTabView.swift:85-96).</p>
+  </div>
+  <div class="col wide">
+    <h3 class="sub" style="margin-top:0">What we carried over, piece by piece</h3>
+    <div class="tscroll"><table class="t">
+      <tr><th>FumbleAI hub</th><th>Fleeced Home (Direction A)</th></tr>
+      <tr><td>"What would you like to do?" title</td><td>Kept verbatim from today's Home: "What would you like to do today?" (D-198 copy)</td></tr>
+      <tr><td>Header subtitle: the user's own property</td><td>The user's own team: <code>taxi_squad_tom · 5th of 12</code></td></tr>
+      <tr><td>Live summary capsule, ordered by urgency, never empty</td><td>Live line in Chalkline's Banner construction; flare numerals; falls back to an all-clear sentence</td></tr>
+      <tr><td>"YOUR HOME" full-width cards (Floor plan, Yard)</td><td>"YOUR LEAGUE": the full-width <b>Trade market</b> hero tile + four position tiles (the league's "floors")</td></tr>
+      <tr><td>Yard card turns into a setup prompt when missing</td><td>Hero turns into "Link a league" / "Not enough rosters yet" (§7)</td></tr>
+      <tr><td>"GET THINGS DONE" 2×2 task grid with count badges</td><td>Same: Rank · Find a trade · Matches · League, live badges</td></tr>
+      <tr><td>Badge priority ladder; quiet at zero</td><td>Same rule: a badge renders only for a real non-zero count</td></tr>
+      <tr><td>Card → Plan tab with lens + floor preset (<code>env.selectedLens</code>)</td><td>Hero/position tile → League tab with the position preset through a one-shot intent store</td></tr>
+      <tr><td>Canvas "Next:" line naming the item, who, when (index.html:550)</td><td>Hero's "Shortest RB rooms" names the four teams</td></tr>
+      <tr><td>Quiet rooms fade so the relevant ones stand out (seven-views.md:34-36)</td><td>Direction B's mid-pack teams fade; A's bar strip greys every team but you (also DynastyGM's focus treatment)</td></tr>
+    </table></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ D · OPERATOR REVISION ═══════════════════════════════ -->
+<style>
+  /* Direction D styles live here, inside <body>, because the <head> block is
+     frozen for the republish script. Same Chalkline tokens as above; every
+     class is d- prefixed so nothing above changes. */
+  .d-q{font:600 22px/26px var(--cond);letter-spacing:.66px;margin:2px 0 12px}
+  .d-rows{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;position:relative}
+  .d-row{display:flex;align-items:center;gap:10px;min-height:40px;padding:0 12px;border-bottom:1px solid var(--line)}
+  .d-row:last-child{border-bottom:0}
+  .d-row .k{width:100px;flex:none;font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .d-row .v{flex:1;min-width:0;display:flex;align-items:center;gap:6px;font:600 14px/20px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden}
+  .d-row .v .t{overflow:hidden;text-overflow:ellipsis}
+  .d-row .v small{font:400 12px var(--ui);color:var(--chalk-dim);white-space:nowrap}
+  .d-row .go{flex:none;display:flex;align-items:center;gap:2px;font:500 13px var(--ui);color:var(--chalk-dim)}
+  .d-row.dimrow .v{color:var(--chalk-dim);font-weight:400;font-size:13px}
+  .d-row.err .v{color:var(--chalk-dim);font-weight:400;font-size:13px}
+  .d-band{font:600 11px/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;border:1px solid;padding:3px 5px;border-radius:2px;flex:none}
+  .d-band.likely{border-color:var(--pos);color:var(--pos)} .d-band.toss{border-color:var(--warn);color:var(--warn)}
+  .d-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .d-pt{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px 10px 10px;
+        display:flex;flex-direction:column;gap:4px;position:relative;overflow:visible;min-width:0}
+  .d-pt::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-top-left-radius:8px;border-top-right-radius:8px}
+  .d-pt.qb::before{background:var(--qb)} .d-pt.rb::before{background:var(--rb)} .d-pt.wr::before{background:var(--wr)} .d-pt.te::before{background:var(--te)}
+  .d-pt .hd{display:flex;justify-content:space-between;align-items:center;gap:6px}
+  .d-pt .p{font:600 11px/14px var(--ui);letter-spacing:.08em}
+  .d-pt .mid{font:400 11px/14px var(--ui);color:var(--chalk-faint)}
+  .d-pt .r{font:600 22px/26px var(--mono);color:var(--chalk)}
+  .d-pt .r small{font:500 11px var(--mono);color:var(--chalk-dim)}
+  .d-pt .val{font:500 11px/14px var(--mono);color:var(--chalk-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .d-pt .val{font:600 13px/17px var(--mono);color:var(--chalk)}
+  .d-pt .val2{font:500 11px/14px var(--mono);color:var(--chalk-dim)}
+  .d-pt .who{font:400 12px/16px var(--ui);color:var(--chalk-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .d-pt .who b{color:var(--chalk);font-weight:600}
+  .d-bs{display:flex;gap:8px;margin-top:auto;padding-top:4px}
+  .d-bb{flex:1;min-width:0;min-height:36px;border:1px solid var(--line-strong);border-radius:4px;display:flex;align-items:center;justify-content:center;
+        font:600 13px var(--ui);color:var(--chalk);position:relative}
+  .d-bb.sug{border-color:var(--ice);color:var(--ice)}
+  .d-bb.one{flex:1}
+  .d-bb.off{border-color:var(--line);color:var(--chalk-faint)}
+  .d-hit{position:absolute;left:-1px;right:-1px;top:-5px;bottom:-5px;border:1px dashed var(--warn);pointer-events:none}
+  .d-wide{display:flex;align-items:center;gap:12px;padding:8px 12px;min-height:56px}
+  .d-wide .tt{font:600 16px/22px var(--ui)} .d-wide .dd{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
+  .d-grid .atile{min-height:112px}
+  .d-stack{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+  .fold.d-fold span{top:3px}
+  .d-banner{display:flex;align-items:flex-start;gap:10px;background:var(--ink-2);border:1px solid var(--line);border-radius:4px;padding:8px 10px;margin:0}
+  .d-banner::before{content:"";width:3px;align-self:stretch;background:var(--ice);flex:none}
+  .d-banner p{margin:0;flex:1;font:400 13px/18px var(--ui);color:var(--chalk-dim)} .d-banner b{color:var(--chalk);font-weight:600}
+  .d-banner .x{color:var(--chalk-dim);flex:none}
+  .lrow.emph{background:var(--ink-1)}
+  /* round 3: pinned banner slot, Standings page */
+  .d-pin{padding:10px 16px;background:var(--ink-0);border-bottom:1px solid var(--line)}
+  .d-seg{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+  .d-seg span{display:flex;align-items:center;justify-content:center;min-height:44px;font:600 12px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);border-bottom:2px solid transparent}
+  .d-seg span.on{background:var(--ink-2);color:var(--chalk);border-bottom-color:var(--ice)}
+  .d-st{border-top:1px solid var(--line)}
+  .d-sth,.d-str{display:grid;grid-template-columns:26px minmax(0,1fr) 44px 50px;align-items:center;gap:6px;padding:0 4px}
+  .d-sth{min-height:28px;font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim);border-bottom:1px solid var(--line-strong)}
+  .d-sth .wl,.d-sth .pf,.d-str .wl,.d-str .pf{text-align:right}
+  .d-str{min-height:40px;border-bottom:1px solid var(--line)}
+  .d-str .rk{font:500 13px var(--mono);color:var(--chalk-dim);text-align:center}
+  .d-str .nm{display:flex;align-items:center;gap:6px;min-width:0}
+  .d-str .nm b{font:600 15px/20px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .d-str .wl{font:600 13px var(--mono);color:var(--chalk)} .d-str .pf{font:500 12px var(--mono);color:var(--chalk-dim)}
+  .d-str.you{background:var(--ink-2);border-bottom-color:var(--line-strong)} .d-str.you .rk{color:var(--ice)}
+  .d-wtick{display:flex;align-items:center;gap:8px;margin:14px 0 2px}
+  .d-wtick::before{content:"";width:3px;height:13px;background:var(--warn);flex:none}
+  .d-wtick span:first-child{font:600 11px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
+  .d-ribbon{font:600 11px/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--warn);color:var(--warn);padding:2px 5px;border-radius:2px}
+  .d-od{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;align-items:center;gap:6px;min-height:40px;padding:0 4px;border-bottom:1px solid var(--line)}
+  .d-od .rk{font:500 13px var(--mono);color:var(--chalk-dim);text-align:center}
+  .d-od.you{background:var(--ink-2)} .d-od.you .rk{color:var(--ice)}
+  .d-od .nm{display:flex;align-items:center;gap:6px;min-width:0}
+  .d-od .nm b{font:600 14px/20px var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .d-od .rec{font:500 12px var(--mono);color:var(--chalk-dim);white-space:nowrap}
+  .d-band.unl{border-color:var(--neg);color:var(--neg)}
+  .d-spin{display:block;width:20px;height:20px;border:2px solid var(--line);border-top-color:var(--warn);border-radius:999px}
+  .d-states{grid-template-columns:repeat(auto-fill,minmax(min(372px,100%),1fr))}
+  .d-row .v .t{flex-shrink:0}
+  .d-row .v small{min-width:0;overflow:hidden;text-overflow:ellipsis}
+  .d-row.dimrow .v .t,.d-row.err .v .t{flex-shrink:1}
+</style>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <!-- verbatim from mobile/src/components/chalkline/Icon.tsx -->
+    <symbol id="i-trends" viewBox="0 0 20 20"><path d="M3 14l4-5 3 3 4-6 3 4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 20 20"><circle cx="8.5" cy="8.5" r="5.5"/><path d="M13 13l4 4"/></symbol>
+  </defs>
+</svg>
+
+<h2 class="sec" id="dir-d">D · Operator revision (current candidate)</h2>
+<p class="lede"><b>Built from Direction C's page, revised by the operator.</b> Top to bottom: three compact <b>status rows</b> (team outlook, standings, overall rank), each a whole-row button that opens where that fact lives; <b>all four position tiles</b> in a 2×2 grid so nothing hides off-screen, each with <b>Buy</b> and <b>Sell</b> buttons inside the tile; then <b>Get things done</b>: Find a trade as a full-width tile, with Rank players, View matches, Check trends and Search free agents as rows in one card below it. <b>Round-2 trims (operator):</b> shorter status rows, no tagline under the position meters, and the four tasks as full-width tiles in the same format as Find a trade, so Find a trade lands above the fold. The old League tile is gone; the status rows cover League. <b>Round-3 rulings (operator):</b> the Buy/Sell banner is decided UI; Sell lands at the end of the list; Home's Standings row is <b>current standings only</b>, and projections move to a new <a href="#dir-d-standings">Standings page</a>.</p>
+
+<div class="flag warn"><b>Two findings that shape D (verified in code).</b><br>
+<b>1. League Summary has no separate buy view or sell view.</b> Under one position filter it renders <b>one</b> ranked list split by the median line (LeagueSummaryScreen.tsx:885-892, :2214-2224), with neutral <b>Seller</b> badges on the top <code>round(n·0.33)</code> and <b>Buyer</b> on the bottom (:1027-1033). The direction lives one level down, per tapped team: above the line ⇒ <code>target</code> (their roster, "Tap a player to target them from …"), below ⇒ <code>offer</code> (your roster, "… to offer them to …") (:1047-1071, :1935-1938). So <b>Buy RB</b> = acquire RB = the teams <i>above</i> the line (Seller badges, Target verb); <b>Sell RB</b> = move RB = the teams <i>below</i> it (Buyer badges, Offer verb). The honest landing for both is the same list: Buy opens at the <b>top of the list</b> (deepest first); Sell opens at the <b>end of the list</b> (shortest last, operator ruling round 3), each under a <b>pinned banner</b> naming the side (operator ruling: yes). Both are <b>mobile changes</b>; no buy page or sell page exists and none is drawn as if it did.<br>
+<b>2. "Team outlook" is the contend/rebuild setting.</b> The app's own sheet for it is headed "What's your team outlook?" (OutlookSheet.tsx:101), values All-in / Contending / Rebuilding / Tanking / Not sure (OutlookBiasReceipt.tsx:34-55). The playoff band is called <b>"Season outlook"</b> in the UI (LeagueSummaryScreen.tsx:2798), and it already pairs with projected standings in one strip ("Likely for the playoffs · projected 3rd of 12", :2805). <b>Round 3:</b> that band and the projected standings now live on the new <b>Standings page</b>'s Projected tab; Home's Standings row shows current standings only. The alternative reading (Team outlook = the playoff band) is named in the D1 caption.</div>
+
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Proposal D · populated</span>
+    <div class="phone" aria-label="Direction D populated">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="scr">
+        <div class="d-q">What would you like to do today?</div>
+        <div class="d-rows"><span class="ann">D1</span>
+          <div class="d-row"><span class="k">Team outlook</span><span class="v"><span class="t">Contending</span><small>set by you</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+          <div class="d-row"><span class="k">Standings</span><span class="v"><span class="t mono">5–1</span><small>2nd of 12</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+          <div class="d-row"><span class="k">Overall rank</span><span class="v"><span class="t mono">5th of 12</span><small class="mono">≈38 firsts</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+        </div>
+
+        <div class="tick"><span>Your positions</span><span class="rt">consensus values</span><span class="ann" style="top:-22px;right:0">D2</span></div>
+        <div class="d-grid">
+          <div class="d-pt qb"><div class="hd"><span class="p" style="color:var(--qb)">QB</span><span class="mid">Mid-pack</span></div><span class="r">7th<small> /12</small></span><span class="val">≈3 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:50%;background:var(--qb)"></i></div>
+            <div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb">Sell</span></div></div>
+          <div class="d-pt rb"><span class="ann" style="right:6px">D3</span><div class="hd"><span class="p" style="color:var(--rb)">RB</span><span class="badge">Seller</span></div><span class="r">2nd<small> /12</small></span><span class="val">≈5.5 firsts</span><span class="val2">median ≈2.5</span><div class="track"><i style="width:92%;background:var(--rb)"></i></div>
+            <div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb sug">Sell<i class="d-hit"></i></span></div></div>
+          <div class="d-pt wr"><div class="hd"><span class="p" style="color:var(--wr)">WR</span><span class="mid">Mid-pack</span></div><span class="r">6th<small> /12</small></span><span class="val">≈4 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:58%;background:var(--wr)"></i></div>
+            <div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb">Sell</span></div></div>
+          <div class="d-pt te"><div class="hd"><span class="p" style="color:var(--te)">TE</span><span class="badge">Buyer</span></div><span class="r">11th<small> /12</small></span><span class="val">≈0.5 firsts</span><span class="val2">median ≈1.5</span><div class="track"><i style="width:17%;background:var(--te)"></i></div>
+            <div class="d-bs"><span class="d-bb sug">Buy</span><span class="d-bb">Sell</span></div></div>
+        </div>
+
+        <div class="tick"><span>Get things done</span><span class="ann" style="top:-14px;right:0">D4</span></div>
+        <div class="card d-wide"><span class="well"><svg class="ic"><use href="#i-trade"/></svg></span><div style="flex:1;min-width:0"><div class="tt">Find a trade</div><div class="dd">Fair packages with any leaguemate</div></div><svg class="ic s16 dim"><use href="#i-cr"/></svg></div>
+        <div class="d-stack">
+          <div class="card d-wide"><span class="well"><svg class="ic"><use href="#i-rank"/></svg></span><div style="flex:1;min-width:0"><div class="tt">Rank players</div><div class="dd">Board live · all 4 positions</div></div><svg class="ic s16 dim"><use href="#i-cr"/></svg></div>
+          <div class="card d-wide"><span class="well"><svg class="ic"><use href="#i-match"/></svg></span><div style="flex:1;min-width:0"><div class="tt">View matches</div><div class="dd">3 awaiting them</div></div><span class="badge fl mono">2 mutual</span><svg class="ic s16 dim"><use href="#i-cr"/></svg></div>
+          <div class="card d-wide"><span class="well"><svg class="ic"><use href="#i-trends"/></svg></span><div style="flex:1;min-width:0"><div class="tt">Check trends</div><div class="dd">Movers this week</div></div><svg class="ic s16 dim"><use href="#i-cr"/></svg></div>
+          <div class="card d-wide"><span class="well"><svg class="ic"><use href="#i-search"/></svg></span><div style="flex:1;min-width:0"><div class="tt">Search free agents</div><div class="dd">Best available on your board</div></div><svg class="ic s16 dim"><use href="#i-cr"/></svg></div>
+        </div>
+      </div>
+      <div class="fold d-fold" style="top:769px"><span>fold · 852pt iPhone, tab bar pinned</span></div>
+      <div class="fab"><svg class="ic"><use href="#i-flag"/></svg></div>
+      <div class="tabbar">
+        <div class="on"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap">The status rows, all four position tiles and the Find a trade tile sit above the fold on a 393×852 phone. <b>Ice count: 3</b>: the suggested side on banded positions (RB <b>Sell</b>, because you're a Seller; TE <b>Buy</b>, because you're a Buyer) plus the active tab. Every other Buy/Sell is the Secondary construction (line-strong border, chalk text) and every "View" is chalk-dim, so the ≤3 ice rule holds. The dashed warn outline on RB Sell is lab chrome: the <b>44pt hit area</b> around a 36pt visible button (the compact button's default 4pt vertical hitSlop, components.md § Buttons).</p>
+  </div>
+  <div class="col wide">
+    <h3 class="sub" style="margin-top:0">Modules, data and routing</h3>
+    <div class="legend">
+      <div><span class="k">D1</span><span><b>Status rows.</b> One card, three rows, 40pt each (<b>operator ruling</b>: trimmed from 44pt to bring Find a trade above the fold). That is under Chalkline's 44pt touch floor; the rows span the full width, so the target is wide but short. The whole row is the button and "View ›" is its visual affordance, so there is no nested control. Each row has its own query, so each loads and fails on its own.<br>
+        • <b>Team outlook</b> (the contend/rebuild setting): <code>GET /api/league/preferences</code> → <code>team_outlook</code>; when none is declared and <code>trade.outlook_seed</code> is on (lit), <code>inferred_outlook</code> renders as "Not set · reads as Rebuilding". Key <code>['league-prefs', id]</code> is shared with TradesScreen, Team Review and the in-league calculator, all of which invalidate it on write (#424). <b>View</b> → Acquire with the Trade DNA sheet open, where the outlook is set (<b>operator ruling</b>). <span class="gap">Mobile gap:</span> that sheet's open state is local to TradesScreen (:999), so it needs an arrival contract. <i>Alternative reading of "team outlook": the playoff band. That band now lives on the Standings page's Projected tab.</i><br>
+        • <b>Standings</b> (<b>current only</b>, operator ruling round 3): <b>"5–1 · 2nd of 12"</b>, record then place, ties as W–L–T. <b>Sleeper:</b> each roster's <code>settings.{wins, losses, ties, fpts, fpts_decimal}</code> from <code>['league-rosters', id]</code> + <code>['league-users', id]</code>, both already seeded by session init (state/queryClient.ts:55-66), so there is <b>no new request</b>. Place = win %, then points for, since Sleeper exposes no standings rank. These are actual results, not projections, so the beta no-record rule does not apply: from week 1 the record shows, and before any game is played the row reads "0–0 · no games yet". <b>ESPN/MFL:</b> not served anywhere today (<span class="gap">backend gap</span>; see the Standings page), so the row reads "Not available for ESPN yet". <b>No projection, no band and no Monte-Carlo on Home.</b> <b>View</b> → the new Standings page (League tab stack, Current tab). <span class="gap">Mobile gap:</span> the new screen.<br>
+        • <b>Overall rank</b>: the power-rankings payload (<code>rank</code> + <code>total_value_label</code> of the <code>is_you</code> team), the same request as the tiles, so no extra cost. <b>View</b> → League rankings, all positions. <span class="gap">Mobile gap</span> (small): the same intent store must clear a filter left over from an earlier visit.</span></div>
+      <div><span class="k">D2</span><span><b>Position tiles</b>, 2×2, all four always shown. Your rank at P (Dynasty Nerds' "(7/12)"), your value against the league median (server <code>value_label</code>s), a 4px meter of your percentile in the position hex (C's "your shape" tile), and the neutral Seller/Buyer badge or "Mid-pack". No tagline under the meter (operator trim); the named teams are one tap away on the Buy/Sell landing. The tile itself is <b>not</b> a button. Its only controls are Buy and Sell, which avoids the nested-control VoiceOver problem <code>mockups/candidates-300-v2</code> measured. Data: power-rankings consensus, the shared util from scope.md (W4), so every band equals League Summary's.</span></div>
+      <div><span class="k">D3</span><span><b>Buy / Sell.</b> Two compact Secondary buttons per tile, 36pt visible with a 44pt hit area. Each is about 71pt wide in a 175pt tile at 393pt, which clears 44pt. Tap → write the intent <code>{leagueId, position, side:'buy'|'sell'}</code> → <code>navigate('League', {screen:'LeagueRankings'})</code> → League Summary sets basis Consensus, subset All and filter {P}, then scrolls: <b>Buy</b> to the top of the list (deepest first); <b>Sell</b> to the end of the list (shortest last). A pinned banner names the side. Frames below. The suggested side (ice) is the side your band implies; it changes no behaviour.</span></div>
+      <div><span class="k">D4</span><span><b>Get things done</b>: five full-width 58pt tiles in one format, stacked, with Find a trade first (<b>operator ruling</b>).<br>
+        • Find a trade → the Acquire tab (<code>Trades</code>).<br>
+        • Rank players → the Rank tab; detail from <code>['progress', id, format]</code>, already warm.<br>
+        • View matches → the Matches tab; badge from <code>['league-summary', id]</code>, already warm.<br>
+        • Check trends → <code>navigate('Rank', {screen:'Trends'})</code> (TabNav.tsx:429). No Home fetch, because TrendsScreen's queries take runtime args and are deliberately not prefetched.<br>
+        • Search free agents → <code>navigate('FreeAgents')</code>, a root-stack push that mounts its own FAB and HeaderBack (RootNav.tsx:802). No Home fetch.<br>
+        All five routes exist today.</span></div>
+      <div><span class="k">Cost</span><span><b>Round 3 brings D back near A's posture.</b> Home's mount adds <b>2</b> requests, <b>neither heavy</b>:<br>
+        • power-rankings consensus (shared with League Summary, as in A);<br>
+        • preferences (a cheap DB read).<br>
+        The Standings row costs <b>0</b> on Sleeper (seeded rosters and users). On ESPN/MFL it would cost one light read of the proposed standings endpoint once it exists; until then, nothing. League summary and progress stay warm. The 10,000-simulation outlook run (<code>outlook_sim_count</code>, database.py:3037) is <b>gone from Home</b>. It now runs only when someone taps <b>Projected</b> on the Standings page, on the cache key League Summary already shares. Round 2 had 3 requests, 1 heavy.</span></div>
+    </div>
+  </div>
+</div>
+
+<h3 class="sub" id="dir-d-tap">D tap-throughs: Buy RB lands at the top of the list, Sell RB at the end</h3>
+<p class="lede">Both frames are the shipped #300 list (reconstruction; see §6 for the full sourcing). What's new is the <b>scroll target</b> and the <b>banner</b>, which is now <b>decided UI</b> (operator ruling, round 3). The banner is a Chalkline Banner (ink-2, hairline, ice tick, body-sm, ghost close control), <b>pinned</b> between the stack header and the scrolling page. That way it is on screen in both landings whatever the scroll offset, and Sell can scroll all the way to the end. It names the position, which matters because the pills have scrolled out of view. It clears on its close control, on any position-filter change, and on leaving the screen. The faint ink-1 fill on the relevant side's rows is a surface-step emphasis that ships with it: no colour, nothing hidden.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp recon">Buy RB → top of the RB list · reconstruction + banner</span>
+    <div class="phone" aria-label="Buy RB landing">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="navhdr"><span class="t">League rankings</span></div>
+      <div class="d-pin"><div class="d-banner"><p><b>Buying RB.</b> Teams above the line are deepest at RB. Tap one to target their players.</p><svg class="ic s14 x"><use href="#i-x"/></svg></div></div>
+      <div class="scr tight">
+        <p class="bodysm" style="margin:0 4px 6px;color:var(--chalk-faint)">Outlook strip, basis toggle, RB pills and chart sit above the viewport.</p>
+        <div class="lrow emph"><span class="rk">1</span><span class="nm"><b>ChubbThumper</b><span class="badge">Seller</span></span><span class="vl">≈6.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow you"><span class="rk">2</span><span class="nm"><b>taxi_squad_tom</b><span class="badge you">You</span><span class="badge">Seller</span></span><span class="vl">≈5.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">3</span><span class="nm"><b>BreeceMyHall</b><span class="badge">Seller</span></span><span class="vl">≈4.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">4</span><span class="nm"><b>WaddleWaddle</b><span class="badge">Seller</span></span><span class="vl">≈4 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">5</span><span class="nm"><b>dynasty_dan</b></span><span class="vl">≈3.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">6</span><span class="nm"><b>the_te_theory</b></span><span class="vl">≈3 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="cut"><i></i><span>League median · ≈2.5 firsts</span><i></i></div>
+        <div class="lrow"><span class="rk">7</span><span class="nm"><b>jsn_fanclub</b></span><span class="vl">≈2 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">8</span><span class="nm"><b>rebuild_ronnie</b></span><span class="vl">≈2 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">9</span><span class="nm"><b>kupp_of_joe</b><span class="badge">Buyer</span></span><span class="vl">≈1.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+      </div>
+      <div class="tabbar">
+        <div><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div class="on"><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap"><b>Buy = acquire RB = teams above the line.</b> "Top" means the top of the <b>list</b>, not the page. The page top is the League home row, basis toggle, Season-outlook strip and chart card (LeagueSummaryScreen.tsx:1530-1700), and on a phone none of the list shows there. Tapping ChubbThumper opens its drill-in in the shipped <code>target</code> direction: <i>their</i> RBs, "Tap a player to target them from ChubbThumper." (:1063-1071, :1935-1938), firing <code>league_candidate_pinned {verb:'target', side:'above'}</code>. Your own row opens your plain roster (:1047-1056).</p>
+  </div>
+  <div class="col">
+    <span class="stamp recon">Sell RB → end of the RB list · reconstruction + banner</span>
+    <div class="phone" aria-label="Sell RB landing">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="navhdr"><span class="t">League rankings</span></div>
+      <div class="d-pin"><div class="d-banner"><p><b>Selling RB.</b> Teams below the line are shortest at RB, shortest last. Tap one to offer them your players.</p><svg class="ic s14 x"><use href="#i-x"/></svg></div></div>
+      <div class="scr tight">
+        <p class="bodysm" style="margin:0 4px 6px;color:var(--chalk-faint)">Rows 1–5, the chart and the strip sit above the viewport.</p>
+        <div class="lrow"><span class="rk">6</span><span class="nm"><b>the_te_theory</b></span><span class="vl">≈3 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="cut"><i></i><span>League median · ≈2.5 firsts</span><i></i></div>
+        <div class="lrow emph"><span class="rk">7</span><span class="nm"><b>jsn_fanclub</b></span><span class="vl">≈2 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">8</span><span class="nm"><b>rebuild_ronnie</b></span><span class="vl">≈2 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">9</span><span class="nm"><b>kupp_of_joe</b><span class="badge">Buyer</span></span><span class="vl">≈1.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">10</span><span class="nm"><b>tankszn_tre</b><span class="badge">Buyer</span></span><span class="vl">≈1.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">11</span><span class="nm"><b>LaPortaPotty</b><span class="badge">Buyer</span></span><span class="vl">≈0.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow emph"><span class="rk">12</span><span class="nm"><b>puntgods</b><span class="badge">Buyer</span></span><span class="vl">≈0.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <p class="bodysm" style="margin:16px 4px 0;color:var(--chalk-faint)">End of page.</p>
+      </div>
+      <div class="tabbar">
+        <div><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div class="on"><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap"><b>Sell = move RB = teams below the line, shortest last</b> (operator ruling: open on the shortest teams). The team list is the last child of the page's <code>ScrollView</code> (list at LeagueSummaryScreen.tsx:2193, ScrollView closes at :2230), so <code>scrollToEnd()</code> lands exactly here with puntgods (12th) and LaPortaPotty (11th) in view. Tapping puntgods opens the shipped <code>offer</code> direction: <i>your</i> RBs, "Tap a player to offer them to puntgods." (§6 step 3), firing <code>league_candidate_pinned {verb:'offer', side:'below'}</code>.</p>
+  </div>
+  <div class="col">
+    <h3 class="sub" style="margin-top:0">Routing gap, restated</h3>
+    <div class="legend">
+      <div><span class="k">Has</span><span>One split list per position, divider, neutral bands, per-team drill-in with a direction (shipped #300). A <code>scrollRef</code> on the page (:479). The League tab re-tap already calls <code>scrollTo({y:0})</code> on it (:483-486).</span></div>
+      <div><span class="k">Gap</span><span><b>1. Arrive pre-filtered</b> (same as A): a one-shot intent <code>{leagueId, position, side}</code> consumed on focus, setting basis Consensus, subset All and filter {P}.<br>
+        <b>2. One scroll call per side.</b> Sell is <code>scrollToEnd()</code> once the filtered content settles (on the next <code>onContentSizeChange</code>), with <b>no measurement</b>. Buy is <code>scrollTo({y: listTop})</code> from one <code>onLayout</code> on the list container. Both are simpler than the round-2 plan of measuring the divider row.<br>
+        <b>3. The pinned banner</b> is a new render branch <i>outside</i> the ScrollView, on a screen pinned by <code>check-league-candidates-300.js</code> / <code>check-analytics-300.js</code>. It touches neither the arithmetic nor the exposure emitter. A new guard should pin that it renders only for an intent arrival and clears on filter change.</span></div>
+      <div><span class="k">Not</span><span>Hiding the other side of the line, or a Buy-only / Sell-only list. The middle third would vanish, which is the outcome the #300 ruling refused (:1018-1026).</span></div>
+    </div>
+  </div>
+</div>
+
+<h3 class="sub" id="dir-d-standings">D · Standings page (the Standings row's View): new screen</h3>
+<p class="lede"><b>Operator ruling, round 3:</b> Home shows <b>current</b> standings only. Projections move one tap deeper, to a new Standings page with a <b>Current | Projected</b> segmented control. The control is the shipped Matches segment construction (full-width hairline bar, radius 4, active segment filled with a 2px ice underline; <code>screens/mobile/matches/populated--mutual.png</code>), not a new pill style. <b>Current</b> is the default and costs no simulation. <b>Projected</b> is the existing Season-outlook content, fetched <b>only when selected</b>.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Standings · Current (default) · proposal</span>
+    <div class="phone" aria-label="Standings current">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="navhdr"><span class="back"><svg class="ic s16"><use href="#i-cl"/></svg></span><span class="t">Standings</span></div>
+      <div class="scr tight">
+        <div class="d-seg"><span class="on">Current</span><span>Projected</span></div>
+        <p class="bodysm" style="margin:10px 2px 8px">Week 6 · ordered by record, then points for</p>
+        <div class="d-st">
+          <div class="d-sth"><span class="rk">#</span><span class="nm">Team</span><span class="wl">W–L</span><span class="pf">PF</span></div>
+          <div class="d-str"><span class="rk">1</span><span class="nm"><b>ChubbThumper</b></span><span class="wl">6–0</span><span class="pf">812.4</span></div>
+          <div class="d-str you"><span class="rk">2</span><span class="nm"><b>taxi_squad_tom</b><span class="badge you">You</span></span><span class="wl">5–1</span><span class="pf">790.2</span></div>
+          <div class="d-str"><span class="rk">3</span><span class="nm"><b>BreeceMyHall</b></span><span class="wl">4–2</span><span class="pf">801.6</span></div>
+          <div class="d-str"><span class="rk">4</span><span class="nm"><b>dynasty_dan</b></span><span class="wl">4–2</span><span class="pf">744.0</span></div>
+          <div class="d-str"><span class="rk">5</span><span class="nm"><b>WaddleWaddle</b></span><span class="wl">4–2</span><span class="pf">731.8</span></div>
+          <div class="d-str"><span class="rk">6</span><span class="nm"><b>jsn_fanclub</b></span><span class="wl">3–3</span><span class="pf">760.5</span></div>
+          <div class="d-str"><span class="rk">7</span><span class="nm"><b>the_te_theory</b></span><span class="wl">3–3</span><span class="pf">702.3</span></div>
+          <div class="d-str"><span class="rk">8</span><span class="nm"><b>LaPortaPotty</b></span><span class="wl">3–3</span><span class="pf">688.9</span></div>
+          <div class="d-str"><span class="rk">9</span><span class="nm"><b>kupp_of_joe</b></span><span class="wl">2–4</span><span class="pf">715.1</span></div>
+          <div class="d-str"><span class="rk">10</span><span class="nm"><b>rebuild_ronnie</b></span><span class="wl">1–5</span><span class="pf">655.0</span></div>
+          <div class="d-str"><span class="rk">11</span><span class="nm"><b>tankszn_tre</b></span><span class="wl">1–5</span><span class="pf">640.2</span></div>
+          <div class="d-str"><span class="rk">12</span><span class="nm"><b>puntgods</b></span><span class="wl">0–6</span><span class="pf">598.7</span></div>
+        </div>
+        <p class="bodysm" style="margin:10px 2px 0">Your league's own tiebreakers and divisions may order tied records differently.</p>
+      </div>
+      <div class="tabbar">
+        <div><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div class="on"><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap"><b>Sleeper data, no new request:</b> each roster's <code>settings.{wins, losses, ties, fpts, fpts_decimal}</code> from <code>['league-rosters', id]</code>, joined to <code>['league-users', id]</code> for names. Session init has already seeded both (state/queryClient.ts:55-66), and the proxy passes Sleeper's raw rosters through (server.py:21843-21845). The outlook pipeline reads the same fields (backend/outlook/league_state.py:197-209). Sleeper exposes no standings <i>rank</i>, so the order is computed (win %, then points for) and the caption says so. Ties render as W–L–T. The You row reuses TeamRow's treatment: ink-2 fill, ice numeral, ice "You" badge.</p>
+  </div>
+  <div class="col">
+    <span class="stamp prop">Standings · Projected (on selection) · proposal</span>
+    <div class="phone" aria-label="Standings projected">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="navhdr"><span class="back"><svg class="ic s16"><use href="#i-cl"/></svg></span><span class="t">Standings</span></div>
+      <div class="scr tight">
+        <div class="d-seg"><span>Current</span><span class="on">Projected</span></div>
+        <div class="d-wtick"><span>Season outlook</span><span class="d-ribbon">Projected</span></div>
+        <p class="bodysm" style="margin:4px 2px 8px">Blended projection · order = projected finish · top 6 make the playoffs</p>
+        <div class="d-od"><span class="rk">1</span><span class="nm"><b>ChubbThumper</b></span><span class="rec">6–0 · proj 11–3</span><span class="d-band likely">Likely</span></div>
+        <div class="d-od"><span class="rk">2</span><span class="nm"><b>BreeceMyHall</b></span><span class="rec">4–2 · proj 9–5</span><span class="d-band likely">Likely</span></div>
+        <div class="d-od you"><span class="rk">3</span><span class="nm"><b>taxi_squad_tom</b><span class="badge you">You</span></span><span class="rec">5–1 · proj 9–5</span><span class="d-band likely">Likely</span></div>
+        <div class="d-od"><span class="rk">4</span><span class="nm"><b>dynasty_dan</b></span><span class="rec">4–2 · proj 8–6</span><span class="d-band toss">Toss-up</span></div>
+        <div class="d-od"><span class="rk">5</span><span class="nm"><b>WaddleWaddle</b></span><span class="rec">4–2 · proj 8–6</span><span class="d-band toss">Toss-up</span></div>
+        <div class="d-od"><span class="rk">6</span><span class="nm"><b>jsn_fanclub</b></span><span class="rec">3–3 · proj 7–7</span><span class="d-band toss">Toss-up</span></div>
+        <div class="cut"><i></i><span>Top 6 make the playoffs</span><i></i></div>
+        <div class="d-od"><span class="rk">7</span><span class="nm"><b>the_te_theory</b></span><span class="rec">3–3 · proj 7–7</span><span class="d-band toss">Toss-up</span></div>
+        <div class="d-od"><span class="rk">8</span><span class="nm"><b>kupp_of_joe</b></span><span class="rec">2–4 · proj 6–8</span><span class="d-band unl">Unlikely</span></div>
+        <div class="d-od"><span class="rk">9</span><span class="nm"><b>LaPortaPotty</b></span><span class="rec">3–3 · proj 6–8</span><span class="d-band unl">Unlikely</span></div>
+        <div class="d-od"><span class="rk">10</span><span class="nm"><b>rebuild_ronnie</b></span><span class="rec">1–5 · proj 4–10</span><span class="d-band unl">Unlikely</span></div>
+        <div class="d-od"><span class="rk">11</span><span class="nm"><b>tankszn_tre</b></span><span class="rec">1–5 · proj 4–10</span><span class="d-band unl">Unlikely</span></div>
+        <div class="d-od"><span class="rk">12</span><span class="nm"><b>puntgods</b></span><span class="rec">0–6 · proj 3–11</span><span class="d-band unl">Unlikely</span></div>
+      </div>
+      <div class="tabbar">
+        <div><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div class="on"><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap"><b>The existing Season-outlook section, verbatim in spirit</b> (LeagueSummaryScreen.tsx:2892-3046): warn "Season outlook" tick, beta ribbon ("Projected"; it adds "preseason · beta" before week 6), the source caption, single-line rows, "top 6 make the playoffs" cutline, and Likely / Toss-up / Unlikely bands. <b>No percentages, no title odds</b>, and <b>records only once <code>meta.beta</code> clears</b> (week 6+, :207-212): week 6 is shown, so records appear. Data: <code>GET /api/league/outlook?basis=consensus</code> on the shared <code>['league-outlook', id, 'consensus']</code> key, with <code>enabled</code> only while Projected is selected. The 10,000-sim run happens on this tap, never on Home.</p>
+  </div>
+  <div class="col">
+    <h3 class="sub" style="margin-top:0">Registration, data, reuse</h3>
+    <div class="legend">
+      <div><span class="k">Route</span><span><b>League tab stack</b>, route <code>LeagueStandings</code>, a sibling of <code>LeagueHome</code> (TabNav.tsx:579-596), with <code>subScreenOptions('Standings', 'LeagueRankings')</code>: the same always-on back control, falling back to League rankings, that LeagueHome uses (:587-592). Home's row calls <code>navigate('League', {screen:'LeagueStandings'})</code>. This follows FumbleAI's hub, where cards switch tabs rather than push over them. Standings is League content, and the tab bar stays correct with League highlighted. A <code>deepLinks.ts</code> route goes in with it (navigation/CLAUDE.md "Adding a screen" rule).</span></div>
+      <div><span class="k">FAB</span><span><b>No local FeedbackFAB</b>: tab-stack screen, covered by RootNav's single global mount (#188; a second one is the #196/#197 double-FAB bug).</span></div>
+      <div><span class="k">Alt</span><span>A root-stack push (FreeAgents-style) would make Back return to Home, but it needs its own <code>FeedbackFAB aboveTabBar={false}</code> and an explicit HeaderBack (native back is dead on iOS 26 for root pushes over the tab bar). This is listed as an operator call.</span></div>
+      <div><span class="k">Reuse</span><span><code>SeasonOutlookSection</code>, <code>OutlookRow</code> and <code>OutlookUnsupportedRow</code> are module-local in LeagueSummaryScreen.tsx (:2892-3061). Extract them to one component that both screens render, so the calibration rules (no %, no title odds, beta-gated records) live once. A guard pins them.</span></div>
+      <div><span class="k">Gap</span><span><span class="gap">Mobile:</span> the new screen; the extraction; <code>RosterRow</code> gains an optional <code>settings</code> (wire type only; the backend already serves it). <span class="gap">Backend (ESPN/MFL only):</span> no endpoint returns their current standings (see ESPN frames below).</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="states d-states" style="margin-top:20px">
+  <div class="mini"><span class="stamp prop">Standings · Projected loading</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="d-seg"><span>Current</span><span class="on">Projected</span></div>
+      <div class="d-wtick"><span>Season outlook</span></div>
+      <div style="display:flex;justify-content:center;padding:28px 0"><i class="d-spin"></i></div>
+    </div></div>
+    <p class="cap">The first Projected tap starts the outlook request, the existing section's loading shell (warn tick + spinner, LeagueSummaryScreen.tsx:2899-2907). Switching back to Current is instant; Current never waits on this. A repeat within <code>staleTime</code>, or after League Summary already fetched the same key, renders from cache.</p>
+  </div>
+  <div class="mini"><span class="stamp prop">Standings · ESPN · Current</span>
+    <div class="phone" style="margin-top:8px">
+      <div class="topbar"><div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Office Dynasty</b><span class="plat">ESPN</span><span class="fmt">1QB</span></span></div></div></div>
+      <div class="scr">
+      <div class="d-seg"><span class="on">Current</span><span>Projected</span></div>
+      <div class="card hero empty" style="margin-top:12px"><h4>ESPN standings coming</h4><p class="bodysm" style="margin:0">Fleeced can't read this league's standings yet. Overall rank and the trade market work as usual.</p></div>
+    </div></div>
+    <p class="cap"><b>Backend gap.</b> ESPN's record is already parsed at import from the same <code>view=mTeam</code> read (wins / losses / ties / pointsFor / playoffSeed, espn_service.py:445-513), but nothing persists or serves it. MFL reads no standings at all (mfl_service.py has no <code>leagueStandings</code> call). Smallest fix: <code>GET /api/league/standings?league_id=</code> → <code>{platform, as_of, teams:[{user_id, display_name, wins, losses, ties, points_for, seed?}]}</code>. ESPN serves the existing mTeam parse, where <code>playoffSeed</code> gives ESPN's own tiebreak order; MFL adds one <code>TYPE=leagueStandings</code> export read. Once that exists, this frame becomes the Current table.</p>
+  </div>
+  <div class="mini"><span class="stamp prop">Standings · ESPN / MFL · Projected</span>
+    <div class="phone" style="margin-top:8px">
+      <div class="topbar"><div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Office Dynasty</b><span class="plat">ESPN</span><span class="fmt">1QB</span></span></div></div></div>
+      <div class="scr">
+      <div class="d-seg"><span>Current</span><span class="on">Projected</span></div>
+      <div class="d-wtick"><span>Season outlook</span></div>
+      <p class="bodysm" style="margin:6px 2px 0">Season outlook needs schedule and scoring history — Sleeper leagues only for now.</p>
+    </div></div>
+    <p class="cap">The existing <code>OutlookUnsupportedRow</code> copy, verbatim (LeagueSummaryScreen.tsx:3052-3061). No request, no retry. The client gate is the same one League Summary uses. This holds whether or not ESPN/MFL Current exists.</p>
+  </div>
+</div>
+
+<h3 class="sub" id="dir-d-states">D edge states</h3>
+<p class="lede">Each status row and the position grid load and fail independently. The Get things done tiles render in every state, so Home always reaches Find a trade, Rank, Matches, Trends and Free agents in one tap.</p>
+<div class="states d-states">
+
+  <div class="mini"><span class="stamp prop">D · Loading</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="d-rows">
+        <div class="d-row"><span class="k">Team outlook</span><span class="v"><span class="skel" style="width:90px"></span></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+        <div class="d-row"><span class="k">Standings</span><span class="v"><span class="skel" style="width:120px"></span></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+        <div class="d-row"><span class="k">Overall rank</span><span class="v"><span class="skel" style="width:70px"></span></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+      </div>
+      <div class="d-grid" style="margin-top:14px">
+        <div class="d-pt qb"><span class="p" style="color:var(--qb)">QB</span><div class="skel" style="width:50%;height:22px"></div><div class="skel"></div><div class="d-bs"><span class="d-bb off">Buy</span><span class="d-bb off">Sell</span></div></div>
+        <div class="d-pt rb"><span class="p" style="color:var(--rb)">RB</span><div class="skel" style="width:50%;height:22px"></div><div class="skel"></div><div class="d-bs"><span class="d-bb off">Buy</span><span class="d-bb off">Sell</span></div></div>
+      </div>
+    </div></div>
+    <p class="cap">Static ink-2 bars, no shimmer. Labels and position names render immediately; Buy/Sell stay disabled until the bands exist, so a tap can't land on a list Home hasn't described. Standings render from the Sleeper rosters session init already cached, usually instantly. A row that is still loading is not tappable.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">D · Error</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="d-rows">
+        <div class="d-row"><span class="k">Team outlook</span><span class="v"><span class="t">Contending</span><small>set by you</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+        <div class="d-row err"><span class="k">Standings</span><span class="v"><span class="t">Couldn't load</span></span><span class="go"><svg class="ic s14"><use href="#i-reload"/></svg>Retry</span></div>
+        <div class="d-row"><span class="k">Overall rank</span><span class="v"><span class="t mono">5th of 12</span><small class="mono">≈38 firsts</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+      </div>
+    </div></div>
+    <p class="cap">One row failed and the others are untouched: the row's affordance becomes Retry (<code>refetch()</code> on that query only). If power-rankings fails, the Overall rank row and the whole position grid take the A-style "Couldn't load rosters / Try again" card together, because they share one payload.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">D · No league linked</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="d-q">What would you like to do today?</div>
+      <div class="card hero empty"><h4>Link a league</h4><p class="bodysm" style="margin:0 0 14px">Your outlook, standings and rank, plus who's buying and selling at each position, need a league. Link Sleeper, ESPN or MFL.</p><div class="btn pri">Link a league</div></div>
+    </div></div>
+    <p class="cap">Status rows and position tiles collapse into one setup card (FumbleAI's card-becomes-setup pattern) → LeaguePicker. Get things done stays; View matches and Search free agents read "Needs a league".</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">D · ESPN / MFL league</span>
+    <div class="phone" style="margin-top:8px">
+      <div class="topbar"><div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Office Dynasty</b><span class="plat">ESPN</span><span class="fmt">1QB</span></span></div></div></div>
+      <div class="scr">
+      <div class="d-rows">
+        <div class="d-row"><span class="k">Team outlook</span><span class="v"><span class="t">Not set</span><small>reads as Rebuilding</small></span><span class="go">Set<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+        <div class="d-row dimrow"><span class="k">Standings</span><span class="v"><span class="t">Not available for ESPN yet</span></span></div>
+        <div class="d-row"><span class="k">Overall rank</span><span class="v"><span class="t mono">8th of 10</span><small class="mono">≈21 firsts</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+      </div>
+      <div class="d-grid" style="margin-top:14px">
+        <div class="d-pt wr"><div class="hd"><span class="p" style="color:var(--wr)">WR</span><span class="badge">Buyer</span></div><span class="r">9th<small> /10</small></span><span class="val">≈2 firsts</span><span class="val2">median ≈4</span><div class="d-bs"><span class="d-bb sug">Buy</span><span class="d-bb">Sell</span></div></div>
+        <div class="d-pt rb"><div class="hd"><span class="p" style="color:var(--rb)">RB</span><span class="mid">Mid-pack</span></div><span class="r">5th<small> /10</small></span><span class="val">≈3 firsts</span><span class="val2">median ≈3</span><div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb">Sell</span></div></div>
+      </div>
+    </div></div>
+    <p class="cap"><b>Standings:</b> ESPN's record is parsed at import but nothing serves it (<span class="gapt">backend gap</span>, see the Standings page). The row says so, with no request and no View. Once <code>/api/league/standings</code> exists it reads like Sleeper's. <b>Team outlook works on every platform</b>; this user hasn't set one, so the inferred read shows and the affordance says Set. <b>Overall rank and the tiles work unchanged</b>, because power-rankings reads the <code>league_members</code> snapshot for ESPN/MFL (server.py:29185-29188). 10-team bands are 3/4/3.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">D · Fewer than 3 valued teams</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="d-rows">
+        <div class="d-row"><span class="k">Team outlook</span><span class="v"><span class="t">Contending</span><small>set by you</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+        <div class="d-row"><span class="k">Standings</span><span class="v"><span class="t mono">5–1</span><small>2nd of 12</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+        <div class="d-row dimrow"><span class="k">Overall rank</span><span class="v"><span class="t">2 rosters valued so far</span></span></div>
+      </div>
+      <div class="card hero empty" style="margin-top:14px"><h4>Not enough rosters yet</h4><p class="bodysm" style="margin:0">Buying and selling by position needs at least <span class="mono">3</span> valued rosters. This fills in as the league's rosters sync.</p></div>
+    </div></div>
+    <p class="cap">Same gate as guide beat N5 (LeagueSummaryScreen.tsx:988-992). Standings come from Sleeper's live rosters, not the valuation snapshot, so they can be complete while the snapshot is thin. The grid becomes one honest card with no Buy/Sell, because there is no line to buy or sell across.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">D · No split at a position</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="d-grid">
+        <div class="d-pt wr"><div class="hd"><span class="p" style="color:var(--wr)">WR</span><span class="mid">Mid-pack</span></div><span class="r">6th<small> /12</small></span><span class="val">≈4 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:58%;background:var(--wr)"></i></div><div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb">Sell</span></div></div>
+        <div class="d-pt te"><div class="hd"><span class="p" style="color:var(--te)">TE</span><span class="mid">No clear split</span></div><span class="r">—</span><div class="d-bs"><span class="d-bb one">See TE ranking</span></div></div>
+      </div>
+    </div></div>
+    <p class="cap">With no median (<code>no_median</code>, old server) or no boundary (<code>no_split</code>), League Summary draws no line and the drill-in carries no Offer/Target verbs (<code>candidateDir</code> is null, :1047-1056). Buy and Sell would promise directions the destination can't give, so they become one "See TE ranking" button to the plain TE ordering.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">D · Standings, before week 1</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="d-rows">
+        <div class="d-row"><span class="k">Standings</span><span class="v"><span class="t mono">0–0</span><small>no games yet</small></span><span class="go">View<svg class="ic s14"><use href="#i-cr"/></svg></span></div>
+      </div>
+    </div></div>
+    <p class="cap">Home's row shows <b>actual</b> standings, so the Season-outlook beta rule (no records in weeks 0–5, LeagueSummaryScreen.tsx:207-212) does not apply here; it governs projections, which now live on the Standings page. The record shows from week 1. Before any game is played, every team is 0–0, so the row says "no games yet" rather than ranking a 12-way tie.</p>
+  </div>
+</div>
+
+<div class="tscroll"><table class="t" style="margin-top:20px">
+  <tr><th>D module</th><th>Endpoint · field</th><th>Query key</th><th>Cost on Home mount</th><th>Status</th></tr>
+  <tr><td>Team outlook row</td><td><code>GET /api/league/preferences</code> · <code>team_outlook</code>, <code>inferred_outlook</code></td><td><code>['league-prefs', id]</code> (shared)</td><td>+1, cheap DB read</td><td><span class="okt">Existing.</span> View → Trade DNA sheet (operator ruling): <span class="gapt">mobile gap</span></td></tr>
+  <tr><td>Standings row (current)</td><td><b>Sleeper:</b> rosters <code>settings.{wins,losses,ties,fpts,fpts_decimal}</code> + league users. <b>ESPN/MFL:</b> none</td><td><code>['league-rosters', id]</code>, <code>['league-users', id]</code> (seeded by session init)</td><td><b>0</b> (Sleeper); ESPN/MFL +1 light once the endpoint exists</td><td><span class="okt">Existing</span> on Sleeper; <span class="gapt">backend gap</span> on ESPN/MFL. View → Standings page: <span class="gapt">mobile gap</span></td></tr>
+  <tr><td>Standings page · Current</td><td>same as the row</td><td>same keys</td><td>n/a (not Home)</td><td>Sleeper existing; ESPN/MFL <span class="gapt">backend gap</span> (<code>GET /api/league/standings</code>)</td></tr>
+  <tr><td>Standings page · Projected</td><td><code>GET /api/league/outlook?basis=consensus</code>, <b>on selection only</b></td><td><code>['league-outlook', id, 'consensus']</code> (shared with League Summary)</td><td>n/a (not Home); heavy, Sleeper only</td><td><span class="okt">Existing</span> endpoint; section extraction = <span class="gapt">mobile gap</span></td></tr>
+  <tr><td>Overall rank row + position tiles</td><td><code>GET /api/league/power-rankings?basis=consensus</code></td><td><code>['league-power-rankings', id, 'consensus']</code> (shared)</td><td>+1 (as A)</td><td><span class="okt">Existing.</span> Buy/Sell landing (filter + side scroll): <span class="gapt">mobile gap</span></td></tr>
+  <tr><td>Rank, View matches</td><td>progress; league summary</td><td>already warm</td><td>0</td><td><span class="okt">Existing</span></td></tr>
+  <tr><td>Find a trade, Check trends, Search free agents</td><td>navigation only</td><td>none</td><td>0</td><td><span class="okt">Existing routes</span></td></tr>
+  <tr><td><b>Total on Home</b></td><td colspan="2"></td><td><b>2 new, none heavy</b> (round 2 was 3 with 1 heavy; A was 1)</td><td>One more than A: the cheap preferences read</td></tr>
+</table></div>
+
+<h2 class="sec" id="earlier">Earlier round (2026-10-10): Directions A–C, unchanged</h2>
+<p class="lede">The first-round proposals as the operator reviewed them. Direction D above is built from C's page and supersedes the round-one recommendation for now; A–C are kept for reasoning.</p>
+
+
+<!-- ═══════════════════════════════ 2 · DIRECTION A ═══════════════════════════════ -->
+<h2 class="sec" id="dir-a">2 · Direction A: Hub (recommended)</h2>
+<p class="lede"><b>FumbleAI's hub, one to one.</b> Header + live line, a <b>YOUR LEAGUE</b> section whose full-width hero is the Trade market (the buyers/sellers split, pre-chosen at your most lopsided position), four position tiles that each open their own split, then the familiar four destinations as a 2×2 tile grid. The whole hero is one button. It lands on League rankings with RB already selected, so the split the user has never found is the first thing they see.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Proposal · populated</span>
+    <div class="phone" aria-label="Direction A Hub">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="scr">
+        <div class="a-sub">taxi_squad_tom · 5th of 12 overall</div>
+        <div class="a-title">What would you like to do today?</div>
+        <div class="live"><span class="ann">A1</span><p>RB: <b>4</b> teams are short and you're 2nd · <b>2</b> mutual matches waiting</p></div>
+
+        <div class="tick"><span>Your league</span><span class="rt">consensus values</span></div>
+        <div class="card hero" role="button">
+          <span class="ann">A2</span>
+          <div class="top"><span class="lbl">Trade market · <span style="color:var(--rb)">RB</span></span><span class="badge">You · Seller</span></div>
+          <h4>4 teams are short at RB</h4>
+          <p class="why">You're <span class="mono">2nd</span> of 12: <span class="mono">≈5.5 firsts</span> of RB value against a league median of <span class="mono">≈2.5 firsts</span>.</p>
+          <div class="strip" aria-hidden="true">
+            <div class="bars">
+              <i style="height:100%"></i><i class="me" style="height:85%"></i><i style="height:69%"></i><i style="height:62%"></i><i style="height:54%"></i><i style="height:46%"></i>
+              <i style="height:31%"></i><i style="height:31%"></i><i style="height:23%"></i><i style="height:23%"></i><i style="height:8%"></i><i style="height:8%"></i>
+            </div>
+            <div class="med" style="top:39.4px"></div><span class="medl" style="top:32px">Median ≈2.5</span>
+            <span class="you" style="left:calc(100%/12*1 + 1px)">YOU</span>
+            <div class="br" style="left:0;width:calc(100%/12*4 - 4px)"></div><span class="brl" style="left:8px">Sellers</span>
+            <div class="br" style="left:calc(100%/12*8 + 2px);right:0"></div><span class="brl" style="right:8px">Buyers</span>
+          </div>
+          <p class="names">Shortest RB rooms: <b>puntgods</b>, <b>LaPortaPotty</b>, <b>tankszn_tre</b>, <b>kupp_of_joe</b></p>
+          <div class="cta"><span>See RB buyers and sellers</span><svg class="ic s16"><use href="#i-cr"/></svg></div>
+        </div>
+        <div class="pos4" style="position:relative">
+          <span class="ann">A3</span>
+          <div class="ptile qb"><span class="p">QB</span><span class="r">7th<small> /12</small></span><span class="none">Mid-pack</span></div>
+          <div class="ptile rb cur"><span class="p">RB</span><span class="r">2nd<small> /12</small></span><span class="badge">Seller</span></div>
+          <div class="ptile wr"><span class="p">WR</span><span class="r">6th<small> /12</small></span><span class="none">Mid-pack</span></div>
+          <div class="ptile te"><span class="p">TE</span><span class="r">11th<small> /12</small></span><span class="badge">Buyer</span></div>
+        </div>
+
+        <div class="tick"><span>Get things done</span></div>
+        <div class="grid2">
+          <div class="card atile"><span class="ann">A4</span><div class="tp"><span class="well"><svg class="ic"><use href="#i-rank"/></svg></span></div><div><div class="tt">Rank players</div><div class="dd">Board live in SF TEP · all 4 positions</div></div></div>
+          <div class="card atile"><span class="ann">A5</span><div class="tp"><span class="well"><svg class="ic"><use href="#i-trade"/></svg></span></div><div><div class="tt">Find a trade</div><div class="dd">Fair packages with any leaguemate</div></div></div>
+          <div class="card atile"><span class="ann">A6</span><div class="tp"><span class="well"><svg class="ic"><use href="#i-match"/></svg></span><span class="badge fl mono">2</span></div><div><div class="tt">Matches</div><div class="dd">2 mutual · 3 awaiting them</div></div></div>
+          <div class="card atile"><span class="ann">A7</span><div class="tp"><span class="well"><svg class="ic"><use href="#i-crown"/></svg></span><span class="badge mono">5th</span></div><div><div class="tt">League</div><div class="dd">Rankings, rosters and outlook</div></div></div>
+        </div>
+      </div>
+      <div class="fold" style="top:769px"><span>fold · 852pt iPhone, tab bar pinned</span></div>
+      <div class="fab"><svg class="ic"><use href="#i-flag"/></svg></div>
+      <div class="tabbar">
+        <div class="on"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap">Frame extended to show the whole scroll. On a 393×852 phone the fold line falls inside the task grid, which is FumbleAI's own density (its grid's bottom row lands at the fold). Ice is used in three places: the hero's CTA, the "YOU" marker, the active tab. <code>scr</code> bottom padding clears the global FAB so it never covers the League tile.</p>
+  </div>
+  <div class="col wide">
+    <h3 class="sub" style="margin-top:0">Modules and their data</h3>
+    <div class="legend">
+      <div><span class="k">A1</span><span><b>Live line.</b> FumbleAI's summary capsule as Chalkline's Banner (ink-2, hairline, ice tick, body-sm). Ordered: the hero position's split, then mutual matches, then (if neither) an all-clear: "Your board is live. Pick a position below to see who's short." Data: hero = <code>GET /api/league/power-rankings?basis=consensus</code>; matches = <code>GET /api/league/summary</code> → <code>matches_mutual</code>. <span class="ok">Existing endpoints.</span> Both queries are already warm: TopBar fetches <code>['league-summary', id]</code> (TopBar.tsx:175).</span></div>
+      <div><span class="k">A2</span><span><b>Trade market hero (the centrepiece).</b> One button. From the same payload: <code>teams[].positions[P].{value,value_label}</code>, <code>teams[].is_you</code>, <code>teams[].display_name|username</code>, <code>medians[P].{value,value_label}</code>. Ordering, median cut and the <code>round(n·0.33)</code> Seller/Buyer bands are <b>exactly</b> LeagueSummaryScreen's arithmetic (:661-671, :885-892, :1018-1034), extracted into one shared pure util so Home's "4 teams" is the number of Buyer badges the user then sees. Position choice: the core position where you carry a band with the largest |you − median| / median; tie → QB, RB, WR, TE order. Bars: the DynastyGM focus treatment (you in the RB hex, everyone else ink-3) on League Summary's dashed AVG-line construction. <span class="ok">Existing endpoint.</span> Query key <code>['league-power-rankings', id, 'consensus']</code> is shared with League Summary and the in-league calculator, so Home warms the cache they read. <span class="gap">Mobile gap:</span> League Summary has no way to arrive pre-filtered. Needs a one-shot intent store (see scope).</span></div>
+      <div><span class="k">A3</span><span><b>Position tiles.</b> Your rank at each position + your band (neutral badge, the same construction League Summary uses: "being a seller is not good and a buyer is not bad", LeagueSummaryScreen.tsx:2591-2595). Each tile opens that position's split. Pattern: Dynasty Nerds' Analyzer "5,606 (7/12)" per-position rank (<code>03-analyzer.png</code>). Same payload, same util. <span class="ok">Existing endpoint.</span></span></div>
+      <div><span class="k">A4</span><span><b>Rank.</b> <code>GET /api/rankings/progress</code> → <code>unlocked</code>, per-position counts vs <code>threshold</code>; key <code>['progress', id, format]</code>, already fetched by RootNav.tsx:396-402. Badge only when something is unfinished: flare "3/4" + "TE not ranked yet". <span class="ok">Existing endpoint.</span></span></div>
+      <div><span class="k">A5</span><span><b>Find a trade.</b> Static detail; no badge (FumbleAI: quiet at zero). A pre-generated deck count would need a new read. <span class="gap">Backend gap, deliberately not drawn.</span></span></div>
+      <div><span class="k">A6</span><span><b>Matches.</b> <code>/api/league/summary</code> → <code>matches_mutual</code> (badge, flare = count emphasis) and <code>matches_awaiting</code>. These equal the Matches tab's two segments by contract (api-reference.md League table). <span class="ok">Existing, already warm.</span></span></div>
+      <div><span class="k">A7</span><span><b>League.</b> Your overall rank: <code>teams[].rank</code> of the <code>is_you</code> team from the same power-rankings payload (identical to <code>/api/league/rank-chip</code>, which reuses the same computation, server.py:28891 + :29803). No playoff band on Home: <code>/api/league/outlook</code> is a Monte-Carlo run and Sleeper-only; keep Home to one new request. <span class="ok">Existing endpoint.</span></span></div>
+      <div><span class="k">Tap</span><span>Hero / RB tile → League tab → League rankings with <b>RB selected, subset All, basis consensus</b>, scrolled to the list. Rank → Rank tab. Find a trade → Acquire. Matches → Matches. League → League tab (no filter). See <a href="#tapthrough">§6</a>.</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 3 · DIRECTION B ═══════════════════════════════ -->
+<h2 class="sec" id="dir-b">3 · Direction B: League plan</h2>
+<p class="lede"><b>FumbleAI's floor-plan canvas, with the league as the house.</b> Position pills are the floors; a lens dropdown changes what each team tile shows (Trade market · Power · Matches); every team is a big tappable "room" tile in value order with the median drawn across the grid; mid-pack teams fade like FumbleAI's quiet rooms; a bottom strip carries the totals and a named "Next:" line. Tapping a team opens a half-height team sheet (FumbleAI's room sheet). The split <i>is</i> the Home.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Proposal · populated</span>
+    <div class="phone" aria-label="Direction B League plan">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="scr">
+        <div class="ctl" style="position:relative"><span class="ann">B1</span>
+          <span class="lens">Trade market <svg class="ic s14"><use href="#i-cd"/></svg></span>
+        </div>
+        <div class="pills" style="margin-top:10px"><span class="pill qb">QB</span><span class="pill on">RB</span><span class="pill wr">WR</span><span class="pill te">TE</span></div>
+        <div class="plan" style="position:relative"><span class="ann">B2</span>
+          <div class="room"><span class="n"><span class="mono">1</span>ChubbThumper</span><span class="v">≈6.5 firsts</span><span class="badge">Seller</span></div>
+          <div class="room me"><span class="n"><span class="mono">2</span>You</span><span class="v">≈5.5 firsts</span><span class="badge you">You · Seller</span></div>
+          <div class="room"><span class="n"><span class="mono">3</span>BreeceMyHall</span><span class="v">≈4.5 firsts</span><span class="badge">Seller</span></div>
+          <div class="room"><span class="n"><span class="mono">4</span>WaddleWaddle</span><span class="v">≈4 firsts</span><span class="badge">Seller</span></div>
+          <div class="room quiet"><span class="n"><span class="mono">5</span>dynasty_dan</span><span class="v">≈3.5 firsts</span></div>
+          <div class="room quiet"><span class="n"><span class="mono">6</span>the_te_theory</span><span class="v">≈3 firsts</span></div>
+          <div class="rule"><i></i><span>League median · ≈2.5 firsts</span><i></i></div>
+          <div class="room quiet"><span class="n"><span class="mono">7</span>jsn_fanclub</span><span class="v">≈2 firsts</span></div>
+          <div class="room quiet"><span class="n"><span class="mono">8</span>rebuild_ronnie</span><span class="v">≈2 firsts</span></div>
+          <div class="room"><i class="dot"></i><span class="n"><span class="mono">9</span>kupp_of_joe</span><span class="v">≈1.5 firsts</span><span class="badge">Buyer</span></div>
+          <div class="room"><i class="dot"></i><span class="n"><span class="mono">10</span>tankszn_tre</span><span class="v">≈1.5 firsts</span><span class="badge">Buyer</span></div>
+          <div class="room"><i class="dot"></i><span class="n"><span class="mono">11</span>LaPortaPotty</span><span class="v">≈0.5 firsts</span><span class="badge">Buyer</span></div>
+          <div class="room"><i class="dot"></i><span class="n"><span class="mono">12</span>puntgods</span><span class="v">≈0.5 firsts</span><span class="badge">Buyer</span></div>
+        </div>
+        <div class="card bstrip"><span class="ann">B3</span><div class="t"><div class="a">4 buyers · 4 sellers at RB · you sell</div><div class="b">Next: puntgods is 12th at RB with WR to spare</div></div><svg class="ic s16 dim"><use href="#i-cr"/></svg></div>
+        <div class="q4" style="position:relative"><span class="ann" style="right:auto;left:8px">B4</span>
+          <div class="qt"><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+          <div class="qt"><svg class="ic"><use href="#i-trade"/></svg><span>Trade</span></div>
+          <div class="qt"><em>2</em><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+          <div class="qt"><em class="n">5th</em><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+        </div>
+      </div>
+      <div class="fab"><svg class="ic"><use href="#i-flag"/></svg></div>
+      <div class="tabbar">
+        <div class="on"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap">The flare 6px square marks the teams worth noticing for <i>you</i> (the buyers, since you sell RB): the NotificationRow unread-dot construction, informational only, never the affordance. Mid-pack rooms fade to a dashed ink-0 tile: FumbleAI's quiet rooms.</p>
+  </div>
+  <div class="col">
+    <span class="stamp prop">Proposal · team sheet (tap puntgods)</span>
+    <div class="phone" aria-label="Direction B team sheet" style="min-height:820px">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="scr tight">
+        <div class="pills"><span class="pill qb">QB</span><span class="pill on">RB</span><span class="pill wr">WR</span><span class="pill te">TE</span></div>
+        <div class="plan"><div class="room"><span class="n">ChubbThumper</span></div><div class="room me"><span class="n">You</span></div><div class="room"><span class="n">BreeceMyHall</span></div></div>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet"><span class="ann" style="top:-10px">B5</span>
+        <div class="grab"></div>
+        <div class="sh-h"><div><div style="font:600 22px/26px var(--cond);letter-spacing:.66px">puntgods</div><div class="bodysm">RB <span class="mono">12th</span> of 12 · <span class="mono">≈0.5 firsts</span> · Buyer</div></div><span class="xbtn"><svg class="ic"><use href="#i-x"/></svg></span></div>
+        <div class="grp"><span class="lbl">Their shape</span></div>
+        <div class="bodysm" style="font-family:var(--mono);font-size:12px"><span style="color:var(--qb)">QB</span> 3rd · <span style="color:var(--rb)">RB</span> 12th · <span style="color:var(--wr)">WR</span> 1st · <span style="color:var(--te)">TE</span> 8th</div>
+        <div class="grp"><span class="lbl">Your RBs they could use</span><span class="mono dim" style="font-size:11px">5</span></div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">Jahmyr Gibbs</span><span class="tier" style="border-color:var(--t-2f)">2 1sts</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">De'Von Achane</span><span class="tier" style="border-color:var(--t-1f)">1 1st</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">Omarion Hampton</span><span class="tier" style="border-color:var(--t-1f)">1 1st</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="btn pri" style="margin-top:16px">Open in League rankings</div>
+        <div class="btn ghost" style="margin-top:4px">Find a trade with puntgods</div>
+      </div>
+    </div>
+    <p class="cap">FumbleAI's room sheet (half height, the tapped room stays visible above) in Chalkline's sheet construction: ink-2, top radius 8, grabber, solid scrim, explicit close. "Open in League rankings" lands on RB + drilled into puntgods, where the shipped Offer rows live.</p>
+  </div>
+  <div class="col">
+    <h3 class="sub" style="margin-top:0">Modules and their data</h3>
+    <div class="legend">
+      <div><span class="k">B1</span><span><b>Lens + position pills.</b> Lens options: Trade market (bands), Power (overall rank, from <code>rank</code>), Matches (per-team mutual count). Pills reuse League Summary's pill construction. <span class="ok">Existing endpoints</span> for Trade market and Power; per-team match counts would need <code>/api/trades/matches/all</code> grouped client-side.</span></div>
+      <div><span class="k">B2</span><span><b>Team rooms.</b> Twelve tiles in value order, the median as a rule across the grid, Seller/Buyer badges = the shared util. A 12-team grid at 3 columns gives ~110pt tiles; a 14-team league adds a fifth row. <span class="ok">Power-rankings payload.</span></span></div>
+      <div><span class="k">B3</span><span><b>Bottom strip.</b> FumbleAI's <code>.strip</code> (index.html:106): scope stats + a named "Next:" line. "With WR to spare" = that team's best position rank. Tap → League rankings RB + drilled into puntgods. <span class="gap">Mobile gap:</span> the intent store must also carry a team to focus.</span></div>
+      <div><span class="k">B4</span><span><b>Compact action tiles.</b> The four destinations shrink to a row because the canvas takes the screen. Weaker than A's grid (no detail line).</span></div>
+      <div><span class="k">B5</span><span><b>Team sheet.</b> A new component, essentially a second drill-in that duplicates League Summary's. "Their shape" = per-position league rank computed client-side from the same payload. <span class="gap">Mobile gap: new sheet.</span></span></div>
+      <div><span class="k">Risk</span><span>Rebuilds League Summary's list as a grid, so the two can drift. It is the heaviest build and the densest screen, and on small leagues (6–8 teams) the canvas looks empty.</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 4 · DIRECTION C ═══════════════════════════════ -->
+<h2 class="sec" id="dir-c">4 · Direction C: Partner rails</h2>
+<p class="lede"><b>Named opponents first.</b> A compact "your shape" tile names where you're rich and where you're short, then horizontally scrolling rails of team tiles: <i>buying your RB depth</i> and <i>selling what you need at TE</i>. Each team tile is a big tappable card with its shape line and lands on League rankings with that position selected and the team already drilled in, one tap from the shipped Offer/Target rows. The four destinations become a third rail.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Proposal · populated</span>
+    <div class="phone" aria-label="Direction C Partner rails">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="scr">
+        <div class="c-title">What would you like to do today?</div>
+        <div class="card shape"><span class="ann">C1</span>
+          <div><span class="lbl" style="color:var(--rb)">RB · you're rich</span><span class="mono" style="font-size:20px;font-weight:600">2nd<small class="dim" style="font-size:11px"> /12</small></span><div class="track"><i style="width:92%;background:var(--rb)"></i></div></div>
+          <div><span class="lbl" style="color:var(--te)">TE · you're short</span><span class="mono" style="font-size:20px;font-weight:600">11th<small class="dim" style="font-size:11px"> /12</small></span><div class="track"><i style="width:17%;background:var(--te)"></i></div></div>
+        </div>
+        <div class="tick"><span>Buying your RB depth</span><span class="rt">4 teams</span><span class="ann" style="top:-14px;right:70px">C2</span></div>
+        <div class="railx">
+          <div class="card ttile"><span class="n">puntgods</span><span class="r">RB 12th <span class="dim">/12</span></span><span class="sh"><b style="color:var(--wr)">WR</b> 1st · <b style="color:var(--qb)">QB</b> 3rd</span><span class="gapchip">Window: gap</span><span class="go">Offer RB <svg class="ic s14 dim"><use href="#i-cr"/></svg></span></div>
+          <div class="card ttile"><span class="n">LaPortaPotty</span><span class="r">RB 11th <span class="dim">/12</span></span><span class="sh"><b style="color:var(--te)">TE</b> 1st · <b style="color:var(--wr)">WR</b> 4th</span><span class="gapchip">Window: gap</span><span class="go">Offer RB <svg class="ic s14 dim"><use href="#i-cr"/></svg></span></div>
+          <div class="card ttile"><span class="n">tankszn_tre</span><span class="r">RB 10th <span class="dim">/12</span></span><span class="sh"><b style="color:var(--qb)">QB</b> 2nd · <b style="color:var(--te)">TE</b> 5th</span><span class="gapchip">Window: gap</span><span class="go">Offer RB <svg class="ic s14 dim"><use href="#i-cr"/></svg></span></div>
+        </div>
+        <div class="tick"><span>Deep at TE, where you're short</span><span class="rt">4 teams</span></div>
+        <div class="railx">
+          <div class="card ttile"><span class="n">LaPortaPotty</span><span class="r">TE 1st <span class="dim">/12</span></span><span class="sh">Short at <b style="color:var(--rb)">RB</b> 11th</span><span class="go">Target TE <svg class="ic s14 dim"><use href="#i-cr"/></svg></span></div>
+          <div class="card ttile"><span class="n">the_te_theory</span><span class="r">TE 2nd <span class="dim">/12</span></span><span class="sh">Short at <b style="color:var(--wr)">WR</b> 10th</span><span class="go">Target TE <svg class="ic s14 dim"><use href="#i-cr"/></svg></span></div>
+          <div class="card ttile"><span class="n">ChubbThumper</span><span class="r">TE 3rd <span class="dim">/12</span></span><span class="sh">Short at <b style="color:var(--qb)">QB</b> 12th</span><span class="go">Target TE <svg class="ic s14 dim"><use href="#i-cr"/></svg></span></div>
+        </div>
+        <div class="tick"><span>Get things done</span><span class="ann" style="top:-14px">C3</span></div>
+        <div class="railx">
+          <div class="card atx"><span class="well"><svg class="ic"><use href="#i-rank"/></svg></span><span class="tt">Rank players</span></div>
+          <div class="card atx"><span class="well"><svg class="ic"><use href="#i-trade"/></svg></span><span class="tt">Find a trade</span></div>
+          <div class="card atx"><span class="well"><svg class="ic"><use href="#i-match"/></svg></span><span class="tt">Matches <span class="mono fl">2</span></span></div>
+          <div class="card atx"><span class="well"><svg class="ic"><use href="#i-crown"/></svg></span><span class="tt">League <span class="mono dim">5th</span></span></div>
+        </div>
+      </div>
+      <div class="fab"><svg class="ic"><use href="#i-flag"/></svg></div>
+      <div class="tabbar">
+        <div class="on"><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap">Rails scroll sideways; the partly-visible third tile is the scroll affordance. "Offer RB" / "Target TE" reuse #300's verbs (Offer = yours, Target = theirs). Chevrons stay chalk-dim: with up to eight team tiles on screen, ice would blow the ≤3 ration.</p>
+  </div>
+  <div class="col wide">
+    <h3 class="sub" style="margin-top:0">Modules and their data</h3>
+    <div class="legend">
+      <div><span class="k">C1</span><span><b>Your shape.</b> Your richest and shortest banded positions, rank + a 4px meter in the position hex. <span class="ok">Power-rankings payload</span>, shared util.</span></div>
+      <div><span class="k">C2</span><span><b>Team rails.</b> Buyers at your rich position, sellers at your short one, each with a shape line (that team's two best position ranks): the DTF partner-row pattern ("bkey5 · QB 930 | RB 2225…", <code>docs/business/product/2026-07-26-dynastydealer-dtf-teardowns.md:59-62</code>) and Dynasty Nerds' cross-league "Trade target · RB1 · TRADE ›" rows (<code>05d-player-detail-stats-leagues.png</code>). <span class="ok">Power-rankings payload</span> for ranks. <span class="gap">Backend gap:</span> a per-opponent window chip (Contender / Rebuilding) is not on power-rankings; <code>opponent_outlook</code> is stamped on trade cards only (trade_service.py:6495) and Team Review's <code>partners.opposed_window</code> is caller-centric and flag-gated. Drawn as a dashed placeholder. <span class="gap">Mobile gap:</span> intent must carry <code>{position, focusUserId}</code> so the tap lands drilled in.</span></div>
+      <div><span class="k">C3</span><span><b>Action rail.</b> The four destinations as smaller tiles. Least visible of the three directions; a user hunting "Matches" has to scroll sideways.</span></div>
+      <div><span class="k">Risk</span><span>Strongest opponent naming, but every tile puts a verb ("Offer RB") on a value fact: a team in the bottom band is short at RB by roster value, which is not the same as shopping for one. Copy must stay "short at RB", never "wants RB" (trade-quality research: "a missing opponent board should produce an estimated fit, not a claim", <code>docs/competitor-research-trade-quality-2026-09-04.md:101</code>). Two rails of team tiles is also the most vertical space spent on one position pair.</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 5 · COMPARE ═══════════════════════════════ -->
+<h2 class="sec" id="compare">5 · Compare and recommend</h2>
+<div class="tscroll"><table class="t">
+  <tr><th></th><th>A · Hub</th><th>B · League plan</th><th>C · Partner rails</th></tr>
+  <tr><td><b>FumbleAI fidelity</b></td><td>The shipped hub, one to one (header, live line, "your" section, 2×2 grid)</td><td>The older canvas mockup (lens, floors, rooms, strip, room sheet)</td><td>Hub cards re-cut as rails; least literal</td></tr>
+  <tr><td><b>Pull into buyers/sellers</b></td><td>Hero teaches the mechanic and lands on the split pre-filtered; four position tiles = four more doors</td><td>Home <i>is</i> the split, so the pull into League Summary is weaker (it's a second visit to the same idea)</td><td>Lands deepest (drilled into a named team), but skips the split view the operator wants found</td></tr>
+  <tr><td><b>Opponents named</b></td><td>4 names, in one line</td><td>All 12, as tiles</td><td>6+, as tiles</td></tr>
+  <tr><td><b>Quick access to Rank / Trade / Matches / League</b></td><td>Full 2×2 tiles with live detail</td><td>Compact 4-up row</td><td>Sideways rail (worst)</td></tr>
+  <tr><td><b>New network requests</b></td><td>1 (power-rankings consensus, a cache League Summary reuses)</td><td>1–2 (+ matches grouping for the Matches lens)</td><td>1</td></tr>
+  <tr><td><b>Backend work</b></td><td>None</td><td>None for v1 lenses</td><td>None for v1; window chip is a backend gap</td></tr>
+  <tr><td><b>Mobile build</b></td><td>HomeScreen + one pure util + one intent store + a small League Summary consume hook</td><td>All of A + a grid canvas + a lens + a new team sheet</td><td>All of A + rails + focus-team intent</td></tr>
+  <tr><td><b>Drift risk vs League Summary</b></td><td>Low: one shared util, one landing</td><td>High: a second rendering of the same list</td><td>Medium: claims about teams outside League Summary's own words</td></tr>
+</table></div>
+<div class="flag ice"><b>Recommend A (Hub).</b> It is the FumbleAI design the operator pointed at, nearly line for line, so it answers "big tappable tiles" without inventing a new idiom. It makes the split the hero instead of the whole screen, so the pull into League Summary is a single tap with a reason attached ("4 teams are short at RB, you're 2nd"). It keeps all four launch destinations as live tiles, and it runs on one existing endpoint whose cache League Summary already reads, with no backend work. B is the bolder idea and worth a later experiment; C's named-team tiles are the best idea in C and can be folded into A's hero later (a second line of tappable buyers) once the window chip exists server-side.</div>
+
+<!-- ═══════════════════════════════ 6 · TAP-THROUGH ═══════════════════════════════ -->
+<h2 class="sec" id="tapthrough">6 · Tap-through: hero → League rankings (RB) → drill-in</h2>
+<p class="lede">The whole point of the hero. Step 2 is the shipped #300 surface (median divider, Seller/Buyer badges) arriving with RB already applied. Step 3 is the shipped drill-in, where an Offer tap pins the player and hands off to the finder (<code>league_candidate_pinned</code>, the feature's conversion moment). Nothing on steps 2–3 is new UI; the only new behaviour is that step 2 arrives pre-filtered and scrolled to the list.</p>
+<div class="rail">
+  <div class="col">
+    <span class="stamp prop">Step 1 · Home A, hero pressed</span>
+    <div class="phone" aria-label="Hero pressed">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="scr tight">
+        <div class="tick" style="margin-top:0"><span>Your league</span></div>
+        <div class="card hero pressed">
+          <div class="top"><span class="lbl">Trade market · <span style="color:var(--rb)">RB</span></span><span class="badge">You · Seller</span></div>
+          <h4>4 teams are short at RB</h4>
+          <p class="why">You're <span class="mono">2nd</span> of 12: <span class="mono">≈5.5 firsts</span> against a median of <span class="mono">≈2.5 firsts</span>.</p>
+          <p class="names">Shortest RB rooms: <b>puntgods</b>, <b>LaPortaPotty</b>, <b>tankszn_tre</b>, <b>kupp_of_joe</b></p>
+          <div class="cta"><span>See RB buyers and sellers</span><svg class="ic s16"><use href="#i-cr"/></svg></div>
+        </div>
+      </div>
+    </div>
+    <p class="cap"><b>On press:</b> pressed fill <code>ink-3</code> (Chalkline state change; FumbleAI's 0.98 scale is not used) → emit <code>home_tile_tapped {tile:'market', position:'RB', side:'seller'}</code> → write <code>leagueSummaryIntent {position:'RB', seq}</code> → <code>navigation.navigate('League', {screen:'LeagueRankings'})</code>. No route params: same store-first contract as the #300 pin handoff (LeagueSummaryScreen.tsx:1139-1144) and FumbleAI's <code>env.selectedLens</code>.</p>
+  </div>
+  <div class="col">
+    <span class="stamp recon">Step 2 · League rankings, RB pre-selected · reconstruction</span>
+    <div class="phone" aria-label="League rankings RB filtered">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="navhdr"><span class="t">League rankings</span></div>
+      <div class="scr tight">
+        <div class="pills"><span class="pill all">ALL</span><span class="pill qb">QB</span><span class="pill on">RB</span><span class="pill wr">WR</span><span class="pill te">TE</span><span class="pill pk">PICKS</span></div>
+        <div class="minichart"><i class="dim" style="height:100%"></i><i style="height:85%"></i><i class="dim" style="height:69%"></i><i class="dim" style="height:62%"></i><i class="dim" style="height:54%"></i><i class="dim" style="height:46%"></i><i class="dim" style="height:31%"></i><i class="dim" style="height:31%"></i><i class="dim" style="height:23%"></i><i class="dim" style="height:23%"></i><i class="dim" style="height:8%"></i><i class="dim" style="height:8%"></i></div>
+        <p class="ls-hint">Ranked by RB value only — chart reordered.</p>
+        <div class="lrow"><span class="rk">1</span><span class="nm"><b>ChubbThumper</b><span class="badge">Seller</span></span><span class="vl">≈6.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow you"><span class="rk">2</span><span class="nm"><b>taxi_squad_tom</b><span class="badge you">You</span><span class="badge">Seller</span></span><span class="vl">≈5.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">3</span><span class="nm"><b>BreeceMyHall</b><span class="badge">Seller</span></span><span class="vl">≈4.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">4</span><span class="nm"><b>WaddleWaddle</b><span class="badge">Seller</span></span><span class="vl">≈4 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">5</span><span class="nm"><b>dynasty_dan</b></span><span class="vl">≈3.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">6</span><span class="nm"><b>the_te_theory</b></span><span class="vl">≈3 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="cut"><i></i><span>League median · ≈2.5 firsts</span><i></i></div>
+        <div class="lrow"><span class="rk">7</span><span class="nm"><b>jsn_fanclub</b></span><span class="vl">≈2 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">8</span><span class="nm"><b>rebuild_ronnie</b></span><span class="vl">≈2 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">9</span><span class="nm"><b>kupp_of_joe</b><span class="badge">Buyer</span></span><span class="vl">≈1.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">10</span><span class="nm"><b>tankszn_tre</b><span class="badge">Buyer</span></span><span class="vl">≈1.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">11</span><span class="nm"><b>LaPortaPotty</b><span class="badge">Buyer</span></span><span class="vl">≈0.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+        <div class="lrow"><span class="rk">12</span><span class="nm"><b>puntgods</b><span class="badge">Buyer</span></span><span class="vl">≈0.5 firsts</span><svg class="ic s14 ch"><use href="#i-cr"/></svg></div>
+      </div>
+      <div class="tabbar">
+        <div><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div class="on"><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap"><b>Reconstructed from source</b> (the capture predates #300): pills + hint per the shipped chart card (hint copy verbatim, LeagueSummaryScreen.tsx:1735); rows = TeamRow (LeagueSummaryScreen.tsx:2551-2600, "You" badge in ice, ink-2 row fill); neutral Seller/Buyer badges for the top/bottom <code>round(12·0.33)=4</code> (:1018-1034); divider = rule · label · rule in chalk-faint (:2214-2224); values = <code>positions.RB.value_label</code> (:1098-1108). The chart card is compressed here so the list is visible: the consume hook scrolls to the list. Arriving fires the shipped <code>league_pos_candidates_viewed {position:'RB', divider:'shown'}</code>, plus the proposed <code>entry:'home'</code> prop.</p>
+  </div>
+  <div class="col">
+    <span class="stamp recon">Step 3 · drill-in on puntgods · reconstruction</span>
+    <div class="phone" aria-label="Drill-in puntgods">
+      <div class="status"><span>9:41</span><span class="r">100%</span></div>
+      <div class="topbar">
+        <div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Gridiron Syndicate</b><span class="fmt">SF TEP</span><svg class="ic s14 chev"><use href="#i-cd"/></svg></span></div></div>
+        <div class="tb-r"><span><svg class="ic"><use href="#i-bell"/></svg></span><span><svg class="ic"><use href="#i-settings"/></svg></span></div>
+      </div>
+      <div class="navhdr"><span class="back"><svg class="ic s16"><use href="#i-cl"/></svg>All teams</span><span class="t">puntgods</span></div>
+      <div class="scr tight">
+        <div class="bodysm">12th of 12 at RB · Buyer · <span class="mono">≈0.5 firsts</span></div>
+        <div class="pills" style="margin-top:10px"><span class="pill all">ALL</span><span class="pill qb">QB</span><span class="pill on">RB</span><span class="pill wr">WR</span><span class="pill te">TE</span></div>
+        <p class="bodysm" style="margin:14px 0 6px">Tap a player to offer them to puntgods.</p>
+        <div class="lbl" style="margin:8px 0 4px">Your RB</div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">Jahmyr Gibbs</span><span class="tier" style="border-color:var(--t-2f)">2 1sts</span><span class="mono">RB3</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">De'Von Achane</span><span class="tier" style="border-color:var(--t-1f)">1 1st</span><span class="mono">RB7</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">Omarion Hampton</span><span class="tier" style="border-color:var(--t-1f)">1 1st</span><span class="mono">RB11</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">Kaleb Johnson</span><span class="tier" style="border-color:var(--t-2nd)">2nd</span><span class="mono">RB24</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="prow"><span class="pchip rb">RB</span><span class="nm">Tyjae Spears</span><span class="tier" style="border-color:var(--t-3rd)">3rd</span><span class="mono">RB41</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+        <div class="prow" style="margin-top:10px"><span class="lbl" style="flex:1;color:var(--chalk)">puntgods' RB</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+      </div>
+      <div class="tabbar">
+        <div><svg class="ic"><use href="#i-home"/></svg><span>Home</span></div>
+        <div><svg class="ic"><use href="#i-rank"/></svg><span>Rank</span></div>
+        <div><svg class="ic"><use href="#i-trade"/></svg><span>Acquire</span></div>
+        <div><svg class="ic"><use href="#i-check"/></svg><span>Calibration</span></div>
+        <div><svg class="ic"><use href="#i-match"/></svg><span>Matches</span></div>
+        <div class="on"><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
+      </div>
+    </div>
+    <p class="cap"><b>Reconstructed from source:</b> a team below the line ⇒ direction <code>offer</code> ⇒ your roster primary, theirs as the collapsed mirror (LeagueSummaryScreen.tsx:1063-1071); caption copy verbatim (:1935-1938); mirror toggle "puntgods' RB" (:1966-1968); header title swaps to the team, "All teams" back (#302). A row tap pins the give side, scopes the finder to puntgods and fires <code>league_candidate_pinned {verb:'offer', position:'RB', rank:12, side:'below'}</code>, all shipped. Row layout schematic: see <code>mockups/candidates-300-v2/</code> for the measured tile.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 7 · STATES ═══════════════════════════════ -->
+<h2 class="sec" id="states">7 · Empty and edge states (Direction A)</h2>
+<p class="lede">Every state keeps the 2×2 task grid, so Home always gets the user to Rank / Find a trade / Matches / League in one tap. Only the YOUR LEAGUE section changes. Frames show that section; the grid below each is unchanged unless noted. The <i>first-run</i> user never sees Home at all: D-198 keeps them landing on Acquire until their first swipe, and nothing here changes that.</p>
+<div class="states">
+
+  <div class="mini"><span class="stamp prop">1 · Loading</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="a-sub">taxi_squad_tom</div><div class="a-title">What would you like to do today?</div>
+      <div class="tick" style="margin-top:6px"><span>Your league</span></div>
+      <div class="card hero"><div class="skel" style="width:40%"></div><div class="skel" style="width:75%;height:22px;margin-top:14px"></div><div class="skel" style="width:90%;margin-top:10px"></div><div class="skel" style="width:100%;height:56px;margin-top:14px"></div></div>
+      <div class="pos4"><div class="ptile"><div class="skel"></div></div><div class="ptile"><div class="skel"></div></div><div class="ptile"><div class="skel"></div></div><div class="ptile"><div class="skel"></div></div></div>
+    </div></div>
+    <p class="cap">Static ink-2 bars (no shimmer: a moving gradient is banned). The task grid renders immediately with whatever badges are already cached (league-summary and progress are warm before Home mounts). Cached power-rankings from a prior visit (persisted query cache, 30 min) render instantly, with no skeleton.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">2 · No league linked</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="a-title">What would you like to do today?</div>
+      <div class="tick" style="margin-top:6px"><span>Your league</span></div>
+      <div class="card hero empty"><h4>Link a league</h4><p class="bodysm" style="margin:0 0 14px">Fleeced splits your league into buyers and sellers by position and names who's short where. Link Sleeper, ESPN or MFL to see it.</p><div class="btn pri">Link a league</div></div>
+    </div></div>
+    <p class="cap">Guarded on <code>useSession.league == null</code> (the same null LeagueSummaryScreen.tsx:406 handles). FumbleAI's "Add your yard" card-becomes-setup pattern. Button → LeaguePicker. Position tiles hidden. Grid: Matches and League tiles drop their badges and read "Needs a league".</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">3 · ESPN / MFL league</span>
+    <div class="phone" style="margin-top:8px">
+      <div class="topbar"><div class="tb-l"><i class="tk"></i><div class="nm"><span class="ml">League</span><span class="ln"><b>Office Dynasty</b><span class="plat">ESPN</span><span class="fmt">1QB</span></span></div></div></div>
+      <div class="scr">
+      <div class="tick" style="margin-top:0"><span>Your league</span></div>
+      <div class="card hero"><div class="top"><span class="lbl">Trade market · <span style="color:var(--wr)">WR</span></span><span class="badge">You · Buyer</span></div><h4>You're 9th of 10 at WR</h4><p class="why">3 teams are deep: <b style="color:var(--chalk)">dmorgan</b>, <b style="color:var(--chalk)">kbell_ff</b>, <b style="color:var(--chalk)">ESPNFAN4512</b>.</p><div class="cta"><span>See WR buyers and sellers</span><svg class="ic s16"><use href="#i-cr"/></svg></div></div>
+    </div></div>
+    <p class="cap"><b>The split works unchanged</b>: power-rankings reads the <code>league_members</code> snapshot for every platform (server.py:29185-29188 docstring: "ESPN-imported leagues work unchanged"). ESPN carries no pick ownership, which a single-position split never uses. Differences: the bands are 3/4/3 in a 10-team league; no playoff outlook anywhere on Home (Sleeper-only, not used by A anyway). A buyer-side hero ("You're 9th") flips the copy to name sellers.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">4 · Fewer than 3 valued teams</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="tick" style="margin-top:0"><span>Your league</span></div>
+      <div class="card hero empty"><h4>Not enough rosters yet</h4><p class="bodysm" style="margin:0 0 14px">We can value <span class="mono">2</span> rosters in this league so far. The buyer and seller split needs at least <span class="mono">3</span>; it fills in as the league's rosters sync.</p><div class="btn sec">Open League rankings</div></div>
+    </div></div>
+    <p class="cap">The same gate as guide beat N5 (LeagueSummaryScreen.tsx:988-992): <code>ranked.length ≥ 3</code> and a median at ≥1 core position. Copy never claims leaguemates must "join". Power-rankings values every roster in the snapshot whether or not its owner uses Fleeced, so the only cause is an unsynced snapshot. Position tiles hidden.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">5 · Mid-pack everywhere</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="tick" style="margin-top:0"><span>Your league</span></div>
+      <div class="card hero"><div class="top"><span class="lbl">Trade market</span></div><h4>You're mid-pack at every position</h4><p class="why">No position puts you in the top or bottom four. Pick one to see who's short and who's deep.</p></div>
+      <div class="pos4"><div class="ptile qb"><span class="p">QB</span><span class="r">6th<small> /12</small></span><span class="none">Mid-pack</span></div><div class="ptile rb"><span class="p">RB</span><span class="r">7th<small> /12</small></span><span class="none">Mid-pack</span></div><div class="ptile wr"><span class="p">WR</span><span class="r">5th<small> /12</small></span><span class="none">Mid-pack</span></div><div class="ptile te"><span class="p">TE</span><span class="r">8th<small> /12</small></span><span class="none">Mid-pack</span></div></div>
+    </div></div>
+    <p class="cap">No banded position ⇒ the hero has no CTA and becomes the explainer; the four position tiles are the doors. Honest: we don't invent an "opportunity" the bands don't show.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">6 · No split at a position</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="pos4"><div class="ptile qb"><span class="p">QB</span><span class="r">7th<small> /12</small></span><span class="none">Mid-pack</span></div><div class="ptile rb cur"><span class="p">RB</span><span class="r">2nd<small> /12</small></span><span class="badge">Seller</span></div><div class="ptile wr"><span class="p">WR</span><span class="r">6th<small> /12</small></span><span class="none">Mid-pack</span></div><div class="ptile te"><span class="p">TE</span><span class="r">—</span><span class="none">No clear split</span></div></div>
+    </div></div>
+    <p class="cap">When the payload has no median for a position (old server: <code>no_median</code>) or the median marks no boundary (<code>no_split</code>, e.g. every TE room equal), the tile says so and is never the hero. If no position splits at all, YOUR LEAGUE collapses to a single "League rankings" tile.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">7 · Error</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="tick" style="margin-top:0"><span>Your league</span></div>
+      <div class="card hero empty"><h4>Couldn't load rosters</h4><p class="bodysm" style="margin:0 0 14px">The league's rosters didn't load. Check your connection and try again.</p><div class="btn sec"><svg class="ic s16"><use href="#i-reload"/></svg>Try again</div></div>
+    </div></div>
+    <p class="cap">Names what failed and what to try (BRAND.md § in-app copy). Only this section errors; the task grid keeps working. Retry = <code>refetch()</code> on the shared query.</p>
+  </div>
+
+  <div class="mini"><span class="stamp prop">8 · Flag <code>league.pos_candidates</code> off</span>
+    <div class="phone" style="margin-top:8px"><div class="scr">
+      <div class="a-title">What would you like to do today?</div>
+      <div class="tick" style="margin-top:6px"><span>Get things done</span></div>
+      <div class="grid2"><div class="card atile"><div class="tp"><span class="well"><svg class="ic"><use href="#i-rank"/></svg></span></div><div class="tt">Rank players</div></div><div class="card atile"><div class="tp"><span class="well"><svg class="ic"><use href="#i-trade"/></svg></span></div><div class="tt">Find a trade</div></div></div>
+    </div></div>
+    <p class="cap">The hero promises a split that only renders with <code>league.pos_candidates</code> on, so with it off YOUR LEAGUE is not rendered at all and Home is the header + task grid. With the Home flag <code>nav.home_hub</code> off, Home is today's four text rows, byte-identical.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════ 8 · DATA MAP ═══════════════════════════════ -->
+<h2 class="sec" id="data">8 · Data map: every module, every direction</h2>
+<div class="tscroll"><table class="t">
+  <tr><th>Module</th><th>Endpoint · field</th><th>Mobile client · query key</th><th>Status</th></tr>
+  <tr><td>Hero / position tiles / your shape / team rooms / rails</td><td><code>GET /api/league/power-rankings?basis=consensus</code> · <code>teams[].{rank,user_id,display_name,username,is_you,positions[P].value,positions[P].value_label}</code>, <code>medians[P].{value,value_label}</code></td><td><code>api/league.ts getPowerRankings</code> · <code>['league-power-rankings', id, 'consensus']</code> (shared with LeagueSummary + InLeagueCalculator)</td><td><span class="okt">Existing.</span> Arithmetic must be the shared util</td></tr>
+  <tr><td>Overall rank (League tile, subtitle)</td><td>same payload · <code>rank</code> of the <code>is_you</code> team (= <code>/api/league/rank-chip</code>)</td><td>same key</td><td><span class="okt">Existing</span></td></tr>
+  <tr><td>Matches badge + detail</td><td><code>GET /api/league/summary</code> · <code>matches_mutual</code>, <code>matches_awaiting</code></td><td><code>getLeagueSummary</code> · <code>['league-summary', id]</code> (TopBar already fetches)</td><td><span class="okt">Existing, warm</span></td></tr>
+  <tr><td>Rank tile</td><td><code>GET /api/rankings/progress</code> · <code>unlocked</code>, <code>QB/RB/WR/TE</code>, <code>threshold</code></td><td><code>getProgress</code> · <code>['progress', id, format]</code> (RootNav already fetches)</td><td><span class="okt">Existing, warm</span></td></tr>
+  <tr><td>Arrive pre-filtered on League rankings</td><td>none (client state)</td><td>new <code>state/leagueSummaryIntent.ts</code> one-shot store; LeagueSummary consumes on focus</td><td><span class="gapt">Mobile gap</span></td></tr>
+  <tr><td>Arrive drilled into a team (B strip, C rails)</td><td>none</td><td>same store + <code>focusUserId</code></td><td><span class="gapt">Mobile gap</span> (B, C only)</td></tr>
+  <tr><td>Opponent window chip (C)</td><td>not served on power-rankings; <code>opponent_outlook</code> only on cards</td><td>n/a</td><td><span class="gapt">Backend gap</span> (C only)</td></tr>
+  <tr><td>Deck-ready count on Find a trade</td><td>no cheap read</td><td>n/a</td><td><span class="gapt">Backend gap</span>, not drawn</td></tr>
+  <tr><td>Per-team match counts (B Matches lens)</td><td><code>GET /api/trades/matches/all</code> grouped by opponent</td><td>existing <code>['matches','all']</code> prefetch (TabNav.tsx:971-975)</td><td><span class="okt">Existing</span> (client grouping)</td></tr>
+  <tr><td>Playoff band (deliberately omitted)</td><td><code>GET /api/league/outlook</code> (Sleeper-only, Monte-Carlo)</td><td><code>['league-outlook', id, basis]</code></td><td>Existing, kept off Home in A <b>and in D</b>; D shows it only on the Standings page's Projected tab</td></tr>
+  <tr><td><b>D</b> · Team outlook row</td><td><code>GET /api/league/preferences</code> · <code>team_outlook</code> / <code>inferred_outlook</code></td><td><code>['league-prefs', id]</code></td><td><span class="okt">Existing</span> (+1 cheap); View → Trade DNA sheet = <span class="gapt">mobile gap</span></td></tr>
+  <tr><td><b>D</b> · Standings row (current)</td><td>Sleeper rosters <code>settings.{wins,losses,ties,fpts}</code> + league users; ESPN/MFL: no source</td><td><code>['league-rosters', id]</code>, <code>['league-users', id]</code> (seeded)</td><td><span class="okt">Existing</span> on Sleeper (0 requests); <span class="gapt">backend gap</span> on ESPN/MFL</td></tr>
+  <tr><td><b>D</b> · Standings page</td><td>Current: as the row. Projected: <code>GET /api/league/outlook</code>, on selection only</td><td>as the row; <code>['league-outlook', id, 'consensus']</code></td><td><span class="gapt">Mobile gap</span> (new screen + Season-outlook extraction); ESPN/MFL Current = <span class="gapt">backend gap</span></td></tr>
+  <tr><td><b>D</b> · Buy / Sell landing</td><td>none (client state)</td><td>intent <code>{position, side}</code>; Buy = list-top <code>onLayout</code>, Sell = <code>scrollToEnd()</code></td><td><span class="gapt">Mobile gap</span>; pinned banner (decided)</td></tr>
+  <tr><td><b>D</b> · Check trends, Search free agents</td><td>navigation only (<code>Rank › Trends</code>, root <code>FreeAgents</code>)</td><td>none</td><td><span class="okt">Existing routes</span></td></tr>
+</table></div>
+<div class="flag warn"><b>Request posture.</b> A adds <b>one</b> request to Home's mount (power-rankings consensus, a cache League Summary reuses). <b>D (round 3) adds two, neither heavy</b>: power-rankings and a cheap preferences read. Sleeper standings come from rosters session init already cached. The 10,000-simulation outlook run (<code>outlook_sim_count</code>, database.py:3037) no longer runs on Home; it runs only on the Standings page's Projected tab. Round 2's D added three, one heavy.</div>
+
+<!-- ═══════════════════════════════ 9 · AUDIT ═══════════════════════════════ -->
+<h2 class="sec" id="audit">9 · Chalkline audit: where FumbleAI conflicts, and what we drew instead</h2>
+<div class="tscroll"><table class="t">
+  <tr><th>FumbleAI (value · source)</th><th>Chalkline rule</th><th>Rendered here as</th></tr>
+  <tr><td>Card radius 14, icon-tile radius 10.8/14 (HomeHubView.swift:311-313, :349-355, :372)</td><td>Radius ≤8 except specced pills</td><td>Cards 8 (<code>--r-md</code>), icon well 4 (<code>--r-sm</code>), badges 2 (<code>--r-xs</code>)</td></tr>
+  <tr><td>Pill badges + summary capsule (:390, :91)</td><td>Pills only for count badges / specced chips</td><td>Badges are the 2px Badge construction; the capsule is a Banner (radius 4)</td></tr>
+  <tr><td>SF Pro (<code>.system</code>), mockup stack <code>-apple-system,"SF Pro Text","Inter",system-ui</code> (index.html:12)</td><td>No Inter / system stack</td><td>Barlow Condensed (title, hero headline), Archivo (UI), IBM Plex Mono (every number)</td></tr>
+  <tr><td>Accent <code>#1E5AA8</code> on accent-soft <code>rgba(30,90,168,.11)</code> (index.html:17-18)</td><td>Ice for actions, flare for highlights, no alpha-tint fills</td><td>Icon wells ink-2 with chalk-dim glyphs; ice only on the hero CTA, YOU marker, active tab</td></tr>
+  <tr><td>Attention badge: danger <code>#C23A2E</code> on danger-soft (:377-392)</td><td><code>--neg</code> is pass/error only; flare is the highlight</td><td>Flare-bordered mono count (Matches "2"); never red for a count</td></tr>
+  <tr><td>Blueprint-grid paper texture on page + wide cards (:58, :404-420)</td><td>Solid ink surfaces; no decorative texture in chrome</td><td>Dropped. The hero's bar strip carries the "this is your league" visual instead</td></tr>
+  <tr><td>Pressed: scale 0.98 + opacity 0.85 (:394-401)</td><td>State changes use surface/border, no lift/scale</td><td>Pressed fill ink-3 (§6 step 1)</td></tr>
+  <tr><td>"sparkles" icon on the summary (:82)</td><td>Chalkline icon set only; no decorative glyphs</td><td>Ice tick of the Banner construction</td></tr>
+  <tr><td>Strip/menu/sheet shadows (index.html:106, :154, :160)</td><td>One shadow, sheets/menus/toasts only</td><td>Tiles: hairline only. B's team sheet: <code>--shadow-sheet</code> permitted (not drawn)</td></tr>
+  <tr><td>Stock iOS tab bar blur material (MainTabView.swift:27)</td><td>No blur</td><td>Our existing solid ink-0 tab bar, unchanged</td></tr>
+  <tr><td>Light-first theme (<code>--page:#E8EAED</code>)</td><td>Dark-only</td><td>Dark ink steps throughout</td></tr>
+  <tr><td>Gradient legend swatch / hatch (index.html:225, :286)</td><td>No gradients</td><td>Not used: B's quiet rooms use a dashed border instead of a hatch</td></tr>
+</table></div>
+<p class="cap">Lab chrome exempt from the app rules: the 22px phone bezel, dashed <code>.ann</code> tags and the fold line (warn colour), page furniture. No rule in app UI sets text below 11px.</p>
+
+</div>
+</body>
+</html>

@@ -38,6 +38,19 @@ export interface RosterRow {
    * co-owner has full control of the team — see `ownsRoster` below.
    */
   co_owners?: string[] | null;
+  /**
+   * Sleeper's season record for this roster, passed through verbatim by the
+   * proxy (Sleeper leagues only). Points for = `fpts + fpts_decimal / 100`.
+   * Absent on platform-imported (ESPN/MFL/Fleaflicker) rows, which the proxy
+   * serves from the DB snapshot. Read through utils/standings.ts.
+   */
+  settings?: {
+    wins?: number | null;
+    losses?: number | null;
+    ties?: number | null;
+    fpts?: number | null;
+    fpts_decimal?: number | null;
+  } | null;
 }
 export async function getLeagueRosters(leagueId: string) {
   return api.get<RosterRow[]>(`/api/sleeper/rosters/${leagueId}`);

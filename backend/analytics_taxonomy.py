@@ -704,6 +704,15 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "paywall_viewed", "paywall_purchase_initiated",
     "paywall_purchase_completed", "paywall_purchase_failed",
     "paywall_restore",
+    # ── Home hub (flag `nav.home_hub`, 2026-10-10) ───────────────────────
+    # Scope: docs/plans/home-engagement/scope.md §1. REGISTERED BEFORE THE
+    # EMITTERS SHIP (Phase 1 foundations), and both land in
+    # analytics_queries.NON_INTENT_EVENTS in this same commit.
+    #   home_tile_tapped          — any tap on a Home hub tile, row or button.
+    #   standings_segment_changed — the Standings page's Current | Projected
+    #                               control, on a user tap only (never mount).
+    "home_tile_tapped",
+    "standings_segment_changed",
 })
 
 # ---------------------------------------------------------------------------
@@ -1647,6 +1656,24 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "paywall_purchase_completed":  frozenset({"product_id", "source"}),
     "paywall_purchase_failed":     frozenset({"product_id", "user_cancelled"}),
     "paywall_restore":             frozenset({"restored"}),
+    # ── Home hub (flag `nav.home_hub`, 2026-10-10; scope.md §1) ──────────
+    # `tile` is a CLOSED vocabulary:
+    #   outlook | standings | overall_rank          — the three status rows
+    #   buy | sell | position_ranking               — a position tile's controls
+    #                                                 (position_ranking = the
+    #                                                 no-split fallback button)
+    #   find_trade | rank | matches | trends | free_agents — task tiles
+    #   link_league | retry                          — empty/error states
+    # `position` (QB|RB|WR|TE) and `band` (seller|buyer|mid — the USER's
+    # band at that position) ride ONLY on buy / sell / position_ranking.
+    # `band` with `tile` is what makes the suggested-side emphasis readable:
+    # a Seller tapping Sell took the suggestion. No league id, no team, no
+    # player, no device platform (a user_events COLUMN, never a prop).
+    "home_tile_tapped":            frozenset({"tile", "position", "band"}),
+    # `segment` ∈ current | projected — the segment the tap SELECTED.
+    # Projected is the only path that runs the outlook simulation, so this
+    # row is also the denominator for that request's cost.
+    "standings_segment_changed":   frozenset({"segment"}),
 }
 
 

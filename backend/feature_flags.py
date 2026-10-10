@@ -334,6 +334,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # decides once at mount. Registered here so the flag ships through
     # /api/feature-flags like every other key.
     "nav.home_tab",
+    # Home hub (2026-10-10 operator approval, docs/plans/home-engagement/
+    # scope.md, Direction D) — the Home tab becomes a tile hub: status rows,
+    # position tiles with Buy / Sell into League rankings' buyers/sellers
+    # split, five task tiles, and a new Standings page. Off = today's
+    # four-row Home, byte-identical. CLIENT-ONLY: no route reads this key;
+    # HomeScreen decides once per mount. Registered here so the flag ships
+    # through /api/feature-flags like every other key.
+    "nav.home_hub",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",

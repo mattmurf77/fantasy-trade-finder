@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Text } from '../components/chalkline';
 import { ink, space, type } from '../theme/chalkline';
+import { useFeatureFlags } from '../state/useFeatureFlags';
+import HomeHub from '../components/home/HomeHub';
 
 // Home tab (flag `nav.home_tab`, docs/plans/home-tab/plan.md) — the launch
 // tab for returning users: one question and four plain-text ways into the
@@ -21,6 +23,12 @@ const OPTIONS = [
 
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
+  // Home hub (flag `nav.home_hub`, docs/plans/home-engagement/scope.md):
+  // read IMPERATIVELY, once per mount, so a mid-session flag revalidation
+  // never swaps Home under the user. Every query, state and event of the hub
+  // lives in components/home/ — this file stays data-free either way.
+  const hubOn = useRef(!!useFeatureFlags.getState().flags['nav.home_hub']).current;
+  if (hubOn) return <HomeHub />;
   return (
     // No `top` safe-area edge: TabNav's TopBar owns the top inset.
     <View style={styles.root} testID="home.screen">
