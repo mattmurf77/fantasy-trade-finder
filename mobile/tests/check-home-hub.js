@@ -164,7 +164,7 @@ const handler = (name) => {
 {
   assert(/from '\.\.\/\.\.\/utils\/positionSplit';/.test(hub) && /from '\.\.\/\.\.\/utils\/standings';/.test(hub),
     '3a. HomeHub imports utils/positionSplit and utils/standings');
-  // The ice side is emphasizedSides' pick (≤2 tiles, for the ≤3 ice ration),
+  // The ice side is emphasizedSides' pick (every banded tile, uncapped),
   // handed to each tile as `emphasis`; the tile never derives it itself.
   assert(['canSplit(', 'positionSplits(', 'emphasizedSides(', 'currentStandings(', 'standingsSummary(', 'ordinal('].every((f) => hub.includes(f))
     && ['rankPercentile(', 'ordinal('].every((f) => tile.includes(f))

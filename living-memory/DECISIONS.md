@@ -1,5 +1,18 @@
 # Decisions — Fantasy Trade Finder
 
+## D-204 — Buyer/Seller tags turn flare pink; Home's suggested-side ice is uncapped
+
+**Date:** 2026-10-10 · **Who:** operator (both calls); lead (build).
+**Context:** The Buyer/Seller tags on League rankings (one position filtered) and on the Home position tiles were neutral grey outlines, which the operator found flat next to the ice "You" tag. Separately, Home drew the suggested Buy/Sell side in ice on at most two tiles (`emphasizedSides`, the two most extreme), to keep the Chalkline ≤3 ice ration. A user tagged at three or four positions saw only two highlighted.
+**Decision:**
+- (1) Both tags use **flare** (border + text), the same construction as the ice "You" badge. Flare is the informational-highlight accent (ADR-005), and these tags are informational. Buyer and Seller share the one color, keeping the original "neither is good or bad" rule (no pos/neg).
+- (2) **Every** banded Home tile draws its suggested side in ice: up to four. This is an explicit operator exception to the ≤3 ice-per-screen rule, scoped to the Home position tiles. With all four banded plus the active tab, Home shows five ice elements.
+
+**Consequences:**
+- The global ≤3 ice ration is unchanged elsewhere; `docs/design/components.md` (Position tile row) records the exception.
+- `emphasizedSides` lost its `max` cap and its extremity ordering, which existed only to pick the two winners.
+- Express ship (operator): no scope block. Evidence in TEST_LEDGER 2026-10-10.
+
 ## D-203 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
 
 **Date:** 2026-10-10 · **Who:** operator (missed-games ruling, entry points, mobile only, ship dark, simplicity brief); lead (source, spike rule, naming).

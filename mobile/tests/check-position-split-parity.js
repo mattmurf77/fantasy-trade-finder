@@ -274,15 +274,16 @@ const desc = (n) => Array.from({ length: n }, (_, i) => (n - i) * 100);
     '1p. ordinal matches LeagueSummaryScreen (11th–13th, 21st, 111th)',
   );
   {
-    // emphasizedSides: at most `max` sides, most extreme first, mid-pack never.
+    // emphasizedSides: every banded position (uncapped by operator decision), mid-pack never.
     const mk = (pos, rank, band, n = 12, state = 'shown') => ({
       position: pos, state, teamCount: n, you: { rank, band },
     });
     const all4 = [mk('QB', 3, 'Seller'), mk('RB', 1, 'Seller'), mk('WR', 11, 'Buyer'), mk('TE', 12, 'Buyer')];
     const e = util.emphasizedSides(all4);
     assert(
-      Object.keys(e).sort().join() === 'RB,TE' && e.RB === 'sell' && e.TE === 'buy',
-      '1q. emphasizedSides: four banded ⇒ the two most extreme (1st Seller, last Buyer)',
+      Object.keys(e).sort().join() === 'QB,RB,TE,WR'
+        && e.QB === 'sell' && e.RB === 'sell' && e.WR === 'buy' && e.TE === 'buy',
+      '1q. emphasizedSides: four banded ⇒ all four, each on its own side (no two-tile cap)',
     );
     const mixed = util.emphasizedSides([mk('QB', 6, null), mk('RB', 2, 'Seller'), mk('WR', 4, 'Seller', 12, 'no_split')]);
     assert(
