@@ -1,3 +1,10 @@
+## 2026-10-10 — Value core v3 (#320): rule tests, replay, rebuild outcome
+
+- CI 4/4 green on `69558060`. Value-core + grading + fit suites: 229 passed, incl. `test_redundant_no_second_starter_at_a_capped_position` (partner and viewer sides, swap, 1QB vs superflex, TE in superflex, two-TE league, weak incumbent, off, enumeration).
+- Replay on round-2 cards (all graders' decks): flagged as redundant 30% of today's engine, 28% fit A, 25% fit B, 19% value core. Operator grades, redundant vs not: today's engine 3.47 vs 3.91, fit A 3.40 vs 4.11.
+- Dry run on the 19 unstarted decks (read-only): v3 value-core decks 77–566 ranked cards; fit A 1–18, fit B 0–9.
+- Prod: 19 rebuilt (17 first pass, 2 on retry); fit arms folded into all 19; every open deck reports `engine_version = value-core-3`.
+
 ## 2026-10-10 — Home hub (D-202, `nav.home_hub`): evidence
 
 Full gates (no express). Scope block before code ([scope](../docs/plans/home-engagement/scope.md)); Phase 1 foundations, then two build agents (M-Home, M-Dest) with disjoint files, integrated on `feat/home-hub`. D-056 posture: no simulator, `FTF_SKIP_SIM_GATE=1`.
