@@ -121,6 +121,9 @@ const V2_SCREENS = {
   LeagueSummary: 'app/league/summary',
   WinNow: 'app/trades/win-now',
   FreeAgents: 'app/league/free-agents',
+  // Home hub (scope R5) — Current | Projected standings. Root stack, so the
+  // link pushes over the tabs exactly as Home's Standings row does.
+  Standings: 'app/league/standings',
   // rookie-draft M4. Addressable even while `draft.room` is off: the flag
   // gates the League tab's ENTRY TILE, not the route, and a link that
   // 404s at the API renders the room's honest error state rather than a
