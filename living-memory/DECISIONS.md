@@ -1,5 +1,22 @@
 # Decisions — Fantasy Trade Finder
 
+## D-201 — Home becomes a tile hub that leads into League rankings' buyers/sellers split
+
+**Date:** 2026-10-10 · **Who:** operator, over four design rounds on the Fleeced Home Redesign mockup. Built by parallel agents, lead-integrated.
+**Context:** The Home tab shipped by D-198 was four plain text rows that repeated the tab bar. Users almost never found League rankings' position split (#300), where a single position filter divides the league into buyers and sellers. The operator pointed at the FumbleAI homeowner app's home hub as the look to follow: big tappable tiles in place of tight links.
+**Decision:** Direction D, behind `nav.home_hub` (ships ON):
+- **Status rows (40pt):** Team outlook, current Standings and Overall rank.
+- **Position tiles:** QB/RB/WR/TE in a 2×2 grid, each with in-tile **Buy** | **Sell**.
+- **Task tiles:** five full-width tiles (Find a trade, Rank players, View matches, Check trends, Search free agents).
+
+Where each control goes:
+- **Buy/Sell** opens League rankings reset to Consensus / All / that position, under a pinned banner that names the side. Buy lands at the top of the list (deepest teams); Sell lands at the end (shortest teams).
+- **Standings** on Home is the *current* record only. Its View opens a new root-stack **Standings** page with a Current | Projected control. The Season-outlook simulation runs only when Projected is selected.
+- **Team outlook** View opens the Trade DNA sheet.
+
+This narrows D-198 on the flag-on path: Home now fetches data and emits two events (`home_tile_tapped`, `standings_segment_changed`, both non-intent). The buyer/seller arithmetic is duplicated into `utils/positionSplit.ts`, with an executable parity guard, rather than moved out of League Summary, whose inline code other guards pin.
+**Consequences:** On mount, Home adds two light requests (power-rankings consensus, shared with League Summary, and preferences). Sleeper standings come from rosters already cached at session start. ESPN/MFL current standings and a `/api/league/standings` endpoint are follow-ups; until they exist, those leagues get an honest "not available" state. League Summary's own Season-outlook strip still runs the simulation when the League tab opens (follow-up). Rollback: `nav.home_hub` false, which brings back the four-row Home byte-identical on the next Home mount. [Scope](../docs/plans/home-engagement/scope.md).
+
 ## D-200 — Fit-first approaches A and B go into Calibration despite failing the offline bar
 
 **Date:** 2026-10-09 · **Who:** operator (chose "Add A + fixed B" after seeing the failed test), lead-built.
