@@ -20,6 +20,7 @@
 - [Synthesis: what we carried over](#synthesis-what-we-carried-over)
 - [FumbleAI vs Chalkline: every conflict](#fumbleai-vs-chalkline-every-conflict)
 - [What we deliberately did not take](#what-we-deliberately-did-not-take)
+- [Round 2: Direction D (operator revision)](#round-2-direction-d-operator-revision)
 
 ---
 
@@ -267,3 +268,27 @@ Rule applied (operator): keep FumbleAI's tile structure, render it in Chalkline 
 - **Playoff odds on Home.** `/api/league/outlook` is a Sleeper-only Monte-Carlo run. Home stays at one new request, and the band lives one tap away on League.
 - **Opponent intent claims.** "Buying" means *short at the position by value*, a fact about rosters. Copy never says a team "wants" or "is shopping" anything (trade-quality research `:101`).
 - **Colored rank chips (green/amber/red).** League Summary deliberately renders Buyer/Seller as neutral badges. Home follows it.
+
+---
+
+## Round 2: Direction D (operator revision)
+
+2026-10-10, same day. The operator revised Direction C into **D**, now the current candidate (mockup § D). D has three parts:
+- status rows for team outlook, standings and overall rank;
+- all four position tiles in a 2×2, each with Buy / Sell;
+- a five-tile Get things done.
+
+`scope.md` is not rewritten yet, because the operator is still iterating. Patterns D borrows that round 1 did not:
+
+- **Status rows as the "your team" header.** This is DynastyGM's league-row health check (rank chip + "Updated", `01-home-leagues.png`; `competitor-teardown-dynastygm.md:84-86`) collapsed onto one league, standing in for FumbleAI's header subtitle naming the user's own property (`HomeHubView.swift:62-80`). Every row is a whole-row button to where the fact lives, which is FumbleAI's one-tap-to-destination rule.
+- **A verb per opportunity.** This is Dynasty Nerds' cross-league "Trade target · RB 1 · TRADE ›" rows (`05d-player-detail-stats-leagues.png`). In D the verb sits on the position, Buy or Sell, rather than on a player or team. It maps onto the shipped #300 directions: Buy = Target (teams above the line), Sell = Offer (teams below).
+- **Check trends and Search free agents as Home tiles.**
+  - Dynasty Nerds puts Free Agents in its primary nav (`08-free-agents.png`).
+  - The Trends tile links the existing `TrendsScreen` (movers + consensus gap), which is TI-CALC's "high on / low on" pattern (`competitor-teardown-ti-calc.md:52`) and already ships.
+  - It is not the risers/fallers *build* the operator parked in July (`2026-07-26-dynastydealer-dtf-teardowns.md:126-128`); it is a link to a screen that already exists.
+
+Findings that constrain D (detail in the mockup):
+- League Summary has **no separate buy or sell view**: one split list per position, with the direction chosen per tapped team.
+- **"Team outlook" is the contend/rebuild setting.** The app's own sheet is headed "What's your team outlook?" (`OutlookSheet.tsx:101`). The playoff band is "Season outlook".
+- **Request cost.** The standings row needs `/api/league/outlook`, a 10,000-simulation run per request (`database.py:3037`), Sleeper only. That takes Home's mount from 1 new request (A) to 3.
+
