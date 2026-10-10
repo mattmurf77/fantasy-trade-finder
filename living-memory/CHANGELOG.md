@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-10-10 — Value core v3 (`redundant`, #320, D-201); 19 decks rebuilt; second grader in
+
+- #320 (`01cda0ef`, live 2026-10-10 17:27 UTC): hard rule `redundant`. No TE (any format) and no QB (single-QB only) for a team that already keeps one worth ≥ 0.70 × the incoming player; it applies to both sides and reaches the fit engines through the shared core. It came from the operator's McBride-to-the-Bowers-owner card. Measured on round-2 decks, it hit 19–30% of every engine's cards.
+- Rebuilt the 19 unstarted decks on v3 with fresh Sleeper rosters, and folded the fit arms back in. Two needed a retry: Josh Gordon's (`owner_impression_unavailable` on the deck refresh) and the MFL deck (worker restarted 17:49 mid-run). Final: 19 open v3 decks of 44–63 cards. Bcork's Bush League deck is still invalid (v2, he owns no roster).
+- Graders: the operator finished 2 v2 decks; gdubs10 finished 1 (62 cards, before the rebuild). Round-2 means, operator / gdubs10: today's engine 3.73 / 3.65, value core 2.80 / 3.47, fit A 3.96 / 3.22, fit B 3.00 (n=2) / 2.00 (n=5).
+
 ## 2026-10-10 — Home hub shipped (#319, D-202); Render live; iOS 1.20.0 submitted
 
 - **What:** Home is now a tile hub behind `nav.home_hub`, which is ON. It has status rows (team outlook → Trade DNA sheet; current standings → a new Standings page; overall rank → League rankings), QB/RB/WR/TE tiles with **Buy** | **Sell**, and five task tiles. Buy/Sell open League rankings reset to Consensus / All / that position, under a pinned banner: Buy at the top of the list, Sell at the end. The Standings page has a Current | Projected control; the outlook simulation runs only when Projected is selected.
