@@ -1,3 +1,49 @@
+## 2026-10-10 — Usage Trends (`usage_trends.enabled`, off): evidence, branch `feat/usage-trends`, not merged
+
+Full gates, not express. Scope first ([scope](../docs/plans/usage-trends/scope.md)). Evidence under D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Data source check:** Sleeper `/stats/nfl/2026/{1..4}` against the operator's snap CSV and the Footballguys target export. Identical on 1652/1656 snap and 1648/1652 target RB/WR/TE player-weeks; team totals match (NYJ 66→32 snaps, CHI 72→93, PHI targets 25/25).
+- **Backend:**
+  - `test_usage_trends.py` (31): math, real-data NYJ+PHI regression, route incl. week selection.
+  - `test_usage_trends_refresh.py` (15): weekly store.
+  - **9 named sabotages, each red then green:**
+    - byes/out in the divisor;
+    - count-gated spikes;
+    - no previous-game clause;
+    - QB rows out of team totals;
+    - orphan rosters read as FA;
+    - non-member league served;
+    - partial week stored;
+    - corrections never freeze;
+    - route ignores the store.
+  - **Live end-to-end** into a scratch SQLite: 4 weeks stored (32 teams, about 610 players each); a re-run plans nothing; stored vs a fresh live fetch compute byte-identical on the full NFL (354 players). An order-only mismatch was found and fixed with a deterministic sort.
+  - **Full suite** `pytest backend/tests -k "not calibration_gate"`: **7695 passed, 1 skipped, 0 failed** (local Python 3.14; CI runs 3.12).
+  - An earlier overlapping run showed one failure in `test_prepared_trade_store_v2::test_generation_renewal_retains_token_and_never_extends_artifact_expiry`. It passes alone on this branch and on `main` `d154eef1`: timing-sensitive under load, unrelated.
+  - `test_seed_ui_test_db` caught the flag missing from the `onboarding-v2` fixture; fixed, and the guard now pins all three fixtures.
+- **Mobile:**
+  - New `check-usage-trends.js` executes the pure helpers: status, filter, headline copy and vocabulary, table cells and total, sort, week selection. It also pins the wiring and the analytics registration. It caught the unregistered `view`, `weeks` and `sort` props during the build.
+  - **12 named sabotages, each red then green:**
+    - client re-sort;
+    - text on table actions;
+    - jargon headline;
+    - pins before a league switch;
+    - Quick Set ignoring a re-push;
+    - orphan as FA;
+    - OUT sorting with zeros;
+    - column sort leaking into Version A;
+    - third tap never resetting;
+    - zero weeks allowed;
+    - weeks missing from the cache key;
+    - selection never sent.
+  - `check-home-tab.js` 4i (flag-gated row).
+  - All 102 `check-*.js` green; `tsc --noEmit` clean; testid-lint OK.
+- **Code-walk:** [code-walk.md](../docs/plans/usage-trends/code-walk.md) §1–7.
+- **Not run:**
+  - hosted CI (the draft PR runs it);
+  - the TestFlight checklist in scope §3, which needs a build with the flag on.
+
+Merge is held for the home-engagement redesign (operator).
+
 ## 2026-10-09b — Fit engines (#317) and roster refresh (#318): evidence
 
 - #317: CI 4/4 green on `bea27767`; local full suite 7615 passed, 1 skipped (`test_rookie_scope.py` excluded, machine-local). New tests: `test_fit_engine.py` (9), the fold-in tests (`test_add_fit_arms_folds_blind_and_keeps_answered_cards`, `test_fold_aborts_when_a_moving_card_was_answered`), `test_admin_add_fit_arms_route`; the e2e blinding test forbids the fit arm names and versions.

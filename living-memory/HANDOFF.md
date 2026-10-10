@@ -1,24 +1,30 @@
 # HANDOFF
 
-## Usage Trends — built 2026-10-10, held for the home redesign (branch `feat/usage-trends`, worktree `.claude/worktrees/usage-trends`)
+## Usage Trends — built 2026-10-10, draft PR open, held for the home redesign (branch `feat/usage-trends`, worktree `.claude/worktrees/usage-trends`)
 
-**Where I stopped:**
-- **The feature is built:**
-  - backend `GET /api/usage-trends` (flag `usage_trends.enabled`, off);
-  - mobile `UsageTrendsScreen` with **two views behind a Simple | Raw stats pill**. Version A is the approved draft A as drawn; Version B is a per-week table + Total with icon actions. This was the operator's direction mid-session;
-  - shared `ClaimSheet`;
-  - Home row + Free Agents link;
-  - Quick Set `positionSeq`.
-- Evidence: 24 backend tests and 6 sabotages; `check-usage-trends.js` and 6 sabotages; tsc clean; every `check-*.js` green. Details in [scope](../docs/plans/usage-trends/scope.md) §3 and [code-walk](../docs/plans/usage-trends/code-walk.md).
-- A preview of Version B was drawn on the [canvas](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo).
+**Where I stopped:** the feature is complete and green. Full suite 7695/0 failed; 102 mobile guards; tsc clean. Draft PR open, CI running there.
+- **Backend:** `GET /api/usage-trends` with `weeks` selection and `available_weeks`, flag `usage_trends.enabled` off.
+- **Weekly store:** 3 `usage_*` tables, `usage_trends_refresh`, `POST /api/cron/usage-trends-refresh`, `scripts/refresh_usage_trends.py`.
+- **Mobile:** two views behind a Simple | Raw stats pill. Raw stats columns sort. Filters → Weeks / Position / Show as.
 
-**Blocked on (operator):** **do not merge or deploy until the home-engagement redesign (`design/home-engagement`, flag `nav.home_hub`) is live** (operator, 2026-10-10). Then:
-- rebase onto `origin/main`;
-- re-home the Home entry as a hub tile and keep the flag-off text row;
-- reconcile `check-home-tab.js` with what that branch expects (it wants the file unmodified; this branch added assertion 4i);
-- exact-head CI, merge, deploy flag-off, TestFlight build, and the 12-step checklist in scope §3.
+Specs: [scope](../docs/plans/usage-trends/scope.md), [weekly update](../docs/plans/usage-trends/weekly-update.md), [code-walk](../docs/plans/usage-trends/code-walk.md).
 
-**Don't:** sort the list client-side (`check-usage-trends.js` §2e); write finder pins before a league switch (§2h).
+**Blocked on (operator):** **do not merge or deploy until the home-engagement redesign (`design/home-engagement`, flag `nav.home_hub`) is live.** Then:
+1. rebase onto `origin/main`;
+2. re-home the Home entry as a hub tile (keep the flag-off text row);
+3. reconcile `check-home-tab.js` with that branch (it wants the file unmodified; this branch added 4i);
+4. exact-head CI, merge, deploy flag-off;
+5. `python3 scripts/refresh_usage_trends.py --remote` to backfill;
+6. TestFlight build, flag on for the operator, the 12-step checklist in scope §3.
+
+**Open design calls (offered, not decided):**
+- a frozen player column / pinned actions for Raw stats past 4 weeks (today the whole table swipes);
+- extra filters: My team only, Big jumps only, NFL team, minimum usage.
+
+**Don't:**
+- sort Version A, or sort anywhere but `sortStatsRows` (`check-usage-trends.js` §2e–2e2);
+- write finder pins before a league switch (§2h);
+- write the store from anywhere but `usage_trends_refresh`.
 
 ## Current State — 2026-10-07 (Calibration + value-core shipped to the backend; app build blocked)
 
