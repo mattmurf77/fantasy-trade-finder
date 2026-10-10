@@ -24412,6 +24412,30 @@ def cron_roster_snapshot():
                     "period_key": _rh.iso_period_key(now)})
 
 
+@app.route("/api/cron/usage-trends-refresh", methods=["POST"])
+def cron_usage_trends_refresh():
+    """Usage Trends weekly store — the operator's manual lever
+    (docs/plans/usage-trends/weekly-update.md). Same writer as the daily-tick
+    step, started on a daemon thread; returns at once. Works with the feature
+    flag OFF on purpose, so the store can be backfilled before launch.
+
+    Body (all optional): {"weeks": [1, 2], "force": true, "dry_run": true}.
+    `weeks` limits the run to those completed weeks, `force` re-fetches them
+    even when fresh, `dry_run` fetches and logs without writing. The result
+    goes to the log (`usage-refresh (cron_route): {...}`) and to the
+    usage_week_loads table."""
+    _require_cron_auth()
+    body = request.get_json(silent=True) or {}
+    weeks = body.get("weeks")
+    if weeks is not None and not (isinstance(weeks, list)
+                                  and all(isinstance(w, int) for w in weeks)):
+        return jsonify({"error": "weeks must be a list of integers"}), 400
+    started = _start_usage_refresh(
+        "cron_route", weeks=weeks, force=bool(body.get("force")),
+        dry_run=bool(body.get("dry_run")))
+    return jsonify({"ok": True, "started": started, "busy": not started})
+
+
 @app.route("/api/cron/realtime-tick", methods=["POST"])
 def cron_realtime_tick():
     """Every 15 minutes. Pushes match_expiring for pending matches >48h
@@ -24795,6 +24819,17 @@ def cron_daily_tick():
     except Exception as e:
         log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
 
+    # ── Usage Trends weekly store (docs/plans/usage-trends/weekly-update.md) ──
+    # Idempotent: fetches only completed weeks not yet stored, plus stat
+    # corrections for weeks loaded within the last 7 days. Daemon thread;
+    # reported only while usage_trends.enabled is on (flag-off payload
+    # stays byte-identical).
+    usage_refresh_stats: dict | None = None
+    try:
+        usage_refresh_stats = _kickoff_usage_refresh(now)
+    except Exception as e:
+        log.warning("daily-tick: usage-trends refresh kickoff failed (continuing): %s", e)
+
     # ── Receipts grading guard (docs/plans/receipts/, HLD D-9) ──
     # POST /api/cron/receipts-grade is the primary trigger, but no Render cron
     # service is provisioned for it (operator ruling Q-4) — and the one
@@ -24832,6 +24867,8 @@ def cron_daily_tick():
         extra["players_refresh_started"] = players_refresh_started
     if receipts_grade_started is not None:
         extra["receipts_grade_started"] = receipts_grade_started
+    if usage_refresh_stats is not None and not usage_refresh_stats.get("disabled"):
+        extra["usage_refresh"] = usage_refresh_stats
     if replenish_stats is not None:
         log.info("daily-tick replenish: %s", replenish_stats)
         return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
@@ -30598,6 +30635,62 @@ def _usage_cached(key: tuple, ttl: float, build):
     return value
 
 
+def _usage_window(season: int, weeks: list[int]) -> dict:
+    """{week: normalized week} for the window: the weekly store when every
+    week is loaded (usage_trends_refresh writes it), else one live fetch of
+    the whole window (a store that is not caught up never mixes with live
+    data inside one window). Raises when the live fetch fails."""
+    from . import usage_trends as _usage
+    from .database import load_usage_weeks
+    try:
+        stored = load_usage_weeks(season, weeks)
+    except Exception as e:
+        log.warning("usage-trends: weekly store read failed (going live): %s", e)
+        stored = {}
+    if all(w in stored for w in weeks):
+        return stored
+    rows = _usage.fetch_weeks(season, weeks, lambda url: _sleeper_get(url, 20))
+    return {w: _usage.normalize_week(rows[w]) for w in weeks}
+
+
+_usage_refresh_lock = threading.Lock()
+
+
+def _start_usage_refresh(source: str, **kwargs) -> bool:
+    """Run usage_trends_refresh on a daemon thread (one gunicorn worker: a
+    multi-week fetch must never block requests). Single-flight: returns False
+    when a run is already going. A run that stored anything drops the cached
+    computed windows so the route serves the new numbers at once."""
+    if not _usage_refresh_lock.acquire(blocking=False):
+        return False
+
+    def _body():
+        try:
+            from .usage_trends_refresh import refresh_usage_weeks
+            summary = refresh_usage_weeks(lambda url: _sleeper_get(url, 20), **kwargs)
+            if summary.get("stored"):
+                with _usage_lock:
+                    for key in [k for k in _usage_cache if k and k[0] == "players"]:
+                        _usage_cache.pop(key, None)
+            log.info("usage-refresh (%s): %s", source, summary)
+        except Exception:
+            log.exception("usage-refresh (%s) crashed", source)
+        finally:
+            _usage_refresh_lock.release()
+
+    threading.Thread(target=_body, name="usage-trends-refresh", daemon=True).start()
+    return True
+
+
+def _kickoff_usage_refresh(now: datetime | None = None) -> dict:
+    """Daily-tick step: the steady-state weekly update. Idempotent and cheap
+    when nothing is due (one state call). Off with the feature flag, so a
+    flag-off tick payload stays byte-identical."""
+    if not is_enabled("usage_trends.enabled"):
+        return {"disabled": True}
+    return {"started": _start_usage_refresh("daily_tick", now=now)}
+
+
 def _usage_league_rosters(sess: dict, league_id: str) -> dict | None:
     """{"me", "owners", "rosters"} for one of the caller's leagues, or None.
 
@@ -30728,9 +30821,7 @@ def usage_trends_route():
     try:
         players = _usage_cached(
             ("players", season, tuple(weeks)), _USAGE_TRENDS_TTL,
-            lambda: _usage.compute(
-                _usage.fetch_weeks(season, weeks, lambda url: _sleeper_get(url, 20)),
-                weeks))
+            lambda: _usage.compute_normalized(_usage_window(season, weeks), weeks))
     except Exception as e:
         log.warning("usage-trends: stats unavailable for %s %s: %s", season, weeks, e)
         return jsonify(unavailable[0]), unavailable[1]

@@ -871,4 +871,9 @@ Two seams worth naming. **Leaf rules:** `blind_grading.py` imports `database` at
   - Clients derive mine / rostered / free agent / unknown with one helper (`mobile/src/utils/usageTrends.statusIn`).
   - Ownerless Sleeper rosters key as `roster:<id>` so their players never read as free agents. Keep that when adding a client.
 - **The server owns order.** Each metric carries `rank`, and clients filter, then order by it. A client sort is a regression, pinned by `check-usage-trends.js` §2e.
+- **One writer for the weekly store.** `usage_week_loads` / `usage_team_weeks` / `usage_player_weeks` hold raw counts only, written by `usage_trends_refresh.refresh_usage_weeks` alone. Its three callers are the daily tick (flag on), `POST /api/cron/usage-trends-refresh` and `scripts/refresh_usage_trends.py`.
+  - A week is replaced whole and trusted only once its load row exists.
+  - The route uses the store only when the WHOLE window is loaded. It never mixes stored and live weeks.
+  - `compute_normalized` takes the same `{week: normalize_week(...)}` shape from either source, and its output is sorted by player id, so stored == live byte for byte (checked on the full 2026 Weeks 1–4 NFL).
+  - New usage fields go into `normalize_week` + the tables + `load_usage_weeks` together. [Spec](../docs/plans/usage-trends/weekly-update.md).
 

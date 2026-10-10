@@ -1,20 +1,24 @@
 # HANDOFF
 
-## Usage Trends — in flight 2026-10-10 (branch `feat/usage-trends`, worktree `.claude/worktrees/usage-trends`)
+## Usage Trends — built 2026-10-10, held for the home redesign (branch `feat/usage-trends`, worktree `.claude/worktrees/usage-trends`)
 
 **Where I stopped:**
-- **Backend is done and committed (`3ab9fb5b`):** `GET /api/usage-trends`, flag `usage_trends.enabled` (off), 24 tests and 6 sabotages.
-- **Mobile groundwork committed (`40a401d0`):** shared `ClaimSheet`, route, flag-gated Home row and Free Agents link, Quick Set `positionSeq`, API client + pure helpers.
-- **`UsageTrendsScreen.tsx` is NOT written yet,** so `tsc` fails on that one import. It waits on the operator's design pick.
-- Scope is [scope.md](../docs/plans/usage-trends/scope.md).
+- **The feature is built:**
+  - backend `GET /api/usage-trends` (flag `usage_trends.enabled`, off);
+  - mobile `UsageTrendsScreen` with **two views behind a Simple | Raw stats pill**. Version A is the approved draft A as drawn; Version B is a per-week table + Total with icon actions. This was the operator's direction mid-session;
+  - shared `ClaimSheet`;
+  - Home row + Free Agents link;
+  - Quick Set `positionSeq`.
+- Evidence: 24 backend tests and 6 sabotages; `check-usage-trends.js` and 6 sabotages; tsc clean; every `check-*.js` green. Details in [scope](../docs/plans/usage-trends/scope.md) §3 and [code-walk](../docs/plans/usage-trends/code-walk.md).
+- A preview of Version B was drawn on the [canvas](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo).
 
-**Blocked on (operator):**
-- **Design feedback** on the [review page](https://claude.ai/artifact/BKgwB3AvjZKcAu1gwyjWyw). Answers are stored in its db (`reviews/<uid>`); read them with `ArtifactData list reviews`.
-- Drafts are on the [canvas](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo). The recommendation is A + C's recap + B's tap-to-open numbers.
+**Blocked on (operator):** **do not merge or deploy until the home-engagement redesign (`design/home-engagement`, flag `nav.home_hub`) is live** (operator, 2026-10-10). Then:
+- rebase onto `origin/main`;
+- re-home the Home entry as a hub tile and keep the flag-off text row;
+- reconcile `check-home-tab.js` with what that branch expects (it wants the file unmodified; this branch added assertion 4i);
+- exact-head CI, merge, deploy flag-off, TestFlight build, and the 12-step checklist in scope §3.
 
-**Don't:**
-- Don't merge or deploy until the home-engagement redesign (`design/home-engagement`, flag `nav.home_hub`) is live (operator, 2026-10-10).
-- Then rebase. Re-home the Home entry as a hub tile, keep the flag-off text row, and keep `check-home-tab.js` matching what that branch expects.
+**Don't:** sort the list client-side (`check-usage-trends.js` §2e); write finder pins before a league switch (§2h).
 
 ## Current State — 2026-10-07 (Calibration + value-core shipped to the backend; app build blocked)
 

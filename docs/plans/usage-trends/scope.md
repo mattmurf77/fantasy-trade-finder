@@ -52,9 +52,13 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 
 ## 2. Schema & flag scope
 
-- New/changed tables or columns: **none**. In-process caches only (`server._usage_cache`), following the outlook and free-agent cache precedent.
+- New/changed tables or columns: **three new tables**, `usage_week_loads`, `usage_team_weeks` and `usage_player_weeks`. They are the weekly store, added 2026-10-10 at the operator's ask ("a script for a weekly data update").
+  - Written only by `usage_trends_refresh.py`. Raw counts per completed week; no user data.
+  - Created by `create_all`, so there is no migration.
+  - Documented in the [data dictionary](../../data-dictionary.md#usage-trends-weekly-store); [spec](weekly-update.md).
+  - The route reads the store when the whole window is loaded, else fetches live.
 - New/changed feature flags: **`usage_trends.enabled`**, default **false**.
-  - Registered in `config/features.json`, `backend/feature_flags.py` `FLAG_KEYS`, `backend/tests/fixtures/flags/release.json` and `docs/config-reference.md`.
+  - Registered in `config/features.json`, `backend/feature_flags.py` `FLAG_KEYS`, the `release` / `onboarding-v2` / `profiles-on` flag fixtures (`test_seed_ui_test_db` requires `onboarding-v2` to carry every release key) and `docs/config-reference.md`.
   - Gates `GET /api/usage-trends` (404 when off) and both mobile entry points.
   - **Graduation criterion:** one TestFlight build has run §3's checklist clean with the flag on for the operator, and the operator turns it on for everyone.
 - New env vars / `model_config` keys: **none**.
@@ -95,6 +99,18 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   - route: flag gate, roster join incl. orphaned roster, non-member league withheld, ESPN snapshot path, 503 without caching the failure, out-of-season shape, stats cache
 
   Six named sabotages, each proven red, then green on revert (TEST_LEDGER).
+
+  `backend/tests/test_usage_trends_refresh.py` (15 tests) covers the weekly store:
+  - the calendar;
+  - the plan (backfill, the correction window, the freeze);
+  - store / unchanged / correction;
+  - partial weeks and failures not stored;
+  - dry run and force;
+  - stored == live compute on real data;
+  - the route preferring the store;
+  - the cron route and the daily-tick gate.
+
+  Three named sabotages.
 - [x] **Code-walk proof:** file:line trace of focus status → action routing, recorded in `living-memory/TEST_LEDGER.md` with the ship entry.
 - [x] **Manual TestFlight checklist** (the only runtime evidence mobile gets). Turn on `usage_trends.enabled` for the test, then relaunch twice; flags are cached.
   1. Home shows a **Usage Trends** row. Tap it: the screen opens with a back control and an info (i) button. It shows the focused league's name and "Weeks 1–N", a **Simple | Raw stats** pill, and exactly one feedback button.
@@ -141,7 +157,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | `docs/glossary.md` | updated | Usage Trends, team share, spike, return, new role |
 | ADR or `DECISIONS.md` entry | updated | D-201: share-driven spikes; byes AND missed games out of averages; Sleeper stats feed as the usage source |
 | `docs/config-reference.md` | updated | `usage_trends.enabled` row |
-| `docs/data-dictionary.md` | n/a | no schema change |
+| `docs/data-dictionary.md` | updated | Usage Trends weekly store (3 tables) |
 | `mobile/src/navigation/{CLAUDE,README}.md`, `mobile/src/screens/{CLAUDE,README}.md` | updated | route tree + screen inventory |
 
 ## 5. Ship gate declaration

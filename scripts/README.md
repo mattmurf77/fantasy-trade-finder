@@ -38,6 +38,12 @@ fixtures live in `backend/tests/fixtures/`.
 | `outlook_strength_source_compare.py` | Diagnostic: roster-value prior vs Sleeper projections as strength source. Needs `--players-cache`; **the projections source is never shipped** |
 | `deck_eval.py` | Offline deck-quality + latency eval — the onboarding-conversion ship gate. Reads the public Sleeper API (read-only); report in `docs/plans/onboarding-conversion/deck-eval-report.md` |
 
+## Data jobs — network, write the app DB
+
+| Script | Purpose |
+|---|---|
+| `refresh_usage_trends.py` | Usage Trends weekly data update ([spec](../docs/plans/usage-trends/weekly-update.md)): the same `refresh_usage_weeks` the daily tick runs. Default writes the LOCAL DB. `--remote` runs it on the deployed server via `POST /api/cron/usage-trends-refresh` (`CRON_SECRET` from `secrets.local.env`). Also takes `--dry-run`, `--weeks 1-4 --force` and `--status`. Reads public Sleeper endpoints only |
+
 ## Fixture capture — network, run once
 
 | Script | Purpose |

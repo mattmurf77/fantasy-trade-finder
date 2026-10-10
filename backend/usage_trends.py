@@ -100,8 +100,21 @@ def _num(v) -> float:
         return 0.0
 
 
-def _parse_week(rows: list) -> tuple[dict, dict]:
-    """(team totals {team: {metric: n}}, players {pid: {...}}) for one week."""
+def normalize_week(rows: list) -> tuple[dict, dict]:
+    """One week of raw Sleeper stat rows -> the stored shape (integers):
+
+      teams   {team: {"snaps", "carries", "targets"}}
+              snaps   = max `tm_off_snp` over the team's rows (repeated per row)
+              carries = sum `rush_att` over its QB/RB/WR/TE/FB rows
+              targets = sum `rec_tgt`  over the same rows
+      players {player_id: {"name", "position", "team", "played",
+                           "snaps", "carries", "targets"}}   RB/WR/TE only
+              played  = `gp` > 0 or `off_snp` > 0 (inactive players still get
+                        a row carrying only `gms_active`)
+
+    This is exactly what `usage_team_weeks` / `usage_player_weeks` hold
+    (database.py), so a stored week and a live fetch feed `compute_normalized`
+    identically. A team with no rows that week had a bye."""
     teams: dict[str, dict] = {}
     players: dict[str, dict] = {}
     for r in rows:
@@ -113,10 +126,10 @@ def _parse_week(rows: list) -> tuple[dict, dict]:
         if not team or pos not in _TEAM_POSITIONS:
             continue
         st = r.get("stats") or {}
-        t = teams.setdefault(team, {"snaps": 0.0, "carries": 0.0, "targets": 0.0})
-        t["snaps"] = max(t["snaps"], _num(st.get("tm_off_snp")))
-        t["carries"] += _num(st.get("rush_att"))
-        t["targets"] += _num(st.get("rec_tgt"))
+        t = teams.setdefault(team, {"snaps": 0, "carries": 0, "targets": 0})
+        t["snaps"] = max(t["snaps"], _int(st.get("tm_off_snp")))
+        t["carries"] += _int(st.get("rush_att"))
+        t["targets"] += _int(st.get("rec_tgt"))
         pid = str(r.get("player_id") or "")
         if pos not in POSITIONS or not pid:
             continue
@@ -124,9 +137,13 @@ def _parse_week(rows: list) -> tuple[dict, dict]:
         players[pid] = {
             "name": name or pid, "position": pos, "team": team,
             "played": _num(st.get("gp")) > 0 or _num(st.get("off_snp")) > 0,
-            **{m: _num(st.get(_STAT_KEY[m])) for m in METRICS},
+            **{m: _int(st.get(_STAT_KEY[m])) for m in METRICS},
         }
     return teams, players
+
+
+def _int(v) -> int:
+    return int(round(_num(v)))
 
 
 def _mean(xs):
@@ -227,14 +244,20 @@ def _metric(metric: str, weeks: list[int], status: list[str],
 
 
 def compute(weeks_rows: dict[int, list], weeks: list[int]) -> list[dict]:
+    """`compute_normalized` over raw Sleeper rows (the live-fetch path)."""
+    return compute_normalized({w: normalize_week(weeks_rows.get(w) or []) for w in weeks}, weeks)
+
+
+def compute_normalized(parsed: dict[int, tuple[dict, dict]], weeks: list[int]) -> list[dict]:
     """One record per RB/WR/TE who played at least one window week and passes
-    `_relevant`, each metric carrying its server rank (see `_rank`). Shares
-    are percentages rounded to one decimal; counts are ints; a week the player
-    did not play (bye or out) is null in both."""
-    parsed = {w: _parse_week(weeks_rows.get(w) or []) for w in weeks}
+    `_relevant`, each metric carrying its server rank (see `_rank`). Input is
+    `{week: normalize_week(...)}` — from a live fetch or the stored tables.
+    Shares are percentages rounded to one decimal; counts are ints; a week
+    the player did not play (bye or out) is null in both."""
+    parsed = {w: parsed.get(w) or ({}, {}) for w in weeks}
     pids = {pid for w in weeks for pid in parsed[w][1]}
     out = []
-    for pid in pids:
+    for pid in sorted(pids):   # deterministic order: stored == live, byte for byte
         latest = next(parsed[w][1][pid] for w in reversed(weeks) if pid in parsed[w][1])
         status, rec = [], {m: ([], [], []) for m in METRICS}   # counts, shares, team totals
         for w in weeks:

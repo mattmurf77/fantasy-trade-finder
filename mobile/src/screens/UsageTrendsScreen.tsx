@@ -408,10 +408,17 @@ export default function UsageTrendsScreen() {
       {showControls ? (
         <View style={styles.controls}>
           <View style={styles.subRow}>
-            <Text style={styles.sub} numberOfLines={1}>
-              {leagueName ?? 'Your league'}
-              {weeks.length ? ` · Week${weeks.length > 1 ? 's' : ''} ${weeks[0]}${weeks.length > 1 ? `–${latest}` : ''}` : ''}
-            </Text>
+            {/* Two lines so "Weeks 1–4" never truncates beside the pill
+                (the canvas preview cut it at 390pt); a long league name
+                ellipsizes alone. */}
+            <View style={styles.subText}>
+              <Text style={styles.subLeague} numberOfLines={1}>{leagueName ?? 'Your league'}</Text>
+              {weeks.length ? (
+                <Text style={styles.sub} numberOfLines={1}>
+                  {`Week${weeks.length > 1 ? 's' : ''} ${weeks[0]}${weeks.length > 1 ? `–${latest}` : ''}`}
+                </Text>
+              ) : null}
+            </View>
             <View style={styles.viewPill} accessibilityRole="tablist">
               {(['simple', 'stats'] as const).map((v) => {
                 const on = view === v;
@@ -602,7 +609,9 @@ const styles = StyleSheet.create({
   headerBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   controls: { paddingTop: space.sm, gap: space.sm, borderBottomWidth: 1, borderBottomColor: ink.line },
   subRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg },
-  sub: { ...type.bodySm, flex: 1 },
+  subText: { flex: 1, minWidth: 0 },
+  subLeague: { ...type.bodySm, color: chalk.base, fontFamily: fonts.uiSemi },
+  sub: { ...type.bodySm },
   viewPill: {
     flexDirection: 'row',
     borderWidth: 1,

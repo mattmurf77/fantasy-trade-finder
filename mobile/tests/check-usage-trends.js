@@ -209,6 +209,10 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
   assert(features['usage_trends.enabled'] === false && typeof features._comment_usage_trends_enabled === 'string',
     '4a. ships false in config/features.json with a house comment');
   assert(release['usage_trends.enabled'] === false, '4b. release fixture mirrors it');
+  for (const f of ['onboarding-v2', 'profiles-on']) {
+    const j = JSON.parse(readRoot(`backend/tests/fixtures/flags/${f}.json`) || '{}');
+    assert(j['usage_trends.enabled'] === false, `4b. ${f}.json mirrors it`);
+  }
   assert(/"usage_trends\.enabled",/.test(readRoot('backend/feature_flags.py')), '4c. registered in FLAG_KEYS');
   const pkg = JSON.parse(read('package.json'));
   assert(pkg.scripts['test:usage-trends'] === 'node tests/check-usage-trends.js', '4d. npm run test:usage-trends');

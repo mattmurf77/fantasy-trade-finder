@@ -18,6 +18,10 @@ Sleeper / GitHub endpoints only) and write fixtures.
 - `demo_matchup.py` — exercise the smart matchup generator end-to-end
 - `deck_eval.py` — offline deck-quality + timing eval, the onboarding-conversion GATE (build item 2 of `docs/plans/onboarding-conversion/plan.md`). Fetches rosters/users from the public Sleeper API read-only, then simulates each team's brand-new-user first session. Report: `docs/plans/onboarding-conversion/deck-eval-report.md`
 
+## Data jobs
+
+- `refresh_usage_trends.py` — runs the Usage Trends weekly store update (`backend/usage_trends_refresh.py`). **For production use `--remote`**: the server writes its own DB and drops its in-process cache. A direct write to the prod DB from a laptop would leave the app serving cached numbers for up to 6 h. A local run (no flag) writes whatever `DATABASE_URL` points at, so check that before running it.
+
 ## Outlook research (#169)
 
 - `outlook_calibration_backtest.py` — offline as-of backtest of the #169 outlook odds engine against captured past Sleeper seasons (fixtures in `backend/tests/fixtures/outlook-calibration/`). No network, no DB. Verdict: `docs/feedback/items/169-outlook-league-summary/calibration-report-2026-08-09.md`; combined post-fix re-measurement: `calibration-combined-2026-08-10.md`. **Every bracket it builds must be passed the league's `playoff_seed_type` via `seed_type(fx)`** — omitting it scores the four FFv3 seasons (all `playoff_seed_type: 0`, a FIXED bracket) under the reseeding rule they don't use. Pinned by `test_backtest_scripts_pass_seed_type_into_every_bracket_they_build`.

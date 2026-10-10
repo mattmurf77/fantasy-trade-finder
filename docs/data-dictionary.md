@@ -144,6 +144,7 @@ counterparty board disclosure or client analytics event is added.
 - [`elo_history`](#elo_history)
 - [`asset_preferences`](#asset_preferences)
 - [`player_value_history`](#player_value_history)
+- [Usage Trends weekly store](#usage-trends-weekly-store) (`usage_week_loads`, `usage_team_weeks`, `usage_player_weeks`)
 - [`league_roster_history`](#league_roster_history)
 - [`league_board_history`](#league_board_history)
 - [`rank_sets`](#rank_sets)
@@ -1270,6 +1271,52 @@ Constraint: `uq_value_snapshot` on `(player_id, scoring_format, snapshot_date)` 
 **2026-07-12 (#117) scale migration:** rows written before the consensus seed recalibration stored old-scale (`elo = 1200 + dp/10000 × 600`) values; `database._migrate_db` rescaled them in place to the new value-affine scale (closed-form, invertible), guarded by the one-time `model_config` marker row `value_history_seed_scale = 2.0`. See docs/runbook.md → "8-tier ladder + consensus seed recalibration".
 
 **Index (ADR-011, 2026-08-14):** `ix_pvh_format_date` on `(scoring_format, snapshot_date)` — the recap's league-wide query (`WHERE scoring_format = ? AND snapshot_date IN (…)`) had no leading-column match against `uq_value_snapshot` (which leads with `player_id`) and would full-scan.
+
+---
+
+## Usage Trends weekly store
+
+Raw NFL usage counts per **completed** week, from Sleeper's public weekly stats feed (`/stats/nfl/{season}/{week}`). They are normalized by `usage_trends.normalize_week`, written ONLY by `usage_trends_refresh.refresh_usage_weeks`, and read by `GET /api/usage-trends`. Spec: [weekly-update.md](plans/usage-trends/weekly-update.md).
+
+The tables hold **counts only**. Shares, averages, signals and order are computed at read time, so a rule change never rewrites data.
+
+Each week is replaced whole: delete and insert in one transaction, via `replace_usage_week`. A week is trusted only once its `usage_week_loads` row exists. A team with no `usage_team_weeks` row in a loaded week had a bye.
+
+All seasons are kept, at about 11,000 rows a season (about 600 player rows and 32 team rows a week). The tables hold no user data, so account export and deletion are unaffected.
+
+### `usage_week_loads`
+
+| Column | Type | Notes |
+|---|---|---|
+| `season`, `week` | int | Unique `uq_usage_week_load` |
+| `source` | str | `'sleeper_stats'` |
+| `first_fetched_at` | str | ISO UTC, first successful load. Opens the 7-day stat-correction window |
+| `fetched_at` | str | ISO UTC, last fetch (changed or not) |
+| `changed_at` | str | ISO UTC, last time the week's content changed (a stat correction) |
+| `content_hash` | str | sha256 of the normalized week; an identical re-fetch only moves `fetched_at` |
+| `team_count`, `player_count` | int | Sanity readout; a normal week has 26–32 teams |
+
+### `usage_team_weeks`
+
+| Column | Type | Notes |
+|---|---|---|
+| `season`, `week`, `team` | int, int, str | Unique `uq_usage_team_week`; Sleeper team abbreviation |
+| `snaps` | int | Team offensive plays: the max `tm_off_snp` over the team's rows |
+| `carries` | int | Sum of `rush_att` over the team's QB/RB/WR/TE/FB rows (QB scrambles included) |
+| `targets` | int | Sum of `rec_tgt` over the same rows |
+
+### `usage_player_weeks`
+
+| Column | Type | Notes |
+|---|---|---|
+| `season`, `week`, `player_id` | int, int, str | Unique `uq_usage_player_week`; Sleeper `player_id` |
+| `name` | str | `first_name last_name` |
+| `position` | str | `RB` / `WR` / `TE` |
+| `team` | str | His team **that week** |
+| `played` | int | 1 when `gp` > 0 or `off_snp` > 0. 0 = inactive: the feed still sends a row carrying only `gms_active` |
+| `snaps`, `carries`, `targets` | int | `off_snp`, `rush_att`, `rec_tgt` |
+
+Helpers: `load_usage_week_loads(season)`, `load_usage_weeks(season, weeks)`, which returns loaded weeks only and never fabricates an empty one, `replace_usage_week(...)` and `touch_usage_week(...)`.
 
 ---
 
