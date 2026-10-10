@@ -163,6 +163,27 @@ export function suggestedSide(band: Band | null): SplitSide | null {
   return null;
 }
 
+/** Home's ice emphasis, capped so the screen keeps the Chalkline ≤3 ice
+ *  ration (two Buy/Sell sides + the active tab). Ranks the user's banded
+ *  positions by how extreme they sit: a Seller's rank, a Buyer's distance
+ *  from last; ties keep QB/RB/WR/TE order. Changes no behaviour. */
+export function emphasizedSides(
+  splits: readonly PositionSplit[],
+  max = 2,
+): Partial<Record<SplitPos, SplitSide>> {
+  const banded: { pos: SplitPos; side: SplitSide; extremity: number }[] = [];
+  for (const s of splits) {
+    const side = s.state === 'shown' ? suggestedSide(s.you?.band ?? null) : null;
+    if (!side || !s.you) continue;
+    const extremity = side === 'sell' ? s.you.rank : s.teamCount - s.you.rank + 1;
+    banded.push({ pos: s.position, side, extremity });
+  }
+  banded.sort((a, b) => a.extremity - b.extremity);
+  const out: Partial<Record<SplitPos, SplitSide>> = {};
+  for (const b of banded.slice(0, max)) out[b.pos] = b.side;
+  return out;
+}
+
 /** Meter fill for a rank: 1st of 12 ⇒ 1, 12th of 12 ⇒ 1/12. */
 export function rankPercentile(rank: number, teamCount: number): number {
   if (teamCount <= 0 || rank <= 0) return 0;

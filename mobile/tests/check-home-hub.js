@@ -164,8 +164,11 @@ const handler = (name) => {
 {
   assert(/from '\.\.\/\.\.\/utils\/positionSplit';/.test(hub) && /from '\.\.\/\.\.\/utils\/standings';/.test(hub),
     '3a. HomeHub imports utils/positionSplit and utils/standings');
-  assert(['canSplit(', 'positionSplits(', 'currentStandings(', 'standingsSummary(', 'ordinal('].every((f) => hub.includes(f))
-    && ['suggestedSide(', 'rankPercentile(', 'ordinal('].every((f) => tile.includes(f)),
+  // The ice side is emphasizedSides' pick (≤2 tiles, for the ≤3 ice ration),
+  // handed to each tile as `emphasis`; the tile never derives it itself.
+  assert(['canSplit(', 'positionSplits(', 'emphasizedSides(', 'currentStandings(', 'standingsSummary(', 'ordinal('].every((f) => hub.includes(f))
+    && ['rankPercentile(', 'ordinal('].every((f) => tile.includes(f))
+    && !tile.includes('suggestedSide('),
     '3b. the split, band, meter, ordinal and standings all come from the foundation utils');
   const banned = [
     ['0.33', /0\.33/],

@@ -19,6 +19,7 @@ import {
   MIN_SPLIT_TEAMS,
   SPLIT_POSITIONS,
   canSplit,
+  emphasizedSides,
   ordinal,
   positionSplits,
   type PositionSplit,
@@ -127,6 +128,7 @@ export default function HomeHub() {
   // The split arithmetic is utils/positionSplit's, shared with League
   // rankings (parity-guarded), so Home's band is the band the user lands on.
   const splits = rankings && canSplit(rankings) ? positionSplits(rankings) : null;
+  const emphasis = splits ? emphasizedSides(splits) : {};
 
   const standings = rostersQuery.data
     ? standingsSummary(
@@ -310,6 +312,7 @@ export default function HomeHub() {
           onBuy={() => onBuy(s)}
           onSell={() => onSell(s)}
           onRanking={() => onRanking(s)}
+          emphasis={emphasis[s.position] ?? null}
         />
       )),
     );

@@ -7,7 +7,6 @@ import { useFlag } from '../../state/useFeatureFlags';
 import {
   ordinal,
   rankPercentile,
-  suggestedSide,
   type PositionSplit,
   type SplitPos,
 } from '../../utils/positionSplit';
@@ -20,8 +19,9 @@ import {
 //
 // The tile itself is NOT pressable: its only controls are Buy and Sell
 // (36pt visible, 44pt hit, inside the tile), so VoiceOver never meets a
-// nested control. The side the user's band implies is drawn in ice; it
-// changes no behaviour. With no line at this position (no_split /
+// nested control. The side the user's band implies is drawn in ice on at
+// most two tiles (the hub's `emphasis`, for the ≤3 ice ration); it changes
+// no behaviour. With no line at this position (no_split /
 // no_median) Buy and Sell would promise directions the destination can't
 // give, so they collapse into one "See P ranking" button.
 //
@@ -63,14 +63,17 @@ interface Props {
   onBuy?: () => void;
   onSell?: () => void;
   onRanking?: () => void;
+  /** The ice side for this tile, if the hub picked it (utils/positionSplit
+   *  emphasizedSides caps the screen at two, for the ≤3 ice ration). */
+  emphasis?: 'buy' | 'sell' | null;
 }
 
-export default function PositionTile({ pos, split, onBuy, onSell, onRanking }: Props) {
+export default function PositionTile({ pos, split, onBuy, onSell, onRanking, emphasis = null }: Props) {
   const ids = IDS[pos];
   const color = posColor(pos);
   const lined = split?.state === 'shown';
   const you = split?.you ?? null;
-  const suggested = suggestedSide(you?.band ?? null);
+  const suggested = emphasis;
   return (
     <View style={styles.tile} testID={ids.tile}>
       <View style={[styles.rail, { backgroundColor: color }]} />

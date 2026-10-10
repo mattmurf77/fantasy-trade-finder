@@ -273,7 +273,24 @@ const desc = (n) => Array.from({ length: n }, (_, i) => (n - i) * 100);
       .join() === [1, 2, 3, 4, 11, 12, 13, 21, 22, 111].map(util.ordinal).join(),
     '1p. ordinal matches LeagueSummaryScreen (11th–13th, 21st, 111th)',
   );
-  if (!failures) pass('§1 named fixtures (16 assertions)');
+  {
+    // emphasizedSides: at most `max` sides, most extreme first, mid-pack never.
+    const mk = (pos, rank, band, n = 12, state = 'shown') => ({
+      position: pos, state, teamCount: n, you: { rank, band },
+    });
+    const all4 = [mk('QB', 3, 'Seller'), mk('RB', 1, 'Seller'), mk('WR', 11, 'Buyer'), mk('TE', 12, 'Buyer')];
+    const e = util.emphasizedSides(all4);
+    assert(
+      Object.keys(e).sort().join() === 'RB,TE' && e.RB === 'sell' && e.TE === 'buy',
+      '1q. emphasizedSides: four banded ⇒ the two most extreme (1st Seller, last Buyer)',
+    );
+    const mixed = util.emphasizedSides([mk('QB', 6, null), mk('RB', 2, 'Seller'), mk('WR', 4, 'Seller', 12, 'no_split')]);
+    assert(
+      Object.keys(mixed).join() === 'RB' && mixed.RB === 'sell',
+      '1r. emphasizedSides: mid-pack and no-line positions are never emphasized',
+    );
+  }
+  if (!failures) pass('§1 named fixtures (18 assertions)');
 }
 
 // ── §2 executable parity: the util vs the screen's own code ──────────────
