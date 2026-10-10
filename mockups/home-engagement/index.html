@@ -431,7 +431,7 @@
      class is d- prefixed so nothing above changes. */
   .d-q{font:600 22px/26px var(--cond);letter-spacing:.66px;margin:2px 0 12px}
   .d-rows{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;position:relative}
-  .d-row{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 12px;border-bottom:1px solid var(--line)}
+  .d-row{display:flex;align-items:center;gap:10px;min-height:36px;padding:0 12px;border-bottom:1px solid var(--line)}
   .d-row:last-child{border-bottom:0}
   .d-row .k{width:100px;flex:none;font:600 11px/14px var(--ui);letter-spacing:.08em;text-transform:uppercase;color:var(--chalk-dim)}
   .d-row .v{flex:1;min-width:0;display:flex;align-items:center;gap:6px;font:600 14px/20px var(--ui);color:var(--chalk);white-space:nowrap;overflow:hidden}
@@ -443,8 +443,8 @@
   .d-band{font:600 11px/1 var(--ui);letter-spacing:.06em;text-transform:uppercase;border:1px solid;padding:3px 5px;border-radius:2px;flex:none}
   .d-band.likely{border-color:var(--pos);color:var(--pos)} .d-band.toss{border-color:var(--warn);color:var(--warn)}
   .d-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-  .d-pt{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px 10px 10px;min-height:178px;
-        display:flex;flex-direction:column;gap:5px;position:relative;overflow:visible;min-width:0}
+  .d-pt{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;padding:12px 10px 10px;
+        display:flex;flex-direction:column;gap:4px;position:relative;overflow:visible;min-width:0}
   .d-pt::before{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-top-left-radius:8px;border-top-right-radius:8px}
   .d-pt.qb::before{background:var(--qb)} .d-pt.rb::before{background:var(--rb)} .d-pt.wr::before{background:var(--wr)} .d-pt.te::before{background:var(--te)}
   .d-pt .hd{display:flex;justify-content:space-between;align-items:center;gap:6px}
@@ -464,9 +464,14 @@
   .d-bb.one{flex:1}
   .d-bb.off{border-color:var(--line);color:var(--chalk-faint)}
   .d-hit{position:absolute;left:-1px;right:-1px;top:-5px;bottom:-5px;border:1px dashed var(--warn);pointer-events:none}
-  .d-wide{display:flex;align-items:center;gap:12px;padding:12px;min-height:64px}
+  .d-wide{display:flex;align-items:center;gap:12px;padding:10px 12px;min-height:56px}
   .d-wide .tt{font:600 16px/22px var(--ui)} .d-wide .dd{font:400 13px/18px var(--ui);color:var(--chalk-dim)}
   .d-grid .atile{min-height:112px}
+  .d-list{background:var(--ink-1);border:1px solid var(--line);border-radius:8px;position:relative}
+  .d-li{display:flex;align-items:center;gap:10px;min-height:44px;padding:0 12px;border-bottom:1px solid var(--line)}
+  .d-li:last-child{border-bottom:0}
+  .d-li .tt{flex:none;font:600 15px/20px var(--ui);color:var(--chalk);white-space:nowrap}
+  .d-li .dd{flex:1;min-width:0;text-align:right;font:400 13px/18px var(--ui);color:var(--chalk-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .d-banner{display:flex;align-items:flex-start;gap:10px;background:var(--ink-2);border:1px dashed var(--warn);border-radius:4px;padding:8px 10px;margin:0 0 10px}
   .d-banner::before{content:"";width:3px;align-self:stretch;background:var(--ice);flex:none}
   .d-banner p{margin:0;flex:1;font:400 13px/18px var(--ui);color:var(--chalk-dim)} .d-banner b{color:var(--chalk);font-weight:600}
@@ -486,7 +491,7 @@
 </svg>
 
 <h2 class="sec" id="dir-d">D · Operator revision (current candidate)</h2>
-<p class="lede"><b>Built from Direction C's page, revised by the operator.</b> Top to bottom: three compact <b>status rows</b> (team outlook, standings, overall rank), each a whole-row button that opens where that fact lives; <b>all four position tiles</b> in a 2×2 grid so nothing hides off-screen, each with <b>Buy</b> and <b>Sell</b> buttons inside the tile; then <b>Get things done</b>: Find a trade as a full-width tile over a 2×2 of Rank players, View matches, Check trends and Search free agents. Five tiles, one wide and four square, so none is stranded. The old League tile is gone; the status rows cover League.</p>
+<p class="lede"><b>Built from Direction C's page, revised by the operator.</b> Top to bottom: three compact <b>status rows</b> (team outlook, standings, overall rank), each a whole-row button that opens where that fact lives; <b>all four position tiles</b> in a 2×2 grid so nothing hides off-screen, each with <b>Buy</b> and <b>Sell</b> buttons inside the tile; then <b>Get things done</b>: Find a trade as a full-width tile, with Rank players, View matches, Check trends and Search free agents as rows in one card below it. <b>Round-2 trims (operator):</b> shorter status rows, no tagline under the position meters, and the four tasks as rows, so Find a trade lands above the fold. The old League tile is gone; the status rows cover League.</p>
 
 <div class="flag warn"><b>Two findings that shape D (verified in code).</b><br>
 <b>1. League Summary has no separate buy view or sell view.</b> Under one position filter it renders <b>one</b> ranked list split by the median line (LeagueSummaryScreen.tsx:885-892, :2214-2224), with neutral <b>Seller</b> badges on the top <code>round(n·0.33)</code> and <b>Buyer</b> on the bottom (:1027-1033). The direction lives one level down, per tapped team: above the line ⇒ <code>target</code> (their roster, "Tap a player to target them from …"), below ⇒ <code>offer</code> (your roster, "… to offer them to …") (:1047-1071, :1935-1938). So <b>Buy RB</b> = acquire RB = the teams <i>above</i> the line (Seller badges, Target verb); <b>Sell RB</b> = move RB = the teams <i>below</i> it (Buyer badges, Offer verb). The honest landing for both is the same list: Buy opens at the top of the list, Sell opens scrolled to the median divider. A side-specific scroll target and the optional one-line banner drawn below are <b>mobile changes</b>; no buy page or sell page exists and none is drawn as if it did.<br>
@@ -511,23 +516,23 @@
 
         <div class="tick"><span>Your positions</span><span class="rt">consensus values</span><span class="ann" style="top:-22px;right:0">D2</span></div>
         <div class="d-grid">
-          <div class="d-pt qb"><div class="hd"><span class="p" style="color:var(--qb)">QB</span><span class="mid">Mid-pack</span></div><span class="r">7th<small> /12</small></span><span class="val">≈3 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:50%;background:var(--qb)"></i></div><span class="who">6 teams deeper than you</span>
+          <div class="d-pt qb"><div class="hd"><span class="p" style="color:var(--qb)">QB</span><span class="mid">Mid-pack</span></div><span class="r">7th<small> /12</small></span><span class="val">≈3 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:50%;background:var(--qb)"></i></div>
             <div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb">Sell</span></div></div>
-          <div class="d-pt rb"><span class="ann" style="right:6px">D3</span><div class="hd"><span class="p" style="color:var(--rb)">RB</span><span class="badge">Seller</span></div><span class="r">2nd<small> /12</small></span><span class="val">≈5.5 firsts</span><span class="val2">median ≈2.5</span><div class="track"><i style="width:92%;background:var(--rb)"></i></div><span class="who">Shortest: <b>puntgods</b></span>
+          <div class="d-pt rb"><span class="ann" style="right:6px">D3</span><div class="hd"><span class="p" style="color:var(--rb)">RB</span><span class="badge">Seller</span></div><span class="r">2nd<small> /12</small></span><span class="val">≈5.5 firsts</span><span class="val2">median ≈2.5</span><div class="track"><i style="width:92%;background:var(--rb)"></i></div>
             <div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb sug">Sell<i class="d-hit"></i></span></div></div>
-          <div class="d-pt wr"><div class="hd"><span class="p" style="color:var(--wr)">WR</span><span class="mid">Mid-pack</span></div><span class="r">6th<small> /12</small></span><span class="val">≈4 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:58%;background:var(--wr)"></i></div><span class="who">5 teams deeper than you</span>
+          <div class="d-pt wr"><div class="hd"><span class="p" style="color:var(--wr)">WR</span><span class="mid">Mid-pack</span></div><span class="r">6th<small> /12</small></span><span class="val">≈4 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:58%;background:var(--wr)"></i></div>
             <div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb">Sell</span></div></div>
-          <div class="d-pt te"><div class="hd"><span class="p" style="color:var(--te)">TE</span><span class="badge">Buyer</span></div><span class="r">11th<small> /12</small></span><span class="val">≈0.5 firsts</span><span class="val2">median ≈1.5</span><div class="track"><i style="width:17%;background:var(--te)"></i></div><span class="who">Deepest: <b>LaPortaPotty</b></span>
+          <div class="d-pt te"><div class="hd"><span class="p" style="color:var(--te)">TE</span><span class="badge">Buyer</span></div><span class="r">11th<small> /12</small></span><span class="val">≈0.5 firsts</span><span class="val2">median ≈1.5</span><div class="track"><i style="width:17%;background:var(--te)"></i></div>
             <div class="d-bs"><span class="d-bb sug">Buy</span><span class="d-bb">Sell</span></div></div>
         </div>
 
         <div class="tick"><span>Get things done</span><span class="ann" style="top:-14px;right:0">D4</span></div>
         <div class="card d-wide"><span class="well"><svg class="ic"><use href="#i-trade"/></svg></span><div style="flex:1;min-width:0"><div class="tt">Find a trade</div><div class="dd">Fair packages with any leaguemate</div></div><svg class="ic s16 dim"><use href="#i-cr"/></svg></div>
-        <div class="d-grid" style="margin-top:8px">
-          <div class="card atile"><div class="tp"><span class="well"><svg class="ic"><use href="#i-rank"/></svg></span></div><div><div class="tt">Rank players</div><div class="dd">Board live · all 4 positions</div></div></div>
-          <div class="card atile"><div class="tp"><span class="well"><svg class="ic"><use href="#i-match"/></svg></span><span class="badge fl mono">2</span></div><div><div class="tt">View matches</div><div class="dd">2 mutual · 3 awaiting them</div></div></div>
-          <div class="card atile"><div class="tp"><span class="well"><svg class="ic"><use href="#i-trends"/></svg></span></div><div><div class="tt">Check trends</div><div class="dd">Movers, and where you differ from consensus</div></div></div>
-          <div class="card atile"><div class="tp"><span class="well"><svg class="ic"><use href="#i-search"/></svg></span></div><div><div class="tt">Search free agents</div><div class="dd">Best available on your board</div></div></div>
+        <div class="d-list" style="margin-top:8px">
+          <div class="d-li"><svg class="ic dim"><use href="#i-rank"/></svg><span class="tt">Rank players</span><span class="dd">Board live · all 4</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+          <div class="d-li"><svg class="ic dim"><use href="#i-match"/></svg><span class="tt">View matches</span><span class="dd">3 awaiting</span><span class="badge fl mono">2 mutual</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+          <div class="d-li"><svg class="ic dim"><use href="#i-trends"/></svg><span class="tt">Check trends</span><span class="dd">Movers this week</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
+          <div class="d-li"><svg class="ic dim"><use href="#i-search"/></svg><span class="tt">Search free agents</span><span class="dd">Best available</span><svg class="ic s14 dim"><use href="#i-cr"/></svg></div>
         </div>
       </div>
       <div class="fold" style="top:769px"><span>fold · 852pt iPhone, tab bar pinned</span></div>
@@ -541,18 +546,18 @@
         <div><svg class="ic"><use href="#i-crown"/></svg><span>League</span></div>
       </div>
     </div>
-    <p class="cap">All three status rows and all four position tiles sit above the fold on a 393×852 phone. <b>Ice count: 3</b>: the suggested side on banded positions (RB <b>Sell</b>, because you're a Seller; TE <b>Buy</b>, because you're a Buyer) plus the active tab. Every other Buy/Sell is the Secondary construction (line-strong border, chalk text) and every "View" is chalk-dim, so the ≤3 ice rule holds. The dashed warn outline on RB Sell is lab chrome: the <b>44pt hit area</b> around a 36pt visible button (the compact button's default 4pt vertical hitSlop, components.md § Buttons).</p>
+    <p class="cap">The status rows, all four position tiles and the Find a trade tile sit above the fold on a 393×852 phone. <b>Ice count: 3</b>: the suggested side on banded positions (RB <b>Sell</b>, because you're a Seller; TE <b>Buy</b>, because you're a Buyer) plus the active tab. Every other Buy/Sell is the Secondary construction (line-strong border, chalk text) and every "View" is chalk-dim, so the ≤3 ice rule holds. The dashed warn outline on RB Sell is lab chrome: the <b>44pt hit area</b> around a 36pt visible button (the compact button's default 4pt vertical hitSlop, components.md § Buttons).</p>
   </div>
   <div class="col wide">
     <h3 class="sub" style="margin-top:0">Modules, data and routing</h3>
     <div class="legend">
-      <div><span class="k">D1</span><span><b>Status rows.</b> One card, three rows, 44pt each. The whole row is the button and "View ›" is its visual affordance, so there is no nested control. Each row has its own query, so each loads and fails on its own.<br>
+      <div><span class="k">D1</span><span><b>Status rows.</b> One card, three rows, 36pt each (trimmed from 44pt to bring Find a trade above the fold). That is under Chalkline's 44pt touch floor: the rows span the full width, so the target is wide but short. <span class="gap">Operator call.</span> The whole row is the button and "View ›" is its visual affordance, so there is no nested control. Each row has its own query, so each loads and fails on its own.<br>
         • <b>Team outlook</b> (the contend/rebuild setting): <code>GET /api/league/preferences</code> → <code>team_outlook</code>; when none is declared and <code>trade.outlook_seed</code> is on (lit), <code>inferred_outlook</code> renders as "Not set · reads as Rebuilding". Key <code>['league-prefs', id]</code> is shared with TradesScreen, Team Review and the in-league calculator, all of which invalidate it on write (#424). <b>View</b> → Acquire with the Trade DNA sheet open, where the outlook is set. <span class="gap">Mobile gap:</span> that sheet's open state is local to TradesScreen (:999) and has no arrival contract. Zero-code alternative: <code>navigate('Trades', {screen:'TeamReview'})</code>, whose window beat reads and writes the same field. <i>Alternative reading of "team outlook": the playoff band. If the operator meant that, this row and Standings merge into one Season-outlook row, freeing a slot.</i><br>
         • <b>Standings</b>: <code>GET /api/league/outlook?basis=consensus</code> → the <code>is_you</code> team's <code>wins/losses/ties</code>, <code>odds.projected_seed</code> and <code>odds.playoff_pct</code> mapped to the Likely / Toss-up / Unlikely band (thresholds ≥0.65 / &lt;0.35, LeagueSummaryScreen.tsx:2640-2657). It follows the Season-outlook rules: <b>no percentages</b>, and <b>no record while <code>meta.beta</code></b> (weeks 0–5, :207-212). Key <code>['league-outlook', id, 'consensus']</code> is shared with League Summary. <b>Sleeper only</b>, the same client gate League Summary uses, so ESPN/MFL leagues send no request. <b>View</b> → League rankings with the Season outlook section expanded and in view. <span class="gap">Mobile gap:</span> the strip's expanded state is a per-screen hook (<code>state/outlookStrip.ts</code>) with no external setter.<br>
         • <b>Overall rank</b>: the power-rankings payload (<code>rank</code> + <code>total_value_label</code> of the <code>is_you</code> team), the same request as the tiles, so no extra cost. <b>View</b> → League rankings, all positions. <span class="gap">Mobile gap</span> (small): the same intent store must clear a filter left over from an earlier visit.</span></div>
-      <div><span class="k">D2</span><span><b>Position tiles</b>, 2×2, all four always shown. Your rank at P (Dynasty Nerds' "(7/12)"), your value against the league median (server <code>value_label</code>s), a 4px meter of your percentile in the position hex (C's "your shape" tile), the neutral Seller/Buyer badge or "Mid-pack", and one named team: the shortest when you sell, the deepest when you buy. Mid-pack tiles say how many teams sit above you. The tile itself is <b>not</b> a button. Its only controls are Buy and Sell, which avoids the nested-control VoiceOver problem <code>mockups/candidates-300-v2</code> measured. Data: power-rankings consensus, the shared util from scope.md (W4), so every band equals League Summary's.</span></div>
+      <div><span class="k">D2</span><span><b>Position tiles</b>, 2×2, all four always shown. Your rank at P (Dynasty Nerds' "(7/12)"), your value against the league median (server <code>value_label</code>s), a 4px meter of your percentile in the position hex (C's "your shape" tile), and the neutral Seller/Buyer badge or "Mid-pack". No tagline under the meter (operator trim); the named teams are one tap away on the Buy/Sell landing. The tile itself is <b>not</b> a button. Its only controls are Buy and Sell, which avoids the nested-control VoiceOver problem <code>mockups/candidates-300-v2</code> measured. Data: power-rankings consensus, the shared util from scope.md (W4), so every band equals League Summary's.</span></div>
       <div><span class="k">D3</span><span><b>Buy / Sell.</b> Two compact Secondary buttons per tile, 36pt visible with a 44pt hit area. Each is about 71pt wide in a 175pt tile at 393pt, which clears 44pt. Tap → write the intent <code>{leagueId, position, side:'buy'|'sell'}</code> → <code>navigate('League', {screen:'LeagueRankings'})</code> → League Summary sets basis Consensus, subset All and filter {P}, then scrolls: <b>Buy</b> to the top of the list, where the above-line teams are; <b>Sell</b> to the median divider. Frames to the right. The suggested side (ice) is the side your band implies; it changes no behaviour.</span></div>
-      <div><span class="k">D4</span><span><b>Get things done</b> (five tiles: one wide over a 2×2).<br>
+      <div><span class="k">D4</span><span><b>Get things done</b>: Find a trade as one wide tile, then four 44pt rows in one card (operator trim: rows, not tiles).<br>
         • Find a trade → the Acquire tab (<code>Trades</code>).<br>
         • Rank players → the Rank tab; detail from <code>['progress', id, format]</code>, already warm.<br>
         • View matches → the Matches tab; badge from <code>['league-summary', id]</code>, already warm.<br>
@@ -723,7 +728,7 @@
     <div class="phone" style="margin-top:8px"><div class="scr">
       <div class="d-grid">
         <div class="d-pt wr"><div class="hd"><span class="p" style="color:var(--wr)">WR</span><span class="mid">Mid-pack</span></div><span class="r">6th<small> /12</small></span><span class="val">≈4 firsts</span><span class="val2">median ≈3.5</span><div class="track"><i style="width:58%;background:var(--wr)"></i></div><div class="d-bs"><span class="d-bb">Buy</span><span class="d-bb">Sell</span></div></div>
-        <div class="d-pt te"><div class="hd"><span class="p" style="color:var(--te)">TE</span><span class="mid">No clear split</span></div><span class="r">—</span><span class="who">Every TE room is close</span><div class="d-bs"><span class="d-bb one">See TE ranking</span></div></div>
+        <div class="d-pt te"><div class="hd"><span class="p" style="color:var(--te)">TE</span><span class="mid">No clear split</span></div><span class="r">—</span><div class="d-bs"><span class="d-bb one">See TE ranking</span></div></div>
       </div>
     </div></div>
     <p class="cap">With no median (<code>no_median</code>, old server) or no boundary (<code>no_split</code>), League Summary draws no line and the drill-in carries no Offer/Target verbs (<code>candidateDir</code> is null, :1047-1056). Buy and Sell would promise directions the destination can't give, so they become one "See TE ranking" button to the plain TE ordering.</p>
