@@ -334,6 +334,12 @@ FLAG_KEYS: tuple[str, ...] = (
     # decides once at mount. Registered here so the flag ships through
     # /api/feature-flags like every other key.
     "nav.home_tab",
+    # Usage Trends (2026-10-10 operator ask, docs/plans/usage-trends/scope.md) —
+    # in-season RB/WR/TE snaps / carries / targets over the last four completed
+    # weeks with team share and spikes, joined to the caller's league rosters.
+    # Gates GET /api/usage-trends (404 when off) and every mobile entry point
+    # (Home row, Free Agents link). Ships false.
+    "usage_trends.enabled",
     "ux.sheet_guard",
     "ux.rank_tab_destination",
     "ux.retap_active_tab",

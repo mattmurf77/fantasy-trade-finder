@@ -378,6 +378,13 @@ NON_INTENT_EVENTS = frozenset({
     "paywall_purchase_completed",
     "paywall_purchase_failed",
     "paywall_restore",
+    # ── Usage Trends, 2026-10-10 — added in the SAME commit as the emitters
+    # (docs/business/analytics/2026-10-10-usage-trends-events.md). Reading the
+    # cross-league availability sheet and switching metric / filter chips are
+    # navigation over a payload already loaded. `usage_trends_action` (Trade /
+    # Add / Re-rank) stays deliberately ABSENT and counts as INTENT.
+    "usage_trends_availability_opened",
+    "usage_trends_view_changed",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

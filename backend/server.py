@@ -30567,6 +30567,196 @@ def league_free_agents_route():
         return jsonify({"error": "internal_error"}), 500
 
 
+# ─── Usage Trends (docs/plans/usage-trends/scope.md) ───────────────────────
+# GET /api/usage-trends. The math is pure in backend/usage_trends.py; this
+# block owns the caches and the league-ownership join. The stats feed is
+# global — one Sleeper call per completed week, identical for every user — so
+# the computed player list is cached per (season, window) and stat
+# corrections land within _USAGE_TRENDS_TTL. Roster maps are per (league,
+# caller) because `me` depends on who asks. In-process like the outlook and
+# free-agent caches: everything here is cheaply re-derivable from Sleeper.
+_USAGE_STATE_TTL   = 900.0         # which weeks are complete
+_USAGE_TRENDS_TTL  = 6 * 3600.0    # computed player list for one window
+_USAGE_ROSTERS_TTL = 120.0         # one league's roster map for one caller
+_USAGE_CACHE_MAX   = 500
+_usage_cache: dict[tuple, tuple[float, object]] = {}
+_usage_lock = threading.Lock()
+
+
+def _usage_cached(key: tuple, ttl: float, build):
+    """`build()` memoized for `ttl` seconds. A raising build is not cached."""
+    now = time.time()
+    with _usage_lock:
+        hit = _usage_cache.get(key)
+        if hit is not None and now - hit[0] < ttl:
+            return hit[1]
+    value = build()
+    with _usage_lock:
+        if len(_usage_cache) >= _USAGE_CACHE_MAX:
+            _usage_cache.pop(next(iter(_usage_cache)), None)
+        _usage_cache[key] = (now, value)
+    return value
+
+
+def _usage_league_rosters(sess: dict, league_id: str) -> dict | None:
+    """{"me", "owners", "rosters"} for one of the caller's leagues, or None.
+
+    rosters maps player_id -> an owner key: the roster's owner_id, or
+    "roster:<id>" for an ownerless (orphaned) Sleeper roster so its players
+    never read as free agents. `me` is the caller's key — owner OR co-owner
+    via sleeper_roster.owns_roster on the live read; account id or league
+    identity on the league_members snapshot (platform leagues, or Sleeper
+    when the live read fails). None when no source loads or the caller has
+    no team in the league: rosters of a league you are not in are not served.
+    """
+    from .sleeper_roster import owns_roster
+    account = str(sess.get("user_id") or "")
+    g_league = sess.get("league")
+    my_ids = {account}
+    if g_league and g_league.league_id == league_id:
+        my_ids.add(str(_league_user_id(sess)))
+    try:
+        members = load_league_members(league_id)
+    except Exception as e:
+        log.warning("usage-trends: league_members read failed for %s: %s", league_id, e)
+        members = []
+    names = {str(m.get("user_id")): (m.get("display_name") or m.get("username"))
+             for m in members if m.get("user_id")}
+
+    live = None
+    if league_id.isdigit() and not is_linked_platform_league(league_id):
+        live = _fetch_league_rosters(league_id)
+    if live:
+        rosters, me = {}, None
+        for r in live:
+            key = str(r.get("owner_id") or f"roster:{r.get('roster_id')}")
+            for pid in r.get("players") or []:
+                rosters[str(pid)] = key
+            if owns_roster(r, account):
+                me = key
+        if me is None:
+            return None
+        if not any(names.get(str(r.get("owner_id") or "")) for r in live):
+            try:
+                users = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/users") or []
+                names = {str(u.get("user_id")): u.get("display_name") or u.get("username")
+                         for u in users if isinstance(u, dict) and u.get("user_id")}
+            except Exception as e:
+                log.warning("usage-trends: league users read failed for %s: %s", league_id, e)
+    else:
+        rosters, me = {}, None
+        for m in members:
+            key = str(m.get("user_id") or "")
+            for pid in m.get("player_ids") or []:
+                rosters[str(pid)] = key
+            if key in my_ids:
+                me = key
+        if me is None:
+            return None
+    owners = {k: names[k] for k in set(rosters.values()) if names.get(k)}
+    return {"me": me, "owners": owners, "rosters": rosters}
+
+
+@app.route("/api/usage-trends")
+@_gate_unverified_read
+def usage_trends_route():
+    """GET /api/usage-trends?league_id=<focused>&league_ids=a,b,c
+
+    In-season RB/WR/TE usage over the last four completed NFL weeks, with the
+    caller's roster context. Flag `usage_trends.enabled` (404 when off).
+
+    Query params:
+      league_id   — the focused league; defaults to the session league.
+      league_ids  — optional comma list of the caller's OTHER current-season
+                    leagues for the availability sheet (client passes its
+                    league switcher list; capped at 20; the focused league is
+                    de-duplicated out).
+
+    Response:
+      {
+        "season": int|null, "weeks": [int, ...],   # ascending, <= 4
+        "in_season": bool,                         # false => weeks/players empty
+        "league_id": str,
+        "players": [{
+           "player_id", "name", "position": "RB"|"WR"|"TE", "team",
+           "status": ["played"|"out"|"bye", ...],  # aligned with weeks
+           "snaps" | "carries" | "targets": {
+              "counts": [int|null, ...], "shares": [float|null, ...],  # % of team
+              "avg": float|null, "avg_share": float|null,  # played weeks only
+              "signal": null | {"kind": "spike"|"return"|"new"|"out"|"rising"|"falling", ...},
+              "rank": int}                         # server order, 1 = show first
+        }, ...],
+        "leagues": [{                              # [0] is the focused league
+           "league_id", "ok": bool,                # false => status unknown
+           "me": str|null,                         # caller's owner key
+           "owners": {owner_key: display_name},
+           "rosters": {player_id: owner_key}}]     # listed players only; absent = FA
+      }
+    Errors: 400 league_id_required; 503 stats_unavailable (Sleeper state or a
+    stats week failed — never a partial window).
+    """
+    from . import usage_trends as _usage
+    if not is_enabled("usage_trends.enabled"):
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_league = sess.get("league")
+    league_id = (request.args.get("league_id")
+                 or (g_league.league_id if g_league else "")).strip()
+    if not league_id:
+        return jsonify({"error": "league_id_required"}), 400
+    others: list[str] = []
+    for lid in (request.args.get("league_ids") or "").split(","):
+        lid = lid.strip()
+        if lid and lid != league_id and lid not in others:
+            others.append(lid)
+    others = others[:20]
+
+    unavailable = ({"error": "stats_unavailable",
+                    "message": "Usage stats are unavailable right now — try again shortly."}, 503)
+    try:
+        state = _usage_cached(("state",), _USAGE_STATE_TTL,
+                              lambda: _sleeper_get(_usage.state_url(), 10))
+        season, weeks = _usage.window_weeks(state)
+    except Exception as e:
+        log.warning("usage-trends: NFL state unavailable: %s", e)
+        return jsonify(unavailable[0]), unavailable[1]
+    payload = {"season": season, "weeks": weeks, "in_season": bool(weeks),
+               "league_id": league_id, "players": [], "leagues": []}
+    if not weeks:
+        return jsonify(payload)
+    try:
+        players = _usage_cached(
+            ("players", season, tuple(weeks)), _USAGE_TRENDS_TTL,
+            lambda: _usage.compute(
+                _usage.fetch_weeks(season, weeks, lambda url: _sleeper_get(url, 20)),
+                weeks))
+    except Exception as e:
+        log.warning("usage-trends: stats unavailable for %s %s: %s", season, weeks, e)
+        return jsonify(unavailable[0]), unavailable[1]
+
+    listed = {p["player_id"] for p in players}
+    account = str(sess.get("user_id") or "")
+    leagues = []
+    for lid in [league_id] + others:
+        try:
+            info = _usage_cached(("rosters", lid, account), _USAGE_ROSTERS_TTL,
+                                 lambda lid=lid: _usage_league_rosters(sess, lid))
+        except Exception as e:
+            log.warning("usage-trends: rosters failed for %s: %s", lid, e)
+            info = None
+        if info is None:
+            leagues.append({"league_id": lid, "ok": False, "me": None,
+                            "owners": {}, "rosters": {}})
+            continue
+        leagues.append({"league_id": lid, "ok": True, "me": info["me"],
+                        "owners": info["owners"],
+                        "rosters": {pid: k for pid, k in info["rosters"].items()
+                                    if pid in listed}})
+    payload.update(players=players, leagues=leagues)
+    return jsonify(payload)
+
+
 # ─── Monetization platform foundation ──────────────────────────────────────
 # docs/plans/monetization/00-platform-foundation.md §2.3 + §3 + §4.
 #

@@ -704,6 +704,20 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     "paywall_viewed", "paywall_purchase_initiated",
     "paywall_purchase_completed", "paywall_purchase_failed",
     "paywall_restore",
+    # ── Usage Trends, 2026-10-10 (docs/plans/usage-trends/scope.md §1) ──────
+    # Addendum: docs/business/analytics/2026-10-10-usage-trends-events.md.
+    # Registered in the SAME commit as the emitters
+    # (mobile/src/screens/UsageTrendsScreen.tsx). Screen opens ride the
+    # auto-emitted `screen_viewed {screen: 'UsageTrends'}`; these answer what
+    # people DO with a usage signal.
+    #   usage_trends_action              → INTENT (Trade / Add / Re-rank tap —
+    #                                       the outcome this surface exists for)
+    #   usage_trends_availability_opened → NON_INTENT (reads a sheet; the
+    #                                       `tab_selected` class)
+    #   usage_trends_view_changed        → NON_INTENT (metric / filter chips
+    #                                       over a payload already in memory)
+    "usage_trends_action", "usage_trends_availability_opened",
+    "usage_trends_view_changed",
 })
 
 # ---------------------------------------------------------------------------
@@ -940,6 +954,18 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     "receipts_opened":        frozenset({"league_id", "status",
                                          "n_graded_28d", "headline_bucket"}),
     "receipts_window_changed": frozenset({"league_id", "window_days"}),
+    # Usage Trends. `action` is trade | add | rerank; `focus_status` is the
+    # player's status in the focused league (mine | rostered | free_agent);
+    # `signal` is the headline kind the row showed for the selected metric
+    # (spike | return | new | out | rising | falling | none) — "do spikes drive
+    # adds?" is the question. `metric` is snaps | carries | targets;
+    # `ownership` is all | rostered | free_agents.
+    "usage_trends_action":   frozenset({"league_id", "action", "player_id",
+                                        "position", "metric", "signal",
+                                        "focus_status", "ownership"}),
+    "usage_trends_availability_opened": frozenset({"league_id", "player_id",
+                                                   "n_leagues", "n_free_agent"}),
+    "usage_trends_view_changed": frozenset({"league_id", "metric", "ownership"}),
     # `mode` mirrors find_trades_tapped's — the OUTCOME half of the pair. A
     # find_trades_tapped{mode:single_pin} with no following
     # trade_card_viewed{mode:single_pin} is #298 reappearing: a deck
