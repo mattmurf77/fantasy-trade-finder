@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Text } from '../components/chalkline';
-import { useFlag } from '../state/useFeatureFlags';
 import { ink, space, type } from '../theme/chalkline';
+import { useFeatureFlags } from '../state/useFeatureFlags';
+import HomeHub from '../components/home/HomeHub';
 
 // Home tab (flag `nav.home_tab`, docs/plans/home-tab/plan.md) — the launch
 // tab for returning users: one question and four plain-text ways into the
@@ -20,16 +21,14 @@ const OPTIONS = [
   { label: 'View my Leagues', tab: 'League', testID: 'home.option.league' },
 ] as const;
 
-// Usage Trends (flag `usage_trends.enabled`, docs/plans/usage-trends/) — a
-// fifth row, but not a tab jump: it pushes the ROOT-stack `UsageTrends`
-// screen. Same row styling so it reads as one more way into the app; the
-// flag hides it entirely (reactive useFlag is fine here — a row, unlike a
-// tab, can appear without rewriting the navigator).
-const TRENDS_ROW = { label: 'Usage Trends', route: 'UsageTrends', testID: 'home.option.trends' } as const;
-
 export default function HomeScreen() {
   const navigation = useNavigation<any>();
-  const trendsOn = useFlag('usage_trends.enabled');
+  // Home hub (flag `nav.home_hub`, docs/plans/home-engagement/scope.md):
+  // read IMPERATIVELY, once per mount, so a mid-session flag revalidation
+  // never swaps Home under the user. Every query, state and event of the hub
+  // lives in components/home/ — this file stays data-free either way.
+  const hubOn = useRef(!!useFeatureFlags.getState().flags['nav.home_hub']).current;
+  if (hubOn) return <HomeHub />;
   return (
     // No `top` safe-area edge: TabNav's TopBar owns the top inset.
     <View style={styles.root} testID="home.screen">
@@ -48,17 +47,6 @@ export default function HomeScreen() {
           <Text variant="title">{o.label}</Text>
         </Pressable>
       ))}
-      {trendsOn ? (
-        <Pressable
-          testID={TRENDS_ROW.testID}
-          accessibilityRole="button"
-          accessibilityLabel={TRENDS_ROW.label}
-          onPress={() => navigation.navigate(TRENDS_ROW.route)}
-          style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
-        >
-          <Text variant="title">{TRENDS_ROW.label}</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }

@@ -51,7 +51,8 @@ import {
 } from '../utils/usageTrends';
 
 // Usage Trends (flag `usage_trends.enabled`, docs/plans/usage-trends/scope.md)
-// — root-stack push from the Home row and the Free Agents link. Two views of
+// — root-stack push from the Home hub's Usage Rates tile and the Free Agents
+// link. Two views of
 // the same server payload, flipped by a pill: Version A ("Simple", the
 // operator-approved story cards) and Version B ("Raw stats", a per-week
 // table with a total column). The server computes every number and the

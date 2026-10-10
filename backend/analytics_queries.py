@@ -378,6 +378,18 @@ NON_INTENT_EVENTS = frozenset({
     "paywall_purchase_completed",
     "paywall_purchase_failed",
     "paywall_restore",
+    # Home hub (flag `nav.home_hub`, 2026-10-10), added in the SAME commit
+    # that registered them (docs/plans/home-engagement/scope.md §1).
+    #   home_tile_tapped — NAVIGATION, the `tab_selected` class. Home is the
+    #     LAUNCH tab, so a tile tap is often the first event of a session;
+    #     as intent it would turn every "open the app, tap a tile, leave"
+    #     into a user-day and step-change DAU from ship day. The destination
+    #     carries the intent (league_candidate_pinned, find_trades_tapped,
+    #     match_opened, ...).
+    #   standings_segment_changed — a lens switch on a read-only page, the
+    #     `tab_selected` class: choosing what to look at, never a decision.
+    "home_tile_tapped",
+    "standings_segment_changed",
     # ── Usage Trends, 2026-10-10 — added in the SAME commit as the emitters
     # (docs/business/analytics/2026-10-10-usage-trends-events.md). Reading the
     # cross-league availability sheet and switching metric / filter chips are

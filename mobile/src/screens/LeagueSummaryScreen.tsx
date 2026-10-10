@@ -58,6 +58,11 @@ import {
   requestGuideStep,
 } from '../state/useGuide';
 import { S as GUIDE, GUIDE_RECEIPTS } from '../components/analystScript';
+import {
+  useLeagueSummaryIntent,
+  takeLeagueSummaryIntent,
+} from '../state/leagueSummaryIntent';
+import type { SplitSide } from '../utils/positionSplit';
 
 // League rankings ("power rankings", #142/#144/#169) — every team in the league
 // as a stacked bar in a value-ranked chart, from GET /api/league/power-rankings.
@@ -1135,6 +1140,94 @@ export default function LeagueSummaryScreen() {
     AccessibilityInfo.announceForAccessibility('Filter changed. Back to all teams.');
   }, [subset, posFilter, posCandidatesOn, closeTeam]);
 
+  // ── Home hub arrival (flag `nav.home_hub`; docs/plans/home-engagement/
+  //    scope.md §6.4, rulings W2 + R3) ─────────────────────────────────────
+  // Home's Buy / Sell / Overall rank set a one-shot intent
+  // (state/leagueSummaryIntent) and switch to this tab. TAB ROOT ONLY: the
+  // legacy root-stack push must never take an intent meant for the tab.
+  // The reset is W2's: Consensus, All, filter = the position (or none).
+  // It uses the plain setters, not changeBasis/switchSubset — an arrival is
+  // not the user switching a lens, so it emits no lens event; the existing
+  // `league_pos_candidates_viewed` exposure fires on its own.
+  //
+  // DRILL-IN: closed by the EXISTING auto-exit above (closeTeam
+  // 'filter_change'), never a new setSelectedId(null). The sig ref is
+  // re-armed to a value no real signature equals, so the auto-exit also
+  // fires when the arrival's filter happens to equal the current one (an
+  // open RB drill-in, then Home → Sell RB). It still no-ops when nothing
+  // is focused.
+  const intentSeq = useLeagueSummaryIntent((s) => s.pending?.seq);
+  // The pinned Buy/Sell banner's subject. Split arrivals only.
+  const [arrival, setArrival] = useState<{ position: CorePos; side: SplitSide } | null>(null);
+  // Where the arrival lands: Sell → the END of the list (shortest last),
+  // Buy → the TOP OF THE LIST (not the page; R3). Armed by the consume and
+  // re-applied on every page/list layout change until the user drags, so
+  // content that lands late above the list (the second basis' overlay, the
+  // outlook strip) cannot leave the landing short. 'all' scrolls to the top
+  // once and never arms.
+  const arrivalScrollRef = useRef<'end' | 'list' | null>(null);
+  const listTopRef = useRef<number | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      if (!isTabRoot) return;
+      const intent = takeLeagueSummaryIntent(leagueId);
+      if (!intent) return;
+      filterSigRef.current = 'arrival';
+      setBasis('consensus');
+      setSubset('all');
+      if (intent.kind === 'split') {
+        setPosFilter(new Set<FilterKey>([intent.position]));
+        setArrival({ position: intent.position, side: intent.side });
+        arrivalScrollRef.current = intent.side === 'sell' ? 'end' : 'list';
+      } else {
+        setPosFilter(new Set<FilterKey>());
+        setArrival(null);
+        arrivalScrollRef.current = null;
+        scrollRef.current?.scrollTo({ y: 0, animated: false });
+      }
+    }, [isTabRoot, leagueId, intentSeq]),
+  );
+  // Leaving the screen clears the banner and the landing (blur).
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        setArrival(null);
+        arrivalScrollRef.current = null;
+      },
+      [],
+    ),
+  );
+  // Any filter or subset change clears the banner for good: the arrival
+  // state is exactly {position} · All, and a single tap always leaves it.
+  useEffect(() => {
+    if (!arrival) return;
+    if (subset === 'all' && posFilter.size === 1 && posFilter.has(arrival.position)) return;
+    setArrival(null);
+    arrivalScrollRef.current = null;
+  }, [arrival, subset, posFilter]);
+  // The banner shows only while that position's split is `shown` — read off
+  // the divider's own memos, never re-derived.
+  const arrivalBanner =
+    arrival && candidatePos === arrival.position && cutAfter != null ? arrival : null;
+  // Waits for the list itself (data in, no drill-in open), then lands.
+  const applyArrivalScroll = () => {
+    const target = arrivalScrollRef.current;
+    if (!target || selected || ranked.length === 0) return;
+    if (target === 'end') {
+      scrollRef.current?.scrollToEnd({ animated: false });
+    } else if (listTopRef.current != null) {
+      scrollRef.current?.scrollTo({ y: listTopRef.current, animated: false });
+    }
+  };
+  // The post-commit pass, for an arrival that changes no size at all (QB →
+  // RB re-sorts rows of identical height, so neither layout callback fires).
+  useEffect(() => {
+    if (!arrival) return;
+    const frame = requestAnimationFrame(applyArrivalScroll);
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [arrival]);
+
   // ── #300 — the row action: pin, then hand off to the finder ────────────
   // THE PIN STORE IS THE ONLY PRESELECTION CONTRACT THAT WORKS. Route params
   // are ignored while `trades.sheet_targeting` is ON (shipped ON —
@@ -1490,6 +1583,34 @@ export default function LeagueSummaryScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      {/* Home hub — the pinned Buy/Sell banner (Banner construction). It
+          sits OUTSIDE the ScrollView so it stays on screen at either
+          landing, whatever the offset, and Sell can still reach the end. */}
+      {arrivalBanner ? (
+        <View style={styles.arrivalPin}>
+          <View style={styles.arrivalBanner} testID="league-summary.arrival-banner">
+            <View style={styles.arrivalTick} />
+            <ChalkText style={styles.arrivalText}>
+              <ChalkText style={styles.arrivalLead}>
+                {`${arrivalBanner.side === 'buy' ? 'Buying' : 'Selling'} ${arrivalBanner.position}.`}
+              </ChalkText>
+              {arrivalBanner.side === 'buy'
+                ? ` Teams above the line are deepest at ${arrivalBanner.position}. Tap one to target their players.`
+                : ` Teams below the line are shortest at ${arrivalBanner.position}, shortest last. Tap one to offer them your players.`}
+            </ChalkText>
+            <Pressable
+              testID="league-summary.arrival-banner.close"
+              onPress={() => setArrival(null)}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Dismiss"
+              style={({ pressed }) => [styles.arrivalClose, pressed && { backgroundColor: ink.ink3 }]}
+            >
+              <Icon name="x" size={16} color={chalk.dim} />
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
       <ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scroll}
@@ -1503,8 +1624,19 @@ export default function LeagueSummaryScreen() {
         // position pills without a scroll event. Same one-line announcement
         // as the TradeCalculatorScreen precedent (#384 report 1); a no-op
         // with no tour up — the notifier walks an empty listener set.
-        onLayout={notifyGuideTargetsMoved}
-        onContentSizeChange={notifyGuideTargetsMoved}
+        // Home hub — the same two callbacks land a pending arrival.
+        onLayout={() => {
+          notifyGuideTargetsMoved();
+          applyArrivalScroll();
+        }}
+        onContentSizeChange={() => {
+          notifyGuideTargetsMoved();
+          applyArrivalScroll();
+        }}
+        // The user's own drag ends the arrival's hold on the offset.
+        onScrollBeginDrag={() => {
+          arrivalScrollRef.current = null;
+        }}
         scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
@@ -2190,7 +2322,14 @@ export default function LeagueSummaryScreen() {
             </View>
           </View>
         ) : (
-          <View style={styles.list}>
+          <View
+            style={styles.list}
+            // Home hub — Buy lands on the top of this list (R3).
+            onLayout={(e) => {
+              listTopRef.current = e.nativeEvent.layout.y;
+              applyArrivalScroll();
+            }}
+          >
             {ranked.map((r, idx) => (
               <React.Fragment key={r.tc.team.user_id}>
                 <TeamRow
@@ -2889,7 +3028,9 @@ function OutlookStripAndSection({
 // and playoff odds (band chip) as ONE thing. Rendered only when `outlook.odds`
 // is on; degrades quietly (renders nothing) while the endpoint is dark/404s so
 // the screen never shows a broken projection block.
-function SeasonOutlookSection({
+// Exported for StandingsScreen's Projected segment, so the calibration rules
+// above live in one place.
+export function SeasonOutlookSection({
   query,
 }: {
   query: UseQueryResult<LeagueOutlookResponse>;
@@ -3049,7 +3190,8 @@ function OutlookRow({
 // the section simply doesn't render for these leagues, which reads as a bug;
 // one row explaining why is the whole fix. No retry affordance — there is
 // nothing the user can do, and offering one would imply there is.
-function OutlookUnsupportedRow() {
+// Exported for StandingsScreen's Projected segment.
+export function OutlookUnsupportedRow() {
   return (
     <View style={styles.oddsSection} testID="league-summary.odds.unsupported">
       <TickLabel color={semantic.warn}>Season outlook</TickLabel>
@@ -3101,6 +3243,38 @@ const styles = StyleSheet.create({
     color: chalk.base,
   },
   scroll: { padding: space.lg, paddingBottom: space.xxl },
+
+  // Home hub — pinned Buy/Sell banner (components.md Banner: ink-2,
+  // hairline, ice tick, body-sm, ghost dismiss), on a hairline-fenced pin
+  // strip between the stack header and the page.
+  arrivalPin: {
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
+    backgroundColor: ink.ink0,
+    borderBottomWidth: 1,
+    borderBottomColor: ink.line,
+  },
+  arrivalBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: space.sm,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.md,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: ink.line,
+    backgroundColor: ink.ink2,
+  },
+  arrivalTick: { width: 3, alignSelf: 'stretch', backgroundColor: ice.base },
+  arrivalText: { ...type.bodySm, flex: 1 },
+  arrivalLead: { fontFamily: fonts.uiSemi, color: chalk.base },
+  arrivalClose: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // #181 — League home entry row (LeagueRow construction, mirrors
   // LeagueScreen's explore rows).

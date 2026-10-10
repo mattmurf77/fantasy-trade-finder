@@ -31,7 +31,8 @@ export type IconName =
   | 'reload'
   | 'home'
   | 'podium'
-  | 'info';
+  | 'info'
+  | 'usage';
 
 interface Props {
   name: IconName;
@@ -118,4 +119,7 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
       <Path d="M10 9v5M10 6.25v.5" />
     </>
   ),
+  // Usage Rates — weekly bars with the last one tallest (a usage jump),
+  // echoing the Usage Trends card chart. Distinct from `trends` (movers).
+  usage: <Path d="M2 17h16M4 17v-3M8 17v-6M12 17v-4M16 17V5" />,
 };

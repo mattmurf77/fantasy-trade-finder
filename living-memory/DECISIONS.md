@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-202 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
+## D-203 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
 
 **Date:** 2026-10-10 · **Who:** operator (missed-games ruling, entry points, mobile only, ship dark, simplicity brief); lead (source, spike rule, naming).
 **Context:** The operator asked for an in-season usage-trends feature. The brief was a ChatGPT transcript over a Weeks 1–4 snap CSV and a Footballguys target export: snaps, carries, targets, % of team, a 4-week average, spikes, and Trade/Add plus cross-league availability per player. A mid-build direction set the bar: "simple … even casual dynasty players understand", with no reading or sorting of stats.
@@ -16,6 +16,23 @@
 - Mobile only, behind `usage_trends.enabled`, which ships false. Merge waits for the home-engagement redesign to go live (operator, 2026-10-10).
 - Thresholds are module constants, not knobs. Retuning them is a reviewed code change.
 - In-process caches mean the first request after a deploy pays ~1–2 s for four stats weeks.
+
+## D-202 — Home becomes a tile hub that leads into League rankings' buyers/sellers split
+
+**Date:** 2026-10-10 · **Who:** operator, over four design rounds on the Fleeced Home Redesign mockup. Built by parallel agents, lead-integrated.
+**Context:** The Home tab shipped by D-198 was four plain text rows that repeated the tab bar. Users almost never found League rankings' position split (#300), where a single position filter divides the league into buyers and sellers. The operator pointed at the FumbleAI homeowner app's home hub as the look to follow: big tappable tiles in place of tight links.
+**Decision:** Direction D, behind `nav.home_hub` (ships ON):
+- **Status rows (40pt):** Team outlook, current Standings and Overall rank.
+- **Position tiles:** QB/RB/WR/TE in a 2×2 grid, each with in-tile **Buy** | **Sell**.
+- **Task tiles:** five full-width tiles (Find a trade, Rank players, View matches, Check trends, Search free agents).
+
+Where each control goes:
+- **Buy/Sell** opens League rankings reset to Consensus / All / that position, under a pinned banner that names the side. Buy lands at the top of the list (deepest teams); Sell lands at the end (shortest teams).
+- **Standings** on Home is the *current* record only. Its View opens a new root-stack **Standings** page with a Current | Projected control. The Season-outlook simulation runs only when Projected is selected.
+- **Team outlook** View opens the Trade DNA sheet.
+
+This narrows D-198 on the flag-on path: Home now fetches data and emits two events (`home_tile_tapped`, `standings_segment_changed`, both non-intent). The buyer/seller arithmetic is duplicated into `utils/positionSplit.ts`, with an executable parity guard, rather than moved out of League Summary, whose inline code other guards pin.
+**Consequences:** On mount, Home adds two light requests (power-rankings consensus, shared with League Summary, and preferences). Sleeper standings come from rosters already cached at session start. ESPN/MFL current standings and a `/api/league/standings` endpoint are follow-ups; until they exist, those leagues get an honest "not available" state. League Summary's own Season-outlook strip still runs the simulation when the League tab opens (follow-up). Rollback: `nav.home_hub` false, which brings back the four-row Home byte-identical on the next Home mount. [Scope](../docs/plans/home-engagement/scope.md).
 
 ## D-201 — Value core v3: no second starter at a TE slot (any format) or QB slot (single-QB leagues)
 

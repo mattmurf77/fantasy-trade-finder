@@ -121,6 +121,9 @@ const V2_SCREENS = {
   LeagueSummary: 'app/league/summary',
   WinNow: 'app/trades/win-now',
   FreeAgents: 'app/league/free-agents',
+  // Home hub (scope R5) — Current | Projected standings. Root stack, so the
+  // link pushes over the tabs exactly as Home's Standings row does.
+  Standings: 'app/league/standings',
   // Usage Trends — addressable regardless of `usage_trends.enabled` (the
   // flag gates the entry points; a 404 renders the screen's unavailable state).
   UsageTrends: 'app/league/usage-trends',

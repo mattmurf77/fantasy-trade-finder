@@ -49,6 +49,7 @@
 - [Exact source interest and durable pass state](#exact-source-interest-and-durable-pass-state)
 - [Value-core engine seams (2026-09-30, trade.value_core)](#value-core-engine-seams-2026-09-30-tradevalue_core)
 - [Blind grading: one neutral formatter, hidden arms, per-caller flag resolution (2026-10-02, grading.blind)](#blind-grading-one-neutral-formatter-hidden-arms-per-caller-flag-resolution-2026-10-02-gradingblind)
+- [Cross-tab arrival intents and duplicated arithmetic under a parity guard (2026-10-10, nav.home_hub)](#cross-tab-arrival-intents-and-duplicated-arithmetic-under-a-parity-guard-2026-10-10-navhome_hub)
 - [Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)](#usage-trends-global-stats-cache-per-caller-roster-maps-server-order-2026-10-10-usage_trendsenabled)
 
 ---
@@ -857,9 +858,19 @@ Anchors (re-verified 2026-10-02, with the partner-board edit in `_run_value_core
 
 Two seams worth naming. **Leaf rules:** `blind_grading.py` imports `database` at module level and `eval.value_core_bench`, `value_core.*`, `trade_service` lazily inside functions; it never imports `server` or `tools`, and `server.py` imports it at its route section (cheap — only `database` loads). It is the one place server-path code imports from `backend/eval/`: `value_core_bench.read_league_inputs`, the DB half extracted from `_freeze_league` (which also fixed the pick predicate to `source IS NULL OR source = 'platform'`, since `sync_draft_picks` leaves `source` NULL). **Two-phase build:** production runs one synchronous gunicorn worker, so `start_session` (request thread: resume, league check, current-arm selection, `building` row) is split from `build_session` (daemon thread: value core, merge, shuffle, cards; flips to `open`, or to `failed` with `error_json`; never raises; idempotent on a non-`building` row). POST returns 202 and the client polls `GET …/sessions/current`. The POST route always calls `start_session`: a resumed `building` row returns `needs_build=True`, so a build orphaned by a restart or deploy is re-kicked (`finish_grading_session_build` guards on status, so a duplicate build writes nothing), and `_build_grading_session` falls back to empty `ServerInputs` when gathering league facts fails, so a session can never stay `building`. `pregenerate` reuses the same two halves for every candidate from `database.list_grading_candidates` (fresh current-engine deck within `MAX_DECK_AGE_DAYS` = 14, league member, seat = user id), building them in turn on one daemon thread. Grading writes only `grading_sessions` / `grading_cards`; it never registers a `TradeCard`, logs an impression, records an event or touches Elo, and card ids are not trade ids.
 
+## Cross-tab arrival intents and duplicated arithmetic under a parity guard (2026-10-10, nav.home_hub)
+
+The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two conventions.
+
+- **Cross-tab arrival goes through a one-shot intent store, not route params.**
+  - **Why:** a tab-stack *root* such as League rankings (`LeagueSummaryScreen`, route `LeagueRankings`) stays mounted across tab switches and owns its own filter, basis and drill-in state. A param would be stale on the next focus, and a repeat tap would not re-fire.
+  - **The store:** `mobile/src/state/leagueSummaryIntent.ts` holds one pending `{kind: 'split' | 'all', leagueId, …, seq}`. The caller writes it, then navigates. The screen's tab-root registration consumes it on focus with `takeLeagueSummaryIntent(leagueId)`, which clears it always and discards it if it is for another league.
+  - **Lifecycle:** `seq` is a store-stamped nonce, so the same intent twice still re-fires. A league switch clears the store. It is never persisted, so an arrival cannot replay on a cold start.
+  - **Precedent:** the #330 finder hand-off (`useFinderTargets`). Reuse an existing route param when the destination already consumes one: Team outlook → `editDna: true` on `TradesHome` needed no new store.
+- **Duplicating arithmetic requires an executable parity guard.** When a screen's inline logic is pinned by source-text guards and a second surface needs the same numbers, copy it into a zero-runtime-import util (`utils/positionSplit.ts`) instead of refactoring the pinned screen. Then add a guard that *extracts and runs* the screen's own expressions beside the util over randomised inputs and fails on any divergence (`tests/check-position-split-parity.js`, sabotage-proven against both copies). A comment saying "keep in sync" is not a guard.
 ## Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)
 
-`GET /api/usage-trends` ([scope](../docs/plans/usage-trends/scope.md), [route](../docs/api-reference.md), D-202) follows four conventions:
+`GET /api/usage-trends` ([scope](../docs/plans/usage-trends/scope.md), [route](../docs/api-reference.md), D-203) follows four conventions:
 
 - **Pure math, injected transport.** `backend/usage_trends.py` never imports `server`, the DB or flags. `server.py` passes `lambda url: _sleeper_get(url, 20)`, so every upstream call still goes through the instrumented egress chokepoint. New usage math goes in the module and gets a synthetic-row test. Add to the trimmed real-data fixture only when the case needs real numbers.
 - **Cache by who the answer depends on.**

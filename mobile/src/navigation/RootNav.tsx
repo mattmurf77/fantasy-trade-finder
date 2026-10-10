@@ -37,6 +37,7 @@ import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
 import UsageTrendsScreen from '../screens/UsageTrendsScreen';
+import StandingsScreen from '../screens/StandingsScreen';
 import WinNowScreen from '../screens/WinNowScreen';
 import ReceiptsScreen from '../screens/ReceiptsScreen';
 // #402/#403 rev-3 — the shop window (rev3-spec.md §1): give-side "More
@@ -145,6 +146,10 @@ type AuthStack = {
   // Usage Trends (flag usage_trends.enabled) — `ownership` pre-selects the
   // filter (the Free Agents link opens it on 'free_agents').
   UsageTrends: { ownership?: 'all' | 'rostered' | 'free_agents' } | undefined;
+  // Home hub (docs/plans/home-engagement/scope.md R5) — Current | Projected
+  // standings, pushed from Home's Standings row. No params: the screen reads
+  // the session league.
+  Standings: undefined;
   // Receipts — the viewer's graded suggestion track record
   // (docs/plans/receipts/). No params: the screen scopes itself to the
   // session's league and the session's own user, because cross-user receipts
@@ -829,11 +834,38 @@ export default function RootNav({ booted }: { booted: boolean }) {
             ),
           })}
         />
+        {/* Home hub (scope R5) — Standings, pushed over the tabs from Home's
+            Standings row so Back returns to Home. Registered
+            UNCONDITIONALLY: `nav.home_hub` gates the Home row, not the route.
+            FreeAgents' #151 back control (RNS#3294); the screen mounts its
+            own FeedbackFAB. */}
+        <Stack.Screen
+          name="Standings"
+          component={StandingsScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Standings',
+            headerTitle: () => <HeaderTitle>Standings</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="standings.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
         {/* Usage Trends (docs/plans/usage-trends/scope.md, flag
-            usage_trends.enabled) — pushed from the Home tab row and the
-            Free Agents link. Registered unconditionally (house rule): the
-            flag gates the entry points, and a stale link lands on the
-            screen's honest unavailable state. */}
+            usage_trends.enabled) — pushed from the Home hub's "Usage Rates"
+            tile and the Free Agents link. Registered unconditionally (house
+            rule): the flag gates the entry points, and a stale link lands on
+            the screen's honest unavailable state. */}
         <Stack.Screen
           name="UsageTrends"
           component={UsageTrendsScreen}

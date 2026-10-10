@@ -18,8 +18,7 @@
 //      missing server-side flips the tab set between first paint and the
 //      next launch.
 // Also pinned: Home is the FIRST tab; the four option labels / targets /
-// testIDs; the flag-gated Usage Trends row; no second FeedbackFAB
-// (#196/#197); the `app/home` route.
+// testIDs; no second FeedbackFAB (#196/#197); the `app/home` route.
 //
 // Dependency-free: text assertions over comment-stripped source.
 // Run: node tests/check-home-tab.js
@@ -182,9 +181,8 @@ const initialAt = tabNav.indexOf('const [initialTab] = useState(');
     if (m) last = m.index;
   }
   assert(ordered, '4d. the options render in the specced order');
-  const optionsBlock = (/const OPTIONS = \[([\s\S]*?)\] as const;/.exec(home) || [])[1] || '';
-  assert((optionsBlock.match(/testID: 'home\.option\./g) || []).length === 4,
-    '4e. exactly four tab options');
+  assert((home.match(/testID: 'home\.option\./g) || []).length === 4,
+    '4e. exactly four options');
   assert(/onPress=\{\(\) => navigation\.navigate\(o\.tab\)\}/.test(home)
     && /testID=\{o\.testID\}/.test(home)
     && /accessibilityRole="button"/.test(home),
@@ -194,13 +192,6 @@ const initialAt = tabNav.indexOf('const [initialTab] = useState(');
     "RootNav's global mount covers tab screens — a second one is the #196/#197 double-FAB bug");
   assert(!/useQuery|useState|useEffect|fetch\(/.test(home),
     '4h. no data fetching and no local state');
-  // Usage Trends (docs/plans/usage-trends/scope.md): one extra row, a
-  // root-stack push rather than a tab jump, rendered only under its flag.
-  assert(/const TRENDS_ROW = \{ label: 'Usage Trends', route: 'UsageTrends', testID: 'home\.option\.trends' \} as const;/.test(home)
-    && /const trendsOn = useFlag\('usage_trends\.enabled'\);/.test(home)
-    && /\{trendsOn \? \(\s*<Pressable\s+testID=\{TRENDS_ROW\.testID\}/.test(home)
-    && /onPress=\{\(\) => navigation\.navigate\(TRENDS_ROW\.route\)\}/.test(home),
-    '4i. a Usage Trends row pushes UsageTrends, only while usage_trends.enabled is on');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
