@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups](#2026-10-10--home-hub-run-the-testflight-checklist-on-1200-then-the-two-follow-ups)
 - [2026-10-07 — Calibration: renew iOS signing, ship 1.18.0, collect grades, read Gate 2](#2026-10-07--calibration-renew-ios-signing-ship-1180-collect-grades-read-gate-2)
 - [2026-09-08 — Feedback batch #422–#428: ship on go, run the checklist on 1.17.3, then the four follow-up candidates](#2026-09-08--feedback-batch-422428-ship-on-go-run-the-checklist-on-1173-then-the-four-follow-up-candidates)
 - [2026-09-07 — Owner-only: ship the paged insert, restore budgets, then slim per-row evidence](#2026-09-07--owner-only-ship-the-paged-insert-restore-budgets-then-slim-per-row-evidence)
@@ -48,6 +49,14 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups
+
+Shipped in #319 ([D-202](DECISIONS.md)). `nav.home_hub` is on.
+
+1. **The operator runs the 15-step checklist** in [scope §3](../docs/plans/home-engagement/scope.md) on 1.20.0. *Why now:* it is the only runtime evidence (D-056). The things to eyeball: the fold (Find a trade above it on a 6.1" phone), the Sell landing at the end of the list, and the banner.
+2. **ESPN/MFL current standings** (scope F2): a small `GET /api/league/standings` that serves ESPN's already-parsed mTeam record plus one MFL `leagueStandings` read. *Why now:* those leagues show "Not available" on Home's Standings row.
+3. **Decide F1:** League Summary's Season-outlook strip still runs the 10,000-sim outlook when the League tab opens. Should it move to the Standings page, as Home's did?
 
 ## 2026-10-07 — Calibration: renew iOS signing, ship 1.18.0, collect grades, read Gate 2
 

@@ -26,10 +26,10 @@ outside iCloud. Package/ship worktrees from the old path are gone with the move;
 
 **Don't repeat:** Preserve dirty canonical/legacy and unrelated evaluator414faade/b17cc379. No raw identity exports, fake production actions, model/offer caps. Ops /private/tmp/prepared-release-20260922.S7GrYs; freshsweepkeys. V2 rollback is flagoff; olderbinary needs private-table purge/deletionbridge. See release.md; source edits invalidate running model-hash benchmarks.
 
-## Home tab — shipped 2026-10-08
+## Home hub — shipped 2026-10-10
 
-**Where I stopped:** Home tab merged to `main` as `dd08c7c2` (PR #309, D-198); Render redeploys; iOS 1.19.0 EAS build started with `--auto-submit`. See [CHANGELOG](CHANGELOG.md) 2026-10-08 for build numbers and deploy evidence.
+**Where I stopped:** the Home hub (D-202, `nav.home_hub` ON) merged as `70740fea` (PR #319). Render ``dep-db57kdvlot8c73e0e640` (live 17:49 UTC)` is live, and `/api/feature-flags` serves `nav.home_hub: true`. The iOS 1.20.0 EAS build was started with `--auto-submit`.
 
-**Next (operator):** run the 8-step TestFlight checklist in [scope.md](../docs/plans/home-tab/scope.md) §3 on 1.19.0 — the six-tab bar (Calibration is the longest label) is the one thing only a phone can prove. Two cold launches may be needed before the Home tab appears (flags are cached; tabs are fixed at mount).
+**Next (operator):** the 15-step TestFlight checklist in [scope.md](../docs/plans/home-engagement/scope.md) §3 on 1.20.0.
 
-**Watch:** "returning user" = first swipe done on this install, so a never-swiped or reinstalled user still lands on Trades; `app/home` is silently dropped with the flag off.
+**Watch:** the hub reads the flag ONCE per Home mount, so a kill switch takes effect on the next mount. Home's band equals League rankings' band only while `check-position-split-parity.js` passes; change both copies together. ESPN/MFL leagues show "Not available" for standings until F2.

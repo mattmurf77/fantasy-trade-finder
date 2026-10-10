@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-10-10 — Home hub shipped (#319, D-202); Render live; iOS 1.20.0 submitted
+
+- **What:** Home is now a tile hub behind `nav.home_hub`, which is ON. It has status rows (team outlook → Trade DNA sheet; current standings → a new Standings page; overall rank → League rankings), QB/RB/WR/TE tiles with **Buy** | **Sell**, and five task tiles. Buy/Sell open League rankings reset to Consensus / All / that position, under a pinned banner: Buy at the top of the list, Sell at the end. The Standings page has a Current | Projected control; the outlook simulation runs only when Projected is selected.
+- **Why:** the operator found Home bland and wanted users to discover the #300 buyers/sellers split. The look follows the FumbleAI home hub, through four mockup rounds ([lab](../mockups/home-engagement/index.html)).
+- **Ship:** PR #319 squash-merged as `70740fea`. Render ``dep-db57kdvlot8c73e0e640` (live 17:49 UTC)` was triggered through the API. iOS 1.20.0 EAS build `162 (`5c023866`, submission `93871be1`)` is on `--auto-submit`.
+- **Evidence:** CI 4/4 green. Local full suite 7658 passed, 1 skipped; 105 guards; [TEST_LEDGER](TEST_LEDGER.md) 2026-10-10.
+- **Follow-ups:** ESPN/MFL current standings (`/api/league/standings`); whether League Summary's outlook strip moves to the Standings page; the operator's 15-step TestFlight checklist ([scope §3](../docs/plans/home-engagement/scope.md)).
+
 ## 2026-10-09b — Fit engines A + B in Calibration (#317), roster refresh (#318); 22 decks for 9 users
 
 - #317 (`9cfcac7a`): `backend/fit_engine.py`, with two fit-first scorers (A multipliers; B grades × profiles, `fit-b-2`) and one generator over `core.evaluate_trade`. `POST /api/admin/grading/add-fit-arms` folds arms `fit_a` / `fit_b` into open sessions: blind-shuffled into the unanswered positions, answered cards never move (D-200). Offline test on round 1: neither approach passed (AUC A 0.58, B 0.46 final vs best baseline 0.66). The operator chose to grade them live.
