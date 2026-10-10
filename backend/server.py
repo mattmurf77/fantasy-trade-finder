@@ -24412,6 +24412,30 @@ def cron_roster_snapshot():
                     "period_key": _rh.iso_period_key(now)})
 
 
+@app.route("/api/cron/usage-trends-refresh", methods=["POST"])
+def cron_usage_trends_refresh():
+    """Usage Trends weekly store — the operator's manual lever
+    (docs/plans/usage-trends/weekly-update.md). Same writer as the daily-tick
+    step, started on a daemon thread; returns at once. Works with the feature
+    flag OFF on purpose, so the store can be backfilled before launch.
+
+    Body (all optional): {"weeks": [1, 2], "force": true, "dry_run": true}.
+    `weeks` limits the run to those completed weeks, `force` re-fetches them
+    even when fresh, `dry_run` fetches and logs without writing. The result
+    goes to the log (`usage-refresh (cron_route): {...}`) and to the
+    usage_week_loads table."""
+    _require_cron_auth()
+    body = request.get_json(silent=True) or {}
+    weeks = body.get("weeks")
+    if weeks is not None and not (isinstance(weeks, list)
+                                  and all(isinstance(w, int) for w in weeks)):
+        return jsonify({"error": "weeks must be a list of integers"}), 400
+    started = _start_usage_refresh(
+        "cron_route", weeks=weeks, force=bool(body.get("force")),
+        dry_run=bool(body.get("dry_run")))
+    return jsonify({"ok": True, "started": started, "busy": not started})
+
+
 @app.route("/api/cron/realtime-tick", methods=["POST"])
 def cron_realtime_tick():
     """Every 15 minutes. Pushes match_expiring for pending matches >48h
@@ -24795,6 +24819,17 @@ def cron_daily_tick():
     except Exception as e:
         log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
 
+    # ── Usage Trends weekly store (docs/plans/usage-trends/weekly-update.md) ──
+    # Idempotent: fetches only completed weeks not yet stored, plus stat
+    # corrections for weeks loaded within the last 7 days. Daemon thread;
+    # reported only while usage_trends.enabled is on (flag-off payload
+    # stays byte-identical).
+    usage_refresh_stats: dict | None = None
+    try:
+        usage_refresh_stats = _kickoff_usage_refresh(now)
+    except Exception as e:
+        log.warning("daily-tick: usage-trends refresh kickoff failed (continuing): %s", e)
+
     # ── Receipts grading guard (docs/plans/receipts/, HLD D-9) ──
     # POST /api/cron/receipts-grade is the primary trigger, but no Render cron
     # service is provisioned for it (operator ruling Q-4) — and the one
@@ -24832,6 +24867,8 @@ def cron_daily_tick():
         extra["players_refresh_started"] = players_refresh_started
     if receipts_grade_started is not None:
         extra["receipts_grade_started"] = receipts_grade_started
+    if usage_refresh_stats is not None and not usage_refresh_stats.get("disabled"):
+        extra["usage_refresh"] = usage_refresh_stats
     if replenish_stats is not None:
         log.info("daily-tick replenish: %s", replenish_stats)
         return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
@@ -30565,6 +30602,277 @@ def league_free_agents_route():
     except Exception as e:
         log.error("league/free-agents error: %s", e)
         return jsonify({"error": "internal_error"}), 500
+
+
+# ─── Usage Trends (docs/plans/usage-trends/scope.md) ───────────────────────
+# GET /api/usage-trends. The math is pure in backend/usage_trends.py; this
+# block owns the caches and the league-ownership join. The stats are global —
+# identical for every user — so each NORMALIZED WEEK is cached on its own
+# (from the weekly store, else one live fetch of that week), and the computed
+# player list for a week selection is cached separately under a small cap
+# (users pick their own weeks, so selections are many; compute is ~30-70 ms).
+# Stat corrections land within _USAGE_TRENDS_TTL, or at once when the weekly
+# job stores them. Roster maps are per (league, caller) because `me` depends
+# on who asks. In-process like the outlook and free-agent caches.
+_USAGE_STATE_TTL   = 900.0         # which weeks are complete
+_USAGE_TRENDS_TTL  = 6 * 3600.0    # one normalized week / one computed selection
+_USAGE_ROSTERS_TTL = 120.0         # one league's roster map for one caller
+_USAGE_CACHE_MAX   = 500
+_USAGE_SELECTIONS_MAX = 24         # computed week selections kept at once
+_usage_cache: dict[tuple, tuple[float, object]] = {}
+_usage_lock = threading.Lock()
+
+
+def _usage_cached(key: tuple, ttl: float, build):
+    """`build()` memoized for `ttl` seconds. A raising build is not cached."""
+    now = time.time()
+    with _usage_lock:
+        hit = _usage_cache.get(key)
+        if hit is not None and now - hit[0] < ttl:
+            return hit[1]
+    value = build()
+    with _usage_lock:
+        if len(_usage_cache) >= _USAGE_CACHE_MAX:
+            _usage_cache.pop(next(iter(_usage_cache)), None)
+        if key[0] == "players":
+            # Each selection holds a ~200-330 KB list: keep only the newest few.
+            sels = [k for k in _usage_cache if k[0] == "players"]
+            for old in sels[:max(0, len(sels) - _USAGE_SELECTIONS_MAX + 1)]:
+                _usage_cache.pop(old, None)
+        _usage_cache[key] = (now, value)
+    return value
+
+
+def _usage_week(season: int, week: int) -> tuple[dict, dict]:
+    """One normalized week: the weekly store when it holds the week
+    (usage_trends_refresh writes it), else one live fetch of that week.
+    Stored and live normalize identically (pinned by
+    test_stored_weeks_compute_exactly_like_the_live_feed), so a selection
+    may mix the two safely. Raises when the live fetch fails."""
+    from . import usage_trends as _usage
+    from .database import load_usage_weeks
+
+    def _build():
+        try:
+            stored = load_usage_weeks(season, [week])
+        except Exception as e:
+            log.warning("usage-trends: weekly store read failed (going live): %s", e)
+            stored = {}
+        if week in stored:
+            return stored[week]
+        rows = _usage.fetch_weeks(season, [week], lambda url: _sleeper_get(url, 20))
+        return _usage.normalize_week(rows[week])
+
+    return _usage_cached(("week", season, int(week)), _USAGE_TRENDS_TTL, _build)
+
+
+_usage_refresh_lock = threading.Lock()
+
+
+def _start_usage_refresh(source: str, **kwargs) -> bool:
+    """Run usage_trends_refresh on a daemon thread (one gunicorn worker: a
+    multi-week fetch must never block requests). Single-flight: returns False
+    when a run is already going. A run that stored anything drops the cached
+    computed windows so the route serves the new numbers at once."""
+    if not _usage_refresh_lock.acquire(blocking=False):
+        return False
+
+    def _body():
+        try:
+            from .usage_trends_refresh import refresh_usage_weeks
+            summary = refresh_usage_weeks(lambda url: _sleeper_get(url, 20), **kwargs)
+            if summary.get("stored"):
+                with _usage_lock:
+                    for key in [k for k in _usage_cache if k and k[0] in ("players", "week")]:
+                        _usage_cache.pop(key, None)
+            log.info("usage-refresh (%s): %s", source, summary)
+        except Exception:
+            log.exception("usage-refresh (%s) crashed", source)
+        finally:
+            _usage_refresh_lock.release()
+
+    threading.Thread(target=_body, name="usage-trends-refresh", daemon=True).start()
+    return True
+
+
+def _kickoff_usage_refresh(now: datetime | None = None) -> dict:
+    """Daily-tick step: the steady-state weekly update. Idempotent and cheap
+    when nothing is due (one state call). Off with the feature flag, so a
+    flag-off tick payload stays byte-identical."""
+    if not is_enabled("usage_trends.enabled"):
+        return {"disabled": True}
+    return {"started": _start_usage_refresh("daily_tick", now=now)}
+
+
+def _usage_league_rosters(sess: dict, league_id: str) -> dict | None:
+    """{"me", "owners", "rosters"} for one of the caller's leagues, or None.
+
+    rosters maps player_id -> an owner key: the roster's owner_id, or
+    "roster:<id>" for an ownerless (orphaned) Sleeper roster so its players
+    never read as free agents. `me` is the caller's key — owner OR co-owner
+    via sleeper_roster.owns_roster on the live read; account id or league
+    identity on the league_members snapshot (platform leagues, or Sleeper
+    when the live read fails). None when no source loads or the caller has
+    no team in the league: rosters of a league you are not in are not served.
+    """
+    from .sleeper_roster import owns_roster
+    account = str(sess.get("user_id") or "")
+    g_league = sess.get("league")
+    my_ids = {account}
+    if g_league and g_league.league_id == league_id:
+        my_ids.add(str(_league_user_id(sess)))
+    try:
+        members = load_league_members(league_id)
+    except Exception as e:
+        log.warning("usage-trends: league_members read failed for %s: %s", league_id, e)
+        members = []
+    names = {str(m.get("user_id")): (m.get("display_name") or m.get("username"))
+             for m in members if m.get("user_id")}
+
+    live = None
+    if league_id.isdigit() and not is_linked_platform_league(league_id):
+        live = _fetch_league_rosters(league_id)
+    if live:
+        rosters, me = {}, None
+        for r in live:
+            key = str(r.get("owner_id") or f"roster:{r.get('roster_id')}")
+            for pid in r.get("players") or []:
+                rosters[str(pid)] = key
+            if owns_roster(r, account):
+                me = key
+        if me is None:
+            return None
+        if not any(names.get(str(r.get("owner_id") or "")) for r in live):
+            try:
+                users = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/users") or []
+                names = {str(u.get("user_id")): u.get("display_name") or u.get("username")
+                         for u in users if isinstance(u, dict) and u.get("user_id")}
+            except Exception as e:
+                log.warning("usage-trends: league users read failed for %s: %s", league_id, e)
+    else:
+        rosters, me = {}, None
+        for m in members:
+            key = str(m.get("user_id") or "")
+            for pid in m.get("player_ids") or []:
+                rosters[str(pid)] = key
+            if key in my_ids:
+                me = key
+        if me is None:
+            return None
+    owners = {k: names[k] for k in set(rosters.values()) if names.get(k)}
+    return {"me": me, "owners": owners, "rosters": rosters}
+
+
+@app.route("/api/usage-trends")
+@_gate_unverified_read
+def usage_trends_route():
+    """GET /api/usage-trends?league_id=<focused>&league_ids=a,b,c&weeks=1,3,4
+
+    In-season RB/WR/TE usage over the selected completed NFL weeks (default:
+    the last four), with the caller's roster context. Flag
+    `usage_trends.enabled` (404 when off).
+
+    Query params:
+      league_id   — the focused league; defaults to the session league.
+      league_ids  — optional comma list of the caller's OTHER current-season
+                    leagues for the availability sheet (client passes its
+                    league switcher list; capped at 20; the focused league is
+                    de-duplicated out).
+      weeks       — optional comma list of completed weeks to include (any
+                    subset of `available_weeks`, 1-18 of them). Absent = the
+                    last four. 400 invalid_weeks otherwise.
+
+    Response:
+      {
+        "season": int|null,
+        "weeks": [int, ...],                       # the selection, ascending
+        "available_weeks": [int, ...],             # every completed week this season
+        "in_season": bool,                         # false => weeks/players empty
+        "league_id": str,
+        "players": [{
+           "player_id", "name", "position": "RB"|"WR"|"TE", "team",
+           "status": ["played"|"out"|"bye", ...],  # aligned with weeks
+           "snaps" | "carries" | "targets": {
+              "counts": [int|null, ...], "shares": [float|null, ...],  # % of team
+              "avg": float|null, "avg_share": float|null,  # played weeks only
+              "signal": null | {"kind": "spike"|"return"|"new"|"out"|"rising"|"falling", ...},
+              "rank": int}                         # server order, 1 = show first
+        }, ...],
+        "leagues": [{                              # [0] is the focused league
+           "league_id", "ok": bool,                # false => status unknown
+           "me": str|null,                         # caller's owner key
+           "owners": {owner_key: display_name},
+           "rosters": {player_id: owner_key}}]     # listed players only; absent = FA
+      }
+    Errors: 400 league_id_required / invalid_weeks; 503 stats_unavailable
+    (Sleeper state or a selected week failed — never a partial selection).
+    """
+    from . import usage_trends as _usage
+    if not is_enabled("usage_trends.enabled"):
+        return jsonify({"error": "feature_disabled"}), 404
+    sess = _require_initialized_session()
+    sess["last_active"] = time.time()
+    g_league = sess.get("league")
+    league_id = (request.args.get("league_id")
+                 or (g_league.league_id if g_league else "")).strip()
+    if not league_id:
+        return jsonify({"error": "league_id_required"}), 400
+    others: list[str] = []
+    for lid in (request.args.get("league_ids") or "").split(","):
+        lid = lid.strip()
+        if lid and lid != league_id and lid not in others:
+            others.append(lid)
+    others = others[:20]
+
+    unavailable = ({"error": "stats_unavailable",
+                    "message": "Usage stats are unavailable right now — try again shortly."}, 503)
+    try:
+        state = _usage_cached(("state",), _USAGE_STATE_TTL,
+                              lambda: _sleeper_get(_usage.state_url(), 10))
+        season, weeks = _usage.window_weeks(state)
+    except Exception as e:
+        log.warning("usage-trends: NFL state unavailable: %s", e)
+        return jsonify(unavailable[0]), unavailable[1]
+    available = _usage.completed_weeks(state)[1] if weeks else []
+    try:
+        chosen = _usage.parse_weeks_param(request.args.get("weeks"), available)
+    except ValueError as e:
+        return jsonify({"error": "invalid_weeks", "message": str(e)}), 400
+    weeks = chosen or weeks
+    payload = {"season": season, "weeks": weeks, "available_weeks": available,
+               "in_season": bool(weeks), "league_id": league_id,
+               "players": [], "leagues": []}
+    if not weeks:
+        return jsonify(payload)
+    try:
+        players = _usage_cached(
+            ("players", season, tuple(weeks)), _USAGE_TRENDS_TTL,
+            lambda: _usage.compute_normalized(
+                {w: _usage_week(season, w) for w in weeks}, weeks))
+    except Exception as e:
+        log.warning("usage-trends: stats unavailable for %s %s: %s", season, weeks, e)
+        return jsonify(unavailable[0]), unavailable[1]
+
+    listed = {p["player_id"] for p in players}
+    account = str(sess.get("user_id") or "")
+    leagues = []
+    for lid in [league_id] + others:
+        try:
+            info = _usage_cached(("rosters", lid, account), _USAGE_ROSTERS_TTL,
+                                 lambda lid=lid: _usage_league_rosters(sess, lid))
+        except Exception as e:
+            log.warning("usage-trends: rosters failed for %s: %s", lid, e)
+            info = None
+        if info is None:
+            leagues.append({"league_id": lid, "ok": False, "me": None,
+                            "owners": {}, "rosters": {}})
+            continue
+        leagues.append({"league_id": lid, "ok": True, "me": info["me"],
+                        "owners": info["owners"],
+                        "rosters": {pid: k for pid, k in info["rosters"].items()
+                                    if pid in listed}})
+    payload.update(players=players, leagues=leagues)
+    return jsonify(payload)
 
 
 # ─── Monetization platform foundation ──────────────────────────────────────

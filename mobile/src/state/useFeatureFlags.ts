@@ -107,6 +107,12 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // install's first Home would be the old four rows until a revalidate.
   // A server `false` kill-switches on the next Home mount.
   'nav.home_hub': true,
+  // `usage_trends.enabled`: Usage Trends (docs/plans/usage-trends/scope.md),
+  // shipped ON (operator, 2026-10-10). Absent here, a fresh install's first
+  // Home would lack the Usage Rates tile until a revalidate. A server
+  // `false` hides the tile and Free Agents link at the next revalidate, and
+  // the route 404s at once.
+  'usage_trends.enabled': true,
   // `calc.canvas_results`: found ideas browse inside the merged canvas.
   // 2026-08-31 operator ruling 1 (D-171): OFF — the landing is the builder
   // only and results moved to the pushed deck (`calc.results_push` below).

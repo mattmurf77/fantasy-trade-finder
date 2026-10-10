@@ -240,7 +240,7 @@ const handler = (name) => {
 // ═══════════════════════════════════════════════════════════════════════
 {
   const VOCAB = ['outlook', 'standings', 'overall_rank', 'buy', 'sell', 'position_ranking',
-    'find_trade', 'rank', 'matches', 'trends', 'free_agents', 'link_league', 'retry'];
+    'find_trade', 'rank', 'matches', 'trends', 'usage_rates', 'free_agents', 'link_league', 'retry'];
   const WITH_POS = new Set(['buy', 'sell', 'position_ranking']);
   const re = /track\('home_tile_tapped', \{ ([^}]*) \}, 'Home'\);/g;
   const calls = [];
@@ -336,7 +336,18 @@ const handler = (name) => {
     IDS.push(`home.position.${p}`, `home.position.${p}.buy`, `home.position.${p}.sell`, `home.position.${p}.ranking`);
   }
   IDS.push('home.tile.find-trade', 'home.tile.rank', 'home.tile.matches', 'home.tile.trends',
-    'home.tile.free-agents', 'home.positions.error', 'home.positions.retry', 'home.link-league');
+    'home.tile.usage-rates', 'home.tile.free-agents', 'home.positions.error', 'home.positions.retry',
+    'home.link-league');
+  // Usage Rates (docs/plans/usage-trends/): its own tile, gated on its own
+  // flag, pushing the root-stack UsageTrends screen — never the Rank-stack
+  // Trends screen "Check trends" opens.
+  {
+    const t = (/<TaskTile\s+testID="home\.tile\.usage-rates"[\s\S]*?\/>/.exec(hub) || [''])[0];
+    assert(/const usageOn = useFlag\('usage_trends\.enabled'\);/.test(hub)
+      && /\{usageOn \? \(\s*<TaskTile\s+testID="home\.tile\.usage-rates"/.test(hub)
+      && /title="Usage Rates"/.test(t) && /navigation\.navigate\('UsageTrends'\);/.test(t),
+      '11c. the Usage Rates tile shows only with usage_trends.enabled and opens UsageTrends');
+  }
   const missing = IDS.filter((id) => !new RegExp(`(["'])${esc(id)}\\1`).test(homeAll));
   assert(missing.length === 0, `11a. all ${IDS.length} specced testIDs are present as literals`,
     `missing: ${missing.join(', ')}`);

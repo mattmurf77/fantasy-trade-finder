@@ -616,6 +616,18 @@ The `not_drafted` draft-status TTL is also season-gated: 3 h inside the rookie-d
 
 **`value-snapshot` monitoring (#57):** the daily job upserts ~1,369 rows (≈684 `1qb_ppr` + 685 `sf_tep`); the response is `{"ok": true, "snapshot_date": "...", "1qb_ppr": N, "sf_tep": N}`. A day with no row written is value-history permanently lost (the universal pool is rebuilt from the live DP CSV each boot, so there is no backfill). If the job misses a day, that gap stays a gap — accept it; do **not** fabricate history. Verify it's firing by checking `player_value_history` has rows for today's UTC date. Idempotent, so re-running same-day is safe. **2026-07-26 (market-data readiness):** the endpoint was never provisioned in `render.yaml`. A dedicated `value-snapshot-daily` cron was added but **broke Render blueprint sync** (new blueprint cron = new billable resource needing approval) and was removed same-day. The operative mechanism is the **`hourly-tick` idempotent fallback guard**: it writes today's snapshot whenever any format is missing (response gains a `value_snapshot` key when the fallback ran), so cadence is guaranteed by the existing hourly cron alone — a lost day requires hourly-tick down ~24h. If a dedicated cron is ever wanted, create it manually in the Render dashboard rather than via blueprint.
 
+**Usage Trends weekly store (2026-10-10, [spec](plans/usage-trends/weekly-update.md)).** Runs as a `daily-tick` step while `usage_trends.enabled` is on. There is no new cron service. It costs one state call on a quiet day and loads each just-finished week on the first tick after Sleeper rolls `week` forward (Tue/Wed). It then re-checks that week about daily for 7 days to catch stat corrections, then freezes it.
+
+- **Liveness:**
+  ```sql
+  SELECT season, week, team_count, player_count, fetched_at, changed_at FROM usage_week_loads ORDER BY season, week;
+  ```
+  Every completed week should be present, with 26–32 teams.
+- **Backfill before launch, or after an outage:** `python3 scripts/refresh_usage_trends.py --remote` (works with the flag off).
+- **A late stat correction** (after day 7): `--remote --weeks N --force`.
+- **Results** are in the server log as `usage-refresh (daily_tick|cron_route): {…}`.
+- **If the store is behind,** the route serves the same numbers from a live fetch, so a stalled job degrades to the old behavior rather than an error.
+
 **`roster-snapshot` monitoring (ADR-011, 2026-08-14):** the weekly league-state sweep (Writer B) rides `daily-tick` behind the `FTF_ROSTER_SNAPSHOT_WEEKDAY` `>=` gate; on-sync capture (Writer A) needs no scheduler at all. **The `source` column is the liveness instrument** — one week after ship, run:
 
 ```sql

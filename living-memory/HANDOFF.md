@@ -1,5 +1,24 @@
 # HANDOFF
 
+## Usage Trends — shipping 2026-10-10 with the flag ON (branch `feat/usage-trends`, PR #321)
+
+**Where I stopped:** merging PR #321 and deploying with `usage_trends.enabled` **on** (operator, 2026-10-10: "I want it deployed with the flag on"). The Home entry is the hub's **Usage Rates** tile (a separate row from "Check trends", which stays the Elo movers screen).
+- **Backend:** `GET /api/usage-trends` (`weeks` selection, `available_weeks`); weekly store (3 `usage_*` tables, `usage_trends_refresh`, `POST /api/cron/usage-trends-refresh`, `scripts/refresh_usage_trends.py`), refreshed by the daily tick.
+- **Mobile (iOS 1.21.0):** Simple | Raw stats pill, sortable columns, Filters → Weeks / Position / Show as.
+
+Specs: [scope](../docs/plans/usage-trends/scope.md), [weekly update](../docs/plans/usage-trends/weekly-update.md), [code-walk](../docs/plans/usage-trends/code-walk.md).
+
+**After the ship:** backfill with `python3 scripts/refresh_usage_trends.py --remote`; EAS 1.21.0 → TestFlight; the operator runs the 12-step checklist in scope §3.
+
+**Open design calls (offered, not decided):**
+- a frozen player column / pinned actions for Raw stats past 4 weeks (today the whole table swipes);
+- extra filters: My team only, Big jumps only, NFL team, minimum usage.
+
+**Don't:**
+- sort Version A, or sort anywhere but `sortStatsRows` (`check-usage-trends.js` §2e–2e2);
+- write finder pins before a league switch (§2h);
+- write the store from anywhere but `usage_trends_refresh`.
+
 ## Current State — 2026-10-07 (Calibration + value-core shipped to the backend; app build blocked)
 
 **Where I stopped:** PR #312 merged (`295cd951`) and deployed (`dep-db38m460tbcc7380tufg`, API-triggered — Render

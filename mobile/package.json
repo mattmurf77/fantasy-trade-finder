@@ -49,6 +49,7 @@
     "test:home-destinations": "node tests/check-home-destinations.js",
     "test:home-hub": "node tests/check-home-hub.js",
     "test:home-tab": "node tests/check-home-tab.js",
+    "test:usage-trends": "node tests/check-usage-trends.js",
     "test:inline-home": "node tests/check-inline-home.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",

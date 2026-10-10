@@ -504,6 +504,17 @@ export default function QuickSetTiersScreen() {
     haptics.selection();
   }, [position]);
 
+  // Usage Trends "Re-rank" (2026-10-10): the position useState above reads
+  // route params once, so a push into an ALREADY-mounted walk would keep the
+  // old position. Callers that need the switch send `positionSeq` (a fresh
+  // Date.now()) with `position`; a repeat of the same position still lands.
+  // Callers without it are unchanged.
+  const positionSeq = route.params?.positionSeq;
+  React.useEffect(() => {
+    if (positionSeq != null && route.params?.position) onPosition(route.params.position);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [positionSeq]);
+
   // #137 — format switch restarts the walk on the other format's board.
   // Committed saves this run belong to the PREVIOUS format (every save
   // went to that format's server session), so savedByTier must reset with

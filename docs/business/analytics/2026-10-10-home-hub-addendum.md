@@ -16,7 +16,7 @@ Mobile only. Web and the extension have no Home.
 | `home_tile_tapped` | `Home` | **non-intent** (navigation, the `tab_selected` class) | any tap on a Home hub row, tile or button, before navigating | `tile`, and on `buy` / `sell` / `position_ranking` only: `position`, `band` |
 | `standings_segment_changed` | `Standings` | **non-intent** (lens switch) | the user taps Current or Projected and the segment changes; never on mount | `segment` |
 
-**`tile`** (closed): `outlook` · `standings` · `overall_rank` · `buy` · `sell` · `position_ranking` · `find_trade` · `rank` · `matches` · `trends` · `free_agents` · `link_league` · `retry`.
+**`tile`** (closed): `outlook` · `standings` · `overall_rank` · `buy` · `sell` · `position_ranking` · `find_trade` · `rank` · `matches` · `trends` · `usage_rates` (added with Usage Trends, `usage_trends.enabled`) · `free_agents` · `link_league` · `retry`.
 **`position`**: `QB` · `RB` · `WR` · `TE`. **`band`**: `seller` · `buyer` · `mid` — the user's own band at that position, so `band` + `tile` reads whether the suggested side was taken.
 **`segment`**: `current` · `projected`.
 

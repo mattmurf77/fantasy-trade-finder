@@ -50,6 +50,7 @@
 - [Value-core engine seams (2026-09-30, trade.value_core)](#value-core-engine-seams-2026-09-30-tradevalue_core)
 - [Blind grading: one neutral formatter, hidden arms, per-caller flag resolution (2026-10-02, grading.blind)](#blind-grading-one-neutral-formatter-hidden-arms-per-caller-flag-resolution-2026-10-02-gradingblind)
 - [Cross-tab arrival intents and duplicated arithmetic under a parity guard (2026-10-10, nav.home_hub)](#cross-tab-arrival-intents-and-duplicated-arithmetic-under-a-parity-guard-2026-10-10-navhome_hub)
+- [Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)](#usage-trends-global-stats-cache-per-caller-roster-maps-server-order-2026-10-10-usage_trendsenabled)
 
 ---
 
@@ -867,4 +868,25 @@ The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two c
   - **Lifecycle:** `seq` is a store-stamped nonce, so the same intent twice still re-fires. A league switch clears the store. It is never persisted, so an arrival cannot replay on a cold start.
   - **Precedent:** the #330 finder hand-off (`useFinderTargets`). Reuse an existing route param when the destination already consumes one: Team outlook → `editDna: true` on `TradesHome` needed no new store.
 - **Duplicating arithmetic requires an executable parity guard.** When a screen's inline logic is pinned by source-text guards and a second surface needs the same numbers, copy it into a zero-runtime-import util (`utils/positionSplit.ts`) instead of refactoring the pinned screen. Then add a guard that *extracts and runs* the screen's own expressions beside the util over randomised inputs and fails on any divergence (`tests/check-position-split-parity.js`, sabotage-proven against both copies). A comment saying "keep in sync" is not a guard.
+## Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)
+
+`GET /api/usage-trends` ([scope](../docs/plans/usage-trends/scope.md), [route](../docs/api-reference.md), D-203) follows four conventions:
+
+- **Pure math, injected transport.** `backend/usage_trends.py` never imports `server`, the DB or flags. `server.py` passes `lambda url: _sleeper_get(url, 20)`, so every upstream call still goes through the instrumented egress chokepoint. New usage math goes in the module and gets a synthetic-row test. Add to the trimmed real-data fixture only when the case needs real numbers.
+- **Cache by who the answer depends on.**
+  - `_usage_cache` keys are `("state",)` (15 min) and `("players", season, weeks)` (6 h). These are identical for every user: one stats fetch per week per window, server-wide.
+  - Roster maps are keyed `("rosters", league_id, account)` (2 min), because `me` and "not your league" depend on the caller.
+  - A raising build is never cached.
+  - A partial window is a 503, never a payload: averages over three of four weeks would silently mislead.
+- **Status is a lookup, not a field.** The payload ships per-league `rosters {player_id: owner_key}` plus `me`, not a status per player × league. That keeps a 350-player × N-league answer small.
+  - Clients derive mine / rostered / free agent / unknown with one helper (`mobile/src/utils/usageTrends.statusIn`).
+  - Ownerless Sleeper rosters key as `roster:<id>` so their players never read as free agents. Keep that when adding a client.
+- **The server owns the default order.** Each metric carries `rank`, and clients filter, then order by it.
+  - The one exception is Version B's user-chosen column sort, operator 2026-10-10. It is a pure tested helper (`utils/usageTrends.sortStatsRows`) applied only in the stats view, and a third tap returns to the server order.
+  - Any other client sort, or any sort in Version A, is a regression (`check-usage-trends.js` §2e–2e2).
+- **One writer for the weekly store.** `usage_week_loads` / `usage_team_weeks` / `usage_player_weeks` hold raw counts only, written by `usage_trends_refresh.refresh_usage_weeks` alone. Its three callers are the daily tick (flag on), `POST /api/cron/usage-trends-refresh` and `scripts/refresh_usage_trends.py`.
+  - A week is replaced whole and trusted only once its load row exists.
+  - Since week selection (2026-10-10), the route resolves each week on its own (`server._usage_week`): from the store when loaded, else one live fetch of that week. It caches per (season, week).
+  - `compute_normalized` takes the same `{week: normalize_week(...)}` shape from either source, and its output is sorted by player id, so stored == live byte for byte (checked on the full 2026 Weeks 1–4 NFL). That equivalence is what makes mixing safe; keep the pinning test.
+  - New usage fields go into `normalize_week` + the tables + `load_usage_weeks` together. [Spec](../docs/plans/usage-trends/weekly-update.md).
 

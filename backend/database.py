@@ -1828,6 +1828,52 @@ player_value_history_table = Table("player_value_history", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# Usage Trends weekly store (docs/plans/usage-trends/weekly-update.md)
+# ---------------------------------------------------------------------------
+# Raw NFL usage counts per completed week, from Sleeper's weekly stats feed,
+# normalized by usage_trends.normalize_week. Written ONLY by
+# usage_trends_refresh.refresh_usage_weeks (daily tick, cron route, CLI);
+# read by GET /api/usage-trends. Counts only: every share, average and
+# signal is computed at read time, so a rule change never needs a rewrite.
+# A week is replaced whole (delete + insert in one transaction) and is only
+# trusted once its usage_week_loads row exists. A team with no
+# usage_team_weeks row in a loaded week had a bye.
+usage_week_loads_table = Table("usage_week_loads", metadata,
+    Column("season",           Integer, nullable=False),
+    Column("week",             Integer, nullable=False),
+    Column("source",           String,  nullable=False),   # 'sleeper_stats'
+    Column("first_fetched_at", String,  nullable=False),   # ISO UTC, first load
+    Column("fetched_at",       String,  nullable=False),   # ISO UTC, last fetch
+    Column("changed_at",       String,  nullable=False),   # ISO UTC, last content change
+    Column("content_hash",     String,  nullable=False),   # sha256 of the normalized week
+    Column("team_count",       Integer, nullable=False),
+    Column("player_count",     Integer, nullable=False),
+    UniqueConstraint("season", "week", name="uq_usage_week_load"),
+)
+usage_team_weeks_table = Table("usage_team_weeks", metadata,
+    Column("season",  Integer, nullable=False),
+    Column("week",    Integer, nullable=False),
+    Column("team",    String,  nullable=False),   # NFL abbreviation (Sleeper's)
+    Column("snaps",   Integer, nullable=False),   # offensive plays (tm_off_snp)
+    Column("carries", Integer, nullable=False),   # all rush_att, QB scrambles included
+    Column("targets", Integer, nullable=False),   # all rec_tgt
+    UniqueConstraint("season", "week", "team", name="uq_usage_team_week"),
+)
+usage_player_weeks_table = Table("usage_player_weeks", metadata,
+    Column("season",    Integer, nullable=False),
+    Column("week",      Integer, nullable=False),
+    Column("player_id", String,  nullable=False),  # Sleeper player_id
+    Column("name",      String,  nullable=False),
+    Column("position",  String,  nullable=False),  # RB | WR | TE
+    Column("team",      String,  nullable=False),  # his team THAT week
+    Column("played",    Integer, nullable=False),  # 1 = gp>0 or off_snp>0, 0 = inactive
+    Column("snaps",     Integer, nullable=False),  # off_snp
+    Column("carries",   Integer, nullable=False),  # rush_att
+    Column("targets",   Integer, nullable=False),  # rec_tgt
+    UniqueConstraint("season", "week", "player_id", name="uq_usage_player_week"),
+)
+
+# ---------------------------------------------------------------------------
 # league_roster_history — append-only league-state snapshots (#46 Wrapped)
 # ---------------------------------------------------------------------------
 # ADR-011. player_value_history above logs the MARKET side daily; this logs
@@ -15555,3 +15601,96 @@ def load_grading_report_rows(since: str | None, include_open: bool
                 select(gc).where(gc.c.session_id.in_(ids[start:start + 500]))
                 .order_by(gc.c.session_id, gc.c.position)).mappings())
     return sessions, cards
+
+
+# ---------------------------------------------------------------------------
+# Usage Trends weekly store — helpers (writer: usage_trends_refresh only)
+# ---------------------------------------------------------------------------
+
+def load_usage_week_loads(season: int) -> dict[int, dict]:
+    """{week: usage_week_loads row} for one season."""
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(usage_week_loads_table)
+            .where(usage_week_loads_table.c.season == int(season))
+        ).fetchall()
+    return {int(r._mapping["week"]): dict(r._mapping) for r in rows}
+
+
+def replace_usage_week(season: int, week: int, teams: dict, players: dict, *,
+                       content_hash: str, source: str = "sleeper_stats",
+                       now: str | None = None) -> dict:
+    """Replace one stored week whole, in one transaction: team rows, player
+    rows, then the load row that marks the week trusted. `teams` / `players`
+    are usage_trends.normalize_week's output. Returns the load row written.
+    `first_fetched_at` survives a re-fetch; `changed_at` moves only when the
+    content hash does (a stat correction)."""
+    season, week, now = int(season), int(week), now or _now()
+    team_rows = [{"season": season, "week": week, "team": t,
+                  "snaps": int(v["snaps"]), "carries": int(v["carries"]),
+                  "targets": int(v["targets"])} for t, v in teams.items()]
+    player_rows = [{"season": season, "week": week, "player_id": str(pid),
+                    "name": v["name"], "position": v["position"], "team": v["team"],
+                    "played": 1 if v["played"] else 0, "snaps": int(v["snaps"]),
+                    "carries": int(v["carries"]), "targets": int(v["targets"])}
+                   for pid, v in players.items()]
+    lt = usage_week_loads_table
+    with engine.begin() as conn:
+        prev = conn.execute(
+            select(lt).where(lt.c.season == season, lt.c.week == week)
+        ).fetchone()
+        prev = dict(prev._mapping) if prev else None
+        for table in (usage_team_weeks_table, usage_player_weeks_table):
+            conn.execute(table.delete().where(table.c.season == season,
+                                              table.c.week == week))
+        if team_rows:
+            conn.execute(usage_team_weeks_table.insert(), team_rows)
+        if player_rows:
+            conn.execute(usage_player_weeks_table.insert(), player_rows)
+        load = {
+            "season": season, "week": week, "source": source,
+            "first_fetched_at": prev["first_fetched_at"] if prev else now,
+            "fetched_at": now,
+            "changed_at": (prev["changed_at"]
+                           if prev and prev["content_hash"] == content_hash else now),
+            "content_hash": content_hash,
+            "team_count": len(team_rows), "player_count": len(player_rows),
+        }
+        conn.execute(lt.delete().where(lt.c.season == season, lt.c.week == week))
+        conn.execute(lt.insert(), [load])
+    return load
+
+
+def touch_usage_week(season: int, week: int, now: str | None = None) -> None:
+    """A re-fetch that found identical content: move fetched_at only."""
+    lt = usage_week_loads_table
+    with engine.begin() as conn:
+        conn.execute(lt.update()
+                     .where(lt.c.season == int(season), lt.c.week == int(week))
+                     .values(fetched_at=now or _now()))
+
+
+def load_usage_weeks(season: int, weeks: list[int]) -> dict[int, tuple[dict, dict]]:
+    """{week: (teams, players)} in usage_trends.normalize_week's shape, for
+    the LOADED weeks among `weeks` only (an unloaded week is absent, never
+    an empty week — callers decide whether to fall back)."""
+    loaded = set(load_usage_week_loads(season)) & {int(w) for w in weeks}
+    out: dict[int, tuple[dict, dict]] = {w: ({}, {}) for w in loaded}
+    if not loaded:
+        return {}
+    with engine.connect() as conn:
+        for r in conn.execute(select(usage_team_weeks_table).where(
+                usage_team_weeks_table.c.season == int(season),
+                usage_team_weeks_table.c.week.in_(sorted(loaded)))):
+            m = r._mapping
+            out[int(m["week"])][0][m["team"]] = {
+                "snaps": m["snaps"], "carries": m["carries"], "targets": m["targets"]}
+        for r in conn.execute(select(usage_player_weeks_table).where(
+                usage_player_weeks_table.c.season == int(season),
+                usage_player_weeks_table.c.week.in_(sorted(loaded)))):
+            m = r._mapping
+            out[int(m["week"])][1][m["player_id"]] = {
+                "name": m["name"], "position": m["position"], "team": m["team"],
+                "played": bool(m["played"]), "snaps": m["snaps"],
+                "carries": m["carries"], "targets": m["targets"]}
+    return out

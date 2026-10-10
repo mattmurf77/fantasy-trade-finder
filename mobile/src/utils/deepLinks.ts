@@ -124,6 +124,9 @@ const V2_SCREENS = {
   // Home hub (scope R5) — Current | Projected standings. Root stack, so the
   // link pushes over the tabs exactly as Home's Standings row does.
   Standings: 'app/league/standings',
+  // Usage Trends — addressable regardless of `usage_trends.enabled` (the
+  // flag gates the entry points; a 404 renders the screen's unavailable state).
+  UsageTrends: 'app/league/usage-trends',
   // rookie-draft M4. Addressable even while `draft.room` is off: the flag
   // gates the League tab's ENTRY TILE, not the route, and a link that
   // 404s at the API renders the room's honest error state rather than a

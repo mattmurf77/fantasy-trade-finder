@@ -38,7 +38,7 @@ Research: [research.md](research.md). Tracking plan: [`docs/business/analytics/2
 
   | Event | Properties | Fires when | Client |
   |---|---|---|---|
-  | `home_tile_tapped` | `tile` (closed: `outlook` · `standings` · `overall_rank` · `buy` · `sell` · `position_ranking` · `find_trade` · `rank` · `matches` · `trends` · `free_agents` · `link_league` · `retry`). On `buy` / `sell` / `position_ranking` **only**: `position` (`QB\|RB\|WR\|TE`) and `band` (`seller\|buyer\|mid`, the user's own band at that position). | On press of any Home hub row, tile or button, **before** navigating. Screen `Home`. | mobile (M-Home) |
+  | `home_tile_tapped` | `tile` (closed: `outlook` · `standings` · `overall_rank` · `buy` · `sell` · `position_ranking` · `find_trade` · `rank` · `matches` · `trends` · `usage_rates` (added with Usage Trends, `usage_trends.enabled`) · `free_agents` · `link_league` · `retry`). On `buy` / `sell` / `position_ranking` **only**: `position` (`QB\|RB\|WR\|TE`) and `band` (`seller\|buyer\|mid`, the user's own band at that position). | On press of any Home hub row, tile or button, **before** navigating. Screen `Home`. | mobile (M-Home) |
   | `standings_segment_changed` | `segment` (`current\|projected`, the segment the tap selected) | The user taps a segment **and it changes**. Never on mount, never on a re-tap of the active segment. Screen `Standings`. | mobile (M-Dest) |
 
   - **Why NON_INTENT.** Home is the launch tab, so counting a tile tap as intent would step-change DAU on ship day. The destinations' events carry intent. The segment switch is a lens change.

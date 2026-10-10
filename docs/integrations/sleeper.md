@@ -504,3 +504,25 @@ Successful source responses are cached briefly in the application layer (weekly 
 Safe diagnostic context: endpoint class, season/week, response status, counts, provider/model revisions, snapshot IDs and aggregate missing/unknown coverage. Do not log session/JWT/credential headers, raw personal ranking inputs or full roster/forecast/job payloads as telemetry. Persisted normalized snapshots are evidence storage, not a logging allowlist. Source probe: `scripts/probe_season_forecasts.py`; actual integrated/rollout evidence remains in [the Win Now plan](../plans/win-now/EVIDENCE.md).
 
 Historical research uses the documented `GET /v1/league/{id}` predecessor chain, `/matchups/{week}` and `/winners_bracket`, bounded by `scripts/capture_season_history.py`. It omits user profiles, owner IDs and final `/rosters`; local weekly player lists are historical week-level evidence, not proven pregame eligibility. Research captures retain commissioner score overrides and bracket truth. The [2026-09-04 source audit](../plans/win-now/historical-source-probe-2026-09-04.json) found post-game revision timestamps throughout six historical projection responses; do not treat those responses as pregame archives.
+
+## Weekly actual-stats feed (Usage Trends)
+
+`backend/usage_trends.py` (flag `usage_trends.enabled`, ships on) reads the projections feed's sibling for **completed** weeks:
+
+`GET https://api.sleeper.app/stats/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=FB`
+
+Plus `GET https://api.sleeper.app/v1/state/nfl` to know which weeks are complete (`week` is the week in progress; only `season_type == "regular"` yields a window).
+
+- **Shape.** A JSON list, about 650–700 KB per week for these five positions. One row per player-week, with `player_id`, `team`, `player.{position, first_name, last_name}` and `stats`. Usage Trends reads five stat keys: `gp`, `off_snp`, `tm_off_snp` (the team's offensive snaps, repeated on every row of that team), `rush_att` and `rec_tgt`.
+- **Inactive players** still get a row with only `gms_active` set, so "played" means `gp > 0` or `off_snp > 0`.
+- **Byes.** A team with no `tm_off_snp` on any row that week was on bye.
+- **Company field:** `sportradar`.
+- **Fidelity.** Checked 2026-10-10 against an independent snap CSV and the Footballguys target export. 1652/1656 RB/WR/TE snap player-weeks and 1648/1652 target player-weeks were identical ([scope §0](../plans/usage-trends/scope.md)).
+- **Weekly store (2026-10-10).** `backend/usage_trends_refresh.py` stores each completed week in the `usage_*` tables. The route reads them week by week, and fetches live only the weeks the store doesn't hold yet. Steady state is about 5 stats fetches a week server-wide (each new week once, then about daily re-checks for 7 days), from the daily tick. [Spec](../plans/usage-trends/weekly-update.md).
+- **Calls and caching** (in-process, `server._usage_cache`):
+  - one state call per 15 min;
+  - four week calls per (season, window), cached 6 h. Every user shares them; stat corrections land within the TTL;
+  - a failed week is never cached and never served partially (503 `stats_unavailable`).
+- **The URL has no `/v1/` segment.** `_sleeper_fixture_path` (UI-test seam) and `api_observability.sleeper_endpoint_class` expect `/v1/`, so under `FTF_SLEEPER_FIXTURES_DIR` this call errors (the route turns that into a 503), and apihealth labels it `other`. The projections feed has the same latent gap.
+- **Logging.** Season/week, status and row counts are safe to log. The feed carries no user data.
+- **Rights.** As with projections, access is not a contractual grant of commercial or redistribution rights.

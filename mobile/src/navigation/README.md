@@ -20,7 +20,7 @@ RootNav (Stack)
 ├─ LeagueJoin
 ├─ Main ──► <TabNav /> + <VerifyAccountBanner /> + <PushPrimingModal /> + <FeedbackFAB />
 ├─ Settings          ├─ Profile        ├─ FeedbackInbox
-├─ LeagueSummary     ├─ FreeAgents     ├─ DraftRoom
+├─ LeagueSummary     ├─ FreeAgents     ├─ UsageTrends     ├─ DraftRoom
 ├─ MockDraft         ├─ PickAssignment ├─ RecordPicks
 ├─ TestStages        ├─ SleeperConnect └─ EspnConnect
 ```

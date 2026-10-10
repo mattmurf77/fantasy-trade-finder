@@ -77,6 +77,8 @@ export default function HomeHub() {
     useSession((s) => s.leagues.find((l) => l.league_id === leagueId)?.platform) ?? 'sleeper';
   const isSleeper = platform === 'sleeper';
   const posCandidatesOn = useFlag('league.pos_candidates');
+  // Usage Rates tile (flag `usage_trends.enabled`, docs/plans/usage-trends/).
+  const usageOn = useFlag('usage_trends.enabled');
 
   // ── Queries (scope §6.2) ──────────────────────────────────────────────
   const prefsQuery = useQuery({
@@ -432,6 +434,21 @@ export default function HomeHub() {
             navigation.navigate('Rank', { screen: 'Trends' });
           }}
         />
+        {/* Usage Rates: RB/WR/TE snaps, carries and targets by week — a
+            different screen from "Check trends" (ranking movers). Root-stack
+            push; hidden while usage_trends.enabled is off. */}
+        {usageOn ? (
+          <TaskTile
+            testID="home.tile.usage-rates"
+            icon="usage"
+            title="Usage Rates"
+            detail="Snaps, carries and targets by week"
+            onPress={() => {
+              track('home_tile_tapped', { tile: 'usage_rates' }, 'Home');
+              navigation.navigate('UsageTrends');
+            }}
+          />
+        ) : null}
         <TaskTile
           testID="home.tile.free-agents"
           icon="search"

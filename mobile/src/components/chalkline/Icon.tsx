@@ -29,7 +29,10 @@ export type IconName =
   | 'flag'
   | 'upload'
   | 'reload'
-  | 'home';
+  | 'home'
+  | 'podium'
+  | 'info'
+  | 'usage';
 
 interface Props {
   name: IconName;
@@ -105,4 +108,18 @@ const GLYPHS: Record<IconName, React.ReactNode> = {
   // Home tab (flag `nav.home_tab`) — roof + walls + door. Mobile-only: web
   // has no tab bar, so there is no web/style-guide.html glyph to mirror.
   home: <Path d="M3 9l7-6 7 6M5 8v9h10V8M8 17v-5h4v5" />,
+  // Usage Trends Re-rank (docs/plans/usage-trends/) — three podium blocks on
+  // a baseline, from the operator-approved draft. Distinct from `rank` (bare
+  // bars), which already labels the Rank tab. Mobile-only for now.
+  podium: <Path d="M3 17v-6h4v6M8 17V5h4v12M13 17v-8h4v8M2 17h16" />,
+  // "How this works" — circled i, from the same draft's header button.
+  info: (
+    <>
+      <Circle cx={10} cy={10} r={7.5} />
+      <Path d="M10 9v5M10 6.25v.5" />
+    </>
+  ),
+  // Usage Rates — weekly bars with the last one tallest (a usage jump),
+  // echoing the Usage Trends card chart. Distinct from `trends` (movers).
+  usage: <Path d="M2 17h16M4 17v-3M8 17v-6M12 17v-4M16 17V5" />,
 };
