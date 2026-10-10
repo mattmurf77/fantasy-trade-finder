@@ -121,6 +121,9 @@ const V2_SCREENS = {
   LeagueSummary: 'app/league/summary',
   WinNow: 'app/trades/win-now',
   FreeAgents: 'app/league/free-agents',
+  // Usage Trends — addressable regardless of `usage_trends.enabled` (the
+  // flag gates the entry points; a 404 renders the screen's unavailable state).
+  UsageTrends: 'app/league/usage-trends',
   // rookie-draft M4. Addressable even while `draft.room` is off: the flag
   // gates the League tab's ENTRY TILE, not the route, and a link that
   // 404s at the API renders the room's honest error state rather than a

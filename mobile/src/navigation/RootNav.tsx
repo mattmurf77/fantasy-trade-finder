@@ -36,6 +36,7 @@ import PremiumRankingsBrowserScreen from '../screens/PremiumRankingsBrowserScree
 import TestStagesScreen from '../screens/TestStagesScreen';
 import LeagueSummaryScreen from '../screens/LeagueSummaryScreen';
 import FreeAgentsScreen from '../screens/FreeAgentsScreen';
+import UsageTrendsScreen from '../screens/UsageTrendsScreen';
 import WinNowScreen from '../screens/WinNowScreen';
 import ReceiptsScreen from '../screens/ReceiptsScreen';
 // #402/#403 rev-3 — the shop window (rev3-spec.md §1): give-side "More
@@ -141,6 +142,9 @@ type AuthStack = {
   LeagueSummary: undefined;
   WinNow: undefined;
   FreeAgents: undefined;
+  // Usage Trends (flag usage_trends.enabled) — `ownership` pre-selects the
+  // filter (the Free Agents link opens it on 'free_agents').
+  UsageTrends: { ownership?: 'all' | 'rostered' | 'free_agents' } | undefined;
   // Receipts — the viewer's graded suggestion track record
   // (docs/plans/receipts/). No params: the screen scopes itself to the
   // session's league and the session's own user, because cross-user receipts
@@ -816,6 +820,34 @@ export default function RootNav({ booted }: { booted: boolean }) {
             headerLeft: () => (
               <HeaderBack
                 testID="free-agents.back-btn"
+                onPress={() =>
+                  navigation.canGoBack()
+                    ? navigation.goBack()
+                    : navigation.navigate('Main')
+                }
+              />
+            ),
+          })}
+        />
+        {/* Usage Trends (docs/plans/usage-trends/scope.md, flag
+            usage_trends.enabled) — pushed from the Home tab row and the
+            Free Agents link. Registered unconditionally (house rule): the
+            flag gates the entry points, and a stale link lands on the
+            screen's honest unavailable state. */}
+        <Stack.Screen
+          name="UsageTrends"
+          component={UsageTrendsScreen}
+          options={({ navigation }) => ({
+            headerShown: true,
+            title: 'Usage Trends',
+            headerTitle: () => <HeaderTitle>Usage Trends</HeaderTitle>,
+            headerStyle: { backgroundColor: ink.ink0 },
+            headerTintColor: chalk.base,
+            // #151 pattern — see FreeAgents above (RNS#3294).
+            headerBackVisible: false,
+            headerLeft: () => (
+              <HeaderBack
+                testID="usage-trends.back-btn"
                 onPress={() =>
                   navigation.canGoBack()
                     ? navigation.goBack()

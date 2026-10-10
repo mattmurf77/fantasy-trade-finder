@@ -34,7 +34,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | Naming | **"Usage Trends"**, everywhere (route `UsageTrends`, `/api/usage-trends`, `usage_trends.*`). "Trends" is already the Rank stack's Elo risers/fallers screen (`TrendsScreen`, `/api/trends/*`). | lead |
 | Entry points | Home tab row, plus a link on the Free Agents screen that opens pre-filtered to free agents (operator, 2026-10-10). | operator |
 | Platforms | **Mobile only** (operator, 2026-10-10). Web waived for v1. | operator |
-| Ship posture | **Merge + deploy, flag off** (operator, 2026-10-10). | operator |
+| Ship posture | **Merge + deploy, flag off** (operator, 2026-10-10), **but not before the home-engagement redesign (`design/home-engagement`) is live** (operator, same day). The Home entry is re-homed onto that redesign at rebase. | operator |
 | Visual direction | See [design drafts](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo); the build follows the direction recorded in §5. | operator |
 
 ## 1. Analytics scope
@@ -110,7 +110,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | `living-memory/HLD.md` | n/a | one read-only route + one screen over existing seams; no new subsystem |
 | `docs/cross-client-invariants.md` | n/a | mobile only; the signal kinds are a server→client enum documented in api-reference, with no second client yet |
 | `docs/glossary.md` | updated | Usage Trends, team share, spike, return, new role |
-| ADR or `DECISIONS.md` entry | updated | D-199: share-driven spikes; byes AND missed games out of averages; Sleeper stats feed as the usage source |
+| ADR or `DECISIONS.md` entry | updated | D-201: share-driven spikes; byes AND missed games out of averages; Sleeper stats feed as the usage source |
 | `docs/config-reference.md` | updated | `usage_trends.enabled` row |
 | `docs/data-dictionary.md` | n/a | no schema change |
 | `mobile/src/navigation/{CLAUDE,README}.md`, `mobile/src/screens/{CLAUDE,README}.md` | updated | route tree + screen inventory |

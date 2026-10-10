@@ -1,5 +1,22 @@
 # Decisions — Fantasy Trade Finder
 
+## D-201 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
+
+**Date:** 2026-10-10 · **Who:** operator (missed-games ruling, entry points, mobile only, ship dark, simplicity brief); lead (source, spike rule, naming).
+**Context:** The operator asked for an in-season usage-trends feature. The brief was a ChatGPT transcript over a Weeks 1–4 snap CSV and a Footballguys target export: snaps, carries, targets, % of team, a 4-week average, spikes, and Trade/Add plus cross-league availability per player. A mid-build direction set the bar: "simple … even casual dynasty players understand", with no reading or sorting of stats.
+**Decision:**
+- (1) **Source:** Sleeper's public `/stats/nfl/{season}/{week}` feed, the projections feed's sibling. It matched both of the operator's files on 99.7% of player-weeks, so there is no new vendor and no scraping.
+- (2) **Averages:** both byes and missed games are left out of the divisor (operator chose this over "count as zero"); the week shows as Bye / Out.
+- (3) **Spikes:** driven by team share, not raw counts, and they must beat both the player's earlier average and his previous game. Counts move with the team's play volume: Braelon Allen's snaps fell while his share nearly doubled, and Tee Higgins' snaps rose while his share fell. Without the previous-game clause, a steady riser reads as a spike every week.
+- (4) **Ordering:** the server orders the list (`rank`, latest-week news first) and the client never re-sorts.
+- (5) **Name:** "Usage Trends" everywhere, because "Trends" is the Rank stack's Elo screen.
+- (6) **Add:** reuses the #179 claim sheet, which is now a shared component. Sleeper still has no roster-move API.
+
+**Consequences:**
+- Mobile only, behind `usage_trends.enabled`, which ships false. Merge waits for the home-engagement redesign to go live (operator, 2026-10-10).
+- Thresholds are module constants, not knobs. Retuning them is a reviewed code change.
+- In-process caches mean the first request after a deploy pays ~1–2 s for four stats weeks.
+
 ## D-201 — Value core v3: no second starter at a TE slot (any format) or QB slot (single-QB leagues)
 
 **Date:** 2026-10-10 · **Who:** operator, from round-2 grading ("trades suggesting I move Trey McBride to John who already owned Brock Bowers"). Lead-built.
