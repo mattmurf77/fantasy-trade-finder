@@ -13,7 +13,8 @@ Spec: docs/plans/usage-trends/scope.md. Covers:
   * real-data regression on a trimmed 2026 Weeks 1-4 capture (NYJ + PHI);
   * the route: flag gate, roster join (mine / rostered / orphan / FA), other
     leagues, non-member leagues withheld, 503 without a partial window, the
-    out-of-season shape, and the stats cache.
+    out-of-season shape, the stats cache, and the user's week selection
+    (default last four, `available_weeks`, any subset, 400 on a bad one).
 """
 import json
 from pathlib import Path
@@ -308,7 +309,28 @@ def test_route_out_of_season_shape(client):
     fake = FakeSleeper(state={"season": "2026", "week": 1, "season_type": "pre"})
     body = _get(client, fake).get_json()
     assert body["in_season"] is False and body["weeks"] == [] and body["players"] == []
+    assert body["available_weeks"] == []
     assert not any("/stats/nfl/" in u for u in fake.calls)
+
+
+def test_route_default_selection_and_available_weeks(client):
+    body = _get(client, FakeSleeper(state={"season": "2026", "week": 7, "season_type": "regular"})).get_json()
+    assert body["weeks"] == [3, 4, 5, 6] and body["available_weeks"] == [1, 2, 3, 4, 5, 6]
+
+
+def test_route_honours_a_user_week_selection(client):
+    fake = FakeSleeper(state={"season": "2026", "week": 7, "season_type": "regular"})
+    body = _get(client, fake, "?weeks=6,2,2").get_json()
+    assert body["weeks"] == [2, 6]
+    rb = next(p for p in body["players"] if p["player_id"] == "rb1")
+    assert len(rb["status"]) == 2 and len(rb["snaps"]["counts"]) == 2
+    assert sorted({u.split("/stats/nfl/2026/")[1].split("?")[0] for u in fake.calls if "/stats/" in u}) == ["2", "6"]
+
+
+@pytest.mark.parametrize("bad", ["7", "0", "abc", ",", ",".join(str(w) for w in range(1, 21))])
+def test_route_rejects_a_bad_week_selection(client, bad):
+    r = _get(client, FakeSleeper(state={"season": "2026", "week": 7, "season_type": "regular"}), f"?weeks={bad}")
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_weeks"
 
 
 def test_route_caches_the_stats_window(client):

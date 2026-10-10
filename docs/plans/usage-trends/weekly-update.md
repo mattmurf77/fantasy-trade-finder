@@ -94,11 +94,11 @@ Three tables live in the app database: Postgres in production via `DATABASE_URL`
 
 ## 4. Calculations at read time (`GET /api/usage-trends`)
 
-1. **Window.** The last 4 completed weeks.
-   - If **all** of them are in the store, they are read from it.
-   - Otherwise the whole window is fetched live, the old path. A window never mixes stored and live weeks.
-   - The computed result is cached 6 hours, and a job run that stored new numbers clears that cache.
-2. **Per player, per metric** (snaps, carries, targets), over the window:
+1. **Weeks.** The user's selection (Filters → Weeks): any completed weeks this season, defaulting to the last 4.
+   - Each week is read from the store when it's there, else fetched live on its own. Stored and live normalize identically (a test pins it on real data), so a selection can mix them.
+   - Each normalized week is cached 6 hours. Each computed selection is cached 6 hours, keeping the newest 24.
+   - A job run that stores new numbers clears both caches.
+2. **Per player, per metric** (snaps, carries, targets), over the selected weeks:
    - **status per week:**
      - `played`;
      - `out` (his team played, he didn't);
@@ -129,6 +129,6 @@ All of this lives in `usage_trends.compute_normalized`. It takes the same input 
 |---|---|
 | Sleeper down during the job | Week reported `fetch_failed` (or `error: state_unavailable`); nothing written; the next tick retries |
 | Feed not finished (Monday night stats lag) | `< 24 teams` → `incomplete`, skipped; next tick retries |
-| Store behind (job off, new deploy) | Route falls back to the live fetch for that window, same numbers |
+| Store behind (job off, new deploy) | Route fetches the missing weeks live, same numbers |
 | Stat correction after day 7 | Not picked up automatically. Run `--remote --weeks N --force` |
 | Bad data stored | Re-fetch with `--force`; the week is replaced whole |

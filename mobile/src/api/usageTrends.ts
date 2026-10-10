@@ -65,7 +65,10 @@ export interface UsageLeague {
 
 export interface UsageTrendsResponse {
   season: number | null;
+  /** The selection this payload covers (ascending). */
   weeks: number[];
+  /** Every completed week this season — what the week picker offers. */
+  available_weeks: number[];
   in_season: boolean;
   league_id: string;
   players: UsagePlayer[];
@@ -73,10 +76,16 @@ export interface UsageTrendsResponse {
   leagues: UsageLeague[];
 }
 
-export async function getUsageTrends(leagueId: string, otherLeagueIds: string[]) {
+/** `weeks` null/absent = the server's default (the last four completed). */
+export async function getUsageTrends(
+  leagueId: string,
+  otherLeagueIds: string[],
+  weeks?: number[] | null,
+) {
   const others = otherLeagueIds.filter((id) => id && id !== leagueId);
   const qs =
     `league_id=${encodeURIComponent(leagueId)}` +
-    (others.length ? `&league_ids=${others.map(encodeURIComponent).join(',')}` : '');
+    (others.length ? `&league_ids=${others.map(encodeURIComponent).join(',')}` : '') +
+    (weeks && weeks.length ? `&weeks=${weeks.join(',')}` : '');
   return api.get<UsageTrendsResponse>(`/api/usage-trends?${qs}`);
 }

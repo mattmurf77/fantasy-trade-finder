@@ -965,6 +965,7 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # the two the operator's pill experiment people actually use. `sort` (view
     # changes only) is Version B's column sort: default | player_asc |
     # w<week>_desc | total_asc | … — do raw-stats users actually sort?
+    # `weeks` is the user's week selection: default (last four) | "2,6" | …
     "usage_trends_action":   frozenset({"league_id", "action", "player_id",
                                         "position", "metric", "signal",
                                         "focus_status", "ownership", "view"}),
@@ -972,7 +973,7 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                                    "n_leagues", "n_free_agent",
                                                    "view"}),
     "usage_trends_view_changed": frozenset({"league_id", "metric", "ownership",
-                                            "view", "sort"}),
+                                            "view", "sort", "weeks"}),
     # `mode` mirrors find_trades_tapped's — the OUTCOME half of the pair. A
     # find_trades_tapped{mode:single_pin} with no following
     # trade_card_viewed{mode:single_pin} is #298 reappearing: a deck

@@ -30606,16 +30606,19 @@ def league_free_agents_route():
 
 # ─── Usage Trends (docs/plans/usage-trends/scope.md) ───────────────────────
 # GET /api/usage-trends. The math is pure in backend/usage_trends.py; this
-# block owns the caches and the league-ownership join. The stats feed is
-# global — one Sleeper call per completed week, identical for every user — so
-# the computed player list is cached per (season, window) and stat
-# corrections land within _USAGE_TRENDS_TTL. Roster maps are per (league,
-# caller) because `me` depends on who asks. In-process like the outlook and
-# free-agent caches: everything here is cheaply re-derivable from Sleeper.
+# block owns the caches and the league-ownership join. The stats are global —
+# identical for every user — so each NORMALIZED WEEK is cached on its own
+# (from the weekly store, else one live fetch of that week), and the computed
+# player list for a week selection is cached separately under a small cap
+# (users pick their own weeks, so selections are many; compute is ~30-70 ms).
+# Stat corrections land within _USAGE_TRENDS_TTL, or at once when the weekly
+# job stores them. Roster maps are per (league, caller) because `me` depends
+# on who asks. In-process like the outlook and free-agent caches.
 _USAGE_STATE_TTL   = 900.0         # which weeks are complete
-_USAGE_TRENDS_TTL  = 6 * 3600.0    # computed player list for one window
+_USAGE_TRENDS_TTL  = 6 * 3600.0    # one normalized week / one computed selection
 _USAGE_ROSTERS_TTL = 120.0         # one league's roster map for one caller
 _USAGE_CACHE_MAX   = 500
+_USAGE_SELECTIONS_MAX = 24         # computed week selections kept at once
 _usage_cache: dict[tuple, tuple[float, object]] = {}
 _usage_lock = threading.Lock()
 
@@ -30631,26 +30634,36 @@ def _usage_cached(key: tuple, ttl: float, build):
     with _usage_lock:
         if len(_usage_cache) >= _USAGE_CACHE_MAX:
             _usage_cache.pop(next(iter(_usage_cache)), None)
+        if key[0] == "players":
+            # Each selection holds a ~200-330 KB list: keep only the newest few.
+            sels = [k for k in _usage_cache if k[0] == "players"]
+            for old in sels[:max(0, len(sels) - _USAGE_SELECTIONS_MAX + 1)]:
+                _usage_cache.pop(old, None)
         _usage_cache[key] = (now, value)
     return value
 
 
-def _usage_window(season: int, weeks: list[int]) -> dict:
-    """{week: normalized week} for the window: the weekly store when every
-    week is loaded (usage_trends_refresh writes it), else one live fetch of
-    the whole window (a store that is not caught up never mixes with live
-    data inside one window). Raises when the live fetch fails."""
+def _usage_week(season: int, week: int) -> tuple[dict, dict]:
+    """One normalized week: the weekly store when it holds the week
+    (usage_trends_refresh writes it), else one live fetch of that week.
+    Stored and live normalize identically (pinned by
+    test_stored_weeks_compute_exactly_like_the_live_feed), so a selection
+    may mix the two safely. Raises when the live fetch fails."""
     from . import usage_trends as _usage
     from .database import load_usage_weeks
-    try:
-        stored = load_usage_weeks(season, weeks)
-    except Exception as e:
-        log.warning("usage-trends: weekly store read failed (going live): %s", e)
-        stored = {}
-    if all(w in stored for w in weeks):
-        return stored
-    rows = _usage.fetch_weeks(season, weeks, lambda url: _sleeper_get(url, 20))
-    return {w: _usage.normalize_week(rows[w]) for w in weeks}
+
+    def _build():
+        try:
+            stored = load_usage_weeks(season, [week])
+        except Exception as e:
+            log.warning("usage-trends: weekly store read failed (going live): %s", e)
+            stored = {}
+        if week in stored:
+            return stored[week]
+        rows = _usage.fetch_weeks(season, [week], lambda url: _sleeper_get(url, 20))
+        return _usage.normalize_week(rows[week])
+
+    return _usage_cached(("week", season, int(week)), _USAGE_TRENDS_TTL, _build)
 
 
 _usage_refresh_lock = threading.Lock()
@@ -30670,7 +30683,7 @@ def _start_usage_refresh(source: str, **kwargs) -> bool:
             summary = refresh_usage_weeks(lambda url: _sleeper_get(url, 20), **kwargs)
             if summary.get("stored"):
                 with _usage_lock:
-                    for key in [k for k in _usage_cache if k and k[0] == "players"]:
+                    for key in [k for k in _usage_cache if k and k[0] in ("players", "week")]:
                         _usage_cache.pop(key, None)
             log.info("usage-refresh (%s): %s", source, summary)
         except Exception:
@@ -30753,10 +30766,11 @@ def _usage_league_rosters(sess: dict, league_id: str) -> dict | None:
 @app.route("/api/usage-trends")
 @_gate_unverified_read
 def usage_trends_route():
-    """GET /api/usage-trends?league_id=<focused>&league_ids=a,b,c
+    """GET /api/usage-trends?league_id=<focused>&league_ids=a,b,c&weeks=1,3,4
 
-    In-season RB/WR/TE usage over the last four completed NFL weeks, with the
-    caller's roster context. Flag `usage_trends.enabled` (404 when off).
+    In-season RB/WR/TE usage over the selected completed NFL weeks (default:
+    the last four), with the caller's roster context. Flag
+    `usage_trends.enabled` (404 when off).
 
     Query params:
       league_id   — the focused league; defaults to the session league.
@@ -30764,10 +30778,15 @@ def usage_trends_route():
                     leagues for the availability sheet (client passes its
                     league switcher list; capped at 20; the focused league is
                     de-duplicated out).
+      weeks       — optional comma list of completed weeks to include (any
+                    subset of `available_weeks`, 1-18 of them). Absent = the
+                    last four. 400 invalid_weeks otherwise.
 
     Response:
       {
-        "season": int|null, "weeks": [int, ...],   # ascending, <= 4
+        "season": int|null,
+        "weeks": [int, ...],                       # the selection, ascending
+        "available_weeks": [int, ...],             # every completed week this season
         "in_season": bool,                         # false => weeks/players empty
         "league_id": str,
         "players": [{
@@ -30785,8 +30804,8 @@ def usage_trends_route():
            "owners": {owner_key: display_name},
            "rosters": {player_id: owner_key}}]     # listed players only; absent = FA
       }
-    Errors: 400 league_id_required; 503 stats_unavailable (Sleeper state or a
-    stats week failed — never a partial window).
+    Errors: 400 league_id_required / invalid_weeks; 503 stats_unavailable
+    (Sleeper state or a selected week failed — never a partial selection).
     """
     from . import usage_trends as _usage
     if not is_enabled("usage_trends.enabled"):
@@ -30814,14 +30833,22 @@ def usage_trends_route():
     except Exception as e:
         log.warning("usage-trends: NFL state unavailable: %s", e)
         return jsonify(unavailable[0]), unavailable[1]
-    payload = {"season": season, "weeks": weeks, "in_season": bool(weeks),
-               "league_id": league_id, "players": [], "leagues": []}
+    available = _usage.completed_weeks(state)[1] if weeks else []
+    try:
+        chosen = _usage.parse_weeks_param(request.args.get("weeks"), available)
+    except ValueError as e:
+        return jsonify({"error": "invalid_weeks", "message": str(e)}), 400
+    weeks = chosen or weeks
+    payload = {"season": season, "weeks": weeks, "available_weeks": available,
+               "in_season": bool(weeks), "league_id": league_id,
+               "players": [], "leagues": []}
     if not weeks:
         return jsonify(payload)
     try:
         players = _usage_cached(
             ("players", season, tuple(weeks)), _USAGE_TRENDS_TTL,
-            lambda: _usage.compute_normalized(_usage_window(season, weeks), weeks))
+            lambda: _usage.compute_normalized(
+                {w: _usage_week(season, w) for w in weeks}, weeks))
     except Exception as e:
         log.warning("usage-trends: stats unavailable for %s %s: %s", season, weeks, e)
         return jsonify(unavailable[0]), unavailable[1]

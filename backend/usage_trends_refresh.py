@@ -34,7 +34,6 @@ from . import database as db
 from . import usage_trends as ut
 
 SOURCE = "sleeper_stats"
-LAST_REGULAR_WEEK = 18
 # A real NFL week has 26-32 teams playing (at most 6 on bye). Fewer means the
 # feed is not finished for that week, so nothing is stored.
 MIN_TEAMS_PER_WEEK = 24
@@ -43,22 +42,7 @@ CORRECTION_WINDOW_DAYS = 7
 CORRECTION_MIN_AGE_HOURS = 20
 
 
-def completed_weeks(state: dict | None) -> tuple[int | None, list[int]]:
-    """(season, every completed regular-season week ascending). The regular
-    season runs weeks 1-18; Sleeper's `week` is the one in progress. Post
-    season means all 18 are complete; pre/off season stores nothing new."""
-    state = state or {}
-    try:
-        season = int(state.get("season"))
-        week = int(state.get("week") or 0)
-    except (TypeError, ValueError):
-        return None, []
-    kind = state.get("season_type")
-    if kind == "post":
-        return season, list(range(1, LAST_REGULAR_WEEK + 1))
-    if kind != "regular":
-        return season, []
-    return season, list(range(1, min(week - 1, LAST_REGULAR_WEEK) + 1))
+completed_weeks = ut.completed_weeks   # one calendar for the route and the job
 
 
 def _ts(value: str) -> datetime:

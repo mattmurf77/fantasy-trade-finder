@@ -875,7 +875,7 @@ Two seams worth naming. **Leaf rules:** `blind_grading.py` imports `database` at
   - Any other client sort, or any sort in Version A, is a regression (`check-usage-trends.js` §2e–2e2).
 - **One writer for the weekly store.** `usage_week_loads` / `usage_team_weeks` / `usage_player_weeks` hold raw counts only, written by `usage_trends_refresh.refresh_usage_weeks` alone. Its three callers are the daily tick (flag on), `POST /api/cron/usage-trends-refresh` and `scripts/refresh_usage_trends.py`.
   - A week is replaced whole and trusted only once its load row exists.
-  - The route uses the store only when the WHOLE window is loaded. It never mixes stored and live weeks.
-  - `compute_normalized` takes the same `{week: normalize_week(...)}` shape from either source, and its output is sorted by player id, so stored == live byte for byte (checked on the full 2026 Weeks 1–4 NFL).
+  - Since week selection (2026-10-10), the route resolves each week on its own (`server._usage_week`): from the store when loaded, else one live fetch of that week. It caches per (season, week).
+  - `compute_normalized` takes the same `{week: normalize_week(...)}` shape from either source, and its output is sorted by player id, so stored == live byte for byte (checked on the full 2026 Weeks 1–4 NFL). That equivalence is what makes mixing safe; keep the pinning test.
   - New usage fields go into `normalize_week` + the tables + `load_usage_weeks` together. [Spec](../docs/plans/usage-trends/weekly-update.md).
 

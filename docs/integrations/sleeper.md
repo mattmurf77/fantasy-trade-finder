@@ -518,7 +518,7 @@ Plus `GET https://api.sleeper.app/v1/state/nfl` to know which weeks are complete
 - **Byes.** A team with no `tm_off_snp` on any row that week was on bye.
 - **Company field:** `sportradar`.
 - **Fidelity.** Checked 2026-10-10 against an independent snap CSV and the Footballguys target export. 1652/1656 RB/WR/TE snap player-weeks and 1648/1652 target player-weeks were identical ([scope §0](../plans/usage-trends/scope.md)).
-- **Weekly store (2026-10-10).** `backend/usage_trends_refresh.py` stores each completed week in the `usage_*` tables. The route reads them, and falls back to a live fetch of the window when the store isn't caught up. Steady state is about 5 stats fetches a week server-wide (each new week once, then about daily re-checks for 7 days), from the daily tick. [Spec](../plans/usage-trends/weekly-update.md).
+- **Weekly store (2026-10-10).** `backend/usage_trends_refresh.py` stores each completed week in the `usage_*` tables. The route reads them week by week, and fetches live only the weeks the store doesn't hold yet. Steady state is about 5 stats fetches a week server-wide (each new week once, then about daily re-checks for 7 days), from the daily tick. [Spec](../plans/usage-trends/weekly-update.md).
 - **Calls and caching** (in-process, `server._usage_cache`):
   - one state call per 15 min;
   - four week calls per (season, window), cached 6 h. Every user shares them; stat corrections land within the TTL;

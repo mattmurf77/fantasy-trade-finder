@@ -153,6 +153,17 @@ const players = [P('a', 'RB', [3, 1, 2]), P('b', 'WR', [1, 3, 3]), P('c', 'TE', 
   assert(U.sortLabel(null, [1, 2, 3, 4]) === 'default' && U.sortLabel({ key: 3, dir: 'desc' }, [1, 2, 3, 4]) === 'w4_desc',
     '1ab. analytics sort label');
 }
+{
+  // The user picks which weeks are included (operator, 2026-10-10).
+  assert(U.weeksLabel([4]) === 'Week 4' && U.weeksLabel([1, 2, 3, 4]) === 'Weeks 1–4'
+    && U.weeksLabel([8, 1, 2, 3, 5, 7]) === 'Weeks 1–3, 5, 7–8', '1ac. selection label collapses runs');
+  const avail = [1, 2, 3, 4, 5, 6];
+  assert(U.presetWeeks('last4', avail) === null && eq(U.presetWeeks('last2', avail), [5, 6])
+    && eq(U.presetWeeks('season', avail), avail), '1ad. presets: Last 4 = the server default, Last 2, All season');
+  assert(eq(U.toggleWeek([2, 6], 4), [2, 4, 6]) && eq(U.toggleWeek([2, 4, 6], 4), [2, 6])
+    && eq(U.toggleWeek([6], 6), [6]), '1ae. toggling a week; the last one cannot be removed');
+  assert(U.weeksParam(null) === 'default' && U.weeksParam([2, 6]) === '2,6', '1af. selection param');
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // 2 — wiring.
@@ -211,6 +222,18 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
     '2n. Version B actions: + add, ⇄ trade, podium Re-rank, chevron expander');
   assert(!/>\s*(Add|Trade|Re-rank)\s*</.test(table), '2o. Version B action buttons carry no text');
   assert(/<UsageLeagueList[^>]*compact/.test(table), '2p. the expanded row lists the other leagues');
+  assert(/getUsageTrends\(focusId as string, otherIds, selectedWeeks\)/.test(screen)
+    && /queryKey: \['usage-trends', focusId, otherIds\.join\(','\), weeksParam\(selectedWeeks\)\]/.test(screen)
+    && /placeholderData: keepPreviousData/.test(screen),
+    '2p2. the week selection reaches the server and keys the cache; the old list stays up while it loads');
+  assert(/<TickLabel>WEEKS<\/TickLabel>/.test(screen) && /testID=\{`usage-trends\.week\.\$\{w\}`\}/.test(screen)
+    && /setDraft\(toggleWeek\(shown, w\)\)/.test(screen) && /available=\{data\?\.available_weeks \?\? \[\]\}/.test(screen),
+    '2p3. Filters offers every completed week (server-provided) as a toggle, plus presets');
+  assert(/const close = \(\) => onClose\(/.test(screen) && /setSelectedWeeks\(nextWeeks\)/.test(screen),
+    '2p4. weeks commit once, when the sheet closes (one refetch per change)');
+  assert(/export function statsTableWidth/.test(table) && /<ScrollView\s+horizontal/.test(screen)
+    && /<UsageStatsHeader/.test(screen.slice(screen.indexOf('const table = ('))),
+    '2p5. more than four weeks: the table (header + rows together) swipes sideways');
   assert(/name="podium"/.test(card) && />Re-rank</.test(card) && /<StatusPip/.test(card),
     '2q. Version A keeps the mock: podium Re-rank text button and league pips');
   assert(/\|\s*'podium'/.test(icons) && /^\s*podium: </m.test(icons) && /\|\s*'info'/.test(icons),

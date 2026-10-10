@@ -21,13 +21,20 @@ import {
 // flare, a missed game as an amber baseline tick), then Add / Trade / Yours,
 // the cross-league availability pill, and Re-rank.
 
-const BAR_W = 10;
-const BAR_GAP = 4;
 const BAR_MAX = 36;
 const CHART_H = 40;
+const CHART_MAX_W = 64;
+
+// Four weeks draw exactly as the approved mock (10pt bars, 4pt gaps). A
+// longer user-picked selection shrinks the bars to stay within ~64pt.
+function barGeometry(n: number): { w: number; gap: number } {
+  if (n <= 4) return { w: 10, gap: 4 };
+  return { w: Math.max(3, Math.floor((CHART_MAX_W - (n - 1) * 2) / n)), gap: 2 };
+}
 
 function WeekBars({ player, metric, weeks }: { player: UsagePlayer; metric: UsageMetric; weeks: number[] }) {
   const block = player[metric];
+  const { w: BAR_W, gap: BAR_GAP } = barGeometry(weeks.length);
   const width = weeks.length * BAR_W + (weeks.length - 1) * BAR_GAP;
   const spoken = weeks
     .map((w, i) => {
@@ -53,17 +60,24 @@ function WeekBars({ player, metric, weeks }: { player: UsagePlayer; metric: Usag
           return <Rect key={w} x={x} y={CHART_H - h} width={BAR_W} height={h} fill={fill} />;
         })}
       </Svg>
-      <View style={styles.weekLabels} importantForAccessibility="no-hide-descendants">
-        {weeks.map((w, i) => {
-          const st = player.status[i];
-          const color = st === 'out' ? semantic.warn : isNewsWeek(block.signal, w) ? flare.base : chalk.dim;
-          return (
-            <Text key={w} scale="dense" style={[styles.weekLabel, { color }]}>
-              {st === 'played' ? String(w) : '–'}
-            </Text>
-          );
-        })}
-      </View>
+      {weeks.length <= 4 ? (
+        <View style={[styles.weekLabels, { gap: BAR_GAP }]} importantForAccessibility="no-hide-descendants">
+          {weeks.map((w, i) => {
+            const st = player.status[i];
+            const color = st === 'out' ? semantic.warn : isNewsWeek(block.signal, w) ? flare.base : chalk.dim;
+            return (
+              <Text key={w} scale="dense" style={[styles.weekLabel, { width: BAR_W, color }]}>
+                {st === 'played' ? String(w) : '–'}
+              </Text>
+            );
+          })}
+        </View>
+      ) : (
+        <View style={[styles.weekLabelsSpan, { width }]} importantForAccessibility="no-hide-descendants">
+          <Text scale="dense" style={styles.weekLabel}>{weeks[0]}</Text>
+          <Text scale="dense" style={styles.weekLabel}>{weeks[weeks.length - 1]}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -193,8 +207,9 @@ const styles = StyleSheet.create({
   name: { ...type.title, flexShrink: 1 },
   sentence: { ...type.body, fontSize: 15, lineHeight: 20, fontFamily: fonts.uiMedium },
   chart: { alignItems: 'center', gap: space.xs, flexShrink: 0 },
-  weekLabels: { flexDirection: 'row', gap: BAR_GAP },
-  weekLabel: { ...type.data, fontSize: 11, lineHeight: 14, width: BAR_W, textAlign: 'center' },
+  weekLabels: { flexDirection: 'row' },
+  weekLabelsSpan: { flexDirection: 'row', justifyContent: 'space-between' },
+  weekLabel: { ...type.data, fontSize: 11, lineHeight: 14, color: chalk.dim, textAlign: 'center' },
   actions: { flexDirection: 'row', alignItems: 'center', gap: space.sm, flexWrap: 'wrap' },
   btn: {
     minHeight: 44,

@@ -1,4 +1,5 @@
-"""Usage Trends — in-season RB/WR/TE usage over the last four completed weeks.
+"""Usage Trends — in-season RB/WR/TE usage over the selected completed weeks
+(default: the last four).
 
 Pure computation behind GET /api/usage-trends (route + caches in server.py).
 Source: Sleeper's weekly actual-stats feed (`/stats/nfl/{season}/{week}`, the
@@ -60,25 +61,57 @@ def stats_url(season: int, week: int) -> str:
             "&position[]=TE&position[]=FB")
 
 
-def window_weeks(state: dict | None) -> tuple[int | None, list[int]]:
-    """(season, the last WINDOW_WEEKS completed regular-season weeks ascending).
+LAST_REGULAR_WEEK = 18
+# The most weeks one request may ask for: a whole regular season.
+MAX_SELECTED_WEEKS = LAST_REGULAR_WEEK
 
-    Sleeper's `week` is the week in progress, so weeks before it are complete.
-    Anything but the regular season (pre/post/off) — or week 1 in progress —
-    yields [] and the screen shows its out-of-season state.
-    """
+
+def completed_weeks(state: dict | None) -> tuple[int | None, list[int]]:
+    """(season, every COMPLETED regular-season week ascending). Sleeper's
+    `week` is the one in progress. Post season = all 18 complete; pre/off
+    season = none. Shared by the route (`available_weeks`) and the weekly
+    store job."""
     state = state or {}
     try:
         season = int(state.get("season"))
         week = int(state.get("week") or 0)
     except (TypeError, ValueError):
         return None, []
-    if state.get("season_type") != "regular":
+    kind = state.get("season_type")
+    if kind == "post":
+        return season, list(range(1, LAST_REGULAR_WEEK + 1))
+    if kind != "regular":
         return season, []
-    last = week - 1
-    if last < 1:
+    return season, list(range(1, min(week - 1, LAST_REGULAR_WEEK) + 1))
+
+
+def window_weeks(state: dict | None) -> tuple[int | None, list[int]]:
+    """(season, the DEFAULT window: the last WINDOW_WEEKS completed weeks).
+    Only during the regular season — anything else (or week 1 in progress)
+    yields [] and the screen shows its out-of-season state."""
+    season, done = completed_weeks(state)
+    if (state or {}).get("season_type") != "regular":
         return season, []
-    return season, list(range(max(1, last - WINDOW_WEEKS + 1), last + 1))
+    return season, done[-WINDOW_WEEKS:]
+
+
+def parse_weeks_param(raw: str | None, available: list[int]) -> list[int] | None:
+    """The user's week selection from `?weeks=1,3,4` (ascending, unique).
+    None when the param is absent (use the default window). ValueError when
+    it names a week that is not a completed week this season, is empty, or
+    asks for more than MAX_SELECTED_WEEKS."""
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        weeks = sorted({int(x) for x in raw.split(",") if x.strip()})
+    except ValueError:
+        raise ValueError("weeks must be comma-separated week numbers")
+    if not weeks or len(weeks) > MAX_SELECTED_WEEKS:
+        raise ValueError("pick between 1 and 18 weeks")
+    missing = [w for w in weeks if w not in set(available)]
+    if missing:
+        raise ValueError(f"not a completed week: {missing[0]}")
+    return weeks
 
 
 def fetch_weeks(season: int, weeks: list[int], fetch_json: Callable) -> dict[int, list]:

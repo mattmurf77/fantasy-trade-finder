@@ -6,19 +6,21 @@ import {
   Modal,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { Button, Icon, Text, TickLabel } from '../components/chalkline';
 import ClaimSheet, { explainNoAdd, resolveAddPlatform, type ClaimTarget } from '../components/ClaimSheet';
 import FeedbackFAB from '../components/FeedbackFAB';
 import UsageTrendCard from '../components/UsageTrendCard';
 import { UsageAvailabilitySheet, type UsageLeagueRow } from '../components/UsageLeagueList';
-import { UsageStatsHeader, UsageStatsRow } from '../components/UsageStatsTable';
+import { UsageStatsHeader, UsageStatsRow, statsTableWidth } from '../components/UsageStatsTable';
 import { chalk, fonts, ice, ink, radii, scrim, shadowSheet, space, type } from '../theme/chalkline';
 import { ApiError } from '../api/client';
 import { track } from '../api/events';
@@ -33,10 +35,14 @@ import {
   newsCount,
   nextSort,
   ownerName,
+  presetWeeks,
   sortLabel,
   sortStatsRows,
   statusIn,
+  toggleWeek,
   visiblePlayers,
+  weeksLabel,
+  weeksParam,
   type OwnershipFilter,
   type PositionFilter,
   type StatsSort,
@@ -90,6 +96,10 @@ export default function UsageTrendsScreen() {
   const [expanded, setExpanded] = useState<string | null>(null);
   // Version B only: the user's column sort (null = server order).
   const [statsSort, setStatsSort] = useState<StatsSort | null>(null);
+  // The user's week selection (Filters → Weeks). null = the server default,
+  // the last four completed weeks.
+  const [selectedWeeks, setSelectedWeeks] = useState<number[] | null>(null);
+  const { width: screenWidth } = useWindowDimensions();
   const [claim, setClaim] = useState<{ target: ClaimTarget; leagueId: string } | null>(null);
 
   // The Free Agents link pushes `{ownership:'free_agents'}`; honour it on a
@@ -104,10 +114,12 @@ export default function UsageTrendsScreen() {
     [leagues, focusId],
   );
   const query = useQuery({
-    queryKey: ['usage-trends', focusId, otherIds.join(',')],
-    queryFn: () => getUsageTrends(focusId as string, otherIds),
+    queryKey: ['usage-trends', focusId, otherIds.join(','), weeksParam(selectedWeeks)],
+    queryFn: () => getUsageTrends(focusId as string, otherIds, selectedWeeks),
     enabled: enabled && !!focusId,
     staleTime: 10 * 60_000,
+    // A new week selection keeps the current list on screen while it loads.
+    placeholderData: keepPreviousData,
   });
   const faQuery = useQuery({
     queryKey: ['free-agents', claim?.leagueId, 'ALL'],
@@ -153,16 +165,17 @@ export default function UsageTrendsScreen() {
 
   const reportView = useCallback(
     (next: { view?: UsageView; metric?: UsageMetric; ownership?: OwnershipFilter;
-             sort?: StatsSort | null }) => {
+             sort?: StatsSort | null; weeks?: number[] | null }) => {
       track('usage_trends_view_changed', {
         league_id: focusId,
         metric: next.metric ?? metric,
         ownership: next.ownership ?? ownership,
         view: next.view ?? view,
         sort: sortLabel(next.sort !== undefined ? next.sort : statsSort, weeks),
+        weeks: weeksParam(next.weeks !== undefined ? next.weeks : selectedWeeks),
       }, 'UsageTrends');
     },
-    [focusId, metric, ownership, view, statsSort, weeks],
+    [focusId, metric, ownership, view, statsSort, weeks, selectedWeeks],
   );
 
   const leagueRowsFor = useCallback(
@@ -355,6 +368,10 @@ export default function UsageTrendsScreen() {
   const errorBody = (query.error instanceof ApiError ? query.error.body : null) as
     | { error?: string; message?: string }
     | null;
+  // A selection the server no longer accepts falls back to the default window.
+  useEffect(() => {
+    if (errorBody?.error === 'invalid_weeks' && selectedWeeks) setSelectedWeeks(null);
+  }, [errorBody?.error, selectedWeeks]);
 
   let body: React.ReactNode;
   if (!enabled || errorBody?.error === 'feature_disabled') {
@@ -385,7 +402,7 @@ export default function UsageTrendsScreen() {
       />
     );
   } else {
-    body = (
+    const list = (
       <FlatList
         testID="usage-trends.list"
         data={items}
@@ -410,9 +427,45 @@ export default function UsageTrendsScreen() {
         }
       />
     );
+    if (view === 'simple') {
+      body = list;
+    } else {
+      // Version B: the header rides with the rows. Four weeks fit a phone;
+      // a wider selection makes the whole table swipe sideways, so header
+      // and rows always scroll together.
+      const tableWidth = statsTableWidth(screenWidth, weeks.length);
+      const wide = tableWidth > screenWidth;
+      const table = (
+        <View style={wide ? [styles.tableWide, { width: tableWidth }] : styles.table}>
+          <UsageStatsHeader
+            weeks={weeks}
+            unit={unit}
+            sort={statsSort}
+            onSort={(key) => {
+              const next = nextSort(statsSort, key);
+              setStatsSort(next);
+              reportView({ sort: next });
+            }}
+          />
+          {list}
+        </View>
+      );
+      body = wide ? (
+        <ScrollView
+          horizontal
+          testID="usage-trends.table-scroll"
+          contentContainerStyle={styles.tableScroll}
+          showsHorizontalScrollIndicator
+        >
+          {table}
+        </ScrollView>
+      ) : table;
+    }
   }
 
   const showControls = enabled && !!focusId && !!data?.in_season;
+  // How many Filters-sheet settings differ from their defaults.
+  const activeFilters = (positionFilter !== 'ALL' ? 1 : 0) + (selectedWeeks ? 1 : 0);
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']} testID="usage-trends.screen">
@@ -425,8 +478,8 @@ export default function UsageTrendsScreen() {
             <View style={styles.subText}>
               <Text style={styles.subLeague} numberOfLines={1}>{leagueName ?? 'Your league'}</Text>
               {weeks.length ? (
-                <Text style={styles.sub} numberOfLines={1}>
-                  {`Week${weeks.length > 1 ? 's' : ''} ${weeks[0]}${weeks.length > 1 ? `–${latest}` : ''}`}
+                <Text style={styles.sub} numberOfLines={1} testID="usage-trends.weeks-label">
+                  {weeksLabel(weeks)}
                 </Text>
               ) : null}
             </View>
@@ -502,28 +555,16 @@ export default function UsageTrendsScreen() {
             <Pressable
               testID="usage-trends.filters"
               accessibilityRole="button"
-              accessibilityLabel="Filters: position, show as count or percent"
+              accessibilityLabel={`Filters: weeks, position, show as count or percent${activeFilters ? `, ${activeFilters} changed` : ''}`}
               onPress={() => setFiltersOpen(true)}
               style={({ pressed }) => [styles.filtersBtn, pressed && styles.pressed]}
             >
               <Icon name="settings" size={16} color={chalk.base} />
               <Text style={styles.filtersText}>
-                Filters{positionFilter !== 'ALL' ? ` · ${positionFilter}` : ''}
+                Filters{activeFilters ? ` · ${activeFilters}` : ''}
               </Text>
             </Pressable>
           </View>
-          {view === 'stats' ? (
-            <UsageStatsHeader
-              weeks={weeks}
-              unit={unit}
-              sort={statsSort}
-              onSort={(key) => {
-                const next = nextSort(statsSort, key);
-                setStatsSort(next);
-                reportView({ sort: next });
-              }}
-            />
-          ) : null}
         </View>
       ) : null}
 
@@ -533,9 +574,21 @@ export default function UsageTrendsScreen() {
         <FiltersSheet
           position={positionFilter}
           unit={unit}
+          available={data?.available_weeks ?? []}
+          weeks={weeks}
+          isDefaultWeeks={!selectedWeeks}
           onPosition={setPositionFilter}
           onUnit={(u) => setUnits((prev) => ({ ...prev, [view]: u }))}
-          onClose={() => setFiltersOpen(false)}
+          onClose={(nextWeeks) => {
+            setFiltersOpen(false);
+            // Weeks are committed when the sheet closes: one refetch per
+            // change, not one per chip tap.
+            if (nextWeeks !== undefined && weeksParam(nextWeeks) !== weeksParam(selectedWeeks)) {
+              setSelectedWeeks(nextWeeks);
+              setExpanded(null);
+              reportView({ weeks: nextWeeks });
+            }
+          }}
         />
       ) : null}
       {sheetPlayer ? (
@@ -576,24 +629,75 @@ function Centered({ text, testID, children }: { text: string; testID: string; ch
 function FiltersSheet({
   position,
   unit,
+  available,
+  weeks,
+  isDefaultWeeks,
   onPosition,
   onUnit,
   onClose,
 }: {
   position: PositionFilter;
   unit: UsageUnit;
+  available: number[];
+  weeks: number[];
+  isDefaultWeeks: boolean;
   onPosition: (p: PositionFilter) => void;
   onUnit: (u: UsageUnit) => void;
-  onClose: () => void;
+  /** `weeks` is the draft week selection (null = default); undefined = unchanged. */
+  onClose: (weeks?: number[] | null) => void;
 }) {
   const chip = (on: boolean) => [styles.chip, on && styles.chipOn];
+  // Draft selection: chips toggle locally and commit once, on close.
+  const [draft, setDraft] = useState<number[] | null>(isDefaultWeeks ? null : weeks);
+  const defaultWeeks = available.slice(-4);   // the server's default window
+  const shown = draft ?? defaultWeeks;
+  // A pick identical to the default IS the default (keeps "Last 4" lit and
+  // avoids a pointless refetch).
+  const close = () => onClose(draft && weeksParamEq(draft, defaultWeeks) ? null : draft);
+  const preset = (key: 'last4' | 'last2' | 'season', label: string) => {
+    const value = presetWeeks(key, available);
+    const on = key === 'last4' ? draft === null : weeksParamEq(draft, value);
+    return (
+      <Pressable key={key} testID={`usage-trends.weeks.${key}`} accessibilityRole="button"
+        accessibilityState={{ selected: on }} onPress={() => setDraft(value)} style={chip(on)}>
+        <Text style={[styles.segText, on && styles.segTextOn]}>{label}</Text>
+      </Pressable>
+    );
+  };
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityRole="button" accessibilityLabel="Close" />
+    <Modal visible transparent animationType="slide" onRequestClose={close}>
+      <Pressable style={styles.backdrop} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
       <View style={styles.sheet} testID="usage-trends.filters-sheet">
         <SafeAreaView edges={['bottom']} style={styles.sheetContent}>
           <View style={styles.grabber} />
           <Text style={type.heading} accessibilityRole="header">Filters</Text>
+          <View style={styles.filterGroup}>
+            <TickLabel>WEEKS</TickLabel>
+            <View style={styles.chips}>
+              {preset('last4', 'Last 4')}
+              {preset('last2', 'Last 2')}
+              {preset('season', 'All season')}
+            </View>
+            <View style={styles.chips}>
+              {available.map((w) => {
+                const on = shown.includes(w);
+                return (
+                  <Pressable
+                    key={w}
+                    testID={`usage-trends.week.${w}`}
+                    accessibilityRole="checkbox"
+                    accessibilityLabel={`Week ${w}`}
+                    accessibilityState={{ checked: on }}
+                    onPress={() => setDraft(toggleWeek(shown, w))}
+                    style={[styles.weekChip, on && styles.chipOn]}
+                  >
+                    <Text style={[styles.weekChipText, on && styles.segTextOn]}>{w}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text style={type.bodySm}>{weeksLabel(shown)} · averages and totals cover these weeks only.</Text>
+          </View>
           <View style={styles.filterGroup}>
             <TickLabel>POSITION</TickLabel>
             <View style={styles.chips}>
@@ -618,11 +722,15 @@ function FiltersSheet({
               ))}
             </View>
           </View>
-          <Button testID="usage-trends.filters-done" label="Done" variant="secondary" onPress={onClose} />
+          <Button testID="usage-trends.filters-done" label="Done" variant="secondary" onPress={close} />
         </SafeAreaView>
       </View>
     </Modal>
   );
+}
+
+function weeksParamEq(a: number[] | null, b: number[] | null): boolean {
+  return weeksParam(a) === weeksParam(b);
 }
 
 const styles = StyleSheet.create({
@@ -727,4 +835,19 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
   },
   chipOn: { backgroundColor: ink.ink3, borderColor: ice.base },
+  weekChip: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: ink.lineStrongA11y,
+    borderRadius: radii.sm,
+  },
+  weekChipText: { ...type.data, color: chalk.dim },
+  table: { flex: 1 },
+  // Inside the horizontal ScrollView: explicit width, full height (the row
+  // container's cross-axis stretch) — never flex:1, which would override it.
+  tableWide: { alignSelf: 'stretch' },
+  tableScroll: { flexGrow: 1 },
 });

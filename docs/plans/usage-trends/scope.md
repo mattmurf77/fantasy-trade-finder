@@ -9,7 +9,7 @@
 
 ## 0. What it is, and the decisions it rests on
 
-An in-season screen listing NFL **RBs, WRs and TEs** with their usage over the **last four completed weeks**. Three metrics (**snaps, carries, targets**), each viewable as a raw count or as a **% of the team's total that week**. Every row shows one plain-language headline signal. The server orders the list so the user never has to sort stats (operator, 2026-10-10: "simple, easy to understand without much reading or sorting of stats … even casual dynasty players").
+An in-season screen listing NFL **RBs, WRs and TEs** with their usage over the **completed weeks the user picks** (default: the last four). Three metrics (**snaps, carries, targets**), each viewable as a raw count or as a **% of the team's total that week**. Every row shows one plain-language headline signal. The server orders the list so the user never has to sort stats (operator, 2026-10-10: "simple, easy to understand without much reading or sorting of stats … even casual dynasty players").
 
 Per row, three actions:
 
@@ -33,6 +33,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | Other signals | `return` (back after missed games), `new` (first game of the window with real volume), `out` (missed the latest week), `rising` / `falling` (share slope of at least 5 pp a week over 3 or more games). | lead |
 | Naming | **"Usage Trends"**, everywhere (route `UsageTrends`, `/api/usage-trends`, `usage_trends.*`). "Trends" is already the Rank stack's Elo risers/fallers screen (`TrendsScreen`, `/api/trends/*`). | lead |
 | Entry points | Home tab row, plus a link on the Free Agents screen that opens pre-filtered to free agents (operator, 2026-10-10). | operator |
+| Weeks | **The user picks which weeks are included** (operator, 2026-10-10). Filters → Weeks offers presets (**Last 4** = the default, **Last 2**, **All season**) plus one toggle per completed week, from the server's `available_weeks`. At least one week must stay selected. The pick commits when the sheet closes, so it's one refetch per change. Averages, totals, signals and order cover only the picked weeks. Version A's bars shrink to fit, showing the first and last week numbers past four weeks; Version B's table swipes sideways when more than four weeks are picked, header and rows together. | operator |
 | Sorting | **Version A is never re-sorted.** The server's order, newest jumps first, is the point of the simple view. **Version B columns are all sortable** (operator, 2026-10-10: "make sure the columns are sortable"): Player, each week and Total/Avg. A tap sorts biggest-first (A–Z for Player), a second tap reverses, a third restores the server order. A missed game or bye sorts last in both directions, and ties keep the server order. The sort applies to the unit shown (counts, or % of team) | operator |
 | Acting in another league | The availability sheet (A) and the expanded row (B) carry each league's own Add/Trade, as drawn. Acting in a league other than the focused one **switches the focused league first** (the MatchesScreen precedent), then pins or opens the claim sheet. | lead, from the approved mock |
 | Platforms | **Mobile only** (operator, 2026-10-10). Web waived for v1. | operator |
@@ -47,7 +48,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   |---|---|---|---|
   | `usage_trends_action` (INTENT) | `league_id, action (trade\|add\|rerank), player_id, position, metric, signal, focus_status, ownership, view` | Trade, Add or Re-rank tapped (row, availability sheet, or expanded table row) | mobile |
   | `usage_trends_availability_opened` (non-intent) | `league_id, player_id, n_leagues, n_free_agent, view` | Availability sheet opened / table row expanded | mobile |
-  | `usage_trends_view_changed` (non-intent) | `league_id, metric, ownership, view, sort` | View pill, metric, ownership or a Version B column sort changed | mobile |
+  | `usage_trends_view_changed` (non-intent) | `league_id, metric, ownership, view, sort, weeks` | View pill, metric, ownership, week selection or a Version B column sort changed | mobile |
 
   Screen opens are the auto-emitted `screen_viewed {screen: 'UsageTrends'}`. Entry source is its `prev_screen` (`Home` vs `FreeAgents`).
 
@@ -57,7 +58,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   - Written only by `usage_trends_refresh.py`. Raw counts per completed week; no user data.
   - Created by `create_all`, so there is no migration.
   - Documented in the [data dictionary](../../data-dictionary.md#usage-trends-weekly-store); [spec](weekly-update.md).
-  - The route reads the store when the whole window is loaded, else fetches live.
+  - The route reads each week from the store when it's there, else fetches that week live.
 - New/changed feature flags: **`usage_trends.enabled`**, default **false**.
   - Registered in `config/features.json`, `backend/feature_flags.py` `FLAG_KEYS`, the `release` / `onboarding-v2` / `profiles-on` flag fixtures (`test_seed_ui_test_db` requires `onboarding-v2` to carry every release key) and `docs/config-reference.md`.
   - Gates `GET /api/usage-trends` (404 when off) and both mobile entry points.
@@ -138,6 +139,12 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 
      A missed week reads OUT, a bye reads BYE, and the newest jump is pink. Tot equals the sum of the played weeks. **Filters → % of team** switches the cells to % and the last column to **Avg**.
   6b. In **Raw stats**, tap **W4**. Rows reorder biggest-first, the header turns ice with a down arrow, and OUT/BYE rows sit at the bottom. Tap again: smallest-first (up arrow), with OUT/BYE still at the bottom. Tap a third time: back to the default order (newest jumps first). **Tot** sorts by the total. **Player** sorts A–Z, then Z–A. Under **% of team** the same taps sort by %. **Simple** view never reorders.
+  6c. **Filters → Weeks → All season**, then Done. The sub-header reads "Weeks 1–N".
+     - Simple view: the cards' bars get thinner, labelled only with the first and last week.
+     - Raw stats: the table has one column per week and swipes sideways; the header moves with the rows, and the Tot column covers all weeks.
+     - Now pick just weeks 2 and 4: the sub-header reads "Weeks 2, 4" and every number covers only those two.
+     - Try to un-tick the last remaining week: it stays ticked.
+     - **Last 4** restores the default.
   7. Tap a row's **chevron** (or the row): it expands to list your leagues with each league's Add/Trade. The chevron points down, and tapping again collapses it.
   8. Tap the **podium** on a WR: Quick Set opens on **WR**. Go back, then tap the podium on a TE: Quick Set switches to **TE** (it was already open). The **Re-rank** button in Simple view does the same.
   9. The **Free agents** filter in either view shows only Add actions. **Rostered** shows Trade or Yours. The Free Agents screen's **See usage trends** link opens pre-filtered to Free agents.
@@ -145,7 +152,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   11. Leave the screen in **Raw stats**, open it again: it reopens on Raw stats (remembered until the app restarts).
   12. Kill switch: `usage_trends.enabled` false + relaunch twice. No Home row, no Free Agents link, and `GET /api/usage-trends` returns 404.
 - [x] **WAIVED — web:** operator chose mobile only for v1.
-- `testID`s added: `home.option.trends`, `free-agents.usage-trends-link`, `usage-trends.screen`, `usage-trends.back-btn`, `usage-trends.info`, `usage-trends.view.<simple|stats>`, `usage-trends.metric.<snaps|carries|targets>`, `usage-trends.ownership.<all|rostered|free_agents>`, `usage-trends.filters`, `usage-trends.sort.<player|w1…w4|total>`, `usage-trends.filters-sheet`, `usage-trends.position.<all|rb|wr|te>`, `usage-trends.unit.<share|count>`, `usage-trends.filters-done`, `usage-trends.list`, `usage-trends.row.<id>`, `usage-trends.action.<id>`, `usage-trends.yours.<id>`, `usage-trends.availability.<id>`, `usage-trends.rerank.<id>`, `usage-trends.expand.<id>`, `usage-trends.availability-sheet`, `usage-trends.availability-close`, `usage-trends.league.<id>.<league>`, `usage-trends.league-action.<id>.<league>`, `usage-trends.unavailable`, `usage-trends.no-league`, `usage-trends.pick-league`, `usage-trends.error`, `usage-trends.off-season`, `usage-trends.empty`. None is referenced by a retained Maestro flow, so testid-lint needs no allowlist entry
+- `testID`s added: `home.option.trends`, `free-agents.usage-trends-link`, `usage-trends.screen`, `usage-trends.back-btn`, `usage-trends.info`, `usage-trends.view.<simple|stats>`, `usage-trends.metric.<snaps|carries|targets>`, `usage-trends.ownership.<all|rostered|free_agents>`, `usage-trends.filters`, `usage-trends.sort.<player|w<n>|total>`, `usage-trends.weeks.<last4|last2|season>`, `usage-trends.week.<n>`, `usage-trends.weeks-label`, `usage-trends.table-scroll`, `usage-trends.filters-sheet`, `usage-trends.position.<all|rb|wr|te>`, `usage-trends.unit.<share|count>`, `usage-trends.filters-done`, `usage-trends.list`, `usage-trends.row.<id>`, `usage-trends.action.<id>`, `usage-trends.yours.<id>`, `usage-trends.availability.<id>`, `usage-trends.rerank.<id>`, `usage-trends.expand.<id>`, `usage-trends.availability-sheet`, `usage-trends.availability-close`, `usage-trends.league.<id>.<league>`, `usage-trends.league-action.<id>.<league>`, `usage-trends.unavailable`, `usage-trends.no-league`, `usage-trends.pick-league`, `usage-trends.error`, `usage-trends.off-season`, `usage-trends.empty`. None is referenced by a retained Maestro flow, so testid-lint needs no allowlist entry
 
 ## 4. Docs scope
 

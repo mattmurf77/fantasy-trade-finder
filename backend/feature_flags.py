@@ -335,7 +335,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # /api/feature-flags like every other key.
     "nav.home_tab",
     # Usage Trends (2026-10-10 operator ask, docs/plans/usage-trends/scope.md) —
-    # in-season RB/WR/TE snaps / carries / targets over the last four completed
+    # in-season RB/WR/TE snaps / carries / targets over user-picked completed
     # weeks with team share and spikes, joined to the caller's league rosters.
     # Gates GET /api/usage-trends (404 when off) and every mobile entry point
     # (Home row, Free Agents link). Ships false.

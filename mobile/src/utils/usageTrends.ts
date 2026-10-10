@@ -273,3 +273,38 @@ export function sortLabel(sort: StatsSort | null, weeks: number[]): string {
   const k = typeof sort.key === 'number' ? `w${weeks[sort.key] ?? sort.key}` : sort.key;
   return `${k}_${sort.dir}`;
 }
+
+/** "Week 4", "Weeks 1–4", "Weeks 1–3, 5, 7–8" — runs collapsed. */
+export function weeksLabel(weeks: number[]): string {
+  if (!weeks.length) return '';
+  const sorted = [...new Set(weeks)].sort((a, b) => a - b);
+  const runs: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (const w of [...sorted.slice(1), Infinity]) {
+    if (w === prev + 1) { prev = w; continue; }
+    runs.push(start === prev ? String(start) : `${start}–${prev}`);
+    start = w; prev = w;
+  }
+  return `${sorted.length === 1 ? 'Week' : 'Weeks'} ${runs.join(', ')}`;
+}
+
+/** The week-picker presets. null = the server default (last four). */
+export function presetWeeks(preset: 'last4' | 'last2' | 'season', available: number[]): number[] | null {
+  if (preset === 'last4') return null;
+  if (preset === 'last2') return available.slice(-2);
+  return [...available];
+}
+
+/** Toggle one week in a selection; the last selected week cannot be removed. */
+export function toggleWeek(selection: number[], week: number): number[] {
+  if (selection.includes(week)) {
+    return selection.length > 1 ? selection.filter((w) => w !== week) : selection;
+  }
+  return [...selection, week].sort((a, b) => a - b);
+}
+
+/** Analytics label: "default" or "2,6". */
+export function weeksParam(selection: number[] | null): string {
+  return selection && selection.length ? selection.join(',') : 'default';
+}

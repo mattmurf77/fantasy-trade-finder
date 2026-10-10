@@ -13,8 +13,8 @@ Spec: docs/plans/usage-trends/weekly-update.md. Covers:
     writes nothing; `weeks` + `force` re-fetch on demand;
   * the store round-trips: compute over stored weeks == compute over the live
     feed (real 2026 NYJ+PHI capture);
-  * the route serves a fully stored window without calling Sleeper's stats
-    feed and falls back to live when any window week is missing;
+  * the route reads each stored week without calling Sleeper's stats feed
+    and fetches live only the weeks the store lacks;
   * the cron route (auth, body validation) and the daily-tick step (flag off
     = disabled, so the tick payload is unchanged); single-flight.
 """
@@ -168,17 +168,20 @@ def test_stored_weeks_compute_exactly_like_the_live_feed(mem_db):
 
 # ── route + cron wiring ─────────────────────────────────────────────────────
 
-def test_route_window_prefers_the_store_and_falls_back_live(mem_db):
-    ur.refresh_usage_weeks(Feed(), now=T0)
+def test_route_weeks_come_from_the_store_and_only_missing_weeks_go_live(mem_db):
+    ur.refresh_usage_weeks(Feed(), now=T0)            # stores weeks 1-4
+    server._usage_cache.clear()
     def no_stats(url, timeout=15):
-        raise AssertionError(f"stats fetched despite a full store: {url}")
+        raise AssertionError(f"stats fetched for a stored week: {url}")
     with patch.object(server, "_sleeper_get", no_stats):
-        stored = server._usage_window(2026, [1, 2, 3, 4])
-    assert sorted(stored) == [1, 2, 3, 4]
-    feed = Feed()
+        stored = [server._usage_week(2026, w) for w in (1, 2, 3, 4)]
+    assert all(teams and players for teams, players in stored)
+    feed = Feed(week=6)
     with patch.object(server, "_sleeper_get", lambda url, timeout=15: feed(url)):
-        live = server._usage_window(2026, [2, 3, 4, 5])   # week 5 not stored
-    assert sum("/stats/" in u for u in feed.calls) == 4    # the whole window, live
+        server._usage_week(2026, 4)                   # cached: no call
+        server._usage_week(2026, 5)                   # not stored: one live call
+    assert [u for u in feed.calls if "/stats/" in u] == [ut.stats_url(2026, 5)]
+    server._usage_cache.clear()
 
 
 @pytest.fixture()

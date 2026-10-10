@@ -14,7 +14,7 @@ the exchange is fair. Shared across generator arms; cheap assets cannot be
 summed to qualify. Explicit asset searches and genuine incoming offers are
 exceptions. See [configuration](config-reference.md#shared-recommendation-significance-default-off).
 
-**Usage Trends** — The in-season screen and `GET /api/usage-trends` (flag `usage_trends.enabled`) showing how much RBs, WRs and TEs are used: **snaps**, **carries** and **targets** over the last four completed NFL weeks, from Sleeper's weekly actual-stats feed. Distinct from **Trends** (the Rank stack's Elo risers/fallers, `/api/trends/*`). See [scope](plans/usage-trends/scope.md).
+**Usage Trends** — The in-season screen and `GET /api/usage-trends` (flag `usage_trends.enabled`) showing how much RBs, WRs and TEs are used: **snaps**, **carries** and **targets** over the completed NFL weeks the user picks (default: the last four), from Sleeper's weekly actual-stats feed. Distinct from **Trends** (the Rank stack's Elo risers/fallers, `/api/trends/*`). See [scope](plans/usage-trends/scope.md).
 
 **Team share** (Usage Trends) — A player's count as a % of his team's that week: snaps ÷ the team's offensive snaps (`tm_off_snp`); carries and targets ÷ the team's total over every QB/RB/WR/TE/FB row (QB scrambles count). The 4-week **average share** is played-weeks total ÷ team total over the same weeks — byes and missed games are left out of both.
 

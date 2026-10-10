@@ -29,6 +29,12 @@ const CHEV_W = 32;
 // 32pt visual box, 40×44 touch target inside its column.
 const ICON_SLOP = { top: 6, bottom: 6, left: 4, right: 4 };
 
+/** Table width for a week count: four weeks fit a phone exactly; each extra
+ *  week adds one column, and the host scrolls the table sideways. */
+export function statsTableWidth(screenWidth: number, weekCount: number): number {
+  return screenWidth + Math.max(0, weekCount - 4) * WEEK_W;
+}
+
 const POS_COLOR: Record<string, string> = { RB: position.rb, WR: position.wr, TE: position.te };
 
 export function UsageStatsHeader({

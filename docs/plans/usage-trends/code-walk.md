@@ -52,3 +52,12 @@
 1. `setView(v)` and `lastView = v` (`:426-427`) swap the `renderItem` branch: `UsageTrendCard` vs `UsageStatsRow`.
 2. The swap also changes the fixed header (`UsageStatsHeader` appears only under `stats`) and the per-view unit: A defaults to % of team, B to counts.
 3. Version B's chevron (`UsageStatsTable.tsx:162`) and its row body both call `onToggle` (`UsageTrendsScreen.tsx:331`), which expands `UsageLeagueList` inline and reports `usage_trends_availability_opened`.
+
+## 7. The user's week selection reaches every number
+
+1. Filters → Weeks keeps a draft (`toggleWeek`, `presetWeeks`). On close it commits `setSelectedWeeks(nextWeeks)`. A pick equal to the last four is normalized back to `null`, the default.
+2. The query key includes `weeksParam(selectedWeeks)`, and `getUsageTrends(..., selectedWeeks)` sends `&weeks=2,6`. `keepPreviousData` holds the old list on screen while it loads.
+3. Server side, `parse_weeks_param` validates against `completed_weeks` (400 `invalid_weeks` otherwise; the client resets to the default on that error).
+4. Each week resolves through `_usage_week` (store, else a live fetch of that week). `compute_normalized` runs over exactly those weeks, so averages, totals, signals and `rank` cover the pick only.
+5. The response echoes `weeks` and `available_weeks`. The sub-header renders `weeksLabel(weeks)`, Version A sizes its bars with `barGeometry(n)`, and Version B widens the table with `statsTableWidth` inside a horizontal `ScrollView`.
+
