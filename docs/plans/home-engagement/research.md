@@ -292,3 +292,15 @@ Findings that constrain D (detail in the mockup):
 - **"Team outlook" is the contend/rebuild setting.** The app's own sheet is headed "What's your team outlook?" (`OutlookSheet.tsx:101`). The playoff band is "Season outlook".
 - **Request cost.** The standings row needs `/api/league/outlook`, a 10,000-simulation run per request (`database.py:3037`), Sleeper only. That takes Home's mount from 1 new request (A) to 3.
 
+**Round 3 (operator rulings, same day).**
+- **Buy/Sell banner:** decided UI.
+- **Sell lands at the end of the list:** the shortest teams.
+- **Home's Standings row shows current standings only.** Projections move to a new Standings page with a Current | Projected control.
+
+What that needed, verified in code:
+- **Sleeper.** Current standings cost nothing. Each roster's `settings.{wins, losses, ties, fpts}` arrive through the existing rosters proxy (`backend/server.py:21843-21845`), already seeded into the query cache at session init (`mobile/src/state/queryClient.ts:55-66`). Sleeper exposes no standings rank, so the order is computed (win %, then points for) and labelled.
+- **ESPN.** The importer already parses the record (`espn_service.py:445-513`), but nothing persists or serves it.
+- **MFL.** No standings are read at all.
+- **Backend gap (ESPN/MFL only):** a small `GET /api/league/standings`.
+- **Request count.** Home's mount drops from three new requests (one a 10,000-simulation outlook run) to two, neither heavy. Outlook now runs only on the Standings page's Projected tab.
+
