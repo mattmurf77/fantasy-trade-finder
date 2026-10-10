@@ -33,6 +33,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | Other signals | `return` (back after missed games), `new` (first game of the window with real volume), `out` (missed the latest week), `rising` / `falling` (share slope of at least 5 pp a week over 3 or more games). | lead |
 | Naming | **"Usage Trends"**, everywhere (route `UsageTrends`, `/api/usage-trends`, `usage_trends.*`). "Trends" is already the Rank stack's Elo risers/fallers screen (`TrendsScreen`, `/api/trends/*`). | lead |
 | Entry points | Home tab row, plus a link on the Free Agents screen that opens pre-filtered to free agents (operator, 2026-10-10). | operator |
+| Sorting | **Version A is never re-sorted.** The server's order, newest jumps first, is the point of the simple view. **Version B columns are all sortable** (operator, 2026-10-10: "make sure the columns are sortable"): Player, each week and Total/Avg. A tap sorts biggest-first (A–Z for Player), a second tap reverses, a third restores the server order. A missed game or bye sorts last in both directions, and ties keep the server order. The sort applies to the unit shown (counts, or % of team) | operator |
 | Acting in another league | The availability sheet (A) and the expanded row (B) carry each league's own Add/Trade, as drawn. Acting in a league other than the focused one **switches the focused league first** (the MatchesScreen precedent), then pins or opens the claim sheet. | lead, from the approved mock |
 | Platforms | **Mobile only** (operator, 2026-10-10). Web waived for v1. | operator |
 | Ship posture | **Merge + deploy, flag off** (operator, 2026-10-10), **but not before the home-engagement redesign (`design/home-engagement`) is live** (operator, same day). The Home entry is re-homed onto that redesign at rebase. | operator |
@@ -46,7 +47,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   |---|---|---|---|
   | `usage_trends_action` (INTENT) | `league_id, action (trade\|add\|rerank), player_id, position, metric, signal, focus_status, ownership, view` | Trade, Add or Re-rank tapped (row, availability sheet, or expanded table row) | mobile |
   | `usage_trends_availability_opened` (non-intent) | `league_id, player_id, n_leagues, n_free_agent, view` | Availability sheet opened / table row expanded | mobile |
-  | `usage_trends_view_changed` (non-intent) | `league_id, metric, ownership, view` | View pill, metric or ownership changed | mobile |
+  | `usage_trends_view_changed` (non-intent) | `league_id, metric, ownership, view, sort` | View pill, metric, ownership or a Version B column sort changed | mobile |
 
   Screen opens are the auto-emitted `screen_viewed {screen: 'UsageTrends'}`. Entry source is its `prev_screen` (`Home` vs `FreeAgents`).
 
@@ -136,6 +137,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
      - then the podium and a chevron.
 
      A missed week reads OUT, a bye reads BYE, and the newest jump is pink. Tot equals the sum of the played weeks. **Filters → % of team** switches the cells to % and the last column to **Avg**.
+  6b. In **Raw stats**, tap **W4**. Rows reorder biggest-first, the header turns ice with a down arrow, and OUT/BYE rows sit at the bottom. Tap again: smallest-first (up arrow), with OUT/BYE still at the bottom. Tap a third time: back to the default order (newest jumps first). **Tot** sorts by the total. **Player** sorts A–Z, then Z–A. Under **% of team** the same taps sort by %. **Simple** view never reorders.
   7. Tap a row's **chevron** (or the row): it expands to list your leagues with each league's Add/Trade. The chevron points down, and tapping again collapses it.
   8. Tap the **podium** on a WR: Quick Set opens on **WR**. Go back, then tap the podium on a TE: Quick Set switches to **TE** (it was already open). The **Re-rank** button in Simple view does the same.
   9. The **Free agents** filter in either view shows only Add actions. **Rostered** shows Trade or Yours. The Free Agents screen's **See usage trends** link opens pre-filtered to Free agents.
@@ -143,7 +145,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   11. Leave the screen in **Raw stats**, open it again: it reopens on Raw stats (remembered until the app restarts).
   12. Kill switch: `usage_trends.enabled` false + relaunch twice. No Home row, no Free Agents link, and `GET /api/usage-trends` returns 404.
 - [x] **WAIVED — web:** operator chose mobile only for v1.
-- `testID`s added: `home.option.trends`, `free-agents.usage-trends-link`, `usage-trends.screen`, `usage-trends.back-btn`, `usage-trends.info`, `usage-trends.view.<simple|stats>`, `usage-trends.metric.<snaps|carries|targets>`, `usage-trends.ownership.<all|rostered|free_agents>`, `usage-trends.filters`, `usage-trends.filters-sheet`, `usage-trends.position.<all|rb|wr|te>`, `usage-trends.unit.<share|count>`, `usage-trends.filters-done`, `usage-trends.list`, `usage-trends.row.<id>`, `usage-trends.action.<id>`, `usage-trends.yours.<id>`, `usage-trends.availability.<id>`, `usage-trends.rerank.<id>`, `usage-trends.expand.<id>`, `usage-trends.availability-sheet`, `usage-trends.availability-close`, `usage-trends.league.<id>.<league>`, `usage-trends.league-action.<id>.<league>`, `usage-trends.unavailable`, `usage-trends.no-league`, `usage-trends.pick-league`, `usage-trends.error`, `usage-trends.off-season`, `usage-trends.empty`. None is referenced by a retained Maestro flow, so testid-lint needs no allowlist entry
+- `testID`s added: `home.option.trends`, `free-agents.usage-trends-link`, `usage-trends.screen`, `usage-trends.back-btn`, `usage-trends.info`, `usage-trends.view.<simple|stats>`, `usage-trends.metric.<snaps|carries|targets>`, `usage-trends.ownership.<all|rostered|free_agents>`, `usage-trends.filters`, `usage-trends.sort.<player|w1…w4|total>`, `usage-trends.filters-sheet`, `usage-trends.position.<all|rb|wr|te>`, `usage-trends.unit.<share|count>`, `usage-trends.filters-done`, `usage-trends.list`, `usage-trends.row.<id>`, `usage-trends.action.<id>`, `usage-trends.yours.<id>`, `usage-trends.availability.<id>`, `usage-trends.rerank.<id>`, `usage-trends.expand.<id>`, `usage-trends.availability-sheet`, `usage-trends.availability-close`, `usage-trends.league.<id>.<league>`, `usage-trends.league-action.<id>.<league>`, `usage-trends.unavailable`, `usage-trends.no-league`, `usage-trends.pick-league`, `usage-trends.error`, `usage-trends.off-season`, `usage-trends.empty`. None is referenced by a retained Maestro flow, so testid-lint needs no allowlist entry
 
 ## 4. Docs scope
 

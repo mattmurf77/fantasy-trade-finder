@@ -216,3 +216,60 @@ export function leagueFormatLine(lg: { total_rosters?: number; settings_type?: n
   const line = [size, kind].filter(Boolean).join(' ');
   return line || null;
 }
+
+/** Version B column sort (operator, 2026-10-10: "make sure the columns are
+ *  sortable"). Version A never sorts; it keeps the server's order. `key` is
+ *  'player', 'total' (the right-hand column) or a week INDEX into `weeks`. */
+export interface StatsSort {
+  key: 'player' | 'total' | number;
+  dir: 'asc' | 'desc';
+}
+
+/** Header tap: a new column starts biggest-first (A–Z for Player), a second
+ *  tap flips it, a third returns to the default (server) order. */
+export function nextSort(current: StatsSort | null, key: StatsSort['key']): StatsSort | null {
+  const first: StatsSort['dir'] = key === 'player' ? 'asc' : 'desc';
+  if (!current || current.key !== key) return { key, dir: first };
+  if (current.dir === first) return { key, dir: first === 'asc' ? 'desc' : 'asc' };
+  return null;
+}
+
+/** The value a sort compares; null (a missed game, a bye) always sorts last. */
+function sortValue(p: UsagePlayer, metric: UsageMetric, unit: UsageUnit, key: StatsSort['key']): number | null {
+  const b = p[metric];
+  if (key === 'total') {
+    if (unit === 'share') return b.avg_share;
+    return b.counts.reduce<number>((t, c) => t + (c ?? 0), 0);
+  }
+  if (typeof key !== 'number' || p.status[key] !== 'played') return null;
+  return unit === 'count' ? b.counts[key] : b.shares[key];
+}
+
+/** `rows` (already in server order) re-ordered by a column; ties keep the
+ *  server order. null = the server order unchanged. */
+export function sortStatsRows(
+  rows: UsagePlayer[], metric: UsageMetric, unit: UsageUnit, sort: StatsSort | null,
+): UsagePlayer[] {
+  if (!sort) return rows;
+  const sign = sort.dir === 'asc' ? 1 : -1;
+  return rows
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => {
+      if (sort.key === 'player') {
+        const c = a.p.name.localeCompare(b.p.name);
+        return c !== 0 ? sign * c : a.i - b.i;
+      }
+      const va = sortValue(a.p, metric, unit, sort.key);
+      const vb = sortValue(b.p, metric, unit, sort.key);
+      if (va == null || vb == null) return va == null && vb == null ? a.i - b.i : va == null ? 1 : -1;
+      return va !== vb ? sign * (va - vb) : a.i - b.i;
+    })
+    .map(({ p }) => p);
+}
+
+/** Analytics label for the active sort, e.g. "w4_desc", "total_asc", "default". */
+export function sortLabel(sort: StatsSort | null, weeks: number[]): string {
+  if (!sort) return 'default';
+  const k = typeof sort.key === 'number' ? `w${weeks[sort.key] ?? sort.key}` : sort.key;
+  return `${k}_${sort.dir}`;
+}

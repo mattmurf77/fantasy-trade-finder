@@ -120,6 +120,39 @@ const players = [P('a', 'RB', [3, 1, 2]), P('b', 'WR', [1, 3, 3]), P('c', 'TE', 
   assert(U.leagueFormatLine({ total_rosters: 12, settings_type: 2 }) === '12-Team Dynasty'
     && U.leagueFormatLine({}) === null, '1u. league format line from what the league list carries');
 }
+{
+  // Version B column sort (operator, 2026-10-10).
+  const row = (id, name, counts, status, shares) => ({
+    player_id: id, name, position: 'WR', team: 'PHI', status,
+    snaps: blk({ counts, shares, avg_share: shares.filter((x) => x != null).reduce((a, b) => a + b, 0) / 2 }),
+    carries: blk(), targets: blk(),
+  });
+  const P4 = ['played', 'played', 'played', 'played'];
+  const rows = [
+    row('a', 'Zed Able', [10, 10, 10, 30], P4, [10, 10, 10, 50]),
+    row('b', 'Amy Best', [10, 10, 10, 50], P4, [10, 10, 10, 40]),
+    row('c', 'Cal Out', [10, 10, 10, null], ['played', 'played', 'played', 'out'], [10, 10, 10, null]),
+    row('d', 'Dee Tie', [10, 10, 10, 30], P4, [10, 10, 10, 30]),
+  ];
+  const ids = (xs) => xs.map((p) => p.player_id).join('');
+  assert(ids(U.sortStatsRows(rows, 'snaps', 'count', null)) === 'abcd', '1v. no sort = server order untouched');
+  assert(ids(U.sortStatsRows(rows, 'snaps', 'count', { key: 3, dir: 'desc' })) === 'badc',
+    '1w. week column, biggest first; ties keep server order; OUT sorts last');
+  assert(ids(U.sortStatsRows(rows, 'snaps', 'count', { key: 3, dir: 'asc' })) === 'adbc',
+    '1x. reversed — and OUT still sorts last');
+  assert(ids(U.sortStatsRows(rows, 'snaps', 'share', { key: 3, dir: 'desc' })) === 'abdc',
+    '1y. the % view sorts by % of team, not counts');
+  assert(ids(U.sortStatsRows(rows, 'snaps', 'count', { key: 'total', dir: 'desc' })) === 'badc'
+    && ids(U.sortStatsRows(rows, 'snaps', 'count', { key: 'player', dir: 'asc' })) === 'bcda',
+    '1z. Total (sum of played weeks) and Player (A–Z) sort');
+  const a = U.nextSort(null, 3), b = U.nextSort(a, 3), c = U.nextSort(b, 3);
+  assert(eq(a, { key: 3, dir: 'desc' }) && eq(b, { key: 3, dir: 'asc' }) && c === null
+    && eq(U.nextSort(null, 'player'), { key: 'player', dir: 'asc' })
+    && eq(U.nextSort(a, 'total'), { key: 'total', dir: 'desc' }),
+    '1aa. header taps: biggest first (A–Z for Player) → reversed → default');
+  assert(U.sortLabel(null, [1, 2, 3, 4]) === 'default' && U.sortLabel({ key: 3, dir: 'desc' }, [1, 2, 3, 4]) === 'w4_desc',
+    '1ab. analytics sort label');
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 // 2 — wiring.
@@ -143,7 +176,16 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
   assert((screen.match(/<FeedbackFAB/g) || []).length === 1
     && /<FeedbackFAB activeScreen="UsageTrends" aboveTabBar=\{false\} \/>/.test(screen),
     '2d. exactly one FeedbackFAB, root-stack form (#188)');
-  assert(!/\.sort\(/.test(screen), '2e. the screen never sorts — order is the server rank via visiblePlayers');
+  assert(!/\.sort\(/.test(screen), '2e. the screen never sorts itself — server rank via visiblePlayers, column sort via the tested helper');
+  {
+    const simpleBranch = screen.slice(screen.indexOf("const items: ListItem[] = useMemo"), screen.indexOf('const renderItem'));
+    assert(/if \(view !== 'simple'\) \{\s*return sortStatsRows\(list, metric, unit, statsSort\)/.test(simpleBranch)
+      && (screen.match(/sortStatsRows\(/g) || []).length === 1,
+      '2e2. only Version B applies the column sort; Version A keeps the server order');
+    assert(/testID=\{`usage-trends\.sort\.\$\{testKey\}`\}/.test(table) && /onSort\(key\)/.test(table)
+      && /sort=\{statsSort\}/.test(screen) && /nextSort\(statsSort, key\)/.test(screen),
+      '2e3. every Version B column header is a sort button');
+  }
   assert(/useFlag\('usage_trends\.enabled'\)/.test(screen) && /enabled: enabled && !!focusId/.test(screen),
     '2f. no request while the flag is off or there is no league');
   assert(/setSide\('receive', \[\{ id: p\.player_id/.test(screen) && /setHandoff\(\{/.test(screen)

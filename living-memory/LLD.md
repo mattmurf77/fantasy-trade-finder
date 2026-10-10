@@ -870,7 +870,9 @@ Two seams worth naming. **Leaf rules:** `blind_grading.py` imports `database` at
 - **Status is a lookup, not a field.** The payload ships per-league `rosters {player_id: owner_key}` plus `me`, not a status per player × league. That keeps a 350-player × N-league answer small.
   - Clients derive mine / rostered / free agent / unknown with one helper (`mobile/src/utils/usageTrends.statusIn`).
   - Ownerless Sleeper rosters key as `roster:<id>` so their players never read as free agents. Keep that when adding a client.
-- **The server owns order.** Each metric carries `rank`, and clients filter, then order by it. A client sort is a regression, pinned by `check-usage-trends.js` §2e.
+- **The server owns the default order.** Each metric carries `rank`, and clients filter, then order by it.
+  - The one exception is Version B's user-chosen column sort, operator 2026-10-10. It is a pure tested helper (`utils/usageTrends.sortStatsRows`) applied only in the stats view, and a third tap returns to the server order.
+  - Any other client sort, or any sort in Version A, is a regression (`check-usage-trends.js` §2e–2e2).
 - **One writer for the weekly store.** `usage_week_loads` / `usage_team_weeks` / `usage_player_weeks` hold raw counts only, written by `usage_trends_refresh.refresh_usage_weeks` alone. Its three callers are the daily tick (flag on), `POST /api/cron/usage-trends-refresh` and `scripts/refresh_usage_trends.py`.
   - A week is replaced whole and trusted only once its load row exists.
   - The route uses the store only when the WHOLE window is loaded. It never mixes stored and live weeks.

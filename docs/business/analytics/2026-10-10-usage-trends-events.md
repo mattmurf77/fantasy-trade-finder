@@ -16,7 +16,7 @@
 |---|---|---|---|
 | `usage_trends_action` | **INTENT** | `league_id` (the league acted in), `action` (`trade`\|`add`\|`rerank`), `player_id`, `position`, `metric` (`snaps`\|`carries`\|`targets`), `signal` (`spike`\|`return`\|`new`\|`out`\|`rising`\|`falling`\|`none`), `focus_status` (`mine`\|`rostered`\|`free_agent`\|`unknown`, in that league), `ownership` (`all`\|`rostered`\|`free_agents`), `view` (`simple`\|`stats`) | A Trade, Add or Re-rank control is tapped (row, availability sheet or expanded table row), **before** navigation |
 | `usage_trends_availability_opened` | non-intent | `league_id`, `player_id`, `n_leagues`, `n_free_agent`, `view` | The availability sheet opens (Version A) or a table row expands (Version B) |
-| `usage_trends_view_changed` | non-intent | `league_id`, `metric`, `ownership`, `view` | The view pill, metric or ownership control changes. The state after the change is reported |
+| `usage_trends_view_changed` | non-intent | `league_id`, `metric`, `ownership`, `view`, `sort` (`default` \| `player_asc` \| `w4_desc` \| `total_asc` …, Version B's column sort) | The view pill, metric, ownership or a Version B column sort changes. The state after the change is reported |
 
 **Why the classes:** `usage_trends_action` is a deliberate move on a player, the outcome this surface exists to produce. It is the peer of `find_trades_tapped`. The other two read or reshape a payload already in memory: the `tab_selected` / `receipts_window_changed` class. They are listed in `analytics_queries.NON_INTENT_EVENTS` in the same commit as the emitters, so a browse-only visit adds no user-day beyond the existing `screen_viewed` handling.
 

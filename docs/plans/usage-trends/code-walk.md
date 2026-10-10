@@ -37,11 +37,15 @@
 2. On a fresh mount, `QuickSetTiersScreen`'s `useState` initializer reads `position`.
 3. On an already-mounted walk, the new effect (`QuickSetTiersScreen.tsx:512-516`) fires on the changed `positionSeq` and calls the existing `onPosition`. A repeat of the same position still lands, because the seq changes.
 
-## 5. The list is the server's order, in both views
+## 5. The list is the server's order; Version B can re-sort by column
 
 1. `visiblePlayers(data.players, focus, metric, ownership, positionFilter)` (`UsageTrendsScreen.tsx:119`) filters, then sorts by the server's per-metric `rank` (`usageTrends.ts:50`).
 2. The screen contains no other `.sort(`, and the guard pins that.
 3. Version A splits the list at `newsCount`: the newest-week jumps come first, under "Biggest jumps last week".
+4. **Version B only.** The `items` memo's stats branch is `sortStatsRows(list, metric, unit, statsSort)`. With `statsSort` null it returns `list` untouched.
+   - Header taps go through `nextSort`: first → reversed → null.
+   - Nulls (out/bye) sort last both ways, and ties keep the server order. Both are executed by `check-usage-trends.js` §1v–1ab.
+   - §2e2 pins that this is the only `sortStatsRows` call, so Version A cannot be re-sorted.
 
 ## 6. One pill flips the two views
 

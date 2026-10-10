@@ -31,11 +31,15 @@ import { readErrorCopy } from '../utils/verification';
 import {
   leagueFormatLine,
   newsCount,
+  nextSort,
   ownerName,
+  sortLabel,
+  sortStatsRows,
   statusIn,
   visiblePlayers,
   type OwnershipFilter,
   type PositionFilter,
+  type StatsSort,
   type UsageUnit,
   type UsageView,
 } from '../utils/usageTrends';
@@ -84,6 +88,8 @@ export default function UsageTrendsScreen() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sheetPlayer, setSheetPlayer] = useState<UsagePlayer | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Version B only: the user's column sort (null = server order).
+  const [statsSort, setStatsSort] = useState<StatsSort | null>(null);
   const [claim, setClaim] = useState<{ target: ClaimTarget; leagueId: string } | null>(null);
 
   // The Free Agents link pushes `{ownership:'free_agents'}`; honour it on a
@@ -146,15 +152,17 @@ export default function UsageTrendsScreen() {
   }, [navigation]);
 
   const reportView = useCallback(
-    (next: { view?: UsageView; metric?: UsageMetric; ownership?: OwnershipFilter }) => {
+    (next: { view?: UsageView; metric?: UsageMetric; ownership?: OwnershipFilter;
+             sort?: StatsSort | null }) => {
       track('usage_trends_view_changed', {
         league_id: focusId,
         metric: next.metric ?? metric,
         ownership: next.ownership ?? ownership,
         view: next.view ?? view,
+        sort: sortLabel(next.sort !== undefined ? next.sort : statsSort, weeks),
       }, 'UsageTrends');
     },
-    [focusId, metric, ownership, view],
+    [focusId, metric, ownership, view, statsSort, weeks],
   );
 
   const leagueRowsFor = useCallback(
@@ -266,7 +274,10 @@ export default function UsageTrendsScreen() {
   };
 
   const items: ListItem[] = useMemo(() => {
-    if (view !== 'simple') return list.map((p) => ({ kind: 'player', key: p.player_id, player: p }));
+    if (view !== 'simple') {
+      return sortStatsRows(list, metric, unit, statsSort)
+        .map((p) => ({ kind: 'player' as const, key: p.player_id, player: p }));
+    }
     const n = newsCount(list, metric, latest);
     const out: ListItem[] = [];
     if (n) {
@@ -284,7 +295,7 @@ export default function UsageTrendsScreen() {
       out.push(...list.slice(n).map((p) => ({ kind: 'player' as const, key: p.player_id, player: p })));
     }
     return out;
-  }, [view, list, metric, latest]);
+  }, [view, list, metric, latest, unit, statsSort]);
 
   const renderItem = ({ item }: { item: ListItem }) => {
     if (item.kind === 'section') {
@@ -501,7 +512,18 @@ export default function UsageTrendsScreen() {
               </Text>
             </Pressable>
           </View>
-          {view === 'stats' ? <UsageStatsHeader weeks={weeks} unit={unit} /> : null}
+          {view === 'stats' ? (
+            <UsageStatsHeader
+              weeks={weeks}
+              unit={unit}
+              sort={statsSort}
+              onSort={(key) => {
+                const next = nextSort(statsSort, key);
+                setStatsSort(next);
+                reportView({ sort: next });
+              }}
+            />
+          ) : null}
         </View>
       ) : null}
 

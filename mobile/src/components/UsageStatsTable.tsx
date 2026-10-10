@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 
 import { Icon, Text } from './chalkline';
 import { UsageLeagueList, type UsageLeagueRow } from './UsageLeagueList';
-import { chalk, flare, fonts, ink, position, radii, semantic, space, type } from '../theme/chalkline';
+import { chalk, flare, fonts, ice, ink, position, radii, semantic, space, type } from '../theme/chalkline';
 import type { UsageMetric, UsagePlayer } from '../api/usageTrends';
 import {
   isNewsWeek,
@@ -11,6 +11,7 @@ import {
   shortName,
   weekCell,
   type LeagueStatus,
+  type StatsSort,
   type UsageUnit,
 } from '../utils/usageTrends';
 
@@ -30,14 +31,44 @@ const ICON_SLOP = { top: 6, bottom: 6, left: 4, right: 4 };
 
 const POS_COLOR: Record<string, string> = { RB: position.rb, WR: position.wr, TE: position.te };
 
-export function UsageStatsHeader({ weeks, unit }: { weeks: number[]; unit: UsageUnit }) {
+export function UsageStatsHeader({
+  weeks,
+  unit,
+  sort,
+  onSort,
+}: {
+  weeks: number[];
+  unit: UsageUnit;
+  sort: StatsSort | null;
+  onSort: (key: StatsSort['key']) => void;
+}) {
+  // Every column sorts (operator, 2026-10-10). Tap: biggest first (A-Z for
+  // Player), tap again: reversed, a third tap: back to the default order.
+  const head = (key: StatsSort['key'], label: string, spoken: string, colStyle: object, testKey: string) => {
+    const active = sort?.key === key;
+    const dirWord = active ? (sort!.dir === 'asc' ? 'ascending' : 'descending') : 'not sorted';
+    return (
+      <Pressable
+        key={testKey}
+        testID={`usage-trends.sort.${testKey}`}
+        accessibilityRole="button"
+        accessibilityLabel={`Sort by ${spoken}, ${dirWord}`}
+        onPress={() => onSort(key)}
+        hitSlop={{ top: 8, bottom: 8 }}
+        style={[styles.headPress, colStyle, key === 'player' ? styles.headLeft : styles.headRight]}
+      >
+        <Text scale="dense" style={[styles.headCell, active && styles.headActive]}>{label}</Text>
+        {active ? (
+          <Icon name={sort!.dir === 'asc' ? 'chevron-up' : 'chevron-down'} size={10} color={ice.base} />
+        ) : null}
+      </Pressable>
+    );
+  };
   return (
-    <View style={styles.headerRow} accessibilityRole="header">
-      <Text scale="dense" style={[styles.headCell, styles.playerCol]}>Player</Text>
-      {weeks.map((w) => (
-        <Text key={w} scale="dense" style={[styles.headCell, styles.weekCol]}>W{w}</Text>
-      ))}
-      <Text scale="dense" style={[styles.headCell, styles.lastCol]}>{unit === 'share' ? 'Avg' : 'Tot'}</Text>
+    <View style={styles.headerRow}>
+      {head('player', 'Player', 'player name', styles.playerCol, 'player')}
+      {weeks.map((w, i) => head(i, `W${w}`, `week ${w}`, styles.weekCol, `w${w}`))}
+      {head('total', unit === 'share' ? 'Avg' : 'Tot', unit === 'share' ? 'average' : 'total', styles.lastCol, 'total')}
       <View style={{ width: ACT_W * 2 + CHEV_W }} />
     </View>
   );
@@ -174,14 +205,18 @@ export function UsageStatsRow({
 const styles = StyleSheet.create({
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'stretch',
+    minHeight: 36,
     paddingLeft: space.lg,
     paddingRight: space.sm,
-    paddingBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: ink.lineStrongA11y,
   },
   headCell: { ...type.label },
+  headActive: { color: ice.base },
+  headPress: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, paddingBottom: 6 },
+  headLeft: { justifyContent: 'flex-start' },
+  headRight: { justifyContent: 'flex-end' },
   playerCol: { flex: 1, minWidth: 0, paddingRight: space.xs },
   weekCol: { width: WEEK_W, textAlign: 'right' },
   lastCol: { width: LAST_W, textAlign: 'right' },
