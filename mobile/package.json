@@ -47,6 +47,7 @@
     "test:guide-script": "node tests/check-guide-script.js",
     "test:guide-spotlight-tracking": "node tests/check-guide-spotlight-tracking.js",
     "test:home-tab": "node tests/check-home-tab.js",
+    "test:usage-trends": "node tests/check-usage-trends.js",
     "test:inline-home": "node tests/check-inline-home.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",

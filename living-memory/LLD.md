@@ -49,6 +49,7 @@
 - [Exact source interest and durable pass state](#exact-source-interest-and-durable-pass-state)
 - [Value-core engine seams (2026-09-30, trade.value_core)](#value-core-engine-seams-2026-09-30-tradevalue_core)
 - [Blind grading: one neutral formatter, hidden arms, per-caller flag resolution (2026-10-02, grading.blind)](#blind-grading-one-neutral-formatter-hidden-arms-per-caller-flag-resolution-2026-10-02-gradingblind)
+- [Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)](#usage-trends-global-stats-cache-per-caller-roster-maps-server-order-2026-10-10-usage_trendsenabled)
 
 ---
 
@@ -855,3 +856,19 @@ Anchors (re-verified 2026-10-02, with the partner-board edit in `_run_value_core
 - **Tab presence is mount-once, like `draft.tab`.** `TabNav` reads `useFeatureFlags.getState().flags['grading.blind']` imperatively into `useState` at first mount — never `useFlag` — and renders the third slot as `showCalibrationTab ? Calibration : showDraftTab ? Draft : null`, so a mid-session flag revalidation cannot insert or remove a tab under the user's thumb and the bar never exceeds five. An overlay start or stop shows at the next launch; between a kill and that launch every call 404s and the screen renders "Calibration isn't turned on for this account". The Draft `<Tab.Screen>` block survives verbatim in the else-branch (`draft.tab` is false since 2026-10-02, code kept for next season).
 
 Two seams worth naming. **Leaf rules:** `blind_grading.py` imports `database` at module level and `eval.value_core_bench`, `value_core.*`, `trade_service` lazily inside functions; it never imports `server` or `tools`, and `server.py` imports it at its route section (cheap — only `database` loads). It is the one place server-path code imports from `backend/eval/`: `value_core_bench.read_league_inputs`, the DB half extracted from `_freeze_league` (which also fixed the pick predicate to `source IS NULL OR source = 'platform'`, since `sync_draft_picks` leaves `source` NULL). **Two-phase build:** production runs one synchronous gunicorn worker, so `start_session` (request thread: resume, league check, current-arm selection, `building` row) is split from `build_session` (daemon thread: value core, merge, shuffle, cards; flips to `open`, or to `failed` with `error_json`; never raises; idempotent on a non-`building` row). POST returns 202 and the client polls `GET …/sessions/current`. The POST route always calls `start_session`: a resumed `building` row returns `needs_build=True`, so a build orphaned by a restart or deploy is re-kicked (`finish_grading_session_build` guards on status, so a duplicate build writes nothing), and `_build_grading_session` falls back to empty `ServerInputs` when gathering league facts fails, so a session can never stay `building`. `pregenerate` reuses the same two halves for every candidate from `database.list_grading_candidates` (fresh current-engine deck within `MAX_DECK_AGE_DAYS` = 14, league member, seat = user id), building them in turn on one daemon thread. Grading writes only `grading_sessions` / `grading_cards`; it never registers a `TradeCard`, logs an impression, records an event or touches Elo, and card ids are not trade ids.
+
+## Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)
+
+`GET /api/usage-trends` ([scope](../docs/plans/usage-trends/scope.md), [route](../docs/api-reference.md), D-201) follows four conventions:
+
+- **Pure math, injected transport.** `backend/usage_trends.py` never imports `server`, the DB or flags. `server.py` passes `lambda url: _sleeper_get(url, 20)`, so every upstream call still goes through the instrumented egress chokepoint. New usage math goes in the module and gets a synthetic-row test. Add to the trimmed real-data fixture only when the case needs real numbers.
+- **Cache by who the answer depends on.**
+  - `_usage_cache` keys are `("state",)` (15 min) and `("players", season, weeks)` (6 h). These are identical for every user: one stats fetch per week per window, server-wide.
+  - Roster maps are keyed `("rosters", league_id, account)` (2 min), because `me` and "not your league" depend on the caller.
+  - A raising build is never cached.
+  - A partial window is a 503, never a payload: averages over three of four weeks would silently mislead.
+- **Status is a lookup, not a field.** The payload ships per-league `rosters {player_id: owner_key}` plus `me`, not a status per player × league. That keeps a 350-player × N-league answer small.
+  - Clients derive mine / rostered / free agent / unknown with one helper (`mobile/src/utils/usageTrends.statusIn`).
+  - Ownerless Sleeper rosters key as `roster:<id>` so their players never read as free agents. Keep that when adding a client.
+- **The server owns order.** Each metric carries `rank`, and clients filter, then order by it. A client sort is a regression, pinned by `check-usage-trends.js` §2e.
+

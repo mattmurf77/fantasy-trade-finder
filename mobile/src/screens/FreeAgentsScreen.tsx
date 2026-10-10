@@ -20,6 +20,7 @@ import {
   position,
   space,
   radii,
+  fonts,
   type,
 } from '../theme/chalkline';
 import { Button, Icon } from '../components/chalkline';
@@ -349,7 +350,7 @@ const styles = StyleSheet.create({
     minHeight: 44,
     marginBottom: space.xs,
   },
-  trendsLinkText: { ...type.bodySm, color: ice.base, fontWeight: '600' },
+  trendsLinkText: { ...type.bodySm, color: ice.base, fontFamily: fonts.uiSemi },
   consensusNote: {
     ...type.bodySm,
     color: chalk.base,

@@ -8,14 +8,15 @@
 2. **Which entry earns the visits?** `screen_viewed {screen: 'UsageTrends'}` already carries `prev_screen`: `Home` or `FreeAgents`. No new event is needed.
 3. **Which metric do people read?** `usage_trends_view_changed.metric`. If almost nobody leaves the default Snaps view, Carries and Targets are candidates to cut, in keeping with the operator's simplicity brief.
 4. **Is cross-league availability worth its button?** Opens per visit, and `n_free_agent` at open.
+5. **Which version wins?** The operator asked for two views behind a pill (Version A story cards, Version B raw-stats table). `view` on every event splits visits, actions and filter use by version.
 
 ## Events
 
 | Event | Class | Properties | Fires when |
 |---|---|---|---|
-| `usage_trends_action` | **INTENT** | `league_id`, `action` (`trade`\|`add`\|`rerank`), `player_id`, `position`, `metric` (`snaps`\|`carries`\|`targets`), `signal` (`spike`\|`return`\|`new`\|`out`\|`rising`\|`falling`\|`none`), `focus_status` (`mine`\|`rostered`\|`free_agent`), `ownership` (`all`\|`rostered`\|`free_agents`) | A row's Trade, Add or Re-rank control is tapped, **before** navigation |
-| `usage_trends_availability_opened` | non-intent | `league_id`, `player_id`, `n_leagues`, `n_free_agent` | The availability sheet opens |
-| `usage_trends_view_changed` | non-intent | `league_id`, `metric`, `ownership` | The metric or ownership control changes. The state after the change is reported |
+| `usage_trends_action` | **INTENT** | `league_id` (the league acted in), `action` (`trade`\|`add`\|`rerank`), `player_id`, `position`, `metric` (`snaps`\|`carries`\|`targets`), `signal` (`spike`\|`return`\|`new`\|`out`\|`rising`\|`falling`\|`none`), `focus_status` (`mine`\|`rostered`\|`free_agent`\|`unknown`, in that league), `ownership` (`all`\|`rostered`\|`free_agents`), `view` (`simple`\|`stats`) | A Trade, Add or Re-rank control is tapped (row, availability sheet or expanded table row), **before** navigation |
+| `usage_trends_availability_opened` | non-intent | `league_id`, `player_id`, `n_leagues`, `n_free_agent`, `view` | The availability sheet opens (Version A) or a table row expands (Version B) |
+| `usage_trends_view_changed` | non-intent | `league_id`, `metric`, `ownership`, `view` | The view pill, metric or ownership control changes. The state after the change is reported |
 
 **Why the classes:** `usage_trends_action` is a deliberate move on a player, the outcome this surface exists to produce. It is the peer of `find_trades_tapped`. The other two read or reshape a payload already in memory: the `tab_selected` / `receipts_window_changed` class. They are listed in `analytics_queries.NON_INTENT_EVENTS` in the same commit as the emitters, so a browse-only visit adds no user-day beyond the existing `screen_viewed` handling.
 

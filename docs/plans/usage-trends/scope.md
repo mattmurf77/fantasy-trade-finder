@@ -33,9 +33,10 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | Other signals | `return` (back after missed games), `new` (first game of the window with real volume), `out` (missed the latest week), `rising` / `falling` (share slope of at least 5 pp a week over 3 or more games). | lead |
 | Naming | **"Usage Trends"**, everywhere (route `UsageTrends`, `/api/usage-trends`, `usage_trends.*`). "Trends" is already the Rank stack's Elo risers/fallers screen (`TrendsScreen`, `/api/trends/*`). | lead |
 | Entry points | Home tab row, plus a link on the Free Agents screen that opens pre-filtered to free agents (operator, 2026-10-10). | operator |
+| Acting in another league | The availability sheet (A) and the expanded row (B) carry each league's own Add/Trade, as drawn. Acting in a league other than the focused one **switches the focused league first** (the MatchesScreen precedent), then pins or opens the claim sheet. | lead, from the approved mock |
 | Platforms | **Mobile only** (operator, 2026-10-10). Web waived for v1. | operator |
 | Ship posture | **Merge + deploy, flag off** (operator, 2026-10-10), **but not before the home-engagement redesign (`design/home-engagement`) is live** (operator, same day). The Home entry is re-homed onto that redesign at rebase. | operator |
-| Visual direction | See [design drafts](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo); the build follows the direction recorded in §5. | operator |
+| Visual direction | **Two views behind one pill** (operator, 2026-10-10). **Version A "Simple"** = draft A *as drawn* ("the mock is perfect as is"): story cards, the per-league availability sheet with its own Add/Trade per league, the visible podium Re-rank. **Version B "Raw stats"** = a plain table modeled on the operator's snap-count source sheet: one column per week for the selected stat and a total column on the right, then icon-only actions (+ add, stacked ⇄ trade, the podium Re-rank, and a chevron that expands the row into the other leagues). [Drafts](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo). | operator |
 
 ## 1. Analytics scope
 
@@ -43,9 +44,9 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 
   | Event | Properties | Fires when | Client |
   |---|---|---|---|
-  | `usage_trends_action` (INTENT) | `league_id, action (trade\|add\|rerank), player_id, position, metric, signal, focus_status, ownership` | Trade, Add or Re-rank tapped on a row | mobile |
-  | `usage_trends_availability_opened` (non-intent) | `league_id, player_id, n_leagues, n_free_agent` | Availability sheet opened | mobile |
-  | `usage_trends_view_changed` (non-intent) | `league_id, metric, ownership` | Metric or ownership chip changed | mobile |
+  | `usage_trends_action` (INTENT) | `league_id, action (trade\|add\|rerank), player_id, position, metric, signal, focus_status, ownership, view` | Trade, Add or Re-rank tapped (row, availability sheet, or expanded table row) | mobile |
+  | `usage_trends_availability_opened` (non-intent) | `league_id, player_id, n_leagues, n_free_agent, view` | Availability sheet opened / table row expanded | mobile |
+  | `usage_trends_view_changed` (non-intent) | `league_id, metric, ownership, view` | View pill, metric or ownership changed | mobile |
 
   Screen opens are the auto-emitted `screen_viewed {screen: 'UsageTrends'}`. Entry source is its `prev_screen` (`Home` vs `FreeAgents`).
 
@@ -70,8 +71,17 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   - Re-rank navigates to `QuickSetTiers` with `position`
   - Trade uses the `useFinderTargets` pin + handoff
   - Add reuses the shared `ClaimSheet`
-  - only registered analytics names are emitted
+  - only registered analytics names and props are emitted
   - the client never re-sorts stats (it orders by the server `rank`)
+  - the pure readers in `utils/usageTrends.ts` are EXECUTED under node:
+    - league status, with orphan rosters never free agents;
+    - the filter;
+    - the mock's headline copy and its no-jargon vocabulary;
+    - table cells and the total;
+    - the availability label.
+  - the A/B pill, B's icon-only actions and inline league expansion, and A's podium Re-rank
+
+  Six named sabotages, each proven red, then green on revert (TEST_LEDGER).
 - [x] **Unit tests:** `backend/tests/test_usage_trends.py`, 24 tests:
   - window
   - team share incl. QB carries
@@ -87,18 +97,37 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   Six named sabotages, each proven red, then green on revert (TEST_LEDGER).
 - [x] **Code-walk proof:** file:line trace of focus status → action routing, recorded in `living-memory/TEST_LEDGER.md` with the ship entry.
 - [x] **Manual TestFlight checklist** (the only runtime evidence mobile gets). Turn on `usage_trends.enabled` for the test, then relaunch twice; flags are cached.
-  1. Home shows a **Usage Trends** row. Tap it: the screen opens with a back control, the focused league's name and "Weeks 1–N", and exactly one feedback button.
-  2. Default view is **Snaps / All**. The first rows are the latest week's spikes. Each row shows one plain-language line, a 4-week mini chart and one number. No sort control exists.
-  3. Switch to **Targets**, then **Carries**: the order changes. Toggle count vs **% of team** and the numbers change. Spot-check two players against Sleeper's game log, e.g. CeeDee Lamb Week 4 targets = 21.
-  4. **Free agents** filter: every row's first action reads **Add**. Tap Add on a Sleeper league: the claim sheet opens (FAAB/drop) and "Open in Sleeper to claim" lands on the league's players page. On an ESPN/MFL league: the "can't add here" alert.
-  5. **Rostered** filter: rows show **Trade**, or a **Yours** label for your own players. Tap Trade: Find a Trade opens with the player pinned on the receive side and his manager selected, and the search runs.
-  6. Tap the **availability** control on a player you know is owned in one of your leagues and free in another. The sheet lists every league with the right status and manager name.
-  7. Tap **Re-rank** on a WR: Quick Set opens on **WR**. Go back, tap Re-rank on a TE: Quick Set switches to **TE** (it was already mounted).
-  8. Free Agents screen shows a **See usage trends** link. It opens Usage Trends pre-filtered to **Free agents**.
-  9. A player who missed a game shows that week as "Out" on the chart, and his average matches his played games only.
-  10. Kill switch: `usage_trends.enabled` false + relaunch twice. No Home row, no Free Agents link, and `GET /api/usage-trends` returns 404.
+  1. Home shows a **Usage Trends** row. Tap it: the screen opens with a back control and an info (i) button. It shows the focused league's name and "Weeks 1–N", a **Simple | Raw stats** pill, and exactly one feedback button.
+  2. **Simple** (Version A), **Snaps / All**. Under "Biggest jumps last week", each card shows:
+     - the name, position and team;
+     - one sentence, e.g. "Jumped to 90% of Eagles plays";
+     - four bars with the newest jump in pink;
+     - Add, Trade or Yours, the league pips with "FA n/m", and Re-rank.
+
+     "Everyone else" follows. There is no sort control.
+  3. Switch to **Targets**, then **Carries**: the order and the sentences change.
+     - Open **Filters → Count**: sentences read in counts, e.g. "Jumped to 21 targets".
+     - **Filters → WR** shows only receivers.
+     - Spot-check CeeDee Lamb's Week 4 targets = 21 against Sleeper.
+  4. Tap a player's **FA n/m** pill. The sheet lists every league with its status ("Free agent", "On your roster", "Rostered by <manager>"), and the focused league is tagged "This league".
+     - Tap **Add** on the focused Sleeper league: the claim sheet opens (FAAB / drop) and "Open in Sleeper to claim" lands on the league's players page.
+     - Tap **Trade** on ANOTHER league: the app switches to that league, then Find a Trade opens with the player pinned and his manager selected.
+  5. On an ESPN or MFL league row, **Add** shows the "can't add here" explanation and does not switch leagues.
+  6. Flip the pill to **Raw stats** (Version B). You see a table: Player · W1–W4 · **Tot**. Each row's actions are icon-only:
+     - **+** for a free agent;
+     - stacked arrows for another manager's player;
+     - a check for yours;
+     - then the podium and a chevron.
+
+     A missed week reads OUT, a bye reads BYE, and the newest jump is pink. Tot equals the sum of the played weeks. **Filters → % of team** switches the cells to % and the last column to **Avg**.
+  7. Tap a row's **chevron** (or the row): it expands to list your leagues with each league's Add/Trade. The chevron points down, and tapping again collapses it.
+  8. Tap the **podium** on a WR: Quick Set opens on **WR**. Go back, then tap the podium on a TE: Quick Set switches to **TE** (it was already open). The **Re-rank** button in Simple view does the same.
+  9. The **Free agents** filter in either view shows only Add actions. **Rostered** shows Trade or Yours. The Free Agents screen's **See usage trends** link opens pre-filtered to Free agents.
+  10. A player who missed a game shows an amber tick and "–" (Simple) or OUT (Raw stats), and his average and total cover only the games he played.
+  11. Leave the screen in **Raw stats**, open it again: it reopens on Raw stats (remembered until the app restarts).
+  12. Kill switch: `usage_trends.enabled` false + relaunch twice. No Home row, no Free Agents link, and `GET /api/usage-trends` returns 404.
 - [x] **WAIVED — web:** operator chose mobile only for v1.
-- `testID`s added: `home.option.trends`, `free-agents.usage-trends-link`, `usage-trends.screen`, `usage-trends.back-btn`, `usage-trends.metric.<snaps|carries|targets>`, `usage-trends.unit.<count|share>`, `usage-trends.ownership.<all|rostered|free_agents>`, `usage-trends.row.<id>`, `usage-trends.action.<id>`, `usage-trends.availability.<id>`, `usage-trends.rerank.<id>`, `usage-trends.availability-sheet`
+- `testID`s added: `home.option.trends`, `free-agents.usage-trends-link`, `usage-trends.screen`, `usage-trends.back-btn`, `usage-trends.info`, `usage-trends.view.<simple|stats>`, `usage-trends.metric.<snaps|carries|targets>`, `usage-trends.ownership.<all|rostered|free_agents>`, `usage-trends.filters`, `usage-trends.filters-sheet`, `usage-trends.position.<all|rb|wr|te>`, `usage-trends.unit.<share|count>`, `usage-trends.filters-done`, `usage-trends.list`, `usage-trends.row.<id>`, `usage-trends.action.<id>`, `usage-trends.yours.<id>`, `usage-trends.availability.<id>`, `usage-trends.rerank.<id>`, `usage-trends.expand.<id>`, `usage-trends.availability-sheet`, `usage-trends.availability-close`, `usage-trends.league.<id>.<league>`, `usage-trends.league-action.<id>.<league>`, `usage-trends.unavailable`, `usage-trends.no-league`, `usage-trends.pick-league`, `usage-trends.error`, `usage-trends.off-season`, `usage-trends.empty`. None is referenced by a retained Maestro flow, so testid-lint needs no allowlist entry
 
 ## 4. Docs scope
 
@@ -121,4 +150,4 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 - **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry naming what ran and what it proved.
 - **TestFlight verification:** the §3 checklist, run by the operator on the first build carrying the screen; outcome logged in TEST_LEDGER.
 - Express lane declared by the operator? **No**, full gates.
-- Design direction built: *(filled in at build: the draft the operator picked, or the recommendation if they deferred)*.
+- Design direction built: **both**, behind the Simple | Raw stats pill. Version A is draft A as drawn; Version B is the per-week stats table (see §0).
