@@ -43,6 +43,12 @@ Full gates, not express. Scope first ([scope](../docs/plans/usage-trends/scope.m
   - the TestFlight checklist in scope §3, which needs a build with the flag on.
 
 Merged after the home-engagement redesign shipped; ships with the flag on (operator, 2026-10-10).
+- **Ship gate:** full local suite on the merged code 7702 passed, 1 skipped, 0 failed. After the flag flip, the flag/seed/usage/home subset passed 546. 106 guards, tsc clean, testid-lint OK. CI 4/4 green on the exact head `a6945901`, then squash-merged as `35c6838c`. `FTF_SKIP_SIM_GATE=1` (D-056).
+- **Prod checks (2026-10-10 18:28 UTC):**
+  - `/api/feature-flags` → `usage_trends.enabled: true`;
+  - `/api/usage-trends` and the cron route answer 401 unauthenticated (they are live routes, not 404);
+  - backfill stored weeks 1–4 (32 teams each; 603/616/616/618 players);
+  - TestFlight checklist: not yet run (iOS 1.21.0 build 163).
 
 ## 2026-10-10 — Value core v3 (#320): rule tests, replay, rebuild outcome
 

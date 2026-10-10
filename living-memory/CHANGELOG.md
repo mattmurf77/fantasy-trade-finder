@@ -11,6 +11,14 @@
 
 ---
 
+## 2026-10-10b — Usage Trends shipped with the flag ON (#321, D-203); Render live; iOS 1.21.0 (163) submitted
+
+- **What:** in-season RB/WR/TE snaps, carries and targets, as counts and as % of team, over the weeks the user picks (default: the last 4). Byes and missed games are left out of averages. Spikes are judged on team share. Two views behind a pill: **Simple** (draft A) and **Raw stats** (sortable per-week table). Actions are Add / Trade / Re-rank, plus per-league availability. Entry points: the Home hub's **Usage Rates** tile and a Free Agents link.
+- **Data:** Sleeper's weekly stats feed, kept in a weekly store (`usage_*` tables, D-203). The daily tick refreshes it and `POST /api/cron/usage-trends-refresh` triggers it on demand. Backfilled in prod: 2026 weeks 1–4, 32 teams, 2,453 player-weeks.
+- **Ship:** PR #321 squash-merged as `35c6838c`. Render `dep-db586krbc2fs73ellaig` (live 18:27 UTC, API-triggered) serves `usage_trends.enabled: true`. iOS 1.21.0 EAS build 163 (`923f29da`, submission `14d814a8`) is on `--auto-submit`.
+- **Evidence:** CI 4/4 on the exact head; local full suite 7702 passed; [TEST_LEDGER](TEST_LEDGER.md) 2026-10-10.
+- **Follow-ups:** the operator's 12-step TestFlight checklist ([scope §3](../docs/plans/usage-trends/scope.md)). Two open design calls: a frozen player column in Raw stats, and extra filters.
+
 ## 2026-10-10 — Value core v3 (`redundant`, #320, D-201); 19 decks rebuilt; second grader in
 
 - #320 (`01cda0ef`, live 2026-10-10 17:27 UTC): hard rule `redundant`. No TE (any format) and no QB (single-QB only) for a team that already keeps one worth ≥ 0.70 × the incoming player; it applies to both sides and reaches the fit engines through the shared core. It came from the operator's McBride-to-the-Bowers-owner card. Measured on round-2 decks, it hit 19–30% of every engine's cards.

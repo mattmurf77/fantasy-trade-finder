@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-10b — Usage Trends: run the TestFlight checklist on 1.21.0 (163), then the two design calls](#2026-10-10b--usage-trends-run-the-testflight-checklist-on-1210-163-then-the-two-design-calls)
 - [2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups](#2026-10-10--home-hub-run-the-testflight-checklist-on-1200-then-the-two-follow-ups)
 - [2026-10-07 — Calibration: renew iOS signing, ship 1.18.0, collect grades, read Gate 2](#2026-10-07--calibration-renew-ios-signing-ship-1180-collect-grades-read-gate-2)
 - [2026-09-08 — Feedback batch #422–#428: ship on go, run the checklist on 1.17.3, then the four follow-up candidates](#2026-09-08--feedback-batch-422428-ship-on-go-run-the-checklist-on-1173-then-the-four-follow-up-candidates)
@@ -49,6 +50,12 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-10-10b — Usage Trends: run the TestFlight checklist on 1.21.0 (163), then the two design calls
+
+1. **TestFlight checklist** ([scope §3](../docs/plans/usage-trends/scope.md), 12 steps) on 1.21.0 (163). *Why now:* the flag is already on in prod, and this is the only runtime evidence the screen gets (D-056).
+2. **Confirm week 5 lands** in `usage_week_loads` on the first 13:30 UTC tick after Sleeper's state rolls to week 6. *Why now:* it is the first week the store picks up on its own schedule rather than by backfill.
+3. **Operator calls:** a frozen player column in Raw stats, and extra filters (My team only, Big jumps only, NFL team, minimum usage). *Why now:* both were offered during the build and not decided.
 
 ## 2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups
 

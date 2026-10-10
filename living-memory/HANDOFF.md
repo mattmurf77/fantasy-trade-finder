@@ -1,14 +1,10 @@
 # HANDOFF
 
-## Usage Trends — shipping 2026-10-10 with the flag ON (branch `feat/usage-trends`, PR #321)
+## Usage Trends — shipped 2026-10-10 with the flag ON (PR #321 → `35c6838c`)
 
-**Where I stopped:** merging PR #321 and deploying with `usage_trends.enabled` **on** (operator, 2026-10-10: "I want it deployed with the flag on"). The Home entry is the hub's **Usage Rates** tile (a separate row from "Check trends", which stays the Elo movers screen).
-- **Backend:** `GET /api/usage-trends` (`weeks` selection, `available_weeks`); weekly store (3 `usage_*` tables, `usage_trends_refresh`, `POST /api/cron/usage-trends-refresh`, `scripts/refresh_usage_trends.py`), refreshed by the daily tick.
-- **Mobile (iOS 1.21.0):** Simple | Raw stats pill, sortable columns, Filters → Weeks / Position / Show as.
+**Where I stopped:** shipped and live. Render `dep-db586krbc2fs73ellaig` serves `usage_trends.enabled: true`, and the prod store holds 2026 weeks 1–4. iOS 1.21.0 build 163 is building on `--auto-submit` ([build](https://expo.dev/accounts/mattmurf77/projects/dtf-dynasty-trade-finder/builds/923f29da-15bc-4a25-858f-36cf8204519c)). The branch and worktree were ledgered in `docs/recovery/2026-10-10-usage-trends.md` and removed.
 
-Specs: [scope](../docs/plans/usage-trends/scope.md), [weekly update](../docs/plans/usage-trends/weekly-update.md), [code-walk](../docs/plans/usage-trends/code-walk.md).
-
-**After the ship:** backfill with `python3 scripts/refresh_usage_trends.py --remote`; EAS 1.21.0 → TestFlight; the operator runs the 12-step checklist in scope §3.
+**Next (operator):** once 163 reaches TestFlight, run the 12-step checklist in [scope §3](../docs/plans/usage-trends/scope.md). Week 5 enters the store on the first daily tick (13:30 UTC) after Sleeper's state rolls to week 6, usually early in the week. To force it: `python3 scripts/refresh_usage_trends.py --remote`.
 
 **Open design calls (offered, not decided):**
 - a frozen player column / pinned actions for Raw stats past 4 weeks (today the whole table swipes);
