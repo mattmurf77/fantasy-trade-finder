@@ -859,7 +859,7 @@ Two seams worth naming. **Leaf rules:** `blind_grading.py` imports `database` at
 
 ## Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)
 
-`GET /api/usage-trends` ([scope](../docs/plans/usage-trends/scope.md), [route](../docs/api-reference.md), D-201) follows four conventions:
+`GET /api/usage-trends` ([scope](../docs/plans/usage-trends/scope.md), [route](../docs/api-reference.md), D-202) follows four conventions:
 
 - **Pure math, injected transport.** `backend/usage_trends.py` never imports `server`, the DB or flags. `server.py` passes `lambda url: _sleeper_get(url, 20)`, so every upstream call still goes through the instrumented egress chokepoint. New usage math goes in the module and gets a synthetic-row test. Add to the trimmed real-data fixture only when the case needs real numbers.
 - **Cache by who the answer depends on.**

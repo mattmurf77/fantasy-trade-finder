@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-201 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
+## D-202 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
 
 **Date:** 2026-10-10 · **Who:** operator (missed-games ruling, entry points, mobile only, ship dark, simplicity brief); lead (source, spike rule, naming).
 **Context:** The operator asked for an in-season usage-trends feature. The brief was a ChatGPT transcript over a Weeks 1–4 snap CSV and a Footballguys target export: snaps, carries, targets, % of team, a 4-week average, spikes, and Trade/Add plus cross-league availability per player. A mid-build direction set the bar: "simple … even casual dynasty players understand", with no reading or sorting of stats.

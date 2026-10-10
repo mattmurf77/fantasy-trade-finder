@@ -164,7 +164,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | `living-memory/HLD.md` | n/a | one read-only route + one screen over existing seams; no new subsystem |
 | `docs/cross-client-invariants.md` | n/a | mobile only; the signal kinds are a server→client enum documented in api-reference, with no second client yet |
 | `docs/glossary.md` | updated | Usage Trends, team share, spike, return, new role |
-| ADR or `DECISIONS.md` entry | updated | D-201: share-driven spikes; byes AND missed games out of averages; Sleeper stats feed as the usage source |
+| ADR or `DECISIONS.md` entry | updated | D-202: share-driven spikes; byes AND missed games out of averages; Sleeper stats feed as the usage source |
 | `docs/config-reference.md` | updated | `usage_trends.enabled` row |
 | `docs/data-dictionary.md` | updated | Usage Trends weekly store (3 tables) |
 | `mobile/src/navigation/{CLAUDE,README}.md`, `mobile/src/screens/{CLAUDE,README}.md` | updated | route tree + screen inventory |
