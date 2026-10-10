@@ -65,7 +65,7 @@ def test_public_api():
                                  "stud_premium", "throwin_ok",
                                  "evaluate_trade", "find_fair_trades"}
     assert REJECT_CODES == ("floor", "band", "filler", "breakup", "picks_for_players",
-                            "untouchable", "reducible", "roster_size", "lineup")
+                            "redundant", "untouchable", "reducible", "roster_size", "lineup")
 
 
 def test_one_for_one_inside_band_kept():
@@ -196,6 +196,34 @@ def test_rebuilders_never_trade_picks_for_players():
     assert reason(viewer, ["k1"], ["b1"], off) is None
     trades, diag = run(snap(teams, windows=viewer))
     assert (("k1",), ("b1",)) not in pairs(trades) and diag.rejected["picks_for_players"] >= 1
+
+
+def test_redundant_no_second_starter_at_a_capped_position():
+    """Operator 2026-10-10 (McBride offered to the Bowers owner): no team takes a TE (any
+    format) or a QB (no superflex) while keeping as many as it starts, each worth >= 0.70 of
+    the incoming one. Sending one back frees the slot. Both sides of the trade."""
+    teams = {"V": [A("vte", "TE", 3000), A("vqb", "QB", 3000), A("vw", "WR", 3000)] + BODIES("V"),
+             "P": [A("pte", "TE", 2800), A("pqb", "QB", 2500), A("pw", "WR", 3100),
+                   A("pw2", "WR", 2950)] + BODIES("P")}
+
+    def reason(give, receive, slots=SLOTS, cfg=CFG10, t=teams):
+        return evaluate_trade(snap(t, slots=slots), Request("V"), cfg, partner_team_id="P",
+                              give=give, receive=receive).reason
+
+    assert reason(["vte"], ["pw"]) == "redundant"            # P keeps a 2800 TE, takes a 3000 one
+    assert reason(["vte"], ["pte"]) is None                  # TE for TE: P sends his back
+    assert reason(["vw"], ["pte"]) == "redundant"            # V keeps vte (3000) and takes pte
+    assert reason(["vqb"], ["pw"]) == "redundant"            # 1QB: P keeps a 2500 QB
+    sf = SLOTS + ("SUPER_FLEX",)
+    assert reason(["vqb"], ["pw"], slots=sf) is None         # superflex: a second QB starts
+    assert reason(["vte"], ["pw"], slots=sf) == "redundant"  # TE is capped in every format
+    two_te = {**teams, "V": teams["V"] + [A("vte9", "TE", 300)]}     # V can still fill two TE slots
+    assert reason(["vte"], ["pw"], slots=SLOTS + ("TE",), t=two_te) is None  # a two-TE league takes a second
+    weak = {**teams, "P": [A("pte", "TE", 1500)] + teams["P"][1:]}
+    assert reason(["vte"], ["pw"], t=weak) is None           # 1500 < 0.70 x 3000: a real upgrade
+    assert reason(["vte"], ["pw"], cfg=dataclasses.replace(CFG10, redundancy_min_ratio=0.0)) is None
+    trades, diag = run(snap(teams))
+    assert (("vte",), ("pw",)) not in pairs(trades) and diag.rejected["redundant"] >= 1
 
 
 def test_not_interested_never_received():

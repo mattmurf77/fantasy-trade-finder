@@ -1,4 +1,4 @@
-## 2026-10-10 — Home hub (D-201, `nav.home_hub`): evidence
+## 2026-10-10 — Home hub (D-202, `nav.home_hub`): evidence
 
 Full gates (no express). Scope block before code ([scope](../docs/plans/home-engagement/scope.md)); Phase 1 foundations, then two build agents (M-Home, M-Dest) with disjoint files, integrated on `feat/home-hub`. D-056 posture: no simulator, `FTF_SKIP_SIM_GATE=1`.
 

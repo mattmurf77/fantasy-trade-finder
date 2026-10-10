@@ -859,7 +859,7 @@ Two seams worth naming. **Leaf rules:** `blind_grading.py` imports `database` at
 
 ## Cross-tab arrival intents and duplicated arithmetic under a parity guard (2026-10-10, nav.home_hub)
 
-The Home hub (D-201, [scope](../docs/plans/home-engagement/scope.md)) sets two conventions.
+The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two conventions.
 
 - **Cross-tab arrival goes through a one-shot intent store, not route params.**
   - **Why:** a tab-stack *root* such as League rankings (`LeagueSummaryScreen`, route `LeagueRankings`) stays mounted across tab switches and owns its own filter, basis and drill-in state. A param would be stale on the next focus, and a repeat tap would not re-fire.

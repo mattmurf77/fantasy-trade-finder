@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-201 — Home becomes a tile hub that leads into League rankings' buyers/sellers split
+## D-202 — Home becomes a tile hub that leads into League rankings' buyers/sellers split
 
 **Date:** 2026-10-10 · **Who:** operator, over four design rounds on the Fleeced Home Redesign mockup. Built by parallel agents, lead-integrated.
 **Context:** The Home tab shipped by D-198 was four plain text rows that repeated the tab bar. Users almost never found League rankings' position split (#300), where a single position filter divides the league into buyers and sellers. The operator pointed at the FumbleAI homeowner app's home hub as the look to follow: big tappable tiles in place of tight links.
@@ -16,6 +16,13 @@ Where each control goes:
 
 This narrows D-198 on the flag-on path: Home now fetches data and emits two events (`home_tile_tapped`, `standings_segment_changed`, both non-intent). The buyer/seller arithmetic is duplicated into `utils/positionSplit.ts`, with an executable parity guard, rather than moved out of League Summary, whose inline code other guards pin.
 **Consequences:** On mount, Home adds two light requests (power-rankings consensus, shared with League Summary, and preferences). Sleeper standings come from rosters already cached at session start. ESPN/MFL current standings and a `/api/league/standings` endpoint are follow-ups; until they exist, those leagues get an honest "not available" state. League Summary's own Season-outlook strip still runs the simulation when the League tab opens (follow-up). Rollback: `nav.home_hub` false, which brings back the four-row Home byte-identical on the next Home mount. [Scope](../docs/plans/home-engagement/scope.md).
+
+## D-201 — Value core v3: no second starter at a TE slot (any format) or QB slot (single-QB leagues)
+
+**Date:** 2026-10-10 · **Who:** operator, from round-2 grading ("trades suggesting I move Trey McBride to John who already owned Brock Bowers"). Lead-built.
+**Context:** No rule stopped a team from taking a player at a position it had already filled. The fit engines' need check counted a second elite TE as a starter because he fits the flex. Measured on the round-2 decks, it hit 19–30% of every engine's cards (today's engine 30%, fit A 28%, fit B 25%, value core 19%), and the operator graded those cards lower (today's engine 3.47 vs 3.91; fit A 3.40 vs 4.11).
+**Decision:** Hard rule `redundant` in the shared core, so the value core and both fit engines get it; today's engine stays the untouched baseline. It checks both sides. It caps TE in every format and QB only when the lineup has no `SUPER_FLEX`. The cap is the dedicated-slot count (min 1), and "already covered" means kept players worth ≥ 0.70 × the incoming one. Sending one back frees the slot. The operator confirmed the scope: QB in single-QB leagues only; TE across all formats. `ENGINE_VERSION` becomes `value-core-3`. The unstarted round-2 decks are rebuilt.
+**Consequences:** Value-core decks still hold 77–566 ranked cards per seat, and the fit decks are about as before. RB/WR are deliberately uncapped, since flex and multiple slots absorb depth. If RB/WR redundancy shows up in grades, the same rule extends with a slot-plus-flex count.
 
 ## D-200 — Fit-first approaches A and B go into Calibration despite failing the offline bar
 

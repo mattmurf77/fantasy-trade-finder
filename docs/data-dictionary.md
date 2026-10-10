@@ -574,7 +574,7 @@ A job served by the value core writes one row per served card through the same `
 |---|---|
 | `model_arm` | `value_core`. **Not a bake-off arm**: the value core replaces the legacy stack for its job, so no other generator's cards share the deck |
 | `policy_variant` | `value_core` |
-| `policy_version` | `value-core-2` (the engine version; `value-core-1` before 2026-10-09) |
+| `policy_version` | `value-core-3` (the engine version; `value-core-2` 2026-10-09, `value-core-1` before) |
 | `arm_rank` | the served position, equal to `card_index` |
 | `base_score` | the card's priority (its `composite_score`) |
 | `final_score` | the effective priority after repeat penalties, as used by deck assembly |
@@ -588,7 +588,7 @@ A job served by the value core writes one row per served card through the same `
 `valuation_json` for `generator = "value_core"` is a **generator-specific schema**, like the owner-v1 one: dispatch on `generator`, never on `schema_version` alone. Written with `json.dumps(..., sort_keys=True)`:
 
 ```
-{schema_version: 1, generator: "value_core", generator_version: "value-core-2",
+{schema_version: 1, generator: "value_core", generator_version: "value-core-3",
  deck_position,            # 0-based position in the assembled deck, before already-passed trades are removed
  weights:  {value, outlook, rank, repeat_penalty, player_cap},
  scores:   {value, outlook, rank, priority},                  # each in [0, 1]
@@ -1892,7 +1892,7 @@ One row per grading session: one grader, one league, up to 40 cards. A session w
 | `created_at` | str, not null | ISO UTC |
 | `completed_at` | str | ISO UTC; NULL until completed |
 | `counts_json` | text (JSON), not null | **Hidden.** `{total, current, value_core, shared, current_candidates, current_dropped_stale, current_dropped_unknown, value_core_pool}` — filled by `build_session` (a placeholder before that); `add_fit_arms` adds `fit_a`, `fit_b`, `fit_merged` (fit cards merged into an existing card) and updates `total` |
-| `source_json` | text (JSON), not null | **Hidden provenance.** `{version: "blind-grading-1", seat, scoring_format, current: {deck_job_id, served_at}, value_core: {engine_version, core, rank, standings_weight, completed_weeks, lineup_slots, max_players, pool, elapsed_ms, budget_exhausted}}` once built. While `building`, holds the current-arm trades `start_session` selected, for the background half to merge `add_fit_arms` adds `fit_a` / `fit_b`: `{version (fit-a-1 / fit-b-2), pool, cards, dropped_unknown, diag, ros: {season, from_week, weeks}}`. |
+| `source_json` | text (JSON), not null | **Hidden provenance.** `{version: "blind-grading-1", seat, scoring_format, current: {deck_job_id, served_at}, value_core: {engine_version, core, rank, standings_weight, completed_weeks, lineup_slots, max_players, pool, elapsed_ms, budget_exhausted}}` once built. While `building`, holds the current-arm trades `start_session` selected, for the background half to merge `add_fit_arms` adds `fit_a` / `fit_b`: `{version (fit-a-1 / fit-b-2), core_engine (the value-core rules they passed, e.g. value-core-3), pool, cards, dropped_unknown, diag, ros: {season, from_week, weeks}}`. |
 | `error_json` | text (JSON) | `failed` only: `{"code": "value_core_too_few", "usable": N, "min_cards": 10}`, `{"code": "value_core_failed"}`, or `{"code": "superseded"}` (an unanswered session retired by a targeted rebuild after an engine change, `blind_grading.retire_unanswered`, 2026-10-09); NULL otherwise. Surfaces as `SessionView.error` |
 
 Index: `ix_grading_sessions_user_league` (`user_id`, `league_id`, `status`) — the resume lookup.

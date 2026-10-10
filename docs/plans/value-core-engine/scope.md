@@ -124,3 +124,19 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
 
 5. **Ship gate:** CI green plus a TEST_LEDGER entry. Express lane: **no**.
 
+---
+
+## Addendum 2026-10-10 — value-core-3: `redundant`
+
+**Entry point:** direct ask after round-2 grading (D-201). Operator sign-off: scope confirmed (QB in single-QB leagues; TE in every format). No waivers.
+
+1. **Analytics:** (b) existing coverage. `CoreDiagnostics.rejected["redundant"]` is recorded in session provenance; Calibration grades and tags measure the effect.
+2. **Schema & flags:** none. `CoreConfig.redundancy_min_ratio` (0.70) is a code default with no knob. `ENGINE_VERSION` becomes `value-core-3`.
+3. **Evidence:**
+   - `test_value_core_core.py::test_redundant_no_second_starter_at_a_capped_position` covers: partner side, viewer side, the swap, 1QB vs superflex, TE in superflex, two-TE leagues, a weaker incumbent, switched off, and enumeration.
+   - Version pins updated.
+   - Replay on round-2 cards: redundant on 19–30% of each engine's cards.
+   - Dry run on the 19 unstarted decks (read-only): value-core decks 77–566 cards, fit A 1–18, fit B 0–9.
+4. **Docs:** lld §4.3 (row 3c), specs §3 and its changelog, data-dictionary (`policy_version`, fit `core_engine`), glossary, D-201. api-reference n/a: no route change.
+5. **Ship gate:** CI green plus a TEST_LEDGER entry. Express: no.
+
