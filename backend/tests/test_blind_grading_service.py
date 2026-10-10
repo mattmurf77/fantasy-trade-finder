@@ -336,7 +336,7 @@ def test_run_value_core_feeds_bench_snapshot_with_default_config(engine):
     assert snapshot.teams["u1"].window.pf_index is not None
     assert len(cards) == 20 and all(c.arm == "value_core" for c in cards)
     assert cards[0].provenance == {"deck_position": 0, "reasons": ["Fair on value"]}
-    assert meta["engine_version"] == "value-core-2" and meta["core"]["band"] == 0.2
+    assert meta["engine_version"] == "value-core-3" and meta["core"]["band"] == 0.2
     assert meta["pool"] == 20 and meta["elapsed_ms"] == 5 and meta["budget_exhausted"] is False
     assert meta["completed_weeks"] == 8 and meta["max_players"] == 12
     assert meta["lineup_slots"] == list(server.lineup_slots)
@@ -455,7 +455,7 @@ def test_build_session_end_to_end(engine):
     source = json.loads(session["source_json"])
     assert source["current"] == {"deck_job_id": "J1", "served_at": SERVED}
     assert source["value_core"]["core"]["band"] == 0.2
-    assert source["value_core"]["engine_version"] == "value-core-2"
+    assert source["value_core"]["engine_version"] == "value-core-3"
     assert source["seat"] == "u1" and source["version"] == "blind-grading-1"
     view = bg.current_session(user_id="u1", league_id="L1")["session"]
     assert view["status"] == "open" and view["progress"] == {"answered": 0, "total": 39}
