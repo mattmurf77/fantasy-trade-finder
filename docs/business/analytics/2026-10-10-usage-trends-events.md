@@ -1,6 +1,6 @@
 # Tracking-plan addendum — Usage Trends (2026-10-10)
 
-**Status:** registered with the feature build ([scope](../../plans/usage-trends/scope.md) §1). Takes effect from the first mobile release that contains `UsageTrendsScreen`. The flag `usage_trends.enabled` ships off, so expect zero rows until the operator turns it on.
+**Status:** registered with the feature build ([scope](../../plans/usage-trends/scope.md) §1). Takes effect from the first mobile release that contains `UsageTrendsScreen`. The flag `usage_trends.enabled` ships on (operator, 2026-10-10), so rows start with the first iOS 1.21.0+ session.
 
 ## Questions these events answer
 

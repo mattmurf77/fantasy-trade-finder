@@ -37,7 +37,7 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
 | Sorting | **Version A is never re-sorted.** The server's order, newest jumps first, is the point of the simple view. **Version B columns are all sortable** (operator, 2026-10-10: "make sure the columns are sortable"): Player, each week and Total/Avg. A tap sorts biggest-first (A–Z for Player), a second tap reverses, a third restores the server order. A missed game or bye sorts last in both directions, and ties keep the server order. The sort applies to the unit shown (counts, or % of team) | operator |
 | Acting in another league | The availability sheet (A) and the expanded row (B) carry each league's own Add/Trade, as drawn. Acting in a league other than the focused one **switches the focused league first** (the MatchesScreen precedent), then pins or opens the claim sheet. | lead, from the approved mock |
 | Platforms | **Mobile only** (operator, 2026-10-10). Web waived for v1. | operator |
-| Ship posture | **Merge + deploy, flag off** (operator, 2026-10-10), **but not before the home-engagement redesign (`design/home-engagement`) is live** (operator, same day). The Home entry is re-homed onto that redesign at rebase. | operator |
+| Ship posture | **Merge + deploy with the flag ON** (operator, 2026-10-10; this reversed the earlier "flag off" call), **after the home-engagement redesign shipped** (#319). The Home entry became the hub's Usage Rates tile. | operator |
 | Visual direction | **Two views behind one pill** (operator, 2026-10-10). **Version A "Simple"** = draft A *as drawn* ("the mock is perfect as is"): story cards, the per-league availability sheet with its own Add/Trade per league, the visible podium Re-rank. **Version B "Raw stats"** = a plain table modeled on the operator's snap-count source sheet: one column per week for the selected stat and a total column on the right, then icon-only actions (+ add, stacked ⇄ trade, the podium Re-rank, and a chevron that expands the row into the other leagues). [Drafts](https://claude.ai/artifact/WUZmSymvTASsQvdjeK8yjo). | operator |
 
 ## 1. Analytics scope
@@ -59,10 +59,10 @@ Ownership filter: **All** (default) · **Rostered** (on any roster in the focuse
   - Created by `create_all`, so there is no migration.
   - Documented in the [data dictionary](../../data-dictionary.md#usage-trends-weekly-store); [spec](weekly-update.md).
   - The route reads each week from the store when it's there, else fetches that week live.
-- New/changed feature flags: **`usage_trends.enabled`**, default **false**.
+- New/changed feature flags: **`usage_trends.enabled`**, ships **true** (operator, 2026-10-10: "I want it deployed with the flag on"; it was planned dark until that call).
   - Registered in `config/features.json`, `backend/feature_flags.py` `FLAG_KEYS`, the `release` / `onboarding-v2` / `profiles-on` flag fixtures (`test_seed_ui_test_db` requires `onboarding-v2` to carry every release key) and `docs/config-reference.md`.
   - Gates `GET /api/usage-trends` (404 when off) and both mobile entry points.
-  - **Graduation criterion:** one TestFlight build has run §3's checklist clean with the flag on for the operator, and the operator turns it on for everyone.
+  - **Graduation:** shipped on. The TestFlight checklist in §3 still runs on 1.21.0, and the flag stays as the kill switch.
 - New env vars / `model_config` keys: **none**.
   - Spike thresholds are module constants in `backend/usage_trends.py`. They are not `model_config` knobs because they are not trade-engine math, and a code change is the right review gate for them.
   - Rollback lever: `usage_trends.enabled` false, then `POST /api/feature-flags/reload`. Takes effect without a deploy.

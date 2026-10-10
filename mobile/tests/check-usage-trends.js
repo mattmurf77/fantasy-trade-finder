@@ -271,13 +271,15 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
 {
   const features = JSON.parse(readRoot('config/features.json') || '{}');
   const release = JSON.parse(readRoot('backend/tests/fixtures/flags/release.json') || '{}');
-  assert(features['usage_trends.enabled'] === false && typeof features._comment_usage_trends_enabled === 'string',
-    '4a. ships false in config/features.json with a house comment');
-  assert(release['usage_trends.enabled'] === false, '4b. release fixture mirrors it');
+  assert(features['usage_trends.enabled'] === true && typeof features._comment_usage_trends_enabled === 'string',
+    '4a. ships TRUE in config/features.json (operator, 2026-10-10) with a house comment');
+  assert(release['usage_trends.enabled'] === true, '4b. release fixture mirrors it');
   for (const f of ['onboarding-v2', 'profiles-on']) {
     const j = JSON.parse(readRoot(`backend/tests/fixtures/flags/${f}.json`) || '{}');
-    assert(j['usage_trends.enabled'] === false, `4b. ${f}.json mirrors it`);
+    assert(j['usage_trends.enabled'] === true, `4b. ${f}.json mirrors it`);
   }
+  assert(/^\s*'usage_trends\.enabled': true,$/m.test(strip(read('src/state/useFeatureFlags.ts'))),
+    '4e. the baked default states it true (a fresh install shows the tile from first paint)');
   assert(/"usage_trends\.enabled",/.test(readRoot('backend/feature_flags.py')), '4c. registered in FLAG_KEYS');
   const pkg = JSON.parse(read('package.json'));
   assert(pkg.scripts['test:usage-trends'] === 'node tests/check-usage-trends.js', '4d. npm run test:usage-trends');

@@ -13,7 +13,7 @@
 - (6) **Add:** reuses the #179 claim sheet, which is now a shared component. Sleeper still has no roster-move API.
 
 **Consequences:**
-- Mobile only, behind `usage_trends.enabled`, which ships false. Merge waits for the home-engagement redesign to go live (operator, 2026-10-10).
+- Mobile only, behind `usage_trends.enabled`. **Shipped ON** after the home-engagement redesign went live (operator, 2026-10-10, reversing the earlier flag-off plan). The Home entry is the hub's "Usage Rates" tile; the flag-off Home stays byte-identical as the hub's kill-switch fallback.
 - Thresholds are module constants, not knobs. Retuning them is a reviewed code change.
 - In-process caches mean the first request after a deploy pays ~1–2 s for four stats weeks.
 

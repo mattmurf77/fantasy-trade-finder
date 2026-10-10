@@ -346,7 +346,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # in-season RB/WR/TE snaps / carries / targets over user-picked completed
     # weeks with team share and spikes, joined to the caller's league rosters.
     # Gates GET /api/usage-trends (404 when off) and every mobile entry point
-    # (the Home hub's Usage Rates tile, the Free Agents link). Ships false.
+    # (the Home hub's Usage Rates tile, the Free Agents link). Ships TRUE
+    # (operator, 2026-10-10).
     "usage_trends.enabled",
     "ux.sheet_guard",
     "ux.rank_tab_destination",

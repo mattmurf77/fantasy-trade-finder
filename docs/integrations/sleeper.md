@@ -507,7 +507,7 @@ Historical research uses the documented `GET /v1/league/{id}` predecessor chain,
 
 ## Weekly actual-stats feed (Usage Trends)
 
-`backend/usage_trends.py` (flag `usage_trends.enabled`, ships off) reads the projections feed's sibling for **completed** weeks:
+`backend/usage_trends.py` (flag `usage_trends.enabled`, ships on) reads the projections feed's sibling for **completed** weeks:
 
 `GET https://api.sleeper.app/stats/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=FB`
 
