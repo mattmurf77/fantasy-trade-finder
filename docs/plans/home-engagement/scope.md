@@ -1,241 +1,413 @@
-# Feature Scope — Home hub (Direction A: Trade market hero + position tiles + task grid)
+# Feature Scope — Home hub (Direction D)
 
 **Date:** 2026-10-10
-**Entry point:** direct ask (operator, via coordinator): "Home is bland; make it engaging, grounded in competitor research; surface trade opponents so users are pulled into League Summary's buyers/sellers split." Operator follow-up the same day: the FumbleAI Home hub is the intended reference; tiles, not text links.
-**Builder:** design session 2026-10-10 (design only; no `mobile/` or `backend/` code). Research: [research.md](research.md). Mockup: [`mockups/home-engagement/index.html`](../../../mockups/home-engagement/index.html) §2 (Direction A), §6 (tap-through), §7 (states).
-**Operator sign-off on waivers:** **pending.** No section below is waived. Four items need an explicit operator call before build (§0).
+**Entry point:** direct ask. The operator approved building Direction D as drawn in [`mockups/home-engagement/index.html`](../../../mockups/home-engagement/index.html) through `c330274b`, and shipping it to Render and TestFlight.
+**Builder:** Phase 0+1 (this scope + foundations) on `feat/home-hub`. Phase 2 is two parallel mobile agents, **M-Home** and **M-Dest**, per the BUILD CONTRACT (§6).
+**Operator sign-off on waivers:** **given 2026-10-10.** No section below is waived. Every operator call is recorded in §0.
+
+Research: [research.md](research.md). Tracking plan: [`docs/business/analytics/2026-10-10-home-hub-addendum.md`](../../business/analytics/2026-10-10-home-hub-addendum.md).
 
 ---
 
-## 0. Operator calls needed before build
+## 0. Operator rulings (final)
 
-No template section is waived. These four items override an earlier written constraint or set a behaviour the operator should own:
+| # | Ruling |
+|---|---|
+| R1 | **Scope:** build D as drawn through `c330274b`. |
+| R2 | **Flag `nav.home_hub` ships ON.** Flag off ⇒ today's Home, byte-identical. |
+| W1 | **Approved:** with the flag on, Home fetches data and emits new analytics events. This overrides `docs/plans/home-tab/plan.md:59` and D-198's "no new analytics events" on the flag-on path only. |
+| W2 | **Approved:** arriving on League rankings from Home resets it to basis **Consensus**, subset **All**, filter = the position (or none), and closes any open drill-in. |
+| W3 | The mockup's "before" pane is a labelled reconstruction (interim posture, `mockups/CLAUDE.md`). |
+| W4 | **Approved:** the buyer/seller arithmetic is duplicated into `utils/positionSplit.ts`, with an executable parity guard (`check-position-split-parity.js`). League Summary's inline code is untouched. |
+| R3 | Status rows are 40pt. The Buy/Sell banner ships, pinned. **Sell** lands at the **end** of the list, **Buy** at the **top of the list**. |
+| R4 | Team outlook "View" opens the **Trade DNA sheet**. Home shows **current** standings only. |
+| R5 | **`Standings` is a root-stack push.** Back returns to Home. It mounts its own `FeedbackFAB aboveTabBar={false}` and an explicit `HeaderBack` (RNS#3294). |
+| R6 | League Summary's Season-outlook strip is **unchanged** in this build (follow-up F1). |
+| R7 | **ESPN/MFL current standings are out of v1**, and so is any `/api/league/standings` endpoint (follow-up F2). **No route or API change in this build.** ESPN/MFL get the honest row and page states as drawn. Sleeper standings come client-side from cached rosters. |
 
-| # | Item | Why it needs a call | Recommendation |
-|---|---|---|---|
-| W1 | **`docs/plans/home-tab/plan.md:59` ("No data fetching, no new state") and D-198's "No new analytics events" are overridden on the flag-on path.** | Both were true of the static Home and are written down. This design fetches one payload, holds a one-shot intent, and adds two events. | Accept. The flag-off path stays byte-identical, and `nav.home_tab` keeps its meaning. |
-| W2 | **Arriving from Home resets League rankings to basis = consensus, subset = All, filter = {position}**, and closes any open drill-in. | League Summary's basis/subset are component state that survives tab switches. The Home claim ("4 teams are short at RB") is computed on consensus/All, so the screen must match it. That overwrites a user's My-board toggle. | Accept. The alternative is Home computing on whatever basis League Summary last used, which Home cannot see. |
-| W3 | **The mockup's "before" pane is a labelled reconstruction, not a capture.** | `mockups/CLAUDE.md`'s embed rule is unsatisfiable (Home shipped 2026-10-08; `screens/` froze 2026-08-11 under D-056). The embed-vs-freeze conflict is a standing open operator question. | Accept under the interim posture. Only the real League Summary capture is embedded. |
-| W4 | **The Seller/Buyer arithmetic is duplicated into a pure util rather than extracted from League Summary.** | `check-league-candidates-300.js` pins `cutAfter`/`bandFor` source text in `LeagueSummaryScreen.tsx`. Extracting would re-pin a shipped, guarded surface. Duplicating needs a parity guard. | Duplicate + parity guard for v1 (surgical). Extraction is a later cleanup with its own re-pin. |
+**Follow-ups (logged, not in this build):**
+- **F1:** League Summary's Season-outlook strip still runs `/api/league/outlook` on League-tab mount. Should it move to the Standings page?
+- **F2:** `GET /api/league/standings` for ESPN (the importer already parses the record, `backend/espn_service.py:445-513`) and MFL (a new `leagueStandings` export read).
+- **F3:** a per-opponent Contender/Rebuilding chip on power-rankings.
 
----
+**One deviation from the brief, for the coordinator:** there is **no Trade DNA intent store**. `TradesScreen` already consumes a `editDna: true` route param that opens the Trade DNA sheet (`TradesScreen.tsx:1039-1045`). It is live because `trades.finder_hub` is on, and MatchesScreen already ships the same `navigate('Trades', {screen: 'TradesHome', params})` shape (`MatchesScreen.tsx:598-608`). A second mechanism would be a second source of truth. M-Home navigates with that param, and **TradesScreen is not touched**.
 
 ## 1. Analytics scope
 
-- [x] **(a) New events specced** (mobile only; web and the extension have no Home):
+- [x] **(a) New events specced.** Both are registered in Phase 1 in `backend/analytics_taxonomy.py` (`ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS`) **and** classified in `backend/analytics_queries.NON_INTENT_EVENTS` in the **same commit**. Both are pinned by `backend/tests/test_analytics_taxonomy_home_hub.py`.
 
   | Event | Properties | Fires when | Client |
   |---|---|---|---|
-  | `home_viewed` | `state` ∈ `market \| mid_pack \| no_split \| thin_league \| no_league \| error`; `hero_position` ∈ `QB\|RB\|WR\|TE` or absent; `hero_side` ∈ `seller\|buyer` or absent; `team_count` (int); `platform` = the **league** platform (`sleeper\|espn\|mfl\|fleaflicker`, same meaning as on `league_view`) | Once per Home **focus**, after the power-rankings query settles (`isFetched`), or immediately for `no_league`. Deduped per focus in a ref, so a background refetch never mints a second row. Never fires on the flag-off path. | mobile |
-  | `home_tile_tapped` | `tile` ∈ `market \| position \| rank \| trades \| matches \| league \| link_league \| retry`; `position` (only for `market`/`position`); `side` ∈ `seller\|buyer\|mid` (only for `market`/`position`: the user's band at that position) | On press of any Home hub tile, before navigation | mobile |
+  | `home_tile_tapped` | `tile` (closed: `outlook` · `standings` · `overall_rank` · `buy` · `sell` · `position_ranking` · `find_trade` · `rank` · `matches` · `trends` · `free_agents` · `link_league` · `retry`). On `buy` / `sell` / `position_ranking` **only**: `position` (`QB\|RB\|WR\|TE`) and `band` (`seller\|buyer\|mid`, the user's own band at that position). | On press of any Home hub row, tile or button, **before** navigating. Screen `Home`. | mobile (M-Home) |
+  | `standings_segment_changed` | `segment` (`current\|projected`, the segment the tap selected) | The user taps a segment **and it changes**. Never on mount, never on a re-tap of the active segment. Screen `Standings`. | mobile (M-Dest) |
 
-  **Classification: both go in `analytics_queries.NON_INTENT_EVENTS`, in the same commit that registers them.**
-  - `home_viewed` is an impression, the `league_view` class.
-  - `home_tile_tapped` is navigation, the `tab_selected` class. Home is the launch tab, so counting a tile tap as intent would turn every "open app, tap a tile, leave" into a user-day and step-change DAU on ship day, which is the seam `NON_INTENT_EVENTS` exists to prevent (`analytics_queries.py:63-75`).
-  - The destination's own events carry intent: `league_team_opened`, `league_candidate_pinned`, `find_trades_tapped`, `match_opened`.
-
-  **No prop is added to existing events.** Home→split attribution uses the session sequence: a `home_tile_tapped {tile ∈ market|position, position: P}` followed, in the same session, by `league_pos_candidates_viewed {position: P}` within 10 s. The envelope already carries a per-session `seq` (`mobile/src/api/events.ts`). This keeps the #300 exposure emitter, pinned by `check-analytics-300.js`, untouched. If the operator wants exact attribution instead, the alternative is an `entry ∈ pill|home` prop on `league_pos_candidates_viewed`, at the cost of re-pinning that guard.
-
-  **Funnel this answers:**
-  1. `home_viewed{state:market}`
-  2. `home_tile_tapped{tile:market|position}`
-  3. `league_pos_candidates_viewed{divider:shown}`
-  4. `league_team_opened`
-  5. `league_candidate_pinned`, the #300 conversion moment (unchanged)
-
-  The question it answers: does Home move the share of active users who ever reach the split (today near zero, per the ask)?
-
-  → **follow-through at build:**
-  - A tracking-plan addendum at `docs/business/analytics/<build-date>-home-hub-addendum.md`. The taxonomy is default-deny ("New client event types require a tracking-plan addendum first", `analytics_taxonomy.py:8-10`).
-  - Register both names in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` and classify them in `NON_INTENT_EVENTS`, in **one registration-only commit that lands before any emitter**, following the T1 precedent (`analytics_taxonomy.py`, P1 remediation block). An unregistered name or prop is counted and dropped behind a 200.
-  - Nothing is stored beyond `user_events`, so there is no data-dictionary change.
-- [ ] (b) Existing events cover it: no. `screen_viewed` / `tab_selected` cannot say which hero state was shown or which tile was tapped.
-- [ ] (c) Waived
+  - **Why NON_INTENT.** Home is the launch tab, so counting a tile tap as intent would step-change DAU on ship day. The destinations' events carry intent. The segment switch is a lens change.
+  - **Existing events reused, unchanged:**
+    - `screen_viewed` (`Home`, `Standings`);
+    - `tab_selected`;
+    - `league_pos_candidates_viewed` (fires on its own when a Buy/Sell arrival applies the filter; **not** re-emitted);
+    - `league_team_opened` / `league_candidate_pinned` (the conversion);
+    - `league_team_closed{via: 'filter_change'}` (the W2 drill-in close rides the existing auto-exit).
+  - **Attribution:** Home → split is measured by session sequence. No new prop goes on the #300 event.
+  - **Follow-through:** the tracking-plan addendum is written (`docs/business/analytics/2026-10-10-home-hub-addendum.md`). Nothing new is stored beyond `user_events`, so there is no data-dictionary row.
+- [ ] (b) Existing events cover it: no.
+- [ ] (c) Waived: no.
 
 ## 2. Schema & flag scope
 
 - **New/changed tables or columns:** none.
-- **New/changed feature flags:** **`nav.home_hub`**, **default `false` (dark)**, client-only (no route reads it).
-  - **Files:** `config/features.json` (+ `_comment_nav_home_hub`), `backend/feature_flags.py` `FLAG_KEYS` + `DEFAULT_FLAGS`, `backend/tests/fixtures/flags/*.json` (the mirror test), `docs/config-reference.md`. It does **not** go in `LAUNCHED_FLAG_DEFAULTS` (`mobile/src/state/useFeatureFlags.ts:45`), because absent ⇒ false is the intended cold-start value.
-  - **Read:** imperatively, once per `HomeScreen` mount (`useState(() => !!useFeatureFlags.getState().flags['nav.home_hub'])`), so a mid-session revalidation never swaps Home's layout under the user. The `check-home-tab.js` precedent pins the same shape for `nav.home_tab`.
+- **New/changed feature flags:** **`nav.home_hub`**, default **true** (R2), client-only (no route reads it).
+  - **Registered in Phase 1:**
+    - `config/features.json` (+ `_comment_nav_home_hub`);
+    - `backend/feature_flags.py` `FLAG_KEYS` (code default False, as every key);
+    - `backend/tests/fixtures/flags/{release,onboarding-v2,profiles-on}.json` (the 3-touch mirror);
+    - `mobile/src/state/useFeatureFlags.ts` `LAUNCHED_FLAG_DEFAULTS` (true, so a fresh install's first Home is the hub);
+    - `docs/config-reference.md`.
+  - **Read:** imperatively, once per `HomeScreen` mount (`useRef`, below). A mid-session revalidation never swaps Home under the user.
   - **Dependencies:**
-    - `nav.home_tab` off ⇒ no Home at all; this flag is moot.
-    - `nav.home_hub` on and `league.pos_candidates` off ⇒ header + live line + task grid only. The hero and position tiles promise a split that would not render.
-    - `onboarding.trades_first` first-run carve-out (D-198) unchanged: first-run users never land on Home.
-  - **Graduation criterion:**
-    1. Lit after one operator TestFlight build passes the §3 checklist clean.
-    2. Remove the flag after 30 days lit, provided:
-       - `home_viewed{state:market}` → `league_pos_candidates_viewed` (session-sequence attributed) is non-zero and the operator accepts the rate;
-       - the Acquire landing's own traffic shows no drop the operator attributes to Home.
-- **New env vars / `model_config` keys:** none. **Rollback lever:** `nav.home_hub` → false + `POST /api/feature-flags/reload`; takes effect on each device's next Home mount. No deploy.
-- **New client state (no schema):** `mobile/src/state/leagueSummaryIntent.ts`, a one-shot zustand store. It is the only cross-tab preselection contract, matching `useFinderTargets`' handoff pattern and FumbleAI's `env.selectedLens`.
-  - **Shape:** `{ pending: { leagueId, position: 'QB'|'RB'|'WR'|'TE', seq } | null; set(); take() }`. Written only by `HomeScreen`; `take()`n only by `LeagueSummaryScreen` when `isTabRoot`.
-  - **League switch:** a `leagueId` mismatch is discarded.
-  - **Persistence:** never persisted, so a cold start never replays a stale intent.
+    - `nav.home_tab` off ⇒ no Home, moot.
+    - `league.pos_candidates` off ⇒ the position tiles are not rendered (the split they open wouldn't draw). The status rows and task tiles still render.
+  - **Graduation:** remove the flag once one TestFlight build has run the §3 checklist clean and the operator confirms the hub stays.
+- **New env vars / `model_config` keys:** none. **Rollback lever:** `nav.home_hub` → false + `POST /api/feature-flags/reload`; takes effect on the next Home mount, no deploy.
+- **New client state:** `mobile/src/state/leagueSummaryIntent.ts`, a one-shot arrival intent (session-only, never persisted, cleared on league switch). Exact API in §6.
+- **Wire type (no backend change):** `api/sleeper.ts` `RosterRow` gains optional `settings` (Sleeper's raw rosters already carry it through the proxy, `backend/server.py:21843-21845`).
+- **Route/API changes:** **none** (R7).
 
 ## 3. Evidence scope
 
 D-056: no Maestro, no simulator, no captures.
 
-- [x] **Structural guard: new `mobile/tests/check-home-hub.js`** (`npm run test:home-hub`). Dependency-free text assertions over comment-stripped source. It pins:
-  1. **Flag read.** `nav.home_hub` is read imperatively, once per mount, never via `useFlag`.
-  2. **Flag-off parity.** The flag-off branch renders the existing `OPTIONS` table and the shipped heading byte-identically. `check-home-tab.js` must keep passing **unmodified**; it is the flag-off regression net.
-  3. **Gating.** The hero and position tiles render only when `league.pos_candidates` is on.
-  4. **No local arithmetic.** `HomeScreen.tsx` imports `utils/positionMarket` and contains no band/median arithmetic of its own (no `0.33`, no `medians[` indexing, no `.sort(` over teams).
-  5. **Single writer.** `HomeScreen.tsx` is the only writer of `leagueSummaryIntent` (`git grep`-style scan of `src/`).
-  6. **Consumer.** `LeagueSummaryScreen.tsx` consumes it only behind `isTabRoot`. The consume block sets exactly `setBasis('consensus')`, `setSubset('all')` and `setPosFilter(new Set([position]))`, and contains no second `track('league_pos_candidates_viewed'` call (one interaction, one event; the existing emitter fires on its own).
-  7. **FAB.** No `FeedbackFAB` import in `HomeScreen.tsx` (#188, #196/#197).
-  8. **Tokens.** No hex or `rgba(` literals in `HomeScreen.tsx`.
-  9. **testIDs.** Every Home hub tile carries a static literal `testID` from the list below (testid-lint compatibility).
-  10. **Analytics registration.** `home_viewed` and `home_tile_tapped` appear in `backend/analytics_taxonomy.py` `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` **and** in `backend/analytics_queries.py` `NON_INTENT_EVENTS`.
-  11. **Tile targets.** Each task tile navigates by route name to `Rank` / `Trades` / `Matches` / `League`, the same targets `check-home-tab.js` pins for the text rows.
-- [x] **Unit tests for the pure util: new `mobile/tests/check-position-market.js`** (`npm run test:position-market`). It transpiles `mobile/src/utils/positionMarket.ts` (zero runtime imports, per `mobile/src/CLAUDE.md` "Adding a feature" §4) and runs fixtures:
-  - **Band sizes:** 12 teams (4/4/4), 10 (3/4/3), 14 (5/4/5), 8 (3/2/3).
-  - **Median position:** an odd team count (the team on the median sits on the seller side, `>=`).
-  - **Ties:** equal values break by `user_id` asc.
-  - **Degenerate inputs:**
-    - a flat league ⇒ `no_split`;
-    - `medians` absent ⇒ `no_median`;
-    - fewer than 3 teams ⇒ `thin_league`;
-    - the user mid-pack everywhere ⇒ no hero;
-    - no `is_you` team ⇒ no hero, no position tiles.
-  - **Hero choice:** the largest `|you − median| / median` among banded positions, with the tie order QB, RB, WR, TE.
-  - **Parity (W4):** reads `LeagueSummaryScreen.tsx` and asserts its `cutAfter` / `bandFor` / `ranked` sort still match the exact regexes `check-league-candidates-300.js` pins, **and** that the util's equivalents match the same shapes. Changing one side without the other fails.
-- [x] **Backend pytest:** extend `backend/tests/test_analytics_p0.py` (the file that already asserts `CLIENT_EVENT_PROPS` per event) with:
-  - `CLIENT_EVENT_PROPS["home_viewed"] == {"state","hero_position","hero_side","team_count","platform"}`
-  - `CLIENT_EVENT_PROPS["home_tile_tapped"] == {"tile","position","side"}`
-  - both names ∈ `NON_INTENT_EVENTS`
-  - both names ∉ `SERVER_FIRED_EVENTS` (the import-time disjointness invariant already enforces this)
-- [x] **Code-walk proof** (written at build into the TEST_LEDGER entry, file:line-cited). The trace:
-  1. Hero `onPress` → `track('home_tile_tapped', …)` → `leagueSummaryIntent.set({leagueId, position:'RB', seq})` → `navigation.navigate('League', {screen:'LeagueRankings'})`.
-  2. `LeagueSummaryScreen` focus effect (`isTabRoot`) → `take()` → `setBasis('consensus')`, `setSubset('all')`, `setPosFilter(new Set(['RB']))`.
-  3. The existing `candidatePos` memo (`LeagueSummaryScreen.tsx:860-866`) resolves to RB.
-  4. `medianAtPos` / `cutAfter` (`:875-892`) and `bandFor` (`:1027-1033`) compute.
-  5. The divider renders (`:2214-2224`).
-  6. The existing exposure effect (`:931-946`) fires `league_pos_candidates_viewed {position:'RB', divider:'shown'}`, and the existing drill-in auto-exit (`:1124-1136`) closes any open team via `closeTeam('filter_change')`.
-  7. The scroll lands on the list.
-  8. The proof must also show that Home's "4 teams" equals the number of `Buyer` badges rendered for the same payload: the same function, the same inputs.
-- [x] **Manual TestFlight checklist** (operator; the only runtime evidence; run with `nav.home_hub` lit):
-  1. **Returning user, Sleeper league, cold launch** → lands on Home.
-     - The title reads "What would you like to do today?".
-     - A one-line live summary sits under it.
-     - Under YOUR LEAGUE there is a Trade market tile naming one position, a "You · Seller" or "You · Buyer" badge, a sentence with your rank and two `≈N firsts` values, a bar strip, and four team names.
-  2. **Write down** the hero's position P, the count N in its headline, and the four names.
-  3. **Tap the hero** → the League tab opens on League rankings with **only P selected** in the pills, **Consensus** basis, **All** subset, and the list in view.
-     - Exactly N rows carry **Buyer** (if you're a Seller) or **Seller** (if you're a Buyer).
-     - The four names from step 2 are among them.
-     - Your row carries the same badge Home showed.
-     - A "League median · ≈… firsts" divider sits in the list.
-  4. **Tap a Buyer team** → the drill-in opens with "Tap a player to offer them to <team>." Tap one of your players → the Acquire tab opens scoped to that team with that player pinned. (This is the shipped #300 path, unchanged; it confirms Home reaches it.)
-  5. **On League rankings, switch to My board and tap QB**, then go back to Home and tap the **RB position tile** → League rankings returns to **Consensus**, **RB only**. No drill-in is left open.
-  6. **Position tiles:** each shows your rank "Nth /T" and either a Seller/Buyer badge or "Mid-pack". Tapping each lands on that position's split.
-  7. **Task tiles:**
-     - Rank → Rank tab.
-     - Find a trade → Acquire.
-     - Matches → Matches. Its badge number equals the "Mutual" segment count on the Matches tab.
-     - League → League rankings with **no** position filter applied.
-  8. **Exactly one feedback button** is visible on Home, and it covers no tile's text at the bottom of the scroll.
-  9. **ESPN or MFL league** (switch via the TopBar): Home renders the Trade market tile with that league's teams and no error.
-  10. **Airplane mode, pull to Home after a fresh league switch:** the YOUR LEAGUE section shows "Couldn't load rosters" with Try again. The four task tiles still work. Re-enable the network and tap Try again → the hero loads.
-  11. **Largest Dynamic Type size:** the task grid collapses to one column, nothing is clipped, and every tile is still tappable.
-  12. **Kill switch:** set `nav.home_hub` false, reload flags, relaunch → Home is the four plain text rows exactly as today.
-  13. **Fresh install, first run:** sign in, pick a league → lands on **Acquire** with the analyst guide (not Home), as today (D-198).
-- [ ] WAIVED: not waived.
-- **`testID`s added** (static literals):
-  - `home.hub`, `home.live-line`
-  - `home.market`, `home.market.empty`, `home.market.retry`, `home.market.link-league`
-  - `home.position.qb`, `home.position.rb`, `home.position.wr`, `home.position.te`
-  - `home.tile.rank`, `home.tile.trades`, `home.tile.matches`, `home.tile.league`
+- [x] **Structural guards.**
 
-  Unchanged on the flag-off path: `home.screen`, `home.option.rank|trades|matches|league`. All must pass `mobile/scripts/testid-lint.sh`.
+  | Guard | Owner | Pins |
+  |---|---|---|
+  | `check-position-split-parity.js` | foundation, **done** (25 checks) | 16 named fixtures (4/4/4, 3/4/3, 5/4/5, 3/2/3, median-on-team ⇒ seller side, flat ⇒ no_split, no median ⇒ no_median, user_id tiebreak, canSplit, suggestedSide, ordinal…), plus **executable parity**: the guard extracts and runs LeagueSummaryScreen's own `computeSubset` / `activeTotal` / `ranked` / `cutAfter` / `bandSize` / `bandFor` beside the util over 16,000 randomised position views (1–32 teams). Sabotage-proven 3 ways: util `>=`→`>`, screen `idx < bandSize`→`<=`, screen `0.33`→`0.34`. |
+  | `check-standings-order.js` | foundation, **done** (15 checks) | Win % (a tie counts half), then points for, then roster_id. `fpts + fpts_decimal/100`. The en-dash record. The you row. Before week 1 ⇒ `no_games`. No `settings` (ESPN/MFL) ⇒ `unavailable`. Zero runtime imports. `RosterRow.settings` declared. |
+  | `check-home-hub.js` | **M-Home** | See §6 "M-Home guard must pin". |
+  | `check-home-destinations.js` | **M-Dest** | See §6 "M-Dest guard must pin". |
+  | `check-home-tab.js` | **must pass UNMODIFIED** | It is the flag-off regression net: the heading copy, the four OPTIONS rows, no FeedbackFAB, and no `useQuery\|useState\|useEffect\|fetch(` in `HomeScreen.tsx`. |
+  | `check-league-candidates-300.js`, `check-analytics-300.js`, `check-analytics-297-302.js`, `check-guide-spotlight-tracking.js`, `check-session-seed.js`, `check-position-split-parity.js` | **must pass UNMODIFIED** | M-Dest edits LeagueSummaryScreen next to everything these pin. |
+
+- [x] **Unit tests:** `backend/tests/test_analytics_taxonomy_home_hub.py` (6 tests). It covers allowlisted names, exact prop rows, no device-platform prop, NON_INTENT classification, no duplicate of the #300 events, and both names landing with every prop through `POST /api/events`.
+- [x] **Code-walk proof** (written at ship into TEST_LEDGER, file:line-cited). It traces:
+  1. Home Sell RB `onPress` → `track('home_tile_tapped', {tile: 'sell', position: 'RB', band: 'seller'}, 'Home')` → `requestLeagueSummarySplit(leagueId, 'RB', 'sell')` → `navigate('League', {screen: 'LeagueRankings'})`.
+  2. LeagueSummaryScreen consume effect (`isTabRoot`, keyed on the intent `seq`) → `takeLeagueSummaryIntent(leagueId)` → `setBasis('consensus')`, `setSubset('all')`, `setPosFilter(new Set(['RB']))`.
+  3. The existing auto-exit closes any drill-in (`via: 'filter_change'`).
+  4. The existing `candidatePos` → `cutAfter` → `bandFor` → divider render → the existing `league_pos_candidates_viewed` emit. The pinned banner renders.
+  5. `scrollToEnd()` after the filtered content settles.
+  6. The same trace for Buy (`scrollTo({y: listTop})`) and Overall rank (`kind: 'all'`, no filter, no banner, top).
+  7. Standings: `navigate('Standings')` → the Current table from seeded rosters (no request); Projected tap → `standings_segment_changed` → the outlook query enables.
+  8. Team outlook → `navigate('Trades', {screen: 'TradesHome', params: {mode: 'guided', editDna: true}})` → `TradesScreen.tsx:1039-1045` opens the sheet.
+  9. The proof states that Home's band for RB equals the band League rankings renders: both come from the same arithmetic, pinned by the parity guard.
+- [x] **Manual TestFlight checklist** (operator; `nav.home_hub` on; the only runtime evidence):
+  1. **Returning user, Sleeper league, cold launch** → Home. Top to bottom:
+     - "What would you like to do today?";
+     - three 40pt rows: **Team outlook**, **Standings** "W–L · Nth of N", **Overall rank** "Nth of N";
+     - four position tiles QB/RB/WR/TE in a 2×2, each with a rank, your value vs the median, a meter, a badge (Seller / Buyer / Mid-pack), and **Buy** + **Sell** inside the tile;
+     - five full-width task tiles: Find a trade, Rank players, View matches, Check trends, Search free agents.
+     All three rows and all four tiles are visible without scrolling on a 6.1" phone.
+  2. **Note** your band at RB on Home. Tap **RB → Sell** → the League tab opens on League rankings with **only RB** selected, **Consensus**, **All**, a pinned banner "Selling RB…", and the **end** of the list in view, shortest team last. Your row's badge equals Home's band.
+  3. **Tap a team below the line** → the drill-in reads "Tap a player to offer them to <team>." Tap a player → Acquire opens scoped to that team with the player pinned.
+  4. **Back on Home, tap RB → Buy** → League rankings at the **top of the list**, banner "Buying RB…". Tap a team above the line → "Tap a player to target them from <team>."
+  5. **On League rankings, switch to My board, tap QB and open any team**, then go back to Home and tap **WR → Sell** → League rankings returns to **Consensus · All · WR**, no drill-in open, end of list.
+  6. **Banner:** tap its close → it disappears. Tap another position pill → it does not come back. Leave the tab and return → no banner.
+  7. **Overall rank → View** → League rankings, **no position filter**, no banner, top. Its rank equals the Overall rank row.
+  8. **Standings → View** → the Standings page slides over Home (no tab bar), **Current** selected, a table with rank, team, W–L, PF and your row highlighted. Its place equals Home's row. Tap **Projected** → a spinner, then the Season-outlook list with Likely / Toss-up / Unlikely and **no percentages**. Tap **Back** → Home. Exactly one feedback button on the Standings page.
+  9. **Team outlook → View** → the Acquire tab with the Trade DNA sheet open. Change the outlook, close the sheet, return to Home → the row shows the new outlook.
+  10. **Task tiles:**
+      - Find a trade → Acquire.
+      - Rank players → Rank.
+      - View matches → Matches. Its badge equals the Mutual count there.
+      - Check trends → Trends.
+      - Search free agents → Free agents (Back → Home).
+  11. **ESPN or MFL league** (switch via the TopBar):
+      - Standings row reads "Not available for ESPN yet" with no View.
+      - Team outlook, Overall rank and the four tiles work.
+      - Open Standings another way (deep link): Current shows the unavailable card, Projected shows "Season outlook needs schedule and scoring history — Sleeper leagues only for now."
+  12. **Airplane mode, then switch league:**
+      - The position grid shows "Couldn't load rosters" + Try again.
+      - The status rows that can't load show Retry.
+      - The task tiles still work.
+      - Network back, Try again → recovers.
+  13. **Largest Dynamic Type:** nothing clipped; the Buy/Sell buttons are still tappable and still inside their tiles.
+  14. **Kill switch:** `nav.home_hub` false, reload flags, relaunch → Home is the four plain text rows exactly as today.
+  15. **Fresh install, first run** → lands on Acquire with the guide (D-198), not Home.
+- [ ] WAIVED: not waived.
+- **`testID`s:** fixed in §6. All static literals, and all must pass `mobile/scripts/testid-lint.sh`.
 
 ## 4. Docs scope
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` | n/a | No route added, renamed or contract-changed. Home reads `/api/league/power-rankings` (consensus), `/api/league/summary` and `/api/rankings/progress` exactly as documented. |
-| `living-memory/LLD.md` | updated | New convention: **cross-tab preselection goes through a one-shot intent store, never route params** (`state/leagueSummaryIntent.ts`), mirroring `useFinderTargets`' handoff; plus the "Home claims must use the League Summary arithmetic" parity rule. |
-| `docs/architecture.md` | n/a | No backend module or data flow changes. |
-| `living-memory/HLD.md` | n/a | One screen re-composed from existing reads; no new module, client or major flow. |
-| `docs/cross-client-invariants.md` | n/a | The band rule (`round(n·0.33)`, `>=` median) is mobile-only. Web has no position split and no Home. Parity is pinned mobile-side by `check-position-market.js`. |
-| `docs/glossary.md` | updated | Add **Trade market (Home)**: the Home hero that surfaces one position's buyers/sellers split. Add **Buyer / Seller band**: the #300 term, absent from the glossary today. |
-| ADR or `DECISIONS.md` entry | updated | New D-: the operator's direction pick (A/B/C) and W1–W4 as ruled. Narrows D-198's "No new analytics events" for the flag-on path. |
-| `docs/config-reference.md` | updated | `nav.home_hub` row: default, read-once semantics, dependency on `league.pos_candidates`, rollback. |
-| `docs/design/components.md` | updated | Four constructions, all built from existing primitives:<br>• **Trade market tile** (hero card + bar strip + brackets)<br>• **Position tile** (3px position rail, mono rank, neutral band badge)<br>• **Task tile** (MethodTile variant: 40pt ink-2 icon well, badge top-right, title + detail, min 124pt, 2 columns → 1 at accessibility sizes)<br>• **Live line** (Banner variant with flare count emphasis) |
-| Tracking-plan addendum | updated | `docs/business/analytics/<build-date>-home-hub-addendum.md` (§1). |
-| Mobile CLAUDE maps | updated | `mobile/src/screens/CLAUDE.md` (HomeScreen row), `mobile/src/state/CLAUDE.md` (new store), `mobile/src/utils/CLAUDE.md` (new util), `mobile/tests/README.md` (two new guards), `mobile/src/navigation/CLAUDE.md` (the Home bullet). |
-| `docs/plans/README.md` | updated | Row for `home-engagement/`, added in this design commit. |
+| `docs/api-reference.md` | n/a | No route added, renamed or contract-changed (R7). Home and Standings read existing routes as documented. |
+| `living-memory/LLD.md` | updated at ship | Two conventions: cross-tab arrival goes through a one-shot intent store (`leagueSummaryIntent`); a duplicated arithmetic needs an executable parity guard (W4). |
+| `docs/architecture.md` | n/a | No backend module or data-flow change. |
+| `living-memory/HLD.md` | n/a | Two client screens recomposed from existing reads; no new module, client or flow. |
+| `docs/cross-client-invariants.md` | n/a | The band rule and standings order are mobile-only. Web has no Home, no Standings and no position split. |
+| `docs/glossary.md` | updated at ship | Add **Home hub**, **Buyer / Seller band** (the #300 term, never glossed) and **current vs projected standings**. |
+| ADR or `DECISIONS.md` entry | updated at ship | New D-: Home hub (Direction D) with R1–R7 and W1–W4 as ruled; narrows D-198's "no new analytics events". |
+| `docs/config-reference.md` | **updated (Phase 1)** | `nav.home_hub` row. |
+| Tracking-plan addendum | **updated (Phase 1)** | `docs/business/analytics/2026-10-10-home-hub-addendum.md`. |
+| `docs/design/components.md` | updated at ship | New constructions:<br>• Status row (40pt)<br>• Position tile with in-tile Buy/Sell (36pt visible / 44pt hit)<br>• Task tile (full-width 58pt)<br>• Pinned Buy/Sell banner (Banner construction)<br>• Standings table<br>• The Current/Projected segment (the Matches segment construction) |
+| Mobile CLAUDE maps | updated at ship (integrator) | `mobile/src/screens/CLAUDE.md` (HomeScreen, StandingsScreen, LeagueSummaryScreen arrival), `mobile/src/navigation/CLAUDE.md` (Standings root push), `mobile/src/state/CLAUDE.md` (leagueSummaryIntent), `mobile/src/utils/CLAUDE.md` (positionSplit, standings), `mobile/src/components/CLAUDE.md` (`components/home/`, SeasonOutlook if extracted), `mobile/tests/README.md` (4 guards). |
+| `docs/plans/README.md` | updated at ship | Flip the `home-engagement/` row to shipped. |
 
 ## 5. Ship gate declaration
 
-- **CI green:** `backend-tests` (incl. the extended `test_analytics_p0.py`) + `mobile-typecheck` + `maestro-testid-lint`, all passing on the pushed sha. The two new guards and `check-home-tab.js` / `check-league-candidates-300.js` / `check-analytics-300.js` must pass. The latter two must pass **unmodified**: this design does not touch the #300 arithmetic or emitter.
-- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the guards run, the pytest result, and the code-walk proof from §3.
-- **TestFlight verification:** the operator runs the §3 checklist on a build with `nav.home_hub` lit; the outcome is logged in TEST_LEDGER before the flag is lit for everyone.
-- **Express lane declared by the operator?** No. Full gates. This change adds analytics events and a feature flag, which the bright-line rule says is never a quick fix.
+- **CI green:**
+  - `backend-tests`, incl. `test_analytics_taxonomy_home_hub.py` and the flag-mirror tests;
+  - `mobile-typecheck` (tsc + every `tests/check-*.js`, incl. the four new guards and the six "unmodified" ones);
+  - `maestro-testid-lint`.
+- **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry with the guard counts, the pytest result, the parity sabotage names, and the §3 code-walk proof.
+- **TestFlight verification:** the operator runs the §3 checklist; the outcome is logged in TEST_LEDGER.
+- **Express lane declared by the operator?** No. Full gates (flag + analytics events: bright line).
 
 ---
 
-## Appendix A — what Direction A renders (build reference)
+## 6. BUILD CONTRACT
 
-Order on screen (mockup §2):
+Two parallel mobile agents, **disjoint file ownership**. Branch from `feat/home-hub` at the Phase 1 commit. **Foundation files are frozen.** If an agent needs a foundation change, it stops and asks; it does not edit.
 
-1. **Header.**
-   - Subline `<your display name> · <rank>th of <n> overall`, from the `is_you` team's `rank` in the payload.
-   - Title "What would you like to do today?": D-198 copy, Barlow Condensed, sentence case.
-2. **Live line.** Banner construction; flare numerals. Order:
-   1. the hero position's split;
-   2. `matches_mutual` if > 0;
-   3. otherwise the all-clear "Your board is live. Pick a position below to see who's short."
-3. **YOUR LEAGUE → Trade market hero.** One `Pressable`; the whole tile is the button (no nested controls; `mockups/candidates-300-v2` VoiceOver finding). Copy by side:
+### 6.1 Foundation (Phase 1, committed, FROZEN)
 
-   | Your band at P | Headline | Sentence | Names line | CTA |
-   |---|---|---|---|---|
-   | Seller | "N teams are short at P" | "You're Xth of T: ≈A firsts of P value against a league median of ≈M firsts." | "Shortest P rooms: …" (the bottom band, shortest first) | "See P buyers and sellers" |
-   | Buyer | "You're Xth of T at P" | same sentence | "N teams are deep: …" (the top band, deepest first) | same |
-   | none anywhere | "You're mid-pack at every position" | "No position puts you in the top or bottom N. Pick one to see who's short and who's deep." | none | none (position tiles are the doors) |
+| File | What |
+|---|---|
+| `mobile/src/utils/positionSplit.ts` | Split arithmetic (W4 duplicate) |
+| `mobile/src/utils/standings.ts` | Sleeper rosters → current standings |
+| `mobile/src/state/leagueSummaryIntent.ts` | One-shot League-rankings arrival intent |
+| `mobile/src/api/sleeper.ts` | `RosterRow.settings` (type only) |
+| `mobile/src/state/useFeatureFlags.ts` | `'nav.home_hub': true` baked default |
+| `mobile/tests/check-position-split-parity.js`, `mobile/tests/check-standings-order.js` | Foundation guards |
+| `mobile/package.json` | Scripts `test:position-split-parity`, `test:standings-order`, **and pre-added** `test:home-hub`, `test:home-destinations` |
+| `config/features.json`, `backend/feature_flags.py`, `backend/tests/fixtures/flags/*.json`, `docs/config-reference.md` | Flag |
+| `backend/analytics_taxonomy.py`, `backend/analytics_queries.py`, `backend/tests/test_analytics_taxonomy_home_hub.py`, `docs/business/analytics/2026-10-10-home-hub-addendum.md` | Events |
 
-   - **Copy rules:**
-     - "short" / "deep", never "wants" / "is shopping" (trade-quality research `:101`).
-     - Values are always the server's `value_label` strings, never raw numbers (#277/#279).
-     - The count is the band size, so it equals the badges League Summary renders.
-   - **Bar strip:** bars sorted by P value, yours in the P position hex, the others ink-3, a dashed median line, and Sellers/Buyers brackets under the band columns. It is decorative; `accessibilityElementsHidden`, with the sentence carrying the meaning.
-4. **Position tiles** (4 across). Each shows your rank `Xth /T`, then a neutral `Seller`/`Buyer` badge or "Mid-pack", or "No clear split" for `no_split`/`no_median`. Tap → that position's split.
-5. **GET THINGS DONE → 2×2 task tiles.**
+**Exact APIs (verbatim).**
 
-   | Tile | Detail | Badge | Tap |
-   |---|---|---|---|
-   | Rank players | from `/api/rankings/progress` | flare `n/4` only when not `unlocked` | Rank tab |
-   | Find a trade | static detail | none | Acquire |
-   | Matches | `N mutual · M awaiting them` | flare mono `matches_mutual` when > 0 | Matches |
-   | League | static detail | `Xth` | League tab, no filter |
+`mobile/src/utils/positionSplit.ts`:
+```ts
+export type SplitPos = 'QB' | 'RB' | 'WR' | 'TE';
+export const SPLIT_POSITIONS: readonly SplitPos[] = ['QB', 'RB', 'WR', 'TE'];
+export type Band = 'Seller' | 'Buyer';
+export type SplitSide = 'buy' | 'sell';
+export const MIN_SPLIT_TEAMS = 3;
+export interface SplitTeamInput {
+  user_id: string;
+  username?: string;
+  display_name?: string;
+  is_you: boolean;
+  positions?: Partial<Record<SplitPos, { value: number; value_label?: string }>>;
+}
+export interface SplitPayloadInput {
+  teams: readonly SplitTeamInput[];
+  medians?: Partial<Record<SplitPos, { value: number; value_label?: string }>>;
+}
+export interface SplitRow {
+  userId: string; name: string; value: number; valueLabel?: string; isYou: boolean;
+  rank: number;                 // 1-based under this position's ordering
+  band: Band | null;
+  aboveLine: boolean | null;    // null when no line is drawn
+}
+export type SplitState = 'shown' | 'no_median' | 'no_split';
+export interface PositionSplit {
+  position: SplitPos; state: SplitState; teamCount: number;
+  median: { value: number; valueLabel?: string } | null;
+  cutAfter: number | null; bandSize: number; rows: SplitRow[]; you: SplitRow | null;
+}
+export function teamName(t: SplitTeamInput): string;
+export function positionValue(t: SplitTeamInput, pos: SplitPos): number;
+export function rankByPosition<T extends SplitTeamInput>(teams: readonly T[], pos: SplitPos): T[];
+export function cutAfterFor(values: readonly number[], median: number): number | null;
+export function bandSizeFor(teamCount: number, cutAfter: number | null): number;
+export function bandAt(idx: number, teamCount: number, bandSize: number): Band | null;
+export function positionSplit(payload: SplitPayloadInput, pos: SplitPos): PositionSplit;
+export function positionSplits(payload: SplitPayloadInput): PositionSplit[];   // QB, RB, WR, TE
+export function canSplit(payload: SplitPayloadInput): boolean;                 // >= 3 teams && a median somewhere
+export function suggestedSide(band: Band | null): SplitSide | null;            // Seller→'sell', Buyer→'buy'
+export function rankPercentile(rank: number, teamCount: number): number;       // meter fill 0..1
+export function ordinal(n: number): string;                                    // 1st 2nd 3rd 11th 21st
+```
+`PowerRankingsResponse` (`api/league.ts`) is structurally assignable to `SplitPayloadInput`; pass the query data straight in.
 
-6. **States** (mockup §7):
-   - **Loading:** static ink-2 skeleton; the task grid renders immediately.
-   - **No league:** a setup card with "Link a league" → LeaguePicker.
-   - **ESPN/MFL:** unchanged.
-   - **Fewer than 3 valued teams:** "Not enough rosters yet".
-   - **Mid-pack everywhere:** as in the copy table above.
-   - **No split at a position:** that tile says so; if no position splits at all, YOUR LEAGUE collapses to one League rankings tile.
-   - **Error:** "Couldn't load rosters" + Try again.
-   - **`league.pos_candidates` off:** YOUR LEAGUE is absent.
+`mobile/src/utils/standings.ts`:
+```ts
+export interface SleeperRosterSettings {
+  wins?: number | null; losses?: number | null; ties?: number | null;
+  fpts?: number | null; fpts_decimal?: number | null;
+}
+export interface StandingsRosterInput { roster_id: number; owner_id: string | null; settings?: SleeperRosterSettings | null; }
+export interface StandingsUserInput { user_id: string; display_name?: string | null; username?: string | null; }
+export interface StandingsRow {
+  rosterId: number; ownerId: string | null; name: string;
+  wins: number; losses: number; ties: number; games: number; winPct: number; pointsFor: number;
+  place: number;   // 1-based, unique
+  isYou: boolean;
+}
+export interface CurrentStandings {
+  rows: StandingsRow[]; teamCount: number;
+  gamesPlayed: boolean;   // false ⇒ every record 0–0
+  hasRecords: boolean;    // false ⇒ no `settings` at all (not a Sleeper payload)
+  you: StandingsRow | null;
+}
+export function pointsFor(s: SleeperRosterSettings | null | undefined): number;
+export function winPct(wins: number, losses: number, ties: number): number;
+export function formatRecord(wins: number, losses: number, ties: number): string;  // "5–1", "5–1–1"
+export function currentStandings(
+  rosters: readonly StandingsRosterInput[],
+  users: readonly StandingsUserInput[],
+  myRosterId: number | null,
+): CurrentStandings;
+export type StandingsSummary =
+  | { kind: 'record'; record: string; place: number; teamCount: number }
+  | { kind: 'no_games' }
+  | { kind: 'unavailable' };
+export function standingsSummary(st: CurrentStandings): StandingsSummary;
+```
+`myRosterId = findMyRoster(rosters, user.user_id)?.roster_id ?? null` (`api/sleeper.ts`; that function owns the co-owner rule; never re-implement it).
 
-**Network cost:** one new request, `GET /api/league/power-rankings?basis=consensus`, on the query key League Summary and the in-league calculator already share (`['league-power-rankings', leagueId, 'consensus']`, `staleTime` 60 s). `['league-summary', id]` (TopBar.tsx:175) and `['progress', id, format]` (RootNav.tsx:396-402) are already warm when Home mounts. No outlook request.
+`mobile/src/state/leagueSummaryIntent.ts`:
+```ts
+export type LeagueSummaryIntent =
+  | { kind: 'split'; leagueId: string; position: SplitPos; side: SplitSide; seq: number }
+  | { kind: 'all'; leagueId: string; seq: number };
+export type LeagueSummaryIntentInput =
+  | { kind: 'split'; leagueId: string; position: SplitPos; side: SplitSide }
+  | { kind: 'all'; leagueId: string };
+export const useLeagueSummaryIntent: UseBoundStore<StoreApi<{
+  pending: LeagueSummaryIntent | null;
+  set: (i: LeagueSummaryIntentInput) => void;
+  take: (leagueId: string | null | undefined) => LeagueSummaryIntent | null;   // one-shot; clears always
+  clear: () => void;
+}>>;
+export function requestLeagueSummarySplit(leagueId: string, position: SplitPos, side: SplitSide): void;
+export function requestLeagueSummaryAll(leagueId: string): void;
+export function takeLeagueSummaryIntent(leagueId: string | null | undefined): LeagueSummaryIntent | null;
+```
+How it behaves:
+- **`seq`:** monotonic for the session, stamped by the store.
+- **`take` for another league:** discards the intent.
+- **League switch:** clears the pending intent (`useSession` subscription).
+- **Persistence:** none.
 
-**Files touched at build (expected):**
-- **New:**
-  - `mobile/src/utils/positionMarket.ts`
-  - `mobile/src/state/leagueSummaryIntent.ts`
-  - `mobile/tests/check-home-hub.js`
-  - `mobile/tests/check-position-market.js` (+ two `npm run` scripts)
-- **Edited:**
-  - `mobile/src/screens/HomeScreen.tsx` (flag-off branch unchanged)
-  - `mobile/src/screens/LeagueSummaryScreen.tsx` (one focus effect + scroll-to-list; no change to the #300 code)
-  - `backend/analytics_taxonomy.py`, `backend/analytics_queries.py`, `backend/feature_flags.py`, `config/features.json`, flag fixtures, `backend/tests/test_analytics_p0.py`
-  - the docs in §4
+### 6.2 Cross-agent interface (both sides code to this, neither changes it)
 
-## Appendix B — backend gaps (not in v1)
+| From Home | Call |
+|---|---|
+| Position **Buy / Sell** | `track('home_tile_tapped', {tile, position, band}, 'Home')` → `requestLeagueSummarySplit(leagueId, pos, side)` → `navigation.navigate('League', { screen: 'LeagueRankings' })` |
+| No-split **See P ranking** | same, `tile: 'position_ranking'`, side **`'buy'`** (lands at the list top; the screen draws no banner when the split state isn't `shown`) |
+| **Overall rank** row | `requestLeagueSummaryAll(leagueId)` → `navigate('League', { screen: 'LeagueRankings' })` |
+| **Standings** row | `navigation.navigate('Standings')`. Root-stack route **`Standings`**, no params, reads the session league. |
+| **Team outlook** row | `navigation.navigate('Trades', { screen: 'TradesHome', params: { mode: 'guided', editDna: true } })` (existing contract) |
+| Find a trade / Rank / Matches | `navigate('Trades')` / `navigate('Rank')` / `navigate('Matches')` |
+| Check trends | `navigation.navigate('Rank', { screen: 'Trends' })` |
+| Search free agents | `navigation.navigate('FreeAgents')` |
+| Link a league | `navigation.navigate('LeaguePicker')` |
 
-| Gap | Would enable | Where it would come from |
-|---|---|---|
-| Per-opponent window chip (Contender / Rebuilding) on power-rankings | A later "named buyers" line in the hero that says *why* a team trades (Direction C's team tiles) | `infer_team_outlook` already runs per member for cards (`trade_service.py:3999`, `:6495`) and Team Review (`team_review.py:448`); it would need serializing onto `/api/league/power-rankings` behind a flag |
-| A cheap "deck ready · N ideas" read | A live badge on the Find a trade tile | No current endpoint; the pre-gen worker's job state is not exposed as a count |
+**Query contracts.** Same keys as today, so caches are shared. Every Sleeper-roster consumer keeps `staleTime: 5 * 60_000` and the bare fetcher (the `check-session-seed.js` S-2 rule). Assert it in **your own** guard; do **not** edit `check-session-seed.js`.
+
+| Data | Key | Fetcher | Options |
+|---|---|---|---|
+| Power rankings | `['league-power-rankings', leagueId, 'consensus']` | `getPowerRankings(leagueId, 'consensus')` | `staleTime: 60_000`, `placeholderData: (prev) => prev` |
+| Preferences | `['league-prefs', leagueId]` | `getLeaguePreferences(leagueId)` | default |
+| League summary | `['league-summary', leagueId]` | `getLeagueSummary(leagueId)` | as TopBar |
+| Progress | `['progress', leagueId, activeFormat]` | `getProgress` | as RootNav (`activeFormat` = `useSession(s => s.activeFormat)`) |
+| Sleeper rosters | `['league-rosters', leagueId]` | `getLeagueRosters(leagueId)` | `staleTime: 5 * 60_000`; **enabled only for Sleeper** |
+| Sleeper users | `['league-users', leagueId]` | `getLeagueUsers(leagueId)` | `staleTime: 5 * 60_000`; **enabled only for Sleeper** |
+| Outlook (Standings · Projected only) | `['league-outlook', leagueId, 'consensus']` | `getOutlook(leagueId, 'consensus')` | `enabled: segment === 'projected' && useFlag('outlook.odds') && isSleeper && !!leagueId`, `staleTime: 60_000` |
+
+`isSleeper` uses the rule LeagueSummary uses (`LeagueSummaryScreen.tsx:558-562`): `(useSession(s => s.leagues.find(l => l.league_id === leagueId)?.platform) ?? 'sleeper') === 'sleeper'`. Unknown resolves to supported.
+
+**Chalkline.**
+- Tokens only.
+- **Ice ≤ 3 on Home:** the suggested Buy/Sell side on banded positions (`suggestedSide(band)`) plus the active tab. Every other Buy/Sell is the Secondary button, and every "View" is chalk-dim.
+- Seller/Buyer badges are the neutral Badge (never pos/neg).
+- Buy/Sell buttons: 36pt visible, 44pt hit (`hitSlop` 4 vertical), entirely inside the tile.
+- **The position tile is not itself pressable** (no nested controls).
+- New text uses `components/chalkline/Text`.
+
+### 6.3 M-Home — files it may touch (nothing else)
+
+- `mobile/src/screens/HomeScreen.tsx`: **minimal change only.** `import { useRef } from 'react'`, then `const hubOn = useRef(!!useFeatureFlags.getState().flags['nav.home_hub']).current;`, then `if (hubOn) return <HomeHub />;` before today's JSX. (`nav.home_tab` needs no check here: with it off, TabNav never mounts HomeScreen.)
+  - Today's `OPTIONS` table, heading and rows stay **byte-identical**.
+  - **No `useQuery` / `useState` / `useEffect` / `fetch(` in this file.** `check-home-tab.js` §4h forbids them, and it must pass unmodified.
+- `mobile/src/components/home/**` (new; e.g. `HomeHub.tsx`, `StatusRows.tsx`, `PositionTile.tsx`, `TaskTile.tsx`). All queries, state and analytics live here.
+- `mobile/tests/check-home-hub.js` (new).
+
+**M-Home testIDs:**
+- `home.hub`
+- `home.status.outlook`, `home.status.standings`, `home.status.rank`
+- `home.position.<qb|rb|wr|te>`, `home.position.<pos>.buy`, `home.position.<pos>.sell`, `home.position.<pos>.ranking` (no-split)
+- `home.tile.find-trade`, `home.tile.rank`, `home.tile.matches`, `home.tile.trends`, `home.tile.free-agents`
+- `home.positions.error`, `home.positions.retry`, `home.link-league`
+
+**Write them as static literals per position.** Template-literal ids need an entry in `scripts/testid-lint-allow.txt`, which is not in M-Home's file list.
+
+**M-Home guard must pin:**
+1. The flag is read once (`useRef`) and never via `useFlag`.
+2. The flag-off body is byte-identical. `check-home-tab.js` still passes, and the guard re-asserts the OPTIONS literal is untouched.
+3. `components/home/*` imports `positionSplit` / `standings` and contains **no** band or median arithmetic (`0.33`, `medians[`, `.sort(`, `>= median`).
+4. The position tiles render only when `league.pos_candidates` is on and `canSplit`.
+5. Buy/Sell call `requestLeagueSummarySplit` and navigate to `LeagueRankings`.
+6. Exactly one `track('home_tile_tapped'` call site per tile kind, with the closed `tile` vocabulary, and `position`/`band` only on buy/sell/position_ranking.
+7. The Standings row reads current standings only: no `getOutlook` / `league-outlook` anywhere under `components/home/`.
+8. The roster/user queries use `staleTime: 5 * 60_000` and are Sleeper-gated.
+9. No `FeedbackFAB` under `components/home/` or in HomeScreen.
+10. No hex/`rgba(` literals.
+11. Every listed testID is present.
+12. The Team outlook row navigates with `editDna: true`.
+
+### 6.4 M-Dest — files it may touch (nothing else)
+
+**`mobile/src/screens/LeagueSummaryScreen.tsx`:** the arrival only.
+- **Consume:** a `useFocusEffect` / effect keyed on `useLeagueSummaryIntent(s => s.pending?.seq)`, **tab root only** (`isTabRoot`). It calls `takeLeagueSummaryIntent(leagueId)` → `setBasis('consensus')`, `setSubset('all')`, `setPosFilter(new Set([position]))` (or `new Set()` for `kind: 'all'`).
+- **Drill-in:** an open drill-in closes through the **existing** auto-exit / `closeTeam`, never a new `setSelectedId(null)` (the one-`setSelectedId(null)` sharp edge in `screens/CLAUDE.md`).
+- **Pinned banner:** a new View **outside** the ScrollView, between header and page; `kind: 'split'` only, and only while that position's split state is `shown`. Copy as drawn:
+  - Buying: "**Buying P.** Teams above the line are deepest at P. Tap one to target their players."
+  - Selling: "**Selling P.** Teams below the line are shortest at P, shortest last. Tap one to offer them your players."
+  - Close with a ghost ✕ icon button.
+  - It clears on close, on any `posFilter`/`subset` change, and on blur.
+- **Scroll:**
+  - `sell` → `scrollRef.current?.scrollToEnd()` once the filtered content settles (next `onContentSizeChange`).
+  - `buy` → `scrollTo({ y: listTop })` from one `onLayout` on the list container (`:2193`).
+  - `kind: 'all'` → `scrollTo({ y: 0 })`.
+- **Must not touch:** the inline `ranked` / `cutAfter` / `bandSize` / `bandFor` / exposure emitter (pinned by `check-league-candidates-300.js`, `check-analytics-300.js` and the parity guard).
+- **Keep:** `notifyGuideTargetsMoved` wiring (`check-guide-spotlight-tracking.js` rule 12).
+
+**`mobile/src/screens/StandingsScreen.tsx`** (new): root-stack push.
+- `<FeedbackFAB activeScreen="Standings" aboveTabBar={false} />`.
+- Current | Projected segment (the Matches segment construction), Current by default, local state.
+- **Current:** the table from `currentStandings(...)` (columns `#` · Team · W–L(–T) · PF; you row ink-2 + ice numeral + ice "You" badge; caption "Week N · ordered by record, then points for" + the tiebreak note).
+- **Non-Sleeper Current:** the unavailable card, copy as drawn.
+- **Projected:** reuses the existing Season-outlook rendering. M-Dest **may extract** `SeasonOutlookSection` / `OutlookRow` / `OutlookUnsupportedRow` / `orderOutlookTeams` / `playoffBand` (and their styles) into `mobile/src/components/SeasonOutlook.tsx`, with LeagueSummaryScreen importing them back.
+  - Testids must stay verbatim (`league-summary.odds.*`), so testid-lint still finds them.
+  - **No guard pins these renderers today** (verified). The calibration rules must survive: no %, no title odds, records only when `!meta.beta`.
+- **Analytics:** `standings_segment_changed` on a changing tap only.
+- **testIDs:** `standings.screen`, `standings.segment.current`, `standings.segment.projected`, `standings.current.table`, `standings.current.unavailable`, `standings.back-btn`, plus the reused `league-summary.odds.*`.
+
+**Other M-Dest files:**
+- `mobile/src/components/SeasonOutlook.tsx` (new, only if extracting).
+- `mobile/src/navigation/RootNav.tsx`: register `<Stack.Screen name="Standings">` **unconditionally**, FreeAgents-style options (`headerShown: true`, `HeaderTitle` "Standings", `headerBackVisible: false`, `headerLeft: HeaderBack testID="standings.back-btn"`, `canGoBack ? goBack : navigate('Main')`).
+- `mobile/src/utils/deepLinks.ts`: add `Standings` at `app/league/standings`.
+- `mobile/tests/check-home-destinations.js` (new).
+
+**M-Dest guard must pin:**
+1. The consume is tab-root only and one-shot (`takeLeagueSummaryIntent`).
+2. It sets consensus / all / filter, with no new `setSelectedId(null)`.
+3. The banner is outside the ScrollView, `split` only, and clears on filter change.
+4. `scrollToEnd` for sell; `listTop` for buy.
+5. The Standings route is registered unconditionally in RootNav with `HeaderBack` and the screen mounts exactly one `FeedbackFAB` with `aboveTabBar={false}`.
+6. The outlook query is `enabled` only on `projected`.
+7. `standings_segment_changed` sits in a tap handler, never an effect.
+8. The deep link exists.
+9. The Season-outlook calibration rules hold wherever the renderer now lives (no `%`, no `title_pct`, `showRecords = !meta.beta`).
+10. Roster/user queries use `staleTime: 5 * 60_000` and are Sleeper-gated.
+
+**M-Dest does NOT touch:** `TradesScreen.tsx` (the `editDna` param already works), `TabNav.tsx`, anything under `components/home/`, `HomeScreen.tsx`.
+
+### 6.5 Neither agent touches
+
+The foundation files (§6.1), `check-home-tab.js`, `check-league-candidates-300.js`, `check-analytics-300.js`, `check-analytics-297-302.js`, `check-guide-spotlight-tracking.js`, `check-session-seed.js`, `scripts/testid-lint-allow.txt`, `mobile/package.json`, anything under `backend/`, `config/`, `docs/`, `living-memory/` or `mockups/`. Docs, LLD, DECISIONS and TEST_LEDGER are the integrator's at ship (§4).
+
+### 6.6 Per-agent exit gate
+
+`cd mobile && npx tsc --noEmit` clean. Your new guard, plus every guard in §3 "must pass UNMODIFIED", plus `node tests/check-position-split-parity.js` and `check-standings-order.js`. `bash scripts/testid-lint.sh` OK. One commit on your branch; no push.
