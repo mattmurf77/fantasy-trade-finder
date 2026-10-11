@@ -11,6 +11,13 @@
 
 ---
 
+## 2026-10-10c — Buyer/Seller tags pink; Home ice on every banded tile (#322, D-204); iOS 1.21.1 (164) submitted
+
+- **What:** the Buyer/Seller tags on League rankings (one position filtered) and on the Home position tiles are flare pink (border + text), like the ice "You" badge, instead of grey. Home now draws the suggested Buy/Sell side in ice on every banded tile, up to four, not just the two most extreme: an operator exception to the ≤3 ice ration ([D-204](DECISIONS.md)).
+- **Ship (express, operator):** PR #322 squash-merged as `41894bee`. Mobile + docs only, so no Render deploy. iOS 1.21.1 EAS build 164 (`6ec98fd9`, submission `c47c0f80`) is on `--auto-submit`.
+- **Evidence:** CI 4/4; local backend 7705 passed, 1 skipped; 106/106 mobile structural suites; [TEST_LEDGER](TEST_LEDGER.md) 2026-10-10.
+- **Follow-up:** the operator's TestFlight check on 1.21.1 (listed in the ledger entry).
+
 ## 2026-10-10b — Usage Trends shipped with the flag ON (#321, D-203); Render live; iOS 1.21.0 (163) submitted
 
 - **What:** in-season RB/WR/TE snaps, carries and targets, as counts and as % of team, over the weeks the user picks (default: the last 4). Byes and missed games are left out of averages. Spikes are judged on team share. Two views behind a pill: **Simple** (draft A) and **Raw stats** (sortable per-week table). Actions are Add / Trade / Re-rank, plus per-league availability. Entry points: the Home hub's **Usage Rates** tile and a Free Agents link.
