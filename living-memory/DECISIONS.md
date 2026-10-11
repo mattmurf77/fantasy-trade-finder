@@ -1,6 +1,6 @@
 # Decisions — Fantasy Trade Finder
 
-## D-204 — Usage Trends: a Biggest jumps | Weekly share toggle, jump cards that state both ends, a floor on returns
+## D-205 — Usage Trends: a Biggest jumps | Weekly share toggle, jump cards that state both ends, a floor on returns
 
 **Date:** 2026-10-10 · **Who:** operator (the toggle, the default, fixing jumps mode); lead (wording, newest-week reading, the floor's value).
 **Context:** On the live screen the operator saw that "Biggest jumps last week isn't sorted from largest to smallest". It was sorted, by jump size (this week's share minus the player's earlier average), but the card showed only where he landed. Returns and new roles sat inside the section in their own order, and a 0% return counted as news.
@@ -11,6 +11,19 @@
 - (4) A **return** needs the spike's volume floor (20 / 6 / 4).
 
 **Consequences:** amends D-203 (4): Version A now has exactly one client sort (Weekly share), pinned by `check-usage-trends.js` §2e4. The return floor ships server-side and changes 1.21.0 without an app update. [Scope](../docs/plans/usage-trends/scope-order-toggle.md).
+
+## D-204 — Buyer/Seller tags turn flare pink; Home's suggested-side ice is uncapped
+
+**Date:** 2026-10-10 · **Who:** operator (both calls); lead (build).
+**Context:** The Buyer/Seller tags on League rankings (one position filtered) and on the Home position tiles were neutral grey outlines, which the operator found flat next to the ice "You" tag. Separately, Home drew the suggested Buy/Sell side in ice on at most two tiles (`emphasizedSides`, the two most extreme), to keep the Chalkline ≤3 ice ration. A user tagged at three or four positions saw only two highlighted.
+**Decision:**
+- (1) Both tags use **flare** (border + text), the same construction as the ice "You" badge. Flare is the informational-highlight accent (ADR-005), and these tags are informational. Buyer and Seller share the one color, keeping the original "neither is good or bad" rule (no pos/neg).
+- (2) **Every** banded Home tile draws its suggested side in ice: up to four. This is an explicit operator exception to the ≤3 ice-per-screen rule, scoped to the Home position tiles. With all four banded plus the active tab, Home shows five ice elements.
+
+**Consequences:**
+- The global ≤3 ice ration is unchanged elsewhere; `docs/design/components.md` (Position tile row) records the exception.
+- `emphasizedSides` lost its `max` cap and its extremity ordering, which existed only to pick the two winners.
+- Express ship (operator): no scope block. Evidence in TEST_LEDGER 2026-10-10.
 
 ## D-203 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
 

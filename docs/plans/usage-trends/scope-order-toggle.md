@@ -5,7 +5,7 @@
 **Builder:** lead session (the one that shipped [#321](https://github.com/mattmurf77/fantasy-trade-finder/pull/321))
 **Operator sign-off on waivers:** not needed (no waivers)
 
-Parent scope: [scope.md](scope.md). This change amends its **Sorting** row and §3 step 6b, and adds to [D-203](../../../living-memory/DECISIONS.md) as D-204.
+Parent scope: [scope.md](scope.md). This change amends its **Sorting** row and §3 step 6b, and adds to [D-203](../../../living-memory/DECISIONS.md) as D-205.
 
 ---
 
@@ -33,7 +33,7 @@ Parent scope: [scope.md](scope.md). This change amends its **Sorting** row and �
 - **Schema:** none.
 - **API contract:** `GET /api/usage-trends` has the same shape. One semantic change: a `return` signal now requires the volume floor. Below the floor, the player gets the next signal that applies (an earlier spike, rising/falling, or none). `docs/api-reference.md` is updated.
 - **Flags:** none new. It rides `usage_trends.enabled`, which is ON. The rollback for the whole screen is unchanged. The return floor has no separate switch; reverting it is a one-line revert plus a deploy.
-- **Mobile version:** 1.21.1.
+- **Mobile version:** 1.21.2 (1.21.1 went to #322).
 
 ## 3. Evidence scope
 
@@ -59,7 +59,7 @@ Parent scope: [scope.md](scope.md). This change amends its **Sorting** row and �
   8. toggle not remembered.
 - **Real data:** I recomputed live Week 4 Snaps with the new rule. It gives 35 jumps, then Back or new = Nico Collins 69%, Chig Okonkwo 58%, Mitch Tinsley 53%, Elijah Sarratt 36%. The 0–31% returns that had no real role (Jack Endries 0%, Barion Brown 4%, Treyton Welch 10%, …) are gone.
 - **Code-walk:** [code-walk.md](code-walk.md) §8.
-- **TestFlight checklist (1.21.1)**, to run in addition to scope §3:
+- **TestFlight checklist (1.21.2)**, to run in addition to scope §3:
   1. Simple view opens on **Biggest jumps**, with the pill at the top of the list.
   2. Under "Biggest jumps last week", each card reads "Jumped from X% to Y% of … plays". The gap (Y − X) shrinks as you scroll down. Darius Cooper (22% → 90%) is above Braelon Allen (41% → 94%).
   3. Below that, "Back or new last week" lists "Back in the lineup: …" and "New role: …" cards, highest % first. No card there shows a near-zero %.
@@ -79,7 +79,7 @@ Parent scope: [scope.md](scope.md). This change amends its **Sorting** row and �
 | `living-memory/HLD.md` | n/a | no architectural shift |
 | `docs/cross-client-invariants.md` | n/a | mobile only; no shared constant changed |
 | `docs/glossary.md` | updated | return (volume floor); Biggest jumps / Weekly share orders |
-| ADR or `DECISIONS.md` entry | updated | D-204 |
+| ADR or `DECISIONS.md` entry | updated | D-205 |
 | `docs/plans/usage-trends/scope.md` | updated | Sorting row + §3 6b point here |
 | `docs/business/analytics/2026-10-10-usage-trends-events.md` | updated | `order` prop |
 | `mobile/src/screens/CLAUDE.md`, `mobile/src/components/CLAUDE.md`, `mobile/tests/README.md` | updated | screen / card / guard rows |
@@ -88,5 +88,5 @@ Parent scope: [scope.md](scope.md). This change amends its **Sorting** row and �
 
 - **CI green:** `backend-tests` + `mobile-typecheck` (which runs the `check-*.js` suites) + `maestro-testid-lint` on the pushed sha.
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry.
-- **TestFlight verification:** the 8 steps in §3, on 1.21.1.
+- **TestFlight verification:** the 8 steps in §3, on 1.21.2.
 - Express lane declared by the operator? **No**, so full gates apply.

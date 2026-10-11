@@ -18,6 +18,7 @@ import {
   ink,
   chalk,
   ice,
+  flare,
   semantic,
   space,
   radii,
@@ -2727,12 +2728,12 @@ function TeamRow({ team, rank, active, totalLabel, band, onPress }: {
           {team.display_name || team.username || team.user_id}
         </Text>
         {team.is_you ? <Badge label="You" color={ice.base} colorText /> : null}
-        {/* Neutral outline, deliberately NOT semantic pos/neg: being a
-            seller is not "good" and being a buyer is not "bad", and the
-            Chalkline accents are reserved for actions (ice) and
-            informational highlights (flare). Default Badge = ink.lineStrong
-            border with chalk text — the same construction as the rank chip. */}
-        {band ? <Badge label={band} /> : null}
+        {/* Flare, the informational-highlight accent (ADR-005) — the same
+            construction as the ice "You" badge beside it, so the two read
+            as distinct. Deliberately NOT semantic pos/neg: being a seller
+            is not "good" and being a buyer is not "bad", so both bands
+            share the one color. */}
+        {band ? <Badge label={band} color={flare.base} colorText /> : null}
       </View>
       <View style={styles.listRight}>
         <Text style={type.data}>

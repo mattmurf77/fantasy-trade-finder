@@ -1,4 +1,4 @@
-## 2026-10-10 — Usage Trends order toggle + readable jumps (D-204): evidence, branch `feat/usage-trends-order`
+## 2026-10-10 — Usage Trends order toggle + readable jumps (D-205): evidence, branch `feat/usage-trends-order`
 
 Full gates, not express ([scope](../docs/plans/usage-trends/scope-order-toggle.md)). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
 
@@ -16,7 +16,14 @@ Full gates, not express ([scope](../docs/plans/usage-trends/scope-order-toggle.m
   All `check-*.js` green; `tsc --noEmit` clean; testid-lint OK.
 - **Real data:** live 2026 Week 4 Snaps under the new rule gives 35 jumps, then Back or new = Collins 69% / Okonkwo 58% / Tinsley 53% / Sarratt 36%. The 0–31% low-volume returns are gone.
 - **Code-walk:** [code-walk.md](../docs/plans/usage-trends/code-walk.md) §8.
-- **Not run yet:** hosted CI, and the 8-step TestFlight checklist (scope-order-toggle §3, on 1.21.1).
+- **Not run yet:** hosted CI, and the 8-step TestFlight checklist (scope-order-toggle §3, on 1.21.2).
+
+## 2026-10-10 — Buyer/Seller tags pink, Home ice uncapped (D-204): express
+
+express: flare Buyer/Seller tags on League rankings + Home position tiles; suggested-side ice on every banded Home tile — gates skipped by operator
+
+- `tsc --noEmit` clean; `testid-lint` OK; all 106 `mobile/tests/check-*.js` suites pass. `check-position-split-parity` 1q now expects all four banded positions emphasized (was the two most extreme). Backend untouched.
+- No runtime evidence (D-056). TestFlight 1.21.1 check: Home corner tags pink; every Seller tile has Sell in ice and every Buyer tile Buy in ice, all of them; Mid-pack tile has none; League rankings filtered to one position shows pink Buyer/Seller next to the ice "You". `FTF_SKIP_SIM_GATE=1` posture.
 
 ## 2026-10-10 — Usage Trends (`usage_trends.enabled`, ships on): evidence, PR #321
 
