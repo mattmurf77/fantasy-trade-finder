@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Badge, Meter, Text } from '../chalkline';
-import { chalk, fonts, ice, ink, radii, space, type } from '../../theme/chalkline';
+import { chalk, flare, fonts, ice, ink, radii, space, type } from '../../theme/chalkline';
 import { posColor } from '../../theme/colors';
 import { useFlag } from '../../state/useFeatureFlags';
 import {
@@ -12,16 +12,15 @@ import {
 } from '../../utils/positionSplit';
 
 // One Home hub position tile (scope.md D2/D3): your rank at P, your value
-// against the league median, a 4px meter in the position hex and the neutral
-// Seller / Buyer badge (or "Mid-pack"). Every number comes from the
+// against the league median, a 4px meter in the position hex and the flare
+// Seller / Buyer badge (or "Mid-pack") — League rankings' TeamRow badge. Every number comes from the
 // utils/positionSplit result the hub hands in — this file does no band,
 // median or ordering arithmetic of its own.
 //
 // The tile itself is NOT pressable: its only controls are Buy and Sell
 // (36pt visible, 44pt hit, inside the tile), so VoiceOver never meets a
-// nested control. The side the user's band implies is drawn in ice on at
-// most two tiles (the hub's `emphasis`, for the ≤3 ice ration); it changes
-// no behaviour. With no line at this position (no_split /
+// nested control. The side the user's band implies is drawn in ice on
+// every banded tile (the hub's `emphasis`); it changes no behaviour. With no line at this position (no_split /
 // no_median) Buy and Sell would promise directions the destination can't
 // give, so they collapse into one "See P ranking" button.
 //
@@ -64,7 +63,7 @@ interface Props {
   onSell?: () => void;
   onRanking?: () => void;
   /** The ice side for this tile, if the hub picked it (utils/positionSplit
-   *  emphasizedSides caps the screen at two, for the ≤3 ice ration). */
+   *  emphasizedSides — every banded position, uncapped). */
   emphasis?: 'buy' | 'sell' | null;
 }
 
@@ -84,7 +83,7 @@ export default function PositionTile({ pos, split, onBuy, onSell, onRanking, emp
         {split == null ? null : !lined ? (
           <Text scale="dense" style={styles.mid}>No clear split</Text>
         ) : you?.band ? (
-          <Badge label={you.band} />
+          <Badge label={you.band} color={flare.base} colorText />
         ) : (
           <Text scale="dense" style={styles.mid}>Mid-pack</Text>
         )}
