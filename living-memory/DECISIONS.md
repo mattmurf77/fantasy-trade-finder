@@ -1,5 +1,17 @@
 # Decisions — Fantasy Trade Finder
 
+## D-204 — Usage Trends: a Biggest jumps | Weekly share toggle, jump cards that state both ends, a floor on returns
+
+**Date:** 2026-10-10 · **Who:** operator (the toggle, the default, fixing jumps mode); lead (wording, newest-week reading, the floor's value).
+**Context:** On the live screen the operator saw that "Biggest jumps last week isn't sorted from largest to smallest". It was sorted, by jump size (this week's share minus the player's earlier average), but the card showed only where he landed. Returns and new roles sat inside the section in their own order, and a 0% return counted as news.
+**Decision:**
+- (1) Simple gets a **Biggest jumps | Weekly share** toggle, defaulting to Biggest jumps and remembered until restart. **Weekly share** orders by the newest selected week, in the unit showing, through the same tested sort Raw stats uses. Its cards state that week's number.
+- (2) Jump cards read **"Jumped from X% to Y%"**, where X is the earlier-weeks average the jump is measured against, so the visible gap is the sort key. Not "Up 68 pts": in a fantasy app, "pts" reads as fantasy points.
+- (3) Biggest jumps splits into **jumps**, then **back or new**, then **everyone else**. The client splits the server's order and never re-sorts it.
+- (4) A **return** needs the spike's volume floor (20 / 6 / 4).
+
+**Consequences:** amends D-203 (4): Version A now has exactly one client sort (Weekly share), pinned by `check-usage-trends.js` §2e4. The return floor ships server-side and changes 1.21.0 without an app update. [Scope](../docs/plans/usage-trends/scope-order-toggle.md).
+
 ## D-203 — Usage Trends: Sleeper's stats feed, byes and missed games out of averages, share-driven spikes
 
 **Date:** 2026-10-10 · **Who:** operator (missed-games ruling, entry points, mobile only, ship dark, simplicity brief); lead (source, spike rule, naming).

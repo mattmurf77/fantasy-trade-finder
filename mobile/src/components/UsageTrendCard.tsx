@@ -11,7 +11,9 @@ import {
   headline,
   isNewsWeek,
   ofTeam,
+  weekHeadline,
   type LeagueStatus,
+  type UsageOrder,
   type UsageUnit,
 } from '../utils/usageTrends';
 
@@ -87,6 +89,9 @@ export interface UsageTrendCardProps {
   metric: UsageMetric;
   unit: UsageUnit;
   weeks: number[];
+  /** "jumps" (default): the signal sentence; "week": the newest week's number,
+   *  which is what the list is sorted by in that order. */
+  order?: UsageOrder;
   focusStatus: LeagueStatus;
   /** Statuses across the caller's leagues, focused league first (pips). */
   leagueStatuses: LeagueStatus[];
@@ -101,6 +106,7 @@ export default function UsageTrendCard({
   metric,
   unit,
   weeks,
+  order = 'jumps',
   focusStatus,
   leagueStatuses,
   onAdd,
@@ -126,7 +132,11 @@ export default function UsageTrendCard({
             <PositionBadge pos={player.position} />
             <Text style={type.bodySm}>{player.team}</Text>
           </View>
-          <Text style={styles.sentence}>{headline(player, metric, player[metric], latest, unit)}</Text>
+          <Text style={styles.sentence}>
+            {order === 'week'
+              ? weekHeadline(player, metric, player[metric], weeks, unit)
+              : headline(player, metric, player[metric], latest, unit)}
+          </Text>
         </View>
         <WeekBars player={player} metric={metric} weeks={weeks} />
       </View>

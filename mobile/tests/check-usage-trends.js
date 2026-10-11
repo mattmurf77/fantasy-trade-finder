@@ -89,21 +89,34 @@ const players = [P('a', 'RB', [3, 1, 2]), P('b', 'WR', [1, 3, 3]), P('c', 'TE', 
 }
 {
   const p = { team: 'PHI', status: ['played', 'played', 'played', 'played'] };
+  // Darius Cooper, real 2026 Week 4: 14.5 / 40.8 / 10.0 → 90.2% of snaps, +68.4 over his earlier average.
   const spike4 = blk({ counts: [8, 31, 5, 55], shares: [14.5, 40.8, 10, 90.2],
-    signal: { kind: 'spike', week: 4, count: 55, share: 90.2, prev_share: 10 } });
-  assert(U.headline(p, 'snaps', spike4, 4) === 'Jumped to 90% of Eagles plays',
-    '1j. a newest-week jump reads exactly like the approved mock', U.headline(p, 'snaps', spike4, 4));
+    signal: { kind: 'spike', week: 4, count: 55, share: 90.2, prev_share: 10, delta: 40.3, delta_share: 68.4 } });
+  assert(U.headline(p, 'snaps', spike4, 4) === 'Jumped from 22% to 90% of Eagles plays',
+    '1j. a jump states where it started (his earlier average) and where it landed — the gap is the sort key (operator, 2026-10-10)',
+    U.headline(p, 'snaps', spike4, 4));
   assert(U.headline(p, 'snaps', { ...spike4, signal: { ...spike4.signal, week: 3 } }, 4)
-    === 'Jumped to 90% of Eagles plays in Week 3', '1k. an older jump names its week');
-  assert(U.headline(p, 'targets', spike4, 4, 'count') === 'Jumped to 55 targets', '1l. count unit speaks in counts');
+    === 'Jumped from 22% to 90% of Eagles plays in Week 3', '1k. an older jump names its week');
+  assert(U.headline(p, 'targets', spike4, 4, 'count') === 'Jumped from 15 to 55 targets', '1l. count unit speaks in counts',
+    U.headline(p, 'targets', spike4, 4, 'count'));
   assert(U.headline({ team: 'LAR', status: ['played', 'out', 'out', 'played'] }, 'snaps',
     blk({ signal: { kind: 'return', week: 4, share: 90.5, count: 76, missed: 2 } }), 4)
     === 'Back in the lineup: 91% of Rams plays', '1m. return');
+  assert(U.headline({ team: 'NE', status: ['played', 'played', 'out', 'played'] }, 'snaps',
+    blk({ signal: { kind: 'return', week: 4, share: 57.9, count: 40, missed: 1, delta: 15, delta_share: 21.1 } }), 4)
+    === 'Back and up from 37% to 58% of Patriots plays', '1m2. a return that is also a jump states the jump');
   assert(U.headline(p, 'snaps', blk({ signal: { kind: 'out', week: 4 } }), 4) === "Didn't play in Week 4", '1n. out');
   assert(U.headline(p, 'carries', blk({ avg_share: 47.7, avg: 8.2 }), 4) === 'Steady at 48% of Eagles carries',
     '1o. no signal reads as steady at the average share');
-  assert(!/\bpp\b|baseline|rolling|delta/i.test(read('src/utils/usageTrends.ts').split('export function headline')[1].split('export function isNewsWeek')[0]),
-    '1p. the headline vocabulary has no jargon (pp / baseline / rolling / delta)');
+  {
+    // The words users read: string literals in headline + weekHeadline, ${...} expressions removed.
+    const src = read('src/utils/usageTrends.ts');
+    const copy = [src.split('export function headline')[1].split('export function isNewsWeek')[0],
+      src.split('export function weekHeadline')[1].split('/** Version A')[0]].join('\n');
+    const words = [...copy.matchAll(/`[^`]*`|'[^'\n]*'/g)].map((m) => m[0].replace(/\$\{[^}]*\}/g, '')).join(' ');
+    assert(!/\bpp\b|\bpts?\b|points|baseline|rolling|delta/i.test(words),
+      '1p. the card vocabulary has no jargon (pp / pts — reads as fantasy points / baseline / rolling / delta)', words);
+  }
   const ps = { status: ['played', 'out', 'bye', 'played'] };
   const b = blk({ counts: [10, null, null, 20], shares: [12.4, null, null, 25.5], avg_share: 19.1 });
   assert(eq([0, 1, 2, 3].map((i) => U.weekCell(ps, b, i, 'count')), ['10', 'OUT', 'BYE', '20'])
@@ -117,6 +130,19 @@ const players = [P('a', 'RB', [3, 1, 2]), P('b', 'WR', [1, 3, 3]), P('c', 'TE', 
   news[1].snaps.signal = { kind: 'new', week: 4 };
   news[2].snaps.signal = { kind: 'spike', week: 3 };
   assert(U.newsCount(news, 'snaps', 4) === 2, '1t. "Biggest jumps last week" holds only newest-week news');
+  {
+    const sig = (kind, week, extra = {}) => ({ kind, week, ...extra });
+    const xs = ['j1', 'j2', 'b1', 'n1', 'o1', 'q1'].map((id, i) => P(id, 'WR', [i + 1, i + 1, i + 1]));
+    xs[0].snaps.signal = sig('spike', 4, { delta_share: 40 });
+    xs[1].snaps.signal = sig('return', 4, { delta_share: 25 });   // back AND a jump
+    xs[2].snaps.signal = sig('return', 4, { delta_share: null }); // back, no jump
+    xs[3].snaps.signal = sig('new', 4);
+    xs[4].snaps.signal = sig('spike', 3, { delta_share: 50 });    // older jump
+    assert(eq(U.newsSplit(xs, 'snaps', 4), { jumps: 2, backOrNew: 2 }),
+      '1t2. Biggest jumps holds only newest-week JUMPS; back/new without a jump is its own section', U.newsSplit(xs, 'snaps', 4));
+    assert(eq(U.newsSplit(xs.slice(2), 'snaps', 4), { jumps: 0, backOrNew: 2 })
+      && eq(U.newsSplit(xs, 'snaps', null), { jumps: 0, backOrNew: 0 }), '1t3. no jumps / no week');
+  }
   assert(U.leagueFormatLine({ total_rosters: 12, settings_type: 2 }) === '12-Team Dynasty'
     && U.leagueFormatLine({}) === null, '1u. league format line from what the league list carries');
 }
@@ -142,6 +168,15 @@ const players = [P('a', 'RB', [3, 1, 2]), P('b', 'WR', [1, 3, 3]), P('c', 'TE', 
     '1x. reversed — and OUT still sorts last');
   assert(ids(U.sortStatsRows(rows, 'snaps', 'share', { key: 3, dir: 'desc' })) === 'abdc',
     '1y. the % view sorts by % of team, not counts');
+  assert(ids(U.sortByLatestWeek(rows, 'snaps', 'share', 4)) === 'abdc'
+    && ids(U.sortByLatestWeek(rows, 'snaps', 'count', 4)) === 'badc'
+    && ids(U.sortByLatestWeek(rows, 'snaps', 'share', 0)) === 'abcd',
+    '1y2. Weekly share: the newest week, highest first, in the unit showing; a missed game sorts last');
+  assert(U.weekHeadline(rows[0], 'snaps', rows[0].snaps, [1, 2, 3, 4]) === '50% of Eagles plays in Week 4'
+    && U.weekHeadline(rows[1], 'snaps', rows[1].snaps, [1, 2, 3, 4], 'count') === '50 snaps in Week 4'
+    && U.weekHeadline(rows[2], 'snaps', rows[2].snaps, [1, 2, 3, 4]) === "Didn't play in Week 4"
+    && U.weekHeadline({ ...rows[2], status: ['played', 'played', 'played', 'bye'] }, 'snaps', rows[2].snaps, [1, 2, 3, 4]) === 'Bye in Week 4',
+    '1y3. a Weekly-share card states the very number the list is sorted by');
   assert(ids(U.sortStatsRows(rows, 'snaps', 'count', { key: 'total', dir: 'desc' })) === 'badc'
     && ids(U.sortStatsRows(rows, 'snaps', 'count', { key: 'player', dir: 'asc' })) === 'bcda',
     '1z. Total (sum of played weeks) and Player (A–Z) sort');
@@ -192,7 +227,21 @@ const icons = strip(read('src/components/chalkline/Icon.tsx'));
     const simpleBranch = screen.slice(screen.indexOf("const items: ListItem[] = useMemo"), screen.indexOf('const renderItem'));
     assert(/if \(view !== 'simple'\) \{\s*return sortStatsRows\(list, metric, unit, statsSort\)/.test(simpleBranch)
       && (screen.match(/sortStatsRows\(/g) || []).length === 1,
-      '2e2. only Version B applies the column sort; Version A keeps the server order');
+      '2e2. the screen applies the column sort only in Version B');
+    const weekBranch = simpleBranch.slice(simpleBranch.indexOf("if (order === 'week')"), simpleBranch.indexOf('const { jumps, backOrNew }'));
+    assert(/rows\(sortByLatestWeek\(list, metric, unit, weeks\.length\)\)/.test(weekBranch)
+      && /const \{ jumps, backOrNew \} = newsSplit\(list, metric, latest\);/.test(simpleBranch)
+      && !/sortByLatestWeek|sortStatsRows/.test(simpleBranch.slice(simpleBranch.indexOf('const { jumps, backOrNew }'))),
+      '2e4. Version A: Weekly share sorts through sortByLatestWeek; Biggest jumps keeps the server order, split into sections');
+    assert(/let lastOrder: UsageOrder = 'jumps';/.test(screen) && /useState<UsageOrder>\(lastOrder\)/.test(screen)
+      && /\{ key: 'jumps', label: 'Biggest jumps' \},\s*\{ key: 'week', label: 'Weekly share' \}/.test(screen)
+      && /ListHeaderComponent=\{view === 'simple' \?/.test(screen)
+      && /testID=\{`usage-trends\.order\.\$\{o\.key\}`\}/.test(screen)
+      && /lastOrder = o\.key;\s*reportView\(\{ order: o\.key \}\);/.test(screen)
+      && /order=\{order\}/.test(screen),
+      '2e5. the order toggle: Simple view only, Biggest jumps by default, remembered, reported, and handed to the card');
+    assert(/order === 'week'\s*\?\s*weekHeadline\(player, metric, player\[metric\], weeks, unit\)\s*:\s*headline\(/.test(card),
+      '2e6. the card reads the week sentence only in the Weekly share order');
     assert(/testID=\{`usage-trends\.sort\.\$\{testKey\}`\}/.test(table) && /onSort\(key\)/.test(table)
       && /sort=\{statsSort\}/.test(screen) && /nextSort\(statsSort, key\)/.test(screen),
       '2e3. every Version B column header is a sort button');
