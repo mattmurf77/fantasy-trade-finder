@@ -13,6 +13,8 @@ import type {
 export type LeagueStatus = 'mine' | 'rostered' | 'free_agent' | 'unknown';
 export type OwnershipFilter = 'all' | 'rostered' | 'free_agents';
 export type UsageView = 'simple' | 'stats';
+/** Version A's order: the server's news-first order, or the newest week's number. */
+export type UsageOrder = 'jumps' | 'week';
 export type UsageUnit = 'count' | 'share';
 export type PositionFilter = 'ALL' | 'RB' | 'WR' | 'TE';
 
@@ -107,6 +109,17 @@ function amount(share: number | null | undefined, count: number | null | undefin
   return `${pct(share)} ${ofTeam(team, metric)}`;
 }
 
+/** Where a jump started: his average over the earlier weeks, the baseline the
+ *  server measured the jump against (so the gap on the card IS the sort key).
+ *  Bare number — `amount` names the unit once, after "to". */
+function jumpFrom(signal: UsageSignal, metric: UsageMetric, unit: UsageUnit): string {
+  if (unit === 'count') {
+    const from = Math.max(0, Math.round((signal.count ?? 0) - (signal.delta ?? 0)));
+    return String(from);
+  }
+  return pct(Math.max(0, (signal.share ?? 0) - (signal.delta_share ?? 0)));
+}
+
 /** The last played week's index, or -1. */
 function lastPlayed(status: string[]): number {
   for (let i = status.length - 1; i >= 0; i--) if (status[i] === 'played') return i;
@@ -129,9 +142,11 @@ export function headline(
   const last = lastPlayed(player.status);
   switch (signal?.kind) {
     case 'spike':
-      return `Jumped to ${amount(signal.share, signal.count, team, metric, unit)}${inWeek}`;
+      return `Jumped from ${jumpFrom(signal, metric, unit)} to ${amount(signal.share, signal.count, team, metric, unit)}${inWeek}`;
     case 'return':
-      return `Back in the lineup: ${amount(signal.share, signal.count, team, metric, unit)}`;
+      return signal.delta_share != null
+        ? `Back and up from ${jumpFrom(signal, metric, unit)} to ${amount(signal.share, signal.count, team, metric, unit)}`
+        : `Back in the lineup: ${amount(signal.share, signal.count, team, metric, unit)}`;
     case 'new':
       return `New role: ${amount(signal.share, signal.count, team, metric, unit)}${inWeek}`;
     case 'out':
@@ -152,6 +167,54 @@ export function headline(
 export function isNewsWeek(signal: UsageSignal | null, week: number): boolean {
   return !!signal && signal.week === week
     && (signal.kind === 'spike' || signal.kind === 'return' || signal.kind === 'new');
+}
+
+/** A newest-week jump: a spike, or a return that is also a spike. */
+export function isJump(signal: UsageSignal | null, week: number): boolean {
+  return !!signal && signal.week === week
+    && (signal.kind === 'spike' || (signal.kind === 'return' && signal.delta_share != null));
+}
+
+/** Version A's "Biggest jumps" order, as section sizes over the server's
+ *  order: the newest-week jumps (biggest jump first), then the newest-week
+ *  returns and new roles that are not jumps, then everyone else. The server
+ *  ranks those groups in exactly this order, so each is a contiguous run. */
+export function newsSplit(
+  visible: UsagePlayer[], metric: UsageMetric, latestWeek: number | null,
+): { jumps: number; backOrNew: number } {
+  let jumps = 0;
+  while (latestWeek != null && jumps < visible.length && isJump(visible[jumps][metric].signal, latestWeek)) jumps += 1;
+  let back = 0;
+  while (latestWeek != null && jumps + back < visible.length
+    && isNewsWeek(visible[jumps + back][metric].signal, latestWeek)
+    && !isJump(visible[jumps + back][metric].signal, latestWeek)) back += 1;
+  return { jumps, backOrNew: back };
+}
+
+/** Version A's "Weekly share" order: the newest selected week's number
+ *  (share or count, whichever is showing), highest first. A missed game or a
+ *  bye that week sorts last. The work is `sortStatsRows`, the ONE sort. */
+export function sortByLatestWeek(
+  rows: UsagePlayer[], metric: UsageMetric, unit: UsageUnit, nWeeks: number,
+): UsagePlayer[] {
+  return nWeeks ? sortStatsRows(rows, metric, unit, { key: nWeeks - 1, dir: 'desc' }) : rows;
+}
+
+/** A card's sentence in the "Weekly share" order: the newest week's number,
+ *  the very value the list is sorted by. */
+export function weekHeadline(
+  player: Pick<UsagePlayer, 'team' | 'status'>,
+  metric: UsageMetric,
+  block: { counts: (number | null)[]; shares: (number | null)[] },
+  weeks: number[],
+  unit: UsageUnit = 'share',
+): string {
+  const i = weeks.length - 1;
+  if (i < 0) return 'No usage yet';
+  const st = player.status[i];
+  if (st === 'out') return `Didn't play in Week ${weeks[i]}`;
+  if (st === 'bye') return `Bye in Week ${weeks[i]}`;
+  return `${amount(block.shares[i], block.counts[i], player.team, metric, unit)} in Week ${weeks[i]}`;
 }
 
 /** Version A's two sections: news in the newest week first, then the rest.

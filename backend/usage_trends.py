@@ -248,7 +248,9 @@ def _metric(metric: str, weeks: list[int], status: list[str],
             signal = {"kind": "new", "week": weeks[last], "count": counts[last],
                       "share": shares[last], "missed": missed_before_latest}
             tier, sort = 1, shares[last] or 0.0
-    elif missed_before_latest:
+    elif missed_before_latest and counts[last] >= floor:
+        # Back from a missed game with a real role: the same weekly volume
+        # floor as a spike, so a 0-snap "return" never reads as news.
         signal = {"kind": "return", "week": weeks[last], "count": counts[last],
                   "share": shares[last], "delta": None, "delta_share": None,
                   "missed": missed_before_latest}

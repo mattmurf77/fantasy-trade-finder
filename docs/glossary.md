@@ -18,7 +18,9 @@ exceptions. See [configuration](config-reference.md#shared-recommendation-signif
 
 **Team share** (Usage Trends) — A player's count as a % of his team's that week: snaps ÷ the team's offensive snaps (`tm_off_snp`); carries and targets ÷ the team's total over every QB/RB/WR/TE/FB row (QB scrambles count). The 4-week **average share** is played-weeks total ÷ team total over the same weeks — byes and missed games are left out of both.
 
-**Spike / return / new role** (Usage Trends signals) — A **spike** is a played week whose team share beats both the player's earlier-weeks average and his previous game by 15 pp (snaps), 10 pp (carries) or 8 pp (targets), with a volume floor (20 / 6 / 4). Share-driven by design: counts move with how many plays the team runs. A **return** is a latest-week game after one or more missed games; a **new** role is a player's first game of the window with real volume. `out`, `rising` and `falling` complete the set (`backend/usage_trends.py`).
+**Spike / return / new role** (Usage Trends signals) — A **spike** is a played week whose team share beats both the player's earlier-weeks average and his previous game by 15 pp (snaps), 10 pp (carries) or 8 pp (targets), with a volume floor (20 / 6 / 4). Share-driven by design: counts move with how many plays the team runs. A **return** is a latest-week game after one or more missed games, with the same volume floor as a spike (20 snaps / 6 carries / 4 targets); a **new** role is a player's first game of the window with real volume. `out`, `rising` and `falling` complete the set (`backend/usage_trends.py`).
+
+**Biggest jumps / Weekly share** (Usage Trends orders) — The Simple view's two orders. **Biggest jumps** (default) is the server's order in three sections: the newest week's jumps (biggest jump first, each card reading "Jumped from X% to Y%"), then returns and new roles that aren't jumps, then everyone else. **Weekly share** orders by the newest selected week's share (or count), highest first, and each card states that week's number. Raw stats has neither; its columns sort.
 
 ---
 

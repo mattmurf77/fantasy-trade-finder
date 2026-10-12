@@ -143,6 +143,17 @@ def test_return_after_missed_games_and_new_role_on_first_game():
     assert new["kind"] == "new" and new["missed"] == 3 and new["share"] == 66.7
 
 
+def test_return_needs_the_weekly_volume_floor():
+    # Back from a missed game with 2 snaps (under the floor of 20): not news.
+    # With 30 snaps the same comeback is a return.
+    weeks = {1: _team("A") + [_row("lo", "WR", "A", 30), _row("hi", "WR", "A", 30)],
+             2: _team("A"),
+             3: _team("A") + [_row("lo", "WR", "A", 2), _row("hi", "WR", "A", 30)]}
+    ps = _by_id(ut.compute(weeks, [1, 2, 3]))
+    assert ps["lo"]["snaps"]["signal"] is None
+    assert ps["hi"]["snaps"]["signal"]["kind"] == "return"
+
+
 def test_steadily_growing_share_reads_as_rising():
     weeks = {w: _team("A") + [_row("te", "TE", "A", s)] for w, s in
              zip((1, 2, 3, 4), (18, 24, 30, 36))}            # +10 pp a week, no spike

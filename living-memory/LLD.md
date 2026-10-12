@@ -883,7 +883,8 @@ The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two c
   - Ownerless Sleeper rosters key as `roster:<id>` so their players never read as free agents. Keep that when adding a client.
 - **The server owns the default order.** Each metric carries `rank`, and clients filter, then order by it.
   - The one exception is Version B's user-chosen column sort, operator 2026-10-10. It is a pure tested helper (`utils/usageTrends.sortStatsRows`) applied only in the stats view, and a third tap returns to the server order.
-  - Any other client sort, or any sort in Version A, is a regression (`check-usage-trends.js` §2e–2e2).
+  - The second exception is Version A's **Weekly share** order (operator, 2026-10-10, [scope](../docs/plans/usage-trends/scope-order-toggle.md)): `sortByLatestWeek`, which is `sortStatsRows` on the newest week, descending. Version A's default **Biggest jumps** order only *splits* the server order into sections (`newsSplit`); it never sorts.
+  - Any other client sort is a regression (`check-usage-trends.js` §2e–2e5).
 - **One writer for the weekly store.** `usage_week_loads` / `usage_team_weeks` / `usage_player_weeks` hold raw counts only, written by `usage_trends_refresh.refresh_usage_weeks` alone. Its three callers are the daily tick (flag on), `POST /api/cron/usage-trends-refresh` and `scripts/refresh_usage_trends.py`.
   - A week is replaced whole and trusted only once its load row exists.
   - Since week selection (2026-10-10), the route resolves each week on its own (`server._usage_week`): from the store when loaded, else one live fetch of that week. It caches per (season, week).
