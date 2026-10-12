@@ -1,17 +1,22 @@
 # HANDOFF
 
-## Usage Trends — shipped 2026-10-10 with the flag ON (PR #321 → `35c6838c`)
+## Usage Trends — live; order toggle shipped 2026-10-12 (PR #323 → `fc0f6149`)
 
-**Where I stopped:** shipped and live. Render `dep-db586krbc2fs73ellaig` serves `usage_trends.enabled: true`, and the prod store holds 2026 weeks 1–4. iOS 1.21.0 build 163 is building on `--auto-submit` ([build](https://expo.dev/accounts/mattmurf77/projects/dtf-dynasty-trade-finder/builds/923f29da-15bc-4a25-858f-36cf8204519c)). The branch and worktree were ledgered in `docs/recovery/2026-10-10-usage-trends.md` and removed.
+**Where I stopped:** shipped and live.
+- **#321** (2026-10-10) shipped the feature with the flag ON.
+- **#323** (2026-10-12) added Simple's **Biggest jumps | Weekly share** toggle, "Jumped from X% to Y%" cards, the jumps / back or new / everyone else sections, and a volume floor on returns (D-205).
+- Render `dep-db6mh67avr4c73cqn4h0` is live on `fc0f6149`.
+- iOS 1.21.2 build 165 is on `--auto-submit` ([build](https://expo.dev/accounts/mattmurf77/projects/dtf-dynasty-trade-finder/builds/435def34-19c0-48ee-9558-ae0282c39b4e)).
+- Both branches and worktrees are ledgered in `docs/recovery/` and removed.
 
-**Next (operator):** once 163 reaches TestFlight, run the 12-step checklist in [scope §3](../docs/plans/usage-trends/scope.md). Week 5 enters the store on the first daily tick (13:30 UTC) after Sleeper's state rolls to week 6, usually early in the week. To force it: `python3 scripts/refresh_usage_trends.py --remote`.
+**Next (operator):** on 1.21.2, run the 12-step checklist in [scope §3](../docs/plans/usage-trends/scope.md) and the 8-step one in [scope-order-toggle §3](../docs/plans/usage-trends/scope-order-toggle.md). Week 5 enters the store on the first daily tick (13:30 UTC) after Sleeper's state rolls to week 6. To force it: `python3 scripts/refresh_usage_trends.py --remote`.
 
 **Open design calls (offered, not decided):**
 - a frozen player column / pinned actions for Raw stats past 4 weeks (today the whole table swipes);
 - extra filters: My team only, Big jumps only, NFL team, minimum usage.
 
 **Don't:**
-- sort Version A, or sort anywhere but `sortStatsRows` (`check-usage-trends.js` §2e–2e2);
+- sort Version A anywhere but `sortByLatestWeek` (Weekly share), or Version B anywhere but `sortStatsRows` (`check-usage-trends.js` §2e–2e5);
 - write finder pins before a league switch (§2h);
 - write the store from anywhere but `usage_trends_refresh`.
 

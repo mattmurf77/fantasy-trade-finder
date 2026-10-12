@@ -11,6 +11,18 @@
 
 ---
 
+## 2026-10-12 — Usage Trends: Biggest jumps | Weekly share toggle, readable jumps, return floor (#323, D-205); iOS 1.21.2 (165) submitted
+
+- **Why:** the operator saw that "Biggest jumps last week isn't sorted from largest to smallest". It was sorted by jump size, but cards showed only where the player landed.
+- **What:**
+  - Simple view gets a **Biggest jumps | Weekly share** pill (default Biggest jumps). Weekly share sorts by the newest selected week, and each card states that week's number.
+  - Jump cards read "Jumped from X% to Y%", where X is the earlier-weeks average the jump is measured against.
+  - Biggest jumps now has three sections: jumps / back or new / everyone else.
+  - Server: a return needs the spike's volume floor (20 / 6 / 4).
+  - Analytics: an `order` prop on `usage_trends_view_changed` and `usage_trends_action`.
+- **Ship:** PR #323 squash-merged as `fc0f6149`. Render `dep-db6mh67avr4c73cqn4h0` went live 23:10 UTC, API-triggered; the return floor is live for 1.21.0 users too. iOS 1.21.2 EAS build 165 (`435def34`, submission `cb53f328`) is on `--auto-submit`. #322 had taken D-204 and 1.21.1 mid-build, hence D-205 and 1.21.2.
+- **Evidence:** CI 4/4 on the exact head. 8 named mobile sabotages and 1 backend sabotage; see [TEST_LEDGER](TEST_LEDGER.md). The 8-step TestFlight checklist is in [scope-order-toggle §3](../docs/plans/usage-trends/scope-order-toggle.md).
+
 ## 2026-10-10c — Buyer/Seller tags pink; Home ice on every banded tile (#322, D-204); iOS 1.21.1 (164) submitted
 
 - **What:** the Buyer/Seller tags on League rankings (one position filtered) and on the Home position tiles are flare pink (border + text), like the ice "You" badge, instead of grey. Home now draws the suggested Buy/Sell side in ice on every banded tile, up to four, not just the two most extreme: an operator exception to the ≤3 ice ration ([D-204](DECISIONS.md)).

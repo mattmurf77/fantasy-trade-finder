@@ -1,4 +1,4 @@
-## 2026-10-10 — Usage Trends order toggle + readable jumps (D-205): evidence, branch `feat/usage-trends-order`
+## 2026-10-12 — Usage Trends order toggle + readable jumps (D-205): evidence, PR #323
 
 Full gates, not express ([scope](../docs/plans/usage-trends/scope-order-toggle.md)). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
 
@@ -16,7 +16,9 @@ Full gates, not express ([scope](../docs/plans/usage-trends/scope-order-toggle.m
   All `check-*.js` green; `tsc --noEmit` clean; testid-lint OK.
 - **Real data:** live 2026 Week 4 Snaps under the new rule gives 35 jumps, then Back or new = Collins 69% / Okonkwo 58% / Tinsley 53% / Sarratt 36%. The 0–31% low-volume returns are gone.
 - **Code-walk:** [code-walk.md](../docs/plans/usage-trends/code-walk.md) §8.
-- **Not run yet:** hosted CI, and the 8-step TestFlight checklist (scope-order-toggle §3, on 1.21.2).
+- **Ship gate:** CI 4/4 green on the exact head `87062f72`, after merging main (#322). Squash-merged as `fc0f6149`; `FTF_SKIP_SIM_GATE=1` (D-056).
+- **Prod (2026-10-12 23:10 UTC):** Render `dep-db6mh67avr4c73cqn4h0` is live on `fc0f6149`. `/api/feature-flags` → `usage_trends.enabled: true`, and `/api/usage-trends` answers 401 unauthenticated.
+- **Not run yet:** the 8-step TestFlight checklist (scope-order-toggle §3), on iOS 1.21.2 build 165.
 
 ## 2026-10-10 — Buyer/Seller tags pink, Home ice uncapped (D-204): express
 
