@@ -666,6 +666,7 @@ def test_admin_add_fit_arms_route(client, monkeypatch, flag_off, nobody_allowed)
             {"session_id": "s2", "user_id": "u2", "league_id": "L2",
              "source_json": json.dumps({"scoring_format": "1qb_ppr"})}]
     monkeypatch.setattr(database, "list_open_grading_sessions", lambda: list(rows))
+    monkeypatch.setattr(server, "_ROS_CACHE", {})
     fetched: list = []
     monkeypatch.setattr(fe, "fetch_ros_points",
                         lambda fetch, fmt, **kw: fetched.append(fmt) or {"weeks": 13, "points": {"p": 1.0}})
@@ -739,3 +740,33 @@ def test_refresh_sleeper_members_upserts_owner_rosters(monkeypatch):
     feeds["/rosters"] = []
     written.clear()
     assert server._refresh_sleeper_members("L9") == 0 and written == []
+
+
+def test_build_folds_fit_arms_into_every_new_deck(monkeypatch):
+    """Operator 2026-10-14: a deck built by POST /api/grading/sessions (a user starting one on
+    their own) gets the fit arms too, right after the build; projections are cached per
+    format; a fold failure never breaks the build; a deck that did not open is left alone."""
+    import backend.fit_engine as fe
+
+    monkeypatch.setattr(server, "_grading_server_inputs", lambda sess, league_id: "SERVER")
+    monkeypatch.setattr(bg, "build_session", lambda **kw: None)
+    rows = {SID: {"session_id": SID, "status": "open",
+                  "source_json": json.dumps({"scoring_format": "sf_tep"})}}
+    monkeypatch.setattr(bg.db, "load_grading_session", lambda sid: rows.get(sid))
+    monkeypatch.setattr(server, "_ROS_CACHE", {})
+    fetched: list = []
+    monkeypatch.setattr(fe, "fetch_ros_points",
+                        lambda fetch, fmt, **kw: fetched.append(fmt) or {"weeks": 12, "points": {"p": 2.0}})
+    folds: list = []
+    monkeypatch.setattr(bg, "add_fit_arms", lambda **kw: folds.append(kw) or {"status": "added"})
+    server._build_grading_session({"user_id": USER}, LEAGUE, SID)
+    server._build_grading_session({"user_id": USER}, LEAGUE, SID)
+    assert [f["session_id"] for f in folds] == [SID, SID] and fetched == ["sf_tep"]   # cached
+    assert folds[0]["server"] == "SERVER" and folds[0]["ros_points"] == {"p": 2.0}
+    assert folds[0]["ros_meta"] == {"weeks": 12}
+    rows[SID]["status"] = "failed"
+    server._build_grading_session({"user_id": USER}, LEAGUE, SID)
+    assert len(folds) == 2                                     # a failed build gets no fit arms
+    rows[SID]["status"] = "open"
+    monkeypatch.setattr(bg, "add_fit_arms", lambda **kw: (_ for _ in ()).throw(RuntimeError("x")))
+    server._build_grading_session({"user_id": USER}, LEAGUE, SID)  # logged, never raised

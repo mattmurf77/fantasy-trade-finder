@@ -27061,12 +27061,40 @@ def _grading_server_inputs(sess, league_id: str):
         not_interested_ids=frozenset(map(str, not_interested)))
 
 
+_ROS_CACHE: dict[str, tuple[float, dict]] = {}
+_ROS_TTL_S = 6 * 3600
+
+
+def _ros_points_cached(fmt: str) -> dict:
+    """fit_engine.fetch_ros_points for one scoring format, cached in-process for _ROS_TTL_S:
+    one pass over Sleeper's weekly projection pages serves every fit fold in that window."""
+    from . import fit_engine as _fit
+
+    hit = _ROS_CACHE.get(fmt)
+    if hit and time.time() - hit[0] < _ROS_TTL_S:
+        return hit[1]
+    ros = _fit.fetch_ros_points(lambda url: _sleeper_get(url, 20), fmt)
+    _ROS_CACHE[fmt] = (time.time(), ros)
+    return ros
+
+
+def _fold_fit_arms(row: dict, server_inputs) -> dict:
+    """blind_grading.add_fit_arms for one session row, with its format's cached projections."""
+    fmt = json.loads(row["source_json"]).get("scoring_format") or "1qb_ppr"
+    ros = _ros_points_cached(fmt)
+    return _blind_grading.add_fit_arms(
+        session_id=row["session_id"], server=server_inputs, ros_points=ros["points"],
+        ros_meta={k: v for k, v in ros.items() if k != "points"})
+
+
 def _build_grading_session(sess: dict, league_id: str, session_id: str) -> None:
     """Background half of POST /api/grading/sessions (specs.md §3.3): the
     Sleeper reads behind ServerInputs and the value-core build both leave the
     request thread. build_session never raises; it ends the session 'open' or
     'failed'. If gathering ServerInputs itself fails, the build still runs on
-    empty league facts, so the session can never be left 'building'."""
+    empty league facts, so the session can never be left 'building'.
+    Then the fit arms are folded in (operator 2026-10-14: every new deck carries them,
+    including one a user starts on their own); a fold failure leaves the deck as built."""
     try:
         server_inputs = _grading_server_inputs(sess, league_id)
     except Exception as err:
@@ -27074,6 +27102,13 @@ def _build_grading_session(sess: dict, league_id: str, session_id: str) -> None:
         server_inputs = _blind_grading.ServerInputs(lineup_slots=None, max_players=None,
                                                     standings={}, completed_weeks=0)
     _blind_grading.build_session(session_id=session_id, server=server_inputs)
+    try:
+        row = _blind_grading.db.load_grading_session(session_id)
+        if row is not None and row["status"] == "open":
+            log.info("blind-grading: fit arms session=%s %s", session_id,
+                     _fold_fit_arms(row, server_inputs))
+    except Exception:
+        log.exception("blind-grading: fit arms after build failed session=%s", session_id)
 
 
 @app.route("/api/grading/sessions", methods=["POST"])
@@ -27265,18 +27300,12 @@ def admin_grading_pregenerate_route():
 
 
 def _add_fit_arms_all(rows: list[dict]) -> None:
-    """Daemon-thread half of POST /api/admin/grading/add-fit-arms: rest-of-season projections
-    once per scoring format, then blind_grading.add_fit_arms for each open session in order.
-    A session that fails is logged and skipped; never raises."""
-    from . import fit_engine as _fit
-
-    ros: dict[str, dict] = {}
+    """Daemon-thread half of POST /api/admin/grading/add-fit-arms: blind_grading.add_fit_arms
+    for each open session in order, projections cached per scoring format
+    (_ros_points_cached). A session that fails is logged and skipped; never raises."""
     for row in rows:
         sid, league_id = row["session_id"], row["league_id"]
         try:
-            fmt = json.loads(row["source_json"]).get("scoring_format") or "1qb_ppr"
-            if fmt not in ros:
-                ros[fmt] = _fit.fetch_ros_points(lambda url: _sleeper_get(url, 20), fmt)
             platform = (get_league_draft_context(league_id) or {}).get("platform")
             sess = {"user_id": row["user_id"], "league": SimpleNamespace(platform=platform)}
             try:
@@ -27285,10 +27314,7 @@ def _add_fit_arms_all(rows: list[dict]) -> None:
                 log.warning("blind-grading: fit arms server inputs failed session=%s: %s", sid, err)
                 server_inputs = _blind_grading.ServerInputs(lineup_slots=None, max_players=None,
                                                             standings={}, completed_weeks=0)
-            out = _blind_grading.add_fit_arms(
-                session_id=sid, server=server_inputs, ros_points=ros[fmt]["points"],
-                ros_meta={k: v for k, v in ros[fmt].items() if k != "points"})
-            log.info("blind-grading: fit arms session=%s %s", sid, out)
+            log.info("blind-grading: fit arms session=%s %s", sid, _fold_fit_arms(row, server_inputs))
         except Exception:
             log.exception("blind-grading: fit arms failed session=%s", sid)
 
