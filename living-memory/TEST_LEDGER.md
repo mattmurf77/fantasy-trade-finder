@@ -1,3 +1,7 @@
+## 2026-10-14 — Fit arms after every build (#324)
+
+- CI 4/4 green on `16209717`. Grading, fit and value-core suites: 230 passed, incl. `test_build_folds_fit_arms_into_every_new_deck` (fold after build, projection cache, failed build skipped, fold error never raises). The `add-fit-arms` route test now resets the projection cache.
+
 ## 2026-10-12 — Usage Trends order toggle + readable jumps (D-205): evidence, PR #323
 
 Full gates, not express ([scope](../docs/plans/usage-trends/scope-order-toggle.md)). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.

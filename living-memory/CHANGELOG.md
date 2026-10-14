@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-10-14 — Fit arms in every new Calibration deck (#324); round-2 readout; go-live recommendation
+
+- #324 (`4d880833`, live 2026-10-14 18:59 UTC): `_build_grading_session` folds `fit_a` / `fit_b` in after every build that ends open (projections cached per format, 6 h). It closes the gap where gdubs10 started a deck on their own and got none.
+- Round 2 so far (5 decks, 3 graders: operator, gdubs10, jonbonjourvi): today's engine 3.19 (n=100, 50% would send), fit A 3.36 (n=47, 55%), value core 2.88 (n=99, 39%), fit B 2.38 (n=13, 23%). Graders disagree sharply: fit A runs from 3.96 (operator) to 1.50 (jonbonjourvi); today's engine from 3.73 to 1.60.
+- Operator asked whether this is enough to go live. Lead recommendation: keep today's engine as the default, add the breakup and redundancy filters to it, and run value core v3 / fit A as live experiment arms with a per-engine outcome readout. Awaiting the operator's call.
+
 ## 2026-10-12 — Usage Trends: Biggest jumps | Weekly share toggle, readable jumps, return floor (#323, D-205); iOS 1.21.2 (165) submitted
 
 - **Why:** the operator saw that "Biggest jumps last week isn't sorted from largest to smallest". It was sorted by jump size, but cards showed only where the player landed.
