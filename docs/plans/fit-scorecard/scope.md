@@ -46,3 +46,15 @@ The plan, the frozen multipliers and the round-1 results live in the plan doc. T
 
 - CI green on the pushed sha. The TEST_LEDGER entry names the offline test, the dry run and the prod fold-in outcome.
 - Express lane: **no**.
+
+---
+
+## Addendum 2026-10-14 — fit arms in every new deck
+
+**Entry point:** direct ask. gdubs10 finished a deck, tapped Start again, and got a 40-card deck with no fit cards, because the fold was admin-only.
+**Change:** `server._build_grading_session` folds the fit arms in right after a build that ends `open`. Projections are cached per scoring format for 6 h. A fold failure is logged; the deck stays as built. No schema, flag or route change.
+
+- **Evidence:** `test_blind_grading_routes.py::test_build_folds_fit_arms_into_every_new_deck` covers the fold after build, the projection cache, a failed build getting no fit arms, and a fold error never raising. The grading, fit and value-core suites pass (230).
+- **Docs:** api-reference (`POST /api/grading/sessions` row), runbook (fit arms automatic).
+- **Express:** no; CI plus a TEST_LEDGER entry.
+
