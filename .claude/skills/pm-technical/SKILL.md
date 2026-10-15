@@ -108,8 +108,9 @@ in any pipeline (direct ask, feedback item, NEXT.md, staged-work). Full procedur
 5. §7: platform behavior per
    [references/platform-parity.md](references/platform-parity.md) (written by
    `platforms-pm` on its own branch; pending until it lands).
-6. §8: if a model's output changes, attach a model-change packet (§References) and
-   `models-lead`'s sign-off.
+6. §8: if a model's output changes, attach a
+   [model-change packet](references/model-change-packet.md) and `models-lead`'s
+   sign-off.
 7. Surface waivers to `head-product` before build, and re-diff against `origin/main`
    before the spec goes to eng.
 
@@ -200,6 +201,9 @@ through `head-product`, which relays to the other departments' heads.
 - [references/scope-block.md](references/scope-block.md) — how to fill every section of
   the scope template, the evidence rules, waivers, the re-diff, and the product
   acceptance pass.
+- [references/model-change-packet.md](references/model-change-packet.md) — for any
+  change to what a model outputs: the packet scope §8 attaches and `models-lead` signs
+  (draft, fields pending `models-lead` review).
 - [references/platform-parity.md](references/platform-parity.md) — per-platform reads,
   writes and honest-unsupported behavior for scope §7. Written by `platforms-pm` on its
   own branch; pending until that lands.
