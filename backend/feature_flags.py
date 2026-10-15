@@ -564,6 +564,7 @@ FLAG_KEYS: tuple[str, ...] = (
     "deck.value_model",     # F6 — learned P(like)/P(propose) heads × V-vector base ordering + nightly refit; DARK until an F8 replay win
     "deck.first_session",   # F9 — first-session win: confidence-weighted first-5 + size clamp on FIRST decks, board-refreshed deck header, adaptation moment
     "deck.replenishment",   # reserved (no consumer yet)
+    "deck.quality_filters", # 2026-10-14 — drop breakup / junk-filler / redundant TE-QB cards + cap repeats on the live deck (backend/deck_quality.py)
     # ── Matchmaking research item 1 — suggestion telemetry / counterfactual
     # logging (docs/plans/matchmaking-engine/telemetry-scope.md). When ON
     # (and deck.signal_v2 ON — the F1 spine carries the rows): telemetry-era

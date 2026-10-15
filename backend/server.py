@@ -4447,6 +4447,22 @@ def _deck_first_session_enabled() -> bool:
     return getattr(FLAGS, "deck_first_session", False)
 
 
+def _deck_quality_filters_enabled() -> bool:
+    """deck.quality_filters (operator, 2026-10-14) — backend/deck_quality.py on the served deck."""
+    return getattr(FLAGS, "deck_quality_filters", False)
+
+
+def _records_in_order(cards, records, survivors) -> list:
+    """Presentation records for `survivors`, a re-ordered subset of `cards` (records[i] belongs
+    to cards[i]). Identity plus occurrence order, like retain_occurrences, but allows the
+    re-ordering the deck-quality repeat cap does."""
+    from collections import deque
+    slots: dict = {}
+    for i, card in enumerate(cards):
+        slots.setdefault(id(card), deque()).append(i)
+    return [records[slots[id(card)].popleft()] for card in survivors]
+
+
 def _deck_value_model_enabled() -> bool:
     """F6 — learned acceptance heads × V-vector (docs/plans/
     tiktok-discovery/prds/F6-value-model.md). SHIPS DARK until an F8
@@ -8857,6 +8873,33 @@ def _run_trade_job(
                 job = _trade_jobs.get(job_id)
                 if _job_live(job):
                     job["owner_presentment"] = owner_presentment
+        if _deck_quality_filters_enabled() and final_cards:
+            # Operator, 2026-10-14 (Calibration grades of this engine): drop breakup / junk
+            # filler / redundant TE-QB cards and cap repeats, before the served/ghost split so a
+            # dropped card is never logged as served. Any error serves the deck unfiltered.
+            before_quality = final_cards
+            try:
+                from . import deck_quality as _deck_quality
+                viewer_team = str(ctx.league_user_id or g_user_id)
+                quality_rosters = {str(m.user_id): list(m.roster or ()) for m in (g_league.members or ())}
+                quality_rosters[viewer_team] = list(g_user_roster)
+                _e2v = _trade_service_mod.elo_to_value
+                final_cards, quality_counts = _deck_quality.filter_deck(
+                    final_cards, viewer_id=viewer_team,
+                    market=lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None,
+                    position=lambda pid: getattr(players_dict.get(pid), "position", None),
+                    rosters=quality_rosters, lineup_slots=_league_lineup_slots(league_id))
+                if presentation is not None:
+                    presentation["records"] = _records_in_order(
+                        before_quality, presentation["records"], final_cards)
+                if significance_diag is not None:
+                    significance_diag["quality_filters"] = quality_counts
+                log.info("trade-job %s: deck quality filters %s served=%d", job_id,
+                         quality_counts, len(final_cards))
+            except Exception as quality_err:
+                log.warning("trade-job %s: deck quality filters failed (serving unfiltered): %s",
+                            job_id, quality_err)
+                final_cards = before_quality
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
