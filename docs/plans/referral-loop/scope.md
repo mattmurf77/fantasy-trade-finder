@@ -10,7 +10,7 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
 **Date:** 2026-10-15
 **Entry point:** direct ask: operator 2026-10-15 via `head-product` ("Growth loops. Need to be built and need to work. Referral growth loop is the primary one, …"); growth backlog GB-01
 **Builder:** TBD — `head-eng` allocates (likely `engagement-eng` backend + invite routes, `onboarding-eng` for web/LeagueJoin/SignIn). **First build slice handed to `head-eng` by `head-product` 2026-10-15** (PRD §12: FR-7, FR-8, FR-9, FR-25 the `/s/*` CTA target, §8.2, `IOS_INSTALL_URL` as config), after the operator's ruling "Ok. start building D1 and D3" (PRD D-1 = option A; D-3 = the operator creates the public TestFlight link)
-**Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3). **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on the build branch before ship.** `ux-lead`: approve with changes (R-F1…R-F8, PRD J1/J2/J4, FR-1, FR-7, FR-19, D-9, D-16; checklist steps below). `analytics-lead`: §1 granted with C1–C9 and R1–R3 (analytics addendum, PR #350, `docs/business/analytics/2026-10-15-referral-loop-events.md`)
+**Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3). **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on the build branch before ship.** `ux-lead`: approve with changes (R-F1…R-F8, PRD J1/J2/J4, FR-1, FR-7, FR-19, D-9, D-16; checklist steps below). `analytics-lead`: §1 granted with C1–C9 and R1–R3 (analytics addendum, PR #350, `docs/business/analytics/2026-10-15-referral-loop-events.md`). `design-lead`: confirmed R-F3 and R-F1's A1 step layout 2026-10-15 (PRD D-16 resolved; specs in FR-7, AC-7c, AC-7f; checked in `/design-review` on the build branch)
 **Operator sign-off on waivers:** pending (one waiver: §3 has no automated runtime proof of the universal-link tap or the TestFlight install; the operator checklist is the only runtime evidence, per D-056)
 
 ---
@@ -143,11 +143,19 @@ D-056: no Maestro, no simulator, no captures.
     iPhone/Android/desktop CTA variants with `IOS_INSTALL_URL` set and unset, one primary
     action each, no button on Android or on iPhone with it unset, no `/contact.html`
     TestFlight-request link, the iPhone-set CTA and re-tap line numbered step 1 / step 2
-    (R-F1), the desktop-set QR-primary state (the QR's payload, asserted at the encoder's
-    input, is the join URL with `t` and no other query param; the `/go/ios` link in that
-    block; "Have the Fleeced extension? Open the web app" as the secondary; R-F3), the
-    desktop-unset state with the web app primary and no QR or iOS link, and no `dtf://` link
-    in any variant (PRD AC-7c); human UA increments `open_count` + fires
+    as a two-row list whose second row has no link or button (R-F1), the desktop-set
+    QR-primary state (the QR block first under the "GET IT ON YOUR IPHONE" TickLabel; the
+    QR's payload, asserted at the encoder's input, is the join URL with `t` and no other
+    query param; the `/go/ios` text link inside that block; "Have the Fleeced extension?
+    Open the web app" as a Secondary (outlined) button after it; no ice-filled button;
+    R-F3, D-16), the desktop-unset state with the web app primary and no QR or iOS link,
+    and no `dtf://` link in any variant (PRD AC-7c); the desktop-set QR itself (PRD AC-7f):
+    an inline `<svg>` in the response with an accessible name (e.g. "QR code: opens this
+    invite on your iPhone"), no `<img>`, `<script>` or CSS URL for it and no third-party
+    host in the page other than Google Fonts (no external QR request), the encoder called
+    with error correction M and a 4-module quiet zone, the SVG sized ≥180 CSS px with dark
+    modules on the light panel, and the QR version recorded against PRD FR-7's URL-length
+    note; human UA increments `open_count` + fires
     `invite_landing_opened` with `invite_status` (never a `token_status` key, C1); a human GET
     with no `t` still fires it, `invite_status` null (R1); each listed preview agent and the
     generic `bot|crawler|spider|preview` pattern set only `unfurled_at` and fire nothing, on
@@ -164,7 +172,8 @@ D-056: no Maestro, no simulator, no captures.
     links `/` with the page's label and help line "Sign-in uses the Fleeced extension for
     Chrome or Edge."; Android UA: no CTA link, note "Fleeced runs on iPhone and desktop web
     for now.". Every case: the response is not `public`-cacheable, or carries `Vary:
-    User-Agent`; `og:*` tags unchanged; no `dtf://` or user-supplied target. Strings are
+    User-Agent`; `og:*` tags unchanged; no `dtf://` or user-supplied target; no QR code on
+    any variant (the `/s/*` QR is GB-02's rebuild, PRD FR-25). Strings are
     `marketing-lead`'s proposals until the operator approves the words (PRD D-5).
   - `backend/tests/test_referral_attribution.py` (new): token credit for Sleeper, ESPN and MFL
     invitees; first session in a different league with verified membership; `unknown`,
@@ -213,7 +222,7 @@ D-056: no Maestro, no simulator, no captures.
   the landing's re-tap line (PRD D-2, R-F1); the test league's Sleeper league chat and one
   other chat app it uses (step 4b). Record each step's outcome in `TEST_LEDGER.md`. Steps
   4b, 5b, 7b, 7c and 11b are `ux-lead`'s (PR #348 review); its 11c (iPad) is merged into 11b
-  and its 13b into step 13.
+  and its 13b into step 13. Step 15b checks `design-lead`'s desktop QR specs (PRD D-16).
   1. **Inviter mint.** On device A (signed in, Sleeper league L), tap Invite on League Home.
      Expected: the sheet opens within ~2 s; the message says "Fleeced" and the link has
      `t=` and **no `ref=`**.
@@ -291,18 +300,27 @@ D-056: no Maestro, no simulator, no captures.
   14. **Group chat.** Post one link into a chat with two test invitees; both join. Expected:
       two ledger rows sharing the same `share_token`; device A gets one row per joiner.
   15. **Landing primary action per device** (PRD FR-7 design rules). Open a fresh link on each
-      device and check there is exactly one ice primary action. iPhone with `IOS_INSTALL_URL`
-      set: "Get the iOS beta" is the ice button, and there is no "Open in the app" button.
-      iPhone with it unset, and Android: no button and no "Request TestFlight access" link;
-      the note is readable (not the faintest grey). Desktop with `IOS_INSTALL_URL` set: "Get
-      it on your iPhone" with the QR code is the primary, the iOS link sits in that block as
-      plain text, and "Have the Fleeced extension? Open the web app" is the secondary (R-F3).
+      device and check there is exactly one primary action. iPhone with `IOS_INSTALL_URL`
+      set: "Get the iOS beta" is the ice button in step 1, step 2 (the re-tap line) is plain
+      text, not a button, the step numbers are grey, not ice, and there is no "Open in the
+      app" button. iPhone with it unset, and Android: no button and no "Request TestFlight
+      access" link; the note is readable (not the faintest grey). Desktop with
+      `IOS_INSTALL_URL` set: the QR block comes first under "GET IT ON YOUR IPHONE", the iOS
+      link sits in that block as plain text, "Have the Fleeced extension? Open the web app"
+      is an outlined button below it, and **no button is filled ice** (R-F3, D-16).
       Desktop with it unset: "Open the web app" is the ice button, the extension line is
-      dimmer, and there is no QR and no iOS link. On every device the page is dark,
-      says "Fleeced", and buttons
+      dimmer, and there is no QR and no iOS link. On every device the page is dark (on
+      desktop-set, apart from the QR's light panel), says "Fleeced", and buttons
       are comfortably tappable; on desktop, Tab shows the ice focus ring. There is no
       "already joined" landing state (no auth, and one link can credit several joiners); an
       existing user is step 7, in the app.
+      - **15b. Scan the desktop QR** (PRD FR-7, D-16). With `IOS_INSTALL_URL` set, open a
+        fresh link on a desktop and scan its QR with an iPhone's Camera, from a normal
+        sitting distance. Expected: with the app **installed**, the app opens on
+        LeagueJoin (not Safari); with it **not installed**, Safari opens the iPhone landing
+        A1 (step 1 / step 2). The code is dark on a light panel with a clear margin around
+        it. **Fail if the Camera doesn't recognise the code, or if either case lands
+        anywhere else.**
   16. **Share landing CTA** (PRD FR-25). With `growth.join_landing` on, open a `/s/p/<id>`
       link on each device. Expected: iPhone with `IOS_INSTALL_URL` set → a "Get the iOS
       beta" button to the TestFlight link, with "Installs through Apple's TestFlight app."
@@ -315,10 +333,15 @@ D-056: no Maestro, no simulator, no captures.
   `ux-lead` flow review and the `analytics-lead` review of §1): a `/design-review` verdict at
   `docs/plans/referral-loop/design-review.md` before ship, covering the join landing (per-device
   states, PRD FR-7), the OG card (variant (ii), wordmark + ram), and the invite card/banner
-  diff (copy and events, FR-1's busy state). **Gate-1 asks (`ux-lead`, PR #348):** confirm
-  R-F1's step 1 / step 2 layout on A1, and R-F3's desktop QR-primary layout (PRD D-16; it
-  reverses the desktop rule `design-lead` accepted; `growth-pm` decided the mechanic, P19);
-  decide whether FR-25's `/s/*` desktop branch follows (left as written; a follow-up).
+  diff (copy and events, FR-1's busy state). **Gate-1 asks (`ux-lead`, PR #348) answered by
+  `design-lead` 2026-10-15 (PRD D-16 resolved):** R-F1's A1 step list and R-F3's desktop QR
+  block are confirmed and specced in PRD FR-7 (AC-7c, AC-7f); the verdict checks them on
+  the build branch: Plex Mono chalk-dim step markers, one hairline, no card per step; the
+  QR block first under its TickLabel, no ice-filled button, the web app as a Secondary
+  button; `--ink-0` modules on the chalk panel (added to the exceptions register), 4-module
+  quiet zone, ≥180 CSS px, never inverted, no centre logo; the iPad link's 44px target; and
+  the QR version against FR-7's URL-length note. The `/s/*` QR and Chalkline chrome fold
+  into GB-02 as one rebuild; FR-25 stays target and labels only.
   Every string stays with `marketing-lead`; the
   mockup lab (draft PR #343, `mockups/referral-loop/index.html` @ `899f8619`, frames A1–A6)
   tags each PROPOSED COPY. Its web before-panes are local renders of `origin/main` `678834a`
@@ -347,6 +370,7 @@ D-056: no Maestro, no simulator, no captures.
 | `docs/glossary.md` (new domain term) | **yes** | invite id; referral ledger; attribution method (token / league match); referral activated; loop coefficient `K_30` (distinct from the Elo K-factor, `docs/glossary.md:29`) |
 | ADR or `DECISIONS.md` entry (non-obvious choice made) | **yes** | New D-entry superseding D-028 part 2 (a join page replaces the 302 into `/`); per-share ids replace usernames in links; league-match fallback instead of an attribution SDK |
 | `docs/runbook.md` | **yes** | Rollout sequence (PRD §12) next to § Universal Links AASA; how to set/unset `IOS_INSTALL_URL` |
+| `living-memory/DEPENDENCIES.md` | **yes** | The server-side QR library that emits SVG, picked by `head-eng` (PRD FR-7, AC-7f); none exists in `requirements.txt` today |
 
 ## 5. Ship gate declaration
 
