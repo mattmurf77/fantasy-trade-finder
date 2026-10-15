@@ -218,3 +218,28 @@ The first targeted run, for the operator's ESPN league 11896, was refused with `
 - **Evidence:** `test_blind_grading_service.py::test_assigned_picks_join_the_catalog_when_the_engine_prices_them` checks: switch off ⇒ platform only; on ⇒ the user row priced, labelled and held; no assigned rows ⇒ identical to the bench read. A read-only replay on prod job `e89f466d` (11896): 20/20 candidates usable, versus too_few before.
 - **Docs:** this addendum. api-reference n/a: no contract change, the current-arm description still holds.
 - **Not fixed here:** the offline bench (`value_core_bench.read_league_inputs` on a prod freeze) still reads platform picks only, so ESPN leagues bench without picks. This is a bench-fidelity item, logged in NEXT.
+
+---
+
+## Addendum 2026-10-14 — Yes / No instead of 1–5 (app 1.21.3)
+
+**Entry point:** direct ask. The operator gave a 1 or a 5 on 95% of cards; the other graders use the scale unevenly, so a 1–5 average mixes grading styles.
+**Change (client only):** the five grade buttons become **Yes** (sends grade 5) and **No** (sends grade 1), testIDs `calibration.yes` / `calibration.no`. The 1–5 anchor line is gone; the optional reason chips stay, under "Why? (optional)". The results card leads with **Would send** (`share_ge_4`, which is the Yes rate) and drops Average. The intro copy no longer promises 40 cards or two engines. Server, API and report are unchanged; older builds still send 1–5.
+
+1. **Analytics:** (b) existing. Answers land in `grading_cards.grade` as before.
+2. **Schema & flags:** none.
+3. **Evidence:**
+   - `mobile/tests/check-blind-grading.js` REQUIRED_IDS now pins `calibration.yes` / `calibration.no`.
+   - `tsc --noEmit`, every `check-*.js`, and `testid-lint` pass.
+   - No Maestro flow referenced the old IDs.
+   - **TestFlight checklist** (1.21.3):
+     1. Calibration → Start or Resume. Expected: under "Would you send this?" there are exactly two buttons, **Yes** and **No**. There is no 1–5 row and no "No way / Send it" line.
+     2. Tap **Yes**, then **Next**. Expected: the next card loads and the progress count rises by 1.
+     3. Tap **No**, tick "Overpay", then **Next**. Expected: the card saves with no error toast. (`GET /api/admin/grading/report?include_open=1` shows the card at grade 1 with the overpay tag.)
+     4. Tap **Next** without choosing. Expected: Next stays disabled until Yes or No is chosen.
+     5. Tap **Skip**. Expected: the next card loads.
+     6. Leave the tab mid-deck and come back. Expected: **Resume (k of n answered)** continues at the next card.
+     7. Finish a deck. Expected: each engine card on the results screen shows **Would send** first, then Cards, Answered and Skipped. There is no Average row.
+4. **Docs:** cross-client-invariants (scale), glossary (blind grading), this addendum.
+5. **Ship gate:** CI green. The TEST_LEDGER entry names the checks; the operator runs the TestFlight checklist on 1.21.3. Express: no.
+

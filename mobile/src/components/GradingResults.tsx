@@ -20,7 +20,6 @@ import {
 const ARM_ORDER = ['current', 'value_core'] as const;
 const ARM_LABEL = { current: "Today's engine", value_core: 'New engine' } as const;
 
-const fmtMean = (m: number | null) => (m == null ? '—' : m.toFixed(2));
 const fmtShare = (s: number | null) => (s == null ? '—' : `${Math.round(s * 100)}%`);
 
 // The three most-used tags, written "Overpay ×4". Ties break by label so the
@@ -48,11 +47,12 @@ function ArmCard({ label, arm }: { label: string; arm: GradingArmSummary }) {
     <Card>
       <View style={styles.cardBody}>
         <TickLabel>{label}</TickLabel>
+        {/* Yes/No since 2026-10-14: share_ge_4 is the Yes rate (an older 1–5
+            session reads it as the share of 4s and 5s). The mean is no longer shown. */}
+        <Row label="Would send" value={fmtShare(arm.share_ge_4)} />
         <Row label="Cards" value={String(arm.cards)} />
-        <Row label="Graded" value={String(arm.n)} />
+        <Row label="Answered" value={String(arm.n)} />
         <Row label="Skipped" value={String(arm.skipped)} />
-        <Row label="Average" value={fmtMean(arm.mean)} />
-        <Row label="Would send (4–5)" value={fmtShare(arm.share_ge_4)} />
         <View style={styles.reasons}>
           <Text variant="label">Top reasons</Text>
           <Text variant="bodySm" style={styles.reasonsText}>
