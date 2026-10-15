@@ -70,6 +70,8 @@ them embed captures this rule would now reject. Treat them as history.
 
 - "Real capture · <date> build"
 - "TestFlight screenshot · <version> (<build>) · <date>"
+- "Local render · origin/main <sha7> · <date>"
+- "og_image.py render · <sha7> · <date>"
 - "Reconstruction from source, not a capture"
 - "Proposed"
 - "Wireframe"
@@ -83,6 +85,11 @@ embedded at all.
 **Operator TestFlight screenshots** live in the lab's own folder, at
 `mockups/<lab>/before/`, and never in `screens/`. Each one is labelled with its version,
 build number and date. Ask the operator before committing real leaguemate handles.
+
+**Web pages and OG images (decision P22, 2026-10-15):** a local render of the current
+page from origin/main, labelled with sha and date, or the PNG `og_image.py` produces,
+counts as a real before-pane, stored in the lab folder, never in `screens/`. Procedure:
+the skill's `before-pane.md` (g).
 
 Build labs with the `mockup-lab` skill (`/mockup-lab`).
 

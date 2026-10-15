@@ -110,3 +110,42 @@ build". Before designing, open every PNG under `screens/mobile/<dir>/`.
   unstamped frame is a bug.
 - Never hand-edit a capture PNG, never save a reconstruction into `screens/`, and never
   edit `manifest.json` to fake freshness.
+
+### (g) Web pages and OG images (decision P22, 2026-10-15)
+
+head-product's decision P22: a local render of the current page from `origin/main`,
+labelled with sha and date, counts as a real before-pane. So does the PNG that
+`backend/og_image.py` actually produces. Both are stored in the lab folder, never in
+`screens/`.
+
+- **Scope.** This covers `web/` pages and other server-rendered HTML, which have no
+  captures (`screens/web/` is empty), and the output of `backend/og_image.py`.
+- **Local render.**
+  1. Fetch, then check out the exact `origin/main` sha in your own worktree:
+     `git fetch origin`, then `git switch --detach <sha>`. Commit your lab work before
+     switching away from it.
+  2. Serve that checkout with the repo's dev server on a free port:
+     `env -u DATABASE_URL -u DATABASE_URL_PROD PORT=<port> python3 run.py`.
+  3. Load the page at the frame's device width and screenshot the viewport.
+  4. Save it as `mockups/<slug>/before/web-<page>--<state>--<sha7>--<YYYY-MM-DD>.png` and
+     stamp it "Local render · origin/main <sha7> · <date>".
+- **OG images.**
+  1. Call the `og_image.py` render code locally with invented sample inputs, using no DB
+     rows and no network. The DB-free entry points are `render_placeholder_card`,
+     `_render_tier_card_filled` and `_render_trade_card_png`. The public
+     `render_tier_card`, `render_trade_card` and `render_package_card` read the database,
+     so don't use them for this.
+  2. Save the PNG as `mockups/<slug>/before/og-<kind>--<sha7>--<date>.png` and stamp it
+     "og_image.py render · <sha7> · <date>".
+- **Guards.**
+  - Never render against prod.
+  - For this work, leave `DATABASE_URL_PROD` and every `secrets.local.env` key unset, and
+    don't read them.
+  - Prefer logged-out pages or pages built from fixture data.
+  - If a render shows real users' names or handles from the local DB, ask the operator
+    before committing it, or mask them.
+  - Never put a render in `screens/`.
+  - A render of any sha other than the current `origin/main` is a reconstruction source,
+    not a before-pane.
+- **When rendering isn't possible** (the server won't start, or the page needs auth you
+  don't have), fall back to (d) and say on the page why no render was possible.

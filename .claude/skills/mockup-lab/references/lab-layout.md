@@ -37,6 +37,8 @@ TestFlight screenshots.
 |---|---|
 | Real capture · <date> build | A `screens/` capture that passed before-pane (b) |
 | TestFlight screenshot · <version> (<build>) · <date> | An operator-supplied screenshot stored in `before/` |
+| Local render · origin/main <sha7> · <date> | A web page rendered locally from the current `origin/main` (before-pane.md (g)), stored in `before/` |
+| og_image.py render · <sha7> · <date> | A PNG produced by `backend/og_image.py` from invented inputs (before-pane.md (g)), stored in `before/` |
 | Reconstruction from source, not a capture | A frame drawn from source at a named sha |
 | Proposed | A direction or variant |
 | Wireframe | Structure only, no styling claims |
