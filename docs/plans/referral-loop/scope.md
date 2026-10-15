@@ -10,43 +10,59 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
 **Date:** 2026-10-15
 **Entry point:** direct ask: operator 2026-10-15 via `head-product` ("Growth loops. Need to be built and need to work. Referral growth loop is the primary one, …"); growth backlog GB-01
 **Builder:** TBD — `head-eng` allocates (likely `engagement-eng` backend + invite routes, `onboarding-eng` for web/LeagueJoin/SignIn). **First build slice handed to `head-eng` by `head-product` 2026-10-15** (PRD §12: FR-7, FR-8, FR-9, FR-25 the `/s/*` CTA target, §8.2, `IOS_INSTALL_URL` as config), after the operator's ruling "Ok. start building D1 and D3" (PRD D-1 = option A; D-3 = the operator creates the public TestFlight link)
-**Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3)
+**Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3). **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on the build branch before ship.** `ux-lead`: approve with changes (R-F1…R-F8, PRD J1/J2/J4, FR-1, FR-7, FR-19, D-9, D-16; checklist steps below). `analytics-lead`: §1 granted with C1–C9 and R1–R3 (analytics addendum, PR #350, `docs/business/analytics/2026-10-15-referral-loop-events.md`)
 **Operator sign-off on waivers:** pending (one waiver: §3 has no automated runtime proof of the universal-link tap or the TestFlight install; the operator checklist is the only runtime evidence, per D-056)
 
 ---
 
 ## 1. Analytics scope
 
-- [x] **(a) New events specced.** Names and classes are proposals; `analytics-lead` owns the
-  final taxonomy and registers + classifies each in the same commit as (or before) its
-  emitter (D-040). No prop key may contain `token`: ingest drops it silently
-  (`backend/analytics_ingest.py:160, :195`), so the id travels as `invite_id`.
+- [x] **(a) New events specced.** Granted by `analytics-lead` on 2026-10-15 in the
+  analytics addendum, PR #350, with conditions C1–C9; the rows below match it. The
+  **emitting eng worker** registers and classifies each name and prop under that grant, in
+  the emitter's own commit (C7; D-040); `analytics-lead` grants and does not edit code.
+  Pinned by `backend/tests/test_analytics_taxonomy_referral_loop.py` (the addendum's
+  Verification list). No prop key may contain `token` (C1, C3): ingest drops it silently
+  (`backend/analytics_ingest.py:160, :195`), so the id travels as `invite_id`, the public
+  share id `t`; sibling rows' `invite_token` values are never emitted. The four server
+  events are **NON_INTENT, mandatory** (their `user_id` is the referrer, not the person
+  acting) and are written non-touching: a test proves the referrer's `last_active_at` and
+  `events_count` don't move (C6).
 
   | Event | Properties | Fires when | Client |
   |---|---|---|---|
-  | `invite_landing_opened` (new, NON_INTENT) | `invite_id`?, `league_id`, `token_status`, `device_class` | Human GET of `/app/league/join/<id>` with the ledger flag on (PRD FR-8) | server; owner = referrer, else `system:invite`; non-touching write |
-  | `invite_landing_cta` (new, NON_INTENT) | `invite_id`?, `league_id`, `cta`, `device_class` | Landing click-through `/app/league/join/<id>/go/<cta>` | server; same owner rule |
-  | `referral_attributed` (new, NON_INTENT) | `invite_id`, `referral_id`, `league_id`, `attribution_method`, `referred_user_id`, `league_platform`, `notified` | Ledger credit at a new user's first session (PRD §7.4/§7.5) | server; owner = referrer; non-touching write |
-  | `referral_activated` (new, NON_INTENT) | `invite_id`, `referral_id`, `league_id`, `days_to_activate`, `notified` | Invitee's first `trade_proposed` or `match_swiped` (funnel stage 7) within 14 days of `joined_at` (PRD FR-17); never `trades_generated` | server; owner = referrer; non-touching write |
+  | `invite_landing_opened` (new, NON_INTENT) | `invite_id`?, `league_id`, `invite_status` (`valid\|expired\|unknown\|league_mismatch`\|null when `t` is absent; renamed from `token_status`, C1), `device_class` | **Every** human GET of `/app/league/join/<id>` with the ledger flag on, with or without `t` (PRD FR-8; R1). "Human" = C4's explicit, tested filter: no HEAD, no link-preview fetchers (iMessage, Slack, Discord, WhatsApp, X and the addendum's list); only `device_class` stored, never the UA string or IP | server; owner = the referrer of the row `t` names, else the user a legacy `ref` resolves to, else `system:invite`; non-touching write |
+  | `invite_landing_cta` (new, NON_INTENT) | `invite_id`?, `league_id`, `cta` (`ios_install\|web_app`), `device_class` | Human GET (C4) of the landing click-through `/app/league/join/<id>/go/<cta>` | server; same owner rule; non-touching write |
+  | `referral_attributed` (new, NON_INTENT) | `invite_id`, `referral_id`, `league_id`, `attribution_method`, `league_platform`, `notified`. **No `referred_user_id`** (C2): join through `referral_id` | Ledger credit at a new user's first session (PRD §7.4/§7.5) | server; owner = referrer; non-touching write |
+  | `referral_activated` (new, NON_INTENT) | `invite_id`, `referral_id`, `league_id`, `days_to_activate`, `notified` | Invitee's first funnel stage-7 event, read from `FUNNEL_STAGES` in code (`analytics_queries.py:415`, C5/R3; today `trade_proposed` or `match_swiped`), within 14 days of `joined_at` (PRD FR-17); never `trades_generated` | server; owner = referrer; non-touching write |
   | `signup` (changed props) | + `attribution` (`token\|league_match\|legacy_ref\|none`), `attribution_miss` (`unknown\|expired\|not_member\|null`) | First session | server; owner = new user |
-  | `invite_shared` (changed props, new web emitter) | + `invite_id`?, `mint_outcome` | Share sheet not dismissed | mobile, web |
+  | `invite_shared` (changed props, new web emitter) | + `invite_id`?, `mint_outcome`; `channel` deferred | Share sheet not dismissed | mobile, web |
   | `invite_cta_tapped` (new web emitter) | `surface` gains `web_invite` | Invite tap | mobile, web |
   | `invite_cta_shown` (new emitters) | unchanged | Mount of Trades banner, members overlay, web modal | mobile, web |
   | `invite_link_opened` (changed props, new web emitter) | + `invite_id`?; `format` gains `web` | Invite URL parsed | mobile, web |
   | `invite_league_pinned` (changed props, new web emitter) | + `invite_id`?; `source` gains `web_autoselect` | Invited league becomes active | mobile, web |
   | `invite_pin_failed` (changed props, new web emitter) | + `invite_id`? | Intent can't be honoured | mobile, web |
+  | `share_link_opened` (new, INTENT) | `kind` (`trade\|package\|ref_root`), `has_ref`, `auth_state`; `utm_*` wait for the UTM capture build | A non-league link (`/s/*`, `/?ref=`) is parsed in `handleDeepLink` (`mobile/src/utils/deepLinks.ts:387`) | mobile |
 
-  Granted by `analytics-lead` (P18; analytics-lead, 2026-10-15), not on Phase 1's critical
-  path: `channel` on `invite_shared` and first-touch props on `signup`
+  `notified` is accepted as a prop; there is no separate notification event (C8). No
+  usernames in any event prop (C9); the bell-row meta may carry them.
+
+  Granted by `analytics-lead` (P18; analytics-lead, 2026-10-15) and deferred in the
+  addendum, not on Phase 1's critical path: `channel` on `invite_shared` and first-touch
+  props on `signup`
   ([marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo)).
   `session_init.first_touch` is an API contract change under full gates; a non-matching
   `utm_*` or `channel` value is coerced to `other` with a counter at ingest, not dropped;
   attribution covers only accounts created after ship (no back-fill); prod baselines stay
   unmeasured until W3. Surface values are the existing `surface` props, and
   `signup.attribution` is `token|league_match|legacy_ref|none`, superseding the earlier
-  `link|none` (both `growth-pm`, 2026-10-15, pending `analytics-lead`'s addendum; PRD §10).
+  `link|none` (both `growth-pm`, 2026-10-15; canonical in the analytics addendum, PR #350,
+  which matches; PRD §10). Open, off Phase 1's path: the addendum's UTM bridge table still
+  uses the retired `invite_card`/`share_package`-style names as `utm_content` values (PRD
+  §10).
 
-  → follow-through: tracking-plan addendum under `docs/business/analytics/` (owner
+  → follow-through: the tracking-plan addendum exists
+  (`docs/business/analytics/2026-10-15-referral-loop-events.md`, PR #350, owner
   `analytics-lead`); `docs/cross-client-invariants.md` § Client analytics event contract (web
   now emits the invite names); `docs/data-dictionary.md` for the stored ledger columns (§2).
 - [ ] (b) Existing events cover it — no: the server open, the attribution and the activation
@@ -85,8 +101,10 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   landing's and the `/s/*` pages' iOS install target (PRD FR-7, FR-25): the public TestFlight
   link under option A (chosen by the operator 2026-10-15, PRD D-1; the operator creates the
   link, D-3); the App Store URL after the listing. An environment value only: no link value is
-  ever written in the repo. Unset ⇒ the honest note instead of a button on iPhone, and no "On
-  an iPhone or iPad?" line on desktop (PRD FR-7). Deploy-free lever: unset it.
+  ever written in the repo. Set ⇒ on desktop (and iPad), "Get it on your iPhone" with a QR
+  code of the invite URL is the primary and the web app the secondary (PRD FR-7, D-16;
+  `ux-lead` R-F3). Unset ⇒ the honest note instead of a button on iPhone, and on desktop the
+  web app stays primary with no QR and no iOS link (PRD FR-7). Deploy-free lever: unset it.
   → `docs/config-reference.md` § Environment variables.
 
 ## 3. Evidence scope
@@ -106,6 +124,9 @@ D-056: no Maestro, no simulator, no captures.
   5. Every session-init body builder (two Sleeper in `api/auth.ts`, ESPN in `api/espn.ts`,
      MFL/Fleaflicker in `api/platformLink.ts`) includes `invite_id`.
   6. No invite event prop key contains `token`.
+  7. The Invite busy state ignores repeat taps: `shareInvite` and the web `shareVia` return
+     early while a mint is pending, so one tap gives one mint and one share sheet (PRD
+     AC-1e, `ux-lead` R-F8).
   Also extend `mobile/tests/check-notif-glyphs.js` for `referral_activated` (glyph on both
   clients + mobile `V2_TRADE_KINDS` and web `TRADE_TYPES` membership: it routes to Trades,
   PRD FR-19). Web: extend `qa/web/check_web_structure.py` (CI) to assert
@@ -121,10 +142,17 @@ D-056: no Maestro, no simulator, no captures.
     page links `/css/tokens.css` and none of the `_share_html` chrome (PRD AC-7e);
     iPhone/Android/desktop CTA variants with `IOS_INSTALL_URL` set and unset, one primary
     action each, no button on Android or on iPhone with it unset, no `/contact.html`
-    TestFlight-request link, desktop's iOS line only when it is set, and no `dtf://` link in
-    any variant (PRD AC-7c); human UA
-    increments `open_count` + fires `invite_landing_opened`; preview UA sets only
-    `unfurled_at`; HEAD records nothing; unknown/expired ids; click-through closed set and
+    TestFlight-request link, the iPhone-set CTA and re-tap line numbered step 1 / step 2
+    (R-F1), the desktop-set QR-primary state (the QR's payload, asserted at the encoder's
+    input, is the join URL with `t` and no other query param; the `/go/ios` link in that
+    block; "Have the Fleeced extension? Open the web app" as the secondary; R-F3), the
+    desktop-unset state with the web app primary and no QR or iOS link, and no `dtf://` link
+    in any variant (PRD AC-7c); human UA increments `open_count` + fires
+    `invite_landing_opened` with `invite_status` (never a `token_status` key, C1); a human GET
+    with no `t` still fires it, `invite_status` null (R1); each listed preview agent and the
+    generic `bot|crawler|spider|preview` pattern set only `unfurled_at` and fire nothing, on
+    the landing and on `/go/<cta>` (C4); HEAD records nothing; no stored row carries a
+    user-agent string or an IP (C4); unknown/expired ids; click-through closed set and
     targets (no user-supplied redirect).
   - `backend/tests/test_share_landing_cta.py` (new; PRD FR-25, AC-25): `/s/p` and
     `/s/trade`, asserting per branch the CTA `href`, **its label and its help line or note**,
@@ -144,11 +172,14 @@ D-056: no Maestro, no simulator, no captures.
     league-match picks most recent open, legacy-ref tie-break, >14-day open ignored; existing
     user → no credit; legacy `invited_by` alone → no row, no bell row; `users.invited_by`
     written from the ledger; `signup` props per case; repeat session init idempotent; inviter
-    `users.last_active_at` unchanged by inviter-owned events; FR-20 dedupe.
+    `users.last_active_at` **and `events_count`** unchanged by inviter-owned events (C6);
+    `referral_attributed`'s prop keys equal the granted set exactly, with no
+    `referred_user_id` (C2) and no key containing `token` (C1); FR-20 dedupe.
   - `backend/tests/test_referral_activation.py` (new): a first `match_swiped` or
     `trade_proposed` within 14 days → activated once + `referral_activated` + inbox row
     (meta carries `new_username` and `league_id`); outside 14 days, or a second opinion →
-    no-op; all three stage-7 emitters covered (swipe, calculator queue, reasoned pass).
+    no-op; all three stage-7 emitters covered (swipe, calculator queue, reasoned pass); the
+    helper's qualifying set equals stage 7 of `FUNNEL_STAGES` (C5).
     A `trades_generated` alone never activates, and a replenish-generated one
     (`deck_source = 'replenish'`, no user present) is tested explicitly.
   - `backend/tests/test_invite_impact.py` (new): v2 payload from the ledger; flag off →
@@ -158,6 +189,12 @@ D-056: no Maestro, no simulator, no captures.
     (`referral_activated` type; title ≠ body), `test_account_deletion_coverage.py` and
     `test_account_data_rights.py` (new columns), the taxonomy registration tests (new names
     registered, NON_INTENT, namespaces disjoint).
+  - `backend/tests/test_analytics_taxonomy_referral_loop.py` (new; the analytics addendum's
+    Verification list, PR #350): membership (four server names in `SERVER_FIRED_EVENTS`,
+    `share_link_opened` in `ALLOWED_CLIENT_EVENTS`), exact prop rows (`==`), no device
+    `platform` prop, the intent split, the non-touching write (C6) and C5's stage-7 set, the
+    bot filter (C4), an ingest round-trip with an unregistered-sibling control, and deploy
+    liveness after each deploy (prod only with the operator's yes).
 - [x] **Code-walk proof** (written by the builder into `docs/plans/referral-loop/code-walk.md`,
   file:line-cited at the build sha), covering what tests can't reach:
   1. Inviter: each of the six surfaces → `shareInvite` / `shareVia` → mint → link → sheet.
@@ -172,7 +209,11 @@ D-056: no Maestro, no simulator, no captures.
   Preconditions: backend deployed with `growth.referral_ledger` on; a TestFlight build with
   the client change; a second test device or account that is a member of the test league;
   `IOS_INSTALL_URL` set to the operator's public TestFlight link (option A, PRD D-1/D-3;
-  steps 15 and 16 also check it unset). Record each step's outcome in `TEST_LEDGER.md`.
+  steps 15 and 16 also check it unset); the build's TestFlight "What to Test" text carries
+  the landing's re-tap line (PRD D-2, R-F1); the test league's Sleeper league chat and one
+  other chat app it uses (step 4b). Record each step's outcome in `TEST_LEDGER.md`. Steps
+  4b, 5b, 7b, 7c and 11b are `ux-lead`'s (PR #348 review); its 11c (iPad) is merged into 11b
+  and its 13b into step 13.
   1. **Inviter mint.** On device A (signed in, Sleeper league L), tap Invite on League Home.
      Expected: the sheet opens within ~2 s; the message says "Fleeced" and the link has
      `t=` and **no `ref=`**.
@@ -180,19 +221,37 @@ D-056: no Maestro, no simulator, no captures.
      the preview to render; don't tap. Expected: the admin/readout shows `unfurled_at` set
      and `open_count` = 0 for that id.
   3. **Not installed (iPhone).** On device B with the app deleted, tap the link from Messages.
-     Expected: Safari shows the join landing with L's name, the inviter's display name, "Get
-     the iOS beta" (A) or the honest note (unset), and the re-tap line; `open_count` = 1.
+     Expected: Safari shows the join landing with L's name, the inviter's display name, and
+     "Get the iOS beta" and the re-tap line numbered **step 1** and **step 2** of one task
+     (R-F1), or the honest note (unset); `open_count` = 1.
   4. **Install + re-tap.** Install via TestFlight, return to Messages, tap the link again.
      Expected: the app opens on LeagueJoin → SignIn naming the inviter; after sign-in, L is
      pinned; device A's bell gets **one** "joined via your invite" row (title and body
      different) and no second row for the same join.
+     - **4b. Re-tap from chat apps** (R-F2). After installing, re-tap a fresh invite from the
+       **Sleeper league chat**, then from one other chat app the league uses. Expected: the
+       app opens on LeagueJoin. **Fail if the landing page loads again**; if it does, PRD
+       FR-7's contingent installed-user line is required before rollout step 5.
   5. **Install, no re-tap (league match).** Repeat 3 with a fresh account on device B; after
      installing, open the app from the home screen (not the link), sign in, pick L.
      Expected: the readout shows the join with `attribution_method = league_match`.
+     - **5b. What the cold open shows** (R-F1). On step 5's cold open (TestFlight → Open, or the
+       home screen; not the link), first check that TestFlight's "What to Test" shows the
+       re-tap line next to Open, then note what SignIn and the picker show. Expected: no
+       inviter name and no auto-pin (the accepted cost); L is findable in the list. Record
+       how long it takes to pick L.
   6. **Installed + signed out.** With the app installed and signed out, tap a fresh link.
      Expected: the app opens (not Safari) on SignIn with the inviter named.
   7. **Installed + signed in, member of L (existing user).** Tap a fresh link. Expected: L
      becomes active; **no** bell row for device A; no ledger credit.
+     - **7b. Existing member, another league active** (R-F4). Signed in, a member of L, with
+       league M active: tap a fresh link. Expected: L becomes active, and the screen you
+       land on shows L's name. Record whether the switch is noticeable; if the screen doesn't
+       name L, PRD J4's contingent inline confirmation is required (shared with
+       `onboarding-pm`).
+     - **7c. Existing user, not in L** (R-F5). Tap a fresh link. Expected: the picker shows
+       "You're not in that league yet…", the list is usable, and there is no credit and no
+       bell row.
   8. **Non-Sleeper invitee.** Mint from an ESPN (or MFL) league; on device B, tap, install,
      link the same ESPN league in the app. Expected: credited by token; device A gets the row.
   9. **Expired id.** Use an id older than 30 days (backdated in a staging DB, or a test
@@ -204,25 +263,42 @@ D-056: no Maestro, no simulator, no captures.
       `growth.invite_join_link` is on), byte-identical to before the build. Flip
       `growth.join_landing` off and open a path-form link in Safari. Expected: today's 302 to
       `/?league=…`.
-  11. **Desktop.** Open a fresh link on a desktop browser with the extension installed.
-      Expected: landing shows "Open the web app" and the extension line; sign in; L is
-      auto-selected; credited by token.
+  11. **Desktop, with the extension.** Open a fresh link on a desktop browser with the
+      extension installed. Expected (with `IOS_INSTALL_URL` set): "Get it on your iPhone"
+      with a QR code is the primary, and "Have the Fleeced extension? Open the web app" the
+      secondary (PRD FR-7, R-F3); follow the secondary; sign in; L is auto-selected;
+      credited by token. With it unset: "Open the web app" and the extension line, as
+      before.
+      - **11b. Desktop without the extension, and iPad** (R-F3). On a desktop **without** the
+        extension, open a fresh link and follow the primary action: scan the QR with an
+        iPhone that doesn't have the app, install, then scan it again. Expected: the first
+        scan opens the iPhone landing; the second opens the app on LeagueJoin and credits by
+        token. **Fail if the first thing you reach is the "Install or reload the Fleeced
+        browser extension" error with no way forward.** Then, on an iPad in Safari, open a
+        fresh link. Expected: a path that works on the iPad (the iOS install link in the
+        primary block opens TestFlight); fail if the only way forward is a QR the iPad can't
+        scan or the extension sign-in.
   12. **Android.** Open a fresh link on an Android phone. Expected: the honest note, **no**
       web button; `open_count` increments.
   13. **Activation.** On device B (credited in step 4), open the deck in L and wait without
       swiping. Expected: device A gets **no** activation row yet. Then like or pass one
       trade. Expected: device A gets one activation row naming @B, title and body
-      different, separate from the join row even if B swiped right after joining; tapping
-      it opens the Trades tab (the hub home while `trades.finder_hub` is on), not League.
+      different, separate from the join row even if B swiped right after joining (unless
+      `engagement-pm` adopts the merge-when-unread rule, PRD D-9); tapping it opens the
+      Trades tab (the hub home while `trades.finder_hub` is on), not League. The body does
+      not mention the deck (R-F6). **Fail if the body says "deck" and the tap lands
+      somewhere without one.**
   14. **Group chat.** Post one link into a chat with two test invitees; both join. Expected:
       two ledger rows sharing the same `share_token`; device A gets one row per joiner.
   15. **Landing primary action per device** (PRD FR-7 design rules). Open a fresh link on each
       device and check there is exactly one ice primary action. iPhone with `IOS_INSTALL_URL`
       set: "Get the iOS beta" is the ice button, and there is no "Open in the app" button.
       iPhone with it unset, and Android: no button and no "Request TestFlight access" link;
-      the note is readable (not the faintest grey). Desktop: "Open the web app" is the ice
-      button, the extension line is dimmer, the "On an iPhone or iPad?" link is plain text
-      with `IOS_INSTALL_URL` set and absent with it unset. On every device the page is dark,
+      the note is readable (not the faintest grey). Desktop with `IOS_INSTALL_URL` set: "Get
+      it on your iPhone" with the QR code is the primary, the iOS link sits in that block as
+      plain text, and "Have the Fleeced extension? Open the web app" is the secondary (R-F3).
+      Desktop with it unset: "Open the web app" is the ice button, the extension line is
+      dimmer, and there is no QR and no iOS link. On every device the page is dark,
       says "Fleeced", and buttons
       are comfortably tappable; on desktop, Tab shows the ice focus ring. There is no
       "already joined" landing state (no auth, and one link can credit several joiners); an
@@ -239,7 +315,11 @@ D-056: no Maestro, no simulator, no captures.
   `ux-lead` flow review and the `analytics-lead` review of §1): a `/design-review` verdict at
   `docs/plans/referral-loop/design-review.md` before ship, covering the join landing (per-device
   states, PRD FR-7), the OG card (variant (ii), wordmark + ram), and the invite card/banner
-  diff (copy and events, FR-1's busy state). Every string stays with `marketing-lead`; the
+  diff (copy and events, FR-1's busy state). **Gate-1 asks (`ux-lead`, PR #348):** confirm
+  R-F1's step 1 / step 2 layout on A1, and R-F3's desktop QR-primary layout (PRD D-16; it
+  reverses the desktop rule `design-lead` accepted; `growth-pm` decided the mechanic, P19);
+  decide whether FR-25's `/s/*` desktop branch follows (left as written; a follow-up).
+  Every string stays with `marketing-lead`; the
   mockup lab (draft PR #343, `mockups/referral-loop/index.html` @ `899f8619`, frames A1–A6)
   tags each PROPOSED COPY. Its web before-panes are local renders of `origin/main` `678834a`
   (`head-product` P22); its mobile before-panes are labelled reconstructions.
@@ -257,7 +337,7 @@ D-056: no Maestro, no simulator, no captures.
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **yes** | New `POST /api/invite/token`; `GET /app/league/join/<league_id>` (landing vs 302, `t` forwarding, open recording) and the new `/go/<cta>` click-through; `GET /api/league/invite-meta` (`t`, `inviter_display_name`, `token_status`); `POST /api/session/init` (`invite_id`; `first_touch` when that accepted change is built, full gates); `GET /api/invite/impact` (v2 payload, `k_factor` removed); `/s/*` share landings' device-aware CTA target (FR-25) |
+| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **yes** | New `POST /api/invite/token`; `GET /app/league/join/<league_id>` (landing vs 302, `t` forwarding, open recording) and the new `/go/<cta>` click-through; `GET /api/league/invite-meta` (`t`, `inviter_display_name`, `invite_status`); `POST /api/session/init` (`invite_id`; `first_touch` when that accepted change is built, full gates); `GET /api/invite/impact` (v2 payload, `k_factor` removed); `/s/*` share landings' device-aware CTA target (FR-25) |
 | `docs/data-dictionary.md` | **yes** | § `referrals`: new columns, index, status values in use, `league_id` any platform, writer named |
 | `docs/config-reference.md` | **yes** | `growth.referral_ledger`, `growth.join_landing` (new); `growth.invite_join_link` flip note; `growth.referral` reserved; `invite.k_factor_dashboard` meaning; `IOS_INSTALL_URL` env var |
 | `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | **yes** | Inviter-owned server events use a non-touching write (no `last_active_at` bump); no analytics prop key contains `token`; per-share ids in links, never usernames |
