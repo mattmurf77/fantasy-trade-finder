@@ -20,7 +20,10 @@
 > FR-25; §12); `analytics-lead`'s P18 and baseline answers (§8.4, §10, D-11); `growth-pm`'s
 > surface vocabulary (§10); and `head-product`'s proposed wordmark-period rule (D-15). A
 > follow-up the same day records `growth-pm`'s `signup` attribution values (§10), accepts
-> FR-25's gate (`growth.join_landing`), and closes D-15 (`design-lead`, PR #349).
+> FR-25's gate (`growth.join_landing`), and closes D-15 (`design-lead`, PR #349). A second
+> follow-up re-copies [marketing-inputs.md](marketing-inputs.md) after `marketing-lead`'s
+> FR-25 addendum and gives FR-25 a label and help line per device branch (AC-25 asserts
+> them; still proposed, D-5).
 > Acceptance of the whole PRD (D-6) is still with `head-product`. Requirements only: **no
 > source file is changed by this document.**
 > **Owner:** `growth-pm`. **Base:** `origin/main` 678834ab. **Branch:** `plan/referral-loop`.
@@ -166,9 +169,10 @@ Each was considered and excluded; recorded so nobody reopens it mid-build.
    no UTMs and the join redirect's closed parameter contract (test T7,
    `backend/tests/test_invite_links.py:132-136`) is **not** reversed. First-touch UTMs for
    non-invite traffic are a separate proposal (FR-16, §8.4).
-7. **`/s/*` share landings, apart from their CTA target.** Their `ref` forwarding, OG image
-   and absolute `og:image`, and robots fixes stay in GB-02. The CTA target moved into Phase
-   1's first build slice (FR-25; `head-product`, 2026-10-15).
+7. **`/s/*` share landings, apart from their CTA target and its per-device label.** Their
+   `ref` forwarding, OG image and absolute `og:image`, and robots fixes stay in GB-02. The CTA
+   target, with its label and help line per device, moved into Phase 1's first build slice
+   (FR-25; `head-product`, 2026-10-15).
 8. **`/s/trade` enumeration.** A security handoff to `head-eng`, not this build.
 9. **Retiring legacy URL parsing.** D-028: `/?league=&ref=` is parsed forever. New links stop
    *emitting* `ref` (FR-2); nothing stops *reading* it.
@@ -487,29 +491,53 @@ returns `inviter_display_name` and `token_status` (§8.3). SignIn's banner
   league" when the league name is unknown; an unknown id degrades to "A leaguemate invited you
   to {league}", or "A leaguemate invited you" when the league name is unknown too.
 
-**FR-25 — `/s/*` share landings use the same device-aware CTA target** (pulled into the first
-build slice by `head-product`, 2026-10-15, from GB-02; numbered last so FR-1…FR-24 keep
-their numbers). Every page `_share_html` renders (`S:25460`; callers `/s/tiers` `S:25522`,
-`/s/trade` `S:25552`, `/s/p` `S:25650`, each hard-coding `cta_url="/"` at `S:25548`, `:25563`,
-`:25669`) picks its CTA with the join landing's device classifier (FR-7, §5 option A):
-iPhone → `IOS_INSTALL_URL` when set, else the honest note with no button; desktop → `/`
-(today's target); Android and other phones → the honest note, **no web button** (a phone
-can't sign in on the web). Only the target and the button-or-note choice change: `ref`
+**FR-25 — `/s/*` share landings use the same device-aware CTA target, with a label per
+device** (pulled into the first build slice by `head-product`, 2026-10-15, from GB-02;
+numbered last so FR-1…FR-24 keep their numbers). Every page `_share_html` renders
+(`S:25460`; callers `/s/tiers` `S:25522`, `/s/trade` `S:25552`, `/s/p` `S:25650`, each
+hard-coding `cta_url="/"` at `S:25548`, `:25563`, `:25669`) picks its CTA with the join
+landing's device classifier (FR-7, §5 option A). The label and help line are **per device
+branch**, not one string per page: neither trade label reads true when the tap starts a
+TestFlight install. Today `_share_html` takes a single `cta_text` (`S:25465`, rendered at
+`S:25511`), so it must take a label (and help line or note) per branch instead. Strings, all
+**proposed** by `marketing-lead` and pending the operator's approval of words (D-5)
+([marketing-inputs.md, lab addendum, "Share landings `/s/*` under FR-25"](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)):
+
+| Branch | CTA target | Label | Help line or note |
+|---|---|---|---|
+| iPhone, `IOS_INSTALL_URL` set | `IOS_INSTALL_URL` | "Get the iOS beta" (`gp.join.cta.A_ios`) | "Installs through Apple's TestFlight app." (`gp.join.cta.A_ios_help`). **No re-tap line:** a share page carries no invite, and re-tapping a share link opens the viewer's own tab, not the shared trade (GB-03) |
+| iPhone, `IOS_INSTALL_URL` unset | none: a note, no button | — | "The iPhone beta isn't open to the public yet. Already have it? Open Fleeced." It promises the app, not the shared trade: the universal link opens the app (`mobile/src/utils/deepLinks.ts:229-238`), but `MatchesScreen` reads no match id from its route (`MatchesScreen.tsx:190-214`; GB-03) |
+| Desktop | `/` (today's target) | Kept per page: "Build your own trade" (`/s/p`, `S:25668`), "Find your next trade" (`/s/trade`, `S:25562`) | **Added:** "Sign-in uses the Fleeced extension for Chrome or Edge." (`gp.join.cta.A_desktop_help`, the join landing's line, §5 J2), so a desktop visitor without the extension isn't stranded |
+| Android and other phones | none: a note, **no web button** (a phone can't sign in on the web) | — | "Fleeced runs on iPhone and desktop web for now." (`gp.join.android_note`, reused; it names no invite) |
+
+The iPhone and Android strings and the desktop help line are the same on every `/s/*` route;
+only the desktop label stays per page (`/s/tiers` keeps "Build your tiers", `S:25547`). Only
+the target, the label, the help line and the button-or-note choice change: `ref`
 forwarding, the OG image and absolute `og:image`, `robots.txt`, landing events and the
 off-Chalkline chrome stay in GB-02 (§3 non-goal 7). The response varies by device, so it can
 no longer be a plain `Cache-Control: public` (today `public, max-age=300`, `S:25518`): it is
 either not `public` or it carries `Vary: User-Agent`. Gate: rides `growth.join_landing`
 (accepted by `growth-pm` 2026-10-15; `head-eng` still confirms it in allocation), so one
-flag covers every device-aware CTA surface; with it off the CTA is today's `/` and merge
-changes nothing user-visible (§12). Words are `marketing-lead`'s (D-5): the
-join landing's iPhone-unset note names an invite, so a share landing needs its own.
+flag covers every device-aware CTA surface; with it off the CTA is today's `/` with today's
+label and merge changes nothing user-visible (§12).
 - AC-25: pytest on `/s/p` and `/s/trade` (`/s/tiers` 404s while `growth.tier_board_share` is
-  off and inherits the change through `_share_html`): gate off → the CTA `href` is `/` for
-  every user agent; gate on → iPhone UA links `IOS_INSTALL_URL` when set and renders the note
-  with no CTA link when unset; desktop UA links `/`; Android UA renders the note and no CTA
-  link; the response is not `public`-cacheable, or carries `Vary: User-Agent`; the `og:*`
-  tags are unchanged; no variant
-  links `dtf://` or a user-supplied URL.
+  off and inherits the change through `_share_html`). Each branch asserts the CTA `href`,
+  **its label and its help line or note**, not just the target:
+  - gate off, every user agent: `href` `/`, today's label ("Build your own trade" on `/s/p`,
+    "Find your next trade" on `/s/trade`), no help line and no note;
+  - gate on, iPhone UA, `IOS_INSTALL_URL` set: `href` is `IOS_INSTALL_URL`, label "Get the
+    iOS beta", help line "Installs through Apple's TestFlight app.", no re-tap line;
+  - gate on, iPhone UA, unset: no CTA link; the note "The iPhone beta isn't open to the
+    public yet. Already have it? Open Fleeced.";
+  - gate on, desktop UA: `href` `/`, the page's label as above, help line "Sign-in uses the
+    Fleeced extension for Chrome or Edge.";
+  - gate on, Android UA: no CTA link; the note "Fleeced runs on iPhone and desktop web for
+    now.";
+  - every case: the response is not `public`-cacheable, or carries `Vary: User-Agent`; the
+    `og:*` tags are unchanged; no variant links `dtf://` or a user-supplied URL.
+
+  The test asserts the words the operator approves under D-5; until then, the proposed
+  strings above.
 
 ### H5 · Attribution
 
@@ -1085,8 +1113,9 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 - **`marketing-lead`:** final words for every quoted string, including the activation row
   (revised to stage 7, FR-19); its S-IDs remap to the backlog's S1–S12. The lab's copy
   questions (D-14) are answered (proposed, pending the operator); the OG wordmark period is
-  resolved (D-15, `design-lead`: the period is logo-only). New: the `/s/*` CTA
-  notes and labels for FR-25, including a share landing's iPhone-unset note (D-5).
+  resolved (D-15, `design-lead`: the period is logo-only). The `/s/*` CTA labels, help lines
+  and notes for FR-25 are proposed (lab addendum, "Share landings `/s/*` under FR-25"),
+  including a share landing's own iPhone-unset note; the operator approves them with D-5.
 - **FAQ claim → P9's copy-defect batch (`onboarding-pm`) via `head-product`:**
   `web/faq.html:206` says the web app "works in any phone browser", which is false: web
   sign-in needs the desktop extension (§5). The lab's landing footer links to the FAQ.

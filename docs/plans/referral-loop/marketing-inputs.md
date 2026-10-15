@@ -1,4 +1,4 @@
-> **Owner:** marketing-lead (proposed; operator approval of words pending). Copied verbatim from marketing-lead's wave-2 working file on 2026-10-15 (re-copied 2026-10-15 after the lab addendum) so the PRD's citations stay durable.
+> **Owner:** marketing-lead (proposed; operator approval of words pending). Copied verbatim from marketing-lead's wave-2 working file on 2026-10-15 (re-copied 2026-10-15 after the FR-25 addendum) so the PRD's citations stay durable.
 
 # marketing-lead, wave 2: referral loop words, channels and UTM convention (task 3)
 
@@ -311,6 +311,19 @@ Source: `growth-pm`'s questions on the lab, `mockups/referral-loop/index.html` (
 | "Activated" explainer | 741 | `Activated: joined from your link, then liked or passed on a trade within 14 days.` | 81 | Literal stage-7 definition (PRD FR-17, `first_opinion`). If D-8 moves the stage, this string moves with it |
 | Zero-join league line | 744 | `No joins yet`; when opens ≥ 1: `{N} opened · no joins yet` | 12 / 22 + N | The number is literal. The chevron is the next step |
 | Empty-state prompt, in place of the four tiles | 767 | `No invite links yet. Send one and its opens, joins and activations show up here.` | 80 | Counts only, never "who": the payload has no names (§8.5) |
+
+**D-15 (closed by `design-lead`, `brand.md` on PR #349):** the logotype keeps the ice period, and running copy never uses it. That supersedes my "no period" advice in answer 2 for the logotype. The running-copy rule stands.
+
+**Share landings `/s/*` under FR-25** (device-aware CTA, the build slice the operator approved on 2026-10-15). `mkt-writer` drafted this; `marketing-lead` accepted it. Proposed:
+
+| branch | `/s/p` (S2) | `/s/trade` (S3) | note · source |
+|---|---|---|---|
+| iPhone, `IOS_INSTALL_URL` unset: no button, a note instead | `The iPhone beta isn't open to the public yet. Already have it? Open Fleeced.` (76) | same | One string for every `/s/*` route. It promises "Open Fleeced", **not "this trade"**. The universal link does open the app (`deepLinks.ts:229-238`), but `MatchesScreen` reads no match id from its route (lead-verified: only `guidedArrival`, `segment`, `leagueId`, `at`), and a non-leaguemate doesn't have that match anyway |
+| iPhone, install URL set | `Get the iOS beta` + helper `Installs through Apple's TestFlight app.` | same | `gp.join.cta.A_ios`. Neither trade label reads true when the tap starts a TestFlight install. **No re-tap line:** re-tapping a share link opens the viewer's own tab, not the shared trade |
+| Desktop | `Build your own trade` (keep, `server.py:25668`) | `Find your next trade` (keep, `:25562`) | Both read true once sign-in is done. **Recommended:** add `gp.join.cta.A_desktop_help` ("Sign-in uses the Fleeced extension for Chrome or Edge."), or a desktop visitor without the extension dead-ends |
+| Android / other phones | `Fleeced runs on iPhone and desktop web for now.` (47) | same | `gp.join.android_note`, reused as is. It names no invite |
+
+FR-25 doesn't unify the two desktop labels, and nothing here asks it to. `_share_html` takes a single `cta_text` (`server.py:25465`), so the iPhone-set label needs a per-branch value. AC-25 should test the label as well as the href and the note. → `growth-pm`, `head-eng`.
 
 **Flags from this pass** (→ `growth-pm`, `design-lead`):
 - **The lab's landing sub-line breaks the name rule.** A1–A6 use "Fleeced finds trades where both sides come out ahead." (`web/index.html:75`), which makes Fleeced the subject of an analysis verb (the ram plays The Analyst). Use `gp.join.valueprop` instead. The shipped `index.html:75` should go into the FR-3 name sweep.

@@ -127,10 +127,17 @@ D-056: no Maestro, no simulator, no captures.
     `unfurled_at`; HEAD records nothing; unknown/expired ids; click-through closed set and
     targets (no user-supplied redirect).
   - `backend/tests/test_share_landing_cta.py` (new; PRD FR-25, AC-25): `/s/p` and
-    `/s/trade` with the gate off → CTA `href` `/` for every user agent; gate on → iPhone UA
-    links `IOS_INSTALL_URL` when set and shows the note with no CTA link when unset; desktop
-    UA links `/`; Android UA shows the note and no CTA link; the response is not
-    `public`-cacheable, or carries `Vary: User-Agent`; `og:*` tags unchanged; no `dtf://` or user-supplied target.
+    `/s/trade`, asserting per branch the CTA `href`, **its label and its help line or note**,
+    not just the target. Gate off → `href` `/` with today's label ("Build your own trade" /
+    "Find your next trade") for every user agent, no help line or note. Gate on → iPhone UA
+    with `IOS_INSTALL_URL` set: links it, label "Get the iOS beta", help line "Installs
+    through Apple's TestFlight app.", no re-tap line; iPhone UA unset: no CTA link, note "The
+    iPhone beta isn't open to the public yet. Already have it? Open Fleeced."; desktop UA:
+    links `/` with the page's label and help line "Sign-in uses the Fleeced extension for
+    Chrome or Edge."; Android UA: no CTA link, note "Fleeced runs on iPhone and desktop web
+    for now.". Every case: the response is not `public`-cacheable, or carries `Vary:
+    User-Agent`; `og:*` tags unchanged; no `dtf://` or user-supplied target. Strings are
+    `marketing-lead`'s proposals until the operator approves the words (PRD D-5).
   - `backend/tests/test_referral_attribution.py` (new): token credit for Sleeper, ESPN and MFL
     invitees; first session in a different league with verified membership; `unknown`,
     `expired`, `not_member` misses; group-chat second and third joiners → sibling rows;
@@ -221,10 +228,13 @@ D-056: no Maestro, no simulator, no captures.
       "already joined" landing state (no auth, and one link can credit several joiners); an
       existing user is step 7, in the app.
   16. **Share landing CTA** (PRD FR-25). With `growth.join_landing` on, open a `/s/p/<id>`
-      link on each device. Expected: iPhone with `IOS_INSTALL_URL` set → the button goes to
-      the TestFlight link; iPhone with it unset, and Android → a note and **no** button;
-      desktop → the button goes to the web app (`/`). With the flag off, every device gets
-      today's button to `/`.
+      link on each device. Expected: iPhone with `IOS_INSTALL_URL` set → a "Get the iOS
+      beta" button to the TestFlight link, with "Installs through Apple's TestFlight app."
+      under it and no re-tap line; iPhone with it unset → the "…Open Fleeced." note and
+      **no** button; Android → "Fleeced runs on iPhone and desktop web for now." and **no**
+      button; desktop → "Build your own trade" to the web app (`/`), with the Chrome-or-Edge
+      extension line. With the flag off, every device gets today's "Build your own trade"
+      button to `/` and no extra line.
 - [x] **Design review** (`design-lead`; requested 2026-10-15 by `head-product`, with the
   `ux-lead` flow review and the `analytics-lead` review of §1): a `/design-review` verdict at
   `docs/plans/referral-loop/design-review.md` before ship, covering the join landing (per-device
