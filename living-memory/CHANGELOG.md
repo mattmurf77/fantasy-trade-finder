@@ -11,6 +11,15 @@
 
 ---
 
+## 2026-10-15 — Live-deck filters (#328, D-207), value core v4 (#326, D-206), Calibration Yes/No (#327, D-208)
+
+- Per-grader analysis of 378 Calibration answers. The operator grades in binary (95% 1s or 5s), gdubs10 uses the whole scale, and jonbonjourvi is harsh (73% 1–2). Normalized per grader, each grader prefers a different engine. Signature failures: today's engine junk filler; value core overpay + window; fit A window (mostly QBs). The structural signal is consistent: breakup −0.59 z, 2-for-1 +0.27 z, and receiving picks +0.26 z.
+- #326 (`66cb741b`, live): value-core-4 counts the superflex slot as a QB slot in `redundant`, so jonbonjourvi is no longer offered a third QB.
+- #328 (`71a02541`, live 2026-10-15 01:18 UTC, flag on): `deck.quality_filters` applies breakup / filler / redundant / repeat-cap filters to the served live deck.
+- #327 (`1549370b`): Calibration Yes/No (sends 5/1). iOS 1.21.3 (166) built with auto-submit. Version bumped in both `app.json` and `Info.plist`; CI's `test_app_version_consistency` caught the miss.
+- Rebuilt the 18 unstarted Calibration decks on v4 + filtered current arm + fit arms (auto-folded since #324).
+- Both delegated agents stalled before making a worktree; the lead built all three changes.
+
 ## 2026-10-15 — Usage Trends week 5 loaded by hand; the daily tick has been dead since at least Oct 1
 
 - **Week 5:** `scripts/refresh_usage_trends.py --remote` stored 2026 week 5 (30 teams, 583 players; the byes CAR/KC match nflverse) and re-stored weeks 1–4 with Sleeper's stat corrections. The server log: `usage-refresh (cron_route): planned [1-5], stored [1-5], changed [1-4]`.

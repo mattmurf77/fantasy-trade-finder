@@ -1,5 +1,19 @@
 # Decisions — Fantasy Trade Finder
 
+## D-208 — Calibration asks Yes / No instead of 1–5 (app 1.21.3)
+
+**Date:** 2026-10-14 · **Who:** operator, after the per-grader analysis.
+**Context:** Graders use the 1–5 scale very differently: the operator gives 1 or 5 on 95% of cards, gdubs10 spreads across all five, and jonbonjourvi gives 1–2 on 73%. So cross-grader averages mostly measured grading style.
+**Decision:** The app shows **Yes / No** and sends grade **5 / 1**. Reasons stay optional, and Skip stays. The server, API and report are unchanged: older builds still send 1–5, and `share_ge_4` is the Yes rate. The results screen leads with Would send and drops Average.
+**Consequences:** Engine comparisons become would-send rates. Old 1–5 grades map into the same `share_ge_4`. Separately, the analysis recommended requiring a reason on No, because gdubs10 tagged only 10% of low cards; it was not adopted.
+
+## D-207 — Live-deck quality filters on today's engine (`deck.quality_filters`)
+
+**Date:** 2026-10-14 · **Who:** operator ("turn [the live engine's fixable problems] into changes"), lead-built.
+**Context:** In Calibration (3 graders), today's engine (`owner_v2_bilateral`) failed in four repeatable ways. Junk filler was the reason on 59% of its low cards. Breaking up the viewer's best piece got 18% would-send vs ~47%. Redundant TE/QB cards scored 3.47 vs 3.91. "Same guy again" was tagged 8×.
+**Decision:** `backend/deck_quality.py`, on by flag, in `_run_trade_job` after owner presentment and before the served/ghost split. It drops breakup (< 0.70), filler (< max(450, 25% of the headliner)) and redundant TE/QB (either side; QB counts superflex). It defers any card that would put one asset in more than 3 of the first 30. Protected cards (likes-you, standing offers, injected/wildcard/retest/published) are untouched, and an error serves the deck unfiltered. The thresholds match the value core's rules, so every engine now shares one definition of a bad card. Other serving surfaces (targeted search, owner selected ideas, prepared inventory) are out of scope for v1.
+**Consequences:** Live decks are smaller and less repetitive. Calibration's current arm reads the filtered served decks, so the next round measures the effect directly (`report?since=2026-10-15`). Kill: set `deck.quality_filters` false + reload. Graduation: those four reasons stop topping the current arm's tags.
+
 ## D-206 — Value core v4: the superflex slot counts as a QB slot in the redundancy rule
 
 **Date:** 2026-10-14 · **Who:** operator ("turn [fit A's window misses] into changes"), lead-diagnosed.

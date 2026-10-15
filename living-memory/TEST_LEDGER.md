@@ -1,3 +1,9 @@
+## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
+
+- #326: CI 4/4 green on `fd805933`. Value-core, grading and fit suites 230 passed; the redundancy test gains the superflex third-QB and QB-for-QB cases.
+- #328: CI 4/4 green on `1bf2235d`. Local full suite 7682 passed, 1 skipped (`test_rookie_scope.py` excluded). `test_deck_quality.py` has 10 tests, incl. the wiring test through the real trade-job harness with the flag on and off. The bake-off harness pins the flag off, so golden captures are unchanged. Prod flag confirmed `true` after deploy; the first endpoint read was a stale cache.
+- #327: first CI run failed `test_app_version_consistency` (`app.json` 1.21.3 vs `Info.plist` 1.21.2). It was green 4/4 after bumping `Info.plist` (`81432938`). Mobile: `tsc --noEmit`, every `check-*.js` (`check-blind-grading` now pins `calibration.yes` / `calibration.no`) and testid-lint pass. TestFlight checklist in `docs/plans/blind-grading/scope.md` (2026-10-14 addendum). **Operator to run on 1.21.3.**
+
 ## 2026-10-14 — Fit arms after every build (#324)
 
 - CI 4/4 green on `16209717`. Grading, fit and value-core suites: 230 passed, incl. `test_build_folds_fit_arms_into_every_new_deck` (fold after build, projection cache, failed build skipped, fold error never raises). The `add-fit-arms` route test now resets the projection cache.
