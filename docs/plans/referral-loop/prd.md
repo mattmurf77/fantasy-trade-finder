@@ -272,6 +272,9 @@ doesn't; `InviteLeaguematesBanner.tsx:146-153`).
 - AC-4: every invite surface fires `invite_cta_shown` once per mount; the banner no longer
   hard-codes `platform: 'unknown'` when the league platform is known.
 
+FR-3 and FR-4 are copy and events only: **no visual change** to the invite card or banner.
+`design-lead` still reviews the diff (§13).
+
 **FR-5 — Web invites are measured.** The web modal fires `invite_cta_shown`,
 `invite_cta_tapped` and `invite_shared` via `FTFTrack` with `surface: 'web_invite'` (a new
 value in the closed `InviteSurface` set and its taxonomy domain), and mints per FR-1.
@@ -287,19 +290,47 @@ day** (**assumed**); the 11th returns 429 and the client falls back (FR-1).
 renders a backend page (§8.2) instead of the 302. It shows the league name, the inviter's
 display name (resolved server-side from `t`), absolute OG tags, the device-aware CTA from §5,
 the re-tap step, and an optional `dtf://app/league/join/<id>?t=<id>` button. Chalkline
-styling per `docs/design/design-system.md`; it does **not** reuse the `/s/*` chrome, which is
+styling per `docs/design/design-system.md` (rules below); it does **not** reuse the `/s/*` chrome, which is
 off-Chalkline (999px pill, system/Roboto stack, 16px radius with shadow:
 `S:25493-25501`; marketing-lead defect 11). `<meta name="robots" content="noindex">`; the path
 is **not** added to `robots.txt` (unfurlers that honour robots must still fetch it). Words:
 `gp.join.*` (proposed). With the flag off, the 302 is unchanged.
+
+Design rules (`design-lead` review, accepted by `growth-pm`):
+- **Tokens and type.** The page links `web/css/tokens.css` (served as `/css/tokens.css`, the
+  single web token source) and loads Barlow Condensed / Archivo / IBM Plex Mono from Google
+  Fonts per `docs/design/design-system.md`. None of the `/s/*` `_share_html` chrome
+  (`S:25460`); fixing that chrome stays backlog GB-02.
+- **One primary action per device state, in ice.**
+  - iPhone with `IOS_INSTALL_URL` set: "Get the iOS beta" is the ice primary; "Open in the
+    app" (`dtf://`) is a secondary outlined button with the `--line-strong` border.
+  - Desktop: "Open the web app" is the ice primary; the extension help line in `--chalk-dim`;
+    the iOS link is a secondary text link.
+  - Android, or iPhone with no `IOS_INSTALL_URL`: no button; the note in `--chalk` or
+    `--chalk-dim`, never `--chalk-faint` (it's content).
+- **Expired or unknown link:** drop the inviter name; neutral headline; **not** `--neg` red (an
+  expired invite isn't an error to the user).
+- **No "already joined" state:** the landing has no auth and one link can credit several
+  joiners (§7.6), so it can't know; that state lives in the in-app J4 path.
+- **Floors:** 44pt hit targets, the ice focus ring, `prefers-reduced-motion` respected, dark
+  only.
+- **OG card (v1, static 1200×630).** `--ink-0` field, the FLEECED wordmark in Barlow Condensed
+  caps with the ice tick, one Archivo line; no gradients, no glow; text ≥48px at 1200 wide so
+  it reads at iMessage thumbnail size (~300px). Art direction is `design-lead`'s (P14). The
+  with-ram vs without-ram variant is chosen from `design-lead`'s mockup lab (branch
+  `mockup/referral-loop`) by `growth-pm` or the operator; the ram (app icon) appears only
+  inside its own box.
+
 - AC-7a: flag off → tests T4–T7 in `test_invite_links.py` pass unmodified.
 - AC-7b: flag on → 200 HTML; `og:image` is an absolute `https://` URL; `og:title` carries the
   league name when known; a `noindex` meta is present; no username from the query string is
   echoed into the page.
-- AC-7c: iPhone UA → install CTA when `IOS_INSTALL_URL` is set, honest note when unset; Android
-  UA → honest note, no web button; desktop UA → web-app CTA + extension line + secondary iOS
-  link.
+- AC-7c: one primary action per device state: iPhone UA → install CTA (+ `dtf://` secondary)
+  when `IOS_INSTALL_URL` is set, honest note and no button when unset; Android UA → honest
+  note, no button; desktop UA → web-app CTA + extension line + secondary iOS text link.
 - AC-7d: the brand on the page is "Fleeced" (D-057).
+- AC-7e: the page links `/css/tokens.css` and carries none of the `_share_html` chrome; an
+  unknown or expired `t` renders no inviter name.
 
 **FR-8 — Record the open server-side.** Every GET of the join path (landing or 302) with a
 well-formed `t` and the ledger flag on classifies the user agent:
@@ -609,7 +640,8 @@ Still behind `invite.k_factor_dashboard` (off → today's zeroed payload). On:
 `links_opened` counts minted rows with `open_count > 0` or status `joined` or later.
 `k_factor`, `invited`, `active_rankers` and the milestone badges are removed (the web modal
 reading them, `web/js/app.js:5927-5940`, is updated in the same change; the badges carry
-emoji, which the design system forbids, and their return is a `design-lead` call in Phase 2).
+emoji, which the design system forbids, and their return, as Chalkline icons and never emoji,
+is a `design-lead` call in Phase 2, §12).
 
 ---
 
@@ -685,7 +717,7 @@ prop; `has_ref` stays as it is. The readout joins events to the ledger on
 | Key | Kind | Default | Gates | Graduation | Rollback |
 |---|---|---|---|---|---|
 | `growth.referral_ledger` | **new flag** | false | Mint route (404 off); clients' use of the id (off ⇒ byte-identical links); open recording; §7.4–§7.8 attribution, activation and notification rules; impact v2 | Phase 0 done + 2 weeks with the §2.1 instrumentation target met | Flip off: mint 404s, clients emit today's links, attribution stops; rows stay |
-| `growth.join_landing` | **new flag (proposed here; `growth-pm` to accept, D-7)** | false | Landing page vs today's 302 on `/app/league/join/<id>` | Words approved (`marketing-lead`), `design-lead` review, operator device pass on iPhone / desktop / Android | Flip off: today's 302, T4–T7 contract |
+| `growth.join_landing` | **new flag (proposed here; `growth-pm` to accept, D-7)** | false | Landing page vs today's 302 on `/app/league/join/<id>` | Words approved (`marketing-lead`), `design-lead` `/design-review` verdict (§13), operator device pass on iPhone / desktop / Android | Flip off: today's 302, T4–T7 contract |
 | `growth.invite_join_link` | existing (`config/features.json:190`) | false | Emitter form only (unchanged meaning) | **Flip in Phase 1** after the #239 device checklist passes (`docs/feedback/items/239-invite-universal-links/status.md` § Operator actions 4; procedure `config-reference.md:669`) | Flip off (legacy form parsed forever) |
 | `growth.referral` | existing, **reserved** | false | Nothing in v1. Its declared meaning includes reward granting (`backend/feature_flags.py:268`) | Phase 3 | — |
 | `invite.k_factor_dashboard` | existing (`config/features.json:20`) | false | Impact payload v2 (FR-21). Key name kept to avoid churn; meaning updated in `config-reference.md` | Phase 2 surface | Flip off |
@@ -706,7 +738,9 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
   (impression events).
 - **Phase 2:** APNs `referral_joined` / `referral_activated` pushes (GD-5, `NEXT.md:532`;
   `engagement-pm`: caps, prefs, buckets); the inviter's "Your invites" surface on top of
-  `/api/invite/impact` (`design-lead`); option A's CTA on the `/s/*` landings (GB-02).
+  `/api/invite/impact` (`design-lead`: tiles with live counts in IBM Plex Mono, the operator's
+  tile preference; milestone badges, if they return, use Chalkline icons, never emoji);
+  option A's CTA on the `/s/*` landings (GB-02).
 - **Phase 3:** rewards (`monetization-pm`; `promo_referral` / `promo_group_unlock` sources in
   `backend/entitlements.py:50`, never granted), behind `growth.referral`.
 
@@ -718,7 +752,7 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 | 2 | Ship clients (mobile build + web) | Flags off ⇒ links byte-identical (structural guard) |
 | 3 | Operator: #239 device checklist (tap a path-form link from Messages; app opens) | Pass recorded in `TEST_LEDGER.md` |
 | 4 | Flip `growth.referral_ledger` | Mint 201s live; first ids in the ledger |
-| 5 | Set `IOS_INSTALL_URL` (if A); flip `growth.join_landing` | Words approved; `design-lead` review; operator landing pass |
+| 5 | Set `IOS_INSTALL_URL` (if A); flip `growth.join_landing` | Words approved; `design-lead` `/design-review` verdict (`design-review.md`); operator landing pass |
 | 6 | Flip `growth.invite_join_link` | Only if step 3 passed; otherwise stay on the legacy form, which still carries `t` |
 | 7 | Two-week read | §2.1 target → graduate `growth.referral_ledger` |
 
@@ -729,7 +763,7 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 | Seam | What they decide or review | Route |
 |---|---|---|
 | `marketing-lead` | All strings: invite text, join landing (`gp.join.*`), inbox rows (`gp.push.*`), activation row; UTM values | W4 direct (operator-approved 2026-10-15) |
-| `design-lead` | Join landing (Chalkline; per-surface states: logged-out, not installed, already joined, expired link, flag off; iPhone/desktop/Android), its OG image (v1: a static branded 1200×630 card), invite card/banner states, Phase 2 "Your invites" | W4 direct |
+| `design-lead` | Join landing (Chalkline, FR-7; per-surface states: logged-out, not installed, expired/unknown link, flag off; iPhone/desktop/Android; no "already joined" state: the landing has no auth and one link can credit several joiners, so that state lives in the in-app J4 path), its OG card (FR-7: static 1200×630; art direction P14), the invite card/banner diff (FR-3/FR-4: copy and events only, no visual change), Phase 2 "Your invites" tiles. Every string stays with `marketing-lead`; the mockup lab (`mockup/referral-loop`) tags each PROPOSED COPY. The build gets a `/design-review` verdict at `docs/plans/referral-loop/design-review.md` before ship. The landing's before-pane is today's 302 to `/` (the web landing), a labelled reconstruction until `head-product` rules on web before-panes (W2) | W4 direct |
 | `ux-lead` | The J2 flows, especially re-tap after a TestFlight install | via `head-product` |
 | `analytics-lead` | Event names and classes (§10), taxonomy + NON_INTENT in the emitter's commit, the activation stage (D-8), the readout (FR-22), the first-touch convention (P18), the W3 baseline | via `head-product` |
 | `engagement-pm` | In-app entry points; the notify-once rule (FR-20); the activation row as a receipt (D-046); Phase 2 pushes | via `head-product` |

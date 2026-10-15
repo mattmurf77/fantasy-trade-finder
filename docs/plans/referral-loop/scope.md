@@ -61,7 +61,8 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
     carrying a ledger row (PRD §2.1). Deploy-free rollback: flip off.
   - `growth.join_landing` — **new (proposed by this PRD; `growth-pm`/`head-product` to
     accept, PRD D-7)**, default **false**. Landing vs today's 302. Graduation: words approved,
-    `design-lead` review, operator device pass. Rollback: flip off (T4–T7 contract).
+    `design-lead` `/design-review` verdict (`design-review.md`), operator device pass.
+    Rollback: flip off (T4–T7 contract).
   - `growth.invite_join_link` — existing, **flipped during Phase 1 rollout** after the #239
     device checklist passes; meaning unchanged.
   - `growth.referral` — existing, **untouched, reserved** for rewards (Phase 3).
@@ -101,7 +102,9 @@ D-056: no Maestro, no simulator, no captures.
   - `backend/tests/test_join_landing.py` (new): flag off → T4–T7 behaviour unchanged, plus `t`
     forwarded only with the ledger flag on; flag on → 200, `noindex`, absolute `og:image`,
     league name, inviter display name from a valid id, no query-string username echoed;
-    iPhone/Android/desktop CTA variants with `IOS_INSTALL_URL` set and unset; human UA
+    page links `/css/tokens.css` and none of the `_share_html` chrome (PRD AC-7e);
+    iPhone/Android/desktop CTA variants with `IOS_INSTALL_URL` set and unset, one primary
+    action each, no button on Android or on iPhone with it unset (PRD AC-7c); human UA
     increments `open_count` + fires `invite_landing_opened`; preview UA sets only
     `unfurled_at`; HEAD records nothing; unknown/expired ids; click-through closed set and
     targets (no user-supplied redirect).
@@ -160,7 +163,8 @@ D-056: no Maestro, no simulator, no captures.
      link the same ESPN league in the app. Expected: credited by token; device A gets the row.
   9. **Expired id.** Use an id older than 30 days (backdated in a staging DB, or a test
      fixture id supplied by the builder). Expected: the landing renders without the inviter
-     name; signing up gives no credit; `signup.attribution_miss = expired`.
+     name, with a neutral headline (not error red); signing up gives no credit;
+     `signup.attribution_miss = expired`.
   10. **Flag off.** Flip `growth.referral_ledger` off and reload flags; tap Invite on device A.
       Expected: the link is today's `/?league=…&ref=…` form (or path form if
       `growth.invite_join_link` is on), byte-identical to before the build. Flip
@@ -175,6 +179,22 @@ D-056: no Maestro, no simulator, no captures.
       Expected: device A gets one activation row that routes to League.
   14. **Group chat.** Post one link into a chat with two test invitees; both join. Expected:
       two ledger rows sharing the same `share_token`; device A gets one row per joiner.
+  15. **Landing primary action per device** (PRD FR-7 design rules). Open a fresh link on each
+      device and check there is exactly one ice primary action. iPhone with `IOS_INSTALL_URL`
+      set: "Get the iOS beta" is the ice button; "Open in the app" is outlined, not filled.
+      iPhone with it unset, and Android: no button; the note is readable (not the faintest
+      grey). Desktop: "Open the web app" is the ice button, the extension line is dimmer, the
+      iOS link is plain text. On every device the page is dark, says "Fleeced", and buttons
+      are comfortably tappable; on desktop, Tab shows the ice focus ring. There is no
+      "already joined" landing state (no auth, and one link can credit several joiners); an
+      existing user is step 7, in the app.
+- [x] **Design review** (`design-lead`): a `/design-review` verdict at
+  `docs/plans/referral-loop/design-review.md` before ship, covering the join landing (per-device
+  states, PRD FR-7), the OG card, and the invite card/banner diff (copy and events only, no
+  visual change). Every string stays with `marketing-lead`; the mockup lab
+  (`mockup/referral-loop`) tags each PROPOSED COPY. The landing's before-pane is today's 302 to
+  `/` (the web landing), a labelled reconstruction until `head-product` rules on web
+  before-panes (W2).
 - [ ] **WAIVED because:** — (no waiver of the rows above; the waiver noted in the header is
   only that the universal-link tap and TestFlight install have no automated proof).
 - `testID`s added/renamed: none planned; any added by the builder must pass
@@ -202,6 +222,8 @@ D-056: no Maestro, no simulator, no captures.
   `maestro-testid-lint` (the testID lint job) — all passing on the pushed sha.
 - **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry naming the pytest files, the
   structural guard, the code-walk, and the `FTF_SKIP_SIM_GATE=1` posture (D-056).
+- **Design review:** `design-lead`'s `/design-review` verdict recorded at
+  `docs/plans/referral-loop/design-review.md` before ship (§3).
 - **TestFlight verification:** the §3 checklist run by the operator before rollout steps 4–6
   (PRD §12); outcome logged in `TEST_LEDGER.md`.
 - Express lane declared by the operator? **no** — full gates.
