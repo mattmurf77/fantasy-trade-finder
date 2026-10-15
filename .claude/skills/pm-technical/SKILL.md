@@ -106,11 +106,11 @@ in any pipeline (direct ask, feedback item, NEXT.md, staged-work). Full procedur
    backend tests by name, a code-walk skeleton, and a TestFlight checklist written to
    the reference's rules.
 5. §7: platform behavior per
-   [references/platform-parity.md](references/platform-parity.md) (written by
-   `platforms-pm` on its own branch; pending until it lands).
+   [references/platform-parity.md](references/platform-parity.md) (owned by
+   `platforms-pm`).
 6. §8: if a model's output changes, attach a
-   [model-change packet](references/model-change-packet.md) and `models-lead`'s
-   sign-off.
+   [model-change packet](references/model-change-packet.md): `models-lead`'s plan
+   sign-off (13a) before build, and its result sign-off (13b) before ship.
 7. Surface waivers to `head-product` before build, and re-diff against `origin/main`
    before the spec goes to eng.
 
@@ -202,11 +202,9 @@ through `head-product`, which relays to the other departments' heads.
   the scope template, the evidence rules, waivers, the re-diff, and the product
   acceptance pass.
 - [references/model-change-packet.md](references/model-change-packet.md) — for any
-  change to what a model outputs: the packet scope §8 attaches and `models-lead` signs
-  (draft, fields pending `models-lead` review).
+  change to what a model outputs: the packet scope §8 attaches and `models-lead` signs.
 - [references/platform-parity.md](references/platform-parity.md) — per-platform reads,
-  writes and honest-unsupported behavior for scope §7. Written by `platforms-pm` on its
-  own branch; pending until that lands.
+  writes and honest-unsupported behavior for scope §7. Owned by `platforms-pm`.
 
 ## Guardrails
 

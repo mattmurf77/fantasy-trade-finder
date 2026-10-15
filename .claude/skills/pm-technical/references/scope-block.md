@@ -164,8 +164,7 @@ checklist, and whether the operator declared express.
   false), so it is n/a unless the change lights it.
 - For each: the reads and writes the feature uses, and the behavior — parity, the honest
   `platform_unsupported` payload, fallback copy, or n/a.
-- Follow `references/platform-parity.md` (written by `platforms-pm` on its own branch;
-  pending until it lands). Until then, `platforms-pm` reviews §7 through `head-product`.
+- Follow [platform-parity.md](platform-parity.md), owned by `platforms-pm`.
 
 ## §8 Model-visible change
 
@@ -173,9 +172,12 @@ checklist, and whether the operator declared express.
   (ranking, tiers, matchup selection, values, trade scoring or packaging, deck rules and
   filters, outlook, pick values) or how model output is shown.
 - If yes: name the model, fill a packet in the format of
-  `references/model-change-packet.md`, save it beside the scope, and attach
-  `models-lead`'s sign-off. The route is `head-product` → `head-bizops` →
-  `models-lead`.
+  [model-change-packet.md](model-change-packet.md), and save it beside the scope.
+  Attach both of `models-lead`'s sign-off lines:
+  - **plan (13a),** before the build, routed `head-product` → `head-bizops` →
+    `models-lead`;
+  - **result (13b),** on `models-eng`'s eval output, routed `head-eng` →
+    `head-bizops` → `models-lead`, before `release-lead` ships.
 
 ## Waivers
 
@@ -215,8 +217,9 @@ Every AC needs at least one row. "Not run" is a finding, never a pass.
    stated difference matches what shipped.
 2. **Analytics grant:** attached, and the emitter, registration and classification
    landed in one commit (`git show --stat <sha>`). Or §1 is (b) or (c).
-3. **Reviews:** §6 UX and design, §7 platform, §8 `models-lead` — each attached or
-   waived with a reason.
+3. **Reviews:** §6 UX and design and §7 platform, each attached or waived with a
+   reason. For §8, both `models-lead` lines: the plan sign-off (13a) and the result
+   sign-off (13b) on the eval output. Ship waits on 13b.
 4. **Docs rows:** every "updated" row matches a commit; every "n/a" has a reason.
 5. **Re-diff:** clean against `origin/main`, or the overlap resolved.
 6. **Verdict line:**

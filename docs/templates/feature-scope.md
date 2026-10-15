@@ -125,8 +125,9 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 ## 7. Platform scope
 
 <!-- Per platform: the reads and writes this feature uses, and how it behaves there.
-     Fleaflicker is dark (`fleaflicker.link` false) — n/a unless this change lights it.
-     Reference: .claude/skills/pm-technical/references/platform-parity.md -->
+     Fleaflicker is dark (`fleaflicker.link` false) — n/a unless this change lights it. -->
+
+Guidance: [platform-parity.md](../../.claude/skills/pm-technical/references/platform-parity.md) (owned by `platforms-pm`).
 
 | Platform | Reads / writes used | Behavior: parity / honest `platform_unsupported` / fallback copy / n/a |
 |---|---|---|
@@ -142,11 +143,14 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 <!-- Does this change what a model outputs (ranking, tiers, matchups, values, trade
      scoring/packaging, deck rules, outlook, pick values), or how model output is shown?
      If yes, fill a packet in the format of
-     .claude/skills/pm-technical/references/model-change-packet.md and attach
-     models-lead's sign-off (routed head-product → head-bizops). -->
+     .claude/skills/pm-technical/references/model-change-packet.md and attach both of
+     models-lead's sign-off lines: plan (13a) before the build, routed
+     head-product → head-bizops; result (13b) on models-eng's eval output before
+     ship, routed head-eng → head-bizops. -->
 
 - **Model-visible?** yes / no — because …
 - If yes:
   - **Model:** …
   - **Packet:** <path>
-  - **`models-lead` sign-off:** attached: <path, date> (via `head-product` → `head-bizops`)
+  - **`models-lead` plan sign-off (13a), before build:** attached: <path, date> (via `head-product` → `head-bizops`)
+  - **`models-lead` result sign-off (13b), before ship:** attached: <path, date> (via `head-eng` → `head-bizops`)
