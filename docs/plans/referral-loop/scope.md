@@ -36,7 +36,7 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   | `invite_pin_failed` (changed props, new web emitter) | + `invite_id`? | Intent can't be honoured | mobile, web |
 
   Proposed, not committed: `channel` on `invite_shared` and first-touch props on `signup`
-  (marketing-lead wave 2 §C, pending `analytics-lead`, P18).
+  ([marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo), pending `analytics-lead`, P18).
 
   → follow-through: tracking-plan addendum under `docs/business/analytics/` (owner
   `analytics-lead`); `docs/cross-client-invariants.md` § Client analytics event contract (web

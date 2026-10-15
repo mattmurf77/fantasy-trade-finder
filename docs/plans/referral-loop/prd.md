@@ -135,8 +135,8 @@ Each was considered and excluded; recorded so nobody reopens it mid-build.
 2. **Rewards.** v1 is credit and recognition only. `growth.referral` stays reserved for the
    give-get program (Phase 3, `monetization-pm`).
 3. **Re-engagement credit** for an existing user who opens an invite. Backlog GB-12.
-4. **"Who invited you?" picker** (marketing-lead §C recovery iii). A new write route; not v1.
-5. **Clipboard-based deferred linking.** iOS paste prompt; rejected by marketing-lead §C.
+4. **"Who invited you?" picker** ([marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo) recovery iii). A new write route; not v1.
+5. **Clipboard-based deferred linking.** iOS paste prompt; rejected in [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo).
 6. **UTMs on invite links.** The ledger row records the surface at mint, so invite links need
    no UTMs and the join redirect's closed parameter contract (test T7,
    `backend/tests/test_invite_links.py:132-136`) is **not** reversed. First-touch UTMs for
@@ -154,7 +154,7 @@ Each was considered and excluded; recorded so nobody reopens it mid-build.
 
 ## 4. User journeys
 
-Words in quotes are `marketing-lead`'s **proposed** strings (wave 2 §A, keys named), pending
+Words in quotes are `marketing-lead`'s **proposed** strings ([marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer), keys named), pending
 operator approval of words via `marketing-lead`. None is final.
 
 ### J1 — Inviter
@@ -212,7 +212,7 @@ notification.** Re-engagement credit is backlog GB-12.
 
 ## 5. CTA target before the App Store listing (operator decision)
 
-Audit decision 4. The finding that frames it (marketing-lead §0.2, re-verified): **web
+Audit decision 4. The finding that frames it ([marketing-inputs.md §0.2](marketing-inputs.md#02-cta-target-lead-recommendation), re-verified): **web
 sign-in requires the desktop Fleeced extension** (`web/js/browser-auth.js:1`, fails
 `extension_unavailable` after 2 s at `:45`; called unconditionally at `web/js/app.js:334`), and
 ESPN/MFL browser sign-in is "not available … yet" (`app.js:1262-1266`). On a phone, web `/`
@@ -269,7 +269,7 @@ forever (D-028).
 with the flag off too (copy is not attribution). The same name sweep covers the
 `league_member_unlocked_trades` bell row, which lands next to the inviter rows: its body
 says "@{username} just unlocked Trade Finder. Tap to look for matches." (`S:10542-10543`;
-added at `marketing-lead`'s request, wave 2 §A open question 15). Words from
+added at `marketing-lead`'s request, [marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer) open question 15). Words from
 `marketing-lead`.
 - AC-3: no invite share text contains "Dynasty Trade Finder" or "Fantasy Trade Finder"
   (structural guard); the `league_member_unlocked_trades` body no longer says "unlocked
@@ -302,7 +302,7 @@ display name (resolved server-side from `t`), absolute OG tags, the device-aware
 the re-tap step, and an optional `dtf://app/league/join/<id>?t=<id>` button. Chalkline
 styling per `docs/design/design-system.md` (rules below); it does **not** reuse the `/s/*` chrome, which is
 off-Chalkline (999px pill, system/Roboto stack, 16px radius with shadow:
-`S:25493-25501`; marketing-lead defect 11). `<meta name="robots" content="noindex">`; the path
+`S:25493-25501`; [marketing-inputs.md §0.3](marketing-inputs.md#03-loop-defects-found-for-the-prds-fix-list) defect 11). `<meta name="robots" content="noindex">`; the path
 is **not** added to `robots.txt` (unfurlers that honour robots must still fetch it). Words:
 `gp.join.*` (proposed). With the flag off, the 302 is unchanged.
 
@@ -410,7 +410,7 @@ Stamps `attribution_method = 'league_match'`.
 
 **FR-16 — `signup` says how the user arrived.** The server `signup` event (`S:22619-22630`)
 gains `attribution` (`token | league_match | legacy_ref | none`) and `attribution_miss`
-(`unknown | expired | not_member | null`). First-touch UTM props per marketing-lead §C are a
+(`unknown | expired | not_member | null`). First-touch UTM props per [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo) are a
 separate proposal owned by `analytics-lead` (P18), built only if accepted (§8.4).
 - AC-16: each FR-13/FR-14/FR-15 test case asserts the `signup` props.
 
@@ -467,7 +467,7 @@ Phase 2), posted to the inviter when FR-17 activates.
   The join row (FR-18) still routes to League.
 - **Meta:** `new_user_id`, `new_username` and `league_id`, so the title can render the name
   (`referral_joined` already carries `new_user_id` and `new_username`, `S:22663-22667`).
-- **Words** (proposed by `marketing-lead`, pending the operator; wave 2 §A rows
+- **Words** (proposed by `marketing-lead`, pending the operator; [marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer) rows
   `gp.inbox.activated_title` / `gp.inbox.activated_body`): title "@{new_username} has their
   first trade ideas"; body "If they like a trade with you, it can surface in your deck."
   - The body rests on likes-you mirroring: a leaguemate's `like` decisions from the last 90
@@ -577,7 +577,7 @@ recent `opened_at`. Claim as §7.4 step 4 with `attribution_method 'league_match
 
 Checked against D-028 (no change to parsing or the legacy form), D-046 (the rows it produces
 are receipts, not prompts) and the `league_member_joined` flow (FR-20 dedupes). It is the
-ledger version of marketing-lead §C's query-only "league-scoped inference" (recovery ii):
+ledger version of the query-only "league-scoped inference" in [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo) (recovery ii):
 the same idea, stamped on a row so the ambiguity is visible in data instead of hidden in a
 query.
 
@@ -674,7 +674,7 @@ events. Holding or merging it is an open item for `engagement-pm` (D-9).
   ledger flag is off or the user is not new. Response unchanged. `invited_by` still accepted.
 - **Proposed, not Phase 1 critical path:** optional `first_touch:
   {utm_source, utm_medium, utm_campaign, utm_content}` attached to `signup` props, per
-  marketing-lead §C ("Composition and capture", "Proposal for analytics-lead"). Proposed by
+  [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo) ("Composition and capture", "Proposal for analytics-lead"). Proposed by
   `marketing-lead`, pending `analytics-lead` (P18), who owns the final convention and the value
   validation.
 
@@ -760,7 +760,7 @@ event props only; the meta stays in the inviter's own inbox row.
 
 | Event | Change | Props added | Emitters | Class |
 |---|---|---|---|---|
-| `invite_shared` | changed | `invite_id`?, `mint_outcome`; `channel` per marketing-lead §C (proposed, pending) | mobile `InviteLeaguematesBanner.tsx:135`; **web, new** | INTENT (unchanged) |
+| `invite_shared` | changed | `invite_id`?, `mint_outcome`; `channel` per [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo) (proposed, pending) | mobile `InviteLeaguematesBanner.tsx:135`; **web, new** | INTENT (unchanged) |
 | `invite_cta_tapped` | new web emitter | — (`surface: 'web_invite'`) | mobile; **web, new** | INTENT (unchanged) |
 | `invite_cta_shown` | new emitters | — | + Trades banner, members overlay, web modal | NON_INTENT (unchanged) |
 | `invite_link_opened` | changed | `invite_id`?; `format` gains `web` | `deepLinks.ts:426`, `LeagueJoinScreen.tsx:77`; **web, new** (`captureReferralFromUrl`) | INTENT (unchanged) |
@@ -872,7 +872,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-8 | Activation = stage 7 first opinion (vs 5 or 6) | `analytics-lead` | Stage 7: the first `trade_proposed` or `match_swiped` within 14 days of `joined_at` (FR-17) |
 | D-9 | Notify-once rule (FR-20); the activation row routes to Trades, not League (FR-19). Open item: an activation row within 10 minutes of the join row posts separately today; hold or merge it? (§7.8) | `engagement-pm` | As written |
 | D-10 | A valid id unlocks the stored league name for imported (ESPN/MFL) leagues on the landing and `invite-meta` | `head-eng` (security) | No in v1; revisit with evidence |
-| D-11 | First-touch UTMs on `session_init` (§8.4) | `analytics-lead` (P18) | Accept marketing-lead §C; outside Phase 1's critical path |
+| D-11 | First-touch UTMs on `session_init` (§8.4) | `analytics-lead` (P18) | Accept [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo); outside Phase 1's critical path |
 | D-12 | Mint cap 10 per inviter per league per day; token credit window 30 days | `growth-pm` | As written (assumed values) |
 | D-13 | `record_event` `platform` + `touch_user` parameters vs a separate writer | `head-eng` | Either; the requirement is no denorm bump |
 
