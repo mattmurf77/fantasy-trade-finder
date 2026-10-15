@@ -9,8 +9,13 @@
 > again 2026-10-15 to fold `design-lead`'s mockup lab (draft PR #343, §13) per `growth-pm`'s
 > rulings: OG card variant (ii), no `dtf://` button in v1, desktop iOS line only with
 > `IOS_INSTALL_URL`, banner Invite floors (AC-4b), web invite emphasis colour (AC-9b), open
-> copy questions (D-14). Awaiting acceptance (`head-product`). Requirements only: **no source
-> file is changed by this document.**
+> copy questions (D-14). Then revised to fold `marketing-lead`'s answers to those questions
+> ([marketing-inputs.md, lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15),
+> re-copied; every string still proposed, pending the operator's approval of words): landing
+> headline ladder, A2 note, OG lockup, "leaguemates", the stage-7 activation title, the
+> landing value line, the desktop-extension risk, and an open wordmark item (D-15). Awaiting
+> acceptance (`head-product`). Requirements only: **no source file is changed by this
+> document.**
 > **Owner:** `growth-pm`. **Base:** `origin/main` 678834ab. **Branch:** `plan/referral-loop`.
 > **Evidence:** [loop-audit.md](loop-audit.md) (hop table H1–H8, re-verified at 678834ab).
 > **Scope block:** [scope.md](scope.md). **Backlog row:** GB-01 in
@@ -181,22 +186,24 @@ operator approval of words via `marketing-lead`. None is final.
 4. When a leaguemate joins: one bell row, "@{new_username} joined Fleeced via your invite"
    (`gp.push.joined_inbox_title`) with a distinct body line (`gp.push.joined_inbox_body`).
 5. When that leaguemate first likes or passes a trade (funnel stage 7, FR-17): a second
-   bell row, "@{new_username} has their first trade ideas" (`gp.inbox.activated_title`)
+   bell row, "@{new_username} weighed in on their first trade" (`gp.inbox.activated_title`)
    with "If they like a trade with you, it can surface in your deck."
    (`gp.inbox.activated_body`). The tap opens Trades (FR-19).
 
 ### J2 — Invitee, app not installed
 
 - **iPhone (option A):** taps the link in Messages or a league chat → Safari → join landing:
-  league name, inviter's display name, "Get the iOS beta" (`gp.join.cta.A_ios`) to the public
-  TestFlight link, "Installs through Apple's TestFlight app." (`gp.join.cta.A_ios_help`), and
+  "{display name} invited you to {league}" (FR-7's headline ladder), "Get the iOS beta"
+  (`gp.join.cta.A_ios`) to the public TestFlight link, "Installs through Apple's TestFlight
+  app." (`gp.join.cta.A_ios_help`), and
   the re-tap step "Installed? Go back to the chat and tap the invite again to join
   {leagueName}." (`gp.join.retap`). No `dtf://` "Open in the app" button (§3 non-goal 13).
   - Re-tap after installing → universal link → J3 with the invite id → credited by **token**.
   - No re-tap → the app cold-opens without the link → the user signs in and picks the
     league → credited by **league match** if their landing open was recorded (FR-14).
-  - **`IOS_INSTALL_URL` unset:** the honest note only, no button and no TestFlight-request
-    link (FR-7).
+  - **`IOS_INSTALL_URL` unset:** the honest note only, "The iPhone beta isn't open to the
+    public yet. Already have it? Open the invite in the app.", with no button and no
+    TestFlight-request link (FR-7).
 - **Desktop:** landing → "Open the web app" (`gp.join.cta.A_desktop`) with "Sign-in uses the
   Fleeced extension for Chrome or Edge." (`gp.join.cta.A_desktop_help`) → `/?league=&t=` →
   extension sign-in → invited league auto-selected → credited by token. When
@@ -242,6 +249,11 @@ dead-ends every invitee on every platform.
 Killed: waitlist / email capture (reverted 2026-08-12 in `65c63479`; no email channel; adds
 a step).
 
+**The desktop path rarely completes in practice.** The extension is an unpacked Chrome/Edge
+release, not a store listing (`extension/README.md:44`), so few desktop invitees will
+sideload it. Option A's working install path is effectively iOS TestFlight (§14). That
+strengthens D-1 (A) and D-3 (the public TestFlight link).
+
 **How the choice is applied without code.** The install link is configuration
 (`IOS_INSTALL_URL`, §11). Set → option A. Unset → iOS invitees see the honest note instead of
 a dead button (B and C as they can work on a phone), and the desktop layout drops its "On an
@@ -286,7 +298,10 @@ with the flag off too (copy is not attribution). This PRD renames only the strin
 FRs already touch: this invite share text, the inviter rows (FR-18, FR-19) and the join
 landing (FR-7). Every other old-name string, including the `league_member_unlocked_trades`
 body (`S:10542-10543`), is `head-product`'s P9 copy-defect batch (`onboarding-pm`, after
-this wave). Words from `marketing-lead`.
+this wave). Words from `marketing-lead`. Spelling: **"leaguemates"**, one word, in every
+proposed string (`marketing-lead`, the voice-spec form); note that the shipped banner says
+"league-mates" today (`InviteLeaguematesBanner.tsx:163, :167, :176`), which
+`marketing-lead`'s `h1.banner.title` / `h1.banner.a11y` rows respell.
 - AC-3: no invite share text contains "Dynasty Trade Finder" or "Fantasy Trade Finder"
   (structural guard).
 
@@ -328,7 +343,19 @@ styling per `docs/design/design-system.md` (rules below); it does **not** reuse 
 off-Chalkline (999px pill, system/Roboto stack, 16px radius with shadow:
 `S:25493-25501`; [marketing-inputs.md §0.3](marketing-inputs.md#03-loop-defects-found-for-the-prds-fix-list) defect 11). `<meta name="robots" content="noindex">`; the path
 is **not** added to `robots.txt` (unfurlers that honour robots must still fetch it). Words:
-`gp.join.*` (proposed). With the flag off, the 302 is unchanged.
+`gp.join.*` plus `marketing-lead`'s lab answers
+([addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)),
+all proposed, pending the operator's approval of words:
+- **Headline:** "{display name} invited you to {league}" (supersedes `gp.join.headline`). Only
+  a valid `t` names the inviter (§8.2), so the name is server-verified, never URL-supplied.
+  Fallbacks, in order: "{display name} invited you to their league" (league name unknown) →
+  "A leaguemate invited you to {league}" (no valid inviter) → "A leaguemate invited you"
+  (neither).
+- **Value line:** `gp.join.valueprop`, not the lab's "Fleeced finds trades where both sides
+  come out ahead." (`web/index.html:75`), which makes Fleeced the subject of an analysis verb
+  (the name rule).
+
+With the flag off, the 302 is unchanged.
 
 Design rules (`design-lead` review, accepted by `growth-pm`):
 - **Tokens and type.** The page links `web/css/tokens.css` (served as `/css/tokens.css`, the
@@ -343,28 +370,34 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
     `IOS_INSTALL_URL` is set** (unset, its click-through 404s, §8.2: a dead path).
   - Android, or iPhone with no `IOS_INSTALL_URL`: no button; the note in `--chalk` or
     `--chalk-dim`, never `--chalk-faint` (it's content).
-  - iPhone with no `IOS_INSTALL_URL` (lab frame A2): the honest note only (its words are a
-    `[copy: marketing-lead]` slot, D-14; the Android note's "runs on iPhone" is wrong on an
-    iPhone). **No "Request TestFlight access" link** (today's `/contact.html` link,
-    `web/index.html:266`) in v1: it would depend on manual operator follow-up.
+  - iPhone with no `IOS_INSTALL_URL` (lab frame A2): the honest note only, "The iPhone beta
+    isn't open to the public yet. Already have it? Open the invite in the app." (proposed;
+    the Android note's "runs on iPhone" would be wrong on an iPhone). **No "Request
+    TestFlight access" link** (today's `/contact.html` link, `web/index.html:266`) in v1: it
+    would depend on manual operator follow-up.
 - **Expired or unknown link:** drop the inviter name; neutral headline; **not** `--neg` red (an
   expired invite isn't an error to the user).
 - **No "already joined" state:** the landing has no auth and one link can credit several
   joiners (§7.6), so it can't know; that state lives in the in-app J4 path.
 - **Floors:** 44pt hit targets, the ice focus ring, `prefers-reduced-motion` respected, dark
   only.
-- **OG card (v1, static 1200×630).** `--ink-0` field, the shipped **"FLEECED."** wordmark in
-  Barlow Condensed caps with the **ice period**, as the web header ships it
-  (`web/index.html:54`, `web/css/styles.css:4991-4992`; the `TRADE FINDER`-with-ice-tick
-  wordmark in `docs/design/brand.md:42` is stale and `design-lead` is fixing it), one Archivo
-  line; no gradients, no glow; text ≥48px at 1200 wide so it reads at iMessage thumbnail size
-  (~300px). Art direction is `design-lead`'s (P14).
+- **OG card (v1, static 1200×630).** `--ink-0` field, the FLEECED wordmark in Barlow
+  Condensed caps, one Archivo line; no gradients, no glow; text ≥48px at 1200 wide so it
+  reads at iMessage thumbnail size (~300px). Art direction is `design-lead`'s (P14). The
+  `TRADE FINDER`-with-ice-tick wordmark in `docs/design/brand.md:42` is stale and
+  `design-lead` is fixing it.
+  - **Wordmark period: open (D-15).** `design-lead` ruled the shipped **"FLEECED."** with the
+    ice period, as the web header ships it (`web/index.html:54`,
+    `web/css/styles.css:4991-4992`); `marketing-lead` asks for no period on the OG card,
+    because next to a trade "FLEECED." reads as a verdict. `design-lead` decides.
   - **v1 = lab variant (ii)** (`growth-pm`, 2026-10-15): the wordmark plus the ram (the app
     icon, `mobile/assets/mascot/ram/neutral@3x.png`) in its own box; the ram's own shading
     stays inside that box. **Fallback: variant (i)**, wordmark only. Variant (iii), the league
     name as dynamic text, is Phase 2 (it needs a per-league render and inherits D-10).
-  - The Archivo line's words, including whether "Dynasty Trade Finder" may appear, are open
-    with `marketing-lead` (D-14).
+  - **The Archivo line** (proposed, `marketing-lead`): "Dynasty Trade Finder" may appear only
+    locked up with the FLEECED wordmark, smaller than it, so the two read as D-057's full
+    name; never standalone or on a line of its own (DLF has a product with that name). AC-3
+    still bans the phrase in invite share text.
 
 - AC-7a: flag off → tests T4–T7 in `test_invite_links.py` pass unmodified.
 - AC-7b: flag on → 200 HTML; `og:image` is an absolute `https://` URL; `og:title` carries the
@@ -420,8 +453,10 @@ until a session-init body consumes it, like `consumeInvitedBy`, because
 returns `inviter_display_name` and `token_status` (§8.3). SignIn's banner
 (`SignInScreen.tsx:205-235`) and the LeaguePicker companion state use it when the link has no
 `ref`; it is cached in the intent like `leagueName` (one call site, `SignInScreen.tsx:220`).
-- AC-11: a token-only link renders "{display name} invited you to {league}" (words per
-  `marketing-lead`); an unknown id degrades to "A leaguemate invited you".
+- AC-11: a token-only link renders "{display name} invited you to {league}" (proposed,
+  `marketing-lead`), with FR-7's fallback ladder: "{display name} invited you to their
+  league" when the league name is unknown; an unknown id degrades to "A leaguemate invited you
+  to {league}", or "A leaguemate invited you" when the league name is unknown too.
 
 ### H5 · Attribution
 
@@ -511,14 +546,14 @@ Phase 2), posted to the inviter when FR-17 activates.
 - **Meta:** `new_user_id`, `new_username` and `league_id`, so the title can render the name
   (`referral_joined` already carries `new_user_id` and `new_username`, `S:22663-22667`).
 - **Words** (proposed by `marketing-lead`, pending the operator; [marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer) rows
-  `gp.inbox.activated_title` / `gp.inbox.activated_body`): title "@{new_username} has their
-  first trade ideas"; body "If they like a trade with you, it can surface in your deck."
+  `gp.inbox.activated_title` / `gp.inbox.activated_body`): title "@{new_username} weighed in
+  on their first trade"; body "If they like a trade with you, it can surface in your deck."
   - The body rests on likes-you mirroring: a leaguemate's `like` decisions from the last 90
     days are mirrored into the other side's deck (`_inject_likes_you_cards_impl`,
     `S:3951-3972`), capped and quality-gated (`S:3979-3991`), hence "can". Flag
     `trade.likes_you` is on (`config/features.json:37`).
-  - `marketing-lead` re-checks the title against the stage-7 definition (it was drafted for
-    stage 6, "first suggestions").
+  - The title is `marketing-lead`'s stage-7 revision (2026-10-15): it replaces "…has their
+    first trade ideas", which described stage 6. The body is unchanged.
 - AC-19: the row routes to Trades, not League; title and body differ; the meta carries
   `new_username` and `league_id`; the glyph check passes.
 
@@ -901,6 +936,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | Group-chat posting reads as spam to a league | Low / high (Sleeper relations) | League scope; 10/day cap; no automated posting; `platforms-pm` |
 | Legacy links already in chats lose credit when the flag flips | Certain / low | Accepted (amendment: credit only from verified ids or league match); `legacy_ref` stays visible in `signup` props |
 | TestFlight two-step and 10k tester cap | Medium / medium | Option C end state is one env value away |
+| The desktop path rarely completes: the extension is an unpacked Chrome/Edge release, not a store listing (`extension/README.md:44`), so few desktop invitees will sideload it (`marketing-lead`, lab addendum) | High / medium | Option A's working install path is effectively iOS TestFlight; this strengthens D-1 (A) and D-3 (the public TestFlight link). The desktop CTA stays, with its accurate extension line (`gp.join.cta.A_desktop_help`) |
 
 ---
 
@@ -908,9 +944,9 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 
 | # | Decision | Who | Recommendation |
 |---|---|---|---|
-| D-1 | CTA target A/B/C before the listing (§5) | **operator** | **A** |
+| D-1 | CTA target A/B/C before the listing (§5) | **operator** | **A**; strengthened because the desktop path rarely completes (§14) |
 | D-2 | Run the #239 device checklist | **operator** | Before rollout step 6 |
-| D-3 | Create a public TestFlight link | **operator** (if A) | Yes |
+| D-3 | Create a public TestFlight link | **operator** (if A) | Yes; strengthened: it is option A's working install path (§14) |
 | D-4 | Rewards | **Resolved by `head-product` P20 (2026-10-15): reward-free v1** | Status and recognition only in v1. Rewards are Phase 3, gated on the operator approving `monetization-pm`'s pricing memo; `monetization-pm` designs the economics, `growth-pm` defines "activated" and the mechanics (§12) |
 | D-5 | Approve the words (`gp.*`) | **operator** via `marketing-lead` | — |
 | D-6 | Accept the PRD; **supersede D-028 part 2** (a real join page instead of the 302 into `/`), because D-028's premise that the existing web funnel converts holds only on desktop with the extension | `head-product` (new DECISIONS entry, id claimed against `origin/main`) | Yes |
@@ -921,7 +957,8 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-11 | First-touch UTMs on `session_init` (§8.4) | `analytics-lead` (P18) | Accept [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo); outside Phase 1's critical path |
 | D-12 | Mint cap 10 per inviter per league per day; token credit window 30 days | `growth-pm` | As written (assumed values) |
 | D-13 | `record_event` `platform` + `touch_user` parameters vs a separate writer | `head-eng` | Either; the requirement is no denorm bump |
-| D-14 | Open copy questions from `design-lead`'s lab (§13): (a) every `[copy: marketing-lead]` slot in it (the A2 honest note; a "…to {league}" form of A5's degrade string; the OG `og:title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line); (b) whether FR-11's "{display name} invited you to {league}" works as the landing headline (and A6's "their league" fallback on line 2); (c) whether "Dynasty Trade Finder" may appear on the OG card (the D-057 name is "Fleeced: Dynasty Trade Finder"; AC-3 bans the phrase in share text as an old brand); (d) "league-mates" (banner, `InviteLeaguematesBanner.tsx:163, :166-167, :176`) vs "leaguemates" (card, `InviteLeaguematesCard.tsx:99`): pick one spelling | `marketing-lead`; the operator approves the words with D-5 | Answer with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
+| D-14 | Copy questions from `design-lead`'s lab (§13). **Answered by `marketing-lead` 2026-10-15, all proposed** ([lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)): (a) every `[copy: marketing-lead]` slot is filled (the A2 note and A5's "A leaguemate invited you to {league}", FR-7; `og:title` = `gp.join.og_title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line, in the addendum); (b) FR-11's "{display name} invited you to {league}" **is** the landing headline, superseding `gp.join.headline`, with FR-7's fallback ladder; (c) "Dynasty Trade Finder" may appear on the OG card only locked up with the wordmark, smaller, never standalone (FR-7; the D-057 name is "Fleeced: Dynasty Trade Finder"); (d) **"leaguemates"**, one word (FR-3; the banner says "league-mates" today, `InviteLeaguematesBanner.tsx:163, :167, :176`) | `marketing-lead`; the operator approves the words with D-5 | Approve with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
+| D-15 | **Open:** the OG card wordmark's period. `design-lead` ruled the shipped "FLEECED." with the ice period (`web/index.html:54`); `marketing-lead` asks for no period on the OG card, because next to a trade "FLEECED." reads as a verdict ("you got fleeced") (FR-7) | `design-lead` (owns the wordmark, P14), with `marketing-lead`'s concern | Not picked here; `design-lead` decides before the OG card is exported |
 
 ---
 
@@ -934,16 +971,19 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 - **`analytics-lead`:** §10 proposals, D-8, D-11, FR-22 readout, W3 baseline (nine invite/share
   events, new accounts per week, open → signup feasibility).
 - **`marketing-lead`:** final words for every quoted string, including the activation row
-  (proposed; re-check its title against stage 7, FR-19); its S-IDs remap to the backlog's
-  S1–S12. Plus the lab's open copy questions (D-14): every `[copy: marketing-lead]` slot, the
-  FR-11 sentence as the landing headline, "Dynasty Trade Finder" on the OG card, and one
-  spelling of "league-mates" / "leaguemates".
+  (revised to stage 7, FR-19); its S-IDs remap to the backlog's S1–S12. The lab's copy
+  questions (D-14) are answered (proposed, pending the operator); the OG wordmark period is
+  open with `design-lead` (D-15).
+- **FAQ claim → P9's copy-defect batch (`onboarding-pm`) via `head-product`:**
+  `web/faq.html:206` says the web app "works in any phone browser", which is false: web
+  sign-in needs the desktop extension (§5). The lab's landing footer links to the FAQ.
 - **Old-name strings: overlap resolved by P9.** `head-product` put old-name copy defects in
   P9's copy-defect batch (`onboarding-pm`, after this wave). This PRD renames only the strings
   its FRs touch (FR-3); the rest, including `league_member_unlocked_trades`
   (`S:10542-10543`), go to that batch.
 - **`design-lead`:** landing + OG card + states (§13; lab PR #343 folded); the `/design-review`
-  verdict covers AC-4b's banner floors.
+  verdict covers AC-4b's banner floors; D-15, the OG wordmark's period, with
+  `marketing-lead`'s concern.
 - **`design-lead` → `head-eng` via `head-product` (outside this PRD): F1.** On phones the
   shipped web landing hides the `WR` label but keeps the WR-blue rail
   (`web/css/styles.css:5111`), so position colour is the only encoding (accessibility floor).

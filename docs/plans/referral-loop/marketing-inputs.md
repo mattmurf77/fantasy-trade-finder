@@ -1,4 +1,4 @@
-> **Owner:** marketing-lead (proposed; operator approval of words pending). Copied verbatim from marketing-lead's wave-2 working file on 2026-10-15 so the PRD's citations stay durable.
+> **Owner:** marketing-lead (proposed; operator approval of words pending). Copied verbatim from marketing-lead's wave-2 working file on 2026-10-15 (re-copied 2026-10-15 after the lab addendum) so the PRD's citations stay durable.
 
 # marketing-lead, wave 2: referral loop words, channels and UTM convention (task 3)
 
@@ -145,7 +145,7 @@ Each is cited in its section. Items marked *lead-verified* I re-checked myself.
 | `gp.push.referral_title` | H7 | **Future** push title (Phase 2, `NEXT.md:532`, GD-5, `trade_matches` bucket) | none | `@{new_username} joined via your invite` | ~40 (guidance, assumed): 24+u, fits if u ≤16 | iOS already shows "Fleeced" as the sender, so the title leaves it out | — |
 | `gp.push.referral_body` | H7 | Future push body | none | `Once they rank, trades with them can use their board, not just consensus.` | ~110 (guidance, assumed): 73 | Same line as the inbox body | O5 |
 | `gp.push.referral_inbox` | H7 | Future inbox line | none | Reuse `gp.push.joined_inbox_title` and `_body`. Phase 2 adds a push to the existing row, not a second row | — | — | — |
-| `gp.inbox.activated_title` | H7 | `referral_activated` bell row, title. Goes to the inviter; inbox only (PRD FR-19). *Added 2026-10-15 at growth-pm's request* | none (new type) | `@{new_username} has their first trade ideas` | ≤40: 29 + u (39 with a 10-char name) | States the fact. No ranking claim: `trades_generated` doesn't imply the invitee ranked (`server.py:14619-14650`; consensus decks `:5265`). No period, like other bell titles (`database.py:12237`) | — |
+| `gp.inbox.activated_title` | H7 | `referral_activated` bell row, title. Goes to the inviter; inbox only (PRD FR-19). *Added 2026-10-15 at growth-pm's request* | none (new type) | `@{new_username} weighed in on their first trade` *(revised 2026-10-15; was "…has their first trade ideas", which described stage 6)* | inbox: 32 + u (42 with a 10-char name; inbox only, so the ~40 push guidance applies only in Phase 2) | Matches activation at stage 7, first opinion: liked or passed on a trade (PRD FR-17). No ranking claim. No period, like other bell titles (`database.py:12237`) | — |
 | `gp.inbox.activated_body` | H7 | Same row, body (distinct from the title, per AC-18's rule) | none | `If they like a trade with you, it can surface in your deck.` | ≤90: 59 | Leaguemates' likes are mirrored into your deck (`server.py:3951-3972`; flag `trade.likes_you` on, `config/features.json:37`). It's capped and quality-gated, hence "can". "Like" is the app's verb (`TradeCard.tsx:836`). No "Fleeced" and no first person, so O5 doesn't apply | — |
 
 #### Hops H1 to H8
@@ -285,6 +285,39 @@ Row keys keep their original names, so the PRD's citations still hold. The key p
 13. **The route doesn't match the body.** The body points to the deck, but AC-19 sends the tap to League (`deepLinks.ts:306-312`). Either route it to Trades or accept the mismatch. → growth-pm, design-lead.
 14. **The row needs `new_username` in its meta.** The PRD's `referral_activated` event props don't carry it (`prd.md:660`). → growth-pm.
 15. **Another old-name string, next to this row:** `league_member_unlocked_trades` says "@X just unlocked Trade Finder." (`server.py:10542`, lead-verified). Add it to the FR-3 name sweep. → growth-pm.
+
+### Addendum: design-lead's lab slots and growth-pm's four questions (2026-10-15)
+
+Source: `growth-pm`'s questions on the lab, `mockups/referral-loop/index.html` (`design-lead`, draft PR #343, branch `mockup/referral-loop`). The strings are `mkt-writer` drafts, accepted by `marketing-lead` with one lead rewrite (A2). They're **proposed** and need the operator's approval like the rest of §A.
+
+**Lead answers:**
+1. **FR-11 as the landing headline: yes.** `{display name} invited you to {league}` works, because token-only links mean the inviter is resolved server-side and can't be supplied by the URL. It supersedes `gp.join.headline` ("@{ref} invited you to Fleeced"). The "their league" fallback reads correctly on line 2: it is the inviter's league. The FLEECED wordmark carries the product name above the fold, so the headline doesn't need it. Fallback ladder:
+   - `{display name} invited you to their league`
+   - `A leaguemate invited you to {league}` (the A5 "…to {league}" form)
+   - `A leaguemate invited you`
+2. **"Dynasty Trade Finder" on the invite OG card: yes, as a lockup only.** It goes directly with the FLEECED wordmark, smaller than it. Together they read as D-057's full name. Never standalone (AC-3 still bans it in share text, where it reads as an old brand). Never on its own line away from the wordmark: DLF has a product called "Dynasty Trade Finder". **No period in the wordmark.** "FLEECED." turns the name into a sentence, and on any surface showing a trade it reads as a verdict ("you got fleeced"). The lab draws `FLEECED` without one (line 625), which is right.
+3. **Spelling: "leaguemates"**, one word. That's the voice spec's form (`2026-07-17-assistant-gm-voice.md:29`), and it outnumbers "league-mates" 265 to 29 in `mobile/src` + `web` at `origin/main`. The banner changes, per `h1.banner.title` / `h1.banner.a11y`.
+
+**Slot fills:**
+
+| slot | lab line | proposed | chars | note · source |
+|---|---|---|---|---|
+| A2 honest note (iPhone, public TestFlight link not set) | 419 | `The iPhone beta isn't open to the public yet. Already have it? Open the invite in the app.` | 88 | **Lead rewrite.** The worker's "invite-only" would confuse a reader who is holding an invite. "Open in the app" is real: `dtf://app/league/join/:leagueId` → LeagueJoin (`deepLinks.ts:119`, `:243`). Older builds ignore `t=`, so credit falls back to the league match. No "Request TestFlight access" link in v1, per `growth-pm` |
+| OG (iii) line, under the league name | 625 | `Trades that work for both sides` | 31 | Same words as `gp.join.og_title`. No "Fleeced" and no analysis verb |
+| og:title, league known | previews | `{leagueName}: trades that work for both sides` | 33 + name | `gp.join.og_title`, unchanged. If the name runs over 27 chars: `{leagueName}` alone, cut at 59 + "…" (PRD AC-7b) |
+| og:title fallback | previews | `Dynasty trades that work for both sides` | 39 | Unchanged |
+| §5 label 1 | 734 | `All leagues` | 11 | The tiles are totals (FR-21 `totals`). Renders uppercase |
+| §5 label 2 | 742 | `By league` | 9 | FR-21 `leagues[]` |
+| "Activated" explainer | 741 | `Activated: joined from your link, then liked or passed on a trade within 14 days.` | 81 | Literal stage-7 definition (PRD FR-17, `first_opinion`). If D-8 moves the stage, this string moves with it |
+| Zero-join league line | 744 | `No joins yet`; when opens ≥ 1: `{N} opened · no joins yet` | 12 / 22 + N | The number is literal. The chevron is the next step |
+| Empty-state prompt, in place of the four tiles | 767 | `No invite links yet. Send one and its opens, joins and activations show up here.` | 80 | Counts only, never "who": the payload has no names (§8.5) |
+
+**Flags from this pass** (→ `growth-pm`, `design-lead`):
+- **The lab's landing sub-line breaks the name rule.** A1–A6 use "Fleeced finds trades where both sides come out ahead." (`web/index.html:75`), which makes Fleeced the subject of an analysis verb (the ram plays The Analyst). Use `gp.join.valueprop` instead. The shipped `index.html:75` should go into the FR-3 name sweep.
+- **The FAQ claim is false:** `web/faq.html:206` says the web app "works in any phone browser", but web sign-in needs the desktop extension. A2's footer links to that FAQ. Fix it with the landing.
+- **The desktop path has a hidden install step.** The extension is an unpacked GitHub release, not a store listing (`extension/README.md:44`). `gp.join.cta.A_desktop_help` is accurate, but few desktop invitees will sideload it. That makes iOS TestFlight even more clearly the main path under A.
+- **The activation title is revised to stage 7** (see the `gp.inbox.activated_title` row).
+- **`/contact.html` can't take a TestFlight request** (bug/idea/polish/data topics, no email field, `contact.html:71-90`). That's moot for v1. If the link returns, add a TestFlight topic and an email field first.
 
 ## B. Channel plan (mkt-partners)
 
