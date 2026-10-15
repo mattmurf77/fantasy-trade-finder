@@ -454,7 +454,7 @@ At 250 per condition the 90% CI half-width is about ±7.4 pp before clustering, 
 
 | Reviewer | Reviews | Status |
 |---|---|---|
-| `models-lead` | <ul><li>The balance rule (§0.2) against T3.</li><li>Round enablement (§0.6).</li><li>The caveats (§0.3).</li><li>The read rules (§6).</li></ul> | **Sign-off with changes, folded at `FOLDSHA`.** C1–C5 are applied (§6.1, §6.2, §0.7, and the `analytics-lead` row below). Decisions 4, 6 and 8 are answered |
+| `models-lead` | <ul><li>The balance rule (§0.2) against T3.</li><li>Round enablement (§0.6).</li><li>The caveats (§0.3).</li><li>The read rules (§6).</li></ul> | **Sign-off with changes, folded at `be0514ea`.** C1–C5 are applied (§6.1, §6.2, §0.7, and the `analytics-lead` row below). Decisions 4, 6 and 8 are answered |
 | `ux-lead` | <ul><li>The grader flow across mixed cards.</li><li>The intro line.</li><li>What an old build shows when refused (§0.7).</li></ul> | **Approve with changes, folded.** C-F1 (§0.3, §0.4), C-F2 (§0.4) and C-F3 (§0.7), plus their TestFlight steps (§3) |
 | `design-lead` | <ul><li>The hidden card's reserved empty space for the value slot and the footer (§0.3–§0.4, ux-lead C-F1), in Chalkline.</li><li>The value-free order key.</li><li>The intro line's placement.</li></ul> | **Pending** |
 | `analytics-lead` | <ul><li>The §1 metric definitions, and confirming that no event or property is needed.</li><li>**The readout method and its validity veto** *(models-lead C5)*:<ul><li>the balance check on condition assignment, per arm and per grader;</li><li>the T4 skip-asymmetry check;</li><li>the derived time-to-grade.</li></ul></li><li>A read that `analytics-lead` rules invalid suppresses the verdict.</li></ul> | **Pending** |
