@@ -12689,6 +12689,343 @@ def terms_page():
     return send_from_directory(app.static_folder, "terms.html")
 
 
+# ---------------------------------------------------------------------------
+# Join path — referral loop D-1: the device-aware install CTA
+# ---------------------------------------------------------------------------
+# Spec: docs/plans/referral-loop/prd.md §5, FR-7, FR-8, §8.2 (branch
+# plan/referral-loop @ 9adbf4ce) and engagement-eng's D-1 design. Helpers for
+# GET /app/league/join/<id>, its /go/<cta> click-through, and the /s/* CTA.
+# They sit beside the route rather than in a module of their own (design §0).
+import html as _html  # noqa: E402
+
+# THE invite-id pattern (contract C1). onboarding-eng's web capture reuses this
+# name; never define a second copy. Always use fullmatch: `$` alone would let a
+# trailing newline through.
+INVITE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+# An invite id is valid for credit this long after mint (PRD §7.1, assumed).
+_INVITE_ID_VALID_DAYS = 30
+_INVITE_SYSTEM_OWNER = "system:invite"   # event owner when `t` isn't valid
+
+# Link-preview fetchers, matched case-insensitively as UA substrings. iMessage
+# presents "facebookexternalhit/1.1 Facebot Twitterbot/1.0"; X's is Twitterbot.
+# The generic tail (bot/crawler/spider) also catches the named ones — they are
+# listed so the set the design names stays visible and tested.
+PREVIEW_UA_TOKENS: tuple[str, ...] = (
+    "facebookexternalhit", "facebot", "twitterbot", "slackbot",
+    "slack-imgproxy", "discordbot", "whatsapp", "telegrambot", "linkedinbot",
+    "bot", "crawler", "spider",
+)
+
+# UA markers of a phone that is neither iOS nor Android ("Mobi" is the MDN
+# rule of thumb; Opera Mini omits it).
+_OTHER_MOBILE_UA_TOKENS: tuple[str, ...] = ("Mobi", "Opera Mini")
+
+# Every word on the landing and the /s/* phone CTA: marketing-lead's proposed
+# gp.join.* strings (marketing-inputs.md §A + addendum A2), verbatim and all
+# pending the operator's approval (D-5). One dict so a copy change is one hunk.
+_JOIN_COPY = {
+    "page_title":         "{league} on Fleeced: Dynasty Trade Finder",
+    "page_title_none":    "Your league on Fleeced: Dynasty Trade Finder",
+    "og_title":           "{league}: trades that work for both sides",
+    "og_title_none":      "Dynasty trades that work for both sides",
+    "og_desc":            ("Rank your players on Fleeced and see trades where both "
+                           "sides come out ahead. Works with Sleeper, ESPN and MFL."),
+    "og_site":            "Fleeced: Dynasty Trade Finder",
+    "headline_both":      "{name} invited you to {league}",
+    "headline_name":      "{name} invited you to their league",
+    "headline_league":    "A leaguemate invited you to {league}",
+    "headline_none":      "A leaguemate invited you",
+    "valueprop":          ("Rank your players, then see trades in {league} where "
+                           "both sides come out ahead."),
+    "valueprop_none":     ("Rank your players, then see trades in your league "
+                           "where both sides come out ahead."),
+    "cta_ios":            "Get the iOS beta",
+    "cta_ios_help":       "Installs through Apple's TestFlight app.",
+    "retap":              ("Installed? Go back to the chat and tap the invite "
+                           "again to join {league}."),
+    "retap_none":         ("Installed? Go back to the chat and tap the invite "
+                           "again to join your league."),
+    "ios_unset_note":     ("The iPhone beta isn't open to the public yet. Already "
+                           "have it? Open the invite in the app."),
+    # /s/* uses only A2's first sentence: the second is invite-specific (Q3).
+    "share_ios_unset_note": "The iPhone beta isn't open to the public yet.",
+    "cta_desktop":        "Open the web app",
+    "cta_desktop_help":   "Sign-in uses the Fleeced extension for Chrome or Edge.",
+    "ios_secondary":      "On an iPhone or iPad?",
+    "android_note":       "Fleeced runs on iPhone and desktop web for now.",
+}
+
+# /go/<cta> → the `cta` value of the invite_landing_cta event. Closed set.
+_JOIN_GO_CTAS = {"ios": "ios_install", "web": "web_app"}
+
+_ios_install_url_warned = False
+
+
+def _invite_id_from(raw) -> str | None:
+    """The well-formed `t`, else None (a malformed value is ignored silently)."""
+    return raw if isinstance(raw, str) and INVITE_ID_RE.fullmatch(raw) else None
+
+
+def is_preview_fetcher(ua: str | None) -> bool:
+    """True for a link-preview fetcher. An empty UA counts too: no human
+    browser omits it, and an open recorded from one would inflate opens."""
+    s = (ua or "").strip().lower()
+    return not s or any(tok in s for tok in PREVIEW_UA_TOKENS)
+
+
+def device_class(ua: str | None) -> str:
+    """'ios' | 'android' | 'other' (any other phone) | 'desktop'.
+
+    iPadOS Safari sends a Macintosh UA by default, so it reads as desktop —
+    which is why the desktop layout also offers the iOS link.
+    """
+    s = ua or ""
+    if "iPhone" in s or "iPod" in s or "iPad" in s:
+        return "ios"
+    if "Android" in s:
+        return "android"
+    if any(tok in s for tok in _OTHER_MOBILE_UA_TOKENS):
+        return "other"
+    return "desktop"
+
+
+def ios_install_url() -> str | None:
+    """IOS_INSTALL_URL, read per request so setting or unsetting it needs no
+    deploy (PRD §5). Only an https:// value counts; anything else is treated
+    as unset and logged once per process. No install URL lives in code."""
+    global _ios_install_url_warned
+    raw = (os.environ.get("IOS_INSTALL_URL") or "").strip()
+    if raw.startswith("https://"):
+        return raw
+    if raw and not _ios_install_url_warned:
+        _ios_install_url_warned = True
+        log.warning("IOS_INSTALL_URL is set but not an https:// URL; "
+                    "treating it as unset")
+    return None
+
+
+def _should_record_landing(t: str | None) -> bool:
+    """FR-8's single predicate (design §4): the ledger flag on AND a
+    well-formed `t`. Whether to also record opens without a `t` (Q2) is
+    growth-pm's call — this line is where that answer goes."""
+    return t is not None and is_enabled("growth.referral_ledger")
+
+
+def _invite_status(referral: dict | None, league_id: str) -> str:
+    """valid | expired | league_mismatch | unknown, derived on read (design §3).
+    An unreadable created_at reads as expired, so no name is ever shown off it."""
+    if not referral:
+        return "unknown"
+    if str(referral.get("league_id")) != league_id:
+        return "league_mismatch"
+    try:
+        created = datetime.fromisoformat(
+            str(referral.get("created_at")).replace("Z", "+00:00"))
+    except ValueError:
+        return "expired"
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - created > timedelta(days=_INVITE_ID_VALID_DAYS):
+        return "expired"
+    return "valid"
+
+
+def _resolve_invite(t: str | None, league_id: str) -> tuple[str, dict | None]:
+    """(invite_status, referrals row incl. referrer_display_name) for `t`.
+    A failed lookup reads as unknown: the join path never errors on it."""
+    if t is None:
+        return "unknown", None
+    from . import database as _db
+    try:
+        referral = _db.get_referral_by_invite_token(t)
+    except Exception as e:
+        log.warning("join: invite lookup failed (non-fatal): %s", e)
+        referral = None
+    return _invite_status(referral, league_id), referral
+
+
+def _invite_event_owner(status: str, referral: dict | None) -> str:
+    """The inviter owns the event only for a valid id; otherwise the system
+    owner, which has no users row (the system:receipts precedent)."""
+    return referral["referrer_user_id"] if status == "valid" else _INVITE_SYSTEM_OWNER
+
+
+def _record_join_landing_open(t: str, league_id: str) -> None:
+    """FR-8, both join modes. The caller has checked _should_record_landing(t)
+    and that this is not a HEAD. A preview fetch stamps unfurled_at only; a
+    human GET stamps the open columns and fires invite_landing_opened. The
+    event never moves the inviter's users row (touch_user=False, C6) and its
+    props never carry the UA, IP, a username or a name (C4/C9)."""
+    from . import database as _db
+    ua = request.headers.get("User-Agent")
+    if is_preview_fetcher(ua):
+        _db.record_referral_landing_open(t, "unfurl")
+        return
+    _db.record_referral_landing_open(t, "open")
+    status, referral = _resolve_invite(t, league_id)
+    record_event(
+        _invite_event_owner(status, referral), "invite_landing_opened",
+        league_id=league_id, source="api",
+        props={"invite_id": t, "league_id": league_id,
+               "invite_status": status, "device_class": device_class(ua)},
+        platform="server", touch_user=False,
+    )
+
+
+_JOIN_LANDING_CSS = """
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ink-0);color:var(--chalk);font:400 14px/21px var(--font-ui)}
+main{max-width:480px;margin:0 auto;padding:32px 16px 48px}
+.wordmark{margin:0 0 32px;font:700 28px/1 var(--font-display);letter-spacing:.04em}
+.wordmark span{color:var(--ice)}
+h1{margin:0 0 12px;font:700 32px/34px var(--font-display);letter-spacing:.02em;text-transform:uppercase}
+.value{margin:0 0 24px;color:var(--chalk-dim)}
+.primary{display:flex;align-items:center;justify-content:center;min-height:44px;padding:12px 16px;border-radius:var(--r-sm);background:var(--ice);color:var(--on-ice);font:600 16px/22px var(--font-ui);text-decoration:none;transition:background-color var(--t-fast)}
+.primary:hover,.primary:active{background:var(--ice-press)}
+.help{margin:8px 0 0;color:var(--chalk-dim);font-size:13px;line-height:18px}
+.step{margin:16px 0 0}
+.note{margin:0;color:var(--chalk)}
+.secondary{display:inline-flex;align-items:center;min-height:44px;margin-top:16px;color:var(--chalk);text-decoration:underline;text-underline-offset:3px}
+a:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+"""
+
+
+def _render_join_landing(*, league_id: str, league_name: str | None,
+                         inviter_name: str | None, device: str,
+                         ios_url: str | None, t: str | None, ref: str,
+                         host: str) -> str:
+    """The FR-7 landing. Every interpolated value is HTML-escaped. The only
+    query values that reach the page are `t` (or, without one, the legacy
+    `ref`) inside the onward /go/ hrefs, URL-encoded — never as text."""
+    c, esc = _JOIN_COPY, _html.escape
+    path = "/app/league/join/" + urllib.parse.quote(league_id, safe="")
+    go_ios = path + "/go/ios" + ("?" + urllib.parse.urlencode({"t": t}) if t else "")
+    web_q = {"t": t} if t else ({"ref": ref} if ref else {})
+    go_web = path + "/go/web" + ("?" + urllib.parse.urlencode(web_q) if web_q else "")
+    # Absolute OG. Always https: there is no ProxyFix, so request.scheme
+    # reads http behind Render.
+    og_url = "https://" + host + path
+    og_image = "https://" + host + "/img/og-invite.png"
+
+    if league_name:
+        page_title = c["page_title"].format(league=league_name)
+        og_title = (c["og_title"].format(league=league_name) if len(league_name) <= 27
+                    else league_name[:59] + ("…" if len(league_name) > 59 else ""))
+        value = c["valueprop"].format(league=league_name)
+        retap = c["retap"].format(league=league_name)
+    else:
+        page_title, og_title = c["page_title_none"], c["og_title_none"]
+        value, retap = c["valueprop_none"], c["retap_none"]
+    if inviter_name and league_name:
+        headline = c["headline_both"].format(name=inviter_name, league=league_name)
+    elif inviter_name:
+        headline = c["headline_name"].format(name=inviter_name)
+    elif league_name:
+        headline = c["headline_league"].format(league=league_name)
+    else:
+        headline = c["headline_none"]
+
+    # One primary action per device state (AC-7c). No dtf:// link anywhere.
+    if device == "ios" and ios_url:
+        cta = (f'<a class="primary" href="{esc(go_ios)}">{esc(c["cta_ios"])}</a>\n'
+               f'    <p class="help">{esc(c["cta_ios_help"])}</p>\n'
+               f'    <p class="step">{esc(retap)}</p>')
+    elif device == "ios":
+        cta = f'<p class="note">{esc(c["ios_unset_note"])}</p>'
+    elif device == "desktop":
+        cta = (f'<a class="primary" href="{esc(go_web)}">{esc(c["cta_desktop"])}</a>\n'
+               f'    <p class="help">{esc(c["cta_desktop_help"])}</p>')
+        if ios_url:
+            cta += (f'\n    <a class="secondary" href="{esc(go_ios)}">'
+                    f'{esc(c["ios_secondary"])}</a>')
+    else:
+        cta = f'<p class="note">{esc(c["android_note"])}</p>'
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{esc(page_title)}</title>
+  <meta name="description" content="{esc(c["og_desc"])}">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="{esc(c["og_site"])}">
+  <meta property="og:title" content="{esc(og_title)}">
+  <meta property="og:description" content="{esc(c["og_desc"])}">
+  <meta property="og:url" content="{esc(og_url)}">
+  <meta property="og:image" content="{esc(og_image)}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/tokens.css">
+  <style>{_JOIN_LANDING_CSS}</style>
+</head>
+<body>
+  <main>
+    <p class="wordmark">FLEECED<span>.</span></p>
+    <h1>{esc(headline)}</h1>
+    <p class="value">{esc(value)}</p>
+    {cta}
+  </main>
+</body>
+</html>"""
+
+
+def _join_landing_response(league_id: str, t: str | None) -> "Response":
+    """200 landing, `growth.join_landing` on. The inviter's name comes only
+    from a VALID `t`; the league name only from Sleeper's public API (the
+    invite-meta privacy rule). Neither lookup can fail the page."""
+    status, referral = _resolve_invite(t, league_id)
+    inviter = referral.get("referrer_display_name") if status == "valid" else None
+    league_name = None
+    try:
+        meta = _fetch_sleeper_league_meta(league_id)
+        if meta:
+            league_name = meta.get("name") or None
+    except Exception as e:
+        log.info("join landing: league lookup failed (non-fatal): %s", e)
+    resp = make_response(_render_join_landing(
+        league_id=league_id, league_name=league_name, inviter_name=inviter,
+        device=device_class(request.headers.get("User-Agent")),
+        ios_url=ios_install_url(), t=t,
+        ref=(request.args.get("ref") or "").strip(), host=request.host,
+    ))
+    resp.headers["Content-Type"] = "text/html; charset=utf-8"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+def _share_cta_html(*, cta_text: str, share_kind: str) -> str:
+    """The /s/* CTA element (design §0 + §1). Its web href is always
+    /?share=<kind> — a closed set from the route (contract C5) — so the web
+    shell can tell a share arrival. With `growth.join_landing` off every device
+    gets that single button; on, phones get the device-aware treatment and
+    never a web button (a phone can't sign in on the web). The iOS href is
+    the server's own config value, never user input."""
+    esc, c = _html.escape, _JOIN_COPY
+    button = (f'<a class="cta" href="{esc("/?" + urllib.parse.urlencode({"share": share_kind}))}">'
+              f'{esc(cta_text)}</a>')
+    if not is_enabled("growth.join_landing"):
+        return button
+    device = device_class(request.headers.get("User-Agent"))
+    if device == "desktop":
+        return button
+    if device == "ios":
+        url = ios_install_url()
+        if url:
+            return (f'<a class="cta" href="{esc(url)}">{esc(c["cta_ios"])}</a>\n'
+                    f'    <p>{esc(c["cta_ios_help"])}</p>')
+        return f'<p>{esc(c["share_ios_unset_note"])}</p>'
+    return f'<p>{esc(c["android_note"])}</p>'
+
+
 @app.route("/app/league/join/<league_id>")
 def league_join_redirect(league_id):
     """Web fallback for the mobile invite deep link (P0-3).
@@ -12712,12 +13049,73 @@ def league_join_redirect(league_id):
     redirect stays a closed contract. 302, not 301: a permanent redirect
     would be cached by browsers and CDNs and outlive any future change to the
     landing page.
+
+    REFERRAL LOOP D-1 (2026-10-15). With `growth.join_landing` ON this route
+    renders the device-aware landing instead (_join_landing_response). OFF
+    keeps the 302 below unchanged, except that with `growth.referral_ledger`
+    on a well-formed `t` is forwarded too (PRD §8.2). In BOTH modes a GET with
+    a well-formed `t` and the ledger on records the open (FR-8). HEAD records
+    nothing: Flask runs this GET view for HEAD, so the method is checked here.
     """
+    t = _invite_id_from(request.args.get("t"))
+    if _should_record_landing(t) and request.method != "HEAD":
+        _record_join_landing_open(t, str(league_id))
+    if is_enabled("growth.join_landing"):
+        return _join_landing_response(str(league_id), t)
     params = {"league": str(league_id)}
     ref = (request.args.get("ref") or "").strip()
     if ref:
         params["ref"] = ref
+    if t is not None and is_enabled("growth.referral_ledger"):
+        params["t"] = t
     return redirect("/?" + urllib.parse.urlencode(params), code=302)
+
+
+@app.route("/app/league/join/<league_id>/go/<cta>")
+def league_join_go(league_id, cta):
+    """The landing's recorded click-through (PRD §8.2, referral loop D-1).
+
+    404 while `growth.join_landing` is off, for any `cta` outside {ios, web},
+    and for `ios` while IOS_INSTALL_URL is unset. `ios` → 302 to exactly
+    ios_install_url(). `web` → 302 to "/?" + urlencode() of a dict built
+    here: `league`, plus `t` when well-formed, else the inbound legacy `ref`
+    — never both, never an f-string, nothing else from the query (no next /
+    url / redirect), so no request value can reach a scheme or host.
+    invite_landing_cta fires for non-HEAD, non-preview requests. Every
+    response is no-store: a cached 404 would outlive setting the URL.
+    """
+    league_id = str(league_id)
+    t = _invite_id_from(request.args.get("t"))
+    target = None
+    if is_enabled("growth.join_landing") and cta == "ios":
+        target = ios_install_url()
+    elif is_enabled("growth.join_landing") and cta == "web":
+        params = {"league": league_id}
+        ref = (request.args.get("ref") or "").strip()
+        if t is not None:
+            params["t"] = t
+        elif ref:
+            params["ref"] = ref
+        target = "/?" + urllib.parse.urlencode(params)
+    if target is None:
+        resp = jsonify({"error": "not_found"})
+        resp.status_code = 404
+    else:
+        ua = request.headers.get("User-Agent")
+        if request.method != "HEAD" and not is_preview_fetcher(ua):
+            status, referral = _resolve_invite(t, league_id)
+            props = {"league_id": league_id, "cta": _JOIN_GO_CTAS[cta],
+                     "device_class": device_class(ua)}
+            if t is not None:
+                props["invite_id"] = t
+            record_event(
+                _invite_event_owner(status, referral), "invite_landing_cta",
+                league_id=league_id, source="api", props=props,
+                platform="server", touch_user=False,
+            )
+        resp = redirect(target, code=302)
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 # Apple team id for Universal Links. The repo's canonical value lives in
@@ -25635,13 +26033,19 @@ def _share_html(
     description: str,
     image_url: str,
     cta_text: str,
-    cta_url: str,
+    share_kind: str,
     noindex: bool = False,
 ) -> "Response":
     """Minimal HTML wrapper with OG tags + small human-readable body.
 
     `noindex` adds a robots noindex meta (the expired-trade page); left
-    False, the output is byte-identical to before the parameter existed."""
+    False, the output is byte-identical to before the parameter existed.
+
+    `share_kind` (tiers | trade | package) comes from the calling route, never
+    the request. The CTA element is _share_cta_html's (referral loop D-1): it
+    can vary by device, so the response is private + Vary: User-Agent and a
+    shared cache never hands the desktop copy to an iPhone.
+    """
     # Escape minimal HTML special chars — we never render user-controlled
     # HTML inside any attribute, so basic replacement is sufficient.
     def esc(s: str) -> str:
@@ -25649,6 +26053,7 @@ def _share_html(
                          .replace(">", "&gt;").replace('"', "&quot;")
 
     robots = '\n  <meta name="robots" content="noindex">' if noindex else ""
+    cta_html = _share_cta_html(cta_text=cta_text, share_kind=share_kind)
     html = f"""<!doctype html>
 <html lang="en">
 <head>
@@ -25685,14 +26090,15 @@ def _share_html(
     <img src="{esc(image_url)}" alt="{esc(title)}">
     <h1>{esc(title)}</h1>
     <p>{esc(description)}</p>
-    <a class="cta" href="{esc(cta_url)}">{esc(cta_text)}</a>
+    {cta_html}
     <div class="brand">Fantasy Trade Finder</div>
   </div>
 </body>
 </html>"""
     resp = make_response(html)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
-    resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Cache-Control"] = "private, max-age=300"
+    resp.headers["Vary"] = "User-Agent"
     return resp
 
 
@@ -25722,7 +26128,7 @@ def share_tiers_page(pos, username):
         description=description,
         image_url=image_url,
         cta_text="Build your tiers",
-        cta_url="/",
+        share_kind="tiers",
     )
 
 
@@ -25742,7 +26148,7 @@ def share_trade_page(token):
             description=_og_image.TRADE_LINK_EXPIRED_BODY,
             image_url="/og/trade/expired.png",
             cta_text="Find your next trade",
-            cta_url="/",
+            share_kind="trade",
             noindex=True,
         )
     title = "Trade Match"
@@ -25753,7 +26159,7 @@ def share_trade_page(token):
         description=description,
         image_url=image_url,
         cta_text="Find your next trade",
-        cta_url="/",
+        share_kind="trade",
     )
 
 
@@ -25927,7 +26333,7 @@ def share_package_page(short_id):
                      "breakdown and fairness read."),
         image_url=f"/og/p/{short_id}.png",
         cta_text="Build your own trade",
-        cta_url="/",
+        share_kind="package",
     )
 
 
