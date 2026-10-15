@@ -9,7 +9,8 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
 
 **Date:** 2026-10-15
 **Entry point:** direct ask: operator 2026-10-15 via `head-product` ("Growth loops. Need to be built and need to work. Referral growth loop is the primary one, …"); growth backlog GB-01
-**Builder:** TBD — `head-eng` allocates (likely `engagement-eng` backend + invite routes, `onboarding-eng` for web/LeagueJoin/SignIn)
+**Builder:** TBD — `head-eng` allocates (likely `engagement-eng` backend + invite routes, `onboarding-eng` for web/LeagueJoin/SignIn). **First build slice handed to `head-eng` by `head-product` 2026-10-15** (PRD §12: FR-7, FR-8, FR-9, FR-25 the `/s/*` CTA target, §8.2, `IOS_INSTALL_URL` as config), after the operator's ruling "Ok. start building D1 and D3" (PRD D-1 = option A; D-3 = the operator creates the public TestFlight link)
+**Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3)
 **Operator sign-off on waivers:** pending (one waiver: §3 has no automated runtime proof of the universal-link tap or the TestFlight install; the operator checklist is the only runtime evidence, per D-056)
 
 ---
@@ -35,8 +36,14 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   | `invite_league_pinned` (changed props, new web emitter) | + `invite_id`?; `source` gains `web_autoselect` | Invited league becomes active | mobile, web |
   | `invite_pin_failed` (changed props, new web emitter) | + `invite_id`? | Intent can't be honoured | mobile, web |
 
-  Proposed, not committed: `channel` on `invite_shared` and first-touch props on `signup`
-  ([marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo), pending `analytics-lead`, P18).
+  Granted by `analytics-lead` (P18; analytics-lead, 2026-10-15), not on Phase 1's critical
+  path: `channel` on `invite_shared` and first-touch props on `signup`
+  ([marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo)).
+  `session_init.first_touch` is an API contract change under full gates; a non-matching
+  `utm_*` or `channel` value is coerced to `other` with a counter at ingest, not dropped;
+  attribution covers only accounts created after ship (no back-fill); prod baselines stay
+  unmeasured until W3. Surface values are the existing `surface` props (`growth-pm`,
+  2026-10-15; PRD §10).
 
   → follow-through: tracking-plan addendum under `docs/business/analytics/` (owner
   `analytics-lead`); `docs/cross-client-invariants.md` § Client analytics event contract (web
@@ -60,7 +67,8 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
     impact v2. Graduation: Phase 0 done + 2 weeks with ≥95% of invite-following signups
     carrying a ledger row (PRD §2.1). Deploy-free rollback: flip off.
   - `growth.join_landing` — **new (proposed by this PRD; `growth-pm`/`head-product` to
-    accept, PRD D-7)**, default **false**. Landing vs today's 302. Graduation: words approved,
+    accept, PRD D-7)**, default **false**. Landing vs today's 302; proposed, also the `/s/*`
+    device-aware CTA target (PRD FR-25; `head-eng` confirms). Graduation: words approved,
     `design-lead` `/design-review` verdict (`design-review.md`), operator device pass.
     Rollback: flip off (T4–T7 contract).
   - `growth.invite_join_link` — existing, **flipped during Phase 1 rollout** after the #239
@@ -72,9 +80,11 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   → `config/features.json` + `backend/feature_flags.py` `FLAG_KEYS` +
   `backend/tests/fixtures/flags/release.json` together; `docs/config-reference.md`.
 - **New env vars / `model_config` keys:** `IOS_INSTALL_URL` (unset by default): the
-  landing's iOS install target (public TestFlight link under option A; App Store URL after
-  the listing). Unset ⇒ the honest note instead of a button on iPhone, and no "On an iPhone or
-  iPad?" line on desktop (PRD FR-7). Deploy-free lever: unset it.
+  landing's and the `/s/*` pages' iOS install target (PRD FR-7, FR-25): the public TestFlight
+  link under option A (chosen by the operator 2026-10-15, PRD D-1; the operator creates the
+  link, D-3); the App Store URL after the listing. An environment value only: no link value is
+  ever written in the repo. Unset ⇒ the honest note instead of a button on iPhone, and no "On
+  an iPhone or iPad?" line on desktop (PRD FR-7). Deploy-free lever: unset it.
   → `docs/config-reference.md` § Environment variables.
 
 ## 3. Evidence scope
@@ -114,6 +124,11 @@ D-056: no Maestro, no simulator, no captures.
     increments `open_count` + fires `invite_landing_opened`; preview UA sets only
     `unfurled_at`; HEAD records nothing; unknown/expired ids; click-through closed set and
     targets (no user-supplied redirect).
+  - `backend/tests/test_share_landing_cta.py` (new; PRD FR-25, AC-25): `/s/p` and
+    `/s/trade` with the gate off → CTA `href` `/` for every user agent; gate on → iPhone UA
+    links `IOS_INSTALL_URL` when set and shows the note with no CTA link when unset; desktop
+    UA links `/`; Android UA shows the note and no CTA link; the response is not
+    `public`-cacheable; `og:*` tags unchanged; no `dtf://` or user-supplied target.
   - `backend/tests/test_referral_attribution.py` (new): token credit for Sleeper, ESPN and MFL
     invitees; first session in a different league with verified membership; `unknown`,
     `expired`, `not_member` misses; group-chat second and third joiners → sibling rows;
@@ -147,7 +162,8 @@ D-056: no Maestro, no simulator, no captures.
 - [x] **Manual TestFlight checklist** (operator; the only runtime evidence mobile gets).
   Preconditions: backend deployed with `growth.referral_ledger` on; a TestFlight build with
   the client change; a second test device or account that is a member of the test league;
-  `IOS_INSTALL_URL` set if option A. Record each step's outcome in `TEST_LEDGER.md`.
+  `IOS_INSTALL_URL` set to the operator's public TestFlight link (option A, PRD D-1/D-3;
+  steps 15 and 16 also check it unset). Record each step's outcome in `TEST_LEDGER.md`.
   1. **Inviter mint.** On device A (signed in, Sleeper league L), tap Invite on League Home.
      Expected: the sheet opens within ~2 s; the message says "Fleeced" and the link has
      `t=` and **no `ref=`**.
@@ -202,7 +218,13 @@ D-056: no Maestro, no simulator, no captures.
       are comfortably tappable; on desktop, Tab shows the ice focus ring. There is no
       "already joined" landing state (no auth, and one link can credit several joiners); an
       existing user is step 7, in the app.
-- [x] **Design review** (`design-lead`): a `/design-review` verdict at
+  16. **Share landing CTA** (PRD FR-25). With `growth.join_landing` on, open a `/s/p/<id>`
+      link on each device. Expected: iPhone with `IOS_INSTALL_URL` set → the button goes to
+      the TestFlight link; iPhone with it unset, and Android → a note and **no** button;
+      desktop → the button goes to the web app (`/`). With the flag off, every device gets
+      today's button to `/`.
+- [x] **Design review** (`design-lead`; requested 2026-10-15 by `head-product`, with the
+  `ux-lead` flow review and the `analytics-lead` review of §1): a `/design-review` verdict at
   `docs/plans/referral-loop/design-review.md` before ship, covering the join landing (per-device
   states, PRD FR-7), the OG card (variant (ii), wordmark + ram), and the invite card/banner
   diff (copy and events, FR-1's busy state). Every string stays with `marketing-lead`; the
@@ -223,7 +245,7 @@ D-056: no Maestro, no simulator, no captures.
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **yes** | New `POST /api/invite/token`; `GET /app/league/join/<league_id>` (landing vs 302, `t` forwarding, open recording) and the new `/go/<cta>` click-through; `GET /api/league/invite-meta` (`t`, `inviter_display_name`, `token_status`); `POST /api/session/init` (`invite_id`); `GET /api/invite/impact` (v2 payload, `k_factor` removed) |
+| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **yes** | New `POST /api/invite/token`; `GET /app/league/join/<league_id>` (landing vs 302, `t` forwarding, open recording) and the new `/go/<cta>` click-through; `GET /api/league/invite-meta` (`t`, `inviter_display_name`, `token_status`); `POST /api/session/init` (`invite_id`; `first_touch` when that accepted change is built, full gates); `GET /api/invite/impact` (v2 payload, `k_factor` removed); `/s/*` share landings' device-aware CTA target (FR-25) |
 | `docs/data-dictionary.md` | **yes** | § `referrals`: new columns, index, status values in use, `league_id` any platform, writer named |
 | `docs/config-reference.md` | **yes** | `growth.referral_ledger`, `growth.join_landing` (new); `growth.invite_join_link` flip note; `growth.referral` reserved; `invite.k_factor_dashboard` meaning; `IOS_INSTALL_URL` env var |
 | `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | **yes** | Inviter-owned server events use a non-touching write (no `last_active_at` bump); no analytics prop key contains `token`; per-share ids in links, never usernames |
