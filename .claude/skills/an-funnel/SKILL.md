@@ -63,8 +63,10 @@ plumbs. In the agent org this is `analytics-lead`'s metrics charter.
   `.claude/skills/an-data-architect/references/registration.md`.
 - Dashboard and report specs: what a weekly funnel readout contains, at what grain,
   computable from which queries.
-- The recurring metrics-review ritual: cadence, agenda, and owner. Data flows now, so
-  the ritual is live work, not a plan.
+- The recurring metrics-review ritual: cadence, agenda and owner. It is specced
+  (program plan § Review ritual, 2026-07-17) but not yet activated. Activation is the
+  operator's call through `analytics-lead`; once activated, it runs on prod reads
+  under `/an-user-data`'s authorization gate.
 - The measurement gap register: which funnel stages are measurable today vs dark.
 
 ## Operating procedure
