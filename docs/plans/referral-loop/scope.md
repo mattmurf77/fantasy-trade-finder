@@ -65,7 +65,9 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
     Rollback: flip off (T4–T7 contract).
   - `growth.invite_join_link` — existing, **flipped during Phase 1 rollout** after the #239
     device checklist passes; meaning unchanged.
-  - `growth.referral` — existing, **untouched, reserved** for rewards (Phase 3).
+  - `growth.referral` — existing, **untouched, reserved** for rewards (Phase 3, gated on the
+    operator approving `monetization-pm`'s pricing memo; v1 is reward-free per `head-product`
+    P20).
   - `invite.k_factor_dashboard` — existing, key kept; payload changes when on (PRD §8.5).
   → `config/features.json` + `backend/feature_flags.py` `FLAG_KEYS` +
   `backend/tests/fixtures/flags/release.json` together; `docs/config-reference.md`.
@@ -126,8 +128,7 @@ D-056: no Maestro, no simulator, no captures.
     today's zeroed payload.
   - Updated: `test_invite_links.py` (T4–T7 under `growth.join_landing` off, unmodified
     assertions; T12-style registration for the new flags), `test_notif_inbox_growth.py`
-    (`referral_activated` type; title ≠ body; the `league_member_unlocked_trades` body no
-    longer says "unlocked Trade Finder", PRD FR-3), `test_account_deletion_coverage.py` and
+    (`referral_activated` type; title ≠ body), `test_account_deletion_coverage.py` and
     `test_account_data_rights.py` (new columns), the taxonomy registration tests (new names
     registered, NON_INTENT, namespaces disjoint).
 - [x] **Code-walk proof** (written by the builder into `docs/plans/referral-loop/code-walk.md`,

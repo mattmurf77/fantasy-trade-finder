@@ -3,8 +3,11 @@
 > Requirements for making the league invite loop work end to end: an existing user's
 > invite reaches a leaguemate, the leaguemate becomes an activated Fleeced user, the
 > inviter is credited and told, and every hop is measured per inviter.
-> **Status:** PRD drafted 2026-10-15; awaiting acceptance (`head-product`). Requirements
-> only: **no source file is changed by this document.**
+> **Status:** PRD drafted 2026-10-15; revised 2026-10-15 to fold `head-product` rulings P20
+> (reward-free v1), P9 (old-name strings outside this PRD's own FRs go to P9's copy-defect
+> batch) and P21 (the `docs/plans/README.md` row is approved); nothing else changes. Awaiting
+> acceptance (`head-product`). Requirements only: **no source file is changed by this
+> document.**
 > **Owner:** `growth-pm`. **Base:** `origin/main` 678834ab. **Branch:** `plan/referral-loop`.
 > **Evidence:** [loop-audit.md](loop-audit.md) (hop table H1–H8, re-verified at 678834ab).
 > **Scope block:** [scope.md](scope.md). **Backlog row:** GB-01 in
@@ -132,8 +135,11 @@ Each was considered and excluded; recorded so nobody reopens it mid-build.
 1. **Attribution SDK / deferred deep link.** Still known-unsolvable inside our constraints
    (`docs/plans/audit-p0-remediation/prd-p0-3.md:194-201`). The re-tap step (FR-7) and
    league-match fallback (FR-14) substitute.
-2. **Rewards.** v1 is credit and recognition only. `growth.referral` stays reserved for the
-   give-get program (Phase 3, `monetization-pm`).
+2. **Rewards.** v1 ships reward-free: status and recognition only (`head-product` P20,
+   2026-10-15). Rewards are paid entitlement time, so they come later (Phase 3, §12), gated
+   on the operator approving `monetization-pm`'s pricing memo: `monetization-pm` designs the
+   reward economics; `growth-pm` defines "activated" (FR-17) and the mechanics.
+   `growth.referral` stays reserved for that program.
 3. **Re-engagement credit** for an existing user who opens an invite. Backlog GB-12.
 4. **"Who invited you?" picker** ([marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo) recovery iii). A new write route; not v1.
 5. **Clipboard-based deferred linking.** iOS paste prompt; rejected in [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo).
@@ -266,14 +272,13 @@ forever (D-028).
 **FR-3 — Share text says Fleeced.** Mobile (`InviteLeaguematesBanner.tsx:132`) and web
 (`web/js/app.js:5834`) invite messages use `marketing-lead`'s approved string (proposed:
 `gp.invite.msg`, the version without the league name, which fits ~140 characters). Ships
-with the flag off too (copy is not attribution). The same name sweep covers the
-`league_member_unlocked_trades` bell row, which lands next to the inviter rows: its body
-says "@{username} just unlocked Trade Finder. Tap to look for matches." (`S:10542-10543`;
-added at `marketing-lead`'s request, [marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer) open question 15). Words from
-`marketing-lead`.
+with the flag off too (copy is not attribution). This PRD renames only the strings its own
+FRs already touch: this invite share text, the inviter rows (FR-18, FR-19) and the join
+landing (FR-7). Every other old-name string, including the `league_member_unlocked_trades`
+body (`S:10542-10543`), is `head-product`'s P9 copy-defect batch (`onboarding-pm`, after
+this wave). Words from `marketing-lead`.
 - AC-3: no invite share text contains "Dynasty Trade Finder" or "Fantasy Trade Finder"
-  (structural guard); the `league_member_unlocked_trades` body no longer says "unlocked
-  Trade Finder" (pytest).
+  (structural guard).
 
 **FR-4 — Even impressions.** `invite_cta_shown` fires on the Trades cold-start banner and the
 members-overlay footer (H1b, H1e). The banner passes the league's real `platform` and real
@@ -780,7 +785,7 @@ prop; `has_ref` stays as it is. The readout joins events to the ledger on
 | `growth.referral_ledger` | **new flag** | false | Mint route (404 off); clients' use of the id (off ⇒ byte-identical links); open recording; §7.4–§7.8 attribution, activation and notification rules; impact v2 | Phase 0 done + 2 weeks with the §2.1 instrumentation target met | Flip off: mint 404s, clients emit today's links, attribution stops; rows stay |
 | `growth.join_landing` | **new flag (proposed here; `growth-pm` to accept, D-7)** | false | Landing page vs today's 302 on `/app/league/join/<id>` | Words approved (`marketing-lead`), `design-lead` `/design-review` verdict (§13), operator device pass on iPhone / desktop / Android | Flip off: today's 302, T4–T7 contract |
 | `growth.invite_join_link` | existing (`config/features.json:190`) | false | Emitter form only (unchanged meaning) | **Flip in Phase 1** after the #239 device checklist passes (`docs/feedback/items/239-invite-universal-links/status.md` § Operator actions 4; procedure `config-reference.md:669`) | Flip off (legacy form parsed forever) |
-| `growth.referral` | existing, **reserved** | false | Nothing in v1. Its declared meaning includes reward granting (`backend/feature_flags.py:268`) | Phase 3 | — |
+| `growth.referral` | existing, **reserved** | false | Nothing in v1. Its declared meaning includes reward granting (`backend/feature_flags.py:268`) | Phase 3, gated on the operator approving the pricing memo (P20) | — |
 | `invite.k_factor_dashboard` | existing (`config/features.json:20`) | false | Impact payload v2 (FR-21). Key name kept to avoid churn; meaning updated in `config-reference.md` | Phase 2 surface | Flip off |
 | `IOS_INSTALL_URL` | **new env var** | unset | The landing's iOS install CTA (§5). Unset ⇒ honest note | Operator sets it (public TestFlight link; later the App Store URL) | Unset it |
 
@@ -792,8 +797,8 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 ## 12. Phasing and rollout
 
 - **Phase 0 (operator, no build):** run the #239 universal-link device checklist; decide CTA
-  A/B/C; if A, create the public TestFlight link; answer the reward question (default
-  reward-free); approve words via `marketing-lead`.
+  A/B/C; if A, create the public TestFlight link; approve words via `marketing-lead`. (The
+  reward question is closed: reward-free v1, `head-product` P20.)
 - **Phase 1 (build, flag-gated):** FR-1…FR-24. Backend lands first with every flag off; clients
   read the flags; nothing user-visible changes at merge except FR-3 (copy) and FR-4
   (impression events).
@@ -802,8 +807,10 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
   `/api/invite/impact` (`design-lead`: tiles with live counts in IBM Plex Mono, the operator's
   tile preference; milestone badges, if they return, use Chalkline icons, never emoji);
   option A's CTA on the `/s/*` landings (GB-02).
-- **Phase 3:** rewards (`monetization-pm`; `promo_referral` / `promo_group_unlock` sources in
-  `backend/entitlements.py:50`, never granted), behind `growth.referral`.
+- **Phase 3:** rewards, gated on the operator approving the pricing memo (P20). Rewards are
+  paid entitlement time: `monetization-pm` designs the reward economics; `growth-pm` defines
+  "activated" and the mechanics. `promo_referral` / `promo_group_unlock` sources in
+  `backend/entitlements.py:50`, never granted; behind `growth.referral`.
 
 **Phase 1 rollout sequence — each step gates the next:**
 
@@ -830,7 +837,7 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 | `engagement-pm` | In-app entry points; the notify-once rule (FR-20); the activation row as a receipt (D-046) and its routing to Trades, not League (FR-19); the join/activation timing open item (§7.8); Phase 2 pushes | via `head-product` |
 | `onboarding-pm` | LeagueJoin, SignIn banner from `invite-meta`, web landing capture, LeaguePicker companion | via `head-product` |
 | `platforms-pm` | ESPN/MFL/Fleaflicker session-init attribution and per-platform co-member verification (§7.4 step 3) | via `head-product` |
-| `monetization-pm` | Rewards (Phase 3); confirms v1 stays reward-free | via `head-product` |
+| `monetization-pm` | Reward economics for Phase 3 (paid entitlement time, in its pricing memo; the operator approves it first). v1 is reward-free by `head-product` P20 | via `head-product` |
 | `head-eng` | File allocation (likely `engagement-eng`: ledger, invite routes, landing, attribution; `onboarding-eng`: `web/`, LeagueJoin, SignIn); the `record_event` change; the token-gated league name (D-10, security) | via `head-product` |
 
 Per the non-user-surface seam rule: `growth-pm` decides what the landing shows and where the
@@ -865,7 +872,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-1 | CTA target A/B/C before the listing (§5) | **operator** | **A** |
 | D-2 | Run the #239 device checklist | **operator** | Before rollout step 6 |
 | D-3 | Create a public TestFlight link | **operator** (if A) | Yes |
-| D-4 | Rewards | **operator** via `head-product` → `monetization-pm` | Pending; **default reward-free** |
+| D-4 | Rewards | **Resolved by `head-product` P20 (2026-10-15): reward-free v1** | Status and recognition only in v1. Rewards are Phase 3, gated on the operator approving `monetization-pm`'s pricing memo; `monetization-pm` designs the economics, `growth-pm` defines "activated" and the mechanics (§12) |
 | D-5 | Approve the words (`gp.*`) | **operator** via `marketing-lead` | — |
 | D-6 | Accept the PRD; **supersede D-028 part 2** (a real join page instead of the 302 into `/`), because D-028's premise that the existing web funnel converts holds only on desktop with the extension | `head-product` (new DECISIONS entry, id claimed against `origin/main`) | Yes |
 | D-7 | Second flag `growth.join_landing` | `head-product` / `growth-pm` | Yes: independent rollback for the riskiest surface |
@@ -887,8 +894,12 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 - **`analytics-lead`:** §10 proposals, D-8, D-11, FR-22 readout, W3 baseline (nine invite/share
   events, new accounts per week, open → signup feasibility).
 - **`marketing-lead`:** final words for every quoted string, including the activation row
-  (proposed; re-check its title against stage 7, FR-19) and the
-  `league_member_unlocked_trades` body (FR-3); its S-IDs remap to the backlog's S1–S12.
+  (proposed; re-check its title against stage 7, FR-19); its S-IDs remap to the backlog's
+  S1–S12.
+- **Old-name strings: overlap resolved by P9.** `head-product` put old-name copy defects in
+  P9's copy-defect batch (`onboarding-pm`, after this wave). This PRD renames only the strings
+  its FRs touch (FR-3); the rest, including `league_member_unlocked_trades`
+  (`S:10542-10543`), go to that batch.
 - **`design-lead`:** landing + OG card + states (§13).
 - **`engagement-pm` / `onboarding-pm` / `platforms-pm` / `monetization-pm`:** §13 rows.
 - **`release-lead`:** the doc drift listed in [loop-audit.md](loop-audit.md#contradictions-found-in-re-verification).
