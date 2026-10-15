@@ -218,6 +218,8 @@ older than 7 days. This is the G-075 exposure (`living-memory/GOTCHAS.md:98-102`
 
 ## Q8. Storage footprint (for prd §10.4, AC-11 and the parallel DB-storage task)
 
+Same read as #337's Q2 (`plan/db-storage-budget`); analytics-lead runs it once for both (analytics-lead, 2026-10-15).
+
 Use read-only catalog functions only: `pg_total_relation_size` and `pg_relation_size`.
 
 - Table sizes (total, heap and indexes/TOAST), row counts, and growth over the window (rows/day)
