@@ -610,6 +610,18 @@ External scheduler (Render cron) must hit:
 
 If these stop firing, queued pushes pile up in `notification_queue` and digests/re-engagement go silent.
 
+**Known outage: `daily-tick` is killed every day (found 2026-10-15, not yet fixed).**
+- **Symptom:** every day from at least 2026-10-01 to 2026-10-14, gunicorn logged `WORKER TIMEOUT` about 13:33 UTC, ~150 s after the 13:30 run, and the tick returned **500**.
+- **Cause:**
+  - The tick does too much work inline on the request thread, past `--timeout 120`.
+  - The Wednesday 2026-10-14 traceback is inside `_run_weekly_replenishment` → `_kickoff_trade_job`, which builds decks synchronously. That pass runs Wed–Sun (`replenish_weekday`).
+  - The Monday and Tuesday kills left no traceback. That points at an earlier inline step, most likely the re-engagement scan.
+- **Consequence:**
+  - Every later step in the tick never runs: value-model refit, the players-cache guard, the rookie class-load monitor, the weekly roster-snapshot sweep, the **Usage Trends store refresh** and receipts grading.
+  - Each kill also restarts the single worker, which clears in-process caches.
+- **Diagnose:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:29–13:40 UTC, text `WORKER TIMEOUT` / `POST /api/cron/daily-tick`.
+- **Until it's fixed,** run the skipped writers by hand. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
+
 **Sweep scope (2026-09-03).** Both league sweeps are now bounded: the hourly draft-status queue and the weekly roster-snapshot work-list only return leagues whose `leagues.updated_at` is inside `database.ACTIVE_LEAGUE_WINDOW_DAYS` (30 — stamped by `upsert_league` on every `session_init`), so a league nobody opens any more stops costing platform reads. `POST /api/cron/roster-snapshot` passes `active_within_days=None` and still sweeps everything; per-league forcing is `_refresh_league_draft_status(league_id, force=True)`, which skips the cheap-skip entirely.
 
 The `not_drafted` draft-status TTL is also season-gated: 3 h inside the rookie-draft window (`_ROOKIE_DRAFT_WINDOW_*`, Apr 1 – Sep 15 UTC — dynasty rookie drafts cluster May–Aug) and 24 h outside it, since an undrafted league cannot flip out of season. `drafted` (12 h) and `unknown` (1 h) are unchanged.
@@ -626,6 +638,7 @@ The `not_drafted` draft-status TTL is also season-gated: 3 h inside the rookie-d
 - **Backfill before launch, or after an outage:** `python3 scripts/refresh_usage_trends.py --remote` (works with the flag off).
 - **A late stat correction** (after day 7): `--remote --weeks N --force`.
 - **Results** are in the server log as `usage-refresh (daily_tick|cron_route): {…}`.
+- **The daily-tick step has never completed in production**: see *Known outage* under Cron schedule. Week 5 was loaded by hand on 2026-10-15.
 - **If the store is behind,** the route serves the same numbers from a live fetch, so a stalled job degrades to the old behavior rather than an error.
 
 **`roster-snapshot` monitoring (ADR-011, 2026-08-14):** the weekly league-state sweep (Writer B) rides `daily-tick` behind the `FTF_ROSTER_SNAPSHOT_WEEKDAY` `>=` gate; on-sync capture (Writer A) needs no scheduler at all. **The `source` column is the liveness instrument** — one week after ship, run:

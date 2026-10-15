@@ -9,6 +9,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread](#2026-10-15--daily-tick-dies-at-the-120-s-worker-timeout-every-day-move-its-inline-work-off-the-request-thread)
 - [2026-10-12 — Usage Trends: run both TestFlight checklists on 1.21.2 (165), then the two design calls](#2026-10-12--usage-trends-run-both-testflight-checklists-on-1212-165-then-the-two-design-calls)
 - [2026-10-10 — Home hub: run the TestFlight checklist on 1.20.0, then the two follow-ups](#2026-10-10--home-hub-run-the-testflight-checklist-on-1200-then-the-two-follow-ups)
 - [2026-10-07 — Calibration: renew iOS signing, ship 1.18.0, collect grades, read Gate 2](#2026-10-07--calibration-renew-ios-signing-ship-1180-collect-grades-read-gate-2)
@@ -50,6 +51,11 @@
 - [Queue Hygiene Rules](#queue-hygiene-rules)
 
 ---
+
+## 2026-10-15 — Daily tick dies at the 120 s worker timeout every day: move its inline work off the request thread
+
+1. **Fix the tick** ([runbook § Known outage](../docs/runbook.md)). Weekly replenishment (Wed–Sun) and, on the other days, an earlier inline step (most likely the re-engagement scan) run on the request thread past `--timeout 120`. The worker is killed every day about 13:33 UTC. The fix: run them on daemon threads, as the tick's other heavy steps already do, then confirm a `200` and an `extra.usage_refresh` key in the tick response. *Why now:* every later step has been silently dead since at least 2026-10-01, including the roster-snapshot sweep, receipts grading and the Usage Trends store, and the daily kill restarts the only worker. The operator chose to report rather than fix on 2026-10-15.
+2. **Until then, weekly by hand:** `python3 scripts/refresh_usage_trends.py --remote` once Sleeper's state rolls to the next week. *Why now:* otherwise Usage Trends falls back to live fetches and misses stat corrections.
 
 ## 2026-10-12 — Usage Trends: run both TestFlight checklists on 1.21.2 (165), then the two design calls
 

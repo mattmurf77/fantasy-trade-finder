@@ -9,7 +9,7 @@
 - iOS 1.21.2 build 165 is on `--auto-submit` ([build](https://expo.dev/accounts/mattmurf77/projects/dtf-dynasty-trade-finder/builds/435def34-19c0-48ee-9558-ae0282c39b4e)).
 - Both branches and worktrees are ledgered in `docs/recovery/` and removed.
 
-**Next (operator):** on 1.21.2, run the 12-step checklist in [scope §3](../docs/plans/usage-trends/scope.md) and the 8-step one in [scope-order-toggle §3](../docs/plans/usage-trends/scope-order-toggle.md). Week 5 enters the store on the first daily tick (13:30 UTC) after Sleeper's state rolls to week 6. To force it: `python3 scripts/refresh_usage_trends.py --remote`.
+**Next (operator):** on 1.21.2, run the 12-step checklist in [scope §3](../docs/plans/usage-trends/scope.md) and the 8-step one in [scope-order-toggle §3](../docs/plans/usage-trends/scope-order-toggle.md). **Week 5 was loaded by hand on 2026-10-15** (30 teams; the byes CAR/KC match the schedule). The same run picked up stat corrections to weeks 1–4. **The daily tick has never refreshed the store:** it is killed by the 120 s worker timeout every day (runbook § Known outage, NEXT 2026-10-15; operator: report only). Until that's fixed, run `python3 scripts/refresh_usage_trends.py --remote` each week after Sleeper rolls over.
 
 **Open design calls (offered, not decided):**
 - a frozen player column / pinned actions for Raw stats past 4 weeks (today the whole table swipes);
