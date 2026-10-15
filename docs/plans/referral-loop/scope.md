@@ -101,7 +101,7 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   landing's and the `/s/*` pages' iOS install target (PRD FR-7, FR-25): the public TestFlight
   link under option A (chosen by the operator 2026-10-15, PRD D-1; the operator creates the
   link, D-3); the App Store URL after the listing. An environment value only: no link value is
-  ever written in the repo. Set ⇒ on desktop (and iPad), "Get it on your iPhone" with a QR
+  ever written in the repo. Set ⇒ on desktop (and iPad), "Join on your iPhone" with a QR
   code of the invite URL is the primary and the web app the secondary (PRD FR-7, D-16;
   `ux-lead` R-F3). Unset ⇒ the honest note instead of a button on iPhone, and on desktop the
   web app stays primary with no QR and no iOS link (PRD FR-7). Deploy-free lever: unset it.
@@ -143,12 +143,16 @@ D-056: no Maestro, no simulator, no captures.
     iPhone/Android/desktop CTA variants with `IOS_INSTALL_URL` set and unset, one primary
     action each, no button on Android or on iPhone with it unset, no `/contact.html`
     TestFlight-request link, the iPhone-set CTA and re-tap line numbered step 1 / step 2
-    as a two-row list whose second row has no link or button (R-F1), the desktop-set
-    QR-primary state (the QR block first under the "GET IT ON YOUR IPHONE" TickLabel; the
-    QR's payload, asserted at the encoder's input, is the join URL with `t` and no other
-    query param; the `/go/ios` text link inside that block; "Have the Fleeced extension?
-    Open the web app" as a Secondary (outlined) button after it; no ice-filled button;
-    R-F3, D-16), the desktop-unset state with the web app primary and no QR or iOS link,
+    as a two-row list ("Install Fleeced" heading row 1; row 2 "Tap the invite again, or
+    rescan its code, to join {leagueName}.", with no link or button; R-F1), the iPhone-unset
+    note "…Already have it? Tap the invite again, or rescan its code.", the desktop-set
+    QR-primary state (the QR block first under the "Join on your iPhone" TickLabel, with the
+    scan line; the QR's payload, asserted at the encoder's input, is the join URL with `t`
+    and no other query param; the `/go/ios` text link "On an iPad? Get the iOS beta, then
+    tap the invite again." inside that block; the line "Have the Fleeced extension for
+    Chrome or Edge?" with "Open the web app" as a Secondary (outlined) button after it; no
+    ice-filled button; R-F3, D-16; proposed strings until the operator approves the words,
+    PRD D-5), the desktop-unset state with the web app primary and no QR or iOS link,
     and no `dtf://` link in any variant (PRD AC-7c); the desktop-set QR itself (PRD AC-7f):
     an inline `<svg>` in the response with an accessible name (e.g. "QR code: opens this
     invite on your iPhone"), no `<img>`, `<script>` or CSS URL for it and no third-party
@@ -219,7 +223,9 @@ D-056: no Maestro, no simulator, no captures.
   the client change; a second test device or account that is a member of the test league;
   `IOS_INSTALL_URL` set to the operator's public TestFlight link (option A, PRD D-1/D-3;
   steps 15 and 16 also check it unset); the build's TestFlight "What to Test" text carries
-  the landing's re-tap line (PRD D-2, R-F1); the test league's Sleeper league chat and one
+  `gp.testflight.what_to_test`, "Here from a league invite? After installing, go back and
+  tap the invite again, or rescan its code. That opens the app on your invite." (PRD D-2,
+  R-F1); the test league's Sleeper league chat and one
   other chat app it uses (step 4b). Record each step's outcome in `TEST_LEDGER.md`. Steps
   4b, 5b, 7b, 7c and 11b are `ux-lead`'s (PR #348 review); its 11c (iPad) is merged into 11b
   and its 13b into step 13. Step 15b checks `design-lead`'s desktop QR specs (PRD D-16).
@@ -240,15 +246,20 @@ D-056: no Maestro, no simulator, no captures.
      - **4b. Re-tap from chat apps** (R-F2). After installing, re-tap a fresh invite from the
        **Sleeper league chat**, then from one other chat app the league uses. Expected: the
        app opens on LeagueJoin. **Fail if the landing page loads again**; if it does, PRD
-       FR-7's contingent installed-user line is required before rollout step 5.
+       FR-7's contingent installed-user line ("Have the app and still seeing this page? Open
+       this link in Safari, or tap it in Messages.") is required before rollout step 5, and
+       both of its routes are tested here: from the in-app browser, open the link in Safari
+       and tap it there, then tap the same link in Messages. Expected: each opens the app on
+       LeagueJoin. If Safari only reloads the landing, record it: the line is cut to "…Tap
+       the invite in Messages." (PRD FR-7).
   5. **Install, no re-tap (league match).** Repeat 3 with a fresh account on device B; after
      installing, open the app from the home screen (not the link), sign in, pick L.
      Expected: the readout shows the join with `attribution_method = league_match`.
-     - **5b. What the cold open shows** (R-F1). On step 5's cold open (TestFlight → Open, or the
-       home screen; not the link), first check that TestFlight's "What to Test" shows the
-       re-tap line next to Open, then note what SignIn and the picker show. Expected: no
-       inviter name and no auto-pin (the accepted cost); L is findable in the list. Record
-       how long it takes to pick L.
+     - **5b. What the cold open shows** (R-F1). On step 5's cold open (TestFlight → Open, or
+       the home screen; not the link), first check that TestFlight's "What to Test" shows
+       the "Here from a league invite? …" line next to Open, then note what SignIn and the
+       picker show. Expected: no inviter name and no auto-pin (the accepted cost); L is
+       findable in the list. Record how long it takes to pick L.
   6. **Installed + signed out.** With the app installed and signed out, tap a fresh link.
      Expected: the app opens (not Safari) on SignIn with the inviter named.
   7. **Installed + signed in, member of L (existing user).** Tap a fresh link. Expected: L
@@ -273,11 +284,11 @@ D-056: no Maestro, no simulator, no captures.
       `growth.join_landing` off and open a path-form link in Safari. Expected: today's 302 to
       `/?league=…`.
   11. **Desktop, with the extension.** Open a fresh link on a desktop browser with the
-      extension installed. Expected (with `IOS_INSTALL_URL` set): "Get it on your iPhone"
-      with a QR code is the primary, and "Have the Fleeced extension? Open the web app" the
-      secondary (PRD FR-7, R-F3); follow the secondary; sign in; L is auto-selected;
-      credited by token. With it unset: "Open the web app" and the extension line, as
-      before.
+      extension installed. Expected (with `IOS_INSTALL_URL` set): "Join on your iPhone" with
+      a QR code is the primary, and "Have the Fleeced extension for Chrome or Edge?" with an
+      "Open the web app" button the secondary (PRD FR-7, R-F3); follow the secondary; sign
+      in; L is auto-selected; credited by token. With it unset: "Open the web app" and the
+      extension line, as before.
       - **11b. Desktop without the extension, and iPad** (R-F3). On a desktop **without** the
         extension, open a fresh link and follow the primary action: scan the QR with an
         iPhone that doesn't have the app, install, then scan it again. Expected: the first
@@ -291,29 +302,31 @@ D-056: no Maestro, no simulator, no captures.
       web button; `open_count` increments.
   13. **Activation.** On device B (credited in step 4), open the deck in L and wait without
       swiping. Expected: device A gets **no** activation row yet. Then like or pass one
-      trade. Expected: device A gets one activation row naming @B, title and body
-      different, separate from the join row even if B swiped right after joining (unless
+      trade. Expected: device A gets one activation row naming @B, title and body different,
+      separate from the join row even if B swiped right after joining (unless
       `engagement-pm` adopts the merge-when-unread rule, PRD D-9); tapping it opens the
-      Trades tab (the hub home while `trades.finder_hub` is on), not League. The body does
-      not mention the deck (R-F6). **Fail if the body says "deck" and the tap lands
-      somewhere without one.**
+      Trades tab (the hub home while `trades.finder_hub` is on), not League. The body reads
+      "When they like a trade with you, it can show up with a "They're interested" tag." (or
+      the words the operator approved, PRD D-5) and does not mention the deck (R-F6). **Fail
+      if the body says "deck" and the tap lands somewhere without one.**
   14. **Group chat.** Post one link into a chat with two test invitees; both join. Expected:
       two ledger rows sharing the same `share_token`; device A gets one row per joiner.
-  15. **Landing primary action per device** (PRD FR-7 design rules). Open a fresh link on each
-      device and check there is exactly one primary action. iPhone with `IOS_INSTALL_URL`
-      set: "Get the iOS beta" is the ice button in step 1, step 2 (the re-tap line) is plain
-      text, not a button, the step numbers are grey, not ice, and there is no "Open in the
-      app" button. iPhone with it unset, and Android: no button and no "Request TestFlight
-      access" link; the note is readable (not the faintest grey). Desktop with
-      `IOS_INSTALL_URL` set: the QR block comes first under "GET IT ON YOUR IPHONE", the iOS
-      link sits in that block as plain text, "Have the Fleeced extension? Open the web app"
-      is an outlined button below it, and **no button is filled ice** (R-F3, D-16).
+  15. **Landing primary action per device** (PRD FR-7 design rules). Open a fresh link on
+      each device and check there is exactly one primary action. iPhone with
+      `IOS_INSTALL_URL` set: "Install Fleeced" heads step 1 with "Get the iOS beta" as the
+      ice button, step 2 (the re-tap line) is plain text, not a button, the step numbers are
+      grey, not ice, and there is no "Open in the app" button. iPhone with it unset, and
+      Android: no button and no "Request TestFlight access" link; the note is readable (not
+      the faintest grey). Desktop with `IOS_INSTALL_URL` set: the QR block comes first under
+      "JOIN ON YOUR IPHONE" (the TickLabel's caps), the iPad link sits in that block as
+      plain text, "Have the Fleeced extension for Chrome or Edge?" with an outlined "Open
+      the web app" button comes below it, and **no button is filled ice** (R-F3, D-16).
       Desktop with it unset: "Open the web app" is the ice button, the extension line is
       dimmer, and there is no QR and no iOS link. On every device the page is dark (on
-      desktop-set, apart from the QR's light panel), says "Fleeced", and buttons
-      are comfortably tappable; on desktop, Tab shows the ice focus ring. There is no
-      "already joined" landing state (no auth, and one link can credit several joiners); an
-      existing user is step 7, in the app.
+      desktop-set, apart from the QR's light panel), says "Fleeced", and buttons are
+      comfortably tappable; on desktop, Tab shows the ice focus ring. There is no "already
+      joined" landing state (no auth, and one link can credit several joiners); an existing
+      user is step 7, in the app.
       - **15b. Scan the desktop QR** (PRD FR-7, D-16). With `IOS_INSTALL_URL` set, open a
         fresh link on a desktop and scan its QR with an iPhone's Camera, from a normal
         sitting distance. Expected: with the app **installed**, the app opens on

@@ -1,4 +1,4 @@
-> **Owner:** marketing-lead (proposed; operator approval of words pending). Copied verbatim from marketing-lead's wave-2 working file on 2026-10-15 (re-copied 2026-10-15 after the FR-25 addendum) so the PRD's citations stay durable.
+> **Owner:** marketing-lead (proposed; operator approval of words pending). Copied verbatim from marketing-lead's wave-2 working file on 2026-10-15 (re-copied 2026-10-15 after the ux-lead strings addendum) so the PRD's citations stay durable.
 
 # marketing-lead, wave 2: referral loop words, channels and UTM convention (task 3)
 
@@ -146,7 +146,7 @@ Each is cited in its section. Items marked *lead-verified* I re-checked myself.
 | `gp.push.referral_body` | H7 | Future push body | none | `Once they rank, trades with them can use their board, not just consensus.` | ~110 (guidance, assumed): 73 | Same line as the inbox body | O5 |
 | `gp.push.referral_inbox` | H7 | Future inbox line | none | Reuse `gp.push.joined_inbox_title` and `_body`. Phase 2 adds a push to the existing row, not a second row | — | — | — |
 | `gp.inbox.activated_title` | H7 | `referral_activated` bell row, title. Goes to the inviter; inbox only (PRD FR-19). *Added 2026-10-15 at growth-pm's request* | none (new type) | `@{new_username} weighed in on their first trade` *(revised 2026-10-15; was "…has their first trade ideas", which described stage 6)* | inbox: 32 + u (42 with a 10-char name; inbox only, so the ~40 push guidance applies only in Phase 2) | Matches activation at stage 7, first opinion: liked or passed on a trade (PRD FR-17). No ranking claim. No period, like other bell titles (`database.py:12237`) | — |
-| `gp.inbox.activated_body` | H7 | Same row, body (distinct from the title, per AC-18's rule) | none | `If they like a trade with you, it can surface in your deck.` | ≤90: 59 | Leaguemates' likes are mirrored into your deck (`server.py:3951-3972`; flag `trade.likes_you` on, `config/features.json:37`). It's capped and quality-gated, hence "can". "Like" is the app's verb (`TradeCard.tsx:836`). No "Fleeced" and no first person, so O5 doesn't apply | — |
+| `gp.inbox.activated_body` | H7 | Same row, body (distinct from the title, per AC-18's rule) | none | `When they like a trade with you, it can show up with a "They're interested" tag.` *(revised 2026-10-15, ux-lead R-F6: the tap lands on the Trades hub, so the body no longer promises the deck. Was "…it can surface in your deck.")* | ≤90: 80 | Leaguemates' likes are mirrored into your deck (`server.py:3951-3972`; flag `trade.likes_you` on, `config/features.json:37`). It's capped and quality-gated, hence "can". "Like" is the app's verb (`TradeCard.tsx:836`). No "Fleeced" and no first person, so O5 doesn't apply | — |
 
 #### Hops H1 to H8
 
@@ -302,7 +302,7 @@ Source: `growth-pm`'s questions on the lab, `mockups/referral-loop/index.html` (
 
 | slot | lab line | proposed | chars | note · source |
 |---|---|---|---|---|
-| A2 honest note (iPhone, public TestFlight link not set) | 419 | `The iPhone beta isn't open to the public yet. Already have it? Open the invite in the app.` | 88 | **Lead rewrite.** The worker's "invite-only" would confuse a reader who is holding an invite. "Open in the app" is real: `dtf://app/league/join/:leagueId` → LeagueJoin (`deepLinks.ts:119`, `:243`). Older builds ignore `t=`, so credit falls back to the league match. No "Request TestFlight access" link in v1, per `growth-pm` |
+| A2 honest note (iPhone, public TestFlight link not set) | 419 | `The iPhone beta isn't open to the public yet. Already have it? Tap the invite again, or rescan its code.` *(revised 2026-10-15: the `dtf://` button is gone, PRD non-goal 13, so "Open the invite in the app" gave no action; was "…Already have it? Open the invite in the app.")* | 101 | **Lead rewrite.** The worker's "invite-only" would confuse a reader who is holding an invite. "Open in the app" is real: `dtf://app/league/join/:leagueId` → LeagueJoin (`deepLinks.ts:119`, `:243`). Older builds ignore `t=`, so credit falls back to the league match. No "Request TestFlight access" link in v1, per `growth-pm` |
 | OG (iii) line, under the league name | 625 | `Trades that work for both sides` | 31 | Same words as `gp.join.og_title`. No "Fleeced" and no analysis verb |
 | og:title, league known | previews | `{leagueName}: trades that work for both sides` | 33 + name | `gp.join.og_title`, unchanged. If the name runs over 27 chars: `{leagueName}` alone, cut at 59 + "…" (PRD AC-7b) |
 | og:title fallback | previews | `Dynasty trades that work for both sides` | 39 | Unchanged |
@@ -324,6 +324,26 @@ Source: `growth-pm`'s questions on the lab, `mockups/referral-loop/index.html` (
 | Android / other phones | `Fleeced runs on iPhone and desktop web for now.` (47) | same | `gp.join.android_note`, reused as is. It names no invite |
 
 FR-25 doesn't unify the two desktop labels, and nothing here asks it to. `_share_html` takes a single `cta_text` (`server.py:25465`), so the iPhone-set label needs a per-branch value. AC-25 should test the label as well as the href and the note. → `growth-pm`, `head-eng`.
+
+**`ux-lead`'s review of PR #348 (R-F1, R-F2, R-F3, R-F6), at `60d3120b`.** `mkt-writer` drafted these; `marketing-lead` accepted them with three lead edits. Proposed:
+
+| # | key | proposed | chars | note · source |
+|---|---|---|---|---|
+| 1a | `gp.join.step1` (step-1 heading, iPhone with URL set) | `Install Fleeced` | 15 | The button (`gp.join.cta.A_ios`, "Get the iOS beta") and its help line stay unchanged. The heading names the task; the button names what you get |
+| 1b | `gp.join.step2` (replaces `gp.join.retap` on A1) | `Tap the invite again, or rescan its code, to join {leagueName}.`; fallback `…to join your league.` | 51 + name / 62 | **Lead edit.** The worker's "Go back to the chat…" is wrong for anyone who scanned the desktop QR: their invite is on the desktop. The landing can't tell the two arrivals apart, so step 2 is neutral. The re-tap = universal link → J3 → credit by token (PRD J2) |
+| 2a | `gp.join.desktop.qr_title` (desktop primary, URL set) | `Join on your iPhone` | 19 | Replaces `ux-lead`'s draft "Get it on your iPhone" (21 chars, over the cap; "it" had nothing to refer to under a league-invite headline) |
+| 2b | `gp.join.desktop.qr_help` | `Scan with your iPhone camera. After installing, scan again to join.` | 67 | The second scan is the re-tap (PRD J2). That the camera opens a universal link is **assumed** (Apple behavior) |
+| 2c | `gp.join.desktop.ext_lead` + button `gp.join.cta.A_desktop` | line `Have the Fleeced extension for Chrome or Edge?` + button `Open the web app` | 46 / 16 | A line plus a button. As one label it would run 44 chars. Sign-in needs the sideloaded extension (`web/js/browser-auth.js:1`; `extension/README.md:44`) |
+| 2d | `gp.join.desktop.ipad` (text link in the primary block) | `On an iPad? Get the iOS beta, then tap the invite again.` | 55 | **Lead edit:** it adds the iPad's missing step 2. An iPad can't scan its own screen. `supportsTablet: true` (`app.json:17`) |
+| 3 | `gp.inbox.activated_body` | `When they like a trade with you, it can show up with a "They're interested" tag.` | 80 | It names no place, so there's no deck promise (R-F6). "can", because likes-you is capped and gated (`server.py:3951`; flag `trade.likes_you`). **Dependency:** it quotes the pill label at `TradeCard.tsx:525`, so if that label changes, this string changes too (→ `head-eng`) |
+| 4 | `gp.testflight.what_to_test` (the operator pastes it) | `Here from a league invite? After installing, go back and tap the invite again, or rescan its code. That opens the app on your invite.` | 133 | **Lead edit:** the worker's "Instead of Open" is dropped. Tapping Open still works: the invite intent survives a later re-tap, and credit falls back to the league match (FR-14). No league name |
+| 5 | `gp.join.iab_wayout` (**contingent** on checklist step 4b) | `Have the app and still seeing this page? Open this link in Safari, or tap it in Messages.` | 89 | Only if an in-app browser reopens the landing (R-F2). Step 4b must test **both** routes. If Safari doesn't hand off to the app, cut it to `…Tap the invite in Messages.`. If it ships, it replaces A2's last sentence rather than adding a third |
+| 6 | A2 note, revised | see the A2 row above | 101 | Matches 1b |
+
+Open from this pass (→ `growth-pm`, `ux-lead`, `design-lead`):
+- The step numbering's layout is `design-lead`'s.
+- The camera-to-universal-link behavior is assumed until step 4b runs.
+- The share-page iPhone note ("…Already have it? Open Fleeced.") stays as it is. It has no invite, so it needs no re-tap.
 
 **Flags from this pass** (→ `growth-pm`, `design-lead`):
 - **The lab's landing sub-line breaks the name rule.** A1–A6 use "Fleeced finds trades where both sides come out ahead." (`web/index.html:75`), which makes Fleeced the subject of an analysis verb (the ram plays The Analyst). Use `gp.join.valueprop` instead. The shipped `index.html:75` should go into the FR-3 name sweep.
