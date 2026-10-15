@@ -170,32 +170,44 @@ App Store Connect privacy-label check is the operator's.
   `referred_user_id` (PRD §10, prd.md:886 @ ace09cf3; scope §1). Both need updating to C1 and C2.
 - **R3.** PRD FR-17 (prd.md:551-556 @ ace09cf3) must take its qualifying events from `FUNNEL_STAGES` (C5).
 
-## UTM convention v1 (accepted by `analytics-lead` 2026-10-15)
+## UTM convention (final, P18). Accepted by analytics-lead 2026-10-15; vocabulary from growth-pm's D5 answers, relayed by head-product 2026-10-15
 
-From [marketing-inputs.md §C](../../plans/referral-loop/marketing-inputs.md) (`:533-546`); this
-settles the convention half of P18 / PRD D-11 (prd.md:1064 @ ace09cf3), and the build is deferred.
-- **Params:** `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`; no `utm_term`. Each value
-  matches `^[a-z0-9_]{1,40}$` and comes from the closed vocabulary below.
-- **`ref` = who; UTMs = surface or channel.** With the ledger on, `t` carries "who" instead of
-  `ref` (PRD FR-2, prd.md:302-308 @ ace09cf3). A UTM never carries a username, email, league name or league id.
-- **Coercion, never a drop:** at ingest, a value outside the regex or vocabulary becomes `other`;
-  the event and the key are kept.
-- **Registration timing:** `utm_*` on `invite_link_opened`, `share_link_opened` and web
-  `app_opened`, and `first_utm_*` on `signup`, are registered when their emitters ship, not now.
-- **Event `surface` props keep their values;** this bridge maps them:
+- **Params and regex are unchanged.** There are four params (`utm_source`, `utm_medium`,
+  `utm_campaign`, `utm_content`) and no `utm_term`. Each value matches `^[a-z0-9_]{1,40}$`. At
+  ingest, a value outside the regex or the vocabulary is coerced to `other`; it is never dropped.
+- **Closed vocabulary per param:**
 
-| `utm_content` | Existing `surface` prop | `utm_source` | `utm_medium` | `utm_campaign` |
-|---|---|---|---|---|
-| `invite_card` | `league_home` (card) | `ios_app` | `invite` | `league_invite` |
-| `invite_banner` | `trades_banner` | `ios_app` | `invite` | `league_invite` |
-| `league_tab` | `league_home` (inline link; indistinguishable until it gets a new surface value) | `ios_app` | `invite` | `league_invite` |
-| `matches_empty` · `members_overlay` · `notif_empty` | same names | `ios_app` | `invite` | `league_invite` |
-| `web_invite` | `web_invite` (new, PRD FR-5, prd.md:348-351 @ ace09cf3) | `web_app` | `invite` | `league_invite` |
-| `share_package` | `calc_live`, `calc_in_league` | `ios_app` | `share` | `trade_share` |
-| `trade_card` | `trades_liked` + S1 | `ios_app` | `share` | `trade_share` |
-| `tier_share` | reserved, not emitted | `ios_app` | `share` | `tier_share` |
+| Param | Values |
+|---|---|
+| `utm_source` | `ios_app` \| `web_app` \| `<partner_slug>` (from the partner registry; later) |
+| `utm_medium` | `invite` \| `share` \| `creator` \| `partner` |
+| `utm_campaign` | `league_invite` \| `trade_share` \| `tier_share` (reserved, not emitted) \| `<yyyy>_<name>` (partners; later) |
+| `utm_content` | `image` \| `text` for in-app invites and shares (invites are `text`); `bio_link` \| `video_desc` \| `newsletter` \| `pinned_post` for partners (later) |
 
-The partner/creator and App Store `ct` rows stay as drafted in §C, unbuilt.
+  The partner rows and the App Store `ct` row (`ct=<utm_campaign>`, not a UTM) are as drafted in
+  [marketing-inputs.md §C](../../plans/referral-loop/marketing-inputs.md) (`:549-550` @ ace09cf3).
+- **The surface is never in the URL.** The canonical surface values are the existing `surface`
+  prop values:
+  - invite: `league_home`, `members_overlay`, `matches_empty`, `notif_empty`, `trades_banner`,
+    plus the new `web_invite`;
+  - share: `calc_live`, `calc_in_league`, `trades_liked`.
+
+  For an invite, the surface is recovered through `invite_id` → the ledger's `surface` column,
+  written at mint (PRD §10 surface vocabulary, prd.md:937-952, and §9 ledger columns,
+  prd.md:852 @ ace09cf3).
+- **Link format is the `kind` prop** on `share_link_opened` (`package` | `trade` | `ref_root`),
+  not a surface.
+- **Retired names.** `invite_card`, `invite_banner`, `league_tab`, `share_package` and
+  `trade_card` are never emitted as values. The inline League link reports `league_home`.
+- **`ref` PII.** The opaque `t` closes the username-in-`ref` risk (PRD FR-2, prd.md:302-308 @
+  ace09cf3). Legacy `ref` links already in the wild are still parsed, and `has_ref` stays a boolean.
+- **Measurement limit (stated, nothing granted).** A share-link *recipient* open carries `kind`
+  but not the sharer's surface, unless the shared artifact stores its surface; the sharer-side
+  events carry it. This is acceptable at beta. Revisit if growth asks which share surface converts.
+- **`signup.attribution`:** see the Events table (`token|league_match|legacy_ref|none`, plus
+  `attribution_miss`). It is canonical and supersedes P18's `link|none`.
+- **Registration timing is unchanged:** `utm_*` and `first_utm_*` are registered when their
+  emitters ship.
 
 ## Verification
 
