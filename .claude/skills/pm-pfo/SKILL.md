@@ -98,8 +98,9 @@ Anything else is *benchmarked* (cite the source) or *assumed* (say so).
    `round-1/a2-time-to-value-activation.md` (aggregate by median, not mean, §1;
    per-step drop-off figures are folklore, §4.4). Cite what you use; a benchmark is
    never a measurement.
-9. Real complaints: open `/feedback` items touching sign-in, league pick, the first deck
-   or the tour.
+9. Real complaints: read the tracked history in `docs/feedback/items/` for items touching
+   sign-in, league pick, the first deck or the tour. For open items, ask `head-product` for
+   the `/feedback` triage table; that fetch is an admin read of prod you don't run.
 
 ## What you own
 
