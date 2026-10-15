@@ -22,6 +22,15 @@ These override any default tendency. If generated UI contains one of these, it i
 8. No box-shadow except `--shadow-sheet` on sheets/menus/toasts.
 9. No new hues. If a color isn't in this file or `cross-client-invariants.md`, don't ship it.
 
+### Operator-approved exceptions
+
+| Rule bent | Scope | Decision | Date |
+|---|---|---|---|
+| Ice in ~3 places per screen at most ([`brand.md`](brand.md) § Color philosophy) | **Home position tiles only:** every banded tile draws its suggested Buy/Sell side in ice, up to four, so Home can show five ice elements counting the active tab. The Buyer/Seller tags there use flare (D-204 (1)); flare is informational, so the tags are not an exception. | [D-204](../../living-memory/DECISIONS.md) (2) | 2026-10-10 |
+| Ice is rationed ([`brand.md`](brand.md) § Color philosophy): a full-width ice fill, the largest ice surface allowed | **One full-width ice-filled hero entry tile per landing screen.** First instance: `OverhaulEntryCard` (the Team overhaul entry), which `TradesScreen` mounts above the utility row in the slot the Draft cell held. It counts toward the ice ration, and every color comes from the single `HERO_TONE` constant in `mobile/src/components/OverhaulEntryCard.tsx`. A true red was requested; it is **not approved** and needs a new token plus an ADR-005 amendment (open: `living-memory/NEXT.md`, 2026-09-08 section, item 3). | [D-192](../../living-memory/DECISIONS.md) | 2026-09-08 |
+
+Other exceptions recorded elsewhere are listed in the `design-review` skill's exceptions register.
+
 ## Color tokens
 
 Dark-only (unchanged). All values hex; define as CSS variables in `web/css/styles.css`, mirror in `mobile/src/theme/colors.ts` and `extension/*.css`.
@@ -86,7 +95,7 @@ Trio-ranking rank accents (rank-1/2 card borders + badge fills — web `.ranked-
 ### Preserved invariants (do not restyle — see `docs/cross-client-invariants.md`)
 
 Positions: QB `#F97316` · RB `#22C55E` · WR `#3B82F6` · TE `#A855F7`.
-Tiers (8-tier pick-value ladder, 2026-07-12): 4+ 1sts `#f87171` · 3 1sts `#e879f9` · 2 1sts `#fbbf24` · 1st `#2dd4bf` · 2nd `#38bdf8` · 3rd `#f472b6` · 4th `#a3e635` · FA `#7a7f96` (label renamed from "Waivers" 2026-07-17; key `waivers`). Tier hues never share a hue with a position color (tiers = bright 400-level family, positions = deeper 500-level; tier red-400 vs `--neg` red-500 and tier fuchsia-400 vs TE purple-500 rely on the same bright-vs-deep separation).
+Tiers (8-tier pick-value ladder, 2026-07-12): 4+ 1sts `#f87171` · 3 1sts `#e879f9` · 2 1sts `#fbbf24` · 1 1st `#2dd4bf` · 2nd `#38bdf8` · 3rd `#f472b6` · 4th `#a3e635` · FA `#7a7f96` (label renamed from "Waivers" 2026-07-17; key `waivers`). Tier hues never share a hue with a position color (tiers = bright 400-level family, positions = deeper 500-level; tier red-400 vs `--neg` red-500 and tier fuchsia-400 vs TE purple-500 rely on the same bright-vs-deep separation).
 These are data encodings rendered on ink surfaces (rails, badges, meter segments), never used as chrome/brand colors.
 
 ## Typography
