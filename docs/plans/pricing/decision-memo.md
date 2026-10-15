@@ -16,11 +16,12 @@
 - **Prices: $6.99/mo (14-day trial) and $34.99/yr ("1 month" trial, "save 58%").** Set them now, while there are no
   subscribers: later, a raise notifies every subscriber and a cut passes through to all of them.
 - **Founder: $119**, non-consumable, cap 100 on the server, App Store build only, Family Sharing off; expect single digits.
-- **Season Pass: defer to 2027** as a non-renewing subscription: $24.99 ($22.99 in July), access to 2028-02-15. A $19.99
-  June–July early-bird would beat annual per covered month. Rookie Pass deferred. **Tips ship as built;** no ads or affiliate.
-- **Referral v2:** one Pro month per activated leaguemate, both sides, cap 2 per season, no milestone, grants by state.
-- **No paid launch before** Sleeper commercial coverage, Apple and RevenueCat setup, seven eng fixes, and ≥2 weeks of
-  observe mode. Two fixes stop free Pro: sandbox webhooks grant in prod; a Season Pass purchase projects as perpetual.
+  **Season Pass: defer to 2027**, non-renewing, $24.99 ($22.99 in July), to 2028-02-15 (a $19.99 June–July early-bird
+  would beat annual per covered month); Rookie Pass deferred. **Tips ship as built;** no ads or affiliate. **Referral v2:**
+  one Pro month per activated leaguemate, both sides, cap 2 per season, no milestone, grants by state.
+- **No paid launch before** Gate 0 (the operator's yes/no on paid use of platform data), Apple and RevenueCat setup,
+  eight eng fixes, and ≥2 weeks of observe mode. Two fixes stop free Pro: sandbox webhooks grant in prod; a Season Pass
+  purchase projects as perpetual. Infra runs $43–87/mo, so break-even is ~18–35 annual subscribers.
 - **Riskiest assumption: enough users sync 2+ leagues.** It's unmeasured, and one read-only query tests it. Under 20%,
   Pro still ships (single-league users lose nothing), but the one-shot Founder window waits for a new pillar.
 
@@ -37,14 +38,13 @@
 | 7 | Tester comp | 90-day Pro comp before enforcement, plus the Founder offer | Perpetual comp | A perpetual comp takes the warmest users out of the paying pool forever |
 | 8 | Referral v2 | 1 month per activated leaguemate, both sides, cap 2/season, no milestone | July: cap 4–6 + milestone | Too generous: rewards plus trial cover the whole season, leaving no paid moment |
 | 9 | Ads / affiliate | Not now; reopen on the §4.5 trigger | Web ads or affiliate at launch | Trust and Sleeper-terms exposure, for $150–700/mo even at 1,000 DAU [B, July appendix] |
-| 10 | Sleeper coverage | **Gate 0:** no paid launch until the operator confirms commercial coverage | Launch, ask later | Losing platform access ends the product, not just the revenue |
+| 10 | Gate 0 | **Operator yes/no on paid use of platform data** before public launch (step 9) | Launch without the call | Losing platform access ends the product, not just the revenue |
 | 11 | Kill criteria | WAT and W1-retention thresholds (§8.2) | None | Damage from gating goes unseen at n ≈ 16 |
 
 ## 1. Question & context
 
 **Question.** What does FTF charge for, at what prices, and in what order? The answer has to be final enough for the
 operator to approve and for `head-eng` to scope; it feeds ASC setup, `GET /api/paywall/config`, the gate list and launch.
-
 **Context.** FTF is pre-revenue, TestFlight-only, run by one operator, with 3–16 measured users (§2). The purchase stack
 is built but dark (RevenueCat client, webhook ledger and projector, PaywallScreen, tip jar, manual-grant routes), and
 **nothing is gated:** `_require_pro` (`backend/server.py:30965-30977`) wraps zero routes (`iap-enablement/scope.md:39-41`).
@@ -56,8 +56,10 @@ set up as "1 month"; the tip jar (`ftf_tip_199/499/999`, grants nothing); the `f
 **never tolled**: no data-generating action is ever gated. **Its source, "timing doc §7/§11", is on no ref**; the best
 paraphrases are `origin/claude/new-user-feedback-06dabd:living-memory/HANDOFF.md:195` and `iap-enablement/scope.md:39-41`.
 *P20 (head-product, 2026-10-15):* referral v1 has no rewards; this memo designs v2, and `growth-pm` defines "activated".
-*E2 (head-product):* Sleeper's 2026-10-06 Terms (§11.1, §11.3) bar commercial use and automated access without written
-consent, superseding the July "no ToS restricting commercial use" (`…-research-appendix.md:57`); hence Gate 0.
+*E2 (head-product):* Sleeper's 2026-10-06 Terms (§11.1, §11.3) restrict commercial use and automated access,
+superseding the July "no ToS restricting commercial use" (`…-research-appendix.md:57`). That is the public reason for
+**Gate 0**: before public launch, the operator gives a yes/no on paid use of platform data (operator ruling,
+2026-10-15). The memo records only that the gate exists and, later, that answer.
 
 ## 2. Evidence: facts vs assumptions
 
@@ -68,13 +70,13 @@ consent, superseding the July "no ToS restricting commercial use" (`…-research
 | Every `monetize.*` flag is false; `monetize.pro`, `season_pass` and `founder` are never read | M | `features.json:141-148`; `feature_flags.py:260-290` |
 | Entitlements + paywall flags both on = **enforcing**; `/api/me/entitlements` reports `enforcing` from one flag | M | `entitlements.py:257-265`; `server.py:30989` |
 | The RevenueCat webhook has no sandbox/production check. `NON_RENEWING_PURCHASE` is activating, and expiry is read only from `expiration_at_ms`, so if it's absent the grant is perpetual | M | `server.py:31149-31179`; `entitlements.py:342-343, 535, 556-557` |
-| `entitlement_granted` is fired but not registered in the taxonomy | M | `entitlements.py:302`; repo-facts §6 |
-| Users: 16 (08-05/08-09); 3–5 (08-12 to 08-14); ~10 testers (~08-20); 6 users sent 92 proposals (08-21 to 08-29) | M | repo-facts §8 table |
-| **Leagues per account** | P analytics-lead | "16 users, 7 leagues" (`2026-08-09-mobile-ux-audit/05-appendix.md:47`) says nothing per account |
-| DB: 1,051,078,660 B of 5,246,714,000 B used (20.03%) on 2026-09-15, after compaction; "close to full" on 2026-10-15; operator rules out more disk. Storage per user, infra cost and cost per user are **[P]** | M | `db-storage-reduction/release.md:50-51`; draft PR #337 `requirements.md` §1, C-1; pending analytics-lead (W3), head-bizops |
+| `entitlement_granted` is fired but missing from `SERVER_FIRED_EVENTS`, so Python `INTENT_EVENTS` and the SQL deny-list disagree | M | `entitlements.py:302`; analytics-lead report, 2026-10-15 |
+| Users: 16 (08-05/08-09); 3–5 (08-12 to 08-14); ~10 testers (~08-20); WAU ≈ 4 and MAU ≥ 8 (proxies, 2026-10-05) | M | repo-facts §8 table; head-bizops, 2026-10-15 |
+| **Leagues per account; storage per active user** | P (W3) | Unmeasured until W3, which is with the operator (analytics-lead report, 2026-10-15). "16 users, 7 leagues" (`2026-08-09-mobile-ux-audit/05-appendix.md:47`) says nothing per account |
+| DB: 1,051,078,660 B of 5,246,714,000 B used (20.03%) on 2026-09-15, after compaction; "close to full" on 2026-10-15; operator rules out more disk | M | `db-storage-reduction/release.md:50-51`; draft PR #337 `requirements.md` §1, C-1 |
+| Infra run-rate $43.45–87.45/mo; variable COGS $0.01–0.07 per user-month (AI $0 while the key is off) | M/B/A by line (§7) | head-bizops, 2026-10-15 |
 | Apple: SBP 15%; Season Pass must be non-renewing; no TestFlight sale; no "30-day" trial | B | Apple pages in the platform research, accessed 2026-10-15 |
-| Monthly median $8 (North America $9.99); annual median $34.80 (NA $39.99) | B | RevenueCat SOSA 2026, https://www.revenuecat.com/state-of-subscription-apps (blog 2026-03-19, updated 2026-09-11) |
-| Trial→paid: monthly 10–16 days 46.6%; annual 17–32 days 44.6% | B | https://www.revenuecat.com/blog/growth/free-trial-length (2026-09-28) |
+| Monthly median $8 (North America $9.99); annual median $34.80 (NA $39.99). Trial→paid: monthly 10–16 days 46.6%; annual 17–32 days 44.6% | B | RevenueCat SOSA 2026, https://www.revenuecat.com/state-of-subscription-apps (blog 2026-03-19, updated 2026-09-11); https://www.revenuecat.com/blog/growth/free-trial-length (2026-09-28) |
 | Lifetime "often priced at 5–12x the annual"; lifetime-dominant apps have the lowest revenue per install | B | https://www.revenuecat.com/blog/growth/lifetime-subscriptions (2025-11-12); SOSA 2026 |
 | Multi-league share, gate-hit demand, willingness to pay, paywall conversion | A | Nothing is measured; every conversion figure below is benchmarked or assumed |
 
@@ -162,7 +164,6 @@ onboarding-end paywall at launch (PRD R5 waits for retention data), and the 90-d
 
 **Why $6.99 monthly:** monthly is the decoy, annual the pre-selected hero. Four in-season months cost $27.96 (vs $19.96
 at $4.99), nudging seasonal buyers to the $34.99 annual. It equals Dynasty Scout and sits under Dynasty Nerds' $7.99.
-
 **Why not $39.99 yet:** launch Pro is two multi-league features, so charging the NA median risks trial→paid. Moving
 $34.99→$39.99 later is +14%, notice only, and Apple's "keep current price" option lets early subscribers keep theirs.
 That headroom is real: $39.99 would still undercut every paid dynasty annual found (the cheapest is $49.99, §2.1).
@@ -170,15 +171,14 @@ That headroom is real: $39.99 would still undercut every paid dynasty annual fou
 **Pushback on the lead's rationale:** Apple's consent threshold isn't why to set prices now. A later $4.99→$6.99 raise is
 +40%, under the ">50% **and** >~$5" line, so notice only (platform research §6). The real reasons: no notice cost today;
 every later raise emails every subscriber and starts a 12-month clock before a second needs consent; cuts always pass
-through; and 5.6 bars raising prices "in a tricky manner".
-
-**Server change:** `_PAYWALL_PRODUCTS` (`server.py:31009-31015`) gets `$6.99` as monthly fallback copy; StoreKit-localized
+through; and 5.6 bars raising prices "in a tricky manner". **Server change:** `_PAYWALL_PRODUCTS` (`server.py:31009-31015`) gets `$6.99` as monthly fallback copy; StoreKit-localized
 prices stay authoritative on iOS (`server.py:31044-31048`).
 
 ### 4.2 Net per SKU
 
-SBP is 15% from the first sale once enrolled. RevenueCat is $0 below $2,500 monthly tracked revenue (MTR), then 1% of
-gross [B, https://www.revenuecat.com/pricing/, 2026-10-15].
+Apple takes 15% with the SBP and 30% without. **Enrollment is unconfirmed** (head-bizops, 2026-10-15, operator-paste
+item 6), so both columns stay. RevenueCat is $0 below $2,500 monthly tracked revenue (MTR), then 1% of gross [B,
+https://www.revenuecat.com/pricing/, 2026-10-15].
 
 | SKU | Store type | Price | Net at 15% | Net at 30% (if SBP missed) | RevenueCat 1% (past $2.5k MTR) |
 |---|---|---|---|---|---|
@@ -194,7 +194,6 @@ Apple remits US sales tax on IAP, so net is 85% of list. Reaching $2.5k MTR take
 
 **Why defer:** a 2026 pass bought at a mid-season launch covers ~4 months. It needs a new product type, the rework
 below, and a new app version (Apple's rule for the first non-renewing IAP). Annual, with its 1-month trial, covers launch.
-
 **Shape:** `ftf_season_pass_2027`, a **non-renewing subscription** with a new id; never a non-consumable season SKU, as
 product type can't change later. On sale 2027-07-01 to 2027-11-30 ($22.99 through Jul 31, $24.99 after); access from
 purchase to **2028-02-15**, after the fantasy playoffs, with that date on the purchase sheet (5.6).
@@ -232,22 +231,20 @@ auto-renewal explains first, then links to Manage Subscriptions and the refund p
 
 **Price evidence:** $119 is 3.40× annual and 17× monthly. RevenueCat's "often 5–12x" means $175–420 [B], but it also
 advises pricing "just above expected LTV" (July appendix :10). From SOSA 2026's renewal ranges (23–40%, 44–64%, 56–70%,
-with the third rate held steady after), an annual subscriber pays for **1.5–2.3 years**, an expected LTV of $51–79 gross.
-**$119 is 1.5–2.3× that.** A 5-year loyalist pays $175, so $119 is ~$56 short, a worst case of ~$5.6k gross under the cap.
-No competitor sells a lifetime plan (§2.1); $119 is about 1.5 years of Dynasty Nerds' $79.99 annual.
+third rate held after), an annual subscriber pays for **1.5–2.3 years**, an LTV of $51–79 gross, so **$119 is 1.5–2.3×
+that.** A 5-year loyalist pays $175: ~$56 short, a worst case of ~$5.6k gross under the cap. No competitor sells a
+lifetime plan (§2.1); $119 is about 1.5 years of Dynasty Nerds' $79.99 annual. **Recommend $119 over $149 (4.3×):** with a
+tiny list and a one-shot window, a visible sell-out beats the margin. Lead with value, define "lifetime" in the Terms of
+Use as the product's lifetime, never sell an unbuilt pillar (5.6).
 
-**Recommend $119 over $149 (4.3×):** with a tiny list and a one-shot window, a visible sell-out beats the margin. Lead
-with value, define "lifetime" in the Terms of Use as the product's lifetime, never sell an unbuilt pillar (5.6).
+**Storage liability:** founders never churn on price and keep generating decks, ~3.3 MB of permanent core data per run
+(head-bizops, 2026-10-15). In dollars that's $0.60–4.20 per founder over 5 years against $101.15 net (§7); capacity is the
+real limit, and the cap bounds it. **Testers:** a 90-day Pro comp bulk-granted **before** enforcement
+(`00-platform-foundation.md:173`; Pro PRD Q4), plus the Founder offer; comps don't use cap slots (Founder PRD D4).
 
-**Storage liability:** founders never churn on price and keep generating decks, ≈ 8.2 MB per generation run (~9 KB × ~910
-rows, computed from draft PR #337 §3.1), on a disk the operator won't grow. The cap bounds it; the cost is pending (§7).
-
-**Testers:** a 90-day Pro comp bulk-granted **before** enforcement (`00-platform-foundation.md:173`; Pro PRD Q4), plus the
-Founder offer; comps don't use cap slots (Founder PRD D4).
-
-**Sell-through, honestly:** ~10–16 testers [M] at the warm-list norm of ~5% (≈50 lifetime deals per ~1,000-person list
-[B, July appendix :15]) is roughly **one sale**. Launch traffic is unknown [A]. Plan for single digits in month one; the
-PRD's "viable" 25 (`founder-lifetime/prd.md:177`) is a stretch.
+**Sell-through, honestly:** ~10–16 testers [M] at the warm-list norm of ~5% [B, July appendix :15] is roughly **one
+sale**. Launch traffic is unknown [A]. Plan for single digits in month one; the PRD's "viable" 25
+(`founder-lifetime/prd.md:177`) is a stretch.
 
 ### 4.5 Tips, ads, affiliate
 
@@ -256,9 +253,8 @@ PRD's "viable" 25 (`founder-lifetime/prd.md:177`) is a stretch.
 
 **Ads and affiliate: not now.** No DAU to sell (3–16 users [M]); the plainest "commercial use" of Sleeper-derived
 surfaces (Gate 0); they undercut "your board, not a consensus" (`open-access-onboarding.md:196-205`); $150–700/mo at 1,000 DAU [B].
-
-**Reopen trigger, all of:** Sleeper coverage confirmed in writing; **≥500 DAU sustained for 4 weeks** (July's mobile-ads
-gate); WAT and W1 retention stable for 8 weeks post-paywall. Affiliate also needs a signed DFS partner and FTC copy, web first.
+**Reopen trigger, all of:** Gate 0 yes; **≥500 DAU sustained for 4 weeks** (July's mobile-ads gate); WAT and W1
+retention stable for 8 weeks post-paywall. Affiliate also needs a signed DFS partner and FTC copy, web first.
 
 ## 5. App Store / StoreKit implications & fees (hard constraints)
 
@@ -281,25 +277,23 @@ gate); WAT and W1 retention stable for 8 weeks post-paywall. Affiliate also need
 
 Monthly is "2 weeks" and annual "1 month". Benchmarks back both: 10–16-day monthly trials convert at 46.6%, 17–32-day
 annual at 44.6% with a 47.5% first renewal [B, 2026-09-28]. Both are far longer than any competitor's (≤3 days found:
-FantasyPros and Dynasty Scout 3 days, Dynasty Nerds none; §2.1), which makes them a differentiator. Two gaps: PRD R18's timeline says "Day 14 — you're charged"
-and R19's `trial_ending` push is unbuilt (repo-facts §1); both need the real "1 month" charge date, and a trial without
-the promised push blocks launch (`pro-subscription/prd.md:134-141`). The sandbox checklist still says annual is "14 days
-free" (`sandbox-test-checklist.md:100`).
+FantasyPros and Dynasty Scout 3 days, Dynasty Nerds none; §2.1), which makes them a differentiator. Two gaps: PRD R18's
+timeline says "Day 14 — you're charged" and R19's `trial_ending` push is unbuilt (repo-facts §1); both need the real
+"1 month" charge date, and a trial without the promised push blocks launch (`pro-subscription/prd.md:134-141`). The
+sandbox checklist still says annual is "14 days free" (`sandbox-test-checklist.md:100`).
 
 ### 6.2 Referral v2 reward economics (v1 has no rewards, per P20)
 
 **Reward: one free Pro month per activated leaguemate, both sides.** `growth-pm` defines "activated" (July: verified
-co-member plus ≥25 ranking matchups). Open access counts grading as ranking, so pin it to an existing event such as
+co-member plus ≥25 ranking matchups); since open access counts grading as ranking, pin it to an existing event such as
 `ranking_complete_first_time` ("board usable"). An invitee is rewarded once, ever.
 
 **Cap: 2 rewarded months per referrer per season** (July 4–6; foundation ≤4). In-season engagement runs ~5.5 months,
 Sept to Feb 15 [A]; keeping rewards plus the 1-month trial at or under half of that allows ~1.75 months, so **2**. A cap
 of 4 plus the trial is 5 free months, the whole season with no paid decision, given to the likeliest payers. Past the
-cap, activations earn recognition on the signal-quality invite CTA (Pro PRD R13): free, and true to the product.
-
-**Milestone (8+ activated → free Season Pass): drop it from v2.** There's no pass until 2027, eight activated members in
-one league has never been seen (16 users across 7 leagues [M]), and it breaks the cap by design. Revisit it, and the
-group unlock, when any league reaches 5 activated members [A].
+cap, activations earn recognition on the signal-quality invite CTA (Pro PRD R13). **Drop the milestone** (8+ activated →
+free Season Pass): no pass exists until 2027, eight activated in one league has never been seen (16 users across 7
+leagues [M]), and it breaks the cap. Revisit it, and the group unlock, when any league reaches 5 activated members [A].
 
 **Grant mechanism by user state:**
 
@@ -314,43 +308,59 @@ group unlock, when any league reaches 5 activated members [A].
 
 **Stacking:** a promo month then a trial is fine, since the promo leaves intro eligibility alone. While a promo row is
 active, suppress contextual paywall prompts (keep the Settings row), with one in-app note, not a push, 3 days before expiry.
-
 **Compliance:** reward in-app actions, never installs, sign-ups, ratings or reviews (3.2.2(x)); rewards are additive,
 never needed to get what was paid for (3.1.2(a)); no referral manipulation (5.6.3), bulk contact select (5.1.2(v)) or
 typed unlock code (3.1.1); describe it in Review Notes (2.3.1(a)). **Fraud:** only verified co-members of a league the
 referrer synced count, one reward per Sleeper user ever. `referrals` has `UNIQUE(referrer, referred)` (`database.py:2598-2618`)
-but no writer; v2 adds per-referred-user uniqueness.
-
-**Reward cost = forgone revenue + infra per user-month.** Forgone revenue is ≈0 for a free user (unless they'd have paid
+but no writer; v2 adds per-referred-user uniqueness. **Reward cost = forgone revenue + infra per user-month.** Forgone revenue is ≈0 for a free user (unless they'd have paid
 that month) and at most one month's net for a payer ($5.94 monthly, $2.48 annual-equivalent): **worst case $11.88 per
-referrer per season.** Infra is **pending fin-pnl / head-bizops**; the storage share is pending analytics-lead.
+referrer per season.** Infra is now $0.01–0.07 per user-month (head-bizops, 2026-10-15), so a reward's cost is almost all
+forgone revenue.
 
 ## 7. Unit economics
 
-| Cost line | Status | Monthly |
+Source: head-bizops, 2026-10-15: `fin-pnl`'s interim unit economics, accepted the same day and provisional until the
+operator pastes invoices. The labels are theirs.
+
+| Cost line | $/mo | Label and basis |
+|---|---:|---|
+| Render web service, Standard (1 CPU / 2 GB) | 25.00 | Price benchmarked; instance type measured 2026-09-22. `render.yaml:14` still says `plan: free`: blueprint drift, routed to head-eng |
+| Render crons ×3 | 3.00 | $1/mo minimum per job; price benchmarked, runtime assumed |
+| Render Postgres `basic-256mb` | 6.00 | Benchmarked (`render.yaml:6`) |
+| Postgres storage | 1.20 | 5 GB − 1 GB included = 4 GB × $0.30; benchmarked; disk size measured 2026-09-15 |
+| Render workspace · bandwidth and build minutes | 0 or 25 · 0 | Hobby vs Pro, plan unknown [A] · inside the Hobby allowances [A] |
+| EAS (Expo) | 0 or 19 | ~9 iOS builds per 30 days lately (Free covers 15); plan assumed, counts measured. **Spike risk:** August's ~64 builds would have cost ~$102 on Starter |
+| Anthropic, product · ops tooling | 0 · ? | Key unset on Render, measured 2026-09-03 · unknown **[P, operator paste]** |
+| Apple Developer · domains · RevenueCat | 8.25 · 0 · 0 | $99/yr, benchmarked · none registered, measured (repo) · free under $2.5k MTR |
+| **Run-rate** | **43.45–87.45** | Low = Hobby + EAS Free; high = Pro + EAS Starter. Excludes Anthropic ops |
+| Ceiling | 200 | Hard operating budget (`budget-scalability/scope.md:4`, 2026-09-04) |
+
+**Variable COGS: $0.01–0.07 per user per month,** almost all storage. AI is $0 while the key stays off (head-bizops
+recommends keeping it off, their Decision 2); if enabled, up to ~$0.80 per heavy user per month. **Fixed cost per MAU** at
+the ~8 MAU proxy (WAU ≈ 4, MAU ≥ 8) is **$5.43–10.93**. **Break-even** = run-rate ÷ net per subscriber-month ($2.48
+annual, $5.94 monthly); netting the $0.07 COGS ceiling off each subscriber moves it under 3% (17.5 → 18.0):
+
+| Run-rate | Annual subscribers | Monthly subscribers |
 |---|---|---|
-| Apple Developer Program | $99/yr [M, `docs/business/context.md:81`] | $8.25 |
-| Render web service | `render.yaml:14` says `plan: free`; the dashboard is **unverified**. Starter ~$7/mo is assumed (`2026-07-17-render-paid-tier-memo.md:15`) | $0, or ~$7 [A] |
-| Render Postgres `basic-256mb` | `render.yaml:6`; price not recorded in the repo | **[P head-bizops]** |
-| Postgres disk, 5 GB | $0.30/GB-month (`db-storage-reduction/status.md:5-6`) | $1.50 (computed) |
-| Three Render crons | Billable (`GOTCHAS.md` G-018); plan unrecorded | **[P]** |
-| EAS builds | Plan unrecorded | **[P]** |
-| Anthropic API (matchup selection; `claude-sonnet-4-6` when the key is set) | No spend recorded (`smart_matchup_generator.py:23, 59`) | **[P]** |
-| Domain(s) | Unrecorded | **[P]** |
-| RevenueCat | $0 under $2.5k MTR | $0 |
-| **Ceiling** | Hard $200/month operating budget (`budget-scalability/scope.md:4`, 2026-09-04) | — |
+| $43.45 | 43.45 ÷ 2.48 ≈ **17.5** | 43.45 ÷ 5.94 ≈ **7.3** |
+| $87.45 | 87.45 ÷ 2.48 ≈ **35.3** | 87.45 ÷ 5.94 ≈ **14.7** |
+| $200 ceiling | ≈ 81 | ≈ 34 |
 
-**Break-even** (computed, at $2.48 net per annual user-month and $5.94 monthly): **every $10/month of cost needs 4.0
-annual or 1.7 monthly subscribers.** The known $9.75 floor (Apple plus disk) breaks even at **4 annual**, the $200 ceiling
-at **81 annual or 34 monthly**. The real number waits on head-bizops' monthly total.
+**Storage is a capacity limit first.** The next disk step (5 → 10 GB) is +$1.50/mo and permanent, because disk can't
+shrink. PR #337's archive plan is $18–75 cheaper over 12 months, but its build cost and migration risk are unpriced
+(head-bizops). League history alone reaches ~470 MB at 1,000 leagues (`adr-011-…:114-115`).
 
-**Storage is a capacity limit, not a dollar cost.** The operator ruled out more disk (C-1), so a user's real cost is a
-share of a fixed 5 GB. Measured: 539 MB of database on 1.05 GB of volume after compaction (2026-09-15), "close to full"
-by 2026-10-15; `deck_impressions` ≈ 8.2 MB per run (computed, draft PR #337 §3.1). League history alone reaches ~470 MB
-at 1,000 leagues (`adr-011-…:114-115`). Storage per active user waits on analytics-lead's W3 inventory (§3.4 there).
+**Per run, the cost basis is ~3.3 MB of permanent core data** (910 rows × 3.64 KB, measured 2026-09-15). That 3.64 KB
+matches `deck_impressions` bytes, including indexes and TOAST, ÷ the 67,159 rows compaction checked [computed]. The
+≈ 8.2 MB this memo used before (910 × ~9 KB, computed from draft PR #337 §3.1) comes from the 2026-09-15 runway estimate:
+"measured payloads plus allocation overhead", applied to whole-volume bytes that carry ~49% WAL and platform overhead
+(`db-storage-reduction/release.md:19`; #337 §3.2). It's a conservative capacity-planning rate, not marginal cost.
 
-**Lifetime liability = founders × (storage and $ per user-month) × active months;** the cap bounds the first term. Over 5
-years a founder stays net-positive while all-in cost is under $101.15 ÷ 60 = $1.69/month [computed; cost pending].
+**Storage per active user is unmeasured until W3** (analytics-lead report, 2026-10-15). Definition: bytes of user-keyed
+tables ÷ 28-day active accounts (≥ 1 INTENT event), split into a fixed part and a per-user part, because
+`deck_impressions` scales with generation runs, not users (≥ 4.3 runs per active user-league per month, head-bizops).
+**Founder liability:** 5 years × $0.01–0.07 a month = **$0.60–4.20** per founder, against $101.15 net. Dollars don't bind;
+disk capacity does, and the cap of 100 bounds it.
 
 ## 8. Activation sequence
 
@@ -358,13 +368,13 @@ years a founder stays net-positive while all-in cost is under $101.15 ÷ 60 = $1
 
 | # | Gate | Owner | Flag / state | Exit criterion |
 |---|---|---|---|---|
-| 0 | **Sleeper commercial coverage:** written consent for commercial use and automated access under Terms §11.1/§11.3 (2026-10-06) | Operator (`platforms-pm` drafts the ask; also checks ESPN/MFL terms) | None; blocks gates 6–10 | Operator confirms coverage in writing |
+| 0 | **Operator yes/no on paid use of platform data.** The public reason: Sleeper Terms §11.1/§11.3 (2026-10-06) | Operator | None; due before step 9 (public launch) | The operator's yes/no. Nothing else is recorded |
 | 1 | **Apple setup:** Paid Apps agreement; **SBP enrollment before the first sale**; ASC products `ftf_pro_monthly` $6.99 ("2 weeks"), `ftf_pro_annual` $34.99 ("1 month"), one group, same level; tips; `ftf_founder` | Operator (`release-lead` keeps the checklist) | ASC only | Products "Ready to Submit" |
 | 2 | **Multiseat off** on both subscriptions; **Family Sharing off** on every SKU | Operator | ASC only | Verified in ASC |
 | 3 | **RevenueCat:** project, `pro` entitlement, Offering marked Current. Key names only: `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (EAS env, baked in at build time); `REVENUECAT_WEBHOOK_SECRET` (Render env **and** `secrets.local.env`) | Operator | Webhook 503s until the secret is set (`server.py:31162-31163`) | Wrong bearer → 401, right → 200 |
 | 4 | **Design review of placement:** Settings row; 402 touchpoints on second-league sync and Portfolio; **no** paywall before the first suggestion; the onboarding-end soft paywall waits for retention data. Moved ahead of the build (the lead's list had it seventh), since the 402s ship with the cap | `ux-lead` and `design-lead`, before step 5's build | None | Signed-off spec |
 | 5 | **Eng fixes** (below) | `head-eng` | Dark | CI green; TEST_LEDGER evidence |
-| 6 | **Analytics:** register `entitlement_granted`; add `paywall_dismissed`, `trial_started`, `pro_gate_hit`, `subscription_cancelled`, `referral_*`, each registered in `analytics_taxonomy.py` and classified in `NON_INTENT_EVENTS` **in the same commit as its emitter**; confirm funnel coverage | `analytics-lead` | `analytics.*` already on | Events visible in reports |
+| 6 | **Analytics:** conversion truth comes from the server ledger (`entitlements`, `subscription_events`); renewal, expiry, refund and trial are ledger rows, not events. Add **one NON_INTENT gate-hit event** (`pro_gate_hit`), plus `paywall_plan_selected` only if a pricing test needs it. `referral_*` events come from growth-pm's PRD. No client `trial_started` / `subscription_cancelled` / `paywall_dismissed`: the ledger has the first two, and dismissal is `paywall_viewed` with no purchase. Gap: no App Store Server Notifications route; RevenueCat webhooks cover it | `analytics-lead` grants each when the build's scope §1 asks | `analytics.*` already on | Grants recorded in the build scope |
 | 7 | **Observe mode:** `monetize.entitlements` on **alone**, after fix 5a | Operator flips; `analytics-lead` reads | `monetize.entitlements` | ≥2 weeks of `would_block` counts per gate (§9) |
 | 8 | **Operator sandbox checklist** in TestFlight, updated for $6.99, Founder, the cap, and sandbox events not granting in prod | Operator (`release-lead` updates it) | Sandbox | Every row passes; logged in TEST_LEDGER |
 | 9 | **Public launch:** tester comps bulk-granted **first**, then paywall + Pro + Founder window + tips. Onboarding-end soft paywall only after 8 weeks of retention data | Operator, `release-lead` | `monetize.paywall`, `monetize.pro`, `monetize.founder` | §8.2 watch starts |
@@ -383,20 +393,22 @@ years a founder stays net-positive while all-in cost is under $101.15 ÷ 60 = $1
   from the cap and revenue. **Land before the Founder SKU is created.**
 - **(g)** League-cap gate in observe mode: a second distinct current-season league at session init logs `would_block`,
   then returns 402 `league_limit` (PRD R3) once (a) enforces.
+- **(h) Register `entitlement_granted`** in `SERVER_FIRED_EVENTS` with **no** NON_INTENT row. analytics-lead granted
+  this; it's the INTENT truth row, and today Python `INTENT_EVENTS` and the SQL deny-list disagree on it.
+  **It must land before any `monetize.*` flag flips.**
 
 ### 8.2 Guardrail kill criteria
 
-Thresholds are **[A]** until `analytics-lead` replaces them with observe-mode baselines. Window: the 4 weeks before vs
-the 4 weeks after `monetize.pro` enforcement.
+Thresholds are **[A]**: analytics-lead's W3 baselines replace them once W3 runs, refined by observe-mode readings.
+Window: the 4 weeks before vs the 4 weeks after `monetize.pro` enforcement. At n ≈ 16 these are directional, not
+significant (power needed ~174 per arm, `2026-08-09-mobile-ux-audit/06-resolutions.md:22`). WAT also moves with the NFL
+calendar; compare against the comped tester cohort, which sees no gates for 90 days.
 
 | Criterion | Trigger | Action |
 |---|---|---|
 | **K1, WAT** | 4-week mean WAT (`analytics_queries.py:49-56`) after enforcement falls below **85%** of the mean before it, for **2 consecutive weeks** | `monetize.pro` off: gates stop; purchases and grants keep working |
 | **K2, W1 retention** | Week-1 retention of the 4 signup cohorts after enforcement (`report_retention`, `:1307`) averages **≥10 points** below the 4 cohorts before | Same as K1 |
 | **K3, gate churn (small n)** | Of users who hit `pro_gate_hit{league_limit}` and were WAT-active in the prior 14 days, **2 of the first 5, or ≥30% once there are 10+**, go WAT-dark for the 14 days after | Revert the cap only |
-
-At n ≈ 16 these are directional, not significant: power needed ~174 per arm (`2026-08-09-mobile-ux-audit/06-resolutions.md:22`).
-WAT also moves with the NFL calendar; compare against the comped tester cohort, which sees no gates for 90 days.
 
 ## 9. What would change the price
 
@@ -415,10 +427,12 @@ WAT also moves with the NFL calendar; compare against the comped tester cohort, 
 ## 10. Riskiest assumption & cheapest test
 
 **Riskiest assumption: a meaningful share of active users sync 2+ leagues in a season.** Both launch features depend on
-it, and it's unmeasured ("16 users / 7 leagues" says nothing per account). **Cheapest test:** one read-only production
-query by `analytics-lead` (once the prod-read grant is in force, per draft PR #337 §3.4): distinct current-season
-leagues per active account, and the share of WAT users with 2+. No build; observe-mode `would_block` counts confirm it.
-**Second-riskiest:** Sleeper coverage (Gate 0), tested by the operator's written ask.
+it, and it's **unmeasured until W3, which is with the operator** (analytics-lead report, 2026-10-15).
+**Cheapest test: one read-only production query by `analytics-lead`.** `COUNT(DISTINCT league_id)` over `user_events`
+where `event_type='league_synced'`, per `COALESCE(accounts.account_id, user_id)`, over 28-day active accounts with
+`device_exclusion()` applied. **Not** `leagues.user_id` (only the first importer), and **not** `league_members`. No
+build; observe-mode `would_block` counts confirm it. **Second-riskiest:** Gate 0, the operator's yes/no on paid use of
+platform data.
 
 | Multi-league share of active accounts | What launches |
 |---|---|
@@ -437,7 +451,7 @@ leagues per active account, and the share of WAT users with 2+. No build; observ
 7. **Testers:** 90-day manual Pro comp before enforcement, plus the Founder offer. *Recommend yes.*
 8. **Referral v2:** 1 month per activated leaguemate, both sides, cap 2/season, no milestone or group unlock, grants by state (§6.2). *Recommend yes.*
 9. **Ads and affiliate:** no, until the §4.5 trigger. *Recommend yes.*
-10. **Gate 0:** no paid launch until you confirm Sleeper commercial coverage in writing. *Recommend yes.*
+10. **Gate 0:** before public launch (step 9), give a yes/no on paid use of platform data; the memo records only that answer. *Recommend yes.*
 11. **Kill criteria K1–K3** by default, replaced by measured baselines (§8.2). *Recommend yes.*
 12. **Van Westendorp:** send the 4-question tester survey before step 9 (outbound, so you send it). *Recommend yes.*
 13. **Founder branch:** pre-approve deferring the Founder window if multi-league is under 20% (§10). *Recommend yes.*
@@ -446,13 +460,12 @@ leagues per active account, and the share of WAT users with 2+. No build; observ
 
 | Owner box | Deliverable |
 |---|---|
-| Operator | Decisions 1–13. Gate 0 (Sleeper). Gates 1–3: ASC, SBP, multiseat and Family Sharing off, RevenueCat keys by key name in `secrets.local.env` and Render. Flag flips at 7 and 9. Send the Van Westendorp survey |
-| `head-eng` | The scope block (full feature gates) for eng fixes 5a–5g and the Season Pass rework (§4.3 a–d). The sandbox fix (5f) lands before the Founder SKU exists |
-| `analytics-lead` | The multi-league query (§10); W3 storage per active user; event registrations (step 6); funnel-coverage confirmation; observe-mode `would_block` readout; baselines that replace K1–K3 |
+| Operator | Decisions 1–13. Gate 0 yes/no before step 9. Gates 1–3: ASC, SBP, multiseat and Family Sharing off, RevenueCat keys by key name in `secrets.local.env` and Render. The W3 prod-read grant. head-bizops' operator-paste items (Render invoice, Anthropic ops spend, Expo plan, SBP enrollment). Flag flips at 7 and 9. Send the Van Westendorp survey |
+| `head-eng` | The scope block (full feature gates) for eng fixes 5a–5h and the Season Pass rework (§4.3 a–d). 5h lands before any `monetize.*` flag flips; 5f before the Founder SKU exists |
+| `analytics-lead` | Once the operator grants W3: the multi-league share (§10 method) and storage per active user (§7 definition). Step-6 grants when the build's scope §1 asks. The observe-mode `would_block` readout. W3 baselines that replace K1–K3 |
 | `growth-pm` | Define "activated"; the referral v2 build spec from §6.2 (reward writer, state branching, cap of 2, fraud rules); the promotional-offer sandbox test plan |
-| `head-bizops` (fin-pnl) | Monthly infra total by line (the §7 pending rows; verify the Render web and DB plans in the dashboard); cost per active user-month; break-even and Founder-liability numbers |
+| `head-bizops` (fin-pnl) | Turn the interim §7 into invoiced numbers once the operator pastes them. Reconcile the web-plan drift with head-eng. Update break-even if the run-rate moves outside $43.45–87.45 |
 | `ux-lead` + `design-lead` | Step 4 placement review: Settings row, 402 touchpoints, cap-swap confirm copy, Founder overlap prompt, the trial timeline for "1 month". Chalkline-compliant |
-| `platforms-pm` | Draft the Sleeper written-consent ask (Terms §11.1/§11.3); check ESPN and MFL terms for the same exposure |
 | `marketing-lead` | Grid and price copy ("save 58%", the Portfolio line); Founder launch-window copy with no future-pillar claims; the Van Westendorp survey text |
 | `release-lead` | ASC configuration checklist, including **re-verify PFF+ and Dynasty Nerds prices before setting ASC prices** (§2.1 caveats); Review Notes (cap, referral); sandbox checklist update (fix `:100`; add Founder, the cap, sandbox-not-granting); `web/privacy.html` IAP language in the same release as the paywall |
 | `monetization-pm` (this box), after decisions | Stale-doc sweep: **`docs/plans/README.md` `monetization/` row** (:85 on `678834ab`; it says "No `monetize.*` flag exists … nothing was implemented", which is false); `monetization/README.md:6, 16, 35`; Pro PRD R4 (`:100-101`) and R18 "Day 14" (`:117-119`); Season Pass PRD non-consumable shape (`:32-33, 45-46, 75-79`); `season-pass/lld.md:103` ($79 Founder); Founder PRD FR3 TestFlight Stripe rail (`:116-120`); foundation doc `:23, :38-40`; `docs/business/context.md:20-27, 34` |
