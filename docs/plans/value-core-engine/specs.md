@@ -59,7 +59,7 @@ from dataclasses import dataclass, field
 from typing import Literal, Mapping
 
 ENGINE_ID = "value_core"
-ENGINE_VERSION = "value-core-3"   # 2: breakup + picks_for_players (2026-10-09); 3: redundant (2026-10-10)
+ENGINE_VERSION = "value-core-4"   # 2: breakup + picks_for_players; 3: redundant; 4: superflex QB cap (2026-10-14)
 TOP_WINDOW = 30  # the guardrails and the per-asset cap are defined on the first 30 cards
 CORE_POSITIONS = ("QB", "RB", "WR", "TE")
 
@@ -166,7 +166,7 @@ class CoreConfig:
     throwin_min_ratio: float = 2.0   # recipient's value / consensus market a throw-in needs
     breakup_min_ratio: float = 0.70  # the viewer's best piece received / best piece given; below = "breakup"
     rebuilders_keep_picks: bool = True   # a rebuilding team never gives a pick while receiving a player
-    redundancy_min_ratio: float = 0.70   # no TE (any format) / QB (1QB) a team already covers at >= this x his value; 0 = off
+    redundancy_min_ratio: float = 0.70   # no TE / QB beyond the slots a team starts (QB incl. superflex) at >= this x his value; 0 = off
 
 
 @dataclass(frozen=True)
@@ -257,6 +257,7 @@ class PipelineResult:
 **The public signatures in lld.md** (§4.1, §5.1, §5.2, §5.6, §6, §7.1, §8) are part of the contract too. Change them only through the lead.
 
 **Changes to date:**
+- 2026-10-14 — `value-core-4`: `redundant` counts `SUPER_FLEX` as a QB slot, so a superflex team keeping two comparable QBs is not offered a third (Calibration: jonbonjourvi offered Jayden Daniels behind Maye + Hurts). [D-206](../../../living-memory/DECISIONS.md).
 - 2026-10-10 — `value-core-3`: hard rule `redundant` after `picks_for_players`, with `CoreConfig.redundancy_min_ratio` (0.70). It is a code default with no knob. [lld §4.3](lld.md#43-hard-rules-in-order), [D-201](../../../living-memory/DECISIONS.md).
 - 2026-10-09 — `value-core-2`, lead-applied on the operator's rules after the first Calibration round: two hard rules, `breakup` and `picks_for_players`, after `filler` in `REJECT_CODES`, with two `CoreConfig` fields (`breakup_min_ratio` 0.70, `rebuilders_keep_picks` True). Code defaults only — no `model_config` knob yet (Calibration builds with `CoreConfig()`). [lld §4.3](lld.md#43-hard-rules-in-order), [D-199](../../../living-memory/DECISIONS.md).
 - 2026-10-01 — throw-ins, lead-applied on the operator's rule: *"throwins are fine, but only if there is a clear throwin that the recipient values much higher than consensus (double the value)"*. `types.py` gained `LeagueSnapshot.partner_boards: Mapping[str, Board]` (default empty), `FairTrade.throwin: str | None` (default None) and `CoreConfig.throwin_min_ratio = 2.0` (seed `vc_throwin_min_ratio`, clamp [1, 10]). lld §4.1 gained `core.throwin_ok`, `MAX_THROWIN_OPTIONS = 3` and `THROWIN_MIN_COMPARISONS = 3`; lld §7.1 gained `adapter.partner_board_from` and the `partner_boards=` keyword of `adapter.build_snapshot`. A throw-in needs evidence on both sides (market > 0, and at least `THROWIN_MIN_COMPARISONS` comparisons behind the recipient's value for that player): before that rule, unranked or unpriced players produced up to 28 of 30 cards on one real seat. A review pass the same day fixed three more things: a throw-in is not a piece for the stud premium, so it never switches the premium on or off; the throw-in shortlist is cut to `MAX_THROWIN_OPTIONS` per candidate pair after the junk check, not per partner before it; and throw-in variants have their own check budget, so they never starve base pairs. Real bench (6 leagues, 77 seats, first 30 cards): throw-ins on 17 of 2,220 cards, 4 to the viewer and 13 to the partner. Tests added: core `test_throwin_to_viewer_needs_double_value`, `test_throwin_value_must_clear_the_floor`, `test_throwin_to_partner_uses_their_published_board`, `test_throwin_is_exempt_from_reducible_and_at_most_one`, `test_evaluate_trade_marks_the_explicit_throwin`, `test_throwin_needs_real_evidence_on_both_sides`, `test_throwin_never_switches_the_stud_premium`, `test_throwin_shortlist_is_cut_per_pair_after_the_junk_check`, `test_throwin_needs_three_comparisons`; ranking `test_reasons_explain_the_throwin`; adapter `test_partner_board_from_no_evidence_stays_at_consensus`, `test_build_snapshot_keeps_partner_boards_for_known_partners_and_assets`, `test_core_config_reads_throwin_ratio`. The knob count is now 14.

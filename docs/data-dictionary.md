@@ -575,7 +575,7 @@ A job served by the value core writes one row per served card through the same `
 |---|---|
 | `model_arm` | `value_core`. **Not a bake-off arm**: the value core replaces the legacy stack for its job, so no other generator's cards share the deck |
 | `policy_variant` | `value_core` |
-| `policy_version` | `value-core-3` (the engine version; `value-core-2` 2026-10-09, `value-core-1` before) |
+| `policy_version` | `value-core-4` (the engine version; `value-core-3` 2026-10-10, `value-core-2` 2026-10-09, `value-core-1` before) |
 | `arm_rank` | the served position, equal to `card_index` |
 | `base_score` | the card's priority (its `composite_score`) |
 | `final_score` | the effective priority after repeat penalties, as used by deck assembly |
@@ -589,7 +589,7 @@ A job served by the value core writes one row per served card through the same `
 `valuation_json` for `generator = "value_core"` is a **generator-specific schema**, like the owner-v1 one: dispatch on `generator`, never on `schema_version` alone. Written with `json.dumps(..., sort_keys=True)`:
 
 ```
-{schema_version: 1, generator: "value_core", generator_version: "value-core-3",
+{schema_version: 1, generator: "value_core", generator_version: "value-core-4",
  deck_position,            # 0-based position in the assembled deck, before already-passed trades are removed
  weights:  {value, outlook, rank, repeat_penalty, player_cap},
  scores:   {value, outlook, rank, priority},                  # each in [0, 1]
