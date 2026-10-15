@@ -313,6 +313,9 @@ is new work on every serve path, not just a constraint on a faster one.
 - **Exception 2, wrong math:** if the served model or config version, or the league's scoring or
   roster settings, changed since the deck was built, every card's valuation is wrong. Block: generate
   fresh, show the progress state, and count the tap as a gate miss.
+- **Deck-quality filters run at display, too** (models-lead R.b; I-6, AC-9a). A card that passes
+  every bound but fails `deck_quality` against today's inputs is not shown. If lineup slots are
+  unknown on a fast path, the card falls through to the fresh path.
 
 **Alternatives (not proposed):**
 
@@ -395,6 +398,17 @@ is new work on every serve path, not just a constraint on a faster one.
   (`delivery.md:81`).
 - **I-5 Model identity.** A card is served only under the model, config and significance version
   that built it (existing guard; `release-20260921/README.md:10`).
+- **I-6 Quality at display** (models-lead R.b; AC-9a). Every displayed card, on any serve path, has
+  passed `deck_quality`'s rules (D-207) **evaluated against the freshest inputs held at display**:
+  rosters within the §5.1 bounds, the value snapshot in use, and lineup slots.
+  - Breakup and redundant TE/QB depend on rosters, and filler and repeats on values, so a card
+    prepared earlier can fail by tap time.
+  - **An unknown lineup on a fast path is never a silent skip.** Today `deck_quality.py` skips the
+    redundant rule when the lineup is unknown. On a fast path that card falls through to the fresh
+    path instead.
+  - **Critical-path risk:** the lineup-slot lookup can make a live Sleeper `GET /league/<id>` of up
+    to 10 s on a meta-cache miss (`server.py:29130-29152`). Under platforms-pm R7 it stays
+    user-triggered, never scheduled or headless.
 
 ### 5.4 How the user sees freshness (requirements; visual spec by design-lead, flow by ux-lead)
 
@@ -548,7 +562,23 @@ TestFlight checklist step (TF, §9.4).
 | AC-8 | §5.4 "updating" and withdrawn states. "Updating" shows only when serving past a bound. It meets the seven shared constraints: no layout shift, no interrupt claim, its own copy, a maximum duration then refresh-failed, controls enabled, no highlight accent, built from existing parts. The withdrawn fronted card keeps dimmed terms, replaces Like/Pass with the reason line plus "Next trade", and changes only after a swipe settles. | G: the state is driven by `freshness_state` from the payload; the updating component calls no `useInterruptSlot` and renders no Toast; the strings contain no "Searching…" and no seconds figure. TF steps 10–12 and 16–18. |
 | AC-8b | **Gate-miss wait** (ux-lead F-5). It names its real reason, makes no timing promise, and ends: on timeout it shows the error with Retry, and Back stays usable. The false "within a few seconds" copy is gone. | G: a string check on the placeholder, plus a recovery guard in the pattern of `check-win-now-recovery.js`. TF step 5 |
 | AC-8c | **Offline** (ux-lead F-6). Inside the bounds, cards may show with the refresh-failed state at once, and a match-creating like or a send fails visibly and keeps the choice. Past the viewer's roster bound, the offline state shows, with no cards. | G: a pattern of `check-swipe-failure-recovery.js` for the offline like/send. TF steps 14 and 17 |
-| AC-9 | **Quality parity.** Every card served on a fast path passes the same `deck.quality_filters` rules as the live deck, and the fast path's first 30 match, in identity and order, what the full current-model job would serve from the same inputs. Any approved deviation is recorded with models-lead sign-off. | T: a differential test comparing the fast path with the fresh path on frozen inputs, with `PYTHONHASHSEED=0` and a frozen clock (G-065, `GOTCHAS.md:737-742`). |
+
+**[models-lead]** AC-9a to AC-9e replace AC-9. The rows below are pasted verbatim from models-lead R.b
+(`docs/plans/org-bringup/leads/models-lead-wave2.md` § "R.b PR #339, AC-9", reviewed at `6f8ae71a`). Under
+them, models-lead's sign-off follows the two-line packet route in R.a (ii).
+
+| ID | Criterion | Check |
+|---|---|---|
+| **AC-9a, filter parity at display** | Every card displayed on any serve path (fresh, cached, joined, prepared or device-resident) has passed `deck_quality`'s rules, evaluated against the **freshest inputs held at display time**: rosters within the §5.1 bounds, the value snapshot in use, and lineup slots. If lineup slots are unknown on a fast path, that card isn't served from the fast path; it falls through to the fresh path. **Never a silent skip.** On the value-core path the filters run too, unless a test shows its hard rules are equivalent on the same frozen inputs | T: the AC-5 pattern. Mutate the roster and values between prepare and display; assert every newly failing card is absent; assert the unknown-lineup fallthrough |
+| **AC-9b, code parity** | As written: on identical frozen inputs, the fast path's first 30 match the fresh job's in identity and order, with protected cards (likes-you, standing offers, injected, wildcard, retest, published) in the same places | T: the differential test, as written |
+| **AC-9c, bounded drift** | On sampled fast-path serves, overlap@30 with the fresh deck built from **tap-time** inputs is **no worse than the engine's own re-run churn** (two fresh builds from the same inputs a few minutes apart) **plus 10 pp**. The draft fallback is a median of ≥ 0.80 until churn is measured. Counted, never sampled: **zero fast-path cards that fail the filters at tap-time inputs** (AC-9a) | A: shadow or offline recompute at a low sample rate, off the critical path (eng chooses how); path-tagged filter counts on both paths |
+| **AC-9d, order** | A first card that isn't the full deck's best-first card (approach D, progressive publication) is a model-behavior change. It needs a model-change packet (PR #331) and my sign-off before it ships | Packet |
+| **AC-9e, Calibration integrity** | Impressions carry a serve-path tag. Until the round-3 read (2026-11-05), either no fast path ships to users, or Calibration's current-arm sampling is pinned to the fresh path | G or T: the impression tag; sampling filtered by path |
+
+**Remaining criteria:**
+
+| ID | Criterion | Check |
+|---|---|---|
 | AC-10 | No offer cap or budget cut: the complete eligible inventory stays reachable (the `research-plan.md:66-69` non-negotiables). | T: the inventory-count parity test (pattern of `release-20260921/README.md:16`). |
 | AC-11 | **Storage within budget.** The build states its server-side footprint per user-league and in total, plus its daily write volume, using §10.4's formulas, and stays inside that byte budget (P23). | The byte budget is stated, and head-eng accepts it against H1–H3 (`docs/plans/db-storage-budget/requirements.md:314-317` on draft PR #337) before rollout. A: Q8 table sizes before and after (`baseline-request.md` Q8). |
 | AC-11b | **Shedding is safe.** Dropping prepared or cache data under disk pressure (P23) never breaks serving: Find a trade falls back to the fresh path and still meets every §5.3 invariant. | T: a backend test that drops the cache tables or rows and asserts that serving still works through the fresh path. |
@@ -579,7 +609,9 @@ TestFlight checklist step (TF, §9.4).
 - **Ownership:** a roster mutation between prepare and serve, covering every serve path (AC-5).
 - **Action-time revalidation:** per platform write path, including team-overhaul sends, with
   moved-asset and read-failure fixtures (AC-6a); and likes on moved-asset cards (AC-6b).
-- **Quality parity:** the differential test (AC-9), seeded with a frozen clock.
+- **Quality:** filter parity at display, with a roster/value mutation between prepare and display
+  and the unknown-lineup fallthrough (AC-9a); the code-parity differential test seeded with a frozen
+  clock (AC-9b); and the impression serve-path tag (AC-9e).
 - **Inventory parity:** AC-10.
 
 ### 9.3 Code-walk proof (file:line, written by the build)
@@ -689,8 +721,8 @@ and skip the second (canvas) tap in steps 1 and 3.
 |---|---|---|---|
 | A. Server-prepared inventory, fast serve | Adopt a validated prepared deck at tap (#305–#307 path, now dark) | Only if server work plus one round trip fits. Best local first-30 is 1.081 s (`prepared-trade-inventory/release.md:161-165`): about 4× over the whole budget, and about 20× over the 50 ms server slice in §10.2 | ~2–2.6 MB per user-league stored, plus evidence writes per adoption (§10.4). Freshness is bounded by refresh cadence. Skips `deck.quality_filters` today. Production canaries failed twice (`release.md:37-39,90-93`). |
 | B. Device-resident first page | Prefetch the first N validated cards to the phone at app open, foreground or Trades focus. The tap renders locally; validity is rechecked in the background | Removes the network from the critical path; render only | Device copy can go stale between prefetch and tap, so it leans on §5.2 and I-1/I-2. About 1.25 KB per card on device (`delivery.md:106`). Needs a new mobile binary. |
-| C. Faster fresh generation | Engine and evidence speedups, or a faster engine (value core local p95 1.77 s on a 14-team fixture; `TEST_LEDGER.md:213`) | **No on its own.** Even 1.77 s is 7× the budget | Shortens refresh time, so it helps freshness. Swapping engines is a model change (models-lead). |
-| D. Progressive publication | Publish a card before global ranking completes | Possibly | Changes the best-first order contract (`execution-20260921/README.md:9`). Needs models-lead sign-off (AC-9). |
+| C. Faster fresh generation | Engine and evidence speedups, or a faster engine (value core local p95 1.77 s on a 14-team fixture; `TEST_LEDGER.md:213`) | **No on its own.** Even 1.77 s is 7× the budget | Shortens refresh time, so it helps freshness. Swapping engines is a model change (models-lead). The value-core path skips the filters today (`server.py:7566-7600`), so approach C must run them or prove its hard rules equivalent on the same frozen inputs (AC-9a; models-lead R.b). |
+| D. Progressive publication | Publish a card before global ranking completes | Possibly | Changes the best-first order contract (`execution-20260921/README.md:9`). A model-behavior change: it needs a model-change packet (PR #331) and models-lead's sign-off (AC-9d). |
 | E. Transport | Replace 800 ms-first polling with an immediate response or push | Likely needed alongside A: the first poll alone lands at 800 ms. Irrelevant to B's critical path | API contract change (api-reference); new client binary. |
 
 ### 10.2 Latency budget split (illustrative; eng refines)
@@ -801,19 +833,26 @@ What it means for any build:
   - Its lineup-slot lookup (`_league_lineup_slots`) can make a **live Sleeper `GET /league/<id>` with
     a 10 s timeout** on a 15-min meta-cache miss (`server.py:29130-29152`). That puts a network call
     on the first-card critical path.
-  - The value-core path skips the filters (`:7566-7600`). Prepared inventory is out of their v1
-    scope, so a prepared fast path serves unfiltered cards unless the filters are extended to it.
-    AC-9 requires parity.
+  - The value-core path skips the filters (`:7566-7600`), so approach C must run them or prove
+    equivalence (AC-9a). Prepared inventory is out of their v1 scope, so a prepared fast path serves
+    unfiltered cards unless the filters are extended to it.
+  - AC-9a to AC-9c require the filters on every serve path, evaluated at display-time inputs. AC-9b
+    covers code parity on frozen inputs, and AC-9c bounded drift in production (models-lead R.b).
 - **Model arms:** today's engine (`owner_v2_bilateral`) is the default. Value core is flag-off and
   graded lower in Calibration round 2 (2.88 vs 3.19; `living-memory/CHANGELOG.md:31`). Its speed
   (p95 1.77 s local) makes it tempting as a latency fix. Choosing an engine for speed is a models-lead
   and operator call, not a latency optimization. While `trade.value_core` is on, prepared inventory
   is unsupported (`docs/config-reference.md:351`).
-- **Calibration decks** are built headlessly and their current arm samples served `deck_impressions`
-  (`architecture.md:406-412`). A fast path that changes which cards are served, or which get evidence
-  rows, changes what Calibration grades.
-- **Order:** a fast first card that isn't the full deck's best card is a quality regression unless
-  models-lead approves it (AC-9).
+- **Calibration decks** are built headlessly, and their current arm samples served
+  `deck_impressions` (`architecture.md:406-412`). A fast path that changes which cards are served, or
+  which get evidence rows, changes what Calibration grades. Round 3 is open until 2026-11-05.
+  - **AC-9e, Calibration integrity (models-lead R.b):** impressions carry a serve-path tag.
+  - Until the round-3 read on 2026-11-05, either no fast path ships to users, or Calibration's
+    current-arm sampling is pinned to the fresh path (Decision D12).
+- **Order:** a fast first card that isn't the full deck's best-first card is a **model-behavior
+  change**. It needs a model-change packet (PR #331,
+  `.claude/skills/pm-technical/references/model-change-packet.md`) and models-lead's sign-off
+  (AC-9d; models-lead R.b).
 
 ### 10.6 Flags and knobs involved
 
@@ -864,7 +903,7 @@ Review status as of 2026-10-15, folded in at this revision.
 | **design-lead** | The §5.4 states (updating, withdrawn, refresh-failed, offline), the push motion (AC-2b), Chalkline compliance, D10 labels | **Pass with notes 1–7 plus D10 notes, folded in.** Still owed: the visual spec for the withdrawn card and status line, a `components.md` row, the motion spec, and the joint D11 slot call. A mockup lab is optional |
 | **ux-lead** | The flow: D10, the push transition (F-1), focus regain (F-2), "updating" (F-3), withdrawal (F-4), gate-miss (F-5), offline (F-6), blocked actions (F-7), arrivals (F-8) | **Approve with changes F-1 to F-8, folded in.** Still owed: the joint D11 slot call and the VoiceOver announcement spec |
 | **analytics-lead** | Event grant and the W3 baseline (`baseline-request.md`) | **R1–R3 granted with conditions; R4 refused, with a `network_type` prop granted instead; folded in (§4.6, AC-1, AC-1b).** Baseline still pending W3. Owed by the build: the addendum doc |
-| **models-lead** | Sign-off if served cards, their order or their composition can change. Precompute timing alone can change which offers are served (§10.3), as can a progressive order (D), an engine swap (C), skipping or extending `deck.quality_filters`, or lazy evidence | **AC-9 review pending.** AC-9 is unchanged at this revision |
+| **models-lead** | Sign-off if served cards, their order or their composition can change. Precompute timing alone can change which offers are served (§10.3), as can a progressive order (D), an engine swap (C), skipping or extending `deck.quality_filters`, or lazy evidence | **Changes folded (R.b)**, as AC-9a to AC-9e. Sign-off follows the two-line packet route (R.a (ii)) |
 | **platforms-pm** | I-2 on the Sleeper, ESPN and MFL send paths (including overhaul) and the roster cadence behind §5.1 | **Accept with changes R1–R8 plus notes N1–N4, folded in** (§5.1, §5.3, AC-6a/6b, scope.md §6). Logs R7 in the platform risk register |
 | **onboarding-pm** | D10's first-run limit, F-4's guide interplay, and the P12 privacy-label check for `network_type` and `search_id` | **Needed** (raised by ux-lead and analytics-lead) |
 | **marketing-lead** | Copy for the updating, withdrawn, refresh-failed, offline and gate-miss lines, and the calculator-row relabel (through head-product) | **Needed** (design-lead 5, D10) |
@@ -889,6 +928,10 @@ Review status as of 2026-10-15, folded in at this revision.
   Sleeper roster reads, a prepared deck is often past the roster bound by the time it's tapped. The
   viewer-roster refetch (exception 1) then sits on the critical path more often than a scheduled
   refresh would allow.
+- **Calibration contamination** (models-lead R.b, AC-9e). A fast path changes which cards reach
+  `deck_impressions`, which Calibration's current arm samples while round 3 runs to 2026-11-05.
+  Without the serve-path tag and pinned sampling (or holding the fast path), the round-3 grades stop
+  measuring the engine they name.
 - **Stage-6 undercount** (analytics-lead R3). A prepared, cached or joined serve that skips the job
   would emit no `trades_generated`. AC-1b, or an `/an-funnel` amendment, must land before the build.
 - **Prepared inventory is unproven in production.** Two failed canaries, rollout off
@@ -924,12 +967,13 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 | D3 | Is cellular held to the same 250 ms p95? | Yes, as the operator's ask reads. Revisit only if `network_type` data (on R2/R2b) shows the network floor alone exceeds the budget. |
 | D4 | The stale-deck rule | Serve-and-refresh with the two hard exceptions (§5.2). It is supported by design-lead and ux-lead, with ux-lead F-3, F-4 and F-6 pinned (trades-pm decision, 2026-10-15). Alternatives: block, or serve-with-label. |
 | D5 | The §5.1 freshness bounds | As proposed in the table. |
-| D6 | May the first card differ from the full deck's top card (progressive order)? | No by default. Only with models-lead sign-off and a measured quality comparison. |
+| D6 | May the first card differ from the full deck's top card (progressive order)? | No by default. A first card that isn't the full deck's best-first card is a model-behavior change. It needs a model-change packet (PR #331, `.claude/skills/pm-technical/references/model-change-packet.md`) and models-lead's sign-off before it ships (AC-9d; models-lead R.b). |
 | D7 | Storage budget for a faster path, and whether evidence rows may be written only for displayed cards | **Decided in part by head-product P23 (2026-10-15):** cache data sheds first, and nothing rolls out without an explicit byte budget checked by head-eng against H1–H3 (#337, §10.4). **Still open:** the budget number, which head-eng sets against H1–H3, and lazy evidence, which still needs analytics-lead and models-lead. |
 | D8 | Does 250 ms supersede the 3 s goal in `trade-search-latency/research-plan.md` §4? | Yes. 250 ms becomes the tap-to-first-card KPI, and that thread's non-negotiables stay. |
-| D9 | Must every fast-path card pass `deck.quality_filters`? | Yes (AC-9). |
+| D9 | Must every fast-path card pass `deck.quality_filters`? | Yes, evaluated at display-time inputs, with no silent skip (AC-9a; models-lead R.b). |
 | D10 | Should a table B control (Home tile, League, Matches, calculator row) start a search and show cards directly, instead of opening the builder? | **Yes for onboarded users** on the Home tile, League ×2 and Matches. First-run keeps the builder (onboarding-pm signs off). The stack is builder → pushed deck, using `push`, not `navigate`. The calculator row stays navigation-only and is relabelled (design-lead; copy via head-product → marketing-lead). A Home tile preview is an optional follow-up (design-lead). **The operator's call, because it amends D-171.** Alternative: keep D-171 and relabel table B (ux-lead, design-lead). |
 | D11 | Where does the "updating" state sit? design-lead proposes a trailing header-row label; ux-lead proposes the progress-strip slot | **design-lead and ux-lead settle it jointly before any UI build**, within §5.4's seven shared constraints (trades-pm decision, 2026-10-15). |
+| D12 | Calibration integrity before the round-3 read (2026-11-05): hold any fast path until then, or pin Calibration's current-arm sampling to the fresh path? | Either satisfies AC-9e (models-lead R.b). Impressions carry a serve-path tag in both cases. **Proposed:** pin the sampling to the fresh path if a fast path is ready before 2026-11-05; otherwise the date passes first. models-lead confirms; the operator decides. |
 
 ## Handoffs
 
@@ -958,15 +1002,22 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
   for `network_type` and `search_id` ("check, likely no change"; App Store Connect is the
   operator's).
 - **marketing-lead (through head-product):** copy for the §5.4 lines and the calculator-row relabel.
-- **models-lead:** a sign-off position on AC-9, precompute timing, lazy evidence and any engine
-  swap. The AC-9 review is pending.
+- **head-eng → models-eng, plus analytics-lead:** AC-9c.
+  - A shadow or offline recompute at a low sample rate, off the critical path (eng chooses how).
+  - Path-tagged filter counts on both paths.
+  - A measurement of the engine's own re-run churn: two fresh builds from the same inputs, a few
+    minutes apart.
+- **head-eng → trades-eng:** the serve-path tag on impressions (AC-9e; scope.md §2) and the
+  display-time filter pass with the unknown-lineup fallthrough (AC-9a, I-6).
+- **models-lead:** sign-off through the two-line packet route (R.a (ii)), D12, and any AC-9d model-change
+  packet if approach D is pursued. Lazy evidence and any engine swap also need models-lead.
 - **platforms-pm:** log R7 in the platform risk register. Any future pending-offer read goes to the
   register first (N2).
 - **DB-storage task + head-eng:** take the §10.4 arithmetic. head-eng sets and accepts the byte
   budget against H1–H3 (#337; DEC-7) before any rollout (P23).
 - **release-lead:** merge this plan PR on the operator's go. Plan only, no code.
 - **Operator:**
-  - decide D1–D10 (D10 amends D-171) and E2, which gates any headless Sleeper roster reads. D11 is
-    settled by design-lead and ux-lead;
+  - decide D1–D10 and D12 (D10 amends D-171), and E2, which gates any headless Sleeper roster
+    reads. D11 is settled by design-lead and ux-lead;
   - run the §9.4 checklist once a build exists, including approving and cancelling the step 13 test
     sends.

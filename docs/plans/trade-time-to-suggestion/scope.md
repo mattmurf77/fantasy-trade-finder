@@ -43,6 +43,8 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
     identifier) need an App Store label check, "check, likely no change".
   - The new Sleeper send-block value on `sleeper_send_failed.error_code` (platforms-pm R4) goes to
     analytics-lead. ESPN and MFL block events are not requested in v1; they would need a grant.
+  - **Serve-path tag (models-lead R.b, AC-9e):** if eng carries it as an analytics prop rather than
+    an impression field (§2), it needs analytics-lead's grant.
   - No player ids or names in props (`tracking-plan-v2.md:183`). Device platform stays a
     server-derived column (`tracking-plan-v2.md:218`).
 - [ ] (b) Existing events cover it: **no**. `deck_card_viewed` requires 500 ms of exposure.
@@ -54,6 +56,14 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
 
 - **New or changed tables/columns: BUILD OBLIGATION.**
   - No `user_events` column: R4 was refused, and `network_type` is a prop (analytics-lead).
+  - **Serve-path tag on deck impressions** (models-lead R.b, prd AC-9e). Every impression records
+    the path that served it: fresh, cached, joined, prepared or device-resident. **BUILD
+    OBLIGATION:** eng decides the form.
+    - A new `deck_impressions` column needs a `docs/data-dictionary.md` row and a migration entry.
+    - A declared key inside `features_json` needs a data-dictionary note.
+
+    Calibration's current-arm sampling filters on it (Decision D12). If eng instead carries it as an
+    analytics prop, it needs analytics-lead's grant (§1).
   - Any persistent cache or prepared-page storage must state its footprint per user-league and its
     daily write volume, using prd §10.4's formulas, before it is built.
   - Per head-product P23 (2026-10-15), cache data is the first class shed under disk pressure. It
@@ -102,7 +112,9 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
     read-failure fixtures (prd AC-6a); likes on moved-asset cards record no like and no match
     (AC-6b);
   - fast-path vs fresh-path differential on frozen inputs with `PYTHONHASHSEED=0` and a frozen
-    clock (AC-9, G-065);
+    clock (AC-9b, G-065);
+  - filter parity at display: a roster/value mutation between prepare and display, plus the
+    unknown-lineup fallthrough (AC-9a); the impression serve-path tag (AC-9e);
   - inventory-count parity (AC-10).
 - [ ] **Code-walk proof:** a file:line trace from tap → navigation → request or local read → first
   enabled card, per entry point, naming every blocking hop and every skeleton branch (prd §9.3).
@@ -130,7 +142,7 @@ This is a plan; nothing is updated yet. Each row states what the build must do.
 | `docs/glossary.md` | BUILD OBLIGATION | New terms: "time to first card", "freshness bound", "serve-and-refresh". |
 | ADR or `DECISIONS.md` | BUILD OBLIGATION | The approach choice and the stale-deck rule (Decision D4) are non-obvious choices. |
 | `docs/business/analytics/<date>-time-to-suggestion-events.md` addendum | BUILD OBLIGATION | R1–R3 per analytics-lead's grant, plus the R2 `network_type` prop. Written before any emitter (G-031) |
-| `docs/data-dictionary.md` | n/a for analytics | R4 was refused, so no `user_events` column. Still applies if a cache table is added (§2) |
+| `docs/data-dictionary.md` | n/a for analytics; BUILD OBLIGATION otherwise | R4 was refused, so no `user_events` column. Still applies if a cache table is added, or if the serve-path tag becomes a `deck_impressions` column or a declared `features_json` key (§2, AC-9e) |
 | `docs/integrations/mfl.md` (also `sleeper.md`, `espn.md` if a call's shape changes) | BUILD OBLIGATION | MFL adds one rosters export per send for I-2 (platforms-pm R1). Sleeper and ESPN reuse data already fetched |
 
 ## 5. Ship gate declaration
