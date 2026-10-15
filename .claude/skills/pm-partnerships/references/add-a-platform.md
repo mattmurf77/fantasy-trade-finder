@@ -72,7 +72,7 @@
    - **Send (write):** last, on a separate flag, through SKILL.md's write-feature gate.
 9. **Parity column.** Add the platform as a column in `/pm-technical`'s
    `references/platform-parity.md`: reads, writes, and honest-unsupported behavior per
-   feature. That file is being written on branch `skill/platform-parity`; if it has not
+   feature. That file is draft PR #346 (branch `skill/platform-parity`); if it has not
    landed, list the column contents in the memo for `/pm-technical` to fold in.
 10. **The go/no-go memo** (below), ending in **Decisions needed** + **Handoffs**.
 

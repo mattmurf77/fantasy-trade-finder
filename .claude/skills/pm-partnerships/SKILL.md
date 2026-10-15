@@ -31,8 +31,8 @@ is legal advice.
   `trades-eng`'s and the platform write call is `platforms-eng`'s.
 - **Specs are not written here.** Product specs for connect and write flows are written
   with `/pm-technical` and its `references/platform-parity.md` (per-platform reads,
-  writes and honest-unsupported behavior). That file is being written on branch
-  `skill/platform-parity` and may not have landed yet. This skill covers risk, the ToS
+  writes and honest-unsupported behavior), currently draft PR #346 (branch
+  `skill/platform-parity`). This skill covers risk, the ToS
   watch, sequencing, add-a-platform, and build-vs-partner.
 
 ## The platform surface today
@@ -43,8 +43,8 @@ Verify against freshly fetched `origin/main` before citing. Flag values below ar
 | Platform | Live surface | Kill-switch flags | Decisions |
 |---|---|---|---|
 | **Sleeper** | Username sign-in; public v1 reads; GraphQL writes: Send in Sleeper and team-overhaul sends | `trade.send_in_sleeper`, `overhaul.enabled`, `sleeper.trade_block`, `market.trade_capture`, `picks.owned_sync`, `account.sleeper_disconnect` | D-001, D-051, D-176, D-178, D-188, D-189 |
-| **ESPN** | Link, WebView cookie capture, league picker, send (players only), platform entry | `espn.link`, `espn.webview_capture`, `espn.league_picker`, `espn.send` | D-021, D-039 (ESPN entry), D-164 |
-| **MFL** | Link, sign-in, send and respond, platform entry | `mfl.link`, `mfl.auth_link`, `trade.send_in_mfl`, `draft.mfl` | D-164 |
+| **ESPN** | Link, WebView cookie capture, league picker, send (players only), team-overhaul sends (players only), platform entry | `espn.link`, `espn.webview_capture`, `espn.league_picker`, `espn.send`, `overhaul.enabled` | D-021, D-039 (ESPN entry), D-164, D-188 (revised by #290) |
+| **MFL** | Link, sign-in, send and respond, team-overhaul sends (picks allowed), platform entry | `mfl.link`, `mfl.auth_link`, `trade.send_in_mfl`, `draft.mfl`, `overhaul.enabled` | D-164, D-188 (revised by #290) |
 | **Fleaflicker** | Phase 1 built 2026-07-18, **dark** | `fleaflicker.link` = false | — |
 | **Extension** | Sleeper-page tier overlay; unpacked-only, never published | — | `extension/CLAUDE.md` |
 
