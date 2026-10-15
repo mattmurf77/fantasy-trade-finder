@@ -48,8 +48,14 @@ The research.md table is the full version.
 
 - Radii: cards 8, icon wells 4, badges 2. Pills only where the spec calls for one.
 - Tiles carry no shadow. The pressed state is an ink-3 fill, never a scale or lift.
-- Ice appears in at most about 3 places per screen (the hero CTA, the YOU marker, the
-  active tab). Flare is for counts and attention only, never the tile's tap affordance.
+- Ice appears in at most 3 places per screen (the hero CTA, the YOU marker, the active
+  tab), unless an operator exception scopes otherwise. D-204 (2026-10-10) is one such
+  exception, and it covers the Home position tiles only: every banded tile draws its
+  suggested Buy/Sell side in ice, up to four, so Home shows five ice elements counting
+  the active tab. D-204 also makes the Buyer/Seller tags flare. Flare is for counts and
+  attention only, never the tile's tap affordance. The authority on exceptions is the
+  exceptions register in the sibling `design-review` skill (`references/exceptions.md`,
+  on branch `skill/design-review`).
 - Barlow Condensed for headings, Archivo for UI, IBM Plex Mono for every number. Icon
   wells are ink-2 with chalk-dim glyphs from the Chalkline icon set.
 - Hit targets are 44pt or larger. The 2-column grid collapses to 1 column at
