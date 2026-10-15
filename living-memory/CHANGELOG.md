@@ -11,6 +11,11 @@
 
 ---
 
+## 2026-10-15 — Usage Trends week 5 loaded by hand; the daily tick has been dead since at least Oct 1
+
+- **Week 5:** `scripts/refresh_usage_trends.py --remote` stored 2026 week 5 (30 teams, 583 players; the byes CAR/KC match nflverse) and re-stored weeks 1–4 with Sleeper's stat corrections. The server log: `usage-refresh (cron_route): planned [1-5], stored [1-5], changed [1-4]`.
+- **Found:** the automatic refresh never ran. `POST /api/cron/daily-tick` hit gunicorn's `WORKER TIMEOUT` (~13:33 UTC, 500) every day from Oct 1 to Oct 14. The Wednesday traceback is in `_run_weekly_replenishment`. Every later tick step was skipped: roster snapshots, receipts grading, the players-cache guard, the class-load monitor and the usage refresh. The operator chose to report rather than fix: [runbook § Known outage](../docs/runbook.md), [NEXT](NEXT.md) 2026-10-15.
+
 ## 2026-10-14 — Fit arms in every new Calibration deck (#324); round-2 readout; go-live recommendation
 
 - #324 (`4d880833`, live 2026-10-14 18:59 UTC): `_build_grading_session` folds `fit_a` / `fit_b` in after every build that ends open (projections cached per format, 6 h). It closes the gap where gdubs10 started a deck on their own and got none.
