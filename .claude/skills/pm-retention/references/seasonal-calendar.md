@@ -59,7 +59,7 @@ are the three in `render.yaml:41-71`. "New" means no tick has that logic today.
 - **Home hub candidate:** foreground rookie ranks and the Draft Room.
 - **Ready on TestFlight by:** about April 10 (assumption: one release cycle).
 - **Fires from:** daily-tick (the class-load monitor already lives there).
-- **Owner:** `engagement-pm` for the touch; the Draft Room's owning lead for the landing.
+- **Owner:** `engagement-pm` for the touch; `draft-pm` for the landing.
 
 **June lull (assumption)**
 - **When:** June.

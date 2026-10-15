@@ -121,11 +121,12 @@ how it handles the arrival intent belong to the owning area, and need that lead 
 
 | Tile | Lands on | Owner of the landing |
 |---|---|---|
-| Standings, Overall rank, Buy / Sell | Standings page, League rankings split | League area's lead |
+| Standings, Overall rank, Buy / Sell | Standings page, League rankings split | `league-pm` |
 | Find a trade, Team outlook (Trade DNA) | Trades | `trades-pm` |
-| Rank players | Rank | core-loop owners `trades-pm` / `onboarding-pm` (`/pm-pfo`) |
+| Rank players | Rank | `rankings-pm` |
 | View matches | Matches | `trades-pm` |
-| Check trends, usage rates, free agents | Trends, Usage Trends | the owning area's lead (confirm via `head-product`) |
+| Check trends, usage rates | Trends, Usage Trends | `rankings-pm` |
+| Search free agents | Free agents | `league-pm` |
 | Invite or referral tiles | Invite flow | `growth-pm` (mechanics); you own the placement |
 
 Precedent: the Home build added no Trade DNA intent store. It reused the existing

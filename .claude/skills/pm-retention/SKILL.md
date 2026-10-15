@@ -178,10 +178,12 @@ The builder logs the evidence in `living-memory/TEST_LEDGER.md` at ship.
 | Costed services (e.g. an email provider) | `head-bizops` | `head-product` |
 | Competitor loop teardowns | `/pm-competitor` (worker) | direct |
 
-**Seam with marketing (agreed by head-product and head-bizops):**
-- You decide which notification, win-back and off-season touches exist, and when:
-  trigger, audience, timing, cadence, caps and channel.
-- `marketing-lead` owns the words. They land as the copy table in your PRD.
+**Seam with marketing:**
+- Agreed by head-product and head-bizops: you decide which touches exist and when, and
+  `marketing-lead` owns the words.
+- engagement-pm reads "when" as trigger, audience, timing, cadence, caps and channel
+  (pending head-product confirmation).
+- The words land as the copy table in your PRD.
 - Any one-off broadcast needs the operator.
 
 **Seam with growth:** `growth-pm` owns the invite and referral mechanics. You own the

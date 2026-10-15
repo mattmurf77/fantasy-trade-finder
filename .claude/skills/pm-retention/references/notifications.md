@@ -185,7 +185,7 @@ Copy one block per kind into the PRD. Every field is answered or marked
   → tap → landing, with file:line> · TestFlight <numbered operator steps with expected
   results>
 - **Reviews needed:** ux-lead (flow / permission) · design-lead (any new visual) ·
-  marketing-lead (copy) · analytics-lead (events) · <owning lead of the landing screen>
+  marketing-lead (copy) · analytics-lead (events) · <landing screen's box: league-pm | rankings-pm | trades-pm | draft-pm | onboarding-pm>
 ```
 
 ---
