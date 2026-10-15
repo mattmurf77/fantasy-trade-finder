@@ -278,7 +278,7 @@ This section states what the published terms say and how FTF's uses line up agai
 ### 5.4 How FTF prices formats today
 
 - **One consensus seed per format bucket:** DP blended with KTC crowd ordering; the 1QB QB cap (`qb_1qb_cap_elo`); a ×1.18 TE uplift in `sf_tep` (`tep_te_uplift`; `backend/database.py:2904-2906`).
-- **Format detection is binary:** Superflex **or** TE premium → `sf_tep`, else `1qb_ppr` (`backend/server.py:750-786`). **A 1QB league with TE premium is priced with superflex QB values, and a superflex league without TE premium still gets the TE uplift.** This is a concrete, testable mis-bucket (H-L1).
+- **Format detection is binary:** Superflex **or** TE premium → `sf_tep`, else `1qb_ppr` (`backend/server.py:750-786`). **A 1QB league with TE premium is priced with superflex QB values, and a superflex league without TE premium still gets the TE uplift.** This is a concrete, testable mis-bucket (H-L1a).
 - **Per-roster context on top:** marginal value over each roster's replacement level, outlook and window, lineup-aware deck rules, and the fit arms' multipliers.
 - **Not modelled:** PPR level, 6-point passing TD, first-down scoring, team count in base values, TE-premium magnitude, any league's own market prices (P2's `price_level` was designed and never built), and IDP on the dynasty board.
 
@@ -367,7 +367,7 @@ Planning estimate, to be replaced by measurement on the existing 555 trades:
 - **Today that supports:**
   - format direction (H-L1 / LS-1): yes, as a direction;
   - whether league effects exist (H-L4 step 1): yes;
-  - team count, scoring rules and depth (H-L2, H-L3): **no**. Every team-count cell other than 12 has **zero** franchises.
+  - team count, scoring rules and depth (H-L2, H-L3b): **no**. Every team-count cell other than 12 has **zero** franchises.
 
 ### 7.4 Corpus reach by path
 
