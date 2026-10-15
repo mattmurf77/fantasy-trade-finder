@@ -50,7 +50,11 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - R4 may add one `user_events` column.
   - Any persistent cache or prepared-page storage must state its footprint per user-league and its
     daily write volume, using prd §10.4's formulas, before it is built.
-  - The parallel DB-storage task owns the budget (Decision D7).
+  - Per head-product P23 (2026-10-15), cache data is the first class shed under disk pressure. It
+    must be rebuildable and never the system of record, with a fresh-path fallback (prd AC-11b).
+  - No rollout without an explicit byte budget, per user-league and in total. head-eng checks it
+    against H1–H3 in `docs/plans/db-storage-budget/requirements.md:314-317` (draft PR #337) before
+    rollout. The budget number stays open under Decision D7.
   - Rows go to `docs/data-dictionary.md`, plus a migration entry.
 - **Feature flags:** none decided. Existing flags and knobs on the path are listed in prd §10.6.
   The likely candidates:

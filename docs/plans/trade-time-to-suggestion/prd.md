@@ -383,7 +383,8 @@ TestFlight checklist step (TF, §9.4).
 | AC-8 | §5.4: the "updating" state shows only when serving past a bound, and clears when the refresh lands or fails. A withdrawn card shows its reason. | G: structural check that the state is driven by `freshness_state` from the payload. TF steps 10–14. |
 | AC-9 | **Quality parity.** Every card served on a fast path passes the same `deck.quality_filters` rules as the live deck, and the fast path's first 30 match, in identity and order, what the full current-model job would serve from the same inputs. Any approved deviation is recorded with models-lead sign-off. | T: a differential test comparing the fast path with the fresh path on frozen inputs, with `PYTHONHASHSEED=0` and a frozen clock (G-065, `GOTCHAS.md:737-742`). |
 | AC-10 | No offer cap or budget cut: the complete eligible inventory stays reachable (the `research-plan.md:66-69` non-negotiables). | T: the inventory-count parity test (pattern of `release-20260921/README.md:16`). |
-| AC-11 | **Storage within budget.** The build states its server-side footprint per user-league and its daily write volume using §10.4's formulas, and stays within the budget the DB-storage task sets (Decision D7). | A: before and after table sizes (`baseline-request.md` Q8). |
+| AC-11 | **Storage within budget.** The build states its server-side footprint per user-league and in total, plus its daily write volume, using §10.4's formulas, and stays inside that byte budget (P23). | The byte budget is stated, and head-eng accepts it against H1–H3 (`docs/plans/db-storage-budget/requirements.md:314-317` on draft PR #337) before rollout. A: Q8 table sizes before and after (`baseline-request.md` Q8). |
+| AC-11b | **Shedding is safe.** Dropping prepared or cache data under disk pressure (P23) never breaks serving: Find a trade falls back to the fresh path and still meets every §5.3 invariant. | T: a backend test that drops the cache tables or rows and asserts that serving still works through the fresh path. |
 | AC-12 | No regressions: CI green (`pytest backend/tests`, `tsc --noEmit`, testid-lint) plus all existing `check-*.js` suites. TEST_LEDGER records the evidence. | CI. |
 | AC-13 | First → next card: after the first card, the next card is ready before the user can act on the first. The buffer-empty stall rate is reported. | A (R2 sibling or a later-card timing field). TF step 6. |
 
@@ -554,6 +555,22 @@ Arithmetic (stored bytes only; excludes index, TOAST and WAL overhead):
 - **Device-side (approach B):** the first 30 cards ≈ 37,348 B uncompressed (4,075 B gzip)
   (`delivery.md:106-107`). No server storage.
 
+**Ruling (head-product P23, 2026-10-15):** "prepared-inventory data sheds first under disk pressure,
+and no rollout without an explicit byte budget, which head-eng checks against task 2's H1–H3."
+What it means for any build:
+
+- **Cache data sheds first.** Prepared inventory, and any other fast-path cache, is the first class
+  of data dropped under disk pressure. It must be rebuildable and never the system of record.
+  Serving falls back to the fresh path when it is gone (AC-11b).
+- **No rollout without a byte budget.** The budget is stated per user-league and in total, using the
+  formulas above. head-eng checks it against the storage-budget task's headroom targets before
+  rollout (`docs/plans/db-storage-budget/requirements.md:314-317` on draft PR #337):
+  - H1: at least 20% of the volume stays free;
+  - H2: above that reserve, room for the largest relation's total size;
+  - H3: H1 and H2 hold for 52 weeks at W3-measured weekly growth × 2.
+
+  head-eng also confirms the H1–H4 numbers themselves (that task's DEC-7, `requirements.md:336`).
+
 ### 10.5 Deck quality vs speed
 
 - **`deck.quality_filters` (D-207)** runs in `_run_trade_job` after presentment
@@ -632,6 +649,9 @@ deploy-free kill switch.
   path (D3). Measure before committing to a design.
 - **Freshness and storage fight each other.** Tighter bounds mean more rebuilds, and more rebuilds
   mean more writes (§10.4) and more contention on the single worker (§10.3).
+- **The fast path can lose its cache at the worst time.** Under P23, cache data is shed first under
+  disk pressure. While it rebuilds, taps fall back to the fresh path (AC-11b) and miss the 250 ms
+  gate.
 - **Small sample.** About 8 active users means p95 gates may take weeks to reach n ≥ 40. The
   TestFlight checklist carries the decision until then.
 - **The freshness work can cost speed.** Refetching the viewer's roster before display (§5.2,
@@ -650,7 +670,7 @@ deploy-free kill switch.
 | D4 | The stale-deck rule | Serve-and-refresh with the two hard exceptions (§5.2). Alternatives: block, or serve-with-label. |
 | D5 | The §5.1 freshness bounds | As proposed in the table. |
 | D6 | May the first card differ from the full deck's top card (progressive order)? | No by default. Only with models-lead sign-off and a measured quality comparison. |
-| D7 | Storage budget for a faster path, and whether evidence rows may be written only for displayed cards | Set with the DB-storage task. Lazy evidence needs analytics-lead and models-lead agreement. |
+| D7 | Storage budget for a faster path, and whether evidence rows may be written only for displayed cards | **Decided in part by head-product P23 (2026-10-15):** cache data sheds first, and nothing rolls out without an explicit byte budget checked by head-eng against H1–H3 (#337, §10.4). **Still open:** the budget number, which head-eng sets against H1–H3, and lazy evidence, which still needs analytics-lead and models-lead. |
 | D8 | Does 250 ms supersede the 3 s goal in `trade-search-latency/research-plan.md` §4? | Yes. 250 ms becomes the tap-to-first-card KPI, and that thread's non-negotiables stay. |
 | D9 | Must every fast-path card pass `deck.quality_filters`? | Yes (AC-9). |
 | D10 | Should a table B control (Home tile, League, Matches, calculator row) start a search and show cards directly, instead of opening the builder? | ux-lead proposes the flow; the operator decides. Until then the clock starts at the table A tap, and table B taps are measured as tap → builder interactive. |
@@ -666,6 +686,7 @@ deploy-free kill switch.
   swap.
 - **platforms-pm:** review I-2 (live ownership checks on send) and any roster-cadence change behind
   the §5.1 roster bound.
-- **DB-storage task:** take the §10.4 arithmetic and return a budget for D7.
+- **DB-storage task + head-eng:** take the §10.4 arithmetic. head-eng sets and accepts the byte
+  budget against H1–H3 (#337; DEC-7) before any rollout (P23).
 - **release-lead:** merge this plan PR on the operator's go. Plan only, no code.
 - **Operator:** D1–D10, then the §9.4 checklist once a build exists.
