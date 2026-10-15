@@ -6,7 +6,8 @@
 > The build is a later scope block (`docs/templates/feature-scope.md`) under the full four feature gates.
 > **Number labels:** **[M]** measured (source cited), **[B]** benchmarked (URL and date), **[A]** assumed, **[P]** pending an owner.
 > **Evidence copies:** [research/platform-and-benchmarks.md](research/platform-and-benchmarks.md) (Apple, RevenueCat, Stripe;
-> accessed 2026-10-15) and [research/repo-facts.md](research/repo-facts.md) (repo state at `678834ab`, file:line cites).
+> accessed 2026-10-15), [research/repo-facts.md](research/repo-facts.md) (repo state at `678834ab`, file:line cites) and
+> [research/competitor-pricing.md](research/competitor-pricing.md) (`pm-competitor`, public pages, checked 2026-10-15).
 
 ## TL;DR
 
@@ -66,8 +67,7 @@ consent, superseding the July "no ToS restricting commercial use" (`…-research
 | **The grid sells three features that don't exist** (no engine-knob UI; no extension `pro` field despite the server comment; no ad code) **and mislabels Portfolio** as "your roster value over time" when it is cross-league player exposure | M | Grid `server.py:31003-31005`; copy `PaywallScreen.tsx:82-87`; `PortfolioScreen.tsx:24-27`; `iap-enablement/scope.md:35-36`; handler `server.py:25792+` vs `:30984-30986`; `features.json:147-148` |
 | Every `monetize.*` flag is false; `monetize.pro`, `season_pass` and `founder` are never read | M | `features.json:141-148`; `feature_flags.py:260-290` |
 | Entitlements + paywall flags both on = **enforcing**; `/api/me/entitlements` reports `enforcing` from one flag | M | `entitlements.py:257-265`; `server.py:30989` |
-| The RevenueCat webhook has no sandbox/production check | M | `server.py:31149-31179` |
-| `NON_RENEWING_PURCHASE` is an activating event; expiry is read only from `expiration_at_ms`, so if it's absent the grant is perpetual | M | `entitlements.py:342-343, 535, 556-557` |
+| The RevenueCat webhook has no sandbox/production check. `NON_RENEWING_PURCHASE` is activating, and expiry is read only from `expiration_at_ms`, so if it's absent the grant is perpetual | M | `server.py:31149-31179`; `entitlements.py:342-343, 535, 556-557` |
 | `entitlement_granted` is fired but not registered in the taxonomy | M | `entitlements.py:302`; repo-facts §6 |
 | Users: 16 (08-05/08-09); 3–5 (08-12 to 08-14); ~10 testers (~08-20); 6 users sent 92 proposals (08-21 to 08-29) | M | repo-facts §8 table |
 | **Leagues per account** | P analytics-lead | "16 users, 7 leagues" (`2026-08-09-mobile-ux-audit/05-appendix.md:47`) says nothing per account |
@@ -78,31 +78,40 @@ consent, superseding the July "no ToS restricting commercial use" (`…-research
 | Lifetime "often priced at 5–12x the annual"; lifetime-dominant apps have the lowest revenue per install | B | https://www.revenuecat.com/blog/growth/lifetime-subscriptions (2025-11-12); SOSA 2026 |
 | Multi-league share, gate-hit demand, willingness to pay, paywall conversion | A | Nothing is measured; every conversion figure below is benchmarked or assumed |
 
-### 2.1 Competitor price map (interim: July/September sources, refresh pending)
+### 2.1 Competitor price map (checked 2026-10-15)
 
-**Interim:** the `pm-competitor` refresh (`competitor-pricing.md`) didn't exist when this was written. Re-verify every row
-before ASC prices are set.
+`pm-competitor`'s refresh from public pages; every row's URL is in [research/competitor-pricing.md](research/competitor-pricing.md).
+All prices are [B, 2026-10-15]. "Snippet" means the figure came from a search-result summary, weaker than a fetched page.
 
-| Product | Price | Model | Source (date) |
-|---|---|---|---|
-| Dynasty Nerds Premium | $6.99/mo · $69.99/yr. Free tier: preview ranks, **1 league sync**, 3 trades/day. Claims 11,000+ premium members | Freemium sub | `connected-rankings/research/2026-08-15-dynasty-nerds.md:71-73` (2026-08-15); July appendix :29 |
-| FantasyPros PRO → HOF | $5.99/mo · $47.88/yr → $107.88/yr | Tiered sub | July appendix :29 (2026-07-17) |
-| PFF+ · RotoWire · Footballguys Elite | $24.99/mo or $119.99/yr · $17.99/mo · $89.99/yr | Content bundles | July appendix :29 |
-| Dynasty Daddy | Free, plus Patreon $6/mo (ad-free, league-infused values) | Hybrid | July appendix :29, :44 |
-| KeepTradeCut · FantasyCalc | Free; Raptive ads, a donation link | Ads | July appendix :29, :44 |
-| Dynasty Trade Lab | Credits: 10 for $4.99 · 40 for $17.99 · 75 for $29.99; 5 free | Credits | `origin/docs/dtl-teardown:…/competitor-matrix.md` (2026-10-09, draft PR #316) |
-| Season-style products | UDK $34.99 / UDK+ $59.99 · ETR Draft Kit $49.99→$54.99 · DN Rookie Guide $19.99 · PlayerProfiler $45/season/module | One-time per season | July appendix :36, :100 |
+| Product | Price (mo / yr / other) | Free tier and what's paywalled | Trial | Source and caveats |
+|---|---|---|---|---|
+| Dynasty Nerds Premium | $7.99 / $79.99; Rookie Guide $19.99 (bundled with Premium); no lifetime | Free: 1 league sync, 3 preview trades/day. All-league sync and full trade values are Premium | None | Plans page (fetched). **Its help center (2026-03-22) disagrees: $9.99 / $69.99** |
+| FantasyPros PRO · MVP · HOF | Monthly $11.99 · $16.99 · $22.99; annual (implied) $47.88 · $71.88 · $107.88 | Trade analyzer in all tiers. **Dynasty and trade suggestions need MVP.** League sync capped at **2 / 10 / 50** leagues | 3 days | Plans page (fetched). The old "$5.99/mo" was the semi-annual rate |
+| Dynasty Scout · DynastyDealer (iOS) | $6.99 / $49.99 · $5.99 / $49.99 | Premium not itemized; Dynasty Scout syncs Sleeper and MFL | 3 days · not stated | App Store (fetched) |
+| Footballguys PRO · ELITE | $12.99 or $59.99/yr · **$19.99 or $89.99/yr** | Dynasty trade tools and dynasty sync are ELITE only | None; 30-day refund | Plans page (fetched) |
+| Draft Sharks | $72/yr · **$96/yr Keeper, Dynasty & Auction** · $192/yr; no monthly | Dynasty calculator listed; tier unconfirmed (likely $96) | None; money-back to 2026-12-31 | Subscribe page (fetched) |
+| PFF+ | $9.99 / $99.99 (PFF Pro $199.99/yr) | League sync from the Monthly plan | None mentioned | **Single fetch, no strikethrough shown: re-verify before setting ASC prices** |
+| RotoWire Season-Long | Web $14.99/mo, or $95.88/yr implied; iOS $17.99/mo | Trade analyzers in the paid plan; no dynasty tools mentioned | "Free Trial", length unstated | Help page (updated 2026-08-18); App Store |
+| DLF Premium | List $59.99/yr; 2026 promos $0–5 through sportsbook partners | — | — | dynastyleaguefootball.com posts (snippets) |
+| Dynasty Trade Lab · Dynasty Dominator (iOS) | Credits 10/$4.99 · 40/$17.99 · 75/$29.99, no subscription · $4.99 paid app plus $2.99–4.99 IAPs | DTL: 5 free credits, each analysis costs credits. Dominator: trade tool in the paid app | DTL 5 credits | Site; App Store (both fetched) |
+| UDK / UDK+ | $34.99 / $59.99 one-time IAP; FootClan Ultimate $143.99 | League sync in UDK | — | App Store (fetched) |
+| KeepTradeCut · Sleeper | KTC free (donations, ads) · Sleeper has no paid fantasy tier (DFS and pick'em revenue, per review sites) | KTC league sync and its new trade-sourced values are free | — | KTC FAQ (fetched); Sleeper App Store listing |
+| **Not retrieved** | Dynasty Daddy Patreon, FantasyCalc (no paid tier found), ETR Draft Kit, PlayerProfiler modules, 4for4 | — | — | competitor-pricing §1 |
 
-**What it supports:** a barbell of free tools and $70–120/yr bundles, with $30–50/yr still empty. A 1-league free tier
-has a direct precedent (Dynasty Nerds), and $6.99/mo matches the closest league-sync competitor.
+**What it supports.** FTF at $34.99/yr would be the **cheapest annual dynasty subscription found**, under $49.99 (Dynasty
+Scout, DynastyDealer) and $71.88–96 (FantasyPros MVP, Dynasty Nerds, Footballguys, Draft Sharks). Monthly is crowded at
+$6–8: $6.99 equals Dynasty Scout, under Dynasty Nerds' $7.99. League-count packaging has two precedents (Dynasty Nerds'
+1-league free tier; FantasyPros' 2/10/50 caps). Nobody sells a lifetime plan, and no trial found runs past 3 days. Free
+anchors (KTC, FantasyCalc, Sleeper, promo DLF) mean a calculator alone won't sell; mutual-gain suggestions carry the price.
 
 ## 3. Free vs paid
 
 ### 3.1 Options considered
 
 **A. Pro sells what exists (recommended):** unlimited synced leagues plus Portfolio, everything else free. It's the only
-option where the paywall is true on day one. It never touches a single-league user's loop, has a direct precedent in
-Dynasty Nerds' free tier, and gives Founder something real to grant. Weakness: both features need 2+ leagues (§10).
+option where the paywall is true on day one. It never touches a single-league user's loop and gives Founder something
+real to grant. It also has two precedents for league-count packaging: Dynasty Nerds' 1-league free tier and FantasyPros'
+league-sync caps of 2/10/50 by tier. Weakness: both features need 2+ leagues (§10).
 
 **B. No Pro until a new pillar; launch Founder + tips. Killed as default.** With nothing gated, Founder sells a badge
 plus a promise. Selling future pillars invites 5.6 ("charge for features … not delivered") and 3.1.2(c) trouble, and
@@ -148,14 +157,15 @@ onboarding-end paywall at launch (PRD R5 waits for retention data), and the 90-d
 | Option | Monthly | Annual | Annual saving vs 12× monthly | Annual per month | Against benchmarks [B, SOSA 2026] | Verdict |
 |---|---|---|---|---|---|---|
 | Keep | $4.99 | $34.99 | 42% | $2.92 | Monthly at the bottom of category medians ($4.99–9.99); typical annual discount ~64% | Weak annual pitch |
-| **Recommended** | **$6.99** | **$34.99** | **58%** | **$2.92** | Monthly = Dynasty Nerds; annual = all-app median ($34.80), in the empty $30–50 band | **Adopt** |
+| **Recommended** | **$6.99** | **$34.99** | **58%** | **$2.92** | Monthly = Dynasty Scout, under Dynasty Nerds' $7.99. Annual = all-app median ($34.80), and the cheapest dynasty annual found (§2.1) | **Adopt** |
 | Higher annual | $6.99 | $39.99 | 52% | $3.33 | Annual = NA median; Founder drops to 2.98× | Later, when a pillar ships |
 
 **Why $6.99 monthly:** monthly is the decoy, annual the pre-selected hero. Four in-season months cost $27.96 (vs $19.96
-at $4.99), nudging seasonal buyers to the $34.99 annual; it also matches Dynasty Nerds.
+at $4.99), nudging seasonal buyers to the $34.99 annual. It equals Dynasty Scout and sits under Dynasty Nerds' $7.99.
 
-**Why not $39.99 yet:** launch Pro is two multi-league features; the NA median risks trial→paid. $34.99→$39.99 later is
-+14% (notice only), and Apple's "keep current price" option lets early subscribers keep theirs.
+**Why not $39.99 yet:** launch Pro is two multi-league features, so charging the NA median risks trial→paid. Moving
+$34.99→$39.99 later is +14%, notice only, and Apple's "keep current price" option lets early subscribers keep theirs.
+That headroom is real: $39.99 would still undercut every paid dynasty annual found (the cheapest is $49.99, §2.1).
 
 **Pushback on the lead's rationale:** Apple's consent threshold isn't why to set prices now. A later $4.99→$6.99 raise is
 +40%, under the ">50% **and** >~$5" line, so notice only (platform research §6). The real reasons: no notice cost today;
@@ -224,6 +234,7 @@ auto-renewal explains first, then links to Manage Subscriptions and the refund p
 advises pricing "just above expected LTV" (July appendix :10). From SOSA 2026's renewal ranges (23–40%, 44–64%, 56–70%,
 with the third rate held steady after), an annual subscriber pays for **1.5–2.3 years**, an expected LTV of $51–79 gross.
 **$119 is 1.5–2.3× that.** A 5-year loyalist pays $175, so $119 is ~$56 short, a worst case of ~$5.6k gross under the cap.
+No competitor sells a lifetime plan (§2.1); $119 is about 1.5 years of Dynasty Nerds' $79.99 annual.
 
 **Recommend $119 over $149 (4.3×):** with a tiny list and a one-shot window, a visible sell-out beats the margin. Lead
 with value, define "lifetime" in the Terms of Use as the product's lifetime, never sell an unbuilt pillar (5.6).
@@ -243,9 +254,8 @@ PRD's "viable" 25 (`founder-lifetime/prd.md:177`) is a stretch.
 **Tips:** keep as built: `ftf_tip_199/499/999` consumables that grant nothing (`entitlements.py:363-371`), riding
 `monetize.paywall` and shipping with it. Keep them on IAP: Stripe's 30¢ is 18% of $1.99 [B, platform research §7].
 
-**Ads and affiliate: not now.** There's no DAU to sell (3–16 users [M]). They're the plainest "commercial use" of
-Sleeper-derived surfaces (Gate 0). They'd undercut "your board, not a consensus" (`open-access-onboarding.md:196-205`).
-And the July math is small: $150–700/mo at 1,000 DAU [B].
+**Ads and affiliate: not now.** No DAU to sell (3–16 users [M]); the plainest "commercial use" of Sleeper-derived
+surfaces (Gate 0); they undercut "your board, not a consensus" (`open-access-onboarding.md:196-205`); $150–700/mo at 1,000 DAU [B].
 
 **Reopen trigger, all of:** Sleeper coverage confirmed in writing; **≥500 DAU sustained for 4 weeks** (July's mobile-ads
 gate); WAT and W1 retention stable for 8 weeks post-paywall. Affiliate also needs a signed DFS partner and FTC copy, web first.
@@ -260,9 +270,8 @@ gate); WAT and W1 retention stable for 8 weeks post-paywall. Affiliate also need
 | **Trial durations:** "2 weeks" exists; **"30 days" doesn't** | Configure annual as **"1 month"**; copy says "1 month free", never "30 days". `trial_days: 30` (`server.py:31014`) must render that way | Same page |
 | **Multiseat (Group Purchases) on by default** for subscriptions since 2026-09-16; **Family Sharing** can't be turned off once on | Multiseat **off** for `ftf_pro_*` until seats are designed; Family Sharing **off** on every SKU | developer.apple.com/news/?id=likeohx4; Apple Family Sharing help |
 | **Disclosure and accuracy:** 3.1.2(c) plus Schedule 2 §3.8(b); 2.3 / 5.6 | Billed amount most prominent; trial length and post-trial price; Restore; Terms + Privacy links; grid lists delivered features only (§3.2). `web/privacy.html` still says "no in-app purchases"; fix in the same release (Pro PRD §6 step 6) | Guidelines, updated 2026-06-08 |
-| **TestFlight:** purchases "must be for no charge … beta testing purposes only", including immediate link-outs | No Founder sale or link from TestFlight. Rewrite Founder PRD FR3's Stripe rail (`founder-lifetime/prd.md:116-120`) | DPLA §7.4 |
+| **TestFlight:** purchases "must be for no charge … beta testing purposes only", including immediate link-outs. **Review Notes** must describe new features specifically | No Founder sale or link from TestFlight; rewrite Founder PRD FR3's Stripe rail (`founder-lifetime/prd.md:116-120`). Explain the league cap and referral rewards plainly | DPLA §7.4; guideline 2.3.1(a) |
 | **Price changes:** consent needed if >50% **and** >~$5 (non-annual) or >$50 (annual), or if raised in the past 12 months; otherwise notice. Decreases always pass through | "Keep current price" when a pillar justifies a raise | Apple pricing help |
-| **Review Notes:** describe new features specifically | Explain the league cap and referral rewards plainly | Guideline 2.3.1(a) |
 | **US web checkout:** link-out from the App Store build is legal at 0% Apple fee today; fees on remand, SCOTUS ~mid-2027 | **IAP-only at launch** (Pro PRD Q6). Stripe later, kill-switched, never priced as if 0% lasts | Platform research §2 |
 | **Double pay:** Apple won't cancel a subscription when a lifetime is bought | Check `CustomerInfo`, explain, link to `showManageSubscriptions`, then `beginRefundRequest` | RevenueCat lifetime guide, 2025-11-12 |
 
@@ -271,7 +280,8 @@ gate); WAT and W1 retention stable for 8 weeks post-paywall. Affiliate also need
 ### 6.1 Trials (ruled; implications only)
 
 Monthly is "2 weeks" and annual "1 month". Benchmarks back both: 10–16-day monthly trials convert at 46.6%, 17–32-day
-annual at 44.6% with a 47.5% first renewal [B, 2026-09-28]. Two gaps: PRD R18's timeline says "Day 14 — you're charged"
+annual at 44.6% with a 47.5% first renewal [B, 2026-09-28]. Both are far longer than any competitor's (≤3 days found:
+FantasyPros and Dynasty Scout 3 days, Dynasty Nerds none; §2.1), which makes them a differentiator. Two gaps: PRD R18's timeline says "Day 14 — you're charged"
 and R19's `trial_ending` push is unbuilt (repo-facts §1); both need the real "1 month" charge date, and a trial without
 the promised push blocks launch (`pro-subscription/prd.md:134-141`). The sandbox checklist still says annual is "14 days
 free" (`sandbox-test-checklist.md:100`).
@@ -352,15 +362,13 @@ years a founder stays net-positive while all-in cost is under $101.15 ÷ 60 = $1
 | 1 | **Apple setup:** Paid Apps agreement; **SBP enrollment before the first sale**; ASC products `ftf_pro_monthly` $6.99 ("2 weeks"), `ftf_pro_annual` $34.99 ("1 month"), one group, same level; tips; `ftf_founder` | Operator (`release-lead` keeps the checklist) | ASC only | Products "Ready to Submit" |
 | 2 | **Multiseat off** on both subscriptions; **Family Sharing off** on every SKU | Operator | ASC only | Verified in ASC |
 | 3 | **RevenueCat:** project, `pro` entitlement, Offering marked Current. Key names only: `EXPO_PUBLIC_REVENUECAT_IOS_KEY` (EAS env, baked in at build time); `REVENUECAT_WEBHOOK_SECRET` (Render env **and** `secrets.local.env`) | Operator | Webhook 503s until the secret is set (`server.py:31162-31163`) | Wrong bearer → 401, right → 200 |
-| 4 | **Design review of placement:** Settings row; 402 touchpoints on second-league sync and Portfolio; **no** paywall before the first suggestion; the onboarding-end soft paywall waits for retention data | `ux-lead` and `design-lead`, before step 5's build | None | Signed-off spec |
+| 4 | **Design review of placement:** Settings row; 402 touchpoints on second-league sync and Portfolio; **no** paywall before the first suggestion; the onboarding-end soft paywall waits for retention data. Moved ahead of the build (the lead's list had it seventh), since the 402s ship with the cap | `ux-lead` and `design-lead`, before step 5's build | None | Signed-off spec |
 | 5 | **Eng fixes** (below) | `head-eng` | Dark | CI green; TEST_LEDGER evidence |
 | 6 | **Analytics:** register `entitlement_granted`; add `paywall_dismissed`, `trial_started`, `pro_gate_hit`, `subscription_cancelled`, `referral_*`, each registered in `analytics_taxonomy.py` and classified in `NON_INTENT_EVENTS` **in the same commit as its emitter**; confirm funnel coverage | `analytics-lead` | `analytics.*` already on | Events visible in reports |
 | 7 | **Observe mode:** `monetize.entitlements` on **alone**, after fix 5a | Operator flips; `analytics-lead` reads | `monetize.entitlements` | ≥2 weeks of `would_block` counts per gate (§9) |
 | 8 | **Operator sandbox checklist** in TestFlight, updated for $6.99, Founder, the cap, and sandbox events not granting in prod | Operator (`release-lead` updates it) | Sandbox | Every row passes; logged in TEST_LEDGER |
 | 9 | **Public launch:** tester comps bulk-granted **first**, then paywall + Pro + Founder window + tips. Onboarding-end soft paywall only after 8 weeks of retention data | Operator, `release-lead` | `monetize.paywall`, `monetize.pro`, `monetize.founder` | §8.2 watch starts |
 | 10 | **Season Pass 2027:** mint the non-renewing SKU with the May/June 2027 app version; on sale Jul 1 | `head-eng`, operator | `monetize.season_pass` | Sold Jul 1 to Nov 30 |
-
-The placement review (step 4) moves ahead of the build: the lead's list had it seventh, but the 402 touchpoints ship with the cap.
 
 **Step 5 eng fixes (`head-eng`):**
 - **(a) Decouple enforcement.** `monetize.pro` is never read, so turning on `monetize.paywall` with entitlements on
@@ -400,7 +408,7 @@ WAT also moves with the NFL calendar; compare against the comped tester cohort, 
 | Trial → paid (≥20 trials) | Under 25% → lower price or fix the value page. Over 50% (benchmark 44.6–46.6%) → room to raise |
 | Founder sell-through | 100 sold within 14 days → underpriced; any future lifetime at ≥5× annual. Fewer than 10 in 60 days → expected at this scale; **don't cut** (it burns $119 buyers); close on the date |
 | Refunds and churn | Refunds over 6.8% (2× the NA median of 3.4%) → mis-set expectations; fix copy before price. Monthly first renewal under 40% (benchmark 53–61%) → price–value gap; consider $5.99 |
-| Competitor moves (refresh §2.1) | KTC or FantasyCalc adds a paid tier under $30/yr, or Dynasty Nerds cuts monthly to ≤$4.99 → revisit monthly. Nerds rising → headroom |
+| Competitor moves (§2.1) | KTC or FantasyCalc adds a paid tier under $30/yr, or Dynasty Nerds cuts monthly to ≤$4.99 → revisit monthly. **"Nerds rising → headroom" has already fired** ($6.99/$69.99 → $7.99/$79.99): it supports the later $39.99 step, not a change at launch |
 | Cost per user rising (head-bizops) | All-in cost per active user-month over 20% of net ARPPU → raise annual for new subscribers, and push head-eng on storage. **Never gate the core loop** |
 | Van Westendorp survey of testers (operator sends; outbound) | Median "too expensive" under $34.99 → consider $29.99. Median "expensive but OK" over $49.99 → $39.99 is safe. n ≈ 10–16: directional only |
 
@@ -445,6 +453,6 @@ leagues per active account, and the share of WAT users with 2+. No build; observ
 | `head-bizops` (fin-pnl) | Monthly infra total by line (the §7 pending rows; verify the Render web and DB plans in the dashboard); cost per active user-month; break-even and Founder-liability numbers |
 | `ux-lead` + `design-lead` | Step 4 placement review: Settings row, 402 touchpoints, cap-swap confirm copy, Founder overlap prompt, the trial timeline for "1 month". Chalkline-compliant |
 | `platforms-pm` | Draft the Sleeper written-consent ask (Terms §11.1/§11.3); check ESPN and MFL terms for the same exposure |
-| `marketing-lead` | Grid and price copy ("save 58%", the Portfolio line); Founder launch-window copy with no future-pillar claims; the Van Westendorp survey text; the §2.1 competitor refresh, with `pm-competitor` |
-| `release-lead` | ASC configuration checklist; Review Notes (cap, referral); sandbox checklist update (fix `:100`; add Founder, the cap, sandbox-not-granting); `web/privacy.html` IAP language in the same release as the paywall |
+| `marketing-lead` | Grid and price copy ("save 58%", the Portfolio line); Founder launch-window copy with no future-pillar claims; the Van Westendorp survey text |
+| `release-lead` | ASC configuration checklist, including **re-verify PFF+ and Dynasty Nerds prices before setting ASC prices** (§2.1 caveats); Review Notes (cap, referral); sandbox checklist update (fix `:100`; add Founder, the cap, sandbox-not-granting); `web/privacy.html` IAP language in the same release as the paywall |
 | `monetization-pm` (this box), after decisions | Stale-doc sweep: **`docs/plans/README.md` `monetization/` row** (:85 on `678834ab`; it says "No `monetize.*` flag exists … nothing was implemented", which is false); `monetization/README.md:6, 16, 35`; Pro PRD R4 (`:100-101`) and R18 "Day 14" (`:117-119`); Season Pass PRD non-consumable shape (`:32-33, 45-46, 75-79`); `season-pass/lld.md:103` ($79 Founder); Founder PRD FR3 TestFlight Stripe rail (`:116-120`); foundation doc `:23, :38-40`; `docs/business/context.md:20-27, 34` |
