@@ -125,9 +125,13 @@ ranking quality). Those are not this review.
     the files changed since then. An operator-supplied TestFlight screenshot may also
     serve, stored in the lab folder, never in `screens/`. A reconstruction is never
     presented as a capture (operator decision W2, 2026-10-15; verbatim in
-    `mockups/CLAUDE.md`). Block findings: (a) a stale capture embedded as the "before"
-    pane; (b) an unlabelled or mislabelled reconstruction. Procedure: the `/mockup-lab`
-    skill's `references/before-pane.md`. Never request a capture run.
+    `mockups/CLAUDE.md`). For web pages and OG images, decision P22 (2026-10-15) also
+    accepts a local render of the current page from origin/main, labelled with sha and
+    date, or the PNG og_image.py produces; a render of any other sha is a
+    reconstruction, and an unlabelled render is a block. Block findings: (a) a stale
+    capture embedded as the "before" pane; (b) an unlabelled or mislabelled
+    reconstruction. Procedure: the `/mockup-lab` skill's `references/before-pane.md`.
+    Never request a capture run.
 
 ## Exceptions
 
