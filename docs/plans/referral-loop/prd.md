@@ -36,7 +36,9 @@
 > [marketing-inputs.md](marketing-inputs.md), lab addendum, "`ux-lead`'s review of PR
 > #348"; all proposed, D-5): A1's step 1 / step 2, the desktop QR state's labels, the iPad
 > link, the FR-19 activation body, the TestFlight "What to Test" line, the contingent
-> installed-user line and the revised A2 note.
+> installed-user line and the revised A2 note. Then revised to fold `design-lead`'s QR
+> density rule (FR-7, AC-7f: EC M up to version 6, ≥200 CSS px, whole-pixel modules
+> ≥4 CSS px; version 7+ grows, never shrinks), replacing "version ≤4 / ≥180 px".
 > **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on
 > the build branch before ship.**
 > Acceptance of the whole PRD (D-6) is still with `head-product`. Requirements only: **no
@@ -493,8 +495,15 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
       logo; never inverted (light modules on dark aren't read by every scanner). The chalk
       panel is a sanctioned exception to the dark-only rule below: a functional graphic in
       its own box, like the mascot art. `design-lead` adds it to the exceptions register.
-    - **Size and density.** Rendered at ≥180 CSS px; error correction level M; the encoded
-      URL kept short so the code stays at QR version ≤4.
+    - **Size and density (`design-lead`, 2026-10-15).** Error correction level M, QR up to
+      version 6. Rendered at ≥200 CSS px, with modules ≥4 CSS px, counted with the 4-module
+      quiet zone: the code is (modules + 8) × the module size. The SVG uses
+      `shape-rendering="crispEdges"` and whole-pixel modules. If the encoder ever returns
+      version 7 or higher (a longer league id), grow the code to (modules + 8) × 4 px;
+      never shrink the modules. Worked values: version 5 (37 modules) and version 6 (41)
+      need 5 px modules to reach 200 px (225 and 245 px); version 7 (45) is 212 px at 4 px.
+      The builder reports the encoder's version in the build PR; `design-lead` checks it in
+      `/design-review`.
     - **iPad.** The iOS install link (`/go/ios`) stays inside the QR block as a text (Ghost)
       link, "On an iPad? Get the iOS beta, then tap the invite again."
       (`gp.join.desktop.ipad`; it carries the iPad's step 2), with a 44px hit target,
@@ -507,14 +516,11 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
       leave our server.
     - Build note: no QR generator exists in `requirements.txt` today. `head-eng` picks a
       server-side library that emits SVG, logged in `living-memory/DEPENDENCIES.md`.
-    - Build note, URL length (for `head-eng`, then `design-lead` via `growth-pm`): at EC M,
-      version 4 holds 62 bytes (byte mode). Today's join URL is longer:
+    - Build note, URL length: at EC M, version 6 holds 106 bytes (byte mode).
       `https://fantasy-trade-finder.onrender.com/app/league/join/` is 58 bytes
       (`mobile/app.json:22` host), so a 19-digit Sleeper id plus `?t=` and the 12-character
-      id (§7.1) is 92 bytes, version 6 (78 bytes, version 5, for a 5-digit MFL id). The path
-      is the universal-link path and `t` is fixed at 72 bits, so version ≤4 needs a shorter
-      host. The builder reports the version the encoder picks; if it is above 4,
-      `design-lead` rules on it before ship.
+      id (§7.1) is 92 bytes, version 6 (78 bytes, version 5, for a 5-digit MFL id): inside
+      the cap, with 14 bytes of headroom. Past that, the version-7 rule above applies.
   - Desktop with `IOS_INSTALL_URL` unset: "Open the web app" is the ice primary; the extension
     help line in `--chalk-dim`; no QR and no iOS link (its click-through 404s, §8.2: a dead
     path).
@@ -589,10 +595,13 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
   with an accessible name (e.g. "QR code: opens this invite on your iPhone"). The page
   requests no QR image or script from any host: no `<img>`, `<script>` or CSS URL for the QR,
   and the only third-party host the page references is Google Fonts. The encoder is called
-  with error correction M and a 4-module border, its payload is AC-7c's join URL, and the
-  SVG renders at ≥180 CSS px with dark modules on the light panel (never inverted). Pytest
-  asserts these at the encoder's input and in the HTML; `design-lead`'s `/design-review`
-  checks the rendered code.
+  with error correction M and a 4-module border, and its payload is AC-7c's join URL. The
+  SVG carries `shape-rendering="crispEdges"`; its size is (modules + 8) × a whole-pixel
+  module of ≥4 CSS px and ≥200 CSS px overall, with dark modules on the light panel (never
+  inverted); a version-7-or-higher payload (a sizing unit test with a long league id) grows
+  to (modules + 8) × 4 px rather than shrinking its modules. Pytest asserts these at the
+  encoder's input and in the HTML; the build PR reports the encoder's version for today's
+  join URL, and `design-lead`'s `/design-review` checks the rendered code.
 
 **FR-8 — Record the open server-side.** With the ledger flag on, **every** GET of the join
 path (landing or 302) classifies the user agent, with or without `t`, so opens of mint-failed
@@ -1326,7 +1335,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-13 | `record_event` `platform` + `touch_user` parameters vs a separate writer | `head-eng` | Either; the requirement is no denorm bump |
 | D-14 | Copy questions from `design-lead`'s lab (§13). **Answered by `marketing-lead` 2026-10-15, all proposed** ([lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)): (a) every `[copy: marketing-lead]` slot is filled (the A2 note and A5's "A leaguemate invited you to {league}", FR-7; `og:title` = `gp.join.og_title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line, in the addendum); (b) FR-11's "{display name} invited you to {league}" **is** the landing headline, superseding `gp.join.headline`, with FR-7's fallback ladder; (c) "Dynasty Trade Finder" may appear on the OG card only locked up with the wordmark, smaller, never standalone (FR-7; the D-057 name is "Fleeced: Dynasty Trade Finder"); (d) **"leaguemates"**, one word (FR-3; the banner's "league-mates", `InviteLeaguematesBanner.tsx:163, :167, :176`, is respelled in this build). **Follow-up, answered** (`marketing-lead`, lab addendum, "`ux-lead`'s review of PR #348"): the A2 note now reads "…Already have it? Tap the invite again, or rescan its code.", so it names the re-tap itself (FR-7) | `marketing-lead`; the operator approves the words with D-5 | Approve with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
 | D-15 | The OG card wordmark's period. `marketing-lead` had asked for no period on the OG card, because next to a trade "FLEECED." reads as a verdict ("you got fleeced"); `head-product` proposed that the logotype keeps the period and running copy never uses it (FR-7) | **Resolved by `design-lead` 2026-10-15** (owns the wordmark, P14) | The OG card carries the logotype "FLEECED." with the ice period, Barlow Condensed Bold caps, chalk. Rule (`docs/design/brand.md`, PR [#349](https://github.com/mattmurf77/fantasy-trade-finder/pull/349)): the ice period belongs to the logotype; it goes wherever the logo appears and nowhere else (not verdict cards, headings, badges or buttons). Matches `head-product`'s proposed rule. PR #349 also sanctions the invite OG link card as a ram placement (variant (ii)) |
-| D-16 | Desktop layout with `IOS_INSTALL_URL` set (`ux-lead` R-F3): "Get it on your iPhone" with a QR code of the invite URL (`t` included) as the primary, the iOS install link kept in that block for iPad, and "Have the Fleeced extension? Open the web app" as the secondary (FR-7, AC-7c); and R-F1's A1 step layout | **Decided by `growth-pm` 2026-10-15 (P19). Resolved by `design-lead` 2026-10-15** (confirms R-F3, which reverses the desktop rule it had accepted; checked in `/design-review` on the build branch) | Folded into FR-7, AC-7c and AC-7f: the QR block first and primary under a TickLabel ("Join on your iPhone", `marketing-lead`'s label), no ice-filled button, the web app as a Secondary (outlined) button; `--ink-0` modules on a `--chalk` panel (a sanctioned exception, added to the exceptions register), 4-module quiet zone, ≥180 CSS px, EC M, version ≤4 (see FR-7's URL-length note), never inverted; the iPad link inside the block with a 44px target; an accessible name; **server-side inline SVG, never a third-party QR service**. A1: a two-row step list, Plex Mono chalk-dim markers, one hairline. Unset, the desktop layout is unchanged. `/s/*`: the QR and Chalkline chrome fold into GB-02 as one rebuild; FR-25 stays target and labels only |
+| D-16 | Desktop layout with `IOS_INSTALL_URL` set (`ux-lead` R-F3): "Get it on your iPhone" with a QR code of the invite URL (`t` included) as the primary, the iOS install link kept in that block for iPad, and "Have the Fleeced extension? Open the web app" as the secondary (FR-7, AC-7c); and R-F1's A1 step layout | **Decided by `growth-pm` 2026-10-15 (P19). Resolved by `design-lead` 2026-10-15** (confirms R-F3, which reverses the desktop rule it had accepted; checked in `/design-review` on the build branch) | Folded into FR-7, AC-7c and AC-7f: the QR block first and primary under a TickLabel ("Join on your iPhone", `marketing-lead`'s label), no ice-filled button, the web app as a Secondary (outlined) button; `--ink-0` modules on a `--chalk` panel (a sanctioned exception, added to the exceptions register), 4-module quiet zone, EC M up to version 6, ≥200 CSS px with whole-pixel modules ≥4 CSS px and `crispEdges` (version ≥7 grows at 4 px modules, never shrinks; `design-lead`'s density rule, 2026-10-15), never inverted; the iPad link inside the block with a 44px target; an accessible name; **server-side inline SVG, never a third-party QR service**. A1: a two-row step list, Plex Mono chalk-dim markers, one hairline. Unset, the desktop layout is unchanged. `/s/*`: the QR and Chalkline chrome fold into GB-02 as one rebuild; FR-25 stays target and labels only |
 
 ---
 
@@ -1341,8 +1350,9 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   (`S:25552-25564`, `S:25446-25457`). Gate 1 adds to the first slice: FR-8's tested human-GET
   filter and every-GET recording (C4, R1), the `invite_status` name (C1), the desktop QR
   code (R-F3, D-16: server-side inline SVG, never a third-party QR service, AC-7f; pick a
-  server-side library that emits SVG and log it in `living-memory/DEPENDENCIES.md`; report
-  the QR version against FR-7's URL-length note), and the emitter's own registration under
+  server-side library that emits SVG and log it in `living-memory/DEPENDENCIES.md`; apply
+  FR-7's density rule and report the encoder's version in the build PR), and the emitter's
+  own registration under
   the analytics addendum, PR #350 (C7).
 - **`analytics-lead`:** §10 is granted (analytics addendum, PR #350; C1–C9 and R1–R3
   folded here). Still open: D-8, the FR-22 readout (including FR-8's note that a desktop QR
@@ -1371,12 +1381,13 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   (`S:10542-10543`), go to that batch. So does any old-name or name-rule string outside the
   files this PRD touches, e.g. `web/index.html:75` ("Fleeced finds trades…", Fleeced as the
   subject of an analysis verb), via `head-product`.
-- **`design-lead`:** landing + OG card + states (§13; lab PR #343 folded); the `/design-review`
-  verdict covers AC-4b's banner floors and checks R-F1's step list and R-F3's QR block
-  against FR-7 (D-16, resolved by `design-lead` 2026-10-15). Add the QR's chalk panel to the
-  exceptions register; rule on the QR version if the build reports it above 4 (FR-7's
-  URL-length note). The `/s/*` QR and chrome are GB-02's. D-15 (the OG wordmark's period) is
-  resolved by `design-lead`, 2026-10-15 (`brand.md`, PR #349).
+- **`design-lead`:** landing + OG card + states (§13; lab PR #343 folded); the
+  `/design-review` verdict covers AC-4b's banner floors and checks R-F1's step list and
+  R-F3's QR block against FR-7 (D-16, resolved by `design-lead` 2026-10-15). Add the QR's
+  chalk panel to the exceptions register; check the reported QR version and size against
+  FR-7's density rule (`design-lead`, 2026-10-15). The `/s/*` QR and chrome are GB-02's.
+  D-15 (the OG wordmark's period) is resolved by `design-lead`, 2026-10-15 (`brand.md`,
+  PR #349).
 - **`design-lead` → `head-eng` via `head-product` (outside this PRD): F1.** On phones the
   shipped web landing hides the `WR` label but keeps the WR-blue rail
   (`web/css/styles.css:5111`), so position colour is the only encoding (accessibility floor).

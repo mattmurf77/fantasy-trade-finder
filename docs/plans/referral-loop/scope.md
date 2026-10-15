@@ -157,9 +157,13 @@ D-056: no Maestro, no simulator, no captures.
     an inline `<svg>` in the response with an accessible name (e.g. "QR code: opens this
     invite on your iPhone"), no `<img>`, `<script>` or CSS URL for it and no third-party
     host in the page other than Google Fonts (no external QR request), the encoder called
-    with error correction M and a 4-module quiet zone, the SVG sized ≥180 CSS px with dark
-    modules on the light panel, and the QR version recorded against PRD FR-7's URL-length
-    note; human UA increments `open_count` + fires
+    with error correction M and a 4-module quiet zone, the SVG with
+    `shape-rendering="crispEdges"`, sized (modules + 8) × a whole-pixel module of ≥4 CSS px
+    and ≥200 CSS px overall, with dark modules on the light panel; a sizing unit test with
+    a long league id (version 7 or higher) grows to (modules + 8) × 4 px instead of
+    shrinking the modules (PRD FR-7's density rule, `design-lead` 2026-10-15); the build PR
+    reports the encoder's version for today's join URL; human UA increments `open_count` +
+    fires
     `invite_landing_opened` with `invite_status` (never a `token_status` key, C1); a human GET
     with no `t` still fires it, `invite_status` null (R1); each listed preview agent and the
     generic `bot|crawler|spider|preview` pattern set only `unfurled_at` and fire nothing, on
@@ -352,8 +356,10 @@ D-056: no Maestro, no simulator, no captures.
   the build branch: Plex Mono chalk-dim step markers, one hairline, no card per step; the
   QR block first under its TickLabel, no ice-filled button, the web app as a Secondary
   button; `--ink-0` modules on the chalk panel (added to the exceptions register), 4-module
-  quiet zone, ≥180 CSS px, never inverted, no centre logo; the iPad link's 44px target; and
-  the QR version against FR-7's URL-length note. The `/s/*` QR and Chalkline chrome fold
+  quiet zone, never inverted, no centre logo; the iPad link's 44px target; and the
+  build PR's reported QR version and the rendered size against FR-7's density rule (EC M up
+  to version 6, ≥200 CSS px, whole-pixel modules ≥4 CSS px with `crispEdges`; version 7+
+  grows, never shrinks). The `/s/*` QR and Chalkline chrome fold
   into GB-02 as one rebuild; FR-25 stays target and labels only.
   Every string stays with `marketing-lead`; the
   mockup lab (draft PR #343, `mockups/referral-loop/index.html` @ `899f8619`, frames A1–A6)
