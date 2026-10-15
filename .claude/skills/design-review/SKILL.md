@@ -120,8 +120,14 @@ ranking quality). Those are not this review.
    is illustration, so S6 hits there are art direction, not rule 9.
 10. **Mockups.** `mockups/` never ships and is never cited as app behaviour. Mockups use
     Chalkline tokens, so the sweep applies. A mockup revising a shipped screen embeds the
-    real capture when one exists, else a labelled reconstruction (`mockups/CLAUDE.md`
-    interim posture). Never request a capture run.
+    real capture only when one exists **and** `git log` shows the screen's source
+    unchanged since 2026-08-11. Otherwise it uses a labelled reconstruction that names
+    the files changed since then. An operator-supplied TestFlight screenshot may also
+    serve, stored in the lab folder, never in `screens/`. A reconstruction is never
+    presented as a capture (operator decision W2, 2026-10-15; verbatim in
+    `mockups/CLAUDE.md`). Block findings: (a) a stale capture embedded as the "before"
+    pane; (b) an unlabelled or mislabelled reconstruction. Procedure: the `/mockup-lab`
+    skill's `references/before-pane.md`. Never request a capture run.
 
 ## Exceptions
 
@@ -173,7 +179,7 @@ exists.
 | Fixes to the diff itself | the building area's eng lead, through `head-eng` |
 | Model-visible changes (deck or ranking output) | not this review; `models-lead` through `head-bizops` |
 | Palette, token system, rebrand | `design-lead` with user-level `/brand-lab`; needs an operator decision and an ADR |
-| Invite, share and landing UI | `growth-pm` ↔ `design-lead` directly (operator-approved route W4, 2026-10-15) |
+| Invite, share and landing UI for task 3 (growth loops) | `growth-pm` ↔ `design-lead` directly, until task 3's deliverables are accepted (operator-approved route W4, 2026-10-15); after that, through `head-product` |
 
 Never route to retired skills (`ux-design`, `ux-research`, `fin-budget`, `fin-forecast`,
 `legal-privacy`) or to `maestro-test`.

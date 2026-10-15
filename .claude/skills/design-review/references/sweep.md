@@ -15,6 +15,11 @@ check it against [exceptions.md](exceptions.md) before you call it.
 Run from the repo root of a checkout of the branch under review (your own worktree;
 `git switch --detach <branch>` there is fine). Output lands in `/tmp/design-review/`.
 
+**Concurrent reviews:** several leads run reviews in parallel, and one shared directory
+would let them overwrite each other's files. Each concurrent review runs in its own
+worktree and uses its own directory, `/tmp/design-review-<slug>/`, in place of
+`/tmp/design-review/` in every command below.
+
 ```sh
 git fetch origin
 mkdir -p /tmp/design-review
