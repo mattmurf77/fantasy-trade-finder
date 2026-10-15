@@ -73,7 +73,8 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   `backend/tests/fixtures/flags/release.json` together; `docs/config-reference.md`.
 - **New env vars / `model_config` keys:** `IOS_INSTALL_URL` (unset by default): the
   landing's iOS install target (public TestFlight link under option A; App Store URL after
-  the listing). Unset ⇒ the honest note instead of a button. Deploy-free lever: unset it.
+  the listing). Unset ⇒ the honest note instead of a button on iPhone, and no "On an iPhone or
+  iPad?" line on desktop (PRD FR-7). Deploy-free lever: unset it.
   → `docs/config-reference.md` § Environment variables.
 
 ## 3. Evidence scope
@@ -107,7 +108,9 @@ D-056: no Maestro, no simulator, no captures.
     league name, inviter display name from a valid id, no query-string username echoed;
     page links `/css/tokens.css` and none of the `_share_html` chrome (PRD AC-7e);
     iPhone/Android/desktop CTA variants with `IOS_INSTALL_URL` set and unset, one primary
-    action each, no button on Android or on iPhone with it unset (PRD AC-7c); human UA
+    action each, no button on Android or on iPhone with it unset, no `/contact.html`
+    TestFlight-request link, desktop's iOS line only when it is set, and no `dtf://` link in
+    any variant (PRD AC-7c); human UA
     increments `open_count` + fires `invite_landing_opened`; preview UA sets only
     `unfurled_at`; HEAD records nothing; unknown/expired ids; click-through closed set and
     targets (no user-supplied redirect).
@@ -190,20 +193,27 @@ D-056: no Maestro, no simulator, no captures.
       two ledger rows sharing the same `share_token`; device A gets one row per joiner.
   15. **Landing primary action per device** (PRD FR-7 design rules). Open a fresh link on each
       device and check there is exactly one ice primary action. iPhone with `IOS_INSTALL_URL`
-      set: "Get the iOS beta" is the ice button; "Open in the app" is outlined, not filled.
-      iPhone with it unset, and Android: no button; the note is readable (not the faintest
-      grey). Desktop: "Open the web app" is the ice button, the extension line is dimmer, the
-      iOS link is plain text. On every device the page is dark, says "Fleeced", and buttons
+      set: "Get the iOS beta" is the ice button, and there is no "Open in the app" button.
+      iPhone with it unset, and Android: no button and no "Request TestFlight access" link;
+      the note is readable (not the faintest grey). Desktop: "Open the web app" is the ice
+      button, the extension line is dimmer, the "On an iPhone or iPad?" link is plain text
+      with `IOS_INSTALL_URL` set and absent with it unset. On every device the page is dark,
+      says "Fleeced", and buttons
       are comfortably tappable; on desktop, Tab shows the ice focus ring. There is no
       "already joined" landing state (no auth, and one link can credit several joiners); an
       existing user is step 7, in the app.
 - [x] **Design review** (`design-lead`): a `/design-review` verdict at
   `docs/plans/referral-loop/design-review.md` before ship, covering the join landing (per-device
-  states, PRD FR-7), the OG card, and the invite card/banner diff (copy and events only, no
-  visual change). Every string stays with `marketing-lead`; the mockup lab
-  (`mockup/referral-loop`) tags each PROPOSED COPY. The landing's before-pane is today's 302 to
-  `/` (the web landing), a labelled reconstruction until `head-product` rules on web
-  before-panes (W2).
+  states, PRD FR-7), the OG card (variant (ii), wordmark + ram), and the invite card/banner
+  diff (copy and events, FR-1's busy state). Every string stays with `marketing-lead`; the
+  mockup lab (draft PR #343, `mockups/referral-loop/index.html` @ `899f8619`, frames A1–A6)
+  tags each PROPOSED COPY. Its web before-panes are local renders of `origin/main` `678834a`
+  (`head-product` P22); its mobile before-panes are labelled reconstructions.
+  - **Banner Invite floors (PRD AC-4b):** the verdict confirms the Trades banner's Invite
+    button reaches a 44pt hit target (`hitSlop` allowed) and a border of ≥3:1 against the
+    banner's `ink.ink2` surface (today 36pt, no `hitSlop`, `#3D4654`; `design-lead` F2).
+  - **Web invite emphasis (PRD AC-9b):** the verdict confirms no invite-context element on
+    the web landing uses `--pos` / `--green` (`design-lead` F3).
 - [ ] **WAIVED because:** — (no waiver of the rows above; the waiver noted in the header is
   only that the universal-link tap and TestFlight install have no automated proof).
 - `testID`s added/renamed: none planned; any added by the builder must pass
