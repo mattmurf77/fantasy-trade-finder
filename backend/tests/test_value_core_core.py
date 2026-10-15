@@ -216,6 +216,11 @@ def test_redundant_no_second_starter_at_a_capped_position():
     assert reason(["vqb"], ["pw"]) == "redundant"            # 1QB: P keeps a 2500 QB
     sf = SLOTS + ("SUPER_FLEX",)
     assert reason(["vqb"], ["pw"], slots=sf) is None         # superflex: a second QB starts
+    # value-core-4 (2026-10-14): superflex caps QB at two, so a team already starting two
+    # comparable QBs is not offered a third (jonbonjourvi offered Daniels behind Maye + Hurts).
+    three = {**teams, "P": teams["P"] + [A("pqb2", "QB", 2600)]}
+    assert reason(["vqb"], ["pw"], slots=sf, t=three) == "redundant"
+    assert reason(["vqb"], ["pqb2"], slots=sf, t=three) != "redundant"   # QB for QB: one goes back
     assert reason(["vte"], ["pw"], slots=sf) == "redundant"  # TE is capped in every format
     two_te = {**teams, "V": teams["V"] + [A("vte9", "TE", 300)]}     # V can still fill two TE slots
     assert reason(["vte"], ["pw"], slots=SLOTS + ("TE",), t=two_te) is None  # a two-TE league takes a second

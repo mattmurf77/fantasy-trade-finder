@@ -1,5 +1,12 @@
 # Decisions — Fantasy Trade Finder
 
+## D-206 — Value core v4: the superflex slot counts as a QB slot in the redundancy rule
+
+**Date:** 2026-10-14 · **Who:** operator ("turn [fit A's window misses] into changes"), lead-diagnosed.
+**Context:** Fit A's worst-graded cards were mostly quarterbacks. In jonbonjourvi's superflex SFO league, fit A offered Jayden Daniels and Brock Purdy for three young assets while the team already starts Drake Maye and Jalen Hurts (graded 1–2, tagged "wrong for my window"). v3's `redundant` rule exempted superflex QBs entirely (D-201). gdubs10's QB offers came from pre-v3 decks in a 1QB league, and v3 already blocks those.
+**Decision:** QB cap = dedicated QB slots + `SUPER_FLEX` slots (min 1). Superflex teams can still add a second QB but are never offered a third comparable one. TE is unchanged. It applies to the value core and both fit engines through the shared core. `ENGINE_VERSION` becomes `value-core-4`.
+**Consequences:** It extends the operator's single-QB rule (D-201) to superflex by the same slot logic. The live engine gets the same cap through the separate `deck.quality_filters` work.
+
 ## D-205 — Usage Trends: a Biggest jumps | Weekly share toggle, jump cards that state both ends, a floor on returns
 
 **Date:** 2026-10-10 · **Who:** operator (the toggle, the default, fixing jumps mode); lead (wording, newest-week reading, the floor's value).

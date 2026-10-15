@@ -89,11 +89,11 @@ class _Ctx:
         self.breakup = cfg.breakup_min_ratio
         self.keep_picks = cfg.rebuilders_keep_picks
         self.redundancy = cfg.redundancy_min_ratio
-        # Positions a team starts only a fixed number of (operator, 2026-10-10): TE in every
-        # format; QB unless the league has a superflex slot. Value = dedicated slots (min 1).
-        superflex = "SUPER_FLEX" in self.slots
-        self.capped = {p: max(1, self.slots.count(p)) for p in ("TE", "QB")
-                       if p == "TE" or not superflex}
+        # Positions a team starts only a fixed number of (operator, 2026-10-10): TE = dedicated TE
+        # slots; QB = dedicated QB slots + SUPER_FLEX slots (value-core-4, 2026-10-14: a superflex
+        # team that already starts two QBs is not offered a third). Each min 1.
+        self.capped = {"TE": max(1, self.slots.count("TE")),
+                       "QB": max(1, self.slots.count("QB") + self.slots.count("SUPER_FLEX"))}
         # Asymmetric band (operator, 2026-10-01): the viewer may overpay by up to `band` but
         # never take more than `gain_band` from the partner. Tolerance included.
         self.lo = 1.0 / (1.0 + effective_band(cfg.band, request.fairness_threshold)) - RATIO_TOL
@@ -241,8 +241,9 @@ def _judge(ctx: _Ctx, v: _TeamState, p: _TeamState, g: _Package, r: _Package,
 
 def _redundant(ctx: _Ctx, team: _TeamState, *, out: _Package, into: _Package) -> bool:
     """Operator, 2026-10-10 (Calibration: McBride offered to the Bowers owner): a team does
-    not take a TE (any format) or a QB (no superflex) when it already keeps as many players
-    at that position as it starts, each worth >= redundancy_min_ratio of the incoming one.
+    not take a TE or a QB when it already keeps as many players at that position as it starts
+    (QB counts the superflex slot, value-core-4), each worth >= redundancy_min_ratio of the
+    incoming one.
     Sending one back at that position frees the slot; a throw-in is never judged."""
     for a in into.ids:
         if a == into.throwin:

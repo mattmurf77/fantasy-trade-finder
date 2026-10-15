@@ -140,3 +140,13 @@ Companion docs: [prd.md](prd.md) · [hld.md](hld.md) · [lld.md](lld.md) · [spe
 4. **Docs:** lld §4.3 (row 3c), specs §3 and its changelog, data-dictionary (`policy_version`, fit `core_engine`), glossary, D-201. api-reference n/a: no route change.
 5. **Ship gate:** CI green plus a TEST_LEDGER entry. Express: no.
 
+---
+
+## Addendum 2026-10-14 — value-core-4: superflex QB cap
+
+**Entry point:** direct ask (D-206). No schema, flag or route change.
+
+- **Evidence:** `test_redundant_no_second_starter_at_a_capped_position` gains two cases: a superflex team keeping two QBs is not offered a third, and QB-for-QB is not judged redundant. The value-core, grading and fit suites pass (230). Version pins move to `value-core-4`.
+- **Docs:** lld §4.3 row 3c, specs §3 and its changelog, data-dictionary `policy_version`, glossary, D-206.
+- **Express:** no.
+
