@@ -42,8 +42,9 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   `session_init.first_touch` is an API contract change under full gates; a non-matching
   `utm_*` or `channel` value is coerced to `other` with a counter at ingest, not dropped;
   attribution covers only accounts created after ship (no back-fill); prod baselines stay
-  unmeasured until W3. Surface values are the existing `surface` props (`growth-pm`,
-  2026-10-15; PRD §10).
+  unmeasured until W3. Surface values are the existing `surface` props, and
+  `signup.attribution` is `token|league_match|legacy_ref|none`, superseding the earlier
+  `link|none` (both `growth-pm`, 2026-10-15, pending `analytics-lead`'s addendum; PRD §10).
 
   → follow-through: tracking-plan addendum under `docs/business/analytics/` (owner
   `analytics-lead`); `docs/cross-client-invariants.md` § Client analytics event contract (web
@@ -67,8 +68,9 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
     impact v2. Graduation: Phase 0 done + 2 weeks with ≥95% of invite-following signups
     carrying a ledger row (PRD §2.1). Deploy-free rollback: flip off.
   - `growth.join_landing` — **new (proposed by this PRD; `growth-pm`/`head-product` to
-    accept, PRD D-7)**, default **false**. Landing vs today's 302; proposed, also the `/s/*`
-    device-aware CTA target (PRD FR-25; `head-eng` confirms). Graduation: words approved,
+    accept, PRD D-7)**, default **false**. Landing vs today's 302; also the `/s/*`
+    device-aware CTA target (PRD FR-25; accepted by `growth-pm` 2026-10-15, `head-eng`
+    confirms in allocation). Graduation: words approved,
     `design-lead` `/design-review` verdict (`design-review.md`), operator device pass.
     Rollback: flip off (T4–T7 contract).
   - `growth.invite_join_link` — existing, **flipped during Phase 1 rollout** after the #239
@@ -128,7 +130,7 @@ D-056: no Maestro, no simulator, no captures.
     `/s/trade` with the gate off → CTA `href` `/` for every user agent; gate on → iPhone UA
     links `IOS_INSTALL_URL` when set and shows the note with no CTA link when unset; desktop
     UA links `/`; Android UA shows the note and no CTA link; the response is not
-    `public`-cacheable; `og:*` tags unchanged; no `dtf://` or user-supplied target.
+    `public`-cacheable, or carries `Vary: User-Agent`; `og:*` tags unchanged; no `dtf://` or user-supplied target.
   - `backend/tests/test_referral_attribution.py` (new): token credit for Sleeper, ESPN and MFL
     invitees; first session in a different league with verified membership; `unknown`,
     `expired`, `not_member` misses; group-chat second and third joiners → sibling rows;

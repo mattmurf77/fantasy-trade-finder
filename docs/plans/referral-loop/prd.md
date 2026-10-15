@@ -18,7 +18,9 @@
 > creates the public TestFlight link); `head-product`'s first build slice for `head-eng`
 > (FR-7, FR-8, FR-9, §8.2, `IOS_INSTALL_URL`, plus the `/s/*` CTA target pulled forward as
 > FR-25; §12); `analytics-lead`'s P18 and baseline answers (§8.4, §10, D-11); `growth-pm`'s
-> surface vocabulary (§10); and `head-product`'s proposed wordmark-period rule (D-15).
+> surface vocabulary (§10); and `head-product`'s proposed wordmark-period rule (D-15). A
+> follow-up the same day records `growth-pm`'s `signup` attribution values (§10), accepts
+> FR-25's gate (`growth.join_landing`), and closes D-15 (`design-lead`, PR #349).
 > Acceptance of the whole PRD (D-6) is still with `head-product`. Requirements only: **no
 > source file is changed by this document.**
 > **Owner:** `growth-pm`. **Base:** `origin/main` 678834ab. **Branch:** `plan/referral-loop`.
@@ -406,17 +408,20 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
 - **OG card (v1, static 1200×630).** `--ink-0` field, the FLEECED wordmark in Barlow
   Condensed caps, one Archivo line; no gradients, no glow; text ≥48px at 1200 wide so it
   reads at iMessage thumbnail size (~300px). Art direction is `design-lead`'s (P14). The
-  `TRADE FINDER`-with-ice-tick wordmark in `docs/design/brand.md:42` is stale and
-  `design-lead` is fixing it.
-  - **Wordmark period: open (D-15).** `design-lead` ruled the shipped **"FLEECED."** with the
-    ice period, as the web header ships it (`web/index.html:54`,
-    `web/css/styles.css:4991-4992`); `marketing-lead` asks for no period on the OG card,
-    because next to a trade "FLEECED." reads as a verdict. `head-product` has proposed a rule,
-    pending `head-bizops` (D-15): the logotype keeps the ice period, including on the invite
-    OG card; running copy never uses it.
+  `TRADE FINDER`-with-ice-tick wordmark in `docs/design/brand.md:42` is stale;
+  `design-lead`'s fix is `docs/design/brand.md` on PR
+  [#349](https://github.com/mattmurf77/fantasy-trade-finder/pull/349).
+  - **Wordmark period: resolved (D-15, `design-lead`, 2026-10-15).** The OG card carries the
+    logotype **"FLEECED."** with the ice period: Barlow Condensed Bold caps, in chalk, as the
+    web header ships it (`web/index.html:54`, `web/css/styles.css:4991-4992`). The rule, in
+    PR #349's `brand.md`: the ice period belongs to the logotype; it goes wherever the logo
+    appears and nowhere else (not verdict cards, headings, badges or buttons). This matches
+    `head-product`'s proposed rule (running copy never uses it). `marketing-lead`'s concern
+    ("FLEECED." next to a trade reads as a verdict) is answered by the logo-only scope.
   - **v1 = lab variant (ii)** (`growth-pm`, 2026-10-15): the wordmark plus the ram (the app
     icon, `mobile/assets/mascot/ram/neutral@3x.png`) in its own box; the ram's own shading
-    stays inside that box. **Fallback: variant (i)**, wordmark only. Variant (iii), the league
+    stays inside that box. PR #349's `brand.md` sanctions the invite OG link card as a ram
+    placement. **Fallback: variant (i)**, wordmark only. Variant (iii), the league
     name as dynamic text, is Phase 2 (it needs a per-league render and inherits D-10).
   - **The Archivo line** (proposed, `marketing-lead`): "Dynasty Trade Finder" may appear only
     locked up with the FLEECED wordmark, smaller than it, so the two read as D-057's full
@@ -492,15 +497,18 @@ iPhone → `IOS_INSTALL_URL` when set, else the honest note with no button; desk
 can't sign in on the web). Only the target and the button-or-note choice change: `ref`
 forwarding, the OG image and absolute `og:image`, `robots.txt`, landing events and the
 off-Chalkline chrome stay in GB-02 (§3 non-goal 7). The response varies by device, so it can
-no longer be `Cache-Control: public` (today `public, max-age=300`, `S:25518`). Gate: rides
-`growth.join_landing` (**proposed** here, with D-7), so with the flag off the CTA is today's
-`/` and merge changes nothing user-visible (§12). Words are `marketing-lead`'s (D-5): the
+no longer be a plain `Cache-Control: public` (today `public, max-age=300`, `S:25518`): it is
+either not `public` or it carries `Vary: User-Agent`. Gate: rides `growth.join_landing`
+(accepted by `growth-pm` 2026-10-15; `head-eng` still confirms it in allocation), so one
+flag covers every device-aware CTA surface; with it off the CTA is today's `/` and merge
+changes nothing user-visible (§12). Words are `marketing-lead`'s (D-5): the
 join landing's iPhone-unset note names an invite, so a share landing needs its own.
 - AC-25: pytest on `/s/p` and `/s/trade` (`/s/tiers` 404s while `growth.tier_board_share` is
   off and inherits the change through `_share_html`): gate off → the CTA `href` is `/` for
   every user agent; gate on → iPhone UA links `IOS_INSTALL_URL` when set and renders the note
   with no CTA link when unset; desktop UA links `/`; Android UA renders the note and no CTA
-  link; the response is not `public`-cacheable; the `og:*` tags are unchanged; no variant
+  link; the response is not `public`-cacheable, or carries `Vary: User-Agent`; the `og:*`
+  tags are unchanged; no variant
   links `dtf://` or a user-supplied URL.
 
 ### H5 · Attribution
@@ -920,9 +928,11 @@ prop; `has_ref` stays as it is. The readout joins events to the ledger on
 - **Attribution exists only for accounts created after ship. No back-fill.**
 - **Prod baselines stay unmeasured until W3**, including the nine invite and share event
   counts and new accounts per week. Every §2.2 value stays **assumed** until then.
-- **Overlap to settle in the addendum:** `analytics-lead` granted `marketing-lead`'s seven
-  `signup` props, whose `attribution` is `link | none`; FR-16 specs `attribution` as
-  `token | league_match | legacy_ref | none`, plus `attribution_miss`.
+- **`signup.attribution` values** (decided by `growth-pm`, 2026-10-15, pending
+  `analytics-lead`'s addendum): `token | league_match | legacy_ref | none` (FR-16), plus
+  `attribution_miss`. They supersede the `link | none` that `analytics-lead` granted from
+  `marketing-lead`'s earlier proposal, which predates the ledger: `link` splits into `token`
+  and `legacy_ref`.
 
 **Surface vocabulary** (decided by `growth-pm`, 2026-10-15, pending `analytics-lead`'s final
 addendum; [marketing-inputs.md §D](marketing-inputs.md#d-decisions-needed) D5, "vocabulary
@@ -948,7 +958,7 @@ bridge"):
 | Key | Kind | Default | Gates | Graduation | Rollback |
 |---|---|---|---|---|---|
 | `growth.referral_ledger` | **new flag** | false | Mint route (404 off); clients' use of the id (off ⇒ byte-identical links); open recording; §7.4–§7.8 attribution, activation and notification rules; impact v2 | Phase 0 done + 2 weeks with the §2.1 instrumentation target met | Flip off: mint 404s, clients emit today's links, attribution stops; rows stay |
-| `growth.join_landing` | **new flag (proposed here; `growth-pm` to accept, D-7)** | false | Landing page vs today's 302 on `/app/league/join/<id>`; proposed, also the `/s/*` device-aware CTA target (FR-25) | Words approved (`marketing-lead`), `design-lead` `/design-review` verdict (§13), operator device pass on iPhone / desktop / Android | Flip off: today's 302, T4–T7 contract |
+| `growth.join_landing` | **new flag (proposed here; `growth-pm` to accept, D-7)** | false | Landing page vs today's 302 on `/app/league/join/<id>`; also the `/s/*` device-aware CTA target (FR-25; accepted by `growth-pm` 2026-10-15, `head-eng` confirms in allocation) | Words approved (`marketing-lead`), `design-lead` `/design-review` verdict (§13), operator device pass on iPhone / desktop / Android | Flip off: today's 302, T4–T7 contract |
 | `growth.invite_join_link` | existing (`config/features.json:190`) | false | Emitter form only (unchanged meaning) | **Flip in Phase 1** after the #239 device checklist passes (`docs/feedback/items/239-invite-universal-links/status.md` § Operator actions 4; procedure `config-reference.md:669`) | Flip off (legacy form parsed forever) |
 | `growth.referral` | existing, **reserved** | false | Nothing in v1. Its declared meaning includes reward granting (`backend/feature_flags.py:268`) | Phase 3, gated on the operator approving the pricing memo (P20) | — |
 | `invite.k_factor_dashboard` | existing (`config/features.json:20`) | false | Impact payload v2 (FR-21). Key name kept to avoid churn; meaning updated in `config-reference.md` | Phase 2 surface | Flip off |
@@ -991,7 +1001,7 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 | 2 | Ship clients (mobile build + web) | Flags off ⇒ links byte-identical (structural guard) |
 | 3 | Operator: #239 device checklist (tap a path-form link from Messages; app opens) | Pass recorded in `TEST_LEDGER.md` |
 | 4 | Flip `growth.referral_ledger` | Mint 201s live; first ids in the ledger |
-| 5 | Set `IOS_INSTALL_URL` (option A, D-1; the operator's link, D-3); flip `growth.join_landing` (the join landing, and the `/s/*` CTA target if FR-25's proposed gate holds) | Words approved; `design-lead` `/design-review` verdict (`design-review.md`); operator landing pass |
+| 5 | Set `IOS_INSTALL_URL` (option A, D-1; the operator's link, D-3); flip `growth.join_landing` (the join landing and the `/s/*` CTA target, FR-25) | Words approved; `design-lead` `/design-review` verdict (`design-review.md`); operator landing pass |
 | 6 | Flip `growth.invite_join_link` | Only if step 3 passed; otherwise stay on the legacy form, which still carries `t` |
 | 7 | Two-week read | §2.1 target → graduate `growth.referral_ledger` |
 
@@ -1055,7 +1065,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-12 | Mint cap 10 per inviter per league per day; token credit window 30 days | `growth-pm` | As written (assumed values) |
 | D-13 | `record_event` `platform` + `touch_user` parameters vs a separate writer | `head-eng` | Either; the requirement is no denorm bump |
 | D-14 | Copy questions from `design-lead`'s lab (§13). **Answered by `marketing-lead` 2026-10-15, all proposed** ([lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)): (a) every `[copy: marketing-lead]` slot is filled (the A2 note and A5's "A leaguemate invited you to {league}", FR-7; `og:title` = `gp.join.og_title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line, in the addendum); (b) FR-11's "{display name} invited you to {league}" **is** the landing headline, superseding `gp.join.headline`, with FR-7's fallback ladder; (c) "Dynasty Trade Finder" may appear on the OG card only locked up with the wordmark, smaller, never standalone (FR-7; the D-057 name is "Fleeced: Dynasty Trade Finder"); (d) **"leaguemates"**, one word (FR-3; the banner's "league-mates", `InviteLeaguematesBanner.tsx:163, :167, :176`, is respelled in this build). **Follow-up, open:** `marketing-lead` confirms the A2 note's "Open the invite in the app" reads as a re-tap of the invite link (a universal link that opens the installed app), not as a button (FR-7) | `marketing-lead`; the operator approves the words with D-5 | Approve with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
-| D-15 | **Open:** the OG card wordmark's period. `design-lead` ruled the shipped "FLEECED." with the ice period (`web/index.html:54`); `marketing-lead` asks for no period on the OG card, because next to a trade "FLEECED." reads as a verdict ("you got fleeced") (FR-7). **Proposed by `head-product`, pending `head-bizops`:** the logotype keeps the ice period as a logo, the invite OG card included; running copy never uses it | `design-lead` (owns the wordmark, P14), with `marketing-lead`'s concern; `head-product`'s proposed rule is now with `head-bizops` | Not picked here; open until `head-bizops` rules, and before the OG card is exported |
+| D-15 | The OG card wordmark's period. `marketing-lead` had asked for no period on the OG card, because next to a trade "FLEECED." reads as a verdict ("you got fleeced"); `head-product` proposed that the logotype keeps the period and running copy never uses it (FR-7) | **Resolved by `design-lead` 2026-10-15** (owns the wordmark, P14) | The OG card carries the logotype "FLEECED." with the ice period, Barlow Condensed Bold caps, chalk. Rule (`docs/design/brand.md`, PR [#349](https://github.com/mattmurf77/fantasy-trade-finder/pull/349)): the ice period belongs to the logotype; it goes wherever the logo appears and nowhere else (not verdict cards, headings, badges or buttons). Matches `head-product`'s proposed rule. PR #349 also sanctions the invite OG link card as a ram placement (variant (ii)) |
 
 ---
 
@@ -1065,17 +1075,17 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   with `head-eng` (§12, 2026-10-15).
 - **`head-eng`:** build the first slice first (§12: FR-7, FR-8, FR-9, FR-25, §8.2,
   `IOS_INSTALL_URL`); allocate files (builder TBD; likely `engagement-eng` backend + invite
-  routes, `onboarding-eng` web/LeagueJoin/SignIn); confirm FR-25's proposed gate
-  (`growth.join_landing`); security handoff on `/s/trade` enumeration
+  routes, `onboarding-eng` web/LeagueJoin/SignIn); confirm FR-25's gate
+  (`growth.join_landing`, accepted by `growth-pm`); security handoff on `/s/trade` enumeration
   (`S:25552-25564`, `S:25446-25457`).
 - **`analytics-lead`:** §10 proposals (P18 and the baseline asks answered 2026-10-15, §10),
   D-8, FR-22 readout, the tracking-plan addendum (final UTM convention, the surface
-  vocabulary in §10, the `signup` props overlap), W3 baseline (nine invite/share events, new
+  vocabulary and the `signup.attribution` values in §10), W3 baseline (nine invite/share events, new
   accounts per week, open → signup feasibility).
 - **`marketing-lead`:** final words for every quoted string, including the activation row
   (revised to stage 7, FR-19); its S-IDs remap to the backlog's S1–S12. The lab's copy
   questions (D-14) are answered (proposed, pending the operator); the OG wordmark period is
-  open (D-15: `head-product`'s proposed rule, pending `head-bizops`). New: the `/s/*` CTA
+  resolved (D-15, `design-lead`: the period is logo-only). New: the `/s/*` CTA
   notes and labels for FR-25, including a share landing's iPhone-unset note (D-5).
 - **FAQ claim → P9's copy-defect batch (`onboarding-pm`) via `head-product`:**
   `web/faq.html:206` says the web app "works in any phone browser", which is false: web
@@ -1087,8 +1097,8 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   files this PRD touches, e.g. `web/index.html:75` ("Fleeced finds trades…", Fleeced as the
   subject of an analysis verb), via `head-product`.
 - **`design-lead`:** landing + OG card + states (§13; lab PR #343 folded); the `/design-review`
-  verdict covers AC-4b's banner floors; D-15, the OG wordmark's period, with
-  `marketing-lead`'s concern (`head-product`'s proposed rule is pending `head-bizops`).
+  verdict covers AC-4b's banner floors. D-15 (the OG wordmark's period) is resolved by
+  `design-lead`, 2026-10-15 (`brand.md`, PR #349).
 - **`design-lead` → `head-eng` via `head-product` (outside this PRD): F1.** On phones the
   shipped web landing hides the `WR` label but keeps the WR-blue rail
   (`web/css/styles.css:5111`), so position colour is the only encoding (accessibility floor).
