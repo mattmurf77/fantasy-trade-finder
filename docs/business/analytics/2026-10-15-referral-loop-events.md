@@ -193,8 +193,8 @@ App Store Connect privacy-label check is the operator's.
   - share: `calc_live`, `calc_in_league`, `trades_liked`.
 
   For an invite, the surface is recovered through `invite_id` → the ledger's `surface` column,
-  written at mint (PRD §10 surface vocabulary, prd.md:937-952, and §9 ledger columns,
-  prd.md:852 @ ace09cf3).
+  written at mint (PRD §10 surface vocabulary, prd.md:971-976, and §9 ledger columns,
+  prd.md:880 @ 08f324ec).
 - **Link format is the `kind` prop** on `share_link_opened` (`package` | `trade` | `ref_root`),
   not a surface.
 - **Retired names.** `invite_card`, `invite_banner`, `league_tab`, `share_package` and
