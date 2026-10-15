@@ -97,6 +97,9 @@ def _flag_patches(*, signal_v2=True, thompson=True, diversity=True):
         patch.object(server, "_deck_thompson_v2_enabled", lambda: False),
         patch.object(server, "_deck_diversity_enabled", lambda: diversity),
         patch.object(server, "_deck_fatigue_enabled", lambda: False),
+        # deck.quality_filters (2026-10-14) drops cards from the served deck; pinned OFF so the
+        # golden/bake-off captures keep testing what they test. A test opts in by patching it.
+        patch.object(server, "_deck_quality_filters_enabled", lambda: False),
         patch.object(server, "_deck_taste_enabled", lambda: False),
         patch.object(server, "_deck_value_model_enabled", lambda: False),
         patch.object(server, "_deck_exploration_enabled", lambda: False),

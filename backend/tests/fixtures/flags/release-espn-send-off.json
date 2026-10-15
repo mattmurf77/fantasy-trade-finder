@@ -145,6 +145,7 @@
   "deck.value_model": false,
   "deck.first_session": true,
   "deck.replenishment": true,
+  "deck.quality_filters": true,
   "ranks.rookie_subset": true,
   "draft.room": true,
   "draft.live_poll": true,
