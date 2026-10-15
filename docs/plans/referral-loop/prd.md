@@ -299,11 +299,15 @@ FRs already touch: this invite share text, the inviter rows (FR-18, FR-19) and t
 landing (FR-7). Every other old-name string, including the `league_member_unlocked_trades`
 body (`S:10542-10543`), is `head-product`'s P9 copy-defect batch (`onboarding-pm`, after
 this wave). Words from `marketing-lead`. Spelling: **"leaguemates"**, one word, in every
-proposed string (`marketing-lead`, the voice-spec form); note that the shipped banner says
-"league-mates" today (`InviteLeaguematesBanner.tsx:163, :167, :176`), which
-`marketing-lead`'s `h1.banner.title` / `h1.banner.a11y` rows respell.
+proposed string (`marketing-lead`, the voice-spec form). The shipped banner's
+"league-mates" (`InviteLeaguematesBanner.tsx:163, :167, :176`) is respelled "leaguemates"
+**in this build** (`marketing-lead`'s `h1.banner.title` / `h1.banner.a11y`; spelling only, no
+other banner words change): FR-3 and AC-4b already touch that file, and P9 covers only
+strings outside the files this PRD touches.
 - AC-3: no invite share text contains "Dynasty Trade Finder" or "Fantasy Trade Finder"
   (structural guard).
+- AC-3b: `InviteLeaguematesBanner.tsx` contains no "league-mates" in any rendered string or
+  accessibility label.
 
 **FR-4 — Even impressions.** `invite_cta_shown` fires on the Trades cold-start banner and the
 members-overlay footer (H1b, H1e). The banner passes the league's real `platform` and real
@@ -316,9 +320,10 @@ doesn't; `InviteLeaguematesBanner.tsx:146-153`).
   border meets **3:1** non-text contrast against the surface it sits on. Today it is
   `minHeight: 36` with no `hitSlop` (`:213`) and the legacy `ink.lineStrong` `#3D4654`
   border (`:220`; 2.03:1 on ink-0 per `mobile/src/theme/chalkline.ts:28`) (`design-lead`
-  finding F2). Note: the banner's surface is `ink.ink2` (`:192`), where even
-  `ink.lineStrongA11y` `#59647A` measures 2.81:1 (`chalkline.ts:29-34`), so a token swap
-  alone does not pass; `design-lead`'s `/design-review` verdict settles the value.
+  finding F2). **The border's colour value is set by `design-lead`'s `/design-review`**,
+  because existing tokens top out at 2.81:1 on the banner's `ink.ink2` surface (`:192`):
+  even `ink.lineStrongA11y` `#59647A` measures 2.81:1 there (`chalkline.ts:29-34`), so a
+  token swap alone does not pass.
 
 Apart from AC-4b and FR-1's pending state (J1 step 2; the lab draws it with the chalkline
 Button's loading treatment, §13), FR-3 and FR-4 are copy and events only: **no other visual
@@ -372,7 +377,10 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
     `--chalk-dim`, never `--chalk-faint` (it's content).
   - iPhone with no `IOS_INSTALL_URL` (lab frame A2): the honest note only, "The iPhone beta
     isn't open to the public yet. Already have it? Open the invite in the app." (proposed;
-    the Android note's "runs on iPhone" would be wrong on an iPhone). **No "Request
+    the Android note's "runs on iPhone" would be wrong on an iPhone). "Open the invite in
+    the app" means re-tapping the invite link in the chat: it is a universal link and opens
+    the installed app. It does not mean a `dtf://` button (§3 non-goal 13); D-14 asks
+    `marketing-lead` to confirm the words read as a re-tap. **No "Request
     TestFlight access" link** (today's `/contact.html` link, `web/index.html:266`) in v1: it
     would depend on manual operator follow-up.
 - **Expired or unknown link:** drop the inviter name; neutral headline; **not** `--neg` red (an
@@ -957,7 +965,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-11 | First-touch UTMs on `session_init` (§8.4) | `analytics-lead` (P18) | Accept [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo); outside Phase 1's critical path |
 | D-12 | Mint cap 10 per inviter per league per day; token credit window 30 days | `growth-pm` | As written (assumed values) |
 | D-13 | `record_event` `platform` + `touch_user` parameters vs a separate writer | `head-eng` | Either; the requirement is no denorm bump |
-| D-14 | Copy questions from `design-lead`'s lab (§13). **Answered by `marketing-lead` 2026-10-15, all proposed** ([lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)): (a) every `[copy: marketing-lead]` slot is filled (the A2 note and A5's "A leaguemate invited you to {league}", FR-7; `og:title` = `gp.join.og_title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line, in the addendum); (b) FR-11's "{display name} invited you to {league}" **is** the landing headline, superseding `gp.join.headline`, with FR-7's fallback ladder; (c) "Dynasty Trade Finder" may appear on the OG card only locked up with the wordmark, smaller, never standalone (FR-7; the D-057 name is "Fleeced: Dynasty Trade Finder"); (d) **"leaguemates"**, one word (FR-3; the banner says "league-mates" today, `InviteLeaguematesBanner.tsx:163, :167, :176`) | `marketing-lead`; the operator approves the words with D-5 | Approve with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
+| D-14 | Copy questions from `design-lead`'s lab (§13). **Answered by `marketing-lead` 2026-10-15, all proposed** ([lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)): (a) every `[copy: marketing-lead]` slot is filled (the A2 note and A5's "A leaguemate invited you to {league}", FR-7; `og:title` = `gp.join.og_title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line, in the addendum); (b) FR-11's "{display name} invited you to {league}" **is** the landing headline, superseding `gp.join.headline`, with FR-7's fallback ladder; (c) "Dynasty Trade Finder" may appear on the OG card only locked up with the wordmark, smaller, never standalone (FR-7; the D-057 name is "Fleeced: Dynasty Trade Finder"); (d) **"leaguemates"**, one word (FR-3; the banner's "league-mates", `InviteLeaguematesBanner.tsx:163, :167, :176`, is respelled in this build). **Follow-up, open:** `marketing-lead` confirms the A2 note's "Open the invite in the app" reads as a re-tap of the invite link (a universal link that opens the installed app), not as a button (FR-7) | `marketing-lead`; the operator approves the words with D-5 | Approve with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
 | D-15 | **Open:** the OG card wordmark's period. `design-lead` ruled the shipped "FLEECED." with the ice period (`web/index.html:54`); `marketing-lead` asks for no period on the OG card, because next to a trade "FLEECED." reads as a verdict ("you got fleeced") (FR-7) | `design-lead` (owns the wordmark, P14), with `marketing-lead`'s concern | Not picked here; `design-lead` decides before the OG card is exported |
 
 ---
@@ -980,7 +988,9 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 - **Old-name strings: overlap resolved by P9.** `head-product` put old-name copy defects in
   P9's copy-defect batch (`onboarding-pm`, after this wave). This PRD renames only the strings
   its FRs touch (FR-3); the rest, including `league_member_unlocked_trades`
-  (`S:10542-10543`), go to that batch.
+  (`S:10542-10543`), go to that batch. So does any old-name or name-rule string outside the
+  files this PRD touches, e.g. `web/index.html:75` ("Fleeced finds trades…", Fleeced as the
+  subject of an analysis verb), via `head-product`.
 - **`design-lead`:** landing + OG card + states (§13; lab PR #343 folded); the `/design-review`
   verdict covers AC-4b's banner floors; D-15, the OG wordmark's period, with
   `marketing-lead`'s concern.

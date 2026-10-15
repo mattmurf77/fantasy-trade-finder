@@ -82,10 +82,13 @@ S2). The `/?ref=` root fallback is the last rung of S1/S2, not a separate ID. Re
 | S4 | Tier-board share | killed | 2026-08-11 | Operator ruling D-P1-12: rankings sharing is not a product surface; OFF is the resting state (`living-memory/DECISIONS.md` D-039, tier-board entry) |
 | S9 | Public profile pages `/u/` | parked | 2026-10-15 | `profiles.public_pages` off by operator call (#221); not a growth candidate unless reversed |
 | — | Waitlist / email capture on the invite landing | killed | 2026-08-12 | Reverted in `65c63479`; no email channel; adds a step |
+| — | Desktop "what Fleeced does" panel beside the join landing's CTA (e.g. the web landing's "We find the differences" illustration; raised in `design-lead`'s lab, PR #343) | parked | 2026-10-15 | Low priority while the desktop path rarely completes: the extension is an unpacked release, not a store listing (`extension/README.md:44`; GB-01 PRD §14) |
 | — | Attribution SDK (deferred deep link) | parked | 2026-10-15 | Known non-goal (`docs/plans/audit-p0-remediation/prd-p0-3.md:194-201`); GB-01 substitutes re-tap + league match. Revisit only if league-match error is material |
 
 ## Changelog
 
+- 2026-10-15 — Parked the desktop "what Fleeced does" landing panel (low priority while the
+  desktop path rarely completes).
 - 2026-10-15 — GB-02 widened to the `/s/p` (and `/s/trade`) share OG image,
   `backend/og_image.py` `_render_trade_card_png`: off-Chalkline (gradient, 18px radii,
   non-Chalkline font, pre-D-057 name) plus two visible bugs, the "% fair" label overlapping
