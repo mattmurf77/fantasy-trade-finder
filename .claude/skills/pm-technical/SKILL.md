@@ -181,8 +181,8 @@ through `head-product`, which relays to the other departments' heads.
   `head-eng`.
 - Strategy gaps → the owning box through `head-product`: `growth-pm` (acquisition,
   viral loop), `engagement-pm` (retention), `platforms-pm` (league platforms,
-  partnerships), `monetization-pm` once monetization activates (until then
-  `head-product`), or the area's PM; model behavior → `models-lead` through
+  partnerships), `monetization-pm` (pricing, paywalls, monetization strategy), or
+  the area's PM; model behavior → `models-lead` through
   `head-product` → `head-bizops`.
 - Instrumentation, funnel placement, "do users actually want this" evidence, and
   experiments → `analytics-lead` (`/an-data-architect`, `/an-funnel`,
