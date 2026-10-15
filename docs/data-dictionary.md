@@ -1780,7 +1780,7 @@ Give-get program state (foundation §5). Fraud controls are structural: `uq_refe
 | `open_count` | int, `server_default 0` | Human landing opens, `COALESCE(open_count, 0) + 1` per open |
 | `unfurled_at` | str | ISO UTC of the **first** link-preview fetch (iMessage, Slack, Discord, WhatsApp, …; an empty user agent counts). First write wins. Preview fetches never touch the three open columns |
 
-The four landing columns are written only by `record_referral_landing_open()`: one atomic `UPDATE … WHERE invite_token = :t` (served by `uq_referral_token`; no new index), from `GET /app/league/join/<id>` while `growth.referral_ledger` is on and `t` is well-formed. A HEAD request writes nothing. Added through `_migrate_db`'s `migration_cols` as well as the table, so existing databases gain them on boot.
+The four landing columns are written only by `record_referral_landing_open()`: one atomic `UPDATE … WHERE invite_token = :t` (served by `uq_referral_token`; no new index), from `GET /app/league/join/<id>` while `growth.referral_ledger` is on and `t` is well-formed, and only when the row's `league_id` is the path's league (`invite_status` valid or expired): a `t` pasted into another league's path never stamps the row, because the league-match fallback reads `opened_at`. A HEAD request writes nothing. Added through `_migrate_db`'s `migration_cols` as well as the table, so existing databases gain them on boot.
 
 ## `affiliate_clicks`
 

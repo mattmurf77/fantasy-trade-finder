@@ -717,7 +717,7 @@ def test_nothing_records_without_a_well_formed_t(monkeypatch, env):
 @pytest.mark.parametrize("tok,status,owner,touched", [
     (T_VALID, "valid", REFERRER, True),
     (T_EXPIRED, "expired", "system:invite", True),
-    (T_MISMATCH, "league_mismatch", "system:invite", True),
+    (T_MISMATCH, "league_mismatch", "system:invite", False),
     (T_UNKNOWN, "unknown", "system:invite", False),
 ])
 def test_invite_status_and_owner(monkeypatch, env, flags, tok, status, owner,
@@ -732,6 +732,59 @@ def test_invite_status_and_owner(monkeypatch, env, flags, tok, status, owner,
                      "invite_status": status, "device_class": "android"}
     row = _referral(env, tok)
     assert (row is not None and row["open_count"] == 1) is touched
+
+
+@pytest.mark.parametrize("flags", [LEDGER, BOTH])
+def test_league_mismatch_never_stamps_the_row(monkeypatch, env, flags):
+    """F1 (lead ruling): a `t` pasted into another league's path must not
+    mark the invite opened or unfurled — §7.5's league-match fallback reads
+    opened_at. The event still fires for the human GET."""
+    _set_flags(monkeypatch, *flags)
+    _seed(env)
+    before = _referral(env, T_MISMATCH)
+    _get(f"/app/league/join/{LEAGUE}?t={T_MISMATCH}", ua=UA["iphone"])
+    _get(f"/app/league/join/{LEAGUE}?t={T_MISMATCH}", ua=PREVIEW_UA["imessage"])
+    _get(f"/app/league/join/{LEAGUE}?t={T_MISMATCH}", ua=None)
+    after = _referral(env, T_MISMATCH)
+    assert after == before
+    assert after["opened_at"] is None and after["last_opened_at"] is None
+    assert after["open_count"] == 0 and after["unfurled_at"] is None
+    (e,) = _events(env, "invite_landing_opened")
+    assert e["user_id"] == "system:invite"
+    assert json.loads(e["props"])["invite_status"] == "league_mismatch"
+
+
+@pytest.mark.parametrize("flags", [LEDGER, BOTH])
+def test_expired_still_stamps_the_row(monkeypatch, env, flags):
+    _set_flags(monkeypatch, *flags)
+    _seed(env)
+    _get(f"/app/league/join/{LEAGUE}?t={T_EXPIRED}", ua=PREVIEW_UA["slack"])
+    _get(f"/app/league/join/{LEAGUE}?t={T_EXPIRED}", ua=UA["desktop_chrome"])
+    row = _referral(env, T_EXPIRED)
+    assert row["unfurled_at"] and row["opened_at"]
+    assert row["last_opened_at"] == row["opened_at"] and row["open_count"] == 1
+
+
+@pytest.mark.parametrize("flags,ua", [
+    (BOTH, UA["iphone"]), (BOTH, PREVIEW_UA["imessage"]),
+    (LANDING, UA["iphone"]), (LEDGER, UA["iphone"]),
+])
+def test_join_resolves_the_invite_once_per_request(monkeypatch, env, flags, ua):
+    """F2: one referral read per join request, shared by FR-8 and the landing."""
+    _set_flags(monkeypatch, *flags)
+    _seed(env)
+    calls = []
+    real = db_module.get_referral_by_invite_token
+
+    def _counting(tok):
+        calls.append(tok)
+        return real(tok)
+    monkeypatch.setattr(db_module, "get_referral_by_invite_token", _counting)
+    _get(f"/app/league/join/{LEAGUE}?t={T_VALID}", ua=ua)
+    assert calls == [T_VALID]
+    calls.clear()
+    _get(f"/app/league/join/{LEAGUE}", ua=ua)      # no `t`: no read at all
+    assert calls == []
 
 
 def test_event_props_carry_no_identity(monkeypatch, env):

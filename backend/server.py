@@ -12851,19 +12851,26 @@ def _invite_event_owner(status: str, referral: dict | None) -> str:
     return referral["referrer_user_id"] if status == "valid" else _INVITE_SYSTEM_OWNER
 
 
-def _record_join_landing_open(t: str, league_id: str) -> None:
+def _record_join_landing_open(t: str, league_id: str, status: str,
+                              referral: dict | None) -> None:
     """FR-8, both join modes. The caller has checked _should_record_landing(t)
-    and that this is not a HEAD. A preview fetch stamps unfurled_at only; a
-    human GET stamps the open columns and fires invite_landing_opened. The
-    event never moves the inviter's users row (touch_user=False, C6) and its
-    props never carry the UA, IP, a username or a name (C4/C9)."""
+    and that this is not a HEAD, and resolved (status, referral) once. A
+    preview fetch stamps unfurled_at only; a human GET stamps the open columns
+    and fires invite_landing_opened. The row is stamped only when its league
+    is this path's league (valid or expired): a `t` pasted into another
+    league's path must not mark the invite opened, since §7.5's league-match
+    fallback reads opened_at. The event fires for every status. It never
+    moves the inviter's users row (touch_user=False, C6) and its props never
+    carry the UA, IP, a username or a name (C4/C9)."""
     from . import database as _db
     ua = request.headers.get("User-Agent")
+    stamp_row = status in ("valid", "expired")
     if is_preview_fetcher(ua):
-        _db.record_referral_landing_open(t, "unfurl")
+        if stamp_row:
+            _db.record_referral_landing_open(t, "unfurl")
         return
-    _db.record_referral_landing_open(t, "open")
-    status, referral = _resolve_invite(t, league_id)
+    if stamp_row:
+        _db.record_referral_landing_open(t, "open")
     record_event(
         _invite_event_owner(status, referral), "invite_landing_opened",
         league_id=league_id, source="api",
@@ -12978,11 +12985,12 @@ def _render_join_landing(*, league_id: str, league_name: str | None,
 </html>"""
 
 
-def _join_landing_response(league_id: str, t: str | None) -> "Response":
+def _join_landing_response(league_id: str, t: str | None, status: str,
+                           referral: dict | None) -> "Response":
     """200 landing, `growth.join_landing` on. The inviter's name comes only
-    from a VALID `t`; the league name only from Sleeper's public API (the
-    invite-meta privacy rule). Neither lookup can fail the page."""
-    status, referral = _resolve_invite(t, league_id)
+    from a VALID `t` (status/referral resolved once by the route); the league
+    name only from Sleeper's public API (the invite-meta privacy rule).
+    Neither lookup can fail the page."""
     inviter = referral.get("referrer_display_name") if status == "valid" else None
     league_name = None
     try:
@@ -13058,10 +13066,12 @@ def league_join_redirect(league_id):
     nothing: Flask runs this GET view for HEAD, so the method is checked here.
     """
     t = _invite_id_from(request.args.get("t"))
+    # One referral read per request, and none without a `t`.
+    status, referral = _resolve_invite(t, str(league_id))
     if _should_record_landing(t) and request.method != "HEAD":
-        _record_join_landing_open(t, str(league_id))
+        _record_join_landing_open(t, str(league_id), status, referral)
     if is_enabled("growth.join_landing"):
-        return _join_landing_response(str(league_id), t)
+        return _join_landing_response(str(league_id), t, status, referral)
     params = {"league": str(league_id)}
     ref = (request.args.get("ref") or "").strip()
     if ref:
