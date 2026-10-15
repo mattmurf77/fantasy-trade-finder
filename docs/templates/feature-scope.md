@@ -127,7 +127,7 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 <!-- Per platform: the reads and writes this feature uses, and how it behaves there.
      Fleaflicker is dark (`fleaflicker.link` false) — n/a unless this change lights it. -->
 
-Guidance: [platform-parity.md](../../.claude/skills/pm-technical/references/platform-parity.md) (owned by `platforms-pm`).
+Guidance: [platform-parity.md](/.claude/skills/pm-technical/references/platform-parity.md) (owned by `platforms-pm`).
 
 | Platform | Reads / writes used | Behavior: parity / honest `platform_unsupported` / fallback copy / n/a |
 |---|---|---|
