@@ -114,16 +114,38 @@ table A, and so does the clock.
 
 | Control (testID) | file:line | Lands on |
 |---|---|---|
-| Home tile (`home.tile.find-trade`) | `mobile/src/components/home/HomeHub.tsx:391-398` | Acquire builder |
+| Home tile (`home.tile.find-trade`) | `mobile/src/components/home/HomeHub.tsx:391-398` | **The top of the Trades stack, which isn't always the builder** (ux-lead F-2). It calls `navigation.navigate('Trades')` with no screen (`HomeHub.tsx:397`), and tab stacks persist across switches (`navigation/TabNav.tsx:895`), so a deck left open is what shows |
 | Home list row (when `nav.home_hub` is off) | `mobile/src/screens/HomeScreen.tsx:19,44` | Acquire builder |
-| League Home (`league.action.find`) and the works-now button | `screens/LeagueScreen.tsx:624`, `:867` → `goFindTrade` `:473-476` | Acquire builder |
+| League Home (`league.action.find`) and the works-now button | `screens/LeagueScreen.tsx:624`, works-now block `:861-869` → `goFindTrade` `:473-476` | Acquire builder (`TradesHome`) |
 | Matches empty state (`matches.go-to-trades`) | `screens/MatchesScreen.tsx:1189` | Acquire builder |
 | Calculator "Want ideas instead? Find a trade →" (`calc.find-a-trade`) | `screens/TradeCalculatorScreen.tsx:724-741` | Acquire builder (`popTo`) |
 
 A table B tap is measured as tap → builder interactive. It is **not** a gate pass, because no trade
 is shown. The operator asked for a card within 250 ms of hitting Find a trade, and from a table B
-control the user needs a second tap to get one. Whether table B taps should start a search
-themselves is a flow question for ux-lead and the operator (Decision D10).
+control the user needs a second tap to get one.
+
+**Proposal for D10** (trades-pm decision, 2026-10-15, adopting ux-lead's recommendation; the
+operator decides because it amends D-171's builder-first landing):
+- **Onboarded users:** the Home tile, both League Home controls and the Matches empty-state primary
+  start the organic deck directly.
+  - The app builds the Trades stack as **builder → pushed deck**, using `push`, never `navigate`
+    (G-056). Back returns to the builder, which keeps D-171's build → results → tweak loop.
+  - The search goes through the same fork and analytics path as the canvas tap
+    (`TradesScreen.tsx:3414-3445`).
+  - The clock then starts at that tap, and these controls join table A.
+- **First-run keeps the builder** while `onboarding.trades_first` is on and the user has no first
+  swipe. The guide's adoption step targets the canvas button (`components/analystScript.ts:495-500`,
+  `:536`). onboarding-pm signs off (ux-lead D10 limit 1).
+- **The calculator row stays navigation-only** and is relabelled to say where it goes (design-lead
+  D10; ux-lead D10 limit 2). Copy goes through head-product → marketing-lead.
+- **A Home tile that previews the first prepared card** (within the §5.1 bounds; never a stale
+  preview) is an optional follow-up for design-lead (design-lead D10).
+- **If the operator keeps D-171 as is,** the table B labels change to say where they go. Leaving a
+  "Find a trade" label that finds nothing is a design defect (design-lead D10).
+
+**Other arrivals (measured, not gated; ux-lead F-8):** the `app/trades/finder` deep link, which
+pushes a param-less `TradeDeck` (`navigation/TabNav.tsx:464-470`), and any inbox notification that
+lands on the deck.
 
 **Gate cohort (proposed):** every table A control whose search is the **default organic deck**
 (empty canvas, no pinned asset or partner). Pinned and targeted searches are **measured and reported
@@ -171,7 +193,7 @@ A tap that ends in an honest **zero-results** state is reported separately as ta
 | Dimension | Cells | Notes |
 |---|---|---|
 | Device | TestFlight iPhones (production backend) | iOS only. Record model and OS (already envelope columns: `device_type`, `os_version`, `app_version`; tracking plan `2026-07-17-tracking-plan-v2.md:141`). |
-| Network | Wi-Fi · cellular · offline | Not in the envelope today; requested in §4.6. Both Wi-Fi and cellular are held to 250 ms unless the operator decides otherwise (Decision D3). |
+| Network | Wi-Fi · cellular · offline | Not captured today. Carried as a `network_type` prop on R2/R2b (§4.6; analytics-lead R4 alternative). Both Wi-Fi and cellular are held to 250 ms unless the operator decides otherwise (Decision D3). |
 | Launch state | **cold-launch tap**: first tap after a process start, before that session's session-init completes · **first tap** after launch, once session-init is done · **repeat tap** in the same session | Reported separately. Proposed: first-tap and repeat-tap cells are gated; the cold-launch cell is gated only if the operator says so (Decision D2). |
 | Search type | organic · pinned/targeted · filled-canvas fair sweep | Organic is gated (D1). |
 | Serve source | prepared / cached / joined in-flight job / fresh generation | Diagnostic, so a high cache-hit rate cannot hide a slow miss (`research-plan.md:78`). |
@@ -205,16 +227,29 @@ The rules in `trade-search-latency/research-plan.md` §3–§4 stay binding:
 | `user_events` `api_request` {ms, route, status} (`obs.api_events`) | `backend/api_observability.py:360-380` | Per-request handler time for `/generate`, `/status`, `/fair-packages`, `/session/init` | Successes sampled 1-in-10 (`database.py:3073`). No job id |
 | Prepared `adoption_json.publication.served_at` | `database.py:70-88` | Adoption timestamps | No durations; logs only record "adopted: cards=…" |
 
-**Requests (need `analytics-lead`'s grant):** register in `backend/analytics_taxonomy.py`, and
-classify in `analytics_queries.NON_INTENT_EVENTS` in the same commit as the emitter. Names are
-proposals.
+**Requests and analytics-lead's verdicts (Ask 1b, 2026-10-15):** R1–R3 are granted with
+conditions; R4 is refused as specced, with an alternative granted. Each event is registered in
+`backend/analytics_taxonomy.py` and classified in `analytics_queries.NON_INTENT_EVENTS` in the same
+commit as its emitter.
 
-| # | Request | Why existing events can't answer it |
-|---|---|---|
-| R1 | A tap-time record from **every** table A control (and, for D10, every table B control), carrying a client-generated `search_id` and a monotonic tap timestamp. Preferred: widen `calc_find_a_trade_tapped` and `find_trades_tapped` with `search_id`, and fire `find_trades_tapped` at the tap rather than at dispatch. Alternative: one new NON_INTENT event `trade_search_started`. | `find_trades_tapped` fires only from TradesScreen's own controls (`analytics_taxonomy.py:604-613`), and on the push path it fires at dispatch. Handoff taps carry no search-starting event, and nothing correlates a tap with the server job. |
-| R2 | New event `trade_first_card_shown` (proposed NON_INTENT, because it is a system outcome). Props: `search_id`, `ms_from_tap` (monotonic), `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source`, `freshness_state` (§5.4), `job_id`, `card_index`. A sibling outcome `trade_first_card_failed` {`search_id`, `ms_from_tap`, `reason`: empty / error / abandoned / timeout} unless analytics-lead prefers a `result` prop on R2. | No event marks first render with enabled controls. `deck_card_viewed` needs 500 ms of exposure, and `trade_card_viewed.ms_since_open` is `Date.now() - APP_OPEN_TS`, measured from JS bundle load (`mobile/src/api/events.ts:95,108-110`), not from the tap. |
-| R3 | Server-side job timing on the existing `trades_generated` (or its successor): `first_publish_ms` (job start → first committed card), `serve_source`, the oldest input age at serve (§5.1), and the echoed `search_id`. | `gen_ms` is full-worker completion (`trade-search-latency/README.md:13`). The "first durable owner batch" time exists only as a log line (`docs/runbook.md:195-197`). |
-| R4 | `network_type` (wifi / cellular / offline / unknown) as an envelope column stamped by the SDK. Not a prop, following the NULL-`platform` lesson (`tracking-plan-v2.md:218`). | Not captured anywhere today. |
+| # | Request | Verdict and conditions (analytics-lead) | Why existing events can't answer it |
+|---|---|---|---|
+| R1 | A tap-time record from every table A control (and table B controls if D10 ships), carrying a client-generated `search_id` and a monotonic tap timestamp | **Granted as a widening.** `find_trades_tapped` (`analytics_taxonomy.py:956`) and `calc_find_a_trade_tapped` (`:1604`) gain `search_id` plus new `source` values; no `trade_search_started` event. Both stay **INTENT**. `search_id` is a client UUID, not PII. Every new `source` value is listed in the addendum and the prop-row comment. A per-feature test asserts the exact prop rows (`==`). If D10 ships, the table B `entry_point`/`source` values are added (ux-lead). Fire `find_trades_tapped` at the tap, not at dispatch | `find_trades_tapped` fires only from TradesScreen's own controls (`analytics_taxonomy.py:604-613`), and on the push path it fires at dispatch. Handoff taps carry no search-starting event, and nothing correlates a tap with the server job |
+| R2 | `trade_first_card_shown`. Props: `search_id`, `ms_from_tap` (monotonic), `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source`, `freshness_state` (§5.4), `job_id`, `card_index` | **Granted, NON_INTENT:** a system outcome echoing the R1 tap, which already counts the user. No player ids; `job_id` and `card_index` are fine. **Exactly one of R2/R2b fires per `search_id`**, asserted by the per-feature test. `network_type` (`wifi` / `cellular` / `offline` / `unknown`) rides here as a prop (see R4) | No event marks first render with enabled controls. `deck_card_viewed` needs 500 ms of exposure, and `trade_card_viewed.ms_since_open` is `Date.now() - APP_OPEN_TS`, measured from JS bundle load (`mobile/src/api/events.ts:95,108-110`), not from the tap |
+| R2b | `trade_first_card_failed` {`search_id`, `ms_from_tap`, `reason`: empty / error / abandoned / timeout, `network_type`} | **Granted as a separate NON_INTENT event**, the twin of R2. Preferred over a `result` prop: "shown" carrying `result=failed` reads wrong in every query. The addendum states the `timeout` threshold in ms. `abandoned` fires on unmount or blur before a card shows | Nothing records a tap that never produced a card |
+| R3 | Server timing on `trades_generated`: `first_publish_ms` (job start → first committed card), `serve_source`, `oldest_input_age_s` (§5.1) and the echoed `search_id` | **Granted, with one binding condition.** `trades_generated` is funnel-v2 stage 6 (`analytics_queries.py:414`), and the PFO guardrail parses `props.count`. It fires only at the end of a generation job (`server.py:7617`, `:9234`), and `backend/prepared_trade_*.py` fires none. **Exactly one `trades_generated` per user-visible deck, whatever the `serve_source`, or an `/an-funnel` stage-6 amendment before the build** (AC-1b). Keep `deck_source` (replenish vs pull); `serve_source` is a separate dimension, and the addendum says so. Echoing `search_id` adds a request field, so `docs/api-reference.md` is in scope | `gen_ms` is full-worker completion (`trade-search-latency/README.md:13`). The "first durable owner batch" time exists only as a log line (`docs/runbook.md:195-197`) |
+| R4 | `network_type` as a `user_events` envelope column | **Refused as specced.** A column on the largest analytics table, on every row, for one feature's question contends with task 2 (PR #337, R-E1). An SDK- or header-stamped default is the G-068 failure mode. **Alternative granted:** the `network_type` prop on R2 and R2b only. No schema change, no data-dictionary row | — |
+
+**Also required (analytics-lead):**
+- **Addendum** `docs/business/analytics/<date>-time-to-suggestion-events.md`, written before any
+  emitter ships (G-031), with a seam line saying R1–R3 have no history before ship.
+- **Privacy delta (P12):** `network_type` is diagnostics data and `search_id` is an identifier
+  linked to the user. onboarding-pm checks the App Store privacy label ("check, likely no change");
+  only the operator can see App Store Connect.
+- **Send-block code (platforms-pm R4):** a Sleeper send blocked under I-2 reuses
+  `sleeper_send_failed.error_code` with a new code value, and analytics-lead is told the value.
+  ESPN and MFL have no client failure event. v1 does not request one; measuring their blocks per
+  platform would need a new grant.
 
 No event may carry player ids, names or league-identifying values in props
 (`docs/business/analytics/2026-07-17-tracking-plan-v2.md:183`).
@@ -223,17 +258,28 @@ No event may carry player ids, names or league-identifying values in props
 
 ### 5.1 Inputs and proposed bounds
 
-The bounds apply **at the moment the first card is displayed**. "Age" means time since the input was
-last confirmed against its source of truth. Bounds are proposals for operator approval (Decision D5)
-and eng feasibility review.
+The bounds apply **at the moment the first card is displayed**, and again **whenever an existing deck
+regains focus**: a tab return or an app foreground with no new tap (ux-lead F-2). "Age" means time
+since the input was last confirmed against its source of truth. Bounds are proposals for operator
+approval (Decision D5) and eng feasibility review.
+
+**How the roster bounds are met** (trades-pm decision, 2026-10-15, on platforms-pm R7):
+- Refetch on **user action**: a tap, a serve, or a deck regaining focus. That is the same posture as
+  session-init today.
+- **No scheduled or headless server-side Sleeper roster reads beyond today's pattern** until the
+  operator rules on E2 (the platform risk register, PR #345). Sleeper's published Terms, revised
+  2026-10-06, bar automated access without express written consent (§11.1), as platforms-pm cites
+  them.
+- ESPN and MFL server-side refetches use stored credentials, and stay user-triggered too. MFL calls
+  stay within its guidance of 1 request per second.
 
 | Input | Today (code) | Proposed bound at first-card display | Past the bound |
 |---|---|---|---|
-| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately | **Refetch before display** (§5.2, exception 1). The tap counts as a gate miss, so the build has to keep this roster inside the bound proactively while Find a trade is reachable |
+| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately | **Refetch before display** (§5.2, exception 1). The tap counts as a gate miss, so the build keeps this roster inside the bound by refetching on user action (focus, tap, serve), never on a schedule (platforms-pm R7) |
 | **Partner rosters** | Same session-init fetch for Sleeper. `league_members` is also written by the background daemon (`server.py:22801-22835`). Headless builds read whatever is stored (G-075) | **≤ 5 min** | Serve-and-refresh. Filter against the freshest held roster; I-2 catches the rest before any action |
 | **Viewer's rankings**: trio swipes, tiers, anchors, reorder, import, outlook and prefs | Every change invalidates jobs (`server.py:10119,10183,10969,11720,11907,12262,12483,20856,21062,21141`), which forces fresh generation | **Zero tolerance:** every change made before the tap is reflected, or the deck is past-bound | Serve-and-refresh with the "updating" state. Never presented as current |
 | **Partner boards** (leaguemates' published rankings) | Member epochs fence dependent jobs (`server.py:9283-9294,9381-9384`) | Same as the viewer's rankings | Same |
-| **In-app trade state**: passes, likes, awaiting, matched, standing offers | R4 exclusions are built once at job start (`server.py:7814-7818`). Dispositions are projected at every serve (`:3275-3352`) | **Zero tolerance** (I-3), projected at every display | Filter (already the case) |
+| **In-app trade state**: passes, likes, awaiting, matched, standing offers | Presentment-rule R4 exclusions are built once at job start (`server.py:7814-7818`). Dispositions are projected at every serve (`:3275-3352`) | **Zero tolerance** (I-3), projected at every display | Filter (already the case) |
 | **Platform pending offers** (Sleeper/ESPN/MFL) | **Never read.** Sleeper pending trades are not fetched; the MFL pending route (`server.py:32836`) is not used in generation | n/a in v1 (§7 non-scope). If added, platforms-pm reviews | — |
 | **Player market values** (DynastyProcess + KTC blend) | The players-refresh daemon has a 20 h TTL (`server.py:1874`). It is triggered by `POST /api/cron/players-refresh` (`:25009`; no `render.yaml` entry) or the daily-tick fallback at 13:30 UTC (`:24822-24840`), and **that tick has died at the 120 s timeout every day since at least 2026-10-01** (`living-memory/NEXT.md:55-58`). New values neither reprice an existing session nor invalidate jobs (`:22279-22300`) | The deck uses the newest published value snapshot, and that snapshot is **≤ 24 h** old | Serve-and-refresh. If the snapshot is > 48 h old, show the "updating" state and raise an ops alert (ops owns the alert) |
 | **League settings**: scoring format, lineup slots, roster limit | Format is fixed at session-init. Slots come from a 15-min Sleeper meta cache (`server.py:29130-29152,30351-30380`) | **≤ 24 h**, and any detected change invalidates | **Block** (§5.2, exception 2) |
@@ -249,7 +295,8 @@ is new work on every serve path, not just a constraint on a faster one.
 
 ### 5.2 The rule when a prepared deck is past a bound
 
-**Proposed: serve-and-refresh, with two hard exceptions.**
+**Proposed: serve-and-refresh, with two hard exceptions.** Kept as proposed (trades-pm decision,
+2026-10-15). design-lead and ux-lead both support it, with ux-lead F-3, F-4 and F-6 pinned in §5.4.
 
 - **Within every bound:** serve immediately.
 - **Past a bound on partner rosters, rankings, values or in-app state:** serve immediately only the cards
@@ -279,18 +326,68 @@ is new work on every serve path, not just a constraint on a faster one.
 - **I-1 Ownership.** No card is displayed with an asset the stated side no longer owns, per the
   freshest roster the system holds at display time. For the viewer's own roster, that roster is
   never older than the §5.1 bound.
-- **I-2 Action-time revalidation.** Every outbound action is revalidated against the live platform
-  roster before it is sent: a like that creates a match, and a send to Sleeper, ESPN or MFL. A
-  failure blocks the action with a clear message. **Today this guard is incomplete.**
+- **I-2 Action-time revalidation**, split by action (platforms-pm R2).
+
+  **Today this guard is incomplete.**
   - Sleeper `/api/trades/propose` reads live rosters only to resolve roster ids. It validates picks
     live (422 `sleeper_pick_not_owned`, `backend/server.py:19529-19590`) but does **not** check
     player ownership; it relies on Sleeper rejecting the write (502 `sleeper_write_failed`,
     `:19613`).
   - ESPN's pre-flight resolves teams and slots without an explicit player check (`:33126-33184`).
   - MFL only maps ids (`:32608-32617`).
-  - A like that creates a match has no platform check at all.
+  - A like that creates a match has no check at all.
 
-  So I-2 is new work on each write path, and platforms-pm reviews it.
+  The requirement:
+  - **Sends** (they write to a platform). The check runs against the **live** platform roster, and
+    it is mandatory. It covers:
+    - the deck, match and awaiting cards and the calculator: every send surface mounts
+      `SendInSleeperButton`, which routes all three platforms. That means `TradesScreen`,
+      `TradeCard` and `InLeagueCalculator` (platforms-pm N4; trades-pm decision 7);
+    - **team-overhaul sends.** They go to Sleeper, MFL and ESPN (players only), behind
+      `overhaul.enabled` plus each send flag (`overhaul_service.py:50-60`; #290 revised D-188).
+      Overhaul checks ownership when the package is prepared; I-2 applies when the send goes out
+      (platforms-pm R8).
+  - **Platform cost (platforms-pm R1).** It is lower than it first looks.
+    - Sleeper's send already fetches live rosters (`server.py:19529`, `_fetch_league_rosters`).
+    - ESPN's send already fetches the live league with `view=mRoster` (`server.py:33133`;
+      `espn_service.py:94`).
+    - So for those two, the player check compares against data already in hand: no new platform
+      call, and no change in rate exposure.
+    - Only MFL adds one rosters export per send (`mfl_service.fetch_rosters`,
+      `mfl_service.py:432`). MFL client registration (`NEXT.md` "Complete MFL client registration")
+      is a dependency, not a blocker.
+  - **Scope of the check (platforms-pm R5).**
+    - It works at roster level, using the roster id from `_roster_id_for_owner`, not the viewer's
+      user id, so co-owners pass (D-051).
+    - MFL also checks picks, from `futureDraftPicks` in the same export.
+    - ESPN picks stay hard-blocked (`espn_pick_unsupported`).
+    - Sleeper picks are already checked live.
+  - **Read failure (platforms-pm R3).** If the roster read fails, the send is blocked with
+    "couldn't confirm rosters with <platform>, try again", and it is **never sent unchecked**.
+    - Failure modes to cover: Sleeper Cloudflare 1010s (`f5357445`), ESPN fragility
+      (`docs/runbook.md` L747), MFL `wwwNN` hosts (L758).
+    - platforms-eng confirms what each path does today when its fetch fails.
+  - **One refusal contract (platforms-pm R4).** Reuse team overhaul's codes `asset_not_owned` and
+    `counterparty_asset_not_owned` and their copy, "You no longer own X" and "X no longer owns Y"
+    (`overhaul_service.py:44-45,637,655`).
+    - Name the moved asset or assets, with `detail` equal to `message`. Fielded builds render
+      `detail` in their catch-all.
+    - Sleeper reports the block through `sleeper_send_failed.error_code` (§4.6).
+  - **A like that would create a match** (it writes nothing to a platform). Check it against the
+    freshest roster held, within the §5.1 viewer and partner bounds, and refetch if past the bound.
+    No live platform read per like: ESPN and MFL would need the viewer's credentials for every like
+    (platforms-pm R2).
+
+  **When the asset has moved** (trades-pm decision, 2026-10-15, on ux-lead F-7):
+  - **Like:** the like is **not** recorded and no match is created.
+    - The card is withdrawn in place (§5.4, the withdrawn card), with the reason.
+    - Its disposition is set so it isn't re-served (I-3).
+    - D-170's "the ✓ always records the like" is scoped to the calculator queue, which is unchanged.
+  - **Send:** blocked with the platforms-pm R4 refusal contract and copy, **on the card**, with a next step. It never
+    reports success, never leaves the controls dead, and never silently loses the user's choice
+    (ux-lead F-7).
+  - **Dependency:** `NEXT.md` 0f (the Sleeper propose route's `isdigit()` gate, the G-030 trap) lands
+    before or with I-2, so an MFL league can never reach the Sleeper write path (platforms-pm N1).
 - **I-3 Dispositions.** Cards the user passed, already liked or has awaiting or matched are excluded
   at read time. The prepared-inventory design already projects these at adoption
   (`prepared-trade-inventory/plan.md:47`).
@@ -299,17 +396,82 @@ is new work on every serve path, not just a constraint on a faster one.
 - **I-5 Model identity.** A card is served only under the model, config and significance version
   that built it (existing guard; `release-20260921/README.md:10`).
 
-### 5.4 How the user sees freshness (requirement; copy and placement go to design-lead and ux-lead)
+### 5.4 How the user sees freshness (requirements; visual spec by design-lead, flow by ux-lead)
 
-- When any displayed card comes from a deck past a §5.1 bound, the screen shows a visible,
-  non-blocking "updating" state. It ends when the refresh completes or fails.
-- A withdrawn card says why, in one plain line (e.g. the player moved), and never disappears
-  silently.
-- When a refresh fails, the user sees that the deck may be out of date and can retry. Actions on
-  cards stay governed by I-2.
-- No freshness UI appears when every input is within bounds. The default state is quiet.
-- All of this follows the Chalkline rules (ADR-004/005). Freshness is informational, so flare is the
-  only allowed highlight accent; no new color.
+**The default is quiet.** No freshness UI appears when every input is within bounds, and nothing is
+reserved for it (design-lead 2).
+
+**The "updating" state** shows when any displayed card comes from a deck past a §5.1 bound,
+including on focus regain (ux-lead F-2). Shared constraints (trades-pm decision, 2026-10-15,
+reconciling design-lead 2 and ux-lead F-3):
+1. **No layout shift.** It never pushes the fronted card; a row inserted mid-gesture moves the swipe
+   target.
+2. **State, not an interrupt.** No toast, modal, banner or `useInterruptSlot` claim, and the tour
+   hold doesn't mute it (ux-lead F-3).
+3. **Its own copy**, naming what is being checked (roster, rankings, values) from values the app
+   holds. It is never "Searching…", and it makes no timing promise (ux-lead F-3).
+4. **A maximum duration.** When it is reached, the refresh-failed state shows (ux-lead F-3). The
+   build sets the number.
+5. **Card controls stay enabled** while it shows; actions are governed by I-2 (ux-lead F-3).
+6. **No highlight accent and no new color** (design-lead 1, corrected wording; the earlier "flare"
+   line is withdrawn). The state uses chalk-dim text and the standard Spinner, whose ice arc is the
+   specced progress accent (`components.md` Spinner) and counts toward the ice ration of about 3.
+   The withdrawn and failed lines are chalk-dim text.
+7. **Built from existing parts:** the Spinner (16–20 px) plus `body-sm` chalk-dim text
+   (design-lead 3).
+
+The **exact slot** is open as **Decision D11**: design-lead proposes a trailing label in the deck's
+header row, and ux-lead proposes the progress-strip slot. Both are settled jointly before any UI
+build.
+
+**The withdrawn fronted card** (trades-pm decision, 2026-10-15: ux-lead F-4's structure with
+design-lead 4's treatment; design-lead owns the visual spec):
+- It keeps its slot and its terms, visible but dimmed. It is never silently removed.
+- Like/Pass are replaced by one `body-sm` chalk-dim reason line ("<player> is no longer on <team>")
+  plus a **"Next trade"** action.
+- A chalk-dim Chalkline `x` or `swap` icon. No `--neg` red and no `--warn` amber: a withdrawn card is
+  neither an error nor a warning. Content text stays at 4.5:1 or better, never chalk-faint.
+- The change applies only **after any in-progress swipe settles**. The next card never slides in
+  until the user acts.
+- If a guide step is spotlighting that card (`mobile/tests/check-guide-spotlight-tracking.js`),
+  onboarding-pm says how the guide continues (ux-lead F-4).
+- The same withdrawal applies to a like blocked under I-2 (trades-pm decision 3, §5.3).
+
+**Refresh failed** (design-lead 3 and 5):
+- It says the deck may be out of date and offers Retry. It reuses the Banner construction (ink-2,
+  hairline, `body-sm`), inline in the deck, **non-dismissable**, with a Secondary "Retry" button.
+  Retry is not ice, because the deck's primary actions stay primary.
+- It follows the Error row of the Screen-states standard (`components.md` § Screen states, being
+  written on `docs/design-screen-states`). The precedent is the stale and failed states of
+  Season projections (`components.md:185`).
+
+**Offline** (ux-lead F-6; Offline row of the Screen-states standard, design-lead 5):
+- **Inside the bounds:** cards may show, and the refresh-failed state shows at once. A
+  match-creating like or a send fails visibly and keeps the user's choice (precedent
+  `mobile/tests/check-swipe-failure-recovery.js`).
+- **Past the viewer's roster bound:** the offline state, with no cards.
+
+**Gate-miss wait** (exceptions 1 and 2, cold work; ux-lead F-5, design-lead D10):
+- It names its real reason, e.g. "checking your roster with Sleeper" or "your league settings
+  changed", and makes no timing promise. Today's placeholder, "First few should land within a few
+  seconds" (`TradesScreen.tsx:8868-8871`), is false against a 61 s median and is replaced.
+- It uses the static Loading treatment from § Screen states (no shimmer).
+- Loading must end. On timeout it shows the error with Retry and keeps Back usable (#420 precedent,
+  `mobile/tests/check-win-now-recovery.js`).
+
+**Blocked actions** (ux-lead F-7, platforms-pm N3): shown on the card. The message names the asset
+and the platform, says nothing was sent, and offers a refresh, using the I-2 refusal contract.
+
+**Motion** (design-lead 6): no shimmer, and no animated swap of the fronted card when a refresh
+lands. Unacted cards behind it update off-screen. Under reduced motion the Spinner becomes the
+static text "Updating".
+
+**Accessibility** (design-lead 7 → ux-lead): the state change is announced to VoiceOver through a
+polite live region. ux-lead specs the announcement.
+
+**Copy:** all of these lines go to marketing-lead (design-lead 5). design-lead owes the
+`components.md` "status line" row (updating and failed) plus the withdrawn-card body once the PRD
+is accepted (design-lead 3).
 
 ## 6. Today's baseline: **PENDING analytics-lead read (W3)**
 
@@ -363,7 +525,7 @@ render time. Third, the current client poll schedule alone (first poll at 800 ms
 | TodaysTrade / Browse-all (`trades.presentation_v2`) | Flag is false. If it flips, its entry joins §4.1. |
 | Calibration tab decks | Blind-grading sessions are a separate surface (`docs/architecture.md:354-433`). Their *current* arm reads served `deck_impressions` (`architecture.md:406-412`), so changes to what gets served still need models-lead sign-off (§11). |
 | Engine-quality changes (scoring, budgets, arms) | No candidate-pool, budget or card-count reduction counts as a latency fix (`research-plan.md:66`). Any change to order or composition is a model change needing models-lead sign-off. |
-| Platform pending-offer reads (Sleeper/ESPN/MFL) | Not read today; the cross-platform pending inbox is **not built** (`docs/plans/README.md:110`). If eng proposes adding these reads for freshness, platforms-pm reviews (§11). |
+| Platform pending-offer reads (Sleeper/ESPN/MFL) | Not read today; the cross-platform pending inbox is **not built** (`docs/plans/README.md:110`). If eng proposes adding these reads for freshness, they go to platforms-pm's platform risk register first (platforms-pm N2). |
 | Infrastructure purchases | Under the $200/month ceiling (`docs/plans/README.md:59`). Any paid change is a separate operator decision. |
 
 ## 8. Acceptance criteria
@@ -373,37 +535,50 @@ TestFlight checklist step (TF, §9.4).
 
 | ID | Criterion | Check |
 |---|---|---|
-| AC-1 | Every table A control in §4.1, and every table B control if D10 makes them search-starting, emits the R1 tap record with a `search_id`, and the deck emits R2 (or its failure sibling) exactly once per `search_id`. | G: `mobile/tests/check-trade-first-card.js` enumerates the §4.1 controls and fails if any `onPress` path lacks the emit. T: taxonomy registration and `NON_INTENT_EVENTS` classification test. |
+| AC-1 | Every table A control in §4.1, and every table B control if D10 makes them search-starting, emits the widened R1 tap record with a `search_id`. Exactly one of R2 or R2b fires per `search_id` (analytics-lead R2). The deep-link and inbox arrivals (§4.1, ux-lead F-8) emit too, and are measured, not gated. | G: `mobile/tests/check-trade-first-card.js` enumerates the controls and arrivals and fails if any `onPress` or arrival path lacks the emit. T: a per-feature test asserts the exact prop rows (`==`), INTENT/NON_INTENT classification, and the one-of-R2/R2b invariant (analytics-lead R1, R2). TF step 9 |
+| AC-1b | **One `trades_generated` per user-visible deck** (analytics-lead R3, binding). Every deck the user sees emits exactly one `trades_generated`, whatever its `serve_source` (fresh, cached, joined or prepared), so funnel stage 6 and the PFO guardrail don't undercount. Alternatively, an `/an-funnel` stage-6 amendment lands before the build. `deck_source` keeps its meaning, and `serve_source` is a separate prop. | T: a backend test per serve path asserting exactly one event per deck with `props.count` set, or the merged stage-6 amendment |
 | AC-2 | `ms_from_tap` uses a monotonic clock and ends on the §4.2 definition: controls enabled and card visible. It does not end on `deck_card_viewed`, a skeleton or server readiness. | G: the same check asserts the emitter sits on the card's enabled-and-visible path and not in the skeleton branch. Code-walk proof (§9.3). |
-| AC-3 | **Organic, first-tap and repeat-tap cells: p95 ≤ 250 ms on Wi-Fi and on cellular**, n ≥ 40 per cell, in the 14-day post-ship window. p50/p90/p99 and the abandon/error counts are reported. | A: the analytics-lead read using the R1/R2/R4 fields. Until n ≥ 40: TF steps 1–4 and 9. |
+| AC-2b | **The push can't spend the budget** (ux-lead F-1). Search-starting pushes keep `push` and the back stack (D-171), but run with no animation or with a short fade that design-lead specs. | Code-walk names the animation option on every search-starting push. TF step 1 counts tap → transition-end frames separately from tap → card; ux-lead's target is ≤ 6 frames (≈ 100 ms) |
+| AC-3 | **Organic, first-tap and repeat-tap cells: p95 ≤ 250 ms on Wi-Fi and on cellular**, n ≥ 40 per cell, in the 14-day post-ship window. p50/p90/p99 and the abandon/error counts are reported. | A: the analytics-lead read using R1, R2 and R2b, with `network_type` as a prop on R2/R2b (R4 alternative). Until n ≥ 40: TF steps 1–4 and 9. |
 | AC-4 | Cold-launch, pinned/targeted and fair-sweep cells are reported with the same percentiles. They are gated only per Decisions D1/D2. | A. |
-| AC-5 | I-1: no displayed card contains an asset its stated side doesn't own per the freshest roster held. A roster change between prepare and display withdraws or filters the card before display. | T: backend test on every serve path (fresh, cached, joined, prepared) that mutates a roster after build and asserts the card is absent. TF steps 11–12. |
-| AC-6 | I-2: a send or match on a card whose asset has moved is blocked with a message. | T: route tests per platform write path. TF step 13. |
-| AC-7 | §5.1 bounds are enforced. For each input, a deck past its bound triggers the §5.2 behavior: serve-and-refresh, refetch-before-display for the viewer's roster (exception 1), or block (exception 2). A deck within bounds serves with no freshness UI. | T: one test per input row, plus a block test for a model/config change and a league-settings change. |
-| AC-8 | §5.4: the "updating" state shows only when serving past a bound, and clears when the refresh lands or fails. A withdrawn card shows its reason. | G: structural check that the state is driven by `freshness_state` from the payload. TF steps 10–14. |
+| AC-5 | I-1: no displayed card contains an asset its stated side doesn't own per the freshest roster held. A roster change between prepare and display, or before a deck regains focus, withdraws or filters the card before display. | T: backend test on every serve path (fresh, cached, joined, prepared) that mutates a roster after build and asserts the card is absent. TF steps 11, 12 and 18. |
+| AC-6a | **Sends** (platforms-pm R1–R5, R8). Every send on every surface (deck, match/awaiting card, calculator, team overhaul), to Sleeper, ESPN or MFL, checks ownership against the **live** platform roster at roster level (co-owners pass). MFL also checks picks; ESPN picks stay hard-blocked. A moved asset is refused with `asset_not_owned` / `counterparty_asset_not_owned` and their copy (`detail` = `message`), on the card. A failed roster read blocks the send, which is never sent unchecked. | T: backend route tests per platform with moved-asset fixtures and with read-failure fixtures (Sleeper 1010, ESPN fetch failure, MFL host), plus a file:line code-walk per path (platforms-pm evidence plan). TF step 13, in an operator-named test league only |
+| AC-6b | **Likes** (platforms-pm R2; trades-pm decision 3). A like that would create a match on a card whose asset has moved, per the freshest roster held within the §5.1 bounds (refetched if past the bound), records **no like and no match**. The card is withdrawn in place with the reason (§5.4), and its disposition is set so it isn't re-served. The calculator queue (D-170) is unchanged. | T: route tests asserting no `trade_decisions` like row, no match, a withdrawal payload and the disposition set; a regression test that the calculator queue still records. TF step 13 |
+| AC-7 | §5.1 bounds are enforced, at display and when a deck regains focus (ux-lead F-2). For each input, a deck past its bound triggers the §5.2 behavior: serve-and-refresh, refetch-before-display for the viewer's roster (exception 1), or block (exception 2). A deck within bounds serves with no freshness UI. Roster refetches happen only on user action; nothing is scheduled or headless for Sleeper (platforms-pm R7). | T: one test per input row, a focus-regain test, a block test for a model/config change and one for a league-settings change, and a guard that no scheduled job reads Sleeper rosters. TF steps 10, 15 and 16. |
+| AC-8 | §5.4 "updating" and withdrawn states. "Updating" shows only when serving past a bound. It meets the seven shared constraints: no layout shift, no interrupt claim, its own copy, a maximum duration then refresh-failed, controls enabled, no highlight accent, built from existing parts. The withdrawn fronted card keeps dimmed terms, replaces Like/Pass with the reason line plus "Next trade", and changes only after a swipe settles. | G: the state is driven by `freshness_state` from the payload; the updating component calls no `useInterruptSlot` and renders no Toast; the strings contain no "Searching…" and no seconds figure. TF steps 10–12 and 16–18. |
+| AC-8b | **Gate-miss wait** (ux-lead F-5). It names its real reason, makes no timing promise, and ends: on timeout it shows the error with Retry, and Back stays usable. The false "within a few seconds" copy is gone. | G: a string check on the placeholder, plus a recovery guard in the pattern of `check-win-now-recovery.js`. TF step 5 |
+| AC-8c | **Offline** (ux-lead F-6). Inside the bounds, cards may show with the refresh-failed state at once, and a match-creating like or a send fails visibly and keeps the choice. Past the viewer's roster bound, the offline state shows, with no cards. | G: a pattern of `check-swipe-failure-recovery.js` for the offline like/send. TF steps 14 and 17 |
 | AC-9 | **Quality parity.** Every card served on a fast path passes the same `deck.quality_filters` rules as the live deck, and the fast path's first 30 match, in identity and order, what the full current-model job would serve from the same inputs. Any approved deviation is recorded with models-lead sign-off. | T: a differential test comparing the fast path with the fresh path on frozen inputs, with `PYTHONHASHSEED=0` and a frozen clock (G-065, `GOTCHAS.md:737-742`). |
 | AC-10 | No offer cap or budget cut: the complete eligible inventory stays reachable (the `research-plan.md:66-69` non-negotiables). | T: the inventory-count parity test (pattern of `release-20260921/README.md:16`). |
 | AC-11 | **Storage within budget.** The build states its server-side footprint per user-league and in total, plus its daily write volume, using §10.4's formulas, and stays inside that byte budget (P23). | The byte budget is stated, and head-eng accepts it against H1–H3 (`docs/plans/db-storage-budget/requirements.md:314-317` on draft PR #337) before rollout. A: Q8 table sizes before and after (`baseline-request.md` Q8). |
 | AC-11b | **Shedding is safe.** Dropping prepared or cache data under disk pressure (P23) never breaks serving: Find a trade falls back to the fresh path and still meets every §5.3 invariant. | T: a backend test that drops the cache tables or rows and asserts that serving still works through the fresh path. |
-| AC-12 | No regressions: CI green (`pytest backend/tests`, `tsc --noEmit`, testid-lint) plus all existing `check-*.js` suites. TEST_LEDGER records the evidence. | CI. |
+| AC-12 | No regressions: CI green (`pytest backend/tests`, `tsc --noEmit`, testid-lint) plus all existing `check-*.js` suites. Any new flag has a guard pinning flag-off byte-identity (ux-lead rubric, flag-off note). TEST_LEDGER records the evidence. | CI, plus the named flag-off guard. |
 | AC-13 | First → next card: after the first card, the next card is ready before the user can act on the first. The buffer-empty stall rate is reported. | A (R2 sibling or a later-card timing field). TF step 6. |
 
 ## 9. Test-plan seed (D-056: no Maestro, no simulator)
 
 ### 9.1 Structural guards (`mobile/tests/check-*.js`, plus an `npm run test:<name>` script)
 
-`check-trade-first-card.js` does three things:
-- enumerates the §4.1 controls by testID or file and asserts each emits R1 with a `search_id`;
-- asserts R2 fires from the enabled-card render path and never from the `SkeletonTradeCard` branch;
-- asserts `freshness_state` drives the "updating" UI.
+`check-trade-first-card.js`:
+- enumerates the §4.1 controls and arrivals by testID or file, and asserts each emits R1 with a
+  `search_id`;
+- asserts R2 fires from the enabled-card render path and never from the `SkeletonTradeCard` branch,
+  and R2b fires on unmount or blur before a card (analytics-lead R2b);
+- asserts `freshness_state` drives the "updating" UI, and that the updating component claims no
+  interrupt slot and renders no Toast (AC-8);
+- asserts the gate-miss and updating strings carry no timing promise and never say "Searching…"
+  (AC-8b).
 
 ### 9.2 Unit and integration tests (backend pytest)
 
-- **Taxonomy:** registration and NON_INTENT classification for R1–R3.
+- **Taxonomy:** registration and classification (R1 INTENT; R2 and R2b NON_INTENT), exact prop rows
+  (`==`), and the one-of-R2/R2b invariant (analytics-lead).
+- **Stage 6:** one `trades_generated` per user-visible deck on every serve path (AC-1b).
 - **Freshness:** one test per §5.1 row, covering its §5.2 branch: serve-and-refresh,
   refetch-before-display or block.
 - **Ownership:** a roster mutation between prepare and serve, covering every serve path (AC-5).
-- **Action-time revalidation:** per write path (AC-6).
+- **Action-time revalidation:** per platform write path, including team-overhaul sends, with
+  moved-asset and read-failure fixtures (AC-6a); and likes on moved-asset cards (AC-6b).
 - **Quality parity:** the differential test (AC-9), seeded with a frozen clock.
 - **Inventory parity:** AC-10.
 
@@ -421,12 +596,21 @@ Name every hop that can block, and every place a skeleton can show.
   16.7 ms) as an independent check on the telemetry;
 - note the phone model, iOS version and network for every step.
 
+Steps are tagged **[onboarded]**, **[test league]** or **[first-run]** where it matters (ux-lead).
+**If D10 ships,** the Home, League and Matches taps start the deck directly. Time from that tap,
+and skip the second (canvas) tap in steps 1 and 3.
+
 1. Force-quit, cold-launch, and wait until Home is fully loaded and 10 s have passed (session-init
    done). Tap the Home **Find a trade** tile. **Record:** the time to an interactive Acquire builder
    (table B; not gated). With the canvas **empty**, tap the canvas **Find a Trade**
-   (`calc.action.find-a-trade`). **Expect:** a real card with enabled Like/Pass in ≤ 250 ms from
-   this second tap on the recording (≤ 15 frames). No skeleton, no "Looking for trades…" card, and no
-   "Searching…" frame before it.
+   (`calc.action.find-a-trade`). **Expect:**
+   - a real card with enabled Like/Pass in ≤ 250 ms from this second tap on the recording
+     (≤ 15 frames);
+   - no skeleton, no "Looking for trades…" card, and no "Searching…" frame before it.
+
+   On the same recording, count frames from tap to the end of the push transition **separately**.
+   **Expect:** ≤ 6 frames (≈ 100 ms; ux-lead's target). Fail if a full slide-in plays (ux-lead F-1,
+   AC-2b).
 2. Go back to the builder and tap canvas Find a Trade again (repeat tap). **Expect:** ≤ 250 ms. Then,
    inside the deck, tap **Find more trades** (`trades.find-btn`). **Expect:** ≤ 250 ms.
 3. Reach the builder from every other table B control: League Home **Find a trade** (both
@@ -436,8 +620,9 @@ Name every hop that can block, and every place a skeleton can show.
 4. Turn Wi-Fi off (cellular only). Repeat steps 1–2. **Expect:** ≤ 250 ms, or record the miss for
    Decision D3.
 5. Force-quit, cold-launch, open Acquire, and tap canvas Find a Trade **as soon as it is
-   tappable** (session-init may still be running).
-   **Record:** the time, and what showed before the card (for Decision D2).
+   tappable** (session-init may still be running). **Record:** the time, and what showed before
+   the card (for Decision D2). **Expect:** any wait names its real reason, makes no timing promise,
+   and ends in a card or an error with Retry, with Back usable (ux-lead F-5, AC-8b).
 6. On the first card, wait 1 s, then Pass. **Expect:** the next card is already there. No skeleton,
    no "searching" stall. Pass through 10 cards, noting any stall.
 7. **Targeted searches (record; gated only if Decision D1 says so):**
@@ -448,26 +633,53 @@ Name every hop that can block, and every place a skeleton can show.
 
    **Record:** the time to first card, or what showed instead. A Usage Trends handoff with no
    partner currently lands on the builder with no search.
-8. Like a card, return later, tap canvas Find a Trade. **Expect:** the liked offer does not reappear as new
-   (I-3).
-9. Ask analytics-lead to confirm that every tap in steps 1–7 produced one R1 and one R2 with matching
-   `search_id`, and that `ms_from_tap` agrees with your recording within 1–2 frames.
+8. Like a card, return later, tap canvas Find a Trade. **Expect:** the liked offer does not reappear
+   as new (I-3).
+9. Ask analytics-lead to confirm that every tap in steps 1–7 produced one R1 and exactly one R2 or
+   R2b with matching `search_id`, with `network_type` set. Also confirm that `ms_from_tap` agrees
+   with your recording within 1–2 frames.
 10. Change your rankings (move a player across a tier, or change your outlook), then within 1 minute
-    tap canvas Find a Trade. **Expect:** a card in ≤ 250 ms. If the deck predates the change, the "updating"
-    state shows, and within the refresh window the deck reflects the change without rewriting the
-    card on screen.
+    tap canvas Find a Trade. **Expect:** a card in ≤ 250 ms. If the deck predates the change, the
+    "updating" state shows, and within the refresh window the deck reflects the change without
+    rewriting the card on screen.
 11. **Roster freshness, yours:** in the Sleeper app, drop a bench player of yours who appears in your
     offers (pick one you can re-add, or use a test league). Return to the app within 2 minutes and
-    tap canvas Find a Trade. **Expect:** no displayed card includes that player, now or after the refresh.
-12. **Roster freshness, partner** (needs a test league or a cooperating leaguemate): the partner drops
-    or trades away a player your deck offered from them. **Expect:** no card shows that player as
+    tap canvas Find a Trade. **Expect:** no displayed card includes that player, now or after the
+    refresh.
+12. **Roster freshness, partner [test league]** (or a cooperating leaguemate): the partner drops or
+    trades away a player your deck offered from them. **Expect:** no card shows that player as
     theirs within the §5.1 bound.
-13. Find a card containing a player who moved after the card was built (from step 11 or 12, or a
-    test-league setup), then try to Like into a match or Send. **Expect:** blocked with a clear
-    message. Nothing is sent to Sleeper.
-14. Turn on Airplane Mode and tap canvas Find a Trade. **Expect:** an honest offline state. No crash, and no
-    action that silently fails.
-15. Log the outcomes (times, misses, any card that violated I-1) in `living-memory/TEST_LEDGER.md`.
+13. **Blocked actions [test league the operator names]** (platforms-pm evidence plan; AC-6a, AC-6b).
+    The operator approves the attempt when it runs and cancels any proposal that lands. Start with
+    Sleeper; add ESPN and MFL only where a test league exists. Find a card containing a player who
+    moved after the card was built (from step 11 or 12, or a test-league setup).
+    - Tap **Like** where it would create a match. **Expect:** no like and no match. The card is
+      withdrawn in place with "<player> is no longer on <team>" and "Next trade".
+    - On a second such card, tap **Send**. **Expect:** blocked on the card with the refusal copy
+      ("You no longer own X" or "X no longer owns Y"), naming the platform and saying nothing was
+      sent, with a next step. Nothing reaches the platform.
+14. With no cards loaded, turn on Airplane Mode and tap canvas Find a Trade. **Expect:**
+    - past the viewer's roster bound: the offline state with no cards;
+    - inside the bounds: cards may show with the refresh-failed state at once;
+    - no crash, and no action that silently fails (ux-lead F-6).
+15. **[onboarded]** Run a search and leave the deck open. Go to Home and tap **Find a trade**.
+    **Expect:** per D10, the builder or a fresh deck. Fail if the earlier deck shows its old cards
+    with no "updating" state (ux-lead F-2).
+16. **[onboarded]** Open a deck. Change a tier in Rank, then return to the Trades tab without tapping
+    Find. **Expect:** "updating" shows and ends, the fronted card isn't rewritten, and nothing shifts
+    the card's position.
+17. **[onboarded]** With cards showing, turn Airplane Mode on and trigger a refresh (as in step 16).
+    **Expect:**
+    - "updating" ends in the refresh-failed state with Retry;
+    - Like/Pass still respond;
+    - a like that would match fails visibly and keeps the choice (ux-lead F-6).
+18. **[test league]** The partner trades away a player on your fronted card while it's on screen.
+    **Expect:** the card stays, dimmed, with the reason line and "Next trade". Nothing slides in
+    mid-swipe (ux-lead F-4).
+19. **[first-run, fresh install]** If D10 ships: from the Trades landing, the guide's canvas Find a
+    Trade step still appears, and its adoption event fires once.
+20. Log the outcomes in `living-memory/TEST_LEDGER.md`: times, misses, transition frames, and any
+    card that violated I-1.
 
 ## 10. Trade-offs for eng (surfaced, NOT decided)
 
@@ -492,9 +704,12 @@ The 250 ms must cover the whole path. Illustrative splits:
 Two facts constrain any split:
 - A cellular round trip to the Oregon-hosted service (one Standard instance;
   `infrastructure-and-precompute.md:7`) is **unmeasured** for our users. No RTT figure exists in the
-  repo, which is why R4 is requested.
+  repo, which is why `network_type` is captured on R2/R2b.
 - Navigation itself costs time. A stack-push animation can consume much of the budget before the
-  card is "≥ 50% visible" (§4.2). ux-lead reviews the transition (§11).
+  card is "≥ 50% visible" (§4.2). The repo's own estimate for a transition is "~250–400 ms of
+  otherwise-dead time" (`navigation/TabNav.tsx:1017-1018`). **This is now a requirement, not a
+  trade-off** (ux-lead F-1, AC-2b): search-starting pushes keep `push` and the back stack, but run
+  with no animation or a short fade that design-lead specs.
   - Today the organic control pushes a new `TradeDeck` screen (`TradesScreen.tsx:3429-3445`), and
     each search resets the deck (`:3271`). So the push transition sits on the critical path.
   - No earlier card is reused on the phone: no deck is persisted, and the persisted query allow-list
@@ -513,9 +728,14 @@ Two facts constrain any split:
 - **Every rank swipe invalidates the user's job** (§5.1). A user who ranks and then taps always
   misses the cache today. The zero-tolerance ranking bound with serve-and-refresh is what lets a
   fast path coexist with ranking.
-- **Roster input is currently refreshed only when a member opens the league** (G-075), so headless
-  preparation can work from stale rosters unless it refetches. For MFL and ESPN, that refetch
-  currently needs the owner present.
+- **Roster input is currently refreshed only when a member opens the league** (G-075).
+  - **Prepared inventory can't assume headless roster refresh** (trades-pm decision 6, on
+    platforms-pm R7). No scheduled or headless server-side Sleeper roster reads beyond today's
+    pattern until the operator rules on E2, and ESPN and MFL refetches stay user-triggered.
+  - So a prepared deck can only be as fresh as the last user-triggered roster read. The §5.1 roster
+    bounds are met by refetching on user action (tap, serve, focus), and a prepared deck whose
+    rosters are past the bound goes through §5.2: refetch first for the viewer, filter and refresh
+    for partners.
 - **Precompute timing can change which offers are served**, independent of any model edit. The same
   league can yield a different deck at 3 a.m. than at tap time: rankings, values and roster changes
   in between, and the engine's wall-clock per-pair deadlines (G-065, `GOTCHAS.md:740`). That is why
@@ -610,8 +830,11 @@ can differ: GOTCHAS G-064 records a knob that was live while every doc said dark
 | `deck.replenishment` | true | `:216` | Weekly background decks, run inside the daily tick, which is currently dying at the 120 s timeout (`NEXT.md:55-58`). |
 | `trade.bakeoff` | true | `:254` | Arm interleaving and attribution. Which arm serves can change the deck. |
 | `trade.full_sweep` | true | `:269` | Scores every leaguemate, which costs time. |
-| `trade.presentment_rules` | true | `:76` | R4 awaiting/matched exclusions (I-3). |
+| `trade.presentment_rules` | true | `:76` | Presentment-rule R4 awaiting/matched exclusions (I-3). |
 | `trade.standing_offers` | true | `:282` | Protected cards in the deck. |
+| `trade.send_in_sleeper` / `trade.send_in_mfl` / `espn.send` | true / true / true | `:52` / `:53` / `:115` | The send paths that I-2 covers (platforms-pm R1–R5). |
+| `overhaul.enabled` | true | `:84` | Team-overhaul sends, also covered by I-2 at send time (platforms-pm R8). |
+| `fleaflicker.link` | false | `:119` | Fleaflicker is dark with no write path; n/a for I-2 (scope.md §6). |
 | `suggestion.telemetry` | true | `:220` | Candidate-set and impression telemetry, part of the evidence-write cost. |
 | `deck.signal_v2` | true | `:208` | `deck_card_viewed` and impression logging. |
 | `calc.inline_home` / `calc.results_push` / `calc.merged_layout` | true / true / true | `:97` / `:101` / `:95` | Make the canvas the search entry and push `TradeDeck` (§4.1, §10.2). |
@@ -634,14 +857,18 @@ deploy-free kill switch.
 
 ## 11. Required reviews
 
-| Reviewer | Why | Blocking? |
+Review status as of 2026-10-15, folded in at this revision.
+
+| Reviewer | Why | Status |
 |---|---|---|
-| **design-lead** | The §5.4 freshness indicator: withdrawn-card line, "updating" state and offline state. Chalkline compliance. | Yes, before any UI build |
-| **ux-lead** | The flow: whether table B controls should start a search (D10), the `TradeDeck` push transition inside the 250 ms window (§10.2), what the user sees on a gate miss, and withdraw/replace behavior that never rewrites the fronted card. | Yes |
-| **analytics-lead** | Grant R1–R4 (taxonomy plus NON_INTENT classification in the emitter's commit) and run the W3 baseline (`baseline-request.md`). | Yes, R1/R2 before build; baseline before the gate is judged |
-| **models-lead** | Sign-off is required if served cards, their order or their composition can change. Precompute timing alone can change which offers are served (§10.3), as can a progressive order (D), an engine swap (C), skipping or extending `deck.quality_filters`, or lazy evidence. | Yes, if any of those apply |
-| **platforms-pm** | **Expected:** I-2 adds live ownership checks on the Sleeper, ESPN and MFL send paths, and the §5.1 roster bound likely changes roster fetch cadence, including server-side refetch for headless preparation (G-075). Also required for any new pending-offer read. | Yes, once the build touches platform reads |
-| DB-storage task owner | Footprint (§10.4) against the storage budget (AC-11). | Yes, before any persistent cache expands |
+| **design-lead** | The §5.4 states (updating, withdrawn, refresh-failed, offline), the push motion (AC-2b), Chalkline compliance, D10 labels | **Pass with notes 1–7 plus D10 notes, folded in.** Still owed: the visual spec for the withdrawn card and status line, a `components.md` row, the motion spec, and the joint D11 slot call. A mockup lab is optional |
+| **ux-lead** | The flow: D10, the push transition (F-1), focus regain (F-2), "updating" (F-3), withdrawal (F-4), gate-miss (F-5), offline (F-6), blocked actions (F-7), arrivals (F-8) | **Approve with changes F-1 to F-8, folded in.** Still owed: the joint D11 slot call and the VoiceOver announcement spec |
+| **analytics-lead** | Event grant and the W3 baseline (`baseline-request.md`) | **R1–R3 granted with conditions; R4 refused, with a `network_type` prop granted instead; folded in (§4.6, AC-1, AC-1b).** Baseline still pending W3. Owed by the build: the addendum doc |
+| **models-lead** | Sign-off if served cards, their order or their composition can change. Precompute timing alone can change which offers are served (§10.3), as can a progressive order (D), an engine swap (C), skipping or extending `deck.quality_filters`, or lazy evidence | **AC-9 review pending.** AC-9 is unchanged at this revision |
+| **platforms-pm** | I-2 on the Sleeper, ESPN and MFL send paths (including overhaul) and the roster cadence behind §5.1 | **Accept with changes R1–R8 plus notes N1–N4, folded in** (§5.1, §5.3, AC-6a/6b, scope.md §6). Logs R7 in the platform risk register |
+| **onboarding-pm** | D10's first-run limit, F-4's guide interplay, and the P12 privacy-label check for `network_type` and `search_id` | **Needed** (raised by ux-lead and analytics-lead) |
+| **marketing-lead** | Copy for the updating, withdrawn, refresh-failed, offline and gate-miss lines, and the calculator-row relabel (through head-product) | **Needed** (design-lead 5, D10) |
+| DB-storage task owner + head-eng | Footprint (§10.4) against the storage budget (AC-11, P23) | Before any persistent cache expands |
 
 ## 12. Risks
 
@@ -656,9 +883,37 @@ deploy-free kill switch.
   TestFlight checklist carries the decision until then.
 - **The freshness work can cost speed.** Refetching the viewer's roster before display (§5.2,
   exception 1) is a platform call on the critical path whenever the roster is past its bound.
-  Keeping it inside the bound proactively is part of the build, not optional.
+  Keeping it inside the bound by refetching on user action (focus, tap, serve) is part of the build,
+  not optional.
+- **Roster freshness is capped by user action** (platforms-pm R7, pending E2). With no headless
+  Sleeper roster reads, a prepared deck is often past the roster bound by the time it's tapped. The
+  viewer-roster refetch (exception 1) then sits on the critical path more often than a scheduled
+  refresh would allow.
+- **Stage-6 undercount** (analytics-lead R3). A prepared, cached or joined serve that skips the job
+  would emit no `trades_generated`. AC-1b, or an `/an-funnel` amendment, must land before the build.
 - **Prepared inventory is unproven in production.** Two failed canaries, rollout off
   (`prepared-trade-inventory/release.md:37-39,90-93`).
+
+## 13. Product calls recorded at the review fold-in (trades-pm decision, 2026-10-15)
+
+head-product (2026-10-15): "Fold them in." These calls settle points the reviews left to trades-pm:
+
+1. **Withdrawn fronted card:** ux-lead F-4's structure with design-lead 4's treatment (§5.4).
+   design-lead owns the visual spec.
+2. **"Updating" placement:** the PRD pins the seven shared constraints (§5.4). The exact slot is D11.
+3. **Like on a moved asset:** no like recorded, no match created, the card withdrawn in place, and
+   the disposition set (I-3). D-170 stays scoped to the calculator queue. Sends are blocked on the
+   card with platforms-pm R4's contract (§5.3, AC-6a, AC-6b).
+4. **D4:** serve-and-refresh stays the proposal, with design-lead and ux-lead support (F-3, F-4, F-6
+   pinned).
+5. **D10:** the proposal becomes ux-lead's recommendation (§4.1). It amends D-171, so it is still
+   the operator's call.
+6. **Roster freshness:** met by refetch on user action. No scheduled or headless Sleeper roster reads
+   beyond today's pattern until E2 (§5.1, §10.3).
+7. **Send seam:** the deck (`TradesScreen`), match and awaiting cards (`TradeCard`) and the
+   calculator (`InLeagueCalculator`), all through `SendInSleeperButton` (§5.3).
+8. **Dependency:** `NEXT.md` 0f (the `isdigit()` G-030 trap on the Sleeper propose route) lands before
+   or with I-2 (Handoffs).
 
 ## Decisions needed (operator)
 
@@ -666,27 +921,52 @@ deploy-free kill switch.
 |---|---|---|
 | D1 | Which taps the 250 ms gate covers | The organic deck from every table A control. Pinned, targeted and fair-sweep searches are measured, with a target set after the baseline. |
 | D2 | Are cold-launch taps (before session-init completes) held to 250 ms? | Report separately. Gate first-tap and repeat-tap; decide cold-launch after the baseline. |
-| D3 | Is cellular held to the same 250 ms p95? | Yes, as the operator's ask reads. Revisit only if R4 data shows the network floor alone exceeds the budget. |
-| D4 | The stale-deck rule | Serve-and-refresh with the two hard exceptions (§5.2). Alternatives: block, or serve-with-label. |
+| D3 | Is cellular held to the same 250 ms p95? | Yes, as the operator's ask reads. Revisit only if `network_type` data (on R2/R2b) shows the network floor alone exceeds the budget. |
+| D4 | The stale-deck rule | Serve-and-refresh with the two hard exceptions (§5.2). It is supported by design-lead and ux-lead, with ux-lead F-3, F-4 and F-6 pinned (trades-pm decision, 2026-10-15). Alternatives: block, or serve-with-label. |
 | D5 | The §5.1 freshness bounds | As proposed in the table. |
 | D6 | May the first card differ from the full deck's top card (progressive order)? | No by default. Only with models-lead sign-off and a measured quality comparison. |
 | D7 | Storage budget for a faster path, and whether evidence rows may be written only for displayed cards | **Decided in part by head-product P23 (2026-10-15):** cache data sheds first, and nothing rolls out without an explicit byte budget checked by head-eng against H1–H3 (#337, §10.4). **Still open:** the budget number, which head-eng sets against H1–H3, and lazy evidence, which still needs analytics-lead and models-lead. |
 | D8 | Does 250 ms supersede the 3 s goal in `trade-search-latency/research-plan.md` §4? | Yes. 250 ms becomes the tap-to-first-card KPI, and that thread's non-negotiables stay. |
 | D9 | Must every fast-path card pass `deck.quality_filters`? | Yes (AC-9). |
-| D10 | Should a table B control (Home tile, League, Matches, calculator row) start a search and show cards directly, instead of opening the builder? | ux-lead proposes the flow; the operator decides. Until then the clock starts at the table A tap, and table B taps are measured as tap → builder interactive. |
+| D10 | Should a table B control (Home tile, League, Matches, calculator row) start a search and show cards directly, instead of opening the builder? | **Yes for onboarded users** on the Home tile, League ×2 and Matches. First-run keeps the builder (onboarding-pm signs off). The stack is builder → pushed deck, using `push`, not `navigate`. The calculator row stays navigation-only and is relabelled (design-lead; copy via head-product → marketing-lead). A Home tile preview is an optional follow-up (design-lead). **The operator's call, because it amends D-171.** Alternative: keep D-171 and relabel table B (ux-lead, design-lead). |
+| D11 | Where does the "updating" state sit? design-lead proposes a trailing header-row label; ux-lead proposes the progress-strip slot | **design-lead and ux-lead settle it jointly before any UI build**, within §5.4's seven shared constraints (trades-pm decision, 2026-10-15). |
 
 ## Handoffs
 
 - **head-eng → trades-eng, models-eng:** choose the approach (§10.1) against §4, §5 and §8; write
   HLD/LLD; return the latency budget split and the storage footprint (AC-11).
-- **analytics-lead:** grant or amend R1–R4; run `baseline-request.md` (W3); replace §6's provisional
-  table with the read.
-- **design-lead + ux-lead:** the §5.4 freshness states, plus the transition and gate-miss experience.
+  - Also F-1: the animation option on search-starting pushes (AC-2b).
+  - Also F-2: the Home tile's target inconsistency (`HomeHub.tsx:397`). It is live today,
+    independent of this PRD (ux-lead).
+- **platforms-eng (through head-eng):**
+  - implement I-2 per platforms-pm R1–R5 and R8;
+  - confirm what each send path does today when its roster fetch fails (R3);
+  - **land `NEXT.md` 0f (the Sleeper propose route's `isdigit()` G-030 trap) before or with I-2**
+    (platforms-pm N1).
+- **analytics-lead:** the grants are recorded in §4.6. Run `baseline-request.md` (W3) and replace
+  §6's provisional table with the read. Receive the new `sleeper_send_failed.error_code` value
+  (platforms-pm R4).
+- **The build:** write the addendum `docs/business/analytics/<date>-time-to-suggestion-events.md`
+  before any emitter ships (analytics-lead).
+- **design-lead:**
+  - the visual spec for the withdrawn card and the status line, plus their `components.md` row;
+  - the push motion (AC-2b);
+  - D11 jointly with ux-lead;
+  - the calculator-row relabel, and the optional Home tile preview (D10).
+- **ux-lead:** D11 jointly with design-lead, and the VoiceOver announcement spec (design-lead 7).
+- **onboarding-pm:** D10's first-run limit, F-4's guide interplay, and the P12 privacy-label check
+  for `network_type` and `search_id` ("check, likely no change"; App Store Connect is the
+  operator's).
+- **marketing-lead (through head-product):** copy for the §5.4 lines and the calculator-row relabel.
 - **models-lead:** a sign-off position on AC-9, precompute timing, lazy evidence and any engine
-  swap.
-- **platforms-pm:** review I-2 (live ownership checks on send) and any roster-cadence change behind
-  the §5.1 roster bound.
+  swap. The AC-9 review is pending.
+- **platforms-pm:** log R7 in the platform risk register. Any future pending-offer read goes to the
+  register first (N2).
 - **DB-storage task + head-eng:** take the §10.4 arithmetic. head-eng sets and accepts the byte
   budget against H1–H3 (#337; DEC-7) before any rollout (P23).
 - **release-lead:** merge this plan PR on the operator's go. Plan only, no code.
-- **Operator:** D1–D10, then the §9.4 checklist once a build exists.
+- **Operator:**
+  - decide D1–D10 (D10 amends D-171) and E2, which gates any headless Sleeper roster reads. D11 is
+    settled by design-lead and ux-lead;
+  - run the §9.4 checklist once a build exists, including approving and cancelling the step 13 test
+    sends.
