@@ -160,7 +160,7 @@ Ranked by downstream cost (a break zeroes everything after it) and cost to fix.
 | 10 | Events | None on web, none on the 302 | H3a row |
 | 11 | Indexing intent | `/` is meant to be indexed; a per-league join page is not (none exists) | `web/robots.txt` |
 | 12 | Privacy | Raw username in the URL and in Render logs; spoofable `ref` | `InviteLeaguematesBanner.tsx:56-65`; `S:22649-22675` |
-| 13 | Words owner | No invite-specific words exist; `marketing-lead` has drafted `gp.join.*` (proposed, pending) | marketing-lead wave 2 §A |
+| 13 | Words owner | No invite-specific words exist; `marketing-lead` has drafted `gp.join.*` (proposed, pending) | [marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer) |
 | 14 | Shipped name | Page title/OG correct; invite text, inbox row and `/s/*` chrome wrong | `InviteLeaguematesBanner.tsx:132`; `S:22662`; `S:25479, :25512` |
 
 ## Share loops (S1–S12)
@@ -169,8 +169,8 @@ The share-loop surfaces (trade-card image, `/s/p`, `/s/trade`, `/s/tiers`, the s
 chrome, send-in-league, power rankings, Year in Review, `/u/`, rating prompt, copy trade,
 overhaul copy) are traced in the standing backlog:
 [`docs/business/product/growth-backlog.md` § Share-loop surfaces](../../business/product/growth-backlog.md#share-loop-surfaces-s1s12).
-That S1–S12 numbering is canonical; `marketing-lead`'s wave-2 S-IDs are provisional and
-remap to it.
+That S1–S12 numbering is canonical; `marketing-lead`'s wave-2 S-IDs
+([marketing-inputs.md](marketing-inputs.md)) are provisional and remap to it.
 
 ## Contradictions found in re-verification
 
