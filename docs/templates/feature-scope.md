@@ -13,6 +13,9 @@ Copy this template into the feature's home:
 RULE: every section is answered or explicitly WAIVED with a reason.
 Silence is not a waiver. Waivers are surfaced to the operator before build starts.
 
+HOW TO FILL IT (section by section, plus the product acceptance pass):
+  .claude/skills/pm-technical/references/scope-block.md
+
 EXPRESS LANE: the operator may exempt a change from this template entirely at
 flow start ("quick fix", "just ship it") — see CLAUDE.md §Conventions "Feature
 gates" → "Rigor is an operator decision". No scope.md then; a one-line
@@ -21,6 +24,7 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 
 **Date:** YYYY-MM-DD
 **Entry point:** feedback #NN / NEXT.md item / direct ask
+**Strategy owner:** operator ask "<quote>" (YYYY-MM-DD) / `models-lead` (packet: <path>) / strategy note accepted by `head-product` (<path>, YYYY-MM-DD)
 **Builder:** <session/agent>
 **Operator sign-off on waivers:** yes / not needed (no waivers)
 
@@ -28,8 +32,9 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 
 ## 1. Analytics scope
 
-<!-- Answer against the event taxonomy (an-data-architect owns it).
-     Every feature answers exactly one of a/b/c. -->
+<!-- Answer against the event taxonomy: backend/analytics_taxonomy.py
+     (analytics-lead grants changes to it). git grep every event name you cite;
+     never invent one. Every feature answers exactly one of a/b/c. -->
 
 - [ ] **(a) New events specced:** name, properties, trigger moment, emitting client(s):
 
@@ -37,7 +42,10 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
   |---|---|---|---|
   | | | | |
 
-  → follow-through: `docs/data-dictionary.md` (if stored), taxonomy doc updated.
+  → follow-through: `docs/data-dictionary.md` (if stored), taxonomy doc updated;
+  registered in `backend/analytics_taxonomy.py` and classified against
+  `analytics_queries.NON_INTENT_EVENTS` in the emitter's commit;
+  `analytics-lead` grant attached: <path>.
 - [ ] **(b) Existing events cover it** — name them and what question they answer: …
 - [ ] **(c) WAIVED — no analytics needed because:** …
 
@@ -83,9 +91,62 @@ TEST_LEDGER note replaces it. Operator-declared only, never agent-selected.
 <!-- The simulator-gate tier matrix is RETIRED (D-056, 2026-08-15). There is no tier to
      declare and no qa/sim-runs/last-sim-run.json to write. -->
 
-- **CI green:** `backend-tests` + `mobile-typecheck` (which also runs the `check-*.js`
-  suites) + `maestro-testid-lint` — all passing on the pushed sha
+- **CI green:** `backend-tests` + `mobile-typecheck` (which also runs every `check-*.js`
+  suite) + `web-structure` + the testid-lint job (`maestro-testid-lint` — a legacy job
+  name; it runs only `testid-lint.sh`, Maestro itself stays retired) — all passing on
+  the pushed sha
 - **Evidence recorded:** `living-memory/TEST_LEDGER.md` entry naming what ran and what it proved
 - **TestFlight verification** (if a checklist was written in §3): run by the operator, outcome
   logged in TEST_LEDGER
 - Express lane declared by the operator? <yes + what was skipped / no>
+
+## 6. Flow, states & reviews
+
+<!-- Full UX review (ux-lead) is triggered by: a new visible entry, a tab or IA change,
+     a deep link, a new interrupt, or a new screen's states. A flag-dark registration
+     gets a light check at registration and the full review at flag flip.
+     Any UI change gets a design review (design-lead, Chalkline). -->
+
+- **UX review (`ux-lead`):** attached: <path> / light check (flag-dark): <path> / waived because …
+- **Design review (`design-lead`, Chalkline):** attached: <path> / waived because …
+- **States covered** (behavior, or "n/a because …" per row):
+
+  | State | Behavior |
+  |---|---|
+  | First-run | |
+  | Empty | |
+  | Loading | |
+  | Error | |
+  | Offline | |
+  | Flag-off | byte-identical to today / stated difference: … |
+
+- [ ] **WAIVED because:** … (e.g. backend-only; no user-visible flow or screen)
+
+## 7. Platform scope
+
+<!-- Per platform: the reads and writes this feature uses, and how it behaves there.
+     Fleaflicker is dark (`fleaflicker.link` false) — n/a unless this change lights it.
+     Reference: .claude/skills/pm-technical/references/platform-parity.md -->
+
+| Platform | Reads / writes used | Behavior: parity / honest `platform_unsupported` / fallback copy / n/a |
+|---|---|---|
+| Sleeper | | |
+| ESPN | | |
+| MFL | | |
+| Fleaflicker (dark) | | |
+
+- [ ] **WAIVED because:** … (e.g. no league data read or written)
+
+## 8. Model-visible change
+
+<!-- Does this change what a model outputs (ranking, tiers, matchups, values, trade
+     scoring/packaging, deck rules, outlook, pick values), or how model output is shown?
+     If yes, fill a packet in the format of
+     .claude/skills/pm-technical/references/model-change-packet.md and attach
+     models-lead's sign-off (routed head-product → head-bizops). -->
+
+- **Model-visible?** yes / no — because …
+- If yes:
+  - **Model:** …
+  - **Packet:** <path>
+  - **`models-lead` sign-off:** attached: <path, date> (via `head-product` → `head-bizops`)
