@@ -92,8 +92,11 @@ checked against the baseline:
 | `i` | invites shared per active user per 30 days | 0.5 | `invite_shared` (all surfaces, both clients) ÷ active users |
 | `o` | opens per share | 1.5 (a group-chat share reaches several leaguemates, so this can exceed 1) | ledger `open_count` + `invite_link_opened` with `invite_id` |
 | `j` | joins per open | 0.5 | ledger `joined` ÷ opens |
-| `a` | activated per join (14-day window) | 0.4 | ledger `activated` ÷ `joined` |
+| `a` | activated per join: the invitee's first trade opinion (funnel stage 7, FR-17) within 14 days of `joined_at` | 0.4 | ledger `activated` ÷ `joined` |
 | **K_30** | | **0.5 × 1.5 × 0.5 × 0.4 = 0.15** | |
+
+Stage 7 is a stricter bar than the first-suggestions bar `a` was first assumed against, so
+it may land below 0.4; the W3 baseline recalibrates it.
 
 Two honest limits: a league caps `i` at the leaguemates not yet joined (~9–11 minus joined),
 and spread past one league happens only when an invitee brings their other leagues. K below
@@ -164,8 +167,10 @@ operator approval of words via `marketing-lead`. None is final.
    (`gp.invite.msg`) and a link carrying `t=<invite_id>` and no username.
 4. When a leaguemate joins: one bell row, "@{new_username} joined Fleeced via your invite"
    (`gp.push.joined_inbox_title`) with a distinct body line (`gp.push.joined_inbox_body`).
-5. When that leaguemate first gets trade suggestions: a second bell row (words not yet
-   drafted; `marketing-lead`).
+5. When that leaguemate first likes or passes a trade (funnel stage 7, FR-17): a second
+   bell row, "@{new_username} has their first trade ideas" (`gp.inbox.activated_title`)
+   with "If they like a trade with you, it can surface in your deck."
+   (`gp.inbox.activated_body`). The tap opens Trades (FR-19).
 
 ### J2 — Invitee, app not installed
 
@@ -261,9 +266,14 @@ forever (D-028).
 **FR-3 — Share text says Fleeced.** Mobile (`InviteLeaguematesBanner.tsx:132`) and web
 (`web/js/app.js:5834`) invite messages use `marketing-lead`'s approved string (proposed:
 `gp.invite.msg`, the version without the league name, which fits ~140 characters). Ships
-with the flag off too (copy is not attribution).
+with the flag off too (copy is not attribution). The same name sweep covers the
+`league_member_unlocked_trades` bell row, which lands next to the inviter rows: its body
+says "@{username} just unlocked Trade Finder. Tap to look for matches." (`S:10542-10543`;
+added at `marketing-lead`'s request, wave 2 §A open question 15). Words from
+`marketing-lead`.
 - AC-3: no invite share text contains "Dynasty Trade Finder" or "Fantasy Trade Finder"
-  (structural guard).
+  (structural guard); the `league_member_unlocked_trades` body no longer says "unlocked
+  Trade Finder" (pytest).
 
 **FR-4 — Even impressions.** `invite_cta_shown` fires on the Trades cold-start banner and the
 members-overlay footer (H1b, H1e). The banner passes the league's real `platform` and real
@@ -406,15 +416,33 @@ separate proposal owned by `analytics-lead` (P18), built only if accepted (§8.4
 
 ### H6 · First value
 
-**FR-17 — Activation.** After either `trades_generated` emitter (`S:7617`, `S:9233-9238`),
-one helper checks for a `joined` referral whose `referred_user_id` is this user, `joined_at`
-within 14 days, and `props.count ≥ 1` (**proposed**; stage 6 counts any `trades_generated`,
-`analytics_queries.py:414`) → `status = 'activated'`, `activated_at`,
-`qualifying_event = 'trades_generated'`, server `referral_activated`. If `analytics-lead`
-prefers stage 5 (`ranking_complete_first_time`, `:413`), the helper moves to that emitter
-(`S:10519`) and nothing else changes.
-- AC-17: activation inside 14 days stamps once; outside 14 days, or with `count = 0`, does
-  nothing; a second `trades_generated` is a no-op.
+**FR-17 — Activation = the invitee's first trade opinion (funnel stage 7).** "Activated" is
+the invitee's first `trade_proposed` or `match_swiped` (stage 7 `first_opinion`,
+`analytics_queries.py:415`) within 14 days of `joined_at` (**proposed**). After each server
+emitter of those events, one helper checks for a `joined` referral whose
+`referred_user_id` is this user and whose `joined_at` is within 14 days → `status =
+'activated'`, `activated_at`, `qualifying_event` = the event's name, server
+`referral_activated`. The emitters are the swipe route (`S:16110-16112`: like →
+`trade_proposed`, else `match_swiped`), the calculator queue (`S:16572-16574`,
+`trade_proposed`) and the reasoned pass (`S:16745-16746`, `match_swiped`). Both names are
+server-fired only (`analytics_taxonomy.py:736`, `:769`), so no client event can activate.
+
+Why stage 7 and not stage 6 (`trades_generated`, `analytics_queries.py:414`):
+1. Stage 6 fires within seconds of the first deck load, so join and activation would land
+   together and the activation row would say nothing new.
+2. The weekly replenish cron emits `trades_generated` with no user present (`source =
+   "replenish"`, `S:23865`, stamped as `deck_source` at `S:9228-9231` and `S:7615-7616`),
+   so stage 6 can be a cron's doing, not a person's.
+3. Stage 7 is the invitee acting on value: a truer quality bar.
+
+`trades_generated` never activates, so stage 6's `count ≥ 1` guard is dropped. If
+`analytics-lead` picks another stage (D-8), the helper moves to that stage's emitters
+(stage 5: `ranking_complete_first_time`, `analytics_queries.py:413`, `S:10519`) and nothing
+else changes.
+- AC-17: a first `trade_proposed` or `match_swiped` inside 14 days stamps once, from each of
+  the three emitters; outside 14 days it does nothing; a second opinion is a no-op; a
+  `trades_generated` alone never activates, including a replenish deck
+  (`deck_source = 'replenish'`).
 
 ### H7 · Inviter told
 
@@ -426,11 +454,30 @@ and the bell renders both, `TopBar.tsx:499-501`). Words: `gp.push.joined_inbox_t
 - AC-18: the row's title and body differ; no row fires from a legacy `invited_by` alone.
 
 **FR-19 — Activation row.** New notification type `referral_activated` (inbox only; push is
-Phase 2), registered in `V2_LEAGUE_KINDS` (`deepLinks.ts:306-312`), the glyph map pinned by
-`mobile/tests/check-notif-glyphs.js`, and `docs/cross-client-invariants.md`'s type table, so
-the tap goes somewhere (the original `referral_joined` routing bug, `deepLinks.ts:300-305`).
-Words: `marketing-lead` (not yet drafted).
-- AC-19: the row routes to League; the glyph check passes.
+Phase 2), posted to the inviter when FR-17 activates.
+- **Routing: the Trades tab (the deck), not League**, because the body points to the deck.
+  Register the type in mobile `V2_TRADE_KINDS` (`deepLinks.ts:318`, resolved to
+  `{ tab: 'Trades' }` at `:340`; today it holds only `deck_replenished`) and in web
+  `clickNotif`'s `TRADE_TYPES` (`web/js/app.js:5328`). Also register it in the glyph maps
+  pinned by `mobile/tests/check-notif-glyphs.js` (it reads all four tables, `:7-10`; add the
+  type to `TYPES`, `:51-60`) and in `docs/cross-client-invariants.md`'s type table, so the tap
+  goes somewhere (the original `referral_joined` routing bug, `deepLinks.ts:300-305`). While
+  `trades.finder_hub` is on (`config/features.json:16`), a Trades tap lands on the hub home,
+  not the deck itself (`deepLinks.ts:314-317`). `engagement-pm` reviews the routing (D-9).
+  The join row (FR-18) still routes to League.
+- **Meta:** `new_user_id`, `new_username` and `league_id`, so the title can render the name
+  (`referral_joined` already carries `new_user_id` and `new_username`, `S:22663-22667`).
+- **Words** (proposed by `marketing-lead`, pending the operator; wave 2 §A rows
+  `gp.inbox.activated_title` / `gp.inbox.activated_body`): title "@{new_username} has their
+  first trade ideas"; body "If they like a trade with you, it can surface in your deck."
+  - The body rests on likes-you mirroring: a leaguemate's `like` decisions from the last 90
+    days are mirrored into the other side's deck (`_inject_likes_you_cards_impl`,
+    `S:3951-3972`), capped and quality-gated (`S:3979-3991`), hence "can". Flag
+    `trade.likes_you` is on (`config/features.json:37`).
+  - `marketing-lead` re-checks the title against the stage-7 definition (it was drafted for
+    stage 6, "first suggestions").
+- AC-19: the row routes to Trades, not League; title and body differ; the meta carries
+  `new_username` and `league_id`; the glyph check passes.
 
 **FR-20 — Notify once.** When a join is attributed to inviter I, the `league_member_joined`
 fanout (`S:22677-22720`) skips I's coalesced inbox row; I's existing per-pair push is kept
@@ -547,7 +594,10 @@ league, `share_token` = the parent's id, a fresh unique `invite_token`
 
 ### 7.7 Activation
 
-FR-17. 14 days from `joined_at`, stage 6 with `count ≥ 1` (proposed).
+FR-17. The invitee's first `trade_proposed` or `match_swiped` (stage 7 `first_opinion`)
+within 14 days of `joined_at` (proposed). `trades_generated` (stage 6) never activates: it
+fires seconds after the first deck load, and the replenish cron fires it with no user
+present.
 
 ### 7.8 Notification rules
 
@@ -556,6 +606,11 @@ FR-17. 14 days from `joined_at`, stage 6 with `count ≥ 1` (proposed).
 | Join attributed (token or league match) | one `referral_joined` row (FR-18); their existing `league_member_joined` push, unchanged | unchanged `league_member_joined` row + push |
 | Join not attributed | nothing new (a legacy `ref` alone notifies no one, FR-15) | unchanged |
 | Activation | one `referral_activated` row (FR-19) | nothing |
+
+With stage 7, the activation row no longer lands seconds after the join row; it waits for
+the invitee's first like or pass. If both would still fire within 10 minutes (an invitee who
+joins and swipes at once), the activation row posts as its own row: they are different
+events. Holding or merging it is an open item for `engagement-pm` (D-9).
 
 ### 7.9 Fraud and spoofing
 
@@ -665,7 +720,8 @@ is a `design-lead` call in Phase 2, §12).
 New index `ix_referrals_league_status (league_id, status)` for §7.5. Reused unchanged:
 `referred_user_id`, `status` (`pending → joined → activated`; `rewarded`, `rejected`,
 `expired` reserved), `joined_at`, `activated_at`, `qualifying_event`
-(`'trades_generated'`). Comment fix: `league_id` is any platform's league, not only Sleeper.
+(`'trade_proposed'` or `'match_swiped'`, FR-17). Comment fix: `league_id` is any
+platform's league, not only Sleeper.
 `uq_referral_token` and `uq_referral_pair` stay. **No change to `users`.**
 
 ---
@@ -689,11 +745,16 @@ two optional `record_event` parameters, `platform='server'` (it has none today) 
 | `invite_landing_opened` | new, server | `invite_id`?, `league_id`, `token_status`, `device_class` (`ios\|android\|desktop\|other`) | Human GET of the join path (FR-8) | NON_INTENT |
 | `invite_landing_cta` | new, server | `invite_id`?, `league_id`, `cta` (`ios_install\|web_app`), `device_class` | Click-through (§8.2) | NON_INTENT |
 | `referral_attributed` | new, server | `invite_id`, `referral_id`, `league_id`, `attribution_method`, `referred_user_id`, `league_platform`, `notified` | §7.4 / §7.5 credit | NON_INTENT |
-| `referral_activated` | new, server | `invite_id`, `referral_id`, `league_id`, `days_to_activate`, `notified` | FR-17 | NON_INTENT |
+| `referral_activated` | new, server | `invite_id`, `referral_id`, `league_id`, `days_to_activate`, `notified` | FR-17: the invitee's first `trade_proposed` or `match_swiped` (stage 7) within 14 days of `joined_at`; never `trades_generated` | NON_INTENT |
 | `signup` | changed, server (owner: the new user) | + `attribution`, `attribution_miss` (FR-16); first-touch props only if §8.4's proposal is accepted | First session | unchanged |
 
 `notified` stands in for a separate notification-created event (none exists today); if
 `analytics-lead` prefers a `notif_created{type}` event, it replaces the prop.
+
+**Notification meta (not event props).** The `referral_activated` bell row's meta carries
+`new_user_id`, `new_username` and `league_id` (FR-19), as `referral_joined`'s meta carries
+`new_user_id` and `new_username` today (`S:22663-22667`). The no-username rule below covers
+event props only; the meta stays in the inviter's own inbox row.
 
 **Client-fired.**
 
@@ -766,7 +827,7 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 | `design-lead` | Join landing (Chalkline, FR-7; per-surface states: logged-out, not installed, expired/unknown link, flag off; iPhone/desktop/Android; no "already joined" state: the landing has no auth and one link can credit several joiners, so that state lives in the in-app J4 path), its OG card (FR-7: static 1200×630; art direction P14), the invite card/banner diff (FR-3/FR-4: copy and events only, no visual change), Phase 2 "Your invites" tiles. Every string stays with `marketing-lead`; the mockup lab (`mockup/referral-loop`) tags each PROPOSED COPY. The build gets a `/design-review` verdict at `docs/plans/referral-loop/design-review.md` before ship. The landing's before-pane is today's 302 to `/` (the web landing), a labelled reconstruction until `head-product` rules on web before-panes (W2) | W4 direct |
 | `ux-lead` | The J2 flows, especially re-tap after a TestFlight install | via `head-product` |
 | `analytics-lead` | Event names and classes (§10), taxonomy + NON_INTENT in the emitter's commit, the activation stage (D-8), the readout (FR-22), the first-touch convention (P18), the W3 baseline | via `head-product` |
-| `engagement-pm` | In-app entry points; the notify-once rule (FR-20); the activation row as a receipt (D-046); Phase 2 pushes | via `head-product` |
+| `engagement-pm` | In-app entry points; the notify-once rule (FR-20); the activation row as a receipt (D-046) and its routing to Trades, not League (FR-19); the join/activation timing open item (§7.8); Phase 2 pushes | via `head-product` |
 | `onboarding-pm` | LeagueJoin, SignIn banner from `invite-meta`, web landing capture, LeaguePicker companion | via `head-product` |
 | `platforms-pm` | ESPN/MFL/Fleaflicker session-init attribution and per-platform co-member verification (§7.4 step 3) | via `head-product` |
 | `monetization-pm` | Rewards (Phase 3); confirms v1 stays reward-free | via `head-product` |
@@ -808,8 +869,8 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-5 | Approve the words (`gp.*`) | **operator** via `marketing-lead` | — |
 | D-6 | Accept the PRD; **supersede D-028 part 2** (a real join page instead of the 302 into `/`), because D-028's premise that the existing web funnel converts holds only on desktop with the extension | `head-product` (new DECISIONS entry, id claimed against `origin/main`) | Yes |
 | D-7 | Second flag `growth.join_landing` | `head-product` / `growth-pm` | Yes: independent rollback for the riskiest surface |
-| D-8 | Activation = stage 6 with `count ≥ 1` (vs stage 5) | `analytics-lead` | Stage 6, `count ≥ 1` |
-| D-9 | Notify-once rule (FR-20) | `engagement-pm` | As written |
+| D-8 | Activation = stage 7 first opinion (vs 5 or 6) | `analytics-lead` | Stage 7: the first `trade_proposed` or `match_swiped` within 14 days of `joined_at` (FR-17) |
+| D-9 | Notify-once rule (FR-20); the activation row routes to Trades, not League (FR-19). Open item: an activation row within 10 minutes of the join row posts separately today; hold or merge it? (§7.8) | `engagement-pm` | As written |
 | D-10 | A valid id unlocks the stored league name for imported (ESPN/MFL) leagues on the landing and `invite-meta` | `head-eng` (security) | No in v1; revisit with evidence |
 | D-11 | First-touch UTMs on `session_init` (§8.4) | `analytics-lead` (P18) | Accept marketing-lead §C; outside Phase 1's critical path |
 | D-12 | Mint cap 10 per inviter per league per day; token credit window 30 days | `growth-pm` | As written (assumed values) |
@@ -825,8 +886,9 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   (`S:25552-25564`, `S:25446-25457`).
 - **`analytics-lead`:** §10 proposals, D-8, D-11, FR-22 readout, W3 baseline (nine invite/share
   events, new accounts per week, open → signup feasibility).
-- **`marketing-lead`:** final words for every quoted string, plus the activation row (not yet
-  drafted); its S-IDs remap to the backlog's S1–S12.
+- **`marketing-lead`:** final words for every quoted string, including the activation row
+  (proposed; re-check its title against stage 7, FR-19) and the
+  `league_member_unlocked_trades` body (FR-3); its S-IDs remap to the backlog's S1–S12.
 - **`design-lead`:** landing + OG card + states (§13).
 - **`engagement-pm` / `onboarding-pm` / `platforms-pm` / `monetization-pm`:** §13 rows.
 - **`release-lead`:** the doc drift listed in [loop-audit.md](loop-audit.md#contradictions-found-in-re-verification).

@@ -26,7 +26,7 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
   | `invite_landing_opened` (new, NON_INTENT) | `invite_id`?, `league_id`, `token_status`, `device_class` | Human GET of `/app/league/join/<id>` with the ledger flag on (PRD FR-8) | server; owner = referrer, else `system:invite`; non-touching write |
   | `invite_landing_cta` (new, NON_INTENT) | `invite_id`?, `league_id`, `cta`, `device_class` | Landing click-through `/app/league/join/<id>/go/<cta>` | server; same owner rule |
   | `referral_attributed` (new, NON_INTENT) | `invite_id`, `referral_id`, `league_id`, `attribution_method`, `referred_user_id`, `league_platform`, `notified` | Ledger credit at a new user's first session (PRD §7.4/§7.5) | server; owner = referrer; non-touching write |
-  | `referral_activated` (new, NON_INTENT) | `invite_id`, `referral_id`, `league_id`, `days_to_activate`, `notified` | Invitee's first `trades_generated` with `count ≥ 1` within 14 days (PRD FR-17) | server; owner = referrer; non-touching write |
+  | `referral_activated` (new, NON_INTENT) | `invite_id`, `referral_id`, `league_id`, `days_to_activate`, `notified` | Invitee's first `trade_proposed` or `match_swiped` (funnel stage 7) within 14 days of `joined_at` (PRD FR-17); never `trades_generated` | server; owner = referrer; non-touching write |
   | `signup` (changed props) | + `attribution` (`token\|league_match\|legacy_ref\|none`), `attribution_miss` (`unknown\|expired\|not_member\|null`) | First session | server; owner = new user |
   | `invite_shared` (changed props, new web emitter) | + `invite_id`?, `mint_outcome` | Share sheet not dismissed | mobile, web |
   | `invite_cta_tapped` (new web emitter) | `surface` gains `web_invite` | Invite tap | mobile, web |
@@ -91,8 +91,9 @@ D-056: no Maestro, no simulator, no captures.
   5. Every session-init body builder (two Sleeper in `api/auth.ts`, ESPN in `api/espn.ts`,
      MFL/Fleaflicker in `api/platformLink.ts`) includes `invite_id`.
   6. No invite event prop key contains `token`.
-  Also extend `mobile/tests/check-notif-glyphs.js` for `referral_activated` (glyph +
-  `V2_LEAGUE_KINDS` membership). Web: extend `qa/web/check_web_structure.py` (CI) to assert
+  Also extend `mobile/tests/check-notif-glyphs.js` for `referral_activated` (glyph on both
+  clients + mobile `V2_TRADE_KINDS` and web `TRADE_TYPES` membership: it routes to Trades,
+  PRD FR-19). Web: extend `qa/web/check_web_structure.py` (CI) to assert
   the web invite builder never emits `ref=` with an id, and `captureReferralFromUrl` stores
   `t`.
 - [x] **Unit tests (backend pytest):**
@@ -115,14 +116,18 @@ D-056: no Maestro, no simulator, no captures.
     user → no credit; legacy `invited_by` alone → no row, no bell row; `users.invited_by`
     written from the ledger; `signup` props per case; repeat session init idempotent; inviter
     `users.last_active_at` unchanged by inviter-owned events; FR-20 dedupe.
-  - `backend/tests/test_referral_activation.py` (new): `count ≥ 1` within 14 days → activated
-    once + `referral_activated` + inbox row; outside 14 days, `count = 0`, second
-    `trades_generated` → no-op; both emitters covered.
+  - `backend/tests/test_referral_activation.py` (new): a first `match_swiped` or
+    `trade_proposed` within 14 days → activated once + `referral_activated` + inbox row
+    (meta carries `new_username` and `league_id`); outside 14 days, or a second opinion →
+    no-op; all three stage-7 emitters covered (swipe, calculator queue, reasoned pass).
+    A `trades_generated` alone never activates, and a replenish-generated one
+    (`deck_source = 'replenish'`, no user present) is tested explicitly.
   - `backend/tests/test_invite_impact.py` (new): v2 payload from the ledger; flag off →
     today's zeroed payload.
   - Updated: `test_invite_links.py` (T4–T7 under `growth.join_landing` off, unmodified
     assertions; T12-style registration for the new flags), `test_notif_inbox_growth.py`
-    (`referral_activated` type; title ≠ body), `test_account_deletion_coverage.py` and
+    (`referral_activated` type; title ≠ body; the `league_member_unlocked_trades` body no
+    longer says "unlocked Trade Finder", PRD FR-3), `test_account_deletion_coverage.py` and
     `test_account_data_rights.py` (new columns), the taxonomy registration tests (new names
     registered, NON_INTENT, namespaces disjoint).
 - [x] **Code-walk proof** (written by the builder into `docs/plans/referral-loop/code-walk.md`,
@@ -175,8 +180,11 @@ D-056: no Maestro, no simulator, no captures.
       auto-selected; credited by token.
   12. **Android.** Open a fresh link on an Android phone. Expected: the honest note, **no**
       web button; `open_count` increments.
-  13. **Activation.** On device B (credited in step 4), generate trade suggestions in L.
-      Expected: device A gets one activation row that routes to League.
+  13. **Activation.** On device B (credited in step 4), open the deck in L and wait without
+      swiping. Expected: device A gets **no** activation row yet. Then like or pass one
+      trade. Expected: device A gets one activation row naming @B, title and body
+      different, separate from the join row even if B swiped right after joining; tapping
+      it opens the Trades tab (the hub home while `trades.finder_hub` is on), not League.
   14. **Group chat.** Post one link into a chat with two test invitees; both join. Expected:
       two ledger rows sharing the same `share_token`; device A gets one row per joiner.
   15. **Landing primary action per device** (PRD FR-7 design rules). Open a fresh link on each
