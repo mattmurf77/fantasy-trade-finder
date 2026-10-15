@@ -116,7 +116,7 @@ feedback precedents: [references/rubric.md](references/rubric.md).
    - E4 A push or inbox kind that should land here resolves in `resolveNotificationTarget`.
    - E5 A new screen does three things together: file, registration, deep-link route (`mobile/src/navigation/CLAUDE.md:23`).
 2. **Exits and back paths**
-   - X1 A visible back or close on every screen: explicit `HeaderBack` with a `canGoBack()` fallback on root-stack pushes; a header ✕ on modals.
+   - X1 A visible back or close on every screen: explicit `HeaderBack` with a `canGoBack()` fallback on root-stack pushes; a close control in the header on modals (its glyph and styling are design-lead's).
    - X2 No loops, and one control per destination (#162, #217; rank surfaces keep the single More-ways exit, `check-rank-nav-exit.js`).
    - X3 The landing after a terminal action (send, save, finish) is stated, and Back from there makes sense.
    - X4 Push vs modal matches the siblings; nothing pushes onward from a modal.
