@@ -31,7 +31,9 @@ import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 // Flow (specs.md §3.3 wins over lld §10.3 where they differ):
 //   intro → Start POSTs → 202 `building` → poll GET /current every 1.5 s
 //   (cap 60 s, then "taking longer than usual") → `open` → one card at a
-//   time → grade 1–5 (+ tags) or Skip → … → done → Results → Done → intro.
+//   time → Yes / No (+ optional reasons) or Skip → … → done → Results → Done →
+//   intro. Yes sends grade 5 and No grade 1 (operator, 2026-10-14: graders used
+//   the extremes almost exclusively); the server still accepts 1–5.
 //   `failed` renders a plain message per error code + Start over (POST again).
 //
 // A TAB-stack screen: it mounts NO FeedbackFAB — RootNav's single global
@@ -40,17 +42,14 @@ import { NO_LEAGUE_ID, useSession } from '../state/useSession';
 // and that no engine-identifying token appears in this file: the screen holds
 // a card's trade and nothing else about it.
 
-type Grade = 1 | 2 | 3 | 4 | 5;
+type Grade = 1 | 5;   // the server's 1–5 scale, used as No / Yes
 
 // Static testIDs — two const tables of literal strings, mapped over, so
 // testid-lint's grep and the blind-grading guard both resolve every id
 // (scope.md §3). Never template these.
-const GRADE_BUTTONS = [
-  { grade: 1, testID: 'calibration.grade-1' },
-  { grade: 2, testID: 'calibration.grade-2' },
-  { grade: 3, testID: 'calibration.grade-3' },
-  { grade: 4, testID: 'calibration.grade-4' },
-  { grade: 5, testID: 'calibration.grade-5' },
+const VERDICT_BUTTONS = [
+  { grade: 5, label: 'Yes', testID: 'calibration.yes' },
+  { grade: 1, label: 'No', testID: 'calibration.no' },
 ] as const;
 const TAG_CHIPS = [
   { tag: 'overpay', testID: 'calibration.tag.overpay' },
@@ -72,11 +71,11 @@ const BUILD_POLL_CAP_MS = 60_000;
 const COPY = {
   introTitle: 'Calibration',
   intro: (league: string) =>
-    `Grade up to 40 trade ideas for ${league}, one at a time. Some come from ` +
-    "today's trade engine and some from the new one, shuffled — you won't know which is which.",
+    `Answer yes or no on trade ideas for ${league}, one at a time. Some come from ` +
+    "today's trade engine and some from newer ones, shuffled — you won't know which is which.",
   purpose:
     'Why this exists: Calibration captures your honest reactions so we can improve the ' +
-    'trade model. Your grades are compared across both engines and used to tune which trade ' +
+    'trade model. Your answers are compared across the engines and used to tune which trade ' +
     'ideas Fleeced suggests.',
   start: 'Start',
   resume: (k: number, n: number) => `Resume (${k} of ${n} answered)`,
@@ -94,8 +93,7 @@ const COPY = {
   startFailed: 'Something went wrong starting the session. Try again.',
   buildFailed: 'Something went wrong building the session. Start over to try again.',
   prompt: 'Would you send this?',
-  anchorLow: '1 · No way',
-  anchorHigh: '5 · Send it',
+  whyLabel: 'Why? (optional)',
   next: 'Next',
   skip: 'Skip',
   done: 'Done',
@@ -438,32 +436,30 @@ export default function CalibrationScreen() {
             <Text variant="title">{COPY.prompt}</Text>
 
             <View style={styles.gradeRow}>
-              {GRADE_BUTTONS.map((b) => {
+              {VERDICT_BUTTONS.map((b) => {
                 const selected = grade === b.grade;
                 return (
                   <Pressable
                     key={b.testID}
                     testID={b.testID}
                     accessibilityRole="button"
-                    accessibilityLabel={`Grade ${b.grade} of 5`}
+                    accessibilityLabel={`Would send: ${b.label}`}
                     accessibilityState={{ selected }}
                     onPress={() => setGrade(b.grade)}
                     style={[styles.gradeBtn, selected && styles.gradeBtnSelected]}
                   >
                     <Text
-                      variant="dataLg"
+                      variant="title"
                       style={selected ? styles.gradeNumSelected : undefined}
                     >
-                      {String(b.grade)}
+                      {b.label}
                     </Text>
                   </Pressable>
                 );
               })}
             </View>
-            <View style={styles.anchors}>
-              <Text variant="bodySm">{COPY.anchorLow}</Text>
-              <Text variant="bodySm">{COPY.anchorHigh}</Text>
-            </View>
+
+            <Text variant="label">{COPY.whyLabel}</Text>
 
             <View style={styles.tagWrap}>
               {TAG_CHIPS.map((c) => {
@@ -559,11 +555,11 @@ const styles = StyleSheet.create({
   progressRow: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   meter: { flex: 1 },
   gradeRow: { flexDirection: 'row', gap: space.sm },
-  // Five equal-width cells, 44pt floor; selection = ice border + ice numeral
-  // on an ink-3 well (ice = action/selection, never flare).
+  // Two equal-width cells, 52pt tall; selection = ice border + ice label on an
+  // ink-3 well (ice = action/selection, never flare).
   gradeBtn: {
     flex: 1,
-    minHeight: 44,
+    minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.sm,
@@ -573,7 +569,6 @@ const styles = StyleSheet.create({
   },
   gradeBtnSelected: { backgroundColor: ink.ink3, borderColor: ice.base },
   gradeNumSelected: { color: ice.base },
-  anchors: { flexDirection: 'row', justifyContent: 'space-between', marginTop: -space.sm },
   tagWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm },
   // Badges & chips construction: radius 2, label type, 1px border; 32pt tall
   // with 6pt hitSlop for an effective 44pt target.

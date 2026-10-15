@@ -187,8 +187,7 @@ const REQUIRED_IDS = [
   'calibration.loading', 'calibration.no-league', 'calibration.unavailable',
   'calibration.open-acquire', 'calibration.retry', 'calibration.start', 'calibration.purpose',
   'calibration.resume', 'calibration.progress', 'calibration.card',
-  'calibration.grade-1', 'calibration.grade-2', 'calibration.grade-3',
-  'calibration.grade-4', 'calibration.grade-5',
+  'calibration.yes', 'calibration.no',   // Yes/No since 2026-10-14 (were grade-1…grade-5)
   'calibration.tag.overpay', 'calibration.tag.they_wont_accept',
   'calibration.tag.junk_filler', 'calibration.tag.too_small',
   'calibration.tag.wrong_for_my_window', 'calibration.tag.wrong_for_their_window',
