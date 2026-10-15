@@ -49,8 +49,8 @@ Pinned by `backend/tests/test_analytics_taxonomy_referral_loop.py`.
 
 | Event | Class | Client / owner | Properties | Fires when |
 |---|---|---|---|---|
-| `invite_landing_opened` (new) | NON_INTENT | server; owner = the referrer, else `system:invite` | `invite_id`? (absent unless it resolves to a ledger row, C3), `league_id`, `invite_status` (`valid`\|`expired`\|`unknown`\|`league_mismatch`\|null, C1), `device_class` (`ios`\|`android`\|`desktop`\|`other`) | A **human** GET (C4) of `/app/league/join/<id>`, in landing or 302 mode (PRD FR-8, §8.2) |
-| `invite_landing_cta` (new) | NON_INTENT | server; same owner rule | `invite_id`?, `league_id`, `cta` (`ios_install`\|`web_app`; path `/go/ios`\|`/go/web`), `device_class` | The landing click-through `/app/league/join/<id>/go/<cta>` (PRD §8.2) |
+| `invite_landing_opened` (new) | NON_INTENT | server; owner = the referrer, else `system:invite` | `invite_id`? (C3; the well-formed `t` as received (`^[A-Za-z0-9_-]{8,64}$`, PRD :731), else omitted; whether it resolves is `invite_status`), `league_id`, `invite_status` (`valid`\|`expired`\|`unknown`\|`league_mismatch`\|null, C1), `device_class` (`ios`\|`android`\|`desktop`\|`other`) | A **human** GET (C4) of `/app/league/join/<id>`, in landing or 302 mode (PRD FR-8, §8.2) |
+| `invite_landing_cta` (new) | NON_INTENT | server; same owner rule | `invite_id`?, `league_id`, `cta` (`ios_install`\|`web_app`; path `/go/ios`\|`/go/web`), `device_class` | A **human** GET (C4) of the landing click-through `/app/league/join/<id>/go/<cta>` (PRD §8.2) |
 | `referral_attributed` (new) | NON_INTENT | server; owner = the referrer | `invite_id`, `referral_id`, `league_id`, `attribution_method` (`token`\|`league_match`), `league_platform` (`sleeper`\|`espn`\|`mfl`\|`fleaflicker`), `notified` (bool) | Ledger credit at a new user's first session (PRD §7.4 / §7.5). No invitee id (C2) |
 | `referral_activated` (new) | NON_INTENT | server; owner = the referrer | `invite_id`, `referral_id`, `league_id`, `days_to_activate` (int 0–14), `notified` (bool) | The invitee's first stage-7 event within 14 days of `joined_at` (C5; PRD FR-17, D-8) |
 | `signup` (changed props) | unchanged | server; owner = the new user | adds `attribution` (`token`\|`league_match`\|`legacy_ref`\|`none`) and `attribution_miss` (`unknown`\|`expired`\|`not_member`\|null) | First session (`server.py:22620-22627`) |
@@ -68,6 +68,10 @@ Pinned by `backend/tests/test_analytics_taxonomy_referral_loop.py`.
 - `surface` is one closed enum shared by `invite_shared`, `invite_cta_shown` and `invite_cta_tapped`
   (`analytics_taxonomy.py:1132`, `:1293-1296`), so `web_invite` widens all three. A new enum value
   edits the comment beside the row and this addendum, not the keys.
+- `invite_id` on every row is C3's share id. The landing rows and the client parse rows
+  (`invite_link_opened`, `invite_league_pinned`, `invite_pin_failed`) send the well-formed `t` as
+  received, else omit it; a client cannot know whether it resolves. `invite_shared` sends the id
+  the mint returned (PRD AC-1b).
 - The four server events go into `SERVER_FIRED_EVENTS`, their writes are non-touching (C6), and
   the owner is `system:invite` only when no referrer resolves (the `system:api` precedent,
   `analytics_queries.py:60-62`).
@@ -96,7 +100,7 @@ Pinned by `backend/tests/test_analytics_taxonomy_referral_loop.py`.
 - The P18 draft's `has_ref`, `ref_resolved` and `attribution: link|none` on `signup`: superseded
   by the canonical `attribution` / `attribution_miss` vocabulary. `K_30` is a query, not an event.
 
-**PII:** ids only. `invite_id` is a 12-character opaque ledger id (C3); `referral_id` is
+**PII:** ids only. `invite_id` is the public share id `t`, opaque and granting no access (C3); `referral_id` is
 `referrals.id`, an integer; `league_id` is a platform league id, exempt from the 16-digit scrub on
 client ingest (`analytics_ingest.py:176-183`). No usernames, display names or league names (C9);
 `has_ref` stays a boolean. No invitee user id (C2), no user-agent string or IP (C4), no key
@@ -133,8 +137,12 @@ App Store Connect privacy-label check is the operator's.
   ledger. Account deletion removes only the user's own events (`accounts.py:754-757`) and NULLs the
   ledger's `referred_user_id` (`:829-834`), so an id inside the referrer's row would escape the
   referred user's deletion. Same gap as PR #337 R-L3.
-- **C3.** `invite_id` is a non-secret ledger id, never the bearer token or anything derivable from it.
-- **C4.** "Human GET" for `invite_landing_opened`: HEAD requests are excluded; link-preview and
+- **C3.** `invite_id` is the public share id `t` (`share_token`, PRD :605-607): opaque, 72-bit
+  random, no PII, an identifier that grants no access. It must never be an auth or session
+  credential, and no prop key may contain `token`. Sibling rows' `invite_token` (`<share_token>~…`)
+  is never emitted.
+- **C4.** "Human GET" for `invite_landing_opened` and for the `invite_landing_cta` click-through
+  (`/go/<cta>`), which uses the same filter: HEAD requests are excluded; link-preview and
   unfurl fetchers are excluded by an explicit, tested user-agent list (at least
   `facebookexternalhit`, `Twitterbot`, `Slackbot`, `Discordbot`, `WhatsApp`, `TelegramBot`,
   `Applebot`, `LinkedInBot`, and a generic `bot|crawler|spider|preview` pattern); only the
@@ -151,6 +159,16 @@ App Store Connect privacy-label check is the operator's.
 - **C8.** `notified` is accepted as a prop; there is no separate notification event.
 - **C9.** No usernames in any event prop. The `referral_activated` bell row's meta may carry
   `new_username` (FR-19), because it is not an event.
+
+## Requests to growth-pm (not grant conditions)
+
+- **R1.** FR-8 (prd.md:423-424, :430-433) records only GETs that have a well-formed `t`, so
+  `invite_status: null` never fires and opens of mint-failed or legacy links go unmeasured.
+  Analytics asks that every human GET be recorded while the ledger flag is on, with
+  `invite_status` null when `t` is absent and owner `system:invite` unless a legacy `ref` resolves.
+- **R2.** The PRD and scope still use `token_status` (prd.md:431, :832) and `referred_user_id`
+  (prd.md:834; scope §1). Both need updating to C1 and C2.
+- **R3.** FR-17 (prd.md:505-513) must take its qualifying events from `FUNNEL_STAGES` (C5).
 
 ## UTM convention v1 (accepted by `analytics-lead` 2026-10-15)
 
@@ -196,8 +214,9 @@ The partner/creator and App Store `ct` rows stay as drafted in §C, unbuilt.
    `q.INTENT_EVENTS`: `signup`, `invite_cta_tapped`, `invite_shared`, `invite_link_opened`,
    `invite_league_pinned`, `invite_pin_failed`, `share_link_opened`.
 5. **The non-touching write** (C6), and C5's qualifying set equals stage 7 of `FUNNEL_STAGES`.
-6. **The bot filter** (C4). Each listed user agent and the generic pattern produce no event and no
-   `open_count` bump; HEAD records nothing; no stored row carries a user agent or an IP.
+6. **The bot filter** (C4), on both `invite_landing_opened` and `invite_landing_cta`. Each listed
+   user agent and the generic pattern produce no event (and no `open_count` bump); HEAD records
+   nothing; no stored row carries a user agent or an IP.
 7. **An ingest round-trip** through `POST /api/events` (the 384 harness): `accepted ==
    len(_CLIENT_PROPS)`, `dropped == 0`, every row read back with its props. Plus an
    **unregistered-sibling control** (e.g. `share_link_viewed`) expecting `dropped == 1` and no row.
