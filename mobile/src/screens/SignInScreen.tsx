@@ -31,7 +31,7 @@ import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTarget
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { fetchInviteMeta } from '../api/league';
-import { getLastUsername, setLastUsername } from '../api/client';
+import { getLastUsername, getSessionToken, setLastUsername } from '../api/client';
 import { testLaunchArg } from '../utils/testRouteEntry';
 import EspnLinkSheet from '../components/EspnLinkSheet';
 import PlatformLinkSheet from '../components/PlatformLinkSheet';
@@ -198,7 +198,27 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // session's 401 routed here for an Apple re-auth — say so, once. The
   // hint is one-shot (consumed at mount) so an ordinary later visit to
   // SignIn doesn't re-show it. Only ever set while the flag is on.
-  const [reauthNotice] = useState(() => consumeAppleReauthHint());
+  //
+  // Incident 2026-10-17: a Sleeper-keyed session's 401 routes here the same
+  // way, and LeaguePicker's no-token reroute arrives with no hint at all. The
+  // copy follows the store user: a Sleeper-keyed user signs in again, anyone
+  // else keeps the Apple copy.
+  const [sleeperKeyedUser] = useState(() => {
+    const { user: u, isDemo } = useSession.getState();
+    return !!u && !u.account_only && !u.user_id.startsWith('demo_user_') && !isDemo;
+  });
+  const [reauthNotice, setReauthNotice] = useState(() => consumeAppleReauthHint());
+  useEffect(() => {
+    if (reauthNotice || !sleeperKeyedUser) return;
+    let alive = true;
+    void getSessionToken().then((token) => {
+      if (alive && !token) setReauthNotice(true);
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── P0-3 — the invited banner ─────────────────────────────────────────
   // Subscribed selectors, so the copy upgrades in place when the name lands.
@@ -235,7 +255,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     : null;
 
   useEffect(() => {
-    getLastUsername().then((u) => {
+    getLastUsername().then((last) => {
+      // Fallback (incident 2026-10-17): a signed-out Sleeper user still has
+      // their store user, so prefill from it when the Keychain has nothing.
+      const u = last || useSession.getState().user?.username;
       if (u) {
         setUsername(u);
         setHint(u);
@@ -570,8 +593,9 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           <View style={styles.form}>
             {reauthNotice ? (
               <Text testID="signin.reauth-notice" style={styles.reauthNotice}>
-                Your session expired — sign in with Apple to pick up where you
-                left off.
+                {sleeperKeyedUser
+                  ? 'Your session expired — sign in again to pick up where you left off.'
+                  : 'Your session expired — sign in with Apple to pick up where you left off.'}
               </Text>
             ) : null}
             {/* P0-3 — the invited banner. INSIDE styles.form, beside the
