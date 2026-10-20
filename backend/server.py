@@ -40,6 +40,7 @@ import weakref
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 
 from dataclasses import dataclass, replace as _dc_replace
 from datetime import datetime, timedelta, timezone
@@ -2807,6 +2808,8 @@ def _cleanup_loop() -> None:
 
         # P1 first-page store: age, then the byte ceiling; flag off ⇒ untouched.
         _evict_trade_page_store()
+        # ADR-025 C8: archive extras past 90 days; flag off ⇒ untouched.
+        _purge_archive_evidence()
 
         # Silent durable inventory refresh is deliberately separate from the
         # notification-bearing daily tick and weekly replenishment.
@@ -3283,6 +3286,10 @@ def _trade_job_public_view(job: dict) -> dict:
         out.update(cards=[], status="error", error="owner_model_changed")
     elif not _trade_significance_matches(job):
         out.update(cards=[], status="error", error="significance_policy_changed")
+    # ADR-025 stage 1: sending a deferred deck's cards is a delivery (paged and
+    # legacy responses alike). Only flag-on organic jobs carry `evidence`.
+    if job.get("evidence") is not None and out["cards"] and out["status"] != "error":
+        _deck_evidence_delivered(job["evidence"], out["cards"])
     return out
 
 
@@ -3521,18 +3528,21 @@ def _trade_page_viewer(sess: Mapping, league_id: str) -> str:
     return str(sess.get("user_id") or "")
 
 
-def _job_page_eligible(job: dict) -> bool:
-    """Store pages only from a complete, organic, fully stamped job (§6.8).
-
-    INTEGRATION POINT: models-eng's count-bounded conversion (not merged) marks
+def _trade_job_ceiling_hit(job: dict) -> bool:
+    """INTEGRATION POINT: models-eng's count-bounded conversion (not merged) marks
     a deck cut short by the value core's safety ceiling. Each place that flag
-    may land refuses the page.
-    """
+    may land counts."""
     value_core = job.get("value_core") or {}
     diag = value_core.get("diag") or {}
-    ceiling = (job.get("safety_ceiling_hit") or value_core.get("safety_ceiling_hit")
-               or (diag.get("safety_ceiling_hit") if isinstance(diag, Mapping)
-                   else getattr(diag, "safety_ceiling_hit", False)))
+    return bool(job.get("safety_ceiling_hit") or value_core.get("safety_ceiling_hit")
+                or (diag.get("safety_ceiling_hit") if isinstance(diag, Mapping)
+                    else getattr(diag, "safety_ceiling_hit", False)))
+
+
+def _job_page_eligible(job: dict) -> bool:
+    """Store pages only from a complete, organic, fully stamped job (§6.8),
+    never from one cut short by the safety ceiling (_trade_job_ceiling_hit)."""
+    ceiling = _trade_job_ceiling_hit(job)
     return bool(job.get("page_scope") and job.get("status") == "complete"
                 and job.get("error") is None and not job.get("superseded")
                 and not job.get("prepared_inventory_id") and not job.get("is_pinned")
@@ -3573,25 +3583,426 @@ def _store_trade_page(job_id: str) -> bool:
         blob = _db.CompressedJSON.encode({"v": _TRADE_PAGE_FORMAT,
                                           "opponents_total": job.get("opponents_total") or 0,
                                           "cards": cards})
-        written = _db.save_trade_page({
-            "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
-            "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
-            "values_snapshot_id": job["values_snapshot_id"],
-            "engine_version": _trade_page_engine_version(
-                _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
-                job.get("presentation_capture")),
-            "config_signature": job["request_signature"], "deck_job_id": job_id,
-            "built_at": _db.page_store_iso(built),
-            "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
-            "card_count": len(cards), "pages_blob": blob, "evidence_blob": None,
-            "stored_bytes": len(blob), "state": "ready",
-        })
-        log.info("trade-page %s: stored=%s scope=%s cards=%d bytes=%d", job_id, written,
-                 job["page_scope"], len(cards), len(blob))
+        ev = job.get("evidence")
+        # A deferred deck's snapshots for its stored cards ride with the pages; a
+        # delivery write in flight must not interleave (_deck_evidence_flush).
+        with _deck_evidence_write_lock:
+            evidence = None
+            if ev is not None:
+                with ev.lock:
+                    ev.stored_ids = {c.get("impression_id") for c in cards} - {None}
+                    ev.pages_bytes = len(blob)
+                    evidence = ev.blob()
+            written = _db.save_trade_page({
+                "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
+                "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
+                "values_snapshot_id": job["values_snapshot_id"],
+                "engine_version": _trade_page_engine_version(
+                    _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
+                    job.get("presentation_capture")),
+                "config_signature": job["request_signature"], "deck_job_id": job_id,
+                "built_at": _db.page_store_iso(built),
+                "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
+                "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
+                "stored_bytes": len(blob) + len(evidence or b""), "state": "ready",
+            })
+        log.info("trade-page %s: stored=%s scope=%s cards=%d bytes=%d evidence_bytes=%d", job_id,
+                 written, job["page_scope"], len(cards), len(blob), len(evidence or b""))
         return written
     except Exception:
         log.warning("trade-page %s: store failed", job_id, exc_info=True)
         return False
+
+
+# ── Deferred evidence (ADR-025 stage 1; flag trade.first_page_store) ──────────
+# Spec: docs/plans/org-bringup/adr-025-draft.md "Decision" and models-lead's
+# C1-C9 (leads/models-lead-launch.md, Confirmation). An organic job admitted
+# while the flag is on runs with evidence_mode "deferred" (_kickoff_trade_job):
+# its logger mints impression ids and assembles the rows it would write, frozen
+# at build (C6), but writes no deck_impressions or deck_candidate_sets row (C2).
+# The assembly is held on the job (job["evidence"]) and, for the stored cards,
+# in the page store's evidence_blob. A response that sends cards is a delivery
+# (_trade_job_public_view, _trade_page_view). A deck's first delivery writes
+# full rows for the delivered cards and its first 30 (C3, C4), its narrow ghost
+# rows (C5) and its candidate set, then, in this interim stage, full rows for
+# the rest of the deck (full_interim, or archive for a C8 deck). A later
+# delivery marks its cards delivered. Writes run off the request thread, one at
+# a time, and are idempotent. A run that errors, times out, is superseded or
+# hits the safety ceiling writes nothing. No packing yet.
+
+_EVIDENCE_FIRST_N = 30         # C4: the always-full first cards of a served deck
+_EVIDENCE_BLOB_FORMAT = 1
+# A ghost row's features_json keeps only these (C5): exactly what
+# value_model.extract_features reads (models-lead §DEC-2 §2), plus the two
+# _inject inputs (Confirmation §1, edit E2).
+_COMPACT_FEATURE_KEYS = (
+    "give_value", "receive_value", "surplus_margin", "fairness_score", "ranked_player_count",
+    "shape", "lane", "basis", "give_positions", "receive_positions",
+    "involves_pick", "likes_you", "relaxed", "user_value_basis",
+)
+_INJECTED_FEATURE_KEYS = ("partner_user_id", "taste_attrs")
+# One evidence write at a time (the web service runs one worker). The page
+# store holds it too while it writes a deck's evidence_blob.
+_deck_evidence_write_lock = threading.RLock()
+_ARCHIVE_RETENTION_DAYS = 90
+_ARCHIVE_PURGE_EVERY_S = 3600
+_ARCHIVE_PURGE_BATCHES = 20
+_archive_purge_last = 0.0
+
+
+def _deck_archive_selected(deck_job_id: str) -> bool:
+    """C8: the deterministic 2% whole-deck archive sample, chosen by deck only."""
+    digest = hashlib.sha256(f"c8-archive-v1|{deck_job_id}".encode()).hexdigest()
+    return int(digest, 16) % 10000 < 200
+
+
+def _pack_row(row: dict) -> bytes:
+    """A held row, zlib-compressed: a production deck's compacted rows are about
+    13 MiB raw, about 4 MiB packed (test_deferred_evidence's measure)."""
+    return zlib.compress(json.dumps(row, separators=(",", ":")).encode())
+
+
+def _unpack_row(packed: bytes) -> dict:
+    return json.loads(zlib.decompress(packed))
+
+
+def _diagnostic_refs(value) -> set:
+    from .deck_diagnostics import REFERENCE_KEY, is_reference
+    if is_reference(value):
+        return {value[REFERENCE_KEY]}
+    if isinstance(value, dict):
+        return set().union(*map(_diagnostic_refs, value.values()))
+    if isinstance(value, list):
+        return set().union(*map(_diagnostic_refs, value))
+    return set()
+
+
+def _narrow_ghost_row(row: dict) -> dict:
+    """C5: a ghost's row without the wide features_json or valuation_json:
+    every other column as built (impression_id, assets_json, the scalars) and a
+    features_json holding only the compact inputs."""
+    features = json.loads(row["features_json"])
+    narrow = {k: v for k, v in row.items() if k != "valuation_json"}
+    narrow["features_json"] = json.dumps({k: features[k] for k in
+                                          (*_COMPACT_FEATURE_KEYS, *_INJECTED_FEATURE_KEYS)
+                                          if k in features})
+    return narrow
+
+
+class _DeckEvidence:
+    """One deferred deck's build-time evidence and what its deliveries call for.
+
+    Held on its job dict and shared, never copied, by the dict's copies. State
+    changes under `lock`; database writes under _deck_evidence_write_lock.
+    `rows`, `ghosts`, `diagnostics` and `candidate_set` hold only what is not
+    yet written. Rows are held as save_deck_impressions would insert them:
+    compacted, their debug subtrees in `diagnostics` (deck_diagnostic_snapshots
+    rows, content-addressed, shared by the deck's rows).
+    """
+
+    def __init__(self, job_id: str, user_id: str, lease=None):
+        self.job_id, self.user_id = job_id, user_id
+        self.lease = lease if lease is not None else _user_data_lifecycle.capture(user_id)
+        self.lock = threading.Lock()
+        self.rows: dict = {}          # impression_id -> (card_index, packed frozen row), served order
+        self.ghosts: dict = {}        # impression_id -> narrow ghost row
+        self.diagnostics: dict = {}   # snapshot_id -> deck_diagnostic_snapshots row
+        self.candidate_set = None     # the frozen deck_candidate_sets row
+        self.by_hash: dict = {}       # trade_hash -> [impression_id], for id-less deliveries
+        self.delivered: set = set()   # impression ids sent to a client
+        self.delivered_hashes: set = set()
+        self.marked: set = set()      # delivered ids already written or marked 'delivered'
+        self.sealed = False           # the logger finished assembling
+        self.complete = False         # the run completed: its deliveries may write
+        self.discarded = False        # the run ended partial: nothing is ever written
+        self.archive = _deck_archive_selected(job_id)
+        self.stored_ids = None        # impression ids whose snapshots the page store holds
+        self.pages_bytes = None       # len(pages_blob) of this deck's stored row
+
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        return self
+
+    # The logger's evidence sink: assemble, never write (C2).
+    def capture_impressions(self, rows: list[dict]) -> None:
+        """Freeze one logger batch (C6) exactly as save_deck_impressions would
+        compact it for insertion: the same 100-row pages, the same snapshots."""
+        from .database import DECK_IMPRESSION_INSERT_ROWS
+        from .deck_diagnostics import compact_rows
+        with self.lock:
+            for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
+                compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
+                for snapshot in snapshots:
+                    self.diagnostics.setdefault(snapshot["snapshot_id"], snapshot)
+                for frozen in compacted:
+                    iid = frozen["impression_id"]
+                    if frozen.get("is_ghost") == 1:
+                        self.ghosts[iid] = _narrow_ghost_row(frozen)
+                    else:
+                        self.rows[iid] = (frozen["card_index"], _pack_row(frozen))
+                        self.by_hash.setdefault(frozen.get("trade_hash"), []).append(iid)
+
+    def capture_candidate_set(self, row: dict) -> None:
+        with self.lock:
+            self.candidate_set = dict(row)
+
+    def seal(self) -> None:
+        with self.lock:
+            self.sealed = True
+
+    def closure(self, rows: list[dict], exclude=()) -> list[dict]:
+        """Under `lock`: the held diagnostic snapshots `rows` reference, transitively."""
+        pending = set().union(*(_diagnostic_refs(json.loads(r["features_json"] or "null"))
+                                for r in rows))
+        found = {}
+        while pending:
+            sid = pending.pop()
+            if sid in self.diagnostics and sid not in found and sid not in exclude:
+                found[sid] = self.diagnostics[sid]
+                pending |= _diagnostic_refs(json.loads(found[sid]["payload_json"]))
+        return list(found.values())
+
+    def plan(self):
+        """Under `lock`: ((first, its snapshots), (rest, its snapshots),
+        candidate_set, upgrades) for a write now.
+
+        A delivered card is 'delivered'; else one of the first 30 is 'first30';
+        else (the rest of the deck, stage 1) 'archive' on a C8 deck or
+        'full_interim'; ghosts are 'ghost'. `first`, the snapshots it references
+        and the candidate set are one transaction; `rest`, today's
+        per-served-deck cost that packing will replace (C1), follows with its
+        own. `upgrades`: delivered ids already written at a lower tier.
+        """
+        delivered = self.delivered | {iid for h in self.delivered_hashes
+                                      for iid in self.by_hash.get(h, ())}
+        first, rest = [], []
+        for iid, (index, packed) in self.rows.items():
+            if iid in delivered:
+                first.append({**_unpack_row(packed), "evidence_tier": "delivered"})
+            elif index < _EVIDENCE_FIRST_N:
+                first.append({**_unpack_row(packed), "evidence_tier": "first30"})
+            else:
+                rest.append({**_unpack_row(packed),
+                             "evidence_tier": "archive" if self.archive else "full_interim"})
+        first += [{**row, "evidence_tier": "ghost"} for row in self.ghosts.values()]
+        upgrades = sorted(delivered - self.marked - self.rows.keys())
+        first_diag = self.closure(first)
+        rest_diag = self.closure(rest, exclude={d["snapshot_id"] for d in first_diag})
+        return (first, first_diag), (rest, rest_diag), self.candidate_set, upgrades
+
+    def wrote(self, rows: list[dict], candidate_set=None, diagnostics=(), upgrades=()) -> None:
+        """Under `lock`: drop the written snapshots (the budget rule)."""
+        for row in rows:
+            self.rows.pop(row["impression_id"], None)
+            self.ghosts.pop(row["impression_id"], None)
+            if row["evidence_tier"] == "delivered":
+                self.marked.add(row["impression_id"])
+        if candidate_set is not None:
+            self.candidate_set = None
+        for snapshot in diagnostics:
+            self.diagnostics.pop(snapshot["snapshot_id"], None)
+        self.marked.update(upgrades)
+
+    def blob(self) -> bytes | None:
+        """Under `lock`: the page store's evidence_blob (CompressedJSON): the not
+        yet written snapshots of the stored cards, every not yet written ghost
+        row, the diagnostic snapshots and the candidate set; None once nothing
+        is left."""
+        rows = [_unpack_row(packed) for iid, (_, packed) in self.rows.items()
+                if self.stored_ids is None or iid in self.stored_ids]
+        if not (rows or self.ghosts or self.candidate_set):
+            return None
+        from .database import CompressedJSON
+        return CompressedJSON.encode({
+            "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
+            "pages_bytes": self.pages_bytes, "rows": rows,
+            "ghosts": list(self.ghosts.values()), "diagnostics": self.closure(rows),
+            "candidate_set": self.candidate_set})
+
+    @classmethod
+    def from_row(cls, user_id: str, deck_job_id: str, row: Mapping | None, lease) -> "_DeckEvidence":
+        """A stored deck's evidence once its job has left this process: complete
+        (only a complete job stores pages), holding what the row's blob holds."""
+        ev = cls(deck_job_id, user_id, lease)
+        blob = (row or {}).get("evidence_blob")
+        if isinstance(blob, Mapping) and blob.get("v") == _EVIDENCE_BLOB_FORMAT:
+            ev.rows = {r["impression_id"]: (r["card_index"], _pack_row(r)) for r in blob.get("rows") or []}
+            ev.ghosts = {r["impression_id"]: r for r in blob.get("ghosts") or []}
+            ev.diagnostics = {d["snapshot_id"]: d for d in blob.get("diagnostics") or []}
+            ev.candidate_set = blob.get("candidate_set")
+            ev.pages_bytes = blob.get("pages_bytes")
+        ev.sealed = ev.complete = True
+        return ev
+
+
+def _start_deck_evidence_thread(*, target, args):
+    threading.Thread(target=target, args=args, daemon=True, name="deck-evidence").start()
+
+
+def _deck_evidence_flush(ev: _DeckEvidence) -> None:
+    """Write what `ev`'s deliveries call for, then shrink the stored blob.
+
+    The caller holds _deck_evidence_write_lock inside an admitted user-data
+    lease. A failed write keeps its snapshots for the next delivery. Never raises.
+    """
+    from . import database as _db
+    with ev.lock:
+        if not ev.complete or ev.discarded or not (ev.delivered or ev.delivered_hashes):
+            return
+        (first, first_diag), (rest, rest_diag), candidate_set, upgrades = ev.plan()
+    shrunk = False
+    try:
+        if first or candidate_set is not None or upgrades:
+            _db.save_deck_evidence(first, candidate_set=candidate_set, diagnostics=first_diag,
+                                   delivered=upgrades, deck_job_id=ev.job_id)
+            with ev.lock:
+                ev.wrote(first, candidate_set, first_diag, upgrades)
+            shrunk = bool(first) or candidate_set is not None
+        if rest:
+            _db.save_deck_evidence(rest, diagnostics=rest_diag, deck_job_id=ev.job_id)
+            with ev.lock:
+                ev.wrote(rest, diagnostics=rest_diag)
+            shrunk = True
+    except Exception:
+        log.warning("deck-evidence %s: delivery write failed (snapshots kept)", ev.job_id,
+                    exc_info=True)
+    if shrunk and ev.pages_bytes is not None:
+        try:
+            with ev.lock:
+                blob = ev.blob()
+            _db.save_trade_page_evidence(ev.user_id, ev.job_id, blob, ev.pages_bytes)
+        except Exception:
+            log.warning("deck-evidence %s: evidence_blob not shrunk", ev.job_id, exc_info=True)
+
+
+def _deck_evidence_write(ev: _DeckEvidence) -> None:
+    """Thread target: one serialized delivery write inside the job's lease, so
+    evidence built before an account deletion is never written after it."""
+    with ev.lease.active() as active:
+        if not active:
+            log.info("deck-evidence %s: account gone, nothing written", ev.job_id)
+            return
+        with _deck_evidence_write_lock:
+            _deck_evidence_flush(ev)
+
+
+def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease) -> None:
+    """Thread target: a stored deck's delivery once its job has left this
+    process, from the row's evidence_blob read fresh under the write lock."""
+    from . import database as _db
+    with lease.active() as active:
+        if not active:
+            return
+        with _deck_evidence_write_lock:
+            try:
+                row = _db.load_trade_page_for_job(user_id, deck_job_id)
+            except Exception:
+                log.warning("deck-evidence %s: stored evidence unreadable", deck_job_id, exc_info=True)
+                return
+            ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
+            ev.delivered.update(ids)
+            _deck_evidence_flush(ev)
+
+
+def _deck_evidence_delivered(ev: _DeckEvidence, cards: list) -> None:
+    """Record a delivery of `cards` (public dicts) from `ev`'s deck. Once its run
+    is complete, the write runs off the request thread. A card published before
+    its impression id existed counts by trade_hash."""
+    ids, hashes = set(), set()
+    for card in cards:
+        iid = card.get("impression_id")
+        if isinstance(iid, str):
+            ids.add(iid)
+        else:
+            hashes.add(card.get("trade_hash") or _deck_trade_hash(
+                [p["id"] for p in card.get("give", [])], [p["id"] for p in card.get("receive", [])],
+                card.get("target_user_id")))
+    with ev.lock:
+        if ev.discarded:
+            return
+        new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
+        ev.delivered |= ids
+        ev.delivered_hashes |= hashes
+        go = new and ev.complete
+    if go:
+        _start_deck_evidence_thread(target=_deck_evidence_write, args=(ev,))
+
+
+def _deck_evidence_delivered_stored(row: Mapping, cards: list) -> None:
+    """A delivery of a stored page's `cards`: through the deck's job while it is
+    in this process, else through the row's evidence_blob."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(row["deck_job_id"])
+        in_process = job is not None and job["key"][0] == row["user_id"]
+        ev = job.get("evidence") if in_process else None
+    if ev is not None:
+        _deck_evidence_delivered(ev, cards)
+        return
+    ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
+    if in_process or not ids:
+        return   # a live-mode deck wrote its rows at build
+    lease = _user_data_lifecycle.capture(
+        row["user_id"], started=g.get("_user_data_started") if has_request_context() else None)
+    _start_deck_evidence_thread(target=_deck_evidence_write_stored,
+                                args=(row["user_id"], row["deck_job_id"], ids, lease))
+
+
+def _deck_evidence_job_done(job_id: str) -> None:
+    """After _run_trade_job returns (worker thread, inside the job's lease): a
+    deferred run that completed may now write, and deliveries made while it ran
+    are written here. A run that errored (a timeout included), was superseded or
+    hit the safety ceiling discards its evidence and never writes (§6.8)."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        ev = job.get("evidence") if job is not None else None
+        ok = (ev is not None and job.get("status") == "complete"
+              and not _trade_job_ceiling_hit(job))
+    if ev is None:
+        return
+    with ev.lock:
+        ok = ok and ev.sealed
+        if ok:
+            ev.complete = True
+        else:
+            ev.discarded = True
+            ev.rows, ev.ghosts, ev.diagnostics, ev.candidate_set, ev.by_hash = {}, {}, {}, None, {}
+    if ok:
+        with _deck_evidence_write_lock:
+            _deck_evidence_flush(ev)
+
+
+def _deck_evidence_live(job_id: str) -> None:
+    """A job whose own path writes its evidence at build (the value core,
+    prepared adoption) keeps today's mode."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if job is not None and job.pop("evidence", None) is not None:
+            job["evidence_mode"] = "live"
+
+
+def _purge_archive_evidence() -> None:
+    """C8 retention (the cleanup loop, flag on only): delete archive extras older
+    than 90 days, in bounded batches, at most once an hour. Never first30,
+    delivered, ghost or full_interim rows."""
+    global _archive_purge_last
+    if not _trade_page_store_enabled() or time.monotonic() - _archive_purge_last < _ARCHIVE_PURGE_EVERY_S:
+        return
+    _archive_purge_last = time.monotonic()
+    from . import database as _db
+    try:
+        purged = 0
+        for _ in range(_ARCHIVE_PURGE_BATCHES):
+            n = _db.purge_archive_deck_impressions(days=_ARCHIVE_RETENTION_DAYS, batch_size=500)
+            purged += n
+            if n < 500:
+                break
+        if purged:
+            log.info("deck-evidence: purged %d archive rows older than %d days", purged,
+                     _ARCHIVE_RETENTION_DAYS)
+    except Exception:
+        log.exception("deck-evidence: archive retention failed")
 
 
 def _mark_trade_pages_stale(marked_at: float, *, user_id: str | None = None,
@@ -3657,6 +4068,8 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     cards = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
     if cards:
         cards = _with_trade_hash(_filter_cards_to_current_owners(cards, league_id, viewer_id, snap=snap))
+    if cards:
+        _deck_evidence_delivered_stored(row, cards)   # ADR-025 stage 1: a delivery
     opponents = pages.get("opponents_total") or 0
     out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
            "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,
@@ -5929,6 +6342,10 @@ def _log_deck_signal_impressions(
     should_continue=None,
     prepare_sink=None,
     value_core_evidence: dict | None = None,  # {id(card): evidence} — lld.md §7.3
+    # ADR-025 stage 1 (flag trade.first_page_store): a deferred job's
+    # _DeckEvidence. Rows and the candidate set go to it instead of the
+    # database; batch callbacks still run, so publication waits on no commit.
+    evidence_sink=None,
 ) -> dict[int, str]:
     """Write one deck_impressions row per card (final served order) and
     return {id(card): impression_id} so the caller can stamp the ids into
@@ -5997,7 +6414,9 @@ def _log_deck_signal_impressions(
                 })
             cand_set_id = uuid.uuid4().hex
             cand_set_size = len(members)
-            (prepare_sink.candidate_set if prepare_sink is not None else save_deck_candidate_set)({
+            (prepare_sink.candidate_set if prepare_sink is not None
+             else evidence_sink.capture_candidate_set if evidence_sink is not None
+             else save_deck_candidate_set)({
                 "candidate_set_id": cand_set_id,
                 "deck_job_id":      job_id,
                 "user_id":          user_id,
@@ -6036,7 +6455,9 @@ def _log_deck_signal_impressions(
         if not rows:
             return
         check_live()
-        (prepare_sink.impressions if prepare_sink is not None else save_deck_impressions)(rows)
+        (prepare_sink.impressions if prepare_sink is not None
+         else evidence_sink.capture_impressions if evidence_sink is not None
+         else save_deck_impressions)(rows)
         imp_by_card.update(batch_impressions)
         if prepare_sink is None and on_batch_committed is not None and batch_cards:
             on_batch_committed(list(batch_cards), dict(batch_impressions))
@@ -8796,6 +9217,9 @@ def _run_trade_job(
         if _value_core_live(league_id=league_id, user_id=g_user_id,
                             league_user_id=ctx.league_user_id,
                             trade_intent=trade_intent, preparation=preparation):
+            # ADR-025 stage 1: the value core (dark, tester-only) writes its own
+            # rows at build; a fallback legacy run then stays live too.
+            _deck_evidence_live(job_id)
             if _run_value_core_job(
                 job_id=job_id, ctx=ctx, service=service, trade_service=trade_service,
                 g_user_id=g_user_id, g_league=g_league, g_user_roster=g_user_roster,
@@ -9809,6 +10233,9 @@ def _run_trade_job(
         with _trade_jobs_lock:
             _j = _trade_jobs.get(job_id)
             job_source = (_j or {}).get("source")
+            # ADR-025 stage 1: a deferred job's logger assembles its rows and
+            # writes none; publication then waits on no commit.
+            deck_evidence = None if preparation else (_j or {}).get("evidence")
 
         # Owner publication happens only after the logger commits each batch.
         # All ranking, final policy and disposition work above is complete;
@@ -9897,6 +10324,7 @@ def _run_trade_job(
                     **({"owner_presentment": owner_presentment} if owner_presentment is not None else {}),
                     significance_results = significance_results,
                     **({"prepare_sink": prepare_sink} if preparation else {}),
+                    **({"evidence_sink": deck_evidence} if deck_evidence is not None else {}),
                     **({
                         "structured_features": True,
                         "initial_publication_batch_size": 30,
@@ -9906,6 +10334,8 @@ def _run_trade_job(
                     } if owner_serve else {}),
                     **telemetry_kw,
                 )
+                if deck_evidence is not None:
+                    deck_evidence.seal()
                 if owner_serve and any(not imp_by_card.get(id(c)) for c in served_final):
                     raise ValueError("owner_impression_incomplete")
                 if owner_serve and not preparation:
@@ -10226,8 +10656,12 @@ def _kickoff_trade_job(
                     from . import prepared_trade_runtime
                     if prepared_trade_runtime.try_adopt(sys.modules[__name__], job_id=job_id,
                             context=execution_context, fairness=fairness_threshold, prefs=prefs_preload):
+                        _deck_evidence_live(job_id)   # its runtime owns its evidence
                         return
                 _run_trade_job(*args, **kwargs)
+                # ADR-025 stage 1: seal or discard a deferred deck's evidence and
+                # write deliveries made while it ran (no evidence ⇒ no-op).
+                _deck_evidence_job_done(job_id)
                 # P1: a complete organic job stores its first pages (flag off ⇒ no-op).
                 _store_trade_page(job_id)
             else:
@@ -10311,6 +10745,15 @@ def _kickoff_trade_job(
             and not presentation_exempt and not source and league_id != "league_demo"):
         job["page_scope"] = _trade_page_scope(fairness_threshold)
         job["page_built_at"] = time.time()   # wall-clock admission: the row's built_at
+        # ADR-025 stage 1: an organic deck's evidence waits for its delivery
+        # (pre-builds, page-serve backing jobs, rebuilds and `force` alike).
+        job["evidence_mode"] = "deferred"
+        job["evidence"] = _DeckEvidence(job_id, user_id, _job_write_lease)
+    elif _trade_page_store_enabled():
+        # Pinned, opponent, intent, presentation-exempt, replenishment (and so
+        # Calibration's targeted refresh, which reads the rows at once) and demo
+        # jobs keep today's evidence: rows at build.
+        job["evidence_mode"] = "live"
     if _trade_page_store_enabled():
         # P2: will every publish only extend the list? Owner-serve does, by
         # the same reads the worker makes. The value core and prepared
