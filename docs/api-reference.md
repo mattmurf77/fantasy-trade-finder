@@ -444,7 +444,10 @@ execution context and dependency tokens, not the rejected new context.
 
 Opt-in by request params, with no feature flag. **A request without `page`
 (generate) or `cursor` (status) gets the cumulative snapshot above, byte for
-byte.** That includes `search_id`, which is read only alongside `page`.
+byte.** Older app binaries never send these params, so they keep today's
+response; no minimum-version gate is needed for this change (head-eng,
+2026-10-20). The byte-for-byte rule includes `search_id`, which is read only
+alongside `page`.
 
 **Requests:**
 - `POST /api/trades/generate` body `page: 1` (a JSON integer; only `1` is valid)
