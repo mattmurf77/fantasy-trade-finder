@@ -68,6 +68,74 @@ def p1_ids(start, stop):
     return [f"p1-{i:03d}" for i in range(start, stop)]
 
 
+# ── Page 1 names its deck ───────────────────────────────────────────────────
+
+def test_a_store_served_page_one_names_its_deck(p1, spawned):
+    client, _, _ = p1
+    deck = build_deck()
+    body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page" and body["deck_id"] == body["job_id"] == deck
+    assert not {"rebased", "pool_exhausted"} & set(body)
+
+
+def test_a_job_served_page_one_names_its_deck_and_a_pinned_search_does_not(p1, spawned):
+    client, engine, _ = p1
+    job_id = run_job()
+    with engine.begin() as conn:
+        conn.execute(delete(db_module.trade_page_store_table))
+    body = generate(client, page=1).get_json()             # the fresh job, no row
+    assert "serve_source" not in body and body["deck_id"] == body["job_id"] == job_id
+    forced = generate(client, page=1, force=True).get_json()  # the newest organic deck
+    assert forced["deck_id"] == forced["job_id"] != job_id
+    pinned = generate(client, page=1, pinned_give_players=["g2"]).get_json()
+    assert "deck_id" not in pinned and "job_id" in pinned
+
+
+# ── A backing job is always alive ───────────────────────────────────────────
+
+def test_an_all_equal_serve_with_no_job_in_process_kicks_the_backing_job(p1, spawned):
+    client, _, _ = p1
+    deck = build_deck()
+    restart()
+    body = generate(client, page=1).get_json()
+    assert (body["serve_source"], body["freshness_state"], body["deck_id"]) == ("page", "fresh", deck)
+    assert len(spawned) == 1
+    backing = server._trade_jobs[server._trade_jobs_by_key[KEY]]
+    assert backing["status"] == "running" and backing["page_scope"] == SCOPE
+    assert backing["job_id"] != deck
+    again = generate(client, page=1).get_json()
+    assert again["deck_id"] == deck and len(spawned) == 1  # joined
+
+
+def test_the_debounce_stops_repeated_taps_stacking_jobs(p1, spawned, monkeypatch):
+    """A failed snapshot read never compares, so preserve_running alone would
+    revoke the running job and start another on every tap."""
+    client, _, _ = p1
+    build_deck()
+    restart()
+    with patch.object(roster_snapshot, "snapshot_ids", MagicMock(side_effect=RuntimeError("db"))):
+        first = generate(client, page=1).get_json()
+        assert first["cards"] == [] and first["freshness_state"] == "updating"
+        assert len(spawned) == 1
+        for _ in range(3):
+            assert generate(client, page=1).get_json()["job_id"] == first["job_id"]
+        assert len(spawned) == 1 and not server._trade_jobs[first["job_id"]].get("superseded")
+        monkeypatch.setitem(server._trade_service_mod._cfg, "trade_prebuild_debounce_s", 0.0)
+        assert generate(client, page=1).get_json()["job_id"] != first["job_id"]
+    assert len(spawned) == 2 and server._trade_jobs[first["job_id"]]["superseded"]
+
+
+def test_the_debounce_never_delays_a_rebuild_after_an_input_change(p1, spawned):
+    client, _, _ = p1
+    build_deck()
+    restart()
+    generate(client, page=1)                               # kicks the backing job
+    assert len(spawned) == 1
+    _vote(client)                                          # revokes it, inside the window
+    body = generate(client, page=1).get_json()
+    assert body["freshness_state"] == "updating" and len(spawned) == 2
+
+
 # ── The append_only marker ──────────────────────────────────────────────────
 
 @pytest.fixture()

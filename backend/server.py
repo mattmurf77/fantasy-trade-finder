@@ -3749,6 +3749,61 @@ def _trade_page_past_stored(row: dict, cursor: int, *, freshness: str = "fresh")
                                 total_ready=row["card_count"], freshness=freshness)
 
 
+# ── P2 next pages across rebuilds, end of deck (flag trade.first_page_store) ──
+# Design: the trades-eng P2 draft §2-§4; scope §6.3-§6.5. The client pages one
+# deck by `deck_id` + `cursor`. When that deck can no longer continue, the
+# server moves the client to the scope's current deck (`rebased`) and the
+# client drops cards it already holds by trade_hash. No per-client state.
+
+def _trade_page_backing_job(key: tuple, kick) -> str:
+    """The job behind a page serve: `kick()` (a preserve_running kickoff)
+    behind a leading-edge debounce on P1's `trade_prebuild_debounce_s`,
+    measured from the job's admission. While the key's newest job is running,
+    unrevoked and was admitted inside the window, another serve joins it
+    instead of kicking, so repeated taps never stack workers.
+    (preserve_running alone still replaces a running job whose fingerprints
+    no longer compare, as during a failed snapshot read.) A revoked job never
+    holds the window: an input change gets its rebuild at once."""
+    debounce = _trade_page_knob("trade_prebuild_debounce_s", 20.0, 0, 3600)
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(_trade_jobs_by_key.get(key))
+        if (job is not None and _job_live(job)
+                and time.monotonic() - job.get("started_at", float("-inf")) < debounce):
+            return job["job_id"]
+    return kick()
+
+
+def _serve_trade_page_for(sess: Mapping, row: dict, current, *, sess_token: str, league_id: str,
+                          scoring_format: str, fairness_threshold, prefs_preload, outlook_value,
+                          request_signature, input_epochs, presentation_capture,
+                          opponents_total: int, search_id=None) -> dict | None:
+    """P1's /generate `page: 1` serve of `row`, also P2's rebase onto a row:
+    _serve_trade_page, backed by the key's fresh or matching running job, else
+    by a job kicked behind the debounce."""
+    user_id = sess["user_id"]
+    key = _trade_job_key(user_id, league_id, scoring_format)
+    fingerprints = (current[0].fp, current[1]) if current else None
+    with _trade_jobs_lock:
+        current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
+        has_current_job = bool(
+            current_job is not None and not any(token.revoked for token in input_epochs)
+            and (_trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
+                                     presentation_capture, request_signature, fingerprints)
+                 or _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
+                                           presentation_capture, request_signature, fingerprints)))
+    return _serve_trade_page(
+        row, current, user_id=user_id, league_id=league_id,
+        viewer_id=_trade_page_viewer(sess, league_id), request_signature=request_signature,
+        presentation_capture=presentation_capture, search_id=search_id,
+        has_current_job=has_current_job,
+        kick=lambda: _trade_page_backing_job(key, lambda: _kickoff_trade_job(
+            sess_token=sess_token, user_id=user_id, league_id=league_id,
+            scoring_format=scoring_format, fairness_threshold=fairness_threshold,
+            opponents_total=opponents_total, prefs_preload=prefs_preload,
+            session_context=sess, presentation_capture=presentation_capture,
+            input_epochs=input_epochs, preserve_running=True)))
+
+
 def _rebuild_league_trade_pages(league_id: str) -> int:
     """P1 trigger (b): after a roster move, kick an organic rebuild for each
     stored page in the league whose viewer has a live session here.
@@ -15390,6 +15445,9 @@ def generate_trades():
     # store. Its one snapshot read also feeds the job-cache checks below.
     page_scope = (_trade_page_request_scope(body, league_id, fairness_threshold, force_fresh)
                   if paged else None)
+    # P2: an organic paged response names its deck (`force` too: the newest deck).
+    deck_named = paged and _trade_page_request_scope(body, league_id, fairness_threshold,
+                                                     False) is not None
     if page_scope is not None:
         page_row, page_current = _trade_page_read(g_user_id, league_id, fmt, page_scope)
         fingerprints = (page_current[0].fp, page_current[1]) if page_current else None
@@ -15397,27 +15455,15 @@ def generate_trades():
         # S0: read before the lock; the checks under it only compare.
         fingerprints = None if _any_pinned else _trade_current_fingerprints(league_id, fmt)
     if page_scope is not None and page_row is not None:
-        with _trade_jobs_lock:
-            current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
-            has_current_job = bool(
-                current_job is not None and not any(token.revoked for token in input_epochs)
-                and (_trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
-                                         presentation_capture, request_signature, fingerprints)
-                     or _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
-                                               presentation_capture, request_signature, fingerprints)))
-        served = _serve_trade_page(
-            page_row, page_current, user_id=g_user_id, league_id=league_id,
-            viewer_id=_trade_page_viewer(sess, league_id), request_signature=request_signature,
-            presentation_capture=presentation_capture, search_id=search_id,
-            has_current_job=has_current_job,
-            kick=lambda: _kickoff_trade_job(
-                sess_token=sess_token, user_id=g_user_id, league_id=league_id,
-                scoring_format=fmt, fairness_threshold=fairness_threshold,
-                opponents_total=opponents_total, prefs_preload=prefs_preload,
-                session_context=sess, presentation_capture=presentation_capture,
-                input_epochs=input_epochs, preserve_running=True))
+        served = _serve_trade_page_for(
+            sess, page_row, page_current, sess_token=sess_token, league_id=league_id,
+            scoring_format=fmt, fairness_threshold=fairness_threshold,
+            prefs_preload=prefs_preload, outlook_value=outlook_value,
+            request_signature=request_signature, input_epochs=input_epochs,
+            presentation_capture=presentation_capture, opponents_total=opponents_total,
+            search_id=search_id)
         if served is not None:
-            return jsonify(served)
+            return jsonify({**served, "deck_id": served["job_id"]})
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -15460,7 +15506,8 @@ def generate_trades():
 
     if reuse_snapshot is not None:
         if paged:
-            return jsonify(_trade_job_page_view(reuse_snapshot, 0, search_id))
+            out = _trade_job_page_view(reuse_snapshot, 0, search_id)
+            return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
@@ -15489,7 +15536,8 @@ def generate_trades():
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
     if paged:
-        return jsonify(_trade_job_page_view(snapshot, 0, search_id))
+        out = _trade_job_page_view(snapshot, 0, search_id)
+        return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
     return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
 
