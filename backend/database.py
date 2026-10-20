@@ -18,6 +18,7 @@ import math
 import os
 import threading
 import time
+import zlib
 from datetime import datetime, timezone
 
 try:
@@ -26,10 +27,11 @@ except ImportError:                # pragma: no cover
     ZoneInfo = None  # type: ignore
 
 from sqlalchemy import (
-    Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
+    Column, Float, Index, Integer, LargeBinary, MetaData, String, Table, Text, UniqueConstraint,
     create_engine, delete, func, insert, literal, or_, select, update, and_, text,
 )
 from sqlalchemy import event as sa_event
+from sqlalchemy.types import TypeDecorator
 from datetime import timedelta
 
 # #158 — shared pick ladder + owned-pick pool_value reconciliation. Lives in a
@@ -1117,6 +1119,74 @@ Index(
     deck_candidate_sets_table.c.user_id,
     deck_candidate_sets_table.c.league_id,
 )
+
+
+class CompressedJSON(TypeDecorator):
+    """JSON stored zlib-compressed in a binary column (BLOB / BYTEA).
+
+    Bind: bytes pass through, so a writer can compress once and count the
+    bytes; any other value is JSON-encoded and compressed here. Result: the
+    decoded JSON, or None when the bytes do not decode. A read (the page
+    serve, the account export) therefore never raises on a bad row, and the
+    export archive stays JSON.
+    """
+    impl = LargeBinary
+    cache_ok = True
+
+    @staticmethod
+    def encode(value) -> bytes:
+        return zlib.compress(json.dumps(value, separators=(",", ":")).encode("utf-8"))
+
+    def process_bind_param(self, value, dialect):
+        if value is None or isinstance(value, (bytes, bytearray, memoryview)):
+            return value
+        return self.encode(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return json.loads(zlib.decompress(bytes(value)))
+        except (zlib.error, ValueError, TypeError) as err:
+            log.warning("compressed JSON column does not decode: %s", err)
+            return None
+
+
+# ── P1 first-page store (flag trade.first_page_store) ───────────────────────
+# docs/plans/trade-time-to-suggestion/scope-eng-200ms.md §2, §6.2, §7. One row
+# per (user, league, format, request_scope): the first trade_pages_stored ×
+# trade_page_size cards of the latest complete organic job, in final served
+# order, plus the stamps the serve compares (roster_fp, values_snapshot_id,
+# engine_version, config_signature). Read and written only by server.py while
+# the flag is on. user_id is the account deletion/export key
+# (accounts._ADDITIONAL_PRIVATE_TABLES). Upserted by save_trade_page with a
+# supersede guard: a row is replaced only by one built at the same time or
+# later. evidence_blob is reserved for the packed-evidence piece (NULL in P1).
+trade_page_store_table = Table("trade_page_store", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("user_id",            String,  nullable=False),
+    Column("league_id",          String,  nullable=False),
+    Column("scoring_format",     String,  nullable=False),
+    Column("request_scope",      String,  nullable=False),   # "organic:f=0.50"
+    Column("roster_fp",          String,  nullable=False),   # rfp1 at the job's kickoff
+    Column("values_snapshot_id", String,  nullable=False),   # vsn1 at the job's kickoff
+    Column("engine_version",     String,  nullable=False),
+    Column("config_signature",   String,  nullable=False),   # the job's request signature
+    Column("deck_job_id",        String,  nullable=False),
+    Column("built_at",           String,  nullable=False),   # ISO UTC, the job's admission
+    Column("expires_at",         String,  nullable=False),   # ISO UTC, earliest stored card expiry
+    Column("last_served_at",     String,  nullable=True),    # ISO UTC
+    Column("card_count",         Integer, nullable=False),
+    Column("pages_blob",         CompressedJSON, nullable=False),  # {"v", "opponents_total", "cards"}
+    Column("evidence_blob",      LargeBinary, nullable=True),
+    Column("stored_bytes",       Integer, nullable=False),   # len(pages_blob) + len(evidence_blob)
+    Column("state",              String,  nullable=False),   # "ready"
+    UniqueConstraint("user_id", "league_id", "scoring_format", "request_scope",
+                     name="uq_trade_page_store_scope"),
+)
+
+Index("ix_trade_page_store_last_served", trade_page_store_table.c.last_served_at)
+Index("ix_trade_page_store_league", trade_page_store_table.c.league_id)
 
 # ── suggestion.telemetry — executed-trade tagging ───────────────────────────
 # One row per captured sleeper_trades transaction examined by the matcher
@@ -2946,6 +3016,12 @@ _MODEL_CONFIG_DEFAULTS = [
     ("force_supersedes_running", 1.0, "/api/trades/generate: 1 = `force: true` supersedes an already-RUNNING job for the same key (the superseded worker finishes quietly — no further snapshots, no impression rows, no trades_generated event); 0 restores the pre-2026-08-18 behaviour where a forced request silently returned the in-flight job and the regeneration never happened"),
     # ── Paged trade responses (E2, docs/plans/trade-time-to-suggestion) ──
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
+    # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
+    ("trade_pages_stored", 3.0, "Pages of trade_page_size cards stored per trade_page_store row; clamped to 1-10 at read"),
+    ("trade_prefetch_remaining", 30.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read"),
+    ("trade_prebuild_debounce_s", 20.0, "on_roster_change page rebuilds: a key whose last roster-change rebuild was kicked less than this many seconds ago is skipped (the next serve rebuilds it)"),
+    ("trade_page_store_evict_days", 30.0, "trade_page_store eviction: delete rows not served (or, never served, not built) in this many days; clamped to 1-3650 at read"),
+    ("trade_page_store_max_bytes", 262144000.0, "trade_page_store eviction: when SUM(stored_bytes) exceeds this, delete least recently served rows until under it"),
     # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
     # Read by ranking_service. pin_tier_bounded=0 with the other three at their
     # shipped values restores the pre-2026-08-18 freeze exactly (goldens:
@@ -6873,6 +6949,111 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
         ids = select(d.c.snapshot_id).where(d.c.created_at < cutoff).order_by(
             d.c.created_at, d.c.snapshot_id).limit(max(1, min(batch_size, 1000)))
         return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
+
+
+# ---------------------------------------------------------------------------
+# P1 first-page store (trade_page_store; flag trade.first_page_store)
+# ---------------------------------------------------------------------------
+
+_PAGE_STORE_KEY = ("user_id", "league_id", "scoring_format", "request_scope")
+# Replaced on a rebuild. last_served_at survives it: eviction is by use.
+_PAGE_STORE_REPLACED = (
+    "roster_fp", "values_snapshot_id", "engine_version", "config_signature", "deck_job_id",
+    "built_at", "expires_at", "card_count", "pages_blob", "evidence_blob", "stored_bytes", "state",
+)
+
+
+def page_store_iso(epoch_seconds: float) -> str:
+    """The one timestamp format of trade_page_store, so ISO strings compare in order."""
+    return datetime.fromtimestamp(epoch_seconds, timezone.utc).isoformat(timespec="microseconds")
+
+
+def save_trade_page(row: dict) -> bool:
+    """Upsert one page row. An existing row is replaced only when the new
+    `built_at` is at or after its own (the supersede guard), in one statement,
+    so concurrent writers for a key leave exactly one consistent row. True when
+    the row was written."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        stmt = dialect_insert(t).values(**row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[t.c[name] for name in _PAGE_STORE_KEY],
+            set_={name: stmt.excluded[name] for name in _PAGE_STORE_REPLACED},
+            where=t.c.built_at <= stmt.excluded.built_at)
+        return bool(conn.execute(stmt).rowcount)
+
+
+def load_trade_page(user_id: str, league_id: str, scoring_format: str,
+                    request_scope: str) -> dict | None:
+    """The page row for one key (a unique-index read), pages decoded, or None."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format,
+            t.c.request_scope == request_scope)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def load_trade_page_for_job(user_id: str, deck_job_id: str) -> dict | None:
+    """The viewer's page row built by `deck_job_id`, or None."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def touch_trade_page(page_id: int, served_at: str) -> None:
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        conn.execute(update(t).where(t.c.id == page_id).values(last_served_at=served_at))
+
+
+def list_trade_pages_for_league(league_id: str) -> list[dict]:
+    """Every stored page key in a league (no blobs): the roster-change rebuild set."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t.c.user_id, t.c.scoring_format, t.c.request_scope)
+                            .where(t.c.league_id == league_id)).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def evict_trade_pages(*, evict_days: int, max_bytes: int,
+                      batch_size: int = 500) -> tuple[int, int]:
+    """One bounded pass of page-store eviction; returns (aged, over_budget).
+
+    1. Delete up to `batch_size` rows whose last serve (or, never served, whose
+       build) is older than `evict_days`.
+    2. If SUM(stored_bytes) is still above `max_bytes`, delete least recently
+       served rows, from up to `batch_size`, until it is not.
+    A larger backlog finishes over later passes.
+    """
+    t = trade_page_store_table
+    batch = max(1, min(batch_size, 1000))
+    last_use = func.coalesce(t.c.last_served_at, t.c.built_at)
+    cutoff = page_store_iso(time.time() - evict_days * 86400)
+    with engine.begin() as conn:
+        aged_ids = select(t.c.id).where(last_use < cutoff).order_by(last_use, t.c.id).limit(batch)
+        aged = conn.execute(delete(t).where(t.c.id.in_(aged_ids))).rowcount or 0
+    with engine.begin() as conn:
+        over = (conn.execute(select(func.coalesce(func.sum(t.c.stored_bytes), 0))).scalar() or 0) - max_bytes
+        doomed, freed = [], 0
+        if over > 0:
+            for page_id, size in conn.execute(select(t.c.id, t.c.stored_bytes)
+                                              .order_by(last_use, t.c.id).limit(batch)):
+                if freed >= over:
+                    break
+                doomed.append(page_id)
+                freed += size or 0
+        removed = 0
+        if doomed:
+            removed = conn.execute(delete(t).where(t.c.id.in_(doomed))).rowcount or 0
+    return aged, removed
 
 
 # ---------------------------------------------------------------------------

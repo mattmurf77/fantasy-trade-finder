@@ -164,6 +164,7 @@ counterparty board disclosure or client analytics event is added.
 - [`deck_outcomes`](#deck_outcomes)
 - [`trade_pass_reasons`](#trade_pass_reasons)
 - [`deck_candidate_sets`](#deck_candidate_sets)
+- [`trade_page_store`](#trade_page_store)
 - [`suggestion_trade_links`](#suggestion_trade_links)
 - [`bakeoff_runs`](#bakeoff_runs)
 - [`deck_suppressions`](#deck_suppressions)
@@ -860,6 +861,35 @@ Candidates the **treatment policy rejected**, plus liked mirrors that were never
 | `created_at` | str | ISO UTC |
 
 Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
+
+---
+
+## `trade_page_store`
+
+**P1 first-page store** (flag `trade.first_page_store`, default **false**; [scope](plans/trade-time-to-suggestion/scope-eng-200ms.md) §2, §6.2, §7 on `plan/trades-200ms-eng-scope`). One row per `(user_id, league_id, scoring_format, request_scope)`: the first `trade_pages_stored` × `trade_page_size` cards (90 at the defaults) of the latest **complete organic** trade job, in final served order, so `POST /api/trades/generate` with `page: 1` can serve page 1 in one round trip from a DB read, also after a restart. Written by `server._store_trade_page` once `_run_trade_job` returns (worker thread, inside the job's user-data lease) and read by `server._serve_trade_page` / `_trade_page_status_view`, **only while the flag is on**: flag off ⇒ the table is never queried. Never written from an errored, timed-out, revoked, superseded, safety-ceiling-hit, pinned, opponent-scoped, intent, replenishment, prepared-inventory or demo-league job, nor from one with a missing fingerprint stamp. Upserted (`database.save_trade_page`, `ON CONFLICT … DO UPDATE … WHERE built_at <= excluded.built_at`, both dialects), so a row is replaced only by a build at least as new, and concurrent writers leave one row. Private user data: deleted and exported by `user_id` via `accounts._ADDITIONAL_PRIVATE_TABLES`; the export carries the decoded pages as JSON. Evicted by `server._evict_trade_page_store` (the cleanup loop, flag on only): rows unused for `trade_page_store_evict_days`, then least recently used rows while `SUM(stored_bytes)` exceeds `trade_page_store_max_bytes`. Size report: `scripts/report_trade_page_store_size.py` (read only).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str, not null | the viewer's account id (deletion/export key) |
+| `league_id` | str, not null | |
+| `scoring_format` | str, not null | `1qb_ppr` \| `sf_tep` |
+| `request_scope` | str, not null | `organic:f=<fairness, 2 decimals>`, e.g. `organic:f=0.50`. Only the organic default search is stored |
+| `roster_fp` | str, not null | `rfp1:` roster fingerprint stamped at the job's kickoff (S0, `roster_snapshot`) |
+| `values_snapshot_id` | str, not null | `vsn1:` values snapshot id stamped at kickoff (S0) |
+| `engine_version` | str, not null | `<engine>+<policy hash>`: `v1`/`v2`/`v3` (as `trades_generated` names it) or `value_core:<value_core.types.ENGINE_VERSION>`, plus sha256[:12] of the job's safety-policy signature and presentation mode (what `_trade_job_is_fresh` also requires) |
+| `config_signature` | str, not null | the job's `request_signature` (preferences + `model_config` + flags) |
+| `deck_job_id` | str, not null | the building job; served as `job_id`, and the key `/api/trades/status?cursor=` pages by |
+| `built_at` | str, not null | ISO UTC, microseconds: the job's admission (when its inputs were read). The supersede guard compares it |
+| `expires_at` | str, not null | ISO UTC: the earliest `expires_at` among the stored cards. Past it, the page is not served |
+| `last_served_at` | str, nullable | ISO UTC of the last `/generate` page serve; kept across rebuilds. Eviction reads `COALESCE(last_served_at, built_at)` |
+| `card_count` | int, not null | cards stored (≤ 90 at the defaults); served as `total_ready` |
+| `pages_blob` | binary (BLOB / BYTEA), not null | zlib-compressed JSON `{"v": 1, "opponents_total", "cards": [...]}`; `cards` are the job's raw public card dicts, before the serve-time disposition projection and I-1 filter (`database.CompressedJSON`) |
+| `evidence_blob` | binary, nullable | reserved for the packed-evidence piece; NULL in P1 |
+| `stored_bytes` | int, not null | `len(pages_blob) + len(evidence_blob or b"")` |
+| `state` | str, not null | `ready` |
+
+Constraints and indexes: unique `uq_trade_page_store_scope` on `(user_id, league_id, scoring_format, request_scope)`; `ix_trade_page_store_last_served` on `last_served_at`; `ix_trade_page_store_league` on `league_id` (the roster-change rebuild set). Measured (2026-10-20, a 2,354-card deck, 90 cards stored): about 109–122 KB raw JSON, **2.9 KiB** compressed for the replicated golden card and **29.2 KiB** for fully random card contents, against the §7 budget of about 0.2 MB per pair.
 
 ---
 
