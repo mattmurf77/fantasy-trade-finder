@@ -34,41 +34,62 @@ All of these are in [prd.md § Decisions needed](prd.md#10-decisions-needed).
 
 So nothing records whether a hand-off reached the Sleeper app or hit the not-installed path. Apart from the operator's checklist, that is the one runtime signal that the scheme works on testers' phones.
 
-- [x] **(a) New events specced.** `sleeper_handoff_resolved` is **GRANTED** by `analytics-lead` (2026-10-20).
+- [x] **(a) New events specced.** **Status: granted 2026-10-20 (`analytics-lead`), with conditions G1–G7 and F1–F5.** The sources are `analytics-lead`'s #351 grant (G1–G7) and its #351 update review at `8b63ef10` (F1–F5).
 
-  | Event | Properties | Fires when | Client |
+  **Hand-off event: `sleeper_handoff_resolved`.** Granted in widened form. It is **INTENT**, and not a WAT event.
+
+  | Event | Properties (G1, exact) | Fires when | Client |
   |---|---|---|---|
-  | `sleeper_handoff_resolved` | `surface` ∈ `free_agents` \| `usage_trends` \| `send_button` \| `trade_queue` (closed enum) · `target` ∈ `add` \| `trade` · `rung` ∈ the proven-rung enum from [prd.md § 4.1](prd.md#41-the-target-ladder) (`add` \| `player` \| `players_tab` \| `trade` \| `trades_tab` \| `league` \| `bare`) · `outcome` ∈ `app` \| `not_installed` · `has_drop` (bool; claim-sheet surfaces only, `null` otherwise) | Once per hand-off, when the `sleeper://` open settles: resolved → `app`, rejected → `not_installed`, fired before the D2 fallback shows. One emitter, inside the shared helper. A Send All of N queued trades is one hand-off and one event. | mobile only |
+  | `sleeper_handoff_resolved` | `surface`: `free_agents` \| `usage_trends` \| `send_button` \| `trade_queue`. `target`: `add` \| `trade`. `rung`: `add` \| `player` \| `players_tab` \| `trade` \| `trades_tab` \| `league` \| `bare` ([prd.md § 4.1](prd.md#41-the-target-ladder)). `outcome`: `app` \| `not_installed`. `has_drop`: bool, **only on claim-sheet rows** (`target=add` from `free_agents` / `usage_trends`). | Once per hand-off, synchronously in the `openURL` settle handler (G3), before the D2 message shows. One emitter, inside the shared helper. A Send All of N queued trades is one hand-off and one event | mobile only |
 
-  What it answers:
+  Conditions:
+  - **G2.** `has_drop` is **omitted, never sent as `null`**, wherever it doesn't apply. That covers every `target=trade` row and `send_button` / `trade_queue`.
+  - **G3.** Fire synchronously in the settle handler, with no further `await`. The addendum states the residual undercount of `outcome=app`, which happens if iOS kills JS before the promise settles.
+  - **G4.** `not_installed` means "`openURL` rejected". It is not a verified install state, because `canOpenURL` is never called.
+  - **G5.** No player id, name or league id.
+  - **G6.** Same commit as the emitter:
+    - register it in `ALLOWED_CLIENT_EVENTS` + `CLIENT_EVENT_PROPS` (`backend/analytics_taxonomy.py`);
+    - no `NON_INTENT_EVENTS` row;
+    - add `backend/tests/test_analytics_taxonomy_sleeper_handoff.py`, covering membership, exact props, no device `platform`, and the INTENT split;
+    - write a dated addendum in `docs/business/analytics/` before the emitter ships, covering the seam, G3 and G4.
+  - **G7.** No privacy change.
+
+  What the hand-off event answers:
   - Does the scheme reach the app on real devices (`outcome`)?
-  - Which surface drives Sleeper hand-offs (`surface`)? `send_button` rows can be read next to `sleeper_send_attempted {has_target:false}`.
-  - How often is the roster full at hand-off (`has_drop`)? That evidence decides whether D1, the add/drop write path, is worth a spike.
+  - Which surface drives hand-offs (`surface`, `target`)? `send_button` rows can be read next to `sleeper_send_attempted {has_target:false}`.
+  - How often is the roster full at an add hand-off (`has_drop`)?
 
-  The event carries no player id, no player name and no free text.
-  Classification: as `analytics-lead` set it in the grant. We proposed **INTENT**, the same reasoning as `usage_trends_action`.
-  Follow-through, in the same commit as the emitter:
-  - register in `ALLOWED_CLIENT_EVENTS` and `CLIENT_EVENT_PROPS` (`backend/analytics_taxonomy.py`);
-  - classify in `analytics_queries` (INTENT, so absent from `NON_INTENT_EVENTS`);
-  - add `backend/tests/test_analytics_taxonomy_sleeper_handoff.py` (precedent: `test_analytics_taxonomy_home_hub.py`);
-  - add a dated addendum in `docs/business/analytics/`.
+  `docs/data-dictionary.md`: n/a for every event here. They are `user_events` rows with no new column.
 
-  `docs/data-dictionary.md`: n/a, because it is a `user_events` row with no new column.
-  **Direct write (D1): seven more events, all PENDING an `analytics-lead` grant.** R15.3 applies: no token, no free text. Full table in [consent.md § 6](consent.md#6-analytics):
+  **Direct write (D1): the seven `sleeper_fa_*` events.** All are granted. Two classes changed. The props below are exactly as granted (full table in [consent.md § 6](consent.md#6-analytics)). None are WAT events.
 
-  | Event | Fired by | Props | Classification |
+  | Event | Side | Class (granted) | Props (granted) |
   |---|---|---|---|
-  | `sleeper_fa_connect_shown` | client | `surface`, `reason` | NON_INTENT. Sizes K-F1 |
-  | `sleeper_fa_consent_shown` | client | `surface`, `reason` | NON_INTENT |
-  | `sleeper_fa_consent_recorded` | server | `surface`, `copy_version` | INTENT |
-  | `sleeper_fa_consent_withdrawn` | server | `via` | INTENT |
-  | `sleeper_fa_write_attempted` | client | `surface`, `has_drop`, `has_bid`, `consent_ticked` | INTENT |
-  | `sleeper_fa_write_succeeded` | server | `mode`, `has_drop`, `has_bid`, `result`, `transaction_id` | INTENT |
-  | `sleeper_fa_write_failed` | client | `surface`, `error_code` (closed enum), `status` | INTENT |
+  | `sleeper_fa_connect_shown` | client | NON_INTENT (exposure) | `surface`, `reason` ∈ `not_linked` \| `expired` \| `unverified` |
+  | `sleeper_fa_consent_shown` | client | NON_INTENT (exposure) | `surface`, `reason` ∈ `first` \| `lapsed` \| `version` \| `withdrawn` |
+  | `sleeper_fa_consent_recorded` | server | **NON_INTENT** (was proposed INTENT) | `surface`, `copy_version` |
+  | `sleeper_fa_consent_withdrawn` | server | **NON_INTENT** (was proposed INTENT) | `via` ∈ `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected` |
+  | `sleeper_fa_write_attempted` | client | INTENT | `surface`, `has_drop`, `has_bid`, `consent_ticked`, `attempt_id` |
+  | `sleeper_fa_write_succeeded` | server | INTENT | `mode` ∈ `add` \| `claim`, `has_drop`, `has_bid`, `result` ∈ `accepted` \| `partial`, `attempt_id` |
+  | `sleeper_fa_write_failed` | client | INTENT | `surface`, `error_code` (closed: consent.md §3 codes ∪ `network` \| `timeout` \| `unknown`), `status` (int), `attempt_id` |
 
-  They follow the P0-7 send split: attempts and failures come from the client; successes, consent records and withdrawals come from the server.
-  **App Privacy labels:** no change. Per `legal-lead` R15.6, the data falls under categories already declared, and there's no tracking. Re-check only if a new data type is added. Each is registered and classified in the same commit as its emitter. The tests are `backend/tests/test_analytics_taxonomy_sleeper_fa_write.py`, plus an addendum.
-- [ ] **(b) Existing events cover it.** Not used, because `sleeper_handoff_resolved` was granted.
+  **Why the two consent events are NON_INTENT:** withdrawals include **system** ones (`credential_expired`, `credential_rejected`). An INTENT class would mint a user-day for something the user never did.
+
+  Conditions:
+  - **F1. The consent ledger is the record of truth.** The `platform_write_consents` and `platform_write_moves` tables are the R15.3 record. These events are telemetry and are **never** read as consent proof.
+  - **F2. No event for `account_deletion` withdrawals.** Background (system) withdrawals are written non-touching: they don't bump `users.last_active_at` or `events_count`. This is the same rule as the referral loop's C6.
+  - **F3. `attempt_id`,** a client UUID, rides on `attempted`, `succeeded` and `failed`. The write request body carries it, and `platform_write_moves` stores it. `transaction_id` is **not** an event prop; it stays in the moves table as `sleeper_transaction_id`.
+  - **F4. `sleeper_fa_write_succeeded` fires only for `accepted` | `partial`.** A Sleeper rejection or error fires `sleeper_fa_write_failed` only. The two never double-count.
+  - **F5. Closed enums and tests.**
+    - `surface` takes the claim-sheet values shared with `sleeper_handoff_resolved`.
+    - `has_bid` is a bool, never the amount.
+    - No player ids, names, tokens or free text.
+    - Same commit as the emitters.
+    - `backend/tests/test_analytics_taxonomy_sleeper_fa_write.py` asserts exact props, the class split (both consent events in `NON_INTENT_EVENTS`), namespace disjointness, and that succeeded and failed are exclusive.
+    - A dated addendum is written before the emitters ship.
+
+  **App Privacy labels:** no change. `legal-lead` R15.6 says so and `analytics-lead` accepts it. Re-check only if a new data type is added.
+- [ ] **(b) Existing events cover it.** Not used, because every event above was granted.
 - [ ] **(c) WAIVED:** not chosen.
 
 ## 2. Schema & flag scope
@@ -156,7 +177,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
   - `backend/tests/test_sleeper_write.py` (extended with golden bodies from the spike).
   - The flag-parity test (extended).
   - `test_account_deletion_coverage.py` (covers both new tables automatically).
-  - `backend/tests/test_analytics_taxonomy_sleeper_handoff.py` (event granted), and `…_sleeper_fa_write.py` once those events are granted.
+  - `backend/tests/test_analytics_taxonomy_sleeper_handoff.py` (G6) and `backend/tests/test_analytics_taxonomy_sleeper_fa_write.py` (F5). Both events sets are granted.
 
   The full list is in [consent.md § 8.1](consent.md#81-backend-tests). Mobile has no jest harness, so its unit-level tests are the executed guard sections.
 - [x] **Code-walk proof:**
@@ -232,7 +253,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 | `mobile/src/state/CLAUDE.md:27` | **updated (by the build)** | The `useTradeQueue.ts` line says Send All "opens each Sleeper propose URL with a 500 ms stagger". It becomes one hand-off through the helper. |
 | `mobile/src/components/CLAUDE.md:16, :38` | **updated (by the build)** | The `ClaimSheet` row (steps block, helper) and the `SendInSleeperButton` row (the no-target hand-off confirm). |
 | `mobile/tests/README.md` | **updated (by the build)** | Add the `check-sleeper-handoff` row and bump the guard count (88 → 89). |
-| `docs/business/analytics/` addendum | **updated** | Dated event addenda, written by `analytics-lead`: one now for the granted `sleeper_handoff_resolved`, and one for the `sleeper_fa_*` events once they are granted. |
+| `docs/business/analytics/` addendum | **updated (before the emitters ship)** | Dated event addenda by `analytics-lead`: one for `sleeper_handoff_resolved` (G6: covers the seam, G3 and G4), and one for the seven `sleeper_fa_*` events (F5). |
 | Platform risk register (`.claude/skills/pm-partnerships/references/platform-risk-register.md`, PR #345, not merged) | **route to `platforms-pm`** | Add the new write (add/drop/claim, consent, `sleeper.fa_write`) to the Sleeper row's writes and kill switches, and record the write-feature-gate pass. Separately, its Sleeper "Pre-planned response" names the trade deep link as the fallback that remains if writes go off. That link is broken on iPhone (F3), and after this build it no longer exists in mobile. This is `platforms-pm`'s document, so it isn't edited here. |
 
 ## 5. Ship gate declaration

@@ -153,6 +153,8 @@ Any capture or replay is a **live write that needs the operator's approval when 
 
 **Product requirements on the route** (`POST /api/league/free-agents/add`; the final name is the spike's):
 
+- **Request body.** `{league_id, add_player_id, drop_player_id?, faab_bid?, consent?: {copy_version, locale}, attempt_id}`. `attempt_id` is a client-generated UUID, required, one per tap (`analytics-lead` F3). The server echoes it on `sleeper_fa_write_succeeded` and stores it in `platform_write_moves`.
+
 - **Order of checks.** The route runs these in order: test-mode fail-closed (599) → `sleeper.fa_write` (404) → session and `_verified_write_denial` (`server.py:2653`) → body → credential (`sleeper_not_linked` / `sleeper_expired` / `sleeper_unconfigured`, as `server.py:19515-19524`) → **consent** (§4.2) → the pre-write public reads (roster resolved by roster, D-051) → the write → the **move record** (§4.3).
 - **Consent before any Sleeper write.** A body carrying `consent: {copy_version, locale}` with the current version records the grant first, then writes. Without a valid grant the route answers 409 **`consent_required`**, and nothing is sent.
 - **Refusals the client must handle.** Each one is `{error, message, detail}` with `detail = message` (#428).
@@ -170,7 +172,7 @@ Any capture or replay is a **live write that needs the operator's approval when 
 | 409 `sleeper_rejected` (reused; the credential is deleted, so consent is withdrawn, §4.4) | Sleeper refused the token | the refusal pattern, then the connect step on the next try |
 | 502 `sleeper_write_failed` (reused; `detail` = Sleeper's sentence) | Sleeper refused the move | the refusal pattern (§2.3): reason, no retry, Open in Sleeper |
 
-- **Success response.** It reports `mode` (`add` \| `claim`), `status` (`complete` \| `pending`), what was added and dropped **as Sleeper reports it** (a partial result is stated exactly), and `move_id`.
+- **Success response.** It reports `mode` (`add` \| `claim`), `status` (`complete` \| `pending`), what was added and dropped **as Sleeper reports it** (a partial result is stated exactly), `move_id` and `attempt_id`. A Sleeper rejection or error is never a success response. It returns an error code, so the client fires only `sleeper_fa_write_failed` (F4).
 - **Kill switch.** `sleeper.fa_write`, default **`false`**. It gates the write route and the two consent routes (they 404 instantly when off), and the client's direct-write UI and Settings row. It is absent from `LAUNCHED_FLAG_DEFAULTS` until it graduates. It goes into `FLAG_KEYS`, the flag fixtures and `docs/config-reference.md`. This flag is the write's deploy-free rollback lever.
   - **D6, decided by `head-product` (P34).** The flag turns on only after **all three** of: LEG-L12 is done, the P31 device tests have passed, and the `platforms-eng` spike has captured the mutation shapes. **The flip itself is the operator's.**
 
@@ -234,13 +236,14 @@ Rows are **never edited, only added**. Neither table ever stores a token or cred
 | `consented_at`, `expires_at` | server UTC; grants only |
 | `client_platform`, `app_version` | from the `X-Device` / `X-App-Version` headers the server already reads (`server.py:2831-2849`) |
 | `trigger_move_id` | grants: the move the tick was given for |
-| `withdrawn_at`, `withdrawn_via` | withdrawals: `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected` \| `account_deletion` (the last only if H6 keeps a record) |
+| `withdrawn_at`, `withdrawn_via` | withdrawals: `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected` \| `account_deletion` (the last only if H6 keeps a record; it never fires an event, F2) |
 
 **`platform_write_moves`** has one row per move:
 
 | Column | Notes |
 |---|---|
 | `move_id` | PK, uuid |
+| `attempt_id` | the client UUID from the request (`analytics-lead` F3). Joins the `sleeper_fa_write_*` events to this row |
 | `consent_id` | the grant that covered it |
 | `user_id` | |
 | `league_id` | |
@@ -304,17 +307,39 @@ Withdrawing takes effect at once and never undoes moves already made.
 
 ## 6. Analytics
 
-These seven events are **PENDING an `analytics-lead` grant** (R15.3: no token, no free text). The hand-off's `sleeper_handoff_resolved` is already granted (scope §1). They follow the P0-7 split: attempts and failures come from the client, while success and consent records come from the server, because only the server knows they landed.
+**Status: granted 2026-10-20 (`analytics-lead`), conditions G1–G7 and F1–F5.** The source is `analytics-lead`'s #351 update review at `8b63ef10`, together with the original #351 grant (G1–G7). The props below are exactly as granted. None of these events is a WAT event.
 
-| Event | Fired by | Props | Proposed class |
+They follow the P0-7 split:
+- **client:** attempts, failures and exposures;
+- **server:** successes and the consent ledger events.
+
+| Event | Side | Class (granted) | Props (granted) |
 |---|---|---|---|
-| `sleeper_fa_connect_shown` | client | `surface`, `reason` ∈ `not_linked` \| `expired` \| `unverified` | NON_INTENT. It sizes K-F1, as ux-lead asks |
-| `sleeper_fa_consent_shown` | client | `surface`, `reason` ∈ `first` \| `lapsed` \| `version` \| `withdrawn` | NON_INTENT |
-| `sleeper_fa_consent_recorded` | server | `surface`, `copy_version` | INTENT |
-| `sleeper_fa_consent_withdrawn` | server | `via` | INTENT |
-| `sleeper_fa_write_attempted` | client | `surface`, `has_drop`, `has_bid`, `consent_ticked` | INTENT |
-| `sleeper_fa_write_succeeded` | server | `mode`, `has_drop`, `has_bid`, `result`, `transaction_id` | INTENT |
-| `sleeper_fa_write_failed` | client | `surface`, `error_code` (closed: the §3 codes ∪ `network` \| `timeout` \| `unknown`), `status` | INTENT |
+| `sleeper_fa_connect_shown` | client | NON_INTENT (exposure) | `surface`, `reason` ∈ `not_linked` \| `expired` \| `unverified` |
+| `sleeper_fa_consent_shown` | client | NON_INTENT (exposure) | `surface`, `reason` ∈ `first` \| `lapsed` \| `version` \| `withdrawn` |
+| `sleeper_fa_consent_recorded` | server | **NON_INTENT** | `surface`, `copy_version` |
+| `sleeper_fa_consent_withdrawn` | server | **NON_INTENT** | `via` ∈ `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected` |
+| `sleeper_fa_write_attempted` | client | INTENT | `surface`, `has_drop`, `has_bid`, `consent_ticked`, `attempt_id` |
+| `sleeper_fa_write_succeeded` | server | INTENT | `mode` ∈ `add` \| `claim`, `has_drop`, `has_bid`, `result` ∈ `accepted` \| `partial`, `attempt_id` |
+| `sleeper_fa_write_failed` | client | INTENT (a refused deliberate act stays intent) | `surface`, `error_code` (closed: the §3 codes ∪ `network` \| `timeout` \| `unknown`), `status` (int), `attempt_id` |
+
+**Both consent events are NON_INTENT.** Withdrawals include system ones (`credential_expired`, `credential_rejected`), and one event name carries one class. Grants and withdrawals are twins. Nothing is lost, because `consent_recorded` always arrives in the same request as the INTENT `write_attempted`.
+
+**Conditions, as written by `analytics-lead`:**
+- **F1.** The append-only `platform_write_consents` / `platform_write_moves` tables (§4.3) are the R15.3 record of truth. These events are telemetry and are **never** read as consent proof.
+- **F2.** No event fires for `account_deletion` withdrawals; the user's events are deleted with the account anyway. Background (system) withdrawals are written non-touching: they don't bump `users.last_active_at` or `events_count`. This is the referral loop's C6 rule.
+- **F3.** `attempt_id`, a client UUID, rides on attempted, succeeded and failed. The request body carries it (§3), and `platform_write_moves` stores it (§4.3).
+- **F4.** `sleeper_fa_write_succeeded` fires only for `accepted` | `partial`. A Sleeper rejection or error reaches the client as an error and fires `sleeper_fa_write_failed` only, so the two can never double-count. `transaction_id` is not a prop: `attempt_id` joins the moves table, which holds `sleeper_transaction_id`.
+- **F5.**
+  - `surface` uses the claim-sheet values shared with `sleeper_handoff_resolved`.
+  - `has_bid` is a bool, never the amount.
+  - No player ids, names, tokens or free text.
+  - `test_analytics_taxonomy_sleeper_fa_write.py` asserts exact props, the class split, namespace disjointness and succeeded/failed exclusivity.
+  - A dated addendum is written before the emitters ship.
+
+**`sleeper_handoff_resolved`** (the fallback hand-off) is granted separately, under G1–G7 (scope §1).
+- On this sheet it carries `has_drop` only on claim-sheet `target=add` rows.
+- Per G2, the key is **omitted** everywhere else, never sent as `null`.
 
 ## 7. Acceptance criteria (AC-19 to AC-40)
 
@@ -328,7 +353,7 @@ AC-1 to AC-18 are in [prd.md § 6](prd.md#6-acceptance-criteria).
 | AC-22 | A current-version tick appends a grant with every R15.3 field, then writes. A stale version appends nothing and gets 409 | `test_consent_grant_records_r15_fields`, `test_fa_write_stale_copy_version_refused` |
 | AC-23 | A grant is valid at 7 d − 1 min and invalid at 7 d. Moves don't extend it | `test_consent_window_rolling_from_server_tick` |
 | AC-24 | Settings withdrawal, disconnect, credential expiry and credential rejection each **append** a withdrawal. A different Sleeper account invalidates the grant. No row is ever updated | `test_consent_withdrawals_append_only`, `test_consent_bound_to_sleeper_account` |
-| AC-25 | Every move appends a `platform_write_moves` row with the R15.3 fields and Sleeper's result, including on refusals | `test_move_record_written_per_attempt` |
+| AC-25 | Every move appends a `platform_write_moves` row with the R15.3 fields, the request's `attempt_id` and Sleeper's result, including on refusals | `test_move_record_written_per_attempt` |
 | AC-26 | Account deletion removes both tables' rows, and export includes them | `test_account_deletion_coverage.py` (parametrized); `test_consent_and_moves_in_export` |
 | AC-27 | Each §3 refusal returns its code with `detail = message`. Pre-write refusals never call the opener | `test_fa_write_refusals` (parametrized) |
 | AC-28 | Mocked success for add and add+drop builds the spike-recorded body (golden) and returns `mode` / `status` / the halves. A claim gets 422 `waiver_claim_unsupported` and no write until D5 is answered and a claim has been captured; only then is it tested the same way | `test_build_fa_*_body_golden`, `test_fa_write_success_modes`, `test_fa_write_claim_refused_until_d5_and_capture` |
@@ -343,7 +368,7 @@ AC-1 to AC-18 are in [prd.md § 6](prd.md#6-acceptance-criteria).
 | AC-37 | After success, the FA list is refreshed. The trade deck no longer offers the dropped player as the user's (handed off to `trades-pm` as I-2/U2) | TestFlight 29 (with `trades-pm`'s mechanism test) |
 | AC-38 | Result copy distinguishes a claim placed from a player added, and states partials exactly | S26; TestFlight 25 |
 | AC-39 | The Settings row shows the window and withdraws in one tap with R15.2.6's copy. The sheet's Turn off link opens it | S27; TestFlight 27 |
-| AC-40 | The `sleeper_fa_*` events are registered and classified in the same commit as their emitters, once granted | `test_analytics_taxonomy_sleeper_fa_write.py` |
+| AC-40 | The seven granted `sleeper_fa_*` events are registered and classified in the same commit as their emitters, per F1–F5. Both consent events are in `NON_INTENT_EVENTS`. `write_succeeded` fires only for `accepted` / `partial`. A request without `attempt_id` is a 400 `bad_request`. | `test_analytics_taxonomy_sleeper_fa_write.py` |
 
 ## 8. Evidence
 
@@ -374,7 +399,7 @@ Sleeper is mocked through `sleeper_write._opener`. **Nothing here ever makes a l
   - `test_sleeper_write.py`: the golden bodies from the spike;
   - `test_account_deletion_coverage.py`: automatic, through the tuple;
   - the flag-parity test: `sleeper.fa_write` default false.
-- **Once granted:** `test_analytics_taxonomy_sleeper_fa_write.py`.
+- **Granted events:** `test_analytics_taxonomy_sleeper_fa_write.py` (F5: exact props, class split, namespace disjointness, succeeded/failed exclusivity). Plus `test_fa_write_succeeded_only_accepted_or_partial` and `test_fa_write_attempt_id_round_trip` in the route test file.
 
 ### 8.2 Guard additions (`mobile/tests/check-sleeper-handoff.js`)
 
@@ -434,7 +459,7 @@ There are no ESPN, MFL or Fleaflicker steps: they keep `NO_ADD_REASON`, and they
 | ux-lead | K-F1 to K-F7 as landed (§2, §5), and TestFlight 21–29 | `head-product` |
 | `design-lead` | The checkbox, step, window line, result and refusal states, the Settings row, and the D2 alert | `platforms-pm` |
 | `marketing-lead` | All words except the R15 copy: CTA labels, the connect-step line, result lines and the D2 alert (through `platforms-pm`). The secondary button's words (§2.4) are **pending** | `head-bizops` |
-| `analytics-lead` | The seven §6 events, **pending a grant** | `platforms-pm` |
+| `analytics-lead` | The seven §6 events: **granted** 2026-10-20 (G1–G7, F1–F5). Reviews the addenda | `platforms-pm` |
 | `trades-pm` | The K-F5 deck invalidation (#339 §5.1), **handed off** as I-2/U2 | `head-product` |
 | `platforms-pm` | The write-feature-gate pass and the risk-register row | — |
 | `platforms-eng` / `eng-architect` | `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet): spike, route and adapter. Also the two table shapes | `head-eng` |
