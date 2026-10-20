@@ -239,6 +239,33 @@ def test_a_rebase_onto_a_job_is_strict_where_the_job_view_is_lenient(p1, spawned
     assert body["cards"] == [] and body["freshness_state"] == "updating"
 
 
+@pytest.mark.parametrize("failure", ["no_stored_rosters", "read_fails"])
+def test_the_live_deck_is_strict_where_the_job_id_form_is_lenient(p1, spawned, failure):
+    """One I-1 rule on the deck path: (b)'s continuation is strict, like (a)
+    and (c). E2's lenient view stays only for plain job_id + cursor."""
+    client, engine, _ = p1
+    deck = build_deck()
+    if failure == "no_stored_rosters":
+        with engine.begin() as conn:
+            conn.execute(delete(league_members_table))
+        assert ids(status(client, deck, 90).get_json()["cards"]) == p1_ids(90, 95)   # lenient
+        broken = None
+    else:
+        broken = patch.object(roster_snapshot, "roster_snapshot",
+                              MagicMock(side_effect=RuntimeError("db")))
+        broken.start()
+    try:
+        for cursor in (90, 95):                            # mid-deck and at its end
+            body = deck_status(client, deck, cursor).get_json()
+            assert body["cards"] == [] and body["freshness_state"] == "updating"
+            assert (body["deck_id"], body["cursor"], body["status"]) == (deck, cursor, "complete")
+            assert not {"rebased", "pool_exhausted"} & set(body)
+    finally:
+        if broken is not None:
+            broken.stop()
+    assert not spawned
+
+
 def test_another_users_deck_is_never_served(p1, spawned):
     client, _, _ = p1
     mine = build_deck()

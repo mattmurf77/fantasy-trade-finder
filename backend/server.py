@@ -3844,23 +3844,29 @@ def _trade_page_request_inputs(sess: Mapping, league_id: str) -> dict:
             "opponents_total": opponents_total}
 
 
-def _trade_deck_first_page(job: dict) -> dict:
-    """A job's E2 first page under P1's strict I-1: a league with no stored
-    rosters, or a failed roster read, serves no cards, "updating"."""
+def _trade_deck_unchecked(job: dict, cursor: int) -> dict | None:
+    """P1's strict I-1 on the deck path, for a job's page at `cursor`: when the
+    league has no stored rosters or the roster read fails, the no-cards
+    "updating" response (`cursor` echoes K, so the client asks again); None
+    when the check can run, and E2's view (whose I-1 then runs on stored
+    rosters) serves. E2's lenient rule stays only for the plain job_id +
+    cursor form. The demo league has no rosters to check, as in
+    _trade_job_public_view."""
+    league_id = job["key"][1]
+    if league_id == "league_demo":
+        return None
     from . import roster_snapshot
     from .database import engine as _engine
     try:
         with _engine.connect() as conn:
-            missing = roster_snapshot.roster_snapshot(conn, job["key"][1]).status == "missing"
+            if roster_snapshot.roster_snapshot(conn, league_id).status != "missing":
+                return None
     except Exception as err:
         log.warning("trade-deck %s: check unavailable, serving no cards: %s", job["job_id"], err)
-        missing = True
-    if missing:
-        return _trade_page_no_cards(
-            job_id=job["job_id"], status=job["status"], error=job.get("error"),
-            opponents=(job.get("opponents_done", 0), job.get("opponents_total", 0)),
-            cursor=0, total_ready=0, freshness="updating")
-    return _trade_job_page_view(job, 0)
+    return _trade_page_no_cards(
+        job_id=job["job_id"], status=job["status"], error=job.get("error"),
+        opponents=(job.get("opponents_done", 0), job.get("opponents_total", 0)),
+        cursor=cursor, total_ready=len(job.get("cards") or []), freshness="updating")
 
 
 def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int) -> dict | None:
@@ -3871,9 +3877,10 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
           its stored pages (P1's slice, dispositions, strict I-1);
       (b) D is the requester's job in this process and has neither errored
           nor been revoked: E2's page view of its raw list at K (append-only
-          rules, E2's `replace`). A complete D asked past its last card is
-          the deck's end: _trade_deck_rebase decides between a newer deck
-          and `pool_exhausted`;
+          rules, E2's `replace`) under strict I-1, as (a) and (c) (no stored
+          rosters or a failed read: no cards, "updating"). A complete D asked
+          past its last card is the deck's end: _trade_deck_rebase decides
+          between a newer deck and `pool_exhausted`;
       (c) otherwise the deck changed: _trade_deck_rebase.
     The server never dedupes against the client; the client does, by trade_hash.
     """
@@ -3895,7 +3902,12 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
     with _trade_jobs_lock:
         job = _trade_jobs.get(deck_id)
         deck = dict(job) if job is not None and job["key"][0] == user_id else None
+        dead = deck is not None and (_trade_job_revoked(job) or job["status"] == "error")
     finished = None
+    if deck is not None and not dead:
+        unchecked = _trade_deck_unchecked(deck, cursor)   # strict I-1: never an end or a rebase
+        if unchecked is not None:
+            return {**unchecked, "deck_id": deck_id}
     if deck is not None:
         out = _trade_job_page_view(deck, cursor)
         continues = (deck["status"] != "complete" or out["replace"]
@@ -3960,7 +3972,8 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, row: dict |
             return {**finished, "deck_id": deck_id}
         with _trade_jobs_lock:
             newest = dict(_trade_jobs[job_id])
-    return {**_trade_deck_first_page(newest), "deck_id": newest["job_id"], "rebased": True}
+    page = _trade_deck_unchecked(newest, 0) or _trade_job_page_view(newest, 0)
+    return {**page, "deck_id": newest["job_id"], "rebased": True}
 
 
 def _rebuild_league_trade_pages(league_id: str) -> int:
