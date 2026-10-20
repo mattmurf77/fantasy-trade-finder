@@ -8,7 +8,9 @@ Covers (PRD acceptance criteria):
     than the production baseline.
   • ESS + CI reported on every run; tiny samples labeled UNRELIABLE.
   • Exclusion accounting adds up (null propensity / never-viewed /
-    undo-reversed / bad features / scorer error) — nothing silently dropped.
+    undo-reversed / missing scorer inputs / scorer error) — nothing
+    silently dropped; a deck missing scorer inputs is excluded whole,
+    never sunk (C7 (iv)).
   • Time-ordered protocol: fit() sees only pre-split impressions; a
     fit-capable scorer without eval_start is refused.
   • Loader outcome reduction; CLI end-to-end (synth db → report + records);
@@ -29,10 +31,11 @@ from sqlalchemy import create_engine, insert
 import backend.database as db_module
 from backend.database import deck_impressions_table, deck_outcomes_table, metadata
 
-from backend.eval.data import LoggedCard, LoggedDeck, load_decks, split_decks
+from backend.eval.data import LoggedCard, LoggedDeck, card_dict, load_decks, split_decks
 from backend.eval.replay import (
     EXCLUSION_REASONS,
     evaluate,
+    exposure_curve,
     self_check,
     render_report,
     verdict,
@@ -180,8 +183,7 @@ def test_exclusion_accounting_adds_up():
         _card("jx", 1, viewed=True, propensity=0.0, served_at=served),      # null_propensity
         _card("jx", 2, viewed=False, served_at=served),                     # never_viewed
         _card("jx", 3, viewed=True, undone=True, served_at=served),         # undo_reversed
-        _card("jx", 4, viewed=True, features=None, served_at=served),       # bad_features
-        _card("jx", 5, viewed=True, served_at=served),
+        _card("jx", 4, viewed=True, served_at=served),
     ]
     decks = [_deck("jx", cards, served_at=served)] + _uniform_decks(n_decks=3)
     run = evaluate(get_scorer("production"), decks, ess_min=1,
@@ -189,10 +191,72 @@ def test_exclusion_accounting_adds_up():
     assert run.excluded["null_propensity"] == 1
     assert run.excluded["never_viewed"] == 1 + 3 * 2   # +2 unviewed per uniform deck
     assert run.excluded["undo_reversed"] == 1
-    assert run.excluded["bad_features"] == 1
+    assert run.excluded["missing_scorer_inputs"] == 0
     assert run.excluded["scorer_error"] == 0
     assert run.n_total == run.n_included + sum(run.excluded.values())
     assert set(run.excluded) == set(EXCLUSION_REASONS)
+
+
+class _SpyScorer:
+    name = "spy"
+
+    def __init__(self):
+        self.scored = []
+
+    def score(self, card):
+        self.scored.append(card["impression_id"])
+        return float(card.get("base_score") or 0.0)
+
+
+def test_deck_missing_scorer_inputs_is_excluded_whole_not_sunk():
+    """C7 (iv): one card with neither features nor a compact block takes
+    its whole deck out, counted by cards and by decks. The deck is never
+    scored, and the rest of the run is exactly what it is without it."""
+    served = _iso(2)
+    cards = [
+        _card("jm", 0, viewed=True, liked=True, served_at=served),
+        _card("jm", 1, viewed=True, propensity=0.0, served_at=served),
+        _card("jm", 2, viewed=False, features=None, served_at=served),  # no inputs
+        _card("jm", 3, viewed=True, undone=True, served_at=served),
+        _card("jm", 4, viewed=True, served_at=served),
+    ]
+    missing = _deck("jm", cards, served_at=served)
+    uniform = _uniform_decks(n_decks=3)
+    curve = exposure_curve([missing] + uniform)
+
+    spy = _SpyScorer()
+    run = evaluate(spy, [missing] + uniform, ess_min=1, bootstrap=0, seed=0,
+                   curve=curve)
+    assert run.excluded["missing_scorer_inputs"] == 5
+    assert run.missing_inputs_decks == 1
+    # The deck's other cards are not double-counted under per-card reasons.
+    assert run.excluded["null_propensity"] == 0
+    assert run.excluded["undo_reversed"] == 0
+    assert run.excluded["never_viewed"] == 3 * 2
+    assert run.n_total == run.n_included + sum(run.excluded.values())
+    assert not any(i.startswith("jm_") for i in spy.scored)
+
+    without = evaluate(_SpyScorer(), uniform, ess_min=1, bootstrap=0, seed=0,
+                       curve=curve)
+    assert run.n_included == without.n_included
+    assert run.metrics == without.metrics
+
+    text = render_report([run], run)
+    assert "missing_scorer_inputs=5" in text
+    assert "missing_inputs_decks=1" in text
+
+
+def test_compact_only_card_is_scored_not_excluded():
+    served = _iso(2)
+    cards = [_card("jc", p, viewed=True, liked=(p == 0), served_at=served)
+             for p in range(3)]
+    cards[2].features = None
+    cards[2].features_compact = {"shape": "1x1"}
+    run = evaluate(get_scorer("base_score"), [_deck("jc", cards, served_at=served)],
+                   ess_min=1, bootstrap=0, seed=0)
+    assert run.excluded["missing_scorer_inputs"] == 0
+    assert run.missing_inputs_decks == 0
+    assert run.n_included == 3
 
 
 def test_scorer_error_excludes_whole_deck():
@@ -308,6 +372,52 @@ def test_load_decks_time_and_scope_filters(mem_engine):
             load_decks(engine=mem_engine, since="2026-07-10")] == ["jb", "jc"]
     assert [d.deck_job_id for d in
             load_decks(engine=mem_engine, user_id="u1")] == ["ja", "jb"]
+
+
+def test_load_decks_compact_block_absent_without_the_column(mem_engine):
+    with mem_engine.begin() as conn:
+        conn.execute(insert(deck_impressions_table).values(
+            impression_id="i0", user_id="u1", league_id="lg", deck_job_id="j1",
+            card_index=0, features_json=json.dumps({"shape": "1x1"}),
+            propensity=1.0, shape_bucket="1x1", served_at=_iso(1)))
+    (card,) = load_decks(engine=mem_engine)[0].cards
+    assert card.features == {"shape": "1x1"} and card.features_compact is None
+
+
+def test_load_decks_reads_features_compact_when_the_column_exists():
+    """C7 (i) scaffolding: the column does not exist yet, so this stands up
+    a copy of deck_impressions with it added and points the loader at it."""
+    import backend.eval.data as data_mod
+    from sqlalchemy import Column, MetaData, Text
+
+    md = MetaData()
+    imp = deck_impressions_table.to_metadata(md)
+    imp.append_column(Column("features_compact", Text))
+    deck_outcomes_table.to_metadata(md)
+    eng = create_engine("sqlite:///:memory:",
+                        connect_args={"check_same_thread": False})
+    md.create_all(eng)
+    served = _iso(1)
+    compact = {"shape": "2x1", "give_value": 1200.0}
+    with eng.begin() as conn:
+        for pos, features_json, compact_json in (
+            (0, json.dumps({"shape": "1x1"}), json.dumps(compact)),  # full row
+            (1, None, json.dumps(compact)),                          # narrow row
+            (2, None, "not json"),                                   # neither
+        ):
+            conn.execute(insert(imp).values(
+                impression_id=f"i{pos}", user_id="u1", league_id="lg",
+                deck_job_id="j1", card_index=pos, features_json=features_json,
+                features_compact=compact_json, propensity=1.0,
+                shape_bucket="1x1", served_at=served))
+    with patch.object(data_mod, "deck_impressions_table", imp):
+        full, narrow, neither = load_decks(engine=eng)[0].cards
+    assert full.features == {"shape": "1x1"} and full.features_compact == compact
+    assert narrow.features is None and narrow.features_compact == compact
+    assert neither.features is None and neither.features_compact is None
+    assert card_dict(full)["shape"] == "1x1"            # features win
+    assert card_dict(narrow)["shape"] == "2x1"          # else the compact block
+    assert card_dict(narrow)["shape_bucket"] == "1x1"   # logged fields still merged
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,11 @@ Read-only. One LoggedDeck per deck_job_id, cards in served order
 outcome flags from deck_outcomes (append-only labels: any number of rows
 per impression is legal — we reduce to booleans here).
 
+Narrow rows (C7 (i) scaffolding): a card may carry only a frozen compact
+scorer-input block (backend/eval/contract.py) instead of features_json.
+It is read from a `features_compact` column when the table has one; until
+that column exists, every card's features_compact is None.
+
 Engine resolution: pass an explicit SQLAlchemy engine (tests), or a
 db_url (CLI --db), or neither — in which case backend.database.engine is
 used, read at call time so test patches of backend.database.engine are
@@ -36,6 +41,7 @@ class LoggedCard:
     shape_bucket: str | None
     served_at: str
     features: dict | None          # None ⇔ features_json missing/unparseable
+    features_compact: dict | None = None   # frozen compact block (narrow rows)
     # Aggregated outcome flags (deck_outcomes reduce)
     viewed: bool = False
     liked: bool = False
@@ -68,12 +74,15 @@ def resolve_engine(engine=None, db_url: str | None = None):
 
 
 def card_dict(card: LoggedCard) -> dict:
-    """The dict handed to a Scorer: frozen features merged with logged
-    fields. Baseline scorers legitimately read `final_score` /
-    `card_index`; honest CANDIDATE scorers must not touch `card_index`,
-    `final_score`, or `propensity` — those encode the logged policy.
-    Logged fields win key collisions (they are ground truth)."""
-    d = dict(card.features or {})
+    """The dict handed to a Scorer: frozen features (features_json when
+    present, else the compact block) merged with logged fields. Baseline
+    scorers legitimately read `final_score` / `card_index`; honest
+    CANDIDATE scorers must not touch `card_index`, `final_score`, or
+    `propensity` — those encode the logged policy (backend/eval/contract.py
+    declares what each scorer may read). Logged fields win key collisions
+    (they are ground truth)."""
+    frozen = card.features if card.features is not None else card.features_compact
+    d = dict(frozen or {})
     d.update({
         "impression_id": card.impression_id,
         "deck_job_id":   card.deck_job_id,
@@ -89,6 +98,16 @@ def card_dict(card: LoggedCard) -> dict:
         "served_at":     card.served_at,
     })
     return d
+
+
+def _json_dict(raw) -> dict | None:
+    """A JSON object column → dict; None when missing, unparseable, or not
+    an object."""
+    try:
+        value = json.loads(raw) if raw else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return value if isinstance(value, dict) else None
 
 
 def load_decks(
@@ -133,12 +152,9 @@ def load_decks(
     decks: dict[str, LoggedDeck] = {}
     order: list[str] = []
     for r in rows:
-        try:
-            features = json.loads(r.features_json) if r.features_json else None
-            if not isinstance(features, dict):
-                features = None
-        except (json.JSONDecodeError, TypeError):
-            features = None
+        features = _json_dict(r.features_json)
+        # The column does not exist yet; getattr keeps this a no-op until it does.
+        features_compact = _json_dict(getattr(r, "features_compact", None))
         card = LoggedCard(
             impression_id=r.impression_id,
             deck_job_id=r.deck_job_id,
@@ -153,6 +169,7 @@ def load_decks(
             shape_bucket=r.shape_bucket,
             served_at=r.served_at,
             features=features,
+            features_compact=features_compact,
         )
         for orow in outcomes.get(r.impression_id, ()):
             action = orow.action

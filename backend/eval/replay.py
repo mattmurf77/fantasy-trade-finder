@@ -51,12 +51,19 @@ Exclusions (counted per reason and printed — never silently dropped):
   never_viewed     no `viewed` outcome — served ≠ seen; the label would be
                    fabricated (the F2 cascade rule: unseen is not a negative)
   undo_reversed    an `undo` outcome exists — the disposition was retracted
-  bad_features     features_json missing/unparseable — scorer can't score it
+  missing_scorer_inputs
+                   any card in the deck has neither features_json nor a
+                   compact block (C7 (iv)) — whole deck out, counted by
+                   cards here and by decks in EvalRun.missing_inputs_decks
   scorer_error     scorer raised on any card in the deck — whole deck out
                    (a partial deck can't be ranked consistently)
-Excluded cards still occupy candidate-rank positions when scoreable (the
-counterfactual deck still contains them); unscoreable cards sink to the
-bottom of the candidate order.
+Every card of an included deck is scored, so excluded cards still occupy
+candidate-rank positions (the counterfactual deck still contains them).
+Unscoreable cards used to sink to the bottom of the candidate order, which
+silently shifted the counterfactual ranks of the viewed cards above them;
+their deck is now excluded instead. That retired the per-card
+`bad_features` reason: a card without features either has a compact block
+(scored normally) or takes its whole deck out under missing_scorer_inputs.
 """
 
 from __future__ import annotations
@@ -86,7 +93,7 @@ METRICS = ("like", "propose")
 
 EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
-    "bad_features", "scorer_error",
+    "missing_scorer_inputs", "scorer_error",
 )
 
 
@@ -111,6 +118,7 @@ class EvalRun:
     n_included: int
     excluded: dict = field(default_factory=dict)   # reason -> count
     tilt_clipped: int = 0            # propensity tilts hit TILT_MIN/TILT_MAX
+    missing_inputs_decks: int = 0    # decks excluded as missing_scorer_inputs
     exposure_positions: int = 0      # positions with an estimated e(k)
     metrics: dict = field(default_factory=dict)    # metric -> MetricEstimate
     eval_start: str | None = None
@@ -151,21 +159,18 @@ def exposure_at(curve: dict[int, float], k: int) -> float:
 # ---------------------------------------------------------------------------
 
 def _candidate_ranks(scorer, deck: LoggedDeck) -> dict[str, int]:
-    """Counterfactual rank per impression_id under `scorer`. Cards without
-    parseable features sink to the bottom (they still occupy slots). Any
-    scorer exception propagates — the caller excludes the whole deck as
-    scorer_error (a partially-scored deck can't be ranked consistently)."""
+    """Counterfactual rank per impression_id under `scorer`. Every card is
+    scored: the caller has already excluded decks with a card missing its
+    scorer inputs. Any scorer exception propagates — the caller excludes
+    the whole deck as scorer_error (a partially-scored deck can't be
+    ranked consistently)."""
     scored: list[tuple[float, int, str]] = []
     for c in deck.cards:
-        if c.features is None:
-            key = (float("-inf"), c.card_index, c.impression_id)
-        else:
-            s = scorer.score(card_dict(c))
-            if s is None or (isinstance(s, float) and not math.isfinite(s)):
-                raise ValueError(
-                    f"scorer returned non-finite score for {c.impression_id}")
-            key = (float(s), c.card_index, c.impression_id)
-        scored.append(key)
+        s = scorer.score(card_dict(c))
+        if s is None or (isinstance(s, float) and not math.isfinite(s)):
+            raise ValueError(
+                f"scorer returned non-finite score for {c.impression_id}")
+        scored.append((float(s), c.card_index, c.impression_id))
     # Higher score first; ties broken by logged position (stable: replaying
     # the logged scorer reproduces the served order exactly).
     scored.sort(key=lambda t: (-t[0], t[1]))
@@ -237,6 +242,11 @@ def evaluate(
     # weights/rewards per deck (bootstrap clusters)
     clusters: list[dict] = []   # {"w": [...], "r_like": [...], "r_propose": [...]}
     for deck in eval_decks:
+        if any(c.features is None and c.features_compact is None
+               for c in deck.cards):
+            run.excluded["missing_scorer_inputs"] += len(deck.cards)
+            run.missing_inputs_decks += 1
+            continue
         try:
             ranks = _candidate_ranks(scorer, deck)
         except Exception:
@@ -257,9 +267,6 @@ def evaluate(
                 continue
             if c.undone:
                 run.excluded["undo_reversed"] += 1
-                continue
-            if c.features is None:
-                run.excluded["bad_features"] += 1
                 continue
             tilt = p_bar / c.propensity
             if tilt < TILT_MIN or tilt > TILT_MAX:
@@ -414,7 +421,9 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
         excl = ", ".join(f"{k}={v}" for k, v in run.excluded.items() if v)
         lines.append(
             f"- {run.scorer}: total={run.n_total} included={run.n_included} "
-            f"excluded[{excl or 'none'}] tilt_clipped={run.tilt_clipped} "
+            f"excluded[{excl or 'none'}] "
+            f"missing_inputs_decks={run.missing_inputs_decks} "
+            f"tilt_clipped={run.tilt_clipped} "
             f"(bounds [{TILT_MIN}, {TILT_MAX}])"
         )
         total_accounted = run.n_included + sum(run.excluded.values())
