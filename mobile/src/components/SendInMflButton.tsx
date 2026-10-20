@@ -1,9 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, ViewStyle } from 'react-native';
+import { Alert, ViewStyle } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Button from './chalkline/Button';
 import MflSignInSheet from './MflSignInSheet';
 import { haptics } from '../utils/haptics';
+import { openPlatform } from '../utils/openExternal';
 import { maybeRequestReview } from '../utils/ratingPrompt';
 import { useFlag } from '../state/useFeatureFlags';
 import { getMflLinkStatus, proposeTradeToMfl } from '../api/sendInMfl';
@@ -82,8 +83,15 @@ export default function SendInMflButton({
   // the send surface, instead of a cross-surface punt to the league picker.
   const [signInVisible, setSignInVisible] = useState(false);
 
+  // Same URL as before; utils/openExternal adds the re-tap lock and an
+  // alert if it can't open, instead of a silent catch.
   const openMfl = useCallback(() => {
-    Linking.openURL('https://www.myfantasyleague.com').catch(() => {});
+    void openPlatform({
+      platform: 'mfl',
+      httpsUrl: 'https://www.myfantasyleague.com',
+      surface: 'send_button',
+      appMissing: 'https',
+    });
   }, []);
 
   const openSignIn = useCallback(() => setSignInVisible(true), []);
