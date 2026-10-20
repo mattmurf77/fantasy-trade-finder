@@ -70,7 +70,10 @@ NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold",
                # with the flags off, which IS the flag-off byte-identity
                # guarantee for this change.
                "valuation_json", "trade_concept_id", "policy_variant",
-               "source_like_impression_id")
+               "source_like_impression_id",
+               # Deferred evidence (ADR-025 stage 1, 2026-10-20): NULL on every
+               # row written at build, so NULL here with the flags off.
+               "evidence_tier")
 
 
 # ---------------------------------------------------------------------------
