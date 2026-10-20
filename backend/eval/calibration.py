@@ -7,8 +7,10 @@ mean predicted probability against the observed outcome rate per bin, and
 summarize with ECE (expected calibration error, bin-weight-averaged |gap|).
 
 Inclusion mirrors replay.py: viewed, not undo-reversed, valid propensity,
-parseable features — calibration is about labels, and only viewed cards
-have honest labels (the F2 cascade rule).
+scorer inputs present (features_json or the compact block) — calibration
+is about labels, and only viewed cards have honest labels (the F2 cascade
+rule). Unlike replay there are no ranks here, so a card with neither is
+excluded on its own as bad_features rather than taking its deck out.
 """
 
 from __future__ import annotations
@@ -70,8 +72,10 @@ def calibration_pairs(
     scorer, decks: list[LoggedDeck], metric: str = "like",
 ) -> tuple[list[tuple[float, float]], dict]:
     """Collect (predicted, outcome) pairs for a probability-emitting scorer
-    over the included impressions. Returns (pairs, excluded_counts) — same
-    exclusion reasons and precedence as replay.py, printed by callers."""
+    over the included impressions. Returns (pairs, excluded_counts) — the
+    per-card reasons and precedence of replay.py, with per-card
+    bad_features where replay excludes the deck (missing_scorer_inputs);
+    printed by callers."""
     if not hasattr(scorer, "predict_proba"):
         raise ValueError(
             f"scorer {getattr(scorer, 'name', scorer)!r} has no predict_proba(); "
@@ -91,7 +95,7 @@ def calibration_pairs(
             if c.undone:
                 excluded["undo_reversed"] += 1
                 continue
-            if c.features is None:
+            if c.features is None and c.features_compact is None:
                 excluded["bad_features"] += 1
                 continue
             try:

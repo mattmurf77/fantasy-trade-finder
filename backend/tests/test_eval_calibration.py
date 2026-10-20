@@ -110,6 +110,20 @@ def test_calibration_pairs_inclusion_and_labels():
                         "scorer_error": 0}
 
 
+def test_calibration_scores_compact_only_cards():
+    """A card with no features_json but a compact block is scoreable; only
+    a card with neither is bad_features, and only that card is excluded."""
+    served = _iso(1)
+    cards = [_card("jk", p, viewed=True, liked=(p == 0), served_at=served)
+             for p in range(3)]
+    cards[1].features = None
+    cards[1].features_compact = {"shape": "1x1"}    # narrow row: scored
+    cards[2].features = None                        # neither: excluded alone
+    pairs, excluded = calibration_pairs(ProbaScorer(), [_deck("jk", cards)])
+    assert pairs == [(0.25, 1.0), (0.25, 0.0)]
+    assert excluded["bad_features"] == 1
+
+
 def test_calibration_requires_predict_proba():
     from backend.eval.scorers import get_scorer
     with pytest.raises(ValueError, match="predict_proba"):

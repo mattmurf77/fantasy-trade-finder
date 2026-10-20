@@ -28,9 +28,14 @@ THE RULE, from 2026-10-20 on: adding a feature to any scorer means adding
 it to COMPACT_KEYS (and to the writer that freezes the compact block)
 first. Unseen cards written before that date cannot be backtested on the
 new feature, except on the C8 whole-deck archive.
+
+C8 archive selection (`is_archive_deck`) lives here too, as the one
+definition the evidence writer and eval share.
 """
 
 from __future__ import annotations
+
+import hashlib
 
 COMPACT_KEYS = frozenset({
     "give_value", "receive_value", "surplus_margin", "fairness_score",
@@ -79,3 +84,20 @@ def allowed_keys(scorer_name: str) -> frozenset:
     for a scorer without a PERMITTED_LOGGED entry."""
     return (COMPACT_KEYS | INJECTED_KEYS | IDENTITY_KEYS
             | PERMITTED_LOGGED[scorer_name])
+
+
+# C8 whole-deck archive (models-lead-launch §DEC-2 C8): a fixed share of
+# served decks, chosen by deck and never by row, keeps full rows for every
+# card for ARCHIVE_DAYS, so a scorer needing a feature outside the compact
+# block can still be backtested.
+ARCHIVE_RATE_BP = 200    # basis points of served decks (2%)
+ARCHIVE_DAYS = 90
+
+
+def is_archive_deck(deck_job_id: str) -> bool:
+    """C8 selection, the single definition (the evidence writer imports it).
+    A pure function of the deck id alone: no user, league, content or
+    clock, so the choice is stable across processes and re-runs and can't
+    correlate with what the deck contains."""
+    digest = hashlib.sha256(("c8-archive-v1|" + deck_job_id).encode()).hexdigest()
+    return int(digest[:8], 16) % 10000 < ARCHIVE_RATE_BP

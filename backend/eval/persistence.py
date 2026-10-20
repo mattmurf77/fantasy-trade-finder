@@ -45,6 +45,7 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "n_total": run.n_total,
         "n_included": run.n_included,
         "excluded": dict(run.excluded),
+        "missing_inputs_decks": run.missing_inputs_decks,
         "tilt_clipped": run.tilt_clipped,
         "metrics": {
             name: {

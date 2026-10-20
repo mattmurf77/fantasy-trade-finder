@@ -246,6 +246,21 @@ def test_deck_missing_scorer_inputs_is_excluded_whole_not_sunk():
     assert "missing_inputs_decks=1" in text
 
 
+def test_run_record_persists_missing_inputs_decks(tmp_path, monkeypatch):
+    from backend.eval.persistence import append_run, load_runs, run_record
+    monkeypatch.setenv("EVAL_RUNS_DIR", str(tmp_path / "runs"))
+    served = _iso(2)
+    cards = [_card("jm", p, viewed=True, served_at=served) for p in range(3)]
+    cards[1].features = None
+    decks = [_deck("jm", cards, served_at=served)] + _uniform_decks(n_decks=2)
+    run = evaluate(get_scorer("production"), decks, ess_min=1, bootstrap=0, seed=0)
+    append_run(run_record(run, run))
+    (record,) = load_runs()
+    assert record["missing_inputs_decks"] == 1
+    assert record["excluded"]["missing_scorer_inputs"] == 3
+    assert record["n_total"] == record["n_included"] + sum(record["excluded"].values())
+
+
 def test_compact_only_card_is_scored_not_excluded():
     served = _iso(2)
     cards = [_card("jc", p, viewed=True, liked=(p == 0), served_at=served)
