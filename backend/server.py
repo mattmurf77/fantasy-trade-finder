@@ -3718,6 +3718,7 @@ class _DeckEvidence:
         self.delivered: set = set()   # impression ids sent to a client
         self.delivered_hashes: set = set()
         self.pending: set = set()     # delivered ids awaited until their row is written (F4)
+        self.served_at = None         # F2: the deck's first delivery, every row's served_at
         self.marked: set = set()      # delivered ids already written or marked 'delivered'
         self.sealed = False           # the logger finished assembling
         self.complete = False         # the run ended: its deliveries may write
@@ -3886,7 +3887,7 @@ class _DeckEvidence:
             "ghosts": list(self.ghosts.values()), "diagnostics": self.closure(rows),
             # Not the bakeoff_runs row: it can be megabytes (defer_bakeoff_run).
             "candidate_set": self.candidate_set, "trade_impressions": impressions,
-            "generated": self.generated})
+            "generated": self.generated, "served_at": self.served_at})
 
     @classmethod
     def from_row(cls, user_id: str, deck_job_id: str, row: Mapping | None, lease) -> "_DeckEvidence":
@@ -3903,6 +3904,7 @@ class _DeckEvidence:
             if blob.get("trade_impressions") is not None:
                 ev.trade_impressions = _pack_row(blob["trade_impressions"])
             ev.generated = blob.get("generated")
+            ev.served_at = blob.get("served_at")
         ev.sealed = ev.complete = True
         return ev
 
@@ -3973,6 +3975,9 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             return
         (first, first_diag), (rest, rest_diag), candidate_set, upgrades = ev.plan()
         covered, ev.pending = ev.pending, set()
+        served_at = ev.served_at
+    for row in (*first, *rest):   # F2: one served_at per deck, its first delivery
+        row["served_at"] = served_at or row["served_at"]
     shrunk = False
     try:
         if first or candidate_set is not None or upgrades:
@@ -4045,7 +4050,8 @@ def _deck_evidence_write(ev: _DeckEvidence) -> None:
             _deck_evidence_flush(ev)
 
 
-def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease) -> None:
+def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
+                                delivered_at: str | None = None) -> None:
     """Thread target: a stored deck's delivery once its job has left this
     process, from the row's evidence_blob read fresh under the write lock."""
     from . import database as _db
@@ -4062,6 +4068,7 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease)
                     return
                 ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
                 ev.delivered.update(ids)
+                ev.served_at = ev.served_at or delivered_at
                 _deck_evidence_flush(ev)
     finally:
         _deck_evidence_settle(ids)
@@ -4088,6 +4095,8 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         if partial:
             ev.partial = ev.complete = True
         new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
+        if ev.served_at is None:
+            ev.served_at = datetime.now(timezone.utc).isoformat()
         awaited = {iid for iid in ids - ev.pending if iid in ev.rows}   # F4: rows not yet in
         ev.pending |= awaited
         _deck_evidence_pend(awaited)
@@ -4116,7 +4125,8 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list) -> None:
         row["user_id"], started=g.get("_user_data_started") if has_request_context() else None)
     _deck_evidence_pend(ids)
     _start_deck_evidence_thread(target=_deck_evidence_write_stored,
-                                args=(row["user_id"], row["deck_job_id"], ids, lease))
+                                args=(row["user_id"], row["deck_job_id"], ids, lease,
+                                      datetime.now(timezone.utc).isoformat()))
 
 
 def _deck_evidence_job_done(job_id: str) -> None:

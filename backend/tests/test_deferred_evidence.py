@@ -574,7 +574,52 @@ def test_c6_written_rows_equal_the_build_time_snapshot(deferred, monkeypatch):
     assert set(written) == set(snapshot)
     for iid, frozen in snapshot.items():
         row = written[iid]
-        assert {k: row[k] for k in frozen} == frozen
+        # Everything frozen at build; served_at is the first delivery's (F2).
+        assert {k: row[k] for k in frozen if k != "served_at"} == {
+            k: v for k, v in frozen.items() if k != "served_at"}
+
+
+# ── F2: served_at is the deck's first delivery ──────────────────────────────
+
+def test_f2_every_row_of_a_deck_carries_its_first_delivery_time(deferred, monkeypatch):
+    client, engine, _ = deferred
+    job_id, _, _, ev, _ = deferred_deck(120, ghost_every=9)
+    built = {r["served_at"] for r in held(ev).values()}
+    assert len(built) == 1                                 # the logger's one build timestamp
+    real = db_module.save_deck_evidence
+
+    def rest_fails_once(rows_, **kw):                      # the rest is written a delivery later
+        if rows_ and rows_[0]["evidence_tier"] == "full_interim" and not getattr(rest_fails_once, "done", 0):
+            rest_fails_once.done = 1
+            raise RuntimeError("injected")
+        return real(rows_, **kw)
+
+    monkeypatch.setattr(db_module, "save_deck_evidence", rest_fails_once)
+    before = datetime_now()
+    status(client, job_id, 0)
+    after_first = datetime_now()
+    time.sleep(0.01)
+    status(client, job_id, 30)
+    stamps = {r["served_at"] for r in rows(engine)}
+    assert len(rows(engine)) == 120 + 13 and len(stamps) == 1
+    [served_at] = stamps
+    assert before <= served_at <= after_first and served_at > next(iter(built))
+
+
+def test_f2_after_the_job_left_the_process_the_first_delivery_stamps_the_deck(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(120, ghost_every=9)
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    before = datetime_now()
+    status(client, job_id, 0)
+    stamps = {r["served_at"] for r in rows(engine)}
+    assert len(stamps) == 1 and before <= next(iter(stamps)) <= datetime_now()
+
+
+def datetime_now():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 # ── C5: narrow ghosts ───────────────────────────────────────────────────────

@@ -741,7 +741,7 @@ Flag `trade.first_page_store` (default **false**). Spec: `docs/plans/org-bringup
 
 **Narrow ghost rows (C5).** On a deferred deck a ghost row keeps every scalar column, `impression_id` and `assets_json`, has `valuation_json` NULL, and its `features_json` holds **only** the compact scorer inputs: `value_model.extract_features`' keys (`give_value`, `receive_value`, `surplus_margin`, `fairness_score`, `ranked_player_count`, `shape`, `lane`, `basis`, `give_positions`, `receive_positions`, `involves_pick`, `likes_you`, `relaxed`, `user_value_basis`) plus the `_inject` inputs `partner_user_id` and `taste_attrs` (when stamped). A ghost inside the first 30 stays narrow. The executed-trade matcher (`partner_user_id`, `assets_json`) and replay's scorers read these keys unchanged; `eval/scorecard_evidence.py` sees no valuation on them.
 
-**`served_at`** on a deferred row is the build time (the frozen snapshot's), not the delivery time.
+**`served_at`** on a deferred row is the deck's **first delivery** time, one timestamp shared by every row the deck writes (ghosts and later-written rows included), as the logger's start was one per deck before. Features and valuation stay frozen at build (C6).
 
 Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`. None on `evidence_tier`, so the hourly archive purge scans the table; a partial index is an open follow-up.
 
