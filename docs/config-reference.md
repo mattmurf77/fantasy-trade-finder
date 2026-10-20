@@ -95,6 +95,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
 - [Flags — Trade generation pipeline v2 (matchmaking research — ships dark)](#flags-trade-generation-pipeline-v2-matchmaking-research-ships-dark)
 - [Flags — Trade presentment rules (G6 2026-08-16 — ships ON)](#flags-trade-presentment-rules-g6-2026-08-16-ships-on)
 - [Flags — Value-core trade engine (2026-09-30, ships **OFF**)](#flags--value-core-trade-engine-2026-09-30-ships-off)
+- [Flags — First-page store (P1, 2026-10-20, ships **OFF**)](#flags--first-page-store-p1-2026-10-20-ships-off)
 - [Flags — Send in Sleeper (flagged beta)](#flags-send-in-sleeper-flagged-beta)
 - [Flags — Team overhaul (ships dark)](#flags-team-overhaul-ships-dark)
 - [Flags — Account auth (account-auth plan P2 — ships dark)](#flags-account-auth-account-auth-plan-p2-ships-dark)
@@ -124,6 +125,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
   - [Board-override pins — `ranking_service._DEFAULT_CFG`, DB-seeded](#board-override-pins-ranking_service_default_cfg-db-seeded)
   - [Forced deck regeneration — `backend/server.py`, DB-seeded](#forced-deck-regeneration-backendserverpy-db-seeded)
   - [Paged trade responses (E2) — `backend/server.py`, DB-seeded](#paged-trade-responses-e2-backendserverpy-db-seeded)
+  - [First-page store (P1, flag `trade.first_page_store`) — `backend/server.py`, DB-seeded](#first-page-store-p1-flag-tradefirst_page_store--backendserverpy-db-seeded)
   - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
   - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
   - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
@@ -363,6 +365,14 @@ Scope block: [value-core-engine/scope.md](plans/value-core-engine/scope.md) · [
 2. **Narrow it (deploy-free):** `vc_testers_only` → `1` via `scripts/set_knob.py` / `PUT /api/admin/config/vc_testers_only` returns serving to the tester allowlist.
 
 **Graduation** (operator decision; all four required): the bench guardrails pass on every frozen bench league; the operator's blind grade averages ≥ 4.0; that grade beats the incumbent's served cards on the same bench; two weeks of tester-only serving show no rise in trade-job errors. Procedure: [runbook § Value-core bench](runbook.md#value-core-bench-freeze--run--recall--blind-grade).
+
+## Flags — First-page store (P1, 2026-10-20, ships **OFF**)
+
+Scope block: `docs/plans/trade-time-to-suggestion/scope-eng-200ms.md` §2, §6.2, §7 (branch `plan/trades-200ms-eng-scope`). Table: [`trade_page_store`](data-dictionary.md#trade_page_store). Knobs: [First-page store](#first-page-store-p1-flag-tradefirst_page_store--backendserverpy-db-seeded).
+
+| Flag | Default | Gates |
+|---|---|---|
+| `trade.first_page_store` | **false** | ON ⇒ (1) every complete **organic** trade job (no pins, no opponent scope, no intent, not replenishment, not the demo league; a forced organic job counts) stores its first `trade_pages_stored` × `trade_page_size` cards in `trade_page_store`, with its roster fingerprint, values snapshot id, engine version and request signature; (2) `POST /api/trades/generate` with `page: 1` and an organic body serves page 1 from that row before the job cache, per scope §6.2: all stamps equal ⇒ the page (`serve_source: "page"`, `freshness_state: "fresh"`); roster or values moved ⇒ the I-1-filtered page, `"updating"`, and a rebuild; engine or config moved, or the stored cards expired ⇒ today's path; a failed check (including a league with no stored `league_members` rows: **strict I-1**) ⇒ no cards, `"updating"`, and a rebuild. A rebuild is also kicked when no fresh or matching running job backs the page in this process (after a restart or an input change); (3) `GET /api/trades/status` with `cursor` on a page-served deck's job id serves the stored pages after the cursor; (4) paged responses carry `prefetch_remaining`; (5) `on_roster_change` kicks a debounced rebuild for the league's stored pages whose viewer has a live session; (6) the cleanup loop evicts rows. OFF ⇒ the table is never read or written and every response is byte-identical to the S0+E2 base (`backend/tests/test_trade_page_flag_off.py`). Not on any launched-defaults list (D-166). The mobile client does not read the flag: it reads the response shape. **Rollback:** set it `false` in `config/features.json` (or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`; stored rows go dormant and are never served. **Graduation** (scope §2): device p95 ≤ 200 ms; C7 green; the measured bytes in scope §7 within the P23 budget; models-lead 13b. Read back the live features endpoint and one `trade-page … served source=page` log line after the flip (G-016). |
 
 ## Flags — Send in Sleeper (flagged beta)
 
@@ -870,6 +880,18 @@ exhibits the behaviour it is supposed to record, so the proof cannot rot.
 | Key | Default | Meaning |
 |---|---|---|
 | `trade_page_size` | 30.0 | Max cards in one opt-in paged response: `POST /api/trades/generate` with `page: 1`, and `GET /api/trades/status` with `cursor` ([api-reference](api-reference.md#opt-in-paged-responses-e2-2026-10-20)). Read through `_deck_cfg` and clamped to 1–200 (NaN or infinity → 30). Unpaged (legacy) requests never read it. A change takes effect on the next request after `reload_config()`; like every `model_config` row it is part of the trade request signature, so changing it also misses the in-process deck cache once. |
+
+### First-page store (P1, flag `trade.first_page_store`) — `backend/server.py`, DB-seeded
+
+Read through `_deck_cfg` only while the flag is on (`trade_prefetch_remaining` also only on paged responses). Like every `model_config` row they are part of the trade request signature, so a change also misses stored pages once (their `config_signature` no longer matches) and the next search rebuilds them.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `trade_pages_stored` | 3.0 | Pages of `trade_page_size` cards stored per `trade_page_store` row (90 cards at the defaults). Clamped to 1–10. Scope §6.4: pages 2 and 3 are one round trip away; tunable within the §7 budget. |
+| `trade_prefetch_remaining` | 30.0 | Served as `prefetch_remaining` on paged `/api/trades/generate` and `/api/trades/status` responses: the client requests the next page when this many ready cards remain (at least one full page ahead, U3). Clamped to 1–200; the code default is `trade_page_size`. trades-pm sets the final number. |
+| `trade_prebuild_debounce_s` | 20.0 | `on_roster_change` page rebuilds: a key whose last roster-change rebuild was kicked less than this many seconds ago is skipped; its next serve sees the roster move and rebuilds. Clamped to 0–3600. |
+| `trade_page_store_evict_days` | 30.0 | The cleanup loop deletes rows whose `last_served_at` (or `built_at`, never served) is older than this. Clamped to 1–3650. |
+| `trade_page_store_max_bytes` | 262144000.0 | Then, while `SUM(stored_bytes)` exceeds this (250 MB, scope §7), it deletes least recently used rows. Both passes are bounded to 500 rows per tick. |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 
