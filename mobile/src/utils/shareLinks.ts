@@ -14,9 +14,14 @@
 //
 // The ladder NEVER throws and NEVER resolves to an empty url. Callers can
 // concatenate `.url` into a message body unconditionally.
+//
+// A MUTUAL match is tried first, outside the ladder: resolveTradeShareUrl
+// (build O8) asks the server for a /s/trade/<token> link and returns null on
+// failure, after which the caller runs the ladder as for any other trade.
 
 import { createSharePackage } from '../api/calc';
 import { getBaseUrl } from '../api/client';
+import { createTradeShare } from '../api/share';
 
 /** Which client surface produced the share. Closed enum — mirrors the
  *  `surface` prop registered in backend/analytics_taxonomy.py. Adding a
@@ -151,6 +156,28 @@ export async function resolveShareUrl(args: ResolveArgs): Promise<ResolvedShareU
   } catch {
     // Nothing above is allowed to break a share. Degrade, never fail.
     return floor;
+  }
+}
+
+/** A mutual match's share landing (build O8): <base>/s/trade/<token>, where
+ *  the token is minted server-side by POST /api/share/trade. The client
+ *  never builds /s/trade/ from a match id — that id is sequential, and the
+ *  server now answers every id with a generic "expired" page.
+ *
+ *  Returns the absolute URL WITHOUT a ?ref= suffix (the caller appends its
+ *  own), or null on ANY failure so the caller can fall back to the package
+ *  rung. NEVER throws. No client cache: the server mint is idempotent per
+ *  (match, sharer), so a repeat share gets the same link back. */
+export async function resolveTradeShareUrl(
+  matchId: string | number,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  try {
+    const res = await createTradeShare(matchId, signal);
+    if (res.outcome !== 'ok') return null;
+    return `${getBaseUrl()}${res.url}`;
+  } catch {
+    return null;
   }
 }
 
