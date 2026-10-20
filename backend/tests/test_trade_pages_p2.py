@@ -12,6 +12,7 @@ Pinned here, with the flag on:
     newer or running deck for the scope and no stale row;
   * every page-store serve has a backing job, and the debounce stops stacking;
   * the kickoff's `append_only` marker decides over the card markers;
+  * every paged card carries `trade_hash`, equal to its deck_impressions row's;
   * the legacy `job_id` + `cursor` form is unchanged; `deck` is validated.
 With the flag off, `deck` is ignored and every body is byte-identical to P1's
 base: each (status, body) sha256 equals a golden captured by running
@@ -27,7 +28,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
-from sqlalchemy import delete, insert, update
+from sqlalchemy import delete, insert, select, update
 
 import backend.database as db_module
 import backend.feature_flags as ff
@@ -395,18 +396,55 @@ def test_the_kickoff_stamps_append_only_from_owner_serve(p1, spawned, monkeypatc
 
 # ── trade_hash on every served card (the client's dedupe key) ───────────────
 
-@pytest.mark.xfail(strict=True, reason="served cards carry no trade_hash yet: P2 brief point "
-                   "reported to trades-eng, not built here")
+def _hash_of(c):
+    return server._deck_trade_hash([p["id"] for p in c["give"]], [p["id"] for p in c["receive"]],
+                                   c["target_user_id"])
+
+
 def test_every_served_card_carries_its_trade_hash(p1, spawned):
-    client, _, _ = p1
+    """The page-store serve, the stored slices (both forms), the live deck and
+    both rebased first pages (from a row and from a job)."""
+    client, engine, _ = p1
     deck = build_deck()
     served = (generate(client, page=1).get_json()["cards"]
               + deck_status(client, deck, 30).get_json()["cards"]
-              + deck_status(client, deck, 90).get_json()["cards"])
-    assert served
-    for c in served:
-        assert c["trade_hash"] == server._deck_trade_hash(
-            [p["id"] for p in c["give"]], [p["id"] for p in c["receive"]], c["target_user_id"])
+              + status(client, deck, 60).get_json()["cards"]
+              + deck_status(client, deck, 90).get_json()["cards"]
+              + status(client, deck, 90).get_json()["cards"])
+    restart()
+    served += deck_status(client, "gone", 0).get_json()["cards"]           # rebased: the row
+    job_id = run_job()
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id]["cards"] = [page_card(i + 300) for i in range(5)]
+    with engine.begin() as conn:
+        conn.execute(delete(db_module.trade_page_store_table))
+    rebased = deck_status(client, "gone", 0).get_json()                    # rebased: the job
+    assert rebased["deck_id"] == job_id and rebased["cards"]
+    served += rebased["cards"]
+    assert len(served) == 30 + 30 + 30 + 5 + 5 + 30 + 5
+    assert all(c["trade_hash"] == _hash_of(c) for c in served)
+    assert "trade_hash" not in stored_cards_of(job_id)                      # never stored
+
+
+def stored_cards_of(job_id):
+    """The job's published card keys: the hash is added at serve, never stored."""
+    with server._trade_jobs_lock:
+        return {k for c in server._trade_jobs[job_id]["cards"] for k in c}
+
+
+def test_trade_hash_equals_the_impression_rows(p1, spawned):
+    """A real deck with F1 on: every served card's hash is its deck_impressions row's."""
+    client, engine, _ = p1
+    with patch.object(server, "_deck_signal_v2_enabled", lambda: True):
+        deck = run_job()
+    assert stored()["deck_job_id"] == deck and stored()["card_count"] > 0
+    with engine.connect() as conn:
+        rows = {r.impression_id: r.trade_hash
+                for r in conn.execute(select(db_module.deck_impressions_table))}
+    for body in (generate(client, page=1).get_json(), deck_status(client, deck, 0).get_json()):
+        assert body["cards"]
+        for c in body["cards"]:
+            assert c["trade_hash"] == rows[c["impression_id"]]
 
 
 # ── Validation and the legacy form ──────────────────────────────────────────

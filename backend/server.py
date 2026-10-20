@@ -3364,7 +3364,8 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
 
     P2: while trade.first_page_store is on, the kickoff's `append_only`
     stamp, when the job has one, decides instead of the card markers; jobs
-    admitted without it keep the card check.
+    admitted without it keep the card check. Every served card then carries
+    its `trade_hash` (_with_trade_hash).
     """
     raw = job.get("cards") or []
     marker = job.get("append_only") if _trade_page_store_enabled() else None
@@ -3384,7 +3385,20 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
         out["search_id"] = search_id
     if _trade_page_store_enabled():
         out["prefetch_remaining"] = _trade_prefetch_remaining()
+        out["cards"] = _with_trade_hash(out["cards"])
     return out
+
+
+def _with_trade_hash(cards: list) -> list:
+    """P2 (flag trade.first_page_store, paged responses only): each card plus
+    its `trade_hash`, the F1 card identity the impression writer stores in
+    deck_impressions.trade_hash (_deck_trade_hash over the same give,
+    receive and partner ids). The client dedupes rebased pages by it.
+    Copies; never mutates the published or stored card."""
+    return [{**c, "trade_hash": _deck_trade_hash([p["id"] for p in c.get("give", [])],
+                                                [p["id"] for p in c.get("receive", [])],
+                                                c.get("target_user_id"))}
+            for c in cards]
 
 
 # ── P1 first-page store (flag trade.first_page_store) ─────────────────────────
@@ -3638,7 +3652,7 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     end = min(len(pages["cards"]), cursor + _trade_page_size())
     cards = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
     if cards:
-        cards = _filter_cards_to_current_owners(cards, league_id, viewer_id, snap=snap)
+        cards = _with_trade_hash(_filter_cards_to_current_owners(cards, league_id, viewer_id, snap=snap))
     opponents = pages.get("opponents_total") or 0
     out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
            "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,
