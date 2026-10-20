@@ -130,6 +130,9 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when
     page N is fronted; the P30 card never renders while a page is pending and has no Like/Pass
     (AC-L4);
+  - no "Find more trades" button on the deck once U3 is on, and Retry only in the error and offline
+    states (D13); P30's "Adjust" runs its search in place and emits R1 (D14(a)); and no third
+    action or new-trades notice on the P30 card (D14(c));
   - **the hidden ms readout** reads R2's `ms_from_tap` and no other timer, and renders only behind the
     Testing gate (`__DEV__ || testing.stage_users`), applied in the component itself because the
     route is deep-linkable (prd §9.5).
@@ -163,7 +166,7 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   (platforms-pm evidence plan).
 - [ ] **Waived:** no.
 - `testID`s added or renamed: **BUILD OBLIGATION.** Every §4.1 control needs a stable testID for the
-  guard. Most already have one (`calc.action.find-a-trade`, `trades.find-btn`, `home.tile.find-trade`,
+  guard. Most already have one (`calc.action.find-a-trade`, `trades.find-btn` until D13 removes it, `home.tile.find-trade`,
   `league.action.find`, `matches.go-to-trades`, `calc.find-a-trade`). They must pass `mobile/scripts/testid-lint.sh`.
 
 ## 4. Docs scope (MANDATORY: HLD / LLD / API)

@@ -119,7 +119,8 @@ table A, and so does the clock.
 | Control (testID) | file:line | Search it runs | Notes |
 |---|---|---|---|
 | Canvas **Find a Trade** (`calc.action.find-a-trade`) on the Acquire builder | `mobile/src/components/InLeagueCalculator.tsx:1313-1342`, hosted at `screens/TradesScreen.tsx:8010-8018`. Handler `handleInlineFindATrade` `TradesScreen.tsx:3414` pushes a new `TradeDeck` (`:3429-3445`) | Empty or receive-only canvas → model deck (`POST /api/trades/generate`, then `GET /api/trades/status` polling). Canvas with a give side → synchronous `POST /api/trades/fair-packages` (`utils/canvasSearch.ts:41-68`) | **The primary entry.** Organic = empty canvas, no partner. A stack push is on the critical path. |
-| Deck **Find more trades** (`trades.find-btn`) | `TradesScreen.tsx:7601-7614`, `:7803-7816` → `handleFindTrades` `:1213` | model deck | A repeat search from inside a deck |
+| ~~Deck **Find more trades** (`trades.find-btn`)~~ | `TradesScreen.tsx:7601-7614`, `:7803-7816` → `handleFindTrades` `:1213` | model deck | **Leaves table A (D13 adopted; trades-pm decision, 2026-10-20; head-product to accept).** The button is removed from the deck once U3 ships; until then its taps are measured, not gated. Retry stays only in the error and offline states |
+| P30 card **Adjust what I'm looking for** | the P30 end card (§4.7) | Opens the deck's own preferences (fairness and filters); the changed search runs **in place** | **Search-starting (D14(a)):** the clock starts at the tap that applies the change, and the AC-L1 cells apply |
 | In-deck retries | error retry `TradesScreen.tsx:6403`/`:9066`, prefs strip `:6991`, summary unpin `:3915`, search-all `:3933` | model deck | Same choke point (`:3269-3354`) |
 | Handoff auto-runs | League Summary Offer/Target `screens/LeagueSummaryScreen.tsx:1281-1300`; Usage Trends "Trade" / "Find a trade for {player}" `components/UsageTrendCard.tsx:159`, `UsageStatsTable.tsx:169`, `UsageLeagueList.tsx:96` → `screens/UsageTrendsScreen.tsx:251-268`. Consumed at `TradesScreen.tsx:3195-3249` | pinned / partner-scoped model deck | Not organic. A Usage Trends handoff with no opponent dispatches **nothing**: the model auto-run needs a scoped opponent unless the origin is the calculator (`TradesScreen.tsx:3319-3347`). It lands on the builder. |
 | Dead or dark today | calculator merged `onFindATrade` `screens/TradeCalculatorScreen.tsx:830-871` (needs `calc.inline_home` off); TodaysTrade `hooks/usePresentationDeck.ts:76` (flag off); `TradeFinderHubScreen` (not registered, `navigation/TabNav.tsx:38,446`); first-run auto-start `TradesScreen.tsx:2385-2404` (skipped while results-push is live, `:2392`) | — | Join table A if they come back |
@@ -296,7 +297,7 @@ U2 and U4 are in §5.5. These requirements are product's; eng chooses how to mee
   |---|---|
   | Canvas Find a Trade (`calc.action.find-a-trade`), the primary | **Instant route:** keep the push and its back stack (D-171 rulings 2–4) with `animation: 'none'`. **Fallback, eng's choice by device measurement:** if mounting the screen alone breaks AC-L1, render a full-screen deck layer on `TradesHome` that looks and behaves identically |
   | D10 controls (Home tile, League Home ×2, Matches empty state), only if the operator approves D10 | **Instant route:** a tab switch plus the [builder → deck] stack in one dispatch, with no animation and no visible builder frame |
-  | In-deck searches (`trades.find-btn`, error retry, prefs strip, unpin, search-all) | **In place:** the deck's contents are replaced, with no navigation. ux-lead recommends removing "Find more trades" once U3 ships (D13) |
+  | In-deck searches (error retry, prefs strip, unpin, search-all, and P30's "Adjust what I'm looking for") | **In place:** the deck's contents are replaced, with no navigation. "Find more trades" is removed once U3 ships (D13 adopted) |
   | Hand-off auto-runs (League Summary Offer/Target, Usage Trends "Trade") | **Instant route.** Pinned searches aren't pre-built. If no page exists, the honest Loading state shows in the card rect. Measured, not gated (D1) |
   | Deep link `app/trades/finder`, inbox arrivals | **Instant route.** Measured, not gated |
   | First run (U5) | Unchanged: the builder, then the canvas tap uses the instant route |
@@ -348,7 +349,15 @@ U2 and U4 are in §5.5. These requirements are product's; eng chooses how to mee
     - Actions: **Adjust what I'm looking for** and **Back to Home**. No Like or Pass.
     - Visual spec: design-lead's P30 card (same rect, EmptyState construction, Primary and
       Secondary).
-    - This replaces the earlier call to reuse the existing end-of-deck tally.
+    - **D14 (trades-pm decision, 2026-10-20; head-product to accept):**
+      - **(a)** "Adjust what I'm looking for" opens the deck's own preferences (fairness and
+        filters), per ux-lead, and the changed search runs in place. That is a search-starting
+        action, measured under the §4 clock; the AC-L1 cells apply.
+      - **(b)** D-171 ruling 4's end-of-deck tally **stays** on the P30 card as one chalk-dim line,
+        which design-lead places. Retiring it would amend an operator ruling.
+      - **(c)** No third action and no notice. New candidates that arrive behind the P30 card aren't
+        announced; they appear on the next search, including one started by "Adjust". P30's copy
+        and two actions are unchanged.
   - Offline uses the Screen-states offline state.
   - **The only permitted wait card** is U5's "Building your first trades", for a brand-new account
     whose first page doesn't exist yet. It counts against the p95, and its design target is that it
@@ -363,7 +372,7 @@ U2 and U4 are in §5.5. These requirements are product's; eng chooses how to mee
   | 2 | Online; a next-page fetch fails while the device still holds at least one page | **Nothing** | Silent background retry with backoff |
   | 3a | **Offline**, and the user reaches the last card on the device | The Offline state in the card rect, e.g. "You're offline. More trades load when you're back online." | No spinner, no "finding". Retry is Secondary. On reconnect the next page appends automatically and replaces the offline card in place. Reported separately; **doesn't fail AC-L4** |
   | 3b | **Online, but the fetch keeps failing**, and the user reaches the last card | The recoverable Error state in the card rect: "Couldn't load more trades" plus **Try again** | It must end, and Back stays usable. **Reaching 3b while online is a prefetch failure under AC-L4** |
-  | 4 | **The genuine end (P30)**: every candidate seen or acted on, and no page pending. Rows 1–3 take precedence | The P30 final card | Static. New candidates arriving while it shows are placed **behind** it, and it never swaps under the user's thumb. Open items in D14 |
+  | 4 | **The genuine end (P30)**: every candidate seen or acted on, and no page pending. Rows 1–3 take precedence | The P30 final card, with the D-171 tally as one chalk-dim line (D14(b)) | Static. New candidates arriving while it shows are placed **behind** it and are not announced. They appear on the next search (D14(c)); it never swaps under the user's thumb |
   | 5 | **Offline at the tap** | With a device-held first page inside the bounds: cards, plus the refresh-failed line at once. Without one: the Offline state at once, in the card rect | Offline taps are excluded from the p95 cells (`network_type=offline`) and reported. Never a wait |
   | 6 | Network lost during Like/Pass | The card's controls never go dead | A failed like or send shows on the card and keeps the user's choice (`check-swipe-failure-recovery.js`) |
 
@@ -776,6 +785,10 @@ them, models-lead's sign-off follows the two-line packet route in R.a (ii).
 - asserts no animated push or transition on any search-starting route or in-place reveal (AC-L2);
 - asserts no "Finding more" component or copy on the Find a trade path, and that the page N+2
   request starts when page N is fronted (AC-L4);
+- asserts the deck renders no "Find more trades" button once U3 is on, and Retry only in the error
+  and offline states (D13);
+- asserts the P30 card's "Adjust" applies its change in place and emits R1 like any search start
+  (D14(a)), and that the card renders no third action and no new-trades notice (D14(c));
 - asserts the hidden readout (§9.5) reads R2's `ms_from_tap` and nothing else, and renders only
   behind the Testing gate.
 
@@ -834,8 +847,9 @@ and skip the second (canvas) tap in steps 1 and 3.
    On the same recording, count transition frames **separately**. **Expect:** zero; the card is
    revealed in place or by an instant, non-animated route (U1, AC-L2). Fail if any slide-in or fade
    plays.
-2. Go back to the builder and tap canvas Find a Trade again (repeat tap). **Expect:** ≤ 200 ms. Then,
-   inside the deck, tap **Find more trades** (`trades.find-btn`). **Expect:** ≤ 200 ms.
+2. Go back to the builder and tap canvas Find a Trade again (repeat tap). **Expect:** ≤ 200 ms.
+   Once U3 is on, the deck shows **no "Find more trades" button**; Retry appears only in the error
+   and offline states (D13).
 3. Reach the builder from every other table B control: League Home **Find a trade** (both
    buttons), the Matches empty-state CTA, and the calculator's "Find a trade →" row. For each:
    **record** tap → builder, then tap canvas Find a Trade with an empty canvas. **Expect:**
@@ -918,8 +932,14 @@ authority):
   - the P30 final card, in the same rect: "You've seen every trade we have for now. New ideas show
     up as rosters and values change.";
   - **Adjust what I'm looking for** and **Back to Home**, with no Like or Pass;
+  - the end-of-deck tally as one chalk-dim line (D14(b));
   - it never appears while a page is still loading;
-  - with VoiceOver on, focus moves to it and its copy is read once.
+  - with VoiceOver on, focus moves to it and its copy is read once;
+  - no "new trades" notice while it shows (D14(c)).
+
+  Then tap **Adjust what I'm looking for**. **Expect:** the deck's own preferences (fairness and
+  filters) open. Change one and apply it. **Expect:** the changed search runs in place, with no
+  navigation. Record the readout from the apply tap; it falls under AC-L1 (D14(a)).
 - **L2c. Page end offline and on error** (ux-lead rows 3a and 3b). Turn on Airplane Mode and swipe to
   the last loaded card. **Expect:** the Offline card, and on reconnect the next trade replaces it in
   place. Then, if a fault-injection build exists, force a fetch failure while online. **Expect:**
@@ -1177,7 +1197,7 @@ Review status as of 2026-10-15, folded in. The 2026-10-20 launch revision adds t
 | **onboarding-pm** | D10's first-run limit, F-4's guide interplay, and the P12 privacy-label check for `network_type` and `search_id` | **Needed** (raised by ux-lead and analytics-lead) |
 | **marketing-lead** | Copy for the updating, withdrawn, refresh-failed, offline and gate-miss lines, and the calculator-row relabel (through head-product) | **Needed** (design-lead 5, D10) |
 | DB-storage task owner + head-eng | Footprint (§10.4) against the storage budget (AC-11, AC-L8, P23) | Before any persistent cache expands |
-| **ux-lead (launch)** | U1 per entry point, and the U3 six-state table with VoiceOver rules | **Delivered 2026-10-20 and folded** (§4.7, AC-L2, AC-L4). Open: D13, plus D14 for trades-pm |
+| **ux-lead (launch)** | U1 per entry point, and the U3 six-state table with VoiceOver rules | **Delivered 2026-10-20 and folded** (§4.7, AC-L2, AC-L4). D13 is adopted and D14 decided by trades-pm, pending head-product's acceptance |
 | **design-lead (launch)** | The U1 visual spec with the deck motion exemption, the P30 end card, and the U5 card | **Delivered 2026-10-20 and cited** (§4.7). The visual specs stay design-lead's. Owed: the `components.md` rows and the Motion exemption |
 | **analytics-lead (launch)** | AC-L1 measurement terms; the R5 page-end readiness prop (AC-L4); confirming AC-9c works from DEC-2 narrow rows | **T1–T6 folded** into AC-L1. R5 grant needed before the emitter |
 | **models-lead (launch, through head-bizops)** | Confirm Calibration and AC-9c readouts work from DEC-2 narrow rows | Confirmation, not a blocker |
@@ -1256,6 +1276,12 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 4. **AC-L4's measure:** zero page ends without the next page in the deck, across all test sessions.
    Telemetry R5 is requested from analytics-lead (§4.6).
 5. **The hidden ms readout** is specified in §9.5. head-eng decides the build.
+6. **D13, adopted** (head-product to accept): remove the deck's "Find more trades" once U3 ships.
+   Retry stays only in the error and offline states, and `trades.find-btn` leaves table A.
+7. **D14, decided** (head-product to accept):
+   - (a) "Adjust" opens the deck's preferences, and the search runs in place under the §4 clock.
+   - (b) The D-171 tally stays on the P30 card as one chalk-dim line.
+   - (c) No third action or notice; new candidates appear on the next search.
 
 ## Decisions needed (operator)
 
@@ -1273,8 +1299,8 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 | D10 | Should a table B control (Home tile, League, Matches, calculator row) start a search and show cards directly, instead of opening the builder? | **Yes for onboarded users** on the Home tile, League ×2 and Matches. First-run keeps the builder (onboarding-pm signs off). The stack is builder → pushed deck, using `push`, not `navigate`. The calculator row stays navigation-only and is relabelled (design-lead; copy via head-product → marketing-lead). A Home tile preview is an optional follow-up (design-lead). **The operator's call, because it amends D-171.** Alternative: keep D-171 and relabel table B (ux-lead, design-lead). |
 | D11 | Where does the "updating" state sit? design-lead proposes a trailing header-row label; ux-lead proposes the progress-strip slot | **design-lead and ux-lead settle it jointly before any UI build**, within §5.4's seven shared constraints (trades-pm decision, 2026-10-15). |
 | D12 | Calibration integrity before the round-3 read (2026-11-05): hold any fast path until then, or pin Calibration's current-arm sampling to the fresh path? | Either satisfies AC-9e (models-lead R.b). Impressions carry a serve-path tag in both cases. **Proposed:** pin the sampling to the fresh path if a fast path is ready before 2026-11-05; otherwise the date passes first. models-lead confirms; the operator decides. |
-| D13 | Remove the deck's "Find more trades" button once U3 ships? | **ux-lead, launch: yes.** The deck never ends and refreshes itself, so a "more" button that restarts the search is mislabelled (P4). Retry stays only in the error and offline states. trades-pm or head-product confirms. If adopted, `trades.find-btn` leaves table A and TF step 2 changes. |
-| D14 | P30 open items, for trades-pm (raised by ux-lead and design-lead) | Three items, all open: <br>**(a) Destination of "Adjust what I'm looking for".** ux-lead recommends the deck's preferences (fairness and filters), so a changed search runs in place. <br>**(b) D-171 ruling 4's end-of-deck tally.** Keep it on the P30 card, or retire it? <br>**(c) New candidates arriving behind the P30 card.** Does the card gain a third action ("See new trades")? Design asks that any notice be one chalk-dim line on the card, never a toast or animation. |
+| D13 | Remove the deck's "Find more trades" button once U3 ships? | **Adopted (trades-pm decision, 2026-10-20; head-product to accept).** Removed once U3 ships, because a "more" button that restarts the search is mislabelled when the deck never ends (ux-lead, launch). Retry stays only in the error and offline states. `trades.find-btn` leaves table A, TF step 2 checks that it's absent, and the §9.1 guard asserts it. |
+| D14 | P30 open items (raised by ux-lead and design-lead) | **Decided (trades-pm decision, 2026-10-20; head-product to accept):** <br>**(a)** "Adjust what I'm looking for" opens the deck's own preferences (fairness and filters), and the changed search runs in place. It's search-starting, measured under the §4 clock (AC-L1 cells). <br>**(b)** Keep D-171 ruling 4's end-of-deck tally on the P30 card as one chalk-dim line (design-lead places it); retiring it would amend an operator ruling. <br>**(c)** No third action and no notice: new candidates behind the P30 card appear on the next search. P30's copy and actions are unchanged. |
 
 ## Handoffs
 
