@@ -3530,6 +3530,22 @@ def _store_trade_page(job_id: str) -> bool:
         return False
 
 
+def _mark_trade_pages_stale(marked_at: float, *, user_id: str | None = None,
+                            league_id: str | None = None) -> None:
+    """P1: an input change makes the stored pages it touches stale (one
+    bounded UPDATE). Call with _trade_jobs_lock released. `marked_at` is
+    taken before the in-process fence, so the supersede guard also refuses a
+    deck admitted before the change. Flag off ⇒ no-op. Never raises."""
+    if not _trade_page_store_enabled():
+        return
+    from . import database as _db
+    try:
+        _db.mark_trade_pages_stale(marked_at=_db.page_store_iso(marked_at),
+                                   user_id=user_id, league_id=league_id)
+    except Exception as err:
+        log.warning("trade-page stale mark failed (user=%s league=%s): %s", user_id, league_id, err)
+
+
 def _trade_current_snapshot(league_id: str, scoring_format: str):
     """(roster_snapshot, vsn1) read now, or None on a failed read: the one read
     behind S0's fingerprints and P1's serve, whose I-1 reuses the snapshot."""
@@ -3605,13 +3621,17 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
     """§6.2 for /generate `page: 1`. The response body, or None to fall through
     to today's path (engine or config moved, or the stored cards expired).
 
+    A page is "updating" when its row is marked stale (an input change:
+    rankings, preferences, dispositions, rosters; _mark_trade_pages_stale) or
+    its roster or values stamp moved.
+
     `current` is the caller's _trade_current_snapshot(); `kick()` starts (or
     joins, preserve_running) the organic rebuild and returns its job id. A
     rebuild is kicked when a check fails, and whenever no fresh or matching
     running job backs the page in this process: after a restart, after an
     input change revoked it, and always when the page is stale (a job on the
-    current fingerprints is either running already, and joined, or absent).
-    The page serves now; the rebuild replaces it for the next request.
+    current inputs is either running already, and joined, or absent). The
+    page serves now; the rebuild replaces it, `ready`, for the next request.
     """
     from . import database as _db
     started = time.perf_counter()
@@ -3639,7 +3659,8 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
             job_id=job_id, status=job.get("status", "running"), error=job.get("error"),
             opponents=(job.get("opponents_done", 0), job.get("opponents_total", 0)),
             cursor=0, total_ready=0, freshness="updating", search_id=search_id)
-    if snap.fp != row["roster_fp"] or vsn != row["values_snapshot_id"]:
+    if (row["state"] == "stale" or snap.fp != row["roster_fp"]
+            or vsn != row["values_snapshot_id"]):
         out["freshness_state"] = "updating"
     if not has_current_job:
         kick()
@@ -3668,7 +3689,7 @@ def _trade_page_status_view(row: dict, cursor: int, sess: Mapping) -> dict:
     except Exception as err:
         log.warning("trade-page %s: check unavailable, serving no cards: %s", row["deck_job_id"], err)
         return _trade_page_past_stored(row, cursor, freshness="updating")
-    if snap.fp != row["roster_fp"]:
+    if row["state"] == "stale" or snap.fp != row["roster_fp"]:
         out["freshness_state"] = "updating"
     return out
 
@@ -9754,7 +9775,12 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
     one. Jobs consuming this member's inputs retain the same scoped token.
     Selected jobs are fenced too even though they have no cache pointer.
     Durable offer IDs and the session's action store are never replaced here.
+
+    P1 (flag trade.first_page_store): the stored pages the change affects are
+    then marked stale, after the lock is released: the user's rows, or a
+    league-scoped change's whole league.
     """
+    marked_at = time.time()   # before the fence: decks admitted earlier never write
     dropped = 0
     with _trade_jobs_lock:
         token = _trade_input_epochs.pop((user_id, league_id), None)
@@ -9772,6 +9798,10 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
             if _trade_jobs_by_key.get(key) == job.get("job_id"):
                 _trade_jobs_by_key.pop(key)
                 dropped += 1
+    if league_id is None:
+        _mark_trade_pages_stale(marked_at, user_id=user_id)
+    else:
+        _mark_trade_pages_stale(marked_at, league_id=league_id)
     return dropped
 
 
@@ -9782,11 +9812,16 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
     a new member epoch and read old stored rankings before this write commits;
     the final fence closes that gap, including failed or uncertain writes.
     Ordinary initialization and database writers do not use this helper.
+    P1: league-mates' decks read the published board, so the league's stored
+    pages are marked stale too.
     """
     try:
         return upsert_member_rankings(user_id=user_id, **kwargs)
     finally:
+        marked_at = time.time()
         _invalidate_trade_jobs(user_id=user_id)
+        if kwargs.get("league_id"):
+            _mark_trade_pages_stale(marked_at, league_id=kwargs["league_id"])
 
 
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):

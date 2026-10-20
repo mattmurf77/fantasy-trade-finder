@@ -580,6 +580,115 @@ def test_session_init_warm_up_is_page_eligible(init_harness, monkeypatch, spawne
             server._trade_jobs_by_key.pop(key, None)
 
 
+# ── Input changes make pages stale (lead review A) ──────────────────────────
+# Every _invalidate_trade_jobs call marks rows stale after the job lock is
+# released (user scope: the user's rows; league scope: the league's rows), and
+# a board publish also marks the league, whose decks read that board.
+
+def _vote(client):
+    response = client.post("/api/rank3", headers=HEADERS, json={"ranked": ["g1", "g2", "r1"]})
+    assert response.status_code == 200, response.get_json()
+
+
+def _other_league_row():
+    db_module.save_trade_page({**_row(time.time(), "elsewhere"), "league_id": "league_other"})
+
+
+def _state(league_id=LEAGUE):
+    row = db_module.load_trade_page(UID, league_id, "1qb_ppr", SCOPE)
+    return row["state"]
+
+
+def test_a_vote_makes_the_next_serve_updating_until_a_rebuild_lands(p1, spawned):
+    client, _, _ = p1
+    build_page()
+    _vote(client)
+    assert _state() == "stale"
+    body = generate(client, page=1).get_json()
+    assert (body["serve_source"], body["freshness_state"]) == ("page", "updating")
+    assert ids(body["cards"]) == [f"p1-{i:03d}" for i in range(30)]
+    assert len(spawned) == 1                          # the rebuild
+    rebuilt = run_job(force_fresh=True)               # a deck on the voted board lands
+    assert _state() == "ready" and stored()["deck_job_id"] == rebuilt
+    body = generate(client, page=1).get_json()
+    assert (body["job_id"], body["freshness_state"]) == (rebuilt, "fresh")
+
+
+def test_the_stale_mark_survives_a_restart(p1, spawned):
+    client, _, _ = p1
+    build_page()
+    _vote(client)
+    server._trade_jobs.clear()                        # the daily worker kill
+    server._trade_jobs_by_key.clear()
+    server._trade_input_epochs.clear()
+    body = generate(client, page=1).get_json()
+    assert (body["serve_source"], body["freshness_state"]) == ("page", "updating")
+    assert len(spawned) == 1
+
+
+def test_a_league_scoped_change_marks_only_that_league(p1, spawned):
+    """The awaiting-dismiss shape: a partner's league-scoped invalidation."""
+    client, _, _ = p1
+    build_page()
+    _other_league_row()
+    server._invalidate_trade_jobs(user_id=OPP, league_id=LEAGUE)
+    assert (_state(), _state("league_other")) == ("stale", "ready")
+    assert generate(client, page=1).get_json()["freshness_state"] == "updating"
+
+
+def test_a_partners_board_publish_marks_the_league(p1, spawned):
+    build_page()
+    _other_league_row()
+    server._publish_member_rankings_for_trade_refresh(
+        user_id=OPP, league_id=LEAGUE, rankings=[{"player_id": "r1", "elo": 1510.0}],
+        scoring_format="1qb_ppr")
+    assert (_state(), _state("league_other")) == ("stale", "ready")
+
+
+def test_a_user_scoped_change_marks_every_league_of_that_user(p1, spawned):
+    build_page()
+    _other_league_row()
+    server._invalidate_trade_jobs(user_id=UID)
+    assert (_state(), _state("league_other")) == ("stale", "stale")
+
+
+def test_a_rebuild_in_flight_at_the_mark_never_writes(p1, spawned):
+    client, _, _ = p1
+    build_page()
+    inflight = run_job(synchronous=False, force_fresh=True)   # admitted before the vote
+    admitted = server._trade_jobs[inflight]["page_built_at"]
+    _vote(client)
+    # In process: the epoch fence revoked it, so its completion stores nothing.
+    assert server._store_trade_page(inflight) is False
+    # In the DB: the mark advanced built_at, so even a write that slipped past
+    # the in-process check before the vote is refused by the supersede guard.
+    late = {**_row(admitted, inflight), "roster_fp": stored()["roster_fp"]}
+    assert db_module.save_trade_page(late) is False
+    assert _state() == "stale" and stored()["deck_job_id"] != inflight
+    run_job(force_fresh=True)                                  # admitted after it
+    assert _state() == "ready"
+
+
+def test_stale_marks_never_run_under_the_job_lock(p1, spawned, monkeypatch):
+    """T4-style audit: every mark records whether _trade_jobs_lock was held."""
+    client, _, _ = p1
+    build_page()
+    seen = []
+    real = db_module.mark_trade_pages_stale
+
+    def audited(**kwargs):
+        seen.append((kwargs.get("user_id"), kwargs.get("league_id"),
+                     server._trade_jobs_lock.locked()))
+        return real(**kwargs)
+
+    monkeypatch.setattr(db_module, "mark_trade_pages_stale", audited)
+    _vote(client)                                                    # user + publish
+    server._invalidate_trade_jobs(user_id=OPP, league_id=LEAGUE)     # league scope
+    roster_snapshot.on_roster_change(LEAGUE, "rfp1:old", "rfp1:new")  # S0's handler
+    assert {(user, league) for user, league, _ in seen} >= {(UID, None), (None, LEAGUE)}
+    assert [entry for entry in seen if entry[2]] == []
+
+
 # ── Eviction ────────────────────────────────────────────────────────────────
 
 def _days_ago(days):

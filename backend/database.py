@@ -28,7 +28,7 @@ except ImportError:                # pragma: no cover
 
 from sqlalchemy import (
     Column, Float, Index, Integer, LargeBinary, MetaData, String, Table, Text, UniqueConstraint,
-    create_engine, delete, func, insert, literal, or_, select, update, and_, text,
+    case, create_engine, delete, func, insert, literal, or_, select, update, and_, text,
 )
 from sqlalchemy import event as sa_event
 from sqlalchemy.types import TypeDecorator
@@ -1161,7 +1161,10 @@ class CompressedJSON(TypeDecorator):
 # the flag is on. user_id is the account deletion/export key
 # (accounts._ADDITIONAL_PRIVATE_TABLES). Upserted by save_trade_page with a
 # supersede guard: a row is replaced only by one built at the same time or
-# later. evidence_blob is reserved for the packed-evidence piece (NULL in P1).
+# later. An input change (rankings, preferences, dispositions, rosters) marks
+# rows state='stale' and advances built_at to the change (mark_trade_pages_stale),
+# so no deck admitted before it can overwrite the mark. evidence_blob is
+# reserved for the packed-evidence piece (NULL in P1).
 trade_page_store_table = Table("trade_page_store", metadata,
     Column("id",                 Integer, primary_key=True, autoincrement=True),
     Column("user_id",            String,  nullable=False),
@@ -1180,7 +1183,7 @@ trade_page_store_table = Table("trade_page_store", metadata,
     Column("pages_blob",         CompressedJSON, nullable=False),  # {"v", "opponents_total", "cards"}
     Column("evidence_blob",      LargeBinary, nullable=True),
     Column("stored_bytes",       Integer, nullable=False),   # len(pages_blob) + len(evidence_blob)
-    Column("state",              String,  nullable=False),   # "ready"
+    Column("state",              String,  nullable=False),   # "ready" | "stale"
     UniqueConstraint("user_id", "league_id", "scoring_format", "request_scope",
                      name="uq_trade_page_store_scope"),
 )
@@ -7012,6 +7015,23 @@ def touch_trade_page(page_id: int, served_at: str) -> None:
     t = trade_page_store_table
     with engine.begin() as conn:
         conn.execute(update(t).where(t.c.id == page_id).values(last_served_at=served_at))
+
+
+def mark_trade_pages_stale(*, marked_at: str, user_id: str | None = None,
+                           league_id: str | None = None) -> int:
+    """One bounded UPDATE after an input change: every row of `user_id` (all
+    its leagues), or every row in `league_id`. Sets state='stale' and advances
+    built_at to `marked_at`, so the supersede guard refuses any deck admitted
+    before the change. Returns the rows marked."""
+    if (user_id is None) == (league_id is None):
+        raise ValueError("exactly one of user_id, league_id")
+    t = trade_page_store_table
+    scope = t.c.user_id == user_id if user_id is not None else t.c.league_id == league_id
+    with engine.begin() as conn:
+        return conn.execute(update(t).where(scope).values(
+            state="stale",
+            built_at=case((t.c.built_at < marked_at, marked_at), else_=t.c.built_at),
+        )).rowcount or 0
 
 
 def list_trade_pages_for_league(league_id: str) -> list[dict]:

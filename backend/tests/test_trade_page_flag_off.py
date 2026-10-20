@@ -10,8 +10,8 @@ Pinned here, with the flag off:
     S0+E2 base: each body's sha256 equals a golden captured by running
     `test_bodies_match_the_s0_e2_base` on the base merge d826170f;
   * trade_page_store is never queried and never gains a row, through those
-    routes, a real job's completion, the roster-change trigger and the
-    cleanup pass.
+    routes, a real job's completion, the roster-change trigger, user- and
+    league-scoped input invalidations, a board publish and the cleanup pass.
 
 Harnesses: test_trade_responses_small's `e2` (seeded jobs) and
 test_i1_serve_filter's `live` (a real synchronous worker).
@@ -132,5 +132,10 @@ def test_a_real_job_trigger_and_cleanup_never_touch_the_table(live, monkeypatch,
         assert response.status_code == 200
         assert not {"serve_source", "freshness_state", "prefetch_remaining"} & set(response.get_json())
     roster_snapshot.on_roster_change(LEAGUE, "rfp1:old", "rfp1:new")
+    server._invalidate_trade_jobs(user_id=UID)
+    server._invalidate_trade_jobs(user_id=UID, league_id=LEAGUE)
+    server._publish_member_rankings_for_trade_refresh(
+        user_id=UID, league_id=LEAGUE, rankings=[{"player_id": "g1", "elo": 1500.0}],
+        scoring_format="1qb_ppr")
     server._evict_trade_page_store()
     assert page_statements == [] and page_rows() == 0
