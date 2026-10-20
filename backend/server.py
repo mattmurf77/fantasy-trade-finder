@@ -22194,11 +22194,16 @@ def session_init():
     incoming_token = request.headers.get("X-Session-Token", "")
     existing_sess = _get_session(incoming_token)
     from .session_input import resolve_session_input, SessionInputError
+    _s0_raw: dict = {}   # S0 — this init's Sleeper rosters + meta, handed to the daemon
     try:
-        authoritative = resolve_session_input(existing_sess, body, _sleeper_get)
+        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw)
     except SessionInputError as exc:
         return jsonify({"error": exc.error}), exc.status
     body = {**body, **authoritative}
+    if _s0_raw.get("meta"):
+        # S0 — seed the 15-min league-meta cache from the read just made, so
+        # the trade paths' lineup lookups (_sleeper_lineup_slots) don't refetch.
+        _FA_LEAGUE_META_CACHE[authoritative["league_id"]] = (time.time(), _s0_raw["meta"])
 
     user_id           = body.get("user_id",          DEMO_USER_ID)
     league_id         = body.get("league_id",        "sleeper_league")
@@ -22604,7 +22609,7 @@ def session_init():
             nonlocal _meta_fetched, _meta_payload
             if not _meta_fetched:
                 _meta_fetched = True
-                _meta_payload = _fetch_sleeper_league_meta(league_id)
+                _meta_payload = _s0_raw.get("meta") or _fetch_sleeper_league_meta(league_id)
             return _meta_payload
 
         try:
@@ -22796,6 +22801,7 @@ def session_init():
                 log.warning("  DB upsert failed (continuing): %s", db_err)
 
             # ── Persist full league membership roster ────────────────
+            _s0_members_ok, _s0_picks_ok = False, True   # S0 refresh outcome
             try:
                 all_members_for_db = [
                     {
@@ -22830,6 +22836,7 @@ def session_init():
                     if opp.get("user_id")
                 ]
                 upsert_league_members(league_id=league_id, members=all_members_for_db)
+                _s0_members_ok = True
                 log.info("  ✅ league_members upserted (%d members)", len(all_members_for_db))
                 # Roster changed → drop cached _league_members projections
                 # so the next /api/league/members call rebuilds the
@@ -22858,7 +22865,8 @@ def session_init():
                              or is_enabled("market.roster_history")
                              or is_enabled("picks.owned_sync"))):
                     from .trade_block_service import _fetch_rosters as _tb_fetch
-                    _rh_roster_rows = _tb_fetch(league_id)
+                    # S0 — reuse the request thread's read (D-178: once per init).
+                    _rh_roster_rows = _s0_raw.get("rosters") or _tb_fetch(league_id)
             except Exception as _rr_err:
                 log.warning("  shared rosters fetch failed (continuing): %s", _rr_err)
 
@@ -22924,7 +22932,10 @@ def session_init():
                     if _n_picks is not None:
                         log.info("  ✅ owned draft picks synced (%d picks)",
                                  len(_n_picks))
+                    else:
+                        _s0_picks_ok = False
             except Exception as pk_err:
+                _s0_picks_ok = False
                 log.warning("  owned-pick sync failed (continuing): %s", pk_err)
 
             # ── #207: refresh the league's rookie-draft status ────────
@@ -22935,6 +22946,14 @@ def session_init():
             # self-contained failure handling inside the helper, so it can
             # never affect the syncs above.
             _refresh_league_draft_status(league_id)
+
+            # ── S0: record this init's Sleeper roster refresh ─────────
+            # After members, picks and draft state are committed. Never raises.
+            if _s0_raw and not _platform_linked:
+                from . import roster_refresh as _roster_refresh
+                _roster_refresh.record_outcome(
+                    league_id, _s0_raw.get("fetch_started_at"),
+                    members_ok=_s0_members_ok, picks_ok=_s0_picks_ok)
 
             # ── Market-data readiness: capture executed league trades ──
             # Raw Sleeper trade transactions → sleeper_trades (PRD #43
@@ -27274,7 +27293,8 @@ def _refresh_sleeper_members(league_id: str) -> int:
              for u in users if isinstance(u, dict)}
     members = [{"user_id": str(r["owner_id"]), "username": names.get(str(r["owner_id"]), ""),
                 "display_name": names.get(str(r["owner_id"]), ""),
-                "player_ids": [str(x) for x in (r.get("players") or [])]}
+                "player_ids": [str(x) for x in (r.get("players") or [])
+                               if x not in (None, "")]}   # G-004
                for r in rosters if isinstance(r, dict) and r.get("owner_id")]
     if not members:
         return 0

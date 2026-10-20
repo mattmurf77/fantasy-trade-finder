@@ -126,6 +126,7 @@ counterparty board disclosure or client analytics event is added.
 - [`users`](#users)
 - [`leagues`](#leagues)
 - [`league_members`](#league_members)
+- [`league_roster_state`](#league_roster_state)
 - [`accounts`](#accounts)
 - [`linked_identities`](#linked_identities)
 - [`sessions`](#sessions)
@@ -363,8 +364,30 @@ MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same w
 | `league_id` | str | |
 | `user_id` | str | Real FTF id, or a synthetic id for imported-league counterparties (`espn:` / `mfl:` / `flea:`) |
 | `username`, `display_name` | str | |
-| `roster_data` | JSON text | |
+| `roster_data` | JSON text | Sleeper player ids (strings). For Sleeper this is the roster's `players` array, which includes reserve/IR and taxi players. Null/empty slots are dropped at the writer (G-004, S0) |
 | `updated_at` | str | |
+
+---
+
+## `league_roster_state`
+
+S0 (launch §3a, `docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md`). One row per league recording the
+last **Sleeper roster refresh**: the read `/api/session/init` makes at app open and foreground. Written by
+`backend/roster_refresh.py` through `database.mark_league_roster_fresh` / `mark_league_roster_failed`; read
+with `get_league_roster_state`. Every write is a single-row dialect-aware upsert. A failed read **never** touches
+`league_members` or `draft_picks`: the last good rows stay and only this row changes. ESPN/MFL/Fleaflicker
+leagues get no row from session init (they're not refreshed from the platform there). League-keyed with no
+`user_id`, so it is outside account deletion/export. Created by `metadata.create_all` (new table; no migration
+row).
+
+| Column | Type | Notes |
+|---|---|---|
+| `league_id` | str PK | Platform-native league id (same semantics as `leagues.sleeper_league_id`) |
+| `roster_fp` | str, nullable | `rfp1:…` roster fingerprint (trades-eng's `roster_snapshot`), stamped after a committed refresh. NULL until that stamp ships (S0 PR-B). Never changed by a failure |
+| `refreshed_at` | str, nullable | ISO-8601 UTC (fixed microsecond precision): fetch **start** time of the last refresh whose members **and** owned picks both committed. Only moves forward. NULL = never fully refreshed |
+| `status` | str | `fresh` (the last attempt committed) · `stale` (the last attempt failed; the league has prior rows) · `missing` (the last attempt failed and the league never had rows). This describes the last attempt, not an age bound; consumers compute age from `refreshed_at` |
+| `last_error_code` | str, nullable | NULL after a success. Otherwise one of `rate_limited` (429 or the circuit is open) · `blocked` (403, incl. Cloudflare 1010) · `http_4xx` · `http_5xx` · `timeout` · `network` · `invalid_payload` · `picks_unavailable` (owned-pick sync skipped on a throttled read) · `write_failed` |
+| `updated_at` | str | ISO-8601 UTC of this write |
 
 ---
 

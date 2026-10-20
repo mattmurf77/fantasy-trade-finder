@@ -633,6 +633,23 @@ league_members_table = Table("league_members", metadata,
     UniqueConstraint("league_id", "user_id", name="uq_league_member"),
 )
 
+# S0 (launch §3a) — the per-league roster refresh record. One row per league,
+# written by the session-init Sleeper refresh (success: 'fresh' + refreshed_at;
+# a failed read: 'stale', or 'missing' when the league never had rows, plus
+# last_error_code — the last good rows are never touched on failure).
+# roster_fp is NULL until the PR-B stamp writes trades-eng's rfp1 fingerprint.
+# League-keyed, no user_id: not part of account deletion/export. New table, so
+# metadata.create_all creates it on both dialects — no migration_cols row.
+# Scope: docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md §B.2.
+league_roster_state_table = Table("league_roster_state", metadata,
+    Column("league_id",       String, primary_key=True),  # platform-native id (leagues PK semantics)
+    Column("roster_fp",       String),                    # "rfp1:…" — PR-B; NULL until stamped
+    Column("refreshed_at",    String),                    # ISO UTC: fetch start of the last fully committed refresh
+    Column("status",          String, nullable=False),    # 'fresh' | 'stale' | 'missing'
+    Column("last_error_code", String),                    # closed set (sleeper_http.classify + picks_unavailable/write_failed); NULL after success
+    Column("updated_at",      String, nullable=False),    # ISO UTC of this write
+)
+
 # FB-147 — Sleeper trade-block snapshot, per league. One row per asset a
 # manager currently has "on the block" in the Sleeper app. Replaced
 # atomically on every sync (delete + insert, snapshot semantics like
@@ -8418,6 +8435,89 @@ def load_league_members(league_id: str) -> list[dict]:
             d["player_ids"] = []
         result.append(d)
     return result
+
+
+# ---------------------------------------------------------------------------
+# League roster refresh state (S0) — `league_roster_state`
+# ---------------------------------------------------------------------------
+# One small row per league; every write is a single-row upsert (G-072: bounded).
+# Timestamps are ISO-8601 UTC text (dual-dialect; no SQL JSON or date functions).
+ROSTER_STATE_FRESH = "fresh"
+ROSTER_STATE_STALE = "stale"
+ROSTER_STATE_MISSING = "missing"
+
+
+def _dialect_insert(conn):
+    """The dialect-specific `insert` that supports on_conflict_do_update."""
+    if conn.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    return dialect_insert
+
+
+def get_league_roster_state(league_id: str) -> dict | None:
+    """The league's refresh record, or None when it was never written."""
+    t = league_roster_state_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(t.c.league_id == str(league_id))).first()
+    return dict(row._mapping) if row else None
+
+
+def mark_league_roster_fresh(league_id: str, refreshed_at: str) -> None:
+    """A refresh committed its rows: status 'fresh', error cleared.
+
+    `refreshed_at` only moves forward (ISO strings in one fixed format compare
+    in time order), so a slow older refresh finishing last can't rewind it.
+    `roster_fp` is left as stored.
+    """
+    from sqlalchemy import case
+    t = league_roster_state_table
+    now = _now()
+    with engine.begin() as conn:
+        stmt = _dialect_insert(conn)(t).values(
+            league_id=str(league_id), roster_fp=None, refreshed_at=refreshed_at,
+            status=ROSTER_STATE_FRESH, last_error_code=None, updated_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["league_id"],
+            set_={
+                "refreshed_at": case(
+                    (t.c.refreshed_at.is_(None), stmt.excluded.refreshed_at),
+                    (stmt.excluded.refreshed_at > t.c.refreshed_at, stmt.excluded.refreshed_at),
+                    else_=t.c.refreshed_at),
+                "status": stmt.excluded.status,
+                "last_error_code": None,
+                "updated_at": stmt.excluded.updated_at,
+            })
+        conn.execute(stmt)
+
+
+def mark_league_roster_failed(league_id: str, error_code: str) -> str:
+    """A refresh failed: the last good rows are untouched. Returns the status written.
+
+    'stale' when the league has a prior successful refresh or any stored
+    `league_members` rows; 'missing' when it never had rows. `roster_fp` and
+    `refreshed_at` keep their stored values.
+    """
+    t = league_roster_state_table
+    lid = str(league_id)
+    now = _now()
+    with engine.begin() as conn:
+        prior = conn.execute(select(t.c.refreshed_at).where(t.c.league_id == lid)).first()
+        had_rows = (prior is not None and prior.refreshed_at is not None) or conn.execute(
+            select(league_members_table.c.id)
+            .where(league_members_table.c.league_id == lid).limit(1)).first() is not None
+        status = ROSTER_STATE_STALE if had_rows else ROSTER_STATE_MISSING
+        stmt = _dialect_insert(conn)(t).values(
+            league_id=lid, roster_fp=None, refreshed_at=None, status=status,
+            last_error_code=str(error_code), updated_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["league_id"],
+            set_={"status": stmt.excluded.status,
+                  "last_error_code": stmt.excluded.last_error_code,
+                  "updated_at": stmt.excluded.updated_at})
+        conn.execute(stmt)
+    return status
 
 
 def replace_trade_block(league_id: str, entries: list[dict]) -> None:

@@ -266,9 +266,32 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
 | Cloudflare 1010 ban (bot-signature detection) | Mitigated proactively, not caught reactively — `sleeper_write.py:43-59`, `trade_block_service.py:51-62`, `sleeper_trades_service.py:42-50` all send a real Chrome UA + `origin`/`referer` headers on every write/GraphQL call. Plain `urllib` UAs (`Python-urllib/x.y`) trip this instantly | N/A (prevention, not error handling) |
 | No `cryptography` package / no `SLEEPER_TOKEN_KEY` set | `backend/sleeper_write.py:93-104` | `503 sleeper_unconfigured` — feature goes dark rather than storing plaintext |
 | Numeric league id misrouted to Sleeper-only code for an ESPN/MFL/Fleaflicker league | living-memory `G-014` (`living-memory/GOTCHAS.md:23,135-142`) — **real historical incident**: an MFL league's `draft_picks` were wiped on every app open because a numeric MFL id (all platform-native ids are numeric, not Sleeper-exclusive) fell into the Sleeper roster-sync path, whose empty REPLACE deleted real data on a Sleeper fetch flake. Fixed by routing on `is_linked_platform_league()`, not `.isdigit()` alone (`backend/server.py:13777`, `19342-19343`, and the M0 owned-picks guard at `14652-14661`) | — |
-| `roster.players` containing `null` entries | living-memory `G-004` | Filtered defensively wherever roster player lists are consumed |
+| `roster.players` containing `null` entries | living-memory `G-004` | Filtered defensively wherever roster player lists are consumed; dropped at the `league_members` writers since S0 (`backend/session_input.py`, `server._refresh_sleeper_members`) so a null slot is never stored as the string `"None"` |
+| Sleeper `429` (rate limited) | The per-process circuit, `backend/sleeper_http.py` (§4.1) | While it's open, every Sleeper **read** fails fast with `SleeperRateLimited` (a `URLError`), so each caller's existing fail-soft path runs. Session init returns `503 league_data_unavailable` and records `rate_limited` in `league_roster_state` |
 | Sleeper username lookup returns different casing than typed | living-memory `G-006` | FTF preserves the user-typed username for display, uses the Sleeper-returned id for lookups |
 | Stale `.sleeper_players_cache.json` (pre-M0, no refresh path) | living-memory `G-008` | Superseded by the M0 refresh daemon (§5) — this gotcha predates the daily-tick fallback guard |
+
+### 4.1 Rate limiting: the per-process 429 circuit (S0)
+
+There was no 429 handling on any Sleeper path before S0. `_sleeper_get` retried only on an SSL failure.
+`backend/sleeper_http.py` is one circuit per process, shared by `_sleeper_get` and the three urllib-direct
+readers (`trade_block_service._fetch_rosters` / `fetch_league_players`,
+`sleeper_trades_service.fetch_week_transactions`, `suggestion_telemetry.fetch_league_roster_map`).
+
+- **Opens on a 429** for `min(3600, max(Retry-After, uniform(b/2, b)))` s, with `b = min(600, 2 * 2^(n-1))` and `n`
+  counting consecutive 429s. `Retry-After` may be delta-seconds or an HTTP date; an unparseable value is ignored.
+  A `Retry-After` above the 600 s soft cap is honored up to the 3,600 s ceiling.
+- **While open, reads fail fast before any network call** (no `api_events` row, one info log line per skipped
+  read). There are **no in-line retries or sleeps**: the app runs one sync worker, and a sleeping request would
+  stall every tap.
+- **A success resets `n`.** Reads only: `sleeper_write.py` (GraphQL writes) is not gated.
+- **Never a clobber amplifier.** Both `traded_picks` and `drafts` fail soft to `[]`, so while the circuit is open
+  the owned-pick sync returns `None` (the prior `draft_picks` snapshot is kept) instead of replace-syncing on
+  skipped reads, and `_refresh_league_draft_status` keeps the cached verdict.
+- The fixture seam goes through the circuit too. A cassette `{"__http_error__": 429, "__headers__":
+  {"Retry-After": "30"}}` replays a throttled read.
+- **Logs:** `sleeper 429: circuit open <s> league=<id> status=429 strikes=<n>`. League id and status only, never
+  a URL.
 
 ---
 
@@ -312,14 +335,18 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
 ### 5.2 Per-session-init background sync (best-effort, non-blocking)
 Fired from `/api/session/init`'s background daemon on every league switch/login,
 each independently flag-gated. Payloads that are **immutable for the length of
-one init** — the v1 `rosters` list and the `/league/{id}` meta blob — are
-fetched ONCE by the daemon and handed to every consumer; everything else is a
-fresh live fetch with no shared cache.
+one init** (the v1 `rosters` list and the `/league/{id}` meta blob) are read
+ONCE, on the request thread, by the authoritative membership read
+(`session_input.resolve_session_input`, which also reads `/users`). They are handed
+to the daemon and to every consumer (S0, 2026-10-20). The meta blob also seeds
+the 15-min league-meta cache the trade paths' lineup lookups read. Everything
+else is a fresh live fetch with no shared cache. The outcome is recorded in
+`league_roster_state` (`fresh` / `stale` / `missing`, see the data dictionary).
 
 | Sync | Flag | Endpoints hit | Site |
 |---|---|---|---|
-| Shared rosters fetch | `sleeper.trade_block` \| `market.roster_history` \| `picks.owned_sync` | 1× `rosters`, reused by all four consumers below | `_session_init_background_writes`, `backend/server.py` |
-| Shared league meta | (unconditional for numeric, non-platform-linked ids) | 1× `/league/{id}`, reused by scoring auto-detect, the FB #41 team-count persist and the owned-pick sync | `_league_meta()` in the same daemon |
+| Shared rosters | `sleeper.trade_block` \| `market.roster_history` \| `picks.owned_sync` | 0 in the daemon: the request thread's `rosters` read is reused by all four consumers below (it self-fetches only if that payload is absent) | `_session_init_background_writes`, `backend/server.py` |
+| Shared league meta | (unconditional for numeric, non-platform-linked ids) | 0 in the daemon: the request thread's `/league/{id}` read is reused by scoring auto-detect, the FB #41 team-count persist and the owned-pick sync | `_league_meta()` in the same daemon |
 | Trade-block import | `sleeper.trade_block` | 1× `league_players` GraphQL (rosters shared) | `sync_league_trade_block`, `backend/trade_block_service.py` |
 | Owned draft-pick sync | `picks.owned_sync` | 1× `traded_picks` + 1× `drafts` (rosters + meta shared); MFL leagues re-derive with no Sleeper reads. Since #428 an empty `drafts` answer costs one leagues-row read (the cached #207 verdict, D-189) and no extra upstream call | `_sync_sleeper_owned_picks`, `backend/server.py` |
 | Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **1** (leg 1, where Sleeper books every offseason trade) | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
@@ -327,10 +354,13 @@ fresh live fetch with no shared cache.
 | Rookie-draft status refresh | (unflagged) | 0 in steady state; up to 3 (`/league/{id}`, `drafts`, `rosters`) when the per-status TTL has expired — 12 h once a league reads `drafted` | `_refresh_league_draft_status`, `backend/server.py` |
 
 **Per-init upstream budget for a Sleeper league** (steady state, all flags ON,
-draft-status TTL warm): **7 calls in season, 6 in the offseason** — meta,
-rosters, GraphQL `league_players`, `traded_picks`, `drafts`, and ≤2
-`transactions/{week}`. Before 2026-09-03 the same init cost **26** (29 on a
-draft-status refresh): 18 transaction legs, 3 rosters reads and 2 meta reads.
+draft-status TTL warm): **≤ 8 calls in season, ≤ 7 in the offseason**. On the request
+thread: `rosters`, `users`, `/league/{id}`. In the daemon: GraphQL `league_players`,
+`traded_picks`, `drafts`, and ≤2 `transactions/{week}`. Pinned by
+`backend/tests/test_session_init_sleeper_calls.py`. Before S0 (2026-10-20) the
+authoritative membership read and the daemon each read `rosters` and meta (≤ 10).
+Before 2026-09-03 the same init cost **26** (29 on a draft-status refresh): 18
+transaction legs, 3 rosters reads and 2 meta reads.
 
 All of these are wrapped in bare `try/except` so a Sleeper flake just leaves the
 previous snapshot in place — "best-effort" is load-bearing language throughout
@@ -415,6 +445,9 @@ standing is a wrong answer, not a slow one.
   `backend/server.py:1627-1632`, already logged today)
 - Circuit-breaker state transitions (open/half-open/closed) and budget-exceeded events
   for the Draft Room poller
+- The S0 429 circuit: the open window in seconds, the strike count, the `league_id`, and HTTP status `429`
+  (§4.1). Never the request URL
+- `league_roster_state.status` / `last_error_code`: a closed enum, safe verbatim
 - Error **kind** on `SleeperWriteError` (`auth`/`network`/`config`/`error` —
   `backend/sleeper_write.py:66-77`) — a closed, small enum, safe to log verbatim
 - `verified` boolean and `verified_via` string on session events — these are
