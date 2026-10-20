@@ -3287,9 +3287,11 @@ def _trade_job_public_view(job: dict) -> dict:
     elif not _trade_significance_matches(job):
         out.update(cards=[], status="error", error="significance_policy_changed")
     # ADR-025 stage 1: sending a deferred deck's cards is a delivery (paged and
-    # legacy responses alike). Only flag-on organic jobs carry `evidence`.
-    if job.get("evidence") is not None and out["cards"] and out["status"] != "error":
-        _deck_evidence_delivered(job["evidence"], out["cards"])
+    # legacy responses alike). Only flag-on organic jobs carry `evidence`. An
+    # errored job's published batches (ruling 9, legacy) are a partial run's.
+    if job.get("evidence") is not None and out["cards"]:
+        _deck_evidence_delivered(job["evidence"], out["cards"],
+                                 partial=job.get("status") == "error")
     return out
 
 
@@ -3713,8 +3715,9 @@ class _DeckEvidence:
         self.delivered_hashes: set = set()
         self.marked: set = set()      # delivered ids already written or marked 'delivered'
         self.sealed = False           # the logger finished assembling
-        self.complete = False         # the run completed: its deliveries may write
-        self.discarded = False        # the run ended partial: nothing is ever written
+        self.complete = False         # the run ended: its deliveries may write
+        self.partial = False          # it ended partial: delivered cards only, 'partial_run'
+        self.discarded = False        # it hit the safety ceiling: nothing is ever written
         self.archive = _deck_archive_selected(job_id)
         self.stored_ids = None        # impression ids whose snapshots the page store holds
         self.pages_bytes = None       # len(pages_blob) of this deck's stored row
@@ -3774,9 +3777,19 @@ class _DeckEvidence:
         and the candidate set are one transaction; `rest`, today's
         per-served-deck cost that packing will replace (C1), follows with its
         own. `upgrades`: delivered ids already written at a lower tier.
+
+        A run that ended partial (timeout, error, supersession, or a failed
+        assembly) writes exactly its delivered cards, its assembled ghosts and
+        candidate set, every row 'partial_run' (head-eng ruling 9: swipes on
+        cards a client saw are never rejected; replay excludes the deck).
         """
         delivered = self.delivered | {iid for h in self.delivered_hashes
                                       for iid in self.by_hash.get(h, ())}
+        if self.partial:
+            first = [{**_unpack_row(packed), "evidence_tier": "partial_run"}
+                     for iid, (_, packed) in self.rows.items() if iid in delivered]
+            first += [{**row, "evidence_tier": "partial_run"} for row in self.ghosts.values()]
+            return (first, self.closure(first)), ([], []), self.candidate_set, []
         first, rest = [], []
         for iid, (index, packed) in self.rows.items():
             if iid in delivered:
@@ -3906,10 +3919,12 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease)
             _deck_evidence_flush(ev)
 
 
-def _deck_evidence_delivered(ev: _DeckEvidence, cards: list) -> None:
+def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = False) -> None:
     """Record a delivery of `cards` (public dicts) from `ev`'s deck. Once its run
-    is complete, the write runs off the request thread. A card published before
-    its impression id existed counts by trade_hash."""
+    has ended, the write runs off the request thread. A card published before
+    its impression id existed counts by trade_hash. `partial`: the job has
+    errored (a timed-out job's published batches still serve on the legacy
+    path), so the run has ended partial."""
     ids, hashes = set(), set()
     for card in cards:
         iid = card.get("impression_id")
@@ -3922,6 +3937,8 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list) -> None:
     with ev.lock:
         if ev.discarded:
             return
+        if partial:
+            ev.partial = ev.complete = True
         new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
@@ -3950,27 +3967,28 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list) -> None:
 
 
 def _deck_evidence_job_done(job_id: str) -> None:
-    """After _run_trade_job returns (worker thread, inside the job's lease): a
-    deferred run that completed may now write, and deliveries made while it ran
-    are written here. A run that errored (a timeout included), was superseded or
-    hit the safety ceiling discards its evidence and never writes (§6.8)."""
+    """After _run_trade_job returns (worker thread, inside the job's lease): the
+    run has ended, so its deliveries may write, and those made while it ran are
+    written here. A run that errored (a timeout included), was superseded or
+    failed its assembly ended partial: only its delivered cards are written,
+    as 'partial_run' (nothing when none was delivered). A run that hit the
+    safety ceiling is never served and discards its evidence (§6.8)."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         ev = job.get("evidence") if job is not None else None
-        ok = (ev is not None and job.get("status") == "complete"
-              and not _trade_job_ceiling_hit(job))
+        complete = ev is not None and job.get("status") == "complete"
+        ceiling = ev is not None and _trade_job_ceiling_hit(job)
     if ev is None:
         return
     with ev.lock:
-        ok = ok and ev.sealed
-        if ok:
-            ev.complete = True
-        else:
+        if ceiling:
             ev.discarded = True
             ev.rows, ev.ghosts, ev.diagnostics, ev.candidate_set, ev.by_hash = {}, {}, {}, None, {}
-    if ok:
-        with _deck_evidence_write_lock:
-            _deck_evidence_flush(ev)
+            return
+        ev.partial = not (complete and ev.sealed)
+        ev.complete = True
+    with _deck_evidence_write_lock:
+        _deck_evidence_flush(ev)
 
 
 def _deck_evidence_live(job_id: str) -> None:

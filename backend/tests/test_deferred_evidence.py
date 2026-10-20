@@ -172,38 +172,74 @@ def test_c2_a_completed_deferred_job_never_delivered_writes_no_rows(deferred):
     assert blob["candidate_set"]["deck_job_id"] == job_id
 
 
-ENDINGS = {
+PARTIAL_ENDINGS = {
     "superseded": lambda job: server._revoke_trade_job_locked(job, "superseded"),
     "timeout": lambda job: job.update(status="error", error="timeout"),
     "error": lambda job: job.update(status="error", error="boom"),
-    "ceiling": lambda job: job.update(status="complete", safety_ceiling_hit=True),
+    # The run completed, but its logger raised mid-deck (never sealed).
+    "assembly_failed": lambda job: (job.update(status="complete"),
+                                    setattr(job["evidence"], "sealed", False)),
 }
 
 
-@pytest.mark.parametrize("ending", sorted(ENDINGS))
-def test_a_run_that_ends_partial_writes_nothing_even_after_its_cards_were_seen(deferred, ending):
-    """The first 30 went out while the run was live (an owner batch), then the
-    run was superseded, timed out, failed or hit the safety ceiling (§6.8)."""
+@pytest.mark.parametrize("ending", sorted(PARTIAL_ENDINGS))
+def test_a_partial_run_writes_exactly_its_delivered_cards_as_partial_run(deferred, ending):
+    """F1 (head-eng ruling 9): the first 30 went out while the run was live (an
+    owner batch), then the run ended partial. Swipes on those cards must land,
+    so exactly they are written, with the assembled ghosts and candidate set,
+    every row 'partial_run' (replay excludes the deck)."""
     _, engine, _ = deferred
-    job_id, _, _, ev, _ = deferred_deck(40, store=False, complete=False)
-    server._deck_evidence_delivered(ev, server._trade_jobs[job_id]["cards"][:30])
+    job_id, _, ghosts, ev, _ = deferred_deck(40, ghost_every=9, store=False, complete=False)
+    seen = server._trade_jobs[job_id]["cards"][:30]
+    server._deck_evidence_delivered(ev, seen)
     assert rows(engine) == []                              # recorded, not yet written
     with server._trade_jobs_lock:
-        ENDINGS[ending](server._trade_jobs[job_id])
+        PARTIAL_ENDINGS[ending](server._trade_jobs[job_id])
     server._deck_evidence_job_done(job_id)
-    assert ev.discarded and not ev.rows and ev.candidate_set is None
-    server._deck_evidence_delivered(ev, [{"impression_id": "x"}])
+    written = rows(engine)
+    assert {r["impression_id"] for r in written if not r["is_ghost"]} == {c["impression_id"] for c in seen}
+    assert len([r for r in written if r["is_ghost"]]) == len(ghosts)
+    assert {r["evidence_tier"] for r in written} == {"partial_run"}
+    assert len(rows(engine, db_module.deck_candidate_sets_table)) == 1
+    server._deck_evidence_delivered(ev, seen, partial=True)   # a retried poll
+    assert len(rows(engine)) == len(written)
+
+
+@pytest.mark.parametrize("ending", sorted(PARTIAL_ENDINGS))
+def test_a_partial_run_with_nothing_delivered_writes_nothing(deferred, ending):
+    _, engine, _ = deferred
+    job_id, _, _, ev, _ = deferred_deck(40, ghost_every=9, store=False, complete=False)
+    with server._trade_jobs_lock:
+        PARTIAL_ENDINGS[ending](server._trade_jobs[job_id])
+    server._deck_evidence_job_done(job_id)
     assert rows(engine) == [] and rows(engine, db_module.deck_candidate_sets_table) == []
 
 
-def test_a_run_whose_assembly_failed_writes_nothing(deferred):
+def test_a_timed_out_jobs_batches_served_later_on_the_legacy_path_are_written_as_partial_run(deferred):
+    """Ruling 9: the legacy path keeps serving a timed-out job's published
+    batches; each such delivery writes its cards as 'partial_run'."""
     _, engine, _ = deferred
     job_id, _, _, ev, _ = deferred_deck(40, store=False, complete=False)
-    ev.sealed = False                                      # the logger raised mid-deck
-    server._deck_evidence_delivered(ev, server._trade_jobs[job_id]["cards"][:10])
-    server._trade_jobs[job_id]["status"] = "complete"
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="error", error="timeout")
     server._deck_evidence_job_done(job_id)
-    assert ev.discarded and rows(engine) == []
+    assert rows(engine) == []
+    out = server._trade_job_public_view(dict(server._trade_jobs[job_id]))   # a legacy poll
+    assert out["status"] == "error" and len(out["cards"]) == 40
+    assert tiers(engine) == {c["impression_id"]: "partial_run" for c in out["cards"]}
+    assert server._trade_job_page_view(dict(server._trade_jobs[job_id]), 0)["cards"] == []
+
+
+def test_a_ceiling_hit_run_writes_nothing_even_after_its_cards_were_seen(deferred):
+    _, engine, _ = deferred
+    job_id, _, _, ev, _ = deferred_deck(40, store=False, complete=False)
+    server._deck_evidence_delivered(ev, server._trade_jobs[job_id]["cards"][:30])
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="complete", safety_ceiling_hit=True)
+    server._deck_evidence_job_done(job_id)
+    assert ev.discarded and not ev.rows and ev.candidate_set is None
+    server._deck_evidence_delivered(ev, server._trade_jobs[job_id]["cards"][:30])
+    assert rows(engine) == [] and rows(engine, db_module.deck_candidate_sets_table) == []
 
 
 def test_deliveries_made_while_the_run_was_live_are_written_at_completion(deferred):
