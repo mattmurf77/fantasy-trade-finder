@@ -6972,19 +6972,22 @@ _EVIDENCE_TIERS_BELOW_DELIVERED = ("first30", "full_interim", "archive")
 
 
 def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
-                       delivered: list | tuple = (), deck_job_id: str | None = None) -> None:
+                       diagnostics: list | tuple = (), delivered: list | tuple = (),
+                       deck_job_id: str | None = None) -> None:
     """Deferred evidence (ADR-025 stage 1): one delivery write, one transaction.
 
     `rows` are a deferred deck's build-time deck_impressions rows, each with its
     `evidence_tier`. Each is inserted at most once per impression_id (ON CONFLICT
     DO NOTHING), so a retried delivery writes nothing twice, and compacted
     exactly as save_deck_impressions compacts. Rows are normalized to every
-    column, so full and narrow rows share one VALUES statement. `candidate_set`
-    is the deck's deck_candidate_sets row, also at most once. `delivered` are
+    column, so full and narrow rows share one VALUES statement. `diagnostics`
+    are the deck's deck_diagnostic_snapshots rows the compacted rows reference
+    (content-addressed, so also at most once). `candidate_set` is the deck's
+    deck_candidate_sets row, also at most once. `delivered` are
     impression ids of `deck_job_id` first written at a lower tier and now
     delivered: they become 'delivered'.
     """
-    if not rows and candidate_set is None and not delivered:
+    if not rows and candidate_set is None and not diagnostics and not delivered:
         return
     from .deck_diagnostics import compact_rows
     columns = [c.name for c in deck_impressions_table.columns]
@@ -6993,6 +6996,7 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
             from sqlalchemy.dialects.postgresql import insert as upsert
         else:
             from sqlalchemy.dialects.sqlite import insert as upsert
+        _save_deck_diagnostic_snapshots(conn, list(diagnostics))
         for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
             compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
             _save_deck_diagnostic_snapshots(conn, snapshots)
