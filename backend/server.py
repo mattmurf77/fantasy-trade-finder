@@ -10870,7 +10870,8 @@ def _kickoff_trade_job(
                 with _trade_jobs_lock:
                     if not _job_live(_trade_jobs.get(job_id)):
                         return
-                if (source != "replenish" and not is_pinned and not trade_intent and not force_fresh
+                if (source not in ("replenish", "grading_refresh") and not is_pinned
+                        and not trade_intent and not force_fresh
                         and not presentation_exempt and execution_context is not None):
                     from . import prepared_trade_runtime
                     if prepared_trade_runtime.try_adopt(sys.modules[__name__], job_id=job_id,
@@ -10960,18 +10961,21 @@ def _kickoff_trade_job(
         job["source"] = source
     # P1: the organic scope this job's completion may store pages under. A
     # forced organic job stores too: it is the newest deck for the scope.
-    if (_trade_page_store_enabled() and not is_pinned and not trade_intent
-            and not presentation_exempt and not source and league_id != "league_demo"):
+    organic = (not is_pinned and not trade_intent and not presentation_exempt
+               and league_id != "league_demo")
+    if _trade_page_store_enabled() and organic and not source:
         job["page_scope"] = _trade_page_scope(fairness_threshold)
         job["page_built_at"] = time.time()   # wall-clock admission: the row's built_at
+    if _trade_page_store_enabled() and organic and source in (None, "replenish"):
         # ADR-025 stage 1: an organic deck's evidence waits for its delivery
-        # (pre-builds, page-serve backing jobs, rebuilds and `force` alike).
+        # (pre-builds, page-serve backing jobs, rebuilds, `force`, and the
+        # weekly replenishment, F6).
         job["evidence_mode"] = "deferred"
         job["evidence"] = _DeckEvidence(job_id, user_id, _job_write_lease)
     elif _trade_page_store_enabled():
-        # Pinned, opponent, intent, presentation-exempt, replenishment (and so
-        # Calibration's targeted refresh, which reads the rows at once) and demo
-        # jobs keep today's evidence: rows at build.
+        # Pinned, opponent, intent, presentation-exempt, demo jobs and
+        # Calibration's targeted refresh ("grading_refresh", whose session reads
+        # the rows at once) keep today's evidence: rows at build.
         job["evidence_mode"] = "live"
     if _trade_page_store_enabled():
         # P2: will every publish only extend the list? Owner-serve does, by
@@ -25446,12 +25450,18 @@ def _count_expired_dropped(prior_rows: list[dict], new_cards: list[dict]) -> int
     )
 
 
-def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
+def _replenish_deck_for(user_id: str, league_id: str,
+                        source: str = "replenish") -> tuple[int, int] | None:
     """Ensure a fresh deck exists for this user-league. Reuses a fresh
     cached job when one exists (deck already ready); otherwise runs the
     normal job machinery synchronously — against the user's live session
     when present, else a headless DB-built one. Returns (deck_size,
-    expired_count) on success, None on failure."""
+    expired_count) on success, None on failure.
+
+    `source`: "replenish" (the weekly cron; with trade.first_page_store on,
+    its deck's evidence waits for a delivery) or "grading_refresh"
+    (Calibration's targeted refresh, which reads the deck's rows at once: it
+    never reuses a deferred deck, and its own job keeps rows at build)."""
     try:
         fmt = get_league_scoring(league_id)
     except Exception:
@@ -25490,11 +25500,19 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
     with _trade_jobs_lock:
         jid = _trade_jobs_by_key.get(key)
         job = _trade_jobs.get(jid) if jid else None
+        refresh = False
         if (job and not any(epoch.revoked for epoch in input_epochs)
                 and _trade_job_is_fresh(job, fairness, outlook,
                     presentation_capture=presentation_capture, request_signature=request_signature,
                     fingerprints=fingerprints)):
-            cards = list(job.get("cards") or [])   # cached deck still fresh
+            # Calibration reads the deck's rows at once, and an undelivered
+            # deferred deck has none: build a live deck instead of reusing it.
+            ev = job.get("evidence") if source == "grading_refresh" else None
+            if ev is not None:
+                with ev.lock:
+                    refresh = not (ev.delivered or ev.delivered_hashes)
+            if not refresh:
+                cards = list(job.get("cards") or [])   # cached deck still fresh
 
     if cards is None:
         job_id = _kickoff_trade_job(
@@ -25503,8 +25521,9 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
             league_id      = league_id,
             scoring_format = fmt,
             fairness_threshold = fairness,
-            source         = "replenish",
+            source         = source,
             synchronous    = True,
+            force_fresh    = refresh,
             presentation_capture = presentation_capture,
             session_context = session,
             prefs_preload = prefs_preload,
@@ -28919,7 +28938,7 @@ def _pregenerate_grading_targets(pairs: list[tuple[str, str]], rebuild: bool = F
                 if (platform or "sleeper") == "sleeper":
                     log.info("blind-grading: target rosters refreshed league=%s members=%d",
                              league_id, _refresh_sleeper_members(league_id))
-            if _replenish_deck_for(user_id, league_id) is None:
+            if _replenish_deck_for(user_id, league_id, source="grading_refresh") is None:
                 log.warning("blind-grading: target deck refresh failed user=%s league=%s",
                             user_id, league_id)
                 continue

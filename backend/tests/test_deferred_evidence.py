@@ -457,6 +457,58 @@ def test_f5_delivered_and_running_decks_are_kept(deferred):
                and not server._trade_job_revoked(server._trade_jobs[jid]) for jid in (job_id, running))
 
 
+# ── F6: replenishment ───────────────────────────────────────────────────────
+
+def replenished(source):
+    return [j for j in server._trade_jobs.values() if j.get("source") == source]
+
+
+def test_f6_an_unopened_replenished_deck_writes_nothing(deferred, generated_events):
+    _, engine, _ = deferred
+    assert server._replenish_deck_for(UID, LEAGUE) is not None
+    [job] = replenished("replenish")
+    assert job["evidence_mode"] == "deferred" and job["cards"] and "page_scope" not in job
+    assert rows(engine) == [] and build_writes(engine) == (0, 0) and generated_events == []
+    assert rows(engine, db_module.trade_page_store_table) == []   # never page-stored
+
+
+def test_f6_an_opened_replenished_deck_writes_at_its_delivery(deferred, generated_events):
+    client, engine, _ = deferred
+    server._replenish_deck_for(UID, LEAGUE)
+    [job] = replenished("replenish")
+    body = generate(client).get_json()                     # the tap that opens it: a cache hit
+    assert body["job_id"] == job["job_id"] and body["cards"]
+    written = rows(engine)
+    assert {r["impression_id"] for r in written} == {c["impression_id"] for c in job["cards"]}
+    assert {json.loads(r["features_json"])["deck_source"] for r in written} == {"replenish"}
+    assert [e["props"]["deck_source"] for e in generated_events] == ["replenish"]
+    assert build_writes(engine)[0] == len(job["cards"])
+
+
+def test_f6_calibrations_targeted_refresh_keeps_its_rows_at_build(deferred):
+    """_pregenerate_grading_targets refreshes through source "grading_refresh":
+    a live job, never a reused undelivered deferred deck, so start_session's
+    read (load_grading_legacy_deck) finds the refreshed deck's rows."""
+    _, engine, _ = deferred
+    organic = run_job()                                    # fresh, deferred, undelivered
+    assert rows(engine) == []
+    assert server._replenish_deck_for(UID, LEAGUE, source="grading_refresh") is not None
+    [job] = replenished("grading_refresh")
+    assert job["job_id"] != organic and job["evidence_mode"] == "live" and "evidence" not in job
+    deck_job_id, _served_at, deck = db_module.load_grading_legacy_deck(UID, LEAGUE)
+    assert deck_job_id == job["job_id"] and len(deck) == len(job["cards"]) > 0
+    assert {json.loads(r["features_json"])["deck_source"] for r in deck} == {"grading_refresh"}
+
+
+def test_f6_calibrations_refresh_reuses_a_delivered_deferred_deck(deferred):
+    client, engine, _ = deferred
+    organic = run_job()
+    status(client, organic, 0)                             # delivered: its rows exist
+    assert server._replenish_deck_for(UID, LEAGUE, source="grading_refresh") is not None
+    assert replenished("grading_refresh") == []
+    assert db_module.load_grading_legacy_deck(UID, LEAGUE)[0] == organic
+
+
 # ── C4 and C3: first delivery, later pages ──────────────────────────────────
 
 def test_c4_the_first_delivery_of_a_10_card_page_writes_full_rows_for_the_first_30(deferred, monkeypatch):

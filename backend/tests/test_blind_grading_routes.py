@@ -578,7 +578,8 @@ def test_admin_pregenerate_targets_refresh_then_build_each_pair(
     monkeypatch.setattr(bg, "pregenerate", lambda: pytest.fail("targets must not scan"))
     calls: list = []
 
-    def replenish(user_id, league_id):
+    def replenish(user_id, league_id, source="replenish"):
+        assert source == "grading_refresh"   # Calibration's refresh keeps rows at build
         calls.append(("refresh", user_id, league_id))
         return None if user_id == "u_fail" else (30, 0)
 
@@ -635,7 +636,8 @@ def test_admin_pregenerate_targets_rebuild_retires_before_start(client, monkeypa
     session after the deck refresh and before start_session, so the rebuild is on the new engine."""
     monkeypatch.setattr(server, "_CRON_SECRET", "s3cr3t")
     calls: list = []
-    monkeypatch.setattr(server, "_replenish_deck_for", lambda u, l: calls.append("refresh") or (30, 0))
+    monkeypatch.setattr(server, "_replenish_deck_for",
+                        lambda u, l, source=None: calls.append("refresh") or (30, 0))
     monkeypatch.setattr(bg, "retire_unanswered",
                         lambda *, user_id, league_id: calls.append(("retire", user_id, league_id)) or "old")
     monkeypatch.setattr(bg, "start_session", lambda **kw: calls.append("start") or {
@@ -705,7 +707,8 @@ def test_admin_pregenerate_targets_refresh_rosters_once_per_sleeper_league(clien
     monkeypatch.setattr(server, "get_league_draft_context",
                         lambda lid: {"platform": "mfl" if lid == "M1" else None})
     monkeypatch.setattr(server, "_refresh_sleeper_members", lambda lid: calls.append(("roster", lid)) or 12)
-    monkeypatch.setattr(server, "_replenish_deck_for", lambda u, l: calls.append(("refresh", u, l)) or (30, 0))
+    monkeypatch.setattr(server, "_replenish_deck_for",
+                        lambda u, l, source=None: calls.append(("refresh", u, l)) or (30, 0))
     monkeypatch.setattr(bg, "start_session", lambda **kw: {"session": {"session_id": "s"},
                                                            "resumed": True, "needs_build": False})
     real_thread = server.threading.Thread
