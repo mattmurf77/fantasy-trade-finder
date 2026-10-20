@@ -1,4 +1,4 @@
-# Feature Scope — Time to trade suggestion (first card ≤ 250 ms, up-to-date offers)
+# Feature Scope — Time to trade suggestion (first card ≤ 200 ms, up-to-date offers)
 
 <!--
 Copied from docs/templates/feature-scope.md on 2026-10-15. Per D-056 the template's
@@ -20,6 +20,18 @@ measured but not gated) are listed as Decisions D1, D2 and D10 in
 PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-request.md)
 
 ---
+
+## 0. Launch revision (2026-10-20)
+
+- **Target:** p95 ≤ **200 ms** (was 250 ms), a **launch MUST** with no interim bar. Operator: "This
+  must be ready by launch day. It is possible. We must solve it."
+- **Build:** resumes on the 200 ms path ("Yes building should resume on the 200 ms path").
+- **No "Finding more" card** ("This should never happen"). The P30 genuine-end card is not one.
+- **DEC-2:** narrow rows for unseen trades are approved (§2).
+- **Requirements and criteria:** U1–U5 (prd §4.7, §5.5) and launch criteria AC-L1 to AC-L8
+  (prd §8.1), with analytics-lead's measurement terms T1–T6 and head-product P30 and P32.
+- **Hidden ms readout** for the operator's device runs: prd §9.5, with evidence in §3 below.
+  head-eng decides the build.
 
 ## 1. Analytics scope
 
@@ -43,6 +55,13 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
     identifier) need an App Store label check, "check, likely no change".
   - The new Sleeper send-block value on `sleeper_send_failed.error_code` (platforms-pm R4) goes to
     analytics-lead. ESPN and MFL block events are not requested in v1; they would need a grant.
+  - **R5 page-end readiness (AC-L4), a REQUEST pending analytics-lead's grant (2026-10-20).** A
+    `next_page_ready_at_end` boolean, plus `page_index` and `search_id`, when the user reaches a
+    page's last card. Preferred: props on an existing event, e.g. `trade_card_viewed` on the
+    page's last `card_index`, or on R2's sibling outcomes.
+  - **AC-L1 measurement terms (analytics-lead T1–T6)** apply to R1/R2/R2b. Notably, every R2b counts
+    as above 200 ms (T2), and the readout query includes tester devices (T5).
+  - **The hidden ms readout (prd §9.5) adds no event.** It reads R2's `ms_from_tap` locally.
   - **Serve-path tag (models-lead R.b, AC-9e):** if eng carries it as an analytics prop rather than
     an impression field (§2), it needs analytics-lead's grant.
   - No player ids or names in props (`tracking-plan-v2.md:183`). Device platform stays a
@@ -65,7 +84,12 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
     Calibration's current-arm sampling filters on it (Decision D12). If eng instead carries it as an
     analytics prop, it needs analytics-lead's grant (§1).
   - Any persistent cache or prepared-page storage must state its footprint per user-league and its
-    daily write volume, using prd §10.4's formulas, before it is built.
+    daily write volume, using prd §10.4's formulas, before it is built. The first page is about
+    37 KB per user-league pair, pre-built with page 2 (prd §10.7).
+  - **DEC-2 (operator-approved 2026-10-20): unseen candidates are stored as narrow rows, not full
+    evidence, and nothing changes for the user.** Displayed cards keep full evidence. The narrow-row
+    shape is a schema change: `docs/data-dictionary.md` plus a migration entry (BUILD OBLIGATION).
+    analytics-lead and models-lead confirm their readouts work from it (prd AC-L8, D7).
   - Per head-product P23 (2026-10-15), cache data is the first class shed under disk pressure. It
     must be rebuildable and never the system of record, with a fresh-path fallback (prd AC-11b).
   - No rollout without an explicit byte budget, per user-league and in total. head-eng checks it
@@ -100,7 +124,15 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
     and R2b fires on unmount or blur before a card;
   - `freshness_state` from the payload drives the "updating" UI, which claims no interrupt slot and
     renders no Toast;
-  - the gate-miss and updating strings carry no timing promise and no "Searching…" (prd AC-8b).
+  - the gate-miss and updating strings carry no timing promise and no "Searching…" (prd AC-8b);
+  - `animation: 'none'` on every search-starting route, no transition on in-place reveals, and no
+    deck stagger (AC-L2);
+  - no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when
+    page N is fronted; the P30 card never renders while a page is pending and has no Like/Pass
+    (AC-L4);
+  - **the hidden ms readout** reads R2's `ms_from_tap` and no other timer, and renders only behind the
+    Testing gate (`__DEV__ || testing.stage_users`), applied in the component itself because the
+    route is deep-linkable (prd §9.5).
 - [ ] **Unit tests (backend pytest):**
   - taxonomy registration and classification, exact prop rows (`==`), and the one-of-R2/R2b
     invariant (analytics-lead);
@@ -118,9 +150,15 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - inventory-count parity (AC-10).
 - [ ] **Code-walk proof:** a file:line trace from tap → navigation → request or local read → first
   enabled card, per entry point, naming every blocking hop and every skeleton branch (prd §9.3).
-- [ ] **Manual TestFlight checklist:** the 20 steps in [prd §9.4](prd.md#94-operator-testflight-checklist-the-only-runtime-evidence-run-on-the-builds-testflight-number),
+- [ ] **Manual TestFlight checklist:** the 20 steps plus launch runs L1–L4 (with L2b and L2c) in [prd §9.4](prd.md#94-operator-testflight-checklist-the-only-runtime-evidence-run-on-the-builds-testflight-number),
   including frame-timed screen recordings. It is the only runtime evidence and the gate until
-  telemetry reaches n ≥ 40 per cell. Step 13 (blocked sends) runs only in a test league the
+  telemetry reaches n ≥ 40 per cell. **app-manager writes the launch device checklist:**
+  - 40 taps per cell recording the §9.5 readout;
+  - the U3 three-page run and the P30 end;
+  - the U5 fresh-account run;
+  - the U2 roster-change run.
+
+  Step 13 (blocked sends) runs only in a test league the
   operator names. The operator approves the attempt and cancels any proposal that lands
   (platforms-pm evidence plan).
 - [ ] **Waived:** no.

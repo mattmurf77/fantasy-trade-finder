@@ -25,13 +25,16 @@ shapes given. Nothing here writes, flips or generates anything.
   - Apply the standard exclusion `analytics_queries.device_exclusion(include_demo=False)`
     (`backend/analytics_queries.py:473-500`): no `device:%`, `demo_%`, `test_user_fp_%` or `qa_%`
     ids, and no demo sessions.
+- **Tester devices (analytics-lead T5, 2026-10-20):** for the time-to-first-card reads (Q1, Q5),
+  **include** tester-allowlist devices. They are the TestFlight population, and the default
+  `device_exclusion` would strip them and return n ≈ 0. Report the n with and without them.
 - **Privacy:** aggregates only. No user, league, trade or player ids in the returned tables (the
   `docs/business/analytics/2026-07-17-tracking-plan-v2.md:183` posture).
 - **Small n:** about 8 users and 16 user-league pairs had a qualifying deck in 14 days
   (`living-memory/TEST_LEDGER.md:200-201`).
   - Report n on every row.
   - Report p95/p99 only when n ≥ 40 (p99 only at n ≥ 100). Otherwise show "—", plus max and the
-    share ≤ 250 ms.
+    share ≤ 200 ms.
 
 ### Schema used (from `backend/database.py`)
 
@@ -132,7 +135,7 @@ Return the current values and readback time for:
 
 **Output:**
 
-| search_type | launch_state | n_taps | n_card | n_no_card | n_errored | p50_ms | p90_ms | p95_ms | p99_ms | max_ms | share_le_250ms | share_le_1s | share_le_3s | share_le_10s |
+| search_type | launch_state | n_taps | n_card | n_no_card | n_errored | p50_ms | p90_ms | p95_ms | p99_ms | max_ms | share_le_200ms | share_le_1s | share_le_3s | share_le_10s |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 
 Second output, the de-duplication gap: `n`, p50, p95 and max of tap → dispatch.
@@ -243,7 +246,7 @@ Use read-only catalog functions only: `pg_total_relation_size` and `pg_relation_
 | route | status_class | n_rows | est_requests | p50_ms | p90_ms | p95_ms | p99_ms | max_ms |
 |---|---|---|---|---|---|---|---|---|
 
-**Why:** under 250 ms, even one `/status` poll or one `/generate` round trip has to fit the server
+**Why:** under 200 ms, even one `/status` poll or one `/generate` round trip has to fit the server
 slice of the budget (prd §10.2). This is the only existing server-side per-request timing.
 
 ## What comes back to trades-pm
