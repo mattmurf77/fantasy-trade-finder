@@ -5,6 +5,11 @@
 **Ask:** run the read-only queries below against production and return the output tables in the
 shapes given. Nothing here writes, flips or generates anything.
 
+**Status (2026-10-20): Q0–Q7 and Q9 are answered** by analytics-lead's W3 read (run 2026-10-20
+06:19–06:37 UTC; `docs/plans/org-bringup/reports/analytics-lead.md:342-379`). The results are in
+[prd.md](prd.md) §6. **Q8 (storage) is still with the storage worker**; it is the same read as
+#337's Q2.
+
 ## Ground rules
 
 - **Read-only.** Use `SET default_transaction_read_only = on`, confirm it is on, and use a 15 s

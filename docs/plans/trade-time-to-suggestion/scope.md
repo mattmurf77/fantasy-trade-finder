@@ -159,7 +159,9 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - 40 taps per cell recording the §9.5 readout;
   - the U3 three-page run and the P30 end;
   - the U5 fresh-account run;
-  - the U2 roster-change run.
+  - the U2 roster-change run;
+  - the K-F5 run (L4b);
+  - the §9.6 scripted two-device session, which is the AC-L1 proof.
 
   Step 13 (blocked sends) runs only in a test league the
   operator names. The operator approves the attempt and cancels any proposal that lands
@@ -188,10 +190,16 @@ This is a plan; nothing is updated yet. Each row states what the build must do.
 
 ## 5. Ship gate declaration
 
+- **Precondition, background replenishment restored:** it must be restored, bounded by DEC-2 narrow
+  rows, before the 200 ms build ships. The operator paused it as a DB emergency stopgap on
+  2026-10-20 (relayed by head-product). U2's freshness floor and U3's prefetch depend on it.
+  head-eng owns it (prd Handoffs, §12).
+- **AC-L1 proof:** the scripted two-device session (prd §9.6), run after replenishment is restored.
+  Organic telemetry is monitoring only.
 - **CI green:** `backend-tests` + `mobile-typecheck` (with the `check-*.js` suites) +
   `maestro-testid-lint`, all passing on the pushed sha.
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the guards and tests that ran,
-  the code-walk, and the analytics read once n ≥ 40.
+  the code-walk, and analytics-lead's §9.6 session readout (p95 per cell under T1–T6).
 - **TestFlight verification:** prd §9.4, run by the operator. Outcomes, with frame timings, are
   logged in TEST_LEDGER.
 - **Pre-push:** `FTF_SKIP_SIM_GATE=1` (D-056 standing posture), noting the evidence above.
