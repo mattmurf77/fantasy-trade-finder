@@ -3714,6 +3714,7 @@ class _DeckEvidence:
         self.by_hash: dict = {}       # trade_hash -> [impression_id], for id-less deliveries
         self.delivered: set = set()   # impression ids sent to a client
         self.delivered_hashes: set = set()
+        self.pending: set = set()     # delivered ids awaited until their row is written (F4)
         self.marked: set = set()      # delivered ids already written or marked 'delivered'
         self.sealed = False           # the logger finished assembling
         self.complete = False         # the run ended: its deliveries may write
@@ -3901,6 +3902,56 @@ def _start_deck_evidence_thread(*, target, args):
     threading.Thread(target=target, args=args, daemon=True, name="deck-evidence").start()
 
 
+# F4: an action on a delivered card whose row is still being written (the
+# write runs off the request thread) waits for it, at most this long.
+_DECK_EVIDENCE_AWAIT_S = 2.0
+_deck_evidence_pending: dict = {}             # impression_id -> pending writes
+_deck_evidence_pending_cv = threading.Condition()
+
+
+def _deck_evidence_pend(ids) -> None:
+    with _deck_evidence_pending_cv:
+        for iid in ids:
+            _deck_evidence_pending[iid] = _deck_evidence_pending.get(iid, 0) + 1
+
+
+def _deck_evidence_settle(ids) -> None:
+    """A write that covered `ids` has finished (or failed): stop awaiting them."""
+    with _deck_evidence_pending_cv:
+        for iid in ids:
+            left = _deck_evidence_pending.get(iid, 0) - 1
+            if left > 0:
+                _deck_evidence_pending[iid] = left
+            else:
+                _deck_evidence_pending.pop(iid, None)
+        _deck_evidence_pending_cv.notify_all()
+
+
+def _deck_evidence_await(impression_id: str) -> bool:
+    """Wait, at most _DECK_EVIDENCE_AWAIT_S, while a deferred deck's write for
+    `impression_id` is pending. False when none is (no wait at all)."""
+    deadline = time.monotonic() + _DECK_EVIDENCE_AWAIT_S
+    with _deck_evidence_pending_cv:
+        if impression_id not in _deck_evidence_pending:
+            return False
+        while impression_id in _deck_evidence_pending:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            _deck_evidence_pending_cv.wait(remaining)
+    return True
+
+
+def _load_deck_impression_awaiting(impression_id: str):
+    """load_deck_impression for an id a client sent: an unknown id that belongs
+    to a deferred deck with a pending evidence write is read again once that
+    write lands (or the bound passes). Nothing else changes."""
+    imp = load_deck_impression(impression_id)
+    if imp is None and _deck_evidence_await(impression_id):
+        imp = load_deck_impression(impression_id)
+    return imp
+
+
 def _deck_evidence_flush(ev: _DeckEvidence) -> None:
     """Write what `ev`'s deliveries call for, then shrink the stored blob.
 
@@ -3912,6 +3963,7 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
         if not ev.complete or ev.discarded or not (ev.delivered or ev.delivered_hashes):
             return
         (first, first_diag), (rest, rest_diag), candidate_set, upgrades = ev.plan()
+        covered, ev.pending = ev.pending, set()
     shrunk = False
     try:
         if first or candidate_set is not None or upgrades:
@@ -3920,6 +3972,8 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             with ev.lock:
                 ev.wrote(first, candidate_set, first_diag, upgrades)
             shrunk = bool(first) or candidate_set is not None
+        _deck_evidence_settle(covered)        # the delivered rows are in: actions proceed
+        covered = ()
         shrunk = _deck_evidence_build_writes(ev) or shrunk
         if rest:
             _db.save_deck_evidence(rest, diagnostics=rest_diag, deck_job_id=ev.job_id)
@@ -3929,6 +3983,8 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
     except Exception:
         log.warning("deck-evidence %s: delivery write failed (snapshots kept)", ev.job_id,
                     exc_info=True)
+    finally:
+        _deck_evidence_settle(covered)
     if shrunk and ev.pages_bytes is not None:
         try:
             with ev.lock:
@@ -3970,6 +4026,9 @@ def _deck_evidence_write(ev: _DeckEvidence) -> None:
     with ev.lease.active() as active:
         if not active:
             log.info("deck-evidence %s: account gone, nothing written", ev.job_id)
+            with ev.lock:
+                covered, ev.pending = ev.pending, set()
+            _deck_evidence_settle(covered)
             return
         with _deck_evidence_write_lock:
             _deck_evidence_flush(ev)
@@ -3979,18 +4038,22 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease)
     """Thread target: a stored deck's delivery once its job has left this
     process, from the row's evidence_blob read fresh under the write lock."""
     from . import database as _db
-    with lease.active() as active:
-        if not active:
-            return
-        with _deck_evidence_write_lock:
-            try:
-                row = _db.load_trade_page_for_job(user_id, deck_job_id)
-            except Exception:
-                log.warning("deck-evidence %s: stored evidence unreadable", deck_job_id, exc_info=True)
+    try:
+        with lease.active() as active:
+            if not active:
                 return
-            ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
-            ev.delivered.update(ids)
-            _deck_evidence_flush(ev)
+            with _deck_evidence_write_lock:
+                try:
+                    row = _db.load_trade_page_for_job(user_id, deck_job_id)
+                except Exception:
+                    log.warning("deck-evidence %s: stored evidence unreadable", deck_job_id,
+                                exc_info=True)
+                    return
+                ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
+                ev.delivered.update(ids)
+                _deck_evidence_flush(ev)
+    finally:
+        _deck_evidence_settle(ids)
 
 
 def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = False) -> None:
@@ -4014,6 +4077,9 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         if partial:
             ev.partial = ev.complete = True
         new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
+        awaited = {iid for iid in ids - ev.pending if iid in ev.rows}   # F4: rows not yet in
+        ev.pending |= awaited
+        _deck_evidence_pend(awaited)
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
         go = new and ev.complete
@@ -4036,6 +4102,7 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list) -> None:
         return   # a live-mode deck wrote its rows at build
     lease = _user_data_lifecycle.capture(
         row["user_id"], started=g.get("_user_data_started") if has_request_context() else None)
+    _deck_evidence_pend(ids)
     _start_deck_evidence_thread(target=_deck_evidence_write_stored,
                                 args=(row["user_id"], row["deck_job_id"], ids, lease))
 
@@ -4058,7 +4125,11 @@ def _deck_evidence_job_done(job_id: str) -> None:
         if ceiling:
             ev.discarded = True
             ev.rows, ev.ghosts, ev.diagnostics, ev.candidate_set, ev.by_hash = {}, {}, {}, None, {}
-            return
+            covered, ev.pending = ev.pending, set()
+    if ceiling:
+        _deck_evidence_settle(covered)
+        return
+    with ev.lock:
         ev.partial = not (complete and ev.sealed)
         ev.complete = True
     with _deck_evidence_write_lock:
@@ -6976,7 +7047,7 @@ def _save_deck_outcome_safe(
         if not acting_user_id:
             _deck_outcome_reject("no_user", impression_id)
             return
-        imp = load_deck_impression(impression_id[:64])
+        imp = _load_deck_impression_awaiting(impression_id[:64])
         if imp is None:
             _deck_outcome_reject("unknown", impression_id)
             return
@@ -7057,7 +7128,7 @@ def _owned_impression_id(raw, acting_user_id, *, league_id=None, expected_trade_
     if not (_trade_policy.telemetry_enabled() or _owner_enabled(league_id)):
         return None
     try:
-        imp = load_deck_impression(raw[:64])
+        imp = _load_deck_impression_awaiting(raw[:64])
         if (imp is None or imp.get("user_id") != acting_user_id
                 or (league_id is not None and str(imp.get("league_id")) != str(league_id))):
             return None
@@ -7560,7 +7631,7 @@ def _record_trade_proposal(*, sess, provider: str, user_id: str,
         origin_hash = None
         if impression_id:
             try:
-                imp = load_deck_impression(impression_id)
+                imp = _load_deck_impression_awaiting(impression_id)
                 if imp is not None:
                     origin_hash = imp.get("trade_hash")
             except Exception:
@@ -18214,7 +18285,7 @@ def _pass_reason_key(impression_id, user_id: str, trade_id: str) -> tuple[str, s
         # not get to be a key.
         return surrogate
     try:
-        imp = load_deck_impression(candidate)
+        imp = _load_deck_impression_awaiting(candidate)
     except Exception:
         imp = None
     if imp is None or imp.get("user_id") != user_id:

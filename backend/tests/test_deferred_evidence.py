@@ -26,6 +26,7 @@ import copy
 import hashlib
 import json
 import random
+import threading
 import time
 import zlib
 
@@ -336,6 +337,84 @@ def test_f3_a_partial_run_writes_its_held_rows_at_its_delivery_but_never_trades_
     assert build_writes(engine) == (0, 0)                  # nothing delivered yet
     server._trade_job_public_view(dict(server._trade_jobs[job_id]))
     assert build_writes(engine) == (40, 0) and generated_events == []
+
+
+# ── F4: an action on a card whose row is still being written waits for it ──
+
+@pytest.fixture()
+def threaded(deferred, monkeypatch):
+    """Evidence writes on real threads, as in production; joined at teardown.
+    The in-memory database moves to one shared connection (StaticPool), since
+    SQLite's default pool gives each thread its own empty database."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import StaticPool
+    _, engine, _ = deferred
+    shared = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    db_module.metadata.create_all(shared)
+    with engine.connect() as source, shared.begin() as target:
+        for table in db_module.metadata.sorted_tables:
+            data = [dict(r._mapping) for r in source.execute(select(table))]
+            if data:
+                target.execute(insert(table), data)
+    monkeypatch.setattr(db_module, "engine", shared)
+    threads = []
+
+    def start(*, target, args):
+        thread = threading.Thread(target=target, args=args, daemon=True)
+        threads.append(thread)
+        thread.start()
+
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", start)
+    yield shared
+    for thread in threads:
+        thread.join(10)
+
+
+def delay_flush(monkeypatch, seconds):
+    real = server._deck_evidence_flush
+    monkeypatch.setattr(server, "_deck_evidence_flush",
+                        lambda ev: (time.sleep(seconds), real(ev))[1])
+
+
+def outcomes(engine):
+    return rows(engine, db_module.deck_outcomes_table)
+
+
+def test_f4_an_outcome_on_a_card_whose_row_is_in_flight_waits_for_it(deferred, threaded, monkeypatch):
+    client, engine = deferred[0], threaded
+    job_id, *_ = deferred_deck(40)
+    delay_flush(monkeypatch, 0.5)
+    iid = status(client, job_id, 0).get_json()["cards"][0]["impression_id"]
+    assert db_module.load_deck_impression(iid) is None    # the delivery write is in flight
+    started = time.monotonic()
+    server._save_deck_outcome_safe(iid, "like", acting_user_id=UID)   # /api/trades/swipe's writer
+    waited = time.monotonic() - started
+    assert 0.2 < waited < server._DECK_EVIDENCE_AWAIT_S
+    assert [o["impression_id"] for o in outcomes(engine)] == [iid]
+    assert server._pass_reason_key(iid, UID, "t-0000") == (iid, "impression")
+    assert server._deck_evidence_pending == {}
+
+
+def test_f4_the_wait_is_bounded(deferred, threaded, monkeypatch):
+    client, engine = deferred[0], threaded
+    monkeypatch.setattr(server, "_DECK_EVIDENCE_AWAIT_S", 0.3)
+    job_id, *_ = deferred_deck(40)
+    delay_flush(monkeypatch, 1.5)
+    iid = status(client, job_id, 0).get_json()["cards"][0]["impression_id"]
+    started = time.monotonic()
+    server._save_deck_outcome_safe(iid, "like", acting_user_id=UID)
+    waited = time.monotonic() - started
+    assert 0.25 < waited < 1.0 and outcomes(engine) == []   # proceeds, as an unknown id did
+
+
+def test_f4_an_unknown_id_with_no_pending_write_never_waits(deferred, monkeypatch):
+    _, engine, _ = deferred
+    for iid in ("not-an-impression", "f" * 32):
+        started = time.monotonic()
+        server._save_deck_outcome_safe(iid, "like", acting_user_id=UID)
+        assert time.monotonic() - started < 0.1
+    assert outcomes(engine) == []
 
 
 # ── C4 and C3: first delivery, later pages ──────────────────────────────────
