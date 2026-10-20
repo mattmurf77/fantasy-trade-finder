@@ -2532,6 +2532,29 @@ shared_packages_table = Table("shared_packages", metadata,
 )
 
 # ---------------------------------------------------------------------------
+# Trade share tokens (build O8, 2026-10-20) — the ONLY way /s/trade/<token>
+# and /og/trade/<token>.png reach a trade_matches row. Those routes used to
+# take the sequential trade_matches.id, so walking the ids exposed every
+# mutual match. A token is secrets.token_urlsafe(16): 22 URL-safe chars,
+# 128 bits. match_id and created_by are server-side only — never in a URL,
+# never returned to a client, never rendered. No TTL: a link lives until
+# revoked_at is set, the match row is gone, or the sharer deletes their
+# account (accounts.py deletes rows by created_by). Created by
+# metadata.create_all on fresh AND existing DBs (a new table gets its
+# indexes with it), the same path shared_packages took.
+# ---------------------------------------------------------------------------
+
+trade_share_tokens_table = Table("trade_share_tokens", metadata,
+    Column("token",      String,  primary_key=True),    # token_urlsafe(16)
+    Column("match_id",   Integer, nullable=False),      # trade_matches.id
+    Column("created_by", String,  nullable=False),      # sharer's session user_id
+    Column("created_at", String,  nullable=False),      # ISO UTC; rate-limit input
+    Column("revoked_at", String),                       # ISO UTC; NULL = live
+    Index("ix_trade_share_tokens_match", "match_id"),
+    Index("ix_trade_share_tokens_creator", "created_by", "created_at"),
+)
+
+# ---------------------------------------------------------------------------
 # Monetization platform foundation
 # (docs/plans/monetization/00-platform-foundation.md §2.1)
 #
@@ -14809,6 +14832,89 @@ def count_recent_shared_packages(user_id: str, *, hours: int = 1) -> int:
             .select_from(shared_packages_table)
             .where(and_(shared_packages_table.c.user_id == user_id,
                         shared_packages_table.c.created_at >= cutoff))
+        ).scalar()
+    return int(n or 0)
+
+
+# ---------------------------------------------------------------------------
+# Trade share tokens — helpers for /s/trade/<token> + /og/trade/<token>.png
+# (build O8). The token is the only key; a trade_matches.id never resolves.
+# ---------------------------------------------------------------------------
+
+def create_trade_share_token(match_id: int, user_id: str) -> str | None:
+    """The caller's live share token for a match, minted on first share.
+
+    Idempotent per (match, sharer): a live (non-revoked) token this user
+    already holds for this match is returned as is; otherwise a new
+    secrets.token_urlsafe(16) is minted (re-minted on a PK collision).
+
+    None when the match doesn't exist or `user_id` isn't one of its two
+    parties. The participant predicate is the one every match route uses
+    (dismiss_match / record_match_disposition / load_matches): the session
+    user_id equals user_a_id or user_b_id. The route turns None into the same
+    404 it gives a malformed id, so the mint can't be used to probe ids.
+    """
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+
+    if not user_id:
+        return None
+    tm, tst = trade_matches_table, trade_share_tokens_table
+    for _ in range(4):   # a 128-bit collision is ~impossible; belt+braces
+        token = secrets.token_urlsafe(16)
+        try:
+            with engine.begin() as conn:
+                match = conn.execute(
+                    select(tm.c.user_a_id, tm.c.user_b_id).where(tm.c.id == match_id)
+                ).fetchone()
+                if match is None or user_id not in (match.user_a_id, match.user_b_id):
+                    return None
+                live = conn.execute(
+                    select(tst.c.token)
+                    .where(and_(tst.c.match_id == match_id,
+                                tst.c.created_by == user_id,
+                                tst.c.revoked_at.is_(None)))
+                    .order_by(tst.c.created_at)
+                    .limit(1)
+                ).scalar()
+                if live:
+                    return live
+                conn.execute(insert(tst).values(
+                    token=token, match_id=match_id,
+                    created_by=user_id, created_at=_now(),
+                ))
+            return token
+        except IntegrityError:
+            continue
+    raise RuntimeError("could not mint a unique trade share token")
+
+
+def resolve_trade_share_token(token: str) -> dict | None:
+    """The trade_matches row a live token points at, as a dict, or None for
+    an unknown or revoked token or an orphaned match (the row is gone)."""
+    if not token:
+        return None
+    tm, tst = trade_matches_table, trade_share_tokens_table
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(tm)
+            .select_from(tst.join(tm, tm.c.id == tst.c.match_id))
+            .where(and_(tst.c.token == token, tst.c.revoked_at.is_(None)))
+        ).fetchone()
+    return dict(row._mapping) if row is not None else None
+
+
+def count_recent_trade_share_tokens(user_id: str, *, hours: int = 1) -> int:
+    """Tokens this user minted inside the window — the mint rate-limit input."""
+    if not user_id:
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    tst = trade_share_tokens_table
+    with engine.connect() as conn:
+        n = conn.execute(
+            select(func.count())
+            .select_from(tst)
+            .where(and_(tst.c.created_by == user_id, tst.c.created_at >= cutoff))
         ).scalar()
     return int(n or 0)
 

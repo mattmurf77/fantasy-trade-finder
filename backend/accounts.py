@@ -616,7 +616,8 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #   ALSO DELETE newer private tables in _ADDITIONAL_PRIVATE_TABLES,
 #            durable sessions, account-linked billing (including raw payloads),
 #            own deck impressions/outcomes, identity links, linked anonymous
-#            device events/assignments, and private ranking sets/entries.
+#            device events/assignments, private ranking sets/entries, and
+#            trade_share_tokens the user minted (created_by).
 #            Resolve acct_<account_id> aliases before removing identity rows.
 #   ALSO ANONYMIZE shared packages, public ranking authors, referral sides,
 #            affiliate attribution, recorded-pick authors, trade-block owners,
@@ -860,6 +861,9 @@ def _delete_user_data(sleeper_user_id: str,
         _del("leagues", db.leagues_table)
         _del("bad_trade_flags", db.bad_trade_flags_table)
         _del("trade_impressions", db.trade_impressions_table)
+        # Trade share links this user minted die with the account (build O8);
+        # the other party's own tokens for the same match are untouched.
+        _del("trade_share_tokens", db.trade_share_tokens_table, "created_by")
 
         # Shared rows — anonymize the deleted side, keep the counterparty's
         # record (incl. status + both decisions) intact.
