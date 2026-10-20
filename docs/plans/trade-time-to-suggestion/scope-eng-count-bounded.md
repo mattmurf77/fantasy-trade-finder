@@ -81,7 +81,7 @@ Decks are unchanged, except for runs that previously hit the 8 s clock, which no
 | ADR or `DECISIONS.md` | **needs an entry by the lead (living-memory owner)** | (1) The value core is count-bounded with a 30 s pathology ceiling (G-065). (2) A ceiling run reuses `value_core_failed` rather than a new code, to avoid an API and cross-client invariant change. |
 | `docs/plans/value-core-engine/` | **updated** | `lld.md` §3 constants, §4.1 API, §4.5 pseudo-code, §4.6 table and expected load, §4.7, §6, §10. `specs.md` §3 `CoreDiagnostics`, acceptance criteria 4–6, the test table (`test_check_cap`, `test_safety_ceiling_marks_pathology`), and the new `test_value_core_count_bound.py` block. `hld.md` §5 failure modes and §6 time. `prd.md` latency. |
 | `docs/runbook.md` | **needs update by the runbook owner (ops-release / engines lead)** | :481 says "`budget_exhausted=True` means the 8 s core budget stopped enumeration". It now means the 30 s safety ceiling fired (pathology), and that line comes with an ERROR `value-core: safety ceiling … hit`. |
-| `docs/plans/blind-grading/` | **needs update by the blind-grading plan owner** | `lld.md` §6.3 step 8, `hld.md` :145 and :225, and `specs.md` :532 should each note that a safety-ceiling run gives `value_core_failed` 503. |
+| `docs/plans/blind-grading/` | **updated** | `lld.md` §6.3 step 8, `hld.md` §3.2 (step 5 bullet) and the §8 failure-mode table, and the `specs.md` test table (new `test_safety_ceiling_run_never_becomes_a_session` row). Each says a safety-ceiling run ends as `value_core_failed` 503 (session failed, no cards), with the cause in the ERROR log. |
 
 ## 5. Ship gate declaration
 
