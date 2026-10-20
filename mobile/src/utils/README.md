@@ -18,6 +18,7 @@ Helpers with **no React**. The annotated map — including which values are cros
 | `leagueUnlocks.ts` | Mutual-match unlock threshold (#265) + the contrarian fold-line copy (#308) |
 | `matchesDerive.ts` | #334/#335 — render-layer dismiss suppression + segment/chip counts for Matches |
 | `mockPool.ts` | #326/#327 — mock-draft pool filter-then-search composition |
+| `openExternal.ts` | `openPlatform` — the ONE place mobile opens an outside link: copy → scheme → https, detect by `openURL` rejection, re-tap lock, never silent |
 | `queueCalcTrade.ts` | The ✓ cell's `POST /api/trades/queue` call, its one analytics row and the six refusal lines ([D-152]), shared by both hosts ([D-158]) |
 | `playerValue.ts` | 0–10k display value from Elo — inverse of `backend/data_loader.seed_elo_for_value` |
 | `rankPresets.ts` | Premium rank-set CSV presets (D-058) — tolerant reader, anchor-column source detection, order-only extraction |
@@ -25,6 +26,7 @@ Helpers with **no React**. The annotated map — including which values are cros
 | `relativeTime.ts` | "2h ago"-style formatting |
 | `sessionRerank.ts` | F4 session re-rank math (flag `deck.session_rerank`) |
 | `shareLinks.ts` | Share-package URLs for a built trade |
+| `sleeperHandoff.ts` | `openInSleeperApp` / `sleeperAppUrl` / `SLEEPER_PROVEN_RUNGS` — Sleeper hand-offs open `sleeper://`, never https (#351) |
 | `testRouteEntry.ts` | Launch-argument test-route entry (`FTFTestRoute`), used by the operator QA path |
 | `tickerWindow.ts` | #322/#325 — the mock-draft ticker's ascending last-`depth` window |
 | `tierBands.ts` | Elo/value → tier key + label (8-tier pick ladder, #117); holds the server tier-config cache |
@@ -38,7 +40,7 @@ Helpers with **no React**. The annotated map — including which values are cros
 - **No React, ever.** No hooks, no components, no `useState`.
 - **Two tiers of import discipline, and the file header tells you which one you're in.**
   - *Node-testable* (16) — no runtime import outside `utils/`, so `../../tests/check-*.js` can transpile and run the file under plain `node`: `applyJobResult`, `espnNavPolicy`, `feedbackBadge`, `inviteSocialProof`, `leagueUnlocks`, `matchesDerive`, `mockPool`, `playerValue`, `rankPresets`, `relativeTime`, `sessionRerank`, `tickerWindow`, `tierBands`, `tradeText`, plus `anchorRows` and `firstSessionMoment` (which import only a sibling in this folder). Adding an import from `../api/`, `react-native`, or a package **breaks that file's guard**. Type-only imports are always fine.
-  - *Everything else* (11) pulls in `../api/`, `../data/`, or a native module — `canvasSearch`, `clipboard`, `deepLinks`, `espnCookies`, `haptics`, `queueCalcTrade`, `ratingPrompt`, `shareLinks`, `testRouteEntry`, `tradeCalcMath`, `verification` — and is not node-testable.
+  - *Everything else* (13) pulls in `../api/`, `../data/`, or a native module — `canvasSearch`, `clipboard`, `deepLinks`, `espnCookies`, `haptics`, `openExternal`, `queueCalcTrade`, `ratingPrompt`, `shareLinks`, `sleeperHandoff`, `testRouteEntry`, `tradeCalcMath`, `verification` — and is not node-testable as-is (`openExternal` and `sleeperHandoff` run under node only behind a `require` shim, in `check-external-links.js` / `check-sleeper-handoff.js`).
 - **A cross-client value is a contract.** `anchorRows`'s keys, `tierBands`'s bands, `playerValue`'s curve, and the notification-type glyph set each have a counterpart in `backend/` or in the web/extension clients, listed in [docs/cross-client-invariants.md](../../../docs/cross-client-invariants.md). A copied table here is a silent mis-valuation, not a layout bug — which is exactly why `anchorRows.ts` was extracted the moment a second surface asked the same question.
 
 ## Adding a helper
