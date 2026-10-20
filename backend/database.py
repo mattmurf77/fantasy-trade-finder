@@ -8520,6 +8520,25 @@ def mark_league_roster_failed(league_id: str, error_code: str) -> str:
     return status
 
 
+def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool:
+    """S0 — replace a league's membership with an authoritative snapshot.
+
+    Sleeper session init used to UPSERT, so the rows of managers who left a
+    league (or legacy rows keyed on a co-owner's own id) were never deleted
+    (G-075), and one player could sit on two teams' stored rosters. The
+    session-init read is now complete and authoritative, so it replaces.
+
+    Refuses an empty snapshot (G-015: an empty REPLACE is a wipe): returns
+    False and touches nothing. Otherwise one delete-then-insert transaction
+    (`replace_espn_league_members`, already platform-agnostic); returns True.
+    """
+    rows = [m for m in (members or []) if m.get("user_id")]
+    if not rows:
+        return False
+    replace_espn_league_members(league_id, rows)
+    return True
+
+
 def replace_trade_block(league_id: str, entries: list[dict]) -> None:
     """FB-147 — replace the league's Sleeper trade-block snapshot.
 

@@ -127,6 +127,7 @@ from .database import (
     replenish_week_done, log_deck_replenish,
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
+    replace_league_members_snapshot,   # S0 — authoritative Sleeper membership
     load_member_rankings, load_league_members, get_ranking_coverage,
     find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
@@ -22835,9 +22836,16 @@ def session_init():
                     for opp in opponent_rosters
                     if opp.get("user_id")
                 ]
-                upsert_league_members(league_id=league_id, members=all_members_for_db)
-                _s0_members_ok = True
-                log.info("  ✅ league_members upserted (%d members)", len(all_members_for_db))
+                if _s0_raw and not _platform_linked:
+                    # S0 — the request thread's Sleeper read is the complete,
+                    # authoritative membership: replace, so departed managers'
+                    # rows go (G-075). Refuses an empty snapshot (G-015).
+                    _s0_members_ok = replace_league_members_snapshot(
+                        league_id, all_members_for_db)
+                else:
+                    upsert_league_members(league_id=league_id, members=all_members_for_db)
+                    _s0_members_ok = True
+                log.info("  ✅ league_members written (%d members)", len(all_members_for_db))
                 # Roster changed → drop cached _league_members projections
                 # so the next /api/league/members call rebuilds the
                 # join-status list. (Picked up from PR #63 #B4 cache.)

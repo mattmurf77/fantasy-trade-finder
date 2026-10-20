@@ -258,3 +258,51 @@ def test_failure_keeps_fp_and_refreshed_at(db):
 def test_failure_on_a_never_seen_league_is_missing(db):
     assert db.mark_league_roster_failed("L", "network") == "missing"
     assert db.get_league_roster_state("L")["last_error_code"] == "network"
+
+
+# ---------------------------------------------------------------------------
+# Replace semantics for Sleeper league_members (S0, separate commit)
+# ---------------------------------------------------------------------------
+
+GHOST_ID = "111111111111111111"
+
+
+def test_session_init_replaces_sleeper_members_dropping_ghosts(harness):
+    client, _put = harness
+    db_module.upsert_league_members(LEAGUE_ID, [   # a manager who left (G-075)
+        {"user_id": GHOST_ID, "username": "Gone", "player_ids": ["p2"]}])
+    assert _init(client).status_code == 200
+    assert set(_members()) == {USER_ID, OPP_ID}    # ghost removed, one row per roster
+
+
+def test_replace_refuses_an_empty_snapshot(db):
+    db.upsert_league_members("L", [{"user_id": "u1", "username": "A", "player_ids": ["p1"]}])
+    assert db.replace_league_members_snapshot("L", []) is False
+    assert db.replace_league_members_snapshot("L", [{"user_id": "", "player_ids": ["p9"]}]) is False
+    assert [m["user_id"] for m in db.load_league_members("L")] == ["u1"]   # untouched (G-015)
+    assert db.replace_league_members_snapshot("L", [
+        {"user_id": "u2", "username": "B", "player_ids": ["p2"]}]) is True
+    assert [m["user_id"] for m in db.load_league_members("L")] == ["u2"]
+
+
+def test_platform_league_rows_are_not_replaced_by_session_init(harness, monkeypatch):
+    """ESPN/MFL membership is replaced at import, never by session init."""
+    client, _put = harness
+    mfl = "62846"
+    with db_module.engine.begin() as conn:
+        conn.execute(db_module.leagues_table.insert().values(
+            sleeper_league_id=mfl, user_id=USER_ID, name="Imported", platform="mfl"))
+    db_module.upsert_league_members(mfl, [
+        {"user_id": USER_ID, "username": "Me", "player_ids": ["p1"]},
+        {"user_id": OPP_ID, "username": "Opp", "player_ids": ["p2"]},
+        {"user_id": "mfl:62846.f0003", "username": "Third", "player_ids": []},
+    ])
+    called = []
+    monkeypatch.setattr(server, "replace_league_members_snapshot",
+                        lambda *a, **kw: called.append(a) or True)
+    resp = client.post("/api/session/init", content_type="application/json",
+                       headers={"X-Session-Token": TOKEN},
+                       data=json.dumps({"user_id": USER_ID, "league_id": mfl}))
+    assert resp.status_code == 200
+    assert called == []
+    assert len(db_module.load_league_members(mfl)) == 3
