@@ -1,6 +1,6 @@
 # Feature Scope — Trades eng: the 200 ms path (S0, E2, P1, P2, end of deck, UX, C, M, narrow evidence)
 
-**Date:** 2026-10-20 (v1.2: head-eng's amendment 2 rulings, including ruling 9, folded in; supersedes v1.1, v1 and v0 of the same day)
+**Date:** 2026-10-20 (v1.3: E2 and S0 as built, head-eng's grants and final `vsn1` folded in; supersedes v1.2 and earlier of the same day)
 **Entry point:** direct operator ask, 2026-10-20, relayed by the coordinator.
 - "Yes building should resume on the 200 ms path." This covers the whole §3a critical path, including UX, C and
   M (coordinator, 2026-10-20).
@@ -10,7 +10,8 @@
   `build-200ms-trades-eng-amend-1.md` and `build-200ms-amend-2-packed-evidence.md`.
 **Builder:** trades-eng (lead), with `eng-backend` and `eng-mobile` workers in their own worktrees.
 **Operator sign-off on waivers:** pending. §9 is surfaced to head-eng, who takes it to the operator.
-**Status:** v1.2. Rows marked **OPEN** block the piece named beside them.
+**Status:** v1.3. E2 is built (`feat/trades-200ms-e2-small-responses` @ `1aaa6538`) and S0 serve is built
+(`feat/trades-200ms-s0-serve` @ `7e5f581e`); both are accepted by trades-eng and unpushed. Rows marked **OPEN** block the piece named beside them.
 
 **Supersedes and cites:**
 - **Product's acceptance** (binding): `docs/plans/org-bringup/launch-readiness-product.md` §"200 ms by launch":
@@ -111,7 +112,8 @@ platforms-eng's S0 background fetch.
 | `features_compact` on `deck_impressions` | Narrow fallback | The §DEC-2 §2 key list, frozen at build | Only if C7 (i)–(ii) slip past launch (models-lead line 313) |
 | C8 archive marker | Packed | From models-eng's C8 spec | **OPEN** (models-eng) |
 | Roster refresh state (`league_roster_state`) | S0 | contract §4 | **Granted to platforms-eng** (amendment 2 §5). `roster_snapshot` reads it once it exists |
-| Account deletion and export registration for the new tables (D-183; C7 (v)) | P1, narrow | `_ADDITIONAL_PRIVATE_TABLES` (`accounts.py:652`); export is derived from it by `user_id` (`:988-992`). **So the page store and the pack table each carry their own `user_id` column.** | **Not in my grant:** head-eng or onboarding-eng |
+| `evidence_tier` on `deck_impressions` (archive / delivered / first-30 / ghost) | Packed | Spec: `docs/plans/org-bringup/adr-025-draft.md` §C8 | **Granted** (head-eng, 2026-10-20) |
+| Account deletion and export registration for the new tables (D-183; C7 (v)) | P1, packed | `_ADDITIONAL_PRIVATE_TABLES` (`accounts.py:652`); export is derived from it by `user_id` (`:988-992`). **So the page store and the pack table each carry their own `user_id` column.** | **Granted** (head-eng, 2026-10-20) |
 
 **Feature flag: `trade.first_page_store`** (named by release-lead, 2026-10-20). Default **false**.
 - **In the P1 PR, in the same commit as the code that reads it:**
@@ -122,8 +124,9 @@ platforms-eng's S0 background fetch.
 - **Not** on any launched-defaults list (D-166).
 - **The mobile client doesn't read the flag:** it reads the server's response shape (paged vs legacy). If a client
   gate turns out to be needed, mirror it per G-007.
-- **The flag gates the server's page-store serve and the pre-build triggers.** Off means `/generate` and
-  `/status` are byte-identical to today, even when a client sends the paging params. A test pins this.
+- **The flag gates P1 only:** the page-store serve, its writes and the pre-build triggers. With it off, every
+  request behaves exactly as without P1. **E2's paging is gated by its opt-in params, not by this flag** (head-eng
+  ruling 7). Old binaries never send them. A test pins flag-off = no page-store reads or writes.
 - **Graduation:**
   - device p95 ≤ 200 ms (M, analytics-lead's T6);
   - C7 green;
@@ -225,8 +228,7 @@ needs a grant, or onboarding-eng adds the row reading trades-eng's value.
 
 **Status:** v0 **accepted** by head-eng, 2026-10-20 (amendment 2, rulings on the first reply §2).
 - `backend/roster_snapshot.py` is trades-eng's; any change needs both leads' review.
-- platforms-eng reviews it and names the draft-state columns. models-eng confirms `vsn1`'s inputs (does it
-  include pick `pool_value`?).
+- platforms-eng reviews it and names the draft-state columns.
 - **One `values_snapshot_id`:** `vsn1` is also the id in the packed per-run part.
 - Copied verbatim into platforms-eng's S0 scope block.
 - `rfp1` = sha256[:32] over the canonical stored `league_members` rosters, `draft_picks` ownership and the
@@ -236,8 +238,17 @@ needs a grant, or onboarding-eng adds the row reading trades-eng's value.
   filter and the freshness compare share that snapshot.
 - platforms-eng commits the rows, then computes the fp, then calls `on_roster_change(league, old, new)`.
   trades-eng invalidates jobs and enqueues debounced pre-builds.
-- `vsn1` = sha256[:32] over the format's seed map, memoized on `(fmt, pool_generation())`. It is read-only on the
-  pool, because `pool_generation` is process-local.
+- **`vsn1` (final, models-eng's):** `"vsn1:" + sha256({v:1, fmt, seed: sorted [pid, seed_elo, age], picks: sorted
+  [pick_id, pool_value]})[:32]`, as `values_snapshot_id(conn, fmt, league_id, pool, *, generation=None)`.
+  - The seed part is memoized on `(fmt, pool_generation())`.
+  - It is the same id as the packed per-run `values_snapshot_id`.
+- **I-1 exemptions, as built:**
+  - `generic_pick_*` pool assets pass unchanged; they're never on a roster.
+  - On today's path, a league with no stored `league_members` passes with a loud log line, pending a W3 coverage
+    read. **The P1 page-store serve is strict.**
+- **Co-owners:** the stored row is keyed by the roster's `owner_id`. The viewer's league identity is stamped at
+  kickoff as `job["league_user_id"]`.
+- **Locking:** fingerprints are read before `_trade_jobs_lock`; only the comparison runs under it (E1-safe).
 
 ### 6.2 Page-store serve rules
 
@@ -359,17 +370,16 @@ None proposed in v1.1. Every §1–§4 row is answered. Open items are listed in
 | ID | Item | Owner |
 |---|---|---|
 | FP | platforms-eng's review of contract v0 (accepted by head-eng); naming the draft-state columns | platforms-eng via head-eng |
-| VSN | Whether `vsn1` includes pick `pool_value` | models-eng via head-eng |
 | PACK | models-lead accepting models-eng's pack format; the pack schema is frozen only after it | models-eng → head-eng → head-bizops → models-lead |
 | A2 | analytics-lead agreeing receipts move to delivered cards only (head-eng accepted) | analytics-lead via head-product |
-| DEL | `accounts.py` registration for the new tables (C7 (v) is mine; `accounts.py` itself is onboarding-eng's) | head-eng confirms the grant |
 | PR | The `partial_run` replay-exclusion tag mechanism (§6.8) | trades-eng + models-eng |
 | CAL | `blind_grading` refuses ceiling-hit decks (trades-eng's; with models-eng's conversion) | trades-eng |
+| COV | The W3 coverage read: active leagues without stored `league_members` rows (before I-1 goes strict on today's path) | analytics-lead via head-eng |
 | REPL | Replenishment's evidence writes follow C2 before `deck.replenishment` runs again (the operator was asked to pause it) | trades-eng (in the packed-evidence branch) |
-| TS | The Testing-settings readout row (`SettingsTesting`) | onboarding-eng via head-eng |
-| UXS | ux-lead's in-place reveal spec | ux-lead via head-eng |
-| THR | The final prefetch threshold; the readout spec | trades-pm via head-eng → head-product |
-| SWIPE | The p99 swipe rate | analytics-lead via head-eng |
+| TS | The Testing readout row: granted, one row in `SettingsTesting` | — (granted) |
+| UXS | ux-lead's U1 per-entry-point spec and U3 six-state table (`reports/ux-lead.md`); design-lead's U1 visuals (`reports/design-lead.md`) | available |
+| THR | The prefetch threshold is server-tunable, defaulting to ≥ 1 page ahead; trades-pm's number plugs in later. The readout spec is trades-pm's | trades-pm |
+| SWIPE | The p99 swipe rate (W3 granted) | analytics-lead |
 | MEAS | Measured page-store bytes per pair (and the candidate set) recorded in §7 | trades-eng (P1) |
 | B3 | Notice: invalid cards stop being served (S0) | models-lead via head-eng |
 | ONB | Review of the `on_roster_change` hook and the C session side | onboarding-eng via head-eng |
