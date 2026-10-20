@@ -42,7 +42,7 @@ Verify against freshly fetched `origin/main` before citing. Flag values below ar
 
 | Platform | Live surface | Kill-switch flags | Decisions |
 |---|---|---|---|
-| **Sleeper** | Username sign-in; public v1 reads; GraphQL writes: Send in Sleeper and team-overhaul sends | `trade.send_in_sleeper`, `overhaul.enabled`, `sleeper.trade_block`, `market.trade_capture`, `picks.owned_sync`, `account.sleeper_disconnect` | D-001, D-051, D-176, D-178, D-188, D-189 |
+| **Sleeper** | Username sign-in; public v1 reads; GraphQL writes: Send in Sleeper and team-overhaul sends; free-agent add/drop (planned, `sleeper.fa_write`) | `trade.send_in_sleeper`, `overhaul.enabled`, `sleeper.trade_block`, `market.trade_capture`, `picks.owned_sync`, `account.sleeper_disconnect`, `sleeper.fa_write` | D-001, D-051, D-176, D-178, D-188, D-189 |
 | **ESPN** | Link, WebView cookie capture, league picker, send (players only), team-overhaul sends (players only), platform entry | `espn.link`, `espn.webview_capture`, `espn.league_picker`, `espn.send`, `overhaul.enabled` | D-021, D-039 (ESPN entry), D-164, D-188 (revised by #290) |
 | **MFL** | Link, sign-in, send and respond, team-overhaul sends (picks allowed), platform entry | `mfl.link`, `mfl.auth_link`, `trade.send_in_mfl`, `draft.mfl`, `overhaul.enabled` | D-164, D-188 (revised by #290) |
 | **Fleaflicker** | Phase 1 built 2026-07-18, **dark** | `fleaflicker.link` = false | — |
