@@ -11,9 +11,14 @@
 **Entry point:** direct ask, the operator's top priority (2026-10-15), routed through `platforms-pm` to a spec worker. Clarification relayed by `head-product`: "It opens from the send a trade feature. That's the one we tested it on. Have an eng research all external links to compare differences to ensure a consistent experience"
 **Builder:** not assigned yet; the build stays with `head-eng` (`platforms-eng` / `eng-mobile`).
 - **The hand-off** can start now (P31). R0, device tests 1–12 and T1–T4 gate its **merge**.
-- **The direct write** waits for the spike in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`). It ships only after LEG-L12 and the write-feature-gate pass. See [prd.md § Sequencing](prd.md#9-sequencing-and-dependencies).
+- **The direct write** waits for the spike in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet). Its flag turns on only under D6 (§5). See [prd.md § Sequencing](prd.md#9-sequencing-and-dependencies).
 **Operator sign-off on waivers:** not needed (no waivers). D1 and D2 are decided.
-- Open: D3, D4, D5, D6, D9–D12, and the no-flag confirmation for the hand-off. Several of these are `legal-lead`'s. All are in [prd.md § Decisions needed](prd.md#10-decisions-needed).
+- **Decided by `head-product` (P34, 2026-10-20):** D6 (the flag goes on only after three conditions, §5), D9 (consent is its own step) and D11 (consent per account). D10 (no per-move dialog) is decided by Product **pending `legal-lead`**.
+- **Pending `legal-lead` via `head-bizops`:** D5 and D12, plus the confirmations of D10 and D11.
+- **Pending `marketing-lead` via `head-bizops`:** the secondary button's words.
+- **Open for the operator:** D3, D4, and the no-flag confirmation for the hand-off.
+
+All of these are in [prd.md § Decisions needed](prd.md#10-decisions-needed).
 - The operator also approves every live write when it runs: the spike captures, TestFlight 23–25 and 29, and the flag flip.
 **Pending:** `platforms-eng` (under `head-eng`) is inventorying **all** external links in the app to recommend one consistent pattern. The inventory feeds the shared hand-off helper. Its recommendation folds into this PR through `head-product` when it lands, and the helper's shape is kept open for it ([prd.md § 8](prd.md#8-reviews-needed)).
 
@@ -29,7 +34,7 @@
 
 So nothing records whether a hand-off reached the Sleeper app or hit the not-installed path. Apart from the operator's checklist, that is the one runtime signal that the scheme works on testers' phones.
 
-- [x] **(a) New events specced.** Needs an `analytics-lead` grant before build; the name, props and classification are theirs to change.
+- [x] **(a) New events specced.** `sleeper_handoff_resolved` is **GRANTED** by `analytics-lead` (2026-10-20).
 
   | Event | Properties | Fires when | Client |
   |---|---|---|---|
@@ -41,7 +46,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
   - How often is the roster full at hand-off (`has_drop`)? That evidence decides whether D1, the add/drop write path, is worth a spike.
 
   The event carries no player id, no player name and no free text.
-  Proposed classification: **INTENT**. It is the outcome these surfaces exist for, the same reasoning as `usage_trends_action`. The final call is `analytics-lead`'s.
+  Classification: as `analytics-lead` set it in the grant. We proposed **INTENT**, the same reasoning as `usage_trends_action`.
   Follow-through, in the same commit as the emitter:
   - register in `ALLOWED_CLIENT_EVENTS` and `CLIENT_EVENT_PROPS` (`backend/analytics_taxonomy.py`);
   - classify in `analytics_queries` (INTENT, so absent from `NON_INTENT_EVENTS`);
@@ -49,7 +54,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
   - add a dated addendum in `docs/business/analytics/`.
 
   `docs/data-dictionary.md`: n/a, because it is a `user_events` row with no new column.
-  **Direct write (D1): seven more events, each needing an `analytics-lead` grant.** R15.3 applies: no token, no free text. Full table in [consent.md § 6](consent.md#6-analytics):
+  **Direct write (D1): seven more events, all PENDING an `analytics-lead` grant.** R15.3 applies: no token, no free text. Full table in [consent.md § 6](consent.md#6-analytics):
 
   | Event | Fired by | Props | Classification |
   |---|---|---|---|
@@ -63,13 +68,16 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 
   They follow the P0-7 send split: attempts and failures come from the client; successes, consent records and withdrawals come from the server.
   **App Privacy labels:** no change. Per `legal-lead` R15.6, the data falls under categories already declared, and there's no tracking. Re-check only if a new data type is added. Each is registered and classified in the same commit as its emitter. The tests are `backend/tests/test_analytics_taxonomy_sleeper_fa_write.py`, plus an addendum.
-- [ ] **(b) Existing events cover it.** This is the fallback **only if the grant is refused**. The only signals would then be `usage_trends_action {action:'add'}`, `sleeper_send_attempted {has_target:false}` and `screen_viewed`. These stay unanswerable: CTA taps from Free Agents, Send All usage, installed vs not installed, and the roster-full rate. In that case ClaimSheet gains no `surface` prop and the helper takes none.
+- [ ] **(b) Existing events cover it.** Not used, because `sleeper_handoff_resolved` was granted.
 - [ ] **(c) WAIVED:** not chosen.
 
 ## 2. Schema & flag scope
 
 - **New tables, two of them, both append-only.** These hold the `legal-lead` R15.3 evidence. Columns, reasons and evidence are in [consent.md § 4.3](consent.md#43-evidence-two-append-only-tables-r153).
   - **`platform_write_consents`:** grant and withdrawal rows. A withdrawal is a new row, never an update.
+    - **Keyed by user, not by league (D11: consent is per account).**
+    - Lookups use FTF user + Sleeper user.
+    - `league_scope` is always `'all_linked'`; it stays only because R15.3 lists it.
   - **`platform_write_moves`:** one row per move, including Sleeper's result.
   - Both are created by `metadata.create_all`, and each gets a `docs/data-dictionary.md` row.
   - **Same change:** both join `delete_user_data` / `export_user_data` through `accounts._ADDITIONAL_PRIVATE_TABLES` (`accounts.py:652-658`), which `test_account_deletion_coverage.py:48` already parametrizes.
@@ -79,7 +87,12 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 - **New feature flag: `sleeper.fa_write`**, default **`false`** (D1 direct write; [consent.md § 3](consent.md#3-what-the-write-route-must-do-implemented-in-sleeper-fa-write)).
   - It gates the write route and the two consent routes (they 404 when it's off, immediately and with no deploy). On the client it gates the connect, consent and direct-write UI and the Settings row. Off means hand-off mode.
   - It goes in `FLAG_KEYS`, the flag fixtures and `docs/config-reference.md`, and stays out of `LAUNCHED_FLAG_DEFAULTS`.
-  - **Graduation:** decision D6 (proposed: TestFlight 21–29, the write-feature-gate pass, LEG-L12 closed, then one clean cycle). After that it stays as a permanent kill switch.
+  - **Turning it on (D6, decided by `head-product` P34).** The flag goes on only after **all three** of these:
+    - LEG-L12 is done;
+    - the P31 device tests have passed;
+    - the `platforms-eng` spike has captured the mutation shapes.
+
+    **The flip itself is the operator's.** After that it stays as a permanent kill switch.
   - **It is the write's deploy-free rollback lever.**
 - **The `sleeper://` hand-off itself gets no flag.** `trades.queue_2k` stays as it is (`false`, `config/features.json:14`); lighting it is `trades-pm`'s call. No hand-off flag, because:
   1. **Turning it off would restore a known-broken flow.** Every behavior being replaced is verified broken (feasibility F1, F3, F5): Safari, then Sleeper's home screen or the App Store, with every param dropped. A kill switch earns its keep when its off state is safe and useful. Here the off state is the bug the operator reported.
@@ -96,7 +109,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 - **New env vars / `model_config` keys:** none. The 7-day window is a code constant set by the operator's decision, not a knob. The consent copy version is a constant shared by the server and the client (guard S19, plus a `docs/cross-client-invariants.md` row).
 - **New routes:**
   - `GET` and `DELETE /api/sleeper/write-consent` (consent.md §4.4).
-  - The write route, `POST /api/league/free-agents/add`. Its implementation is owned by `docs/plans/sleeper-fa-write/`; consent.md §3 holds the product requirements on it.
+  - The write route, `POST /api/league/free-agents/add`. Its implementation is owned by `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet); consent.md §3 holds the product requirements on it.
   - `DELETE /api/sleeper/link`, and every credential deletion (expiry, refusal), now also append a consent withdrawal.
 
   All of these go in `docs/api-reference.md`.
@@ -143,7 +156,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
   - `backend/tests/test_sleeper_write.py` (extended with golden bodies from the spike).
   - The flag-parity test (extended).
   - `test_account_deletion_coverage.py` (covers both new tables automatically).
-  - `backend/tests/test_analytics_taxonomy_sleeper_handoff.py` and `…_sleeper_fa_write.py`, if granted.
+  - `backend/tests/test_analytics_taxonomy_sleeper_handoff.py` (event granted), and `…_sleeper_fa_write.py` once those events are granted.
 
   The full list is in [consent.md § 8.1](consent.md#81-backend-tests). Mobile has no jest harness, so its unit-level tests are the executed guard sections.
 - [x] **Code-walk proof:**
@@ -164,7 +177,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 
     If R0's path has no on-demand trigger, step 19/20 is marked n/a with the reason, and guard S2 and S11–S16 plus the code-walk carry it.
   - **Direct write (D1).**
-    - **Before the write merges:** the mutation spike in `docs/plans/sleeper-fa-write/`, captured from Sleeper's own web client. Any FTF replay is a live write probe.
+    - **Before the write merges:** the mutation spike in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet), captured from Sleeper's own web client. Any FTF replay is a live write probe.
     - **Post-ship:** TestFlight **21–29**, which folds in ux-lead's K1–K7:
       - connect, and connect cancelled;
       - consent;
@@ -198,9 +211,9 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **updated (by the build)** | `GET` and `DELETE /api/sleeper/write-consent`, plus the write route (implementation per `docs/plans/sleeper-fa-write/`), with the refusal contract in consent.md §3. `DELETE /api/sleeper/link` now also appends a consent withdrawal. The hand-off adds no routes. |
+| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **updated (by the build)** | `GET` and `DELETE /api/sleeper/write-consent`, plus the write route (implementation per `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet)), with the refusal contract in consent.md §3. `DELETE /api/sleeper/link` now also appends a consent withdrawal. The hand-off adds no routes. |
 | `docs/data-dictionary.md` | **updated (by the build)** | New tables `platform_write_consents` and `platform_write_moves` (consent.md §4.3, R15.3). |
-| `docs/config-reference.md` | **updated (by the build)** | New flag `sleeper.fa_write`: default false, what it gates, and the graduation criterion (D6). |
+| `docs/config-reference.md` | **updated (by the build)** | New flag `sleeper.fa_write`: default false, and what it gates. It goes on only under D6: LEG-L12 done, the P31 device tests passed, and the spike's mutation shapes captured. The flip is the operator's. |
 | `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | **updated (by the build)** | § Code Conventions → Specific patterns gets two bullets. (1) **On-behalf platform writes need a server-enforced, versioned, time-boxed consent record checked before the write call**; the client gate alone is never enough. (2) "Hand-offs into a platform's app go through that platform's one helper (`utils/sleeperHandoff.ts` for Sleeper). Try the custom scheme first with `Linking.openURL`. Never use `canOpenURL` without an `LSApplicationQueriesSchemes` entry, and never pass `https://sleeper.com/leagues/...`, which Sleeper's AASA doesn't claim (feasibility F1/F3)." Reword it if `head-eng`'s inventory sets a cross-platform pattern. |
 | `docs/architecture.md` (module wiring / data flow changed) | **updated (by the build)** | The `sleeper_write.py` module row gains the add/drop and claim mutations. Route wiring: the FA add route → the consent check → `sleeper_write`. (The hand-off itself is a client util that replaces four inline `Linking` calls.) |
 | `living-memory/HLD.md` (architecture genuinely shifted: new module, client, major flow) | n/a | A new write that follows the existing `propose_trade` pattern (same adapter, credential and route shape) is not an architecture shift. The consent store is a new table, not a new module. |
@@ -215,11 +228,11 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 | `docs/design/components.md` (Forms) | **updated by `design-lead`** | The Checkbox component row (consent.md §2.3), which `design-lead` owes, plus the Step list row. |
 | `docs/integrations/sleeper.md:77-79` (Deep-link rows) | **updated (by the build), required** | Replace all three rows with the current call sites and their `sleeper://` targets: trade row `:77` → `useTradeQueue.sendAll` + `SendInSleeperButton.openInSleeper`, target `trade`; `:78` → `openInSleeper`; `:79` → `ClaimSheet`, target `add`. Record F1/F3/F5. |
 | `docs/feedback/items/179-fa-add-button/status.md:35-36, :98-99` | **updated (by the build)** | It says the CTA "opens the league's players page (app or web via universal link)", which is false on iPhone. Add a dated correction pointing to this folder. |
-| `mobile/src/utils/CLAUDE.md` + `README.md` | **updated (by the build)** | Add the `sleeperHandoff.ts` entry. It is impure: react-native `Linking`/`Alert`, `./clipboard`, plus `../api/events` if §1 is granted. |
+| `mobile/src/utils/CLAUDE.md` + `README.md` | **updated (by the build)** | Add the `sleeperHandoff.ts` entry. It is impure: react-native `Linking`/`Alert`, `./clipboard`, plus `../api/events`, since the §1 event is granted. |
 | `mobile/src/state/CLAUDE.md:27` | **updated (by the build)** | The `useTradeQueue.ts` line says Send All "opens each Sleeper propose URL with a 500 ms stagger". It becomes one hand-off through the helper. |
 | `mobile/src/components/CLAUDE.md:16, :38` | **updated (by the build)** | The `ClaimSheet` row (steps block, helper) and the `SendInSleeperButton` row (the no-target hand-off confirm). |
 | `mobile/tests/README.md` | **updated (by the build)** | Add the `check-sleeper-handoff` row and bump the guard count (88 → 89). |
-| `docs/business/analytics/` addendum | **updated if §1 is granted** | A dated event addendum, written by `analytics-lead`. |
+| `docs/business/analytics/` addendum | **updated** | Dated event addenda, written by `analytics-lead`: one now for the granted `sleeper_handoff_resolved`, and one for the `sleeper_fa_*` events once they are granted. |
 | Platform risk register (`.claude/skills/pm-partnerships/references/platform-risk-register.md`, PR #345, not merged) | **route to `platforms-pm`** | Add the new write (add/drop/claim, consent, `sleeper.fa_write`) to the Sleeper row's writes and kill switches, and record the write-feature-gate pass. Separately, its Sleeper "Pre-planned response" names the trade deep link as the fallback that remains if writes go off. That link is broken on iPhone (F3), and after this build it no longer exists in mobile. This is `platforms-pm`'s document, so it isn't edited here. |
 
 ## 5. Ship gate declaration
@@ -227,18 +240,19 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 - **CI green:** `backend-tests`, `mobile-typecheck` (which runs every `check-*.js`, including the new guard) and `maestro-testid-lint`, all passing on the pushed sha.
 - **Pre-merge gate (`head-product` P31: device tests gate the merge, not the start of the build; `platforms-eng` may start the shared helper now):**
   - **Hand-off:** R0, device tests 1–12 and T1–T4 recorded in `device-results.md` before the hand-off merges. The rung constant is set from that file, and guard S10 checks it.
-  - **Direct write:** the mutation shapes recorded in `docs/plans/sleeper-fa-write/` (AC-19) before any write code merges. That folder is being opened by `platforms-eng`.
+  - **Direct write:** the mutation shapes recorded in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet) (AC-19) before any write code merges.
 - **LEG-L12 [PRO]: MUST before the add/drop build ships** (`legal-lead`). It requires all of R15:
   - the R15.1 consent copy, verbatim (consent.md §4.1);
   - the R15.3 evidence tables;
   - the R15.4 privacy-policy changes and the R15.5 terms §5 changes (docs/legal row in §4);
   - the R15.6 label check (no change);
   - professional review of R15.7(a)–(e).
-- **Before `sleeper.fa_write` goes on in production:**
-  - `platforms-pm`'s dated write-feature-gate pass;
-  - LEG-L12 closed;
-  - TestFlight 21–29 passed, with each real write approved when it ran and reversed;
-  - the operator's approval of the flip itself.
+- **`sleeper.fa_write` goes on (D6, decided by `head-product` P34).** It requires all three of:
+  - LEG-L12 done;
+  - the P31 device tests passed;
+  - the `platforms-eng` spike's mutation shapes captured.
+
+  **The flip itself is the operator's.** `platforms-pm`'s write-feature-gate pass, from the risk register, also stands. Straight after the flip, TestFlight 21–29 run in the test league. Each real write is approved when it runs and reversed afterwards, and the flag goes back off if any step fails.
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the guard (S1–S27, with each sabotage applied and reverted), the backend tests, the code-walk, the device-results file, and `FTF_SKIP_SIM_GATE=1` as the standing D-056 posture.
 - **TestFlight verification:** the operator runs steps 13–20 on the build that carries the change, and 21–29 when the write lands. Each real write in 23–25 and 29 is approved when it runs, done in the test league and reversed. Outcomes go in TEST_LEDGER.
 - **Express lane declared by the operator?** No. The operator said full gates apply (2026-10-15).

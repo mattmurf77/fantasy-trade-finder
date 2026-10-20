@@ -56,14 +56,14 @@ So the send-a-trade links are in scope alongside the claim sheet, and they are t
 - **Hypothesis:** every Sleeper hand-off should open the Sleeper app directly, at the deepest screen Sleeper honors, with the right names on the clipboard and the remaining steps named in FTF. If it does, a user can finish an add or a trade proposal in Sleeper with one search and a paste. Today they get a Safari flash and a home screen with no context.
 - **How we'll know:**
   - TestFlight steps 13–20 (hand-off) and 21–29 (direct write, [consent.md § 8.4](consent.md#84-testflight-checklist-direct-write)) pass on a device. Under D-056, that is the only runtime evidence.
-  - If `analytics-lead` grants the event, `sleeper_handoff_resolved.outcome` shows `app` for testers who have Sleeper installed. With the operator plus about 2 testers, that is a smoke signal, not a metric.
+  - `sleeper_handoff_resolved` (granted by `analytics-lead` on 2026-10-20) reports `outcome` = `app` for testers who have Sleeper installed. With the operator plus about 2 testers, that is a smoke signal, not a metric.
 
 ## 3. Surfaces in scope
 
 | # | Surface | Call site (`origin/main` @ `678834ab`) | Today | Change |
 |---|---|---|---|---|
 | 1 | **Claim sheet CTA** "Open in Sleeper to claim" | `mobile/src/components/ClaimSheet.tsx:141-145` (`openSleeper`); button `:307-313` (testID `fa-claim.open-sleeper`); footer `:315` | `Linking.openURL(\`https://sleeper.com/leagues/${leagueId}/players\`)`; rejection swallowed | When the flag is on, the primary CTA performs the direct write, in the order connect → consent → move ([consent.md § 2](consent.md#2-the-flow-connect-then-consent-then-move)). The hand-off (`openInSleeperApp`, `target: 'add'`) becomes **hand-off mode**, reached through the always-present **Do it in Sleeper instead**. Its CTA keeps the `fa-claim.open-sleeper` testID. The steps block (§4.2) shows in every state. |
-| 1a | ↳ host: **Free Agents** | `mobile/src/screens/FreeAgentsScreen.tsx:81-88` (`onAdd`, Sleeper-gated); `:208-219` (ClaimSheet mount) | Has had no `Linking` call of its own since the 2026-10-10 ClaimSheet extraction (`ClaimSheet.tsx:38-43`). The `:320` reference (`docs/integrations/sleeper.md:79`, and the brief) is stale; it now points at a stylesheet. | Logic unchanged; the fix arrives through ClaimSheet. Passes `leagueName`, plus `surface="free_agents"` if the §1 event is granted. Guard S1 keeps this file free of direct Sleeper URLs. |
+| 1a | ↳ host: **Free Agents** | `mobile/src/screens/FreeAgentsScreen.tsx:81-88` (`onAdd`, Sleeper-gated); `:208-219` (ClaimSheet mount) | Has had no `Linking` call of its own since the 2026-10-10 ClaimSheet extraction (`ClaimSheet.tsx:38-43`). The `:320` reference (`docs/integrations/sleeper.md:79`, and the brief) is stale; it now points at a stylesheet. | Logic unchanged; the fix arrives through ClaimSheet. Passes `leagueName`, plus `surface="free_agents"` for the granted §1 event. Guard S1 keeps this file free of direct Sleeper URLs. |
 | 1b | ↳ host: **Usage Trends** | `mobile/src/screens/UsageTrendsScreen.tsx:270-280` (`doAdd` switches to the claim league first); `:665-673` (ClaimSheet mount) | Same CTA | Same as 1a. `leagueName` comes from the session `league_name` (`:94`), which is the claim league after `switchTo`. |
 | 2 | **Send-in-Sleeper hand-off** (send a trade) | `mobile/src/components/SendInSleeperButton.tsx:208-212` (`openInSleeper`), reached from `onPress` `:405-408` | `https://sleeper.com/leagues/${leagueId}` (numeric id) or `https://sleeper.com`; rejection swallowed | `openInSleeper` calls the helper with `target: 'trade'` and the trade summary for the clipboard, after a steps confirm (§4.3). The real send, connect flow, copy affordance and `sleeper_send_attempted` are untouched. |
 | 3 | **Trade queue Send All** (send a trade; flag `trades.queue_2k`) | URL built by `buildSleeperUrl` (`mobile/src/screens/TradesScreen.tsx:9589-9600`) and snapshotted at enqueue (`:6502`). Opened by `useTradeQueue.sendAll` (`mobile/src/state/useTradeQueue.ts:123-151`): `canOpenURL` `:130`, `openURL` `:132`, alert `:137`. | One `https://sleeper.com/leagues/<id>/trade?add_receiver_id=…&give_player_id=…&add_player_id=…` per queued trade, 500 ms apart. On iPhone each one goes Safari → Sleeper home and every param is lost (F3); desktop has no such route (F5). | `sendAll` makes **one** hand-off through the helper (`target: 'trade'`), with every queued trade summary on the clipboard. `canOpenURL` is dropped. `buildSleeperUrl` and the `sleeper_url` snapshot go away. Persisted queues may still carry `sleeper_url` and it is never opened (§4.3). |
@@ -112,7 +112,7 @@ export function openInSleeperApp(t: {
   leagueId?: string;
   playerId?: string;        // add target only
   clipboardText?: string;   // the FA's name, or the trade summary
-  surface?: 'free_agents' | 'usage_trends' | 'send_button' | 'trade_queue'; // only if the §1 event is granted
+  surface?: 'free_agents' | 'usage_trends' | 'send_button' | 'trade_queue'; // for the granted sleeper_handoff_resolved
   hasDrop?: boolean;        // ditto; add target only
 }): Promise<'app' | 'not_installed'>;
 ```
@@ -121,10 +121,10 @@ Behavior, in order:
 1. If `clipboardText` is set, call `copyText(clipboardText)` (`mobile/src/utils/clipboard.ts`, JS-only) **before** opening. Once Sleeper is in the foreground, FTF's JS may be suspended, so the copy can't wait.
 2. Build the URL with `sleeperAppUrl`. A missing or non-numeric `leagueId` never yields a league rung.
 3. `await Linking.openURL(url)`. If it resolves, the outcome is `app`. If it rejects, the outcome is `not_installed` and the D2 fallback runs (§4.4). The rejection is never swallowed.
-4. If the event is granted, emit `sleeper_handoff_resolved` once (scope §1).
+4. Emit `sleeper_handoff_resolved` once (granted 2026-10-20; scope §1).
 5. **Never** call `Linking.canOpenURL` (it rejects without the plist key, F8), pass an `https://sleeper.com/...` URL as the primary target, or touch native config.
 
-The module is impure: it uses react-native `Linking` and `Alert`, `./clipboard`, and `../api/events` if the event is granted. The guard executes it under node with stubs (§7.1). Add its entry to `mobile/src/utils/CLAUDE.md` and `README.md`.
+The module is impure: it uses react-native `Linking` and `Alert`, `./clipboard`, and `../api/events` (for the granted event). The guard executes it under node with stubs (§7.1). Add its entry to `mobile/src/utils/CLAUDE.md` and `README.md`.
 
 ## 4. Expected behavior
 
@@ -275,7 +275,7 @@ Each criterion can be answered pass/fail by a guard, a test, a diff check or a c
 | AC-10 | The ESPN/MFL/Fleaflicker/local claim paths are byte-identical to `678834ab`. | guard S9; diff check |
 | AC-11 | `fa-claim.open-sleeper`, `trades.send-sleeper-btn`, `send-in-sleeper.copy` and `send-in-sleeper.unavailable` keep their testIDs. `fa-claim.steps` is added. `testid-lint.sh` is green. | CI |
 | AC-12 | `web/js/app.js` is not modified by this build. | PR diff |
-| AC-13 | If the §1 event is granted, it is registered and classified **in the same commit** as its emitter, and fires once per hand-off. | backend pytest; guard S3/S4 stubs count `track` calls |
+| AC-13 | The granted §1 event, `sleeper_handoff_resolved`, is registered and classified **in the same commit** as its emitter, and fires once per hand-off. | backend pytest; guard S3/S4 stubs count `track` calls |
 | AC-14 | On device, Sleeper opens with no Safari flash at the proven rung, the copied text pastes, and not-installed reaches the fallback. | TestFlight 13–16, 19–20 |
 | AC-15 | `docs/integrations/sleeper.md:77-79` and the #179 status claim are corrected (scope §4). | docs review |
 | AC-16 | Send-in-Sleeper's hand-off shows the steps confirm, then copies `formatTradeForClipboard(...)` output before opening with `target: 'trade'`. Cancel opens nothing. | guard S14; TestFlight 19 |
@@ -431,15 +431,15 @@ The builder fills this in at current line numbers, in `docs/plans/sleeper-fa-dee
 
 | Reviewer | Role | What | Through |
 |---|---|---|---|
-| `design-lead` | review | Hand-off mode: the steps block and the send-a-trade steps confirm (numbered lines). Direct write (consent.md §2.3): the checkbox spec, step placement (D9), the window line, results, refusals, and the Settings row. Also the D2 alert. Chalkline rules apply: no emoji icons, existing tokens only | `platforms-pm` |
+| `design-lead` | review | Hand-off mode: the steps block and the send-a-trade steps confirm (numbered lines). Direct write (consent.md §2.3): the checkbox spec, the consent step (D9 decided: a step; the box directly above the primary button, `type.bodySm` in chalk, never truncated), the window line, results, refusals, and the Settings row. Also the D2 alert. Chalkline rules apply: no emoji icons, existing tokens only | `platforms-pm` |
 | `ux-lead` | review | The hand-off flows. K-F1 to K-F7 as landed in consent.md §2 and §5. TestFlight 21–29 (K1–K7) | `head-product` |
-| `legal-lead` | review | **R15 / LEG-L12.** The R15.1 copy shipped verbatim (consent.md §4.1). The R15.3 evidence tables. The privacy and terms §5 changes (scope §4 docs/legal row). The Settings row (consent.md §4.4). D5, D9, D10, D11, D12. The R15.7 professional review [PRO] | `head-bizops` |
-| `marketing-lead` | words | Everything except the R15 copy: CTA and step labels, the connect-step line, result lines, the secondary-action label (consent.md §2.4), the D2 alert, and the hand-off steps copy | `platforms-pm` |
-| `trades-pm` | **review** | Their screens: `TradesScreen` (deck, queue), `Matches`, `TradeCalculator` / `InLeagueCalculator`. Surfaces 2 and 3, the §3.1 code-walk, the steps confirm, Send All, `QueuedTrade`, TestFlight 17–20. Plus K-F5: the deck invalidation after an in-app roster move (#339 §5.1) | `platforms-pm` |
+| `legal-lead` | review | **R15 / LEG-L12.** The R15.1 copy shipped verbatim (consent.md §4.1). The R15.3 evidence tables. The privacy and terms §5 changes (scope §4 docs/legal row). The Settings row (consent.md §4.4). **Confirm** D10 and D11 (both decided by Product, pending legal). **Answer** D5 and D12. The R15.7 professional review [PRO] | `head-bizops` |
+| `marketing-lead` | words | Everything except the R15 copy: CTA and step labels, the connect-step line, result lines, the D2 alert and the hand-off steps copy (through `platforms-pm`). The secondary button's words (consent.md §2.4) are **pending** | `head-bizops` |
+| `trades-pm` | **review** | Their screens: `TradesScreen` (deck, queue), `Matches`, `TradeCalculator` / `InLeagueCalculator`. Surfaces 2 and 3, the §3.1 code-walk, the steps confirm, Send All, `QueuedTrade`, TestFlight 17–20. K-F5, the deck invalidation after an in-app roster move (#339 §5.1), is **handed off** to them as I-2/U2 | `platforms-pm` |
 | `league-pm` | consulted | The Free Agents surface | `head-product` |
-| `analytics-lead` | grant | `sleeper_handoff_resolved` (scope §1), plus the seven direct-write events (consent.md §6) | `platforms-pm` |
+| `analytics-lead` | grant | `sleeper_handoff_resolved` (scope §1): **GRANTED** 2026-10-20. The seven `sleeper_fa_*` direct-write events (consent.md §6): **pending** | `platforms-pm` |
 | `platforms-pm` | gate | A dated write-feature-gate pass for the new Sleeper write (risk register, PR #345) | — |
-| `platforms-eng` / `eng-architect` | spike / review | `docs/plans/sleeper-fa-write/`: mutation shapes, write route, adapter. Not on `origin/main` yet; being opened by `platforms-eng`. Also the two consent-evidence table shapes | `head-eng` |
+| `platforms-eng` / `eng-architect` | spike / review | `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet): mutation shapes, write route, adapter. Also the two consent-evidence table shapes | `head-eng` |
 
 **Pending: the all-external-links inventory.** Per the operator's clarification, `platforms-eng` (under `head-eng`) is inventorying **every** external link in the app and will recommend one consistent pattern. It feeds the shared helper, and the build stays with `head-eng`. When the recommendation lands, it folds into this PR through `head-product`. §3.2 keeps the helper's shape open for it: a target-keyed API, one module, no call-site logic. Known inputs for that inventory, all out of scope here:
 - web `_buildSleeperTradeUrl` / Send All (`app.js:4281-4320`);
@@ -462,7 +462,7 @@ Per `head-product` P31, **device tests 1–12 and T1–T4 gate the merge, not th
    - hand-off mode with its steps block, and the send-a-trade steps confirm;
    - `QueuedTrade` / `sendAll`;
    - the guard;
-   - event registration, if granted;
+   - registration of the granted `sleeper_handoff_resolved` event;
    - the docs rows in scope §4.
 
    `SLEEPER_PROVEN_RUNGS` stays `bare`-only until the device results land.
@@ -472,16 +472,17 @@ Per `head-product` P31, **device tests 1–12 and T1–T4 gate the merge, not th
    - **These results gate the merge:** the rung constant is set from them, and guard S10 checks it.
 4. **The `platforms-eng` inventory recommendation** folds in through `head-product` whenever it lands (§8 Pending). If it hasn't landed, the build follows §3.2 as written.
 5. **Reviews:**
-   - The operator confirms D4 and the no-flag confirmation for the hand-off.
-   - `legal-lead` rules on D5 and D9–D12.
-   - `analytics-lead` grants or refuses the events.
-   - `design-lead`, ux-lead and `marketing-lead` settle the copy and placement.
-6. **The D1 track**, separate, in [`docs/plans/sleeper-fa-write/`](../sleeper-fa-write/) (being opened by `platforms-eng`):
+   - The operator confirms D3, D4 and the no-flag confirmation for the hand-off.
+   - `legal-lead`, via `head-bizops`, answers D5 and D12 and confirms D10 and D11.
+   - `analytics-lead` grants or refuses the seven `sleeper_fa_*` events. The hand-off event is already granted.
+   - `design-lead`, ux-lead and `marketing-lead` settle the copy. The secondary button's words are pending `marketing-lead`, via `head-bizops`.
+6. **The D1 track**, separate, in [`docs/plans/sleeper-fa-write/`](../sleeper-fa-write/) (being opened by `platforms-eng`; not on origin/main yet):
    - the mutation spike (any capture or replay is an operator-approved live write);
    - then the write route plus the consent and Settings work in consent.md, behind `sleeper.fa_write` (off);
    - then `platforms-pm`'s write-feature-gate pass;
    - then **LEG-L12** (all of R15, including the privacy and terms changes);
-   - then TestFlight 21–29, with an operator-approved flag flip.
+   - then, under **D6**, the operator flips `sleeper.fa_write`. That happens only once LEG-L12 is done, the P31 device tests have passed and the spike's mutation shapes are captured;
+   - then TestFlight 21–29 run straight away in the test league.
 
    The hand-off doesn't wait for this track. It is the fallback the direct write needs anyway.
 7. **Merge the hand-off:** CI green, the TEST_LEDGER entry, device results recorded, then merge, an EAS build and TestFlight. The operator runs 13–20, and 21–29 once the D1 track lands.
@@ -494,45 +495,55 @@ Outside dependency: E2 (risk register) stays logged. The operator's D1 "Yes" is 
 - **D1:** "Yes. With User authorization to do so. (A checkbox for the first attempt every 7 days)". Spec: [consent.md](consent.md).
 - **D2:** "In app message". Spec: §4.4. `design-lead` added the **Get Sleeper** button.
 
+**Decided by `head-product` (P34, 2026-10-20):**
+- **D6: when `sleeper.fa_write` turns on.** It turns on only after **all three** of these:
+  - LEG-L12 is done;
+  - the P31 device tests have passed;
+  - the `platforms-eng` spike has captured the mutation shapes.
+
+  **The flip itself is the operator's.** After that it stays as a permanent kill switch. This is in the scope §5 ship gate and the scope §2 flag row.
+- **D9: consent is its own step.** R15.1's full panel doesn't fit inline, and the step shows at most once a week. The inline option is dropped. `design-lead`'s type and placement spec applies inside the step: the box sits directly above the primary button, in `type.bodySm` chalk, never truncated (consent.md §2.3).
+- **D10: no per-move dialog. Decided by Product, pending legal.**
+  - The primary button names the exact move: "Add X, drop Y", or "Add X" when there's no drop, or the claim/bid form for waivers. That tap is the per-move confirmation, followed by a result line.
+  - The R15.1 panel line "You'll still confirm every move" is satisfied by that named button, subject to the same confirmation.
+  - `legal-lead` confirms through `head-bizops` that this satisfies R15.1. **Legal's answer governs.** If legal requires a dialog, it runs on later moves only (consent.md §2.2).
+- **D11: consent is per account**, unless `legal-lead` requires per league. Storage follows: `platform_write_consents` is keyed by user (FTF user + Sleeper user), not by league, and `league_scope` is always `'all_linked'` (consent.md §4.3).
+
 **Settled by the 2026-10-20 inputs:**
-- **The Settings control.** `legal-lead` R15.2.6 requires a "Stop roster moves" control, and this spec places it in Settings › Leagues (consent.md §4.4). This was formerly D7.
-- **Do moves extend the window?** No. R15.2.3: rolling 7 × 24 h from the server's consent timestamp, so only a new tick renews. This was formerly D8.
+- **The Settings control.** `legal-lead` R15.2.6 requires a "Stop roster moves" control. This spec places it in Settings › Leagues (consent.md §4.4). This was formerly D7.
+- **Do moves extend the window?** No. Per R15.2.3 the window is a rolling 7 × 24 h from the server's consent timestamp, and only a new tick renews it. This was formerly D8.
+- **K-F5, the trade-deck change** after an in-app roster move, is handed off to `trades-pm` as I-2/U2.
 
-**Still open:**
-- **D3: desktop-UA WebView** (operator). **Recommend no**, unless test 3 fails, and even then only as its own spec. D2 already excludes it as the not-installed fallback.
-- **D4: Sleeper's Branch link** (operator). **Recommend no.** Confirm.
-- **D5: are waiver claims and FAAB under this consent?** (`legal-lead` H5b, then the operator). **Recommend yes, with one consent.** A claim can execute a drop later, outside the user's view.
-  - The R15.1 checkbox says "add and drop", so `legal-lead` confirms whether a claim-naming copy version is needed.
-  - If claims are out of scope, the route refuses them with `waiver_claim_unsupported`, and they go to the hand-off.
-- **D6: graduation criterion for `sleeper.fa_write`** (operator). **Recommend:**
-  - TestFlight 21–29 pass;
-  - `platforms-pm`'s write-feature-gate pass;
-  - LEG-L12 closed;
-  - one clean TestFlight cycle with the flag on.
+**Pending `legal-lead` (via `head-bizops`):**
+- **D5: are waiver claims and FAAB under the same consent?** (H5b). Until D5 is answered, waiver claims stay refused (`waiver_claim_unsupported` → hand-off). Product's view is yes, under one consent, because a claim can execute a drop later, outside the user's view.
+- **D12: keep any consent or move record after account deletion?** (H6 [PRO], then the operator). The default is to delete them with the account.
+- Confirmation of D10 and D11 (above).
 
-  After that, keep it as a permanent kill switch.
-- **D9: consent as its own step, or inline above the CTA?** (`design-lead` + `legal-lead` + ux-lead). The spec uses **the step** (K-F2), with `design-lead`'s checkbox placed directly above Make the move.
-- **D10: is a separate per-move confirmation dialog required?** (`legal-lead`, R15.7(a) [PRO]). The spec uses **no dialog**: the CTA label is the confirmation (K-F3). If a dialog is required, it shows on later moves only.
-- **D11: consent per account or per league?** (`legal-lead` H5a). **Recommend per account**, with the league named on every move (the R15.1 copy as written).
-- **D12: keep any consent or move record after account deletion?** (`legal-lead` H6 [PRO], then the operator). The default is delete with the account.
-- **Confirm: no feature flag for the *hand-off*** (operator). See scope §2. The direct write has its own flag.
+**Pending `marketing-lead` (via `head-bizops`):** the secondary button's words ("Do it in Sleeper instead" / "Open in Sleeper" / "Not now"; consent.md §2.4).
+
+**Still open (operator):**
+- **D3: desktop-UA WebView.** **Recommend no**, unless test 3 fails, and even then only as its own spec. D2 already excludes it as the not-installed fallback.
+- **D4: Sleeper's Branch link.** **Recommend no.** Confirm.
+- **Confirm: no feature flag for the *hand-off*.** See scope §2. The direct write has its own flag.
 
 ## 11. Handoffs
 
 - **Operator / app-manager:**
   - run R0, device tests 1–12 and T1–T4 (with the label capture), recorded in `device-results.md`;
-  - confirm D4 and the no-flag decision;
-  - approve each live write when it runs (the spike captures, and TestFlight 23–25 and 29), plus the flag flip.
+  - confirm D3, D4 and the no-flag decision;
+  - make the `sleeper.fa_write` flip under D6;
+  - approve each live write when it runs: the spike captures, and TestFlight 23–25 and 29.
 - **`head-product`:** route the `league-pm` consult. Carry the inventory recommendation into this PR when it lands.
 - **`head-eng` / `platforms-eng`:**
   - start the shared helper now (P31);
   - run the all-external-links inventory, using this PR's §3.1 table and §8 list as inputs;
-  - open `docs/plans/sleeper-fa-write/` (the spike, write route and adapter);
+  - open `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet), which covers the spike, the write route and the adapter;
   - do the build.
-- **`head-bizops` → `legal-lead`:** LEG-L12 / R15 as folded (D5, D9–D12; the privacy and terms text).
-- **`analytics-lead`:** the event grants (scope §1, consent.md §6), plus the addendum if granted.
+- **`head-bizops` → `legal-lead`:** LEG-L12 / R15 as folded. Answer D5 and D12. Confirm D10 and D11. Plus the privacy and terms text.
+- **`head-bizops` → `marketing-lead`:** the secondary button's words (pending).
+- **`analytics-lead`:** `sleeper_handoff_resolved` is granted (2026-10-20). The seven `sleeper_fa_*` events are pending (consent.md §6). Write the addenda.
 - **`design-lead` / ux-lead / `marketing-lead`:** the copy, flows and placement in §4.2–§4.4 and consent.md §2.
-- **`trades-pm`:** review surfaces 2 and 3, and K-F5's deck invalidation (§8). Lighting `trades.queue_2k` stays their call. Web trade links go to the inventory.
+- **`trades-pm`:** review surfaces 2 and 3. K-F5's deck invalidation is **handed off** to them as I-2/U2 (§8). Lighting `trades.queue_2k` stays their call. Web trade links go to the inventory.
 - **`platforms-pm`:**
   - the write-feature-gate pass, and a register row for the new Sleeper write;
   - in the risk register (PR #345), the Sleeper "Pre-planned response" names the trade deep link as the fallback that remains if writes go off. That link doesn't work on iPhone, and after this build it no longer exists in mobile, so the row needs updating;
