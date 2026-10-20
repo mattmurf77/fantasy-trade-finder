@@ -791,7 +791,8 @@ def test_evidence_built_before_an_account_deletion_is_never_written(deferred):
     ({"opponent_user_id": OPP}, "live"),
     ({"trade_intent": "consolidate"}, "live"),
     ({"presentation_exempt": True}, "live"),
-    ({"source": "replenish"}, "live"),
+    ({"source": "replenish"}, "deferred"),                  # F6
+    ({"source": "grading_refresh"}, "live"),               # F6: Calibration's targeted refresh
 ])
 def test_the_evidence_mode_per_path(deferred, kwargs, mode):
     _, engine, _ = deferred
