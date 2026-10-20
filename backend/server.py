@@ -3119,7 +3119,8 @@ def _trade_running_policy_matches(job, presentation_capture):
                        else _trade_safety_signature())
     # The worker stamps this after preparation; queued jobs already carry
     # the admission-time model/presentation/significance captures above.
-    return "safety_policy" not in job or job["safety_policy"] == expected_safety
+    return (("safety_policy" not in job or job["safety_policy"] == expected_safety)
+            and _trade_fingerprints_match(job))
 
 
 def _start_trade_job_thread(*, target, args, kwargs):
@@ -3260,6 +3261,15 @@ def _trade_job_public_view(job: dict) -> dict:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id, prepared=True)
         else:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
+        # S0 I-1: never serve an asset either side no longer owns. A failed
+        # check serves no cards, distinct from an empty deck.
+        if out["cards"] and league_id != "league_demo":
+            try:
+                out["cards"] = _filter_cards_to_current_owners(
+                    out["cards"], league_id, job.get("league_user_id") or user_id)
+            except Exception as err:
+                log.warning("trade-job %s: roster check unavailable: %s", job["job_id"], err)
+                out.update(cards=[], status="error", error="roster_check_unavailable")
     revoked = revocation_error()
     if revoked:
         out.update(cards=[], status="error", error=revoked)
@@ -3270,6 +3280,35 @@ def _trade_job_public_view(job: dict) -> dict:
     elif not _trade_significance_matches(job):
         out.update(cards=[], status="error", error="significance_policy_changed")
     return out
+
+
+def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str):
+    """I-1 at serve: keep a card only if the viewer still owns every give asset
+    and its opponent still owns every receive asset, per the stored rosters and
+    pick ownership read now (roster_snapshot). Raises when the check cannot
+    run; the caller must then serve no cards. A league with no stored rosters
+    (`status == "missing"`) has nothing to check against and passes unchanged.
+    """
+    from . import roster_snapshot
+    from .database import engine as _engine
+    with _engine.connect() as conn:
+        snap = roster_snapshot.roster_snapshot(conn, league_id)
+    if snap.status == "missing":
+        return cards
+    owners, nobody = snap.asset_owner, frozenset()
+    kept = []
+    for card in cards:
+        if isinstance(card, dict):
+            give = [p["id"] for p in card.get("give", [])]
+            receive = [p["id"] for p in card.get("receive", [])]
+            target = card.get("target_user_id")
+        else:
+            give, receive = card.give_player_ids, card.receive_player_ids
+            target = card.target_user_id
+        if (all(viewer_id in owners.get(str(a), nobody) for a in give)
+                and all(str(target) in owners.get(str(a), nobody) for a in receive)):
+            kept.append(card)
+    return kept
 
 
 def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared=False):
@@ -3523,7 +3562,37 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     # deck filtered for a different (or no) shape.
     if (job.get("trade_intent") or None) != (trade_intent or None):
         return False
-    return True
+    return _trade_fingerprints_match(job)
+
+
+def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[str, str]:
+    """S0 (scope-eng-200ms §6.1): (rfp1, vsn1) from stored rows and the current
+    pool, read now. Two indexed reads plus the hashes; no network, no pool build."""
+    from . import roster_snapshot
+    from .database import engine as _engine
+    with _engine.connect() as conn:
+        snap, vsn = roster_snapshot.snapshot_ids(
+            conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
+            generation=pool_generation())
+    return snap.fp, vsn
+
+
+def _trade_fingerprints_match(job: dict) -> bool:
+    """A job built on rosters or values that have since moved is never reused.
+
+    Every _kickoff_trade_job admission stamps both ids (None when the read
+    failed, which never matches). Hand-built jobs without the stamp are not
+    checked, like `request_signature`. A failed read here fails closed.
+    """
+    if "roster_fp" not in job:
+        return True
+    _user_id, league_id, scoring_format = job["key"]
+    try:
+        current = _trade_current_fingerprints(league_id, scoring_format)
+    except Exception as err:
+        log.warning("trade-job %s: fingerprint read failed: %s", job.get("job_id"), err)
+        return False
+    return current == (job["roster_fp"], job.get("values_snapshot_id"))
 
 
 def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlook_value,
@@ -9294,6 +9363,25 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
         _invalidate_trade_jobs(user_id=user_id)
 
 
+def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
+    """S0 (scope-eng-200ms §6.1): platforms-eng's refresh calls this, through
+    roster_snapshot.on_roster_change, after committing rows whose rfp1 moved.
+    Every job in the league read those rosters, so revoke them all: viewers
+    with a job, plus every (identity, league) epoch, which covers admissions
+    not yet registered. P1 adds the debounced page rebuild here.
+    """
+    with _trade_jobs_lock:
+        user_ids = {key[0] for key in (job.get("key") or () for job in _trade_jobs.values())
+                    if len(key) == 3 and key[1] == league_id}
+        user_ids.update(uid for uid, lid in list(_trade_input_epochs.keys()) if lid == league_id)
+    for user_id in user_ids:
+        _invalidate_trade_jobs(user_id=user_id, league_id=league_id)
+
+
+from . import roster_snapshot as _roster_snapshot  # noqa: E402
+_roster_snapshot.register_roster_change_handler(_invalidate_league_trade_jobs_on_roster_change)
+
+
 def _kickoff_trade_job(
     sess_token: str,
     user_id: str,
@@ -9400,6 +9488,13 @@ def _kickoff_trade_job(
     outlook_value = (((prefs_preload or {}).get("prefs") or {}).get("team_outlook")
                      or (prefs_preload or {}).get("seeded_outlook"))
     request_signature = _trade_request_signature(prefs_preload) if prefs_preload is not None else None
+    # S0: the stored rosters and values this job is built against, stamped
+    # before the worker starts. None on a failed read never matches.
+    try:
+        roster_fp, values_snapshot_id = _trade_current_fingerprints(league_id, scoring_format)
+    except Exception as fp_err:
+        log.warning("trade-job: fingerprint read failed at kickoff: %s", fp_err)
+        roster_fp = values_snapshot_id = None
     force_supersedes = force_fresh and _force_supersede_enabled()
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -9423,6 +9518,12 @@ def _kickoff_trade_job(
         "presentation_capture": presentation_capture,
         "input_epochs":       input_epochs,
         "request_signature":  request_signature,
+        "roster_fp":          roster_fp,
+        "values_snapshot_id": values_snapshot_id,
+        # The viewer's league identity (a co-owner's differs from user_id):
+        # the I-1 serve filter checks give-side ownership against it.
+        "league_user_id":     (execution_context.league_user_id
+                               if execution_context is not None else user_id),
     }
     if source:
         job["source"] = source
