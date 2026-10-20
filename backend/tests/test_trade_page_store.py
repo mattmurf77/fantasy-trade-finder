@@ -689,6 +689,45 @@ def test_stale_marks_never_run_under_the_job_lock(p1, spawned, monkeypatch):
     assert [entry for entry in seen if entry[2]] == []
 
 
+# ── Engine identity across deploys (lead review B) ──────────────────────────
+
+@pytest.mark.parametrize("change", ["deck_shape_version", "engine_code_hash"])
+def test_an_engine_code_or_deck_shape_change_blocks_the_page(p1, spawned, monkeypatch, change):
+    client, _, _ = p1
+    build_page()
+    if change == "deck_shape_version":
+        monkeypatch.setattr(server, "TRADE_DECK_SHAPE_VERSION", server.TRADE_DECK_SHAPE_VERSION + 1)
+    else:
+        monkeypatch.setattr(server, "_engine_code_hash_value", "0" * 12)
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    body = generate(client, page=1).get_json()
+    assert "serve_source" not in body and len(spawned) == 1   # today's path
+
+
+def test_the_engine_code_hash_covers_the_module_set_once_per_process(tmp_path, monkeypatch):
+    root = Path(server.__file__).resolve().parent
+    for pattern in server._ENGINE_CODE_MODULES:
+        assert list(root.glob(pattern)), f"engine module set: nothing matches {pattern}"
+    files = sorted({path for pattern in server._ENGINE_CODE_MODULES for path in root.glob(pattern)})
+    assert "server.py" not in {path.name for path in files}
+    for path in files:
+        copy_to = tmp_path / path.relative_to(root)
+        copy_to.parent.mkdir(parents=True, exist_ok=True)
+        copy_to.write_bytes(path.read_bytes())
+    assert server._engine_code_hash_of(tmp_path) == server._engine_code_hash_of(root)
+    (tmp_path / "server.py").write_text("# a deploy that only touches server.py\n")
+    assert server._engine_code_hash_of(tmp_path) == server._engine_code_hash_of(root)
+    narrative = tmp_path / "trade_narrative.py"
+    narrative.write_bytes(narrative.read_bytes() + b"\n# engine change\n")
+    assert server._engine_code_hash_of(tmp_path) != server._engine_code_hash_of(root)
+    calls = []
+    monkeypatch.setattr(server, "_engine_code_hash_value", None)
+    monkeypatch.setattr(server, "_engine_code_hash_of", lambda path: calls.append(path) or "c0ffee000000")
+    assert server._trade_engine_code_hash() == server._trade_engine_code_hash() == "c0ffee000000"
+    assert len(calls) == 1
+
+
 # ── Eviction ────────────────────────────────────────────────────────────────
 
 def _days_ago(days):

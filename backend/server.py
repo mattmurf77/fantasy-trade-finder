@@ -3389,6 +3389,43 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
 _TRADE_PAGE_FORMAT = 1           # pages_blob = {"v", "opponents_total", "cards"}
 _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card without one
 
+# Bump whenever _run_trade_job's deck-shaping layers change (gates, ordering,
+# quality filters, ghosting, publication): stored pages carry it in their
+# engine_version, so a bump makes every older page fall through. server.py
+# itself is not hashed below; hashing it would cold every page on every deploy.
+TRADE_DECK_SHAPE_VERSION = 1
+
+# The engine modules whose bytes are hashed into every page's engine_version
+# (backend/-relative globs, sorted within each pattern).
+_ENGINE_CODE_MODULES = (
+    "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
+    "deck_quality.py", "trade_bilateral_presentment.py", "small_trade_presentment.py",
+    "trade_policy.py", "trade_significance.py",
+    "ranking_service.py", "pick_values.py", "trade_breaker.py", "trade_narrative.py",
+)
+_engine_code_hash_value: str | None = None
+
+
+def _engine_code_hash_of(root: pathlib.Path) -> str:
+    """sha256[:12] over each engine module's backend-relative path and bytes."""
+    digest = hashlib.sha256()
+    for pattern in _ENGINE_CODE_MODULES:
+        paths = sorted(root.glob(pattern))
+        if not paths:
+            digest.update(f"{pattern}\0missing\0".encode())
+        for path in paths:
+            digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+            digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def _trade_engine_code_hash() -> str:
+    """The engine modules' code hash, computed once per process on first use."""
+    global _engine_code_hash_value
+    if _engine_code_hash_value is None:
+        _engine_code_hash_value = _engine_code_hash_of(pathlib.Path(__file__).resolve().parent)
+    return _engine_code_hash_value
+
 
 def _trade_page_store_enabled() -> bool:
     return is_enabled("trade.first_page_store")
@@ -3440,13 +3477,16 @@ def _trade_engine_name(value_core: bool) -> str:
 
 
 def _trade_page_engine_version(engine_name: str, safety_policy, presentation_capture) -> str:
-    """`engine_version`: the engine plus a hash of the serving policy that the
-    job cache also requires to match (_trade_job_is_fresh's safety signature
-    and presentation mode), so a stored page never outlives a policy rollout."""
+    """`engine_version`: the engine; a hash of the serving policy that the job
+    cache also requires to match (_trade_job_is_fresh's safety signature and
+    presentation mode); the engine modules' code hash; and
+    TRADE_DECK_SHAPE_VERSION. A stored page never outlives a policy rollout or
+    an engine code change across a deploy."""
     presentation = (presentation_capture[:2] if presentation_capture is not None
                     else _simple_presentment.OFF)
     policy = json.dumps([list(safety_policy or []), list(presentation)], default=str)
-    return engine_name + "+" + hashlib.sha256(policy.encode()).hexdigest()[:12]
+    return (f"{engine_name}+policy:{hashlib.sha256(policy.encode()).hexdigest()[:12]}"
+            f"+code:{_trade_engine_code_hash()}+shape:{TRADE_DECK_SHAPE_VERSION}")
 
 
 def _trade_page_viewer(sess: Mapping, league_id: str) -> str:
