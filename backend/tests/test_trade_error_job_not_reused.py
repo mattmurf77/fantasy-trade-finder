@@ -118,16 +118,20 @@ def test_control_the_running_job_is_joined(live):
 @pytest.mark.parametrize("error", ERRORS)
 def test_errored_job_is_neither_fresh_nor_joinable(live, error):
     job = _matching_running_job()
-    _fail(job, error)
     capture = server._capture_trade_presentation()
+    current = server._trade_current_fingerprints(LEAGUE, "1qb_ppr")
+    assert server._trade_running_policy_matches(job, capture, current)   # control
+    _fail(job, error)
     with server._trade_jobs_lock:
         assert not server._trade_job_is_fresh(
             job, job["fairness_threshold"], job["outlook_value"],
-            presentation_capture=capture, request_signature=job["request_signature"])
-        assert not server._trade_running_policy_matches(job, capture)
+            presentation_capture=capture, request_signature=job["request_signature"],
+            fingerprints=current)
+        assert not server._trade_running_policy_matches(job, capture, current)
         assert not server._trade_running_matches(
             job, job["fairness_threshold"], job["outlook_value"],
-            presentation_capture=capture, request_signature=job["request_signature"])
+            presentation_capture=capture, request_signature=job["request_signature"],
+            fingerprints=current)
 
 
 @pytest.mark.parametrize("error", ERRORS)

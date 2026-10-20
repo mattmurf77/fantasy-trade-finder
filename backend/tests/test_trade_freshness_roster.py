@@ -118,10 +118,17 @@ def test_cache_hit_while_stored_rows_are_unchanged(live):
     assert _generate(client) == (job["job_id"], False)
 
 
+def _fresh(job):
+    return server._trade_job_is_fresh(job, job["fairness_threshold"], job["outlook_value"],
+                                      request_signature=job["request_signature"],
+                                      fingerprints=server._trade_current_fingerprints(LEAGUE, "1qb_ppr"))
+
+
 @pytest.mark.parametrize("change", ["move_player", "move_pick", "add_member"])
 def test_complete_job_goes_stale_after_a_stored_roster_change(live, change):
     client, engine = live
     job = _complete_job()
+    assert _fresh(job)
     with engine.begin() as conn:
         if change == "move_player":
             conn.execute(update(league_members_table)
@@ -132,8 +139,7 @@ def test_complete_job_goes_stale_after_a_stored_roster_change(live, change):
         else:
             conn.execute(insert(league_members_table).values(
                 league_id=LEAGUE, user_id="user_fp_new", roster_data="[]"))
-    assert not server._trade_job_is_fresh(job, job["fairness_threshold"], job["outlook_value"],
-                                          request_signature=job["request_signature"])
+    assert not _fresh(job)
     new_id, kicked_off = _generate(client)
     assert new_id != job["job_id"] and kicked_off
 
@@ -160,11 +166,19 @@ def test_display_name_change_is_still_a_cache_hit(live):
 
 
 def test_failed_fingerprint_read_fails_closed(live):
+    client, _ = live
     job = _complete_job()
     with patch.object(roster_snapshot, "snapshot_ids", MagicMock(side_effect=RuntimeError("db"))):
-        assert not server._trade_job_is_fresh(
-            job, job["fairness_threshold"], job["outlook_value"],
-            request_signature=job["request_signature"])
+        assert server._trade_current_fingerprints(LEAGUE, "1qb_ppr") is None
+        assert not _fresh(job)
+        new_id, kicked_off = _generate(client)
+    assert new_id != job["job_id"] and kicked_off
+    with server._trade_jobs_lock:
+        stamped = dict(server._trade_jobs[new_id])
+    # A failed kickoff read stamps None, which never matches a good read.
+    assert stamped["roster_fp"] is None
+    assert not server._trade_fingerprints_match(
+        stamped, server._trade_current_fingerprints(LEAGUE, "1qb_ppr"))
 
 
 # ── running job: join vs supersede ────────────────────────────────────────────
@@ -187,10 +201,16 @@ def test_running_job_is_joined_while_rosters_are_unchanged(live):
 def test_running_job_is_not_joined_after_a_stored_roster_change(live):
     client, engine = live
     running = _register_running_copy(_complete_job())
+
+    def joins():
+        return server._trade_running_matches(
+            running, running["fairness_threshold"], running["outlook_value"],
+            request_signature=running["request_signature"],
+            fingerprints=server._trade_current_fingerprints(LEAGUE, "1qb_ppr"))
+
+    assert joins()
     _set_roster(engine, OPP, ["r1", "r2", "r9"])
-    assert not server._trade_running_matches(
-        running, running["fairness_threshold"], running["outlook_value"],
-        request_signature=running["request_signature"])
+    assert not joins()
     new_id, kicked_off = _generate(client)
     assert new_id != running["job_id"] and kicked_off
     assert running["superseded"] is True
