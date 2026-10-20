@@ -3593,6 +3593,7 @@ def _store_trade_page(job_id: str) -> bool:
             if ev is not None:
                 with ev.lock:
                     ev.stored_ids = {c.get("impression_id") for c in cards} - {None}
+                    ev.stored_count = len(cards)
                     ev.pages_bytes = len(blob)
                     evidence = ev.blob()
             written = _db.save_trade_page({
@@ -3721,6 +3722,11 @@ class _DeckEvidence:
         self.archive = _deck_archive_selected(job_id)
         self.stored_ids = None        # impression ids whose snapshots the page store holds
         self.pages_bytes = None       # len(pages_blob) of this deck's stored row
+        self.stored_count = None      # cards the page store holds
+        # Build-time writes moved to the deck's first delivery (F3), each once:
+        self.trade_impressions = None # packed {"league_id", "cards"} for log_trade_impressions
+        self.bakeoff_run = None       # the packed bakeoff_runs row (in process only)
+        self.generated = None         # {"league_id", "props"} of trades_generated
 
     def __copy__(self):
         return self
@@ -3750,6 +3756,37 @@ class _DeckEvidence:
     def capture_candidate_set(self, row: dict) -> None:
         with self.lock:
             self.candidate_set = dict(row)
+
+    # Build-time writes held for the first delivery (F3).
+    def defer_trade_impressions(self, league_id: str, cards: list) -> None:
+        """log_trade_impressions' fields of each served card, frozen now."""
+        frozen = [{"target_user_id": getattr(c, "target_user_id", None),
+                   "give_player_ids": list(getattr(c, "give_player_ids", None) or []),
+                   "receive_player_ids": list(getattr(c, "receive_player_ids", None) or []),
+                   "basis": getattr(c, "basis", "divergence"),
+                   "likes_you": bool(getattr(c, "likes_you", False)),
+                   "mismatch_score": getattr(c, "mismatch_score", None),
+                   "fairness_score": getattr(c, "fairness_score", None),
+                   "composite_score": getattr(c, "composite_score", None)} for c in cards]
+        with self.lock:
+            self.trade_impressions = _pack_row({"league_id": league_id, "cards": frozen})
+
+    def defer_bakeoff_run(self, row: dict) -> None:
+        """Packed: an owner run's config_json carries the whole owner request
+        input (about 24 MB raw for the 2,354-card test deck)."""
+        packed = _pack_row(row)
+        with self.lock:
+            self.bakeoff_run = packed
+
+    def defer_generated(self, league_id: str, props: dict) -> None:
+        with self.lock:
+            self.generated = {"league_id": league_id, "props": props}
+
+    def take_build_writes(self):
+        """Under `lock`: the held build-time writes, each handed out once."""
+        held = (self.trade_impressions, self.bakeoff_run, self.generated)
+        self.trade_impressions = self.bakeoff_run = self.generated = None
+        return held
 
     def seal(self) -> None:
         with self.lock:
@@ -3825,14 +3862,21 @@ class _DeckEvidence:
         is left."""
         rows = [_unpack_row(packed) for iid, (_, packed) in self.rows.items()
                 if self.stored_ids is None or iid in self.stored_ids]
-        if not (rows or self.ghosts or self.candidate_set):
+        held = self.trade_impressions or self.generated
+        if not (rows or self.ghosts or self.candidate_set or held):
             return None
+        impressions = None
+        if self.trade_impressions is not None:   # the stored cards' only
+            impressions = _unpack_row(self.trade_impressions)
+            impressions["cards"] = impressions["cards"][:self.stored_count]
         from .database import CompressedJSON
         return CompressedJSON.encode({
             "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
             "pages_bytes": self.pages_bytes, "rows": rows,
             "ghosts": list(self.ghosts.values()), "diagnostics": self.closure(rows),
-            "candidate_set": self.candidate_set})
+            # Not the bakeoff_runs row: it can be megabytes (defer_bakeoff_run).
+            "candidate_set": self.candidate_set, "trade_impressions": impressions,
+            "generated": self.generated})
 
     @classmethod
     def from_row(cls, user_id: str, deck_job_id: str, row: Mapping | None, lease) -> "_DeckEvidence":
@@ -3846,6 +3890,9 @@ class _DeckEvidence:
             ev.diagnostics = {d["snapshot_id"]: d for d in blob.get("diagnostics") or []}
             ev.candidate_set = blob.get("candidate_set")
             ev.pages_bytes = blob.get("pages_bytes")
+            if blob.get("trade_impressions") is not None:
+                ev.trade_impressions = _pack_row(blob["trade_impressions"])
+            ev.generated = blob.get("generated")
         ev.sealed = ev.complete = True
         return ev
 
@@ -3873,6 +3920,7 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             with ev.lock:
                 ev.wrote(first, candidate_set, first_diag, upgrades)
             shrunk = bool(first) or candidate_set is not None
+        shrunk = _deck_evidence_build_writes(ev) or shrunk
         if rest:
             _db.save_deck_evidence(rest, diagnostics=rest_diag, deck_job_id=ev.job_id)
             with ev.lock:
@@ -3888,6 +3936,32 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             _db.save_trade_page_evidence(ev.user_id, ev.job_id, blob, ev.pages_bytes)
         except Exception:
             log.warning("deck-evidence %s: evidence_blob not shrunk", ev.job_id, exc_info=True)
+
+
+def _deck_evidence_build_writes(ev: _DeckEvidence) -> bool:
+    """F3: the deck is served, so its build-time writes happen now, once:
+    trade_impressions, the bakeoff_runs row and trades_generated (props as
+    today). True when any was held. Each failure is logged, never retried."""
+    with ev.lock:
+        impressions, run_row, generated = ev.take_build_writes()
+    if impressions is not None:
+        held = _unpack_row(impressions)
+        try:
+            log_trade_impressions(ev.user_id, held["league_id"], held["cards"])
+        except Exception as err:
+            log.warning("deck-evidence %s: trade impression logging failed: %s", ev.job_id, err)
+    if run_row is not None:
+        try:
+            save_bakeoff_run(_unpack_row(run_row))
+        except Exception as err:
+            log.warning("deck-evidence %s: bake-off run logging failed: %s", ev.job_id, err)
+    if generated is not None:
+        try:
+            record_event(ev.user_id, "trades_generated", league_id=generated["league_id"],
+                         source="api", props=generated["props"])
+        except Exception as err:
+            log.warning("deck-evidence %s: record_event(trades_generated) failed: %s", ev.job_id, err)
+    return any(x is not None for x in (impressions, run_row, generated))
 
 
 def _deck_evidence_write(ev: _DeckEvidence) -> None:
@@ -10230,9 +10304,18 @@ def _run_trade_job(
         # the future acceptance model. Never allowed to break generation.
         # Ghost cards are excluded — this table's contract is "every trade
         # card SHOWN to a user"; ghosts land only on the F1 spine, flagged.
+        # ADR-025 stage 1: a deferred job's logger assembles its rows and
+        # writes none (publication then waits on no commit); its build-time
+        # writes (this one, the bake-off run, trades_generated) wait for the
+        # deck's first delivery (F3).
+        with _trade_jobs_lock:
+            deck_evidence = None if preparation else (_trade_jobs.get(job_id) or {}).get("evidence")
         try:
             if league_id != "league_demo" and not preparation:
-                log_trade_impressions(g_user_id, league_id, served_final)
+                if deck_evidence is not None:
+                    deck_evidence.defer_trade_impressions(league_id, served_final)
+                else:
+                    log_trade_impressions(g_user_id, league_id, served_final)
         except Exception as imp_err:
             log.warning("trade impression logging failed (non-fatal): %s", imp_err)
 
@@ -10251,9 +10334,6 @@ def _run_trade_job(
         with _trade_jobs_lock:
             _j = _trade_jobs.get(job_id)
             job_source = (_j or {}).get("source")
-            # ADR-025 stage 1: a deferred job's logger assembles its rows and
-            # writes none; publication then waits on no commit.
-            deck_evidence = None if preparation else (_j or {}).get("evidence")
 
         # Owner publication happens only after the logger commits each batch.
         # All ranking, final policy and disposition work above is complete;
@@ -10459,7 +10539,10 @@ def _run_trade_job(
                     if owner_presentment is not None:
                         config_record["owner_presentment"] = owner_presentment
                     run_row["config_json"] = json.dumps(config_record, default=str)
-                save_bakeoff_run(run_row)
+                if deck_evidence is not None:
+                    deck_evidence.defer_bakeoff_run(run_row)
+                else:
+                    save_bakeoff_run(run_row)
             except Exception as bo_err:
                 log.warning("bake-off run logging failed (non-fatal): %s", bo_err)
         if owner_selected_run is not None:
@@ -10508,12 +10591,16 @@ def _run_trade_job(
             if job_source:
                 _ev_props["deck_source"] = job_source
             if not _job_superseded(job_id):
-                record_event(
-                    g_user_id, "trades_generated",
-                    league_id=league_id,
-                    source="api",
-                    props=_ev_props,
-                )
+                if deck_evidence is not None:
+                    # Analytics-lead R3: exactly once per deck, at its first delivery.
+                    deck_evidence.defer_generated(league_id, _ev_props)
+                else:
+                    record_event(
+                        g_user_id, "trades_generated",
+                        league_id=league_id,
+                        source="api",
+                        props=_ev_props,
+                    )
         except Exception as ev_err:
             log.warning("record_event(trades_generated) failed: %s", ev_err)
 

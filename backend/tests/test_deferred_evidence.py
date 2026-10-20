@@ -253,6 +253,91 @@ def test_deliveries_made_while_the_run_was_live_are_written_at_completion(deferr
     assert {written[i] for i in first30} == {"delivered"} and len(written) == 40
 
 
+# ── F3: the build-time writes wait for the first delivery ──────────────────
+
+@pytest.fixture()
+def generated_events(monkeypatch):
+    """trades_generated emits, captured (every other event passes through)."""
+    events = []
+    real = server.record_event
+
+    def record(user_id, name, *args, **kwargs):
+        if name == "trades_generated":
+            events.append({"user_id": user_id, **kwargs})
+            return None
+        return real(user_id, name, *args, **kwargs)
+
+    monkeypatch.setattr(server, "record_event", record)
+    return events
+
+
+def build_writes(engine):
+    return (len(rows(engine, db_module.trade_impressions_table)),
+            len(rows(engine, db_module.bakeoff_runs_table)))
+
+
+def test_f3_a_never_served_deferred_deck_writes_none_of_its_build_time_rows(deferred, generated_events):
+    _, engine, _ = deferred
+    job_id = run_job()
+    assert server._trade_jobs[job_id]["cards"] and server._trade_jobs[job_id]["status"] == "complete"
+    assert build_writes(engine) == (0, 0) and generated_events == []
+    assert rows(engine) == []
+
+
+def test_f3_the_first_delivery_writes_them_once_with_todays_props(deferred, generated_events, monkeypatch):
+    client, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
+    live_job = run_job()                                   # today's run: written at build
+    today = (build_writes(engine), [e["props"] for e in generated_events])
+    assert today[0] == (len(server._trade_jobs[live_job]["cards"]), 1) and len(today[1]) == 1
+    with engine.begin() as conn:
+        conn.execute(delete(db_module.trade_impressions_table))
+        conn.execute(delete(db_module.bakeoff_runs_table))
+    generated_events.clear()
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": True})
+    job_id = run_job(force_fresh=True)
+    cards = server._trade_jobs[job_id]["cards"]
+    assert build_writes(engine) == (0, 0) and generated_events == []
+    assert generate(client, page=1).get_json()["job_id"] == job_id    # page 1 from the store
+    status(client, job_id, 0)                              # a retry
+    generate(client, page=1)                               # another tap
+    server._deck_evidence_delivered(server._trade_jobs[job_id]["evidence"], cards)
+    assert build_writes(engine) == (len(cards), 1)
+    assert len(generated_events) == 1
+    event = generated_events[0]
+    assert (event["user_id"], event["league_id"], event["source"]) == (UID, LEAGUE, "api")
+    strip = lambda props: {k: v for k, v in props.items() if k != "gen_ms"}
+    assert strip(event["props"]) == strip(today[1][0]) and event["props"]["count"] == len(cards)
+
+
+def test_f3_after_the_job_left_the_process_the_blob_carries_them(deferred, generated_events):
+    client, engine, _ = deferred
+    job_id = run_job()
+    n = len(server._trade_jobs[job_id]["cards"])
+    blob = stored()["evidence_blob"]
+    assert blob["generated"]["props"]["count"] == n and len(blob["trade_impressions"]["cards"]) == n
+    assert "bakeoff_run" not in blob                       # megabytes on an owner run: in process only
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    status(client, job_id, 0)
+    status(client, job_id, 0)
+    assert build_writes(engine) == (n, 0) and len(generated_events) == 1
+    assert stored()["evidence_blob"] is None
+
+
+def test_f3_a_partial_run_writes_its_held_rows_at_its_delivery_but_never_trades_generated(
+        deferred, generated_events):
+    _, engine, _ = deferred
+    job_id, served, _, ev, _ = deferred_deck(40, store=False, complete=False)
+    ev.defer_trade_impressions(LEAGUE, served)             # the worker reached it, then timed out
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="error", error="timeout")
+    server._deck_evidence_job_done(job_id)
+    assert build_writes(engine) == (0, 0)                  # nothing delivered yet
+    server._trade_job_public_view(dict(server._trade_jobs[job_id]))
+    assert build_writes(engine) == (40, 0) and generated_events == []
+
+
 # ── C4 and C3: first delivery, later pages ──────────────────────────────────
 
 def test_c4_the_first_delivery_of_a_10_card_page_writes_full_rows_for_the_first_30(deferred, monkeypatch):
@@ -741,6 +826,7 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
     deck = held(ev)
     with ev.lock:
         ev.stored_ids = stored_ids
+        ev.stored_count = len(stored_cards)
         ev.pages_bytes = len(pages)
         before = ev.blob()
         held_z = sum(len(packed) for _, packed in ev.rows.values())
@@ -749,7 +835,9 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
     rest_of_stored = db_module.CompressedJSON.encode([r for r in stored_rows if r["card_index"] >= 30])
     blob = json.loads(zlib.decompress(before))
     parts = {name: len(db_module.CompressedJSON.encode(blob[name]))
-             for name in ("rows", "diagnostics", "candidate_set")}
+             for name in ("rows", "diagnostics", "candidate_set", "trade_impressions", "generated")}
+    run_row = server._unpack_row(ev.bakeoff_run)            # held in process, never in the blob
+    run_raw, run_z = len(json.dumps(run_row)), len(ev.bakeoff_run)
     row_raw = statistics_mean([len(json.dumps(r)) for r in deck.values()])
     varied = db_module.CompressedJSON.encode(vary(blob, random.Random(20261020)))
     diag_count = len(ev.diagnostics)
@@ -763,7 +851,9 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
           f"  pages_blob (90 cards)            {kib(len(pages))}\n"
           f"  evidence_blob before delivery    {kib(len(before))} (rows {kib(parts['rows'])}, "
           f"diagnostics {kib(parts['diagnostics'])} x{len(blob['diagnostics'])}, "
-          f"candidate set {kib(parts['candidate_set'])})\n"
+          f"candidate set {kib(parts['candidate_set'])}, trade_impressions {kib(parts['trade_impressions'])}, "
+          f"trades_generated {kib(parts['generated'])})\n"
+          f"  bakeoff_runs row (in process only) raw {run_raw / 2**20:.1f} MiB, packed {kib(run_z)}\n"
           f"  per pair before delivery         {kib(len(pages) + len(before))}\n"
           f"  evidence_blob before, varied     {kib(len(varied))} (every value randomized: an upper bound)\n"
           f"  evidence_blob after page 1       {kib(len(after or b''))} (stage 1: every row written)\n"
