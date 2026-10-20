@@ -105,12 +105,12 @@ def public(card, iid):
             "impression_id": iid, "expires_at": card.expires_at}
 
 
-def deferred_deck(n, *, ghost_every=0, job_id=None, store=True, complete=True):
+def deferred_deck(n, *, ghost_every=0, job_id=None, store=True, complete=True, **kickoff):
     """A complete deferred organic job whose deck is `n` cards (plus a ghost
     after every `ghost_every`), assembled by the real logger into the job's
     _DeckEvidence, published with its minted ids, then stored (P1).
     complete=False: the job is still running (assembled, not finished)."""
-    real = run_job()
+    real = run_job(**kickoff)
     with server._trade_jobs_lock:
         job = server._trade_jobs.pop(real)
         assert job["evidence_mode"] == "deferred" and job["status"] == "complete"
@@ -415,6 +415,46 @@ def test_f4_an_unknown_id_with_no_pending_write_never_waits(deferred, monkeypatc
         server._save_deck_outcome_safe(iid, "like", acting_user_id=UID)
         assert time.monotonic() - started < 0.1
     assert outcomes(engine) == []
+
+
+# ── F5: memory ──────────────────────────────────────────────────────────────
+
+def test_f5_a_decks_payload_is_freed_once_its_evidence_is_written(deferred):
+    client, engine, _ = deferred
+    job_id, _, _, ev, _ = deferred_deck(120, ghost_every=9)
+    assert ev.rows and ev.ghosts and ev.candidate_set and ev.by_hash
+    status(client, job_id, 0)
+    assert (ev.rows, ev.ghosts, ev.diagnostics, ev.by_hash, ev.candidate_set) == ({}, {}, {}, {}, None)
+    status(client, job_id, 30)                             # later pages still mark delivered
+    assert len({iid for iid, t in tiers(engine).items() if t == "delivered"}) == 60
+
+
+def test_f5_an_undelivered_deck_past_the_fresh_window_is_dropped_and_no_longer_served(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(120)
+    job = server._trade_jobs[job_id]
+    assert server._drop_stale_deck_evidence() == 0         # inside the window
+    job["finished_at"] = time.monotonic() - server._PREGEN_TTL_SECONDS - 1
+    assert server._drop_stale_deck_evidence() == 1
+    assert "evidence" not in job and job["evidence_mode"] == "deferred" and server._trade_job_revoked(job)
+    assert rows(engine) == []                              # still C2: nothing was written
+    assert deliver_job(job_id, 90)["cards"] == []          # its in-process cards no longer serve
+    page = status(client, job_id, 0).get_json()["cards"]   # its stored pages do, through the blob
+    assert len(page) == 30 and {tiers(engine)[c["impression_id"]] for c in page} == {"delivered"}
+    assert len(rows(engine)) == 90                         # the stored cards only
+
+
+def test_f5_delivered_and_running_decks_are_kept(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(40)
+    status(client, job_id, 0)
+    running, *_ = deferred_deck(40, job_id="deck-running", store=False, complete=False,
+                               force_fresh=True)
+    for jid in (job_id, running):
+        server._trade_jobs[jid]["finished_at"] = time.monotonic() - server._PREGEN_TTL_SECONDS - 1
+    assert server._drop_stale_deck_evidence() == 0
+    assert all("evidence" in server._trade_jobs[jid]
+               and not server._trade_job_revoked(server._trade_jobs[jid]) for jid in (job_id, running))
 
 
 # ── C4 and C3: first delivery, later pages ──────────────────────────────────
@@ -920,6 +960,13 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
     row_raw = statistics_mean([len(json.dumps(r)) for r in deck.values()])
     varied = db_module.CompressedJSON.encode(vary(blob, random.Random(20261020)))
     diag_count = len(ev.diagnostics)
+    with ev.lock:   # F5: the payload held in process from build to the first delivery
+        peak = {"rows (packed)": held_z,
+                "diagnostics": sum(len(d["payload_json"]) for d in ev.diagnostics.values()),
+                "ghosts": sum(len(json.dumps(g)) for g in ev.ghosts.values()),
+                "candidate set": len(json.dumps(ev.candidate_set)),
+                "trade_impressions (packed)": len(ev.trade_impressions),
+                "bakeoff_runs row (packed)": len(ev.bakeoff_run)}
     started = time.perf_counter()
     server._deck_evidence_delivered(ev, job["cards"][:30])
     write_s = time.perf_counter() - started
@@ -939,8 +986,14 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
           f"  per pair after page 1            {kib(len(pages) + len(after or b''))}\n"
           f"  packing-stage proxy after page 1 {kib(len(rest_of_stored))} (stored rows 30-89 only)\n"
           f"  in-process rows held (whole deck) raw {held_raw / 2**20:.1f} MiB, "
-          f"packed {held_z / 2**20:.1f} MiB, diagnostics {diag_count} snapshots")
+          f"packed {held_z / 2**20:.1f} MiB, diagnostics {diag_count} snapshots\n"
+          f"  peak in-process payload          {sum(peak.values()) / 2**20:.1f} MiB "
+          f"({', '.join(f'{k} {v / 2**20:.2f}' for k, v in peak.items())} MiB)")
     assert after is None and len(rows(engine)) == count
+    with ev.lock:   # F5: freed once written
+        assert (ev.rows, ev.ghosts, ev.diagnostics, ev.by_hash, ev.candidate_set,
+                ev.trade_impressions, ev.bakeoff_run, ev.generated) == (
+                    {}, {}, {}, {}, None, None, None, None)
     assert len(pages) + len(before) <= 200_000                # scope §7: ≤ about 0.2 MB per pair
 
 

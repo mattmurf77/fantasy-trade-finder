@@ -2810,6 +2810,9 @@ def _cleanup_loop() -> None:
         _evict_trade_page_store()
         # ADR-025 C8: archive extras past 90 days; flag off ⇒ untouched.
         _purge_archive_evidence()
+        # F5: undelivered deferred decks past the fresh window (only flag-on
+        # jobs carry evidence).
+        _drop_stale_deck_evidence()
 
         # Silent durable inventory refresh is deliberately separate from the
         # notification-bearing daily tick and weekly replenishment.
@@ -3783,6 +3786,12 @@ class _DeckEvidence:
         with self.lock:
             self.generated = {"league_id": league_id, "props": props}
 
+    def release_if_written(self) -> None:
+        """Under `lock` (F5): once nothing is left to write, free the payload."""
+        if not (self.rows or self.ghosts or self.candidate_set or self.trade_impressions
+                or self.bakeoff_run or self.generated):
+            self.rows, self.ghosts, self.diagnostics, self.by_hash = {}, {}, {}, {}
+
     def take_build_writes(self):
         """Under `lock`: the held build-time writes, each handed out once."""
         held = (self.trade_impressions, self.bakeoff_run, self.generated)
@@ -3992,6 +4001,8 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             _db.save_trade_page_evidence(ev.user_id, ev.job_id, blob, ev.pages_bytes)
         except Exception:
             log.warning("deck-evidence %s: evidence_blob not shrunk", ev.job_id, exc_info=True)
+    with ev.lock:
+        ev.release_if_written()
 
 
 def _deck_evidence_build_writes(ev: _DeckEvidence) -> bool:
@@ -4094,12 +4105,13 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list) -> None:
         job = _trade_jobs.get(row["deck_job_id"])
         in_process = job is not None and job["key"][0] == row["user_id"]
         ev = job.get("evidence") if in_process else None
+        live = in_process and job.get("evidence_mode") != "deferred"
     if ev is not None:
         _deck_evidence_delivered(ev, cards)
         return
     ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
-    if in_process or not ids:
-        return   # a live-mode deck wrote its rows at build
+    if live or not ids:
+        return   # a live-mode deck wrote its rows at build (an F5-dropped one uses its blob)
     lease = _user_data_lifecycle.capture(
         row["user_id"], started=g.get("_user_data_started") if has_request_context() else None)
     _deck_evidence_pend(ids)
@@ -4134,6 +4146,37 @@ def _deck_evidence_job_done(job_id: str) -> None:
         ev.complete = True
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
+
+
+def _drop_stale_deck_evidence(now: float | None = None) -> int:
+    """F5 (the cleanup loop): a deferred deck still undelivered
+    _PREGEN_TTL_SECONDS after its run ended is no longer fresh, so a new tap
+    builds a new deck. Its in-process evidence is dropped and its job revoked,
+    so no response serves it from this process (P2's live-job pages past the
+    stored ones included); its stored pages, if any, serve and write through
+    the page store's evidence_blob, as after a restart. Delivered decks keep
+    theirs (written, and freed, at their first delivery). Returns the count."""
+    now = time.monotonic() if now is None else now
+    dropped = 0
+    with _trade_jobs_lock:
+        for job in _trade_jobs.values():
+            ev = job.get("evidence")
+            if (ev is None or job.get("status") == "running" or not job.get("finished_at")
+                    or now - job["finished_at"] <= _PREGEN_TTL_SECONDS):
+                continue
+            with ev.lock:
+                if ev.delivered or ev.delivered_hashes:
+                    continue
+                ev.discarded = True
+                ev.rows, ev.ghosts, ev.diagnostics, ev.candidate_set, ev.by_hash = {}, {}, {}, None, {}
+                ev.trade_impressions = ev.bakeoff_run = ev.generated = None
+            job.pop("evidence")
+            _revoke_trade_job_locked(job, "evidence_expired")
+            dropped += 1
+    if dropped:
+        log.info("deck-evidence: dropped %d undelivered deck(s) past %d s", dropped,
+                 _PREGEN_TTL_SECONDS)
+    return dropped
 
 
 def _deck_evidence_live(job_id: str) -> None:
