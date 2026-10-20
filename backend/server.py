@@ -3361,10 +3361,16 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     callback, the post-layer snapshots, the final publish), so for those, and
     for a cursor past the end, the full current list returns with replace.
     An errored job never pages its partial cards.
+
+    P2: while trade.first_page_store is on, the kickoff's `append_only`
+    stamp, when the job has one, decides instead of the card markers; jobs
+    admitted without it keep the card check.
     """
     raw = job.get("cards") or []
+    marker = job.get("append_only") if _trade_page_store_enabled() else None
     append_only = bool(job.get("value_core") or job.get("prepared_inventory_id")
-                       or (raw and all(c.get("preserve_server_order") for c in raw)))
+                       or (marker if marker is not None
+                           else raw and all(c.get("preserve_server_order") for c in raw)))
     replace = cursor > len(raw) or (cursor > 0 and not append_only)
     start = 0 if replace else cursor
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
@@ -10037,6 +10043,14 @@ def _kickoff_trade_job(
             and not presentation_exempt and not source and league_id != "league_demo"):
         job["page_scope"] = _trade_page_scope(fairness_threshold)
         job["page_built_at"] = time.time()   # wall-clock admission: the row's built_at
+    if _trade_page_store_enabled():
+        # P2: will every publish only extend the list? Owner-serve does, by
+        # the same reads the worker makes. The value core and prepared
+        # adoption are marked when they publish (job["value_core"],
+        # job["prepared_inventory_id"]): stamping them here would be wrong
+        # when the core falls back to a re-sorting legacy run or no
+        # prepared inventory is adopted.
+        job["append_only"] = bool(_owner_enabled(league_id) and _bakeoff.serve_owner())
     admission_owner_config = dict(_trade_service_mod._cfg)
     selected_owner = _bakeoff.owner_arm(admission_owner_config)
     if selected_owner == _bakeoff.ARM_OWNER_BILATERAL:
