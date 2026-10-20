@@ -250,6 +250,7 @@ from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
+from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from types import SimpleNamespace   # proposal-time policy shim (see
                                    # _record_trade_proposal)
@@ -581,6 +582,18 @@ def _sleeper_record(url: str, data) -> None:
 
 
 def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
+    """Fetch JSON from Sleeper API, behind the per-process 429 circuit (S0).
+
+    While the circuit is open this raises `sleeper_http.SleeperRateLimited`
+    (a URLError) without touching the network; a 429 opens it. Fixture mode
+    goes through the circuit too, so cassette 429s exercise the real path.
+    """
+    league = _api_obs.sleeper_endpoint_class(url)[1]
+    with _sleeper_http.guard(league):
+        return _sleeper_get_unguarded(url, timeout)
+
+
+def _sleeper_get_unguarded(url: str, timeout: int = 15) -> dict | list:
     """Fetch JSON from Sleeper API with full request/response logging."""
     global _SSL_CTX  # may be replaced on first SSL failure
     if _SLEEPER_FIXTURES_DIR and not _SLEEPER_RECORD:
@@ -594,7 +607,8 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
         doc = json.loads(fpath.read_text())
         log.info("sleeper-fixture HIT %s", url)
         if isinstance(doc, dict) and "__http_error__" in doc:
-            raise urllib.error.HTTPError(url, int(doc["__http_error__"]), "fixture", None, None)
+            raise urllib.error.HTTPError(url, int(doc["__http_error__"]), "fixture",
+                                         doc.get("__headers__"), None)
         return doc
     if _TEST_MODE:
         # Unreachable given the startup rules; belt-and-braces rail counter.
@@ -14332,6 +14346,14 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     # class for the whole league (the replace-sync made that league-wide).
     # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = drafts if drafts is not None else _fetch_sleeper_drafts(league_id)
+    # S0 — both fetchers fail soft to []. While the 429 circuit is open that
+    # [] is a skipped read, not data: replace-syncing on it would reset every
+    # traded pick to its original team (the G-015 clobber class). Keep the
+    # prior snapshot; the next init retries.
+    if (traded_picks is None or drafts is None) and _sleeper_http.is_open():
+        log.warning("  owned-pick sync skipped for %s — Sleeper circuit open "
+                    "(keeping prior snapshot)", league_id)
+        return None
     _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
     if not _drafts:
         _cached = _sleeper_cached_draft_verdict(league_id)
@@ -19198,6 +19220,12 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
         if not force and _draft_status_is_fresh(ctx):
             return None
         verdict = _detect_league_draft_status(league_id, ctx)
+        if ((ctx.get("platform") or "sleeper").lower() == "sleeper"
+                and _sleeper_http.is_open()):
+            # S0 — the Sleeper signals above were skipped reads, not evidence.
+            # Keep the cached verdict; the TTL lets the next pass retry.
+            log.info("  draft status for %s not written — Sleeper circuit open", league_id)
+            return None
         set_league_draft_status(league_id, verdict.status, verdict.confidence)
         _invalidate_draft_context_cache(league_id)
         log.info("  ✅ draft status for %s: %s (%s via %s) %s", league_id,
