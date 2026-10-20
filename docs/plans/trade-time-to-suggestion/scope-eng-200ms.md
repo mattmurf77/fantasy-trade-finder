@@ -1,16 +1,16 @@
 # Feature Scope — Trades eng: the 200 ms path (S0, E2, P1, P2, end of deck, UX, C, M, narrow evidence)
 
-**Date:** 2026-10-20 (v1, which supersedes the v0 draft of the same day)
+**Date:** 2026-10-20 (v1.1: head-eng's amendment 2 rulings folded in; supersedes v1 and v0 of the same day)
 **Entry point:** direct operator ask, 2026-10-20, relayed by the coordinator.
 - "Yes building should resume on the 200 ms path." This covers the whole §3a critical path, including UX, C and
   M (coordinator, 2026-10-20).
 - On DEC-2: "yes, with tiny rows for unseen trades."
 - On a "finding more trades" card: "This should never happen."
-- Briefs: `docs/plans/org-bringup/briefs/build-200ms-trades-eng.md` and `build-200ms-trades-eng-amend-1.md`
-  (head-eng).
+- Briefs (head-eng): `docs/plans/org-bringup/briefs/build-200ms-trades-eng.md`,
+  `build-200ms-trades-eng-amend-1.md` and `build-200ms-amend-2-packed-evidence.md`.
 **Builder:** trades-eng (lead), with `eng-backend` and `eng-mobile` workers in their own worktrees.
 **Operator sign-off on waivers:** pending. §9 is surfaced to head-eng, who takes it to the operator.
-**Status:** v1. Rows marked **OPEN** block the piece named beside them.
+**Status:** v1.1. Rows marked **OPEN** block the piece named beside them.
 
 **Supersedes and cites:**
 - **Product's acceptance** (binding): `docs/plans/org-bringup/launch-readiness-product.md` §"200 ms by launch":
@@ -19,7 +19,13 @@
   §4.2 clock, §5 freshness bounds and invariants (I-1 to I-5), AC-9 and R1–R3 stand.
 - **Eng input:** `eng-input.md` on `plan/trade-time-eng-input` @ `36af2e83`.
 - **Plan of record:** `docs/plans/org-bringup/launch-readiness-eng.md` §3a.
-- **Evidence policy:** `leads/models-lead-launch.md` §DEC-2. C1–C9 are binding.
+- **Evidence policy (the build spec):** `leads/models-lead-launch.md` §DEC-2, the Confirmation block from line 217.
+  - The **packed** form is the target: a per-run part once per served job, plus per-card arrays at about 92 B per
+    unseen card.
+  - The final C1–C9 are binding.
+  - Separate narrow rows are the fallback, only if C7 (i)–(ii) slip.
+  - The ADR-025 draft is `docs/plans/org-bringup/adr-025-draft.md`. trades-eng lands it in `docs/adr/` with the
+    first packed-write PR.
 - **Event grants:** `reports/analytics-lead.md` Ask 1b (R1–R3 granted with conditions, R4 refused in favor of a
   prop) and the AC-L1 conditions T1–T6.
 
@@ -54,8 +60,8 @@ platforms-eng's S0 background fetch.
 | 0 | This scope block | `plan/trades-200ms-eng-scope` | — |
 | 1 | **S0 serve:** `roster_snapshot` (`rfp1`), `vsn1`, the job freshness and join checks, the I-1 serve filter ("Updating" and no cards on a check error), the `on_roster_change` hook | `feat/trades-200ms-s0-serve` | Contract §6.1 agreed |
 | 2 | **E2:** the opt-in first page on `/generate`; `/status` deltas by cursor; `search_id` echoed (R3) | `feat/trades-200ms-e2-small-responses` | — (parallel with 1) |
-| 3 | **P1:** the page store; pages 1–2 (k = `trade_pages_stored`) pre-built together; triggers (app open and foreground, roster diff, value refresh, knob or `ENGINE_VERSION` change, **league connect, session start** (U5)); serve inline after I-1; flag | `feat/trades-200ms-p1-page-store` | 1, 2; models-eng's count-bounded conversion for AC-9 |
-| 4 | **Narrow evidence** (C1–C9) and receipts on delivered cards | `feat/trades-200ms-narrow-evidence` | models-eng C7 green; N-H decided |
+| 3 | **P1:** the page store; pages 1–3 (k = `trade_pages_stored`) pre-built together; only from a `complete` job, never `safety_ceiling_hit` or errored (§6.8); triggers (app open and foreground, roster diff, value refresh, knob or `ENGINE_VERSION` change, **league connect, session start** (U5)); serve inline after I-1; flag | `feat/trades-200ms-p1-page-store` | 1, 2; models-eng's count-bounded conversion for AC-9 |
+| 4 | **Packed evidence** (C1–C9): C2–C6 now (full-row and no-row rules, including replenishment under C2); the packed writer calls models-eng's `eval/` codec; C7 (v) deletion and export for the pack table; receipts on delivered cards | `feat/trades-200ms-packed-evidence` | C2–C6: none. The packed write: models-eng's C7 (i)–(iv) green **and** models-lead accepting the pack format (the schema isn't frozen before that) |
 | 5 | **P2 server:** cursor pages; the end-of-pool signal (§6.5); R3 `first_publish_ms` / `serve_source` | `feat/trades-200ms-p2-server` | 3 |
 | 6 | **Mobile integration:** E2/P2 consumer and prefetch (≥ 1 full page ahead), the end-of-deck card, withdraw in place plus the non-blocking "Updating" label (U2), **UX** in-place reveal, **C** device-held first page, **M** events R1/R2/R2b and the Testing readout | `feat/trades-200ms-mobile` (one PR) | 2, 5; ux-lead's spec for UX; analytics addendum for M |
 
@@ -86,30 +92,32 @@ platforms-eng's S0 background fetch.
   - T3: `cold_launch` is its own row;
   - T4: backgrounding ends the search as `abandoned`;
   - T5 and T6 are analytics-lead's query rules.
-- **OPEN A2, receipts: a definition change, probably with no code change.**
+- **A2, receipts: a definition change, probably with no code change.** head-eng accepted it 2026-10-20 (amendment 2
+  §6). **OPEN:** analytics-lead's agreement, through head-product.
   - Receipts values a row from `assets_json`. Its grading queue already requires `assets_json IS NOT NULL` and a
     non-ghost row (`database.py:14984-14990`, with the docstring at `:14960-14965`). `features_json` is read only
     for the `basis` slice (`receipts_service.py:459`), and is forbidden for valuation (`:48-49`).
   - Packed and narrow rows carry no `assets_json`, so they drop out of the queue on their own. **Receipts then
     grades delivered (full-row) cards only**: the models-lead §DEC-2 §4 knock-on.
-  - Receipts is trades-eng's. analytics-lead must agree the definition change, and a test pins it.
+  - Receipts is trades-eng's. A test pins it, including `assets_json IS NULL` for every packed and narrow card. If
+    the narrow-row fallback ever keeps `assets_json`, A2 becomes a code change.
 
 ## 2. Schema and flag scope
 
 | Item | Piece | Shape (proposed) | Status |
 |---|---|---|---|
-| **Page store**, e.g. `trade_page_store` | P1 | Unique `(user_id, league_id, scoring_format, request_scope)`; one row per key, upserted. Columns: `roster_fp`, `values_snapshot_id`, `engine_version`, `config_signature`, `built_at`, `expires_at`, `deck_job_id`, `pages_json` (public projection, pages 1..k), `evidence_blob` (compressed build-time snapshot: full rows for the first 30, the packed block, the candidate set; C6), `pool_exhausted_at`, `state` | Granted. **OPEN P1-K:** the key excludes the fingerprint (§6.2) |
-| `features_compact` on `deck_impressions` | Narrow | The §DEC-2 §2 key list, frozen at build | Granted (the interim form if C7 (i) lags) |
-| Per-run pack table, e.g. `deck_impression_packs` | Narrow | models-lead §DEC-2 §1 | **OPEN N-H** (head-eng's call on models-eng's per-run header) |
-| C8 archive marker | Narrow | From models-eng's C8 spec | **OPEN** |
-| Roster refresh state (`refreshed_at`, `status`, `last_error_code`) | S0 (platforms-eng writes) | On `leagues`, or a small table | **Not granted.** Reported to head-eng |
+| **Page store**, e.g. `trade_page_store` | P1 | Unique `(user_id, league_id, scoring_format, request_scope)`; one row per key, upserted. Columns: `roster_fp`, `values_snapshot_id`, `engine_version`, `config_signature`, `built_at`, `expires_at`, `deck_job_id`, `pages_json` (public projection, pages 1..k), `evidence_blob` (compressed build-time snapshot: full rows for the first 30, the packed block, the candidate set; C6), `pool_exhausted_at`, `state`, `user_id` (deletion and export) | **Granted** (amendment 2 §1–§3). Key ruled as corrected: the fingerprints are stored and compared at serve, not keyed. The **frozen snapshot is compressed**, and each card's snapshot is **dropped once its full row is written at delivery** (C3/C6) |
+| Per-run pack table, e.g. `deck_impression_packs` | Packed | models-lead Confirmation §1: per-run part (with the **same** `values_snapshot_id` as `vsn1`), per-card arrays, `pack_version`, `checksum`, `user_id` | **Granted**, but **not frozen until models-lead accepts models-eng's format** (amendment 2 §2) |
+| `features_compact` on `deck_impressions` | Narrow fallback | The §DEC-2 §2 key list, frozen at build | Only if C7 (i)–(ii) slip past launch (models-lead line 313) |
+| C8 archive marker | Packed | From models-eng's C8 spec | **OPEN** (models-eng) |
+| Roster refresh state (`league_roster_state`) | S0 | contract §4 | **Granted to platforms-eng** (amendment 2 §5). `roster_snapshot` reads it once it exists |
 | Account deletion and export registration for the new tables (D-183; C7 (v)) | P1, narrow | `_ADDITIONAL_PRIVATE_TABLES` (`accounts.py:652`); export is derived from it by `user_id` (`:988-992`). **So the page store and the pack table each carry their own `user_id` column.** | **Not in my grant:** head-eng or onboarding-eng |
 
 **Feature flag: `trade.first_page_store`** (named by release-lead, 2026-10-20). Default **false**.
 - **In the P1 PR, in the same commit as the code that reads it:**
   - `config/features.json` `"trade.first_page_store": false`;
-  - `backend/feature_flags.py` `FLAG_KEYS`, next to `trade.prepared_inventory`, with a one-line comment
-    (head-eng's file: **OPEN FK**, the grant);
+  - `backend/feature_flags.py` `FLAG_KEYS`, next to `trade.prepared_inventory`, with a one-line comment (granted
+    for this one key, amendment 2 §8);
   - a `docs/config-reference.md` row: default false, what it gates, rollback = set false and reload.
 - **Not** on any launched-defaults list (D-166).
 - **The mobile client doesn't read the flag:** it reads the server's response shape (paged vs legacy). If a client
@@ -119,7 +127,8 @@ platforms-eng's S0 background fetch.
 - **Graduation:**
   - device p95 ≤ 200 ms (M, analytics-lead's T6);
   - C7 green;
-  - the byte budget accepted (P23 / AC-L8);
+  - the **measured** byte numbers recorded in §7 and within the P23 budget (AC-L8). **The flag stays OFF until
+    they are in.**
   - models-lead 13b.
 - **Read-back plan for the flip** (G-016): after the operator's flip in release-lead's session, read back the
   live features endpoint plus one page-serve trace (a `serve_source=page` R3 row, or the job log line). That
@@ -130,7 +139,8 @@ platforms-eng's S0 background fetch.
 | Key | Default | Purpose |
 |---|---|---|
 | `trade_page_size` | 30 | Cards per page. C4 holds regardless |
-| `trade_pages_stored` | 2 | Pages pre-built and stored per scope. Page 2 always alongside page 1 (AC-L4); 3 if the buffer model needs it (§6.4) |
+| `trade_pages_stored` | 3 | Pages pre-built and stored per scope (head-eng accepted 1–3, tunable). Page 2 is always alongside page 1 (AC-L4); W3 swipe-rate data sets the final number (§6.4) |
+| `trade_page_store_evict_days` | 30 | Evict pages for leagues with no activity in N days (D-178's sweep scope) |
 | `trade_prefetch_remaining` | = page size | The client requests the next page when this many ready cards remain, so **at least one full page ahead** (U3). trades-pm sets the final threshold; it's served to the client |
 | `trade_prebuild_debounce_s` | 20 | Coalesces input-change triggers |
 
@@ -213,8 +223,12 @@ needs a grant, or onboarding-eng adds the row reading trades-eng's value.
 
 ### 6.1 Roster fingerprint and values snapshot id (with platforms-eng)
 
-**Status:** proposed 2026-10-20; agreement pending through head-eng. Copied verbatim into platforms-eng's S0
-scope block.
+**Status:** v0 **accepted** by head-eng, 2026-10-20 (amendment 2, rulings on the first reply §2).
+- `backend/roster_snapshot.py` is trades-eng's; any change needs both leads' review.
+- platforms-eng reviews it and names the draft-state columns. models-eng confirms `vsn1`'s inputs (does it
+  include pick `pool_value`?).
+- **One `values_snapshot_id`:** `vsn1` is also the id in the packed per-run part.
+- Copied verbatim into platforms-eng's S0 scope block.
 - `rfp1` = sha256[:32] over the canonical stored `league_members` rosters, `draft_picks` ownership and the
   draft-state columns. Names, timestamps, SQL ids and values are excluded. It is recomputed at serve from stored
   rows, with no network.
@@ -246,12 +260,12 @@ scope block.
 - **Rule:** the next page must be on the device before the user can reach the end of the current one.
 - `ready_cards_after_prefetch ≥ prefetch_remaining + page_size`.
 - **Build-ahead requirement:** time to deliver the next page ≤ `prefetch_remaining` × the p99 seconds per swipe.
-  - Pages 1–2 are pre-built and stored, so page 2's delivery is one round trip.
-  - Page 3+ needs the server to finish the deck within (page 1 + page 2) × p99 swipe time.
-- **OPEN SWIPE:** the p99 swipe rate (analytics-lead via head-eng; may need W3).
-  - **Conservative default until it arrives:** 1 card per 1.5 s at p99. Two stored pages then give ≥ 90 s before
-    page 3 is needed, against a production engine of 10–25 s and worker of 40–75 s.
-  - If W3 shows a faster rate or slower builds, `trade_pages_stored` goes to 3.
+  - Pages 1–3 are pre-built and stored, so pages 2 and 3 are each one round trip away.
+  - Page 4+ needs the server to finish the deck within (pages 1–3) × the p99 swipe time.
+- **OPEN SWIPE:** the p99 swipe rate (analytics-lead; W3 is granted).
+  - **Conservative default until it arrives:** 1 card per 1.5 s at p99. Three stored pages then give ≥ 135 s
+    before page 4 is needed, against a production engine of 10–25 s and worker of 40–75 s.
+  - `trade_pages_stored` is tunable within the §7 budget.
 
 ### 6.5 End of deck (Product's P30)
 
@@ -277,21 +291,44 @@ scope block.
   the p95 as R2b only if no card arrives (`reason` per R2b). The design target is that it never shows.
 - The code-walk proves the pre-build starts before onboarding can reach the control.
 
-## 7. Storage (AC-L8, for head-eng's P23 / H1–H3 check)
+### 6.8 Ceiling, timeout and partial decks (head-eng's spec items, amendment 2)
+
+- **The page store refuses a deck that hit the value core's safety ceiling** (`diag.safety_ceiling_hit`,
+  models-eng's conversion). `blind_grading` refuses it too; its owner is confirmed through head-eng.
+- **The page store stores only from a `complete` job,** never from `error` (including `timeout`), superseded or
+  revoked jobs.
+- **Paged and cursor responses return no cards for an errored job** (E2).
+- **The legacy path today does serve a timed-out job's published batches.** The sweep sets `status=error,
+  error=timeout` (`server.py:2792-2796`), but `_trade_job_public_view` returns `job["cards"]` (`:3207`).
+  - S0 proposes blanking them (its own commit, a test, and the B3 notice), pending head-eng's OK.
+  - Progressive first-30/100 publication while a job is still **running** (#303) is partial-while-building, and it
+    stays.
+
+## 7. Storage (AC-L8; the P23 budget set by head-eng, amendment 2 §3)
+
+**The budget (binding):**
+- **≤ about 0.2 MB compressed per active pair,** including pages 1–3. Snapshots are stored compressed.
+- **A card's frozen snapshot is dropped** once its full row is written at delivery (C3/C6).
+- **Evict** pages for leagues with no activity in 30 days (`trade_page_store_evict_days`).
+- **A total page-store ceiling of about 250 MB** (5% of 5 GB) at the 52-week plan. It's reported by an H2-style
+  size query, which ships with P1.
+- **Measured numbers replace the estimates below before the flag can flip.** The flag stays OFF until then.
 
 | Item | Per pair (est.) | Basis |
 |---|---|---|
-| Public pages 1–2 (60 cards × ~1.25 KB) | ~75 KB | B15 |
+| Public pages 1–3 (90 cards × ~1.25 KB) | ~110 KB | B15 |
 | Build-time full-row snapshot, first 30 (C4/C6) | ~230–325 KB physical | models-lead §2 |
 | Packed unseen block, held until serve (C1/C2) | ~157 KB raw (~115–130 KB compressed) | models-lead §DEC-2 §1 |
 | Candidate set, held until serve | **unknown** (to be measured) | — |
-| **Total** | **~0.45–0.55 MB uncompressed, plus the candidate set; est. ~0.1–0.15 MB compressed** | One row per scope, upserted |
+| **Total** | **~0.5–0.6 MB uncompressed, plus the candidate set; est. ~0.1–0.15 MB compressed** (to be measured) | One row per scope, upserted |
 
-- That's ~2–3 MB compressed at 22 pairs, or ~0.2–0.3 GB at 2,200 pairs.
+- **Against the budget:**
+  - The estimate fits ≤ 0.2 MB compressed per pair, if the candidate set compresses as expected. **It's the
+    unknown to measure first.**
+  - The 250 MB ceiling allows about 1,250–2,500 active pairs at 0.1–0.2 MB. Eviction keeps inactive leagues out.
 - The served-deck evidence is ~270 KB of full rows plus ~130 KB packed per served job, against ~17.8 MB today
   (about −98%).
 - The device page (C) has no server cost.
-- **OPEN BUDGET:** head-eng's byte budget number (P23).
 
 ## 8. Risks
 
@@ -308,23 +345,24 @@ scope block.
 
 ## 9. Waivers (surfaced to head-eng → operator)
 
-None proposed in v1. Every §1–§4 row is answered. Open items are listed in §10, not waived.
+None proposed in v1.1. Every §1–§4 row is answered. Open items are listed in §10, not waived.
 
 ## 10. Open items
 
 | ID | Item | Owner |
 |---|---|---|
-| P1-K | The page-store key excludes the fingerprint (§6.2) | head-eng |
-| FP | Fingerprint contract agreement; name the draft-state columns | platforms-eng via head-eng |
-| RS | The refresh-state schema grant | head-eng |
-| N-H | The per-run header / pack table | head-eng → models-lead |
-| A2 | Receipts on delivered cards only | analytics-lead via head-eng |
-| FK | The `feature_flags.py` `FLAG_KEYS` grant | head-eng |
-| DEL | `accounts.py` registration for the new tables | head-eng / onboarding-eng |
+| FP | platforms-eng's review of contract v0 (accepted by head-eng); naming the draft-state columns | platforms-eng via head-eng |
+| VSN | Whether `vsn1` includes pick `pool_value` | models-eng via head-eng |
+| PACK | models-lead accepting models-eng's pack format; the pack schema is frozen only after it | models-eng → head-eng → head-bizops → models-lead |
+| A2 | analytics-lead agreeing receipts move to delivered cards only (head-eng accepted) | analytics-lead via head-product |
+| DEL | `accounts.py` registration for the new tables (C7 (v) is mine; `accounts.py` itself is onboarding-eng's) | head-eng confirms the grant |
+| TO | OK to blank a timed-out job's cards on the legacy path (§6.8) | head-eng |
+| CAL | Which lead adds the `blind_grading` ceiling refusal | head-eng |
+| REPL | Replenishment's evidence writes follow C2 before `deck.replenishment` runs again (the operator was asked to pause it) | trades-eng (in the packed-evidence branch) |
 | TS | The Testing-settings readout row (`SettingsTesting`) | onboarding-eng via head-eng |
 | UXS | ux-lead's in-place reveal spec | ux-lead via head-eng |
 | THR | The final prefetch threshold; the readout spec | trades-pm via head-eng → head-product |
 | SWIPE | The p99 swipe rate | analytics-lead via head-eng |
-| BUDGET | The P23 byte budget number | head-eng |
+| MEAS | Measured page-store bytes per pair (and the candidate set) recorded in §7 | trades-eng (P1) |
 | B3 | Notice: invalid cards stop being served (S0) | models-lead via head-eng |
 | ONB | Review of the `on_roster_change` hook and the C session side | onboarding-eng via head-eng |
