@@ -1,6 +1,6 @@
 # Feature Scope — Trades eng: the 200 ms path (S0, E2, P1, P2, end of deck, UX, C, M, narrow evidence)
 
-**Date:** 2026-10-20 (v1.1: head-eng's amendment 2 rulings folded in; supersedes v1 and v0 of the same day)
+**Date:** 2026-10-20 (v1.2: head-eng's amendment 2 rulings, including ruling 9, folded in; supersedes v1.1, v1 and v0 of the same day)
 **Entry point:** direct operator ask, 2026-10-20, relayed by the coordinator.
 - "Yes building should resume on the 200 ms path." This covers the whole §3a critical path, including UX, C and
   M (coordinator, 2026-10-20).
@@ -10,7 +10,7 @@
   `build-200ms-trades-eng-amend-1.md` and `build-200ms-amend-2-packed-evidence.md`.
 **Builder:** trades-eng (lead), with `eng-backend` and `eng-mobile` workers in their own worktrees.
 **Operator sign-off on waivers:** pending. §9 is surfaced to head-eng, who takes it to the operator.
-**Status:** v1.1. Rows marked **OPEN** block the piece named beside them.
+**Status:** v1.2. Rows marked **OPEN** block the piece named beside them.
 
 **Supersedes and cites:**
 - **Product's acceptance** (binding): `docs/plans/org-bringup/launch-readiness-product.md` §"200 ms by launch":
@@ -294,15 +294,22 @@ needs a grant, or onboarding-eng adds the row reading trades-eng's value.
 ### 6.8 Ceiling, timeout and partial decks (head-eng's spec items, amendment 2)
 
 - **The page store refuses a deck that hit the value core's safety ceiling** (`diag.safety_ceiling_hit`,
-  models-eng's conversion). `blind_grading` refuses it too; its owner is confirmed through head-eng.
+  models-eng's conversion). `blind_grading` refuses it too, and that's trades-eng's (the Calibration surface; ruling 9).
 - **The page store stores only from a `complete` job,** never from `error` (including `timeout`), superseded or
   revoked jobs.
 - **Paged and cursor responses return no cards for an errored job** (E2).
-- **The legacy path today does serve a timed-out job's published batches.** The sweep sets `status=error,
-  error=timeout` (`server.py:2792-2796`), but `_trade_job_public_view` returns `job["cards"]` (`:3207`).
-  - S0 proposes blanking them (its own commit, a test, and the B3 notice), pending head-eng's OK.
-  - Progressive first-30/100 publication while a job is still **running** (#303) is partial-while-building, and it
-    stays.
+- **The legacy path serves a timed-out job's published batches** (`server.py:2792-2796`, `:3207`). **They are
+  not blanked** (ruling 9): that would pull cards out from under a mid-swipe user, against U2, and P1/P2 replace
+  this path at launch. Instead:
+  1. An `error` or `timeout` job is **never reused**: never fresh, never joined, never deduped onto. The next tap
+     starts a fresh job. S0 pins this with a test.
+  2. Its evidence is tagged so **replay excludes it.** A `partial_run` exclusion reason sits beside models-eng's
+     `missing_scorer_inputs` and `pack_integrity`. It's never packed, and the tag's mechanism is agreed with
+     models-eng in the packed-evidence piece.
+  3. Both go in the models-lead B3 notice with the I-1 diff. If models-lead requires blanking for eval integrity,
+     head-eng revisits.
+- Progressive first-30/100 publication while a job is still **running** (#303) is allowed. Only a deck cut short by
+  a timeout or the ceiling is the violation.
 
 ## 7. Storage (AC-L8; the P23 budget set by head-eng, amendment 2 §3)
 
@@ -356,8 +363,8 @@ None proposed in v1.1. Every §1–§4 row is answered. Open items are listed in
 | PACK | models-lead accepting models-eng's pack format; the pack schema is frozen only after it | models-eng → head-eng → head-bizops → models-lead |
 | A2 | analytics-lead agreeing receipts move to delivered cards only (head-eng accepted) | analytics-lead via head-product |
 | DEL | `accounts.py` registration for the new tables (C7 (v) is mine; `accounts.py` itself is onboarding-eng's) | head-eng confirms the grant |
-| TO | OK to blank a timed-out job's cards on the legacy path (§6.8) | head-eng |
-| CAL | Which lead adds the `blind_grading` ceiling refusal | head-eng |
+| PR | The `partial_run` replay-exclusion tag mechanism (§6.8) | trades-eng + models-eng |
+| CAL | `blind_grading` refuses ceiling-hit decks (trades-eng's; with models-eng's conversion) | trades-eng |
 | REPL | Replenishment's evidence writes follow C2 before `deck.replenishment` runs again (the operator was asked to pause it) | trades-eng (in the packed-evidence branch) |
 | TS | The Testing-settings readout row (`SettingsTesting`) | onboarding-eng via head-eng |
 | UXS | ux-lead's in-place reveal spec | ux-lead via head-eng |
