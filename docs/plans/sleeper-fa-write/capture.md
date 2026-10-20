@@ -101,6 +101,10 @@ What FTF does **not** know at the tap:
 - **Q7** Does a FA add return an **immediate** transaction (record its `type` and `status` values)?
 - **Q7, continued** Does a waiver claim return a **pending** claim with a `transaction_id`? Record the exact status string, and the `leg` the claim is filed under.
 
+**Two questions R15 needs answered** (legal-lead R15, see §7):
+- **Q7a: transaction IDs.** Does Sleeper return a transaction ID for an **immediate FA add**, and separately for a **pending waiver claim**? Record whether it is present in each case, the field name, and whether a claim's ID changes once the claim processes. R15.3's move record stores "Sleeper's transaction ID if returned".
+- **Q7b: cancelling a claim.** Can a pending waiver claim be **cancelled in Sleeper** at all? Record whether the UI offers a cancel control, the request it fires, and whether it succeeds. R15.1 says platforms-pm must verify any line about cancelling a claim before it ships, so this answer goes to platforms-pm, not straight into copy.
+
 **Free agent vs waiver:**
 - **Q8** Is the choice made **client-side** or **server-side**?
 - **Q8, continued** Which field tells the client that a player is on waivers, and until when? Is it `league_players.settings` or another read?
@@ -267,6 +271,10 @@ Other community notes, also UNVERIFIED:
 - success response: { transaction_id, status: <exact string>, leg: <…>, … }
 - FA-vs-waiver decided: client-side (field: <…> from read <…>) / server-side
 
+### R15 answers
+- Q7a transaction ID: FA add returns one? yes / no (field: <…>)   pending claim returns one? yes / no (field: <…>)   ID changes on processing? yes / no / unknown
+- Q7b claim cancellable in Sleeper? yes (UI control: <…>, request succeeded: yes / no) / no control offered   → hand to platforms-pm
+
 ### (d) Edit + cancel pending claim
 - edit op / mutation / variables: <…>
 - cancel op / mutation / variables: <…>
@@ -313,14 +321,24 @@ This is a short list, not the build spec. The build also goes through the four f
    - Resolve `roster_id` server-side.
    - Check server-side that the drop is on the user's roster and that the bid is no more than remaining FAAB (`_sleeper_waivers`).
    - Decide free agent vs waiver however the capture says Sleeper decides it.
-   - Show the user an explicit confirm step.
+   - Require R15.1's per-move confirm and an active server-side consent (item 3).
    - Note: the propose route has no cross-request idempotency (`server.py:19476-19477`), and a retried add/drop needs a decision on that.
-3. **The 7-day consent gate.** A per-user consent timestamp, enforced server-side; the client checkbox alone is not enough. The **schema proposal goes to head-eng**. One thing to settle there: does "the first attempt every 7 days" mean per user or per user and league?
-4. **A new default-OFF flag**, **named by release-lead**, in `config/features.json`.
+3. **Consent, governed by legal-lead's R15.** Source: `docs/plans/org-bringup/leads/legal-lead.md` from line 540, R15.1–R15.3. That file is in the records worktree `/Users/teresadickens/ftf-worktrees/org-bringup/` and is not on `origin/main` @ `678834ab`.
+   - **Mechanics (R15.2).** The checkbox is unticked by default. The **server** enforces a rolling 7 × 24 h window from its own consent timestamp. Consent covers **user-started moves only**, never scheduled or background ones. Re-consent and the "Stop roster moves" withdrawal follow R15.2 items 5–6.
+   - **Records (R15.3).** Both are append-only: a **consent record** and a **per-move record**, with exactly the fields R15.3 lists. The move record stores Sleeper's transaction ID if one is returned (Q7a).
+   - **No token in any record.**
+   - **Data obligations.** Both tables join `delete_user_data` and `export_user_data` (`backend/accounts.py:696`, `:1016`) in the same change, and get `docs/data-dictionary.md` entries. The schema proposal goes to head-eng (R15 handoffs).
+   - **Copy: R15.1, verbatim.** That includes the per-move confirm, "Add {A}, drop {B} in {League}? This is final on Sleeper.", and the waiver/FAAB variant line. Any cancel-a-claim line waits for platforms-pm to verify it (Q7b).
+   - **Scope still open.** Whether consent is per account or per league is H5a, and whether waivers and FAAB are in scope is H5b. Both are open with head-product / platforms-pm.
+4. **Flag `sleeper.send_add_drop`**, named by release-lead.
+   - It is default OFF and separate from `trade.send_in_sleeper`.
+   - It is added with the build in three places: `config/features.json`, `backend/feature_flags.py` `FLAG_KEYS` (:47), and `docs/config-reference.md`.
+   - With the flag off, the write routes return 404 and the button is unmounted.
+   - **platforms-eng never flips it.**
 5. **Docs:**
    - `docs/api-reference.md` (the route).
-   - `docs/data-dictionary.md` (the consent column or table).
-   - `docs/config-reference.md` (the flag).
+   - `docs/data-dictionary.md` (the R15.3 consent and move tables).
+   - `docs/config-reference.md` (`sleeper.send_add_drop`).
    - `docs/integrations/sleeper.md` (§1.2 ops table and its endpoint count, §3.3 shapes, §4 errors).
    - A DECISIONS entry superseding D-019's "FAAB claims have no API at all" and the #179 posture. `ClaimSheet`'s footer, "Sleeper doesn't allow apps to submit claims", becomes false wherever the flag is on.
 6. **Analytics only with analytics-lead's grant.** A grant means registering the events in the taxonomy and in `NON_INTENT_EVENTS` in the same commit; D-031's server-success / client-attempt split is the precedent.
@@ -330,14 +348,14 @@ This is a short list, not the build spec. The build also goes through the four f
 
 ## 8. Risks
 
-- **ToS / E2, open with legal-lead.**
-  - Runbook C4 (:136-138) recorded that a Sleeper write path is ToS-adverse on several counts. The operator accepted that risk on 2026-07-02 as a flagged, opt-in beta.
-  - **E2** was opened 2026-10-15 in the platform risk register (`.claude/skills/pm-partnerships/references/platform-risk-register.md`, branch `origin/skill/pm-partnerships`). Sleeper's Terms were revised 2026-10-06, with §11.1 and §11.3 barring automated or commercial use without written consent. The operator stated an agreement with Sleeper on 2026-08-12, but it is not filed in the repo.
-  - #351's PRD says the D1 write spike waits on E2. This doc is preparation only. Whether the capture session itself runs before E2 closes is the operator's call (E2, decision 3).
-- **Account bans.** §11.2 lets Sleeper revoke sessions and block third parties. A roster write made from FTF's servers with an impersonated Chrome User-Agent puts the **user's** Sleeper account at risk, not just FTF's access. That risk falls on users who opted in.
-- **No undo.** A FA add with a drop **executes at once**: the dropped player goes to waivers, and FTF cannot reverse it. A `propose_trade` waits for the other side to accept; this does not. It would be FTF's highest-blast-radius write, which is why the confirm step and the server-side drop and bid checks are not optional.
+- **ToS / E2: an accepted operator risk.** The operator's D1 yes on 2026-10-20 accepts it, and this doc does not relitigate it.
+  - **E2** was opened 2026-10-15 in the platform risk register (`.claude/skills/pm-partnerships/references/platform-risk-register.md`, branch `origin/skill/pm-partnerships`). Sleeper's Terms were revised 2026-10-06; §11.1 and §11.3 bar automated or commercial use without written consent.
+  - The precedent is runbook C4 (:136-138), where a write path was found ToS-adverse and accepted on 2026-07-02 as a flagged, opt-in beta.
+  - legal-lead's **R15** carries the user-facing side: consent, the privacy policy, the terms and the labels. Its **[PRO]** items (R15.7 a–e) remain for professional review: whether the consent evidence is adequate, the liability wording, the unofficial-connection line, the browser-header posture, and retention after account deletion. The build carries those items; they don't block this capture.
+- **Account bans.** §11.2 lets Sleeper revoke sessions and block third parties. A roster write made from FTF's servers with an impersonated Chrome User-Agent (R15.7 d) puts the **user's** Sleeper account at risk, not just FTF's access. That risk falls on users who opted in.
+- **No undo.** A FA add with a drop **executes at once**: the dropped player goes to waivers, and FTF cannot reverse it. A `propose_trade` waits for the other side to accept; this does not. It would be FTF's highest-blast-radius write, which is why R15.1's per-move confirm and the server-side drop and bid checks are not optional.
 - **App Store.** Apple guidelines 5.2.2 and 4.x (runbook C4). A new write class widens the same exposure Send in Sleeper already carries.
-- **Token custody.** The same full-account JWT in `sleeper_credentials` gets a new, more consequential use. The 7-day checkbox is the **user's** authorization, but §11.3 says a user's grant is not Sleeper's authorization.
+- **Token custody.** The same full-account JWT in `sleeper_credentials` gets a new, more consequential use. R15.3 keeps the token out of the consent and move records.
 - **Timing.**
   - Waiver claims process on the league's schedule, so the result is not immediate. FTF must say "claim submitted" and never "added".
   - Learning the outcome means reconciling later, either from public transactions (where waiver results, including failures, do publish) or through an authed `league_transactions_filtered` read, which is one more private call.
