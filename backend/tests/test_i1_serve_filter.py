@@ -10,6 +10,7 @@ the check itself fails, no cards are served: status "error", error
 "roster_check_unavailable". Harness: test_force_supersedes_running_job's.
 """
 import json
+import logging
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
@@ -140,14 +141,35 @@ def _via_status(client, job_id):
     return resp.get_json()
 
 
+def _unchecked_lines(caplog):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("[i1] unchecked")]
+
+
 @pytest.mark.parametrize("path", ["generate", "status"])
-def test_moved_players_and_picks_are_never_served(live, path):
+def test_moved_players_and_picks_are_never_served(live, path, caplog):
     client, _, _ = live
+    caplog.set_level(logging.INFO, logger="trade_finder")
     job = _complete_job_with_cards()
     body = _via_generate(client) if path == "generate" else _via_status(client, job["job_id"])
     assert body["job_id"] == job["job_id"]
     assert body["status"] == "complete" and body["error"] is None
     assert {c["trade_id"] for c in body["cards"]} == SERVABLE
+    assert _unchecked_lines(caplog) == []        # everything served was checked
+
+
+def test_generic_picks_are_exempt_from_the_ownership_check(live, caplog):
+    """Generic ladder picks are universal pool assets, never on a roster: a
+    card carrying them passes I-1 unchanged, and the exemption is logged."""
+    _, _, _ = live
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    job = _complete_job_with_cards()
+    generic = _card("generic", ["g2", "generic_pick_1_early"], ["r2", "generic_pick_2_mid"])
+    generic_but_moved = _card("generic-moved", ["g1", "generic_pick_1_late"], ["r2"])
+    job = dict(job, cards=[generic, generic_but_moved])
+    out = server._trade_job_public_view(job)
+    assert out["cards"] == [generic]
+    assert _unchecked_lines(caplog) == [
+        "[i1] unchecked: generic_picks league=league_i1 cards=1 generic_picks=2"]
 
 
 @pytest.mark.parametrize("path", ["generate", "status"])
@@ -202,11 +224,17 @@ def test_co_owner_give_side_is_checked_against_the_league_identity(live):
     assert server._trade_job_public_view(as_account)["cards"] == []
 
 
-def test_league_with_no_stored_rosters_passes_unchanged(live):
+def test_league_with_no_stored_rosters_passes_unchanged_and_loudly(live, caplog):
     """No stored league_members rows: nothing to check against (status
-    "missing"), so the deck is served as built."""
+    "missing"). Lead ruling 2026-10-20: lenient on today's path, with one
+    warning line per serve (P1's page-store serve will be strict)."""
     _, engine, _ = live
+    caplog.set_level(logging.INFO, logger="trade_finder")
     job = _complete_job_with_cards()
     with engine.begin() as conn:
         conn.execute(delete(league_members_table))
     assert {c["trade_id"] for c in server._trade_job_public_view(dict(job))["cards"]} == set(CARDS)
+    lines = [r for r in caplog.records if r.getMessage().startswith("[i1] unchecked")]
+    assert [(r.levelno, r.getMessage()) for r in lines] == [(
+        logging.WARNING,
+        f"[i1] unchecked: league_members_missing league={LEAGUE} cards={len(CARDS)} generic_picks=0")]

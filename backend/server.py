@@ -3286,17 +3286,28 @@ def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str):
     """I-1 at serve: keep a card only if the viewer still owns every give asset
     and its opponent still owns every receive asset, per the stored rosters and
     pick ownership read now (roster_snapshot). Raises when the check cannot
-    run; the caller must then serve no cards. A league with no stored rosters
-    (`status == "missing"`) has nothing to check against and passes unchanged.
+    run; the caller must then serve no cards.
+
+    Passed unchecked, with one `[i1] unchecked` log line per serve:
+    - every card, when the league has no stored rosters (`status == "missing"`;
+      lead ruling 2026-10-20: lenient on today's path, strict in P1);
+    - generic ladder picks (`generic_pick_{rnd}_{tier}`), which are universal
+      pool assets and never on a roster.
     """
     from . import roster_snapshot
     from .database import engine as _engine
     with _engine.connect() as conn:
         snap = roster_snapshot.roster_snapshot(conn, league_id)
-    if snap.status == "missing":
-        return cards
+    missing = snap.status == "missing"
     owners, nobody = snap.asset_owner, frozenset()
-    kept = []
+
+    def is_generic(asset):
+        return parse_generic_pick_id(str(asset)) is not None
+
+    def owned(assets, owner):
+        return all(is_generic(a) or owner in owners.get(str(a), nobody) for a in assets)
+
+    kept, unchecked_cards, generic_picks = [], 0, 0
     for card in cards:
         if isinstance(card, dict):
             give = [p["id"] for p in card.get("give", [])]
@@ -3305,9 +3316,17 @@ def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str):
         else:
             give, receive = card.give_player_ids, card.receive_player_ids
             target = card.target_user_id
-        if (all(viewer_id in owners.get(str(a), nobody) for a in give)
-                and all(str(target) in owners.get(str(a), nobody) for a in receive)):
+        if missing or (owned(give, viewer_id) and owned(receive, str(target))):
             kept.append(card)
+            n_generic = sum(1 for a in (*give, *receive) if is_generic(a))
+            if missing or n_generic:
+                unchecked_cards += 1
+                generic_picks += n_generic
+    if unchecked_cards:
+        (log.warning if missing else log.info)(
+            "[i1] unchecked: %s league=%s cards=%d generic_picks=%d",
+            "league_members_missing" if missing else "generic_picks",
+            league_id, unchecked_cards, generic_picks)
     return kept
 
 
