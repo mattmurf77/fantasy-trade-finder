@@ -1,11 +1,12 @@
 # Feature Scope — S0, fetch side: background roster refresh, Sleeper 429 backoff, roster-state stamp
 
-**Date:** 2026-10-20 (Stage A draft: branch, read, design. No product code.)
+**Date:** 2026-10-20. Stage A (design) at `92513bc1`; Stage B (PR-A build) on the same branch, §3 and §5.
 **Entry point:** direct operator ask, 2026-10-20, relayed by the coordinator: "Yes building should resume on the
 200 ms path." Brief: `docs/plans/org-bringup/briefs/build-platforms-eng-s0-sleeper.md` (head-eng), Piece 1.
 Plan of record: `docs/plans/org-bringup/launch-readiness-eng.md` §3a, row S0.
 **Builder:** platforms-eng (lead), `eng-backend` worker. Branch `build/s0-roster-refresh`, cut from `origin/main`
-`678834ab` (2026-10-14 21:31 -0400). All file:line cites are at that sha.
+`678834ab` (2026-10-14 21:31 -0400). §A–§C cite that sha. §3's code-walk, §5 and R9/R10 cite the branch HEAD
+after PR-A.
 **Companion:** trades-eng's `scope-eng-200ms.md` (v1, 2026-10-20) owns the serve side: `roster_snapshot`, `vsn1`,
 job and page freshness, the I-1 serve filter, and the `on_roster_change` handler. This file is the standalone
 fetch-side block the brief allows ("write `scope-eng-s0-fetch.md` beside it"). §C below is the contract text to
@@ -123,8 +124,11 @@ league_roster_state
 4. **Members:** write the authoritative members with **replace semantics** for Sleeper: delete then insert in one
    transaction (`replace_espn_league_members`, `database.py:13708-13738`, is already platform-agnostic), only when
    the payload is a valid non-empty list (G-015). It replaces the `upsert_league_members` call at `server.py:22804`,
-   for Sleeper leagues only. **Monotonic guard:** skip the write when `league_roster_state.refreshed_at` is newer
-   than this fetch's `fetch_started_at`, so a slow, older init can't overwrite a newer one.
+   for Sleeper leagues only. **As built (PR-A):** only `league_roster_state.refreshed_at` is monotonic
+   (`mark_league_roster_fresh` never rewinds it). The members write itself is last-writer-wins. Two inits for one
+   league whose Sleeper reads straddle a roster change can leave the older rows; the next init corrects them.
+   Making the members write conditional needs it in the same transaction as the state row (`SELECT … FOR UPDATE`
+   on Postgres). That's deferred as residual R9, not built.
 5. **Picks:** `_sync_sleeper_owned_picks(rosters=…, meta=…)` (`:22893`), now handed the request-thread payloads.
    It still makes its own `traded_picks` + `drafts` reads (D-178 pinned).
 6. **Draft state:** `_refresh_league_draft_status` (`:22909`), TTL-gated, unchanged.
@@ -219,7 +223,16 @@ There is no 429 or backoff handling on any Sleeper path today. `_sleeper_get` re
 - **Circuit open on the send path:** the I-2 live roster read fails fast, and the send is blocked with "couldn't
   confirm rosters" (PRD R3). It is never sent unchecked.
 - **Scope:** reads only. `sleeper_write.py` (GraphQL writes) is untouched.
-- **Fixture mode** (`_SLEEPER_FIXTURES_DIR`, `server.py:586-598`) bypasses the circuit unless a test arms it.
+- **Fixture mode** (`_SLEEPER_FIXTURES_DIR`) goes **through** the circuit (as built), so tests exercise the real
+  path. A cassette may carry `"__headers__": {"Retry-After": "30"}` next to `"__http_error__": 429`
+  (`server.py:611-612`). No checked-in cassette holds a 429, so the UI-test worlds are unaffected.
+- **Never a clobber amplifier** (added in the build). Both `_fetch_sleeper_traded_picks` and `_fetch_sleeper_drafts`
+  fail soft to `[]`. While the circuit is open, that `[]` would have reached `sync_draft_picks`' REPLACE and reset
+  every traded pick to its original team. `_sync_sleeper_owned_picks` now returns `None` (prior snapshot kept)
+  when the circuit is open after those reads (`server.py:14354`). `_refresh_league_draft_status` keeps the cached
+  verdict likewise (`server.py:19224-19229`).
+  - **Pre-existing, not fixed here:** a non-429 flake on `traded_picks` (5xx, timeout) still returns `[]`, and the
+    sync still replaces with it. That's a G-015-class hazard on `main` today; reported to head-eng.
 - Only Sleeper-side status codes are logged (league ids are safe to log). No token is involved: these are public
   endpoints.
 
@@ -296,20 +309,63 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
 
 ## 3. Evidence scope (D-056)
 
-- [ ] **Structural guard:** none. No mobile change.
-- [ ] **Backend pytest:**
+- [x] **Structural guard:** none. No mobile change.
+- [x] **Backend pytest, PR-A (built).** 34 + 14 new tests, 5 in the updated budget file. The new files use the
+  shipped `FTF_SLEEPER_FIXTURES_DIR` cassette seam, fake openers and an injected clock. No network.
 
-  | File | Pins |
-  |---|---|
-  | `test_sleeper_backoff.py` (new) | 429 with `Retry-After: 30` → circuit open ≥ 30 s and zero network calls while open (counting fake opener); HTTP-date `Retry-After`; no header → 2, 4, 8 … s within the equal-jitter bounds (seeded random, injected clock); 600 s soft cap, 3,600 s ceiling; success resets; a second caller during an open circuit makes zero calls; the three direct-urllib fetchers honor it; fixture mode bypasses it |
-  | `test_roster_refresh_state.py` (new) | Success → `fresh`, `refreshed_at` = fetch start, `roster_fp` == `roster_snapshot(...).fp`. 429 / 5xx / timeout / invalid payload → `league_members` and `draft_picks` byte-identical, `stale` + the right `last_error_code`, `missing` with no prior success. Recovery clears the error. Unchanged fp → no hook. Changed fp → exactly one hook. Two racing stamps → final row consistent, ≥ 1 and ≤ 2 hook calls. A hook exception never escapes the daemon. Picks read failure → `stale` / `picks_unavailable`. The monotonic guard: an older fetch never overwrites a newer one. Replace semantics drop a ghost row and refuse an empty payload (G-015). A G-004 null is never stored as `"None"`. MFL numeric id → zero Sleeper calls, no Sleeper writer (G-014/G-030), and `refreshed_at` not advanced |
-  | `test_session_init_sleeper_calls.py` (update) | `rosters == 1`, `meta == 1` (from 2 and 2); users, traded_picks, drafts, transactions unchanged; non-Sleeper still `{}`. New: a 429 on the request-thread rosters read → 503, `stale` state, and no further Sleeper call in that init |
-  | `test_tap_path_no_sleeper.py` (new; AC-L3 guard, shared with trades-eng) | With `_sleeper_get` and the direct fetchers replaced by a raising fake: `/generate` (hit, join, kickoff + inline worker), `/status`, `fair-packages`, `asset-ideas`, with the roster flags **on**, make zero Sleeper calls once B.4's switches land. Meta is served from the seeded cache |
-  | fp behavior through the refresh | Add/drop → fp changes; pick-only trade (a `traded_picks` change) → changes; starters-only change → unchanged; display-name change → unchanged. trades-eng's `test_roster_snapshot.py` owns the canonical-form tests |
-- [ ] **Code-walk proof** (written in the build): app open / foreground (`App.tsx:115-117`, `:199-210`) →
-  `revalidateSession` → `/api/session/init` → `resolve_session_input` (3 reads, circuit-guarded) → daemon members
-  replace → picks → draft state → stamp/CAS → `on_roster_change`. Then the tap → `/generate` → worker →
-  `deck_quality` meta from cache → zero Sleeper calls (AC-L3), file:line at the build sha.
+  | File | Tests | Pins |
+  |---|---|---|
+  | `backend/tests/test_sleeper_backoff.py` (new, 34) | `test_429_with_retry_after_seconds_opens_for_at_least_that`, `test_429_with_http_date_retry_after`, `test_unusable_retry_after_falls_back_to_backoff[×4]`, `test_429_without_retry_after_backs_off_exponentially`, `test_jitter_stays_inside_equal_jitter_bounds`, `test_soft_cap_and_hard_ceiling`, `test_fail_fast_while_open_and_recovery`, `test_rate_limited_is_a_urlerror`, `test_classify[×10]`, `test_sleeper_get_429_cassette_opens_the_shared_circuit`, `test_sleeper_get_success_resets_strikes`, `test_direct_fetchers_fail_fast_while_open[×4]`, `test_direct_fetchers_open_the_circuit_on_429[×4]`, `test_owned_pick_sync_keeps_prior_snapshot_while_open`, `test_owned_pick_sync_429_on_traded_picks_itself_is_not_written`, `test_draft_status_not_written_while_open` | The rule: Retry-After as seconds or HTTP date; 2, 4, 8 … s; equal-jitter bounds over 14 strike levels; 600 s soft cap; 3,600 s ceiling; fail fast with **zero reads** (not even a fixture read); recovery resets strikes. Shared by `_sleeper_get` and all four urllib-direct readers. The pick replace-sync and the draft-status write skip while open |
+  | `backend/tests/test_roster_refresh_state.py` (new, 14) | `test_success_marks_fresh_and_never_stores_none_ids`, `test_failure_with_no_prior_rows_is_missing`, `test_failure_after_success_keeps_rows_and_marks_stale`, `test_rows_without_any_state_count_as_stale_not_missing`, `test_429_marks_rate_limited_and_the_next_init_makes_no_read`, `test_recovery_after_failure_clears_the_error`, `test_throttled_pick_read_marks_picks_unavailable`, `test_membership_refusal_is_not_a_refresh_failure`, `test_refreshed_at_only_moves_forward`, `test_failure_keeps_fp_and_refreshed_at`, `test_failure_on_a_never_seen_league_is_missing`; replace commit: `test_session_init_replaces_sleeper_members_dropping_ghosts`, `test_replace_refuses_an_empty_snapshot`, `test_platform_league_rows_are_not_replaced_by_session_init` | Success → `fresh`. Failure → rows byte-identical; `stale` / `missing` + the classified code (`http_5xx`, `invalid_payload`, `rate_limited`, `picks_unavailable`). The 503 body is unchanged. A 403 membership refusal writes nothing. G-004: a null slot is never stored as `"None"`. Meta-cache seed. `refreshed_at` never rewinds and `roster_fp` is never touched. Replace drops a ghost and refuses an empty snapshot (G-015); platform leagues are untouched |
+  | `backend/tests/test_session_init_sleeper_calls.py` (updated, 5) | `test_daemon_makes_one_rosters_and_one_meta_call` (now rosters 1, meta 1, users 1, traded_picks 1, drafts 1, transactions ≤ 2, GraphQL 1, **sum ≤ 8**, state `fresh`); `test_numeric_mfl_league_makes_no_sleeper_calls_on_s0_paths` (new) | The D-178 budget after S0. A numeric MFL id makes no rosters/users/meta/picks/GraphQL call and gets no state row. Its `transactions` read is the pre-existing trade-capture `isdigit()` leak (R8), asserted as the only allowed key so a later fix still passes |
+  | `backend/tests/test_co_owner_rosters.py` (updated in the replace commit) | The capture also intercepts `replace_league_members_snapshot` | One row per roster, still keyed on the primary owner |
+
+  **Moved out of PR-A:**
+  - `test_tap_path_no_sleeper.py` (the AC-L3 guard) needs B.4's switches, which are trades-eng's S0-serve (§Q7).
+  - The fingerprint and hook cases go to PR-B.
+- [x] **Full suite:** `python3 -m pytest backend/tests -q` on `build/s0-roster-refresh`. Local Python 3.14.4 (CI is
+  3.12.3). After the circuit + state commits: **7763 passed, 1 skipped**, exit 0, 882 s. After the replace commit
+  (`9d998886`): **7766 passed, 1 skipped**, exit 0, 691 s. The SQLite "no such table" lines in the log are
+  pre-existing fail-soft logging from other tests' in-memory engines, not failures.
+- [x] **Code-walk proof** (file:line at `build/s0-roster-refresh` HEAD):
+  1. **Trigger:** cold launch `mobile/App.tsx:115-117` and foreground `:199-210` → `useSession.revalidateSession`
+     (`useSession.ts:357-378`, throttle `:65` / `leagueSession.ts:81`) → `POST /api/session/init`.
+  2. **Request thread:** `server.session_init` creates `_s0_raw` (`server.py:22198`) and calls
+     `resolve_session_input(…, raw=_s0_raw)` (`:22200`).
+     - Platform leagues branch first on `db.is_linked_platform_league` (`session_input.py:48`) and never reach Sleeper.
+     - Sleeper: `fetch_started_at()` is captured (`session_input.py:61-62`), then 3 reads, each through
+       `_sleeper_get` → `sleeper_http.guard` (`server.py:585-594`; guard `sleeper_http.py:150-163`).
+  3. **Success:** members are built with nulls dropped (`session_input.py:76-83`), and the raw rosters/meta/start
+     time are handed back (`:87-88`).
+     - The meta seeds `_FA_LEAGUE_META_CACHE` (`server.py:22204-22207`).
+     - The daemon reuses meta (`:22613`) and rosters (`:22877`) instead of re-reading.
+     - It writes members: Sleeper `replace_league_members_snapshot` (`:22839-22844`, `database.py:8523`); platform
+       leagues upsert (`:22845-22847`). Then picks (`:22895-22946`, sets `_s0_picks_ok`) and draft status
+       (`:22956`).
+     - Then `roster_refresh.record_outcome` (`server.py:22960-22964` → `roster_refresh.py:48-67`) →
+       `mark_league_roster_fresh` (`database.py:8467`): `status='fresh'`, `refreshed_at` = fetch start, error
+       cleared.
+  4. **Failure → stale:** any non-membership exception in the read (`session_input.py:91`) →
+     `record_failure(lid, exc)` (`:92` → `roster_refresh.py:31-45`) → `sleeper_http.classify` →
+     `mark_league_roster_failed` (`database.py:8495`).
+     - That writes `status='stale'` when the league has a prior refresh or any `league_members` rows, keeping
+       `roster_fp` and `refreshed_at`.
+     - The response is the unchanged `503 league_data_unavailable` (`session_input.py:93`).
+     - `league_members` and `draft_picks` are never written on this path: the daemon doesn't start
+       (`server.session_init` returns at `:22201-22202`).
+  5. **Never refreshed → missing:** the same path on a league with no state row and no `league_members` rows
+     writes `status='missing'` (`database.py:8495-8520`).
+     - A daemon whose members write or pick sync failed writes `stale`/`missing` with `write_failed` or
+       `picks_unavailable` (`roster_refresh.py:56-59`). `refreshed_at` does not move.
+  6. **Circuit open:** a Sleeper 429 anywhere → `guard` → `record_429` (`sleeper_http.py:118-129`) opens the
+     window.
+     - Every later read in the process raises `SleeperRateLimited` from `check()` (`sleeper_http.py:80-86`)
+       before any I/O.
+     - In session init that lands at step 4 with `last_error_code='rate_limited'`. In the daemon it reaches the
+       pick sync, which returns `None` (`server.py:14354`) → `picks_unavailable`, and draft status keeps its
+       verdict (`server.py:19224-19229`).
+     - The urllib-direct readers share it: `trade_block_service.py:87,111`, `sleeper_trades_service.py:80`,
+       `suggestion_telemetry.py:300`.
 - [ ] **Manual TestFlight checklist** (operator; in an operator-named test league only, because steps 2–3 change a
   real roster):
   1. Cold-open the app on a Sleeper league, tap Find a trade → a card shows. Note one player on your roster.
@@ -330,15 +386,17 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` | **n/a in v1** | No route added and no contract changed. The 503 is unchanged. If C (the device page) needs `roster_fp` on the session-init response, that's a proposed additive field (§Q9) and gets a row then |
-| `docs/data-dictionary.md` | **Yes** | `league_roster_state`; the `league_members` note becomes "Sleeper: replace-synced per refresh" |
-| `docs/integrations/sleeper.md` | **Yes** | The 429 circuit (delay rule, ceiling, fail-fast, no retries); the per-init call budget (≤ 8); safe-to-log (league id, status) / must-redact (none: public reads) |
-| `docs/architecture.md` | **Yes** (head-eng reviews) | Session-init data flow: request-thread read → daemon members/picks/draft → stamp → `on_roster_change`; `sleeper_http` circuit |
-| `living-memory/LLD.md` | **Yes** | Invariants: the tap path makes no Sleeper calls; fp inputs are committed, then stamped; Sleeper `league_members` is replace-synced; ids are filtered for nulls at the writer |
+| `docs/data-dictionary.md` | **Updated (PR-A)** | New `league_roster_state` section + TOC row; the `league_members.roster_data` note (reserve/IR + taxi included, nulls dropped). The replace commit adds the "Sleeper leagues are replace-synced" sentence to the `league_members` intro |
+| `docs/integrations/sleeper.md` | **Updated (PR-A)** | §4: the G-004 row and a new 429 row; new §4.1 (the circuit: rule, fail fast, no retries, never a clobber amplifier, fixture `__headers__`, log line); §5.2 hand-down and the **≤ 8 / ≤ 7** per-init budget; §6.1 safe-to-log (window, strikes, league id, status 429; `league_roster_state` enums) |
+| `docs/runbook.md` | **Updated (PR-A)** | New "Sleeper 429 / circuit open (S0, 2026-10-20)" + TOC row |
+| `docs/architecture.md` | **Owed (head-eng owns; not edited per the Stage B rules)** | Exact text to add under the session-init data flow: "**Roster refresh (S0).** Session init's authoritative Sleeper read (rosters, users, league meta; `session_input.resolve_session_input`) is the league's roster refresh. Its rosters and meta are handed to the background daemon (no second read) and the meta seeds `_FA_LEAGUE_META_CACHE`. The daemon replace-syncs Sleeper `league_members`, syncs owned picks and draft state, then `roster_refresh.record_outcome` writes `league_roster_state` (`fresh`). A failed read writes `stale`/`missing` + `last_error_code` and never touches the rows. Every server-side Sleeper read passes one per-process 429 circuit (`backend/sleeper_http.py`): fail fast while open, no in-line retries." |
+| `living-memory/LLD.md` | **Owed (living-memory is not edited here)** | Exact invariants to add: "(1) Every server-side Sleeper read goes through `sleeper_http.guard` (directly or via `_sleeper_get`); no in-line retries or sleeps. (2) A replace-style writer fed by a fail-soft Sleeper read skips while `sleeper_http.is_open()`. (3) Session init reads Sleeper rosters and meta once; daemon consumers take the handed payload. (4) `league_roster_state` is written only via `roster_refresh`; a failure never writes `league_members` or `draft_picks`. (5) `league_members` writers drop null/empty player ids (G-004). (6) Sleeper `league_members` is replace-synced from the authoritative snapshot; an empty snapshot is refused (G-015)." |
+| `living-memory/CHANGELOG.md`, `TEST_LEDGER.md` | **Owed at merge (release-lead's scribe)** | CHANGELOG: "S0 PR-A: Sleeper 429 circuit; `league_roster_state`; per-init Sleeper budget ≤ 10 → ≤ 8; Sleeper `league_members` replace-synced." TEST_LEDGER: the §3 tests and the full-suite counts |
 | `living-memory/HLD.md` | n/a | No new client, service or major flow. The refresh rides session init |
 | `docs/cross-client-invariants.md` | n/a | Server-only; no shared constant |
 | `docs/glossary.md` | n/a here | trades-eng adds "roster fingerprint"; "Sleeper circuit" goes in `integrations/sleeper.md` |
 | `docs/runbook.md` | **Yes** | "Sleeper 429 / circuit open": the symptom, the log line, what clears it, and that sends block meanwhile |
-| ADR / `DECISIONS.md` | **Yes** | One D-entry: the Sleeper 429 circuit plus replace-synced `league_members` (head-eng) |
+| ADR / `DECISIONS.md` | **Owed (head-eng)** | One D-entry. Title: "Sleeper reads share one per-process 429 circuit; session init's Sleeper read is the roster refresh, recorded in `league_roster_state`; Sleeper `league_members` is replace-synced". Alternatives considered: in-line retries (rejected: they hold the single worker), a per-endpoint circuit (rejected: the limit is per IP), upsert with ghost cleanup by age (rejected: the authoritative snapshot is complete) |
 
 ## 5. Ship gate declaration
 
@@ -350,9 +408,13 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
 - **Landing order (recommended): sequential, not one coordinated PR.** `roster_snapshot.py` and the hook registry
   don't exist on `main`, and trades-eng's snapshot reads `league_roster_state` (contract §3, `refreshed_at` and
   `status`). So:
-  1. **PR-A (platforms-eng, no dependency):** the `league_roster_state` table and data-dictionary row; the
-     `sleeper_http` circuit; payload hand-down (budget 10 → 8); the meta-cache seed; null filtering; replace
-     semantics; `stale`/`missing` + `last_error_code` writes. It can merge first.
+  1. **PR-A (platforms-eng, no dependency): BUILT** on `build/s0-roster-refresh`, not pushed. Three commits:
+     - the `sleeper_http` circuit (plus the two clobber guards);
+     - `league_roster_state` + the hand-down (budget ≤ 10 → ≤ 8) + the meta-cache seed + null filtering +
+       `fresh`/`stale`/`missing` writes;
+     - **replace semantics, its own commit**, droppable with one `git revert` pending head-eng's sign-off.
+     - The session-init diff is ~25 lines in `server.py` (`:22198-22207`, `:22613`, `:22805`, `:22839-22847`,
+       `:22877`, `:22944-22946`, `:22958-22964`). engagement-eng (O8) edits the same region.
   2. **S0-serve (trades-eng):** `roster_snapshot`, the hook registry, freshness, I-1, and the B.4 switches.
   3. **PR-B (platforms-eng, small):** step 7: compute fp → CAS → `on_roster_change`; the B.6 stamps on the
      platforms-eng-owned writers; `test_roster_refresh_state.py`'s hook cases.
@@ -381,6 +443,13 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
 - **R7, a stale meta cache on restart:** it's empty until the next session init, and every restart forces one,
   because sessions are in-memory. A background build for another league member with a cold cache still fetches
   meta, off the tap path.
+- **R9, members-write race (residual, PR-A):** two concurrent inits for one league can commit their
+  `league_members` snapshots out of fetch order. Only `refreshed_at` is monotonic. The next init corrects it
+  (B.3 step 4).
+- **R10, a pre-existing pick clobber on non-429 flakes:** `_fetch_sleeper_traded_picks` returns `[]` on any
+  failure, and `_sync_sleeper_owned_picks` still replace-syncs with it when the circuit is closed (5xx, timeout).
+  PR-A closes only the 429 case. The full fix changes that fetcher's contract (it's shared with the send path at
+  `server.py:19591` at HEAD), so it goes to head-eng.
 - **R8, an existing G-030 trap, observed and not fixed here:** the trade-capture gate at `server.py:22918` uses a
   bare `isdigit()`, so an MFL numeric id reaches the Sleeper transactions sweep. It's out of S0 scope; flagged to
   head-eng.
