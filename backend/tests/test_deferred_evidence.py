@@ -1060,7 +1060,7 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
     diag_count = len(ev.diagnostics)
     with ev.lock:   # F5: the payload held in process from build to the first delivery
         peak = {"rows (packed)": held_z,
-                "diagnostics": sum(len(d["payload_json"]) for d in ev.diagnostics.values()),
+                "diagnostics (packed)": sum(len(packed) for packed in ev.diagnostics.values()),
                 "ghosts": sum(len(json.dumps(g)) for g in ev.ghosts.values()),
                 "candidate set": len(json.dumps(ev.candidate_set)),
                 "trade_impressions (packed)": len(ev.trade_impressions),

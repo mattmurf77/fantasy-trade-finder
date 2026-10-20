@@ -3712,7 +3712,7 @@ class _DeckEvidence:
         self.lock = threading.Lock()
         self.rows: dict = {}          # impression_id -> (card_index, packed frozen row), served order
         self.ghosts: dict = {}        # impression_id -> narrow ghost row
-        self.diagnostics: dict = {}   # snapshot_id -> deck_diagnostic_snapshots row
+        self.diagnostics: dict = {}   # snapshot_id -> packed deck_diagnostic_snapshots row
         self.candidate_set = None     # the frozen deck_candidate_sets row
         self.by_hash: dict = {}       # trade_hash -> [impression_id], for id-less deliveries
         self.delivered: set = set()   # impression ids sent to a client
@@ -3749,7 +3749,8 @@ class _DeckEvidence:
             for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
                 compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
                 for snapshot in snapshots:
-                    self.diagnostics.setdefault(snapshot["snapshot_id"], snapshot)
+                    if snapshot["snapshot_id"] not in self.diagnostics:
+                        self.diagnostics[snapshot["snapshot_id"]] = _pack_row(snapshot)
                 for frozen in compacted:
                     iid = frozen["impression_id"]
                     if frozen.get("is_ghost") == 1:
@@ -3811,7 +3812,7 @@ class _DeckEvidence:
         while pending:
             sid = pending.pop()
             if sid in self.diagnostics and sid not in found and sid not in exclude:
-                found[sid] = self.diagnostics[sid]
+                found[sid] = _unpack_row(self.diagnostics[sid])
                 pending |= _diagnostic_refs(json.loads(found[sid]["payload_json"]))
         return list(found.values())
 
@@ -3898,7 +3899,7 @@ class _DeckEvidence:
         if isinstance(blob, Mapping) and blob.get("v") == _EVIDENCE_BLOB_FORMAT:
             ev.rows = {r["impression_id"]: (r["card_index"], _pack_row(r)) for r in blob.get("rows") or []}
             ev.ghosts = {r["impression_id"]: r for r in blob.get("ghosts") or []}
-            ev.diagnostics = {d["snapshot_id"]: d for d in blob.get("diagnostics") or []}
+            ev.diagnostics = {d["snapshot_id"]: _pack_row(d) for d in blob.get("diagnostics") or []}
             ev.candidate_set = blob.get("candidate_set")
             ev.pages_bytes = blob.get("pages_bytes")
             if blob.get("trade_impressions") is not None:
@@ -4147,6 +4148,9 @@ def _deck_evidence_job_done(job_id: str) -> None:
         if ceiling:
             ev.discarded = True
             ev.rows, ev.ghosts, ev.diagnostics, ev.candidate_set, ev.by_hash = {}, {}, {}, None, {}
+            # TODO(models-eng ceiling): also free the held build-time writes
+            # (ev.trade_impressions = ev.bakeoff_run = ev.generated = None) once
+            # models-eng's count-bounded conversion sets the ceiling flag.
             covered, ev.pending = ev.pending, set()
     if ceiling:
         _deck_evidence_settle(covered)
