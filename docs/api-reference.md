@@ -512,6 +512,14 @@ the store or from a job): `prefetch_remaining` (model_config
 `trade_prefetch_remaining`, seeded at 50). The client requests the next page when
 this many ready cards remain.
 
+**`trade_hash` on every card (P2).** Every card in a paged response (any form
+above or below, from the store or from a job) carries `trade_hash`: the F1
+card identity (sha256 over its sorted give ids, sorted receive ids and
+partner id, 16 hex characters), the same value as that card's
+`deck_impressions.trade_hash`. It is
+the client's dedupe key. It is added at serve: unpaged responses and the
+[trade card object](#trade-card-object) itself don't carry it.
+
 **`deck_id` (P2).** Every organic `page: 1` response carries `deck_id`, from
 the store or from a job, `force` included: the deck the client pages by on
 `/status?deck=`. It equals that response's `job_id`. Pinned, opponent-scoped,
@@ -570,16 +578,25 @@ is the `fairness_threshold`, to two decimals. Unpaged requests never read it.
   count, `serve_source: "page"`, `freshness_state: "fresh"`.
 - A rebuild replaces the stored row and its job id. A cursor on the older job id
   then reads that job if it is still in this process, else 404, as before P1.
-- P2 leaves this form unchanged: no `deck_id`, `rebased` or `pool_exhausted`.
-  To page across rebuilds, use `deck`.
+- P2 leaves this form's resolution unchanged: no `deck_id`, `rebased` or
+  `pool_exhausted`, and past the stored pages a live job's cards still pass
+  E2's lenient I-1 (its cards do carry `trade_hash`). To page across
+  rebuilds, use `deck`.
 
 **`GET /api/trades/status?deck=D&cursor=K` (P2): one deck, across rebuilds.**
 `D` is the `deck_id` from page 1 (or from a `rebased` response). `deck` is read
 only alongside `cursor`; `job_id` is then not read. `D` is 1–64 characters of
 `A-Z a-z 0-9 _ -`, else 400 `{error: "invalid_deck"}` (after the `cursor`
-check). The requester's scope is the session's league, scoring format and
-last non-pinned `fairness_threshold` (0.5 if none). The server resolves, in
-order:
+check).
+
+**The scope is the deck's own:** the organic scope (league, scoring format,
+`fairness_threshold`) `D` was built under, if `D` is still in this server
+process; else that of the requester's stored row built by `D` (one read of
+the user's rows for the session's league and format); else, only when
+neither exists, the session's league, format and last non-pinned
+`fairness_threshold` (0.5 if none). So an intent or other search that
+changes the session's fairness never moves an organic deck's pages. The
+server resolves, in order:
 
 1. **The stored pages.** The scope's stored row was built by `D` and
    `K < total_ready`: the stored cards from `K`, exactly the `job_id=` form's
@@ -587,10 +604,13 @@ order:
 2. **The live deck.** `D` is the requester's job in this server process and
    has neither errored nor been revoked: E2's cursor response at `K` (the
    append-only rules and E2's `replace` apply), plus `deck_id`. This is how
-   pages past the stored ones arrive. Once a `complete` `D` is asked at or
-   past its last card, a newer deck for the scope (running or complete)
-   rebases the client onto it, as in case 3; with none, the deck is over
-   (`pool_exhausted`, below).
+   pages past the stored ones arrive. The **strict** I-1 rule applies here
+   too, as in cases 1 and 3: if the league has no stored rosters or the
+   roster read fails, `cards: []`, `freshness_state: "updating"` and `cursor`
+   echoes `K` (never an end or a rebase; ask again). Once a `complete` `D` is
+   asked at or past its last card, a newer deck for the scope (running or
+   complete) rebases the client onto it, as in case 3; with none, the deck
+   is over (`pool_exhausted`, below).
 3. **Rebased.** Otherwise the deck changed (a rebuild replaced it, an input
    change revoked it, it errored or timed out, or a restart dropped it): the
    scope's current deck from its **first** card, with `rebased: true`,
@@ -601,16 +621,24 @@ order:
    is the scope's newest job's row, so two decks never alternate); else the
    scope's newest job in this process (its first page, also under strict I-1:
    a league with no stored rosters, or a failed check, serves `cards: []` and
-   `freshness_state: "updating"`); else a backing job is started (behind the
-   debounce) and its first page returned, often `cards: []` while it runs.
+   `freshness_state: "updating"`); else a backing job is started and its
+   first page returned, often `cards: []` while it runs.
    An unknown `D`, or another user's, rebases onto the requester's own deck.
+
+**This GET can start a trade job.** Case 3's backing job is the one side
+effect of `/status`: after a restart a client paging by `deck` never calls
+`/generate` again, so without it no live deck would exist for pages past the
+stored ones (AC-L4). It's an organic `preserve_running` kickoff for the
+deck's scope, behind the same debounce as the store serve, so polling joins
+the running job rather than starting more. The rebase onto a stored row
+starts one under the store serve's own rule.
 
 **The client keeps what it holds.** On `rebased: true` it appends the cards
 behind its current card, dropping any whose `trade_hash` it already holds,
-and pages on with the new `deck_id`. If a page comes back short after that,
-it fetches the next page right away. The server never dedupes against the
-client and keeps no per-client state. **Open (2026-10-20): served cards do
-not carry `trade_hash` yet.**
+and pages on with the new `deck_id`. A `replace: true` page is merged the
+same way: deduped, appended, never reordered. If a page comes back short
+after that, it fetches the next page right away. The server never dedupes
+against the client and keeps no per-client state.
 
 **End of deck: `pool_exhausted: true`.** Sent only on case 2, when `D` is
 `complete`, `K` is at or past its last card (and not a `replace`), the
