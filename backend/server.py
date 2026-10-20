@@ -3882,27 +3882,43 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
           past its last card is the deck's end: _trade_deck_rebase decides
           between a newer deck and `pool_exhausted`;
       (c) otherwise the deck changed: _trade_deck_rebase.
+    The organic scope is D's own, so an intent or pinned search that moves
+    the session's fairness never moves the deck: D's `page_scope` when D is in
+    this process; else the requester's stored row built by D (one read of the
+    user's rows for the league and format, then a match); else the session's
+    last non-pinned fairness.
     The server never dedupes against the client; the client does, by trade_hash.
     """
     from . import database as _db
     user_id = sess["user_id"]
-    league_id = getattr(sess.get("league"), "league_id", None)
-    fmt = _active_format(sess)
-    fairness = sess.get("trade_fairness_threshold", 0.5)
-    scope = (_trade_page_scope(fairness)
-             if league_id is not None and league_id != "league_demo" else None)
-    row = None
-    if scope is not None:
-        try:
-            row = _db.load_trade_page(user_id, league_id, fmt, scope)
-        except Exception as err:
-            log.warning("trade-page read failed for league %s: %s", league_id, err)
-    if row is not None and row["deck_job_id"] == deck_id and cursor < row["card_count"]:
-        return {**_trade_page_status_view(row, cursor, sess), "deck_id": deck_id}
     with _trade_jobs_lock:
         job = _trade_jobs.get(deck_id)
         deck = dict(job) if job is not None and job["key"][0] == user_id else None
         dead = deck is not None and (_trade_job_revoked(job) or job["status"] == "error")
+    if deck is not None and deck.get("page_scope"):
+        _, league_id, fmt = deck["key"]
+        scope, fairness = deck["page_scope"], deck["fairness_threshold"]
+    else:
+        league_id = getattr(sess.get("league"), "league_id", None)
+        fmt = _active_format(sess)
+        scope, fairness = None, sess.get("trade_fairness_threshold", 0.5)
+    stored = league_id is not None and league_id != "league_demo"
+    rows = []
+    if stored:
+        try:
+            rows = _db.load_trade_pages_for_user(user_id, league_id, fmt)
+        except Exception as err:
+            log.warning("trade-page read failed for league %s: %s", league_id, err)
+    if scope is None and stored:
+        built = next((r for r in rows if r["deck_job_id"] == deck_id), None)
+        if built is not None:
+            scope = built["request_scope"]
+            fairness = float(scope.rpartition("=")[2])
+        else:
+            scope = _trade_page_scope(fairness)
+    row = next((r for r in rows if r["request_scope"] == scope), None)
+    if row is not None and row["deck_job_id"] == deck_id and cursor < row["card_count"]:
+        return {**_trade_page_status_view(row, cursor, sess), "deck_id": deck_id}
     finished = None
     if deck is not None and not dead:
         unchecked = _trade_deck_unchecked(deck, cursor)   # strict I-1: never an end or a rebase

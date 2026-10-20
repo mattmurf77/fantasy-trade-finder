@@ -266,6 +266,27 @@ def test_the_live_deck_is_strict_where_the_job_id_form_is_lenient(p1, spawned, f
     assert not spawned
 
 
+def test_an_intent_search_never_moves_the_organic_decks_scope(p1, spawned, monkeypatch):
+    """The scope comes from D (its job, else its stored row), not from the
+    session's fairness, which any non-pinned search rewrites."""
+    client, _, sess = p1
+    monkeypatch.setitem(ff._flags_cache, "trades.intent_modes", True)
+    deck = build_deck()                                   # organic, f=0.50
+    intent = generate(client, page=1, trade_intent="tier_up", fairness_threshold=0.75)
+    assert intent.status_code == 200 and "deck_id" not in intent.get_json()
+    assert sess["trade_fairness_threshold"] == 0.75
+    body = deck_status(client, deck, 30).get_json()       # D in this process
+    assert ids(body["cards"]) == p1_ids(30, 60) and body["serve_source"] == "page"
+    restart()                                             # D gone: its stored row names the scope
+    body = deck_status(client, deck, 30).get_json()
+    assert ids(body["cards"]) == p1_ids(30, 60) and body["serve_source"] == "page"
+    assert "rebased" not in body and len(spawned) == 1    # only the intent search's job
+    tail = deck_status(client, deck, 90).get_json()       # past it: a backing job at f=0.50
+    backing = server._trade_jobs[tail["deck_id"]]
+    assert tail["rebased"] is True and backing["page_scope"] == SCOPE
+    assert backing["fairness_threshold"] == 0.5 and len(spawned) == 2
+
+
 def test_another_users_deck_is_never_served(p1, spawned):
     client, _, _ = p1
     mine = build_deck()
