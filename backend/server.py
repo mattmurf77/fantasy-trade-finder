@@ -2164,8 +2164,8 @@ def _rookie_player_ids(season: int) -> set[str]:
     if hit is not None:
         return hit
     ids = load_rookie_player_ids(int(season))
-    for stale in [k for k in _rookie_ids_memo if k[1] != gen]:
-        del _rookie_ids_memo[stale]   # prior generations only — seasons coexist
+    for stale in [k for k in list(_rookie_ids_memo) if k[1] != gen]:
+        _rookie_ids_memo.pop(stale, None)   # prior generations only — seasons coexist
     _rookie_ids_memo[key] = ids
     return ids
 
@@ -3422,9 +3422,7 @@ def _significance_card_key(card):
 
 
 def _significance_exemptions_for(trade_service):
-    exemptions = getattr(trade_service, "_significance_exemptions", None)
-    if exemptions is None:
-        exemptions = trade_service._significance_exemptions = {}
+    exemptions = trade_service.__dict__.setdefault("_significance_exemptions", {})
     if exemptions:
         live = {_significance_card_key(card)
                 for card in list(trade_service._trade_cards.values())}
@@ -9939,7 +9937,7 @@ def _invalidate_league_members_cache(league_id: str) -> None:
     """
     if not league_id:
         return
-    stale = [k for k in _LEAGUE_MEMBERS_CACHE if k[0] == league_id]
+    stale = [k for k in list(_LEAGUE_MEMBERS_CACHE) if k[0] == league_id]
     for k in stale:
         _LEAGUE_MEMBERS_CACHE.pop(k, None)
 
