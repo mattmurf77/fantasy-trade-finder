@@ -20,7 +20,7 @@ reads no environment variables, and makes no provider/network calls.
 | `load_export(path)` | Explicit local UTF-8 JSON file, `{tables: {table: [row]}}` or bare table map | Same allowlisted mapping. Unknown tables/columns, free-text pass reasons and full provider payloads excluded |
 | `audit_rows(tables, include_records=False)` | Detached rows from either reader or explicit in-memory exported rows | Aggregate counts, row-content hash, table/column presence, per-occurrence evidence coverage, join/JSON/integrity gaps, and absent fixed-cohort status |
 | `audit_rows(..., include_records=True)` | Explicit request for sensitive detail | Adds `private_records.occurrences`, `.events`, `.source_tables`; raw source columns and separately decoded snapshots remain available locally |
-| `frozen_owner_requests(tables)` | Run-ledger rows | Private full owner `config_json.input` requests with source keys, status, assignment/capture metadata. No fixed-cohort claim |
+| `frozen_owner_requests(tables)` | Run-ledger rows | Private full owner requests with source keys, status, assignment/capture metadata. Reads top-level `config_json.input` (selected runs) or a valid nested `config_json.owner_request.input` (deck bake-off runs, surfaced as the record's `assignment`). Status `not_sampled` = outside the owner_request archive sample, carrying only `input_sha256`/`input_bytes`. No fixed-cohort claim |
 | `occurrence_to_offer(occurrence)` | One normalized occurrence with valid assets and matching valuation | Conservative `scorecard_dimensions.evaluate_offer` input; missing evidence stays absent and model outputs are not review labels |
 
 Caller paths must identify local files; URIs, remote database strings and

@@ -16,6 +16,8 @@ import json
 from pathlib import Path
 import sqlite3
 
+from backend.eval.capture_owner_benchmark import owner_request
+
 
 VERSION = "scorecard-evidence-v1"
 REFERENCE_KEY = "$deck_diagnostic_v1"
@@ -333,20 +335,24 @@ def frozen_owner_requests(tables):
 
     These are request-input units, not fixed experiment enrollment. Invalid or
     non-owner run config remains represented with a status and source key.
-    A run outside the owner_request archive sample has no frozen input in
-    either shape (top-level ``input`` or ``owner_request.input``); it is
-    ``not_sampled`` and keeps only the writer's ``input_sha256``/``input_bytes``.
+    A deck bake-off run nests its assignment under ``owner_request``; a valid
+    one (``capture_owner_benchmark.owner_request``) is ``present`` and becomes
+    the record's ``assignment``, so ``assignment["input"]`` reads the same in
+    both shapes. A run outside the owner_request archive sample has no frozen
+    input; it is ``not_sampled`` and keeps only ``input_sha256``/``input_bytes``.
     """
     records = []
     for row in _select_rows(tables).get("bakeoff_runs", []):
         config, status = _json(row.get("config_json"), dict)
+        assignment = config
         if status == "present" and not isinstance(config.get("input"), dict):
-            nested = config.get("owner_request")
-            nested_input = isinstance(nested, dict) and isinstance(nested.get("input"), dict)
-            status = ("not_sampled" if config.get("owner_request_sampled") is False and not nested_input
-                      else "no_frozen_owner_input")
+            assignment = owner_request(config)
+            if assignment is None:
+                assignment = config
+                status = ("not_sampled" if config.get("owner_request_sampled") is False
+                          else "no_frozen_owner_input")
         record = {"source": _ref("bakeoff_runs", row), "status": status,
-                  "assignment": config, "created_at": row.get("created_at"),
+                  "assignment": assignment, "created_at": row.get("created_at"),
                   "fixed_preassignment_cohort": False}
         if status == "not_sampled":
             record["input_sha256"] = config.get("input_sha256")

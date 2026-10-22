@@ -218,11 +218,15 @@ def test_owner_input_replay_preserves_request_unit_not_experiment_cohort():
     assert records[0]["source"] == {"table": "bakeoff_runs", "key": "run_id", "value": "run"}
 
 
-def test_owner_request_outside_archive_sample_is_not_sampled_with_writer_fingerprint():
-    owner_input = {"user_id": "alice", "user_elo": {"p1": 1700}}
-    sha = hashlib.sha256(json.dumps(owner_input, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+def test_owner_request_sample_reads_nested_deck_input_and_marks_unsampled_rows():
+    deck_input = {"user_id": "alice", "user_roster": ["p1"], "members": [{"id": "bob", "roster": ["p2"]}],
+                  "players": {}, "seed_elo": {}, "user_elo": {"p1": 1700}}
+    deck_request = {"unit": "owner_only", "request_hash": "untrusted", "input": deck_input}
+    sha = hashlib.sha256(json.dumps(deck_input, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     configs = {
-        "sampled": {"unit": "request_inputs", "input": owner_input},
+        "selected_top_level": {"unit": "request_inputs", "input": {"user_elo": {"p1": 1700}}},
+        "sampled_deck": {"base": {}, "arm_delta": {}, "owner_request": deck_request},
+        "deck_incomplete_input": {"base": {}, "owner_request": {"input": {"user_elo": {"p1": 1700}}}},
         "unsampled": {"unit": "request_inputs", "owner_request_sampled": False,
                       "input_sha256": "0" * 64, "input_bytes": 1234},
         "unsampled_match": {"base": {}, "arm_delta": {}, "owner_request_sampled": False, "input_sha256": sha},
@@ -232,14 +236,20 @@ def test_owner_request_outside_archive_sample_is_not_sampled_with_writer_fingerp
     rows.append({"run_id": "invalid", "config_json": "{"})
     records = {r["source"]["value"]: r for r in frozen_owner_requests({"bakeoff_runs": rows})}
     assert {run_id: r["status"] for run_id, r in records.items()} == {
-        "sampled": "present", "unsampled": "not_sampled", "unsampled_match": "not_sampled",
-        "legacy": "no_frozen_owner_input", "invalid": "malformed"}
+        "selected_top_level": "present", "sampled_deck": "present",
+        "deck_incomplete_input": "no_frozen_owner_input", "unsampled": "not_sampled",
+        "unsampled_match": "not_sampled", "legacy": "no_frozen_owner_input", "invalid": "malformed"}
+    assert records["selected_top_level"]["assignment"] == configs["selected_top_level"]
+    assert records["sampled_deck"]["assignment"] == deck_request
+    assert records["sampled_deck"]["assignment"]["input"] == deck_input
+    assert records["deck_incomplete_input"]["assignment"] == configs["deck_incomplete_input"]
     assert (records["unsampled"]["input_sha256"], records["unsampled"]["input_bytes"]) == ("0" * 64, 1234)
     assert records["unsampled_match"]["input_sha256"] == sha
     assert "input_bytes" not in records["unsampled_match"]
-    assert all("input_sha256" not in records[run_id] for run_id in ("sampled", "legacy", "invalid"))
+    assert all("input_sha256" not in records[run_id]
+               for run_id in ("selected_top_level", "sampled_deck", "legacy", "invalid"))
     assert records["unsampled"]["assignment"] == configs["unsampled"]
-    assert records["unsampled"]["fixed_preassignment_cohort"] is False
+    assert all(r["fixed_preassignment_cohort"] is False for r in records.values())
 
 
 def test_occurrence_bridge_preserves_intent_missingness_and_never_uses_support_as_grade():
