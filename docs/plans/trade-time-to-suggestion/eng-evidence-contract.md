@@ -41,11 +41,12 @@
 **Rule for adding a feature (from 2026-10-20):** a feature joins `COMPACT_KEYS`, and the writer that freezes the block, **before** any scorer reads it. Unseen cards written before that date can't be backtested on the new feature, except on the C8 archive (§3). A new scorer without a `PERMITTED_LOGGED` entry fails the registry guard.
 
 **Reader** (`backend/eval/data.py`):
-- `LoggedCard.features_compact` is filled from a `features_compact` column, but only if the table has one. The column doesn't exist yet.
+- `LoggedCard.features_compact` and `LoggedCard.evidence_tier` are filled from columns of the same names, but only if the table has them. Neither column exists yet.
 - `card_dict` uses `features_json` when it is present, else the compact block. Logged columns win key collisions.
 
 **Exclusion rules:**
 - **Replay** (`backend/eval/replay.py`):
+  - A deck in which **any** card has `evidence_tier == 'partial_run'` is excluded whole, under `partial_run`. This check runs before `missing_scorer_inputs`, so such a deck is never counted twice. Cards are counted in `EvalRun.excluded` and decks in `EvalRun.partial_run_decks`; both appear in the report and the run record.
   - A deck in which **any** card has neither `features_json` nor a compact block is excluded whole, under `missing_scorer_inputs`. It is never sunk.
   - The excluded cards are counted in `EvalRun.excluded`, and the decks in `EvalRun.missing_inputs_decks`. Both appear in the rendered report and the persisted run record (`backend/eval/persistence.py`).
   - Replay no longer has the per-card `bad_features` reason.
@@ -53,6 +54,16 @@
   - Exclusion is per card, since there are no ranks here.
   - A card with neither input is excluded alone, as `bad_features`.
   - A card with only a compact block is scored.
+  - A card with `evidence_tier == 'partial_run'` is excluded alone, as `partial_run`, before the other per-card checks.
+- **Who writes `partial_run`:** trades-eng, on the delivered rows of a partial run (head-eng ruling 21). Calibration's `select_current_cards` must also skip such jobs; that file belongs to trades-eng.
+
+**Lean nightly** (`backend/eval/nightly.py`; the eval pass runs last in the daily tick):
+- `run_all` decides which scorers are due **before** loading anything. With nothing due, it returns without calling `load_decks`, and no baseline is evaluated or recorded.
+- `load_decks` selects only `EVAL_COLUMNS`, never `select(imp)`. Those columns are `impression_id`, `user_id`, `league_id`, `deck_job_id`, `card_index`, `trade_hash`, `features_json`, `propensity`, `base_score`, `final_score`, `archetype`, `shape_bucket` and `served_at`. It adds `features_compact` and `evidence_tier` only when the table has them.
+- The nightly passes `project_features=True`, which keeps only `contract.PROJECTION_KEYS` in each parsed features dict. `PROJECTION_KEYS` is every key some registered scorer may read; it contains `FROZEN_INPUT_KEYS ∪ IDENTITY_KEYS`. Nightly estimates and a value-model fit are bit-identical with and without projection.
+- On a synthetic 30-day window of 9,000 rows, tracemalloc's peak for `load_decks` went from 146 MB (`select(imp)`) to 53 MB.
+
+**Reproducibility note:** taste rows learned from swipes decay with the wall clock when they are read (`taste_service.load_taste_vectors`). Two value-model fits, or two scorer instances, built at different moments can therefore differ in the last bits. Pin the clock, or use taste rows that don't decay (board-derived `prior:` rows), whenever a test or a comparison needs exact reproducibility. The fixtures in `test_eval_scorer_contract.py` and `test_eval_nightly_lean.py` use `prior:` rows for this reason.
 
 **Tests:**
 - `backend/tests/test_eval_scorer_contract.py`:
@@ -71,9 +82,11 @@
   - `test_deck_missing_scorer_inputs_is_excluded_whole_not_sunk`
   - `test_compact_only_card_is_scored_not_excluded`
   - `test_run_record_persists_missing_inputs_decks`
+  - `test_partial_run_deck_is_excluded_whole_and_persisted`
   - `test_load_decks_compact_block_absent_without_the_column`
   - `test_load_decks_reads_features_compact_when_the_column_exists`
-- `backend/tests/test_eval_calibration.py`: `test_calibration_scores_compact_only_cards`.
+- `backend/tests/test_eval_calibration.py`: `test_calibration_scores_compact_only_cards`, `test_calibration_excludes_partial_run_cards`.
+- `backend/tests/test_eval_nightly_lean.py`: the early return when nothing is due, the selected column set, projection keys, and bit-identical nightly estimates and value-model fit with and without projection.
 - `backend/tests/test_eval_archive_selection.py`: C8 selection (§3).
 
 ## 2. AC-9 and P2 page contracts
@@ -169,7 +182,7 @@ The packed format is pending models-lead. The prototype is on `eng/evidence-pack
    - the value for existing rows;
    - an index for the daily prune;
    - precedence when a row qualifies for more than one of `delivered`, `first30` and `ghost`. `archive` is disjoint by construction.
-2. **`docs/runbook.md:1022` still lists `bad_features`** among replay's exclusions. It should name `missing_scorer_inputs` (whole deck) and `missing_inputs_decks`. Owner: the runbook's doc owner.
+2. ~~**`docs/runbook.md:1022` still lists `bad_features`** among replay's exclusions.~~ **Done** (2026-10-22, commit f9d4f611): the line now lists `partial_run` and `missing_scorer_inputs`, both whole-deck reasons.
 
 ## Handoffs
 
@@ -178,4 +191,4 @@ The packed format is pending models-lead. The prototype is on `eng/evidence-pack
   - page-store tests that call `assert_page_is_top_n` and `assert_prefix_stable`;
   - import `is_archive_deck` and `FROZEN_INPUT_KEYS` from `backend/eval/contract.py`. Don't restate them.
 - **head-eng:** the schema grant for `evidence_tier` and the new evidence columns. The C9 ADR should cite this spec.
-- **release-lead's scribe, at merge:** the living-memory write-back (CHANGELOG and TEST_LEDGER), and the runbook fix in Decisions needed item 2 if its owner hasn't made it.
+- **release-lead's scribe, at merge:** the living-memory write-back (CHANGELOG and TEST_LEDGER).
