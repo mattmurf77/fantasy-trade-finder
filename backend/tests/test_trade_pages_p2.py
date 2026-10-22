@@ -495,6 +495,15 @@ def test_trade_hash_equals_the_impression_rows(p1, spawned):
             assert c["trade_hash"] == rows[c["impression_id"]]
 
 
+# ── Knobs ───────────────────────────────────────────────────────────────────
+
+def test_trade_prefetch_remaining_is_seeded_at_50():
+    """head-eng ruling 10: 44-card bursts at 0.4 s/card plus the prefetch round trip."""
+    assert ("trade_prefetch_remaining", 50.0) in [row[:2] for row in db_module._MODEL_CONFIG_DEFAULTS]
+    with patch.dict(server._trade_service_mod._cfg, {}, clear=True):        # no row: the code default
+        assert server._trade_prefetch_remaining() == 50
+
+
 # ── Validation and the legacy form ──────────────────────────────────────────
 
 @pytest.mark.parametrize("deck", ["", "bad!deck", "x" * 65, "sp ace"])
