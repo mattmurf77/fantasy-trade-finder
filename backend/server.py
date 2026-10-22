@@ -2247,6 +2247,55 @@ app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path=
 
 _sessions: dict[str, dict] = {}  # token → per-session dict
 _sessions_lock = threading.RLock()  # request views may write while callers hold it
+# E1 F5 — per-token single-flight for POST /api/session/init (see the decorator).
+_session_init_inflight: dict[str, dict] = {}  # token → {sig, done, result}
+_session_init_inflight_lock = threading.Lock()
+_SESSION_INIT_WAIT_S = 60  # follower wait bound; past it the follower runs its own init
+
+
+def _single_flight_session_init(fn):
+    """Per-token single-flight around the session_init view (E1 F5).
+
+    Concurrent inits for one X-Session-Token never run side by side. An
+    identical request (same user_id, league_id, active_format) replays the
+    in-flight leader's response; a different one waits for the leader, then
+    runs its own init. No token or a non-object body skips single-flight.
+    """
+    @functools.wraps(fn)
+    def single_flight_view():
+        incoming_token = request.headers.get("X-Session-Token", "")
+        body = request.get_json(silent=True)
+        if not incoming_token or not isinstance(body, dict):
+            return fn()
+        sig = (body.get("user_id"), body.get("league_id"), body.get("active_format"))
+        stale = None  # a leader whose wait timed out; never wait on it again
+        while True:
+            with _session_init_inflight_lock:
+                entry = _session_init_inflight.get(incoming_token)
+                if entry is None or entry is stale:
+                    mine = {"sig": sig, "done": threading.Event(), "result": None}
+                    _session_init_inflight[incoming_token] = mine
+                    break
+            finished = entry["done"].wait(_SESSION_INIT_WAIT_S)
+            if finished and entry["sig"] == sig and entry["result"] is not None:
+                log.info("session/init: coalesced onto in-flight init (token %s…)",
+                         incoming_token[:6])
+                data, status, ctype = entry["result"]
+                return app.response_class(data, status=status, content_type=ctype)
+            if not finished:
+                stale = entry
+        try:
+            resp = app.make_response(fn())
+            mine["result"] = (resp.get_data(), resp.status_code,
+                              resp.headers.get("Content-Type"))
+            return resp
+        finally:
+            with _session_init_inflight_lock:
+                if _session_init_inflight.get(incoming_token) is mine:
+                    del _session_init_inflight[incoming_token]
+            mine["done"].set()
+
+    return single_flight_view
 
 if _TEST_MODE:
     # UI-test harness blueprint (/__test__/*) — see backend/test_support.py.
@@ -22151,6 +22200,7 @@ VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
 
 
 @app.route("/api/session/init", methods=["POST"])
+@_single_flight_session_init
 def session_init():
     """Initialize/switch a league for the proven session identity.
 
