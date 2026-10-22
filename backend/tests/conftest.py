@@ -57,3 +57,9 @@ _PLAYER_SNAPSHOT = _FIXTURES / "outlook-hypotheses" / "dp-values-players-2026-08
 
 os.environ.setdefault("FTF_DP_PICK_VALUES_FILE", str(_PICK_SNAPSHOT))
 os.environ.setdefault("FTF_DP_VALUES_FILE", str(_PLAYER_SNAPSHOT))
+
+# `import backend.server` also starts `_cleanup_loop`, a daemon thread whose 300 s
+# sweep evicts sessions with last_active=0, the root cause of suite-wide
+# flakes on long runs. The server skips the thread when this is "1"; prod never
+# sets it.
+os.environ.setdefault("FTF_DISABLE_CLEANUP_LOOP", "1")

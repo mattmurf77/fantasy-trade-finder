@@ -2814,7 +2814,8 @@ def _cleanup_loop() -> None:
             log.warning("prepared inventory maintenance unavailable", exc_info=True)
 
 
-threading.Thread(target=_cleanup_loop, daemon=True).start()
+if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":  # tests set it (conftest); prod never does
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
