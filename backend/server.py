@@ -3821,9 +3821,11 @@ class _DeckEvidence:
         """Under `lock`: ((first, its snapshots), (rest, its snapshots),
         candidate_set, upgrades) for a write now.
 
-        A delivered card is 'delivered'; else one of the first 30 is 'first30';
-        else (the rest of the deck, stage 1) 'archive' on a C8 deck or
-        'full_interim'; ghosts are 'ghost'. `first`, the snapshots it references
+        Tiers by head-eng's ruling 17, ghost > first30 > delivered > archive: a
+        ghost is 'ghost' (never delivered, narrow even inside the first 30); a
+        card of the first 30 is 'first30', delivered or not; else a delivered
+        card is 'delivered'; else (the rest of the deck, stage 1) 'archive' on a
+        C8 deck or 'full_interim'. delivered_at says which were delivered. `first`, the snapshots it references
         and the candidate set are one transaction; `rest`, today's
         per-served-deck cost that packing will replace (C1), follows with its
         own. `upgrades`: delivered ids already written at a lower tier.
@@ -3845,12 +3847,12 @@ class _DeckEvidence:
             return (first, self.closure(first)), ([], []), self.candidate_set, {}
         first, rest = [], []
         for iid, (index, packed) in self.rows.items():
-            if iid in delivered:
+            if index < _EVIDENCE_FIRST_N:
+                first.append({**_unpack_row(packed), "evidence_tier": "first30",
+                              "delivered_at": at.get(iid)})
+            elif iid in delivered:
                 first.append({**_unpack_row(packed), "evidence_tier": "delivered",
                               "delivered_at": at[iid]})
-            elif index < _EVIDENCE_FIRST_N:
-                first.append({**_unpack_row(packed), "evidence_tier": "first30",
-                              "delivered_at": None})
             else:
                 rest.append({**_unpack_row(packed), "delivered_at": None,
                              "evidence_tier": "archive" if self.archive else "full_interim"})

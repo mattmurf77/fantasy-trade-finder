@@ -151,6 +151,12 @@ def tiers(engine):
     return {r["impression_id"]: r["evidence_tier"] for r in rows(engine)}
 
 
+def marks(engine):
+    """{impression_id: (evidence_tier, delivered?)}."""
+    return {r["impression_id"]: (r["evidence_tier"], r["delivered_at"] is not None)
+            for r in rows(engine)}
+
+
 def held(ev):
     """The deck's held (not yet written) full rows, unpacked."""
     with ev.lock:
@@ -250,8 +256,8 @@ def test_deliveries_made_while_the_run_was_live_are_written_at_completion(deferr
     server._deck_evidence_delivered(ev, server._trade_jobs[job_id]["cards"][:30])
     server._trade_jobs[job_id]["status"] = "complete"
     server._deck_evidence_job_done(job_id)
-    written = tiers(engine)
-    assert {written[i] for i in first30} == {"delivered"} and len(written) == 40
+    written = marks(engine)
+    assert {written[i] for i in first30} == {("first30", True)} and len(written) == 40
 
 
 # ── F3: the build-time writes wait for the first delivery ──────────────────
@@ -342,15 +348,15 @@ def test_f3_a_partial_run_writes_its_held_rows_at_its_delivery_but_never_trades_
 # ── F4: an action on a card whose row is still being written waits for it ──
 
 @pytest.fixture()
-def threaded(deferred, monkeypatch):
+def threaded(deferred, monkeypatch, tmp_path):
     """Evidence writes on real threads, as in production; joined at teardown.
-    The in-memory database moves to one shared connection (StaticPool), since
-    SQLite's default pool gives each thread its own empty database."""
+    The data moves to a temporary SQLite file, so each thread has its own
+    connection to one database (in memory, every thread would get its own
+    empty database; one shared connection would be used by two threads)."""
     from sqlalchemy import create_engine
-    from sqlalchemy.pool import StaticPool
     _, engine, _ = deferred
-    shared = create_engine("sqlite://", poolclass=StaticPool,
-                           connect_args={"check_same_thread": False})
+    shared = create_engine(f"sqlite:///{tmp_path / 'evidence.db'}",
+                           connect_args={"check_same_thread": False, "timeout": 10})
     db_module.metadata.create_all(shared)
     with engine.connect() as source, shared.begin() as target:
         for table in db_module.metadata.sorted_tables:
@@ -426,7 +432,7 @@ def test_f5_a_decks_payload_is_freed_once_its_evidence_is_written(deferred):
     status(client, job_id, 0)
     assert (ev.rows, ev.ghosts, ev.diagnostics, ev.by_hash, ev.candidate_set) == ({}, {}, {}, {}, None)
     status(client, job_id, 30)                             # later pages still mark delivered
-    assert len({iid for iid, t in tiers(engine).items() if t == "delivered"}) == 60
+    assert sum(delivered for _, delivered in marks(engine).values()) == 60
 
 
 def test_f5_an_undelivered_deck_past_the_fresh_window_is_dropped_and_no_longer_served(deferred):
@@ -440,7 +446,7 @@ def test_f5_an_undelivered_deck_past_the_fresh_window_is_dropped_and_no_longer_s
     assert rows(engine) == []                              # still C2: nothing was written
     assert deliver_job(job_id, 90)["cards"] == []          # its in-process cards no longer serve
     page = status(client, job_id, 0).get_json()["cards"]   # its stored pages do, through the blob
-    assert len(page) == 30 and {tiers(engine)[c["impression_id"]] for c in page} == {"delivered"}
+    assert len(page) == 30 and {marks(engine)[c["impression_id"]] for c in page} == {("first30", True)}
     assert len(rows(engine)) == 90                         # the stored cards only
 
 
@@ -519,7 +525,8 @@ def test_c4_the_first_delivery_of_a_10_card_page_writes_full_rows_for_the_first_
     sent = [c["impression_id"] for c in body["cards"]]
     assert len(sent) == 10 and body["serve_source"] == "page"
     written = by_index(engine)
-    assert [written[(0, i)]["evidence_tier"] for i in range(30)] == ["delivered"] * 10 + ["first30"] * 20
+    assert [written[(0, i)]["evidence_tier"] for i in range(30)] == ["first30"] * 30   # ruling 17
+    assert [written[(0, i)]["delivered_at"] is not None for i in range(30)] == [True] * 10 + [False] * 20
     full = [written[(0, i)] for i in range(30)]
     assert all(r["features_json"] and json.loads(r["features_json"])["give_value"] is not None for r in full)
     # Stage 1: the rest of the served deck is written too, marked for packing to stop.
@@ -532,16 +539,18 @@ def test_c3_later_cursor_pages_change_exactly_the_newly_delivered_cards(deferred
     monkeypatch.setattr(server, "_trade_page_size", lambda: 10)
     job_id, served, _, _, _ = deferred_deck(120)
     status(client, job_id, 0)
-    before = tiers(engine)
+    before = marks(engine)
     page2 = [c["impression_id"] for c in status(client, job_id, 10).get_json()["cards"]]
-    after = tiers(engine)
+    after = marks(engine)
     assert {iid for iid in after if after[iid] != before[iid]} == set(page2)
-    assert {after[iid] for iid in page2} == {"delivered"} and len(after) == len(before)
+    # A first-30 card stays 'first30' (ruling 17); its delivered_at is stamped.
+    assert {after[iid] for iid in page2} == {("first30", True)} and len(after) == len(before)
     # Past the stored pages (30 at this page size): the live job's page.
     page5 = [c["impression_id"] for c in deliver_job(job_id, 40)["cards"]]
-    final = tiers(engine)
+    final = marks(engine)
     assert {iid for iid in final if final[iid] != after[iid]} == set(page5)
-    assert {after[iid] for iid in page5} == {"full_interim"} and {final[iid] for iid in page5} == {"delivered"}
+    assert {after[iid] for iid in page5} == {("full_interim", False)}
+    assert {final[iid] for iid in page5} == {("delivered", True)}
 
 
 def test_served_impression_ids_are_the_rows_written(deferred):
@@ -550,7 +559,8 @@ def test_served_impression_ids_are_the_rows_written(deferred):
     body = generate(client, page=1).get_json()             # P1: page 1 from the store
     assert body["serve_source"] == "page" and body["job_id"] == job_id
     written = {r["impression_id"]: r for r in rows(engine)}
-    assert body["cards"] and all(written[c["impression_id"]]["evidence_tier"] == "delivered"
+    assert body["cards"] and all(written[c["impression_id"]]["evidence_tier"] == "first30"
+                                 and written[c["impression_id"]]["delivered_at"] is not None
                                  and written[c["impression_id"]]["trade_hash"] == c["trade_hash"]
                                  for c in body["cards"])
 
@@ -620,6 +630,70 @@ def test_f2_after_the_job_left_the_process_the_first_delivery_stamps_the_deck(de
 def datetime_now():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── G1: evidence_tier precedence (ruling 17) ───────────────────────────────
+
+@pytest.mark.parametrize("archive", [False, True])
+def test_g1_the_precedence_table_and_no_downgrade(deferred, monkeypatch, archive):
+    """ghost > first30 > delivered > archive (full_interim beside archive):
+    a ghost inside the first 30 stays ghost and narrow; a first-30 card is
+    first30 delivered or not; later deliveries raise only archive /
+    full_interim to delivered, and never touch a ghost."""
+    client, engine, _ = deferred
+    monkeypatch.setattr(server, "_trade_page_size", lambda: 10)
+    job_id, _, ghosts, ev, _ = deferred_deck(120, ghost_every=9, job_id=archive_id(archive))
+    ghost_ids = set(ev.ghosts)
+    assert [pos for pos, _ in ghosts if pos < 30] == [9, 19, 29]
+    status(client, job_id, 0)                              # served 0-9
+    deliver_job(job_id, 40)                                # served 40-49
+    rest = "archive" if archive else "full_interim"
+
+    def expected(stage):
+        out = {}
+        for (ghost, i), r in by_index(engine).items():
+            if ghost:
+                out[(ghost, i)] = ("ghost", False)
+            elif i < 30:
+                out[(ghost, i)] = ("first30", i < 10 or stage == "all")
+            elif 40 <= i < 50 or stage == "all":
+                out[(ghost, i)] = ("delivered", True)
+            else:
+                out[(ghost, i)] = (rest, False)
+        return out
+
+    def actual():
+        return {(r["is_ghost"] or 0, r["card_index"]): (r["evidence_tier"], r["delivered_at"] is not None)
+                for r in rows(engine)}
+
+    assert actual() == expected("first")
+    narrow = [r for r in rows(engine) if r["is_ghost"]]
+    assert all(set(json.loads(r["features_json"])) <= COMPACT and r["valuation_json"] is None
+               for r in narrow)
+    # Later deliveries of everything, the ghosts included (a client never
+    # receives a ghost id; even so): nothing moves down, ghosts never move.
+    status(client, job_id, 0)
+    server._deck_evidence_delivered(ev, [{"impression_id": iid} for iid in ghost_ids])
+    every = {r["impression_id"]: datetime_now() for r in rows(engine)}
+    db_module.save_deck_evidence([], delivered=every, deck_job_id=job_id)
+    assert actual() == expected("all")
+    assert all(set(json.loads(r["features_json"])) <= COMPACT for r in rows(engine) if r["is_ghost"])
+
+
+def test_g1_a_partial_runs_rows_are_all_partial_run(deferred):
+    """partial_run (ruling 21's replay-exclusion tag) overrides the table: a
+    partial run's delivered first-30 cards and its ghosts are all
+    'partial_run'; a ghost keeps is_ghost=1 and its narrow row."""
+    _, engine, _ = deferred
+    job_id, _, ghosts, ev, _ = deferred_deck(40, ghost_every=9, store=False, complete=False)
+    server._deck_evidence_delivered(ev, server._trade_jobs[job_id]["cards"][:10])
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="error", error="timeout")
+    server._deck_evidence_job_done(job_id)
+    written = rows(engine)
+    assert {r["evidence_tier"] for r in written} == {"partial_run"}
+    assert len([r for r in written if not r["is_ghost"]]) == 10
+    assert all(set(json.loads(r["features_json"])) <= COMPACT for r in written if r["is_ghost"])
 
 
 # ── G2: delivered_at ────────────────────────────────────────────────────────
@@ -752,7 +826,7 @@ def test_evidence_tiers_on_an_archive_deck(deferred, monkeypatch):
     job_id, served, ghosts, ev, _ = deferred_deck(120, ghost_every=9, job_id=archive_id(True))
     assert ev.archive
     status(client, job_id, 0)
-    expected = {(0, i): "delivered" if i < 10 else "first30" if i < 30 else "archive" for i in range(120)}
+    expected = {(0, i): "first30" if i < 30 else "archive" for i in range(120)}
     expected.update({(1, pos): "ghost" for pos, _ in ghosts})
     assert {k: r["evidence_tier"] for k, r in by_index(engine).items()} == expected
     # A delivered archive card is no longer an archive extra: retention keeps it.
@@ -860,7 +934,8 @@ def test_the_first_delivery_after_the_job_left_the_process_writes_from_the_blob(
     page1 = [c["impression_id"] for c in status(client, job_id, 0).get_json()["cards"]]
     written = by_index(engine)
     assert {written[(0, i)]["impression_id"] for i in range(30)} == set(page1)
-    assert {written[(0, i)]["evidence_tier"] for i in range(30)} == {"delivered"}
+    assert {(written[(0, i)]["evidence_tier"], written[(0, i)]["delivered_at"] is not None)
+            for i in range(30)} == {("first30", True)}
     assert {written[(0, i)]["evidence_tier"] for i in range(30, 90)} == {"full_interim"}
     assert not any((0, i) in written for i in range(90, 120))   # only the lost job held them
     assert {k for k in written if k[0] == 1} == {(1, pos) for pos, _ in ghosts}
@@ -1024,7 +1099,9 @@ def test_the_owner_path_publishes_without_commits_and_writes_nothing_until_deliv
     assert {c["impression_id"] for c in job["cards"]} == set(ev.rows)
     server._trade_job_public_view(dict(job))               # a legacy poll delivers every card
     written = owner_rows(engine)
-    assert len(written) == count and {r["evidence_tier"] for r in written.values()} == {"delivered"}
+    assert len(written) == count and all(r["delivered_at"] for r in written.values())
+    assert [r["evidence_tier"] for _, r in sorted(written.items())] == (
+        ["first30"] * 30 + ["delivered"] * (count - 30))
     assert all(r["valuation_json"] for r in written.values())
 
 
@@ -1060,7 +1137,7 @@ def test_owner_rows_written_at_delivery_equal_the_rows_written_live(sized_exclus
     assert ({i: comparable(r, deferred_diag) for i, r in deferred_rows.items()}
             == {i: comparable(r, live_diag) for i, r in live.items()})
     assert ([r["evidence_tier"] for _, r in sorted(deferred_rows.items())]
-            == ["delivered"] * 10 + ["first30"] * 20 + ["full_interim"] * (count - 30))
+            == ["first30"] * 30 + ["full_interim"] * (count - 30))
     assert len(deferred_diag) == len(live_diag)
     for r in deferred_rows.values():                       # every reference resolves
         assert "expired_or_missing" not in json.dumps(db_module.load_deck_diagnostics(r["impression_id"], ME))

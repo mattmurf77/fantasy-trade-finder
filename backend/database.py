@@ -6972,8 +6972,10 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
         return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
 
 
-# Tiers a later delivery may raise to 'delivered'. Never 'ghost': a ghost is withheld.
-_EVIDENCE_TIERS_BELOW_DELIVERED = ("first30", "full_interim", "archive")
+# Tiers a later delivery raises to 'delivered' (ruling 17's precedence: ghost >
+# first30 > delivered > archive, full_interim beside archive). Never 'ghost' or
+# 'first30': a later delivery never downgrades a tier.
+_EVIDENCE_TIERS_BELOW_DELIVERED = ("full_interim", "archive")
 # Tiers whose rows a later delivery stamps with delivered_at (never a ghost's,
 # never a build-time row's: their tier is NULL).
 _EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive")
