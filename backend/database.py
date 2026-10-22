@@ -1078,6 +1078,10 @@ deck_impressions_table = Table("deck_impressions", metadata,
     # rows. 'archive' rows (C8 extras) are deleted after 90 days
     # (purge_archive_deck_impressions); the other tiers never are.
     Column("evidence_tier",             String),
+    # ISO UTC: when this card was first sent to a client (any tier, first30
+    # included). NULL for an undelivered card (first30, archive, full_interim),
+    # a ghost, and every row written at build. Head-eng ruling 22.
+    Column("delivered_at",              String),
 )
 
 Index(
@@ -3614,6 +3618,7 @@ def _migrate_db() -> None:
         # Deferred evidence (ADR-025 stage 1): NULL on every row written at
         # build and on all existing rows; no backfill by design.
         ("deck_impressions",   "evidence_tier",             "VARCHAR"),
+        ("deck_impressions",   "delivered_at",              "VARCHAR"),
         ("trade_decisions",    "impression_id",             "VARCHAR"),
         ("trade_decisions",    "trade_concept_id",          "VARCHAR"),
         ("trade_matches",      "trade_concept_id",          "VARCHAR"),
@@ -6969,10 +6974,13 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
 
 # Tiers a later delivery may raise to 'delivered'. Never 'ghost': a ghost is withheld.
 _EVIDENCE_TIERS_BELOW_DELIVERED = ("first30", "full_interim", "archive")
+# Tiers whose rows a later delivery stamps with delivered_at (never a ghost's,
+# never a build-time row's: their tier is NULL).
+_EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive")
 
 
 def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
-                       diagnostics: list | tuple = (), delivered: list | tuple = (),
+                       diagnostics: list | tuple = (), delivered: dict | None = None,
                        deck_job_id: str | None = None) -> None:
     """Deferred evidence (ADR-025 stage 1): one delivery write, one transaction.
 
@@ -6983,10 +6991,12 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
     column, so full and narrow rows share one VALUES statement. `diagnostics`
     are the deck's deck_diagnostic_snapshots rows the compacted rows reference
     (content-addressed, so also at most once). `candidate_set` is the deck's
-    deck_candidate_sets row, also at most once. `delivered` are
-    impression ids of `deck_job_id` first written at a lower tier and now
-    delivered: they become 'delivered'.
+    deck_candidate_sets row, also at most once. `delivered` maps impression
+    ids of `deck_job_id` written undelivered and since delivered to their
+    delivery time: each gets that `delivered_at` (once) and, from a lower
+    tier, the tier 'delivered'.
     """
+    delivered = dict(delivered or {})
     if not rows and candidate_set is None and not diagnostics and not delivered:
         return
     from .deck_diagnostics import compact_rows
@@ -7006,15 +7016,23 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
         if candidate_set is not None:
             conn.execute(upsert(deck_candidate_sets_table).values(**candidate_set)
                          .on_conflict_do_nothing(index_elements=["candidate_set_id"]))
-        ids = list(delivered)
         i = deck_impressions_table
-        for start in range(0, len(ids), 500):
-            conn.execute(update(i).where(
-                i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(ids[start:start + 500]),
-                i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_DELIVERED),
-            ).values(evidence_tier="delivered"))
+        by_time: dict = {}
+        for iid, at in delivered.items():
+            by_time.setdefault(at, []).append(iid)
+        for at, ids in by_time.items():
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.delivered_at.is_(None), i.c.evidence_tier.in_(_EVIDENCE_TIERS_DELIVERABLE),
+                ).values(delivered_at=at))
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_DELIVERED),
+                ).values(evidence_tier="delivered"))
     log.info("deck evidence: deck=%s rows=%d candidate_set=%s delivered=%d",
-             deck_job_id, len(rows), candidate_set is not None, len(ids))
+             deck_job_id, len(rows), candidate_set is not None, len(delivered))
 
 
 def purge_archive_deck_impressions(*, days: int = 90, batch_size: int = 500) -> int:

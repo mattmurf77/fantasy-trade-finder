@@ -49,7 +49,7 @@ from backend.tests.test_owner_batch_publication import sized_exclusive  # noqa: 
 
 TIERS = ("first30", "delivered", "ghost", "archive", "full_interim")
 COMPACT = set(server._COMPACT_FEATURE_KEYS) | set(server._INJECTED_FEATURE_KEYS)
-VOLATILE = ("impression_id", "served_at", "candidate_set_id", "evidence_tier")
+VOLATILE = ("impression_id", "served_at", "candidate_set_id", "evidence_tier", "delivered_at")
 
 
 def archive_id(selected=True):
@@ -620,6 +620,59 @@ def test_f2_after_the_job_left_the_process_the_first_delivery_stamps_the_deck(de
 def datetime_now():
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat()
+
+
+# ── G2: delivered_at ────────────────────────────────────────────────────────
+
+def stamped(engine):
+    return {(r["is_ghost"] or 0, r["card_index"]): r["delivered_at"] for r in rows(engine)}
+
+
+def test_g2_delivered_at_is_each_cards_first_delivery_and_null_otherwise(deferred, monkeypatch):
+    client, engine, _ = deferred
+    monkeypatch.setattr(server, "_trade_page_size", lambda: 10)
+    job_id, _, ghosts, _, _ = deferred_deck(120, ghost_every=9)
+    t0 = datetime_now()
+    status(client, job_id, 0)
+    t1 = datetime_now()
+    at = stamped(engine)
+    assert {at[(0, i)] for i in range(10)} != {None} and len({at[(0, i)] for i in range(10)}) == 1
+    assert t0 <= at[(0, 0)] <= t1
+    assert all(at[(0, i)] is None for i in range(10, 120))            # undelivered first30 / rest
+    assert all(at[(1, pos)] is None for pos, _ in ghosts)              # ghosts: never delivered
+    time.sleep(0.01)
+    status(client, job_id, 10)                                         # later: a first-30 page
+    deliver_job(job_id, 40)                                            # and a page past them
+    later = stamped(engine)
+    assert all(later[(0, i)] > at[(0, 0)] for i in (*range(10, 20), *range(40, 50)))
+    assert all(later[(0, i)] is None for i in (*range(20, 40), *range(50, 120)))
+    assert all(later[(0, i)] == at[(0, i)] for i in range(10))         # never re-stamped
+    status(client, job_id, 10)                                         # a retry
+    assert stamped(engine) == later
+
+
+def test_g2_a_partial_run_stamps_its_delivered_rows_not_its_ghosts(deferred):
+    _, engine, _ = deferred
+    job_id, _, _, ev, _ = deferred_deck(40, ghost_every=9, store=False, complete=False)
+    server._deck_evidence_delivered(ev, server._trade_jobs[job_id]["cards"][:30])
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="error", error="timeout")
+    server._deck_evidence_job_done(job_id)
+    written = rows(engine)
+    assert {r["delivered_at"] is None for r in written if r["is_ghost"]} == {True}
+    assert None not in {r["delivered_at"] for r in written if not r["is_ghost"]}
+
+
+def test_g2_after_the_job_left_the_process_delivered_at_is_the_request_time(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(120)
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    t0 = datetime_now()
+    page = {c["impression_id"] for c in status(client, job_id, 0).get_json()["cards"]}
+    at = {r["impression_id"]: r["delivered_at"] for r in rows(engine)}
+    assert {iid for iid, t in at.items() if t is not None} == page
+    assert all(t0 <= at[iid] <= datetime_now() for iid in page)
 
 
 # ── C5: narrow ghosts ───────────────────────────────────────────────────────

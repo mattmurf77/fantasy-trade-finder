@@ -73,7 +73,7 @@ NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold",
                "source_like_impression_id",
                # Deferred evidence (ADR-025 stage 1, 2026-10-20): NULL on every
                # row written at build, so NULL here with the flags off.
-               "evidence_tier")
+               "evidence_tier", "delivered_at")
 
 
 # ---------------------------------------------------------------------------

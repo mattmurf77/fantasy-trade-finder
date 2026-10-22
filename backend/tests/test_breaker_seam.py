@@ -67,7 +67,7 @@ NEW_COLUMNS = ("model_arm", "arm_rank", "fairness_threshold",
                "valuation_json", "trade_concept_id", "policy_variant",
                "source_like_impression_id",
                # Deferred evidence (ADR-025 stage 1): NULL on rows written at build.
-               "evidence_tier")
+               "evidence_tier", "delivered_at")
 
 SENTENCE = "They may not want to move off a young back."
 

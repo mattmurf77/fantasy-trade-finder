@@ -3717,6 +3717,7 @@ class _DeckEvidence:
         self.by_hash: dict = {}       # trade_hash -> [impression_id], for id-less deliveries
         self.delivered: set = set()   # impression ids sent to a client
         self.delivered_hashes: set = set()
+        self.delivered_at: dict = {}  # impression_id / trade_hash -> first delivery (G2)
         self.pending: set = set()     # delivered ids awaited until their row is written (F4)
         self.served_at = None         # F2: the deck's first delivery, every row's served_at
         self.marked: set = set()      # delivered ids already written or marked 'delivered'
@@ -3832,24 +3833,30 @@ class _DeckEvidence:
         candidate set, every row 'partial_run' (head-eng ruling 9: swipes on
         cards a client saw are never rejected; replay excludes the deck).
         """
-        delivered = self.delivered | {iid for h in self.delivered_hashes
-                                      for iid in self.by_hash.get(h, ())}
+        at = {iid: self.delivered_at[h] for h in self.delivered_hashes
+              for iid in self.by_hash.get(h, ())}
+        at.update((iid, self.delivered_at[iid]) for iid in self.delivered)
+        delivered = at.keys()
         if self.partial:
-            first = [{**_unpack_row(packed), "evidence_tier": "partial_run"}
+            first = [{**_unpack_row(packed), "evidence_tier": "partial_run", "delivered_at": at[iid]}
                      for iid, (_, packed) in self.rows.items() if iid in delivered]
-            first += [{**row, "evidence_tier": "partial_run"} for row in self.ghosts.values()]
-            return (first, self.closure(first)), ([], []), self.candidate_set, []
+            first += [{**row, "evidence_tier": "partial_run", "delivered_at": None}
+                      for row in self.ghosts.values()]
+            return (first, self.closure(first)), ([], []), self.candidate_set, {}
         first, rest = [], []
         for iid, (index, packed) in self.rows.items():
             if iid in delivered:
-                first.append({**_unpack_row(packed), "evidence_tier": "delivered"})
+                first.append({**_unpack_row(packed), "evidence_tier": "delivered",
+                              "delivered_at": at[iid]})
             elif index < _EVIDENCE_FIRST_N:
-                first.append({**_unpack_row(packed), "evidence_tier": "first30"})
+                first.append({**_unpack_row(packed), "evidence_tier": "first30",
+                              "delivered_at": None})
             else:
-                rest.append({**_unpack_row(packed),
+                rest.append({**_unpack_row(packed), "delivered_at": None,
                              "evidence_tier": "archive" if self.archive else "full_interim"})
-        first += [{**row, "evidence_tier": "ghost"} for row in self.ghosts.values()]
-        upgrades = sorted(delivered - self.marked - self.rows.keys())
+        first += [{**row, "evidence_tier": "ghost", "delivered_at": None}
+                  for row in self.ghosts.values()]
+        upgrades = {iid: at[iid] for iid in sorted(delivered - self.marked - self.rows.keys())}
         first_diag = self.closure(first)
         rest_diag = self.closure(rest, exclude={d["snapshot_id"] for d in first_diag})
         return (first, first_diag), (rest, rest_diag), self.candidate_set, upgrades
@@ -3859,7 +3866,7 @@ class _DeckEvidence:
         for row in rows:
             self.rows.pop(row["impression_id"], None)
             self.ghosts.pop(row["impression_id"], None)
-            if row["evidence_tier"] == "delivered":
+            if row.get("delivered_at"):
                 self.marked.add(row["impression_id"])
         if candidate_set is not None:
             self.candidate_set = None
@@ -4068,7 +4075,9 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                                 exc_info=True)
                     return
                 ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
+                delivered_at = delivered_at or datetime.now(timezone.utc).isoformat()
                 ev.delivered.update(ids)
+                ev.delivered_at.update(dict.fromkeys(ids, delivered_at))
                 ev.served_at = ev.served_at or delivered_at
                 _deck_evidence_flush(ev)
     finally:
@@ -4096,8 +4105,11 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         if partial:
             ev.partial = ev.complete = True
         new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
+        now = datetime.now(timezone.utc).isoformat()
         if ev.served_at is None:
-            ev.served_at = datetime.now(timezone.utc).isoformat()
+            ev.served_at = now
+        for key in (*ids, *hashes):   # G2: each card's first delivery
+            ev.delivered_at.setdefault(key, now)
         awaited = {iid for iid in ids - ev.pending if iid in ev.rows}   # F4: rows not yet in
         ev.pending |= awaited
         _deck_evidence_pend(awaited)
