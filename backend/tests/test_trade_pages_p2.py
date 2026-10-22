@@ -405,6 +405,33 @@ def test_the_debounce_never_delays_a_rebuild_after_an_input_change(p1, spawned):
     assert body["freshness_state"] == "updating" and len(spawned) == 2
 
 
+BACKING_STARTS = {
+    "page_serve": lambda client, engine, deck: generate(client, page=1),
+    "stale": lambda client, engine, deck: (set_row(engine, state="stale"), generate(client, page=1)),
+    "rebase": lambda client, engine, deck: deck_status(client, "gone", 0),
+    "status_restart": lambda client, engine, deck: deck_status(client, deck, 90),
+    "roster_change": lambda client, engine, deck: roster_snapshot.on_roster_change(
+        LEAGUE, "rfp1:old", "rfp1:new"),
+}
+
+
+@pytest.mark.parametrize("reason", sorted(BACKING_STARTS))
+def test_each_backing_job_start_logs_one_line_with_its_reason(p1, spawned, caplog, reason):
+    """head-eng ruling 20; a serve that joins the started job logs nothing more."""
+    client, engine, _ = p1
+    deck = build_deck()
+    restart()
+    caplog.set_level("INFO", logger=server.log.name)
+    BACKING_STARTS[reason](client, engine, deck)
+    started = server._trade_jobs_by_key[KEY]
+    assert len(spawned) == 1
+    assert _page_lines(caplog, "[trade-page] backing-job start") == [
+        f"[trade-page] backing-job start scope={SCOPE} reason={reason} job={started}"]
+    generate(client, page=1)                               # joins it
+    assert len(spawned) == 1
+    assert len(_page_lines(caplog, "[trade-page] backing-job start")) == 1
+
+
 # ── The append_only marker ──────────────────────────────────────────────────
 
 @pytest.fixture()
