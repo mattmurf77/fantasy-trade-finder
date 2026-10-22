@@ -5,6 +5,7 @@ malformed and absent evidence, views versus generation, and sends versus trades.
 All inputs are synthetic scratch files; no application imports or network calls.
 """
 from copy import deepcopy
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -215,6 +216,30 @@ def test_owner_input_replay_preserves_request_unit_not_experiment_cohort():
     assert records[0]["assignment"] == config
     assert records[0]["fixed_preassignment_cohort"] is False
     assert records[0]["source"] == {"table": "bakeoff_runs", "key": "run_id", "value": "run"}
+
+
+def test_owner_request_outside_archive_sample_is_not_sampled_with_writer_fingerprint():
+    owner_input = {"user_id": "alice", "user_elo": {"p1": 1700}}
+    sha = hashlib.sha256(json.dumps(owner_input, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    configs = {
+        "sampled": {"unit": "request_inputs", "input": owner_input},
+        "unsampled": {"unit": "request_inputs", "owner_request_sampled": False,
+                      "input_sha256": "0" * 64, "input_bytes": 1234},
+        "unsampled_match": {"base": {}, "arm_delta": {}, "owner_request_sampled": False, "input_sha256": sha},
+        "legacy": {"base": {}},
+    }
+    rows = [{"run_id": run_id, "config_json": json.dumps(config)} for run_id, config in configs.items()]
+    rows.append({"run_id": "invalid", "config_json": "{"})
+    records = {r["source"]["value"]: r for r in frozen_owner_requests({"bakeoff_runs": rows})}
+    assert {run_id: r["status"] for run_id, r in records.items()} == {
+        "sampled": "present", "unsampled": "not_sampled", "unsampled_match": "not_sampled",
+        "legacy": "no_frozen_owner_input", "invalid": "malformed"}
+    assert (records["unsampled"]["input_sha256"], records["unsampled"]["input_bytes"]) == ("0" * 64, 1234)
+    assert records["unsampled_match"]["input_sha256"] == sha
+    assert "input_bytes" not in records["unsampled_match"]
+    assert all("input_sha256" not in records[run_id] for run_id in ("sampled", "legacy", "invalid"))
+    assert records["unsampled"]["assignment"] == configs["unsampled"]
+    assert records["unsampled"]["fixed_preassignment_cohort"] is False
 
 
 def test_occurrence_bridge_preserves_intent_missingness_and_never_uses_support_as_grade():
