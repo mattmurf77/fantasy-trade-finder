@@ -1080,7 +1080,7 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("evidence_tier",             String),
     # ISO UTC: when this card was first sent to a client (any tier, first30
     # included). NULL for an undelivered card (first30, archive, full_interim),
-    # a ghost, and every row written at build. Head-eng ruling 22.
+    # a ghost, and every row written at build (granted by head-eng, G2).
     Column("delivered_at",              String),
 )
 
