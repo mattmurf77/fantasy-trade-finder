@@ -3386,6 +3386,10 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     if _trade_page_store_enabled():
         out["prefetch_remaining"] = _trade_prefetch_remaining()
         out["cards"] = _with_trade_hash(out["cards"])
+        if out["replace"]:
+            # head-eng ruling 16: does the replace fallback ever fire on owner-serve?
+            log.info("[trade-page] replace job=%s cursor=%d raw=%d append_only=%s",
+                     job.get("job_id"), cursor, len(raw), marker)
     return out
 
 

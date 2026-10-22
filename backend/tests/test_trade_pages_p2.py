@@ -428,6 +428,34 @@ def test_the_append_only_marker_decides_over_the_card_markers(e2_on, marker, own
     assert len(body["cards"]) == (75 if replaces else 30)
 
 
+def _page_lines(caplog, prefix):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith(prefix)]
+
+
+def test_every_replacing_paged_response_logs_one_replace_line(e2_on, caplog):
+    """head-eng ruling 16: the replace fallback is counted in the logs."""
+    client, *_ = e2_on
+    caplog.set_level("INFO", logger=server.log.name)
+    seed_job([card(i) for i in range(75)], append_only=True)          # owner-serve: pages
+    assert e2_status(client, 30).get_json()["replace"] is False
+    assert _page_lines(caplog, "[trade-page] replace") == []
+    seed_job([card(i, owner=False) for i in range(75)], append_only=False)   # re-sorting
+    assert e2_status(client, 30).get_json()["replace"] is True
+    assert e2_status(client, 90).get_json()["replace"] is True        # past the end
+    assert _page_lines(caplog, "[trade-page] replace") == [
+        f"[trade-page] replace job={JOB_ID} cursor=30 raw=75 append_only=False",
+        f"[trade-page] replace job={JOB_ID} cursor=90 raw=75 append_only=False"]
+
+
+def test_flag_off_logs_no_replace_line(e2, monkeypatch, caplog):
+    client, *_ = e2
+    monkeypatch.setitem(ff._flags_cache, FLAG, False)
+    caplog.set_level("INFO", logger=server.log.name)
+    seed_job([card(i, owner=False) for i in range(75)])
+    assert e2_status(client, 30).get_json()["replace"] is True
+    assert _page_lines(caplog, "[trade-page] replace") == []
+
+
 def test_job_level_append_only_markers_still_count(e2_on):
     client, *_ = e2_on
     seed_job([card(i, owner=False) for i in range(75)], append_only=False, value_core={"served": 75})
