@@ -1,4 +1,4 @@
-"""Session-wide hermeticity for the DynastyProcess **pick** curve.
+"""Session-wide hermeticity for the DynastyProcess **pick** and **player** curves.
 
 WHY THIS FILE EXISTS AT ALL. This repo had no conftest.py before 2026-08-21;
 every test brought its own monkeypatching and that was enough, because the two
@@ -32,15 +32,28 @@ The snapshot is `fixtures/dp_values_picks_2026-08-06.csv`, the same file
 those explicit pins are LEFT IN PLACE, because a test that depends on this
 data should say so at its own top rather than inherit it silently.
 
-This pins the PICK curve only. The player curve (`FTF_DP_VALUES_FILE`) is not
-set here: no unconditional code path reaches it, and pinning it would change
-what a large number of unrelated tests see.
+THE PLAYER CURVE TOO (2026-10-22). An earlier version of this file said no
+unconditional path reaches the player curve. One does: `import backend.server`
+calls `load_consensus_maps()` at module level (server.py, the Elo seed), so
+every pytest process that imports the server did a live GET of DP's
+`values-players.csv`, and on success went on to scrape KTC for the blend.
+`FTF_DP_VALUES_FILE` now points at `fixtures/outlook-hypotheses/
+dp-values-players-2026-08-09.csv` (a real DP export, same parse path).
+
+KTC is deliberately NOT pinned here. With the DP seam set and no
+`FTF_KTC_VALUES_FILE`, `data_loader._fetch_ktc_html` treats KTC as off by
+design ("never a live egress from a test run"). Pinning the KTC snapshot
+would turn the blend on, and its id matching calls
+`espn_service.get_crosswalk()`, a live GET of DP's `db_playerids.csv` with no
+env seam. `test_ktc_blend` pins its own KTC data explicitly.
 """
 
 import os
 import pathlib
 
-_PICK_SNAPSHOT = (pathlib.Path(__file__).resolve().parent
-                  / "fixtures" / "dp_values_picks_2026-08-06.csv")
+_FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
+_PICK_SNAPSHOT = _FIXTURES / "dp_values_picks_2026-08-06.csv"
+_PLAYER_SNAPSHOT = _FIXTURES / "outlook-hypotheses" / "dp-values-players-2026-08-09.csv"
 
 os.environ.setdefault("FTF_DP_PICK_VALUES_FILE", str(_PICK_SNAPSHOT))
+os.environ.setdefault("FTF_DP_VALUES_FILE", str(_PLAYER_SNAPSHOT))
