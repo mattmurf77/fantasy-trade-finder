@@ -744,7 +744,7 @@ Flag `trade.first_page_store` (default **false**). Spec: `docs/plans/org-bringup
 
 **`served_at`** on a deferred row is the deck's **first delivery** time, one timestamp shared by every row the deck writes (ghosts and later-written rows included), as the logger's start was one per deck before. Features and valuation stay frozen at build (C6).
 
-Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`. None on `evidence_tier`, so the hourly archive purge scans the table; a partial index is an open follow-up.
+Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`. `ix_deck_impressions_archive` on `(evidence_tier, served_at) WHERE evidence_tier = 'archive'` (partial, both dialects; `_migrate_db` adds it to existing databases): the hourly C8 purge reads through it.
 
 ---
 

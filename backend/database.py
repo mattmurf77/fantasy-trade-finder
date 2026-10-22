@@ -1093,6 +1093,17 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+# C8 retention (ADR-025): purge_archive_deck_impressions reads only archive
+# rows by age. Partial, so it indexes the archive extras alone (both dialects);
+# _migrate_db adds it to existing databases.
+_ARCHIVE_INDEX_WHERE = "evidence_tier = 'archive'"
+Index(
+    "ix_deck_impressions_archive",
+    deck_impressions_table.c.evidence_tier,
+    deck_impressions_table.c.served_at,
+    sqlite_where=text(_ARCHIVE_INDEX_WHERE),
+    postgresql_where=text(_ARCHIVE_INDEX_WHERE),
+)
 
 # Private debug evidence, content-addressed within one user/job. Core card
 # evidence and labels remain on deck_impressions; only debug snapshots expire.
@@ -3843,6 +3854,17 @@ def _migrate_db() -> None:
                 ))
         except Exception:
             pass
+
+    # ADR-025 C8: the archive partial index (after the evidence_tier column
+    # migration above). Both dialects accept CREATE INDEX ... WHERE.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_deck_impressions_archive "
+                f"ON deck_impressions (evidence_tier, served_at) WHERE {_ARCHIVE_INDEX_WHERE}"
+            ))
+    except Exception:
+        pass
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters
@@ -7044,8 +7066,10 @@ def purge_archive_deck_impressions(*, days: int = 90, batch_size: int = 500) -> 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     i = deck_impressions_table
     with engine.begin() as conn:
+        # The archive predicate as the index's literal text, so both planners
+        # match ix_deck_impressions_archive (a bound parameter may not).
         ids = select(i.c.impression_id).where(
-            i.c.evidence_tier == "archive", i.c.served_at < cutoff,
+            text(_ARCHIVE_INDEX_WHERE), i.c.served_at < cutoff,
         ).limit(max(1, min(batch_size, 1000)))
         return conn.execute(delete(i).where(i.c.impression_id.in_(ids))).rowcount or 0
 

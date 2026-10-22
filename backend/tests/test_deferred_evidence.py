@@ -883,6 +883,42 @@ def test_archive_retention_is_off_with_the_flag(deferred, monkeypatch):
     assert [r["impression_id"] for r in rows(engine)] == ["archive-91"]
 
 
+def test_g3_the_archive_purge_uses_the_partial_index(deferred):
+    from sqlalchemy import event, text
+    _, engine, _ = deferred
+    with engine.connect() as conn:
+        ddl = conn.execute(text("SELECT sql FROM sqlite_master WHERE name = 'ix_deck_impressions_archive'")).scalar()
+    assert ddl.endswith("(evidence_tier, served_at) WHERE evidence_tier = 'archive'")
+    seen = []
+    listen = lambda conn, cursor, statement, params, *a: seen.append((statement, params))
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
+        db_module.purge_archive_deck_impressions(days=90, batch_size=500)
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    [(statement, params)] = [(st, pa) for st, pa in seen if st.lstrip().startswith("DELETE")]
+    with engine.connect() as conn:
+        plan = [r[-1] for r in conn.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, params)]
+    assert any("USING INDEX ix_deck_impressions_archive" in step for step in plan), plan
+
+
+def test_g3_the_migration_adds_the_partial_index_to_an_existing_database(tmp_path, monkeypatch):
+    from sqlalchemy import create_engine, text
+    engine = create_engine(f"sqlite:///{tmp_path / 'existing.db'}",
+                           connect_args={"check_same_thread": False})
+    db_module.metadata.create_all(engine)
+    with engine.begin() as conn:
+        conn.execute(text("DROP INDEX ix_deck_impressions_archive"))   # a database from before G3
+    monkeypatch.setattr(db_module, "engine", engine)
+    monkeypatch.setattr(db_module, "DATABASE_URL", "sqlite:///existing")
+    for _ in range(2):                                    # idempotent
+        db_module._migrate_db()
+        with engine.connect() as conn:
+            ddl = conn.execute(text("SELECT sql FROM sqlite_master "
+                                    "WHERE name = 'ix_deck_impressions_archive'")).scalar()
+        assert ddl and ddl.endswith("WHERE evidence_tier = 'archive'")
+
+
 # ── The budget rule ─────────────────────────────────────────────────────────
 
 def test_the_budget_rule_shrinks_the_stored_evidence_blob(deferred):
