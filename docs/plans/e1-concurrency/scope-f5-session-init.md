@@ -45,20 +45,21 @@ The fix is a decorator, `_single_flight_session_init` (`backend/server.py:2256-2
 - [x] **Sabotage proof.** With the decorator made a pass-through (`return fn`), T6a fails with `builds_per_format {'1qb_ppr': 2, 'sf_tep': 2}` and `distinct_services_installed 2`. T6b and both T6c tests fail too. The T6d byte-compare errors because there is no `__wrapped__` to unwrap, and the two bypass tests pass. The sabotage was reverted and never committed.
 - [x] **Code-walk proof:** see the worker's report to onboarding-eng, which has the leader, follower and different-sig paths with `backend/server.py` line numbers.
 - [ ] Manual TestFlight checklist: **WAIVED.** No mobile or web code changes and the response contract is byte-identical. Under today's sync worker a second init simply queues, so the coalesce path can't be observed on TestFlight until E1's `gthread` switch.
+  The runtime coalesce check moves to release-lead's gthread T7 smoke: local gunicorn `--threads 4` with two concurrent inits.
 - `testID`s added/renamed: none.
 
 ## 4. Docs scope
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` | **proposed, not edited** (head-eng owns it) | Append to the `POST /api/session/init` row: "Concurrent inits for one token are single-flighted: identical requests share one result; different leagues run one after the other." |
+| `docs/api-reference.md` | **updated (head-eng grant 2026-10-22)** | Appended to the `POST /api/session/init` row: "Concurrent inits for one token are single-flighted: identical requests share one result; different leagues run one after the other." |
 | `living-memory/LLD.md` | n/a | release-lead's scribe owns `living-memory/*`. No convention shifted. |
-| `docs/architecture.md` | **proposed, not edited** (head-eng owns it) | In § Local request and trade execution context, add one sentence: "E1 F5: `/api/session/init` is single-flighted per token (`_session_init_inflight`); identical concurrent inits replay one result and a different league waits for the in-flight one, so two inits never swap services side by side." |
+| `docs/architecture.md` | **updated (head-eng grant 2026-10-22)** | Added one sentence to § Local request and trade execution context: "E1 F5: `/api/session/init` is single-flighted per token (`_session_init_inflight`); identical concurrent inits replay one result and a different league waits for the in-flight one, so two inits never swap services side by side." |
 | `living-memory/HLD.md` | n/a | release-lead's scribe owns it, and the architecture did not shift (still one worker and in-process state). |
 | `docs/cross-client-invariants.md` | n/a | No shared constants, enums or colors change. |
 | `docs/glossary.md` | n/a | No new domain term. "Single-flight" is an engineering term used only in code comments. |
 | ADR or `DECISIONS.md` entry | n/a | The design is the audit's prescribed fix (F5 "Per-token in-flight map"), not a new choice. The scribe owns `DECISIONS.md` if the lead wants it logged. |
-| `docs/plans/README.md` | n/a | No `e1-concurrency/` row was added. rankings-eng's E1 scope is not on `origin/main` yet, so the first E1 scope to land should add the row. |
+| `docs/plans/README.md` | **added** | New `e1-concurrency/` row in the Thread folders table (head-eng grant 2026-10-22). |
 
 ## 5. Ship gate declaration
 

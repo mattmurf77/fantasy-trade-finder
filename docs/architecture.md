@@ -799,6 +799,10 @@ wrapped. Execution capture rejects a copied league whose ID differs from the
 requested league, before dependency capture or worker input reads can mix scopes.
 [Narrow dependency repair](plans/bilateral-model-revision/spec-round8-counterparty-epochs.md).
 
+E1 F5: `/api/session/init` is single-flighted per token (`_session_init_inflight`);
+identical concurrent inits replay one result and a different league waits for the
+in-flight one, so two inits never swap services side by side.
+
 ## Ownership and telemetry boundaries
 
 Private route gates require a verified session; username discovery cannot authorize private state. `backend/session_input.py` resolves identity and roster inputs from authenticated session state plus authoritative league sources before session construction or persistence. Apple/Google proof authenticates its provider account; a new Sleeper binding separately requires Sleeper proof. Analytics commits validated events before recommendation outcome side effects, which require verified ownership of an existing impression. Authentication tokens are replaced by domain-separated analytics identifiers at both persistence entry points. Account deletion revokes durable sessions in the same transaction as private data deletion.
