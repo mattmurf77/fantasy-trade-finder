@@ -338,7 +338,8 @@ def frozen_owner_requests(tables):
     A deck bake-off run nests its assignment under ``owner_request``; a valid
     one (``capture_owner_benchmark.owner_request``) is ``present`` and becomes
     the record's ``assignment``, so ``assignment["input"]`` reads the same in
-    both shapes. A run outside the owner_request archive sample has no frozen
+    both shapes; the rest of that run's config is kept as ``run_config`` for
+    replay. A run outside the owner_request archive sample has no frozen
     input; it is ``not_sampled`` and keeps only ``input_sha256``/``input_bytes``.
     """
     records = []
@@ -354,6 +355,8 @@ def frozen_owner_requests(tables):
         record = {"source": _ref("bakeoff_runs", row), "status": status,
                   "assignment": assignment, "created_at": row.get("created_at"),
                   "fixed_preassignment_cohort": False}
+        if assignment is not config:
+            record["run_config"] = {k: v for k, v in config.items() if k != "owner_request"}
         if status == "not_sampled":
             record["input_sha256"] = config.get("input_sha256")
             if "input_bytes" in config:

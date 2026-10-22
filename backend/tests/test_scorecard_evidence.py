@@ -225,7 +225,8 @@ def test_owner_request_sample_reads_nested_deck_input_and_marks_unsampled_rows()
     sha = hashlib.sha256(json.dumps(deck_input, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     configs = {
         "selected_top_level": {"unit": "request_inputs", "input": {"user_elo": {"p1": 1700}}},
-        "sampled_deck": {"base": {}, "arm_delta": {}, "owner_request": deck_request},
+        "sampled_deck": {"base": {"k": 1}, "arm_delta": {"k": 2}, "significance": {"final_served": 3},
+                         "owner_presentment": {"shown": 4}, "owner_request": deck_request},
         "deck_incomplete_input": {"base": {}, "owner_request": {"input": {"user_elo": {"p1": 1700}}}},
         "unsampled": {"unit": "request_inputs", "owner_request_sampled": False,
                       "input_sha256": "0" * 64, "input_bytes": 1234},
@@ -242,6 +243,9 @@ def test_owner_request_sample_reads_nested_deck_input_and_marks_unsampled_rows()
     assert records["selected_top_level"]["assignment"] == configs["selected_top_level"]
     assert records["sampled_deck"]["assignment"] == deck_request
     assert records["sampled_deck"]["assignment"]["input"] == deck_input
+    assert records["sampled_deck"]["run_config"] == {"base": {"k": 1}, "arm_delta": {"k": 2},
+        "significance": {"final_served": 3}, "owner_presentment": {"shown": 4}}
+    assert [run_id for run_id, r in records.items() if "run_config" in r] == ["sampled_deck"]
     assert records["deck_incomplete_input"]["assignment"] == configs["deck_incomplete_input"]
     assert (records["unsampled"]["input_sha256"], records["unsampled"]["input_bytes"]) == ("0" * 64, 1234)
     assert records["unsampled_match"]["input_sha256"] == sha
