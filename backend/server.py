@@ -8734,6 +8734,17 @@ def _run_trade_job(
             if j is not None and significance_diag:
                 j["significance"] = significance_diag
 
+        def _replace_significance(old, **updates):
+            # E1 F9: once attached, job["significance"] is copy-on-write. Job snapshots
+            # deep-copy it, the /generate reuse path outside _trade_jobs_lock, so the
+            # attached dict is never mutated: build the next state, swap it in, return it.
+            new = {**old, **updates}
+            with _trade_jobs_lock:
+                j = _trade_jobs.get(job_id)
+                if j is not None and j.get("significance") is old:
+                    j["significance"] = new
+            return new
+
         # One bounded post-policy permutation, before the FIRST evaluated
         # publication. Every later boundary retains this order or removes
         # authoritative dispositions; none re-sorts an old snapshot.
@@ -8893,7 +8904,8 @@ def _run_trade_job(
                     presentation["records"] = _records_in_order(
                         before_quality, presentation["records"], final_cards)
                 if significance_diag is not None:
-                    significance_diag["quality_filters"] = quality_counts
+                    significance_diag = _replace_significance(
+                        significance_diag, quality_filters=quality_counts)
                 log.info("trade-job %s: deck quality filters %s served=%d", job_id,
                          quality_counts, len(final_cards))
             except Exception as quality_err:
@@ -8915,14 +8927,15 @@ def _run_trade_job(
                 served_final, ghost_cards = final_cards, []
 
         if significance_diag:
-            significance_diag["final_served"] = len(served_final)
+            served_diag = {"final_served": len(served_final)}
             if bakeoff_run is not None:
                 served_counts = {}
                 for card in served_final:
                     credit = bakeoff_run.attribution_for(card)
                     arm = credit[0] if credit else "injected"
                     served_counts[arm] = served_counts.get(arm, 0) + 1
-                significance_diag["final_served_per_arm"] = served_counts
+                served_diag["final_served_per_arm"] = served_counts
+            significance_diag = _replace_significance(significance_diag, **served_diag)
 
         # Publish the filtered final list even with F1 disabled. Later F1
         # annotation adds impression IDs without altering package membership.
@@ -9158,16 +9171,15 @@ def _run_trade_job(
         # superseded run measures just as well. Never allowed to fail the job.
         if significance_diag and (owner_impression_error or _job_superseded(job_id)):
             retained = owner_published_cards if not _job_superseded(job_id) else []
-            significance_diag["final_served"] = len(retained)
-            significance_diag["final_served_per_arm"] = {}
+            counts = {}
             if bakeoff_run is not None:
                 for card in retained:
                     credit = bakeoff_run.attribution_for(card)
                     arm = credit[0] if credit else "injected"
-                    counts = significance_diag["final_served_per_arm"]
                     counts[arm] = counts.get(arm, 0) + 1
-            significance_diag["withheld"] = ("impression_unavailable" if owner_impression_error
-                                               else "superseded")
+            significance_diag = _replace_significance(
+                significance_diag, final_served=len(retained), final_served_per_arm=counts,
+                withheld=("impression_unavailable" if owner_impression_error else "superseded"))
         if bakeoff_run is not None:
             try:
                 run_row = bakeoff_run.run_row(
