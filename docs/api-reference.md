@@ -506,7 +506,7 @@ from one DB read, including after a restart.
 
 **On every paged response** (`page: 1` on generate, `cursor` on status, from
 the store or from a job): `prefetch_remaining` (model_config
-`trade_prefetch_remaining`, default 30). The client requests the next page when
+`trade_prefetch_remaining`, seeded at 50). The client requests the next page when
 this many ready cards remain.
 
 **`POST /api/trades/generate` with `page: 1`.** Only an organic body reads the

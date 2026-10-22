@@ -3021,7 +3021,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
     ("trade_pages_stored", 3.0, "Pages of trade_page_size cards stored per trade_page_store row; clamped to 1-10 at read"),
-    ("trade_prefetch_remaining", 30.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read"),
+    ("trade_prefetch_remaining", 50.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read. 50 per head-eng ruling 10's sizing: 44-card swipe bursts at 0.4 s/card plus the prefetch round trip"),
     ("trade_prebuild_debounce_s", 20.0, "on_roster_change page rebuilds: a key whose last roster-change rebuild was kicked less than this many seconds ago is skipped (the next serve rebuilds it)"),
     ("trade_page_store_evict_days", 30.0, "trade_page_store eviction: delete rows not served (or, never served, not built) in this many days; clamped to 1-3650 at read"),
     ("trade_page_store_max_bytes", 262144000.0, "trade_page_store eviction: when SUM(stored_bytes) exceeds this, delete least recently served rows until under it"),

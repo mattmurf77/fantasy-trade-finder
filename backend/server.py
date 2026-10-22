@@ -3444,7 +3444,7 @@ def _trade_pages_stored() -> int:
 
 
 def _trade_prefetch_remaining() -> int:
-    return _trade_page_knob("trade_prefetch_remaining", float(_trade_page_size()), 1, 200)
+    return _trade_page_knob("trade_prefetch_remaining", 50.0, 1, 200)   # ruling 19
 
 
 def _trade_page_scope(fairness_threshold) -> str:

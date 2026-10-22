@@ -71,6 +71,9 @@ def p1(live, monkeypatch):
     monkeypatch.setattr(server, "_trade_jobs", {})
     monkeypatch.setattr(server, "_trade_jobs_by_key", {})
     monkeypatch.setattr(server, "_trade_input_epochs", {})
+    # The code default (ruling 19: 50), not a model_config row a local DB
+    # seeded earlier (seeds are insert-if-absent).
+    monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
     yield client, engine, sess
 
 
@@ -350,7 +353,7 @@ def test_all_equal_serves_page_one_inline(p1, spawned):
                                  "prefetch_remaining")} == {
         "job_id": job_id, "status": "complete", "error": None, "cursor": 30, "total_ready": 90,
         "replace": False, "serve_source": "page", "freshness_state": "fresh", "search_id": "s-1",
-        "prefetch_remaining": 30}
+        "prefetch_remaining": 50}
     assert not spawned                       # a fresh job backs the page: no rebuild
     assert stored()["last_served_at"] is not None
 
@@ -500,7 +503,7 @@ def test_status_cursors_walk_the_stored_pages(p1, spawned):
     assert ids(third["cards"]) == [f"p1-{i:03d}" for i in range(60, 90)]
     # Past the stored pages: the live job (E2's view of the full deck).
     past = status(client, job_id, 90).get_json()
-    assert "serve_source" not in past and past["prefetch_remaining"] == 30
+    assert "serve_source" not in past and past["prefetch_remaining"] == 50
     server._trade_jobs.clear()
     server._trade_jobs_by_key.clear()
     gone = status(client, job_id, 90)
@@ -508,7 +511,7 @@ def test_status_cursors_walk_the_stored_pages(p1, spawned):
     assert gone.get_json() == {
         "job_id": job_id, "status": "complete", "opponents_done": 1, "opponents_total": 1,
         "cards": [], "error": None, "cursor": 90, "total_ready": 90, "replace": False,
-        "serve_source": "page", "freshness_state": "fresh", "prefetch_remaining": 30}
+        "serve_source": "page", "freshness_state": "fresh", "prefetch_remaining": 50}
 
 
 def test_status_page_applies_strict_i1_after_a_roster_move(p1, spawned):

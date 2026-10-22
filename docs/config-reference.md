@@ -888,7 +888,7 @@ Read through `_deck_cfg` only while the flag is on (`trade_prefetch_remaining` a
 | Key | Default | Meaning |
 |---|---|---|
 | `trade_pages_stored` | 3.0 | Pages of `trade_page_size` cards stored per `trade_page_store` row (90 cards at the defaults). Clamped to 1–10. Scope §6.4: pages 2 and 3 are one round trip away; tunable within the §7 budget. |
-| `trade_prefetch_remaining` | 30.0 | Served as `prefetch_remaining` on paged `/api/trades/generate` and `/api/trades/status` responses: the client requests the next page when this many ready cards remain (at least one full page ahead, U3). Clamped to 1–200; the code default is `trade_page_size`. trades-pm sets the final number. |
+| `trade_prefetch_remaining` | 50.0 | Served as `prefetch_remaining` on paged `/api/trades/generate` and `/api/trades/status` responses: the client requests the next page when this many ready cards remain (at least one full page ahead, U3). Seeded at 50 (was 30) per head-eng ruling 10's sizing: a 44-card swipe burst at 0.4 s/card plus the prefetch round trip must not reach the end of the buffer. Clamped to 1–200; with no `model_config` row the code default is also 50. |
 | `trade_prebuild_debounce_s` | 20.0 | `on_roster_change` page rebuilds: a key whose last roster-change rebuild was kicked less than this many seconds ago is skipped; its next serve sees the roster move and rebuilds. Clamped to 0–3600. |
 | `trade_page_store_evict_days` | 30.0 | The cleanup loop deletes rows whose `last_served_at` (or `built_at`, never served) is older than this. Clamped to 1–3650. |
 | `trade_page_store_max_bytes` | 262144000.0 | Then, while `SUM(stored_bytes)` exceeds this (250 MB, scope §7), it deletes least recently used rows. Both passes are bounded to 500 rows per tick. |
