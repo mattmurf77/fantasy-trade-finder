@@ -29,7 +29,6 @@ which is the safe direction.
 """
 
 import random
-from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine, insert
@@ -182,18 +181,19 @@ def _training_decks() -> list[LoggedDeck]:
 @pytest.fixture()
 def taste_db(monkeypatch):
     """In-memory DB for value_model's taste reads, with a taste vector for
-    USER so prefMatch is non-zero."""
+    USER so prefMatch is non-zero. "prior:" rows are never time-decayed, so
+    two scorers built a moment apart score bit-identically (swipe-learned
+    rows decay with the wall clock and can differ in the last bit)."""
     eng = create_engine("sqlite:///:memory:",
                         connect_args={"check_same_thread": False})
     metadata.create_all(eng)
     monkeypatch.setattr(db_module, "engine", eng)
-    now = datetime.now(timezone.utc).isoformat()
     with eng.begin() as conn:
         conn.execute(insert(user_taste_table), [
-            {"user_id": USER, "attr": a, "w_short": ws, "w_long": wl,
-             "updated_at": now}
-            for a, ws, wl in (("partner:opp1", 2.0, 3.0), ("recvpos:WR", 1.0, 0.5),
-                              ("shape:2x1", -1.0, -0.5), ("arch:value", 0.8, 1.2))
+            {"user_id": USER, "attr": f"prior:{a}", "w_short": 0.0, "w_long": wl,
+             "updated_at": "2026-10-01T00:00:00+00:00"}
+            for a, wl in (("partner:opp1", 3.0), ("recvpos:WR", 0.5),
+                          ("shape:2x1", -0.5), ("arch:value", 1.2))
         ])
     return eng
 

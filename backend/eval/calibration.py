@@ -10,7 +10,9 @@ Inclusion mirrors replay.py: viewed, not undo-reversed, valid propensity,
 scorer inputs present (features_json or the compact block) — calibration
 is about labels, and only viewed cards have honest labels (the F2 cascade
 rule). Unlike replay there are no ranks here, so a card with neither is
-excluded on its own as bad_features rather than taking its deck out.
+excluded on its own as bad_features rather than taking its deck out, and
+a card from a partial run (evidence_tier 'partial_run') is excluded on
+its own as partial_run.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from backend.eval.data import LoggedDeck, card_dict
+from backend.eval.data import PARTIAL_RUN_TIER, LoggedDeck, card_dict
 
 N_BINS = 10
 
@@ -74,17 +76,20 @@ def calibration_pairs(
     """Collect (predicted, outcome) pairs for a probability-emitting scorer
     over the included impressions. Returns (pairs, excluded_counts) — the
     per-card reasons and precedence of replay.py, with per-card
-    bad_features where replay excludes the deck (missing_scorer_inputs);
+    bad_features and partial_run where replay excludes the whole deck;
     printed by callers."""
     if not hasattr(scorer, "predict_proba"):
         raise ValueError(
             f"scorer {getattr(scorer, 'name', scorer)!r} has no predict_proba(); "
             "calibration applies only to probability-emitting scorers")
-    excluded = {"null_propensity": 0, "never_viewed": 0,
+    excluded = {"partial_run": 0, "null_propensity": 0, "never_viewed": 0,
                 "undo_reversed": 0, "bad_features": 0, "scorer_error": 0}
     pairs: list[tuple[float, float]] = []
     for deck in decks:
         for c in deck.cards:
+            if c.evidence_tier == PARTIAL_RUN_TIER:
+                excluded["partial_run"] += 1
+                continue
             if (c.propensity is None or not math.isfinite(c.propensity)
                     or c.propensity <= 0):
                 excluded["null_propensity"] += 1

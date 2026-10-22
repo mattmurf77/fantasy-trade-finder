@@ -51,6 +51,10 @@ Exclusions (counted per reason and printed — never silently dropped):
   never_viewed     no `viewed` outcome — served ≠ seen; the label would be
                    fabricated (the F2 cascade rule: unseen is not a negative)
   undo_reversed    an `undo` outcome exists — the disposition was retracted
+  partial_run      any card in the deck has evidence_tier 'partial_run' (a
+                   partial run's delivered rows, head-eng ruling 21) — the
+                   deck isn't a complete ranking, so it's out whole; decks
+                   in EvalRun.partial_run_decks
   missing_scorer_inputs
                    any card in the deck has neither features_json nor a
                    compact block (C7 (iv)) — whole deck out, counted by
@@ -76,6 +80,7 @@ import sys
 from dataclasses import dataclass, field
 
 from backend.eval.data import (
+    PARTIAL_RUN_TIER,
     LoggedDeck,
     card_dict,
     load_decks,
@@ -93,7 +98,7 @@ METRICS = ("like", "propose")
 
 EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
-    "missing_scorer_inputs", "scorer_error",
+    "partial_run", "missing_scorer_inputs", "scorer_error",
 )
 
 
@@ -119,6 +124,7 @@ class EvalRun:
     excluded: dict = field(default_factory=dict)   # reason -> count
     tilt_clipped: int = 0            # propensity tilts hit TILT_MIN/TILT_MAX
     missing_inputs_decks: int = 0    # decks excluded as missing_scorer_inputs
+    partial_run_decks: int = 0       # decks excluded as partial_run
     exposure_positions: int = 0      # positions with an estimated e(k)
     metrics: dict = field(default_factory=dict)    # metric -> MetricEstimate
     eval_start: str | None = None
@@ -242,6 +248,10 @@ def evaluate(
     # weights/rewards per deck (bootstrap clusters)
     clusters: list[dict] = []   # {"w": [...], "r_like": [...], "r_propose": [...]}
     for deck in eval_decks:
+        if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
+            run.excluded["partial_run"] += len(deck.cards)
+            run.partial_run_decks += 1
+            continue
         if any(c.features is None and c.features_compact is None
                for c in deck.cards):
             run.excluded["missing_scorer_inputs"] += len(deck.cards)
@@ -423,6 +433,7 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"- {run.scorer}: total={run.n_total} included={run.n_included} "
             f"excluded[{excl or 'none'}] "
             f"missing_inputs_decks={run.missing_inputs_decks} "
+            f"partial_run_decks={run.partial_run_decks} "
             f"tilt_clipped={run.tilt_clipped} "
             f"(bounds [{TILT_MIN}, {TILT_MAX}])"
         )

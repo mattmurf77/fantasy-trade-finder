@@ -86,6 +86,13 @@ def allowed_keys(scorer_name: str) -> frozenset:
             | PERMITTED_LOGGED[scorer_name])
 
 
+# What load_decks(project_features=True) keeps inside each parsed features
+# dict: every key some registered scorer may read (⊇ FROZEN_INPUT_KEYS ∪
+# IDENTITY_KEYS). value_model training reads the same keys (extract_features
+# and _inject), so a refit on projected decks is unchanged.
+PROJECTION_KEYS = frozenset().union(*(allowed_keys(n) for n in PERMITTED_LOGGED))
+
+
 # C8 whole-deck archive (models-lead-launch §DEC-2 C8): a fixed share of
 # served decks, chosen by deck and never by row, keeps full rows for every
 # card for ARCHIVE_DAYS, so a scorer needing a feature outside the compact

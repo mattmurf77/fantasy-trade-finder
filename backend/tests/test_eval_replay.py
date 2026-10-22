@@ -246,6 +246,29 @@ def test_deck_missing_scorer_inputs_is_excluded_whole_not_sunk():
     assert "missing_inputs_decks=1" in text
 
 
+def test_partial_run_deck_is_excluded_whole_and_persisted():
+    """head-eng ruling 21: a card with evidence_tier 'partial_run' takes its
+    whole deck out under partial_run, ahead of every other reason, counted
+    by cards and by decks, in the report and in the run record."""
+    from backend.eval.persistence import run_record
+    served = _iso(2)
+    cards = [_card("jp", p, viewed=True, liked=(p == 0), served_at=served)
+             for p in range(4)]
+    cards[3].evidence_tier = "partial_run"
+    cards[2].features = None           # would also be missing_scorer_inputs
+    spy = _SpyScorer()
+    run = evaluate(spy, [_deck("jp", cards, served_at=served)]
+                   + _uniform_decks(n_decks=2), ess_min=1, bootstrap=0, seed=0)
+    assert run.excluded["partial_run"] == 4 and run.partial_run_decks == 1
+    assert run.excluded["missing_scorer_inputs"] == 0 and run.missing_inputs_decks == 0
+    assert run.n_total == run.n_included + sum(run.excluded.values())
+    assert not any(i.startswith("jp_") for i in spy.scored)
+    text = render_report([run], run)
+    assert "partial_run=4" in text and "partial_run_decks=1" in text
+    record = run_record(run, run)
+    assert record["partial_run_decks"] == 1 and record["excluded"]["partial_run"] == 4
+
+
 def test_run_record_persists_missing_inputs_decks(tmp_path, monkeypatch):
     from backend.eval.persistence import append_run, load_runs, run_record
     monkeypatch.setenv("EVAL_RUNS_DIR", str(tmp_path / "runs"))
@@ -400,14 +423,16 @@ def test_load_decks_compact_block_absent_without_the_column(mem_engine):
 
 
 def test_load_decks_reads_features_compact_when_the_column_exists():
-    """C7 (i) scaffolding: the column does not exist yet, so this stands up
-    a copy of deck_impressions with it added and points the loader at it."""
+    """C7 (i) scaffolding: neither features_compact nor evidence_tier exists
+    yet, so this stands up a copy of deck_impressions with both added and
+    points the loader at it."""
     import backend.eval.data as data_mod
     from sqlalchemy import Column, MetaData, Text
 
     md = MetaData()
     imp = deck_impressions_table.to_metadata(md)
     imp.append_column(Column("features_compact", Text))
+    imp.append_column(Column("evidence_tier", Text))
     deck_outcomes_table.to_metadata(md)
     eng = create_engine("sqlite:///:memory:",
                         connect_args={"check_same_thread": False})
@@ -424,12 +449,14 @@ def test_load_decks_reads_features_compact_when_the_column_exists():
                 impression_id=f"i{pos}", user_id="u1", league_id="lg",
                 deck_job_id="j1", card_index=pos, features_json=features_json,
                 features_compact=compact_json, propensity=1.0,
+                evidence_tier=("partial_run" if pos == 1 else None),
                 shape_bucket="1x1", served_at=served))
     with patch.object(data_mod, "deck_impressions_table", imp):
         full, narrow, neither = load_decks(engine=eng)[0].cards
     assert full.features == {"shape": "1x1"} and full.features_compact == compact
     assert narrow.features is None and narrow.features_compact == compact
     assert neither.features is None and neither.features_compact is None
+    assert narrow.evidence_tier == "partial_run" and full.evidence_tier is None
     assert card_dict(full)["shape"] == "1x1"            # features win
     assert card_dict(narrow)["shape"] == "2x1"          # else the compact block
     assert card_dict(narrow)["shape_bucket"] == "1x1"   # logged fields still merged
