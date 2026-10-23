@@ -3,7 +3,7 @@
 **Date:** 2026-10-20
 **Entry point:** direct ask: `head-product` App Store launch-readiness review (2026-10-20), item P28; operator decisions BL-2 and P28
 **Builder:** `launch-onboarding-pm-1` for `onboarding-pm` (spec only; build later by `onboarding-eng` under `head-eng`)
-**Operator sign-off on waivers:** **pending.** Waivers W-P28-1 and W-P28-2 are listed in [prd.md §9](prd.md#9-decisions-needed) for `head-product` to surface before build.
+**Operator sign-off on waivers:** signed 2026-10-22 (operator, in head-product's session; quoted verbatim: "I sign off on #354's waivers."). Covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1 ([prd.md §9](prd.md#9-decisions-needed)). **W-BL10-2 has lapsed:** head-eng confirmed D-2's 403 and Product chose D-2(a), so a pytest is required.
 
 Requirements, copy inventory and acceptance criteria: [prd.md §5](prd.md#5-p28-contact-page).
 Ownership: `onboarding-pm` owns the product side of `web/contact.html` (P11) and the data-request
@@ -96,7 +96,7 @@ data-request lines. Visuals: `design-lead`.
 | `docs/glossary.md` (new domain term) | n/a | No new term. |
 | ADR or `DECISIONS.md` entry (non-obvious choice made) | **update at build** | Record that BL-2/P28 (2026-10-20) supersede web-parity waiver W2 "No support email" (`docs/plans/web-parity/scope.md:122`), and that the form stays one-way with no reply field by operator choice. Next ID = max `D-` + 1 at build time (D-208 is the max at `678834ab`). |
 | `web/CLAUDE.md` (page map) | **update at build** | The `contact.html` row (`web/CLAUDE.md:19`) says the form is "the only route a web visitor has to a deletion/access request"; after P28 the email is a second route. |
-| `docs/runbook.md` | **update at build** | Support-inbox operations: who reads `fleecedapp@gmail.com`, the response target, and the identity-verification step for emailed data requests (D-9, D-10). Owner `head-bizops`. |
+| `docs/runbook.md` | **update at build** | Support-inbox operations: who reads `fleecedapp@gmail.com`, the response target, and the identity-verification step for emailed data requests (D-9, D-10). Response targets per D-10 (`head-bizops`): general replies within 2 business days; data requests acknowledged within 2 business days and completed within 30 days (the 30 days pending `legal-lead`'s confirmation). Owner `head-bizops`. |
 | `docs/plans/web-parity/scope.md` | n/a | Historical; W2's supersession is recorded in DECISIONS, not by editing the old plan. |
 
 ## 5. Ship gate declaration
@@ -112,6 +112,6 @@ data-request lines. Visuals: `design-lead`.
 - **TestFlight verification:** none (web-only; waived in §3).
 - **Copy gate:** `marketing-lead`'s copy in place; `legal-lead` has approved the data-request lines
   (C3-C5 in [prd.md §5.4](prd.md#54-copy-inventory-copy-marketing-lead-data-request-lines-reviewed-by-legal-lead)).
-- **Ops gate:** someone owns the inbox before the address is published (D-10).
+- **Ops gate:** someone owns the inbox before the address is published (D-10). **Satisfied:** the operator monitors `fleecedapp@gmail.com` (D-10, `head-bizops`).
 - Express lane declared by the operator? **No.** Full gates apply. P28 touches no schema, API
   contract, flag or analytics event, so the operator could declare express; no agent may.

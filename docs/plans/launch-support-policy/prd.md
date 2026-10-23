@@ -519,6 +519,18 @@ For `head-product`, with a recommendation each.
 | D-13 | **Announcing the policy change in the app** (privacy §9 promises it, `:273-274`). | In-app notice, what's-new, or none (if `legal-lead` deems changes non-material). | `legal-lead` rules; any in-app surface is a separate spec. | legal-lead, head-product |
 | D-14 | **App Store Connect:** Support URL = `contact.html`; whether the listing also shows the address. | — | Support URL = contact page; address per `app-manager`. | app-manager |
 
+**Decisions recorded (as of 2026-10-23)**
+
+- **Gate 1:** `head-product` accepted this PRD and all three scope blocks at `f9762d77` on 2026-10-20 (P35).
+- **Operator waiver sign-off, 2026-10-22,** given in `head-product`'s session, verbatim: "I sign off on #354's waivers." It covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1.
+- **D-1 (b)** (one `retrySync()` after the FAB's `hydrate()`): chosen by `head-product`, agreed by `head-eng`.
+- **D-2 (a)** (exempt `POST /api/feedback` from `@_gate_unverified_write`; attribute verified sessions, take the rest anonymously): `head-eng` confirmed the 403; `head-product` chose (a). **W-BL10-2 has lapsed**, so a pytest is required, and so are the `docs/api-reference.md` rows named in D-2 (`:146`, `:984`). It is an API contract change, so full gates apply.
+- **D-3:** the inbox row goes to Settings → Help & about, decided by `onboarding-pm`; pending `ux-lead`'s review.
+- **D-4:** unflagged, chosen by `head-product`.
+- **D-5** (retire the FAB's App Store build exclusion): chosen by `head-product`, agreed by `head-eng`.
+- **D-10,** decided by `head-bizops`: the operator monitors fleecedapp@gmail.com; general replies go out within 2 business days; data requests are acknowledged within 2 business days and completed within 30 days (the 30 days is pending `legal-lead`'s confirmation). **Gap SUP-M7:** there is no alert for in-app feedback.
+- **Still open:** D-6 and D-7 with `ux-lead`; D-8, D-9, D-11, D-12 and D-13 with `legal-lead` via `head-bizops`; D-14 with `app-manager`.
+
 **Waivers** (surfaced here per the feature-scope rule; each is restated with its reason in its
 scope block):
 
@@ -527,7 +539,7 @@ scope block):
 | W-P28-1 | P28 §1 analytics | No new events. The form already posts through `/api/feedback`, which fires `feedback_submitted` for signed-in senders; mailto taps aren't tracked because the operator's P28 decision minimizes collection on this page. |
 | W-P28-2 | P28 §3 mobile guard, pytest, TestFlight | Web-only change; no mobile or backend code. Evidence is the web checker + a manual web check. |
 | W-BL10-1 | BL-10 §1 analytics | No new events; `feedback_submitted` is unchanged. |
-| W-BL10-2 | BL-10 §3 pytest | No backend change, **unless D-2(a) is accepted**: then a pytest is required and this waiver lapses. |
+| W-BL10-2 | BL-10 §3 pytest | No backend change, **unless D-2(a) is accepted**: then a pytest is required and this waiver lapses. **Lapsed (D-2(a) chosen; head-eng confirmed the 403).** |
 | W-M7-1 | M7 §1 analytics | Static legal pages; no events. |
 | W-M7-2 | M7 §3 mobile guard, pytest, TestFlight checklist | Web-only text; the in-app rows open the web URLs, which AC7's manual step covers. |
 | W-ALL-1 | All §2 flags | None added. Doc/legal copy ships unflagged per ADR-008 (`:21-23`); the row move per D-4. |

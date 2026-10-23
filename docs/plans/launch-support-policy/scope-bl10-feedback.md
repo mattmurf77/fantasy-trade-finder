@@ -3,7 +3,7 @@
 **Date:** 2026-10-20
 **Entry point:** direct ask: `head-product` App Store launch-readiness review (2026-10-20), item BL-10; operator decisions BL-10 ("in app feedback stays") and BL-2 (support address)
 **Builder:** `launch-onboarding-pm-1` for `onboarding-pm` (spec only; build later by `onboarding-eng` under `head-eng`, who owns `FeedbackFAB` and `RootNav`)
-**Operator sign-off on waivers:** **pending.** Waivers W-BL10-1 and W-BL10-2 are listed in [prd.md §9](prd.md#9-decisions-needed) for `head-product` to surface before build.
+**Operator sign-off on waivers:** signed 2026-10-22 (operator, in head-product's session; quoted verbatim: "I sign off on #354's waivers."). Covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1 ([prd.md §9](prd.md#9-decisions-needed)). **W-BL10-2 has lapsed:** head-eng confirmed D-2's 403 and Product chose D-2(a), so a pytest is required.
 
 Requirements, verified facts, copy inventory (F1-F18) and acceptance criteria:
 [prd.md §6](prd.md#6-bl-10-in-app-feedback-for-the-public). Ownership: the Settings row placement is
@@ -96,10 +96,9 @@ D-056: no simulator, no Maestro, no screen captures, for any part of this change
     `settings.feedback-inbox`) where its conventions put a newly added ID.
   - `mobile/tests/check-feedback-capture.js` pins the save path and the 8000-character cap; it pins
     no copy, so the F1 rewrite shouldn't trip it. Re-run it.
-- [ ] **Unit tests:** WAIVED unless D-2(a) is accepted (Waiver **W-BL10-2**). No backend change
-  otherwise. If D-2(a) is accepted, add a pytest: an unverified session's `POST /api/feedback`
-  returns 201 and stores `user_id` NULL (or whatever attribution `head-eng` specifies), and a
-  verified session's note stays attributed.
+- [ ] **Unit tests:** **REQUIRED** (W-BL10-2 lapsed; D-2(a) chosen). Add a pytest: `POST /api/feedback`
+  from an unverified session succeeds (201) and is stored unattributed (`user_id` NULL, or whatever
+  attribution `head-eng` specifies), while a verified session's note stays attributed.
 - [x] **Code-walk proof** (file:line at `678834ab`, the behavior this change starts from; the
   builder appends the same walk against the built files):
   1. **Mount.** The global FAB mounts inside `Main` at `mobile/src/navigation/RootNav.tsx:633`,
@@ -153,7 +152,7 @@ D-056: no simulator, no Maestro, no screen captures, for any part of this change
   9. Deep link `settings/testing` (if D-7 gates it). Expected: no rows are shown.
   10. **Regression, tester device:** on a device with `testing.stage_users` on, Settings shows the
       Testing row and "Test stages"; the feedback row is under Help & about, not under Testing.
-- [ ] **WAIVED because:** — (nothing else waived beyond W-BL10-1 and W-BL10-2)
+- [ ] **WAIVED because:** — (nothing else waived; only W-BL10-1 remains waived, W-BL10-2 has lapsed)
 - `testID`s added/renamed: **added** one, the new About row (proposed `settings.feedback-inbox`).
   **Renamed: none.** All IDs in pin 6 stay, because `mobile/scripts/testid-lint.sh` (kept by D-056)
   cross-checks them against the historical flow files under `mobile/.maestro/`, which D-056 keeps
@@ -163,7 +162,7 @@ D-056: no simulator, no Maestro, no screen captures, for any part of this change
 
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
-| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | n/a, **unless D-2(a)** | No route change. If D-2(a) ships, two places change: the verified-write gate list, which names `feedback` today (`docs/api-reference.md:146`), and the `POST /api/feedback` row (`:984`). |
+| `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **update at build (D-2(a))** | D-2(a) is chosen, so the `POST /api/feedback` contract changes (no route is added or removed). Two places change, the rows [prd.md §9](prd.md#9-decisions-needed) D-2 names: the verified-write gate list, which names `feedback` today (`docs/api-reference.md:146`), and the `POST /api/feedback` row (`:984`). |
 | `docs/data-dictionary.md` | n/a | No schema change. |
 | `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | n/a | No convention shifts. The one-constant-per-client rule for the support address is recorded in cross-client-invariants, its natural home. |
 | `docs/architecture.md` (module wiring / data flow changed) | n/a | No module or data-flow change. |

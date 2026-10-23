@@ -3,7 +3,7 @@
 **Date:** 2026-10-20
 **Entry point:** direct ask: `head-product` App Store launch-readiness review (2026-10-20), item M7; operator decision BL-2 (support address)
 **Builder:** `launch-onboarding-pm-1` for `onboarding-pm` (spec only). Build later: `onboarding-eng` pastes `legal-lead`'s final text, nothing else.
-**Operator sign-off on waivers:** **pending.** Waivers W-M7-1 and W-M7-2 are listed in [prd.md §9](prd.md#9-decisions-needed) for `head-product` to surface before build.
+**Operator sign-off on waivers:** signed 2026-10-22 (operator, in head-product's session; quoted verbatim: "I sign off on #354's waivers."). Covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1 ([prd.md §9](prd.md#9-decisions-needed)). **W-BL10-2 has lapsed:** head-eng confirmed D-2's 403 and Product chose D-2(a), so a pytest is required.
 
 Requirements, the policy claims checklist, the collection-surface list, the wording inventory and
 the terms topics: [prd.md §7](prd.md#7-m7-privacy-and-terms-pages). Ownership: `onboarding-pm` owns the
