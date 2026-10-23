@@ -19,13 +19,16 @@
 //   2. TradesScreen's shareLikedTrade gets the matched-trade link from
 //      resolveTradeShareUrl (utils/shareLinks.ts → api/share.ts →
 //      POST /api/share/trade) and keeps the package rung as its fallback.
+//      The share sheet waits on that mint, so resolveTradeShareUrl must give
+//      up after TRADE_SHARE_MINT_TIMEOUT_MS (2 s) and return null — EXECUTED:
+//      the function is lifted out and run against a mint that never answers.
 //   3. rewriteUniversalPath maps /s/trade/<anything> to app/matches with NO id
 //      segment (the token is not a match id), keeping the query suffix.
 //      EXECUTED: the function is lifted out of deepLinks.ts and run.
 //
-// HONEST LABEL: 1 and 2 prove the absence/presence of exact wirings by
-// pattern, not runtime behaviour; 3 is behavioural. Runtime proof is the
-// operator TestFlight checklist in docs/plans/share-link-tokens/scope.md.
+// HONEST LABEL: 1 and 2a-2g prove the absence/presence of exact wirings by
+// pattern, not runtime behaviour; 2h-2j and 3 are behavioural. Runtime proof
+// is the operator TestFlight checklist in docs/plans/share-link-tokens/scope.md.
 //
 // Run: node tests/check-share-trade-token.js   (npm run test:share-trade-token)
 
@@ -125,6 +128,49 @@ function braceBody(src, from) {
     '2g. api/share.ts posts {match_id} to /api/share/trade');
 }
 
+// ── 2h-2j. The mint wait is bounded (executed) ───────────────────────────
+// shareLikedTrade awaits the mint BEFORE opening the share sheet, so a hung
+// request would freeze the tap. The function is lifted out of shareLinks.ts
+// and run with its three free names injected.
+async function checkMintIsBounded() {
+  const SRC = stripComments(read('mobile/src/utils/shareLinks.ts'));
+  const c = SRC.match(/export const TRADE_SHARE_MINT_TIMEOUT_MS = ([0-9_]+);/);
+  assert(c !== null && Number(c[1].replace(/_/g, '')) === 2000,
+    '2h. TRADE_SHARE_MINT_TIMEOUT_MS is 2000 ms', c ? c[1] : 'constant not found');
+  const at = SRC.indexOf('export async function resolveTradeShareUrl(');
+  const body = at === -1 ? null : braceBody(SRC, SRC.indexOf(')', at));
+  let make = null;
+  try {
+    // eslint-disable-next-line no-new-func
+    make = new Function('createTradeShare', 'getBaseUrl', 'TRADE_SHARE_MINT_TIMEOUT_MS',
+      `return async function resolveTradeShareUrl(matchId) ${body};`);
+  } catch (e) {
+    fail('2i. resolveTradeShareUrl body runs as plain JS', String(e));
+    return;
+  }
+  const base = () => 'https://base.example';
+  // Answers only when its signal aborts — what apiRequest does on a caller abort.
+  let seen = null;
+  const hung = (id, signal) => new Promise((resolve) => {
+    seen = signal || null;
+    if (signal) signal.addEventListener('abort', () => resolve({ outcome: 'failed' }));
+  });
+  const got = await Promise.race([
+    make(hung, base, 50)('42'),
+    new Promise((r) => setTimeout(() => r('STILL WAITING after 1 s'), 1000)),
+  ]);
+  assert(got === null && seen !== null && seen.aborted,
+    '2i. a mint that never answers is aborted at the timeout and resolves null (→ package rung)',
+    `got ${String(got)}; signal ${seen ? (seen.aborted ? 'aborted' : 'not aborted') : 'never passed'}`);
+  const hit = await make(async (id) => ({ outcome: 'ok', token: 't', url: `/s/trade/tok${id}`,
+    og_image: '' }), base, 50)('7');
+  const refused = await make(async () => ({ outcome: 'rate_limited' }), base, 50)('7');
+  const threw = await make(async () => { throw new Error('boom'); }, base, 50)('7');
+  assert(hit === 'https://base.example/s/trade/tok7' && refused === null && threw === null,
+    '2j. a minted link is <base> + the server url; every failure is null, never a throw',
+    `ok=${hit} refused=${refused} threw=${threw}`);
+}
+
 // ── 3. rewriteUniversalPath: /s/trade/* → app/matches, no id ─────────────
 {
   const DL = read('mobile/src/utils/deepLinks.ts');
@@ -159,5 +205,9 @@ function braceBody(src, from) {
   }
 }
 
-console.log(failures ? `\n${failures} FAILURE(S) of ${checks}` : `\nALL CHECKS PASSED (${checks})`);
-process.exit(failures ? 1 : 0);
+checkMintIsBounded()
+  .catch((e) => fail('2h-2j. bounded-mint check crashed', String(e && e.stack ? e.stack : e)))
+  .then(() => {
+    console.log(failures ? `\n${failures} FAILURE(S) of ${checks}` : `\nALL CHECKS PASSED (${checks})`);
+    process.exit(failures ? 1 : 0);
+  });

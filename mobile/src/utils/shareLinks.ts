@@ -159,6 +159,9 @@ export async function resolveShareUrl(args: ResolveArgs): Promise<ResolvedShareU
   }
 }
 
+/** How long a share tap waits for the trade-token mint before falling back. */
+export const TRADE_SHARE_MINT_TIMEOUT_MS = 2_000;
+
 /** A mutual match's share landing (build O8): <base>/s/trade/<token>, where
  *  the token is minted server-side by POST /api/share/trade. The client
  *  never builds /s/trade/ from a match id — that id is sequential, and the
@@ -167,17 +170,24 @@ export async function resolveShareUrl(args: ResolveArgs): Promise<ResolvedShareU
  *  Returns the absolute URL WITHOUT a ?ref= suffix (the caller appends its
  *  own), or null on ANY failure so the caller can fall back to the package
  *  rung. NEVER throws. No client cache: the server mint is idempotent per
- *  (match, sharer), so a repeat share gets the same link back. */
+ *  (match, sharer), so a repeat share gets the same link back.
+ *
+ *  Bounded: the share sheet waits on this, so the mint is aborted after
+ *  TRADE_SHARE_MINT_TIMEOUT_MS and the share falls back instead of hanging
+ *  (apiRequest's own cap is 15 s; the package ladder sets no shorter one). */
 export async function resolveTradeShareUrl(
   matchId: string | number,
-  signal?: AbortSignal,
 ): Promise<string | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TRADE_SHARE_MINT_TIMEOUT_MS);
   try {
-    const res = await createTradeShare(matchId, signal);
+    const res = await createTradeShare(matchId, controller.signal);
     if (res.outcome !== 'ok') return null;
     return `${getBaseUrl()}${res.url}`;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
