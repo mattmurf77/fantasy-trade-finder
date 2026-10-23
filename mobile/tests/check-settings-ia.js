@@ -113,7 +113,9 @@ const ROWS = [
   { row: 'Privacy Policy',                marker: '>Privacy Policy<',                   owner: 'AboutSection.tsx' },
   { row: 'Terms of Use',                  marker: '>Terms of Use<',                     owner: 'AboutSection.tsx' },
   { row: 'Version + build',               marker: 'settings.version',                   owner: 'AboutSection.tsx', new: true },
-  { row: 'Test feedback',                 marker: '>Test feedback<',                    owner: 'TestingSection.tsx' },
+  // #354 BL-10 (D-3): the feedback inbox row moved Testing → Help & about and
+  // was retitled "Your feedback"; its new testID is the marker.
+  { row: 'Your feedback (inbox)',         marker: 'settings.feedback-inbox',            owner: 'AboutSection.tsx', moved: 'Testing' },
   { row: 'Test stages',                   marker: 'settings.test-stages',               owner: 'TestingSection.tsx' },
 ];
 

@@ -80,6 +80,9 @@ const NEW = [
   { id: 'settings.hub.notifications',    file: 'SettingsHubScreen.tsx',  why: 'hub group row' },
   { id: 'settings.hub.account',          file: 'SettingsHubScreen.tsx',  why: 'hub group row' },
   { id: 'settings.hub.about',            file: 'SettingsHubScreen.tsx',  why: 'hub group row' },
+  // Added later by #354 BL-10 (D-3), not this plan: the feedback inbox row's
+  // public home on Help & about (it had no testID while it sat under Testing).
+  { id: 'settings.feedback-inbox',       file: 'AboutSection.tsx',       why: '#354 BL-10 feedback inbox row on Help & about' },
 ];
 
 // The Testing hub row is the seventh group row but is gated

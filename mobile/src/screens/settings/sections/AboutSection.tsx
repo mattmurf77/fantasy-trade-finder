@@ -1,4 +1,5 @@
-// Settings § About — Help & FAQ, Privacy Policy, Terms of Use, Version.
+// Settings § About — Help & FAQ, Your feedback, Privacy Policy, Terms of Use,
+// Version.
 //
 // Lifted verbatim from SettingsScreen.tsx (origin/main) `aboutSection` at
 // :1416-1458, plus:
@@ -23,12 +24,15 @@
 // No queries, no loading state, so there is nothing to place a per-section
 // placeholder against.
 //
-// Note: this module takes no `SettingsSectionProps` — every row opens an
-// external URL via Linking, so it needs neither a notice surface nor in-app
-// navigation.
+// Note: this module takes no `SettingsSectionProps`. Every row but one opens
+// an external URL via Linking; the "Your feedback" row (#354 BL-10, D-3:
+// moved here from the tester-only TestingSection so every user can reach the
+// inbox) is the one in-app push, and it reads `useNavigation()` itself so the
+// host page needs no notice surface or navigate prop for a single row.
 
 import React from 'react';
 import { View, Text, Pressable, Linking } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
 
 import { chalk, type } from '../../../theme/chalkline';
@@ -49,6 +53,7 @@ function appVersionLabel(): string | null {
 }
 
 export default function AboutSection() {
+  const navigation = useNavigation<any>();
   const helpSurfaceEnabled = useFlag('ux.help_surface');
   const versionLabel = appVersionLabel();
 
@@ -76,6 +81,21 @@ export default function AboutSection() {
           <Icon name="chevron-right" color={chalk.dim} size={16} />
         </Pressable>
       ) : null}
+      {/* #354 BL-10 (D-3): public home of the feedback inbox. Unflagged (D-4). */}
+      <Pressable
+        testID="settings.feedback-inbox"
+        accessibilityRole="button"
+        onPress={() => navigation.navigate('FeedbackInbox')}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Your feedback</Text>
+          <Text style={styles.rowSub}>
+            Review and share notes you captured with the floating button.
+          </Text>
+        </View>
+        <Icon name="chevron-right" color={chalk.dim} size={16} />
+      </Pressable>
       <Pressable
         accessibilityRole="link"
         accessibilityHint="Opens in your browser"

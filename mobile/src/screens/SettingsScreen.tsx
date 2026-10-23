@@ -1020,19 +1020,6 @@ export default function SettingsScreen({ navigation }: any) {
       <View style={styles.section}>
         <TickLabel>Testing</TickLabel>
       </View>
-      <Pressable
-        accessibilityRole="button"
-        onPress={() => navigateFromSettings('FeedbackInbox')}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Test feedback</Text>
-          <Text style={styles.rowSub}>
-            Review and share notes you captured with the floating button.
-          </Text>
-        </View>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
       {stageUsersEnabled ? (
         <Pressable
           testID="settings.test-stages"
@@ -1412,6 +1399,22 @@ export default function SettingsScreen({ navigation }: any) {
           <Icon name="chevron-right" color={chalk.dim} size={16} />
         </Pressable>
       ) : null}
+      {/* #354 BL-10 (D-3): public home of the feedback inbox, mirrored from
+          settings/sections/AboutSection.tsx for the hub-off rollback. */}
+      <Pressable
+        testID="settings.feedback-inbox"
+        accessibilityRole="button"
+        onPress={() => navigateFromSettings('FeedbackInbox')}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Your feedback</Text>
+          <Text style={styles.rowSub}>
+            Review and share notes you captured with the floating button.
+          </Text>
+        </View>
+        <Icon name="chevron-right" color={chalk.dim} size={16} />
+      </Pressable>
       <Pressable
         accessibilityRole="link"
         accessibilityHint="Opens in your browser"
