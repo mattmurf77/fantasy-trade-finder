@@ -8,7 +8,7 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
 -->
 
 **Date:** 2026-10-15
-**Revised:** 2026-10-23 (`growth-pm`): launch-day copy keyed to the `IOS_INSTALL_URL` host (PRD FR-7, AC-7g; marketing-lead copy batch, 2026-10-23), the `/s/*` href `/?share=<kind>` (AC-25, `head-eng`'s C5), FR-8's league rule, and the launch slice for Wed 2026-11-18 (PRD §12)
+**Revised:** 2026-10-23 (`growth-pm`): launch-day copy keyed to the `IOS_INSTALL_URL` host (PRD FR-7, AC-7g; marketing-lead copy batch, 2026-10-23), the `/s/*` href `/?share=<kind>` (AC-25, `head-eng`'s C5), FR-8's league rule, and the launch slice for Wed 2026-11-18 (PRD §12). Revised again 2026-10-23 (`growth-pm`): `marketing-lead`'s referral approval package is vendored as [marketing-referral-approval.md](marketing-referral-approval.md), the launch-slice authority for referral wording (`head-product`, 2026-10-23); its [§2](marketing-referral-approval.md#2-operator-approval) (26 entries) was approved by the operator 2026-10-23 (PRD D-5), so the tests and checklist below assert those words; one invite line with no league name (PRD FR-3, package §5 D6); its [§4](marketing-referral-approval.md#4-later-slice-not-in-the-11-06-binary-not-in-this-approval) later slice is listed in PRD §12
 **Entry point:** direct ask: operator 2026-10-15 via `head-product` ("Growth loops. Need to be built and need to work. Referral growth loop is the primary one, …"); growth backlog GB-01
 **Builder:** TBD — `head-eng` allocates (likely `engagement-eng` backend + invite routes, `onboarding-eng` for web/LeagueJoin/SignIn). **First build slice handed to `head-eng` by `head-product` 2026-10-15** (PRD §12: FR-7, FR-8, FR-9, FR-25 the `/s/*` CTA target, §8.2, `IOS_INSTALL_URL` as config), after the operator's ruling "Ok. start building D1 and D3" (PRD D-1 = option A; D-3 = the operator creates the public TestFlight link)
 **Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3). **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on the build branch before ship.** `ux-lead`: approve with changes (R-F1…R-F8, PRD J1/J2/J4, FR-1, FR-7, FR-19, D-9, D-16; checklist steps below). `analytics-lead`: §1 granted with C1–C9 and R1–R3 (analytics addendum, PR #350, `docs/business/analytics/2026-10-15-referral-loop-events.md`). `design-lead`: confirmed R-F3 and R-F1's A1 step layout 2026-10-15 (PRD D-16 resolved; specs in FR-7, AC-7c, AC-7f; checked in `/design-review` on the build branch)
@@ -154,11 +154,12 @@ D-056: no Maestro, no simulator, no captures.
     and no other query param; the `/go/ios` text link "On an iPad? Get the iOS beta, then
     tap the invite again." inside that block; the line "Have the Fleeced extension for
     Chrome or Edge?" with "Open the web app" as a Secondary (outlined) button after it; no
-    ice-filled button; R-F3, D-16; proposed strings until the operator approves the words,
+    ice-filled button; R-F3, D-16; the operator-approved strings of
+    [marketing-referral-approval.md §2](marketing-referral-approval.md#2-operator-approval),
     PRD D-5), the desktop-unset state with the web app primary and no QR or iOS link,
     and no `dtf://` link in any variant (PRD AC-7c); the desktop-set QR itself (PRD AC-7f):
-    an inline `<svg>` in the response with an accessible name (e.g. "QR code: opens this
-    invite on your iPhone"), no `<img>`, `<script>` or CSS URL for it and no third-party
+    an inline `<svg>` in the response with the accessible name "QR code: opens this
+    invite on your iPhone" (`gp.join.desktop.qr_a11y`), no `<img>`, `<script>` or CSS URL for it and no third-party
     host in the page other than Google Fonts (no external QR request), the encoder called
     with error correction M and a 4-module quiet zone, the SVG with
     `shape-rendering="crispEdges"`, sized (modules + 8) × a whole-pixel module of ≥4 CSS px
@@ -188,8 +189,8 @@ D-056: no Maestro, no simulator, no captures.
     "Sign-in uses the Fleeced extension for Chrome or Edge."; Android UA: no CTA link, note
     "Available on iPhone and desktop web for now.". Every case: the response is not `public`-cacheable, or carries `Vary:
     User-Agent`; `og:*` tags unchanged; no `dtf://` or user-supplied target; no QR code on
-    any variant (the `/s/*` QR is GB-02's rebuild, PRD FR-25). Strings are
-    `marketing-lead`'s proposals until the operator approves the words (PRD D-5).
+    any variant (the `/s/*` QR is GB-02's rebuild, PRD FR-25). Strings are the
+    operator-approved ones (package §2, PRD D-5).
   - **Install host rule (PRD AC-7g)**, in `test_join_landing.py` and
     `test_share_landing_cta.py`: the label pair is chosen by the `IOS_INSTALL_URL` host. An
     `https://testflight.apple.com/…` value gives "Get the iOS beta" / "Installs through
@@ -197,7 +198,7 @@ D-056: no Maestro, no simulator, no captures.
     value gives "Get the iPhone app" / "Opens the App Store." (and the iPad line's store
     form); any other host, or a non-`https://` value, renders the unset behaviour on every
     user agent (honest notes, no QR or iOS link on desktop, `/go/ios` 404, the `/s/*` unset
-    note) and logs one warning per process. Proposed strings until D-5.
+    note) and logs one warning per process. Approved strings (package §2, PRD D-5).
   - `backend/tests/test_referral_attribution.py` (new): token credit for Sleeper, ESPN and MFL
     invitees; first session in a different league with verified membership; `unknown`,
     `expired`, `not_member` misses; group-chat second and third joiners → sibling rows;
@@ -249,8 +250,9 @@ D-056: no Maestro, no simulator, no captures.
   4b, 5b, 7b, 7c and 11b are `ux-lead`'s (PR #348 review); its 11c (iPad) is merged into 11b
   and its 13b into step 13. Step 15b checks `design-lead`'s desktop QR specs (PRD D-16).
   1. **Inviter mint.** On device A (signed in, Sleeper league L), tap Invite on League Home.
-     Expected: the sheet opens within ~2 s; the message says "Fleeced" and the link has
-     `t=` and **no `ref=`**.
+     Expected: the sheet opens within ~2 s; the message is "Join me on Fleeced to find
+     trades we both like → " and the link, with **no league name** (PRD FR-3), and the link
+     has `t=` and **no `ref=`**.
   2. **Preview does not count as an open.** Send the link to yourself in Messages; wait for
      the preview to render; don't tap. Expected: the admin/readout shows `unfurled_at` set
      and `open_count` = 0 for that id.
@@ -261,7 +263,8 @@ D-056: no Maestro, no simulator, no captures.
   4. **Install + re-tap.** Install via TestFlight, return to Messages, tap the link again.
      Expected: the app opens on LeagueJoin → SignIn naming the inviter; after sign-in, L is
      pinned; device A's bell gets **one** "joined via your invite" row (title and body
-     different) and no second row for the same join.
+     different; the body reads "Once they rank, trades with them can use their board, not
+     just consensus.", PRD FR-18) and no second row for the same join.
      - **4b. Re-tap from chat apps** (R-F2). After installing, re-tap a fresh invite from the
        **Sleeper league chat**, then from one other chat app the league uses. Expected: the
        app opens on LeagueJoin. **Fail if the landing page loads again**; if it does, PRD

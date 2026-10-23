@@ -46,6 +46,13 @@
 > note and `gp.join.og_desc`; AC-25's href is `head-eng`'s contract C5, `/?share=<kind>`;
 > FR-8 stamps only a same-league row (F1's league rule); and §12's launch slice for the
 > Wed 2026-11-18 launch.
+> Revised again 2026-10-23 to fold `marketing-lead`'s referral approval package, vendored as
+> [marketing-referral-approval.md](marketing-referral-approval.md), now **the launch-slice
+> authority for referral wording** (`head-product`, 2026-10-23; `marketing-inputs.md` stays
+> the drafting record): drift D4–D6 (the iPad store line, the QR's accessible name, one
+> invite line with no league name), `gp.join.og_title`, `gp.join.valueprop`,
+> `gp.join.page_title` and the FR-18 body; the operator's approval of its §2 (26 entries,
+> D-5); and its §4 later-slice strings (§12).
 > **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on
 > the build branch before ship.**
 > Acceptance of the whole PRD (D-6) is still with `head-product`. Requirements only: **no
@@ -212,8 +219,13 @@ Each was considered and excluded; recorded so nobody reopens it mid-build.
 
 ## 4. User journeys
 
-Words in quotes are `marketing-lead`'s **proposed** strings ([marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer), keys named), pending
-operator approval of words via `marketing-lead`. None is final.
+Words in quotes are `marketing-lead`'s strings, keys named. The launch-slice strings are
+[marketing-referral-approval.md §2](marketing-referral-approval.md#2-operator-approval),
+**approved by the operator 2026-10-23** (D-5); that file is the launch-slice authority for
+referral wording. The later-slice strings
+([§4](marketing-referral-approval.md#4-later-slice-not-in-the-11-06-binary-not-in-this-approval),
+listed in §12; e.g. the activation row in step 5) are still **proposed**
+([marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer)), pending the operator.
 
 ### J1 — Inviter
 
@@ -223,11 +235,17 @@ operator approval of words via `marketing-lead`. None is final.
    If minting fails, the share proceeds with a league-only link (FR-1, FR-2). Repeat taps
    are ignored while the mint is pending: one tap, one mint, one share sheet (AC-1e).
 3. The share sheet opens with "Join me on Fleeced to find trades we both like → {url}"
-   (`gp.invite.msg`) and a link carrying `t=<invite_id>` and no username.
+   (`gp.invite.msg`) and a link carrying `t=<invite_id>` and no username. **One invite line
+   everywhere, with no league name, SMS included** ([package §5 D6](marketing-referral-approval.md#5-drift-marketings-file-vs-the-prd--91f1cc29-7)):
+   the web modal's default (`h2.web.default`) and its SMS channel (`h2.web.sms`) reuse it;
+   only the web X channel keeps its own line (FR-3). The league-name variant
+   `gp.invite.msg_league` is parked (later slice, §12).
 4. When a leaguemate joins: one bell row, "@{new_username} joined Fleeced via your invite"
-   (`gp.push.joined_inbox_title`) with a distinct body line (`gp.push.joined_inbox_body`).
+   (`gp.push.joined_inbox_title`) with a distinct body line, "Once they rank, trades with
+   them can use their board, not just consensus." (`gp.push.joined_inbox_body`, FR-18).
 5. When that leaguemate first likes or passes a trade (funnel stage 7, FR-17): a second
-   bell row, "@{new_username} weighed in on their first trade" (`gp.inbox.activated_title`).
+   bell row, "@{new_username} weighed in on their first trade" (`gp.inbox.activated_title`;
+   later slice, not in the operator's 2026-10-23 approval, §12).
    The tap opens Trades (FR-19), which lands on the hub home while `trades.finder_hub` is
    on, so the body (`gp.inbox.activated_body`) no longer promises the deck: "When they like
    a trade with you, it can show up with a "They're interested" tag." (proposed, FR-19;
@@ -238,8 +256,9 @@ operator approval of words via `marketing-lead`. None is final.
 
 - **iPhone (option A):** taps the link in Messages or a league chat → Safari → join landing:
   "{display name} invited you to {league}" (FR-7's headline ladder), then one task in two
-  numbered steps (`ux-lead` R-F1). Strings proposed by `marketing-lead` (D-5;
-  [marketing-inputs.md, lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15),
+  numbered steps (`ux-lead` R-F1). Strings by `marketing-lead`, approved by the operator
+  2026-10-23 ([package §2](marketing-referral-approval.md#2-operator-approval), D-5;
+  drafted in [marketing-inputs.md, lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15),
   "`ux-lead`'s review of PR #348"):
   - **Step 1**, headed "Install Fleeced" (`gp.join.step1`): "Get the iOS beta"
     (`gp.join.cta.A_ios`) to the public TestFlight link, with "Installs through Apple's
@@ -261,7 +280,8 @@ operator approval of words via `marketing-lead`. None is final.
     the landing instead of the app (`ux-lead` R-F2). Checklist step 4b tests it (scope §3).
     **Contingent:** if any in-app browser reopens the landing, A1 and A2 gain a line for
     installed users, "Have the app and still seeing this page? Open this link in Safari, or
-    tap it in Messages." (`gp.join.iab_wayout`). On A2 it replaces the note's last
+    tap it in Messages." (`gp.join.iab_wayout`; approved with package §2, but it ships only
+    if step 4b fails). On A2 it replaces the note's last
     sentence rather than adding a third. Step 4b tests both routes; if Safari doesn't hand
     off to the app, the line is cut to "…Tap the invite in Messages."
   - No re-tap → the app cold-opens without the link → the user signs in and picks the
@@ -285,8 +305,11 @@ operator approval of words via `marketing-lead`. None is final.
     invited league auto-selected → credited by token. An iPad can't scan its own screen, so
     the QR block keeps the iOS install link as a text link: "On an iPad? Get the iOS beta,
     then tap the invite again." (`gp.join.desktop.ipad`; on the App Store host, "On an iPad?
-    Get the iPhone app, then tap the invite again.", FR-7). Words `marketing-lead` (D-5,
-    proposed); layout confirmed by `design-lead` 2026-10-15 (D-16 resolved; specs in FR-7).
+    Get the iPhone app, then tap the invite again.", adopted verbatim, package §5 D4; FR-7).
+    The QR's accessible name is "QR code: opens this invite on your iPhone"
+    (`gp.join.desktop.qr_a11y`, adopted verbatim, D5). Words `marketing-lead`, approved by the
+    operator 2026-10-23 (D-5, package §2); layout confirmed by `design-lead` 2026-10-15 (D-16
+    resolved; specs in FR-7).
   - **`IOS_INSTALL_URL` unset:** "Open the web app" (`gp.join.cta.A_desktop`) with "Sign-in
     uses the Fleeced extension for Chrome or Edge." (`gp.join.cta.A_desktop_help`) →
     `/?league=&t=` → extension sign-in → invited league auto-selected → credited by token.
@@ -394,8 +417,16 @@ forever (D-028).
   the URLs in §7.2; no flag-on URL contains `ref=`.
 
 **FR-3 — Share text says Fleeced.** Mobile (`InviteLeaguematesBanner.tsx:132`) and web
-(`web/js/app.js:5834`) invite messages use `marketing-lead`'s approved string (proposed:
-`gp.invite.msg`, the version without the league name, which fits ~140 characters). Ships
+(`web/js/app.js:5834`) invite messages use `gp.invite.msg`, "Join me on Fleeced to find
+trades we both like → {url}" (49 characters + the URL, 133–141). **One invite line
+everywhere, with no league name, SMS included** ([package §5 D6](marketing-referral-approval.md#5-drift-marketings-file-vs-the-prd--91f1cc29-7)):
+the recipient is already in the league, and the landing names it. The web modal's default
+(`h2.web.default`, `app.js:5834`) and its SMS channel (`h2.web.sms`, `app.js:6082`) reuse
+`gp.invite.msg`. Only the web X channel (`h2.web.x`, `app.js:6086`) keeps its own line,
+"Finding dynasty trades in {leagueName} on Fleeced. Join me → {url}", which drops the
+unverified @FantasyTradeFinder handle. The league-name variant `gp.invite.msg_league` is
+parked (later slice, §12). Words approved by the operator 2026-10-23
+([package §2 H2](marketing-referral-approval.md#h2-link--share-text), D-5). Ships
 with the flag off too (copy is not attribution). This PRD renames only the strings its own
 FRs already touch: this invite share text, the inviter rows (FR-18, FR-19) and the join
 landing (FR-7). Every other old-name string, including the `league_member_unlocked_trades`
@@ -403,9 +434,11 @@ body (`S:10542-10543`), is `head-product`'s P9 copy-defect batch (`onboarding-pm
 this wave). Words from `marketing-lead`. Spelling: **"leaguemates"**, one word, in every
 proposed string (`marketing-lead`, the voice-spec form). The shipped banner's
 "league-mates" (`InviteLeaguematesBanner.tsx:163, :167, :176`) is respelled "leaguemates"
-**in this build** (`marketing-lead`'s `h1.banner.title` / `h1.banner.a11y`; spelling only, no
-other banner words change): FR-3 and AC-4b already touch that file, and P9 covers only
-strings outside the files this PRD touches.
+**in this build** (`marketing-lead`'s `h1.banner.title` / `h1.banner.a11y`, and
+`h1.banner.body` too, per [package §3](marketing-referral-approval.md#3-not-needing-approval-keys-only);
+spelling only, no other banner words change): FR-3 and AC-4b already touch that file, and P9
+covers only strings outside the files this PRD touches. The `h1.banner.body` rewrite is later
+slice (package §5 D7; §12).
 - AC-3: no invite share text contains "Dynasty Trade Finder" or "Fantasy Trade Finder"
   (structural guard).
 - AC-3b: `InviteLeaguematesBanner.tsx` contains no "league-mates" in any rendered string or
@@ -450,17 +483,27 @@ styling per `docs/design/design-system.md` (rules below); it does **not** reuse 
 off-Chalkline (999px pill, system/Roboto stack, 16px radius with shadow:
 `S:25493-25501`; [marketing-inputs.md §0.3](marketing-inputs.md#03-loop-defects-found-for-the-prds-fix-list) defect 11). `<meta name="robots" content="noindex">`; the path
 is **not** added to `robots.txt` (unfurlers that honour robots must still fetch it). Words:
-`gp.join.*` plus `marketing-lead`'s lab answers
-([addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)),
-all proposed, pending the operator's approval of words:
+`gp.join.*` as written in
+[marketing-referral-approval.md §2](marketing-referral-approval.md#2-operator-approval), the
+launch-slice authority for referral wording, approved by the operator 2026-10-23 (D-5);
+`marketing-lead`'s lab answers
+([addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15))
+are the drafting record:
 - **Headline:** "{display name} invited you to {league}" (supersedes `gp.join.headline`). Only
   a valid `t` names the inviter (§8.2), so the name is server-verified, never URL-supplied.
   Fallbacks, in order: "{display name} invited you to their league" (league name unknown) →
   "A leaguemate invited you to {league}" (no valid inviter) → "A leaguemate invited you"
   (neither).
-- **Value line:** `gp.join.valueprop`, not the lab's "Fleeced finds trades where both sides
+- **Value line:** `gp.join.valueprop`, "Rank your players, then see trades built to work for
+  both sides in {leagueName}." (fallback "…in your league."; intent form, the league name
+  last), not the lab's "Fleeced finds trades where both sides
   come out ahead." (`web/index.html:75`), which makes Fleeced the subject of an analysis verb
   (the name rule).
+- **Page title:** `gp.join.page_title`, "{leagueName} on Fleeced: Dynasty Trade Finder"
+  (fallback "Your league on Fleeced: Dynasty Trade Finder").
+- **og:title:** `gp.join.og_title`, "{leagueName}: trades built for both sides" (fallback
+  "Dynasty trades built for both sides"; intent form, to match the `og_desc` under it; ≤60
+  characters, so names up to 31) ([package §2 H3a](marketing-referral-approval.md#h3a-og-card-and-page-head)).
 - **og:description:** `gp.join.og_desc` is "Rank your players on Fleeced and see trades built
   to work for both sides. Works with Sleeper, ESPN and MFL." (= `m3.web.og_desc`,
   marketing-lead copy batch, 2026-10-23: outcome → intent; it replaces "…trades where both
@@ -480,7 +523,10 @@ all proposed, pending the operator's approval of words:
   "`IOS_INSTALL_URL` set" means an `https://` URL on one of those two hosts. The same rule
   picks FR-25's labels and the iPad line below.
 
-All of these strings are proposed, pending the operator's approval of words (D-5).
+All of these strings are approved by the operator 2026-10-23 as written (D-5;
+[package §2](marketing-referral-approval.md#2-operator-approval)). The host-keyed install
+labels (`m4.348.cta_ios`, `m4.348.cta_ios_help`) still flip only on 11-18, when
+`IOS_INSTALL_URL` becomes the App Store URL.
 
 With the flag off, the 302 is unchanged.
 
@@ -543,9 +589,10 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
       (`gp.join.desktop.ipad`; it carries the iPad's step 2), with a 44px hit target,
       because an iPad gets this layout and can't scan its own screen. On the App Store host
       it reads "On an iPad? Get the iPhone app, then tap the invite again." (`growth-pm`'s
-      placeholder, pending `marketing-lead`; D-5).
-    - **Accessibility.** The QR has an accessible name that says what it does, e.g. "QR code:
-      opens this invite on your iPhone" (words `marketing-lead`, D-5).
+      placeholder, adopted verbatim by `marketing-lead`, package §5 D4; approved, D-5).
+    - **Accessibility.** The QR's accessible name says what it does: "QR code: opens this
+      invite on your iPhone" (`gp.join.desktop.qr_a11y`; the PRD's example, adopted verbatim
+      by `marketing-lead`, package §5 D5; approved, D-5).
     - **Privacy: generated server-side, inline (`head-eng` / `engagement-eng`; AC-7f).** The
       landing's own response carries the QR as inline SVG. **Never call a third-party QR
       service**, from the server or the browser: the invite URL carries `t`, and `t` must not
@@ -563,14 +610,15 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
   - **Contingent (`ux-lead` R-F2):** if checklist step 4b finds that an in-app browser
     reopens the landing on a re-tap, A1 and A2 gain a line for installed users: "Have the
     app and still seeing this page? Open this link in Safari, or tap it in Messages."
-    (`gp.join.iab_wayout`, proposed). On A2 it replaces the note's last sentence rather
+    (`gp.join.iab_wayout`; approved 2026-10-23 with package §2, contingent: it ships only if
+    step 4b fails). On A2 it replaces the note's last sentence rather
     than adding a third. Step 4b tests both routes, including re-tapping from Safari; if
     Safari doesn't hand off to the app, the line is cut to "…Tap the invite in Messages."
   - Android, or iPhone with no `IOS_INSTALL_URL`: no button; the note in `--chalk` or
     `--chalk-dim`, never `--chalk-faint` (it's content).
   - iPhone with no `IOS_INSTALL_URL` (lab frame A2): the honest note only, "The iPhone beta
     isn't open to the public yet. Already have it? Tap the invite again, or rescan its
-    code." (proposed, revised by `marketing-lead` to match step 2; the Android note's "runs
+    code." (approved, D-5; revised by `marketing-lead` to match step 2; the Android note's "runs
     on iPhone" would be wrong on an iPhone). The re-tap is the invite link itself: a
     universal link that opens the installed app, not a `dtf://` button (§3 non-goal 13).
     This answers D-14's follow-up (the earlier "Open the invite in the app" named no
@@ -601,7 +649,7 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
     stays inside that box. PR #349's `brand.md` sanctions the invite OG link card as a ram
     placement. **Fallback: variant (i)**, wordmark only. Variant (iii), the league
     name as dynamic text, is Phase 2 (it needs a per-league render and inherits D-10).
-  - **The Archivo line** (proposed, `marketing-lead`): "Dynasty Trade Finder" may appear only
+  - **The Archivo line** (`marketing-lead`; the OG lockup, approved 2026-10-23, D-5): "Dynasty Trade Finder" may appear only
     locked up with the FLEECED wordmark, smaller than it, so the two read as D-057's full
     name; never standalone or on a line of its own (DLF has a product with that name). AC-3
     still bans the phrase in invite share text.
@@ -620,7 +668,7 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
   iPad text link inside the block; then the line "Have the Fleeced extension for Chrome or
   Edge?" with "Open the web app" as a Secondary (outlined) button; no ice-filled button;
   desktop UA with it unset → web-app CTA + extension line, no QR and no iOS link. The
-  test asserts the words the operator approves under D-5; until then, the proposed strings.
+  test asserts the words the operator approved under D-5 (2026-10-23, package §2).
   No state renders a `dtf://` link. The visual specs (marker type and colour, hairline, QR
   panel, quiet zone) are checked in `design-lead`'s `/design-review` on the build branch.
 - AC-7d: the brand on the page is "Fleeced" (D-057).
@@ -628,7 +676,8 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
   unknown or expired `t` renders no inviter name.
 - AC-7f (`head-eng` / `engagement-eng`; `design-lead`, 2026-10-15): with `IOS_INSTALL_URL`
   set, a desktop UA's response carries the QR as an inline `<svg>` generated server-side,
-  with an accessible name (e.g. "QR code: opens this invite on your iPhone"). The page
+  with the accessible name "QR code: opens this invite on your iPhone"
+  (`gp.join.desktop.qr_a11y`). The page
   requests no QR image or script from any host: no `<img>`, `<script>` or CSS URL for the QR,
   and the only third-party host the page references is Google Fonts. The encoder is called
   with error correction M and a 4-module border, and its payload is AC-7c's join URL. The
@@ -644,8 +693,8 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
   `https://apps.apple.com/…` value renders "Get the iPhone app" / "Opens the App Store." and
   the iPad line's store form; any other host, or a non-`https://` value, renders exactly
   AC-7c's unset states on every user agent, `/go/ios` 404s, and one warning is logged per
-  process, not per request. The same cases run on `/s/p` (FR-25, AC-25). Proposed strings
-  until the operator approves the words (D-5).
+  process, not per request. The same cases run on `/s/p` (FR-25, AC-25). The words are the
+  operator-approved ones (D-5, 2026-10-23, package §2).
 
 **FR-8 — Record the open server-side.** With the ledger flag on, **every** GET of the join
 path (landing or 302) classifies the user agent, with or without `t`, so opens of mint-failed
@@ -714,8 +763,8 @@ until a session-init body consumes it, like `consumeInvitedBy`, because
 returns `inviter_display_name` and `invite_status` (§8.3). SignIn's banner
 (`SignInScreen.tsx:205-235`) and the LeaguePicker companion state use it when the link has no
 `ref`; it is cached in the intent like `leagueName` (one call site, `SignInScreen.tsx:220`).
-- AC-11: a token-only link renders "{display name} invited you to {league}" (proposed,
-  `marketing-lead`), with FR-7's fallback ladder: "{display name} invited you to their
+- AC-11: a token-only link renders "{display name} invited you to {league}" (FR-7's
+  `gp.join.headline` ladder, approved 2026-10-23, D-5), with FR-7's fallback ladder: "{display name} invited you to their
   league" when the league name is unknown; an unknown id degrades to "A leaguemate invited you
   to {league}", or "A leaguemate invited you" when the league name is unknown too.
 
@@ -727,9 +776,10 @@ hard-coding `cta_url="/"` at `S:25548`, `:25563`, `:25669`) picks its CTA with t
 landing's device classifier (FR-7, §5 option A). The label and help line are **per device
 branch**, not one string per page: neither trade label reads true when the tap starts a
 TestFlight install. Today `_share_html` takes a single `cta_text` (`S:25465`, rendered at
-`S:25511`), so it must take a label (and help line or note) per branch instead. Strings, all
-**proposed** by `marketing-lead` and pending the operator's approval of words (D-5)
-([marketing-inputs.md, lab addendum, "Share landings `/s/*` under FR-25"](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)):
+`S:25511`), so it must take a label (and help line or note) per branch instead. Strings by
+`marketing-lead`, **approved by the operator 2026-10-23** (D-5;
+[package §2, "S share landings"](marketing-referral-approval.md#s-share-landings-fr-25-sp-strade);
+drafted in [marketing-inputs.md, lab addendum, "Share landings `/s/*` under FR-25"](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)):
 
 | Branch | CTA target | Label | Help line or note |
 |---|---|---|---|
@@ -778,7 +828,7 @@ shared trade, until GB-03 (`MatchesScreen` reads no match id).
     `og:*` tags are unchanged; no variant links `dtf://` or a user-supplied URL; no variant
     renders a QR code (that is GB-02's rebuild).
 
-  The test asserts the words the operator approves under D-5; until then, the proposed
+  The test asserts the words the operator approved under D-5 (2026-10-23, package §2): the
   strings above.
 
 ### H5 · Attribution
@@ -855,8 +905,13 @@ else changes.
 **FR-18 — Join row: correct, once, verified.** The `referral_joined` row fires only from a
 ledger attribution (token or league match), with the shipped name and a body that is not a
 copy of the title (today `push_notification` sets title = body, `database.py:12620-12634`,
-and the bell renders both, `TopBar.tsx:499-501`). Words: `gp.push.joined_inbox_title` /
-`_body` (proposed). Route unchanged (League, `deepLinks.ts:306-312`).
+and the bell renders both, `TopBar.tsx:499-501`). Words: the title
+`gp.push.joined_inbox_title`, "@{new_username} joined Fleeced via your invite" (a name-only
+change via `m3.push.joined`, [package §3](marketing-referral-approval.md#3-not-needing-approval-keys-only)),
+and the body `gp.push.joined_inbox_body`, "Once they rank, trades with them can use their
+board, not just consensus." (approved by the operator 2026-10-23,
+[package §2 H7](marketing-referral-approval.md#h7-notifications), D-5). Route unchanged
+(League, `deepLinks.ts:306-312`).
 - AC-18: the row's title and body differ; no row fires from a legacy `invited_by` alone.
 
 **FR-19 — Activation row.** New notification type `referral_activated` (inbox only; push is
@@ -875,7 +930,10 @@ Phase 2), posted to the inviter when FR-17 activates.
 - **Meta:** `new_user_id`, `new_username` and `league_id`, so the title can render the name
   (`referral_joined` already carries `new_user_id` and `new_username`, `S:22663-22667`).
 - **Words** (proposed by `marketing-lead`, pending the operator; [marketing-inputs.md §A](marketing-inputs.md#a-copy-table-mkt-writer) rows
-  `gp.inbox.activated_title` / `gp.inbox.activated_body`): title "@{new_username} weighed in
+  `gp.inbox.activated_title` / `gp.inbox.activated_body`; **later slice: not in the 11-06
+  binary and not in the operator's 2026-10-23 approval**,
+  [package §4](marketing-referral-approval.md#4-later-slice-not-in-the-11-06-binary-not-in-this-approval);
+  approved with that block only if `head-eng` lands the row by 11-16, §12): title "@{new_username} weighed in
   on their first trade"; body "When they like a trade with you, it can show up with a
   "They're interested" tag." (R-F6, D-5; lab addendum, "`ux-lead`'s review of PR #348").
   - The earlier body, "If they like a trade with you, it can surface in your deck.", is
@@ -1278,7 +1336,7 @@ bridge"):
 | Key | Kind | Default | Gates | Graduation | Rollback |
 |---|---|---|---|---|---|
 | `growth.referral_ledger` | **new flag** | false | Mint route (404 off); clients' use of the id (off ⇒ byte-identical links); open recording; §7.4–§7.8 attribution, activation and notification rules; impact v2 | Phase 0 done + 2 weeks with the §2.1 instrumentation target met | Flip off: mint 404s, clients emit today's links, attribution stops; rows stay |
-| `growth.join_landing` | **new flag (proposed here; `growth-pm` to accept, D-7)** | false | Landing page vs today's 302 on `/app/league/join/<id>`; also the `/s/*` device-aware CTA target (FR-25; accepted by `growth-pm` 2026-10-15, `head-eng` confirms in allocation) | Words approved (`marketing-lead`), `design-lead` `/design-review` verdict (§13), operator device pass on iPhone / desktop / Android | Flip off: today's 302, T4–T7 contract |
+| `growth.join_landing` | **new flag (proposed here; `growth-pm` to accept, D-7)** | false | Landing page vs today's 302 on `/app/league/join/<id>`; also the `/s/*` device-aware CTA target (FR-25; accepted by `growth-pm` 2026-10-15, `head-eng` confirms in allocation) | Words approved (`marketing-lead`; the launch slice approved by the operator 2026-10-23, D-5), `design-lead` `/design-review` verdict (§13), operator device pass on iPhone / desktop / Android | Flip off: today's 302, T4–T7 contract |
 | `growth.invite_join_link` | existing (`config/features.json:190`) | false | Emitter form only (unchanged meaning) | **Flip in Phase 1** after the #239 device checklist passes (`docs/feedback/items/239-invite-universal-links/status.md` § Operator actions 4; procedure `config-reference.md:669`) | Flip off (legacy form parsed forever) |
 | `growth.referral` | existing, **reserved** | false | Nothing in v1. Its declared meaning includes reward granting (`backend/feature_flags.py:268`) | Phase 3, gated on the operator approving the pricing memo (P20) | — |
 | `invite.k_factor_dashboard` | existing (`config/features.json:20`) | false | Impact payload v2 (FR-21). Key name kept to avoid churn; meaning updated in `config-reference.md` | Phase 2 surface | Flip off |
@@ -1294,7 +1352,7 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 - **Phase 0 (operator, no build):** run the #239 universal-link device checklist (D-2; the
   `app-manager` lead turns it into a device-ready version, its Run A); create the public
   TestFlight link (D-3; CTA option A is decided, D-1, 2026-10-15); approve words via
-  `marketing-lead`; put `gp.testflight.what_to_test` (J2) in the TestFlight build's "What to
+  `marketing-lead` (the launch slice approved 2026-10-23, D-5); put `gp.testflight.what_to_test` (J2) in the TestFlight build's "What to
   Test" text (D-2, `ux-lead` R-F1; `app-manager` drafts What to Test, the operator pastes it in
   App Store Connect). (The
   reward question is closed: reward-free v1, `head-product` P20.)
@@ -1324,7 +1382,7 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 | 2 | Ship clients (mobile build + web) | Flags off ⇒ links byte-identical (structural guard) |
 | 3 | Operator: #239 device checklist (tap a path-form link from Messages; app opens) | Pass recorded in `TEST_LEDGER.md` |
 | 4 | Flip `growth.referral_ledger` | Mint 201s live; first ids in the ledger |
-| 5 | Set `IOS_INSTALL_URL` (option A, D-1; the operator's link, D-3); flip `growth.join_landing` (the join landing and the `/s/*` CTA target, FR-25) | Words approved; `ux-lead` R-F1–R-F3 landed (step 1 / step 2, the "What to Test" re-tap line, the desktop QR-primary layout); `design-lead` `/design-review` verdict (`design-review.md`), including its check of R-F1's step list and R-F3's QR block against FR-7 (confirmed 2026-10-15, D-16); operator landing pass, including scope §3 steps 4b and 11b |
+| 5 | Set `IOS_INSTALL_URL` (option A, D-1; the operator's link, D-3); flip `growth.join_landing` (the join landing and the `/s/*` CTA target, FR-25) | Words approved (D-5, 2026-10-23); `ux-lead` R-F1–R-F3 landed (step 1 / step 2, the "What to Test" re-tap line, the desktop QR-primary layout); `design-lead` `/design-review` verdict (`design-review.md`), including its check of R-F1's step list and R-F3's QR block against FR-7 (confirmed 2026-10-15, D-16); operator landing pass, including scope §3 steps 4b and 11b |
 | 6 | Flip `growth.invite_join_link` | Only if step 3 passed; otherwise stay on the legacy form, which still carries `t` |
 | 7 | Two-week read | §2.1 target → graduate `growth.referral_ledger` |
 
@@ -1340,18 +1398,38 @@ is **Wed 11-18**, when the launch-day copy flips with `IOS_INSTALL_URL`. Calls a
 |---|---|---|---|
 | D-1 build: join landing (FR-7), `/go/<cta>` click-through (FR-9, §8.2), FR-8 open recording, the `/s/*` CTA (FR-25) | server | **Yes** | Live by 11-16. FR-8 records nothing until `growth.referral_ledger` flips (the server row below) |
 | `growth.invite_join_link` flip, after the D-2 device run | flag | **Yes** | The live binary emits legacy `/?league=` links, which skip the join landing, until it flips |
-| `growth.join_landing` flip, after D-5 words, the OG asset and `design-lead`'s `/design-review` | flag | **Yes** | Also turns on FR-25's device-aware `/s/*` CTA |
+| `growth.join_landing` flip, after D-5 words (approved by the operator 2026-10-23, package §2), the OG asset and `design-lead`'s `/design-review` | flag | **Yes** | Also turns on FR-25's device-aware `/s/*` CTA |
 | `IOS_INSTALL_URL` = the App Store URL on launch day | config | **Yes** | Flips the iPhone labels to "Get the iPhone app" / "Opens the App Store." on 11-18 with no deploy (FR-7's host rule) |
 | Mobile token pieces: FR-1/FR-2 mobile (the mint call, `t` in the link with the league-only fallback, the busy state that ignores repeat taps; `InviteLeaguematesBanner.tsx`); `t` captured from the deep link into the invite intent (FR-10: `deepLinks.ts`, `LeagueJoinScreen.tsx`, `useSession.ts`); `invite_id` in every mobile session-init body (FR-12/FR-13: `api/auth.ts`, `api/espn.ts`, `api/platformLink.ts`); the mobile events (the `share_link_opened` emitter and the `invite_id` prop on the invite events) | binary | **Yes: must make the 11-06 binary** (it gates the binary, so it gates launch) | Safe to ship before the server: the client falls back to the league-only link while the mint 404s |
 | The `referral_activated` notification type in the app (FR-19: mobile `V2_TRADE_KINDS` in `mobile/src/utils/deepLinks.ts` → Trades; the glyph pinned by `mobile/tests/check-notif-glyphs.js`) | binary | **Yes: must make the 11-06 binary** | Without it, activation rows posted after 11-16 tap to nowhere in the launch binary. The row itself is server-side and can wait (last row) |
-| In-app copy: FR-3's strings in the binary (the invite share text, "leaguemates") | binary | **Yes** (gates the binary) | By 11-06 per the launch plan; words on D-5 |
+| In-app copy: FR-3's strings in the binary: the invite share text, one line with no league name, `gp.invite.msg` "Join me on Fleeced to find trades we both like → {url}" (package §5 D6; no league-name variant ships, `gp.invite.msg_league` is parked); the banner's "leaguemates" re-spelling (spelling only; the `h1.banner.body` rewrite is later slice, D7) | binary | **Yes** (gates the binary) | By 11-06 per the launch plan; words approved by the operator 2026-10-23 (D-5, package §2) |
 | Server mint endpoint (§8.1), token attribution and the league-match fallback (FR-13/FR-14), activation (FR-17), the #350 server emitters, the `growth.referral_ledger` flip | server | No | Target 11-16. If it slips, invites still convert and credit starts when it lands; accounts created before it get no back-fill |
 | Web legs: the web modal mint (FR-1, FR-5), web `t` capture (FR-9), the web invite events (FR-5) | web | No | |
-| Can wait until after launch: the FR-19 activation row (server), FR-21 impact v2, the desktop QR if round 2 slips (fallback: the desktop layout without the QR, web app primary), FR-4 impression events and AC-4b's banner floors, Phase 2 pushes and "Your invites", GB-02 (the share chrome and OG rebuild, `ref` forwarding), rewards (Phase 3) | mixed | No | |
+| Can wait until after launch: the FR-19 activation row (server), FR-21 impact v2, the desktop QR if round 2 slips (fallback: the desktop layout without the QR, web app primary), FR-4 impression events and AC-4b's banner floors, Phase 2 pushes and "Your invites", GB-02 (the share chrome and OG rebuild, `ref` forwarding), rewards (Phase 3), the later-slice strings (below) | mixed | No | |
 
 Everything server-side, web-side or config can land after the 11-06 binary cutoff; the binary
 pieces (the mobile token pieces, the `referral_activated` type registration and the in-app
 copy) cannot.
+
+**Later-slice strings: not in the 11-06 binary and not in the operator's 2026-10-23
+approval** ([package §4](marketing-referral-approval.md#4-later-slice-not-in-the-11-06-binary-not-in-this-approval)).
+D-5 stays open for them.
+- **The FR-19 activation row:** `gp.inbox.activated_title`, `gp.inbox.activated_body`. The
+  binary registers only the type (the row above). If `head-eng` lands the row by 11-16, the
+  operator approves these two with the §2 block; otherwise they wait.
+- **Phase 2:** the pushes and "Your invites": `gp.push.referral_title`,
+  `gp.push.referral_body`, `gp.push.referral_inbox`; the lab §5 labels 1 and 2, the
+  "Activated" explainer, the zero-join line and the empty-state prompt; the OG variant (iii)
+  line.
+- **GB-02** (FR-25 keeps `og:*` unchanged): `s1.trade.title`, `s1.trade.desc`,
+  `s2.pkg.title`, `s2.pkg.desc`, `s4.og_site`.
+- **No build home in this PRD** (a later voice and claims pass): `h1.card.tick`,
+  `h1.rationale`, the `h1.banner.body` rewrite (D7: in the 11-06 binary the banner body is
+  re-spelled only, FR-3); `h2.web.chat`, `h2.web.groupme`, `h2.web.email`; `h3b.join.fail`,
+  `h5.signin.invite`, `h5.signin.invite_noref`.
+- **Parked:** `gp.invite.msg_league`, the league-name invite variant (D6; FR-3).
+- **Dropped:** `gp.join.retap`, replaced by `gp.join.step2`; `gp.join.cta.B`, because option
+  B wasn't chosen.
 
 This answers `launch-plan-1118.md`'s question (its Mon 11-16 row): **yes, part of the referral
 slice needs the binary**: the mobile token pieces, the type registration and the in-app copy.
@@ -1405,10 +1483,10 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | # | Decision | Who | Recommendation |
 |---|---|---|---|
 | D-1 | CTA target A/B/C before the listing (§5) | **Resolved by the operator 2026-10-15: A** ("Ok. start building D1 and D3", verbatim via `head-product`) | Option A, device-aware: iOS → `IOS_INSTALL_URL` (the public TestFlight link); desktop → the web app with the extension line; Android and other phones → the honest note (§5, FR-7, FR-25) |
-| D-2 | Run the #239 device checklist; **and** put the "What to Test" line in the TestFlight build's text (`ux-lead` R-F1; proposed by `marketing-lead`, `gp.testflight.what_to_test`: "Here from a league invite? After installing, go back and tap the invite again, or rescan its code. That opens the app on your invite."; accepted by `growth-pm`: TestFlight shows it beside its Open button, so it reaches the invitee at the right moment; no code) | **operator**. **Open.** The new `app-manager` lead turns the checklist into the operator's device-ready version (its Run A; scope §3's checklist is its Run B) and drafts "What to Test"; `marketing-lead` has proposed the line (J2), approved with D-5. App Store Connect is the operator's own entry | The checklist before rollout step 6; the "What to Test" line on the build Run B uses, before rollout step 5 |
+| D-2 | Run the #239 device checklist; **and** put the "What to Test" line in the TestFlight build's text (`ux-lead` R-F1; proposed by `marketing-lead`, `gp.testflight.what_to_test`: "Here from a league invite? After installing, go back and tap the invite again, or rescan its code. That opens the app on your invite."; accepted by `growth-pm`: TestFlight shows it beside its Open button, so it reaches the invitee at the right moment; no code) | **operator**. **Open.** The new `app-manager` lead turns the checklist into the operator's device-ready version (its Run A; scope §3's checklist is its Run B) and drafts "What to Test"; `marketing-lead`'s line (J2) was approved by the operator 2026-10-23 with D-5 (package §2). App Store Connect is the operator's own entry | The checklist before rollout step 6; the "What to Test" line on the build Run B uses, before rollout step 5 |
 | D-3 | Create a public TestFlight link | **Resolved by the operator 2026-10-15** (same quote): the operator creates it | The link becomes the `IOS_INSTALL_URL` value (§11); no link value is ever written in the repo |
 | D-4 | Rewards | **Resolved by `head-product` P20 (2026-10-15): reward-free v1** | Status and recognition only in v1. Rewards are Phase 3, gated on the operator approving `monetization-pm`'s pricing memo; `monetization-pm` designs the economics, `growth-pm` defines "activated" and the mechanics (§12) |
-| D-5 | Approve the words (`gp.*`). Gate 1 added to the list: the A1 step 1 / step 2 framing (R-F1); the desktop QR state's TickLabel "Join on your iPhone", its scan line, the line "Have the Fleeced extension for Chrome or Edge?" with "Open the web app", the iPad link "On an iPad? Get the iOS beta, then tap the invite again." and the QR's accessible name (e.g. "QR code: opens this invite on your iPhone") (R-F3, D-16); A1's "Install Fleeced" and step 2 "Tap the invite again, or rescan its code, to join {leagueName}." and the revised A2 note (R-F1); the reworded activation body `gp.inbox.activated_body`, "When they like a trade with you, it can show up with a "They're interested" tag." (R-F6, FR-19); the "What to Test" line (D-2); and, only if their checklist steps fail, the installed-user line `gp.join.iab_wayout` on A1/A2 (R-F2, step 4b) and the J4 league-switch confirmation (R-F4, step 7b). The launch-day copy (marketing-lead copy batch, 2026-10-23) is added too: the store pair "Get the iPhone app" / "Opens the App Store." (chosen by the `IOS_INSTALL_URL` host, FR-7), the iPad line's store form (`growth-pm`'s placeholder, pending `marketing-lead`), the Android note "Available on iPhone and desktop web for now." and `gp.join.og_desc` | **operator** via `marketing-lead` | — |
+| D-5 | Approve the words (`gp.*`). Gate 1 added to the list: the A1 step 1 / step 2 framing (R-F1); the desktop QR state's TickLabel "Join on your iPhone", its scan line, the line "Have the Fleeced extension for Chrome or Edge?" with "Open the web app", the iPad link "On an iPad? Get the iOS beta, then tap the invite again." and the QR's accessible name (e.g. "QR code: opens this invite on your iPhone") (R-F3, D-16); A1's "Install Fleeced" and step 2 "Tap the invite again, or rescan its code, to join {leagueName}." and the revised A2 note (R-F1); the reworded activation body `gp.inbox.activated_body`, "When they like a trade with you, it can show up with a "They're interested" tag." (R-F6, FR-19); the "What to Test" line (D-2); and, only if their checklist steps fail, the installed-user line `gp.join.iab_wayout` on A1/A2 (R-F2, step 4b) and the J4 league-switch confirmation (R-F4, step 7b). The launch-day copy (marketing-lead copy batch, 2026-10-23) is added too: the store pair "Get the iPhone app" / "Opens the App Store." (chosen by the `IOS_INSTALL_URL` host, FR-7), the iPad line's store form (`growth-pm`'s placeholder, adopted verbatim by `marketing-lead`, package §5 D4), the Android note "Available on iPhone and desktop web for now." and `gp.join.og_desc` | **operator** via `marketing-lead`. **Resolved for the 26 entries of [marketing-referral-approval.md §2](marketing-referral-approval.md#2-operator-approval): approved by the operator 2026-10-23**, given in `head-bizops`' session (relayed by `head-bizops`) and confirmed by `head-product` 2026-10-23. Verbatim: "Approve all three as written: the App Store listing §5 (recommended subtitle "Your rankings. Deals for both."), the copy file §6 meaning changes, and the referral package §2 (26 entries)." All 26 are approved as written, including the contingent `gp.join.iab_wayout` (it ships only if checklist step 4b fails) and the host-keyed install labels (`m4.348.cta_ios`, `m4.348.cta_ios_help`: they still flip only on 11-18, with `IOS_INSTALL_URL`). **Still open** only for strings outside §2: the later-slice strings ([package §4](marketing-referral-approval.md#4-later-slice-not-in-the-11-06-binary-not-in-this-approval), §12), and the contingent J4 league-switch confirmation, which has no words yet (step 7b) | — |
 | D-6 | Accept the PRD; **supersede D-028 part 2** (a real join page instead of the 302 into `/`), because D-028's premise that the existing web funnel converts holds only on desktop with the extension | `head-product` (new DECISIONS entry, id claimed against `origin/main`) | Yes |
 | D-7 | Second flag `growth.join_landing` | `head-product` / `growth-pm` | Yes: independent rollback for the riskiest surface |
 | D-8 | Activation = stage 7 first opinion (vs 5 or 6) | `analytics-lead` | Stage 7: the first `trade_proposed` or `match_swiped` within 14 days of `joined_at` (FR-17) |
@@ -1417,7 +1495,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-11 | First-touch UTMs on `session_init` (§8.4) | **Accepted by `analytics-lead` (P18; analytics-lead, 2026-10-15)** | The [marketing-inputs.md §C](marketing-inputs.md#c-utm--install-source-convention-mkt-seo) convention is accepted; `analytics-lead` writes the final addendum before any emitter. Conditions: `first_touch` is an API contract change under full gates (`docs/api-reference.md`); a non-matching value is coerced to `other` with a counter, not dropped; attribution only for accounts created after ship, no back-fill. Outside Phase 1's critical path |
 | D-12 | Mint cap 10 per inviter per league per day; token credit window 30 days | `growth-pm` | As written (assumed values) |
 | D-13 | `record_event` `platform` + `touch_user` parameters vs a separate writer | `head-eng` | Either; the requirement is no denorm bump |
-| D-14 | Copy questions from `design-lead`'s lab (§13). **Answered by `marketing-lead` 2026-10-15, all proposed** ([lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)): (a) every `[copy: marketing-lead]` slot is filled (the A2 note and A5's "A leaguemate invited you to {league}", FR-7; `og:title` = `gp.join.og_title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line, in the addendum); (b) FR-11's "{display name} invited you to {league}" **is** the landing headline, superseding `gp.join.headline`, with FR-7's fallback ladder; (c) "Dynasty Trade Finder" may appear on the OG card only locked up with the wordmark, smaller, never standalone (FR-7; the D-057 name is "Fleeced: Dynasty Trade Finder"); (d) **"leaguemates"**, one word (FR-3; the banner's "league-mates", `InviteLeaguematesBanner.tsx:163, :167, :176`, is respelled in this build). **Follow-up, answered** (`marketing-lead`, lab addendum, "`ux-lead`'s review of PR #348"): the A2 note now reads "…Already have it? Tap the invite again, or rescan its code.", so it names the re-tap itself (FR-7) | `marketing-lead`; the operator approves the words with D-5 | Approve with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
+| D-14 | Copy questions from `design-lead`'s lab (§13). **Answered by `marketing-lead` 2026-10-15, all proposed** ([lab addendum](marketing-inputs.md#addendum-design-leads-lab-slots-and-growth-pms-four-questions-2026-10-15)): (a) every `[copy: marketing-lead]` slot is filled (the A2 note and A5's "A leaguemate invited you to {league}", FR-7; `og:title` = `gp.join.og_title`; the Phase 2 tiles' labels, "Activated" explainer, empty-state prompt and zero-join line, in the addendum); (b) FR-11's "{display name} invited you to {league}" **is** the landing headline, superseding `gp.join.headline`, with FR-7's fallback ladder; (c) "Dynasty Trade Finder" may appear on the OG card only locked up with the wordmark, smaller, never standalone (FR-7; the D-057 name is "Fleeced: Dynasty Trade Finder"); (d) **"leaguemates"**, one word (FR-3; the banner's "league-mates", `InviteLeaguematesBanner.tsx:163, :167, :176`, is respelled in this build). **Follow-up, answered** (`marketing-lead`, lab addendum, "`ux-lead`'s review of PR #348"): the A2 note now reads "…Already have it? Tap the invite again, or rescan its code.", so it names the re-tap itself (FR-7) | `marketing-lead`; the operator approves the words with D-5 (the launch slice approved 2026-10-23, package §2) | Approve with D-5, before rollout step 5 (the landing and OG card ship no words without them) |
 | D-15 | The OG card wordmark's period. `marketing-lead` had asked for no period on the OG card, because next to a trade "FLEECED." reads as a verdict ("you got fleeced"); `head-product` proposed that the logotype keeps the period and running copy never uses it (FR-7) | **Resolved by `design-lead` 2026-10-15** (owns the wordmark, P14) | The OG card carries the logotype "FLEECED." with the ice period, Barlow Condensed Bold caps, chalk. Rule (`docs/design/brand.md`, PR [#349](https://github.com/mattmurf77/fantasy-trade-finder/pull/349)): the ice period belongs to the logotype; it goes wherever the logo appears and nowhere else (not verdict cards, headings, badges or buttons). Matches `head-product`'s proposed rule. PR #349 also sanctions the invite OG link card as a ram placement (variant (ii)) |
 | D-16 | Desktop layout with `IOS_INSTALL_URL` set (`ux-lead` R-F3): "Get it on your iPhone" with a QR code of the invite URL (`t` included) as the primary, the iOS install link kept in that block for iPad, and "Have the Fleeced extension? Open the web app" as the secondary (FR-7, AC-7c); and R-F1's A1 step layout | **Decided by `growth-pm` 2026-10-15 (P19). Resolved by `design-lead` 2026-10-15** (confirms R-F3, which reverses the desktop rule it had accepted; checked in `/design-review` on the build branch) | Folded into FR-7, AC-7c and AC-7f: the QR block first and primary under a TickLabel ("Join on your iPhone", `marketing-lead`'s label), no ice-filled button, the web app as a Secondary (outlined) button; `--ink-0` modules on a `--chalk` panel (a sanctioned exception, added to the exceptions register), 4-module quiet zone, EC M up to version 6, ≥200 CSS px with whole-pixel modules ≥4 CSS px and `crispEdges` (version ≥7 grows at 4 px modules, never shrinks; `design-lead`'s density rule, 2026-10-15), never inverted; the iPad link inside the block with a 44px target; an accessible name; **server-side inline SVG, never a third-party QR service**. A1: a two-row step list, Plex Mono chalk-dim markers, one hairline. Unset, the desktop layout is unchanged. `/s/*`: the QR and Chalkline chrome fold into GB-02 as one rebuild; FR-25 stays target and labels only |
 
@@ -1444,19 +1522,27 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   §10's surface vocabulary before the UTM capture build, and the W3 baseline (nine
   invite/share events, new accounts per week, open → signup feasibility).
 - **`marketing-lead`:** final words for every quoted string, including the activation row
-  (revised to stage 7, FR-19); its S-IDs remap to the backlog's S1–S12. The lab's copy
-  questions (D-14) are answered (proposed, pending the operator); the OG wordmark period is
+  (revised to stage 7, FR-19); its S-IDs remap to the backlog's S1–S12. **Its referral
+  approval package, vendored as [marketing-referral-approval.md](marketing-referral-approval.md)
+  (2026-10-23), is the launch-slice authority for referral wording**; its §2 (26 entries) is
+  approved by the operator 2026-10-23 (D-5), its D4–D6 and the `og_title` / `valueprop` /
+  `page_title` / FR-18 body text are folded (J1, FR-3, FR-7, FR-18), and its §4 later slice is
+  listed in §12. The lab's copy
+  questions (D-14) are answered (the launch-slice words approved by the operator 2026-10-23,
+  D-5); the OG wordmark period is
   resolved (D-15, `design-lead`: the period is logo-only). The `/s/*` CTA labels, help lines
   and notes for FR-25 are proposed (lab addendum, "Share landings `/s/*` under FR-25"),
-  including a share landing's own iPhone-unset note; the operator approves them with D-5.
+  including a share landing's own iPhone-unset note; the operator approved them with D-5
+  (2026-10-23, package §2).
   Gate 1's strings are now proposed (lab addendum, "`ux-lead`'s review of PR #348"; folded
   in J2, FR-7, FR-19): A1's step 1 / step 2 (R-F1), the desktop QR state's labels and iPad
   link (R-F3, D-16), the revised A2 note, the activation body (R-F6), the "What to Test"
-  line (D-2) and the contingent installed-user line (R-F2); the operator approves them with
-  D-5. Still to word: the QR's accessible name (FR-7); the iPad line's store form, for which
-  `growth-pm` holds a placeholder ("On an iPad? Get the iPhone app, then tap the invite
-  again.", FR-7); and, only if its checklist step fails, the J4 league-switch confirmation
-  (R-F4). The launch-day rows (copy batch, 2026-10-23: `m4.348.*`, `m3.web.og_desc`) are
+  line (D-2) and the contingent installed-user line (R-F2); the operator approved them with
+  D-5 (2026-10-23, package §2), except the activation body, which is later slice (§12).
+  Worded since (package §5 D4, D5; FR-7): the QR's accessible name, "QR code: opens
+  this invite on your iPhone", and the iPad line's store form, `growth-pm`'s placeholder
+  ("On an iPad? Get the iPhone app, then tap the invite again."), both adopted verbatim. Still
+  to word, only if its checklist step fails: the J4 league-switch confirmation (R-F4). The launch-day rows (copy batch, 2026-10-23: `m4.348.*`, `m3.web.og_desc`) are
   folded in J2, FR-7 and FR-25, with the store labels keyed to the install host, not a date. Keep `gp.inbox.activated_body` in step
   with the "They're interested" pill label (`TradeCard.tsx:525`).
 - **FAQ claim → P9's copy-defect batch (`onboarding-pm`) via `head-product`:**
