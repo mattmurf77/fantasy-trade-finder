@@ -39,6 +39,13 @@
 > installed-user line and the revised A2 note. Then revised to fold `design-lead`'s QR
 > density rule (FR-7, AC-7f: EC M up to version 6, ≥200 CSS px, whole-pixel modules
 > ≥4 CSS px; version 7+ grows, never shrinks), replacing "version ≤4 / ≥180 px".
+> Revised 2026-10-23 per `growth-pm`'s calls, after the operator put the referral loop on the
+> launch critical path ("Launch relies on invites: Yes, hold for it."): launch-day copy from
+> the marketing-lead copy batch, 2026-10-23 (all proposed, D-5), with the iPhone install
+> labels following the `IOS_INSTALL_URL` host, not a date (FR-7, AC-7g, FR-25); the Android
+> note and `gp.join.og_desc`; AC-25's href is `head-eng`'s contract C5, `/?share=<kind>`;
+> FR-8 stamps only a same-league row (F1's league rule); and §12's launch slice for the
+> Wed 2026-11-18 launch.
 > **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on
 > the build branch before ship.**
 > Acceptance of the whole PRD (D-6) is still with `head-product`. Requirements only: **no
@@ -237,6 +244,8 @@ operator approval of words via `marketing-lead`. None is final.
   - **Step 1**, headed "Install Fleeced" (`gp.join.step1`): "Get the iOS beta"
     (`gp.join.cta.A_ios`) to the public TestFlight link, with "Installs through Apple's
     TestFlight app." (`gp.join.cta.A_ios_help`); the button and help line are unchanged.
+    Once `IOS_INSTALL_URL` is the App Store URL, the pair is "Get the iPhone app" / "Opens
+    the App Store." (FR-7's host rule; marketing-lead copy batch, 2026-10-23).
   - **Step 2**, the re-tap: "Tap the invite again, or rescan its code, to join
     {leagueName}." (`gp.join.step2`, replacing `gp.join.retap` on A1; fallback "…to join
     your league."). It is neutral on purpose: an invitee who scanned the desktop QR has no
@@ -275,14 +284,17 @@ operator approval of words via `marketing-lead`. None is final.
     "Open the web app" (`gp.join.cta.A_desktop`) → `/?league=&t=` → extension sign-in →
     invited league auto-selected → credited by token. An iPad can't scan its own screen, so
     the QR block keeps the iOS install link as a text link: "On an iPad? Get the iOS beta,
-    then tap the invite again." (`gp.join.desktop.ipad`). Words `marketing-lead` (D-5,
+    then tap the invite again." (`gp.join.desktop.ipad`; on the App Store host, "On an iPad?
+    Get the iPhone app, then tap the invite again.", FR-7). Words `marketing-lead` (D-5,
     proposed); layout confirmed by `design-lead` 2026-10-15 (D-16 resolved; specs in FR-7).
   - **`IOS_INSTALL_URL` unset:** "Open the web app" (`gp.join.cta.A_desktop`) with "Sign-in
     uses the Fleeced extension for Chrome or Edge." (`gp.join.cta.A_desktop_help`) →
     `/?league=&t=` → extension sign-in → invited league auto-selected → credited by token.
     No QR and no iOS link (its click-through 404s, §8.2, so it would be a dead path).
-- **Android or another phone:** landing → "Fleeced runs on iPhone and desktop web for now."
-  (`gp.join.android_note`). **No web button**, because a phone can't sign in on the web. The
+- **Android or another phone:** landing → "Available on iPhone and desktop web for now."
+  (`gp.join.android_note` = `m4.348.android_note`, marketing-lead copy batch, 2026-10-23:
+  "Fleeced" is never the subject in system strings; it replaces "Fleeced runs on iPhone and
+  desktop web for now."). **No web button**, because a phone can't sign in on the web. The
   open is still recorded.
 
 ### J3 — Invitee, app installed (universal link)
@@ -344,7 +356,8 @@ web app is the secondary action (`ux-lead` R-F3, `growth-pm` P19, `design-lead` 
 invitees see the honest note instead of a dead button (B and C as they can work on a phone),
 and the desktop layout keeps the web app as its primary with no QR and no iOS link, whose
 click-through would 404 (§8.2). When the listing ships, set it to the App Store URL: C's end
-state, no deploy of code.
+state, no deploy of code. The iPhone labels flip with it, because they follow the URL's host
+(FR-7).
 
 ---
 
@@ -448,6 +461,26 @@ all proposed, pending the operator's approval of words:
 - **Value line:** `gp.join.valueprop`, not the lab's "Fleeced finds trades where both sides
   come out ahead." (`web/index.html:75`), which makes Fleeced the subject of an analysis verb
   (the name rule).
+- **og:description:** `gp.join.og_desc` is "Rank your players on Fleeced and see trades built
+  to work for both sides. Works with Sleeper, ESPN and MFL." (= `m3.web.og_desc`,
+  marketing-lead copy batch, 2026-10-23: outcome → intent; it replaces "…trades where both
+  sides come out ahead…").
+- **iPhone install labels follow the `IOS_INSTALL_URL` host, not a date** (`growth-pm`,
+  2026-10-23; words from the marketing-lead copy batch, 2026-10-23, rows `m4.348.cta_ios` and
+  `m4.348.cta_ios_help`). The host is read with the URL on each request:
+  - `testflight.apple.com` → beta: "Get the iOS beta" / "Installs through Apple's TestFlight
+    app.";
+  - `apps.apple.com` → store: "Get the iPhone app" / "Opens the App Store.";
+  - any other host, or a value that isn't `https://` → treated as **unset** everywhere (the
+    honest notes, the desktop layout with no QR and no iOS link, `/go/ios` 404s, FR-25's
+    unset branch), and logged once.
+
+  So the labels flip with the config change on launch day (§12), with no deploy and no date
+  in code; the batch's "from 2026-11-06" is replaced by this rule. In this PRD,
+  "`IOS_INSTALL_URL` set" means an `https://` URL on one of those two hosts. The same rule
+  picks FR-25's labels and the iPad line below.
+
+All of these strings are proposed, pending the operator's approval of words (D-5).
 
 With the flag off, the 302 is unchanged.
 
@@ -457,8 +490,9 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
   Fonts per `docs/design/design-system.md`. None of the `/s/*` `_share_html` chrome
   (`S:25460`); fixing that chrome stays backlog GB-02.
 - **One primary action per device state, in ice.**
-  - iPhone with `IOS_INSTALL_URL` set: "Get the iOS beta" is the ice primary, then the help
-    line and the re-tap step. The CTA and the re-tap line are numbered **step 1** and **step
+  - iPhone with `IOS_INSTALL_URL` set: the install label ("Get the iOS beta", or "Get the
+    iPhone app" on the App Store host) is the ice primary, then the help line and the re-tap
+    step. The CTA and the re-tap line are numbered **step 1** and **step
     2** of one task, so the re-tap reads as part of joining, not a footnote (`ux-lead` R-F1;
     words `marketing-lead`). No second button. **Layout (lab frame A1; `design-lead`,
     2026-10-15; checked in `/design-review` on the build branch):**
@@ -466,7 +500,7 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
       matching the shipped landing's 01/02/03 numerals (`web/index.html:78-80`); no ice on
       the markers.
     - Row 1 holds the step heading "Install Fleeced" (`gp.join.step1`) and the ice primary
-      "Get the iOS beta" with its help line. Row 2 is the re-tap instruction, "Tap the
+      install label with its help line (beta or store, by host, above). Row 2 is the re-tap instruction, "Tap the
       invite again, or rescan its code, to join {leagueName}." (`gp.join.step2`, J2), as
       body text, not a button.
     - One `--line` hairline between the rows; never a card per step.
@@ -507,7 +541,9 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
     - **iPad.** The iOS install link (`/go/ios`) stays inside the QR block as a text (Ghost)
       link, "On an iPad? Get the iOS beta, then tap the invite again."
       (`gp.join.desktop.ipad`; it carries the iPad's step 2), with a 44px hit target,
-      because an iPad gets this layout and can't scan its own screen.
+      because an iPad gets this layout and can't scan its own screen. On the App Store host
+      it reads "On an iPad? Get the iPhone app, then tap the invite again." (`growth-pm`'s
+      placeholder, pending `marketing-lead`; D-5).
     - **Accessibility.** The QR has an accessible name that says what it does, e.g. "QR code:
       opens this invite on your iPhone" (words `marketing-lead`, D-5).
     - **Privacy: generated server-side, inline (`head-eng` / `engagement-eng`; AC-7f).** The
@@ -602,14 +638,27 @@ Design rules (`design-lead` review, accepted by `growth-pm`):
   to (modules + 8) × 4 px rather than shrinking its modules. Pytest asserts these at the
   encoder's input and in the HTML; the build PR reports the encoder's version for today's
   join URL, and `design-lead`'s `/design-review` checks the rendered code.
+- AC-7g (install host; `growth-pm`, 2026-10-23): the label pair is chosen by the
+  `IOS_INSTALL_URL` host. An `https://testflight.apple.com/…` value renders "Get the iOS
+  beta" / "Installs through Apple's TestFlight app." and the iPad line's beta form; an
+  `https://apps.apple.com/…` value renders "Get the iPhone app" / "Opens the App Store." and
+  the iPad line's store form; any other host, or a non-`https://` value, renders exactly
+  AC-7c's unset states on every user agent, `/go/ios` 404s, and one warning is logged per
+  process, not per request. The same cases run on `/s/p` (FR-25, AC-25). Proposed strings
+  until the operator approves the words (D-5).
 
 **FR-8 — Record the open server-side.** With the ledger flag on, **every** GET of the join
 path (landing or 302) classifies the user agent, with or without `t`, so opens of mint-failed
 and legacy links are measured too (analytics addendum, PR #350, request R1):
-- human → server event `invite_landing_opened`; and, when a well-formed `t` names a minted
-  row, `opened_at` (first), `last_opened_at` and `open_count + 1` on that share's minted row;
-- link-preview fetcher → `unfurled_at` (first) on that row only, no event;
+- human → server event `invite_landing_opened`; and, when the row is stampable (below),
+  `opened_at` (first), `last_opened_at` and `open_count + 1` on that share's minted row;
+- link-preview fetcher → `unfurled_at` (first) on a stampable row only, no event;
 - HEAD → nothing.
+
+**Which row is stamped** (F1's league rule; `growth-pm`, 2026-10-23, on `engagement-eng`'s
+R2-4): only a row that the well-formed `t` names, whose `league_id` matches the route's
+league, and whose status is `valid` or `expired`. A `t` naming a row in a different league
+still records the event, with `invite_status = league_mismatch`, but stamps nothing.
 
 "Human GET" is an explicit, tested filter (condition C4), shared with the `/go/<cta>`
 click-through (§8.2):
@@ -630,8 +679,10 @@ second human open of the same link from the phone (`device_class` `ios`), so `op
 and `o` can count one invitee twice.
 - AC-8: pytest with a human UA increments `open_count`; each listed preview agent and the
   generic pattern set only `unfurled_at` and fire no event; HEAD changes nothing; a human GET
-  with no `t` fires `invite_landing_opened` with `invite_status` null; no stored row carries
-  a user agent or an IP.
+  with no `t` fires `invite_landing_opened` with `invite_status` null; a human GET whose `t`
+  names a row in another league fires it with `invite_status` `league_mismatch` and changes
+  no row (nor does a preview fetch of that link); an expired same-league row is stamped; no
+  stored row carries a user agent or an IP.
 
 **FR-9 — Desktop onward link and web capture.** The desktop web-app action (the primary
 with `IOS_INSTALL_URL` unset, the secondary with it set, FR-7) goes through a recorded
@@ -682,10 +733,10 @@ TestFlight install. Today `_share_html` takes a single `cta_text` (`S:25465`, re
 
 | Branch | CTA target | Label | Help line or note |
 |---|---|---|---|
-| iPhone, `IOS_INSTALL_URL` set | `IOS_INSTALL_URL` | "Get the iOS beta" (`gp.join.cta.A_ios`) | "Installs through Apple's TestFlight app." (`gp.join.cta.A_ios_help`). **No re-tap line:** a share page carries no invite, and re-tapping a share link opens the viewer's own tab, not the shared trade (GB-03) |
+| iPhone, `IOS_INSTALL_URL` set | `IOS_INSTALL_URL` | By host (FR-7): "Get the iOS beta" (`gp.join.cta.A_ios`) on `testflight.apple.com`; "Get the iPhone app" on `apps.apple.com` | "Installs through Apple's TestFlight app." (`gp.join.cta.A_ios_help`), or "Opens the App Store." on the store host. **No re-tap line:** a share page carries no invite, and re-tapping a share link opens the viewer's own tab, not the shared trade (GB-03) |
 | iPhone, `IOS_INSTALL_URL` unset | none: a note, no button | — | "The iPhone beta isn't open to the public yet. Already have it? Open Fleeced." It promises the app, not the shared trade: the universal link opens the app (`mobile/src/utils/deepLinks.ts:229-238`), but `MatchesScreen` reads no match id from its route (`MatchesScreen.tsx:190-214`; GB-03) |
-| Desktop | `/` (today's target) | Kept per page: "Build your own trade" (`/s/p`, `S:25668`), "Find your next trade" (`/s/trade`, `S:25562`) | **Added:** "Sign-in uses the Fleeced extension for Chrome or Edge." (`gp.join.cta.A_desktop_help`, the join landing's line, §5 J2), so a desktop visitor without the extension isn't stranded |
-| Android and other phones | none: a note, **no web button** (a phone can't sign in on the web) | — | "Fleeced runs on iPhone and desktop web for now." (`gp.join.android_note`, reused; it names no invite) |
+| Desktop | `/?share=<kind>` (`head-eng`'s contract C5; `kind` from the route: `tiers`, `trade`, or `package` for `/s/p`; today `/`) | Kept per page: "Build your own trade" (`/s/p`, `S:25668`), "Find your next trade" (`/s/trade`, `S:25562`) | **Added:** "Sign-in uses the Fleeced extension for Chrome or Edge." (`gp.join.cta.A_desktop_help`, the join landing's line, §5 J2), so a desktop visitor without the extension isn't stranded |
+| Android and other phones | none: a note, **no web button** (a phone can't sign in on the web) | — | "Available on iPhone and desktop web for now." (`gp.join.android_note`, reused; it names no invite; marketing-lead copy batch, 2026-10-23) |
 
 The iPhone and Android strings and the desktop help line are the same on every `/s/*` route;
 only the desktop label stays per page (`/s/tiers` keeps "Build your tiers", `S:25547`). Only
@@ -695,8 +746,9 @@ off-Chalkline chrome stay in GB-02 (§3 non-goal 7). The response varies by devi
 no longer be a plain `Cache-Control: public` (today `public, max-age=300`, `S:25518`): it is
 either not `public` or it carries `Vary: User-Agent`. Gate: rides `growth.join_landing`
 (accepted by `growth-pm` 2026-10-15; `head-eng` still confirms it in allocation), so one
-flag covers every device-aware CTA surface; with it off the CTA is today's `/` with today's
-label and merge changes nothing user-visible (§12).
+flag covers every device-aware CTA surface; with it off every device keeps today's single
+button and label, only its href becomes `/?share=<kind>` (C5), and merge changes nothing
+user-visible (§12).
 
 **The desktop QR pattern (FR-7, R-F3) is not built on `/s/*` in this build; it folds into
 GB-02.** `design-lead` ruled (2026-10-15, D-16) that the QR/device pattern also applies to
@@ -709,15 +761,18 @@ shared trade, until GB-03 (`MatchesScreen` reads no match id).
 - AC-25: pytest on `/s/p` and `/s/trade` (`/s/tiers` 404s while `growth.tier_board_share` is
   off and inherits the change through `_share_html`). Each branch asserts the CTA `href`,
   **its label and its help line or note**, not just the target:
-  - gate off, every user agent: `href` `/`, today's label ("Build your own trade" on `/s/p`,
-    "Find your next trade" on `/s/trade`), no help line and no note;
-  - gate on, iPhone UA, `IOS_INSTALL_URL` set: `href` is `IOS_INSTALL_URL`, label "Get the
-    iOS beta", help line "Installs through Apple's TestFlight app.", no re-tap line;
+  - gate off, every user agent: `href` `/?share=<kind>` (`package` on `/s/p`, `trade` on
+    `/s/trade`; `head-eng`'s contract C5, not bare `/`), today's label ("Build your own
+    trade" on `/s/p`, "Find your next trade" on `/s/trade`), no help line and no note;
+  - gate on, iPhone UA, `IOS_INSTALL_URL` set: `href` is `IOS_INSTALL_URL`, no re-tap line,
+    and the label and help line by host (AC-7g): on `testflight.apple.com`, "Get the iOS
+    beta" / "Installs through Apple's TestFlight app."; on `apps.apple.com`, "Get the iPhone
+    app" / "Opens the App Store."; any other host renders the unset case below;
   - gate on, iPhone UA, unset: no CTA link; the note "The iPhone beta isn't open to the
     public yet. Already have it? Open Fleeced.";
-  - gate on, desktop UA: `href` `/`, the page's label as above, help line "Sign-in uses the
-    Fleeced extension for Chrome or Edge.";
-  - gate on, Android UA: no CTA link; the note "Fleeced runs on iPhone and desktop web for
+  - gate on, desktop UA: `href` `/?share=<kind>` as above, the page's label as above, help
+    line "Sign-in uses the Fleeced extension for Chrome or Edge.";
+  - gate on, Android UA: no CTA link; the note "Available on iPhone and desktop web for
     now.";
   - every case: the response is not `public`-cacheable, or carries `Vary: User-Agent`; the
     `og:*` tags are unchanged; no variant links `dtf://` or a user-supplied URL; no variant
@@ -1227,7 +1282,7 @@ bridge"):
 | `growth.invite_join_link` | existing (`config/features.json:190`) | false | Emitter form only (unchanged meaning) | **Flip in Phase 1** after the #239 device checklist passes (`docs/feedback/items/239-invite-universal-links/status.md` § Operator actions 4; procedure `config-reference.md:669`) | Flip off (legacy form parsed forever) |
 | `growth.referral` | existing, **reserved** | false | Nothing in v1. Its declared meaning includes reward granting (`backend/feature_flags.py:268`) | Phase 3, gated on the operator approving the pricing memo (P20) | — |
 | `invite.k_factor_dashboard` | existing (`config/features.json:20`) | false | Impact payload v2 (FR-21). Key name kept to avoid churn; meaning updated in `config-reference.md` | Phase 2 surface | Flip off |
-| `IOS_INSTALL_URL` | **new env var** | unset | The landing's iOS install CTA and the desktop QR-primary layout ("Join on your iPhone" with the QR code and the iOS link, R-F3, FR-7; §5); the `/s/*` iPhone CTA (FR-25). Unset ⇒ honest note on iPhone; on desktop the web app stays primary, with no QR and no iOS link | Operator sets it to the public TestFlight link they create (D-3, 2026-10-15); later the App Store URL. An environment value only: no link value is ever written in the repo | Unset it |
+| `IOS_INSTALL_URL` | **new env var** | unset | The landing's iOS install CTA and the desktop QR-primary layout ("Join on your iPhone" with the QR code and the iOS link, R-F3, FR-7; §5); the `/s/*` iPhone CTA (FR-25). Unset ⇒ honest note on iPhone; on desktop the web app stays primary, with no QR and no iOS link | Operator sets it to the public TestFlight link they create (D-3, 2026-10-15); on launch day (2026-11-18, §12) the App Store URL, which flips the iPhone labels to the store pair with no deploy (FR-7's host rule). Only an `https://` URL on `testflight.apple.com` or `apps.apple.com` counts; any other value is treated as unset and logged once. An environment value only: no link value is ever written in the repo | Unset it |
 
 New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/features.json` and
 `backend/tests/fixtures/flags/release.json` together (an unknown JSON key fails the guard).
@@ -1272,6 +1327,35 @@ New flags are registered in `backend/feature_flags.py` `FLAG_KEYS`, `config/feat
 | 5 | Set `IOS_INSTALL_URL` (option A, D-1; the operator's link, D-3); flip `growth.join_landing` (the join landing and the `/s/*` CTA target, FR-25) | Words approved; `ux-lead` R-F1–R-F3 landed (step 1 / step 2, the "What to Test" re-tap line, the desktop QR-primary layout); `design-lead` `/design-review` verdict (`design-review.md`), including its check of R-F1's step list and R-F3's QR block against FR-7 (confirmed 2026-10-15, D-16); operator landing pass, including scope §3 steps 4b and 11b |
 | 6 | Flip `growth.invite_join_link` | Only if step 3 passed; otherwise stay on the legacy form, which still carries `t` |
 | 7 | Two-week read | §2.1 target → graduate `growth.referral_ledger` |
+
+### Launch slice (launch Wed 2026-11-18)
+
+The operator, 2026-10-23 (via `growth-pm`): "Launch relies on invites: Yes, hold for it."
+Dates are `head-eng`'s (`docs/plans/org-bringup/launch-plan-1118.md`): the binary is
+feature-complete **Fri 11-06**; the referral slice is live server-side **Mon 11-16**; launch
+is **Wed 11-18**, when the launch-day copy flips with `IOS_INSTALL_URL`. Calls are
+`growth-pm`'s, 2026-10-23.
+
+| Piece | Runs where | Gates launch? | Note |
+|---|---|---|---|
+| D-1 build: join landing (FR-7), `/go/<cta>` click-through (FR-9, §8.2), FR-8 open recording, the `/s/*` CTA (FR-25) | server | **Yes** | Live by 11-16. FR-8 records nothing until `growth.referral_ledger` flips (the server row below) |
+| `growth.invite_join_link` flip, after the D-2 device run | flag | **Yes** | The live binary emits legacy `/?league=` links, which skip the join landing, until it flips |
+| `growth.join_landing` flip, after D-5 words, the OG asset and `design-lead`'s `/design-review` | flag | **Yes** | Also turns on FR-25's device-aware `/s/*` CTA |
+| `IOS_INSTALL_URL` = the App Store URL on launch day | config | **Yes** | Flips the iPhone labels to "Get the iPhone app" / "Opens the App Store." on 11-18 with no deploy (FR-7's host rule) |
+| Mobile token pieces: FR-1/FR-2 mobile (the mint call, `t` in the link with the league-only fallback, the busy state that ignores repeat taps; `InviteLeaguematesBanner.tsx`); `t` captured from the deep link into the invite intent (FR-10: `deepLinks.ts`, `LeagueJoinScreen.tsx`, `useSession.ts`); `invite_id` in every mobile session-init body (FR-12/FR-13: `api/auth.ts`, `api/espn.ts`, `api/platformLink.ts`); the mobile events (the `share_link_opened` emitter and the `invite_id` prop on the invite events) | binary | **Yes: must make the 11-06 binary** (it gates the binary, so it gates launch) | Safe to ship before the server: the client falls back to the league-only link while the mint 404s |
+| The `referral_activated` notification type in the app (FR-19: mobile `V2_TRADE_KINDS` in `mobile/src/utils/deepLinks.ts` → Trades; the glyph pinned by `mobile/tests/check-notif-glyphs.js`) | binary | **Yes: must make the 11-06 binary** | Without it, activation rows posted after 11-16 tap to nowhere in the launch binary. The row itself is server-side and can wait (last row) |
+| In-app copy: FR-3's strings in the binary (the invite share text, "leaguemates") | binary | **Yes** (gates the binary) | By 11-06 per the launch plan; words on D-5 |
+| Server mint endpoint (§8.1), token attribution and the league-match fallback (FR-13/FR-14), activation (FR-17), the #350 server emitters, the `growth.referral_ledger` flip | server | No | Target 11-16. If it slips, invites still convert and credit starts when it lands; accounts created before it get no back-fill |
+| Web legs: the web modal mint (FR-1, FR-5), web `t` capture (FR-9), the web invite events (FR-5) | web | No | |
+| Can wait until after launch: the FR-19 activation row (server), FR-21 impact v2, the desktop QR if round 2 slips (fallback: the desktop layout without the QR, web app primary), FR-4 impression events and AC-4b's banner floors, Phase 2 pushes and "Your invites", GB-02 (the share chrome and OG rebuild, `ref` forwarding), rewards (Phase 3) | mixed | No | |
+
+Everything server-side, web-side or config can land after the 11-06 binary cutoff; the binary
+pieces (the mobile token pieces, the `referral_activated` type registration and the in-app
+copy) cannot.
+
+This answers `launch-plan-1118.md`'s question (its Mon 11-16 row): **yes, part of the referral
+slice needs the binary**: the mobile token pieces, the type registration and the in-app copy.
+Everything else is server, web or config.
 
 ---
 
@@ -1324,7 +1408,7 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
 | D-2 | Run the #239 device checklist; **and** put the "What to Test" line in the TestFlight build's text (`ux-lead` R-F1; proposed by `marketing-lead`, `gp.testflight.what_to_test`: "Here from a league invite? After installing, go back and tap the invite again, or rescan its code. That opens the app on your invite."; accepted by `growth-pm`: TestFlight shows it beside its Open button, so it reaches the invitee at the right moment; no code) | **operator**. **Open.** The new `app-manager` lead turns the checklist into the operator's device-ready version (its Run A; scope §3's checklist is its Run B) and drafts "What to Test"; `marketing-lead` has proposed the line (J2), approved with D-5. App Store Connect is the operator's own entry | The checklist before rollout step 6; the "What to Test" line on the build Run B uses, before rollout step 5 |
 | D-3 | Create a public TestFlight link | **Resolved by the operator 2026-10-15** (same quote): the operator creates it | The link becomes the `IOS_INSTALL_URL` value (§11); no link value is ever written in the repo |
 | D-4 | Rewards | **Resolved by `head-product` P20 (2026-10-15): reward-free v1** | Status and recognition only in v1. Rewards are Phase 3, gated on the operator approving `monetization-pm`'s pricing memo; `monetization-pm` designs the economics, `growth-pm` defines "activated" and the mechanics (§12) |
-| D-5 | Approve the words (`gp.*`). Gate 1 added to the list: the A1 step 1 / step 2 framing (R-F1); the desktop QR state's TickLabel "Join on your iPhone", its scan line, the line "Have the Fleeced extension for Chrome or Edge?" with "Open the web app", the iPad link "On an iPad? Get the iOS beta, then tap the invite again." and the QR's accessible name (e.g. "QR code: opens this invite on your iPhone") (R-F3, D-16); A1's "Install Fleeced" and step 2 "Tap the invite again, or rescan its code, to join {leagueName}." and the revised A2 note (R-F1); the reworded activation body `gp.inbox.activated_body`, "When they like a trade with you, it can show up with a "They're interested" tag." (R-F6, FR-19); the "What to Test" line (D-2); and, only if their checklist steps fail, the installed-user line `gp.join.iab_wayout` on A1/A2 (R-F2, step 4b) and the J4 league-switch confirmation (R-F4, step 7b) | **operator** via `marketing-lead` | — |
+| D-5 | Approve the words (`gp.*`). Gate 1 added to the list: the A1 step 1 / step 2 framing (R-F1); the desktop QR state's TickLabel "Join on your iPhone", its scan line, the line "Have the Fleeced extension for Chrome or Edge?" with "Open the web app", the iPad link "On an iPad? Get the iOS beta, then tap the invite again." and the QR's accessible name (e.g. "QR code: opens this invite on your iPhone") (R-F3, D-16); A1's "Install Fleeced" and step 2 "Tap the invite again, or rescan its code, to join {leagueName}." and the revised A2 note (R-F1); the reworded activation body `gp.inbox.activated_body`, "When they like a trade with you, it can show up with a "They're interested" tag." (R-F6, FR-19); the "What to Test" line (D-2); and, only if their checklist steps fail, the installed-user line `gp.join.iab_wayout` on A1/A2 (R-F2, step 4b) and the J4 league-switch confirmation (R-F4, step 7b). The launch-day copy (marketing-lead copy batch, 2026-10-23) is added too: the store pair "Get the iPhone app" / "Opens the App Store." (chosen by the `IOS_INSTALL_URL` host, FR-7), the iPad line's store form (`growth-pm`'s placeholder, pending `marketing-lead`), the Android note "Available on iPhone and desktop web for now." and `gp.join.og_desc` | **operator** via `marketing-lead` | — |
 | D-6 | Accept the PRD; **supersede D-028 part 2** (a real join page instead of the 302 into `/`), because D-028's premise that the existing web funnel converts holds only on desktop with the extension | `head-product` (new DECISIONS entry, id claimed against `origin/main`) | Yes |
 | D-7 | Second flag `growth.join_landing` | `head-product` / `growth-pm` | Yes: independent rollback for the riskiest surface |
 | D-8 | Activation = stage 7 first opinion (vs 5 or 6) | `analytics-lead` | Stage 7: the first `trade_proposed` or `match_swiped` within 14 days of `joined_at` (FR-17) |
@@ -1369,8 +1453,11 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   in J2, FR-7, FR-19): A1's step 1 / step 2 (R-F1), the desktop QR state's labels and iPad
   link (R-F3, D-16), the revised A2 note, the activation body (R-F6), the "What to Test"
   line (D-2) and the contingent installed-user line (R-F2); the operator approves them with
-  D-5. Still to word: the QR's accessible name (FR-7), and, only if its checklist step
-  fails, the J4 league-switch confirmation (R-F4). Keep `gp.inbox.activated_body` in step
+  D-5. Still to word: the QR's accessible name (FR-7); the iPad line's store form, for which
+  `growth-pm` holds a placeholder ("On an iPad? Get the iPhone app, then tap the invite
+  again.", FR-7); and, only if its checklist step fails, the J4 league-switch confirmation
+  (R-F4). The launch-day rows (copy batch, 2026-10-23: `m4.348.*`, `m3.web.og_desc`) are
+  folded in J2, FR-7 and FR-25, with the store labels keyed to the install host, not a date. Keep `gp.inbox.activated_body` in step
   with the "They're interested" pill label (`TradeCard.tsx:525`).
 - **FAQ claim → P9's copy-defect batch (`onboarding-pm`) via `head-product`:**
   `web/faq.html:206` says the web app "works in any phone browser", which is false: web

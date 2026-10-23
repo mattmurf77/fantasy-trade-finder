@@ -8,6 +8,7 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
 -->
 
 **Date:** 2026-10-15
+**Revised:** 2026-10-23 (`growth-pm`): launch-day copy keyed to the `IOS_INSTALL_URL` host (PRD FR-7, AC-7g; marketing-lead copy batch, 2026-10-23), the `/s/*` href `/?share=<kind>` (AC-25, `head-eng`'s C5), FR-8's league rule, and the launch slice for Wed 2026-11-18 (PRD §12)
 **Entry point:** direct ask: operator 2026-10-15 via `head-product` ("Growth loops. Need to be built and need to work. Referral growth loop is the primary one, …"); growth backlog GB-01
 **Builder:** TBD — `head-eng` allocates (likely `engagement-eng` backend + invite routes, `onboarding-eng` for web/LeagueJoin/SignIn). **First build slice handed to `head-eng` by `head-product` 2026-10-15** (PRD §12: FR-7, FR-8, FR-9, FR-25 the `/s/*` CTA target, §8.2, `IOS_INSTALL_URL` as config), after the operator's ruling "Ok. start building D1 and D3" (PRD D-1 = option A; D-3 = the operator creates the public TestFlight link)
 **Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3). **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on the build branch before ship.** `ux-lead`: approve with changes (R-F1…R-F8, PRD J1/J2/J4, FR-1, FR-7, FR-19, D-9, D-16; checklist steps below). `analytics-lead`: §1 granted with C1–C9 and R1–R3 (analytics addendum, PR #350, `docs/business/analytics/2026-10-15-referral-loop-events.md`). `design-lead`: confirmed R-F3 and R-F1's A1 step layout 2026-10-15 (PRD D-16 resolved; specs in FR-7, AC-7c, AC-7f; checked in `/design-review` on the build branch)
@@ -100,8 +101,10 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
 - **New env vars / `model_config` keys:** `IOS_INSTALL_URL` (unset by default): the
   landing's and the `/s/*` pages' iOS install target (PRD FR-7, FR-25): the public TestFlight
   link under option A (chosen by the operator 2026-10-15, PRD D-1; the operator creates the
-  link, D-3); the App Store URL after the listing. An environment value only: no link value is
-  ever written in the repo. Set ⇒ on desktop (and iPad), "Join on your iPhone" with a QR
+  link, D-3); the App Store URL after the listing (launch day, PRD §12). The iPhone labels
+  follow its host: `testflight.apple.com` → the beta pair, `apps.apple.com` → the store pair;
+  any other host or a non-`https://` value counts as unset and is logged once (PRD FR-7,
+  AC-7g). An environment value only: no link value is ever written in the repo. Set ⇒ on desktop (and iPad), "Join on your iPhone" with a QR
   code of the invite URL is the primary and the web app the secondary (PRD FR-7, D-16;
   `ux-lead` R-F3). Unset ⇒ the honest note instead of a button on iPhone, and on desktop the
   web app stays primary with no QR and no iOS link (PRD FR-7). Deploy-free lever: unset it.
@@ -165,24 +168,36 @@ D-056: no Maestro, no simulator, no captures.
     reports the encoder's version for today's join URL; human UA increments `open_count` +
     fires
     `invite_landing_opened` with `invite_status` (never a `token_status` key, C1); a human GET
-    with no `t` still fires it, `invite_status` null (R1); each listed preview agent and the
+    with no `t` still fires it, `invite_status` null (R1); a `t` naming a row in another
+    league fires it with `invite_status` `league_mismatch` and stamps no row, while an
+    expired same-league row is stamped (PRD FR-8's league rule); each listed preview agent and the
     generic `bot|crawler|spider|preview` pattern set only `unfurled_at` and fire nothing, on
     the landing and on `/go/<cta>` (C4); HEAD records nothing; no stored row carries a
     user-agent string or an IP (C4); unknown/expired ids; click-through closed set and
     targets (no user-supplied redirect).
   - `backend/tests/test_share_landing_cta.py` (new; PRD FR-25, AC-25): `/s/p` and
     `/s/trade`, asserting per branch the CTA `href`, **its label and its help line or note**,
-    not just the target. Gate off → `href` `/` with today's label ("Build your own trade" /
-    "Find your next trade") for every user agent, no help line or note. Gate on → iPhone UA
-    with `IOS_INSTALL_URL` set: links it, label "Get the iOS beta", help line "Installs
-    through Apple's TestFlight app.", no re-tap line; iPhone UA unset: no CTA link, note "The
-    iPhone beta isn't open to the public yet. Already have it? Open Fleeced."; desktop UA:
-    links `/` with the page's label and help line "Sign-in uses the Fleeced extension for
-    Chrome or Edge."; Android UA: no CTA link, note "Fleeced runs on iPhone and desktop web
-    for now.". Every case: the response is not `public`-cacheable, or carries `Vary:
+    not just the target. Gate off → `href` `/?share=<kind>` (`package` / `trade`; `head-eng`'s
+    contract C5, not bare `/`) with today's label ("Build your own trade" / "Find your next
+    trade") for every user agent, no help line or note. Gate on → iPhone UA with
+    `IOS_INSTALL_URL` set: links it, no re-tap line, label and help line by host (AC-7g):
+    "Get the iOS beta" / "Installs through Apple's TestFlight app." on `testflight.apple.com`,
+    "Get the iPhone app" / "Opens the App Store." on `apps.apple.com`; iPhone UA unset: no
+    CTA link, note "The iPhone beta isn't open to the public yet. Already have it? Open
+    Fleeced."; desktop UA: links `/?share=<kind>` with the page's label and help line
+    "Sign-in uses the Fleeced extension for Chrome or Edge."; Android UA: no CTA link, note
+    "Available on iPhone and desktop web for now.". Every case: the response is not `public`-cacheable, or carries `Vary:
     User-Agent`; `og:*` tags unchanged; no `dtf://` or user-supplied target; no QR code on
     any variant (the `/s/*` QR is GB-02's rebuild, PRD FR-25). Strings are
     `marketing-lead`'s proposals until the operator approves the words (PRD D-5).
+  - **Install host rule (PRD AC-7g)**, in `test_join_landing.py` and
+    `test_share_landing_cta.py`: the label pair is chosen by the `IOS_INSTALL_URL` host. An
+    `https://testflight.apple.com/…` value gives "Get the iOS beta" / "Installs through
+    Apple's TestFlight app." (and the iPad line's beta form); an `https://apps.apple.com/…`
+    value gives "Get the iPhone app" / "Opens the App Store." (and the iPad line's store
+    form); any other host, or a non-`https://` value, renders the unset behaviour on every
+    user agent (honest notes, no QR or iOS link on desktop, `/go/ios` 404, the `/s/*` unset
+    note) and logs one warning per process. Proposed strings until D-5.
   - `backend/tests/test_referral_attribution.py` (new): token credit for Sleeper, ESPN and MFL
     invitees; first session in a different league with verified membership; `unknown`,
     `expired`, `not_member` misses; group-chat second and third joiners → sibling rows;
@@ -342,10 +357,10 @@ D-056: no Maestro, no simulator, no captures.
       link on each device. Expected: iPhone with `IOS_INSTALL_URL` set → a "Get the iOS
       beta" button to the TestFlight link, with "Installs through Apple's TestFlight app."
       under it and no re-tap line; iPhone with it unset → the "…Open Fleeced." note and
-      **no** button; Android → "Fleeced runs on iPhone and desktop web for now." and **no**
-      button; desktop → "Build your own trade" to the web app (`/`), with the Chrome-or-Edge
-      extension line. With the flag off, every device gets today's "Build your own trade"
-      button to `/` and no extra line.
+      **no** button; Android → "Available on iPhone and desktop web for now." and **no**
+      button; desktop → "Build your own trade" to the web app (`/?share=package`), with the
+      Chrome-or-Edge extension line. With the flag off, every device gets today's "Build your
+      own trade" button to the web app (`/?share=package`) and no extra line.
 - [x] **Design review** (`design-lead`; requested 2026-10-15 by `head-product`, with the
   `ux-lead` flow review and the `analytics-lead` review of §1): a `/design-review` verdict at
   `docs/plans/referral-loop/design-review.md` before ship, covering the join landing (per-device
