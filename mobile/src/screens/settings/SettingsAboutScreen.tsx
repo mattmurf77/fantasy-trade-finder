@@ -16,10 +16,12 @@
 // adds none.
 //
 // Neither module takes SettingsSectionProps: GuideSection has no notice surface
-// and no outbound navigation, and every AboutSection row opens an external URL
-// via Linking. So this page mounts NO Toast — there is nothing to announce, and
-// a Toast with no producer is dead state. Add one back with the first row that
-// actually needs it.
+// and no outbound navigation. AboutSection's rows open external URLs via
+// Linking (the data-credits row opens the nflverse repo), except "Your
+// feedback" (#354 BL-10), which pushes FeedbackInbox through AboutSection's own
+// useNavigation(), so this page passes it nothing. This page mounts NO Toast —
+// there is nothing to announce, and a Toast with no producer is dead state. Add
+// one back with the first row that actually needs it.
 //
 // Data (plan §6): no queries.
 

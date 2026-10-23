@@ -42,7 +42,7 @@ const STATUS_COLOR: Record<FeedbackStatus, string> = {
   declined:    chalk.faint,
 };
 
-// Settings → Test feedback → this screen.
+// Settings → Help & about → Your feedback → this screen.
 // Lists every captured feedback note in newest-first order. The header
 // has two destructive-ish actions:
 //   • Share — opens the iOS share sheet with the inbox formatted as
