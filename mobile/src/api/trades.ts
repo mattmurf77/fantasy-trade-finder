@@ -20,11 +20,18 @@ export interface TradePageFields {
   prefetch_remaining?: number; // fetch the next page at this many ready cards
   search_id?: string;       // E2: echoed client search id
 }
-export type PagedTradeJobSnapshot = TradeJobSnapshot & TradePageFields;
+export type PagedTradeJobSnapshot = TradeJobSnapshot & TradePageFields & {
+  cards: PagedTradeCard[];
+};
 // Per-card stable identity (`_deck_trade_hash`: sorted give | sorted
 // receive | partner). Deck dedupe keys on it, because `trade_id` is minted
 // per build and so differs for the same trade across two decks.
-export type PagedTradeCard = TradeCard & { trade_hash?: string };
+export type PagedTradeCard = TradeCard & {
+  trade_hash?: string;
+  // Client-side stamp: the card arrived in a PAGED response (one with a
+  // cursor). TradesScreen keeps such a deck in server order (AC-9).
+  from_page?: true;
+};
 
 export interface GenerateBody {
   league_id: string;
@@ -263,7 +270,12 @@ export function normalizeTradeCard(raw: any): PagedTradeCard {
 // /api/trades/status. Both run cards through the same normalizer so
 // downstream code keeps using the unified TradeCard shape.
 function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
-  const cards = Array.isArray(raw?.cards) ? raw.cards.map(normalizeTradeCard) : [];
+  const paged = Number.isInteger(raw?.cursor);
+  const cards: PagedTradeCard[] = Array.isArray(raw?.cards)
+    ? raw.cards.map((c: any) => (paged
+      ? { ...normalizeTradeCard(c), from_page: true as const }
+      : normalizeTradeCard(c)))
+    : [];
   // F3 (flag deck.fatigue) — additive honoring note; validated defensively so
   // a malformed payload degrades to "no note" (banner hidden).
   const rawNote = raw?.suppression_note;

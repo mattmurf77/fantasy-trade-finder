@@ -109,6 +109,8 @@
     "test:tour-suppression": "node tests/check-tour-suppression.js",
     "test:trade-text": "node tests/check-trade-text.js",
     "test:trades-banner-region": "node tests/check-trades-banner-region.js",
+    "test:trade-pages": "node tests/check-trade-pages.js",
+    "test:trade-buffer": "node tests/check-trade-buffer.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
     "test:window-composite": "node tests/check-window-composite.js",
     "test:win-now": "node tests/check-win-now.js",

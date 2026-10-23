@@ -36,7 +36,7 @@ import Animated, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { haptics } from '../utils/haptics';
 import { useCardImpact, type CardImpactState } from '../state/useCardImpact';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, onlineManager } from '@tanstack/react-query';
 
 import {
   ink,
@@ -95,7 +95,25 @@ import {
   type AssetIdea,
   type SwipeSignal,
   type StandingOffer,
+  type PagedTradeCard,
+  type PagedTradeJobSnapshot,
 } from '../api/trades';
+import { uuidv4 } from '../api/_queue';
+// 200 ms path — the paged deck's merge / prefetch / end-of-buffer rules.
+// Pure, zero runtime imports (tests/check-trade-pages.js runs them).
+import {
+  deckCardKey,
+  deckEndState,
+  isPagedEnvelope,
+  isWholeDeck,
+  mergeDeckPage,
+  needsBackoff,
+  nextRetryAttempt,
+  pageRetryDelayMs,
+  unseenCount,
+  wantsNextPage,
+  type PageFetchPhase,
+} from '../utils/tradePages';
 import StandingOfferSheet from '../components/StandingOfferSheet';
 // #384 W6-B — the fair-package deck builds its cards with the SAME helper the
 // featured-trade window uses, so a fair card and a window card can never
@@ -149,6 +167,10 @@ import { getActiveOverhaul } from '../api/overhaul';
 import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
 import SkeletonTradeCard from '../components/SkeletonTradeCard';
+import {
+  DeckMoreErrorCard,
+  DeckOfflineCard,
+} from '../components/TradeDeckStates';
 import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
 import QuickSetPromptCard from '../components/QuickSetPromptCard';
@@ -442,6 +464,14 @@ function tradePackageKey(c: TradeCard): string {
   ].join('|');
 }
 
+// Failed next-page requests retried silently before the loop rests (the
+// U3 3b error state's Try again restarts it).
+const MAX_SILENT_PAGE_FAILURES = 6;
+// TanStack's onlineManager is bridged to NetInfo in App.tsx; the deck's
+// offline state (U3 rows 3a/5) reads it rather than a second listener.
+const subscribeOnline = (cb: () => void) => onlineManager.subscribe(cb);
+const readOnline = () => onlineManager.isOnline();
+
 export default function TradesScreen({ navigation, route }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
@@ -584,7 +614,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // restored by the hydrate below; nobody's stored value is rewritten.
   const [fairnessOn, setFairnessOn] = useState(fairnessOnFromPref(null));
   const [fairnessReady, setFairnessReady] = useState(false);
-  const [deck, setDeck] = useState<TradeCard[]>([]);
+  const [deck, setDeck] = useState<PagedTradeCard[]>([]);
   const [deckSourcePosition, setDeckSourcePosition] = useState(0);
   const localPassSnapshot = useSyncExternalStore(subscribeLocalPasses, () => localPassSession);
   const deckProjectionRef = useRef<DispositionProjection<TradeCard>>({ cards: [], sourceIndices: [], index: 0, sourceLength: 0 });
@@ -1947,7 +1977,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // The backend runs generation in a background thread and we poll for
   // results. The job snapshot drives both the deck (cards stream in) and
   // the progress strip ("4/11 opponents searched").
-  const [job, setJob] = useState<TradeJobSnapshot | null>(null);
+  // 200 ms path: a paged job's snapshot also carries the paging envelope
+  // (cursor, deck_id, pool_exhausted, freshness_state, …); `cards` is the
+  // cumulative list delivered for this search. A legacy (cursor-less) job is
+  // the server's cumulative snapshot, unchanged.
+  const [job, setJob] = useState<PagedTradeJobSnapshot | null>(null);
 
   // P0-2 — the last search's failure, or null. Set by all three failure
   // paths, cleared by every path that starts or invalidates a search.
@@ -2002,7 +2036,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean }) => {
+    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string }) => {
       // Pins are read from the store (not the render closure) so a
       // pin-then-generate in the same tick (#186 keep-side) always sends
       // the fresh lists.
@@ -2037,7 +2071,10 @@ export default function TradesScreen({ navigation, route }: any) {
       // A handoff supplies one explicit canvas request. Subsequent new
       // targeting uses the pin store; Retry/Find more use the saved request.
       canvasSelectionRef.current = null;
-      return generateTrades(request);
+      // 200 ms path (E2): page 1 under the dispatch's client search id
+      // (minted in dispatchGenerate, never saved into the request above, so
+      // a repeat is a new search).
+      return generateTrades(request, vars.searchId ? { searchId: vars.searchId } : undefined);
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
@@ -2149,7 +2186,9 @@ export default function TradesScreen({ navigation, route }: any) {
         s ? { ...s, origin: 'model' } : { origin: 'model', passed: 0, edits: {} },
       );
     }
-    generateMutation.mutate(vars, mutateOpts);
+    // 200 ms path — every dispatch is a new search with its own client
+    // search id (E2 `search_id`, echoed; R1/R2 key on it in the M pass).
+    generateMutation.mutate({ ...vars, searchId: uuidv4() }, mutateOpts);
   }
 
   // Poll while a job is running. Self-scheduling setTimeout loop with
@@ -2167,6 +2206,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // every poll tick even when the job snapshot is identical.
   useEffect(() => {
     if (!job || job.status !== 'running' || !job.job_id) return;
+    // 200 ms path — a PAGED job (its response carried a cursor) is driven by
+    // the page loop below (prefetch by `prefetch_remaining`, silent backoff);
+    // this cumulative-snapshot poller serves legacy responses only.
+    if (isPagedEnvelope(job)) return;
     let cancelled = false;
     let failures = 0;
     const MAX_POLL_FAILURES = 4;
@@ -2292,9 +2335,14 @@ export default function TradesScreen({ navigation, route }: any) {
   // with a status flip from 'running' → 'complete', which is included.
   useEffect(() => {
     if (!job) return;
+    // 200 ms path — dedupe by `deckCardKey` (the server's `trade_hash`, else
+    // `trade_id`, which is exactly today's key for a server without hashes).
+    // Appends only: delivered cards are never reordered or replaced here.
+    // (Paged pages after the first are merged by the page loop, which keeps
+    // `job.cards` a subset of `deck`, so this is a no-op for them.)
     setDeck((prev) => {
-      const seen = new Set(prev.map((c) => c.trade_id));
-      const fresh = job.cards.filter((c) => !seen.has(c.trade_id));
+      const seen = new Set(prev.map(deckCardKey));
+      const fresh = job.cards.filter((c) => !seen.has(deckCardKey(c)));
       return fresh.length === 0 ? prev : [...prev, ...fresh];
     });
     // #276 — the generated card is now on screen (or about to be, once this
@@ -4082,6 +4130,14 @@ export default function TradesScreen({ navigation, route }: any) {
     // Trial scores are model-local, not comparable across arms. Keep the
     // server's attributed order even when the fairness preference is off.
     if (deck.some((c) => c.preserve_server_order === true)) return pool;
+    // 200 ms path — a PAGED deck (its cards carry `from_page`, stamped by
+    // the API normalizer) keeps the server's order, always: pages append
+    // behind the fronted card, and the fairness-off re-sort below (and its
+    // likes-you lift — the server already fronts those) would move a later
+    // page's cards in front of delivered ones, or slide a different card
+    // under the user's thumb (AC-9; U3 row 1 "no reorder, no jump"; scope
+    // §6.3). Legacy (cursor-less) decks are sorted exactly as before.
+    if (deck.some((c) => c.from_page === true)) return pool;
     if (fairnessOn) return pool;
     const pinned = pool.filter((c) => c.likesYou);
     const rest = pool
@@ -4141,6 +4197,163 @@ export default function TradesScreen({ navigation, route }: any) {
     format: calcFormat,
   });
   const nextCard = sortedDeck[deckIdx + 1];
+
+  // ── 200 ms path: the paged deck (scope-eng-200ms §6.4–§6.6) ─────────────
+  // A job is PAGED when its response carried a cursor (E2/P1/P2). Its next
+  // pages are fetched here, never by the legacy poller above:
+  //   - prefetch while FEWER than `prefetch_remaining` unseen cards are held
+  //     (the server's value, client fallback 50 — head-eng ruling 10). Page 1
+  //     is below that, so page 2 is requested by the effect right after the
+  //     first card's frame commits — outside the tap clock;
+  //   - ONE request in flight or scheduled at a time (`busy`);
+  //   - a page that finds the deck still building and nothing new ready, or
+  //     a failed request, schedules a SILENT retry (pageRetryDelayMs) — no
+  //     UI state (U3 rows 1–2; there is no "Finding more" anything);
+  //   - every result passes the epoch guard and is dropped if the search it
+  //     was for has been replaced.
+  // The pure rules live in utils/tradePages.ts (check-trade-pages.js,
+  // check-trade-buffer.js run them).
+  const online = useSyncExternalStore(subscribeOnline, readOnline);
+  const pagedDeck = isPagedEnvelope(job);
+  const pagedWithCards = pagedDeck && deck.length > 0;
+  const unseen = unseenCount(sortedDeck.length, deckIdx);
+  const [pagePhase, setPagePhase] = useState<PageFetchPhase>('idle');
+  const [pageKick, setPageKick] = useState(0);
+  const pageLoopRef = useRef<{
+    inFlight: boolean;
+    timer: ReturnType<typeof setTimeout> | null;
+    attempt: number;
+    failures: number;
+  }>({ inFlight: false, timer: null, attempt: 0, failures: 0 });
+  const jobRef = useRef(job);
+  jobRef.current = job;
+  const deckRef = useRef(deck);
+  deckRef.current = deck;
+
+  // A new search (new job_id) or a reset (job → null) starts a fresh loop.
+  // The old loop object is replaced, so a request still in flight for it
+  // finds `pageLoopRef.current !== loop` and drops its result.
+  useEffect(() => {
+    const old = pageLoopRef.current;
+    if (old.timer) clearTimeout(old.timer);
+    pageLoopRef.current = { inFlight: false, timer: null, attempt: 0, failures: 0 };
+    setPagePhase('idle');
+  }, [job?.job_id]);
+  useEffect(() => () => {
+    const t = pageLoopRef.current.timer;
+    if (t) clearTimeout(t);
+  }, []);
+
+  // Merge one paged response (utils/tradePages.mergeDeckPage): appends go
+  // behind everything held; a whole-deck response (`replace`, or a rebased
+  // page spanning the new deck) is taken only for what is BEHIND the fronted
+  // card (head-eng ruling 16) — the fronted card and the seen ones never
+  // move. `job.cards` is set to the same list, so the append effect above
+  // has nothing left to add. The job keeps its id across a P2 rebase (the
+  // search's identity: tally, re-rank and first-session state key on it);
+  // the page identity rides `deck_id`.
+  function applyPage(next: PagedTradeJobSnapshot): number {
+    const projection = deckProjectionRef.current;
+    const front = projection.cards[projection.index];
+    const merged = mergeDeckPage(
+      deckRef.current,
+      next.cards,
+      front ? deckCardKey(front) : null,
+      isWholeDeck(next),
+    );
+    deckRef.current = merged.cards;
+    setDeck(merged.cards);
+    setJob((prev) => ({
+      ...(prev ?? {}),
+      ...next,
+      job_id: prev?.job_id || next.job_id,
+      deck_id: next.deck_id ?? prev?.deck_id,
+      search_id: prev?.search_id ?? next.search_id,
+      freshness_state: next.freshness_state,
+      pool_exhausted: next.pool_exhausted,
+      replace: undefined,
+      rebased: undefined,
+      cards: merged.cards,
+    }));
+    return merged.added;
+  }
+
+  async function fetchNextPage() {
+    const snap = jobRef.current;
+    if (!snap || typeof snap.cursor !== 'number') return;
+    const loop = pageLoopRef.current;
+    const epoch = deckEpochRef.current;
+    const forJob = snap.job_id;
+    const requested = snap.cursor;
+    loop.inFlight = true;
+    setPagePhase((p) => (p === 'idle' ? 'loading' : p));
+    let backoff = false;
+    try {
+      const next = await getTradeStatus(snap.job_id, { deck: snap.deck_id, cursor: requested });
+      if (!mountedRef.current || pageLoopRef.current !== loop) return;
+      if (applyJobResult(next, epoch, deckEpochRef.current) === null) return;
+      if (jobRef.current?.job_id !== forJob) return;
+      loop.failures = 0;
+      const added = applyPage(next);
+      backoff = needsBackoff(next, requested);
+      loop.attempt = nextRetryAttempt(loop.attempt, backoff, added);
+      setPagePhase(backoff ? 'retrying' : 'idle');
+    } catch {
+      if (!mountedRef.current || pageLoopRef.current !== loop) return;
+      loop.failures += 1;
+      loop.attempt += 1;
+      backoff = true;
+      setPagePhase(loop.failures >= 3 ? 'failed' : 'retrying');
+    } finally {
+      loop.inFlight = false;
+    }
+    // A deck still building is asked again for as long as it builds; a
+    // request that keeps FAILING stops after a few silent tries (the error
+    // state's Try again restarts it) rather than polling forever.
+    if (backoff && pageLoopRef.current === loop && loop.failures < MAX_SILENT_PAGE_FAILURES) {
+      loop.timer = setTimeout(() => {
+        loop.timer = null;
+        setPageKick((k) => k + 1);
+      }, pageRetryDelayMs(loop.attempt - 1));
+    }
+  }
+
+  useEffect(() => {
+    const snap = jobRef.current;
+    if (!snap?.job_id || !online) return; // offline: reconnect re-runs this
+    const loop = pageLoopRef.current;
+    if (!wantsNextPage({
+      ...snap,
+      unseen,
+      busy: loop.inFlight || loop.timer !== null,
+    })) return;
+    void fetchNextPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.job_id, job?.cursor, job?.deck_id, job?.status, job?.pool_exhausted,
+      job?.prefetch_remaining, unseen, online, pageKick]);
+
+  // U3 Retry / Try again: an errored job can't page any further, so it runs
+  // the search again in place; otherwise the next page is requested now.
+  function handleDeckMoreRetry() {
+    haptics.selection();
+    if (jobRef.current?.status === 'error') {
+      handleFindTrades('deck_error_retry');
+      return;
+    }
+    const loop = pageLoopRef.current;
+    if (loop.timer) clearTimeout(loop.timer);
+    loop.timer = null;
+    loop.attempt = 0;
+    loop.failures = 0;
+    setPageKick((k) => k + 1);
+  }
+
+  // What the deck slot shows past the last held card of a paged deck
+  // (ux-lead U3, utils/tradePages.deckEndState). Never a "Finding more".
+  const deckEnd = pagedWithCards && !rawTopCard && job
+    ? deckEndState({ ...job, phase: pagePhase, online })
+    : null;
+
 
   // ── Swap suggestions (2026-07-27 player-changer) ─────────────────────
   // Operator follow-up to the calculator eveners: counter-suggestions
@@ -8835,6 +9048,16 @@ export default function TradesScreen({ navigation, route }: any) {
                 </Pressable>
               ) : null}
             </>
+          ) : pagedWithCards && deckEnd !== 'legacy' ? (
+            // U3 rows 1–3 — past the last held card of a paged deck. The page
+            // in flight lands behind/into this slot silently ('pending'
+            // renders nothing); offline (3a) and a page that won't come (3b)
+            // are the only states. Never a "Finding more"/"Looking" card.
+            deckEnd === 'offline' ? (
+              <DeckOfflineCard minHeight={topCardH} onRetry={handleDeckMoreRetry} />
+            ) : deckEnd === 'error' ? (
+              <DeckMoreErrorCard minHeight={topCardH} onRetry={handleDeckMoreRetry} />
+            ) : null
           ) : firstRun &&
             !fairDeck &&
             deck.length === 0 &&
