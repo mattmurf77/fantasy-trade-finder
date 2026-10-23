@@ -13,9 +13,9 @@
 //     Like/Pass; or it swaps away when later cards arrive (D14c);
 //   - "Adjust what I'm looking for" navigates instead of searching in place
 //     (D14a), or loses its AC-L1 clock-start boundary for the M pass.
-// What it does: scans the Trades surfaces' strings (AST, so comments never
-// count), EXECUTES utils/tradePages.deckEndState over its whole input space,
-// and pins the end card's component and wiring by source.
+// What it does: scans every string literal and JSX text in mobile/src (AST,
+// so comments never count), EXECUTES utils/tradePages.deckEndState over its
+// whole input space, and pins the end card's component and wiring by source.
 // HONEST LABEL (G-035): the scan and the state matrix are exhaustive; the
 // rendering pins prove wiring, not pixels (TestFlight checklist: the U3
 // three-page run ends on this card).
@@ -66,6 +66,27 @@ function walk(dir, acc = []) {
 
 console.log('check-no-finding-more:');
 
+// ── 1. No "finding more" / "find more" copy anywhere in the build ─────────
+// One reviewed exemption, matched exactly: Team Overhaul's error verb
+// ("Finding more ideas" → "Finding more ideas failed…" on its own screen) is
+// an error message about a different feature's request, not a deck state.
+const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas']);
+{
+  const hits = [];
+  for (const file of walk(SRC)) {
+    const rel = path.relative(SRC, file);
+    for (const s of strings(file)) {
+      if (/find(ing)? more|loading more|more trades (are )?on the way/i.test(s) && !EXEMPT.has(`${rel}::${s}`)) {
+        hits.push(`${rel}: "${s.trim().slice(0, 70)}"`);
+      }
+    }
+  }
+  check('1a. no "Finding more" / "Find more" / "loading more" copy anywhere in mobile/src', hits.length === 0,
+    hits.join('\n      '));
+  check('1b. the one exemption still exists (else drop it from EXEMPT)',
+    strings(path.join(SRC, 'screens/OverhaulReviewScreen.tsx')).includes('Finding more ideas'));
+}
+
 // ── 2. …and no keep-going copy or state on the Trades surfaces ────────────
 {
   const files = ['screens/TradesScreen.tsx', 'components/TradeDeckStates.tsx', 'components/TradeCard.tsx',
@@ -82,6 +103,12 @@ console.log('check-no-finding-more:');
   }
   check('2a. no keep-going copy on the deck', copy.length === 0, copy.join('\n      '));
   check('2b. no waiting-for-more state variable on the deck', state.length === 0, state.join('\n      '));
+  const code = stripComments(read('screens/TradesScreen.tsx'));
+  const btns = code.match(/<Button[^>]*?testID="trades\.find-btn"[\s\S]*?\/>/g) || [];
+  check('2c. D13: both page CTAs read "Find a Trade" only, and render only while the deck holds no cards',
+    btns.length === 2 && btns.every((b) => /label="Find a Trade"/.test(b))
+      && (code.match(/\{deck\.length === 0 \? \(\s*<>\s*\{canvasHost !== 'flag' \? \(\s*<Button\s+variant="primary"\s+testID="trades\.find-btn"/g) || []).length === 2,
+    `found ${btns.length} find-btn mounts`);
 }
 
 // ── 3. EXECUTED: the end card only on the server's pool_exhausted ─────────

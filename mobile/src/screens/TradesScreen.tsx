@@ -2127,7 +2127,8 @@ export default function TradesScreen({ navigation, route }: any) {
           };
       lastModelRequestRef.current = request;
       // A handoff supplies one explicit canvas request. Subsequent new
-      // targeting uses the pin store; Retry/Find more use the saved request.
+      // targeting uses the pin store; Retry and regenerations use the saved
+      // request.
       canvasSelectionRef.current = null;
       // 200 ms path (E2): page 1 under the dispatch's client search id
       // (minted in dispatchGenerate, never saved into the request above, so
@@ -2406,8 +2407,8 @@ export default function TradesScreen({ navigation, route }: any) {
     // #276 — the generated card is now on screen (or about to be, once this
     // render commits): scroll it fully into view. Armed by handleFindTrades,
     // consumed the first time THIS job reports any cards at all (covers
-    // both an empty-deck first search and a "Find more trades" tap that
-    // streams fresh cards on top of an existing deck).
+    // an empty-deck first search and any search that streams fresh cards
+    // on top of an existing deck).
     if (pendingScrollToDeckRef.current && job.cards.length > 0) {
       pendingScrollToDeckRef.current = false;
       requestAnimationFrame(() => {
@@ -8021,19 +8022,23 @@ export default function TradesScreen({ navigation, route }: any) {
               `trades.edit_full_sheet`; were that ever off with
               `calc.inline_home` on, this copy would render beside the hosted
               canvas. Flag off, `canvasHost` is never 'flag' — unchanged. */}
+          {/* Head-eng ruling 13 (D13, ux-lead U3): the deck never ends and
+              refreshes itself, so there is no "more" button — this CTA only
+              STARTS a search, and leaves once the deck holds cards. Retry
+              lives in the error and offline states alone. */}
+          {deck.length === 0 ? (
+          <>
           {canvasHost !== 'flag' ? (
           <Button
             variant="primary"
             testID="trades.find-btn"
-            label={
-              singlePinFeatured || (deck.length > 0 && (fairDeck || job?.status === 'complete'))
-                ? 'Find more trades'
-                : 'Find a Trade'
-            }
+            label="Find a Trade"
             disabled={!leagueId || !fairnessReady || fairPending || generateMutation.isPending || job?.status === 'running'}
             onPress={() => handleFindTrades()}
             style={styles.findBtn}
           />
+          ) : null}
+          </>
           ) : null}
 
           {/* Progress strip — visible only during a running job. Cards are
@@ -8206,9 +8211,9 @@ export default function TradesScreen({ navigation, route }: any) {
             screen shows the landing as a trade, not a control panel.
             #298 — no longer hidden in single-pin featured mode: removing it
             there left the pinned surface with no way to get a swipeable,
-            accept/declinable trade at all. In that mode it reads "Find more
-            trades" from the start, because the featured window is already
-            showing one (V1 mock: "CTA relabelled for the pinned context").
+            accept/declinable trade at all. (Its pinned-context "more"
+            relabel is gone with D13, 2026-10-22: the CTA reads "Find a
+            Trade" and renders only while the deck holds no cards.)
 
             T-2 (merged-view trim, operator ruling 2026-08-28,
             docs/feedback/items/402-more-offers-shop/merged-view-trim-
@@ -8219,25 +8224,25 @@ export default function TradesScreen({ navigation, route }: any) {
             ONLY primary (ice-rationing rule). That cell covers BOTH search
             paths this bar served: a canvas with a give side runs the fair
             sweep, and an EMPTY canvas runs the model deck (D-153 fork via
-            `handleInlineFindATrade`), so the "Find more trades" relabel
-            state and the empty-deck "Hit Find a Trade to start" recovery
-            both still have a live entry. The deck-summary card's copy
+            `handleInlineFindATrade`), so the empty-deck "Hit Find a Trade
+            to start" recovery still has a live entry. The deck-summary card's copy
             quotes whichever control renders (see #316 note there). The
             progress strip below stays — it narrates the inline search too.
             Flag off, `canvasHost` is never 'flag' — byte-identical. */}
+        {/* D13 — start-only, as above: gone once the deck holds cards. */}
+        {deck.length === 0 ? (
+        <>
         {canvasHost !== 'flag' ? (
         <Button
           variant="primary"
           testID="trades.find-btn"
-          label={
-            singlePinFeatured || (deck.length > 0 && (fairDeck || job?.status === 'complete'))
-              ? 'Find more trades'
-              : 'Find a Trade'
-          }
+          label="Find a Trade"
           disabled={!leagueId || !fairnessReady || fairPending || generateMutation.isPending || job?.status === 'running'}
           onPress={() => handleFindTrades()}
           style={styles.findBtn}
         />
+        ) : null}
+        </>
         ) : null}
 
         {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
@@ -9336,10 +9341,9 @@ export default function TradesScreen({ navigation, route }: any) {
                 </Text>
                 {/* #316 — never "after waivers": dynasty leagues barely use
                     waivers and the deck actually refreshes via the weekly
-                    replenishment cron + the always-mounted Find-more-trades
-                    CTA above. "Find more trades" is quoted verbatim from
-                    that CTA's label in this exact state. Pinned by the
-                    smoke/12 flow's deck-done step.
+                    replenishment cron. D13 (2026-10-22) removed the page
+                    CTA's "more" state, so off the merged view the copy
+                    names no control at all.
                     T-2 (ruling 2026-08-28): with the page bar gone on the
                     merged view, the quoted control is the canvas action
                     row's cell, whose label is a fixed "Find a Trade" —
@@ -9347,7 +9351,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 <Text style={styles.emptyBody}>
                   {canvasHost === 'flag'
                     ? 'Fresh ideas land every week — or tap Find a Trade to search again now.'
-                    : 'Fresh ideas land every week — or tap Find more trades to search again now.'}
+                    : 'Fresh ideas land every week.'}
                 </Text>
                 {/* N4 (PRD §5.3) — the pin line reads as content on the
                     card, not chrome, and its verb has a reachable control:
