@@ -625,11 +625,9 @@ export default function RootNav({ booted }: { booted: boolean }) {
                 onVerify={() => navigation.navigate('SleeperConnect')}
               />
               <PushPrimingModal />
-              {/* In-app feedback capture (TestFlight). Floats above the
-                  tab bar on every authed screen. Settings → Test feedback
-                  exposes the inbox + share button. Remove this <FeedbackFAB />
-                  line (and the matching Settings row) when the app graduates
-                  to a public App Store release. */}
+              {/* In-app feedback capture. Floats above the tab bar on every
+                  authed screen, App Store builds included (#354 D-5).
+                  Settings → Help & about → Your feedback opens the inbox. */}
               <FeedbackFAB activeScreen={activeScreen} />
             </>
           )}
@@ -761,8 +759,8 @@ export default function RootNav({ booted }: { booted: boolean }) {
           options={{
             presentation: 'modal',
             headerShown: true,
-            title: 'Test feedback',
-            headerTitle: () => <HeaderTitle>Test feedback</HeaderTitle>,
+            title: 'Your feedback',
+            headerTitle: () => <HeaderTitle>Your feedback</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
           }}
