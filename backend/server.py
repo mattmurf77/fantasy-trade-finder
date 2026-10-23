@@ -20855,28 +20855,29 @@ def submit_rankings():
     user_id   = g_user_id
     league_id = body.get("league_id") or g_league.league_id
 
-    all_rankings = service.get_rankings(position=None)
-    payload = [
-        {"player_id": rp.player.id, "elo": rp.elo}
-        for rp in all_rankings.rankings
-    ]
+    with service._lock:
+        all_rankings = service.get_rankings(position=None)
+        payload = [
+            {"player_id": rp.player.id, "elo": rp.elo}
+            for rp in all_rankings.rankings
+        ]
 
-    try:
-        _conf = _ranking_confidence(service)
-        payload = _confidence_payload(payload, _conf)
-        _publish_member_rankings_for_trade_refresh(
-            user_id        = user_id,
-            league_id      = league_id,
-            rankings       = payload,
-            scoring_format = _active_format(sess),
-            **_conf,
-        )
-        log.info("rankings/submit [%s] — user=%s league=%s players=%d",
-                 _active_format(sess), user_id, league_id, len(payload))
-        return jsonify({"ok": True, "submitted": len(payload)})
-    except Exception as e:
-        log.error("rankings/submit error: %s", e)
-        return jsonify({"error": "internal_error"}), 500
+        try:
+            _conf = _ranking_confidence(service)
+            payload = _confidence_payload(payload, _conf)
+            _publish_member_rankings_for_trade_refresh(
+                user_id        = user_id,
+                league_id      = league_id,
+                rankings       = payload,
+                scoring_format = _active_format(sess),
+                **_conf,
+            )
+            log.info("rankings/submit [%s] — user=%s league=%s players=%d",
+                     _active_format(sess), user_id, league_id, len(payload))
+            return jsonify({"ok": True, "submitted": len(payload)})
+        except Exception as e:
+            log.error("rankings/submit error: %s", e)
+            return jsonify({"error": "internal_error"}), 500
 
 
 # #360/#361 — the five DNA position chips. This is the ONLY validated set for
