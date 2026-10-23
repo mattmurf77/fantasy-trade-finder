@@ -1,5 +1,5 @@
 // Settings § About — Help & FAQ, Your feedback, Privacy Policy, Terms of Use,
-// Version.
+// data credits, Version.
 //
 // Lifted verbatim from SettingsScreen.tsx (origin/main) `aboutSection` at
 // :1416-1458, plus:
@@ -112,6 +112,24 @@ export default function AboutSection() {
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
       >
         <Text style={[styles.rowKey, { flex: 1 }]}>Terms of Use</Text>
+        <Icon name="chevron-right" color={chalk.dim} size={16} />
+      </Pressable>
+      {/* Data credits (LEG-S3; legal-lead-drafts.md Part 3, wording verbatim).
+          Q5b: no league platform is named here. */}
+      <Pressable
+        accessibilityRole="link"
+        accessibilityHint="Opens in your browser"
+        onPress={() => Linking.openURL('https://github.com/nflverse/nfldata')}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>
+            Data by nflverse (https://github.com/nflverse/nfldata), CC-BY
+          </Text>
+          <Text style={styles.rowSub}>
+            Consensus values from DynastyProcess and other published sources.
+          </Text>
+        </View>
         <Icon name="chevron-right" color={chalk.dim} size={16} />
       </Pressable>
       {/* F7 — the build the user is actually running, for support triage. */}
