@@ -8,7 +8,7 @@ self-select it. Requirements: prd.md. Evidence: loop-audit.md.
 -->
 
 **Date:** 2026-10-15
-**Revised:** 2026-10-23 (`growth-pm`): launch-day copy keyed to the `IOS_INSTALL_URL` host (PRD FR-7, AC-7g; marketing-lead copy batch, 2026-10-23), the `/s/*` href `/?share=<kind>` (AC-25, `head-eng`'s C5), FR-8's league rule, and the launch slice for Wed 2026-11-18 (PRD §12). Revised again 2026-10-23 (`growth-pm`): `marketing-lead`'s referral approval package is vendored as [marketing-referral-approval.md](marketing-referral-approval.md), the launch-slice authority for referral wording (`head-product`, 2026-10-23); its [§2](marketing-referral-approval.md#2-operator-approval) (26 entries) was approved by the operator 2026-10-23 (PRD D-5), so the tests and checklist below assert those words; one invite line with no league name (PRD FR-3, package §5 D6); its [§4](marketing-referral-approval.md#4-later-slice-not-in-the-11-06-binary-not-in-this-approval) later slice is listed in PRD §12
+**Revised:** 2026-10-23 (`growth-pm`): launch-day copy keyed to the `IOS_INSTALL_URL` host (PRD FR-7, AC-7g; marketing-lead copy batch, 2026-10-23), the `/s/*` href `/?share=<kind>` (AC-25, `head-eng`'s C5), FR-8's league rule, and the launch slice for Wed 2026-11-18 (PRD §12). Revised again 2026-10-23 (`growth-pm`): `marketing-lead`'s referral approval package is vendored as [marketing-referral-approval.md](marketing-referral-approval.md), the launch-slice authority for referral wording (`head-product`, 2026-10-23); its [§2](marketing-referral-approval.md#2-operator-approval) (26 entries) was approved by the operator 2026-10-23 (PRD D-5), so the tests and checklist below assert those words; one invite line with no league name (PRD FR-3, package §5 D6); its [§4](marketing-referral-approval.md#4-later-slice-not-in-the-11-06-binary-not-in-this-approval) later slice is listed in PRD §12. Revised again 2026-10-23 (`growth-pm`), ruling the package's open items ([§6](marketing-referral-approval.md#6-rewordings-in-this-pass-o5-check-unresolved), U2–U4): FR-11 is in the 11-06 binary (§3 pin 8 and checklist step 6b); FR-18 is in the launch slice, server-side, target 11-16, with the `m3.push.joined` name fix by 11-16 even if FR-18 slips (PRD §12); the release-day `IOS_INSTALL_URL` host check (§5)
 **Entry point:** direct ask: operator 2026-10-15 via `head-product` ("Growth loops. Need to be built and need to work. Referral growth loop is the primary one, …"); growth backlog GB-01
 **Builder:** TBD — `head-eng` allocates (likely `engagement-eng` backend + invite routes, `onboarding-eng` for web/LeagueJoin/SignIn). **First build slice handed to `head-eng` by `head-product` 2026-10-15** (PRD §12: FR-7, FR-8, FR-9, FR-25 the `/s/*` CTA target, §8.2, `IOS_INSTALL_URL` as config), after the operator's ruling "Ok. start building D1 and D3" (PRD D-1 = option A; D-3 = the operator creates the public TestFlight link)
 **Gate 1 reviews:** requested 2026-10-15 by `head-product`: `ux-lead` (the flow), `analytics-lead` (the §1 rows), `design-lead` (`/design-review` before ship, §3). **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on the build branch before ship.** `ux-lead`: approve with changes (R-F1…R-F8, PRD J1/J2/J4, FR-1, FR-7, FR-19, D-9, D-16; checklist steps below). `analytics-lead`: §1 granted with C1–C9 and R1–R3 (analytics addendum, PR #350, `docs/business/analytics/2026-10-15-referral-loop-events.md`). `design-lead`: confirmed R-F3 and R-F1's A1 step layout 2026-10-15 (PRD D-16 resolved; specs in FR-7, AC-7c, AC-7f; checked in `/design-review` on the build branch)
@@ -130,6 +130,13 @@ D-056: no Maestro, no simulator, no captures.
   7. The Invite busy state ignores repeat taps: `shareInvite` and the web `shareVia` return
      early while a mint is pending, so one tap gives one mint and one share sheet (PRD
      AC-1e, `ux-lead` R-F8).
+  8. SignIn names the inviter from `t` (PRD FR-11, AC-11; U2, in the 11-06 binary):
+     `fetchInviteMeta` (`api/league.ts`) sends `t` when the intent holds an `inviteId`, and
+     `InviteMeta` carries `inviter_display_name` and `invite_status`; SignIn's call still
+     runs when the league name is cached but the inviter name isn't; with `t` and no `ref`,
+     the banner is built from `inviter_display_name` through AC-11's four-rung ladder, never
+     the shipped "You were invited to …" line; `fetchInviteMeta` still has exactly one call
+     site (`SignInScreen.tsx`).
   Also extend `mobile/tests/check-notif-glyphs.js` for `referral_activated` (glyph on both
   clients + mobile `V2_TRADE_KINDS` and web `TRADE_TYPES` membership: it routes to Trades,
   PRD FR-19). Web: extend `qa/web/check_web_structure.py` (CI) to assert
@@ -284,6 +291,11 @@ D-056: no Maestro, no simulator, no captures.
        findable in the list. Record how long it takes to pick L.
   6. **Installed + signed out.** With the app installed and signed out, tap a fresh link.
      Expected: the app opens (not Safari) on SignIn with the inviter named.
+     - **6b. Inviter named from the id** (PRD FR-11, U2). Read step 6's SignIn banner.
+       Expected: it opens with device A's display name, "{display name} invited you to L"
+       (AC-11), and no `@username`. **Fail if it reads "You were invited to L — sign in and
+       we'll take you straight there."**: that is the shipped no-inviter line, so FR-11 is
+       missing from the build.
   7. **Installed + signed in, member of L (existing user).** Tap a fresh link. Expected: L
      becomes active; **no** bell row for device A; no ledger credit.
      - **7b. Existing member, another league active** (R-F4). Signed in, a member of L, with
@@ -420,4 +432,12 @@ D-056: no Maestro, no simulator, no captures.
   `docs/plans/referral-loop/design-review.md` before ship (§3).
 - **TestFlight verification:** the §3 checklist run by the operator before rollout steps 4–6
   (PRD §12); outcome logged in `TEST_LEDGER.md`.
+- **Release day (Wed 2026-11-18), the `IOS_INSTALL_URL` flip** (PRD §12's `IOS_INSTALL_URL`
+  row; U4, package §6): `release-lead` sets the App Store URL and, as part of the flip,
+  confirms its host is `apps.apple.com` and it is `https://`. Then open a fresh join link and
+  a `/s/p` link with an iPhone user agent: each shows "Get the iPhone app" / "Opens the App
+  Store.", and neither shows "The iPhone beta isn't open to the public yet". Log the check
+  in `TEST_LEDGER.md`. An unset or invalid value after release is a config error, logged
+  once per process (PRD AC-7g); the store-era unset note that would replace the beta-era
+  notes is later slice (PRD §12) and needs `marketing-lead`'s words.
 - Express lane declared by the operator? **no** — full gates.

@@ -53,6 +53,11 @@
 > invite line with no league name), `gp.join.og_title`, `gp.join.valueprop`,
 > `gp.join.page_title` and the FR-18 body; the operator's approval of its §2 (26 entries,
 > D-5); and its §4 later-slice strings (§12).
+> Revised again 2026-10-23 to fold `growth-pm`'s rulings on the package's open items (§6,
+> U2–U4): FR-11 joins the 11-06 binary (U2); FR-18 is in the launch slice, server-side,
+> target 11-16, and the `m3.push.joined` name fix lands by 11-16 even if FR-18 slips (U3);
+> `release-lead` checks `IOS_INSTALL_URL`'s host on 11-18, and a store-era unset note is
+> later slice (U4) (FR-11, FR-18, §12, §16).
 > **Gate-1 inputs folded (ux-lead, analytics-lead, PR #350); design-review verdict comes on
 > the build branch before ship.**
 > Acceptance of the whole PRD (D-6) is still with `head-product`. Requirements only: **no
@@ -761,8 +766,21 @@ until a session-init body consumes it, like `consumeInvitedBy`, because
 
 **FR-11 — Name the inviter from the id.** `GET /api/league/invite-meta` accepts `t` and
 returns `inviter_display_name` and `invite_status` (§8.3). SignIn's banner
-(`SignInScreen.tsx:205-235`) and the LeaguePicker companion state use it when the link has no
+(`SignInScreen.tsx:203-235`) and the LeaguePicker companion state use it when the link has no
 `ref`; it is cached in the intent like `leagueName` (one call site, `SignInScreen.tsx:220`).
+The mobile call sends `t`: today `fetchInviteMeta` (`mobile/src/api/league.ts:953-975`) takes
+only a league id, `InviteMeta` (`:947-951`) has no inviter field, and the call is skipped
+once the league name is cached (`SignInScreen.tsx:218`), even when the inviter name isn't.
+(Lines at the base, 678834ab. On `origin/main` 712dcbed, SignIn's block sits 20 lines lower,
+`:223-255`; `league.ts` is unchanged.)
+- **Launch slice: must make the 11-06 binary** (`growth-pm`, 2026-10-23, on
+  `marketing-lead`'s U2, package §6; §12's binary row). FR-2 stops emitting the username
+  `ref`, so without FR-11 an installed invitee's SignIn loses the inviter name it shows today
+  (`SignInScreen.tsx:229-231`) and falls back to the shipped no-inviter line, "You were
+  invited to {league} — sign in and we'll take you straight there." (`:232-234`). FR-11
+  reuses the approved headline ladder (AC-11). Its server half (§8.3, `t` and
+  `inviter_display_name`) rides §12's server row, target 11-16; until it lands, the field is
+  absent and SignIn shows the ladder's no-name rungs.
 - AC-11: a token-only link renders "{display name} invited you to {league}" (FR-7's
   `gp.join.headline` ladder, approved 2026-10-23, D-5), with FR-7's fallback ladder: "{display name} invited you to their
   league" when the league name is unknown; an unknown id degrades to "A leaguemate invited you
@@ -913,6 +931,11 @@ board, not just consensus." (approved by the operator 2026-10-23,
 [package §2 H7](marketing-referral-approval.md#h7-notifications), D-5). Route unchanged
 (League, `deepLinks.ts:306-312`).
 - AC-18: the row's title and body differ; no row fires from a legacy `invited_by` alone.
+- **Launch slice: server-side, target 11-16, with the attribution work** (`growth-pm`,
+  2026-10-23, on `marketing-lead`'s U3, package §6; §12's server row). Today's row,
+  "@{new_username} joined Fantasy Trade Finder via your invite." (`S:22662`; title = body, so
+  the bell shows it twice), must not be live at launch: the `m3.push.joined` name fix lands
+  by 11-16 through the copy batch (`engagement-eng`) even if FR-18 slips (§12).
 
 **FR-19 — Activation row.** New notification type `referral_activated` (inbox only; push is
 Phase 2), posted to the inviter when FR-17 activates.
@@ -1399,11 +1422,12 @@ is **Wed 11-18**, when the launch-day copy flips with `IOS_INSTALL_URL`. Calls a
 | D-1 build: join landing (FR-7), `/go/<cta>` click-through (FR-9, §8.2), FR-8 open recording, the `/s/*` CTA (FR-25) | server | **Yes** | Live by 11-16. FR-8 records nothing until `growth.referral_ledger` flips (the server row below) |
 | `growth.invite_join_link` flip, after the D-2 device run | flag | **Yes** | The live binary emits legacy `/?league=` links, which skip the join landing, until it flips |
 | `growth.join_landing` flip, after D-5 words (approved by the operator 2026-10-23, package §2), the OG asset and `design-lead`'s `/design-review` | flag | **Yes** | Also turns on FR-25's device-aware `/s/*` CTA |
-| `IOS_INSTALL_URL` = the App Store URL on launch day | config | **Yes** | Flips the iPhone labels to "Get the iPhone app" / "Opens the App Store." on 11-18 with no deploy (FR-7's host rule) |
-| Mobile token pieces: FR-1/FR-2 mobile (the mint call, `t` in the link with the league-only fallback, the busy state that ignores repeat taps; `InviteLeaguematesBanner.tsx`); `t` captured from the deep link into the invite intent (FR-10: `deepLinks.ts`, `LeagueJoinScreen.tsx`, `useSession.ts`); `invite_id` in every mobile session-init body (FR-12/FR-13: `api/auth.ts`, `api/espn.ts`, `api/platformLink.ts`); the mobile events (the `share_link_opened` emitter and the `invite_id` prop on the invite events) | binary | **Yes: must make the 11-06 binary** (it gates the binary, so it gates launch) | Safe to ship before the server: the client falls back to the league-only link while the mint 404s |
+| `IOS_INSTALL_URL` = the App Store URL on launch day | config | **Yes** | Flips the iPhone labels to "Get the iPhone app" / "Opens the App Store." on 11-18 with no deploy (FR-7's host rule). **Release-day check** (U4, package §6): as part of the flip, `release-lead` confirms the value's host is `apps.apple.com`. Any other host, or a non-`https://` value, renders the unset states (AC-7g), whose beta-era notes ("The iPhone beta isn't open to the public yet…") are false after release. The store-era unset note is later slice (below) and needs `marketing-lead`'s words; until it lands, an unset or invalid value after release is a config error, logged once per process (AC-7g) |
+| Mobile token pieces: FR-1/FR-2 mobile (the mint call, `t` in the link with the league-only fallback, the busy state that ignores repeat taps; `InviteLeaguematesBanner.tsx`); `t` captured from the deep link into the invite intent (FR-10: `deepLinks.ts`, `LeagueJoinScreen.tsx`, `useSession.ts`); SignIn names the inviter from `t` (FR-11: the one `invite-meta` call sends `t` and the banner shows `inviter_display_name` through the approved headline ladder; `SignInScreen.tsx:203-235`, `api/league.ts:947-975`; U2, package §6); `invite_id` in every mobile session-init body (FR-12/FR-13: `api/auth.ts`, `api/espn.ts`, `api/platformLink.ts`); the mobile events (the `share_link_opened` emitter and the `invite_id` prop on the invite events) | binary | **Yes: must make the 11-06 binary** (it gates the binary, so it gates launch) | Safe to ship before the server: the client falls back to the league-only link while the mint 404s. FR-11 is a must here: FR-2's links carry no `ref`, so without it SignIn drops the inviter name to the shipped "You were invited to {league} — sign in and we'll take you straight there." |
 | The `referral_activated` notification type in the app (FR-19: mobile `V2_TRADE_KINDS` in `mobile/src/utils/deepLinks.ts` → Trades; the glyph pinned by `mobile/tests/check-notif-glyphs.js`) | binary | **Yes: must make the 11-06 binary** | Without it, activation rows posted after 11-16 tap to nowhere in the launch binary. The row itself is server-side and can wait (last row) |
 | In-app copy: FR-3's strings in the binary: the invite share text, one line with no league name, `gp.invite.msg` "Join me on Fleeced to find trades we both like → {url}" (package §5 D6; no league-name variant ships, `gp.invite.msg_league` is parked); the banner's "leaguemates" re-spelling (spelling only; the `h1.banner.body` rewrite is later slice, D7) | binary | **Yes** (gates the binary) | By 11-06 per the launch plan; words approved by the operator 2026-10-23 (D-5, package §2) |
-| Server mint endpoint (§8.1), token attribution and the league-match fallback (FR-13/FR-14), activation (FR-17), the #350 server emitters, the `growth.referral_ledger` flip | server | No | Target 11-16. If it slips, invites still convert and credit starts when it lands; accounts created before it get no back-fill |
+| Server mint endpoint (§8.1), token attribution and the league-match fallback (FR-13/FR-14), FR-11's server half (§8.3: `t`, `inviter_display_name`), activation (FR-17), the FR-18 join row (ledger-only, title ≠ body, `gp.push.joined_inbox_body`; U3, package §6), the #350 server emitters, the `growth.referral_ledger` flip | server | No | Target 11-16. If it slips, invites still convert and credit starts when it lands; accounts created before it get no back-fill. Until §8.3 lands, SignIn shows the ladder's no-name rungs (FR-11) |
+| The `m3.push.joined` name fix on today's `referral_joined` row ("@{new_username} joined Fantasy Trade Finder via your invite.", `S:22662`, title = body so it renders twice) | server | **Yes** | By 11-16 through the copy batch (`engagement-eng`), **even if FR-18 slips**: the old-name row must not be live at launch (U3, package §6) |
 | Web legs: the web modal mint (FR-1, FR-5), web `t` capture (FR-9), the web invite events (FR-5) | web | No | |
 | Can wait until after launch: the FR-19 activation row (server), FR-21 impact v2, the desktop QR if round 2 slips (fallback: the desktop layout without the QR, web app primary), FR-4 impression events and AC-4b's banner floors, Phase 2 pushes and "Your invites", GB-02 (the share chrome and OG rebuild, `ref` forwarding), rewards (Phase 3), the later-slice strings (below) | mixed | No | |
 
@@ -1423,6 +1447,10 @@ D-5 stays open for them.
   line.
 - **GB-02** (FR-25 keeps `og:*` unchanged): `s1.trade.title`, `s1.trade.desc`,
   `s2.pkg.title`, `s2.pkg.desc`, `s4.og_site`.
+- **The store-era unset note** (U4, package §6): the honest note for an unset or invalid
+  `IOS_INSTALL_URL` after release, replacing the beta-era unset notes on the landing and
+  `/s/*`. No key or words yet (`marketing-lead`); until it lands, that state is a config
+  error, logged once per process (the `IOS_INSTALL_URL` row above).
 - **No build home in this PRD** (a later voice and claims pass): `h1.card.tick`,
   `h1.rationale`, the `h1.banner.body` rewrite (D7: in the 11-06 binary the banner body is
   re-spelled only, FR-3); `h2.web.chat`, `h2.web.groupme`, `h2.web.email`; `h3b.join.fail`,
@@ -1515,7 +1543,10 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   server-side library that emits SVG and log it in `living-memory/DEPENDENCIES.md`; apply
   FR-7's density rule and report the encoder's version in the build PR), and the emitter's
   own registration under
-  the analytics addendum, PR #350 (C7).
+  the analytics addendum, PR #350 (C7). Launch slice (`growth-pm`, 2026-10-23, package §6):
+  FR-11 must make the 11-06 binary (U2); FR-18 lands server-side by 11-16 with the
+  attribution work, and the `m3.push.joined` name fix lands by 11-16 through the copy batch
+  (`engagement-eng`) even if FR-18 slips (U3; §12).
 - **`analytics-lead`:** §10 is granted (analytics addendum, PR #350; C1–C9 and R1–R3
   folded here). Still open: D-8, the FR-22 readout (including FR-8's note that a desktop QR
   scan is a second open of the same link), reconciling the addendum's UTM bridge values with
@@ -1542,7 +1573,8 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   Worded since (package §5 D4, D5; FR-7): the QR's accessible name, "QR code: opens
   this invite on your iPhone", and the iPad line's store form, `growth-pm`'s placeholder
   ("On an iPad? Get the iPhone app, then tap the invite again."), both adopted verbatim. Still
-  to word, only if its checklist step fails: the J4 league-switch confirmation (R-F4). The launch-day rows (copy batch, 2026-10-23: `m4.348.*`, `m3.web.og_desc`) are
+  to word, only if its checklist step fails: the J4 league-switch confirmation (R-F4). Also
+  to word, later slice: the store-era unset note (U4, §12). The launch-day rows (copy batch, 2026-10-23: `m4.348.*`, `m3.web.og_desc`) are
   folded in J2, FR-7 and FR-25, with the store labels keyed to the install host, not a date. Keep `gp.inbox.activated_body` in step
   with the "They're interested" pill label (`TradeCard.tsx:525`).
 - **FAQ claim → P9's copy-defect batch (`onboarding-pm`) via `head-product`:**
@@ -1569,6 +1601,8 @@ CTA points; `engagement-eng` builds the invite routes and landing; `onboarding-e
   R-F1), with Run A;
   App Store Connect configuration needs the operator's own word.
 - **`release-lead`:** the doc drift listed in [loop-audit.md](loop-audit.md#contradictions-found-in-re-verification).
+  On 11-18, confirm `IOS_INSTALL_URL`'s host is `apps.apple.com` as part of the flip (U4,
+  §12; scope §5).
 
 ---
 
