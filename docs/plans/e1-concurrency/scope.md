@@ -92,7 +92,7 @@ This is a backend-only safety fix. The server still runs `sync` with one thread.
 ## 5. Ship gate declaration
 
 - **CI green is required** (`pytest backend/tests`, `tsc --noEmit`, testid-lint) on the pushed sha. **Not pushed:** this worker does not push or open a PR.
-- **Stub-service blocker:** the 51 failures in 7 files are resolved by grant G1. The G3 submit lock adds 3 failures in an eighth file, `test_rankings_submit_authz.py`; that is still open. See "Test doubles without `_lock`".
+- **Stub-service blocker: resolved.** G1 covers the 51 failures in 7 files. G4 covers the 3 that G3 caused in `test_rankings_submit_authz.py`. A static sweep found no other `_lock`-less service at a lock site. See "Test doubles without `_lock`".
 - **Evidence recorded:** draft TEST_LEDGER entry below, for release-lead to paste.
 - Express lane declared by the operator? **No.** Full gates apply.
 
@@ -131,6 +131,7 @@ It is not moved into the `TradeService` constructor. That would change construct
 - **G1** (test only): add `_lock = threading.RLock()` as a class attribute on the hand-rolled stub service in each of the 7 files below, plus `import threading`. Done.
 - **G2:** `_owner_generation_context` (`server.py:15208`) iterates `list(...)` of `_elo_overrides`. Done.
 - **G3:** one `with service._lock:` in `/api/rankings/submit`, from `get_rankings` through the member_rankings publish. Done (`:20858-20880`). `git diff -w` shows only the lock line.
+- **G4** (rankings-eng, test only): `_lock=threading.RLock()` inside `test_rankings_submit_authz.py::_mk_service`'s `SimpleNamespace`, plus `import threading`. Done.
 
 ## Test doubles without `_lock`
 
@@ -150,11 +151,31 @@ It is not moved into the `TradeService` constructor. That would change construct
 
 The failure counts before G1 are in the table above.
 
-### Still open: the G3 lock trips an eighth stub
+### Resolved by G4: the eighth stub
 
-`test_rankings_submit_authz.py::_mk_service` (`:37`) returns a `types.SimpleNamespace` with no `_lock`. Under G3, 3 of its 4 tests now return 500 with `AttributeError: 'types.SimpleNamespace' object has no attribute '_lock'`.
-- The file is outside G1's list of seven, so it is not edited.
-- **Proposed** test-only fix, the same shape as G1: `_lock=threading.RLock()` in that `SimpleNamespace(...)`, plus `import threading`.
+`test_rankings_submit_authz.py::_mk_service` (`:37`) returned a `types.SimpleNamespace` with no `_lock`. Under G3, 3 of its 4 tests returned 500 with `AttributeError`. G4 adds `_lock=threading.RLock()` to that namespace, plus `import threading`, and the file is now 4/4 green.
+
+### Static sweep (2026-10-23, no full suite)
+
+**Step 1, call sites.** I grepped `backend/tests` for every test file that hits one of the 14 locked routes or calls `_owner_generation_context`:
+- the 14 routes: trio, rank3, tiers copy/save, anchor, reset, reorder, import-apply, trades swipe, queue, pass-reason, account reset-rankings, match disposition, rankings/submit;
+- matched by path literal, by direct `server.<route fn>` call, or by name.
+
+That gives 40 files: 39 tests plus `fixtures/seed_ui_test_db.py`.
+
+**Step 2, service objects.** An AST pass over each file classified every object placed under a `"service"`/`"services"` key, a `service=`/`services=` kwarg, a `sess["service"]` subscript, a service-named variable, or a service-builder return. I then read each non-`RankingService` case by hand. Files whose service came from another module's fixture were traced: `test_owner_generator_routes` and `test_trade_input_evidence` use `test_fair_packages`' real `RankingService`; the prepared-trade files use `prepared_trade_runtime`'s.
+
+| Finding | Files | What it actually does |
+|---|---|---|
+| Stub classes or namespaces, now with `_lock` (G1, G4) | 8 files (G1's 7 + submit_authz) | All green |
+| `_FakeService` with no `_lock` | `test_asset_ideas.py` | Used only at `/api/trades/asset-ideas`. That route can reach `_owner_generation_context`, but G2 is a `list()` snapshot and takes no lock. `/api/trades/swipe` appears only in a comment |
+| `MagicMock()` service, no spec | `test_pick_assignment.py` | Hits only the pick-assignment and league-members routes. `_owner_generation_context` appears only as a string in an AST allow-list. (A spec-less `MagicMock` would act as a context manager, and its truthy `__exit__` would swallow span exceptions; no locked site sees one.) |
+| No `"service"` in the session | `test_pick_labels_in_matches.py` | The disposition route reads `sess.get("service")`, gets None, and skips the locked branch |
+| Bare session | `test_verified_reads.py` | `/api/trio` is refused by the gate before the span |
+| Real `RankingService` (directly or via a shared fixture) | the remaining 27 test files | Not at risk |
+| `MagicMock(spec=…)` / `create_autospec` / `Mock()` services | none in these files | Other `MagicMock` service files (`test_espn_draft_order`, `test_pick_assignment_tradeable`, `test_recorded_picks`) hit no locked route |
+
+**Result:** no test reaches a lock site with a `_lock`-less service. **Files run:** the 8 stub files, `test_asset_ideas`, `test_pick_assignment`, `test_pick_labels_in_matches` and `test_verified_reads`, on `9de6254f`. All are green; counts are in the TEST_LEDGER draft.
 
 ## Residuals
 
@@ -176,6 +197,10 @@ Full gates, not express ([scope](../docs/plans/e1-concurrency/scope.md)). Backen
 - Existing ranking/tier/trio/session + touched-route files (79 files) on 8259e534: 1844 passed, 51 failed — all 51 the `_lock` AttributeError on stub services in 7 files.
 - After the head-eng grants (G1 stub `_lock`, G2 owner-context `list()`, G3 submit lock), on a3b93485:
   - G1's 7 files: point_of_use 45, rookie_scope 35, trends_history_writers 6, analytics_p0 24, pick_rung_year_labels 17, rankings_import 50, verified_sessions 25 — 202 passed, 0 failed.
-  - Owner-generation / submit coverage: owner_generator_routes 34, owner_only_routes 28, trade_input_evidence 77, trade_counterparty_epochs 61, pick_assignment 36 — all passed; rankings_submit_authz 1 passed, 3 failed (SimpleNamespace stub has no `_lock`; open, see scope.md).
+  - Owner-generation / submit coverage: owner_generator_routes 34, owner_only_routes 28, trade_input_evidence 77, trade_counterparty_epochs 61, pick_assignment 36 — all passed; rankings_submit_authz 1 passed, 3 failed (SimpleNamespace stub had no `_lock`).
+- After G4 (submit-authz stub `_lock`), on 9de6254f, static-sweep run set — all passed, 0 failed:
+  - rankings_submit_authz 4, ranking_method_point_of_use 45, rookie_scope 35, trends_history_writers 6, analytics_p0 24, pick_rung_year_labels 17, rankings_import 50, verified_sessions 25;
+  - asset_ideas 70, pick_assignment 36, pick_labels_in_matches 16, verified_reads 6.
+  - Sweep: 40 files hit a locked route or `_owner_generation_context`; none reaches a lock site with a `_lock`-less service.
 - Full suite: GitHub CI on the PR (not run locally, per operator throttle).
 ```
