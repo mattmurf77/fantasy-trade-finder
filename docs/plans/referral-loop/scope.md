@@ -228,9 +228,10 @@ D-056: no Maestro, no simulator, no captures.
     rides PRD §12's server row): a valid `t` → `inviter_display_name` set and
     `invite_status: valid`; an expired `t` and an unknown `t` → a null name with
     `invite_status` `expired` / `unknown`; a `t` naming a row in another league → a null name
-    with `invite_status: league_mismatch`; an absent `t` → today's response, byte-identical
-    (`test_invite_links.py` T8–T11 pass unmodified); no response carries a username or
-    echoes `t`.
+    with `invite_status: league_mismatch`; with `t` present, both keys are always there and
+    the name is null unless the status is `valid`; an absent `t` → neither new key, today's
+    response byte-identical (`test_invite_links.py` T8–T11 pass unmodified); no response
+    carries a username or echoes `t`.
   - Updated: `test_invite_links.py` (T4–T7 under `growth.join_landing` off, unmodified
     assertions; T12-style registration for the new flags), `test_notif_inbox_growth.py`
     (`referral_activated` type; title ≠ body), `test_account_deletion_coverage.py` and

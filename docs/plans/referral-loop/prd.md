@@ -1173,8 +1173,12 @@ as written.
 
 ### 8.3 `GET /api/league/invite-meta` — additive
 
-- New optional query `t`. Response adds `inviter_display_name` (string | null) and
-  `invite_status` (`valid | expired | unknown | league_mismatch` | null when `t` absent).
+- New optional query `t`. **With `t` present**, the response always carries both
+  `inviter_display_name` (string | null: null unless `invite_status` is `valid`) and
+  `invite_status` (`valid | expired | unknown | league_mismatch`). **With `t` absent**, it
+  carries neither key: the response is byte-identical to today's, so
+  `test_invite_links.py` T8–T11 pass unchanged (`growth-pm`, 2026-10-23). (The
+  `invite_landing_opened` event prop is separate: it stays null when `t` is absent, §10.)
   The field shares the event prop's name, so the status has one name everywhere
   (`growth-pm`, 2026-10-15, on condition C1; the addendum notes an API field is not a prop
   and so did not require it).
