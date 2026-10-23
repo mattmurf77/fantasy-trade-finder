@@ -40,7 +40,7 @@ This is a backend-only safety fix. The server still runs `sync` with one thread.
 
   **Decorated (17):** `placement_bands`, `has_player`, `record_ranking`, `record_trade_signal`, `record_disposition_signal`, `get_next_trio`, `get_rankings`, `get_progress`, `comparison_counts`, `replay_from_db`, `reset`, `apply_tiers`, `apply_tiers_subset`, `apply_anchor`, `board_override_count`, `apply_reorder`, `apply_value_map`. **Not decorated:** classmethods `tier_bands_for` and `tier_for_elo`, staticmethod `_pin_cfg_key`, and all `_private` helpers, which run only inside a locked public method or a route span.
 
-  **Route spans** (`backend/server.py`; `git diff -w` shows only these 13 `with` lines plus F6/F7/F8):
+  **Route spans** (`backend/server.py`; `git diff -w` shows only these 14 `with` lines, F6/F7/F8, and the `_owner_generation_context` one-liner from grant G2):
 
   | Site | Span | Holds | Notes |
   |---|---|---|---|
@@ -57,6 +57,9 @@ This is a backend-only safety fix. The server still runs `sync` with one thread.
   | pass-reason `_apply_reasoned_pass_elo_only` | `:16963-16966` | `record_trade_signal` | Persists first (`save_trade_swipes` `:16954`, outside), so the span is the single mutation |
   | account reset `account_reset_rankings` | `:19718-19721` (`svc._lock`, per format) | `reset` + clear `_elo_overrides` / `_elo_override_at` | |
   | match disposition `disposition_trade_match` | `:20628-20633` | `record_disposition_signal` | **Cannot extend to persist.** The `save_trade_swipes` at `:20638` must run even when `service` is None (cross-league), so the span stays on the mutation |
+  | rankings submit `submit_rankings` (grant G3) | `:20858-20880` | `get_rankings(None)` → `_ranking_confidence` → publish | Publish only, no mutation. DB writes only; no network call, no `_kickoff_trade_job` (span scan) |
+
+  **Owner context (grant G2):** `server.py:15208` `_owner_generation_context` now iterates `list(getattr(service, "_elo_overrides", {}) or {})`, a snapshot. It is reached from the job thread (`:8106`) and from routes (`:15067`, `:15698`).
 
   **Lock-order audit** (AST scans, transitive within each module):
   - No code under `_sessions_lock`, `_trade_jobs_lock` or `_pool_build_lock` reaches a RankingService method.
@@ -89,7 +92,7 @@ This is a backend-only safety fix. The server still runs `sync` with one thread.
 ## 5. Ship gate declaration
 
 - **CI green is required** (`pytest backend/tests`, `tsc --noEmit`, testid-lint) on the pushed sha. **Not pushed:** this worker does not push or open a PR.
-- **Blocker before CI can be green:** 51 existing tests use duck-typed service stubs with no `_lock`. See "Open: test doubles without `_lock`".
+- **Stub-service blocker:** the 51 failures in 7 files are resolved by grant G1. The G3 submit lock adds 3 failures in an eighth file, `test_rankings_submit_authz.py`; that is still open. See "Test doubles without `_lock`".
 - **Evidence recorded:** draft TEST_LEDGER entry below, for release-lead to paste.
 - Express lane declared by the operator? **No.** Full gates apply.
 
@@ -103,10 +106,17 @@ This is a backend-only safety fix. The server still runs `sync` with one thread.
 
 The service lock is a per-instance `threading.RLock` (`RankingService._lock`). Every public method takes it, so nested calls are safe: `record_ranking` calls `get_rankings`. Routes take the same lock across mutate → persist → publish.
 
-## Known and unchanged
+## Accepted as known
 
 - **The job's three reads** (`_run_trade_job`: `get_rankings(None)` `:7688`, `comparison_counts()` `:7929`, `placement_bands()` `:7936`; on `origin/main` `:7690`, `:7931`, `:7938`) take the lock per call, never for the job's duration. A swipe can land between them. This is known, accepted and unchanged.
-- **Smart-matchup lane:** `get_next_trio` calls the Anthropic client inside the method lock and the trio span (`ranking_service.py:857`, `self._generator.generate_next_trio`). This happens only when `ANTHROPIC_API_KEY` is set and `smart_matchup_enabled` = 1. The audit notes the key is probably unset in prod (`render.yaml` does not set it). If it is set, rule 3 is broken for that lane.
+- **(a) Swipe persist order.** The `/api/trades/swipe` span covers only the in-memory `record_trade_signal`. The `save_trade_swipes` (`:16104`) sits in the same `try` as `_send_typed_push`, so rule 3 keeps it out.
+  - Effect: two concurrent swipes from one user can append in one order in memory and insert in the other order in `swipe_decisions`.
+  - The replayed board after a restart can then differ slightly from the in-session board. Trade K is small and feedback-bounded.
+- **(b) Disposition persist.** The `/api/trades/matches/<id>/disposition` span covers only `record_disposition_signal`. The persist (`:20638`) runs even when `service` is None (cross-league), so it stays outside. The same ordering caveat as (a) applies.
+- **(c) Anthropic call under the lock.** `get_next_trio` calls the Anthropic client inside the method lock and the trio span (`ranking_service.py:857`, `self._generator.generate_next_trio`).
+  - It happens only when `ANTHROPIC_API_KEY` is set and `smart_matchup_enabled` = 1. `render.yaml` does not set the key.
+  - head-eng has asked the operator whether `ANTHROPIC_API_KEY` is set on Render.
+  - If it is set, rule 3 is broken for that lane. Moving the LLM call out of the lock is then a follow-up that must land before the gthread switch.
 
 ## F8 rationale
 
@@ -116,9 +126,17 @@ The service lock is a per-instance `threading.RLock` (`RankingService._lock`). E
 
 It is not moved into the `TradeService` constructor. That would change construction for every caller and is not needed for atomicity.
 
-## Open: test doubles without `_lock` (needs a decision; not edited)
+## Grants (head-eng, 2026-10-23, relayed by rankings-eng)
 
-`with service._lock:` raises `AttributeError` on duck-typed stubs. Seven existing test files fail, 51 tests in all. Each was checked; every failure is the `_lock` AttributeError:
+- **G1** (test only): add `_lock = threading.RLock()` as a class attribute on the hand-rolled stub service in each of the 7 files below, plus `import threading`. Done.
+- **G2:** `_owner_generation_context` (`server.py:15208`) iterates `list(...)` of `_elo_overrides`. Done.
+- **G3:** one `with service._lock:` in `/api/rankings/submit`, from `get_rankings` through the member_rankings publish. Done (`:20858-20880`). `git diff -w` shows only the lock line.
+
+## Test doubles without `_lock`
+
+### Resolved by G1
+
+`with service._lock:` raises `AttributeError` on duck-typed stubs. Seven existing test files failed, 51 tests in all, every one with the `_lock` AttributeError. After G1, all seven files are green: 202 passed.
 
 | File | Stub | Failing |
 |---|---|---|
@@ -130,14 +148,17 @@ It is not moved into the `TradeService` constructor. That would change construct
 | `test_rankings_import.py` | `_FakeService` `:411` | 2 |
 | `test_verified_sessions.py` | `_StubService` `:399` | 1 |
 
-Options:
-- **(a) Recommended:** grant a one-line, test-only edit per stub, `_lock = threading.RLock()` as a class attribute. Production lock lines stay strict.
-- **(b)** Make each lock line tolerant: `with getattr(service, "_lock", contextlib.nullcontext()):`. That silently skips locking for any lockless object.
+The failure counts before G1 are in the table above.
 
-## Residuals outside the grant (reported, not edited)
+### Still open: the G3 lock trips an eighth stub
 
-- `server.py:15208` `_owner_generation_context` runs `for pid in getattr(service, "_elo_overrides", {})`: a Python-level iteration of the live dict. It is reached from the trade-job thread (`:8106`) and from routes (`:15067`, `:15698`), so a concurrent tier save can raise `RuntimeError`. The fix is to iterate `list(...)` or take the service lock.
-- `/api/rankings/submit` (`submit_rankings`, `server.py:20826`) publishes `get_rankings(None)` and `_ranking_confidence` without the route lock. A concurrent swipe can split the Elo payload from its confidence. One `with service._lock:` around the read → publish would close it.
+`test_rankings_submit_authz.py::_mk_service` (`:37`) returns a `types.SimpleNamespace` with no `_lock`. Under G3, 3 of its 4 tests now return 500 with `AttributeError: 'types.SimpleNamespace' object has no attribute '_lock'`.
+- The file is outside G1's list of seven, so it is not edited.
+- **Proposed** test-only fix, the same shape as G1: `_lock=threading.RLock()` in that `SimpleNamespace(...)`, plus `import threading`.
+
+## Residuals
+
+Both residuals from the first report are now closed by G2 and G3 (see Grants).
 
 ## Draft TEST_LEDGER entry (for release-lead)
 
@@ -152,6 +173,9 @@ Full gates, not express ([scope](../docs/plans/e1-concurrency/scope.md)). Backen
   - lock→nullcontext + store-time memo stamp: T2 3/3 (lock alone green — start stamp closes F1b);
   - tiers-save route lock→nullcontext: T3b 3/3 (T3 green);
   - F6 / F7 / F2 reverted: T5a / T5b / T5c red.
-- Existing ranking/tier/trio/session + touched-route files (79 files) on 8259e534: 1844 passed, 51 failed — all 51 the `_lock` AttributeError on stub services in 7 files (scope.md "Open: test doubles"); re-run after that decision: <counts>.
+- Existing ranking/tier/trio/session + touched-route files (79 files) on 8259e534: 1844 passed, 51 failed — all 51 the `_lock` AttributeError on stub services in 7 files.
+- After the head-eng grants (G1 stub `_lock`, G2 owner-context `list()`, G3 submit lock), on a3b93485:
+  - G1's 7 files: point_of_use 45, rookie_scope 35, trends_history_writers 6, analytics_p0 24, pick_rung_year_labels 17, rankings_import 50, verified_sessions 25 — 202 passed, 0 failed.
+  - Owner-generation / submit coverage: owner_generator_routes 34, owner_only_routes 28, trade_input_evidence 77, trade_counterparty_epochs 61, pick_assignment 36 — all passed; rankings_submit_authz 1 passed, 3 failed (SimpleNamespace stub has no `_lock`; open, see scope.md).
 - Full suite: GitHub CI on the PR (not run locally, per operator throttle).
 ```
