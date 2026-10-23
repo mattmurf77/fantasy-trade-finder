@@ -24877,14 +24877,24 @@ def _daily_tick_reengagement(now: datetime):
 
 
 def _daily_tick_replenishment(now: datetime):
-    """daily-tick step 7 — F10 (flag deck.replenishment) weekly deck
-    pre-generation. The flag is read HERE, at run time: off ⇒ no replenish
-    work at all (no deck builds, no pushes, no marker rows). The
-    `replenish_weekday` >= gate lives inside `_run_weekly_replenishment`."""
-    if not _deck_replenishment_enabled():
-        return "skipped", "flag off"
-    stats = _run_weekly_replenishment(now)
-    return ("skipped" if stats.get("gated") else "ok"), stats
+    """daily-tick step 7 — F10 weekly deck pre-generation, DEFERRED: an
+    unconditional hard skip (operator, 2026-10-23: ship S3 without it). It
+    reads no flag and never calls `_run_weekly_replenishment`, so no deck
+    builds, pushes, inbox rows or marker rows, whatever `deck.replenishment`
+    says.
+
+    Why: trades-eng's C2 (no evidence for unserved builds) and the
+    replenishment self-renewal fix (db-capacity.md latent issue 1) must land
+    first; until then a working tick would run the full weekly sweep and
+    fill the DB.
+
+    Re-enabling = restoring the flag-gated call:
+        if not _deck_replenishment_enabled():
+            return "skipped", "flag off"
+        stats = _run_weekly_replenishment(now)
+        return ("skipped" if stats.get("gated") else "ok"), stats
+    """
+    return "skipped", "deferred: C2"
 
 
 def _daily_tick_eval_nightly(now: datetime):

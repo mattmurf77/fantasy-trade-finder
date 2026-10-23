@@ -723,7 +723,7 @@ External scheduler (Render cron) hits four endpoints:
 |---|---|---|
 | `POST /api/cron/realtime-tick` | every 1–5 min | Drain `notification_queue` rows whose `deliver_after` has passed |
 | `POST /api/cron/hourly-tick` | hourly | Bundle drain + quiet-hours summary push at user's local 8am |
-| `POST /api/cron/daily-tick` | once daily (13:30 UTC) | 202 at once; a single-flight runner thread then runs nine steps serially: roster snapshots, Usage Trends store, receipts grading, rookie class-load monitor, player-cache guard, re-engagement scans, deck replenishment, eval nightly, value-model refit (see *Daily-tick runner* below) |
+| `POST /api/cron/daily-tick` | once daily (13:30 UTC) | 202 at once; a single-flight runner thread then runs nine steps serially: roster snapshots, Usage Trends store, receipts grading, rookie class-load monitor, player-cache guard, re-engagement scans, deck replenishment (deferred: a hard skip since 2026-10-23), eval nightly, value-model refit (see *Daily-tick runner* below) |
 | `POST /api/cron/value-snapshot` | once daily | Upsert consensus value of every universal-pool player into `player_value_history` (#57). Kept separate from `daily-tick` so a push-scan failure can't stop history collection. **NOT provisioned in `render.yaml`** — a dedicated `value-snapshot-daily` cron was added 2026-07-26 and reverted the same day (`1e50d3e`, broke blueprint sync). The **operative mechanism is `hourly-tick`'s idempotent fallback guard** (shared `_write_daily_value_snapshots`), which writes today's snapshot whenever a format is missing — cadence is guaranteed by the existing hourly cron alone. (This row previously claimed the dedicated cron existed; corrected 2026-08-14 as part of ADR-011 — the runbook § value-snapshot monitoring had the truth all along.) |
 | `POST /api/cron/roster-snapshot` | none (manual/external lever) | ADR-011 Writer C: force the weekly league-state snapshot sweep by hand (daemon + budget, idempotent per `period_key` via the existing `'weekly'` rows). Nothing schedules it — the scheduled path is a weekday-gated pass inside `daily-tick` (Writer B), and the on-sync writer (A) needs no scheduler at all. When a cron migration lands, provisioning this route is a one-line workflow addition. |
 
@@ -742,7 +742,7 @@ External scheduler (Render cron) hits four endpoints:
   | 4 | `rookie_monitor` | `_check_rookie_class_load(_CURRENT_SEASON + 1)` | none |
   | 5 | `players_guard` | `_players_refresh_worker` | `_IS_PROD_ENV` and cache past TTL; `FTF_PLAYERS_REFRESH`; `_players_refresh_active` |
   | 6 | `reengagement` | the winback / finish_ranking / season_start user scan | per-kind caps in `_send_typed_push` |
-  | 7 | `replenishment` | `_run_weekly_replenishment(now)` | `deck.replenishment`; `replenish_weekday` `>=` gate |
+  | 7 | `replenishment` | **deferred (2026-10-23):** hard skip, `detail=deferred: C2`; `_run_weekly_replenishment(now)` is not called | none: the flag is not read. Re-enabled = `deck.replenishment`; `replenish_weekday` `>=` gate, after C2 and the self-renewal fix |
   | 8 | `eval_nightly` | `eval.nightly.run_all(window_days=30)` | none (idempotent per UTC day) |
   | 9 | `value_model_refit` | `_value_model.nightly_refit(now=now)` | `deck.value_model` |
 

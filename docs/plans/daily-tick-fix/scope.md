@@ -39,16 +39,16 @@ or a slow step never skips the rest, and each step logs one timing line. Order (
 | 4 | `rookie_monitor` | `_check_rookie_class_load(_CURRENT_SEASON + 1)` | none |
 | 5 | `players_guard` | `_players_refresh_worker` (today behind `_refresh_players_cache_async`) | `_IS_PROD_ENV` and cache past TTL; `_players_refresh_lock` / `_players_refresh_active` |
 | 6 | `reengagement` | the user loop now inline in `cron_daily_tick` (`server.py:24699-24776`), moved verbatim into a function | per-kind caps inside `_send_typed_push` |
-| 7 | `replenishment` | `_run_weekly_replenishment(now)` | `deck.replenishment` via `_deck_replenishment_enabled()`, **at run time**; the `replenish_weekday` gate |
+| 7 | `replenishment` | **Deferred (2026-10-23, below):** a hard skip returning `("skipped", "deferred: C2")`. `_run_weekly_replenishment(now)` is not called | none: the flag is **not read**. Re-enabled, it is `deck.replenishment` via `_deck_replenishment_enabled()` at run time, then the `replenish_weekday` gate |
 | 8 | `eval_nightly` | `eval.nightly.run_all(window_days=30)` | none (idempotent per UTC day) |
 | 9 | `value_model_refit` | `_value_model.nightly_refit(now=now)` | `deck.value_model` |
 
 - **Where things live.** The runner goes in a new `backend/daily_tick.py`, which does not import `server.py` and is
   testable on its own. `server.py` keeps the helpers and registers the step table. Steps resolve server helpers at
   call time, so existing `patch.object(server, …)` tests still bite.
-- **No step changes behavior.** Steps 1, 2, 3 and 5 get a synchronous entry beside their existing async wrapper:
-  same body, same lock or single-flight. Their own routes (`/api/cron/roster-snapshot`, `/receipts-grade`,
-  `/players-refresh`) stay byte-identical.
+- **No step changes behavior** (except step 7, deferred on 2026-10-23, below). Steps 1, 2, 3 and 5 get a
+  synchronous entry beside their existing async wrapper: same body, same lock or single-flight. Their own routes
+  (`/api/cron/roster-snapshot`, `/receipts-grade`, `/players-refresh`) stay byte-identical.
 - **Rejected: (A), the cron service running the steps in its own process.**
   - Steps 5, 7 and 9 are tied to web-process state: the on-disk cache plus `_pool_generation`; `_sessions` plus
     `_trade_jobs`; and the served `models.jsonl`.
@@ -63,6 +63,29 @@ and write full evidence weekly, and it renews itself (`db-capacity.md` latent is
 - **no merge while `deck.replenishment` is ON** (the operator chose to pause it; the flip belongs to release-lead's
   session).
 
+**Superseded on 2026-10-23** by the operator decision below: the guard is now the hard skip, not the flag. The tests
+pin that replenishment cannot run through the tick with the flag on **or** off, and the flag can stay ON at merge.
+
+### 2026-10-23 — operator decision: ship without replenishment
+
+Relayed by head-eng, in the operator's words: "Yes: ship S3 now with the replenishment step skipped until C2 and the
+self-renewal fix land."
+
+- **Why:** `deck.replenishment` stays ON in prod. A working tick would otherwise run the full weekly replenishment
+  sweep, which fills the DB. Two fixes must land first: trades-eng's C2 (no evidence for unserved builds) and the
+  replenishment self-renewal fix (`db-capacity.md` latent issue 1).
+- **The change:** step 7 (`_daily_tick_replenishment`) is an unconditional hard skip. It reads no flag, never calls
+  `_run_weekly_replenishment`, and returns `("skipped", "deferred: C2")`. The runner logs `daily-tick
+  step=replenishment ms=<n> outcome=skipped detail=deferred: C2`. `_run_weekly_replenishment` and its helpers are
+  kept untouched, unreachable from the tick on purpose, and their tests now call the pass directly.
+- **Behavior change:**
+  - Today the 120 s kill caps replenishment at about 7 pre-built decks per day, Wed–Sun (about 17.4 s each). With
+    this change it stops entirely.
+  - Its `deck_replenished` push already reaches no one (`notif.reengagement_default_off`). The "Your new deck is
+    ready" inbox rows stop too.
+- **Re-enabling** = restoring the flag-gated call in `_daily_tick_replenishment` (the docstring holds the exact
+  lines), after C2 and the self-renewal fix land.
+
 ## 1. Analytics scope
 
 - [x] **(c) WAIVED, no analytics needed because:**
@@ -75,6 +98,7 @@ and write full evidence weekly, and it renews itself (`db-capacity.md` latent is
 - **New/changed tables or columns:** none.
 - **New/changed feature flags:** none. The flags read are unchanged (`market.roster_history`, `usage_trends.enabled`,
   `receipts.grading`, `deck.replenishment`, `deck.value_model`, `notif.honest_winbacks`); all are read at run time.
+  Since 2026-10-23 the tick no longer reads `deck.replenishment` (step 7 is deferred, §0).
 - **New env vars / `model_config` keys:** none. `FTF_ROSTER_SNAPSHOT_WEEKDAY`, `FTF_RECEIPTS_GRADE`,
   `FTF_PLAYERS_REFRESH` and `replenish_weekday` keep their meaning.
 - **Rollback lever:** revert the commit (Render redeploys the last good sha). Each step keeps its own flag or env
@@ -101,12 +125,15 @@ and write full evidence weekly, and it renews itself (`db-capacity.md` latent is
     - with every step stubbed to sleep about 2 s, `POST /api/cron/daily-tick` returns 202 `{ok: true, started:
       true}` in well under 1 s, and all 9 steps then run in order;
     - without `X-Cron-Secret`, it is still rejected before any thread starts;
-    - **replenishment guard:** with `deck.replenishment` off, `_run_weekly_replenishment` is never called (spy) and
-      its step logs `outcome=skipped`; with it on and past `replenish_weekday`, it is called once.
+    - **replenishment guard (deferred, 2026-10-23):** with `deck.replenishment` off, and again with it ON and the
+      clock past `replenish_weekday`, the tick runs, `_run_weekly_replenishment` is never called (spy), the flag is
+      never read, and step 7's result is `("skipped", "deferred: C2")`.
   - **Updated:**
     - `test_deck_replenishment.py`: `_tick` and the flag-off "byte-identical payload" test move to the 202 contract,
       and the flag-off assertions become "no replenish work, no push, no marker row" plus the payload equal to
-      `{ok, started}`;
+      `{ok, started}`. Since 2026-10-23 the flag-off test's step 7 detail is `deferred: C2`, and the flag-ON tests
+      call `_run_weekly_replenishment` directly, keeping every behavioral assertion (counts, marker idempotency,
+      push copy, inactive and zero-card skips), because the pass is the code C2 will re-enable;
     - `test_notif_teardown.py`: the winback and Aug-25 tests run the re-engagement step, with the pinned clock still
       applying;
     - `test_receipts_grading.py::test_t9_daily_tick_payload_is_byte_identical_while_grading_is_dark`: becomes
@@ -117,7 +144,7 @@ and write full evidence weekly, and it renews itself (`db-capacity.md` latent is
   - auth, then thread start, then 202;
   - each step's gate and lock, preserved from the old code;
   - steps 1, 2, 3 and 5 calling the same body their async wrapper calls;
-  - replenishment unreachable while the flag is off;
+  - replenishment unreachable from the tick (deferred: a hard skip, flag on or off);
   - a raise in step k not reaching step k+1's call site;
   - no step needing a Flask request or app context (`_send_typed_push` guards `g` with `has_request_context()`; the
     `_user_data_lifecycle` snapshot is taken at step start).
@@ -136,8 +163,8 @@ and write full evidence weekly, and it renews itself (`db-capacity.md` latent is
   4. Value snapshots (hourly-tick guard, not a daily-tick step, but confirms the worker is no longer restarted
      daily): `player_value_history` has rows for today's UTC date.
   5. If `receipts.grading` is on: a `receipts-grade` run logged with `trigger=daily_tick`.
-  6. Wednesday, **with `deck.replenishment` OFF:** the `replenishment` step logs `outcome=skipped` and no
-     `deck_replenish_log` row is written.
+  6. Every day, the `replenishment` step logs `outcome=skipped detail=deferred: C2` and no `deck_replenish_log` row
+     is written.
 - [x] **WAIVED: TestFlight checklist,** because this is backend-only with no app surface. The operator checklist
   above is the runtime evidence.
 - `testID`s added/renamed: none.
@@ -162,8 +189,8 @@ and write full evidence weekly, and it renews itself (`db-capacity.md` latent is
 - **Evidence recorded:** the `living-memory/TEST_LEDGER.md` entry (scribe) names the pytest files and counts, the
   code-walk path, and the operator checklist outcome.
 - **Merge blockers:**
-  - `deck.replenishment` must be **OFF** in `config/features.json` on `origin/main` (or overridden off in prod, as
-    release-lead confirms);
+  - ~~`deck.replenishment` must be **OFF** in `config/features.json` on `origin/main` (or overridden off in prod, as
+    release-lead confirms);~~ superseded on 2026-10-23: the flag stays ON and step 7 is a hard skip (§0);
   - the operator's push word in league-eng's session;
   - the operator's merge go in release-lead's session;
   - release-lead's independent QA pass.
@@ -180,4 +207,4 @@ and write full evidence weekly, and it renews itself (`db-capacity.md` latent is
 - **A worker restart mid-run** (deploy at 13:30, OOM) loses the rest of that run. Each step is idempotent and the
   weekday gates are `>=`, so the next day retries. The permanent-loss writers go first.
 - **CPU:** the run shares the free instance's CPU with the 200 ms tap path for its duration. Steps 1–6 are mostly
-  I/O, and the CPU-heavy steps (7 if lit, 8) run last.
+  I/O, and the CPU-heavy steps (7 once re-enabled, 8) run last.

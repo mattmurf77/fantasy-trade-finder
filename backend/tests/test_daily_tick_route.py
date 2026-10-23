@@ -8,9 +8,9 @@ docs/plans/daily-tick-fix/code-walk.md. Pins:
   • a second POST while a run is in flight answers `started: false`;
   • a missing/wrong X-Cron-Secret is rejected before any thread starts;
   • a raising step never stops the steps after it;
-  • replenishment: flag off ⇒ `_run_weekly_replenishment` is never called and
-    the step logs `outcome=skipped`; flag on past `replenish_weekday` ⇒ called
-    exactly once with the handler's clock;
+  • replenishment is DEFERRED (operator, 2026-10-23): flag off OR on, even
+    past `replenish_weekday`, `_run_weekly_replenishment` is never called, the
+    flag is never read, and the step logs `outcome=skipped detail=deferred: C2`;
   • the inline (sync) entries of steps 1, 2, 3 and 5 keep their async
     wrapper's gates and locks and call the same body.
 
@@ -203,7 +203,7 @@ def test_a_raising_step_never_stops_the_steps_after_it(client, caplog):
 
 
 # ---------------------------------------------------------------------------
-# Replenishment: unreachable while the flag is off
+# Replenishment: deferred — unreachable from the tick, flag off or on
 # ---------------------------------------------------------------------------
 
 def test_replenishment_flag_off_never_calls_the_pass_and_logs_skipped(client, caplog):
@@ -216,32 +216,37 @@ def test_replenishment_flag_off_never_calls_the_pass_and_logs_skipped(client, ca
 
     repl.assert_not_called()
     assert (steps["replenishment"].outcome, steps["replenishment"].detail) == \
-        ("skipped", "flag off")
+        ("skipped", "deferred: C2")
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("daily-tick step=replenishment ")]
     assert len(lines) == 1
     assert re.fullmatch(
-        r"daily-tick step=replenishment ms=\d+ outcome=skipped detail=flag off",
+        r"daily-tick step=replenishment ms=\d+ outcome=skipped detail=deferred: C2",
         lines[0])
 
 
-def test_replenishment_flag_on_past_the_weekday_calls_the_pass_once(client):
+def test_replenishment_flag_on_past_the_weekday_is_still_deferred(client):
+    """The operator's 2026-10-23 call: with `deck.replenishment` ON and the
+    clock past `replenish_weekday`, the tick still runs, but step 7 never
+    reads the flag and never calls the pass."""
     c, _ = client
     assert NOW.weekday() == 3                       # Thursday ≥ Wednesday (2)
     real_cfg = server._deck_cfg
+    flag = MagicMock(return_value=True)
     with _stub_steps({k: _ok for k in STEP_KEYS if k != "replenishment"}), \
-         patch.object(server, "_deck_replenishment_enabled", lambda: True), \
+         patch.object(server, "_deck_replenishment_enabled", flag), \
          patch.object(server, "_deck_cfg",
                       lambda key, default: 2 if key == "replenish_weekday"
                       else real_cfg(key, default)), \
          patch.object(server, "datetime", _clock_at(NOW)), \
-         patch.object(server, "_run_weekly_replenishment",
-                      wraps=server._run_weekly_replenishment) as repl:
+         patch.object(server, "_run_weekly_replenishment", MagicMock()) as repl:
         steps = _post_and_join(c)
 
-    repl.assert_called_once_with(NOW)
-    assert steps["replenishment"].outcome == "ok"
-    assert "gated" not in steps["replenishment"].detail   # the real gate let it through
+    assert list(steps) == STEP_KEYS                 # the tick ran every step
+    repl.assert_not_called()
+    flag.assert_not_called()
+    assert (steps["replenishment"].outcome, steps["replenishment"].detail) == \
+        ("skipped", "deferred: C2")
 
 
 # ---------------------------------------------------------------------------
