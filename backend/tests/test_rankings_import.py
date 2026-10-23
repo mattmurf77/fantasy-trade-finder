@@ -630,12 +630,13 @@ def test_premium_source_flags_registered_and_states_pinned():
     fixtures fails the suite later, in a file that has nothing to do with
     the feature). Compiled DEFAULT_FLAGS stay False (fail-closed) for both.
     Per-source config state pins the CURRENT graduation reality:
-    dynasty_nerds graduated ON 2026-08-16 (operator flip after D-058);
+    dynasty_nerds graduated ON 2026-08-16 (operator flip after D-058), then
+    was hidden again for App Review on 2026-10-23 (operator: "Hide", Q9);
     dlf stays dark until a real subscriber export pins its header shape
     (addendum §3.4 fixture gate)."""
     from backend import feature_flags
 
-    expected = {"ranks.source.dynasty_nerds": True, "ranks.source.dlf": False}
+    expected = {"ranks.source.dynasty_nerds": False, "ranks.source.dlf": False}
     repo = Path(__file__).resolve().parents[2]
     sources = [repo / "config/features.json"] + [
         FIXTURES / "flags" / f"{n}.json"
