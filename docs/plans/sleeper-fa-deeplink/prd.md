@@ -436,8 +436,8 @@ The builder fills this in at current line numbers, in `docs/plans/sleeper-fa-dee
 |---|---|---|---|
 | `design-lead` | review | Hand-off mode: the steps block and the send-a-trade steps confirm (numbered lines). Direct write (consent.md §2.3): the checkbox spec, the consent step (D9 decided: a step; the box directly above the primary button, `type.bodySm` in chalk, never truncated), the window line, results, refusals, and the Settings row. Also the D2 alert. Chalkline rules apply: no emoji icons, existing tokens only | `platforms-pm` |
 | `ux-lead` | review | The hand-off flows. K-F1 to K-F7 as landed in consent.md §2 and §5. TestFlight 21–29 (K1–K7) | `head-product` |
-| `legal-lead` | review | **R15 / LEG-L12.** The R15.1 copy shipped verbatim (consent.md §4.1). The R15.3 evidence tables. The privacy and terms §5 changes (scope §4 docs/legal row). The Settings row (consent.md §4.4). **Confirm** D10 and D11 (both decided by Product, pending legal). **Answer** D5 and D12. The R15.7 professional review [PRO] | `head-bizops` |
-| `marketing-lead` | words | Everything except the R15 copy: CTA and step labels, the connect-step line, result lines, the D2 alert and the hand-off steps copy (through `platforms-pm`). The secondary button's words (consent.md §2.4) are **pending** | `head-bizops` |
+| `legal-lead` | review | **R15 / LEG-L12.** The R15.8 rulings are folded: D10 and D11 confirmed, D5 ruled (final v1/v2 copy, consent.md §4.1), D12 ruled (deleted with the account [PRO]). Also folded: the R15.3 evidence tables and the privacy and terms §5 changes (scope §4 docs/legal row). Legal's remaining items are the LEG-L12 [PRO] confirmations under R15.7 | `head-bizops` |
+| `marketing-lead` | words | Everything except the R15.8 consent copy: button and step labels, the connect-step line, result lines, the D2 alert and the hand-off steps copy (through `platforms-pm`). None may contradict D10(a)–(c). The secondary button's words (consent.md §2.4) are **open**, waiting on the `head-bizops` slot | `head-bizops` |
 | `trades-pm` | **review** | Their screens: `TradesScreen` (deck, queue), `Matches`, `TradeCalculator` / `InLeagueCalculator`. Surfaces 2 and 3, the §3.1 code-walk, the steps confirm, Send All, `QueuedTrade`, TestFlight 17–20. K-F5, the deck invalidation after an in-app roster move (#339 §5.1), is **handed off** to them as I-2/U2 | `platforms-pm` |
 | `league-pm` | consulted | The Free Agents surface | `head-product` |
 | `analytics-lead` | grant | **Granted 2026-10-20, conditions G1–G7, F1–F5:** the widened `sleeper_handoff_resolved` (scope §1), plus the seven `sleeper_fa_*` direct-write events (consent.md §6). Both consent events are NON_INTENT. `attempt_id` replaces `transaction_id`. Still to come: the addenda before the emitters ship | `platforms-pm` |
@@ -476,9 +476,9 @@ Per `head-product` P31, **device tests 1–12 and T1–T4 gate the merge, not th
 4. **The `platforms-eng` inventory recommendation** folds in through `head-product` whenever it lands (§8 Pending). If it hasn't landed, the build follows §3.2 as written.
 5. **Reviews:**
    - The operator confirms D3, D4 and the no-flag confirmation for the hand-off.
-   - `legal-lead`, via `head-bizops`, answers D5 and D12 and confirms D10 and D11.
+   - `legal-lead`'s R15.8 rulings (D5, D10, D11, D12) are folded. Its [PRO] confirmations remain part of LEG-L12.
    - All events are granted (`analytics-lead`, 2026-10-20, G1–G7 and F1–F5). Their addenda are written before the emitters ship.
-   - `design-lead`, ux-lead and `marketing-lead` settle the copy. The secondary button's words are pending `marketing-lead`, via `head-bizops`.
+   - `design-lead`, ux-lead and `marketing-lead` settle the copy. The secondary button's words are still open with `marketing-lead`, waiting on the `head-bizops` slot.
 6. **The D1 track**, separate, in [`docs/plans/sleeper-fa-write/`](../sleeper-fa-write/) (being opened by `platforms-eng`; not on origin/main yet):
    - the mutation spike (any capture or replay is an operator-approved live write);
    - then the write route plus the consent and Settings work in consent.md, behind `sleeper.fa_write` (off);
@@ -506,28 +506,29 @@ Outside dependency: E2 (risk register) stays logged. The operator's D1 "Yes" is 
 
   **The flip itself is the operator's.** After that it stays as a permanent kill switch. This is in the scope §5 ship gate and the scope §2 flag row.
 - **D9: consent is its own step.** R15.1's full panel doesn't fit inline, and the step shows at most once a week. The inline option is dropped. `design-lead`'s type and placement spec applies inside the step: the box sits directly above the primary button, in `type.bodySm` chalk, never truncated (consent.md §2.3).
-- **D10: no per-move dialog. Decided by Product, pending legal.**
-  - The primary button names the exact move: "Add X, drop Y", or "Add X" when there's no drop, or the claim/bid form for waivers. That tap is the per-move confirmation, followed by a result line.
-  - The R15.1 panel line "You'll still confirm every move" is satisfied by that named button, subject to the same confirmation.
-  - `legal-lead` confirms through `head-bizops` that this satisfies R15.1. **Legal's answer governs.** If legal requires a dialog, it runs on later moves only (consent.md §2.2).
-- **D11: consent is per account**, unless `legal-lead` requires per league. Storage follows: `platform_write_consents` is keyed by user (FTF user + Sleeper user), not by league, and `league_scope` is always `'all_linked'` (consent.md §4.3).
+- **D10: no per-move dialog. Confirmed by `legal-lead` (R15.8).** The named button ("Add X, drop Y", or "Add X", or the claim/bid form) is the per-move confirmation, and there is no extra dialog. The tap is followed by a result line. R15.8's conditions (a)–(f) apply (consent.md §2.2): the league named, the finality line always visible, the waiver line and bid shown for claims, "This move: …" in the consent step, a fresh tap for every send, and one tap per move. "You'll still confirm every move" stays true. This is [PRO] under R15.7(a).
+- **D11: consent is per account. Confirmed by `legal-lead` (R15.8).** It covers every Sleeper league of the connected Sleeper user. Storage: `platform_write_consents` is keyed by user (FTF user + Sleeper user), not by league, and `league_scope` is always `'all_linked'` (consent.md §4.3).
 
 **Settled by the 2026-10-20 inputs:**
 - **The Settings control.** `legal-lead` R15.2.6 requires a "Stop roster moves" control. This spec places it in Settings › Leagues (consent.md §4.4). This was formerly D7.
 - **Do moves extend the window?** No. Per R15.2.3 the window is a rolling 7 × 24 h from the server's consent timestamp, and only a new tick renews it. This was formerly D8.
 - **K-F5, the trade-deck change** after an in-app roster move, is handed off to `trades-pm` as I-2/U2.
 
-**Pending `legal-lead` (via `head-bizops`):**
-- **D5: are waiver claims and FAAB under the same consent?** (H5b). Until D5 is answered, waiver claims stay refused (`waiver_claim_unsupported` → hand-off). Product's view is yes, under one consent, because a claim can execute a drop later, outside the user's view.
-- **D12: keep any consent or move record after account deletion?** (H6 [PRO], then the operator). The default is to delete them with the account.
-- Confirmation of D10 and D11 (above).
+**Ruled by `legal-lead` (R15.8, 2026-10-20):**
+- **D5: claims must be named.** The final copy has two versions (consent.md §4.1, verbatim):
+  - **v1** (`sleeper-roster-moves-v1`) covers add/drop and ships while claims stay refused.
+  - **v2** (`sleeper-roster-moves-v2`) names waiver claims and ships only when claims are enabled. The move to v2 is a copy-version bump, so it forces re-consent under the existing lapse rules.
 
-**Pending `marketing-lead` (via `head-bizops`):** the secondary button's words ("Do it in Sleeper instead" / "Open in Sleeper" / "Not now"; consent.md §2.4).
+  Enabling waiver claims needs **both** v2 and the spike's captured claim shape (consent.md §3).
+- **D12: consent and move records are deleted with the account** **[PRO]**. Both tables are covered by `delete_user_data` through `_ADDITIONAL_PRIVATE_TABLES`, and `withdrawn_via = 'account_deletion'` is dropped. If a professional finds a retention duty, it goes to the operator as a new decision and a policy change (H6).
+
+**Still open: `marketing-lead`, waiting on the `head-bizops` slot.** The secondary button's words ("Do it in Sleeper instead" / "Open in Sleeper" / "Not now"; consent.md §2.4).
 
 **Still open (operator):**
 - **D3: desktop-UA WebView.** **Recommend no**, unless test 3 fails, and even then only as its own spec. D2 already excludes it as the not-installed fallback.
 - **D4: Sleeper's Branch link.** **Recommend no.** Confirm.
 - **Confirm: no feature flag for the *hand-off*.** See scope §2. The direct write has its own flag.
+- **The `sleeper.fa_write` flip**, under D6.
 
 ## 11. Handoffs
 
@@ -542,8 +543,8 @@ Outside dependency: E2 (risk register) stays logged. The operator's D1 "Yes" is 
   - run the all-external-links inventory, using this PR's §3.1 table and §8 list as inputs;
   - open `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet), which covers the spike, the write route and the adapter;
   - do the build.
-- **`head-bizops` → `legal-lead`:** LEG-L12 / R15 as folded. Answer D5 and D12. Confirm D10 and D11. Plus the privacy and terms text.
-- **`head-bizops` → `marketing-lead`:** the secondary button's words (pending).
+- **`head-bizops` → `legal-lead`:** LEG-L12, meaning R15 as folded, including R15.8: the [PRO] confirmations under R15.7 and the privacy and terms text.
+- **`head-bizops` → `marketing-lead`:** the secondary button's words. These are still open, waiting on the `head-bizops` slot.
 - **`analytics-lead`:** all events are granted (2026-10-20, G1–G7 and F1–F5). Write the dated addenda before the emitters ship.
 - **`design-lead` / ux-lead / `marketing-lead`:** the copy, flows and placement in §4.2–§4.4 and consent.md §2.
 - **`trades-pm`:** review surfaces 2 and 3. K-F5's deck invalidation is **handed off** to them as I-2/U2 (§8). Lighting `trades.queue_2k` stays their call. Web trade links go to the inventory.

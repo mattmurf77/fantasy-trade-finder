@@ -13,9 +13,9 @@
 - **The hand-off** can start now (P31). R0, device tests 1–12 and T1–T4 gate its **merge**.
 - **The direct write** waits for the spike in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet). Its flag turns on only under D6 (§5). See [prd.md § Sequencing](prd.md#9-sequencing-and-dependencies).
 **Operator sign-off on waivers:** not needed (no waivers). D1 and D2 are decided.
-- **Decided by `head-product` (P34, 2026-10-20):** D6 (the flag goes on only after three conditions, §5), D9 (consent is its own step) and D11 (consent per account). D10 (no per-move dialog) is decided by Product **pending `legal-lead`**.
-- **Pending `legal-lead` via `head-bizops`:** D5 and D12, plus the confirmations of D10 and D11.
-- **Pending `marketing-lead` via `head-bizops`:** the secondary button's words.
+- **Decided by `head-product` (P34, 2026-10-20):** D6 (the flag goes on only after three conditions, §5), D9 (consent is its own step), D10 (the named button is the per-move confirmation; no dialog) and D11 (consent per account).
+- **Ruled or confirmed by `legal-lead` (R15.8, 2026-10-20):** D10 and D11 are confirmed. D5: claims must be named, so the final copy is v1 for add/drop and v2 once claims are enabled. D12: records are deleted with the account [PRO].
+- **Still open:** the secondary button's words. These belong to `marketing-lead` and are waiting on the `head-bizops` slot.
 - **Open for the operator:** D3, D4, and the no-flag confirmation for the hand-off.
 
 All of these are in [prd.md § Decisions needed](prd.md#10-decisions-needed).
@@ -103,7 +103,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
   - Both are created by `metadata.create_all`, and each gets a `docs/data-dictionary.md` row.
   - **Same change:** both join `delete_user_data` / `export_user_data` through `accounts._ADDITIONAL_PRIVATE_TABLES` (`accounts.py:652-658`), which `test_account_deletion_coverage.py:48` already parametrizes.
   - **Why new tables:** nothing existing fits. `accounts.email_consent_at` is email-only, `sleeper_credentials` is deleted on expiry or refusal, and `user_events` is analytics.
-  - **Retention** after account deletion is H6 [PRO]. The default is to delete with the account.
+  - **Retention, D12** (ruled by `legal-lead` R15.8): both tables are **deleted with the account** [PRO], through the same `_ADDITIONAL_PRIVATE_TABLES` coverage. A professional confirms that no retention duty applies; if one does, the question goes to the operator (H6). Export includes both tables while the account exists. There is no `account_deletion` withdrawal value.
 - **Client-side shape change:** `QueuedTrade` (`mobile/src/shared/types.ts:432-440`) loses `sleeper_url` and gains an optional `opponent_username` ([prd.md § 4.3](prd.md#43-send-a-trade-stand-in-clipboard--steps-before-the-open)). That is local AsyncStorage (`ftf_trade_queue_<user_id>`), not a server schema. Persisted entries that still carry `sleeper_url` are read and that field is ignored, so no migration is needed.
 - **New feature flag: `sleeper.fa_write`**, default **`false`** (D1 direct write; [consent.md § 3](consent.md#3-what-the-write-route-must-do-implemented-in-sleeper-fa-write)).
   - It gates the write route and the two consent routes (they 404 when it's off, immediately and with no deploy). On the client it gates the connect, consent and direct-write UI and the Settings row. Off means hand-off mode.
@@ -165,12 +165,13 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
   - S19: the client and server copy versions match.
   - S20: fallback refusals route to the hand-off.
   - S21: the box is never pre-ticked, and there is no double send.
-  - S22: v1's text is pinned by hash.
+  - S22: the v1 and v2 consent texts are pinned by hash.
   - S23: connecting keeps the sheet's bid and drop, and never auto-sends.
   - S24: the steps block shows only in hand-off mode.
   - S25: no stacked confirmation.
   - S26: claim vs add result copy.
   - S27: the Settings row.
+  - S28: R15.8 D10(a)–(d). The league is on the button, the finality line always renders, a claim shows the waiver line and bid, and the consent step shows "This move: …".
 - [x] **Unit tests (backend; Sleeper mocked through `sleeper_write._opener`, never a live write):**
   - `backend/tests/test_sleeper_fa_write_route.py` (new). Includes `test_fa_write_no_consent_never_calls_opener`, the source-order `test_fa_write_consent_check_precedes_write_structural`, and `test_move_record_written_per_attempt`.
   - `backend/tests/test_sleeper_write_consent.py` (new). Includes `test_consent_grant_records_r15_fields` and `test_consent_withdrawals_append_only`.
@@ -233,17 +234,17 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` (any route added/renamed/removed/contract-changed) | **updated (by the build)** | `GET` and `DELETE /api/sleeper/write-consent`, plus the write route (implementation per `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet)), with the refusal contract in consent.md §3. `DELETE /api/sleeper/link` now also appends a consent withdrawal. The hand-off adds no routes. |
-| `docs/data-dictionary.md` | **updated (by the build)** | New tables `platform_write_consents` and `platform_write_moves` (consent.md §4.3, R15.3). |
+| `docs/data-dictionary.md` | **updated (by the build)** | New tables `platform_write_consents` and `platform_write_moves` (consent.md §4.3, R15.3). Both are user-keyed (D11) and deleted with the account; export includes them (R15.8 D12 [PRO]). |
 | `docs/config-reference.md` | **updated (by the build)** | New flag `sleeper.fa_write`: default false, and what it gates. It goes on only under D6: LEG-L12 done, the P31 device tests passed, and the spike's mutation shapes captured. The flip is the operator's. |
 | `living-memory/LLD.md` (schema/route/invariant *conventions* shifted) | **updated (by the build)** | § Code Conventions → Specific patterns gets two bullets. (1) **On-behalf platform writes need a server-enforced, versioned, time-boxed consent record checked before the write call**; the client gate alone is never enough. (2) "Hand-offs into a platform's app go through that platform's one helper (`utils/sleeperHandoff.ts` for Sleeper). Try the custom scheme first with `Linking.openURL`. Never use `canOpenURL` without an `LSApplicationQueriesSchemes` entry, and never pass `https://sleeper.com/leagues/...`, which Sleeper's AASA doesn't claim (feasibility F1/F3)." Reword it if `head-eng`'s inventory sets a cross-platform pattern. |
 | `docs/architecture.md` (module wiring / data flow changed) | **updated (by the build)** | The `sleeper_write.py` module row gains the add/drop and claim mutations. Route wiring: the FA add route → the consent check → `sleeper_write`. (The hand-off itself is a client util that replaces four inline `Linking` calls.) |
 | `living-memory/HLD.md` (architecture genuinely shifted: new module, client, major flow) | n/a | A new write that follows the existing `propose_trade` pattern (same adapter, credential and route shape) is not an architecture shift. The consent store is a new table, not a new module. |
-| `docs/cross-client-invariants.md` (shared constants/enums/colors) | **updated (by the build)** | The consent copy version (`sleeper-roster-moves-v1`), held by both server and client (guard S19). The hand-off's rung constant is mobile-only. Web's bare `sleeper://` nudge (`web/js/app.js:6189-6205`) and web trade link (`:4281-4320`) are unchanged and share no constant. |
+| `docs/cross-client-invariants.md` (shared constants/enums/colors) | **updated (by the build)** | The consent copy versions, `sleeper-roster-moves-v1` (add/drop, claims refused) and `sleeper-roster-moves-v2` (required once claims are enabled; R15.8 D5). The current version is held by both server and client (guard S19). The hand-off's rung constant is mobile-only. Web's bare `sleeper://` nudge (`web/js/app.js:6189-6205`) and web trade link (`:4281-4320`) are unchanged and share no constant. |
 | `docs/glossary.md` (new domain term) | **updated (by the build)** | **Write consent**: the 7-day, versioned authorization for FTF to make roster moves the user taps in Sleeper. "Claim sheet", "hand-off" and "trade queue" already exist. |
 | ADR or `DECISIONS.md` entry (non-obvious choice made) | **updated (by the build)** | An **ADR** (`eng-architect` decides ADR vs D-entry) for the on-behalf write and consent model: server-enforced consent, a new table, the rolling window and what clears it. Plus a new D-entry (next id = max + 1 at build time) recording: the scheme-first hand-off; no flag; clipboard + steps as the prefill stand-in on both paths; Send All as one hand-off; the D2 fallback chosen; and each target's rung from device-results.md. |
 | `docs/integrations/sleeper.md` §1.2 / §3.3 / §4 | **updated (by the build)** | The new GraphQL mutations (spike-recorded shapes), the new error modes, and the consent gate. |
 | `docs/runbook.md` | **updated (by the build)** | How to kill the FA write (flip `sleeper.fa_write`, then reload flags) and what users see afterwards (the hand-off). |
-| **Privacy policy `web/privacy.html`** (docs/legal dependency, **LEG-L12, MUST before the add/drop build ships**) | **updated (by the build, wording by `legal-lead`)** | Per R15.4: (1) the Sleeper-connection-token paragraph (`:150-165`) adds roster moves the user starts and confirms, after authorizing in the last 7 days; (2) §4 Sleeper (`:205`) covers trade proposals **and roster moves**; (3) a new collected-data item for authorization and roster-move records; (4) retention (§5) and deletion (§6) follow R15.3; (5) export includes the records. |
+| **Privacy policy `web/privacy.html`** (docs/legal dependency, **LEG-L12, MUST before the add/drop build ships**) | **updated (by the build, wording by `legal-lead`)** | Per R15.4: (1) the Sleeper-connection-token paragraph (`:150-165`) adds roster moves the user starts and confirms, after authorizing in the last 7 days; (2) §4 Sleeper (`:205`) covers trade proposals **and roster moves**; (3) a new collected-data item for authorization and roster-move records; (4) retention (§5) and deletion (§6): the records are **deleted with the account** (R15.8 D12 [PRO]); (5) export includes the records. |
 | **Terms `web/terms.html` §5** (same dependency, LEG-L12) | **updated (by the build, wording by `legal-lead`; [PRO] lines reviewed)** | Per R15.5: the heading becomes "Sending trades and roster moves to Sleeper" (drop "beta"). Extend the unofficial-interface and account-restriction lines (`:106-107`) to roster moves [PRO]. Add the two new paragraphs: user-started moves with a 7-day authorization, withdrawable in Settings; and moves are final, Sleeper decides processing, plus the liability line [PRO]. Keep `:109`. |
 | **Settings › Leagues: the "Roster moves" row** (`mobile/src/screens/settings/sections/PlatformDisconnectSection.tsx`, near the Sleeper-sending row) | **updated (by the build)** | New row per consent.md §4.4 (R15.2.6, H5c, K-F7): status "Roster moves: on until {date}", the **Stop roster moves** control, R15.2.6's withdrawal notice, behind `sleeper.fa_write`. Update the section's header comment and `SettingsLeaguesScreen.tsx`'s section list. Reviewed by `design-lead`, `legal-lead` and ux-lead (prd §8). |
 | `docs/design/components.md` (Forms) | **updated by `design-lead`** | The Checkbox component row (consent.md §2.3), which `design-lead` owes, plus the Step list row. |
@@ -263,7 +264,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
   - **Hand-off:** R0, device tests 1–12 and T1–T4 recorded in `device-results.md` before the hand-off merges. The rung constant is set from that file, and guard S10 checks it.
   - **Direct write:** the mutation shapes recorded in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet) (AC-19) before any write code merges.
 - **LEG-L12 [PRO]: MUST before the add/drop build ships** (`legal-lead`). It requires all of R15:
-  - the R15.1 consent copy, verbatim (consent.md §4.1);
+  - the R15.8 final consent copy, verbatim: **v1** at ship, **v2** before claims are enabled (consent.md §4.1). Waiver claims need both v2 and the spike's captured claim shape;
   - the R15.3 evidence tables;
   - the R15.4 privacy-policy changes and the R15.5 terms §5 changes (docs/legal row in §4);
   - the R15.6 label check (no change);

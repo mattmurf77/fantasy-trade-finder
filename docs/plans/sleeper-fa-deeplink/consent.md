@@ -8,10 +8,10 @@
 > - **The mutation shapes and the write route's implementation:** the separate D1 write spike, `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet). This file does not duplicate it. It states only what the route must do for the product (§3).
 >
 > **Inputs folded in on 2026-10-20** (review notes held outside the repo, cited by role and section):
-> - `legal-lead` R15 (R15.1–R15.7) and LEG-L12;
+> - `legal-lead` R15 (R15.1–R15.8, including R15.8's rulings on D5, D10, D11 and D12, and the final v1 and v2 consent texts) and LEG-L12;
 > - `ux-lead`'s #351 consent review, K-F1 to K-F7, plus test steps K1–K7;
 > - `design-lead`'s #351 consent checkbox and not-installed message review;
-> - `head-product` P31, and P34 (decisions D6, D9, D10 and D11; the routing of D5 and D12).
+> - `head-product` P31, and P34 (decisions D6, D9, D10 and D11).
 >
 > This is a spec. It changes no code, and nothing was sent to Sleeper while writing it.
 
@@ -50,7 +50,8 @@
 
 | Input | Folded into |
 |---|---|
-| R15.1 copy | §4.1, verbatim |
+| R15.8 final copy (v1, v2) | §4.1, verbatim. This replaces the R15.1 draft |
+| R15.8 rulings (D5, D10, D11, D12) | §2.2, §3, §4.1–§4.3 |
 | R15.2 mechanics | §4.2 and §4.4 |
 | R15.3 evidence | §4.3: two append-only tables |
 | R15.4–R15.5 privacy and terms | scope.md §4: a docs/legal dependency row |
@@ -59,7 +60,7 @@
 | K-F1 to K-F7 | §2 and §5 |
 | design-lead | §2 (checkbox spec, the window line, refusal pattern) and prd §4.4 (the D2 alert) |
 | P31 | prd §9 and scope §5: device tests gate the **merge**, not the start of the build |
-| P34 | D9: the step (§2.3). D10: the named button, pending legal (§2.2). D11: per account (§4.2, §4.3). D6: the flag turns on only under three conditions (§3, §9). D5 and D12 pending legal. The secondary words pending `marketing-lead`. K-F5 handed off (§5) |
+| P34 | D9: the step (§2.3). D10: the named button (§2.2), since confirmed by `legal-lead` R15.8. D11: per account (§4.2, §4.3), since confirmed by R15.8. D6: the flag turns on only under three conditions (§3, §9). The secondary button's words go to `marketing-lead`. K-F5 handed off (§5) |
 
 ## 2. The flow: connect, then consent, then move
 
@@ -86,18 +87,15 @@ A pure function, `faWriteGate({flagOn, linked, linkExpired, consentValid, ticked
 
 ### 2.2 The CTA is the per-move confirmation (K-F3)
 
-**D10, no per-move dialog: decided by Product (`head-product` P34), pending legal.** The operator asked for "a checkbox for the first attempt every 7 days". So:
-- The primary button names the exact move, in one of three forms (`design-lead`):
-  - "Add {Player A}, drop {Player B}";
-  - "Add {Player A}", when there's no drop;
-  - the claim/bid form, for a waiver claim.
-- One line under it reads "Final on Sleeper. Fleeced can't undo it."
-- **That tap is the per-move confirmation, followed by a result line** (§5). There is no separate dialog.
-- On the first move of a window, the consent step's **Make the move** button names the move the same way and is the confirmation.
-- **Waiver claims** (only once D5 allows them, §3) use R15.1's waiver line under the button: "This places a waiver claim for {Player A} (dropping {Player B} if it clears). Sleeper processes it on its waiver schedule."
-- **Pending `legal-lead`.** Legal confirms, via `head-bizops`, that this satisfies R15.1. **Legal's answer governs.**
-  - If legal requires a dialog, it runs on **later moves only**, never on the move where the user has just ticked consent (K-F3's fallback).
-  - The R15.1 panel says "You'll still confirm every move". Under D10, the named button satisfies that sentence, subject to the same legal confirmation. The R15.1 quote in §4.1 stays unedited.
+**D10, no per-move dialog.** Decided by `head-product` (P34) and **confirmed by `legal-lead` (R15.8, D10)**. The named button is the per-move confirmation, and there is no separate dialog. R15.8 sets six conditions, all required:
+- **(a) The button names the move.** Its label names the add and the drop: "Add {Player A}, drop {Player B}", or "Add {Player A}" when there's no drop (`design-lead`). The **league** is named on the button or directly beside it.
+- **(b) The finality line.** "Final on Sleeper. Fleeced can't undo it." sits directly under the button. It is always visible and never collapsed.
+- **(c) Claims.** For a claim, the waiver line and the **bid amount** sit under the button. Claims only come once v2 is live (§3, §4.1). The waiver line is R15.1's: "This places a waiver claim for {Player A} (dropping {Player B} if it clears). Sleeper processes it on its waiver schedule."
+- **(d) The consent step names the move.** On the first move of a window, the consent step shows the line *"This move: {CTA label} in {League}."* above the checkbox. It is part of the final copy in §4.1. Tapping **Make the move** then confirms a named move.
+- **(e) Every send needs a fresh tap.** Nothing sends after connect, after consent, or on return to the sheet without a new tap (§2.1).
+- **(f) One tap is one move.** The button is disabled from the tap until the result arrives.
+
+That tap is followed by a result line (§5). The consent copy's "You'll still confirm every move" stays true, because the named-button tap is that confirmation. This is **[PRO]** under R15.7(a).
 
 ### 2.3 Visual spec (`design-lead`)
 
@@ -129,10 +127,10 @@ The secondary **Do it in Sleeper instead** is always on the sheet and in every s
 
 The same rule covers writes switched off under the platform risk register.
 
-**The secondary button's words are pending `marketing-lead`, via `head-bizops`.** The candidates are:
+**The secondary button's words are still open.** They are `marketing-lead`'s call and are waiting on a slot with `head-bizops`. The candidates are:
 - ux-lead: "Do it in Sleeper instead";
 - `design-lead`: "Open in Sleeper";
-- R15.1: "Not now" for the consent step.
+- R15.8 v1 copy: "Not now" for the consent step.
 
 "Do it in Sleeper instead" is the working label in this spec.
 
@@ -149,14 +147,18 @@ The same rule covers writes switched off under the platform risk register.
 - capture from Sleeper's own web client (runbook §C2);
 - the route and adapter design.
 
-Any capture or replay is a **live write that needs the operator's approval when it runs**, in a test league, with the change reversed afterwards. **Waiver claims stay refused** (`waiver_claim_unsupported`) until two things happen: `legal-lead` answers D5 (claims under the same consent), **and** a claim has been captured. A claim shape is never guessed.
+Any capture or replay is a **live write that needs the operator's approval when it runs**, in a test league, with the change reversed afterwards. **Waiver claims stay refused** (`waiver_claim_unsupported`, which leads to the hand-off) until **both** of these are true, per `legal-lead` R15.8 D5:
+1. the server's current consent copy is **`sleeper-roster-moves-v2`** (§4.1);
+2. the spike has **captured the claim shape**.
+
+A claim shape is never guessed, and claims never run under v1.
 
 **Product requirements on the route** (`POST /api/league/free-agents/add`; the final name is the spike's):
 
 - **Request body.** `{league_id, add_player_id, drop_player_id?, faab_bid?, consent?: {copy_version, locale}, attempt_id}`. `attempt_id` is a client-generated UUID, required, one per tap (`analytics-lead` F3). The server echoes it on `sleeper_fa_write_succeeded` and stores it in `platform_write_moves`.
 
 - **Order of checks.** The route runs these in order: test-mode fail-closed (599) → `sleeper.fa_write` (404) → session and `_verified_write_denial` (`server.py:2653`) → body → credential (`sleeper_not_linked` / `sleeper_expired` / `sleeper_unconfigured`, as `server.py:19515-19524`) → **consent** (§4.2) → the pre-write public reads (roster resolved by roster, D-051) → the write → the **move record** (§4.3).
-- **Consent before any Sleeper write.** A body carrying `consent: {copy_version, locale}` with the current version records the grant first, then writes. Without a valid grant the route answers 409 **`consent_required`**, and nothing is sent.
+- **Consent before any Sleeper write.** A body carrying `consent: {copy_version, locale}` with the current version records the grant first, then writes. **The grant row is committed before Sleeper is called**, in the same request (`legal-lead` R15.8, "also required"). If Sleeper then rejects the move, the grant stands and the move row records the failure. Without a valid grant the route answers 409 **`consent_required`**, and nothing is sent.
 - **Refusals the client must handle.** Each one is `{error, message, detail}` with `detail = message` (#428).
 
 | Code | When | Client |
@@ -168,7 +170,7 @@ Any capture or replay is a **live write that needs the operator's approval when 
 | 422 `asset_not_owned` (reused, the overhaul meaning, `overhaul_service.py:44`) | the drop is no longer on the roster | refresh the drop list |
 | 422 **`player_unavailable`** (new) | the add target was just rostered | "{Name} was just picked up" + refresh |
 | 422 **`waiver_bid_over_budget`** (new; adds `remaining`) | bid > the server-recomputed remaining FAAB | the inline bid error (`ClaimSheet.tsx:219-224`) |
-| 422 **`waiver_claim_unsupported`** (new) | a claim, while D5 is unanswered (pending legal) or no claim has been captured | hand-off mode |
+| 422 **`waiver_claim_unsupported`** (new) | a claim, while the current copy is v1 or no claim shape has been captured (R15.8 D5) | hand-off mode |
 | 409 `sleeper_rejected` (reused; the credential is deleted, so consent is withdrawn, §4.4) | Sleeper refused the token | the refusal pattern, then the connect step on the next try |
 | 502 `sleeper_write_failed` (reused; `detail` = Sleeper's sentence) | Sleeper refused the move | the refusal pattern (§2.3): reason, no retry, Open in Sleeper |
 
@@ -178,33 +180,51 @@ Any capture or replay is a **live write that needs the operator's approval when 
 
 ## 4. Consent
 
-### 4.1 The consent step: `legal-lead` R15.1 copy, verbatim
+### 4.1 The consent step: `legal-lead` R15.8 final copy, verbatim
 
-Shown when the user taps the CTA with no active consent (none yet, expired after 7 days, or withdrawn):
+Shown when the user taps the button with no active consent (none yet, expired after 7 days, or withdrawn). The R15.1 draft is superseded: legal keeps it for the record and does not ship it.
+
+**Final consent copy, v1 (adds and drops; while claims are refused)**, verbatim from R15.8:
 
 > **Let Fleeced make roster moves in Sleeper?**
 > - Fleeced will add and drop players in your Sleeper leagues for you, using the Sleeper sign-in you connected.
 > - Moves are final on Sleeper. Fleeced can't undo them, and a player you drop can be picked up by another team.
-> - This uses an unofficial Sleeper connection, so it could stop working at any time. **[PRO]: keep or drop this line**
-> - Your OK lasts 7 days. You'll still confirm every move. You can turn it off any time in Settings.
+> - This uses an unofficial Sleeper connection, so it could stop working at any time. *(R15.7(c) [PRO]: keep or drop)*
+> - Your OK lasts 7 days. You'll still confirm every move. Turn it off any time in Settings › Leagues › Stop roster moves.
+>
+> *This move: {CTA label} in {League}.*
 >
 > ☐ **I authorize Fleeced to add and drop players in my Sleeper leagues for the next 7 days.**
 >
-> [Make the move] (disabled until the box is ticked) · [Not now]
-> Terms · Privacy
+> [Make the move] · [Not now] — Terms · Privacy
+
+**Final consent copy, v2 (required once claims are enabled)**, verbatim from R15.8: as v1, except:
+- Bullet 1: *"Fleeced will add and drop players, and place waiver claims, in your Sleeper leagues for you, using the Sleeper sign-in you connected."*
+- Bullet 2: *"Moves are final on Sleeper and Fleeced can't undo them. A player you drop can be picked up by another team. A waiver claim runs on Sleeper's schedule and spends any bid you set."* If `platforms-pm` verifies it, add *"You can cancel a pending claim in Sleeper before it runs."*
+- Checkbox: **"I authorize Fleeced to add and drop players and place waiver claims in my Sleeper leagues for the next 7 days."**
+
+**Which version ships with which capability** (`legal-lead` R15.8 D5):
+
+| Copy version | Ships with | Server's current constant |
+|---|---|---|
+| `sleeper-roster-moves-v1` | add and add+drop only. Claims are refused (`waiver_claim_unsupported` → hand-off) | v1 from the first ship |
+| `sleeper-roster-moves-v2` | add, add+drop **and waiver claims** | switched to v2 **in the same release that enables claims**. Claims need **both** v2 and the spike's captured claim shape (§3) |
+
+- **Moving from v1 to v2 is a copy-version bump.** Every v1 grant stops matching (§4.2, validity), so every user re-consents on their next move, under the existing lapse rules.
+- **The Settings path is in v1 itself.** v1 has not shipped, so the path doesn't need a version bump (R15.8 D5).
 
 Notes on the copy:
-- **The [PRO] marker** is `legal-lead`'s note, not UI text. Whether that bullet ships is professional-review item R15.7(c).
-- **The Settings path.** R15.1 says the Settings mention names the real control once `platforms-pm` places it. It is now placed (§4.4: Settings › Leagues › **Stop roster moves**), so `legal-lead` may add the path in the next copy version.
-- **Scope, D11: per account (`head-product` P34),** unless `legal-lead` requires per league. Consent covers all of the user's linked Sleeper leagues. The league is named on every move (§2.2).
-- **"You'll still confirm every move."** Under D10 the named primary button satisfies this sentence, subject to `legal-lead`'s confirmation (§2.2). The quote above is unchanged.
-- **Waiver claims: D5 is pending `legal-lead` via `head-bizops`.** The checkbox wording says "add and drop". If D5 puts claims under this consent, legal also confirms whether the wording must name them, which would mean a new copy version, not an edit. Until D5 is answered, claims are refused (§3).
-- **Storage.** The exact text is kept in the repo under its version, in `mobile/src/utils/sleeperConsentCopy.ts`, keyed by `copy_version` (`sleeper-roster-moves-v1`) and `locale` (`en-US`). A version is never edited in place: changed wording means a new version (guard S22).
+- **The [PRO] marker** on bullet 3 is `legal-lead`'s note, not UI text. Whether that bullet ships is R15.7(c).
+- **"This move: {CTA label} in {League}."** renders the exact button label and league (D10(d), §2.2).
+- **Scope, D11: per account,** decided by `head-product` P34 and **confirmed by `legal-lead` R15.8**. Consent covers every Sleeper league of the connected Sleeper user, including a league linked during the window. The league is named on every move (D10(a)).
+- **"You'll still confirm every move"** stays true: the named-button tap is that confirmation (R15.8 D10).
+- **Storage.** Both versions live in the repo, in `mobile/src/utils/sleeperConsentCopy.ts`, keyed by `copy_version` and `locale` (`en-US`). A version is never edited in place; changed wording means a new version (guard S22 pins both). The server's current constant is `SLEEPER_ROSTER_MOVES_CONSENT_VERSION` (guard S19).
+- **Other words.** Words outside the consent step (button labels, result lines, the connect-step line) are `marketing-lead`'s. They must not contradict D10(a)–(c) or say a move can be undone (R15.8).
 
 ### 4.2 Mechanics (R15.2)
 
 1. **Unticked by default.** Ticking it is the only way to consent. It is never pre-ticked, never bundled, and can't be skipped (guard S21).
-2. **The server enforces it.** No write is sent unless the server finds an active grant for **this FTF user and this Sleeper user**. Under D11 (per account) the grant covers all of that user's linked Sleeper leagues. Consent is **keyed by user, never by league**.
+2. **The server enforces it.** No write is sent unless the server finds an active grant for **this FTF user and this Sleeper user**. Under D11 (per account; confirmed by `legal-lead` R15.8) the grant covers every Sleeper league of that Sleeper user, including one linked during the window. Consent is **keyed by user, never by league**.
 3. **Validity.** A grant is valid when all of these hold:
    - it is the latest grant for (user, `sleeper`, the current credential's `sleeper_user_id`);
    - `copy_version` equals the server's current constant;
@@ -213,7 +233,7 @@ Notes on the copy:
 4. **Moves don't extend the window.** Only a new tick does. There is no reminder before it lapses.
 5. **After a lapse**, the next tap shows the consent step. Nothing is ever sent without a valid grant.
 6. **Re-consent is required when:**
-   - the copy version changes;
+   - the copy version changes, including the v1 → v2 bump when claims are enabled;
    - the connected Sleeper account changes;
    - Sleeper is disconnected and reconnected (§4.4).
 
@@ -231,12 +251,12 @@ Rows are **never edited, only added**. Neither table ever stores a token or cred
 | `user_id` | FTF user id, indexed. Under D11, this and `platform_user_id` are the lookup key; there is no league key |
 | `platform` | `'sleeper'` only. `eng-architect` may drop the column |
 | `platform_user_id` | the Sleeper user the moves are made as |
-| `league_scope` | Always `'all_linked'` under D11 (per account). It is kept because R15.3 lists it. A per-league value would exist only if `legal-lead` requires per-league consent |
+| `league_scope` | Always `'all_linked'` (D11, per account, confirmed by R15.8). It is kept because R15.3 lists it |
 | `copy_version`, `locale` | the exact text is in the repo under the version (§4.1) |
 | `consented_at`, `expires_at` | server UTC; grants only |
 | `client_platform`, `app_version` | from the `X-Device` / `X-App-Version` headers the server already reads (`server.py:2831-2849`) |
 | `trigger_move_id` | grants: the move the tick was given for |
-| `withdrawn_at`, `withdrawn_via` | withdrawals: `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected` \| `account_deletion` (the last only if H6 keeps a record; it never fires an event, F2) |
+| `withdrawn_at`, `withdrawn_via` | withdrawals: `settings` \| `disconnect` \| `credential_expired` \| `credential_rejected`. There is no `account_deletion` value: under R15.8 D12 the rows are deleted with the account instead |
 
 **`platform_write_moves`** has one row per move:
 
@@ -262,7 +282,7 @@ Rows are **never edited, only added**. Neither table ever stores a token or cred
 - `test_account_deletion_coverage.py:48` parametrizes over that tuple;
 - each table gets a `docs/data-dictionary.md` entry.
 
-**Retention, D12: pending `legal-lead` via `head-bizops` [PRO].** The default is to keep the rows while the account exists and delete them with it. Whether a minimal record should outlive deletion is H6, for a professional and then the operator.
+**Retention, D12: ruled by `legal-lead` (R15.8).** Consent and move records are **deleted with the account**: both tables are removed by `delete_user_data`, through `_ADDITIONAL_PRIVATE_TABLES` as above. This keeps privacy §6's deletion promise and Apple 5.1.1(v); the move itself stays in Sleeper's own history. **[PRO]:** a professional confirms that no retention duty applies. If one does, keeping a minimal record becomes a new operator decision and a policy change (H6). Export includes both tables while the account exists.
 
 ### 4.4 Withdrawal is as easy as consent (R15.2.6, K-F7)
 
@@ -327,7 +347,7 @@ They follow the P0-7 split:
 
 **Conditions, as written by `analytics-lead`:**
 - **F1.** The append-only `platform_write_consents` / `platform_write_moves` tables (§4.3) are the R15.3 record of truth. These events are telemetry and are **never** read as consent proof.
-- **F2.** No event fires for `account_deletion` withdrawals; the user's events are deleted with the account anyway. Background (system) withdrawals are written non-touching: they don't bump `users.last_active_at` or `events_count`. This is the referral loop's C6 rule.
+- **F2.** No event fires for `account_deletion` withdrawals; the user's events are deleted with the account anyway. (Under R15.8 D12 no such withdrawal row exists: the rows are deleted.) Background (system) withdrawals are written non-touching: they don't bump `users.last_active_at` or `events_count`. This is the referral loop's C6 rule.
 - **F3.** `attempt_id`, a client UUID, rides on attempted, succeeded and failed. The request body carries it (§3), and `platform_write_moves` stores it (§4.3).
 - **F4.** `sleeper_fa_write_succeeded` fires only for `accepted` | `partial`. A Sleeper rejection or error reaches the client as an error and fires `sleeper_fa_write_failed` only, so the two can never double-count. `transaction_id` is not a prop: `attempt_id` joins the moves table, which holds `sleeper_transaction_id`.
 - **F5.**
@@ -354,17 +374,17 @@ AC-1 to AC-18 are in [prd.md § 6](prd.md#6-acceptance-criteria).
 | AC-23 | A grant is valid at 7 d − 1 min and invalid at 7 d. Moves don't extend it | `test_consent_window_rolling_from_server_tick` |
 | AC-24 | Settings withdrawal, disconnect, credential expiry and credential rejection each **append** a withdrawal. A different Sleeper account invalidates the grant. No row is ever updated | `test_consent_withdrawals_append_only`, `test_consent_bound_to_sleeper_account` |
 | AC-25 | Every move appends a `platform_write_moves` row with the R15.3 fields, the request's `attempt_id` and Sleeper's result, including on refusals | `test_move_record_written_per_attempt` |
-| AC-26 | Account deletion removes both tables' rows, and export includes them | `test_account_deletion_coverage.py` (parametrized); `test_consent_and_moves_in_export` |
+| AC-26 | Account deletion removes both tables' rows (R15.8 D12 [PRO]), and export includes them while the account exists | `test_account_deletion_coverage.py` (parametrized); `test_consent_and_moves_in_export` |
 | AC-27 | Each §3 refusal returns its code with `detail = message`. Pre-write refusals never call the opener | `test_fa_write_refusals` (parametrized) |
-| AC-28 | Mocked success for add and add+drop builds the spike-recorded body (golden) and returns `mode` / `status` / the halves. A claim gets 422 `waiver_claim_unsupported` and no write until D5 is answered and a claim has been captured; only then is it tested the same way | `test_build_fa_*_body_golden`, `test_fa_write_success_modes`, `test_fa_write_claim_refused_until_d5_and_capture` |
+| AC-28 | Mocked success for add and add+drop builds the spike-recorded body (golden) and returns `mode` / `status` / the halves. A claim gets 422 `waiver_claim_unsupported` and no write until the server's copy is v2 **and** the claim shape is captured (R15.8 D5); only then is it tested the same way | `test_build_fa_*_body_golden`, `test_fa_write_success_modes`, `test_fa_write_claim_refused_until_v2_and_capture` |
 | AC-29 | `faWriteGate` truth table: the write API is called only on `write` / `write_with_consent`. An unticked box in a lapsed window never writes | S17 (executed), S18 |
 | AC-30 | **Connect comes before consent.** No connection → `connect` (or `verify` when expired) wins over `consent` | S17 |
 | AC-31 | Returning from `SleeperConnect` re-shows the same sheet with bid and drop intact, and never auto-sends. Cancelling returns unchanged | S23; TestFlight 21–22 |
 | AC-32 | The checkbox is never pre-ticked. Make the move is disabled while it is unticked. A busy CTA prevents a double send | S21; TestFlight 23 |
-| AC-33 | Client and server copy versions are equal. Version v1's text is pinned, and changing it needs a new version | S19, S22 |
+| AC-33 | Client and server copy versions are equal. Both v1 and v2 texts are pinned, and a wording change needs a new version. The server's current version is v1 while claims are refused, and must be v2 before claims can be enabled. The v1 → v2 bump invalidates every v1 grant | S19, S22; `test_claims_require_v2_copy`, `test_consent_copy_version_bump_invalidates` |
 | AC-34 | **Do it in Sleeper instead** is present in every state, and fallback refusals route to hand-off mode | S20; TestFlight 26, 28 |
 | AC-35 | The steps block renders only in hand-off mode, never alongside the checkbox | S24 |
-| AC-36 | No separate per-move dialog. The named button is the confirmation (D10: Product, pending legal). If `legal-lead` requires one, it runs on later moves only | S25 (pins whichever ruling ships) |
+| AC-36 | No separate per-move dialog: the named button is the confirmation (D10, confirmed by `legal-lead` R15.8). Conditions (a)–(f) all hold: the league is on or beside the button; the finality line is always visible; claims show the waiver line and bid; the consent step shows "This move: …"; every send needs a fresh tap; the button is disabled from tap until the result | S25, S28 |
 | AC-37 | After success, the FA list is refreshed. The trade deck no longer offers the dropped player as the user's (handed off to `trades-pm` as I-2/U2) | TestFlight 29 (with `trades-pm`'s mechanism test) |
 | AC-38 | Result copy distinguishes a claim placed from a player added, and states partials exactly | S26; TestFlight 25 |
 | AC-39 | The Settings row shows the window and withdraws in one tap with R15.2.6's copy. The sheet's Turn off link opens it | S27; TestFlight 27 |
@@ -383,8 +403,10 @@ Sleeper is mocked through `sleeper_write._opener`. **Nothing here ever makes a l
   - `test_fa_write_consent_check_precedes_write_structural` (sabotage: move the write above the consent check)
   - `test_fa_write_stale_copy_version_refused`
   - `test_fa_write_refusals[…]` (asserts the opener count for each)
-  - `test_fa_write_success_modes[add|add_drop]`, with `[claim]` added once D5 is answered and a claim is captured
-  - `test_fa_write_claim_refused_until_d5_and_capture`
+  - `test_fa_write_success_modes[add|add_drop]`, with `[claim]` added once v2 is current and a claim is captured
+  - `test_fa_write_claim_refused_until_v2_and_capture`
+  - `test_claims_require_v2_copy` (enabling claims while the current version is v1 fails)
+  - `test_grant_committed_before_write` (R15.8: the grant row exists before the opener is called, and stays when Sleeper rejects)
   - `test_move_record_written_per_attempt`
   - `test_fa_write_sleeper_rejected_withdraws_consent`
 - **`test_sleeper_write_consent.py`** (new):
@@ -410,10 +432,11 @@ Sleeper is mocked through `sleeper_write._opener`. **Nothing here ever makes a l
 | S19 | The client `copy_version` equals the server's `SLEEPER_ROSTER_MOVES_CONSENT_VERSION` | cross-file | Bump only the client |
 | S20 | The refusal mapping sends `feature_disabled`, `sleeper_write_failed`, `waiver_claim_unsupported` and "Do it in Sleeper instead" to hand-off mode | text | Drop the hand-off from the `sleeper_write_failed` branch |
 | S21 | The checkbox state starts `false`. Make the move's `disabled` includes `!ticked`. The CTA is disabled while `sending` | text | Initialize the state to `true` |
-| S22 | `sleeperConsentCopy.ts`: v1's text matches a pinned hash | text | Edit one word of v1 in place |
+| S22 | `sleeperConsentCopy.ts`: the v1 and v2 texts each match a pinned hash, and v1 contains the "This move:" line and the Settings path | text | Edit one word of v1 in place |
 | S23 | The connect return path re-shows the sheet with the preserved `bid` / `dropId`, and doesn't call the write | text | Call the write in the focus handler |
 | S24 | `fa-claim.steps` renders only when the sheet mode is `handoff` | text | Render it unconditionally |
-| S25 | No `Alert.alert` confirm sits between the CTA and the write. Or, if `legal-lead` requires one, it is skipped when `ticked` was set on this sheet | text | Add an `Alert.alert` confirm before every write |
+| S25 | No `Alert.alert` confirm sits between the button and the write (D10, R15.8) | text | Add an `Alert.alert` confirm before every write |
+| S28 | D10(a)–(d): the button label includes the add, the drop and the league (or the league sits beside it). The finality line renders unconditionally under the button. A claim renders the waiver line and the bid. The consent step renders "This move: {CTA label} in {League}." above the box | text | Wrap the finality line in a collapsible or conditional |
 | S26 | The success renderer branches on `mode === 'claim'` and renders both halves from the response | text | Render "Added" for claims |
 | S27 | The Settings row exists in `PlatformDisconnectSection` behind `sleeper.fa_write`, calls `DELETE /api/sleeper/write-consent`, and shows R15.2.6's notice verbatim | text | Change the notice text |
 
@@ -441,9 +464,9 @@ Turning `sleeper.fa_write` on for these steps is itself operator-approved, and i
 |---|---|---|---|
 | 21 (K1) | flag on, **no** Sleeper connection | Add → CTA | The connect step, with the reason. **Connect** → sign in → back on **the same sheet with bid and drop intact**. Nothing is sent |
 | 22 | same | Connect → back out of the WebView | The same sheet, unchanged, with "Sleeper isn't connected" and **Do it in Sleeper instead** |
-| 23 (K2) | connected, no consent | CTA | The consent step with the R15.1 copy, unticked, and Make the move disabled. Tick → it enables → the move happens. **No extra dialog** (if K-F3 holds). Reverse the move |
+| 23 (K2) | connected, no consent | CTA | The consent step with the **v1** copy, including "This move: {CTA label} in {League}.", unticked, and Make the move disabled. Tick → it enables → the move happens. **No extra dialog** (if K-F3 holds). Reverse the move |
 | 24 (K3) | inside the window | A second move (then reverse it) | No consent step. "Adds authorized until {date}" is shown |
-| 25 | full roster, then a FAAB waiver claim | Add + throwaway drop; then a claim with bid ≤ remaining | The result says "added / dropped" vs "claim placed", exactly as Sleeper reports it. Reverse the add and cancel the claim. (Until D5 is answered and a claim is captured, expect the `waiver_claim_unsupported` hand-off instead) |
+| 25 | full roster, then a FAAB waiver claim | Add + throwaway drop; then a claim with bid ≤ remaining | The result says "added / dropped" vs "claim placed", exactly as Sleeper reports it. Reverse the add and cancel the claim. (While the copy is v1, or until a claim shape is captured, expect the `waiver_claim_unsupported` hand-off instead. When claims are enabled with v2, the consent step re-appears with the v2 copy) |
 | 26 (K4) | consent step | **Not now** → **Do it in Sleeper instead** | The sheet is unchanged, then hand-off mode with steps → Sleeper opens (prd §4) |
 | 27 (K7) | Settings › Leagues | **Stop roster moves** | R15.2.6's notice. The next move shows the consent step again. Disconnect → reconnect also re-asks |
 | 28 (K6) | bid > remaining; then a move Sleeper refuses (if one can be set up safely) | Tap | Bid over budget: the inline error, no write. Sleeper refusal: the reason, **no retry**, Open in Sleeper. Not installed: the D2 message |
@@ -455,10 +478,10 @@ There are no ESPN, MFL or Fleaflicker steps: they keep `NO_ADD_REASON`, and they
 
 | Reviewer | What | Through |
 |---|---|---|
-| `legal-lead` | R15 as folded here: the §4.1 copy as shipped; the Settings row (§4.4); the privacy and terms changes (scope §4). **Confirm** D10 (the named button satisfies R15.1, including "You'll still confirm every move") and D11 (per account). **Answer** D5 (claims under the same consent; until then claims are refused) and D12 (records after deletion [PRO]) | `head-bizops` |
+| `legal-lead` | **R15.8 rulings folded:** D10 and D11 confirmed; D5 ruled (v1/v2 copy); D12 ruled (delete with the account). Legal reviews the build against R15. Its remaining items are the LEG-L12 [PRO] confirmations under R15.7 | `head-bizops` |
 | ux-lead | K-F1 to K-F7 as landed (§2, §5), and TestFlight 21–29 | `head-product` |
 | `design-lead` | The checkbox, step, window line, result and refusal states, the Settings row, and the D2 alert | `platforms-pm` |
-| `marketing-lead` | All words except the R15 copy: CTA labels, the connect-step line, result lines and the D2 alert (through `platforms-pm`). The secondary button's words (§2.4) are **pending** | `head-bizops` |
+| `marketing-lead` | All words except the R15.8 consent copy: button labels, the connect-step line, result lines and the D2 alert (through `platforms-pm`). None may contradict D10(a)–(c) or imply a move can be undone. The secondary button's words (§2.4) are **open**, waiting on the `head-bizops` slot | `head-bizops` |
 | `analytics-lead` | The seven §6 events: **granted** 2026-10-20 (G1–G7, F1–F5). Reviews the addenda | `platforms-pm` |
 | `trades-pm` | The K-F5 deck invalidation (#339 §5.1), **handed off** as I-2/U2 | `head-product` |
 | `platforms-pm` | The write-feature-gate pass and the risk-register row | — |
@@ -466,7 +489,7 @@ There are no ESPN, MFL or Fleaflicker steps: they keep `NO_ADD_REASON`, and they
 
 **Ship gate for the add/drop build** (in addition to scope.md §5):
 - **LEG-L12 [PRO] — MUST.** All of R15 must be in place before the add/drop build ships:
-  - the consent copy (R15.1);
+  - the consent copy: the R15.8 final **v1** text (and v2 before claims are enabled);
   - the consent evidence (R15.3);
   - the privacy-policy changes (R15.4);
   - the terms §5 changes (R15.5);
