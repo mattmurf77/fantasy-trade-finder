@@ -171,6 +171,7 @@ import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
 import SkeletonTradeCard from '../components/SkeletonTradeCard';
 import {
+  DeckEndCard,
   DeckMoreErrorCard,
   DeckOfflineCard,
 } from '../components/TradeDeckStates';
@@ -215,7 +216,7 @@ import {
 import type { DeclineReasonResult } from '../api/declineReasons';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFinderTargets } from '../state/useFinderTargets';
-import { useFlag, useOnboardingFeature, onboardingEnabled } from '../state/useFeatureFlags';
+import { useFlag, useOnboardingFeature, onboardingEnabled, useFeatureFlags } from '../state/useFeatureFlags';
 import {
   useOnboardingState,
   getOnboardingState,
@@ -1099,9 +1100,18 @@ export default function TradesScreen({ navigation, route }: any) {
   const [returnToSheetAfterPicker, setReturnToSheetAfterPicker] = useState<
     'team' | 'league' | null
   >(null);
+  // D14a — set while the preferences were opened from the P30 end card;
+  // closing them with a change runs the search in place (applyDeckEndAdjust).
+  const endAdjustRef = useRef<{ fairnessOn: boolean } | null>(null);
   function handleEditSheetClose() {
     setDnaOpenSource('sheet');
     setDnaSheetOpen(false);
+    const endAdjust = endAdjustRef.current;
+    endAdjustRef.current = null;
+    if (endAdjust && (prefsChangedSinceGenerateRef.current || endAdjust.fairnessOn !== fairnessOn)) {
+      applyDeckEndAdjust();
+      return;
+    }
     // Only worth a nudge if there's an existing deck to go stale and no
     // search is already in flight (that search will land under whatever
     // prefs are current by the time it started).
@@ -4345,6 +4355,9 @@ export default function TradesScreen({ navigation, route }: any) {
   const unseen = unseenCount(sortedDeck.length, deckIdx);
   const [pagePhase, setPagePhase] = useState<PageFetchPhase>('idle');
   const [pageKick, setPageKick] = useState(0);
+  // P30 — once the end card has been fronted it stays put: cards that arrive
+  // later go BEHIND it (head-eng D14c), so it never swaps under the thumb.
+  const [endLatched, setEndLatched] = useState(false);
   const pageLoopRef = useRef<{
     inFlight: boolean;
     timer: ReturnType<typeof setTimeout> | null;
@@ -4364,6 +4377,7 @@ export default function TradesScreen({ navigation, route }: any) {
     if (old.timer) clearTimeout(old.timer);
     pageLoopRef.current = { inFlight: false, timer: null, attempt: 0, failures: 0 };
     setPagePhase('idle');
+    setEndLatched(false);
   }, [job?.job_id]);
   useEffect(() => () => {
     const t = pageLoopRef.current.timer;
@@ -4479,6 +4493,10 @@ export default function TradesScreen({ navigation, route }: any) {
   const deckEnd = pagedWithCards && !rawTopCard && job
     ? deckEndState({ ...job, phase: pagePhase, online })
     : null;
+  useEffect(() => {
+    if (deckEnd === 'end') setEndLatched(true);
+  }, [deckEnd]);
+  const showDeckEndCard = pagedWithCards && (endLatched || deckEnd === 'end');
 
   // VoiceOver (ux-lead U1): when a search reveals its first card — the
   // adopted first frame, or an in-place search that refilled an emptied deck
@@ -4500,6 +4518,44 @@ export default function TradesScreen({ navigation, route }: any) {
     }, 150);
     return () => clearTimeout(t);
   }, [deckIsEmpty, rawTopCard?.trade_id]);
+
+  // ── P30 end card actions (head-eng ruling 13, D14) ──────────────────────
+  // "Adjust what I'm looking for" opens the deck's OWN preferences (the full
+  // DNA sheet — fairness, filters, intent, team — or, off the consolidated
+  // layout, the outlook sheet: the same two-way fork the inferred-outlook
+  // banner uses). Applying a change runs the search IN PLACE (no
+  // navigation; ux-lead U1 "in-deck searches"). Closing with no change
+  // leaves the end card where it was.
+  // Read imperatively, once — as TabNav decides the Home tab
+  // (check-home-tab.js: never a reactive read).
+  const [homeTabOn] = useState(() => !!useFeatureFlags.getState().flags['nav.home_tab']);
+  function handleDeckEndAdjust() {
+    haptics.selection();
+    endAdjustRef.current = { fairnessOn };
+    prefsChangedSinceGenerateRef.current = false;
+    if (consolidateOn) setDnaSheetOpen(true);
+    else setOutlookOpen(true);
+  }
+  // AC-L1 CLOCK START (M pass): the apply tap — closing the preferences the
+  // end card opened, with a change (or the outlook sheet's submit) — is a
+  // search-starting control. This function is that boundary; R1 lands here
+  // in the M pass. No event yet.
+  function applyDeckEndAdjust() {
+    // The in-place reset must keep the deck's saved request (canvas
+    // selection, scope): the repeat below re-sends it under the new prefs.
+    const model = lastModelRequestRef.current;
+    const fair = lastFairRequestRef.current;
+    resetDeckForNewTargets();
+    lastModelRequestRef.current = model;
+    lastFairRequestRef.current = fair;
+    handleFindTrades();
+  }
+  // "Back to Home": the Home tab, a tab switch (tabs never animate). A
+  // different exit from the header Back, which returns to the builder.
+  function handleDeckEndHome() {
+    haptics.selection();
+    navigation?.navigate?.('Home');
+  }
 
   // ── Swap suggestions (2026-07-27 player-changer) ─────────────────────
   // Operator follow-up to the calculator eveners: counter-suggestions
@@ -6892,6 +6948,11 @@ export default function TradesScreen({ navigation, route }: any) {
     });
     queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
     setToast({ msg: 'Outlook saved', tone: 'success' });
+    // D14a — opened from the P30 end card: the submit is the apply tap.
+    if (endAdjustRef.current) {
+      endAdjustRef.current = null;
+      applyDeckEndAdjust();
+    }
   }
 
   const topCardQueued = topCard ? isQueued(topCard.trade_id) : false;
@@ -7009,7 +7070,10 @@ export default function TradesScreen({ navigation, route }: any) {
           // Phase-2: with no saved outlook, preselect the backend's
           // roster-inferred guess so "Change" opens on the right option.
           initial={prefsQuery.data?.team_outlook ?? inferredOutlook}
-          onClose={() => setOutlookOpen(false)}
+          onClose={() => {
+            endAdjustRef.current = null;
+            setOutlookOpen(false);
+          }}
           onSubmit={handleOutlookSubmit}
         />
       ) : null}
@@ -8969,6 +9033,21 @@ export default function TradesScreen({ navigation, route }: any) {
             <QuickSetPromptCard
               onAccept={() => acceptQuicksetPrompt('prompt')}
               onDismiss={snoozeQuicksetPrompt}
+            />
+          ) : showDeckEndCard ? (
+            // P30 — the honest end of a paged deck, in the card slot: only on
+            // the server's `pool_exhausted` with nothing in flight or
+            // retrying (deckEndState), then latched so later cards queue
+            // BEHIND it (D14c). No Like/Pass, no count, no third action.
+            <DeckEndCard
+              minHeight={topCardH}
+              tally={
+                replenishmentOn
+                  ? `${sessionTally.passed} passed · ${sessionTally.liked} liked · ${sessionTally.proposed} proposed`
+                  : null
+              }
+              onAdjust={handleDeckEndAdjust}
+              onHome={homeTabOn ? handleDeckEndHome : undefined}
             />
           ) : adaptationMoment && topCard && !mutedForTour ? (
             // F9 (deck.first_session) — the adaptation moment: ONE inline
