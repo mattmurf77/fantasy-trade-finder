@@ -131,7 +131,8 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
     page N is fronted; the P30 card never renders while a page is pending and has no Like/Pass
     (AC-L4);
   - no "Find more trades" button on the deck once U3 is on, and Retry only in the error and offline
-    states (D13); P30's "Adjust" runs its search in place and emits R1 (D14(a)); and no third
+    states (D13); the P30 card renders the P36 strings and **no tally line at 0 · 0 · 0** (P36);
+    P30's "Adjust your search" runs its search in place and emits R1 (D14(a)); and no third
     action or new-trades notice on the P30 card (D14(c));
   - **the hidden ms readout** reads R2's `ms_from_tap` and no other timer, and renders only behind the
     Testing gate (`__DEV__ || testing.stage_users`), applied in the component itself because the
@@ -160,7 +161,7 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - the U3 three-page run and the P30 end;
   - the U5 fresh-account run;
   - the U2 roster-change run;
-  - the K-F5 run (L4b);
+  - the K-F5 run (L4b; activates when #351 D1 ships; not a launch gate);
   - the §9.6 scripted two-device session, which is the AC-L1 proof.
 
   Step 13 (blocked sends) runs only in a test league the

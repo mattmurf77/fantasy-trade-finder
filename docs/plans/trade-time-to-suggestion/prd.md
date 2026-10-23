@@ -121,7 +121,7 @@ table A, and so does the clock.
 |---|---|---|---|
 | Canvas **Find a Trade** (`calc.action.find-a-trade`) on the Acquire builder | `mobile/src/components/InLeagueCalculator.tsx:1313-1342`, hosted at `screens/TradesScreen.tsx:8010-8018`. Handler `handleInlineFindATrade` `TradesScreen.tsx:3414` pushes a new `TradeDeck` (`:3429-3445`) | Empty or receive-only canvas → model deck (`POST /api/trades/generate`, then `GET /api/trades/status` polling). Canvas with a give side → synchronous `POST /api/trades/fair-packages` (`utils/canvasSearch.ts:41-68`) | **The primary entry.** Organic = empty canvas, no partner. A stack push is on the critical path. |
 | ~~Deck **Find more trades** (`trades.find-btn`)~~ | `TradesScreen.tsx:7601-7614`, `:7803-7816` → `handleFindTrades` `:1213` | model deck | **Leaves table A (D13 adopted; trades-pm decision, 2026-10-20; accepted (head-product P33, 2026-10-20)).** The button is removed from the deck once U3 ships; until then its taps are measured, not gated. Retry stays only in the error and offline states |
-| P30 card **Adjust what I'm looking for** | the P30 end card (§4.7) | Opens the deck's own preferences (fairness and filters); the changed search runs **in place** | **Search-starting (D14(a)):** the clock starts at the tap that applies the change, and the AC-L1 cells apply |
+| P30 card **Adjust your search** | the P30 end card (§4.7) | Opens the deck's own preferences (fairness and filters); the changed search runs **in place** | **Search-starting (D14(a)):** the clock starts at the tap that applies the change, and the AC-L1 cells apply |
 | In-deck retries | error retry `TradesScreen.tsx:6403`/`:9066`, prefs strip `:6991`, summary unpin `:3915`, search-all `:3933` | model deck | Same choke point (`:3269-3354`) |
 | Handoff auto-runs | League Summary Offer/Target `screens/LeagueSummaryScreen.tsx:1281-1300`; Usage Trends "Trade" / "Find a trade for {player}" `components/UsageTrendCard.tsx:159`, `UsageStatsTable.tsx:169`, `UsageLeagueList.tsx:96` → `screens/UsageTrendsScreen.tsx:251-268`. Consumed at `TradesScreen.tsx:3195-3249` | pinned / partner-scoped model deck | Not organic. A Usage Trends handoff with no opponent dispatches **nothing**: the model auto-run needs a scoped opponent unless the origin is the calculator (`TradesScreen.tsx:3319-3347`). It lands on the builder. |
 | Dead or dark today | calculator merged `onFindATrade` `screens/TradeCalculatorScreen.tsx:830-871` (needs `calc.inline_home` off); TodaysTrade `hooks/usePresentationDeck.ts:76` (flag off); `TradeFinderHubScreen` (not registered, `navigation/TabNav.tsx:38,446`); first-run auto-start `TradesScreen.tsx:2385-2404` (skipped while results-push is live, `:2392`) | — | Join table A if they come back |
@@ -300,7 +300,7 @@ U2 and U4 are in §5.5. These requirements are product's; eng chooses how to mee
   |---|---|
   | Canvas Find a Trade (`calc.action.find-a-trade`), the primary | **Instant route:** keep the push and its back stack (D-171 rulings 2–4) with `animation: 'none'`. **Fallback, eng's choice by device measurement:** if mounting the screen alone breaks AC-L1, render a full-screen deck layer on `TradesHome` that looks and behaves identically |
   | D10 controls (Home tile, League Home ×2, Matches empty state), only if the operator approves D10 | **Instant route:** a tab switch plus the [builder → deck] stack in one dispatch, with no animation and no visible builder frame |
-  | In-deck searches (error retry, prefs strip, unpin, search-all, and P30's "Adjust what I'm looking for") | **In place:** the deck's contents are replaced, with no navigation. "Find more trades" is removed once U3 ships (D13 adopted) |
+  | In-deck searches (error retry, prefs strip, unpin, search-all, and P30's "Adjust your search") | **In place:** the deck's contents are replaced, with no navigation. "Find more trades" is removed once U3 ships (D13 adopted) |
   | Hand-off auto-runs (League Summary Offer/Target, Usage Trends "Trade") | **Instant route.** Pinned searches aren't pre-built. If no page exists, the honest Loading state shows in the card rect. Measured, not gated (D1) |
   | Deep link `app/trades/finder`, inbox arrivals | **Instant route.** Measured, not gated |
   | First run (U5) | Unchanged: the builder, then the canvas tap uses the instant route |
@@ -347,17 +347,29 @@ U2 and U4 are in §5.5. These requirements are product's; eng chooses how to mee
   - **The genuine end (P30)** shows only when every candidate has been seen, and **never while a
     page is pending**. It is a final card in the deck slot, not a "Finding more" card, so AC-L4
     still holds.
-    - Copy: "You've seen every trade we have for now. New ideas show up as rosters and values
-      change."
-    - Actions: **Adjust what I'm looking for** and **Back to Home**. No Like or Pass.
+    - **Copy (head-product P36, 2026-10-23; marketing-lead-copy.md §1b `p30.*`). Each row is
+      pending operator §6:**
+
+      | Row | String |
+      |---|---|
+      | p30.head | "You've seen every trade for now." |
+      | p30.body | "New ideas show up as rosters and values change." (kept) |
+      | p30.cta1 | "Adjust your search" (still opens the deck preferences, D14(a)) |
+      | p30.cta2 | "Back to Home" (kept) |
+      | p30.tally | "{passed} passed · {liked} liked · {proposed} proposed", one dim line with Plex Mono numerals (design-lead places it). **Suppressed when all three are 0 (0 · 0 · 0)** |
+
+      marketing-lead-copy.md classes p30.head/p30.cta1 as voice swaps (not listed in its §6); head-product to reconcile.
+    - No Like or Pass.
     - Visual spec: design-lead's P30 card (same rect, EmptyState construction, Primary and
       Secondary).
     - **D14 (trades-pm decision, 2026-10-20; accepted (head-product P33, 2026-10-20)):**
-      - **(a)** "Adjust what I'm looking for" opens the deck's own preferences (fairness and
+      - **(a)** "Adjust your search" opens the deck's own preferences (fairness and
         filters), per ux-lead, and the changed search runs in place. That is a search-starting
         action, measured under the §4 clock; the AC-L1 cells apply.
       - **(b)** D-171 ruling 4's end-of-deck tally **stays** on the P30 card as one chalk-dim line,
-        which design-lead places. Retiring it would amend an operator ruling.
+        which design-lead places. Retiring it would amend an operator ruling. **Amended by
+        head-product P36 (2026-10-23):** the tally is suppressed when all three counts are 0
+        (0 · 0 · 0).
       - **(c)** No third action and no notice. New candidates that arrive behind the P30 card aren't
         announced; they appear on the next search, including one started by "Adjust". P30's copy
         and two actions are unchanged.
@@ -375,7 +387,7 @@ U2 and U4 are in §5.5. These requirements are product's; eng chooses how to mee
   | 2 | Online; a next-page fetch fails while the device still holds at least one page | **Nothing** | Silent background retry with backoff |
   | 3a | **Offline**, and the user reaches the last card on the device | The Offline state in the card rect, e.g. "You're offline. More trades load when you're back online." | No spinner, no "finding". Retry is Secondary. On reconnect the next page appends automatically and replaces the offline card in place. Reported separately; **doesn't fail AC-L4** |
   | 3b | **Online, but the fetch keeps failing**, and the user reaches the last card | The recoverable Error state in the card rect: "Couldn't load more trades" plus **Try again** | It must end, and Back stays usable. **Reaching 3b while online is a prefetch failure under AC-L4** |
-  | 4 | **The genuine end (P30)**: every candidate seen or acted on, and no page pending. Rows 1–3 take precedence | The P30 final card, with the D-171 tally as one chalk-dim line (D14(b)) | Static. New candidates arriving while it shows are placed **behind** it and are not announced. They appear on the next search (D14(c)); it never swaps under the user's thumb |
+  | 4 | **The genuine end (P30)**: every candidate seen or acted on, and no page pending. Rows 1–3 take precedence | The P30 final card, with the D-171 tally as one chalk-dim line (D14(b)); the tally is suppressed at 0 · 0 · 0 (P36) | Static. New candidates arriving while it shows are placed **behind** it and are not announced. They appear on the next search (D14(c)); it never swaps under the user's thumb |
   | 5 | **Offline at the tap** | With a device-held first page inside the bounds: cards, plus the refresh-failed line at once. Without one: the Offline state at once, in the card rect | Offline taps are excluded from the p95 cells (`network_type=offline`) and reported. Never a wait |
   | 6 | Network lost during Like/Pass | The card's controls never go dead | A failed like or send shows on the card and keeps the user's choice (`check-swipe-failure-recovery.js`) |
 
@@ -420,7 +432,7 @@ approval (Decision D5) and eng feasibility review.
 
 | Input | Today (code) | Proposed bound at first-card display | Past the bound |
 |---|---|---|---|
-| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately. **Any roster move FTF completes (the #351 add/drop, platforms-pm K-F5) immediately triggers the viewer-roster refresh, and affected cards are withdrawn in place before they are displayed or acted on again** | **Refetch before display** (§5.2, exception 1). The tap counts as a gate miss, so the build keeps this roster inside the bound by refetching on user action (focus, tap, serve), never on a schedule (platforms-pm R7) |
+| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately. **Any roster move FTF completes (the #351 add/drop, platforms-pm K-F5) immediately triggers the viewer-roster refresh, and affected cards are withdrawn in place before they are displayed or acted on again** (K-F5 activates when #351 D1 ships; not a launch gate; #351's D1 write is post-launch per head-eng's critical-path plan, 2026-10-23) | **Refetch before display** (§5.2, exception 1). The tap counts as a gate miss, so the build keeps this roster inside the bound by refetching on user action (focus, tap, serve), never on a schedule (platforms-pm R7) |
 | **Partner rosters** | Same session-init fetch for Sleeper. `league_members` is also written by the background daemon (`server.py:22801-22835`). Headless builds read whatever is stored (G-075) | **≤ 5 min** | Serve-and-refresh. Filter against the freshest held roster; I-2 catches the rest before any action |
 | **Viewer's rankings**: trio swipes, tiers, anchors, reorder, import, outlook and prefs | Every change invalidates jobs (`server.py:10119,10183,10969,11720,11907,12262,12483,20856,21062,21141`), which forces fresh generation | **Zero tolerance:** every change made before the tap is reflected, or the deck is past-bound | Serve-and-refresh with the "updating" state. Never presented as current |
 | **Partner boards** (leaguemates' published rankings) | Member epochs fence dependent jobs (`server.py:9283-9294,9381-9384`) | Same as the viewer's rankings | Same |
@@ -645,8 +657,9 @@ is accepted (design-lead 3).
     If a background check invalidates a visible card, it is **withdrawn in place** (§5.4).
   - The quiet "Updating" state appears only while a background refresh runs, and never blocks
     Like/Pass (§5.4).
-  - **A roster move FTF completes** (the #351 add/drop) immediately triggers the viewer-roster
-    refresh, and cards with the dropped player are withdrawn in place before they are displayed or
+  - **A roster move FTF completes** (the #351 add/drop; **K-F5 activates when #351 D1 ships; not a launch gate**, because #351's
+    D1 write is post-launch per head-eng's critical-path plan, 2026-10-23) immediately triggers the
+    viewer-roster refresh, and cards with the dropped player are withdrawn in place before they are displayed or
     acted on again (platforms-pm K-F5 on #351; AC-L5). Today the deck still shows the dropped
     player after the move.
   - **With AC-L3, the tap path makes no platform call.** The §5.1 roster bounds are met by the
@@ -762,7 +775,7 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 | AC-L2 | No animated push or transition on the Find a trade path (U1), decided per entry point (ux-lead, launch; §4.7): an instant route (`animation: 'none'`) for the canvas, D10, hand-off and deep-link entries, and in place for in-deck searches. Back from the deck is instant too. No motion on the deck at all, including no on-load stagger (design-lead's deck exemption) | Code-walk plus a guard (`check-trade-first-card.js`: `animation: 'none'` on every search-starting route, no transition on the in-place reveal, no stagger on the deck). TF step 1: zero transition frames | **Supersedes AC-2b.** Its "short fade" option is withdrawn |
 | AC-L3 | No live Sleeper or platform call on the tap path | Code-walk, plus the server trace for the first-page request | **New.** It strengthens platforms-pm R7. §5.2 exception 1 becomes the §5.5 U2 fallback, and I-6's lineup lookup moves to the background floor |
 | AC-L4 | The next page is always ready: across all test sessions, **zero** page ends are reached without the next page already in the deck. There is no "Finding more" card in the build. The prefetch threshold is in §4.7. ux-lead's state table (§4.7) defines the outcomes: an online fetch failure at a page end (row 3b) **fails** AC-L4; offline at a page end (row 3a) is reported separately and doesn't. The P30 end card shows only when every candidate is seen and **never while a page is pending**, with no Like or Pass | G: no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when page N is fronted; the P30 card never renders while a page is pending, and renders no Like/Pass. A: R5 (pending grant). TF: the U3 three-page run and the P30 step | **New; supersedes AC-13** (strengthened) |
-| AC-L5 | Zero cards shown with an asset either side no longer owns (I-1 at display, I-2 at action). **Including after a roster move FTF itself completes** (the #351 add/drop, K-F5): the viewer-roster refresh runs immediately, and affected cards are withdrawn in place before they are displayed or acted on again | T: the roster-change fixture, plus a **backend fixture where an FTF add/drop completes and the card with the dropped player is withdrawn**. TF: the U2 roster-change run (steps 11, 12 and 18) and the K-F5 step (L4b) | **Same as AC-5** for display; AC-6a/6b cover actions. The K-F5 fixture is new |
+| AC-L5 | Zero cards shown with an asset either side no longer owns (I-1 at display, I-2 at action). **Including after a roster move FTF itself completes** (the #351 add/drop, K-F5): the viewer-roster refresh runs immediately, and affected cards are withdrawn in place before they are displayed or acted on again | T: the roster-change fixture, plus a **backend fixture where an FTF add/drop completes and the card with the dropped player is withdrawn** (K-F5 parts activates when #351 D1 ships; not a launch gate). TF: the U2 roster-change run (steps 11, 12 and 18) and the K-F5 step (L4b, activates when #351 D1 ships; not a launch gate) | **Same as AC-5** for display; AC-6a/6b cover actions. The K-F5 fixture is new |
 | AC-L6 | Quality parity: first-page cards pass `deck.quality_filters`; Calibration integrity holds per D12 | As AC-9a to AC-9e | **Same as AC-9a to AC-9e and D12.** No new test |
 | AC-L7 | A new account's first Find a trade after onboarding meets AC-L1 (U5) | A: a new-account first-tap cell. TF: the U5 fresh-account run | **New.** D2 decided in part |
 | AC-L8 | Storage: the first-page artifact and evidence writes fit the P23 byte budget and the DB capacity plan. Unseen candidates are stored as narrow rows (DEC-2, operator-approved 2026-10-20) | As AC-11 and AC-11b, plus Q8 table sizes before and after | **Same as AC-11 and AC-11b (P23), plus DEC-2** |
@@ -825,7 +838,10 @@ them, models-lead's sign-off follows the two-line packet route in R.a (ii).
   request starts when page N is fronted (AC-L4);
 - asserts the deck renders no "Find more trades" button once U3 is on, and Retry only in the error
   and offline states (D13);
-- asserts the P30 card's "Adjust" applies its change in place and emits R1 like any search start
+- asserts the P30 card renders the P36 strings (`p30.head`, `p30.body`, `p30.cta1`, `p30.cta2`), and
+  that the tally line is **absent when passed, liked and proposed are all 0** (P36), present
+  otherwise;
+- asserts the P30 card's "Adjust your search" applies its change in place and emits R1 like any search start
   (D14(a)), and that the card renders no third action and no new-trades notice (D14(c));
 - asserts the hidden readout (§9.5) reads R2's `ms_from_tap` and nothing else, and renders only
   behind the Testing gate.
@@ -967,15 +983,19 @@ authority):
   - no "Finding more" card, ever (AC-L4).
 - **L2b. P30 genuine end** (a test league or a narrow search that exhausts). Swipe until every
   candidate is seen. **Expect:**
-  - the P30 final card, in the same rect: "You've seen every trade we have for now. New ideas show
-    up as rosters and values change.";
-  - **Adjust what I'm looking for** and **Back to Home**, with no Like or Pass;
-  - the end-of-deck tally as one chalk-dim line (D14(b));
+  - the P30 final card, in the same rect: "You've seen every trade for now." and "New ideas show
+    up as rosters and values change." (P36);
+  - **Adjust your search** and **Back to Home**, with no Like or Pass;
+  - **tally, both cases (P36):**
+    - after passing, liking or proposing at least one card in the session, one chalk-dim line
+      "{passed} passed · {liked} liked · {proposed} proposed" with the right counts;
+    - after a second run where you swipe nothing to the end (for example, a narrow search with
+      nothing new acted on), **no tally line at all** when all three are 0;
   - it never appears while a page is still loading;
   - with VoiceOver on, focus moves to it and its copy is read once;
   - no "new trades" notice while it shows (D14(c)).
 
-  Then tap **Adjust what I'm looking for**. **Expect:** the deck's own preferences (fairness and
+  Then tap **Adjust your search**. **Expect:** the deck's own preferences (fairness and
   filters) open. Change one and apply it. **Expect:** the changed search runs in place, with no
   navigation. Record the readout from the apply tap; it falls under AC-L1 (D14(a)).
 - **L2c. Page end offline and on error** (ux-lead rows 3a and 3b). Turn on Airplane Mode and swipe to
@@ -989,7 +1009,7 @@ authority):
 - **L4. U2 roster-change run.** As steps 11 and 12, with the readout open. **Expect:** no card with a
   moved asset, a withdrawn-in-place card if one was showing, and no platform call on the tap
   (AC-L3, AC-L5).
-- **L4b. K-F5: a move FTF makes** (once #351's add/drop ships). From a deck showing a card that
+- **L4b. K-F5: a move FTF makes** (activates when #351 D1 ships; not a launch gate; #351's D1 add/drop is post-launch). From a deck showing a card that
   includes one of your bench players, use FTF's add/drop to drop that player. Return to the deck.
   **Expect:** that card is withdrawn in place, with the reason line, before you can act on it. No
   later card includes the dropped player (AC-L5).
@@ -1397,8 +1417,16 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 7. **D14, decided; accepted (head-product P33, 2026-10-20).** D14(a) supersedes P30's "opens the
    targeting builder":
    - (a) "Adjust" opens the deck's preferences, and the search runs in place under the §4 clock.
-   - (b) The D-171 tally stays on the P30 card as one chalk-dim line.
+   - (b) The D-171 tally stays on the P30 card as one chalk-dim line. P36 amends this: it is
+     suppressed at 0 · 0 · 0.
    - (c) No third action or notice; new candidates appear on the next search.
+8. **P30 copy (head-product P36, 2026-10-23).**
+   - The strings are in §4.7 and are pending operator §6.
+   - P30's original wording ("You've seen every trade we have for now." / "Adjust what I'm looking
+     for") is retired in favour of marketing-lead's p30.head and p30.cta1.
+   - marketing-lead-copy.md classes p30.head/p30.cta1 as voice swaps (not listed in its §6); head-product to reconcile.
+9. **Dates (launch-plan-1118.md, relayed 2026-10-23).** Launch is **Wed 2026-11-18**, and the binary
+   is **feature-complete on 2026-11-06**. The P30 copy above ships in that binary.
 
 ## Decisions needed (operator)
 
@@ -1417,7 +1445,7 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 | D11 | Where does the "updating" state sit? design-lead proposes a trailing header-row label; ux-lead proposes the progress-strip slot | **design-lead and ux-lead settle it jointly before any UI build**, within §5.4's seven shared constraints (trades-pm decision, 2026-10-15). |
 | D12 | Calibration integrity before the round-3 read (2026-11-05): hold any fast path until then, or pin Calibration's current-arm sampling to the fresh path? | Either satisfies AC-9e (models-lead R.b). Impressions carry a serve-path tag in both cases. **Proposed:** pin the sampling to the fresh path if a fast path is ready before 2026-11-05; otherwise the date passes first. models-lead confirms; the operator decides. |
 | D13 | Remove the deck's "Find more trades" button once U3 ships? | **Adopted (trades-pm decision, 2026-10-20; accepted (head-product P33, 2026-10-20)).** Removed once U3 ships, because a "more" button that restarts the search is mislabelled when the deck never ends (ux-lead, launch). Retry stays only in the error and offline states. `trades.find-btn` leaves table A, TF step 2 checks that it's absent, and the §9.1 guard asserts it. |
-| D14 | P30 open items (raised by ux-lead and design-lead) | **Decided (trades-pm decision, 2026-10-20; accepted (head-product P33, 2026-10-20)):** <br>**(a)** (supersedes P30's "opens the targeting builder") "Adjust what I'm looking for" opens the deck's own preferences (fairness and filters), and the changed search runs in place. It's search-starting, measured under the §4 clock (AC-L1 cells). <br>**(b)** Keep D-171 ruling 4's end-of-deck tally on the P30 card as one chalk-dim line (design-lead places it); retiring it would amend an operator ruling. <br>**(c)** No third action and no notice: new candidates behind the P30 card appear on the next search. P30's copy and actions are unchanged. |
+| D14 | P30 open items (raised by ux-lead and design-lead) | **Decided (trades-pm decision, 2026-10-20; accepted (head-product P33, 2026-10-20)):** <br>**(a)** (supersedes P30's "opens the targeting builder") "Adjust your search" (P36 copy) opens the deck's own preferences (fairness and filters), and the changed search runs in place. It's search-starting, measured under the §4 clock (AC-L1 cells). <br>**(b)** Keep D-171 ruling 4's end-of-deck tally on the P30 card as one chalk-dim line (design-lead places it); retiring it would amend an operator ruling. **Amended by head-product P36 (2026-10-23):** suppressed at 0 · 0 · 0. <br>**(c)** No third action and no notice: new candidates behind the P30 card appear on the next search. P30's copy and actions are unchanged. |
 
 ## Handoffs
 
@@ -1476,7 +1504,7 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 - **platforms-pm:** log R7 in the platform risk register. Any future pending-offer read goes to the
   register first (N2). **#351 K-F5:** after FTF completes an add/drop, the viewer-roster refresh runs
   immediately and affected cards are withdrawn in place (U2, AC-L5). #351's build and this PRD's
-  stay aligned on it.
+  stay aligned on it. K-F5 activates when #351 D1 ships; not a launch gate.
 - **DB-storage task + head-eng:** take the §10.4 arithmetic. head-eng sets and accepts the byte
   budget against H1–H3 (#337; DEC-7) before any rollout (P23).
 - **release-lead:** merge this plan PR on the operator's go. Plan only, no code.
