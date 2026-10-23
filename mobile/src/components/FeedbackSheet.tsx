@@ -37,8 +37,8 @@ interface Props {
 }
 
 const SEVERITY_OPTIONS: { value: FeedbackSeverity; label: string }[] = [
-  { value: 'bug',    label: 'Bug'    },
-  { value: 'polish', label: 'Polish' },
+  { value: 'bug',    label: 'Broken' },
+  { value: 'polish', label: 'Tweak'  },
   { value: 'idea',   label: 'Idea'   },
 ];
 
@@ -174,11 +174,11 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
       >
         <View style={styles.sheet}>
           <View style={styles.grabber} />
-          <Text style={styles.title} accessibilityRole="header">Capture feedback</Text>
+          <Text style={styles.title} accessibilityRole="header">Send feedback</Text>
           <Text style={styles.sub}>Saved on this device. Share or export from Settings.</Text>
 
           <ScrollView keyboardShouldPersistTaps="handled">
-            <Text style={styles.label}>Severity</Text>
+            <Text style={styles.label}>What's this about?</Text>
             <View style={styles.sevRow}>
               {SEVERITY_OPTIONS.map((opt) => {
                 const active = severity === opt.value;
@@ -188,7 +188,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
                     testID={`feedback.severity.${opt.value}`}
                     accessibilityRole="radio"
                     accessibilityState={{ selected: active, checked: active }}
-                    accessibilityLabel={`Severity: ${opt.label}`}
+                    accessibilityLabel={`Feedback type: ${opt.label}`}
                     onPress={() => setSeverity(opt.value)}
                     style={({ pressed }) => [
                       styles.sevChip,

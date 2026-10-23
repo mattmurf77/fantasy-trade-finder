@@ -266,14 +266,14 @@ export function formatFeedbackAsMarkdown(items: FeedbackItem[]): string {
     arr.push(it);
     byScreen.set(it.screen, arr);
   }
-  let out = `# DTF Mobile Feedback — ${date}\n\n`;
+  let out = `# Fleeced feedback — ${date}\n\n`;
   for (const [screen, list] of byScreen) {
     out += `## ${screen}\n\n`;
     for (const it of list) {
       const stamp = it.created_at.slice(11, 16); // HH:MM (UTC; rough is fine)
       const sev =
-        it.severity === 'bug'    ? 'Bug'    :
-        it.severity === 'polish' ? 'Polish' :
+        it.severity === 'bug'    ? 'Broken' :
+        it.severity === 'polish' ? 'Tweak'  :
                                    'Idea';
       out += `- **${sev}** _(${stamp})_\n  ${it.text.replace(/\n/g, '\n  ')}\n\n`;
     }

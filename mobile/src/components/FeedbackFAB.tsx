@@ -145,8 +145,8 @@ export default function FeedbackFAB({ activeScreen, aboveTabBar = true }: Props)
           accessibilityRole="button"
           accessibilityLabel={
             openCount > 0
-              ? `Capture feedback, ${openCount} open`
-              : 'Capture feedback'
+              ? `Send feedback, ${openCount} open`
+              : 'Send feedback'
           }
         >
           <Icon name="flag" size={20} color={chalk.base} />

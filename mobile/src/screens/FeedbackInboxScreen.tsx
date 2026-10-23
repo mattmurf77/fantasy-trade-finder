@@ -18,8 +18,8 @@ import type { FeedbackStatus } from '../api/feedback';
 import { relativeTime } from '../utils/relativeTime';
 
 const SEV_LABEL: Record<FeedbackItem['severity'], string> = {
-  bug:    'Bug',
-  polish: 'Polish',
+  bug:    'Broken',
+  polish: 'Tweak',
   idea:   'Idea',
 };
 
@@ -120,7 +120,7 @@ export default function FeedbackInboxScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title} accessibilityRole="header">Test feedback</Text>
+          <Text style={styles.title} accessibilityRole="header">Your feedback</Text>
           <Text style={styles.sub}>
             <Text style={styles.subCount}>{visibleItems.length}</Text>
             {` note${visibleItems.length === 1 ? '' : 's'} saved on this device`}
@@ -132,7 +132,7 @@ export default function FeedbackInboxScreen() {
               <ActivityIndicator size="small" color={chalk.dim} />
             </View>
           ) : (
-            <Button label="Retry sync" variant="ghost" onPress={onRetry} />
+            <Button label="Send now" variant="ghost" onPress={onRetry} />
           ))}
         <Button
           label="Share"
@@ -152,7 +152,7 @@ export default function FeedbackInboxScreen() {
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>No feedback yet</Text>
           <Text style={styles.emptySub}>
-            Tap the floating button on any screen to capture a note.
+            Tap the flag button on any screen to send a note.
           </Text>
         </View>
       ) : (
@@ -169,9 +169,9 @@ export default function FeedbackInboxScreen() {
               failed    ? styles.syncFailed :
                           styles.syncPending;
             const syncText =
-              it.synced ? 'Synced' :
+              it.synced ? 'Sent' :
               failed    ? `Sync failed: ${it.last_sync_error}` :
-                          'Pending sync';
+                          'Waiting to send';
             // "Unread" analog for this inbox: the operator responded —
             // a lifecycle status beyond the automatic "new" receipt.
             const responded = !!it.status && it.status !== 'new';
