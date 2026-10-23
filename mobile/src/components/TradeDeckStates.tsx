@@ -1,5 +1,10 @@
 // 200 ms path — the paged deck's quiet states (Trades-only; TradesScreen is
 // the one host). Specs:
+//   - DeckUpdatingLabel: design-lead #339 §5.4.1–2/6 (chalk-dim body-sm +
+//     the standard Spinner, trailing in an EXISTING row, never a new one;
+//     static "Updating" under reduced motion). Never disables Like or Pass.
+//   - WithdrawnTradeCard: design-lead §5.4.4 + U1.7 (keeps its slot; one
+//     chalk-dim reason line + the `x` icon in chalk-dim; no red, no amber).
 //   - DeckEndCard: design-lead "P30: the end-of-deck card" + head-eng
 //     ruling 13 / D14 (EmptyState in the card frame; one Primary, one
 //     Secondary; the D-171 tally as one chalk-dim line; no Like/Pass; no
@@ -10,12 +15,14 @@
 // when the state appears. Copy owner: marketing-lead (the P30 lines are
 // Product's verbatim); the other lines are placeholders from ux-lead's spec.
 import React, { useEffect, useRef } from 'react';
-import { AccessibilityInfo, StyleSheet, View, findNodeHandle } from 'react-native';
-import { Button, Card, Text } from './chalkline';
-import { space } from '../theme/chalkline';
+import { AccessibilityInfo, ActivityIndicator, StyleSheet, View, findNodeHandle } from 'react-native';
+import { Button, Card, Icon, Text } from './chalkline';
+import { chalk, ice, space } from '../theme/chalkline';
+import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 
 export const DECK_END_TITLE = "You've seen every trade we have for now.";
 export const DECK_END_BODY = 'New ideas show up as rosters and values change.';
+export const WITHDRAWN_REASON = 'This trade is no longer available.';
 export const DECK_OFFLINE_LINE = "You're offline. More trades load when you're back online.";
 export const DECK_MORE_ERROR_LINE = "Couldn't load more trades.";
 
@@ -45,6 +52,52 @@ function useFocusOnMount(ref: React.RefObject<View | null>) {
     }, 150);
     return () => clearTimeout(t);
   }, [ref]);
+}
+
+/** Trailing "Updating" status for the deck's existing header row. Purely
+ *  informational: it takes no props that could touch Like or Pass. */
+export function DeckUpdatingLabel() {
+  const reduceMotion = useReducedMotionSafe();
+  useAnnounceOnMount('Updating trades');
+  return (
+    <View testID="trades.deck-updating" style={styles.updating} accessible accessibilityLabel="Updating trades">
+      {reduceMotion ? null : <ActivityIndicator size="small" color={ice.base} style={styles.spinner} />}
+      <Text variant="bodySm">Updating</Text>
+    </View>
+  );
+}
+
+/** U2 — the fronted card the server no longer serves, withdrawn in place.
+ *  It keeps the card's slot (`minHeight` = the measured card height) and
+ *  offers the one move forward. No Like or Pass: there is no trade left to
+ *  judge. */
+export function WithdrawnTradeCard({ minHeight, onNext }: { minHeight?: number | null; onNext: () => void }) {
+  const bodyRef = useRef<View>(null);
+  useFocusOnMount(bodyRef);
+  return (
+    <View testID="trades.withdrawn">
+      <Card style={minHeight ? { minHeight } : undefined}>
+        <View
+          ref={bodyRef}
+          style={styles.withdrawnRow}
+          accessible
+          accessibilityLabel={WITHDRAWN_REASON}
+        >
+          <Icon name="x" size={16} color={chalk.dim} />
+          <Text variant="bodySm" testID="trades.withdrawn.reason" style={styles.flex}>
+            {WITHDRAWN_REASON}
+          </Text>
+        </View>
+        <Button
+          testID="trades.withdrawn.next"
+          label="Next trade"
+          variant="secondary"
+          onPress={onNext}
+          style={styles.fullWidth}
+        />
+      </Card>
+    </View>
+  );
 }
 
 /** P30 — the honest end of the deck, in the card slot. Rendered only when
@@ -143,6 +196,11 @@ export function DeckMoreErrorCard({ minHeight, onRetry }: { minHeight?: number |
 }
 
 const styles = StyleSheet.create({
+  updating: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
+  // The standard Spinner is 20px; RN's "small" indicator is that size.
+  spinner: { width: 20, height: 20 },
+  flex: { flex: 1 },
+  withdrawnRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   fullWidth: { alignSelf: 'stretch', marginTop: space.md },
   endBody: { marginTop: space.sm },
   endActions: { marginTop: space.sm },

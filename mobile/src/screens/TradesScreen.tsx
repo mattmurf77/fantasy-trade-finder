@@ -174,6 +174,8 @@ import {
   DeckEndCard,
   DeckMoreErrorCard,
   DeckOfflineCard,
+  DeckUpdatingLabel,
+  WithdrawnTradeCard,
 } from '../components/TradeDeckStates';
 import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
@@ -4356,6 +4358,9 @@ export default function TradesScreen({ navigation, route }: any) {
   const unseen = unseenCount(sortedDeck.length, deckIdx);
   const [pagePhase, setPagePhase] = useState<PageFetchPhase>('idle');
   const [pageKick, setPageKick] = useState(0);
+  // U2 — fronted cards the server stopped serving (raw trade_id). Each one
+  // renders withdrawn in its own slot until the user moves on.
+  const [withdrawnIds, setWithdrawnIds] = useState<ReadonlySet<string>>(() => new Set());
   // P30 — once the end card has been fronted it stays put: cards that arrive
   // later go BEHIND it (head-eng D14c), so it never swaps under the thumb.
   const [endLatched, setEndLatched] = useState(false);
@@ -4378,6 +4383,7 @@ export default function TradesScreen({ navigation, route }: any) {
     if (old.timer) clearTimeout(old.timer);
     pageLoopRef.current = { inFlight: false, timer: null, attempt: 0, failures: 0 };
     setPagePhase('idle');
+    setWithdrawnIds(new Set());
     setEndLatched(false);
   }, [job?.job_id]);
   useEffect(() => () => {
@@ -4416,6 +4422,12 @@ export default function TradesScreen({ navigation, route }: any) {
       rebased: undefined,
       cards: merged.cards,
     }));
+    // U2 — the fronted card is gone from the server's whole current deck:
+    // withdraw it in place (it keeps its slot; behind-cards the server
+    // dropped were removed silently by the merge).
+    if (merged.withdrawFront && front) {
+      setWithdrawnIds((s) => new Set(s).add(front.trade_id));
+    }
     return merged.added;
   }
 
@@ -4498,6 +4510,25 @@ export default function TradesScreen({ navigation, route }: any) {
     if (deckEnd === 'end') setEndLatched(true);
   }, [deckEnd]);
   const showDeckEndCard = pagedWithCards && (endLatched || deckEnd === 'end');
+  // U2 — the quiet "Updating" label: the page is being rebuilt behind the
+  // cards on screen. Informational only; nothing reads it to gate Like/Pass.
+  const deckUpdating = pagedDeck && job?.freshness_state === 'updating';
+  const topCardWithdrawn = !!rawTopCard && withdrawnIds.has(rawTopCard.trade_id);
+  function handleWithdrawnNext() {
+    haptics.selection();
+    setDeckIdx((i) => i + 1);
+  }
+
+  // The pushed deck's header row is the deck's existing header (design-lead
+  // §5.4.2): "Updating" trails in it, so no row is ever inserted above the
+  // card. Hosts without a header show it under the card (handled inline).
+  useEffect(() => {
+    if (!isResultsPushed) return;
+    navigation?.setOptions?.({
+      headerRight: deckUpdating ? () => <DeckUpdatingLabel /> : undefined,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isResultsPushed, deckUpdating]);
 
   // VoiceOver (ux-lead U1): when a search reveals its first card — the
   // adopted first frame, or an in-place search that refilled an emptied deck
@@ -9084,6 +9115,11 @@ export default function TradesScreen({ navigation, route }: any) {
                 />
               </View>
             </Card>
+          ) : topCard && topCardWithdrawn ? (
+            // U2 — the fronted card left the server's deck (I-1 or a
+            // disposition): withdrawn IN PLACE, in its own slot and height,
+            // with one reason line. The user moves on with Next trade.
+            <WithdrawnTradeCard minHeight={topCardH} onNext={handleWithdrawnNext} />
           ) : topCard ? (
             <>
               {/* Peek of the next card behind the top one. Clipped to the
@@ -9234,6 +9270,14 @@ export default function TradesScreen({ navigation, route }: any) {
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
+              {/* U2 — "Updating" on hosts with no deck header row: below the
+                  card, so it can never push the swipe target. (The pushed
+                  deck shows it in its header instead.) */}
+              {deckUpdating && !isResultsPushed ? (
+                <View style={styles.deckUpdatingInline}>
+                  <DeckUpdatingLabel />
+                </View>
+              ) : null}
               {/* S3 PRD-02 (ux.player_context_menu): the Matches hold-hint
                   carried onto the deck — the long-press menu needs a visible
                   pointer on its primary surface. */}
@@ -10757,6 +10801,10 @@ const styles = StyleSheet.create({
     ...type.bodySm,
     textAlign: 'center',
     marginTop: space.md,
+  },
+  deckUpdatingInline: {
+    alignItems: 'center',
+    marginTop: space.sm,
   },
   emptyInner: {
     alignItems: 'center',
