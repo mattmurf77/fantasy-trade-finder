@@ -1238,6 +1238,26 @@ Analytics session IDs now use a domain-separated `analytics_v1:` SHA-256 represe
 
 Deletion now covers credentials, account aliases, durable sessions, linked anonymous events and newer private tables. Export version 2 covers the expanded private scope and excludes credential material. Submitted feedback notes are removed; public league records, global aggregates, published ranking snapshots and other managers’ records can remain. `user_data_lifecycle` drains active account work and rejects queued stale work in the deployed single-worker process. Deletion times out without deleting if work cannot drain in 10 seconds; retry after the operation finishes. Do not increase the worker count or introduce external direct writers without distributed fencing (ADR-017). Historical poisoned imported membership rows are not repaired by server-authoritative session initialization and need an operator-reviewed resync.
 
+## Trade share links: enumeration fix (build O8, 2026-10-20)
+
+**The hole.** `/s/trade/<x>` and `/og/trade/<x>.png` took the sequential `trade_matches.id` with no auth, and `og_image.render_trade_card` loaded the row directly. Anyone could walk the ids and read every mutual match's give/get and fairness verdict, across leagues.
+
+**The fix.** Both routes now resolve only through `trade_share_tokens` (`docs/data-dictionary.md`): a 128-bit `token_urlsafe(16)` minted by `POST /api/share/trade` for a party to the match (30 mints/user/hour, `growth.share_landing`-gated). A numeric id never resolves. Every miss (numeric id, unknown, revoked or malformed token, orphaned match) gets one generic "This trade link has expired." page (noindex) and PNG, status 200, identical bytes, so a miss can't be told from an expired link. There is no per-IP GET limiter by design: guessing in a 2^128 space is infeasible, and a left-most `X-Forwarded-For` hop is client-spoofable.
+
+**Old links.** Every `/s/trade/<number>` link already shared, and every link an older TestFlight build still produces, now shows the expired page. That is intended (keeping them working would keep the hole open). The minimum-version gate (launch item 19) moves users onto a build that mints tokens. Nothing to migrate.
+
+**Symptoms.** A user says a fresh share shows "expired": check that the link is `/s/trade/<22 chars>` (an older binary still shares numeric links), then that the row exists and `revoked_at` is NULL. The mobile client falls back to a `/s/p/<id>` package link when the mint fails or takes over 2 s, so a share can still carry a working landing while this route is broken. Never log or paste a token: it is a bearer secret.
+
+**Revoking a link.** Nothing in v1 writes `revoked_at`. To kill one share (for example, a user asks for a posted link to stop working), set it on that row:
+
+```sql
+UPDATE trade_share_tokens SET revoked_at = '<ISO UTC now>' WHERE token = '<token>';
+-- or every link to one match:
+UPDATE trade_share_tokens SET revoked_at = '<ISO UTC now>' WHERE match_id = <id> AND revoked_at IS NULL;
+```
+
+The link shows the expired page on the next request (responses carry `Cache-Control: public, max-age=300`, so a cached copy can outlive it by up to 5 minutes). A re-share by the same user then mints a new token. **This is a production write: release-lead runs it, on the operator's go, never a build session.** Deleting the sharer's account also deletes their tokens.
+
 ## Database storage incident and compaction (2026-09-15)
 
 The database was suspended at 98.3% of its 1 GB disk. The incident recovery
