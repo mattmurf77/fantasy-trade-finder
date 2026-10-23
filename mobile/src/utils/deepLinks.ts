@@ -4,6 +4,7 @@ import { useSession } from '../state/useSession';
 import { useFeatureFlags } from '../state/useFeatureFlags';
 import { track } from '../api/events';
 import { navigationRef } from '../navigation/RootNav';
+import { isInviteId } from './inviteId';
 
 // ── Bundle 8 + teardown PRD 01-04: Deep link handling ─────────────────────
 // Legacy (flag `ux.deeplink_router_v2` OFF — the shipping default):
@@ -401,6 +402,12 @@ export function handleDeepLink(url: string | null | undefined): void {
     useSession.getState().setInvitedBy(refStr);
   }
 
+  // FR-10 — the invite id `t`, as received. Only a well-formed value
+  // (utils/inviteId) is ever stored; anything else is ignored.
+  const t = parsed.queryParams?.t;
+  const tStr = Array.isArray(t) ? t[0] : t;
+  const inviteId = isInviteId(tStr) ? tStr : null;
+
   // Invited league: ?league=<id> (P0-3). The invite URL mobile has emitted
   // since FB #239 is `<base>/?league=<id>&ref=<u>` — a bare-path URL, so the
   // v2 short-circuit below returns before anything reads it and the league
@@ -438,6 +445,16 @@ export function handleDeepLink(url: string | null | undefined): void {
   }
 
   const path = (parsed.path || '').replace(/^\/+/, '');
+
+  // FR-10 — capture `t` on EITHER invite form: `/?league=<id>&t=` (above)
+  // or `/app/league/join/<id>?t=`. LeagueJoinScreen also captures the path
+  // form's `t`; setInviteId is last-write-wins, so the overlap is harmless,
+  // and it keeps the id when the v2 router is off and that screen never
+  // mounts. Never on a non-invite link.
+  const isJoinPath = /^app\/league\/join\/[^/]+/i.test(path);
+  if (inviteId && (isJoinPath || (typeof lgStr === 'string' && lgStr.trim()))) {
+    useSession.getState().setInviteId(inviteId);
+  }
 
   if (useFeatureFlags.getState().flags['ux.deeplink_router_v2']) {
     // Bare open / referral-only URL (no path) — nothing to route, no toast.

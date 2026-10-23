@@ -5,6 +5,7 @@ import { ink, chalk, ice, space, type } from '../theme/chalkline';
 import { Button } from '../components/chalkline';
 import { useSession } from '../state/useSession';
 import { track } from '../api/events';
+import { isInviteId } from '../utils/inviteId';
 
 // ── P0-3 — the invite JOIN interstitial ──────────────────────────────────
 // Destination of `<base>/app/league/join/<leagueId>?ref=<u>` (the format
@@ -26,7 +27,7 @@ import { track } from '../api/events';
 
 interface Props {
   // react-navigation props; only params + replace are used.
-  route: { params?: { leagueId?: string; ref?: string } };
+  route: { params?: { leagueId?: string; ref?: string; t?: string } };
   navigation: {
     replace: (name: string, params?: object) => void;
   };
@@ -35,6 +36,9 @@ interface Props {
 export default function LeagueJoinScreen({ route, navigation }: Props) {
   const leagueId = (route?.params?.leagueId || '').trim();
   const inviteRef = (route?.params?.ref || '').trim();
+  // FR-10 — the invite id `t`, only when well-formed (utils/inviteId).
+  const tParam = route?.params?.t;
+  const inviteId = isInviteId(tParam) ? tParam : null;
 
   // Read for RENDER only. The decision below reads getState() instead — it
   // is a one-shot decision, not a subscription.
@@ -59,6 +63,9 @@ export default function LeagueJoinScreen({ route, navigation }: Props) {
     // 2. Belt-and-braces: handleDeepLink normally captured `?ref=` already,
     //    and setInvitedBy is last-write-wins.
     if (inviteRef) st.setInvitedBy(inviteRef);
+    // 2b. FR-10 — the invite id, into the same persisted intent. handleDeepLink
+    //     may have captured it already; setInviteId is last-write-wins.
+    if (inviteId) st.setInviteId(inviteId);
 
     // 3. Classify. The four cases below are exactly the four `auth_state`
     //    values the taxonomy registers.
@@ -108,7 +115,7 @@ export default function LeagueJoinScreen({ route, navigation }: Props) {
     } catch {
       setFailed(true);
     }
-  }, [leagueId, inviteRef, navigation]);
+  }, [leagueId, inviteRef, inviteId, navigation]);
 
   if (failed) {
     return (
