@@ -6,6 +6,10 @@
 **Operator sign-off on waivers:** signed 2026-10-22 (operator, in head-product's session; quoted verbatim: "I sign off on #354's waivers."). Covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1 ([prd.md §9](prd.md#9-decisions-needed)). **W-BL10-2 has lapsed:** head-eng confirmed D-2's 403 and Product chose D-2(a), so a pytest is required.
 
 Requirements, copy inventory and acceptance criteria: [prd.md §5](prd.md#5-p28-contact-page).
+**Copy (2026-10-23):** `marketing-lead`'s c1–c8 are recorded verbatim in the adopted table under
+[prd.md §5.4](prd.md#54-copy-inventory-copy-marketing-lead-data-request-lines-reviewed-by-legal-lead).
+All eight are pending operator §6; c2–c5 and c8 are also pending `legal-lead`'s review (P36). P28
+goes live on **Fri 2026-11-13**, with the privacy and terms pages and the FAQ (prd.md §8).
 Ownership: `onboarding-pm` owns the product side of `web/contact.html` (P11) and the data-request
 lifecycle (P12). Words: `marketing-lead` via `head-product` → `head-bizops`; `legal-lead` reviews the
 data-request lines. Visuals: `design-lead`.

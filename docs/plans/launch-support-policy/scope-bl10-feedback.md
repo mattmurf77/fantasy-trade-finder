@@ -85,8 +85,17 @@ D-056: no simulator, no Maestro, no screen captures, for any part of this change
   6. **`testID`s kept:** `feedback.fab`, `feedback.note-input`, `feedback.save-btn`,
      `feedback.save-error`, `feedback.char-count`, `feedback.note-error`, the
      `feedback.severity.${value}` template, and `settings.test-stages` still exist.
-  7. **Only if D-1(b) is accepted:** `FeedbackFAB`'s mount effect calls `retrySync()` after
-     `hydrate()` resolves.
+  7. **Cold-launch retry (D-1(b), decided).** `FeedbackFAB`'s mount effect calls `retrySync()` after
+     `hydrate()` resolves. Required now: the "not sent" text is f1.alt, "Saved on this device but not
+     sent yet. It retries the next time you open the app, so no need to send it again." ([prd.md
+     §6.7](prd.md#67-copy-inventory-copy-marketing-lead) adopted table). "The next time you open the
+     app" is true only with this pin and the existing foreground retry (`mobile/App.tsx:207` at
+     `712dcbed`) both in place.
+  8. **Screen field hidden (D-6 decided: hide).** `FeedbackSheet.tsx` renders no Screen label or
+     `TextInput` for the screen, and the `add({...})` call still sends a non-empty `screen` taken from
+     `defaultScreen` (today `screen: screen.trim() || 'Unknown'`, `FeedbackSheet.tsx:135-136`).
+  9. **Optional, only if BL10-R11 is built:** a resend of an unsent note reuses that note's id
+     instead of calling `add()` again, so the device keeps one note, not two.
 - [x] **Existing suites the build must update** (or CI fails):
   - `mobile/tests/check-settings-ia.js:116` maps the "Test feedback" row to owner
     `TestingSection.tsx` with marker `'>Test feedback<'`. Move it to owner `AboutSection.tsx` with
@@ -136,17 +145,21 @@ D-056: no simulator, no Maestro, no screen captures, for any part of this change
      Settings (a root-stack push).
   2. Tap the FAB. Expected: the sheet shows `marketing-lead`'s approved title, subline and labels;
      `fleecedapp@gmail.com` appears with an ordinary `@`; nothing mentions Testing, Test feedback,
-     TestFlight or testers.
+     TestFlight or testers. **The sheet has no Screen field** (D-6: hide).
   3. Turn on airplane mode. Type a note and Save. Expected: the sheet stays open with the draft, and
-     the approved "not sent" text says the note is kept and when it will send. No Settings → Testing
-     pointer.
+     the "not sent" text is f1.alt: "Saved on this device but not sent yet. It retries the next time
+     you open the app, so no need to send it again." No Settings → Testing pointer.
   4. Cancel the sheet. Expected: the FAB pill shows **1**.
-  5. Turn off airplane mode. Send the app to the background and bring it back (and, if D-1(b) ships,
-     also force-quit and relaunch). Wait 10 seconds. Expected: the note sends without any tap.
+  5. Turn off airplane mode. Send the app to the background and bring it back. Wait 10 seconds.
+     Expected: the note sends without any tap. Then turn airplane mode on, save a second note as in
+     step 3 and cancel the sheet; turn airplane mode off, force-quit and relaunch (D-1(b)). Expected:
+     the second note also sends without any tap.
   6. Open Settings. Expected: no "Testing" row anywhere on the hub.
   7. Tap Help & about. Expected: the feedback row is present with the approved title; tap it.
      Expected: the inbox opens, titled with the approved public name (once, not twice), and the note
-     from step 3 shows as sent (no "HTTP" text anywhere).
+     from step 3 shows as sent (no "HTTP" text anywhere). **The note still records the screen:** its
+     row shows the screen it was sent from (`FeedbackInboxScreen.tsx:226`), although the sheet had
+     no Screen field.
   8. Compare the pill with the inbox. Expected: pill = number of inbox notes whose status line is
      not "Fixed — in next update".
   9. Deep link `settings/testing` (if D-7 gates it). Expected: no rows are shown.

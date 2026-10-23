@@ -4,8 +4,8 @@
 **Status:** spec, awaiting acceptance by `head-product`. Specs only: no product code is written here.
 **Author:** `launch-onboarding-pm-1`, for `onboarding-pm` (product lead, Onboarding & accounts)
 **Source:** `head-product`'s App Store launch-readiness review (2026-10-20), items **P28**, **BL-10**, **M7**
-**Base:** every `file:line` below was read at `origin/main` `678834ab`. Re-verify before building.
-**Scope blocks:** [P28 contact page](scope-p28-contact.md) · [BL-10 public feedback](scope-bl10-feedback.md) · [M7 policy pages](scope-m7-policy-pages.md)
+**Base:** every `file:line` below was read at `origin/main` `678834ab`, except the 2026-10-23 additions (the adopted-copy tables in §5.4 and §6.7, §6.8 and §7b), which were read at `origin/main` `712dcbed`. The contact, feedback and Settings files those tables cite are unchanged between the two shas. Re-verify before building.
+**Scope blocks:** [P28 contact page](scope-p28-contact.md) · [BL-10 public feedback](scope-bl10-feedback.md) · [M7 policy pages](scope-m7-policy-pages.md) · [Q6 tour line](scope-q6-tour-line.md) · [FAQ, SUP-M4](scope-faq-sup-m4.md) (build input: [faq-copy.md](faq-copy.md))
 
 ---
 
@@ -18,6 +18,7 @@
 5. [P28: contact page](#5-p28-contact-page)
 6. [BL-10: in-app feedback for the public](#6-bl-10-in-app-feedback-for-the-public)
 7. [M7: privacy and terms pages](#7-m7-privacy-and-terms-pages)
+   - [7b. FAQ (SUP-M4)](#7b-faq-sup-m4)
 8. [Sequencing and dependencies](#8-sequencing-and-dependencies)
 9. [Decisions needed](#9-decisions-needed)
 10. [Handoffs](#10-handoffs)
@@ -103,6 +104,8 @@ writes the words. Placeholders read **copy: marketing-lead** or **wording: legal
 - One support-address constant per client, plus a `docs/cross-client-invariants.md` row.
 - Evidence: added assertions in `qa/web/check_web_structure.py`, a new
   `mobile/tests/check-*.js` guard, a file:line code-walk, and manual web and TestFlight checklists.
+- Added 2026-10-23 (P36): the Q6 tour line (§6.8) and the FAQ rewrite (§7b), each with its own
+  scope block.
 
 **Not in scope**
 
@@ -173,6 +176,35 @@ session (`_account_data_gates`, `:27931-27942`, applied at `:27959`), so it is t
 | C6 | "Sent — thank you. We read every message." | `:164` | Can stay. Optionally: we can't reply to form messages, so email for a reply. |
 | C7 | "Could not send. Please try again shortly." | `:171` | Optionally offers the email as a fallback. |
 | C8 | Meta description / og:description | `:7`, `:12` | Only if D-8 removes the data-request topic. |
+
+**Copy adopted (marketing-lead-copy.md §1b, at `712dcbed`).** `marketing-lead`'s launch copy batch
+(2026-10-23, basis `712dcbed`). It is recorded here because the source file isn't tracked in git, so
+builders can't see it. Current and new text are copied verbatim from marketing's table, including its
+bold and its bracketed review tags. The tags are for review only and never ship. All eight rows are
+`meaning` changes in marketing's §6 approval block F. Status labels:
+
+- **pending operator §6:** the operator approves the new text in marketing's §6.
+- **pending operator §6 + legal-lead review:** C2–C5 and C8 also need `legal-lead`'s review (P36).
+
+| key | PRD # | `file:line` (712dcbed) | current | new text (verbatim, marketing-lead) | type | status |
+|---|---|---|---|---|---|---|
+| c1 | C1 | `web/contact.html:69` | Report a bug, suggest an idea, or make a request about your data. This goes straight to the people who build the app. | Report a bug or suggest an idea. This form goes straight to the people who build Fleeced, but it can't send a reply. For a reply, email fleecedapp@gmail.com. | meaning | pending operator §6 |
+| c2 | C2 | `:77` | Data request — access, export, or deletion | **D-8(a), recommended:** `Delete my data` · **D-8(b):** option removed **[legal-lead review]** | meaning | pending operator §6 + legal-lead review |
+| c3 | C3 | `:86` | So we can find your records, include the Sleeper username you use with the app. | To find your account, say how you sign in (Apple, Sleeper, ESPN or MFL) and give the username or league ID you use there. **[legal-lead review]** | meaning | pending operator §6 + legal-lead review |
+| c4 | C4 | `:95-98` | You can ask us for a copy of your data or ask us to delete it. Send a **Data request** above … and we'll action it. In the mobile app you can also export or delete your account directly from Settings. | Quickest route: in the app, open Settings › Account & data and choose **Download my data** or **Delete account**. Without the app, email fleecedapp@gmail.com for a copy of your data or a question about it, and say how you sign in and your username. You may be asked to confirm the account is yours. To ask for deletion without a reply, pick **Delete my data** above. This form can't send a confirmation. **[legal-lead review]** | meaning | pending operator §6 + legal-lead review |
+| c5 | C5 | `:163` | Sent. We'll action your data request and follow up. | Sent. This form can't reply. To hear back about your request, email fleecedapp@gmail.com. **[legal-lead review]** | meaning | pending operator §6 + legal-lead review |
+| c6 | C6 | `:164` | Sent — thank you. We read every message. | Sent, thanks. Every message is read. For a reply, email fleecedapp@gmail.com. | meaning | pending operator §6 |
+| c7 | C7 | `:171` | Could not send. Please try again shortly. | Couldn't send. Try again in a minute, or email fleecedapp@gmail.com. | meaning | pending operator §6 |
+| c8 | C8 | `:7`, `:12` | Report a bug, suggest an idea, or make a data access or deletion request for your Fleeced account. | **D-8(a):** keep. **D-8(b):** `Report a bug or suggest an idea, and see how to get a copy of your Fleeced data or delete it.` **[legal-lead review]** | meaning | pending operator §6 + legal-lead review |
+
+Notes on the adopted contact copy:
+
+- **c2 and c8 follow D-8**, which is still open with `legal-lead`.
+- **c4's length** (about 390 characters) is `design-lead`'s call: marketing suggests splitting it into two
+  paragraphs at "Without the app" (P36).
+- **Not folded:** marketing's §3 also suggests two contact-page strings outside C1–C8: `:68` "Contact
+  us" → `Contact`, and the `:82` placeholder → `What happened, or what would you like changed?`. They
+  are in neither its §1b table nor its §6 approval block. `onboarding-pm` decides whether to add them.
 
 ### 5.5 Support URL
 
@@ -290,6 +322,11 @@ gets "Could not send". No backend test covers `/api/feedback` under the verified
   D-056 keeps but never runs, so a rename fails CI.
 - **BL10-R10.** Chalkline only: no new hue, no emoji, radius ≤ 8px except specced pills, flare
   never on an action (`docs/design/design-system.md` Prohibitions 1-9). Visuals are `design-lead`'s.
+- **BL10-R11 (OPTIONAL, not MUST; P36).** Sending again after a failed send duplicates the note:
+  each Send calls `add()`, which mints a new id (`mobile/src/state/useFeedback.ts:152-158` at
+  `712dcbed`). If `onboarding-eng` finds it cheap, a resend of the unsent note reuses that note's
+  id instead of minting a new one. Launch doesn't depend on it: f1.alt ("…so no need to send it
+  again") already steers users away from resending.
 
 ### 6.4 Open items for `ux-lead`
 
@@ -345,6 +382,108 @@ No new events. `feedback_submitted` stays server-fired and unchanged. Waived in 
 | F16 | Share export header "# DTF Mobile Feedback — <date>" and labels Bug/Polish/Idea | `mobile/src/state/useFeedback.ts:269`, `:275-277` | Current product name; labels match F4. |
 | F17 | Row "Test feedback" / "Review and share notes you captured with the floating button." | `settings/sections/TestingSection.tsx:59-61`; `SettingsScreen.tsx:1029-1032` | Public row title and subtitle in its new About home. |
 | F18 | Hub About preview "FAQ, privacy, terms" / "Privacy, terms" | `settings/SettingsHubScreen.tsx:211` | Also names the feedback row (BL10-R5). |
+
+**Copy adopted (marketing-lead-copy.md §1b, at `712dcbed`).** Same source and rules as the §5.4
+table: current and new text are verbatim from marketing's table. Meaning changes are in marketing's
+§6 approval block E. Status labels:
+
+- **adopted:** `name`, `voice` and `keep` rows; no approval needed.
+- **pending operator §6:** a meaning change; the operator approves the new text in marketing's §6.
+
+BL-10 ships **f1.alt**, because D-1(b) is decided (P36). Marketing's `f1` (the foreground-only
+wording) is **not used**, so it has no row.
+
+| key | PRD # | `file:line` (712dcbed) | current | new text (verbatim, marketing-lead) | type | status |
+|---|---|---|---|---|---|---|
+| f1.alt | F1 | `mobile/src/components/FeedbackSheet.tsx:63-64` | Saved on this device, but not sent yet. Nothing is lost — retry it from Settings → Testing → Test feedback. | Saved on this device but not sent yet. It retries the next time you open the app, so no need to send it again. | meaning | pending operator §6 |
+| f2 | F2 | `FeedbackSheet.tsx:177` | Capture feedback | Send feedback | voice | adopted |
+| f3 | F3 | `FeedbackSheet.tsx:178` | Saved on this device. Share or export from Settings. | No replies here. Track each note in Settings › Help & about › Your feedback, or email fleecedapp@gmail.com for a reply. | meaning | pending operator §6 |
+| f4 | F4 | `FeedbackSheet.tsx:181` | Severity | What's this about? | voice | adopted |
+| f4.bug | F4 | `FeedbackSheet.tsx:40` | Bug | Broken | voice | adopted |
+| f4.polish | F4 | `:41` | Polish | Tweak | voice | adopted |
+| f4.idea | F4 | `:42` | Idea | Idea (keep) | keep | adopted |
+| f4.a11y | F4 | `:191` | Severity: {label} | Feedback type: {label} | voice | adopted |
+| f5 | F5 | `:207`, `:211`, `:213` | Screen / e.g. Trades / Tiers / Rank-Trios | **Recommended:** hide the field and keep sending the value. If `ux-lead` keeps it: label `Screen`, placeholder `e.g. Home, Rank, Acquire` (the real tab labels, `TabNav.tsx:839`, `:878`) | meaning | pending operator §6 · D-6 decided: hide (`ux-lead` review owed) |
+| f6 | F6 | `:231` | What did you notice? | keep | keep | adopted |
+| f7 | F7 | `FeedbackFAB.tsx:145-149` | Capture feedback / Capture feedback, N open | Send feedback / Send feedback, {N} open | voice | adopted |
+| f8 | F8 | `navigation/RootNav.tsx:764-765` | Test feedback | Your feedback | voice | adopted |
+| f9 | F9 | `FeedbackInboxScreen.tsx:123` | Test feedback | Your feedback, or drop it if the header carries it (`ux-lead`) | voice | adopted |
+| f10 | F10 | `FeedbackInboxScreen.tsx:124-127` | {N} notes saved on this device | keep | keep | adopted |
+| f11 | F11 | `:135` | Retry sync | Send now | voice | adopted |
+| f12.ok | F12 | `:171-174` | Synced | Sent | voice | adopted |
+| f12.fail | F12 | `:173` | Sync failed: {raw error} | Not sent yet (the raw error goes to the a11y label only if `ux-lead` wants it) | meaning | pending operator §6 |
+| f12.pending | F12 | `:174` | Pending sync | Waiting to send | voice | adopted |
+| f13.title | F13 | `:153` | No feedback yet | keep | keep | adopted |
+| f13.body | F13 | `:155` | Tap the floating button on any screen to capture a note. | Tap the flag button on any screen to send a note. | voice | adopted |
+| f14.title | F14 | `:99` | Clear all feedback? | Clear notes from this device? | meaning | pending operator §6 |
+| f14.body | F14 | `:100` | This will delete N notes. Cannot be undone. | Removes {N} note{s} from this device. It can't be undone. Notes already sent stay on file. | meaning | pending operator §6 |
+| f15 | F15 | `:28-35` | Received / Planned / In progress / Fixed — in next update / Shipped / Not planned | keep (cross-client invariant, `cross-client-invariants.md:1131-1144`) | keep | adopted |
+| f16 | F16 | `mobile/src/state/useFeedback.ts:269`, `:275-277` | # DTF Mobile Feedback — {date}; Bug / Polish / Idea | # Fleeced feedback — {date}; Broken / Tweak / Idea (header matches copy-A) | name | adopted |
+| f17.title | F17 | `settings/sections/TestingSection.tsx:59`; `SettingsScreen.tsx:1029` | Test feedback | Your feedback | voice | adopted |
+| f17.sub | F17 | `TestingSection.tsx:61`; `SettingsScreen.tsx:1031` | Review and share notes you captured with the floating button. | Notes you've sent with the flag button, and where each one stands. | meaning | pending operator §6 |
+| f18 | F18 | `settings/SettingsHubScreen.tsx:211` | FAQ, privacy, terms / Privacy, terms | FAQ, feedback, privacy, terms / Feedback, privacy, terms | meaning | pending operator §6 |
+| fb.save | — | `FeedbackSheet.tsx:266` | Save | Send | meaning | pending operator §6 |
+| fb.cancel | — | `FeedbackSheet.tsx:258` | Cancel | keep | keep | adopted |
+| fb.close | — | `:169` | Close | keep | keep | adopted |
+| fb.note | — | `:219`, `:229` | Note | keep | keep | adopted |
+| fb.over | — | `:57` | Too long to send — trim {n} character{s}. Your text is still here. | keep: neutral, exact, already in voice | keep | adopted |
+| fb.count | — | `:239` | {n} of {max} characters used | keep | keep | adopted |
+
+Notes on the adopted feedback copy:
+
+- **f1.alt's trigger is true only with D-1(b).** "The next time you open the app" needs both the
+  existing foreground-return retry (`mobile/App.tsx:207` at `712dcbed`) and D-1(b)'s cold-launch
+  retry. They ship in the same binary (BL10-R3).
+- **f3 keeps its email line** (P36). D-2(a) means unverified users' notes now arrive, but the
+  in-app channel is still one-way, so email is the way to get a reply.
+- **f3 and f17 name Settings › Help & about › Your feedback.** That is true only once BL10-R5's row
+  move ships, in the same build.
+- **f4's chips at 320pt** ("Broken / Tweak / Idea" in three flex-1 chips) are `design-lead`'s call
+  (P36).
+- **f5 / D-6: hide** the Screen field and keep sending the pre-filled value. The API still requires
+  a non-empty `screen` (`backend/server.py:11097-11098`). If `ux-lead`'s review keeps the field,
+  the fallback label and placeholder in the f5 cell apply. The inbox row still shows the stored
+  value, an internal route name (`FeedbackInboxScreen.tsx:226`); `ux-lead`'s D-6 review covers that
+  too.
+- **Resend duplicates the note:** see BL10-R11 (optional).
+- **Not folded:** marketing's §3 suggests the inbox's per-note "Delete note?"
+  (`FeedbackInboxScreen.tsx:110`) → `Remove this note from this device?`, because that delete is
+  device-only too (`useFeedback.ts:179-183`). It is outside F1–F18 and not in marketing's §6.
+  `onboarding-pm` decides whether to add it.
+
+### 6.8 Q6 tour line
+
+**Status: approved (Q6, operator 2026-10-23).** The operator answered "Q6 tour line: Yes" on the
+2026-10-23 form, relayed by `head-product`. `legal-lead` (LEG-S15) found the tour line "Passwords
+never leave your phone" literally false and supplied the replacement. The change rides in the
+11-06 binary with BL-10 but has its own scope block: [scope-q6-tour-line.md](scope-q6-tour-line.md).
+
+| Fact (at `origin/main` `712dcbed`) | Where |
+|---|---|
+| `n23` is the Sleeper-only send beat. Its comment explains why the password sentence lives only on the Sleeper beat. | `mobile/src/components/analystScript.ts:632-640` (beat); `:626-631` (comment) |
+| `n23b`, the off-Sleeper sibling, makes no password claim. It is unchanged. | `analystScript.ts:642-655` (`line` `:646`, `degradeLine` `:647`) |
+| The runner picks `n23` only when the send platform resolves to Sleeper; otherwise `n23b`. | `mobile/src/utils/calcTour.ts:232-236` (`beatIdFor`). Its comment at `:228-231` quotes the old sentence. |
+| `degradeLine` renders when the beat's spotlight fails. | `mobile/src/components/AnalystGuide.tsx:284` |
+| The tour is dark. `startCalcTour` returns early unless `onboarding.guided_avatar` and `onboarding.guide_v2` are both on, and both are `false`. | `calcTour.ts:472`; `config/features.json:134`, `:137` |
+| No check pins the old text. `check-guide-script.js` 9a requires `/password/i` in `n23`'s `line` (the new text passes), and 9b requires none in `n23b`'s. `cta` beats are capped at 16 words. `check-calc-tour.js` pins `n23`'s target and screen only. | `mobile/tests/check-guide-script.js:425-447` (§9), `:203` (caps), `:214`, `:229` (2b, 2c); `mobile/tests/check-calc-tour.js:370-371`, `:422` |
+
+**The change.** `onboarding-eng` edits both strings in `n23`:
+
+| Field | Current (`analystScript.ts`) | New |
+|---|---|---|
+| `line` (`:635`) | Sending goes straight to your league. Passwords never leave your phone. | Sending goes straight to your league. We never see your password. |
+| `degradeLine` (`:636`) | Sending a trade goes straight to your league. Passwords stay on your phone. | Sending a trade goes straight to your league. We never see your password. |
+
+The `line` is `legal-lead`'s exact text. The `degradeLine` applies the same operator-approved
+substitution to the second line, as `legal-lead` specifies. They run 11 and 13 words, within the
+16-word `cta` cap.
+
+**Also at build:** update the places that quote the old sentence: the comment at `calcTour.ts:228-231`,
+the §9 comment at `check-guide-script.js:425-430`, and `mobile/src/utils/CLAUDE.md:37`. Re-read the
+`n23` comment (`analystScript.ts:626-631`) so it describes the new sentence.
+
+**Evidence:** a structural assertion added to `check-guide-script.js` §9, plus a code-walk.
+TestFlight is waived while the tour is dark (W-Q6-3). The detail is in the scope block.
 
 ## 7. M7: privacy and terms pages
 
@@ -485,6 +624,89 @@ Each row is a **candidate** for `analytics-lead`; "appears covered" is a reading
 - **M7-AC7.** Manual read-through of both pages on desktop and mobile Safari; both mailto links open
   Mail; the Settings → Help & about Privacy and Terms rows in the app open the updated pages.
 
+## 7b. FAQ (SUP-M4)
+
+`web/faq.html` is rewritten for launch with `marketing-lead`'s text (marketing-lead-copy.md §2,
+2026-10-23, basis `712dcbed`). The build input, verbatim, is [faq-copy.md](faq-copy.md). The scope
+block is [scope-faq-sup-m4.md](scope-faq-sup-m4.md). Build owner: `onboarding-eng`. Every word is
+`marketing-lead`'s, except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes
+are in marketing's §6 approval block I: **pending operator §6**.
+
+### 7b.1 What changes (marketing §1c, summarized)
+
+The full verdict table is copied verbatim in [faq-copy.md](faq-copy.md). Lines are `web/faq.html`
+at `712dcbed`.
+
+| Today | Line | Verdict | New item |
+|---|---|---|---|
+| `<title>`; meta and OG description | 6-7, 11-12 | Keep the title; rewrite the description | Head |
+| H1 and sub | 126-127 | Keep | — |
+| What is Fleeced? | 130-132 | Rewrite | Q1 |
+| How does the ELO ranking system work? | 137-140 | Rewrite (light) | Q9 |
+| 1QB PPR vs SF TEP | 145-149 | Keep | Q13 |
+| Why two rank sets? | 154-156 | Keep (light) | Q14 |
+| How do I sync my Sleeper league? | 161-164 | Rewrite | Q4 |
+| My league is private | 169-171 | Rewrite | Q7 |
+| Do you share my data? | 176-178 | Rewrite [R10] | Q15, Q16 |
+| Can I use values from KTC / Dynasty Daddy? | 183-185 | Rewrite | Q10 |
+| What's a "tier"? | 190-192 | Rewrite (light) | Q12 |
+| What's the I AM SPEED button? | 197-199 | Cut | — |
+| Is there a mobile app? | 204-206 | Rewrite | Q3 |
+| Privacy policy summary | 211-213 | Rewrite [R10] | Q17 |
+| Footer | 217-222 | Rewrite (adds `fleecedapp@gmail.com`) | Footer |
+| — | — | New | Q2, Q5, Q6, Q8, Q11, Q18 |
+
+### 7b.2 Requirements
+
+- **FAQ-R1.** The builder pastes [faq-copy.md](faq-copy.md)'s §2 text and follows its build notes.
+  No agent rewrites the wording. The bracketed review tags and `[APP STORE URL]` never ship.
+- **FAQ-R2. Ship order (P36).** The FAQ goes live **with** the new privacy and terms (M7), by
+  **Fri 2026-11-13**, not before. Until then, today's FAQ stays. This supersedes marketing §2's
+  "only after the listing is live on 2026-11-06".
+- **FAQ-R3. Launch-day variants (P36).** Q3's first line ("On iPhone: the Fleeced app on the App
+  Store ([APP STORE URL]).") is the only "App Store" line in the text, and it is false before
+  launch. It ships on 11-13 in a **pre-launch variant** and flips on **Wed 2026-11-18**, alongside
+  `IOS_INSTALL_URL` and the `m4.348.*` rows (#348; `IOS_INSTALL_URL` isn't on `main` at
+  `712dcbed`). At the flip, `[APP STORE URL]` becomes the listing's real URL.
+  - Marketing supplied only the post-launch text. The pre-launch variant is **copy: marketing-lead
+    (gap)**.
+  - The flip mechanism is `head-eng`'s. If it uses a flag, the FAQ scope block's §2 must name it.
+- **FAQ-R4. Pricing line (P36, R21 #6).** The FAQ includes "Free to use today. Nothing in the app
+  is for sale." `marketing-lead` places it (its §4 open question). It comes out the moment a
+  purchase exists; `head-product` adds it to `monetization-pm`'s step-9 list.
+- **FAQ-R5. Extension link (P36).** Q3's "release download" links the current GitHub release, if it
+  is still `extension-v0.1.1`. Today `web/index.html:170` links
+  `https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1`. Eng confirms at
+  build.
+- **FAQ-R6. K-factors: pending model_config confirmation.** Q9's second paragraph ("a K-factor of
+  32", "8 for a like, 4 for a pass") matches the code defaults (`backend/ranking_service.py:57-59`,
+  `_DEFAULT_CFG`), but prod reads `model_config`. `analytics-lead` reads prod `model_config` and
+  `models-lead` confirms, via `head-bizops`. Q9 ships only once it is confirmed or corrected.
+  Marketing also asks for prod `user_elo_shrink` and `placement_tier_clamp`, which Q11 describes;
+  P36 doesn't cover them (open item 6 in [faq-copy.md](faq-copy.md)).
+- **FAQ-R7. Legal-owned answers.** Q16 and Q17 are `legal-lead`'s (R10 wording). `legal-lead` may
+  switch Q16 to marketing's passive alternative, and Q17's C4 rephrase needs its OK (both in
+  [faq-copy.md](faq-copy.md)).
+- **FAQ-R8. Q18's reply promise.** "Replies come within 2 business days." is the operator's own
+  commitment. It matches D-10.
+- **FAQ-R9. Support address.** Every `fleecedapp@gmail.com` is a `mailto:` link with an ASCII `@`,
+  checked against the same `SUPPORT_EMAIL` constant as P28 and M7.
+
+### 7b.3 Acceptance criteria
+
+- **FAQ-AC1.** `python3 qa/web/check_web_structure.py` passes, including the `FAQ-*` assertions in
+  the scope block. `faq.html` is already in the checker's `PAGES` list, so its SEO and a11y checks
+  apply to the new text.
+- **FAQ-AC2.** The new FAQ is live on Render by 11-13, in the same deploy as M7 or after it.
+- **FAQ-AC3.** From 11-18, the page has no "TestFlight", and the App Store link opens the listing.
+- **FAQ-AC4.** The extension link equals the release link `web/index.html` uses.
+- **FAQ-AC5.** No bracketed review tag and no `[APP STORE URL]` is published.
+- **FAQ-AC6.** Manual read-through on desktop and iOS Safari, before and after the flip. In the
+  app, Settings → Help & about → Help & FAQ opens the new page
+  (`mobile/src/screens/settings/sections/AboutSection.tsx:64-67`).
+- **FAQ-AC7.** Before 11-13: the operator has approved marketing §6 block I, `legal-lead` has
+  approved Q16 and Q17, and Q9's K-factors are confirmed.
+
 ## 8. Sequencing and dependencies
 
 | Item | Can start now | Blocks on | Must land before |
@@ -493,10 +715,24 @@ Each row is a **candidate** for `analytics-lead`; "appears covered" is a reading
 | **P28 copy** | — | `marketing-lead` copy; `legal-lead` reviews C3-C5; D-8, D-9 | App Store submission |
 | **BL-10** | Guard and constant can be built first | `marketing-lead` copy (§6.7); `design-lead` visuals; `ux-lead` row review (P10); D-1, D-2, D-6 | The first App Store build |
 | **M7** | Checklist work now | `legal-lead` wording; `analytics-lead` inventory (7.3, 7.4); D-11, D-12, D-13 | **App Privacy label submission** (M6(b)) and App Store submission |
+| **Q6 tour line** (§6.8) | Yes: approved, strings fixed | Nothing (operator-approved); gate-1 acceptance and waiver sign-off for its scope block | The 11-06 binary |
+| **FAQ** (§7b) | `FAQ-*` assertions; the post-launch text | Operator §6 (I); `legal-lead` on Q16/Q17; Q9's `model_config` confirmation; the pre-launch Q3 variant (copy gap); pricing-line placement; `head-eng`'s flip mechanism | Live 11-13 with M7; Q3 flips 11-18 |
 
 All three are App Store launch MUST or support items. P28 and BL-10 should share one review pass for
 the address, since both put it in front of users. M7-R3 should land after P28's address is live, or
 in the same deploy.
+
+**Launch dates** (`head-product`, citing `launch-plan-1118.md`, 2026-10-23):
+
+- **Launch: Wed 2026-11-18.**
+- **Fri 2026-11-06: the binary is feature-complete.** Every in-app copy row lands by then: BL-10,
+  including f1.alt and D-1(b), and Q6.
+- **Fri 2026-11-13: the privacy and terms pages (M7) and the FAQ deploy,** effective 2026-11-18.
+  P28's contact page is live the same day. An 11-18 effective date satisfies M7-AC3 (on or after
+  the date the text ships).
+- **2026-11-07 to 2026-11-09:** the operator runs the TestFlight checklists.
+- **Launch-day flips follow 2026-11-18,** not marketing's older 2026-11-06. That covers the FAQ's
+  App Store line (FAQ-R3), alongside `IOS_INSTALL_URL` and the `m4.348.*` rows.
 
 ## 9. Decisions needed
 
@@ -529,7 +765,23 @@ For `head-product`, with a recommendation each.
 - **D-4:** unflagged, chosen by `head-product`.
 - **D-5** (retire the FAB's App Store build exclusion): chosen by `head-product`, agreed by `head-eng`.
 - **D-10,** decided by `head-bizops`: the operator monitors fleecedapp@gmail.com; general replies go out within 2 business days; data requests are acknowledged within 2 business days and completed within 30 days (the 30 days is pending `legal-lead`'s confirmation). **Gap SUP-M7:** there is no alert for in-app feedback.
-- **Still open:** D-6 and D-7 with `ux-lead`; D-8, D-9, D-11, D-12 and D-13 with `legal-lead` via `head-bizops`; D-14 with `app-manager`.
+- **D-6 decided: hide** (`onboarding-pm`, matching marketing's f5): the Screen field is hidden and the sheet keeps sending the value, because the API still requires a non-empty `screen` (`backend/server.py:11097-11098`). `ux-lead`'s review is still owed.
+- **Q6 approved** (operator, "Q6 tour line: Yes", form 2026-10-23, relayed by `head-product`): both `n23` strings become "…We never see your password." (§6.8, legal-lead LEG-S15).
+- **P36,** `head-product`'s calls on `marketing-lead`'s launch copy batch (2026-10-23). The copy wording stays marketing's.
+  - **f1.alt ships;** f1 is not used (D-1(b) is decided and agreed by `head-eng`).
+  - **Keep f3's email line** as the way to get a reply. D-2's 403 is confirmed and the route exempted, so unverified users' notes now arrive.
+  - **Resend id reuse is optional,** "if onboarding-eng finds it cheap" (BL10-R11). Each Send mints a new id (`useFeedback.ts:152-158`); f1.alt already steers users away from resending.
+  - **FAQ ship order:** live with the new privacy and terms by 11-13, not before. This supersedes marketing §2's "only after the listing is live on 2026-11-06". Its App Store line gets a launch-day variant that flips on 11-18 alongside `IOS_INSTALL_URL`, like the `m4.348.*` rows. The pre-launch variant is a copy gap for `marketing-lead`. The flip mechanism is `head-eng`'s (FAQ-R3).
+  - **Pricing line included:** "Free to use today. Nothing in the app is for sale." (R21 #6). `marketing-lead` places it. It comes out the moment a purchase exists; `head-product` adds it to `monetization-pm`'s step-9 list (FAQ-R4).
+  - **Extension link:** the current GitHub release, if still `extension-v0.1.1`; it must match `web/index.html`'s link (FAQ-R5).
+  - **Design-lead's calls:** c4's length (the split) and the f4 chips at 320pt.
+  - **Legal review:** C2–C5 and C8 still need `legal-lead`'s review. FAQ Q16 and Q17 are `legal-lead`'s (R10 wording).
+  - **K-factors:** the FAQ's Q9 is pending a prod `model_config` read by `analytics-lead` and `models-lead`'s confirmation, via `head-bizops` (FAQ-R6).
+  - **Q18** ("Replies come within 2 business days.") is the operator's own commitment. It matches D-10.
+- **Copy rows pending operator §6 (A–I), as labelled** in the §5.4 and §6.7 adopted tables and in [faq-copy.md](faq-copy.md) (block I). `name`, `typo`, `voice` and `keep` rows are adopted without approval.
+- **Launch dates:** per `head-product` (`launch-plan-1118.md`), recorded in §8.
+- **New scope blocks need gate 1 and waiver sign-off (pending).** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md) need `head-product`'s gate-1 acceptance and the operator's sign-off on their waivers (W-Q6-1 to W-Q6-4, W-FAQ-1 to W-FAQ-3). The 2026-10-22 sign-off covers only the seven waivers it names.
+- **Still open:** D-7 with `ux-lead` (plus its reviews of D-3 and D-6); D-8, D-9, D-11, D-12 and D-13 with `legal-lead` via `head-bizops`; D-14 with `app-manager`.
 
 **Waivers** (surfaced here per the feature-scope rule; each is restated with its reason in its
 scope block):
@@ -543,18 +795,31 @@ scope block):
 | W-M7-1 | M7 §1 analytics | Static legal pages; no events. |
 | W-M7-2 | M7 §3 mobile guard, pytest, TestFlight checklist | Web-only text; the in-app rows open the web URLs, which AC7's manual step covers. |
 | W-ALL-1 | All §2 flags | None added. Doc/legal copy ships unflagged per ADR-008 (`:21-23`); the row move per D-4. |
+| W-Q6-1 | Q6 §1 analytics | No new events: two strings change in an existing beat. `n23`'s `adoptionEvent` (`sleeper_send_attempted`, `analystScript.ts:639`) is unchanged. **Pending operator sign-off.** |
+| W-Q6-2 | Q6 §2 flags | None added. The beat already sits behind `onboarding.guided_avatar` and `onboarding.guide_v2` (both `false` at `712dcbed`), which this change doesn't touch. **Pending operator sign-off.** |
+| W-Q6-3 | Q6 §3 TestFlight checklist | The tour is dark (`calcTour.ts:472`), so no build can show the beat; the evidence is a structural assertion plus a code-walk. Lapses if either tour flag is lit: a TestFlight step is then owed. **Pending operator sign-off.** |
+| W-Q6-4 | Q6 §3 pytest | No backend code. **Pending operator sign-off.** |
+| W-FAQ-1 | FAQ §1 analytics | A static page: `web/faq.html` loads no script, so there is no events SDK and no new user action to measure. **Pending operator sign-off.** |
+| W-FAQ-2 | FAQ §2 flags | None added. Lapses if `head-eng`'s 11-18 flip uses a flag; the scope block's §2 then names it. **Pending operator sign-off.** |
+| W-FAQ-3 | FAQ §3 mobile guard, pytest, TestFlight checklist | Web-only text. The app's Help & FAQ row only opens the web URL, which the manual read-through covers. **Pending operator sign-off.** |
+
+W-Q6-* and W-FAQ-* are not covered by the 2026-10-22 sign-off, which names only the seven waivers
+above them.
 
 ## 10. Handoffs
 
 | To | What |
 |---|---|
-| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. |
-| `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18). |
-| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12, D-13; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. |
+| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. Gate-1 acceptance of the two new scope blocks (Q6, FAQ). |
+| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; sign-off on W-Q6-1 to W-Q6-4 and W-FAQ-1 to W-FAQ-3. |
+| `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18): delivered 2026-10-23 and recorded in the adopted tables. Still owed for the FAQ (§7b): the **pre-launch variant** of Q3's App Store line (copy gap), and where the **pricing line** goes. |
+| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12, D-13; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4); FAQ Q16 and Q17 (§7b). |
+| `analytics-lead` / `models-lead` (via head-bizops) | Read prod `model_config` and confirm or correct the FAQ's Q9 K-factors (32 / 8 / 4) before 11-13 (FAQ-R6). |
 | `analytics-lead` | Confirm or correct every candidate in §7.3 and §7.4; publish the data inventory (P12/P18) the policy is reconciled against. |
-| `design-lead` | Mailto link styling on `contact.html` and the policy pages; the sheet's support-address line; the About row; the pill. Chalkline only. |
-| `ux-lead` | Review the row move (§6.3 BL10-R5, D-3); D-6, D-7; the inbox modal's missing close control (§6.4). |
+| `design-lead` | Mailto link styling on `contact.html` and the policy pages; the sheet's support-address line; the About row; the pill. Chalkline only. P36: c4's length (the split) and the f4 chips at 320pt. |
+| `ux-lead` | Review the row move (§6.3 BL10-R5, D-3); review D-6 (decided: hide); D-7; the inbox modal's missing close control (§6.4). |
 | `head-eng` → `onboarding-eng` | Build P28 code, BL-10 code and guard, checker assertions; retire the FAB exclusion plan (D-5); the support-address constant and the `cross-client-invariants.md` row; confirm D-1 and D-2. |
+| `head-eng` → `onboarding-eng` (added 2026-10-23) | The Q6 strings and their assertion (§6.8); the FAQ build and the 11-18 flip mechanism (§7b); at build, **confirm the extension release is still `extension-v0.1.1`** and that the FAQ links the same release as `web/index.html`; BL10-R11 if cheap. |
 | `app-manager` / `release-lead` | Support URL and support email in App Store Connect (D-14); App Privacy submission after M7 (M7-AC6); a build number for the BL-10 TestFlight checklist. |
 | `head-bizops` | D-9, D-10, D-11 routing. |
 
