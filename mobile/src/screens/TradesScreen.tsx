@@ -15,6 +15,8 @@ import {
   Share,
   Keyboard,
   KeyboardAvoidingView,
+  AccessibilityInfo,
+  findNodeHandle,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -95,6 +97,7 @@ import {
   type AssetIdea,
   type SwipeSignal,
   type StandingOffer,
+  type GenerateBody,
   type PagedTradeCard,
   type PagedTradeJobSnapshot,
 } from '../api/trades';
@@ -464,6 +467,30 @@ function tradePackageKey(c: TradeCard): string {
   ].join('|');
 }
 
+// ── 200 ms path, U1 (ux-lead "U1: the in-place reveal") ────────────────
+// The landing's canvas Find a Trade fetches page 1 BEFORE it pushes
+// `TradeDeck`, and hands it over on the `resultsPush` param. The pushed
+// instance reads it ONCE, in its useState initializers, so when the page
+// holds cards its first frame is the complete first card: no idle card, no
+// "Looking for trades…", no progress strip, no skeleton. A page that holds
+// none yet (a gate miss: the job is still building) is adopted too, so the
+// pushed deck pages the SAME job in its honest wait instead of starting a
+// second one. Errored or finished-empty pages are never adopted: the pushed
+// deck then dispatches its own search exactly as before.
+type FirstPageHandoff = { request: GenerateBody; snapshot: PagedTradeJobSnapshot };
+function adoptablePage(s: PagedTradeJobSnapshot): boolean {
+  return isPagedEnvelope(s) && s.status !== 'error'
+    && (s.cards.length > 0 || s.status === 'running');
+}
+function adoptedFirstPage(route: any): FirstPageHandoff | null {
+  const fp = route?.params?.resultsPush?.firstPage as FirstPageHandoff | undefined;
+  return fp && adoptablePage(fp.snapshot) ? fp : null;
+}
+// How long the landing holds the tap for page 1 before pushing without it.
+// The 200 ms budget makes the page the tap's feedback (design-lead U1.3); past
+// three budgets a pushed deck in its honest wait state beats a frozen builder.
+// Tunable for trades-pm / ux-lead.
+const FIRST_PAGE_PUSH_DEADLINE_MS = 600;
 // Failed next-page requests retried silently before the loop rests (the
 // U3 3b error state's Try again restarts it).
 const MAX_SILENT_PAGE_FAILURES = 6;
@@ -471,6 +498,18 @@ const MAX_SILENT_PAGE_FAILURES = 6;
 // offline state (U3 rows 3a/5) reads it rather than a second listener.
 const subscribeOnline = (cb: () => void) => onlineManager.subscribe(cb);
 const readOnline = () => onlineManager.isOnline();
+
+// VoiceOver label for the fronted card's header (ux-lead U1): partner, give,
+// get, verdict — in TradeValueBar's own verdict words.
+function tradeA11ySummary(card: TradeCard): string {
+  const names = (ps: Player[]) => ps.map((p) => p.name).join(', ') || 'nothing';
+  const verdict = card.favors === 'receive' ? ' You win.'
+    : card.favors === 'give' ? ' They win.'
+    : card.favors === 'even' ? ' Even.'
+    : '';
+  return `Trade with ${card.opponent_username}. You give ${names(card.give_players)}.`
+    + ` You get ${names(card.receive_players)}.${verdict}`;
+}
 
 export default function TradesScreen({ navigation, route }: any) {
   const queryClient = useQueryClient();
@@ -614,7 +653,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // restored by the hydrate below; nobody's stored value is rewritten.
   const [fairnessOn, setFairnessOn] = useState(fairnessOnFromPref(null));
   const [fairnessReady, setFairnessReady] = useState(false);
-  const [deck, setDeck] = useState<PagedTradeCard[]>([]);
+  // U1 — a pushed deck that arrived holding the landing's first page (see
+  // adoptedFirstPage). Snapshotted once; the initializers below and the two
+  // mount-time resets (the league effect, the #330 choke point) read it.
+  const [adopted] = useState(() => adoptedFirstPage(route));
+  const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
+  const [deck, setDeck] = useState<PagedTradeCard[]>(() => adopted?.snapshot.cards ?? []);
   const [deckSourcePosition, setDeckSourcePosition] = useState(0);
   const localPassSnapshot = useSyncExternalStore(subscribeLocalPasses, () => localPassSession);
   const deckProjectionRef = useRef<DispositionProjection<TradeCard>>({ cards: [], sourceIndices: [], index: 0, sourceLength: 0 });
@@ -873,7 +917,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // opponent chosen (unscoped, today's behavior).
   const [sheetOpponent, setSheetOpponent] = useState<
     { userId: string; name: string } | null
-  >(null);
+  >(() => (adopted ? route?.params?.resultsPush?.opponent ?? null : null));
   // #384 (review #7) — where THIS deck came from. Set only by consuming a
   // handoff stamped `origin:'calculator'`; it is the single signal that makes
   // the ✕ decline-reason OVERLAY legal (round-2 ruling 1: "this calculator
@@ -881,7 +925,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // switch, on the pins being emptied, on a later handoff with a different
   // origin, and on a mode-bar switch — the four ways a deck stops being the
   // one the calculator sent.
-  const [deckOrigin, setDeckOrigin] = useState<'calculator' | null>(null);
+  const [deckOrigin, setDeckOrigin] = useState<'calculator' | null>(
+    // U1 — the adopted first frame already renders the calculator deck's
+    // card (✕ → overlay); the resultsPush consumption sets the same value.
+    () => (adopted && route?.params?.resultsPush?.origin === 'calculator' ? 'calculator' : null),
+  );
   // #384 W6-B (D-153) — this deck is a FAIR-PACKAGE deck: cards came from one
   // synchronous `POST /api/trades/fair-packages` sweep around the calculator
   // canvas, not from the model's job pipeline. It is the deck-level basis
@@ -1981,7 +2029,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // (cursor, deck_id, pool_exhausted, freshness_state, …); `cards` is the
   // cumulative list delivered for this search. A legacy (cursor-less) job is
   // the server's cumulative snapshot, unchanged.
-  const [job, setJob] = useState<PagedTradeJobSnapshot | null>(null);
+  const [job, setJob] = useState<PagedTradeJobSnapshot | null>(() => adopted?.snapshot ?? null);
 
   // P0-2 — the last search's failure, or null. Set by all three failure
   // paths, cleared by every path that starts or invalidates a search.
@@ -2367,6 +2415,13 @@ export default function TradesScreen({ navigation, route }: any) {
   // stale state. (The fairness toggle handles its own reset inline.)
   // FB-47 targets are roster-specific, so they clear with the league too.
   useEffect(() => {
+    // U1 — the MOUNT run of a pushed deck that arrived holding the landing's
+    // first page keeps that page: deck and job were initialized from it so
+    // the first frame is the card, and clearing them here would blank it one
+    // frame later. Everything else below still runs; a later league switch
+    // resets the deck exactly as before.
+    const keepAdoptedPage = adoptedMountRef.current.league;
+    adoptedMountRef.current.league = false;
     // Commit any undoable pass against the OLD league before the reset,
     // and let the guard/match maps start fresh for the new one.
     flushPendingPassRef.current();
@@ -2380,11 +2435,13 @@ export default function TradesScreen({ navigation, route }: any) {
     setFairPending(false);
     setCanvasPrefill(null);
     setSheetOpponent(null);
-    setDeck([]);
-    setDeckIdx(0);
+    if (!keepAdoptedPage) {
+      setDeck([]);
+      setDeckIdx(0);
+    }
     setLaneFilter(null);
     setTradeIntent(null); // #172 — a declared shape is league-specific
-    setJob(null);
+    if (!keepAdoptedPage) setJob(null);
     setFairDeck(false); // #384 W6-B — a fair deck is canvas-specific too
     setDeckFailure(null); // P0-2 — last league's failure never follows you
     setScopedEmpty(null); // #330 — ditto for the scoped zero-result card
@@ -3316,7 +3373,15 @@ export default function TradesScreen({ navigation, route }: any) {
   const finderScopeSeen = useRef(false);
   useEffect(() => {
     if (!finderHubOn || !finderMode || !fairnessReady) return;
-    resetDeckForNewTargets();
+    // U1 — a pushed deck that ARRIVED holding the landing's first page (its
+    // model search already ran, before the push): this first gate-passing
+    // run must neither reset that page away nor dispatch the search again.
+    // It runs the auto-run branch below with the landing's request adopted
+    // in place of the dispatch (same attribution event). Later runs are
+    // unchanged.
+    const adoptedRun = adoptedMountRef.current.choke;
+    adoptedMountRef.current.choke = false;
+    if (!adoptedRun) resetDeckForNewTargets();
     // D-171 ruling 1 (2026-08-31) — the LANDING dispatches nothing under the
     // push posture: Find a Trade and forwarded handoffs push `TradeDeck`
     // (whose own instance runs this same effect with canvasHost null and
@@ -3386,7 +3451,8 @@ export default function TradesScreen({ navigation, route }: any) {
       // #402 QA round — the model-origin session for this dispatch is
       // created inside dispatchGenerate (the one session-creation site for
       // the model path), same rule as the fair branch above.
-      dispatchGenerate({});
+      if (adoptedRun) lastModelRequestRef.current = adopted?.request ?? null;
+      else dispatchGenerate({});
       // The sweep about to land IS the current prefs — don't leave the #257
       // "Preferences changed" nudge armed by the pick that triggered it
       // (handleFindTrades clears these on the manual path).
@@ -3448,6 +3514,63 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultsPushParam?.seq]);
 
+  // ── U1 — the instant route (ux-lead "U1", canvas Find a Trade) ─────────
+  // The model search's page 1 is fetched HERE, before the push, so the
+  // pushed deck (route option `animation: 'none'`) mounts with the card in
+  // hand and its first frame is the complete first card. The tap's only
+  // feedback until then is the control's pressed state (design-lead U1.3).
+  // The request is the one the pushed instance's dispatch would build from
+  // the same resultsPush payload (canvas selection, scope, fairness,
+  // intent); it becomes that deck's saved request. Past
+  // FIRST_PAGE_PUSH_DEADLINE_MS, or on a failure or a card-less page, the
+  // deck is pushed without it and searches for itself (the honest wait).
+  // A fair (anchored) search has no stored page (ux-lead U1: pinned
+  // searches aren't pre-built), so it pushes at once, as before.
+  function pushWithFirstPage(
+    fork: {
+      giveIds: string[];
+      receiveIds: string[];
+      opponent: { userId: string } | null;
+      anchor: unknown;
+    },
+    pushDeck: (firstPage?: FirstPageHandoff) => void,
+  ) {
+    // Before the fairness pref hydrates the pushed deck can't be told which
+    // threshold this page used; it searches for itself (rare, first ms).
+    if (fork.anchor || !fairnessReady) {
+      pushDeck();
+      return;
+    }
+    const request: GenerateBody = {
+      league_id: leagueId!,
+      fairness_threshold: effectiveFairness,
+      ...modelSelectionParams(
+        { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
+        { giveIds: [], receiveIds: [] },
+        targetingEnabled,
+        false,
+      ),
+      opponent_user_id: (sheetTargetingOn ? fork.opponent?.userId : undefined) || undefined,
+      trade_intent: tradeIntent ?? undefined,
+    };
+    let pushed = false;
+    const go = (firstPage?: FirstPageHandoff) => {
+      if (pushed) return;
+      pushed = true;
+      clearTimeout(deadline);
+      // The user left the landing while page 1 was on its way: no push.
+      if (!mountedRef.current || navigation?.isFocused?.() === false) {
+        resultsPushPendingRef.current = false;
+        return;
+      }
+      pushDeck(firstPage);
+    };
+    const deadline = setTimeout(() => go(), FIRST_PAGE_PUSH_DEADLINE_MS);
+    generateTrades(request, { searchId: uuidv4() })
+      .then((snapshot) => go(adoptablePage(snapshot) ? { request, snapshot } : undefined))
+      .catch(() => go());
+  }
+
   // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
   //
   // The pushed page's handler wrote a `FinderHandoff` and `popTo`'d here; on
@@ -3477,19 +3600,22 @@ export default function TradesScreen({ navigation, route }: any) {
     if (resultsPushLive) {
       resultsPushPendingRef.current = true;
       const summary = anchorSummary(opts.give);
-      navigation?.push?.('TradeDeck', {
-        mode: 'guided',
-        resultsPush: {
-          seq: Date.now(),
-          opponent: fork.opponent,
-          origin: 'calculator',
-          fairAnchor: fork.anchor,
-          canvasSelection: { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
-          ...(fairnessReady ? { fairnessOn } : {}),
-          tradeIntent,
-          anchorLabel: fork.anchor && summary ? summary : null,
-        },
-      });
+      const pushDeck = (firstPage?: FirstPageHandoff) =>
+        navigation?.push?.('TradeDeck', {
+          mode: 'guided',
+          resultsPush: {
+            seq: Date.now(),
+            opponent: fork.opponent,
+            origin: 'calculator',
+            fairAnchor: fork.anchor,
+            canvasSelection: { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
+            ...(fairnessReady ? { fairnessOn } : {}),
+            tradeIntent,
+            anchorLabel: fork.anchor && summary ? summary : null,
+            ...(firstPage ? { firstPage } : {}),
+          },
+        });
+      pushWithFirstPage(fork, pushDeck);
       return;
     }
     // The canvas's Team dropdown is the search scope, exactly as the hand-off
@@ -4354,6 +4480,26 @@ export default function TradesScreen({ navigation, route }: any) {
     ? deckEndState({ ...job, phase: pagePhase, online })
     : null;
 
+  // VoiceOver (ux-lead U1): when a search reveals its first card — the
+  // adopted first frame, or an in-place search that refilled an emptied deck
+  // — focus moves to that card's summarizing header, never staying on the
+  // control that started the search. Appends and swipes never move focus.
+  const revealFocusRef = useRef<View>(null);
+  const revealedRef = useRef(false);
+  const deckIsEmpty = deck.length === 0;
+  useEffect(() => {
+    if (deckIsEmpty) {
+      revealedRef.current = false;
+      return;
+    }
+    if (revealedRef.current || !rawTopCard) return;
+    revealedRef.current = true;
+    const t = setTimeout(() => {
+      const node = revealFocusRef.current ? findNodeHandle(revealFocusRef.current) : null;
+      if (node != null) AccessibilityInfo.setAccessibilityFocus(node);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [deckIsEmpty, rawTopCard?.trade_id]);
 
   // ── Swap suggestions (2026-07-27 player-changer) ─────────────────────
   // Operator follow-up to the calculator eveners: counter-suggestions
@@ -7833,7 +7979,9 @@ export default function TradesScreen({ navigation, route }: any) {
               lands somewhere. */}
           {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
               the live canvas host (spec §2); everywhere else, unchanged. */}
-          {job?.status === 'running' && !landingDeckRetired && (
+          {/* U1 — never above cards in hand: a paged deck with cards is
+              searching nothing the user waits on (pages append silently). */}
+          {!pagedWithCards && job?.status === 'running' && !landingDeckRetired && (
             <View testID="trades.progress-strip" style={styles.progressStrip}>
               <View style={styles.progressInfo}>
                 <ActivityIndicator color={chalk.dim} size="small" />
@@ -8030,7 +8178,7 @@ export default function TradesScreen({ navigation, route }: any) {
 
         {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
               the live canvas host (spec §2); everywhere else, unchanged. */}
-          {job?.status === 'running' && !landingDeckRetired && (
+          {!pagedWithCards && job?.status === 'running' && !landingDeckRetired && (
           <View testID="trades.progress-strip" style={styles.progressStrip}>
             <View style={styles.progressInfo}>
               <ActivityIndicator color={chalk.dim} size="small" />
@@ -8931,6 +9079,8 @@ export default function TradesScreen({ navigation, route }: any) {
                 }
                 onEditInCalculator={() => handleEditInCalculator(topCard)}
                 onRemoveAsset={handleRemoveAsset}
+                a11ySummary={tradeA11ySummary(topCard)}
+                a11ySummaryRef={revealFocusRef}
               />
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
@@ -9932,6 +10082,9 @@ interface SwipableProps {
   // swipe itself remains the tutorial; no overlay, no modal.
   nudge?: boolean;
   onFirstTouch?: () => void;
+  // 200 ms path — pass-throughs to TradeCard's summarizing header (U1 VO).
+  a11ySummary?: string;
+  a11ySummaryRef?: React.Ref<View>;
 }
 
 function SwipableTopCard({
@@ -9955,6 +10108,8 @@ function SwipableTopCard({
   shopGiveEntry,
   nudge,
   onFirstTouch,
+  a11ySummary,
+  a11ySummaryRef,
 }: SwipableProps) {
   const translateX = useSharedValue(0);
 
@@ -10053,6 +10208,8 @@ function SwipableTopCard({
           onEditInCalculator={onEditInCalculator}
           onRemoveAsset={onRemoveAsset}
           cardImpact={cardImpact}
+          a11ySummary={a11ySummary}
+          a11ySummaryRef={a11ySummaryRef}
         />
       </Animated.View>
     </GestureDetector>
