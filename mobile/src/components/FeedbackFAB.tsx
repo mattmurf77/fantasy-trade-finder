@@ -54,8 +54,8 @@ export function setPinnedBottomBarHeight(key: string, height: number) {
 }
 
 // Floating action button — sits bottom-right above the tab bar on every
-// authed screen during TestFlight. Tap opens the FeedbackSheet, pre-
-// populated with the screen name.
+// authed screen, App Store builds included (#354 D-5). Tap opens the
+// FeedbackSheet, pre-populated with the screen name.
 //
 // Mount pattern (#188): mounted once in RootNav's Main screen (covers every
 // TAB screen), plus once per root-stack push that covers Main (those cards
@@ -70,18 +70,11 @@ export function setPinnedBottomBarHeight(key: string, height: number) {
 // resolved statuses (fixed/shipped/declined) don't count — otherwise a
 // long-time tester stares at "150+" forever. The inbox LIST still shows
 // 'fixed' notes ("Fixed — in next update"); only the badge excludes them.
-//
-// Production-build exclusion (S3 PRD-01 item 3 — PLANNED, not implemented
-// here): the existing removal note lives at the RootNav mount site
-// (RootNav.tsx "Remove this <FeedbackFAB /> line…"). The durable plan is a
-// build-time gate — an EAS build-profile env (e.g. EXPO_PUBLIC_TESTFLIGHT)
-// checked at the mount site so App Store builds compile the FAB out
-// entirely rather than hiding it at runtime. That change belongs to the
-// RootNav owner + release config, not this component.
 export default function FeedbackFAB({ activeScreen, aboveTabBar = true }: Props) {
   const insets = useSafeAreaInsets();
   const items  = useFeedback((s) => s.items);
   const hydrate = useFeedback((s) => s.hydrate);
+  const retrySync = useFeedback((s) => s.retrySync);
   const refreshStatuses = useFeedback((s) => s.refreshStatuses);
   // Session gate for the authed status pull below.
   const hasToken = useSession((s) => s.hasToken);
@@ -106,11 +99,19 @@ export default function FeedbackFAB({ activeScreen, aboveTabBar = true }: Props)
     // the launch where a session already exists AND when one arrives later
     // (revalidateSession / sign-in) — hydrate() self-guards on `hydrated`,
     // so the re-run costs nothing.
-    void hydrate().then(() => {
-      if (!hasToken) return;
-      return refreshStatuses();
-    });
-  }, [hydrate, refreshStatuses, hasToken]);
+    //
+    // retrySync() between the two (#354 D-1(b)): App.tsx only retries on an
+    // AppState change to `active`, which a cold launch never fires, so a note
+    // left unsent when the app was killed would wait for the next
+    // background → foreground. It is awaited so refreshStatuses can't read
+    // /mine from before a resend lands and mark the just-sent note closed.
+    void hydrate()
+      .then(() => retrySync())
+      .then(() => {
+        if (!hasToken) return;
+        return refreshStatuses();
+      });
+  }, [hydrate, retrySync, refreshStatuses, hasToken]);
 
   useEffect(() => {
     const listener = (h: number) => setBarHeight(h);
