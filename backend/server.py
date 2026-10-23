@@ -15205,7 +15205,7 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
                      "legacy" if user_elo.get(pid) != seed_map.get(pid) else "consensus")
                for pid in user_elo}
     # Imported/copy overrides are explicit actions even without comparisons.
-    for pid in getattr(service, "_elo_overrides", {}) or {}:
+    for pid in list(getattr(service, "_elo_overrides", {}) or {}):
         if pid in placed:
             sources[pid] = "explicit"
     context = dict(
