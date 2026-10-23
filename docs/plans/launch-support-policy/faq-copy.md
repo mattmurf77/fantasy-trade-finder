@@ -1,12 +1,12 @@
 # FAQ copy — build input for `web/faq.html` (SUP-M4)
 
-**Source:** `marketing-lead-copy.md` §2 (`marketing-lead`, 2026-10-23, basis `origin/main` `712dcbed`). That file sits in the org-bringup worktree (`docs/plans/org-bringup/leads/`) and isn't tracked in git, so its text is copied here for the builder. Spec: [prd.md §7b](prd.md#7b-faq-sup-m4) · scope block: [scope-faq-sup-m4.md](scope-faq-sup-m4.md).
+**Source:** `marketing-lead-copy.md` §2 (`marketing-lead`, basis `origin/main` `712dcbed`), **source as of 2026-10-23 18:17, R22 applied (§0 item 11)**. That file sits in the org-bringup worktree (`docs/plans/org-bringup/leads/`) and isn't tracked in git, so its text is copied here for the builder. Spec: [prd.md §7b](prd.md#7b-faq-sup-m4) · scope block: [scope-faq-sup-m4.md](scope-faq-sup-m4.md).
 **Status:** DRAFT. Nothing here is built or published yet.
-**Approval:** the meaning changes are **pending operator §6 (I)**. `marketing-lead`'s §6 block I covers the answers listed under "FAQ, changes in meaning vs. today" below, including two operator commitments: Q18's "Replies come within 2 business days." (D-10) and Q16's R10 wording.
-**Legal-owned:** Q16 and Q17 are `legal-lead`'s (R10 wording).
+**Approval:** the meaning changes are **pending operator §6 (I)**. `marketing-lead`'s §6 block I covers the answers listed under "FAQ, changes in meaning vs. today" below, including two operator commitments: Q18's "Replies come within 2 business days." and Q16's R10 wording. Q18 now also states the data-request timing; both targets are **consistent with D-10**.
+**Legal-owned:** Q16 and Q17 are `legal-lead`'s (R10 wording). Q8, Q15 and Q17 carry `legal-lead`'s R22.1 edits.
 **Pending confirmation:** Q9 (the ranking answer: K-factor 32 for a matchup, 8 for a like, 4 for a pass) is **pending model_config confirmation**: `analytics-lead` reads prod `model_config` and `models-lead` confirms, via `head-bizops`.
-**Ship order (P36, `head-product`, 2026-10-23):** the FAQ goes live **with** the new Privacy Policy and Terms, by **Fri 2026-11-13**, not before. Q3's App Store line gets a launch-day variant: it flips on **Wed 2026-11-18**, alongside `IOS_INSTALL_URL` and the `m4.348.*` rows. This **supersedes** §2's line "only after the listing is live on 2026-11-06", which is kept verbatim below. Every 2026-11-06 launch-day date in the copied notes is superseded by 2026-11-18.
-**Review tags:** the bracketed tags (`[new]`, `[R10]`, `[R10 · R8]`, `[R10 · R21 #3]`) and the `[APP STORE URL]` placeholder are for review only. **They are never published.**
+**Ship order: conflict, flagged for `head-product`.** P36 (`head-product`, 2026-10-23): the FAQ goes live **with** the new Privacy Policy and Terms, by **Fri 2026-11-13**, not before, and Q3's App Store line flips on **Wed 2026-11-18**, alongside `IOS_INSTALL_URL` and the `m4.348.*` rows. Marketing's revised §2, kept verbatim below, now says the FAQ goes live "only after the app is released on the App Store (planned 2026-11-18; R22.5)", with the policy and terms allowed to go first. The spec ([prd.md §7b](prd.md#7b-faq-sup-m4), FAQ-R2) keeps P36's order until `head-product` decides.
+**Review tags:** the bracketed tags (`[new]`, `[R10]`, `[R10 · R8]`, `[R10 · R21 #3]`, `[R22.1 edit]`, `[R22.1 edit; head-eng confirms the number's scope]`, `[R22.3 / R22.4 timing]`, `[goes live only at release, 2026-11-18, with the real URL; R22.1]`) and the `[APP STORE URL]` placeholder are for review only. **They are never published.**
 **Wording:** the body of each section below is copied verbatim from the source. The one-line italic lead-ins and the "Open copy items" list are this spec's. Change no wording.
 
 ## Contents
@@ -18,7 +18,7 @@
 
 ## 2. FAQ text (verbatim, marketing §2)
 
-This is the paste-ready text for `web/faq.html`, by worker C, accepted with the §0.9 edits. Tags in brackets are for review only; don't publish them. **Go live together with `legal-lead`'s new Privacy Policy and Terms, and only after the listing is live on 2026-11-06.** Until then, keep today's FAQ.
+This is the paste-ready text for `web/faq.html`, by worker C, accepted with the §0.9 edits. Tags in brackets are for review only; don't publish them. **Go live together with `legal-lead`'s new Privacy Policy and Terms, and only after the app is released on the App Store (planned 2026-11-18; R22.5).** The policy and terms may go first. Until then, keep today's FAQ.
 
 Build notes: each blank-line paragraph is one `<p>`. Every `fleecedapp@gmail.com` is `<a href="mailto:fleecedapp@gmail.com">` with an ASCII "@" (R11, R18 build rules). "Privacy Policy" links `/privacy`; "Terms of Use" links `/terms`. Keep the first item `open`. Tags in brackets are for review only; don't publish them.
 
@@ -40,7 +40,7 @@ Sleeper also works in the desktop web app and the browser extension.
 Fleeced is not affiliated with or endorsed by any of these platforms.
 
 **Q3. Where can I use Fleeced?** (was "Is there a mobile app?")
-On iPhone: the Fleeced app on the App Store ([APP STORE URL]). Sign in with Apple, Sleeper, ESPN or MFL.
+On iPhone: the Fleeced app on the App Store ([APP STORE URL]). [goes live only at release, 2026-11-18, with the real URL; R22.1] Sign in with Apple, Sleeper, ESPN or MFL.
 
 On a computer: the web app on this site, in Chrome or Edge with the Fleeced browser extension installed. The extension is installed by hand from a release download; it isn't in the Chrome Web Store. The web app signs in with Sleeper only. ESPN and MFL leagues sign in through the iPhone app.
 
@@ -77,7 +77,7 @@ MFL: private leagues work with the MFL sign-in.
 **Q8. Can I send a trade from the app?** [new]
 Yes, on Sleeper, ESPN and MFL. Adjust any trade in the trade calculator, then send it as a real trade proposal in your league. Nothing goes out until you tap send. If you haven't signed in to that platform yet, the app asks you to first.
 
-Sending uses connections the platforms don't officially support for outside apps, so it can stop working without notice. The Terms of Use cover the details.
+Some of these connections, including Sleeper's and ESPN's, aren't officially supported for outside apps, so they can stop working without notice. The Terms of Use cover the details. [R22.1 edit]
 
 **Q9. How does the ranking system work?**
 Your board comes from your calls: three-player matchups, tier placements and reorders. Each matchup splits into head-to-head results (winner beats loser), and those feed an Elo rating, so each player's value moves relative to the rest of the pool. The more matchups a player appears in, the more settled that player's rating.
@@ -114,7 +114,7 @@ The same player is worth very different things in different scoring formats. Tie
 **Q15. Can my leaguemates see my rankings?** [R10]
 No. Your ranking list isn't shown to leaguemates. Boards are compared on the server: your board shapes which trades your leaguemates are shown. When you and a leaguemate like the same trade, it becomes a matched trade and shows for both of you.
 
-The league page can show each member's contrarian score: how far that board sits from the league's consensus overall, not which players it's high or low on.
+The league page can show each member's contrarian score: one number for how far that board sits from the league's consensus, not which players it's high or low on. [R22.1 edit; head-eng confirms the number's scope]
 
 **Q16. Is my data sold or shared?** [R10]
 We don't sell your data. We share it only with the service providers and platforms listed in our Privacy Policy, to run the app.
@@ -122,10 +122,10 @@ We don't sell your data. We share it only with the service providers and platfor
 **Q17. What data does the app keep, and how do I delete it?** [R10] (was "Privacy policy summary")
 What it needs to run: how you sign in, your leagues and rosters (including leaguemates' rosters), your rankings and trade decisions, and usage events. Passwords aren't stored. The full list, and how long each item is kept, is in the Privacy Policy.
 
-You can download a copy of your data or delete your account yourself in the app: Settings → Account & data. If you can't sign in, email fleecedapp@gmail.com from the address you'd like the reply sent to. Account data is never sent by email.
+You can download a copy of your data or delete your account yourself in the app: Settings → Account & data. If you can't sign in, email fleecedapp@gmail.com from the address you'd like the reply sent to. Account data is never sent by email. You may be asked to confirm the account is yours. [R22.1 edit]
 
 **Q18. How do I get help or report a bug?** [new]
-For anything that needs an answer, email fleecedapp@gmail.com. Replies come within 2 business days.
+For anything that needs an answer, email fleecedapp@gmail.com. Replies come within 2 business days. Data requests are acknowledged within 2 business days and completed within 30 days. [R22.3 / R22.4 timing]
 
 For bugs and ideas, use the feedback button on any screen in the app. It's one-way: replies don't come back in the app, so email if you want to hear back.
 
@@ -171,13 +171,13 @@ For bugs and ideas, use the feedback button on any screen in the app. It's one-w
 - Q16/Q17: "never share with third parties" → shared only with listed service providers and platforms (R10). Deletion and export in-app, not "see the policy".
 - I AM SPEED: removed.
 
-*The launch-day flip notes. They cover the landing page and #348, not the FAQ; the FAQ's Q3 flip follows the same pattern. Their 2026-11-06 dates are superseded by 2026-11-18.*
+*The launch-day flip notes. They cover the landing page and #348, not the FAQ; the FAQ's Q3 flip follows the same pattern.*
 
 - **Launch-day flip (M4).**
-  - `m3.web.mobile_cta` ships on 2026-11-06, not before. Until then, the TestFlight line is true.
+  - `m3.web.mobile_cta` flips at release (2026-11-18, R22.1), not before. Until then, the TestFlight line is true.
   - The heading above it (`index.html:264`, "Continue in the Fleeced app") and the platform note (`app.js:1264`) already read correctly.
   - If the official Apple badge artwork is used, "Download on the App Store" is the badge's own text.
-- **Stale §A strings from #348.** These accepted §A strings become false on 2026-11-06 and aren't on main yet: `gp.join.cta.A_ios` / `s.cta.A_ios` ("Get the iOS beta") and `gp.join.cta.A_ios_help` ("Installs through Apple's TestFlight app.").
+- **Stale §A strings from #348.** These accepted §A strings become false at release (2026-11-18) and aren't on main yet: `gp.join.cta.A_ios` / `s.cta.A_ios` ("Get the iOS beta") and `gp.join.cta.A_ios_help` ("Installs through Apple's TestFlight app.").
   - Launch-day variants: `Get the iPhone app` (≤20: 18) and helper `Opens the App Store.` (20), pointing to `[APP STORE URL]`.
   - `marketing-lead` should route these into #348 before it merges.
 
@@ -185,9 +185,11 @@ For bugs and ideas, use the feedback button on any screen in the app. It's one-w
 
 *These are this spec's, not marketing's.*
 
-1. **Pre-launch variant of Q3's App Store line: copy: marketing-lead (gap).** Marketing supplied only the post-launch text ("On iPhone: the Fleeced app on the App Store ([APP STORE URL])."). The FAQ is live from 11-13, five days before launch, so it needs a pre-launch line that is true before 11-18. The flip mechanism is `head-eng`'s.
+1. **Pre-launch Q3 text: depends on the ship order.** Marketing's revised Q3 tags its App Store sentence "goes live only at release, 2026-11-18, with the real URL" but gives no text for what Q3 says before release. Under R22.5's order (the FAQ goes live only at release), there is no pre-launch window and this item closes. Under P36's 11-13 go-live, a pre-launch line is still needed: **copy: marketing-lead (gap)**. `head-product` decides the order; the flip mechanism is `head-eng`'s.
 2. **Pricing-line placement: marketing-lead.** P36 includes R21 #6's line, verbatim: "Free to use today. Nothing in the app is for sale." `marketing-lead` places it (its §4 open question). It comes out the moment a purchase exists.
 3. **Extension link: eng confirms at build.** Q3 links the current GitHub release if it is still `extension-v0.1.1`. Today `web/index.html:170` links `https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1`; the FAQ's link must equal it.
 4. **Q9's K-factors: pending model_config confirmation** (see the header).
-5. **Q16 and Q17: legal-lead.** Marketing's §4 offers a passive alternative to Q16 for `legal-lead`'s yes or no, verbatim: "Your data isn't sold. It's shared only with the service providers and platforms listed in the Privacy Policy, to run the app." Q17 changes C4's "the address you'd like us to reply to" to "the address you'd like the reply sent to", which also needs `legal-lead`'s OK.
+5. **Q16 and Q17: legal-lead.** Q17 now carries an R22.1 edit. Marketing's §4 still offers a passive alternative to Q16 for `legal-lead`'s yes or no, verbatim: "Your data isn't sold. It's shared only with the service providers and platforms listed in the Privacy Policy, to run the app." It also still lists Q17's change of C4's "the address you'd like us to reply to" to "the address you'd like the reply sent to" for `legal-lead`'s OK.
 6. **Q11's blend values: head-product to decide.** Marketing's §4 asks `models-lead` to confirm prod `user_elo_shrink` and `placement_tier_clamp` as well as the K-factors, because Q11 describes the blend. P36 names only the K-factor answer (Q9). Whether Q11 waits on the same `model_config` read is open.
+7. **Q15's contrarian score: head-eng confirms.** Marketing's tag on Q15's R22.1 edit asks `head-eng` to confirm the scope of the "one number".
+8. **Q18: consistent with D-10.** "Replies come within 2 business days. Data requests are acknowledged within 2 business days and completed within 30 days." matches `head-bizops`'s D-10 targets. D-10's 30 days was pending `legal-lead`'s confirmation; marketing tags Q18's timing R22.3 / R22.4.

@@ -8,7 +8,9 @@
 Requirements, copy inventory and acceptance criteria: [prd.md §5](prd.md#5-p28-contact-page).
 **Copy (2026-10-23):** `marketing-lead`'s c1–c8 are recorded verbatim in the adopted table under
 [prd.md §5.4](prd.md#54-copy-inventory-copy-marketing-lead-data-request-lines-reviewed-by-legal-lead).
-All eight are pending operator §6; c2–c5 and c8 are also pending `legal-lead`'s review (P36). P28
+All eight are pending operator §6. P36 said c2–c5 and c8 also need `legal-lead`'s review; marketing's
+R22 revision marks them approved or edited per R22 (c3, c4 and c8 are legal's exact text), flagged for
+`head-product` to confirm (prd.md §9). P28
 goes live on **Fri 2026-11-13**, with the privacy and terms pages and the FAQ (prd.md §8).
 Ownership: `onboarding-pm` owns the product side of `web/contact.html` (P11) and the data-request
 lifecycle (P12). Words: `marketing-lead` via `head-product` → `head-bizops`; `legal-lead` reviews the

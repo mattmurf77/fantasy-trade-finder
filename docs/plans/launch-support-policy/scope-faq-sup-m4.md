@@ -44,9 +44,10 @@ except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes 
   - `FAQ-mailto`: every `fleecedapp@gmail.com` in `faq.html` sits inside
     `<a href="mailto:fleecedapp@gmail.com">`, written with an ASCII `@`; no U+FF20 anywhere on the
     page.
-  - `FAQ-no-review-tags`: no `[APP STORE URL]` placeholder and no bracketed review tag (`[new]`,
-    `[R10]`, `[R10 · R8]`, `[R10 · R21 #3]`; for example the regex
-    `\[(?:new|APP STORE URL|R\d[^\]]*)\]`) in the published page.
+  - `FAQ-no-review-tags`: no `[APP STORE URL]` placeholder and no bracketed review tag in the
+    published page. The R22 revision's tags are listed in [faq-copy.md](faq-copy.md)'s header
+    (`[new]`, `[R10 …]`, `[R22.1 edit …]`, `[R22.3 / R22.4 timing]`, `[goes live only at release …]`);
+    for example the regex `\[(?:new|APP STORE URL|goes live[^\]]*|R\d[^\]]*)\]`.
   - `FAQ-no-testflight` (active from the 11-18 flip): no "TestFlight" on the page. Before the flip it
     depends on the pre-launch variant, which is still a copy gap; the assertion turns on with the
     flip.
@@ -101,7 +102,10 @@ except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes 
 ## 5. Ship gate declaration
 
 - **Live by Fri 2026-11-13,** in the same deploy as the new privacy and terms pages (M7) or after
-  them, never before (FAQ-R2). **Q3 flips on Wed 2026-11-18** (FAQ-R3).
+  them, never before (FAQ-R2, per P36). **Q3 flips on Wed 2026-11-18** (FAQ-R3). Marketing's R22
+  revision says the FAQ goes live only at release (R22.5); that conflict is flagged for
+  `head-product` (prd.md §9). If R22.5's order is chosen, the 11-13 read-through (step 1) and the
+  pre-launch Q3 gap drop out.
 - **CI green:** `backend-tests` + `mobile-typecheck` + `web-structure` (with the `FAQ-*` assertions)
   + `maestro-testid-lint` (testid-lint only), all passing on the pushed sha.
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the checker run (pass count
@@ -109,7 +113,8 @@ except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes 
   standing posture) and name that evidence.
 - **Copy gates, before 11-13:** the operator has approved marketing §6 block I; `legal-lead` has
   approved Q16 and Q17; Q9's K-factors are confirmed; `marketing-lead` has supplied the pre-launch
-  Q3 variant and placed the pricing line; eng has confirmed the extension release.
+  Q3 variant (only under P36's order) and placed the pricing line; eng has confirmed the extension
+  release; `head-eng` has confirmed Q15's contrarian-score scope (FAQ-R10).
 - **Gates still owed:** `head-product`'s gate-1 acceptance of this block; the operator's sign-off on
   W-FAQ-1 to W-FAQ-3.
 - Express lane declared by the operator? **No.** Full gates.
