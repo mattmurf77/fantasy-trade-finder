@@ -10,9 +10,16 @@ ratification and release responsibilities.
 
 ## Implemented adapter
 
-`backend.eval.scorecard_evidence` uses the standard library only. It imports
-neither `backend.database` nor `backend.server`, accepts no SQL or database URL,
-reads no environment variables, and makes no provider/network calls.
+`backend.eval.scorecard_evidence` uses the standard library only, plus the
+pure standard-library codec `backend.eval.evidence_pack` to read packed
+candidate sets. It imports neither `backend.database` nor `backend.server`,
+accepts no SQL or database URL, reads no environment variables, and makes no
+provider/network calls. A packed `deck_candidate_sets` row
+(`candidates_packed`, `cand_pack_version`) reads exactly as the JSON row it
+replaces: `candidates_json` is rebuilt byte for byte and the packed columns are
+dropped, so every output is identical either way. A pack that can't be read
+leaves `candidates_json` empty, records `candidates_pack_error`, and is counted
+as `candidate_set_pack_unreadable`.
 
 | Function | Input | Result |
 |---|---|---|

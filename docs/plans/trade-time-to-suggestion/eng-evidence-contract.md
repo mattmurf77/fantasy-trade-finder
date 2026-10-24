@@ -12,6 +12,7 @@
 - [6. The pack row contract](#6-the-pack-row-contract)
 - [7. Pack version discipline](#7-pack-version-discipline)
 - [8. Reading packs, and the exclusion-rule version](#8-reading-packs-and-the-exclusion-rule-version)
+- [9. Candidate-set packing](#9-candidate-set-packing)
 - [Decisions needed](#decisions-needed)
 - [Handoffs](#handoffs)
 
@@ -296,6 +297,62 @@ Condition R2.2 (c), in `backend/eval/evidence_pack.py`:
 - `load_decks` on (A) and (B) gives identical decks, identical card dicts on every contract key (ids included), identical delivery flags and outcomes, **bit-identical scores for every registered scorer** (value_model fitted in-test, `as_of` pinned), repr-identical replay estimates, and an identical value-model refit.
 - `test_db_golden_detects_a_one_ulp_change`: one packed `base_score` moved by 1 ulp changes exactly one score and fails the golden.
 
+## 9. Candidate-set packing
+
+head-eng ruling 25, under the same gate as the deck pack. **This is separate from the deck pack:** `deck_evidence_packs` and `PACK_VERSION` 1 are frozen and unchanged.
+
+**The codec** (`backend/eval/evidence_pack.py`, pure, no I/O):
+- `pack_candidates(run, members) -> PackedCandidates(cand_pack_version, candidates_packed)` and `unpack_candidates(packed) -> (run, members)`. `CAND_PACK_VERSION = 1` has its own decoder registry, `CAND_DECODERS`, under the version discipline of §7.
+- Members are exactly what the writer builds today (`server._log_deck_signal_impressions`): `{trade_hash, partner, give, receive, base_score, in_deck}` in that key order.
+- Encoding:
+  - `trade_hash` as 8 raw bytes;
+  - `partner` as a code into a per-run dictionary;
+  - `give` and `receive` as a length plus codes into one per-run asset-id dictionary, with exact order and duplicates kept;
+  - `base_score` as float8 (an int stays an int64);
+  - `in_deck` as one bit;
+  - a 2-bit absent / null / value state per field, written only when it varies.
+- The packed value is one bytes object: `zlib(uvarint(len(header)) + header + raw)`. The header holds the version, `run`, `n`, `set_hash`, the dictionaries and a `checksum`: SHA-256 of the canonical `{header, members}`. So the run, the dictionaries, `set_hash` and every member are covered.
+- **`set_hash` is computed exactly as today** (`evidence_pack.candidate_set_hash`: SHA-256 of the sorted member `trade_hash`es joined by `|`, first 16 hex characters). It is verified on unpack.
+- `pack_candidates` refuses, with `ValueError`, anything whose unpacked `json.dumps` differs from the input's by a single byte: key order, types or values.
+
+**The storage contract** (spec for trades-eng, who owns the schema under head-eng's grant):
+
+| Column on `deck_candidate_sets` | Type | Meaning |
+|---|---|---|
+| `candidates_packed` | LargeBinary (BLOB on SQLite, BYTEA on Postgres), **nullable** | `PackedCandidates.candidates_packed`, stored verbatim |
+| `cand_pack_version` | Integer, **nullable** | `PackedCandidates.cand_pack_version`, stored verbatim |
+| `candidates_json` | Text, becomes **nullable** | Legacy rows keep it. New rows leave it NULL when packed |
+
+- **Writer:**
+  - `packed = evidence_pack.pack_candidates({"candidate_set_id": ..., "deck_job_id": ...}, members)`; store both fields, and stop writing `candidates_json` for new rows.
+  - `set_hash` and `size` are still computed and stored as today. Import `candidate_set_hash` rather than restating it.
+  - If `pack_candidates` raises `ValueError`, store `candidates_json` for that row instead (nothing is lost).
+  - Every new row is packed, even a tiny set: a 1-member set packs to 270 B against 142 B of JSON, and the absolute cost is negligible.
+- **Readers** prefer the packed column and fall back to `candidates_json` for legacy rows: `members = unpack_candidates(PackedCandidates(row.cand_pack_version, row.candidates_packed))[1] if row.candidates_packed is not None else json.loads(row.candidates_json)`. A `PackIntegrityError` is a corrupt row: refuse it like a malformed JSON row.
+  - **`backend/eval/scorecard_evidence.py` (built):** see `docs/model-evaluation/evidence-contract.md` §"Implemented adapter".
+  - **`prepared_trade_payload._candidate` and `prepared_trade_payload_v2` (trades-eng; spec only):** get `members` from the packed column when it is set. Keep every existing check on the members (exact keys, ids, `partner` text, `base_score` number, `in_deck` bool, the `trade_hash` terms, and the row's `set_hash`). Extend the key allowlist to the two new columns, and apply `MAX_CANDIDATE_BYTES` to the packed bytes and to the unpacked JSON.
+- **Deletion and export:** unchanged. It is the same row; an export carries the packed bytes, or the reader's unpacked JSON.
+
+**Tests** (`backend/tests/test_candidate_pack.py`):
+- the golden on real candidate sets: two harness trade jobs with `suggestion.telemetry` on, and the real writer's set for a 1,200-card deck with 300 over-generated members. Unpacked members equal the stored JSON byte for byte, in order, and `set_hash` is identical;
+- a 5,000-member synthetic set with duplicate and unsorted asset ids, int ids, null partners and int scores;
+- absent and null fields;
+- refusals;
+- tampering: run, either dictionary, `set_hash`, checksum, a member byte, and a forged `set_hash` with a consistent checksum;
+- unknown, mismatched and unreadable versions;
+- scorecard_evidence's full output, private records included, is identical from JSON, packed and pre-column (legacy) snapshots, and an unreadable pack is flagged.
+
+**Measured** (JSON vs packed, run metadata included):
+
+| Set | Members | JSON | Packed | Per member |
+|---|---|---|---|---|
+| Writer, 250 dealt + 50 over-generated | 300 | 47.6 KiB | **7.7 KiB (−84%)** | 162 → 26.2 B |
+| Writer, 1,200 + 300 | 1,500 | 237 KiB | 33.6 KiB (−86%) | 162 → 22.9 B |
+| Synthetic | 5,000 | 731 KiB | 92.4 KiB (−87%) | 150 → 18.9 B |
+| Harness job | 4 | 566 B | 367 B | |
+
+The ~43 KiB per pair today packs to about 7 KiB.
+
 ## Decisions needed
 
 1. **The `evidence_tier` schema** (trades-eng, under head-eng's grant). This covers:
@@ -322,5 +379,6 @@ Condition R2.2 (c), in `backend/eval/evidence_pack.py`:
   - page-store tests that call `assert_page_is_top_n` and `assert_prefix_stable`;
   - import `is_archive_deck`, `card_impression_id` and `FROZEN_INPUT_KEYS` from `backend/eval/contract.py`. Don't restate them;
   - at go-live, a PR that sets `backend/eval/data.PACK_REQUIRED_SINCE`.
-- **head-eng:** the schema grant for `evidence_tier`, `deck_evidence_packs` and the new evidence columns. The C9 ADR should cite this spec.
+- **trades-eng, candidate sets (§9):** the two new `deck_candidate_sets` columns and a nullable `candidates_json`, the writer switch with its JSON fallback, and the `prepared_trade_payload(_v2)` readers.
+- **head-eng:** the schema grant for `evidence_tier`, `deck_evidence_packs`, the `deck_candidate_sets` packed columns and the new evidence columns. The C9 ADR should cite this spec.
 - **release-lead's scribe, at merge:** the living-memory write-back (CHANGELOG and TEST_LEDGER).
