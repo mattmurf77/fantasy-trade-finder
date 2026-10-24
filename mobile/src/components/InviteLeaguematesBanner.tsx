@@ -238,11 +238,11 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
       <View style={styles.tick} />
       <View style={styles.textCol}>
         <Text style={styles.title}>
-          0 of {total} league-mates have ranked
+          0 of {total} leaguemates have ranked
         </Text>
         <Text style={type.bodySm}>
           Ideas below are fair-value estimates. Real trade matches unlock when
-          league-mates rank their players.
+          leaguemates rank their players.
         </Text>
       </View>
       {/* Composed secondary button: the chalkline Button has no
@@ -251,7 +251,7 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
         onPress={handleInvite}
         style={({ pressed }) => [styles.inviteBtn, pressed && styles.inviteBtnPressed]}
         accessibilityRole="button"
-        accessibilityLabel="Invite league-mates"
+        accessibilityLabel="Invite leaguemates"
         accessibilityState={{ busy: minting }}
       >
         {minting

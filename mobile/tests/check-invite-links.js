@@ -467,6 +467,19 @@ function runStatic() {
   check('I FR-19 web clickNotif TRADE_TYPES has referral_activated',
         !!webTrade && webTrade[1].includes("'referral_activated'"), webTrade ? webTrade[0] : 'TRADE_TYPES not found');
 
+  // J. AC-3b — the banner spells it "leaguemates" in every RENDERED string
+  //    and accessibility label (comments are not rendered and not checked).
+  const bsf = sourceOf('components/InviteLeaguematesBanner.tsx');
+  const rendered = [];
+  walk(bsf, (n) => {
+    if (ts.isJsxText(n) || ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)
+        || ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) rendered.push(n.getText(bsf));
+  });
+  const hyphenated = rendered.filter((t) => /league-mate/i.test(t));
+  eq('J AC-3b no "league-mates" in any banner string or a11y label', hyphenated, []);
+  check('J AC-3b the a11y label reads "Invite leaguemates"',
+        rendered.includes('"Invite leaguemates"'), 'accessibilityLabel changed beyond the respelling');
+
   finish();
 }
 
