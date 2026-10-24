@@ -123,6 +123,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
   - [Decline-reason Elo suppression — `ranking_service._DEFAULT_CFG`](#decline-reason-elo-suppression-ranking_service_default_cfg)
   - [Board-override pins — `ranking_service._DEFAULT_CFG`, DB-seeded](#board-override-pins-ranking_service_default_cfg-db-seeded)
   - [Forced deck regeneration — `backend/server.py`, DB-seeded](#forced-deck-regeneration-backendserverpy-db-seeded)
+  - [Paged trade responses (E2) — `backend/server.py`, DB-seeded](#paged-trade-responses-e2-backendserverpy-db-seeded)
   - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
   - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
   - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
@@ -863,6 +864,12 @@ exhibits the behaviour it is supposed to record, so the proof cannot rot.
 | Key | Default | Meaning |
 |---|---|---|
 | `force_supersedes_running` | 1.0 (**ON**) | `POST /api/trades/generate` with `force: true` **supersedes** an already-RUNNING job for the same `(user, league, format)` key and spawns a fresh one. Before 2026-08-18 the cache-hit branch honoured `force` but the in-flight branch did not, so a forced request arriving mid-generation returned the running job verbatim — same `job_id`, same minted `trade_id`s — and the forced regeneration never happened ("The deck rebuilds around it." after a Quick Set save; it did not). The job registry has **no cancellation mechanism**, so the superseded worker runs to completion but finishes *quietly*: no further snapshot publishes (`_job_live`), no `deck_impressions` rows, and no `trades_generated` event — a deck nobody was served must leave no trace in the signal corpus. It still transitions to `complete`, so a client holding the old `job_id` polls to a terminal state as before. **`0` restores the pre-2026-08-18 silent share.** |
+
+### Paged trade responses (E2) — `backend/server.py`, DB-seeded
+
+| Key | Default | Meaning |
+|---|---|---|
+| `trade_page_size` | 30.0 | Max cards in one opt-in paged response: `POST /api/trades/generate` with `page: 1`, and `GET /api/trades/status` with `cursor` ([api-reference](api-reference.md#opt-in-paged-responses-e2-2026-10-20)). Read through `_deck_cfg` and clamped to 1–200 (NaN or infinity → 30). Unpaged (legacy) requests never read it. A change takes effect on the next request after `reload_config()`; like every `model_config` row it is part of the trade request signature, so changing it also misses the in-process deck cache once. |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 
