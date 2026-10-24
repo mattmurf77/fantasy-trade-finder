@@ -30,7 +30,7 @@ import { getOnboardingState, patchOnboardingState } from '../state/useOnboarding
 import { registerGuideTarget, unregisterGuideTarget } from '../state/guideTargets';
 import { S as GUIDE } from '../components/analystScript';
 import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
-import { fetchInviteMeta } from '../api/league';
+import { fetchInviteMeta, type InviteMeta } from '../api/league';
 import { getLastUsername, getSessionToken, setLastUsername } from '../api/client';
 import { testLaunchArg } from '../utils/testRouteEntry';
 import EspnLinkSheet from '../components/EspnLinkSheet';
@@ -49,6 +49,44 @@ const TEST_APPLE_SUB = testLaunchArg('FTFTestAppleSub');
  *  carry it so RootNav can land LeaguePicker with the matching link sheet
  *  auto-opened (#130 `espnLink` / its `mflLink` twin). */
 export type EntryPlatformIntent = 'espn' | 'mfl';
+
+/** P0-3 + referral FR-11 (AC-11) — the invited banner's headline, in priority
+ *  order. `inviter` is the invite-meta response of a call that carried the
+ *  invite id `t`, else null; it is the ONLY source of an inviter display
+ *  name, so the name is always server-resolved and never read from a URL.
+ *
+ *    (a) legacy `?ref=` captured  → today's line, unchanged
+ *    (b) server named the inviter → "{name} invited you to {league | their league}"
+ *    (c) server knows `t` but can't name the inviter (expired / unknown /
+ *        league_mismatch)         → "A leaguemate invited you[ to {league}]"
+ *    (d) anything else — an older server with neither new key, no `t`, a
+ *        failed call             → today's lines, unchanged
+ *
+ *  Pure, no free variables: tests/check-signin-inviter.js lifts and runs it. */
+function inviteHeadlineFor(
+  invitedBy: string | null,
+  invitedLeagueName: string | null,
+  inviter: InviteMeta | null,
+): string | null {
+  if (invitedBy) {
+    return `@${invitedBy} invited you to ${invitedLeagueName || 'their league'} — ` +
+      "sign in and we'll take you straight there.";
+  }
+  const name = inviter?.inviter_display_name;
+  if (typeof name === 'string' && name.trim()) {
+    return `${name.trim()} invited you to ${invitedLeagueName || 'their league'} — ` +
+      "sign in and we'll take you straight there.";
+  }
+  const status = inviter?.invite_status;
+  if (status === 'expired' || status === 'unknown' || status === 'league_mismatch') {
+    return `A leaguemate invited you${invitedLeagueName ? ` to ${invitedLeagueName}` : ''} — ` +
+      "sign in and we'll take you straight there.";
+  }
+  return invitedLeagueName
+    ? `You were invited to ${invitedLeagueName} — ` +
+      "sign in and we'll take you straight there."
+    : null;
+}
 
 interface Props {
   onSignedIn: (platformIntent?: EntryPlatformIntent) => void;
@@ -225,6 +263,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   const invitedBy = useSession((s) => s.invitedBy);
   const invitedLeagueId = useSession((s) => s.invitedLeagueId);
   const invitedLeagueName = useSession((s) => s.invitedLeagueName);
+  // FR-11 — the invite id `t`, PEEKED: session init consumes it (B3), never
+  // this screen. A selector, so an id captured while SignIn is up still asks.
+  const inviteId = useSession((s) => s.inviteId);
+  // FR-11 — the response of the call that carried `t`. Component state only.
+  const [inviterMeta, setInviterMeta] = useState<InviteMeta | null>(null);
 
   // Resolve the invited league's name ONCE, for the banner. The result is
   // cached into the persisted invite intent so the LeaguePicker companion
@@ -233,26 +276,26 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // CALL SITE; adding another one turns a passing tier-1 sim run red.
   // Never throws, never blocks the form, and has no loading or error state:
   // a missing name is a copy fallback, not a failure the user should see.
+  // FR-11: with `t` it also runs when the league name is already cached (the
+  // cache holds no inviter name). The cached name is read, not a dep, so
+  // caching it from this very response never re-asks.
   useEffect(() => {
     const id = invitedLeagueId;
-    if (!id || invitedLeagueName) return;
+    if (!id || (useSession.getState().invitedLeagueName && !inviteId)) return;
+    setInviterMeta(null); // a different invite: the old answer no longer applies
     let alive = true;
-    void fetchInviteMeta(id).then((meta) => {
-      if (!alive || !meta?.league_name) return;
+    void fetchInviteMeta(id, inviteId).then((meta) => {
+      if (!alive || !meta) return;
+      if (inviteId) setInviterMeta(meta);
+      if (!meta.league_name) return;
       void useSession.getState().setInvitedLeagueName(meta.league_name);
     });
     return () => {
       alive = false;
     };
-  }, [invitedLeagueId, invitedLeagueName]);
+  }, [invitedLeagueId, inviteId]);
 
-  const inviteHeadline = invitedBy
-    ? `@${invitedBy} invited you to ${invitedLeagueName || 'their league'} — ` +
-      "sign in and we'll take you straight there."
-    : invitedLeagueName
-    ? `You were invited to ${invitedLeagueName} — ` +
-      "sign in and we'll take you straight there."
-    : null;
+  const inviteHeadline = inviteHeadlineFor(invitedBy, invitedLeagueName, inviterMeta);
 
   useEffect(() => {
     getLastUsername().then((last) => {
