@@ -421,8 +421,8 @@ since the input was last confirmed against its source of truth. Bounds are propo
 approval (Decision D5) and eng feasibility review.
 
 **How the roster bounds are met** (trades-pm decision, 2026-10-15, on platforms-pm R7):
-- Refetch on **user action**: a tap, a serve, or a deck regaining focus. That is the same posture as
-  session-init today.
+- **Refresh off the tap path (head-product P40, 2026-10-24):** the background floor refreshes the viewer's roster **off the tap path**, on app foreground, Trades focus and session-init, and **never on the search tap or the first-page serve**. That is the same user-triggered
+  posture as session-init today.
 - **No scheduled or headless server-side Sleeper roster reads beyond today's pattern** until the
   operator rules on E2 (the platform risk register, PR #345). Sleeper's published Terms, revised
   2026-10-06, bar automated access without express written consent (§11.1), as platforms-pm cites
@@ -432,7 +432,7 @@ approval (Decision D5) and eng feasibility review.
 
 | Input | Today (code) | Proposed bound at first-card display | Past the bound |
 |---|---|---|---|
-| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately. **Any roster move FTF completes (the #351 add/drop, platforms-pm K-F5) immediately triggers the viewer-roster refresh, and affected cards are withdrawn in place before they are displayed or acted on again** (K-F5 activates when #351 D1 ships; not a launch gate; #351's D1 write is post-launch per head-eng's critical-path plan, 2026-10-23) | **Refetch before display** (§5.2, exception 1). The tap counts as a gate miss, so the build keeps this roster inside the bound by refetching on user action (focus, tap, serve), never on a schedule (platforms-pm R7) |
+| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately. **Any roster move FTF completes (the #351 add/drop, platforms-pm K-F5) immediately triggers the viewer-roster refresh, and affected cards are withdrawn in place before they are displayed or acted on again** (K-F5 activates when #351 D1 ships; not a launch gate; #351's D1 write is post-launch per head-eng's critical-path plan, 2026-10-23) | **The §5.5 U2 fallback** (head-product P40, 2026-10-24; AC-L3 governs over §5.2 exception 1). To keep this roster inside the bound, the background floor refreshes the viewer's roster **off the tap path**, on app foreground, Trades focus and session-init, and **never on the search tap or the first-page serve**. It never runs on a schedule (platforms-pm R7). If the floor has failed and the roster is past its bound at tap, those cards aren't shown, the honest gate-miss state shows while the floor refreshes, and the tap counts as a gate miss |
 | **Partner rosters** | Same session-init fetch for Sleeper. `league_members` is also written by the background daemon (`server.py:22801-22835`). Headless builds read whatever is stored (G-075) | **≤ 5 min** | Serve-and-refresh. Filter against the freshest held roster; I-2 catches the rest before any action |
 | **Viewer's rankings**: trio swipes, tiers, anchors, reorder, import, outlook and prefs | Every change invalidates jobs (`server.py:10119,10183,10969,11720,11907,12262,12483,20856,21062,21141`), which forces fresh generation | **Zero tolerance:** every change made before the tap is reflected, or the deck is past-bound | Serve-and-refresh with the "updating" state. Never presented as current |
 | **Partner boards** (leaguemates' published rankings) | Member epochs fence dependent jobs (`server.py:9283-9294,9381-9384`) | Same as the viewer's rankings | Same |
@@ -464,10 +464,12 @@ is new work on every serve path, not just a constraint on a faster one.
     explanation, and if it is still valid it stays where it is;
   - historical likes and passes keep their original terms (`research-plan.md:70`).
 - **Exception 1, ownership:** a card that fails the ownership invariant is never shown, at any
-  staleness. Filtering is allowed; "show and fix later" is not. If the **viewer's** roster is past its
-  bound, it is refetched before any card is displayed. Speed never outranks "never offer an asset
-  you no longer own". Under AC-L3 that refetch is the background floor's, never the first-page
-  request's; see the §5.5 U2 fallback.
+  staleness. Filtering is allowed; "show and fix later" is not. Speed never outranks "never offer
+  an asset you no longer own".
+  - ~~If the **viewer's** roster is past its bound, it is refetched before any card is displayed.~~
+    **Superseded by head-product P40, 2026-10-24 for the viewer's roster:** AC-L3 governs. There is no refetch on
+    the search tap or the first-page serve; the §5.5 U2 fallback applies instead.
+  - What stays: I-1 and I-2 hold, and the first-page request makes no platform call (AC-L3).
 - **Exception 2, wrong math:** if the served model or config version, or the league's scoring or
   roster settings, changed since the deck was built, every card's valuation is wrong. Block: generate
   fresh, show the progress state, and count the tap as a gate miss.
@@ -665,7 +667,7 @@ is accepted (design-lead 3).
   - **With AC-L3, the tap path makes no platform call.** The §5.1 roster bounds are met by the
     background freshness floor, refreshed on user action off the tap path: app foreground, Trades
     focus and session-init (consistent with platforms-pm R7).
-  - **Fallback (reconciling §5.2 exception 1 with AC-L3):** if the floor has failed and the
+  - **Fallback (head-product P40, 2026-10-24: AC-L3 governs over §5.2 exception 1):** if the floor has failed and the
     viewer's roster is past its bound at tap, cards from that page are not shown. The honest
     gate-miss state shows while the floor's refresh completes, and the tap counts as a gate miss.
     The first-page request itself still makes no platform call.
@@ -773,7 +775,7 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 |---|---|---|---|
 | AC-L1 | **p95 ≤ 200 ms** from the tap on a search-starting control (table A, plus table B if D10 ships) to the first frame where a real card is ≥ 50% visible with Like and Pass enabled (the §4.2 clock). Measured by client telemetry on a TestFlight build. Cells: Wi-Fi and cellular × first tap and repeat tap. n ≥ 40 per cell, from at least 2 devices including the operator's. **A device-held first card counts** if it meets U2: within the freshness bounds, passing I-2, and withdrawn in place if invalidated (head-product P32). **Measurement terms (analytics-lead, launch, T1–T6):** <br>**T1:** R2 fires at exactly this frame. <br>**T2:** p95 is taken over R2 ∪ R2b, one per `search_id`, and every R2b (timeout, error, empty, abandoned) counts as above 200 ms. <br>**T3:** `cold_launch` is its own row and is not joined to first tap; AC-L7 reads `cold_launch` for accounts created that day. <br>**T4:** if the app leaves `active` between tap and card, the search ends as R2b `abandoned`, never a long R2. <br>**T5:** the AC-L1 query runs **with tester devices included** (the default `device_exclusion` would strip them and return n ≈ 0). <br>**T6:** nearest-rank p95 (the 38th-fastest at n = 40) with a 90% order-statistic CI. A point p95 ≤ 200 ms whose CI upper end is > 200 ms reads "pass, not robust", so collect more before calling it. <br>`network_type` `offline` and `unknown` stay out of the cells. Distinct `device_id` per cell proves ≥ 2 devices | **The proof is the scripted two-device session in §9.6** (organic volume is too low; §6). A: R1, R2 and R2b with the `network_type` prop, read by analytics-lead under T1–T6. Cross-check: the §9.5 readout per tap. Organic telemetry after launch is monitoring, not the gate | **Supersedes AC-3's threshold and cells** |
 | AC-L2 | No animated push or transition on the Find a trade path (U1), decided per entry point (ux-lead, launch; §4.7): an instant route (`animation: 'none'`) for the canvas, D10, hand-off and deep-link entries, and in place for in-deck searches. Back from the deck is instant too. No motion on the deck at all, including no on-load stagger (design-lead's deck exemption) | Code-walk plus a guard (`check-trade-first-card.js`: `animation: 'none'` on every search-starting route, no transition on the in-place reveal, no stagger on the deck). TF step 1: zero transition frames | **Supersedes AC-2b.** Its "short fade" option is withdrawn |
-| AC-L3 | No live Sleeper or platform call on the tap path | Code-walk, plus the server trace for the first-page request | **New.** It strengthens platforms-pm R7. §5.2 exception 1 becomes the §5.5 U2 fallback, and I-6's lineup lookup moves to the background floor |
+| AC-L3 | No live Sleeper or platform call on the tap path | Code-walk, plus the server trace for the first-page request | **New.** It strengthens platforms-pm R7. AC-L3 governs over §5.2 exception 1 (head-product P40, 2026-10-24): the §5.5 U2 fallback applies to the viewer's roster, and I-6's lineup lookup moves to the background floor |
 | AC-L4 | The next page is always ready: across all test sessions, **zero** page ends are reached without the next page already in the deck. There is no "Finding more" card in the build. The prefetch threshold is in §4.7. ux-lead's state table (§4.7) defines the outcomes: an online fetch failure at a page end (row 3b) **fails** AC-L4; offline at a page end (row 3a) is reported separately and doesn't. The P30 end card shows only when every candidate is seen and **never while a page is pending**, with no Like or Pass | G: no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when page N is fronted; the P30 card never renders while a page is pending, and renders no Like/Pass. A: R5 (pending grant). TF: the U3 three-page run and the P30 step | **New; supersedes AC-13** (strengthened) |
 | AC-L5 | Zero cards shown with an asset either side no longer owns (I-1 at display, I-2 at action). **Including after a roster move FTF itself completes** (the #351 add/drop, K-F5): the viewer-roster refresh runs immediately, and affected cards are withdrawn in place before they are displayed or acted on again | T: the roster-change fixture, plus a **backend fixture where an FTF add/drop completes and the card with the dropped player is withdrawn** (K-F5 parts activates when #351 D1 ships; not a launch gate). TF: the U2 roster-change run (steps 11, 12 and 18) and the K-F5 step (L4b, activates when #351 D1 ships; not a launch gate) | **Same as AC-5** for display; AC-6a/6b cover actions. The K-F5 fixture is new |
 | AC-L6 | Quality parity: first-page cards pass `deck.quality_filters`; Calibration integrity holds per D12 | As AC-9a to AC-9e | **Same as AC-9a to AC-9e and D12.** No new test |
@@ -793,7 +795,7 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 | AC-5 | I-1: no displayed card contains an asset its stated side doesn't own per the freshest roster held. A roster change between prepare and display, or before a deck regains focus, withdraws or filters the card before display. | T: backend test on every serve path (fresh, cached, joined, prepared) that mutates a roster after build and asserts the card is absent. TF steps 11, 12 and 18. |
 | AC-6a | **Sends** (platforms-pm R1–R5, R8). Every send on every surface (deck, match/awaiting card, calculator, team overhaul), to Sleeper, ESPN or MFL, checks ownership against the **live** platform roster at roster level (co-owners pass). MFL also checks picks; ESPN picks stay hard-blocked. A moved asset is refused with `asset_not_owned` / `counterparty_asset_not_owned` and their copy (`detail` = `message`), on the card. A failed roster read blocks the send, which is never sent unchecked. | T: backend route tests per platform with moved-asset fixtures and with read-failure fixtures (Sleeper 1010, ESPN fetch failure, MFL host), plus a file:line code-walk per path (platforms-pm evidence plan). TF step 13, in an operator-named test league only |
 | AC-6b | **Likes** (platforms-pm R2; trades-pm decision 3). A like that would create a match on a card whose asset has moved, per the freshest roster held within the §5.1 bounds (refetched if past the bound), records **no like and no match**. The card is withdrawn in place with the reason (§5.4), and its disposition is set so it isn't re-served. The calculator queue (D-170) is unchanged. | T: route tests asserting no `trade_decisions` like row, no match, a withdrawal payload and the disposition set; a regression test that the calculator queue still records. TF step 13 |
-| AC-7 | §5.1 bounds are enforced, at display and when a deck regains focus (ux-lead F-2). For each input, a deck past its bound triggers the §5.2 behavior: serve-and-refresh, refetch-before-display for the viewer's roster (exception 1), or block (exception 2). A deck within bounds serves with no freshness UI. Roster refetches happen only on user action; nothing is scheduled or headless for Sleeper (platforms-pm R7). | T: one test per input row, a focus-regain test, a block test for a model/config change and one for a league-settings change, and a guard that no scheduled job reads Sleeper rosters. TF steps 10, 15 and 16. |
+| AC-7 | §5.1 bounds are enforced, at display and when a deck regains focus (ux-lead F-2). For each input, a deck past its bound triggers the §5.2 behavior: serve-and-refresh, block (exception 2), or, for the viewer's roster, **the §5.5 U2 fallback** (head-product P40, 2026-10-24). Under that fallback, if the floor has failed and the roster is past its bound at tap, those cards aren't shown, the honest gate-miss state shows while the floor refreshes, and the tap counts as a gate miss. A deck within bounds serves with no freshness UI. Roster refetches happen only on user action; nothing is scheduled or headless for Sleeper (platforms-pm R7). | T: one test per input row, a focus-regain test, a block test for a model/config change and one for a league-settings change, and a guard that no scheduled job reads Sleeper rosters. TF steps 10, 15 and 16. |
 | AC-8 | §5.4 "updating" and withdrawn states. "Updating" shows only when serving past a bound. It meets the seven shared constraints: no layout shift, no interrupt claim, its own copy, a maximum duration then refresh-failed, controls enabled, no highlight accent, built from existing parts. The withdrawn fronted card keeps dimmed terms, replaces Like/Pass with the reason line plus "Next trade", and changes only after a swipe settles. | G: the state is driven by `freshness_state` from the payload; the updating component calls no `useInterruptSlot` and renders no Toast; the strings contain no "Searching…" and no seconds figure. TF steps 10–12 and 16–18. |
 | AC-8b | **Gate-miss wait** (ux-lead F-5). It names its real reason, makes no timing promise, and ends: on timeout it shows the error with Retry, and Back stays usable. The false "within a few seconds" copy is gone. | G: a string check on the placeholder, plus a recovery guard in the pattern of `check-win-now-recovery.js`. TF step 5 |
 | AC-8c | **Offline** (ux-lead F-6). Inside the bounds, cards may show with the refresh-failed state at once, and a match-creating like or a send fails visibly and keeps the choice. Past the viewer's roster bound, the offline state shows, with no cards. | G: a pattern of `check-swipe-failure-recovery.js` for the offline like/send. TF steps 14 and 17 |
@@ -851,8 +853,8 @@ them, models-lead's sign-off follows the two-line packet route in R.a (ii).
 - **Taxonomy:** registration and classification (R1 INTENT; R2 and R2b NON_INTENT), exact prop rows
   (`==`), and the one-of-R2/R2b invariant (analytics-lead).
 - **Stage 6:** one `trades_generated` per user-visible deck on every serve path (AC-1b).
-- **Freshness:** one test per §5.1 row, covering its §5.2 branch: serve-and-refresh,
-  refetch-before-display or block.
+- **Freshness:** one test per §5.1 row, covering its §5.2 branch: serve-and-refresh, the §5.5 U2
+  fallback (gate-miss, with no platform call on the tap; P40) or block.
 - **Ownership:** a roster mutation between prepare and serve, covering every serve path (AC-5).
 - **Action-time revalidation:** per platform write path, including team-overhaul sends, with
   moved-asset and read-failure fixtures (AC-6a); and likes on moved-asset cards (AC-6b).
@@ -1160,10 +1162,10 @@ Two facts constrain any split:
   - **Prepared inventory can't assume headless roster refresh** (trades-pm decision 6, on
     platforms-pm R7). No scheduled or headless server-side Sleeper roster reads beyond today's
     pattern until the operator rules on E2, and ESPN and MFL refetches stay user-triggered.
-  - So a prepared deck can only be as fresh as the last user-triggered roster read. The §5.1 roster
-    bounds are met by refetching on user action (tap, serve, focus), and a prepared deck whose
-    rosters are past the bound goes through §5.2: refetch first for the viewer, filter and refresh
-    for partners.
+  - So a prepared deck can only be as fresh as the last user-triggered roster read. Under head-product P40, 2026-10-24,
+    the §5.1 roster bounds are met because the background floor refreshes the viewer's roster **off the tap path**, on app foreground, Trades focus and session-init, and **never on the search tap or the first-page serve**.
+  - A prepared deck whose rosters are past the bound gets the §5.5 U2 fallback for the viewer
+    (gate-miss, never a refetch on the tap), and filter-and-refresh for partners.
 - **Precompute timing can change which offers are served**, independent of any model edit. The same
   league can yield a different deck at 3 a.m. than at tap time: rankings, values and roster changes
   in between, and the engine's wall-clock per-pair deadlines (G-065, `GOTCHAS.md:740`). That is why
@@ -1304,8 +1306,9 @@ These are **eng constraints, not product decisions**. head-eng's critical-path b
 and aligns through head-product.
 
 - **No live Sleeper or platform calls on the tap path,** with a background freshness floor
-  ("Step 0") that keeps the pre-built page inside the §5.1 bounds. This is AC-L3, and under
-  platforms-pm R7 the floor refreshes on user action, never on a schedule.
+  ("Step 0") that keeps the pre-built page inside the §5.1 bounds. This is AC-L3. Under
+  platforms-pm R7 and head-product P40, 2026-10-24, the floor refreshes on app foreground, Trades focus and
+  session-init, never on a schedule, and never on the search tap or the first-page serve.
 - **The first page is pre-built server-side** before the tap ("Option 1"): about 37 KB per
   user-league pair, instead of the whole deck. Pages 1 and 2 are built together (§4.7).
 - **No animated push.** The ~350 ms transition alone breaks the budget (AC-L2, U1).
@@ -1359,9 +1362,9 @@ Review status as of 2026-10-15, folded in. The 2026-10-20 launch revision adds t
   offline gap must not leave the user facing a wait. Only end-of-deck and offline are permitted
   outcomes; neither is "finding more".
 - **Roster freshness is capped by user action** (platforms-pm R7, pending E2). With no headless
-  Sleeper roster reads, a prepared deck is often past the roster bound by the time it's tapped. The
-  viewer-roster refetch (exception 1) then sits on the critical path more often than a scheduled
-  refresh would allow.
+  Sleeper roster reads, a prepared deck is often past the roster bound by the time it's tapped.
+  Under P40 there is no refetch on the tap, so the §5.5 U2 fallback (a gate miss) shows more often
+  than a scheduled refresh would allow.
 - **Calibration contamination** (models-lead R.b, AC-9e). A fast path changes which cards reach
   `deck_impressions`, which Calibration's current arm samples while round 3 runs to 2026-11-05.
   Without the serve-path tag and pinned sampling (or holding the fast path), the round-3 grades stop
@@ -1385,12 +1388,22 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
    pinned).
 5. **D10:** the proposal becomes ux-lead's recommendation (§4.1). It amends D-171, so it is still
    the operator's call.
-6. **Roster freshness:** met by refetch on user action. No scheduled or headless Sleeper roster reads
-   beyond today's pattern until E2 (§5.1, §10.3).
+6. **Roster freshness:** met by user-triggered refresh. No scheduled or headless Sleeper roster reads
+   beyond today's pattern until E2 (§5.1, §10.3). *Amended by head-product P40, 2026-10-24:* the refresh runs
+   off the tap path (app foreground, Trades focus, session-init), never on the search tap or the
+   first-page serve.
 7. **Send seam:** the deck (`TradesScreen`), match and awaiting cards (`TradeCard`) and the
    calculator (`InLeagueCalculator`), all through `SendInSleeperButton` (§5.3).
 8. **Dependency:** `NEXT.md` 0f (the `isdigit()` G-030 trap on the Sleeper propose route) lands before
    or with I-2 (Handoffs).
+9. **head-product P40, 2026-10-24 (recorded here).** AC-L3 governs over §5.2 exception 1. The
+   build follows AC-L3 with the §5.5 U2 fallback; head-eng asked Product to pick one, and trades-eng
+   is already building to AC-L3.
+   - The background floor refreshes the viewer's roster off the tap path, on app foreground, Trades
+     focus and session-init, never on the search tap or the first-page serve.
+   - If the floor has failed and the roster is past its bound at tap, those cards aren't shown. The
+     honest gate-miss state shows while the floor refreshes, and the tap counts as a gate miss.
+   - I-1 and I-2 still hold, and the first-page request makes no platform call.
 
 ## 14. Product calls recorded at the launch revision (trades-pm decision, 2026-10-20)
 

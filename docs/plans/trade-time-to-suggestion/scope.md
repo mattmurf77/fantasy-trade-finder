@@ -141,8 +141,8 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - taxonomy registration and classification, exact prop rows (`==`), and the one-of-R2/R2b
     invariant (analytics-lead);
   - one `trades_generated` per user-visible deck on every serve path (prd AC-1b);
-  - one freshness test per prd §5.1 row (serve-and-refresh, refetch-before-display and block
-    branches);
+  - one freshness test per prd §5.1 row (serve-and-refresh, the §5.5 U2 gate-miss fallback per
+    head-product P40, and block branches);
   - ownership-after-roster-change on every serve path (AC-5);
   - action-time revalidation: per platform send path, including team overhaul, with moved-asset and
     read-failure fixtures (prd AC-6a); likes on moved-asset cards record no like and no match
@@ -214,8 +214,8 @@ detail is in prd §5.1 and §5.3 (I-2).
 
 | Platform | Reads / writes used | Behavior: parity / honest `platform_unsupported` / fallback copy / n/a |
 |---|---|---|
-| Sleeper | **Reads:** rosters at session-init and on user action (tap, serve, focus) for the §5.1 bounds. **No scheduled or headless server-side roster reads beyond today's pattern until the operator rules on E2** (platforms-pm R7). At send, the live `_fetch_league_rosters` already runs (`server.py:19529`), so the I-2 player check needs no new call. **Writes:** propose, unchanged | **Parity.** Players are checked live at send, at roster level (co-owners pass, D-051); picks are already checked live. Refusal: `asset_not_owned` / `counterparty_asset_not_owned` with their copy; the block is reported through `sleeper_send_failed.error_code`. A failed read (Cloudflare 1010) blocks the send. Dependency: `NEXT.md` 0f, the `isdigit()` G-030 trap, lands before or with I-2 (N1) |
-| ESPN | **Reads:** DB import, refetched only when the user acts, with stored credentials. At send, the live `fetch_league` with `view=mRoster` already runs (`server.py:33133`; `espn_service.py:94`), so the check needs no new call. **Writes:** propose (players only), unchanged | **Parity for players.** Picks stay hard-blocked (`espn_pick_unsupported`). Same refusal contract. A failed read blocks the send (`docs/runbook.md` L747) |
+| Sleeper | **Reads:** rosters from the background floor, off the tap path, on session-init, app foreground and Trades focus. **Never on the search tap or the first-page serve** (head-product P40, 2026-10-24; AC-L3). **No scheduled or headless server-side roster reads beyond today's pattern until the operator rules on E2** (platforms-pm R7). At send, the live `_fetch_league_rosters` already runs (`server.py:19529`), so the I-2 player check needs no new call. **Writes:** propose, unchanged | **Parity.** Players are checked live at send, at roster level (co-owners pass, D-051); picks are already checked live. Refusal: `asset_not_owned` / `counterparty_asset_not_owned` with their copy; the block is reported through `sleeper_send_failed.error_code`. A failed read (Cloudflare 1010) blocks the send. Dependency: `NEXT.md` 0f, the `isdigit()` G-030 trap, lands before or with I-2 (N1) |
+| ESPN | **Reads:** DB import, refreshed only by the background floor on user action off the tap path (P40), with stored credentials. At send, the live `fetch_league` with `view=mRoster` already runs (`server.py:33133`; `espn_service.py:94`), so the check needs no new call. **Writes:** propose (players only), unchanged | **Parity for players.** Picks stay hard-blocked (`espn_pick_unsupported`). Same refusal contract. A failed read blocks the send (`docs/runbook.md` L747) |
 | MFL | **Reads:** **new**, one rosters export per send (`mfl_service.fetch_rosters`, `mfl_service.py:432`), including `futureDraftPicks`. Refetches are user-triggered, within 1 request per second. **Writes:** propose, unchanged | **Parity**, players and picks. Same refusal contract. A failed read (`wwwNN` hosts, `docs/runbook.md` L758) blocks the send. Dependency, not a blocker: MFL client registration (`NEXT.md`) |
 | Fleaflicker (dark) | none | **n/a:** `fleaflicker.link` is false and there is no write path |
 
