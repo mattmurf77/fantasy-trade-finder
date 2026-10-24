@@ -9,6 +9,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import Constants from 'expo-constants';
 import {
@@ -177,8 +178,21 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
         <View style={styles.sheet}>
           <View style={styles.grabber} />
           <Text style={styles.title} accessibilityRole="header">Send feedback</Text>
+          {/* f3. Only the address is tappable (design-lead #354 change 5): a
+              nested link in chalk with an underline, not ice, which the sheet
+              keeps for Send and the active chip. The Settings path stays plain
+              text, since this is a modal. */}
           <Text style={styles.sub}>
-            {`No replies here. Track each note in Settings › Help & about › Your feedback, or email ${SUPPORT_EMAIL} for a reply.`}
+            No replies here. Track each note in Settings › Help & about › Your feedback, or email{' '}
+            <Text
+              style={styles.subLink}
+              accessibilityRole="link"
+              accessibilityHint="Opens Mail"
+              onPress={() => Linking.openURL('mailto:' + SUPPORT_EMAIL)}
+            >
+              {SUPPORT_EMAIL}
+            </Text>
+            {' '}for a reply.
           </Text>
 
           <ScrollView keyboardShouldPersistTaps="handled">
@@ -292,6 +306,7 @@ const styles = StyleSheet.create({
   },
   title: { ...type.heading },
   sub:   { ...type.bodySm, marginBottom: space.md },
+  subLink: { color: chalk.base, textDecorationLine: 'underline' },
   label: { ...type.label, marginTop: space.md, marginBottom: 6 },
 
   sevRow: { flexDirection: 'row', gap: space.sm },
