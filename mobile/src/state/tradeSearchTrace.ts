@@ -85,6 +85,24 @@ const traces = new Map<string, TradeSearchTrace>();
 let pending: TradeSearchTrace | null = null;
 let searchesThisProcess = 0;
 
+// Bounded for the life of the process: each new tap drops the OLDEST settled
+// traces beyond the MAX_SETTLED_TRACES most recent (Map insertion order is
+// tap order), with their deck_buffer_empty marks. An unsettled trace is never
+// dropped: its R2/R2b is still owed.
+const MAX_SETTLED_TRACES = 20;
+function pruneSettledTraces(): void {
+  let excess = -MAX_SETTLED_TRACES;
+  for (const t of traces.values()) if (t.settled) excess += 1;
+  if (excess <= 0) return;
+  for (const [id, t] of traces) {
+    if (excess <= 0) break;
+    if (!t.settled) continue;
+    traces.delete(id);
+    bufferEmptyReported.delete(id);
+    excess -= 1;
+  }
+}
+
 /** R1 — call AT THE TAP of a search-starting control. Mints the search id,
  *  stamps the tap, emits `find_trades_tapped {source, mode, search_id}` and
  *  parks the search for the deck that will dispatch it. Returns the id. */
@@ -94,6 +112,7 @@ export function beginTradeSearch(o: {
   searchType: SearchType;
   screen: string;
 }): string {
+  pruneSettledTraces();
   // A newer tap supersedes every search still waiting for its first card.
   for (const t of traces.values()) {
     if (!t.settled) failFirstCard(t.searchId, 'abandoned');

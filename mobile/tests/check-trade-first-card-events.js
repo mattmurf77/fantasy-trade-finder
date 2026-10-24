@@ -368,5 +368,21 @@ function freshTraceWithTimers() {
       && eff.length > 0);
 }
 
+// ── 9. The trace's module state is bounded ───────────────────────────────
+{
+  const h = freshTraceWithTimers();
+  const ids = [];
+  for (let i = 0; i < 30; i += 1) ids.push(h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' }));
+  // ids[29] is open; ids[28] was still open when the 30th tap pruned, then
+  // superseded — so only settled ones were ever dropped, oldest first.
+  const kept = ids.filter((id) => h.mod.traceFor(id));
+  check('9a. EXECUTED: each tap drops the oldest SETTLED traces beyond the 20 most recent; the open one stays',
+    !h.mod.traceFor(ids[0]) && !!h.mod.traceFor(ids[29]) && h.mod.isSearchOpen(ids[29])
+      && kept.length <= 22 && kept[kept.length - 1] === ids[29] && kept.every((id, i) => i === 0 || ids.indexOf(id) > ids.indexOf(kept[i - 1])));
+  check('9b. the prune never touches an unsettled trace and drops its deck_buffer_empty mark with it',
+    /function pruneSettledTraces\(\): void \{[\s\S]*?if \(!t\.settled\) continue;\s*traces\.delete\(id\);\s*bufferEmptyReported\.delete\(id\);/.test(traceCode)
+      && /\}\): string \{\s*pruneSettledTraces\(\);/.test(traceCode));
+}
+
 console.log(failures ? `check-trade-first-card-events: ${failures} FAILED` : 'check-trade-first-card-events: all passed');
 process.exit(failures ? 1 : 0);
