@@ -110,6 +110,7 @@ reference material), not the file's last-edit date.
 | [device-side-platform-auth-prd-2026-08-12.md](device-side-platform-auth-prd-2026-08-12.md) | **active** | Device-held platform credentials. Dual-agent final, 4 rounds. Operator defaults ratified as [D-047]; ADR-011 on `main`. |
 | [device-side-platform-auth-hld-decisions-2026-08-13.md](device-side-platform-auth-hld-decisions-2026-08-13.md) | **active** | The HLD decision set for the above. Binding on `connected-rankings/`, which conforms rather than re-litigates. |
 | [pending-trades-inbox-plan-2026-08-12.md](pending-trades-inbox-plan-2026-08-12.md) | **not built** | Cross-platform pending-offer inbox (Sleeper/ESPN/MFL) as a third Matches tab. No flag exists. |
+| [generic-pick-signal-strip.md](generic-pick-signal-strip.md) | **active** | A2: generic pick rungs never take a trade Elo signal (stripped at the signal layer; no route/response change). Built on `fix/generic-pick-signal-strip`, not yet merged. Replay forward-only (5b(i)); correction is BL-003. |
 
 ### Shipped (kept for the reasoning trail)
 
