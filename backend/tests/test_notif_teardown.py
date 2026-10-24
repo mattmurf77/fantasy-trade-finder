@@ -24,10 +24,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 
+import backend.api_observability as api_obs
 import backend.database as db_module
 import backend.feature_flags as feature_flags
 import backend.server as server
+from backend import daily_tick
 from backend.database import metadata
 
 UID = "313560442465169408"
@@ -43,7 +46,10 @@ def _h(token, tz=None):
 
 @pytest.fixture()
 def client():
-    engine = create_engine("sqlite:///:memory:",
+    # StaticPool: the daily tick's steps run on its runner thread, and
+    # SQLite's default per-thread pool would hand that thread a FRESH, empty
+    # :memory: database.
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool,
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
 
@@ -222,15 +228,27 @@ def _dormant_user(days_inactive=40, now=_TICK_NOW):
 
 
 def _run_daily_tick(c, unread, now=_TICK_NOW):
+    """POST the tick (202 `{ok, started}`) and JOIN its runner thread INSIDE
+    the patches, so the pinned clock and the mocks apply to the steps.
+    Returns the push mock and the re-engagement step's counters (the
+    winback/season counters the tick response used to carry). API-event
+    capture is off for the POST: its after_request write would share the
+    StaticPool connection with the runner thread."""
     with patch.object(server, "load_all_signed_up_users",
                       MagicMock(return_value=_dormant_user(now=now))), \
          patch.object(server, "load_unread_match_count",
                       MagicMock(return_value=unread)), \
          patch.object(server, "datetime", _clock_at(now)), \
+         patch.object(api_obs, "is_enabled", lambda k: False), \
          patch.object(server, "_send_typed_push", MagicMock()) as push:
         r = c.post("/api/cron/daily-tick", headers={"X-Cron-Secret": "x"})
-    assert r.status_code == 200
-    return push, r.get_json()
+        results = daily_tick.wait(30)
+    assert r.status_code == 202
+    assert r.get_json() == {"ok": True, "started": True}
+    assert results is not None, "daily-tick run did not finish"
+    reengagement = {res.key: res for res in results}["reengagement"]
+    assert reengagement.outcome == "ok"
+    return push, reengagement.detail
 
 
 def test_season_start_fanout_on_aug25(client):
