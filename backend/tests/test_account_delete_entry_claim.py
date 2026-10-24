@@ -219,3 +219,106 @@ def test_export_for_an_unverified_entry_session_still_403(client):
     finally:
         with server._sessions_lock:
             server._sessions.pop(token, None)
+
+
+# ── Advisory (head-eng 2026-10-24): the device the MINT recorded wins ──────
+# `/api/entry/platform` stores the minting request's device id on the session
+# (sess["device_id"]); the claim-only delete then ignores whatever id its own
+# request carries, so it can't be pointed at another device's rows. Sessions
+# minted before that change have no device_id and fall back to the request's
+# body / X-Device-Id.
+
+def test_minted_device_id_wins_over_the_request_ids(client):
+    c, _, _ = client
+    token = "sess-entry-claim-minted"
+    _entry_session(token, MFL_UID)
+    server._sessions[token]["device_id"] = THIS_DEVICE
+    _seed(MFL_UID)
+    before = _events(MFL_UID)
+
+    r = _claim_delete(c, token, device=OTHER_DEVICE,
+                      body=json.dumps({"confirm": "delete", "device_id": OTHER_DEVICE}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["removed"] == {"identity_links": 1, "user_events": 2, "push_tokens": 0}
+    # The minted device's rows are gone; the device the request named is untouched.
+    assert _links(MFL_UID) == [OTHER_DEVICE]
+    assert _events(MFL_UID) == [e for e in before if e != THIS_DEVICE]
+
+
+def test_legacy_session_without_a_minted_device_falls_back_to_the_request(client):
+    c, _, _ = client
+    token = "sess-entry-claim-legacy"
+    _entry_session(token, ESPN_UID)          # no device_id: minted before the change
+    _seed(ESPN_UID)
+
+    r = _claim_delete(c, token, device=None,
+                      body=json.dumps({"confirm": "delete", "device_id": OTHER_DEVICE}))
+    assert r.status_code == 200
+    assert r.get_json()["removed"]["identity_links"] == 1
+    assert _links(ESPN_UID) == [THIS_DEVICE]
+
+
+# The real mint, on test_entry_platform_route's no-network fixtures.
+from .test_entry_platform_route import (  # noqa: E402
+    ENTRY_FLAGS, MFL_FIXTURE, MFL_LEAGUE, _fake_extension_builder,
+)
+
+
+@pytest.fixture()
+def mint_client():
+    import copy
+    from unittest.mock import patch
+    from sqlalchemy import create_engine
+    import backend.mfl_service as mfl
+    from backend.database import metadata
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    metadata.create_all(engine)
+    server.app.config["TESTING"] = True
+    with open(MFL_FIXTURE) as f:
+        bundle = json.load(f)
+    with server._sessions_lock:
+        before = set(server._sessions)
+    with patch.object(db_module, "engine", engine), \
+         patch.object(server, "is_enabled", lambda k: k in ENTRY_FLAGS), \
+         patch.object(mfl, "resolve_host", lambda *a, **kw: "www48.myfantasyleague.com"), \
+         patch.object(mfl, "fetch_league_bundle", lambda *a, **kw: copy.deepcopy(bundle)), \
+         patch.object(server, "_extension_build_session", _fake_extension_builder), \
+         patch.object(server, "_link_device_identity", lambda **kw: None):
+        try:
+            yield server.app.test_client()
+        finally:
+            with server._sessions_lock:
+                for t in set(server._sessions) - before:
+                    server._sessions.pop(t, None)
+
+
+def _mint(c, device=None):
+    headers = {"Content-Type": "application/json"}
+    if device:
+        headers["X-Device-Id"] = device
+    r = c.post("/api/entry/platform", headers=headers, data=json.dumps(
+        {"platform": "mfl", "mfl_league_id": MFL_LEAGUE, "year": 2026, "franchise_id": "0001"}))
+    assert r.status_code == 200, r.get_data(as_text=True)
+    return r.get_json()
+
+
+def test_the_mint_records_its_device_id_on_the_session(mint_client):
+    body = _mint(mint_client, device=THIS_DEVICE)
+    with server._sessions_lock:
+        assert server._sessions[body["session_token"]]["device_id"] == THIS_DEVICE
+    bare = _mint(mint_client)
+    with server._sessions_lock:
+        assert "device_id" not in server._sessions[bare["session_token"]]
+
+
+def test_minted_session_claim_delete_ignores_a_different_request_id(mint_client):
+    body = _mint(mint_client, device=THIS_DEVICE)
+    uid, token = body["user_id"], body["session_token"]
+    _seed(uid)
+
+    r = mint_client.delete("/api/account", data=CONFIRM, headers={
+        **_h(token), "X-Device-Id": OTHER_DEVICE})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert r.get_json()["deleted"] == "session_only"
+    assert _links(uid) == [OTHER_DEVICE]

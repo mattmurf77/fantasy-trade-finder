@@ -26120,6 +26120,12 @@ def entry_platform():
         log.error("entry_platform: session build failed: %s", e)
         return jsonify({"error": "session_build_failed",
                         "message": str(e)}), 500
+    # M11 advisory (head-eng 2026-10-24): remember which install minted this
+    # claim, so a later claim-only delete removes THAT device's rows and can't
+    # be pointed at another device's by a different id in its own request.
+    minted_device = _request_device_id()
+    if minted_device:
+        payload["device_id"] = minted_device
     _link_device_identity(sleeper_user_id=entry_uid)
     log.info("entry_platform: minted %s session for %s (%s)",
              platform, entry_uid, display_name)
@@ -27976,6 +27982,14 @@ def export_account_route():
     return resp
 
 
+def _request_device_id() -> str:
+    """This request's install id: body `device_id`, else the X-Device-Id
+    header — the derivation `_link_device_identity` uses. '' when neither."""
+    body = request.get_json(force=True, silent=True) or {}
+    return (str(body.get("device_id") or "").strip()
+            or (request.headers.get("X-Device-Id") or "").strip())
+
+
 def _entry_claim_delete(sess):
     """M11 minimal path (#354, head-eng's ruling 2026-10-24): "Delete account"
     for an UNVERIFIED ESPN/MFL entry session (`entry:espn:…` / `entry:mfl:…`).
@@ -27984,8 +27998,10 @@ def _entry_claim_delete(sess):
     session's user_id may be another person's account: this deletes NOTHING
     keyed only by that id. It removes what this device wrote for it — the
     identity_links row(s) and the user_events it sent, keyed by the device id
-    from the body `device_id` or the X-Device-Id header, the same derivation
-    `_link_device_identity` uses — then ends THIS session the way
+    the mint recorded on this session (`sess["device_id"]`). A session minted
+    before that was recorded falls back to the request's own id (body
+    `device_id`, else X-Device-Id, via `_request_device_id`). Then it ends
+    THIS session the way
     /api/session/signout does. With no device id it skips the rows (their
     counts are null). Push tokens: none to remove, because device_tokens is
     keyed by the Expo token, not the device, and register-device is
@@ -27999,8 +28015,8 @@ def _entry_claim_delete(sess):
         return jsonify({"error": "confirmation_required",
                         "message": "Confirm the deletion to continue."}), 400
     user_id = str(sess.get("user_id") or "")
-    device_id = (str(body.get("device_id") or "").strip()
-                 or (request.headers.get("X-Device-Id") or "").strip())
+    # The minted id wins; a body or header id is only the legacy fallback.
+    device_id = str(sess.get("device_id") or "").strip() or _request_device_id()
     removed = {"identity_links": None, "user_events": None, "push_tokens": 0}
     if device_id:
         try:
