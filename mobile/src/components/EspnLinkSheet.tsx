@@ -704,10 +704,11 @@ export default function EspnLinkSheet({
               </Text>
             ) : null}
             <Text style={[type.bodySm, styles.readOnlyNote]}>
-              ESPN leagues are read-only imports. Rankings, tiers, and trios
-              fully work today; trade features for ESPN leagues come later.
-              Draft picks aren't available from ESPN, so suggestions stay
-              players-only.
+              ESPN leagues import team names and rosters. Rankings, tiers,
+              trios and trade ideas all work. ESPN doesn't share draft picks:
+              league members can enter them in the Draft Room, and trades
+              sent to ESPN are players-only. Nothing is posted to ESPN unless
+              you sign in and send a trade you approve.
             </Text>
             <Button
               testID="espn-link.open"
