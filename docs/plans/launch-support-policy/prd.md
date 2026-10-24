@@ -4,8 +4,8 @@
 **Status:** spec, awaiting acceptance by `head-product`. Specs only: no product code is written here.
 **Author:** `launch-onboarding-pm-1`, for `onboarding-pm` (product lead, Onboarding & accounts)
 **Source:** `head-product`'s App Store launch-readiness review (2026-10-20), items **P28**, **BL-10**, **M7**
-**Base:** every `file:line` below was read at `origin/main` `678834ab`, except the 2026-10-23 additions (the adopted-copy tables in §5.4 and §6.7, §6.8 and §7b), which were read at `origin/main` `712dcbed`. The contact, feedback and Settings files those tables cite are unchanged between the two shas. Re-verify before building.
-**Scope blocks:** [P28 contact page](scope-p28-contact.md) · [BL-10 public feedback](scope-bl10-feedback.md) · [M7 policy pages](scope-m7-policy-pages.md) · [Q6 tour line](scope-q6-tour-line.md) · [FAQ, SUP-M4](scope-faq-sup-m4.md) (build input: [faq-copy.md](faq-copy.md))
+**Base:** every `file:line` below was read at `origin/main` `678834ab`, except the 2026-10-23 additions (the adopted-copy tables in §5.4 and §6.7, §6.8, §6.9 and §7b), which were read at `origin/main` `712dcbed`. The contact, feedback and Settings files those tables cite are unchanged between the two shas. Re-verify before building.
+**Scope blocks:** [P28 contact page](scope-p28-contact.md) · [BL-10 public feedback](scope-bl10-feedback.md) · [M7 policy pages](scope-m7-policy-pages.md) · [Q6 tour line](scope-q6-tour-line.md) · [FAQ, SUP-M4](scope-faq-sup-m4.md) (build input: [faq-copy.md](faq-copy.md)) · [M11 entry ownership](scope-m11-entry-ownership.md)
 
 ---
 
@@ -106,6 +106,9 @@ writes the words. Placeholders read **copy: marketing-lead** or **wording: legal
   `mobile/tests/check-*.js` guard, a file:line code-walk, and manual web and TestFlight checklists.
 - Added 2026-10-23 (P36): the Q6 tour line (§6.8) and the FAQ rewrite (§7b), each with its own
   scope block.
+- Added 2026-10-23 (`head-product`'s new launch MUST M11): ESPN/MFL entry ownership proof, so that
+  entry users can delete their account, download their data and import their league (§6.9), with
+  its own scope block.
 
 **Not in scope**
 
@@ -499,6 +502,177 @@ the §9 comment at `check-guide-script.js:425-430`, and `mobile/src/utils/CLAUDE
 **Evidence:** a structural assertion added to `check-guide-script.js` §9, plus a code-walk.
 TestFlight is waived while the tour is dark (W-Q6-3). The detail is in the scope block.
 
+### 6.9 M11: ESPN/MFL entry ownership proof: in-app deletion, data export and league import
+
+**Status:** spec. **Decision: option (e)** (`onboarding-pm`, 2026-10-23). Source: `head-product`'s
+new launch MUST M11 (2026-10-23); `legal-lead` tracks it as LEG-M5. Apple guideline 5.1.1(v) requires
+in-app deletion for every account the app creates. `legal-lead`'s D-9 email procedure is the support
+fallback, not the fix. Scope block: [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md).
+
+Everything in 6.9.1 to 6.9.4 is **code-derived** at `origin/main` `712dcbed`. How many users it
+affects needs an `analytics-lead` prod read (§10).
+
+#### 6.9.1 The gates
+
+| Fact | Where |
+|---|---|
+| Delete account and Download my data share one gate. A demo session gets 400 `demo_session`; any session without `sess["verified"]` gets 403 `verification_required`. | `backend/server.py:27931-27942`, applied at `:27959` (export) and `:27994` (delete) |
+| The write and read gates check only **this session's** `verified` flag (or a synthetic demo session). There is no account-level check: an unverified session is denied whether or not the account was ever verified. | `:2653-2660`, `:2689-2696` |
+| `users.verified_via` never authorizes anything. It feeds the account-binding conflict lookup, session_init's `verification` report and `GET /api/account`. | `:2632-2644`; `:23053-23080`; `:27731-27736` |
+| `/api/profile/visibility`: the GET is read-gated, the PUT runs the write denial, and both 404 while `profiles.user_toggle` is off (it is `false`). Because the GET is gated, the toggle row never renders for an unverified session, so its step-up never fires today. | `:26745-26746`, `:26765`, `:26756`; `config/features.json:195`; `mobile/src/screens/settings/sections/AccountDataSection.tsx:196-197` |
+| On a 403, Delete and Download show "Your account is verified, but this session isn't. Verify with your Sleeper login to …", and the only route offered is SleeperConnect. Delete shows the prompt only while `account.data_export` is on (it is `true`). | `AccountDataSection.tsx:87-100` (copy `:90-91`, route `:96`), `:129-130`, `:150`; `config/features.json:191` |
+
+#### 6.9.2 How each entry gets `verified`
+
+| Entry | Session verified? | Where |
+|---|---|---|
+| Sleeper username (`/api/extension/auth`) | No. The silent replay verifies it when this device holds a Sleeper JWT. | `server.py:25846-25871`; `mobile/src/api/auth.ts:57`, `:295-300` |
+| Sleeper login (JWT captured in SleeperConnect) | Yes: `verified_via='sleeper'`, the users marker and a durable row. The JWT's user claim must equal the session's user_id. | `server.py:19307-19310`, `:19346-19371` |
+| Apple, new (account-only `acct_*`) | Yes, at mint. | `:27529-27537` |
+| Apple, returning | Yes, but as a **new** session: a restore session for the bound user, or a new account-only one. An unverified current session is discarded first. | `:27558-27559`, `:27600-27621` |
+| ESPN entry (`entry:espn:<SWID>` or `entry:espn:<league>.t<team>`) | **No, and no route can verify it.** The import is write-gated; the credential-only store never touches `sess`. | mint `:26066-26069`, `:26110-26116`; `:28370`; `:28540-28553` |
+| MFL entry (`entry:mfl:<league>.f<franchise>`; chip, league ID or "Sign in with MFL") | **No, and no route can verify it.** The entry login (`auth_leagues`) stores nothing. `POST /api/mfl/auth-link` would verify, but it is write-gated, so only an already-verified session reaches it. | mint `:26107`; `:25970-25998`; `/api/mfl/link` gated `:31336`; auth-link gated `:31680`, verifies at `:31784-31793`; `backend/tests/test_mfl_auth_link_route.py:192` |
+| ESPN or MFL linked from Settings | Needs an already-verified session. MFL auth-link then re-stamps `users.verified_via='mfl_login'`, overwriting the earlier proof's marker. | `backend/accounts.py:435-442`; `server.py:31793` |
+| Demo | Not mintable in prod (`landing.try_before_sync` is `false`); the section renders nothing for demo. | `server.py:26792-26793`; `config/features.json:27`; `AccountDataSection.tsx:232` |
+
+Durable sessions come back verified (`server.py:2458-2459`), and only verified sessions are persisted
+(`:2342-2349`).
+
+#### 6.9.3 Who is stuck
+
+| Entry / account state | Delete / Download | Step-up |
+|---|---|---|
+| Sleeper username, unverified session (account never verified, or verified via Sleeper, Apple or MFL) | 403, then the prompt | SleeperConnect works (the JWT claim matches). The user taps Delete again afterwards. |
+| Sleeper JWT session or Apple session (verified) | succeeds | not needed |
+| ESPN entry, never verified | 403, then the prompt | **Dead end.** SleeperConnect fails with `token_user_mismatch` and shows its error state (`mobile/src/screens/SleeperConnectScreen.tsx:44-47`, `:67-73`). There is no Apple path either (6.9.5). |
+| MFL entry, never verified | 403, then the prompt | **Dead end**, as for ESPN. |
+| MFL entry created before #279 and stamped `mfl_login` (inference) | works only while its durable 90-day session lives | **Dead end** once that session is lost: re-entry mints an unverified session, and auth-link is gated. |
+
+- Entry users are stored with `account_only: true` (`mobile/src/screens/SignInScreen.tsx:148-156`), so
+  Settings hides the "Verify account" row from them
+  (`mobile/src/screens/settings/sections/AccountIdentitySection.tsx:280`). The Delete prompt still sends
+  them to SleeperConnect.
+- What a fresh entry leaves on the server: a users row named after the claimed team, written by
+  `_extension_build_session` (`server.py:25735-25740`), and a device link (`:26121`).
+- **Not traced:** whether a no-league entry user can reach Settings at all (`RootNav.tsx:453-455` sends
+  them to LeaguePicker).
+
+#### 6.9.4 New finding: entry can't import its league either
+
+Since #279 (`a927e3a7`, 2026-09-05), a fresh ESPN or MFL entry session can't import its league. The
+mint hands off to the canonical `/api/{espn,mfl}/link` import under the fresh token
+(`mobile/src/api/platformEntry.ts:15`), and both routes are write-gated (`server.py:28370`, `:31336`).
+`backend/tests/test_entry_platform_route.py:231-236` asserts the 403, and the tests reach the import
+only by hand-setting `verified=True` (`:236`, `:484-486`). The user sees "Verify your account to link a
+league." (`mobile/src/components/EspnLinkSheet.tsx:391-392`; `PlatformLinkSheet.tsx:277-278`) and has
+no way to verify. The `/api/entry/platform` docstring (`server.py:25922-25926`) and
+`docs/api-reference.md:128` still describe an "unverified-write grace" that #279 removed.
+
+This is code-derived. How many `entry:*` users are stuck needs an `analytics-lead` prod read (§10).
+
+#### 6.9.5 Proofs that exist today
+
+| Proof | Built? | Does it verify the current session today? | What M11 needs |
+|---|---|---|---|
+| Apple re-auth | Yes: `AppleAuthentication.signInAsync` then `appleSignIn` (`AccountIdentitySection.tsx:108-115`, `SignInScreen.tsx:342-354`); the server verifies the token (`server.py:27684`). | **No.** An unverified session is discarded and a different session is minted or restored (`:27558-27559`); the client adopts its token silently (`mobile/src/api/auth.ts:108-110`). For an entry user with no Apple link that is a new, empty `acct_*` account: a Delete from it would delete the wrong account and report success. | A server change (M11-R2). |
+| ESPN cookie re-capture | Yes: EspnConnect (`espn.webview_capture` true, `config/features.json:112`) and the verification oracle (`server.py:28158`). | **No.** The route is write-gated (`:28370`) and doesn't mark the session. The fallback `fan_profile` oracle is weak by its own docstring (`:28200-28207`), and SWIDs are readable from league data (`:26066`). | A server change; strong proof only (M11-R1). |
+| MFL password | Yes (`:31743-31785`). | Only for an already-verified session (`:31680`). It doesn't check that the login owns the session's franchise. | A server change: ungated for an entry session, with franchise ownership required (M11-R1). |
+
+#### 6.9.6 Requirements (decision: option (e))
+
+- **M11-R1. Verified mint for proven entries.** An entry session is minted **verified** only when the
+  entry carried real proof:
+  - **MFL:** an MFL login whose myleagues contains the claimed franchise.
+  - **ESPN:** a sign-in whose SWID owns the claimed team, proven by an authenticated, cookie-gated
+    read. The weak `fan_profile` oracle is not enough.
+
+  This fixes both import and deletion for proven entries. How the proof reaches the mint (sending the
+  login with the mint call, or a short-lived proof from the discovery call) is `head-eng`'s; the MFL
+  password stays transient, never stored or logged (`server.py:25984-25989`). If a public-league ESPN
+  user has no cookie-gated read to prove with, that entry stays claim-only (M11-R5) until `head-eng`
+  and `eng-security` name an equivalent proof.
+- **M11-R2. Step-up by identity.** The Delete / Download (and profile-toggle) step-up re-runs the
+  proof that matches the account's identity, chosen by the user-id prefix:
+  - a numeric Sleeper id → SleeperConnect;
+  - `acct_` (Apple) → an Apple re-auth that **verifies the current session's own account**. It
+    never mints or adopts a different session: today's token swap (`mobile/src/api/auth.ts:108-110`)
+    must not happen on this path. That is a server change (`server.py:27558-27559`);
+  - `entry:mfl:` → the MFL login;
+  - `entry:espn:` → the ESPN sign-in.
+
+  It is never hard-coded to SleeperConnect. A successful step-up marks the session verified the way
+  `/api/sleeper/link` does (`server.py:19346-19371`), so the user retries Delete or Download in place.
+- **M11-R3. One rule for Delete and Download:** the single `_account_data_gates`
+  (`server.py:27931-27942`). No second gate, and no route-specific exemption.
+- **M11-R4. The protection stays:** an unverified session can't delete or export. Option (d) is
+  rejected (6.9.7).
+- **M11-R5. Unproven claims** (league-ID-only entries, ownerless ESPN teams) can't prove ownership.
+  Product position:
+  - an unverified claim creates no server account data beyond its session and device link. Today the
+    mint writes a users row for every claim (`server.py:25735-25740`), so the build stops doing that
+    for an unproven claim, or defers it until proof (`head-eng` decides how);
+  - its "Delete" ends the session and removes this device's link (the `identity_links` row,
+    `backend/database.py:2172-2190`, written at `server.py:26121`), without touching an account row
+    that a real owner could hold. Sign-out already ends the session (`/api/session/signout`,
+    `:28028-28052`); no route removes a device link today, so that part is a server change;
+  - the entry flow steers users to the proven sign-in (MFL login, ESPN sign-in);
+  - `legal-lead` confirms this meets 5.1.1(v). D-9 email remains the support fallback, not the fix.
+- **M11-R6. The step-up copy names the right identity.** Today's "Your account is verified, but
+  this session isn't" (`AccountDataSection.tsx:90-91`) is wrong for never-verified accounts, and
+  "Verify with your Sleeper login" is wrong for every non-Sleeper account. Copy: marketing-lead.
+
+#### 6.9.7 Rejected options
+
+- **(a) Route the step-up by `verified_via`.** It is null for entry users, and every new proof
+  overwrites it (`backend/accounts.py:435-442`; `server.py:31793`, `:27900`). M11-R2 routes by the
+  user-id prefix instead.
+- **(b) Apple re-auth for every account with Apple linked.** Entry users can't link Apple: linking
+  needs a verified session (`server.py:27558`, `:27580-27586`). And today's Apple path swaps sessions
+  (6.9.5), which is dangerous on a delete path.
+- **(c) ESPN/MFL re-auth on its own** is folded into (e): it is M11-R2's `entry:*` routes, and on its
+  own it leaves import broken.
+- **(d) No step-up for never-verified accounts.** Entry ids are deterministic and built from public
+  data (league and franchise ids; owner SWIDs read from the league), so anyone can mint a session for
+  someone else's id (`server.py:26066-26069`, `:26107`). (d) would let them delete or export that
+  user's data, reverse #279, and break `backend/tests/test_private_session_ownership.py:18-47`
+  (`controller=None` asserts a 403 on `DELETE /api/account`).
+
+#### 6.9.8 Acceptance criteria
+
+- **M11-AC1.** A fresh MFL entry through "Sign in with MFL" gets a verified session. The import
+  returns 200, and Delete and Download succeed without a further prompt.
+- **M11-AC2.** A fresh ESPN entry through "Sign in to ESPN", with a cookie-gated read whose SWID owns
+  the claimed team, gets the same result.
+- **M11-AC3.** An unproven claim (league ID only, an ownerless ESPN team, or only the weak oracle)
+  still gets 403 on import, Delete and Download. `test_private_session_ownership.py` stays green with
+  `entry:*` ids added, and the claim writes no users row (M11-R5).
+- **M11-AC4.** The Apple step-up verifies the current session's own account, or fails. It never
+  returns or adopts a different session token.
+- **M11-AC5.** The step-up routes by user-id prefix (M11-R2), and a structural guard fails if a
+  hard-coded `navigate('SleeperConnect')` comes back.
+- **M11-AC6.** The step-up copy names the account's own sign-in (M11-R6), from `marketing-lead`.
+- **M11-AC7.** The TestFlight steps in the scope block pass on a fresh MFL-entry and a fresh
+  ESPN-entry account.
+- **M11-AC8.** CI green: `pytest backend/tests`, `tsc --noEmit`, every `mobile/tests/check-*.js`
+  (`.github/workflows/ci.yml:42-48`) and testid-lint.
+
+#### 6.9.9 Owners, size and risk
+
+- **Build:** `onboarding-eng`. The client part rides in the 11-06 binary; the server part can deploy
+  separately, and earlier.
+- **`head-eng`** allocates the server files: `/api/espn/*` and `/api/mfl/*` are Platforms', and auth
+  is cross-area.
+- **Reviews:**
+  - `platforms-pm` (P10: credential sheets and linking inside sign-in);
+  - `eng-security`, on the identity proofs;
+  - `legal-lead`: the proofs accepted for erasure and export, M11-R5, and the residual 5.1.1(v)
+    exposure;
+  - `ux-lead` (the step-up flow) and `design-lead` (the sheets).
+- **`analytics-lead`:** a prod count of stuck `entry:*` users, and of `AUTH-DENY` log lines
+  (`server.py:2657-2659`) on `/api/espn/link` and `/api/mfl/link`.
+- **Size: M.** Server about 150–250 lines plus tests; client about 100–200 lines. **Tight for the
+  11-06 binary** (flagged in §9).
+
 ## 7. M7: privacy and terms pages
 
 ### 7.1 Verified current state
@@ -676,23 +850,25 @@ at `712dcbed`.
 
 - **FAQ-R1.** The builder pastes [faq-copy.md](faq-copy.md)'s §2 text and follows its build notes.
   No agent rewrites the wording. The bracketed review tags and `[APP STORE URL]` never ship.
-- **FAQ-R2. Ship order (P36).** The FAQ goes live **with** the new privacy and terms (M7), by
-  **Fri 2026-11-13**, not before. Until then, today's FAQ stays. This supersedes marketing §2's
-  original "only after the listing is live on 2026-11-06".
-  - **Conflict, flagged for `head-product` (§9).** Marketing's R22 revision of §2 now reads "only
-    after the app is released on the App Store (planned 2026-11-18; R22.5). The policy and terms may
-    go first." That would put the new FAQ live at release, not on 11-13. This spec keeps P36's
-    order until `head-product` decides.
-- **FAQ-R3. Launch-day variants (P36).** Q3's first line ("On iPhone: the Fleeced app on the App
-  Store ([APP STORE URL]).") is the only "App Store" line in the text, and it is false before
-  launch. It ships on 11-13 in a **pre-launch variant** and flips on **Wed 2026-11-18**, alongside
-  `IOS_INSTALL_URL` and the `m4.348.*` rows (#348; `IOS_INSTALL_URL` isn't on `main` at
-  `712dcbed`). At the flip, `[APP STORE URL]` becomes the listing's real URL.
+- **FAQ-R2. Ship order (P37, `head-product`, 2026-10-23).** The FAQ goes live **with** the new
+  privacy policy and terms (M7), by **Mon 2026-11-09**, before the **Tue 2026-11-10** App Store
+  submission, and not before M7. Until then, today's FAQ stays. This supersedes P36's 11-13 date and
+  marketing §2's original "only after the listing is live on 2026-11-06".
+  - **Marketing's release-only order (R22.5) is declined.** Its §2 reads "only after the app is
+    released on the App Store (planned 2026-11-18; R22.5)". But the live FAQ says the iOS app "is in
+    TestFlight beta and not yet on the App Store" (`web/faq.html:206` at `712dcbed`), and an App
+    Store reviewer can reach the page from the app (Settings → Help & about → Help & FAQ,
+    `mobile/src/screens/settings/sections/AboutSection.tsx:64-67`).
+  - `head-product` has asked `head-eng` to move the legal-pages milestone to 11-09.
+- **FAQ-R3. Launch-day variants (P36, P37).** Q3's first line ("On iPhone: the Fleeced app on the
+  App Store ([APP STORE URL]).") is the only "App Store" line in the text, and it is false before
+  launch. It ships by 11-09 in **marketing's pre-launch variant**, which `head-bizops` is obtaining
+  (copy: marketing-lead, in progress), and flips on **Wed 2026-11-18**, alongside `IOS_INSTALL_URL`
+  and the `m4.348.*` rows (#348; `IOS_INSTALL_URL` isn't on `main` at `712dcbed`). At the flip,
+  `[APP STORE URL]` becomes the listing's real URL.
   - Marketing's R22 revision tags the sentence "[goes live only at release, 2026-11-18, with the
-    real URL; R22.1]", but still gives no text for what Q3 says before release.
-  - **The gap now depends on the ship order.** Under R22.5's order (the FAQ goes live only at
-    release), there is no pre-launch window and the gap closes. Under P36's 11-13 go-live, the
-    pre-launch variant is still **copy: marketing-lead (gap)**.
+    real URL; R22.1]", but gives no text for what Q3 says before release; that is the variant now
+    being obtained.
   - The flip mechanism is `head-eng`'s. If it uses a flag, the FAQ scope block's §2 must name it.
 - **FAQ-R4. Pricing line (P36, R21 #6).** The FAQ includes "Free to use today. Nothing in the app
   is for sale." `marketing-lead` places it (its §4 open question). It comes out the moment a
@@ -725,14 +901,14 @@ at `712dcbed`.
 - **FAQ-AC1.** `python3 qa/web/check_web_structure.py` passes, including the `FAQ-*` assertions in
   the scope block. `faq.html` is already in the checker's `PAGES` list, so its SEO and a11y checks
   apply to the new text.
-- **FAQ-AC2.** The new FAQ is live on Render by 11-13, in the same deploy as M7 or after it.
+- **FAQ-AC2.** The new FAQ is live on Render by 11-09, in the same deploy as M7 or after it.
 - **FAQ-AC3.** From 11-18, the page has no "TestFlight", and the App Store link opens the listing.
 - **FAQ-AC4.** The extension link equals the release link `web/index.html` uses.
 - **FAQ-AC5.** No bracketed review tag and no `[APP STORE URL]` is published.
 - **FAQ-AC6.** Manual read-through on desktop and iOS Safari, before and after the flip. In the
   app, Settings → Help & about → Help & FAQ opens the new page
   (`mobile/src/screens/settings/sections/AboutSection.tsx:64-67`).
-- **FAQ-AC7.** Before 11-13: the operator has approved marketing §6 block I, `legal-lead` has
+- **FAQ-AC7.** Before 11-09: the operator has approved marketing §6 block I, `legal-lead` has
   approved Q16 and Q17, and Q9's K-factors are confirmed.
 
 ## 8. Sequencing and dependencies
@@ -744,7 +920,8 @@ at `712dcbed`.
 | **BL-10** | Guard and constant can be built first | `marketing-lead` copy (§6.7); `design-lead` visuals; `ux-lead` row review (P10); D-1, D-2, D-6 | The first App Store build |
 | **M7** | Checklist work now | `legal-lead` wording; `analytics-lead` inventory (7.3, 7.4); D-11, D-12, D-13 | **App Privacy label submission** (M6(b)) and App Store submission |
 | **Q6 tour line** (§6.8) | Yes: approved, strings fixed | Nothing (operator-approved); gate-1 acceptance and waiver sign-off for its scope block | The 11-06 binary |
-| **FAQ** (§7b) | `FAQ-*` assertions; the post-launch text | Operator §6 (I); `legal-lead` on Q16/Q17; Q9's `model_config` confirmation; `head-product`'s ship-order call (P36 vs R22.5, §9), and with it the pre-launch Q3 variant; pricing-line placement; `head-eng`'s flip mechanism | Live 11-13 with M7 (P36); Q3 flips 11-18 |
+| **FAQ** (§7b) | `FAQ-*` assertions; the post-launch text | Operator §6 (I); `legal-lead` on Q16/Q17; Q9's `model_config` confirmation; marketing's pre-launch Q3 variant (via `head-bizops`, in progress); pricing-line placement; `head-eng`'s flip mechanism | Live by 11-09 with M7, before the 11-10 App Store submission (P37); Q3 flips 11-18 |
+| **M11** (§6.9) | Server design and the `eng-security` review of the proofs | `head-eng`'s server-file allocation; `platforms-pm` review; `legal-lead` on M11-R5 and the proofs; `marketing-lead` step-up copy (M11-R6); operator sign-off on W-M11-1, W-M11-2 and gate 1 | Client: the 11-06 binary. Server: can deploy before it. Size M, tight (§9) |
 
 All three are App Store launch MUST or support items. P28 and BL-10 should share one review pass for
 the address, since both put it in front of users. M7-R3 should land after P28's address is live, or
@@ -754,11 +931,15 @@ in the same deploy.
 
 - **Launch: Wed 2026-11-18.**
 - **Fri 2026-11-06: the binary is feature-complete.** Every in-app copy row lands by then: BL-10,
-  including f1.alt and D-1(b), and Q6.
-- **Fri 2026-11-13: the privacy and terms pages (M7) and the FAQ deploy,** effective 2026-11-18.
-  The FAQ's date is P36's; marketing's R22.5 note would move it to release (flagged in §9).
-  P28's contact page is live the same day. An 11-18 effective date satisfies M7-AC3 (on or after
-  the date the text ships).
+  including f1.alt and D-1(b), Q6, and M11's client part (§6.9).
+- **By Mon 2026-11-09: the privacy and terms pages (M7) and the FAQ are live** (P37,
+  `head-product`), before the App Store submission. The effective date is `legal-lead`'s; M7-AC3
+  needs it on or after the date the text ships. `head-product` has asked `head-eng` to move the
+  legal-pages milestone to 11-09; until `head-eng` moves it, `launch-plan-1118.md` still says 11-13.
+- **Tue 2026-11-10: App Store submission** (P37).
+- **Fri 2026-11-13: P28's contact page** goes live, per `launch-plan-1118.md`. The new privacy, terms
+  and FAQ link to it and to the mailto, so this spec recommends P28 also be live by 11-09; flagged
+  for `head-product` and `head-eng` (§9). The spec doesn't change P28's date.
 - **2026-11-07 to 2026-11-09:** the operator runs the TestFlight checklists.
 - **Launch-day flips follow 2026-11-18,** not marketing's older 2026-11-06. That covers the FAQ's
   App Store line (FAQ-R3), alongside `IOS_INSTALL_URL` and the `m4.348.*` rows.
@@ -788,6 +969,14 @@ For `head-product`, with a recommendation each.
 
 - **Gate 1:** `head-product` accepted this PRD and all three scope blocks at `f9762d77` on 2026-10-20 (P35).
 - **Operator waiver sign-off, 2026-10-22,** given in `head-product`'s session, verbatim: "I sign off on #354's waivers." It covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1.
+- **Operator waiver sign-off, 2026-10-23,** given in `head-product`'s session, verbatim: "I sign off on #354's new waivers (W-Q6-1 to W-Q6-4, W-FAQ-1 to W-FAQ-3)." It covers those seven waivers. It does not cover W-M11-1 or W-M11-2, which were written after it.
+- **P37,** `head-product`, 2026-10-23:
+  - **Gate 1 accepted** for [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md).
+  - **FAQ go-live:** with the new privacy policy and terms, **by Mon 2026-11-09, before the Tue 2026-11-10 App Store submission** (FAQ-R2). This supersedes P36's 11-13.
+  - **Marketing's release-only order (R22.5) is declined.** The live FAQ says "TestFlight beta" (`web/faq.html:206` at `712dcbed`), and a reviewer can reach it from the app.
+  - **Q3 uses marketing's pre-launch variant** until the 11-18 flip. `head-bizops` is obtaining it (copy: marketing-lead, in progress).
+  - `head-product` has asked `head-eng` to move the legal-pages milestone to 11-09.
+- **M11, option (e),** decided by `onboarding-pm`, 2026-10-23 (§6.9, M11-R1 to M11-R6). Options (a), (b) and (d) are rejected; (c) is folded into (e).
 - **D-1 (b)** (one `retrySync()` after the FAB's `hydrate()`): chosen by `head-product`, agreed by `head-eng`.
 - **D-2 (a)** (exempt `POST /api/feedback` from `@_gate_unverified_write`; attribute verified sessions, take the rest anonymously): `head-eng` confirmed the 403; `head-product` chose (a). **W-BL10-2 has lapsed**, so a pytest is required, and so are the `docs/api-reference.md` rows named in D-2 (`:146`, `:984`). It is an API contract change, so full gates apply.
 - **D-3:** the inbox row goes to Settings → Help & about, decided by `onboarding-pm`; pending `ux-lead`'s review.
@@ -800,7 +989,7 @@ For `head-product`, with a recommendation each.
   - **f1.alt ships;** f1 is not used (D-1(b) is decided and agreed by `head-eng`).
   - **Keep f3's email line** as the way to get a reply. D-2's 403 is confirmed and the route exempted, so unverified users' notes now arrive.
   - **Resend id reuse is optional,** "if onboarding-eng finds it cheap" (BL10-R11). Each Send mints a new id (`useFeedback.ts:152-158`); f1.alt already steers users away from resending.
-  - **FAQ ship order:** live with the new privacy and terms by 11-13, not before. This supersedes marketing §2's "only after the listing is live on 2026-11-06". Its App Store line gets a launch-day variant that flips on 11-18 alongside `IOS_INSTALL_URL`, like the `m4.348.*` rows. The pre-launch variant is a copy gap for `marketing-lead`. The flip mechanism is `head-eng`'s (FAQ-R3).
+  - **FAQ ship order:** live with the new privacy and terms by 11-13, not before. This supersedes marketing §2's "only after the listing is live on 2026-11-06". Its App Store line gets a launch-day variant that flips on 11-18 alongside `IOS_INSTALL_URL`, like the `m4.348.*` rows. The pre-launch variant is a copy gap for `marketing-lead`. The flip mechanism is `head-eng`'s (FAQ-R3). **The 11-13 date is superseded by P37 (by 11-09), and the pre-launch variant is now being obtained.**
   - **Pricing line included:** "Free to use today. Nothing in the app is for sale." (R21 #6). `marketing-lead` places it. It comes out the moment a purchase exists; `head-product` adds it to `monetization-pm`'s step-9 list (FAQ-R4).
   - **Extension link:** the current GitHub release, if still `extension-v0.1.1`; it must match `web/index.html`'s link (FAQ-R5).
   - **Design-lead's calls:** c4's length (the split) and the f4 chips at 320pt.
@@ -809,13 +998,18 @@ For `head-product`, with a recommendation each.
   - **Q18** ("Replies come within 2 business days.") is the operator's own commitment. It matches D-10.
 - **Copy rows pending operator §6 (A–I), as labelled** in the §5.4 and §6.7 adopted tables and in [faq-copy.md](faq-copy.md) (block I). `name`, `typo`, `voice` and `keep` rows are adopted without approval.
 - **Launch dates:** per `head-product` (`launch-plan-1118.md`), recorded in §8.
-- **New scope blocks need gate 1 and waiver sign-off (pending).** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md) need `head-product`'s gate-1 acceptance and the operator's sign-off on their waivers (W-Q6-1 to W-Q6-4, W-FAQ-1 to W-FAQ-3). The 2026-10-22 sign-off covers only the seven waivers it names.
+- **Scope-block gates.** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md): gate 1 accepted (P37) and waivers signed (2026-10-23). [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md): `head-product`'s gate-1 acceptance and the operator's sign-off on W-M11-1 and W-M11-2 are **pending**.
 - **Flags for `head-product` from marketing's R22 revision** (source as of 2026-10-23 18:17, R22 applied, its §0 item 11):
   - **C2–C5 and C8, legal review.** P36 said they "still need legal-lead's review". Marketing's R22 column now marks c2 and c5 "approved (R22.1)" and c3, c4 and c8 "edited per R22" (legal's exact text), and its §0.11 says "No row is pending". Confirm that legal-lead's review is done.
   - **D-8.** c2 now reads `Delete my data` "(D-8(a); R22.1)", and c8 no longer branches on D-8. That reads as legal-lead choosing D-8(a). Confirm, and D-8 leaves "Still open".
-  - **FAQ ship order.** P36 says the FAQ goes live with the new privacy and terms by 11-13. Marketing's revised §2 (R22.5) says only after release (planned 11-18), with the policy and terms allowed to go first. This spec keeps P36 until you decide. The Q3 pre-launch gap closes under R22.5's order (FAQ-R2, FAQ-R3).
+  - **FAQ ship order.** P36 says the FAQ goes live with the new privacy and terms by 11-13. Marketing's revised §2 (R22.5) says only after release (planned 11-18), with the policy and terms allowed to go first. **Resolved by P37:** live by 11-09, R22.5 declined (FAQ-R2, FAQ-R3).
   - **`r22.settings.rows` has no PRD home.** Marketing's new §1d row is a legal MUST (R22.2: LEG-M10 extended to MFL and Settings). It replaces "Read-only import: rankings, tiers, and trios work today." with legal's text, "Import a league to rank and find trades. Sending a trade needs that platform's sign-in.", at four sites: `mobile/src/screens/SettingsScreen.tsx:821`, `:846` and `mobile/src/screens/settings/sections/PlatformLinkSection.tsx:49`, `:74` (all verified at `712dcbed`). Marketing names `onboarding-eng` as the build owner. **Recommendation:** it rides in #354's 11-06 binary pass, with `platforms-pm`'s review, because `PlatformLinkSection` is Platforms' (P17). `head-product` decides; it is not folded into this spec's tables or scope blocks.
-- **Still open:** D-7 with `ux-lead` (plus its reviews of D-3 and D-6); D-8, D-9, D-11, D-12 and D-13 with `legal-lead` via `head-bizops`; D-14 with `app-manager`.
+- **Flags for `head-product` (2026-10-23, P37 and M11):**
+  - **P28's date.** `launch-plan-1118.md` still has P28's contact page live on 11-13, but the new privacy, terms and FAQ, live by 11-09, link to it and to the mailto, and the M7 block's ordering gate wants the address live on `contact.html` first or in the same deploy. **Recommendation:** P28 also goes live by 11-09. `head-product` and `head-eng` decide; this spec doesn't change P28's date.
+  - **M11 (i): the import break is a launch MUST on its own.** Since #279 a fresh ESPN or MFL entry can't import its league (§6.9.4). The same change fixes it (M11-R1). `platforms-pm` should be told.
+  - **M11 (ii): schedule risk.** Size M (server about 150–250 lines plus tests, client about 100–200), tight for the 11-06 binary. The server part can deploy separately.
+  - **M11 (iii): M11-R5 needs `legal-lead`:** that a claim-only "Delete" (end the session, remove the device link, no account row) meets 5.1.1(v), which proofs are accepted for erasure and export, and the residual exposure for users who can't prove ownership.
+- **Still open:** D-7 with `ux-lead` (plus its reviews of D-3 and D-6); D-8, D-9, D-11, D-12 and D-13 with `legal-lead` via `head-bizops`; D-14 with `app-manager`; M11-R5 with `legal-lead`.
 
 **Waivers** (surfaced here per the feature-scope rule; each is restated with its reason in its
 scope block):
@@ -829,31 +1023,35 @@ scope block):
 | W-M7-1 | M7 §1 analytics | Static legal pages; no events. |
 | W-M7-2 | M7 §3 mobile guard, pytest, TestFlight checklist | Web-only text; the in-app rows open the web URLs, which AC7's manual step covers. |
 | W-ALL-1 | All §2 flags | None added. Doc/legal copy ships unflagged per ADR-008 (`:21-23`); the row move per D-4. |
-| W-Q6-1 | Q6 §1 analytics | No new events: two strings change in an existing beat. `n23`'s `adoptionEvent` (`sleeper_send_attempted`, `analystScript.ts:639`) is unchanged. **Pending operator sign-off.** |
-| W-Q6-2 | Q6 §2 flags | None added. The beat already sits behind `onboarding.guided_avatar` and `onboarding.guide_v2` (both `false` at `712dcbed`), which this change doesn't touch. **Pending operator sign-off.** |
-| W-Q6-3 | Q6 §3 TestFlight checklist | The tour is dark (`calcTour.ts:472`), so no build can show the beat; the evidence is a structural assertion plus a code-walk. Lapses if either tour flag is lit: a TestFlight step is then owed. **Pending operator sign-off.** |
-| W-Q6-4 | Q6 §3 pytest | No backend code. **Pending operator sign-off.** |
-| W-FAQ-1 | FAQ §1 analytics | A static page: `web/faq.html` loads no script, so there is no events SDK and no new user action to measure. **Pending operator sign-off.** |
-| W-FAQ-2 | FAQ §2 flags | None added. Lapses if `head-eng`'s 11-18 flip uses a flag; the scope block's §2 then names it. **Pending operator sign-off.** |
-| W-FAQ-3 | FAQ §3 mobile guard, pytest, TestFlight checklist | Web-only text. The app's Help & FAQ row only opens the web URL, which the manual read-through covers. **Pending operator sign-off.** |
+| W-Q6-1 | Q6 §1 analytics | No new events: two strings change in an existing beat. `n23`'s `adoptionEvent` (`sleeper_send_attempted`, `analystScript.ts:639`) is unchanged. **Signed 2026-10-23.** |
+| W-Q6-2 | Q6 §2 flags | None added. The beat already sits behind `onboarding.guided_avatar` and `onboarding.guide_v2` (both `false` at `712dcbed`), which this change doesn't touch. **Signed 2026-10-23.** |
+| W-Q6-3 | Q6 §3 TestFlight checklist | The tour is dark (`calcTour.ts:472`), so no build can show the beat; the evidence is a structural assertion plus a code-walk. Lapses if either tour flag is lit: a TestFlight step is then owed. **Signed 2026-10-23.** |
+| W-Q6-4 | Q6 §3 pytest | No backend code. **Signed 2026-10-23.** |
+| W-FAQ-1 | FAQ §1 analytics | A static page: `web/faq.html` loads no script, so there is no events SDK and no new user action to measure. **Signed 2026-10-23.** |
+| W-FAQ-2 | FAQ §2 flags | None added. Lapses if `head-eng`'s 11-18 flip uses a flag; the scope block's §2 then names it. **Signed 2026-10-23.** |
+| W-FAQ-3 | FAQ §3 mobile guard, pytest, TestFlight checklist | Web-only text. The app's Help & FAQ row only opens the web URL, which the manual read-through covers. **Signed 2026-10-23.** |
+| W-M11-1 | M11 §1 analytics | No new events. The re-auths reuse proof paths that already carry the `signin_*` funnel; that each step-up fires it is verified at build, and the waiver is reopened if one doesn't. **Pending operator sign-off.** |
+| W-M11-2 | M11 §2 flags | None added. The existing proof-path flags `mfl.auth_link` and `espn.webview_capture` act as kill switches: with one off, that entry stays claim-only. A recommendation; `head-eng` decides. **Pending operator sign-off.** |
 
-W-Q6-* and W-FAQ-* are not covered by the 2026-10-22 sign-off, which names only the seven waivers
-above them.
+W-Q6-* and W-FAQ-* are covered by the 2026-10-23 sign-off, not the 2026-10-22 one. W-M11-* are
+covered by neither.
 
 ## 10. Handoffs
 
 | To | What |
 |---|---|
-| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. Gate-1 acceptance of the two new scope blocks (Q6, FAQ). The four R22 flags in §9: the C2–C5/C8 legal review, D-8, the FAQ ship order, and a home for `r22.settings.rows`. |
-| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; sign-off on W-Q6-1 to W-Q6-4 and W-FAQ-1 to W-FAQ-3. |
-| `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18): delivered 2026-10-23 and recorded in the adopted tables. Still owed for the FAQ (§7b): the **pre-launch variant** of Q3's App Store line (copy gap, only if P36's 11-13 go-live stands), and where the **pricing line** goes. **Copy: marketing-lead (not inventoried):** type the three "§3 note" rows (contact `:68` and `:82`, inbox `:110`; new text given in its §3, no type or §6 entry) and say whether they need operator §6. |
-| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12, D-13; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4; marketing's R22 column marks them reviewed, `head-product` to confirm); FAQ Q16 and Q17 (§7b). |
-| `analytics-lead` / `models-lead` (via head-bizops) | Read prod `model_config` and confirm or correct the FAQ's Q9 K-factors (32 / 8 / 4) before 11-13 (FAQ-R6). |
-| `analytics-lead` | Confirm or correct every candidate in §7.3 and §7.4; publish the data inventory (P12/P18) the policy is reconciled against. |
-| `design-lead` | Mailto link styling on `contact.html` and the policy pages; the sheet's support-address line; the About row; the pill. Chalkline only. P36: c4's length (the split) and the f4 chips at 320pt. |
-| `ux-lead` | Review the row move (§6.3 BL10-R5, D-3); review D-6 (decided: hide); D-7; the inbox modal's missing close control (§6.4). |
+| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. Gate-1 acceptance of the M11 scope block (Q6 and FAQ were accepted in P37). The R22 flags in §9: the C2–C5/C8 legal review, D-8 and a home for `r22.settings.rows` (the FAQ ship order is resolved by P37). The 2026-10-23 flags in §9: P28's date, and M11 (i) to (iii). |
+| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; sign-off on W-M11-1 and W-M11-2 (W-Q6-* and W-FAQ-* were signed on 2026-10-23). |
+| `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18): delivered 2026-10-23 and recorded in the adopted tables. Still owed for the FAQ (§7b): the **pre-launch variant** of Q3's App Store line (in progress via `head-bizops`; needed for the 11-09 go-live, P37), and where the **pricing line** goes. M11: the step-up copy that names the account's own sign-in (M11-R6). **Copy: marketing-lead (not inventoried):** type the three "§3 note" rows (contact `:68` and `:82`, inbox `:110`; new text given in its §3, no type or §6 entry) and say whether they need operator §6. |
+| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12, D-13; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4; marketing's R22 column marks them reviewed, `head-product` to confirm); FAQ Q16 and Q17 (§7b). M11 (§6.9): which proofs are accepted for erasure and export, M11-R5, and the residual 5.1.1(v) exposure. |
+| `analytics-lead` / `models-lead` (via head-bizops) | Read prod `model_config` and confirm or correct the FAQ's Q9 K-factors (32 / 8 / 4) before 11-09 (FAQ-R6). |
+| `analytics-lead` | Confirm or correct every candidate in §7.3 and §7.4; publish the data inventory (P12/P18) the policy is reconciled against. M11: a prod count of stuck `entry:*` users, and of `AUTH-DENY` lines on `/api/espn/link` and `/api/mfl/link` (§6.9.9). |
+| `design-lead` | Mailto link styling on `contact.html` and the policy pages; the sheet's support-address line; the About row; the pill. Chalkline only. P36: c4's length (the split) and the f4 chips at 320pt. M11: the step-up sheets. |
+| `ux-lead` | Review the row move (§6.3 BL10-R5, D-3); review D-6 (decided: hide); D-7; the inbox modal's missing close control (§6.4). M11: the step-up flow (M11-R2). |
+| `platforms-pm` | M11 review (P10): the credential sheets and linking inside sign-in (§6.9). Also: ESPN and MFL entry can't import a league since #279 (§6.9.4). |
+| `eng-security` | M11 review of the identity proofs (M11-R1, M11-R2), including what counts as a cookie-gated ESPN read. |
 | `head-eng` → `onboarding-eng` | Build P28 code, BL-10 code and guard, checker assertions; retire the FAB exclusion plan (D-5); the support-address constant and the `cross-client-invariants.md` row; confirm D-1 and D-2. |
-| `head-eng` → `onboarding-eng` (added 2026-10-23) | The Q6 strings and their assertion (§6.8); the FAQ build and the 11-18 flip mechanism (§7b); at build, **confirm the extension release is still `extension-v0.1.1`** and that the FAQ links the same release as `web/index.html`; BL10-R11 if cheap; confirm the scope of FAQ Q15's contrarian score (FAQ-R10). |
+| `head-eng` → `onboarding-eng` (added 2026-10-23) | The Q6 strings and their assertion (§6.8); the FAQ build and the 11-18 flip mechanism (§7b); at build, **confirm the extension release is still `extension-v0.1.1`** and that the FAQ links the same release as `web/index.html`; BL10-R11 if cheap; confirm the scope of FAQ Q15's contrarian score (FAQ-R10). P37: move the legal-pages milestone to 11-09; decide P28's date with `head-product` (§9). M11 (§6.9): allocate the server files (`/api/espn/*` and `/api/mfl/*` are Platforms'; auth is cross-area); the client part in the 11-06 binary, the server part deployable earlier. |
 | `app-manager` / `release-lead` | Support URL and support email in App Store Connect (D-14); App Privacy submission after M7 (M7-AC6); a build number for the BL-10 TestFlight checklist. |
 | `head-bizops` | D-9, D-10, D-11 routing. |
 
@@ -873,3 +1071,12 @@ above them.
 7. **Root `CLAUDE.md` is stale on one point:** it says the `mobile/tests/check-*.js` suites "gate
    nothing yet", but `.github/workflows/ci.yml:42-48` runs every one of them in the
    `mobile-typecheck` job. A new guard is live in CI the moment the file exists.
+8. **M11's "ESPN- and MFL-entry users may be unable to delete":** confirmed, and broader. No route
+   can verify an entry session, so entry users can't import their league either (§6.9.4). The
+   step-up prompt's "Your account is verified" is also wrong for accounts that were never verified
+   (§6.9.1).
+9. **Stale "unverified-write grace":** the `/api/entry/platform` docstring (`server.py:25922-25926`)
+   and `docs/api-reference.md:128` still describe a grace path that #279 (`a927e3a7`) removed. So
+   does the auth-link comment (`server.py:31780-31783`), and `docs/data-dictionary.md:254` lists
+   `verified_via` values without `mfl_login`, which the code writes (`server.py:31785`). M11's docs
+   row fixes all of them.

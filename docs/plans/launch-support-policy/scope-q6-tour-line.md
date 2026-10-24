@@ -3,8 +3,8 @@
 **Date:** 2026-10-23
 **Entry point:** operator decision Q6 (2026-10-23) / legal-lead LEG-S15
 **Builder:** `onboarding-eng` (build, under `head-eng`). Spec by `launch-onboarding-pm-3` for `onboarding-pm`.
-**Operator sign-off on waivers:** **pending.** W-Q6-1 to W-Q6-4 are listed in [prd.md §9](prd.md#9-decisions-needed). The 2026-10-22 sign-off covers only the seven waivers it names, not these.
-**Gate 1 (`head-product` acceptance of this block):** pending.
+**Operator sign-off on waivers:** signed 2026-10-23 (operator, in head-product's session; quoted verbatim: "I sign off on #354's new waivers (W-Q6-1 to W-Q6-4, W-FAQ-1 to W-FAQ-3).").
+**Gate 1 (head-product acceptance of this block):** accepted 2026-10-23 (P37).
 
 The decision, the facts and the two strings: [prd.md §6.8](prd.md#68-q6-tour-line). **Status:
 approved (Q6, operator 2026-10-23).** The operator answered "Q6 tour line: Yes" on the 2026-10-23
@@ -110,6 +110,6 @@ D-056: no simulator, no Maestro, no screen captures.
   counts and the code-walk. `githooks/pre-push` still checks the retired simulator marker; under
   D-056 push with `FTF_SKIP_SIM_GATE=1` and name this evidence instead.
 - **TestFlight verification:** none while the tour is dark (W-Q6-3).
-- **Gates still owed:** `head-product`'s gate-1 acceptance of this block; the operator's sign-off on
-  W-Q6-1 to W-Q6-4.
+- **Gates still owed:** none on this block. Gate 1 was accepted and W-Q6-1 to W-Q6-4 were signed on
+  2026-10-23 (P37; see the header).
 - Express lane declared by the operator? **No.** Full gates.

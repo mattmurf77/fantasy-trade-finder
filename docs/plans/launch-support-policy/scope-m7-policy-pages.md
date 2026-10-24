@@ -99,6 +99,9 @@ submitted by `app-manager` / `release-lead`.
 
 ## 5. Ship gate declaration
 
+- **Live by Mon 2026-11-09** (P37, `head-product`), with the FAQ, before the Tue 2026-11-10 App
+  Store submission. The effective date is `legal-lead`'s (M7-AC3: on or after the ship date).
+  `head-product` has asked `head-eng` to move the legal-pages milestone to 11-09.
 - **CI green:** `backend-tests` + `mobile-typecheck` (with every `mobile/tests/check-*.js`) +
   `web-structure` (with the `POLICY-*` assertions) + `maestro-testid-lint` (the job name D-056 kept;
   it runs testid-lint only), all passing on the pushed sha.

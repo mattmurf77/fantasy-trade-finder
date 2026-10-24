@@ -3,8 +3,8 @@
 **Date:** 2026-10-23
 **Entry point:** SUP-M4 / marketing-lead launch copy batch / P36
 **Builder:** `onboarding-eng` (build, under `head-eng`). Spec by `launch-onboarding-pm-3` for `onboarding-pm`.
-**Operator sign-off on waivers:** **pending.** W-FAQ-1 to W-FAQ-3 are listed in [prd.md §9](prd.md#9-decisions-needed). The 2026-10-22 sign-off covers only the seven waivers it names, not these.
-**Gate 1 (`head-product` acceptance of this block):** pending.
+**Operator sign-off on waivers:** signed 2026-10-23 (operator, in head-product's session; quoted verbatim: "I sign off on #354's new waivers (W-Q6-1 to W-Q6-4, W-FAQ-1 to W-FAQ-3).").
+**Gate 1 (head-product acceptance of this block):** accepted 2026-10-23 (P37).
 
 Requirements, ship order and acceptance criteria: [prd.md §7b](prd.md#7b-faq-sup-m4). The text to
 paste, verbatim, with marketing's build notes: [faq-copy.md](faq-copy.md). Words: `marketing-lead`,
@@ -25,7 +25,7 @@ except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes 
 
 - New/changed tables or columns: **none.** → `docs/data-dictionary.md` n/a.
 - New/changed feature flags: **none** (Waiver **W-FAQ-2**), **unless `head-eng` picks a flag for the
-  11-18 flip.** Q3's App Store line ships on 11-13 as a pre-launch variant and flips on 11-18
+  11-18 flip.** Q3's App Store line ships by 11-09 as a pre-launch variant and flips on 11-18
   (prd.md FAQ-R3). The mechanism is `head-eng`'s: a manual deploy on 11-18, a flag, or the same
   switch as #348's `IOS_INSTALL_URL` (not on `main` at `712dcbed`). **If it uses a flag or an env
   var, this section must be amended before build** to name it, with its default, the flip date and
@@ -49,8 +49,8 @@ except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes 
     (`[new]`, `[R10 …]`, `[R22.1 edit …]`, `[R22.3 / R22.4 timing]`, `[goes live only at release …]`);
     for example the regex `\[(?:new|APP STORE URL|goes live[^\]]*|R\d[^\]]*)\]`.
   - `FAQ-no-testflight` (active from the 11-18 flip): no "TestFlight" on the page. Before the flip it
-    depends on the pre-launch variant, which is still a copy gap; the assertion turns on with the
-    flip.
+    depends on marketing's pre-launch variant (copy: marketing-lead via head-bizops, in progress);
+    the assertion turns on with the flip.
   - `FAQ-extension-link`: the extension link's `href` in `faq.html` equals the release link in
     `index.html` (today
     `https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1`,
@@ -64,7 +64,7 @@ except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes 
   extension release (eng confirms at build, FAQ-R5).
 - [x] **Manual read-through** (operator or `onboarding-eng`, after each deploy to Render, on desktop
   Safari and iOS Safari):
-  1. **11-13, before the flip.** Open `/faq.html`. Expected: the new questions, in order; the first
+  1. **By 11-09, before the flip.** Open `/faq.html`. Expected: the new questions, in order; the first
      item is open; Q3 shows the pre-launch variant, with no "App Store" claim; no bracketed tag or
      placeholder anywhere.
   2. Tap each `fleecedapp@gmail.com` (Q17, Q18, footer). Expected: Mail opens addressed to
@@ -101,20 +101,24 @@ except Q16 and Q17, which are `legal-lead`'s (R10 wording). The meaning changes 
 
 ## 5. Ship gate declaration
 
-- **Live by Fri 2026-11-13,** in the same deploy as the new privacy and terms pages (M7) or after
-  them, never before (FAQ-R2, per P36). **Q3 flips on Wed 2026-11-18** (FAQ-R3). Marketing's R22
-  revision says the FAQ goes live only at release (R22.5); that conflict is flagged for
-  `head-product` (prd.md §9). If R22.5's order is chosen, the 11-13 read-through (step 1) and the
-  pre-launch Q3 gap drop out.
+- **Live by Mon 2026-11-09, before the Tue 2026-11-10 App Store submission** (P37, `head-product`),
+  in the same deploy as the new privacy and terms pages (M7) or after them, never before (FAQ-R2).
+  **Q3 flips on Wed 2026-11-18** (FAQ-R3). Until the flip, Q3 uses marketing's pre-launch variant,
+  which `head-bizops` is obtaining (copy: marketing-lead, in progress).
+- **Marketing's release-only order (R22.5) is declined** (P37). The live FAQ says the iOS app "is in
+  TestFlight beta and not yet on the App Store" (`web/faq.html:206` at `712dcbed`), and an App Store
+  reviewer can reach the page from the app (Settings → Help & about → Help & FAQ,
+  `mobile/src/screens/settings/sections/AboutSection.tsx:64-67`). So the new text must be live before
+  submission. `head-product` has asked `head-eng` to move the legal-pages milestone to 11-09.
 - **CI green:** `backend-tests` + `mobile-typecheck` + `web-structure` (with the `FAQ-*` assertions)
   + `maestro-testid-lint` (testid-lint only), all passing on the pushed sha.
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the checker run (pass count
-  before and after) and both read-throughs (11-13 and 11-18). Push with `FTF_SKIP_SIM_GATE=1` (D-056
+  before and after) and both read-throughs (11-09 and 11-18). Push with `FTF_SKIP_SIM_GATE=1` (D-056
   standing posture) and name that evidence.
-- **Copy gates, before 11-13:** the operator has approved marketing §6 block I; `legal-lead` has
+- **Copy gates, before 11-09:** the operator has approved marketing §6 block I; `legal-lead` has
   approved Q16 and Q17; Q9's K-factors are confirmed; `marketing-lead` has supplied the pre-launch
-  Q3 variant (only under P36's order) and placed the pricing line; eng has confirmed the extension
-  release; `head-eng` has confirmed Q15's contrarian-score scope (FAQ-R10).
-- **Gates still owed:** `head-product`'s gate-1 acceptance of this block; the operator's sign-off on
-  W-FAQ-1 to W-FAQ-3.
+  Q3 variant (via `head-bizops`, in progress) and placed the pricing line; eng has confirmed the
+  extension release; `head-eng` has confirmed Q15's contrarian-score scope (FAQ-R10).
+- **Gates still owed:** none on this block. Gate 1 was accepted and W-FAQ-1 to W-FAQ-3 were signed on
+  2026-10-23 (P37; see the header).
 - Express lane declared by the operator? **No.** Full gates.
