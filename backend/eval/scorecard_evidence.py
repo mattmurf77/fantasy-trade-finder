@@ -16,6 +16,8 @@ import json
 from pathlib import Path
 import sqlite3
 
+from backend.eval.capture_owner_benchmark import owner_request
+
 
 VERSION = "scorecard-evidence-v1"
 REFERENCE_KEY = "$deck_diagnostic_v1"
@@ -333,15 +335,33 @@ def frozen_owner_requests(tables):
 
     These are request-input units, not fixed experiment enrollment. Invalid or
     non-owner run config remains represented with a status and source key.
+    A deck bake-off run nests its assignment under ``owner_request``; a valid
+    one (``capture_owner_benchmark.owner_request``) is ``present`` and becomes
+    the record's ``assignment``, so ``assignment["input"]`` reads the same in
+    both shapes; the rest of that run's config is kept as ``run_config`` for
+    replay. A run outside the owner_request archive sample has no frozen
+    input; it is ``not_sampled`` and keeps only ``input_sha256``/``input_bytes``.
     """
     records = []
     for row in _select_rows(tables).get("bakeoff_runs", []):
         config, status = _json(row.get("config_json"), dict)
+        assignment = config
         if status == "present" and not isinstance(config.get("input"), dict):
-            status = "no_frozen_owner_input"
-        records.append({"source": _ref("bakeoff_runs", row), "status": status,
-                        "assignment": config, "created_at": row.get("created_at"),
-                        "fixed_preassignment_cohort": False})
+            assignment = owner_request(config)
+            if assignment is None:
+                assignment = config
+                status = ("not_sampled" if config.get("owner_request_sampled") is False
+                          else "no_frozen_owner_input")
+        record = {"source": _ref("bakeoff_runs", row), "status": status,
+                  "assignment": assignment, "created_at": row.get("created_at"),
+                  "fixed_preassignment_cohort": False}
+        if assignment is not config:
+            record["run_config"] = {k: v for k, v in config.items() if k != "owner_request"}
+        if status == "not_sampled":
+            record["input_sha256"] = config.get("input_sha256")
+            if "input_bytes" in config:
+                record["input_bytes"] = config["input_bytes"]
+        records.append(record)
     return records
 
 
