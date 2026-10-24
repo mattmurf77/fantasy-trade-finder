@@ -139,14 +139,15 @@ def test_projection_drops_wide_keys(synth):
 
 def test_value_model_fit_identical_on_projected_decks(synth):
     fixed = datetime(2026, 10, 22, tzinfo=timezone.utc)
-    full = vm.train_model(load_decks(db_url=synth), now=fixed)
-    lean = vm.train_model(load_decks(db_url=synth, project_features=True), now=fixed)
+    full = vm.train_model(load_decks(db_url=synth), as_of=fixed)
+    lean = vm.train_model(load_decks(db_url=synth, project_features=True), as_of=fixed)
     assert full is not None and lean is not None
     assert full.to_dict() == lean.to_dict()
 
 
 def test_nightly_estimates_identical_with_and_without_projection(synth, tmp_path, monkeypatch):
-    vm.append_model(vm.train_model(load_decks(db_url=synth)))
+    vm.append_model(vm.train_model(load_decks(db_url=synth),
+                                   as_of=datetime(2026, 10, 22, tzinfo=timezone.utc)))
     vm._model_cache = None
     real = nightly.load_decks
 

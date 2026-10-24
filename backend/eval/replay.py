@@ -55,13 +55,17 @@ Exclusions (counted per reason and printed — never silently dropped):
                    partial run's delivered rows, head-eng ruling 21) — the
                    deck isn't a complete ranking, so it's out whole; decks
                    in EvalRun.partial_run_decks
+  in_flight        the deck has no pack yet and may still be live (served
+                   at/after data.PACK_REQUIRED_SINCE, within
+                   IN_FLIGHT_WINDOW of as_of) — whole deck out, not an
+                   error; decks in EvalRun.in_flight_decks
   pack_integrity   the deck's pack fails its checksum, has an unknown
                    pack_version, or holds another run's cards (C7 (iv)) —
                    whole deck out; decks in EvalRun.pack_integrity_decks
   incomplete_deck  the deck's non-ghost card indexes aren't exactly 0..N-1
                    after the pack merge (N = the pack's card_count, or
-                   max+1 without a pack) — whole deck out; decks in
-                   EvalRun.incomplete_decks
+                   max+1 without a pack), or its required pack is lost —
+                   whole deck out; decks in EvalRun.incomplete_decks
   missing_scorer_inputs
                    any card in the deck has neither features_json nor a
                    compact block (C7 (iv)) — whole deck out, counted by
@@ -75,9 +79,12 @@ silently shifted the counterfactual ranks of the viewed cards above them;
 their deck is now excluded instead. That retired the per-card
 `bad_features` reason: a card without features either has a compact block
 (scored normally) or takes its whole deck out under missing_scorer_inputs.
-A pack_integrity or incomplete_deck deck is also left out of the exposure
-curve: the cards that survive in it (first 30, viewed rows) are a selected
-subset, so their view rates would bias e(k).
+An in_flight, pack_integrity or incomplete_deck deck is also left out of
+the exposure curve: the cards present in it (first 30, viewed rows) are a
+selected subset, so their view rates would bias e(k). Under paging the
+curve's served set is the DELIVERED positions (R4.2 U1, LoggedCard.
+delivered): a generated card that was never sent to a client was not
+served at its position.
 
 EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
 verdict() and render_report() say so when runs graded under different rules
@@ -92,8 +99,10 @@ import os
 import random
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from backend.eval.data import (
+    IN_FLIGHT,
     INCOMPLETE_DECK,
     PACK_INTEGRITY,
     PARTIAL_RUN_TIER,
@@ -114,7 +123,7 @@ METRICS = ("like", "propose")
 
 EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
-    "partial_run", "pack_integrity", "incomplete_deck",
+    "partial_run", "in_flight", "pack_integrity", "incomplete_deck",
     "missing_scorer_inputs", "scorer_error",
 )
 
@@ -122,8 +131,8 @@ EXCLUSION_REASONS = (
 #   1  before 2026-10-20: a card without features sank to the bottom of the
 #      candidate order (per-card bad_features). Persisted records without an
 #      exclusion_rule_version field are version 1.
-#   2  whole-deck exclusion: missing_scorer_inputs, partial_run,
-#      pack_integrity and incomplete_deck.
+#   2  whole-deck exclusion: missing_scorer_inputs, partial_run, in_flight,
+#      pack_integrity and incomplete_deck; e(k) counts delivered positions.
 # Estimates graded under different versions are not comparable.
 EXCLUSION_RULE_VERSION = 2
 
@@ -151,6 +160,7 @@ class EvalRun:
     tilt_clipped: int = 0            # propensity tilts hit TILT_MIN/TILT_MAX
     missing_inputs_decks: int = 0    # decks excluded as missing_scorer_inputs
     partial_run_decks: int = 0       # decks excluded as partial_run
+    in_flight_decks: int = 0         # decks excluded as in_flight (not an error)
     pack_integrity_decks: int = 0    # decks excluded as pack_integrity
     incomplete_decks: int = 0        # decks excluded as incomplete_deck
     exposure_positions: int = 0      # positions with an estimated e(k)
@@ -171,15 +181,18 @@ class EvalRun:
 def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
     """e(k) = P(viewed | served at position k), Laplace(+1/+2)-smoothed,
     floored at EXPOSURE_FLOOR. Positions never observed fall back to the
-    floor at lookup time (exposure_at). Decks with an integrity reason
-    (pack_integrity, incomplete_deck) are skipped: their surviving cards
-    are a selected subset."""
+    floor at lookup time (exposure_at). Only delivered cards count as
+    served (R4.2 U1). Decks with a loader exclusion (in_flight,
+    pack_integrity, incomplete_deck) are skipped: their present cards are
+    a selected subset."""
     served: dict[int, int] = {}
     viewed: dict[int, int] = {}
     for deck in decks:
-        if deck.integrity is not None:
+        if deck.exclusion is not None:
             continue
         for c in deck.cards:
+            if not c.delivered:
+                continue
             served[c.card_index] = served.get(c.card_index, 0) + 1
             if c.viewed:
                 viewed[c.card_index] = viewed.get(c.card_index, 0) + 1
@@ -285,11 +298,15 @@ def evaluate(
             run.excluded["partial_run"] += len(deck.cards)
             run.partial_run_decks += 1
             continue
-        if deck.integrity == PACK_INTEGRITY:
+        if deck.exclusion == IN_FLIGHT:
+            run.excluded["in_flight"] += len(deck.cards)
+            run.in_flight_decks += 1
+            continue
+        if deck.exclusion == PACK_INTEGRITY:
             run.excluded["pack_integrity"] += len(deck.cards)
             run.pack_integrity_decks += 1
             continue
-        if deck.integrity == INCOMPLETE_DECK:
+        if deck.exclusion == INCOMPLETE_DECK:
             run.excluded["incomplete_deck"] += len(deck.cards)
             run.incomplete_decks += 1
             continue
@@ -488,6 +505,7 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"excluded[{excl or 'none'}] "
             f"missing_inputs_decks={run.missing_inputs_decks} "
             f"partial_run_decks={run.partial_run_decks} "
+            f"in_flight_decks={run.in_flight_decks} "
             f"pack_integrity_decks={run.pack_integrity_decks} "
             f"incomplete_decks={run.incomplete_decks} "
             f"tilt_clipped={run.tilt_clipped} "
@@ -529,6 +547,8 @@ def main(argv=None) -> int:
                                          "evaluate on decks at/after (time-ordered protocol)")
     ap.add_argument("--since", help="only load impressions served at/after this ISO timestamp")
     ap.add_argument("--until", help="only load impressions served before this ISO timestamp")
+    ap.add_argument("--as-of", help="ISO UTC clock for the in_flight rule "
+                                    "(default: now, read here at the CLI)")
     ap.add_argument("--user", help="restrict to one user_id")
     ap.add_argument("--league", help="restrict to one league_id")
     ap.add_argument("--ess-min", type=float, default=DEFAULT_ESS_MIN,
@@ -545,8 +565,9 @@ def main(argv=None) -> int:
     if args.db:
         db_url = args.db if "://" in args.db else f"sqlite:///{args.db}"
 
+    as_of = args.as_of or datetime.now(timezone.utc).isoformat()
     decks = load_decks(db_url=db_url, since=args.since, until=args.until,
-                       user_id=args.user, league_id=args.league)
+                       user_id=args.user, league_id=args.league, as_of=as_of)
     n_imps = sum(len(d.cards) for d in decks)
     print(f"Loaded {len(decks)} decks / {n_imps} impressions"
           + (f" from {args.db}" if args.db else " from default DB"))
@@ -585,7 +606,7 @@ def main(argv=None) -> int:
         for run in runs:
             path = append_run(run_record(run, baseline, extra={
                 "db": args.db, "since": args.since, "until": args.until,
-                "seed": args.seed, "bootstrap": args.bootstrap,
+                "as_of": as_of, "seed": args.seed, "bootstrap": args.bootstrap,
             }))
         print(f"Run records appended to {path} (runs.jsonl)")
     return 0

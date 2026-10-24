@@ -24,8 +24,12 @@ trivial):
 Features come from the SAME frozen features_json the F1 spine logs
 (via backend.eval.data.card_dict at train time and card_features() at
 serve time — identical key names, so no training/serving skew), plus:
-  - F5 taste-match scores (prefMatch_long/short cosine of the user's live
-    taste vector against the card's frozen taste_attrs),
+  - F5 taste-match scores (prefMatch_long/short): in a fit or an eval,
+    the serve-time values frozen on the card (taste_pref_long/short,
+    models-lead R4.1; absent = 0.0, the no-signal anchor). Only live
+    serving (serving_scores) reads the user's live taste vectors; no fit
+    or eval path does, so a re-fit at the same `as_of` is reproducible
+    and taste learned after a card was served never scores it,
   - per-(user, partner) smoothed historical like rate ("partner history"),
   - served position as a TRAIN-TIME debiasing feature only (YouTube
     shallow-tower pattern): at predict time it is pinned to its training
@@ -116,6 +120,10 @@ K_PREF_LONG = "_pref_long"
 K_PREF_SHORT = "_pref_short"
 K_PARTNER_RATE = "_partner_rate"
 K_POSITION = "_position"       # served-position fraction; TRAIN-TIME ONLY
+# Frozen card keys (R4.1): the taste matches taste_service.taste_multipliers
+# used when the card was served. Absent when the taste layer didn't run.
+K_TASTE_PREF_LONG = "taste_pref_long"
+K_TASTE_PREF_SHORT = "taste_pref_short"
 
 
 def _num(v, default=0.0) -> float:
@@ -230,9 +238,10 @@ def _taste_attrs_of(f: dict) -> list[str]:
 
 
 class _TasteCache:
-    """Per-run cache of (short, long) taste vectors by user — one DB read
-    per user per training run / deck / eval pass. Any failure degrades to
-    empty vectors (prefMatch 0.0), never an exception."""
+    """LIVE SERVING ONLY (serving_scores): (short, long) taste vectors by
+    user, one DB read per user per deck. Never used by a fit or an eval
+    (R4.1): those read the frozen taste_pref_long/short. Any failure
+    degrades to empty vectors (prefMatch 0.0), never an exception."""
 
     def __init__(self):
         self._by_user: dict[str, tuple[dict, dict]] = {}
@@ -402,17 +411,17 @@ class ValueModel:
         self.trained_at = trained_at
         self.train_date = train_date
         self.meta = dict(meta or {})
-        self._taste = _TasteCache()
 
     # -- feature injection ---------------------------------------------------
     def _inject(self, f: dict, user_id, *, position=None) -> dict:
         """Return a copy of the features dict with the computed features
-        injected. `position` None (serving/eval) ⇒ the training mean —
-        the shallow-tower drop; the model never reads card_index."""
+        injected. The taste matches are the card's frozen
+        taste_pref_long/short (0.0 when absent), never a live read.
+        `position` None (serving/eval) ⇒ the training mean — the
+        shallow-tower drop; the model never reads card_index."""
         g = dict(f)
-        pl, ps = self._taste.pref_match(user_id, _taste_attrs_of(f))
-        g[K_PREF_LONG] = pl
-        g[K_PREF_SHORT] = ps
+        g[K_PREF_LONG] = _num(f.get(K_TASTE_PREF_LONG))
+        g[K_PREF_SHORT] = _num(f.get(K_TASTE_PREF_SHORT))
         partner = f.get("partner_user_id")
         g[K_PARTNER_RATE] = self.partner_rates.get(
             _partner_key(user_id, partner), self.global_like_rate)
@@ -498,17 +507,23 @@ def build_training_rows(decks) -> tuple[list[dict], list[dict]]:
 
     like head:    viewed ∧ ¬undone ∧ (liked ∨ passed), y = liked.
     propose head: viewed ∧ ¬undone ∧ liked,            y = proposed.
+
+    "f" is the card's frozen block in whichever form it was stored: its
+    features_json, else its compact block (a narrow row, or a packed card
+    whose outcomes joined by id, R4.2 U2), so a viewed card trains the same
+    whether or not it was upgraded to a full row.
     """
     like_rows: list[dict] = []
     propose_rows: list[dict] = []
     for deck in decks:
         for c in deck.cards:
-            if not c.viewed or c.undone or c.features is None:
+            f = c.features if c.features is not None else c.features_compact
+            if not c.viewed or c.undone or f is None:
                 continue
             row = {
-                "f": c.features,
+                "f": f,
                 "user_id": c.user_id,
-                "partner": (c.features or {}).get("partner_user_id"),
+                "partner": f.get("partner_user_id"),
                 "served_at": c.served_at,
                 "position": _clip(c.card_index / _POSITION_NORM, 0.0, 1.0),
             }
@@ -546,12 +561,15 @@ def _vectorize(rows: list[dict], model: "ValueModel") -> list[tuple[dict, float]
     ]
 
 
-def train_model(decks, *, now: datetime | None = None) -> ValueModel | None:
-    """Fit both heads on all supplied decks (callers pass history ≤ now —
-    the nightly refit passes everything; the time discipline for EVAL is
-    F8's job, not this function's). Returns None when the like head lacks
-    MIN_LIKE_ROWS/MIN_LIKE_POS — no model is better than a fake one."""
-    now = now or datetime.now(timezone.utc)
+def train_model(decks, *, as_of: datetime) -> ValueModel | None:
+    """Fit both heads on all supplied decks (callers pass history served
+    before `as_of` — the nightly refit loads until=as_of; the time
+    discipline for EVAL is F8's job, not this function's). `as_of` is the
+    fit's explicit clock: it stamps trained_at / train_date, and nothing
+    in the fit reads the wall clock or live taste state, so a re-fit at
+    the same as_of on the same evidence is bit-identical (R4.1). Returns
+    None when the like head lacks MIN_LIKE_ROWS/MIN_LIKE_POS — no model
+    is better than a fake one."""
     like_rows, propose_rows = build_training_rows(decks)
     n_like_pos = int(sum(r["y"] for r in like_rows))
     if len(like_rows) < MIN_LIKE_ROWS or n_like_pos < MIN_LIKE_POS:
@@ -575,8 +593,8 @@ def train_model(decks, *, now: datetime | None = None) -> ValueModel | None:
         partner_rates=partner_rates,
         global_like_rate=global_rate,
         position_mean=position_mean,
-        trained_at=now.isoformat(),
-        train_date=now.date().isoformat(),
+        trained_at=as_of.isoformat(),
+        train_date=as_of.date().isoformat(),
     )
 
     model.like_head.fit(_vectorize(fit_rows, model), l2=l2, l2_cat=l2_cat)
@@ -694,7 +712,7 @@ def nightly_refit(*, engine=None, db_url: str | None = None,
         from backend.eval.data import load_decks
         decks = load_decks(engine=engine, db_url=db_url,
                            until=now.isoformat())
-        model = train_model(decks, now=now)
+        model = train_model(decks, as_of=now)
         if model is None:
             return {"status": "skipped", "reason": "insufficient labels",
                     "train_date": today}
@@ -760,9 +778,12 @@ def serving_scores(cards, *, user_id: str, league_id: str,
             except Exception:
                 ranked_count = None
         out: dict[int, float] = {}
+        taste = _TasteCache()   # the one live taste read (serving only)
         for c in cards:
             f = card_features(c, players_dict or {}, seed_map or {},
                               ranked_player_count=ranked_count)
+            f[K_TASTE_PREF_LONG], f[K_TASTE_PREF_SHORT] = taste.pref_match(
+                user_id, _taste_attrs_of(f))
             out[id(c)] = float(model.rank_score(f, user_id))
         return out
     except Exception as e:

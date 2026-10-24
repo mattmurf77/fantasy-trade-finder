@@ -44,18 +44,23 @@ INJECTED = {vm.K_PREF_LONG, vm.K_PREF_SHORT, vm.K_PARTNER_RATE, vm.K_POSITION}
 FIXED_NOW = datetime(2026, 10, 20, tzinfo=timezone.utc)
 
 
-def _stub_pref_match(self, user_id, attrs):
-    """Fixed taste prefs: any change to the attribute list moves the value."""
-    if not user_id or not attrs:
-        return 0.0, 0.0
-    h = sha256("|".join(attrs).encode()).digest()
-    return h[0] / 127.5 - 1.0, h[1] / 127.5 - 1.0
+def _no_live_taste(self, user_id, attrs):
+    raise AssertionError("a fit or eval read live taste state (R4.1)")
 
 
 @pytest.fixture(autouse=True)
 def _fixed_taste():
-    with patch.object(vm._TasteCache, "pref_match", _stub_pref_match):
+    """Fits and evals read the frozen taste_pref_*; a live read fails here."""
+    with patch.object(vm._TasteCache, "pref_match", _no_live_taste):
         yield
+
+
+def _frozen_prefs(trade_hash: str) -> dict:
+    """R4.1: the taste matches the writer freezes per card, as exact float8s
+    (derived from the trade hash, so a card keeps its pair across forms)."""
+    h = sha256(trade_hash.encode()).digest()
+    return {vm.K_TASTE_PREF_LONG: int.from_bytes(h[:8], "little") / 2**63 - 1.0,
+            vm.K_TASTE_PREF_SHORT: int.from_bytes(h[8:16], "little") / 2**64 - 0.5}
 
 
 def _edge_cards():
@@ -71,7 +76,8 @@ def _edge_cards():
          "give_value": 4000.0, "receive_value": 2100.5, "surplus_margin": 12.5,
          "fairness_score": 0.91, "likes_you": False, "relaxed": False, "involves_pick": False,
          "partner_user_id": "user_opp", "propensity": 1.25, "base_score": 0.5,
-         "final_score": 0.625, "model_arm": "current", "arm_rank": 0},
+         "final_score": 0.625, "model_arm": "current", "arm_rank": 0,
+         "taste_pref_long": -0.0, "taste_pref_short": 5e-324},
         {**shared, "card_index": 31, "trade_hash": None, "shape_bucket": "2x1",
          "lane": None, "archetype": "value", "basis": "divergence",
          "give_positions": ["QB", "TE"], "receive_positions": ["WR"],
@@ -92,6 +98,7 @@ def _edge_cards():
          "fairness_score": 0.5, "likes_you": False, "relaxed": True, "involves_pick": False,
          "partner_user_id": "user_opp", "propensity": 1.5, "base_score": 0.1,
          "final_score": 0.15, "taste_attrs": ["arch:outlook", "givepos:RB", "recvpos:WR"],
+         "taste_pref_long": 0.6180339887498949, "taste_pref_short": -0.25,
          "group_key": "current_value", "group_rank": 40000, "lane_slot": "value",
          "fairness_threshold": 0.8, "centerpiece_id": "rb7", "policy_version": "v3/bo:current"},
     ]
@@ -126,8 +133,14 @@ def harness():
 
 @pytest.fixture(scope="module")
 def writer():
+    """The 1,200-card writer deck, with the R4.1 frozen taste matches on
+    every card (the real writer stamps them once trades-eng ships it)."""
     with D.hermetic_values():
         deck, cards = D.writer_deck(1200, seed=3)
+    for c, d in zip(deck.cards, cards):
+        prefs = _frozen_prefs(d["trade_hash"])
+        c.features.update(prefs)
+        d.update(prefs)
     return _with_outcomes(deck, seed=3), cards
 
 
@@ -142,15 +155,27 @@ def _all_decks(harness, writer, synth):
     return [d for decks in harness.values() for d in decks] + [writer] + synth
 
 
-def _pack(cards, run=None):
+def _count(cards):
     """card_count = the last card_index + 1 (these card lists end the deck)."""
-    return ep.pack_run(run if run is not None else {"values_snapshot_id": 7}, cards,
-                       card_count=cards[-1]["card_index"] + 1 if cards else 0)
+    return cards[-1]["card_index"] + 1 if cards else 0
+
+
+def _run(cards):
+    """Run metadata with the whole deck delivered in one page (R4.2 U1)."""
+    n = _count(cards)
+    return {"values_snapshot_id": 7,
+            "deliveries": [[n - 1, "2026-10-20T00:05:00+00:00"]] if n else []}
+
+
+def _pack(cards, run=None):
+    return ep.pack_run(run if run is not None else _run(cards), cards,
+                       card_count=_count(cards))
 
 
 def _round_trip(cards, run=None):
+    run = run if run is not None else _run(cards)
     out_run, out = ep.unpack_run(_pack(cards, run))
-    assert out_run == (run if run is not None else {"values_snapshot_id": 7})
+    assert out_run == run
     return out
 
 
@@ -211,9 +236,9 @@ def assert_golden(orig, rt, model):
 @pytest.fixture(scope="module")
 def trained(harness, writer, synth):
     decks = [d for d, _ in _all_decks(harness, writer, synth)]
-    with patch.object(vm._TasteCache, "pref_match", _stub_pref_match):
-        model = vm.train_model(decks, now=FIXED_NOW)
+    model = vm.train_model(decks, as_of=FIXED_NOW)
     assert model is not None and model.propose_head is not None
+    assert model.like_head.weights.get("pref_long", 0.0) != 0.0   # the frozen prefs score
     return model
 
 
@@ -251,6 +276,9 @@ def test_edge_and_legacy_cards_round_trip_exactly(trained):
     assert struct.pack("<d", rt[2]["fairness_score"]) == struct.pack("<d", -0.0)
     assert "impression_id" not in rt[0] and "need_fit" not in rt[0]
     assert [c["card_index"] for c in rt] == [30, 31, 33, 40]
+    assert _bits([rt[0]["taste_pref_long"], rt[0]["taste_pref_short"]]) == \
+        _bits([-0.0, 5e-324])                                   # R4.1 fields, exact
+    assert "taste_pref_long" not in rt[1] and rt[3]["taste_pref_short"] == -0.25
 
 
 def test_replay_estimates_and_value_model_fit_are_bit_identical(harness, writer, synth,
@@ -258,7 +286,7 @@ def test_replay_estimates_and_value_model_fit_are_bit_identical(harness, writer,
     decks = _all_decks(harness, writer, synth)
     orig = [d for d, _ in decks]
     rt = [_rt_deck(d, _round_trip(cards)) for d, cards in decks]
-    refit = vm.train_model(rt, now=FIXED_NOW)
+    refit = vm.train_model(rt, as_of=FIXED_NOW)
     assert refit.to_dict() == trained.to_dict()
     for name in registered_names():
         with patch.object(vm, "load_latest_model", lambda: trained):
@@ -310,7 +338,8 @@ def test_codec_carries_every_key_the_contract_names():
 # ---------------------------------------------------------------------------
 
 RUN = {"values_snapshot_id": "vsn1:9f2c", "built_at": "2026-10-24T01:02:03+00:00",
-       "config_ref": 41}
+       "config_ref": 41, "deliveries": [[49, "2026-10-24T01:10:00+00:00"],
+                                        [99, "2026-10-24T01:30:00+00:00"]]}
 
 
 def _with_header(packed, edit):
@@ -330,18 +359,22 @@ def _flip_last_raw_byte(packed):
 @pytest.mark.parametrize("tamper", [
     lambda p: _with_header(p, lambda h: h["run"].update(values_snapshot_id="vsn1:9f2d")),
     lambda p: _with_header(p, lambda h: h["run"].update(built_at="2026-10-24T01:02:04+00:00")),
+    lambda p: _with_header(p, lambda h: h["run"]["deliveries"][1].__setitem__(0, 149)),
+    lambda p: _with_header(p, lambda h: h["run"]["deliveries"].pop()),
     lambda p: _with_header(p, lambda h: h["dicts"]["basis"][0][0].__setitem__(0, "x")),
     lambda p: _with_header(p, lambda h: h["dicts"]["basis"].append([["unused"]])),
     lambda p: _with_header(p, lambda h: h["shared"].update(user_id="user_99")),
     lambda p: _with_header(p, lambda h: h.update(card_count=h["card_count"] + 1)),
     _flip_last_raw_byte,
     lambda p: replace(p, checksum="0" * 64),
-], ids=["run_snapshot_id", "run_built_at", "dictionary_entry", "unused_dictionary_entry",
-        "shared_field", "card_count", "card", "checksum"])
+], ids=["run_snapshot_id", "run_built_at", "run_delivery_boundary", "run_delivery_dropped",
+        "dictionary_entry", "unused_dictionary_entry", "shared_field", "card_count", "card",
+        "checksum"])
 def test_tampering_with_anything_a_reader_acts_on_is_refused(writer, tamper):
-    """R2.2 (a): the run metadata, every header field (an unused dictionary
-    entry changes no decoded card, so only header coverage catches it) and
-    every card are under the checksum."""
+    """R2.2 (a): the run metadata (deliveries included, R4.2 U1), every
+    header field (an unused dictionary entry changes no decoded card, so
+    only header coverage catches it) and every card are under the
+    checksum."""
     _deck, cards = writer
     packed = ep.pack_run(RUN, cards[:200], card_count=1200)
     assert len(json.loads(packed.header_json)["dicts"]["basis"]) == 2
@@ -354,11 +387,26 @@ def test_tampering_with_anything_a_reader_acts_on_is_refused(writer, tamper):
 
 def test_a_flipped_byte_anywhere_is_refused(writer):
     _deck, cards = writer
-    packed = _pack(cards[:200], run={})
+    packed = _pack(cards[:200])
     blob = bytearray(packed.cards_blob)
     blob[len(blob) // 2] ^= 0x01
     with pytest.raises(ep.PackIntegrityError):
         ep.unpack_run(replace(packed, cards_blob=bytes(blob)))
+
+
+@pytest.mark.parametrize("deliveries", [
+    None, "49", [[49]], [[49, None]], [["49", "t"]], [[True, "t"]], [[-1, "t"]],
+    [[5, "t"], [5, "t"]], [[9, "t"], [4, "t"]], [[5, "t"], [5000, "t"]],
+], ids=["missing", "not_a_list", "short", "no_time", "str_index", "bool_index", "negative",
+        "repeated", "decreasing", "past_card_count"])
+def test_malformed_deliveries_are_refused(deliveries):
+    run = {"values_snapshot_id": 7}
+    if deliveries is not None:
+        run["deliveries"] = deliveries
+    with pytest.raises(ValueError, match="deliveries"):
+        ep.pack_run(run, _legacy_cards(), card_count=5)
+    assert ep.check_deliveries({"deliveries": [[1, "t"], [4, "u"]]}, 5) == 4
+    assert ep.check_deliveries({"deliveries": []}, 5) == -1
 
 
 def test_row_fields_must_agree_with_the_header():
@@ -413,12 +461,12 @@ def test_a_card_count_below_a_packed_index_is_refused(card_count):
 # ---------------------------------------------------------------------------
 
 FIRST_FULL = 30   # C4
-# Compared card by card: every key a registered scorer or replay may read.
-# impression_id differs by design (a packed card's is synthesized).
-GOLDEN_KEYS = (C.FROZEN_INPUT_KEYS | C.IDENTITY_KEYS | C.LOGGED_POLICY_KEYS) - {"impression_id"}
-_ROW_COLUMNS = ("impression_id", "user_id", "league_id", "card_index", "trade_hash",
-                "propensity", "base_score", "final_score", "archetype", "shape_bucket",
-                "served_at")
+LAST_DELIVERED = 99   # the golden decks were delivered in pages of 25 through card 99
+# Compared card by card: every key a registered scorer or replay may read,
+# impression_id included (a non-ghost card's is card_impression_id, R4.2 U2).
+GOLDEN_KEYS = C.FROZEN_INPUT_KEYS | C.IDENTITY_KEYS | C.LOGGED_POLICY_KEYS
+_ROW_COLUMNS = ("user_id", "league_id", "card_index", "trade_hash", "propensity",
+                "base_score", "final_score", "archetype", "shape_bucket", "served_at")
 _ACTIONS = (("viewed", "viewed"), ("liked", "like"), ("passed", "pass"),
             ("proposed", "propose"), ("not_interested", "not_interested"), ("undone", "undo"))
 
@@ -428,50 +476,61 @@ def _has_outcome(card):
 
 
 def _write_db(decks, *, packed, head=FIRST_FULL, nudge=None):
-    """A fresh DB holding `decks` = [(tag, LoggedDeck, packable card dicts)].
+    """A fresh DB holding `decks` = [(tag, LoggedDeck, packable card dicts)]
+    as the packing writer leaves a retired deck: every non-ghost card's id is
+    card_impression_id(run, index); every deck has a pack row whose run
+    metadata records its deliveries (pages of 25 through card 99, or the
+    whole deck if shorter); outcomes exist on delivered cards only, posted
+    with the card's id; two ghost rows per deck copy cards 0 and n//2 at
+    those would-have-been ranks. Deck ids are prefixed by tag (the harness
+    configs share one job id).
 
-    (A) packed=False: every card is a full deck_impressions row; no pack table.
-    (B) packed=True: the first `head` cards and every card with an outcome
-        (an outcome upgrades a card to a full row, R4.2) are rows; every
-        non-ghost card from `head` on goes into the run's pack, so an upgraded
-        card is in both and its row must win. Every deck gets a pack row.
-    Both: two ghost rows per deck, copies of cards 0 and n//2 at those
-    would-have-been ranks, and identical deck_outcomes rows. Deck ids are
-    prefixed by tag (the harness configs share one job id).
+    (A) packed=False, the C8 archive form: every card is a full row, and the
+        pack holds the cards from `head` on (every row wins).
+    (B) packed=True: the first `head` cards and the ghosts are rows; so are
+        the cards with an outcome at an even index (upgraded on view, R4.2);
+        the pack holds every card from `head` on, so an odd-index card with
+        an outcome stays packed and its outcomes join by id (U2).
     nudge = (deck_job_id, card_index): that packed card's base_score moves 1 ulp."""
-    eng, packs = make_engine(with_packs=packed)
+    eng, packs = make_engine()
     with eng.begin() as conn:
         for tag, deck, cards in decks:
             job, n = f"{tag}/{deck.deck_job_id}", len(deck.cards)
             served = deck.cards[0].served_at
+            last = min(n - 1, LAST_DELIVERED)
             rows, outcomes, to_pack = [], [], []
             for c, d in zip(deck.cards, cards):
+                iid = C.card_impression_id(job, c.card_index)
                 row = {k: getattr(c, k) for k in _ROW_COLUMNS}
-                row.update(deck_job_id=job, is_ghost=0, features_json=json.dumps(c.features),
+                row.update(impression_id=iid, deck_job_id=job, is_ghost=0,
+                           features_json=json.dumps(c.features),
                            **{k: d[k] for k in D.ATTRIBUTION_COLUMNS if k in d})
                 if c.card_index in (0, n // 2):
                     rows.append({**row, "impression_id": f"{c.impression_id}-ghost",
                                  "is_ghost": 1})
-                if not packed or c.card_index < head or _has_outcome(c):
-                    rows.append(row)
+                seen = c.card_index <= last and _has_outcome(c)
+                if seen:
                     actions = [a for attr, a in _ACTIONS if getattr(c, attr)]
-                    outcomes += [{"impression_id": c.impression_id, "action": a,
+                    outcomes += [{"impression_id": iid, "action": a,
                                   "dwell_ms": c.dwell_ms if i == 0 else None,
                                   "acted_at": served} for i, a in enumerate(actions)]
-                if packed and c.card_index >= head:
+                if (not packed or c.card_index < head
+                        or (seen and c.card_index % 2 == 0)):
+                    rows.append(row)
+                if c.card_index >= head:
                     p = {**d, "deck_job_id": job}
-                    if (job, c.card_index) == nudge:
+                    if packed and (job, c.card_index) == nudge:
                         p["base_score"] = math.nextafter(p["base_score"], math.inf)
                     to_pack.append(p)
             conn.execute(insert(deck_impressions_table), rows)
             if outcomes:
                 conn.execute(insert(deck_outcomes_table), outcomes)
-            if packed:
-                run = {"values_snapshot_id": "vsn1:golden", "built_at": served,
-                       "config_ref": None}
-                insert_pack(conn, packs, run_id=job, user_id=deck.user_id,
-                            league_id=deck.league_id, served_at=served,
-                            packed=ep.pack_run(run, to_pack, card_count=n))
+            run = {"values_snapshot_id": "vsn1:golden", "built_at": served, "config_ref": None,
+                   "deliveries": [[b, served] for b in
+                                  sorted({min(k, last) for k in range(24, last + 25, 25)})]}
+            insert_pack(conn, packs, run_id=job, user_id=deck.user_id,
+                        league_id=deck.league_id, served_at=served,
+                        packed=ep.pack_run(run, to_pack, card_count=n))
     return eng
 
 
@@ -486,18 +545,17 @@ def _outcomes(c):
 
 def assert_db_golden(full, packed, model):
     """C7 (ii) over load_decks' output: the decks, the card dicts on every
-    contract key, every registered scorer's scores bit for bit, replay's
-    estimates by repr, and a value-model refit."""
-    assert ([(d.deck_job_id, d.served_at, d.integrity) for d in full]
-            == [(d.deck_job_id, d.served_at, d.integrity) for d in packed])
-    assert all(d.integrity is None for d in full)
+    contract key, delivery, outcomes, every registered scorer's scores bit
+    for bit, replay's estimates by repr, and a value-model refit."""
+    assert ([(d.deck_job_id, d.served_at, d.exclusion) for d in full]
+            == [(d.deck_job_id, d.served_at, d.exclusion) for d in packed])
+    assert all(d.exclusion is None for d in full)
     for a, b in zip(full, packed):
-        assert [(c.card_index, c.is_ghost) for c in a.cards] == \
-               [(c.card_index, c.is_ghost) for c in b.cards], a.deck_job_id
+        assert [(c.card_index, c.is_ghost, c.delivered) for c in a.cards] == \
+               [(c.card_index, c.is_ghost, c.delivered) for c in b.cards], a.deck_job_id
         for x, y in zip(a.cards, b.cards):
             assert _contract_view(x) == _contract_view(y), (a.deck_job_id, x.card_index)
             assert _outcomes(x) == _outcomes(y), (a.deck_job_id, x.card_index)
-            assert y.impression_id in (x.impression_id, f"pack:{b.deck_job_id}:{y.card_index}")
     dicts_a = [card_dict(c) for d in full for c in d.cards]
     dicts_b = [card_dict(c) for d in packed for c in d.cards]
     with patch.object(vm, "load_latest_model", lambda: model):
@@ -508,8 +566,8 @@ def assert_db_golden(full, packed, model):
             run_a = evaluate(get_scorer(name, seed=5), full, bootstrap=200, seed=1)
             run_b = evaluate(get_scorer(name, seed=5), packed, bootstrap=200, seed=1)
             assert run_a.n_included > 0 and repr(run_a) == repr(run_b), name
-    assert (vm.train_model(full, now=FIXED_NOW).to_dict()
-            == vm.train_model(packed, now=FIXED_NOW).to_dict())
+    assert (vm.train_model(full, as_of=FIXED_NOW).to_dict()
+            == vm.train_model(packed, as_of=FIXED_NOW).to_dict())
 
 
 @pytest.fixture(scope="module")
@@ -522,12 +580,17 @@ def db_decks(harness, writer, synth):
 @pytest.mark.parametrize("head, project", [(FIRST_FULL, False), (0, True)])
 def test_db_golden_full_rows_vs_packed(db_decks, trained, head, project):
     """head=30 is C4. head=0 packs every non-ghost card (the rows left are
-    ghosts and upgraded cards), with the nightly's projected load."""
+    ghosts and upgraded cards), with the nightly's projected load. (iv): the
+    writer deck's cards carry the R4.1 frozen taste matches."""
     full = load_decks(engine=_write_db(db_decks, packed=False), project_features=project)
     packed = load_decks(engine=_write_db(db_decks, packed=True, head=head),
                         project_features=project)
-    n_packed = sum(c.impression_id.startswith("pack:") for d in packed for c in d.cards)
-    assert n_packed >= 1100
+    from_pack = [c for d in packed for c in d.cards if not c.is_ghost and c.features is None]
+    assert len(from_pack) >= 1100
+    assert sum(c.viewed for c in from_pack) >= 3                   # outcomes joined by id
+    assert all(vm.K_TASTE_PREF_LONG in c.features_compact for c in from_pack
+               if c.deck_job_id.startswith("writer/"))
+    assert sum(not c.delivered for d in packed for c in d.cards) >= 1100
     assert_db_golden(full, packed, trained)
 
 

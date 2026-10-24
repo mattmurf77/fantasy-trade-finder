@@ -1,8 +1,10 @@
 """ADR-025 stage 2, the reader side: backend.eval.data.load_decks merges
 deck_evidence_packs into decks (C7 (i)); replay excludes a deck whose pack
-fails integrity or whose card indexes have a gap, whole and never sunk, and
-calibration excludes its cards (C7 (iv)); every run carries
-EXCLUSION_RULE_VERSION (R2.5 (2)).
+fails integrity, whose card indexes have a gap, or whose required pack is
+lost or not yet written (in_flight), whole and never sunk, and calibration
+excludes its cards (C7 (iv)); the exposure model counts delivered positions
+(R4.2 U1); outcomes join packed cards by their deterministic id (U2); every
+run carries EXCLUSION_RULE_VERSION (R2.5 (2)).
 
 The pack table is defined HERE, test-locally (pack_table): it is the row
 contract trades-eng builds in backend/database.py
@@ -20,13 +22,19 @@ from sqlalchemy import (
 
 from backend.database import deck_impressions_table, deck_outcomes_table, metadata
 from backend.eval import evidence_pack as ep
+import backend.eval.data as data_mod
+import backend.eval.replay as replay_mod
+import backend.value_model as vm
 from backend.eval.calibration import calibration_pairs
-from backend.eval.contract import FROZEN_INPUT_KEYS, PROJECTION_KEYS
-from backend.eval.data import INCOMPLETE_DECK, PACK_INTEGRITY, card_dict, load_decks
+from backend.eval.contract import FROZEN_INPUT_KEYS, PROJECTION_KEYS, card_impression_id
+from backend.eval.data import (
+    IN_FLIGHT, INCOMPLETE_DECK, PACK_INTEGRITY, card_dict, load_decks,
+)
 from backend.eval.persistence import record_rule_version, run_record
 from backend.eval.replay import (
     EXCLUSION_RULE_VERSION, evaluate, exposure_curve, render_report, rule_version_note, verdict,
 )
+from backend.eval.scorers import get_scorer, registered_names
 
 SERVED = "2026-10-23T12:00:00+00:00"
 # The deck_impressions columns a card dict's logged fields come from.
@@ -93,27 +101,33 @@ def _card(job: str, i: int, served_at: str = SERVED, user: str = "u1") -> dict:
         "give_value": 1000.0 + i, "receive_value": 1100.5, "surplus_margin": 3.25,
         "fairness_score": 0.9, "likes_you": False, "relaxed": False, "involves_pick": False,
         "partner_user_id": f"opp{i % 3}", "taste_attrs": ["arch:value", "givepos:WR"],
+        "taste_pref_long": (i * 37 % 19 - 9) / 10.3, "taste_pref_short": (i % 5 - 2) / 7.1,
         "ranked_player_count": 12, "user_value_basis": "personal",
         "model_arm": "current", "arm_rank": i, "need_fit": 0.5,
     }
 
 
 def _row(card: dict, *, ghost: bool = False) -> dict:
-    suffix = "_g" if ghost else ""
+    """A deck_impressions row. A non-ghost card's id is card_impression_id
+    (R4.2 U2); a ghost's never is."""
+    iid = card_impression_id(card["deck_job_id"], card["card_index"])
     return {
         **{k: card[k] for k in ROW_KEYS if k in card},
-        "impression_id": f"{card['deck_job_id']}_{card['card_index']}{suffix}",
+        "impression_id": f"{iid}:ghost" if ghost else iid,
         "features_json": json.dumps({k: v for k, v in card.items() if k not in ROW_KEYS}),
         "is_ghost": 1 if ghost else 0,
     }
 
 
 def write_deck(eng, packs, cards, *, full, packed=None, card_count=None, ghosts=(),
-               viewed=(), served_at=SERVED, edit=None):
+               viewed=(), served_at=SERVED, deliveries=None, edit=None):
     """Rows for the indexes in `full` (+ ghost rows copying `ghosts`), a pack
-    holding the indexes in `packed` (None: no pack), a `viewed` outcome per
-    listed index. `edit(packed_run) -> packed_run` tampers before storing."""
+    holding the indexes in `packed` (None: no pack) with `deliveries`
+    (default: the whole deck in one page), and a `viewed` outcome per listed
+    index, posted with the card's id. `edit(packed_run) -> packed_run`
+    tampers before storing."""
     job = cards[0]["deck_job_id"]
+    n = len(cards) if card_count is None else card_count
     with eng.begin() as conn:
         rows = [_row(c) for c in cards if c["card_index"] in full]
         rows += [_row(cards[i], ghost=True) for i in ghosts]
@@ -121,11 +135,14 @@ def write_deck(eng, packs, cards, *, full, packed=None, card_count=None, ghosts=
             conn.execute(insert(deck_impressions_table), rows)
         for i in viewed:
             conn.execute(insert(deck_outcomes_table).values(
-                impression_id=f"{job}_{i}", action="viewed", acted_at=served_at))
+                impression_id=card_impression_id(job, i), action="viewed",
+                acted_at=served_at))
         if packed is not None:
-            run = ep.pack_run({"values_snapshot_id": "vsn1:t", "built_at": served_at},
+            run = ep.pack_run({"values_snapshot_id": "vsn1:t", "built_at": served_at,
+                               "deliveries": (deliveries if deliveries is not None
+                                              else [[n - 1, served_at]])},
                               [c for c in cards if c["card_index"] in packed],
-                              card_count=len(cards) if card_count is None else card_count)
+                              card_count=n)
             insert_pack(conn, packs, run_id=job, user_id=cards[0]["user_id"],
                         league_id="lg", served_at=served_at,
                         packed=edit(run) if edit else run)
@@ -146,25 +163,29 @@ def test_missing_pack_table_means_no_packs():
     write_deck(with_table, packs, cards, full=range(5))
     write_deck(without, None, cards, full=range(5))
     (a,), (b,) = load_decks(engine=with_table), load_decks(engine=without)
-    assert a.integrity is None and b.integrity is None
+    assert a.exclusion is None and b.exclusion is None
     assert [card_dict(c) for c in a.cards] == [card_dict(c) for c in b.cards]
 
 
-def test_pack_merges_unseen_cards_and_a_full_row_wins():
-    """Rows 0-29 and a viewed row at 35; the pack holds 30-39 (35 included,
-    as an upgraded card would be); a ghost row at 33 collides with packed 33."""
+def test_pack_merges_cards_a_full_row_wins_and_outcomes_join():
+    """Rows 0-29 and an upgraded viewed row at 35; the pack holds 30-39 (35
+    included); 37 was viewed but left packed, so its outcome joins the
+    packed card by its id; a ghost row at 33 collides with packed 33."""
     cards = _deck_cards("j", 40)
     eng, packs = make_engine()
     write_deck(eng, packs, cards, full={*range(30), 35}, packed=range(30, 40),
-               ghosts=[33], viewed=[0, 35])
+               ghosts=[33], viewed=[0, 35, 37])
     (deck,) = load_decks(engine=eng)
-    assert deck.integrity is None
+    assert deck.exclusion is None
     assert [(c.card_index, c.is_ghost) for c in deck.cards] == (
         [(i, False) for i in range(34)] + [(33, True)] + [(i, False) for i in range(34, 40)])
     by_index = {c.card_index: c for c in deck.cards if not c.is_ghost}
-    assert by_index[35].impression_id == "j_35" and by_index[35].viewed     # the row won
+    assert by_index[35].features is not None and by_index[35].viewed       # the row won
+    assert by_index[37].features is None and by_index[37].viewed           # joined, packed
+    assert [c.impression_id for c in deck.cards if not c.is_ghost] == [
+        f"j:{i}" for i in range(40)]
     packed = by_index[34]
-    assert packed.impression_id == "pack:j:34" and not packed.viewed
+    assert packed.impression_id == "j:34" and not packed.viewed
     assert packed.features is None and FROZEN_INPUT_KEYS <= set(packed.features_compact)
     assert not set(packed.features_compact) & set(ROW_KEYS)
     assert packed.features_compact["model_arm"] == "current"           # attribution kept
@@ -179,7 +200,7 @@ def test_project_features_trims_packed_cards_too():
     write_deck(eng, packs, cards, full=range(30), packed=range(30, 32))
     (deck,) = load_decks(engine=eng, project_features=True)
     packed = deck.cards[-1]
-    assert packed.impression_id == "pack:j:31"
+    assert packed.impression_id == "j:31"
     assert FROZEN_INPUT_KEYS <= set(packed.features_compact) <= PROJECTION_KEYS
     assert "model_arm" not in packed.features_compact
 
@@ -194,7 +215,7 @@ def test_window_and_scope_filters_apply_to_packs():
     for kw, job in (({"since": "2026-10-10"}, "jb"), ({"until": "2026-10-10"}, "ja"),
                     ({"user_id": "u2"}, "jb")):
         (deck,) = load_decks(engine=eng, **kw)
-        assert deck.deck_job_id == job and len(deck.cards) == 33 and deck.integrity is None
+        assert deck.deck_job_id == job and len(deck.cards) == 33 and deck.exclusion is None
 
 
 def test_an_empty_pack_carries_the_card_count():
@@ -204,7 +225,7 @@ def test_an_empty_pack_carries_the_card_count():
     eng, packs = make_engine()
     write_deck(eng, packs, cards, full=range(12), packed=())
     (deck,) = load_decks(engine=eng)
-    assert deck.integrity is None and len(deck.cards) == 12
+    assert deck.exclusion is None and len(deck.cards) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +255,7 @@ def test_a_pack_failing_integrity_marks_the_deck(edit):
     eng, packs = make_engine()
     write_deck(eng, packs, cards, full=range(30), packed=range(30, 36), edit=edit)
     (deck,) = load_decks(engine=eng)
-    assert deck.integrity == PACK_INTEGRITY
+    assert deck.exclusion == PACK_INTEGRITY
     assert [c.card_index for c in deck.cards] == list(range(30))   # nothing merged
 
 
@@ -250,7 +271,7 @@ def test_a_gap_marks_the_deck_incomplete(layout):
     eng, packs = make_engine()
     write_deck(eng, packs, cards, **layout)
     (deck,) = load_decks(engine=eng)
-    assert deck.integrity == INCOMPLETE_DECK
+    assert deck.exclusion == INCOMPLETE_DECK
 
 
 # ---------------------------------------------------------------------------
@@ -288,8 +309,8 @@ def _mixed_engine():
 def test_replay_excludes_integrity_decks_whole_and_counts_them():
     decks = load_decks(engine=_mixed_engine())
     by_job = {d.deck_job_id: d for d in decks}
-    assert by_job["bad_pack"].integrity == PACK_INTEGRITY
-    assert by_job["gap"].integrity == INCOMPLETE_DECK
+    assert by_job["bad_pack"].exclusion == PACK_INTEGRITY
+    assert by_job["gap"].exclusion == INCOMPLETE_DECK
     spy = _Spy()
     run = evaluate(spy, decks, ess_min=1, bootstrap=50, seed=0)
     assert run.excluded["pack_integrity"] == 30 and run.pack_integrity_decks == 1
@@ -337,3 +358,108 @@ def test_exclusion_rule_version_is_stamped_and_mixed_versions_are_flagged():
     assert "Exclusion rules: version 2." in render_report([run], run)
     mixed = render_report([run], old)
     assert "WARNING: exclusion rules differ" in mixed and "RULE-MISMATCH" in mixed
+
+
+# ---------------------------------------------------------------------------
+# R4.2 U1: delivered positions are the exposure model's served set
+# ---------------------------------------------------------------------------
+
+def test_delivered_positions_are_the_served_set():
+    eng, packs = make_engine()
+    write_deck(eng, packs, _deck_cards("j", 40), full=range(30), packed=range(30, 40),
+               ghosts=[5], viewed=[0, 3],
+               deliveries=[[9, SERVED], [19, "2026-10-23T12:05:00+00:00"]])
+    write_deck(eng, packs, _deck_cards("old", 12), full=range(12))     # no pack: pre-paging
+    deck, old = load_decks(engine=eng)
+    assert [c.card_index for c in deck.cards if c.delivered] == list(range(20))
+    assert not any(c.delivered for c in deck.cards if c.is_ghost)
+    assert all(c.delivered for c in old.cards)
+    assert set(exposure_curve([deck])) == set(range(20))
+    assert set(exposure_curve([old])) == set(range(12))
+
+
+# ---------------------------------------------------------------------------
+# In flight, and lost packs (PACK_REQUIRED_SINCE)
+# ---------------------------------------------------------------------------
+
+REQUIRED = "2026-10-20T00:00:00+00:00"
+AS_OF = "2026-10-23T14:00:00+00:00"
+
+
+@pytest.mark.parametrize("required", [None, REQUIRED])
+def test_pack_required_since_flags_in_flight_and_lost_packs(monkeypatch, required):
+    monkeypatch.setattr(data_mod, "PACK_REQUIRED_SINCE", required)
+    eng, packs = make_engine()
+    served = {"live": "2026-10-23T12:00:00+00:00",     # 2 h before as_of: may be live
+              "lost": "2026-10-21T12:00:00+00:00",     # 50 h before: retired, pack lost
+              "legacy": "2026-10-19T12:00:00+00:00"}   # before the requirement
+    for job, at in served.items():
+        write_deck(eng, packs, _deck_cards(job, 30, served_at=at), full=range(30),
+                   served_at=at, viewed=[0])
+    write_deck(eng, packs, _deck_cards("packed", 34, served_at=served["lost"]),
+               full=range(30), packed=range(30, 34), served_at=served["lost"])
+
+    got = {d.deck_job_id: d.exclusion for d in load_decks(engine=eng, as_of=AS_OF)}
+    no_clock = {d.deck_job_id: d.exclusion for d in load_decks(engine=eng)}
+    if required is None:      # the writer hasn't shipped: no pack is ever expected
+        assert got == no_clock == dict.fromkeys(("live", "lost", "legacy", "packed"))
+        return
+    assert got == {"live": IN_FLIGHT, "lost": INCOMPLETE_DECK, "legacy": None,
+                   "packed": None}
+    assert no_clock["live"] == INCOMPLETE_DECK    # without as_of it can't be called live
+
+    decks = load_decks(engine=eng, as_of=AS_OF)
+    run = evaluate(_Spy(), decks, ess_min=1, bootstrap=0, seed=0)
+    assert run.excluded["in_flight"] == 30 and run.in_flight_decks == 1
+    assert run.incomplete_decks == 1 and run.pack_integrity_decks == 0
+    assert run.n_total == run.n_included + sum(run.excluded.values())
+    assert "in_flight=30" in render_report([run], run)
+    assert run_record(run, run)["in_flight_decks"] == 1
+    _pairs, excluded = calibration_pairs(_Spy(), decks)
+    assert excluded["in_flight"] == 30
+
+
+# ---------------------------------------------------------------------------
+# R4.2 U2: a viewed card replays the same, upgraded or left packed
+# ---------------------------------------------------------------------------
+
+def _u2_engine(upgrade: bool):
+    """Three decks; 31, 35 and 38 were viewed past the first 30. upgrade:
+    they also have full rows (the upgrade on view); else they stay packed
+    and their outcomes join by id."""
+    eng, packs = make_engine()
+    late = {31, 35, 38}
+    for job in ("ua", "ub", "uc"):
+        write_deck(eng, packs, _deck_cards(job, 40),
+                   full=set(range(30)) | (late if upgrade else set()),
+                   packed=range(30, 40), viewed=[*range(0, 30, 3), *late],
+                   deliveries=[[19, SERVED], [39, "2026-10-23T12:07:00+00:00"]])
+    return eng
+
+
+def test_a_viewed_card_replays_the_same_upgraded_or_left_packed(monkeypatch):
+    upgraded = load_decks(engine=_u2_engine(upgrade=True))
+    packed = load_decks(engine=_u2_engine(upgrade=False))
+    joined = [c for d in packed for c in d.cards if c.viewed and c.features is None]
+    assert len(joined) == 9
+    assert exposure_curve(upgraded) == exposure_curve(packed)
+
+    model = vm.ValueModel(
+        like_head=vm.LogisticHead(weights={"bias": -0.4, "value_delta": 0.8,
+                                           "pref_long": 1.1, "pref_short": -0.6,
+                                           "partner_rate": 0.9}),
+        propose_head=None, propose_constant=0.2,
+        partner_rates={"u1|opp1": 0.7}, global_like_rate=0.3, position_mean=0.4,
+        trained_at="t", train_date="t")
+    monkeypatch.setattr(vm, "load_latest_model", lambda: model)
+    real = replay_mod._estimate
+    for name in registered_names():
+        out = []
+        for decks in (upgraded, packed):
+            weights = []
+            monkeypatch.setattr(replay_mod, "_estimate",
+                                lambda *a, w=weights: w.append(list(a[1])) or real(*a))
+            run = evaluate(get_scorer(name, seed=3), decks, ess_min=1, bootstrap=100, seed=2)
+            out.append((repr(run), weights))
+        assert out[0] == out[1], name
+        assert out[0][1][0], name     # the IPS weights were compared, not empty

@@ -16,17 +16,32 @@ Packed cards (ADR-025 C1, C7 (i)): when the engine has a deck_evidence_packs
 table, each pack in the window is unpacked (backend/eval/evidence_pack.py)
 and merged into its deck: a deck's cards are its rows ∪ its unpacked cards,
 in card_index order, and a non-ghost row wins over a packed card with the
-same card_index. A packed card is unseen: its impression_id is synthesized
-as "pack:<run_id>:<card_index>" and it has no outcomes. Ghost rows (C5) are
-never packed and never displace a packed card. Integrity, per deck:
+same card_index. Every non-ghost card's impression_id is
+contract.card_impression_id(run_id, card_index) (R4.2 U2): a packed card
+gets it here, the writer gives it to rows, and the client posts outcomes
+with it, so outcomes join a packed card exactly as they join an upgraded
+row. Ghost rows (C5) are never packed and never displace a packed card.
+
+Delivery (R4.2 U1): in a deck with a pack, a card is delivered when it is
+not a ghost and its card_index is within the pack's run["deliveries"]; the
+exposure model counts delivered positions only. In a deck without a pack
+every card counts as delivered (the pre-paging rule).
+
+LoggedDeck.exclusion, per deck: replay excludes the deck whole and never
+sinks it; calibration excludes its cards.
   pack_integrity   unpack_run refuses the pack (unreadable, unknown version,
                    checksum mismatch, row fields disagreeing with its
-                   header), or it holds another run's cards; its cards are
-                   not merged
+                   header, malformed deliveries), or it holds another run's
+                   cards; its cards are not merged
   incomplete_deck  the non-ghost card indexes are not exactly 0..N-1, where
-                   N is the pack's card_count, or max+1 without a pack
-LoggedDeck.integrity carries the reason: replay excludes the deck whole and
-never sinks it; calibration excludes its cards.
+                   N is the pack's card_count, or max+1 without a pack; or a
+                   deck served at/after PACK_REQUIRED_SINCE has no pack and
+                   is past IN_FLIGHT_WINDOW (a lost pack)
+  in_flight        a deck served at/after PACK_REQUIRED_SINCE has no pack yet
+                   and may still be live (served within IN_FLIGHT_WINDOW of
+                   as_of): the pack is written when the deck retires. Not an
+                   error; without as_of the reader can't tell, and such a
+                   deck is incomplete_deck.
 
 Lean load: only the columns eval reads are selected, and
 project_features=True (the nightly) also trims each parsed features dict
@@ -42,6 +57,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 from sqlalchemy import (
     Integer, LargeBinary, String, Text, column, create_engine, inspect, select, table,
@@ -49,7 +65,7 @@ from sqlalchemy import (
 
 from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval import evidence_pack
-from backend.eval.contract import PROJECTION_KEYS
+from backend.eval.contract import PROJECTION_KEYS, card_impression_id
 
 # The deck_impressions columns eval reads (never select(imp): valuation_json,
 # assets_json and the rest are large and unused here).
@@ -75,9 +91,17 @@ _PACKS = table(
     column("header_json", Text), column("cards_blob", LargeBinary),
     column("checksum", String), column("card_count", Integer),
 )
-# LoggedDeck.integrity values (also replay's exclusion reasons).
+# LoggedDeck.exclusion values (also replay's exclusion reasons).
 PACK_INTEGRITY = "pack_integrity"
 INCOMPLETE_DECK = "incomplete_deck"
+IN_FLIGHT = "in_flight"
+# Lost-pack detection: decks served at or after this ISO UTC time must have a
+# pack row. None until trades-eng's packed writer ships; then set it to the
+# writer's go-live time.
+PACK_REQUIRED_SINCE: str | None = None
+# A deck's pack is written when it retires (superseded, or the 24 h display
+# cap, PRD #339 §5.1); 1 h more for the write.
+IN_FLIGHT_WINDOW = timedelta(hours=25)
 # The LoggedCard fields a packed card takes from its unpacked dict; every other
 # unpacked key goes into its features_compact.
 _PACKED_LOGGED = (
@@ -104,6 +128,7 @@ class LoggedCard:
     features_compact: dict | None = None   # frozen compact block (narrow rows, packed cards)
     evidence_tier: str | None = None       # e.g. 'partial_run' (column pending)
     is_ghost: bool = False                 # a withheld ghost row (C5): never packed
+    delivered: bool = True                 # sent to a client (R4.2 U1; module doc)
     # Aggregated outcome flags (deck_outcomes reduce)
     viewed: bool = False
     liked: bool = False
@@ -121,7 +146,8 @@ class LoggedDeck:
     league_id: str
     served_at: str
     cards: list[LoggedCard] = field(default_factory=list)
-    integrity: str | None = None   # None, PACK_INTEGRITY or INCOMPLETE_DECK
+    # None, or PACK_INTEGRITY / INCOMPLETE_DECK / IN_FLIGHT (module doc).
+    exclusion: str | None = None
 
 
 def resolve_engine(engine=None, db_url: str | None = None):
@@ -181,13 +207,15 @@ def load_decks(
     user_id: str | None = None,
     league_id: str | None = None,
     project_features: bool = False,
+    as_of: str | None = None,      # ISO UTC — the eval's clock (in_flight)
 ) -> list[LoggedDeck]:
     """Load deck_impressions (+reduced outcomes) as LoggedDecks, time-ordered
     by served_at then deck_job_id. ISO-8601 UTC strings compare lexically,
     matching the storage format everywhere in this schema. Packs in the same
     window (deck_evidence_packs.served_at, user_id, league_id) are merged
     into their decks (module docstring); a card is ordered by card_index,
-    a non-ghost card before a ghost row at the same index.
+    a non-ghost card before a ghost row at the same index. `as_of` is the
+    explicit clock the in_flight rule needs; the loader reads no wall clock.
 
     project_features=True keeps only contract.PROJECTION_KEYS inside each
     parsed features dict (and each packed card's features_compact): every
@@ -211,18 +239,6 @@ def load_decks(
 
     with eng.connect() as conn:
         rows = conn.execute(q).fetchall()
-        imp_ids = [r.impression_id for r in rows]
-        outcomes: dict[str, list] = {}
-        if imp_ids:
-            # Chunk the IN() to stay under SQLite's parameter cap.
-            out = deck_outcomes_table
-            for i in range(0, len(imp_ids), 500):
-                chunk = imp_ids[i:i + 500]
-                for orow in conn.execute(
-                    select(out.c.impression_id, out.c.action, out.c.dwell_ms)
-                    .where(out.c.impression_id.in_(chunk))
-                ).fetchall():
-                    outcomes.setdefault(orow.impression_id, []).append(orow)
         packs = []
         if inspect(conn).has_table(PACK_TABLE):
             pq = select(_PACKS)
@@ -235,6 +251,22 @@ def load_decks(
             if league_id:
                 pq = pq.where(_PACKS.c.league_id == league_id)
             packs = conn.execute(pq).fetchall()
+        unpacked = {p.run_id: _unpack(p) for p in packs}   # None: pack_integrity
+        imp_ids = list(dict.fromkeys(
+            [r.impression_id for r in rows]
+            + [card_impression_id(run_id, u["card_index"])
+               for run_id, got in unpacked.items() if got for u in got[1]]))
+        outcomes: dict[str, list] = {}
+        if imp_ids:
+            # Chunk the IN() to stay under SQLite's parameter cap.
+            out = deck_outcomes_table
+            for i in range(0, len(imp_ids), 500):
+                chunk = imp_ids[i:i + 500]
+                for orow in conn.execute(
+                    select(out.c.impression_id, out.c.action, out.c.dwell_ms)
+                    .where(out.c.impression_id.in_(chunk))
+                ).fetchall():
+                    outcomes.setdefault(orow.impression_id, []).append(orow)
 
     decks: dict[str, LoggedDeck] = {}
     order: list[str] = []
@@ -262,22 +294,7 @@ def load_decks(
             evidence_tier=getattr(r, "evidence_tier", None),
             is_ghost=(r.is_ghost == 1),
         )
-        for orow in outcomes.get(r.impression_id, ()):
-            action = orow.action
-            if action == "viewed":
-                card.viewed = True
-            elif action == "like":
-                card.liked = True
-            elif action == "pass":
-                card.passed = True
-            elif action == "propose":
-                card.proposed = True
-            elif action == "not_interested":
-                card.not_interested = True
-            elif action == "undo":
-                card.undone = True
-            if orow.dwell_ms is not None:
-                card.dwell_ms = max(card.dwell_ms or 0, int(orow.dwell_ms))
+        _reduce_outcomes(card, outcomes.get(r.impression_id, ()))
         deck = decks.get(r.deck_job_id)
         if deck is None:
             deck = LoggedDeck(
@@ -290,7 +307,7 @@ def load_decks(
             order.append(r.deck_job_id)
         deck.cards.append(card)
 
-    card_counts: dict[str, int] = {}
+    packed: dict[str, tuple[int, int]] = {}   # run_id -> (card_count, last delivered)
     pack_only = False
     for p in packs:
         deck = decks.get(p.run_id)
@@ -300,38 +317,83 @@ def load_decks(
             decks[p.run_id] = deck
             order.append(p.run_id)
             pack_only = True
-        try:
-            _run, unpacked = evidence_pack.unpack_run(evidence_pack.PackedRun(
-                pack_version=p.pack_version, header_json=p.header_json,
-                cards_blob=p.cards_blob, checksum=p.checksum, card_count=p.card_count))
-            if any(u.get("deck_job_id") != p.run_id for u in unpacked):
-                raise evidence_pack.PackIntegrityError("the pack holds another run's cards")
-        except evidence_pack.PackIntegrityError:
-            deck.integrity = PACK_INTEGRITY
+        got = unpacked[p.run_id]
+        if got is None:
+            deck.exclusion = PACK_INTEGRITY
             continue
-        card_counts[p.run_id] = p.card_count
+        last_delivered, cards = got
+        packed[p.run_id] = (p.card_count, last_delivered)
         full = {c.card_index for c in deck.cards if not c.is_ghost}
-        deck.cards.extend(_packed_card(p, u, project_features)
-                          for u in unpacked if u["card_index"] not in full)
+        for u in cards:
+            if u["card_index"] not in full:
+                card = _packed_card(p, u, project_features)
+                _reduce_outcomes(card, outcomes.get(card.impression_id, ()))
+                deck.cards.append(card)
 
+    in_flight_from = (None if as_of is None else
+                      (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat())
     result = [decks[j] for j in order]
     if pack_only:
         result.sort(key=lambda d: (d.served_at, d.deck_job_id))
     for deck in result:
         deck.cards.sort(key=lambda c: (c.card_index, c.is_ghost))
-        if deck.integrity is None:
-            idx = [c.card_index for c in deck.cards if not c.is_ghost]
-            n = card_counts.get(deck.deck_job_id, idx[-1] + 1 if idx else 0)
-            if idx != list(range(n)):
-                deck.integrity = INCOMPLETE_DECK
+        if deck.exclusion is not None:
+            continue
+        idx = [c.card_index for c in deck.cards if not c.is_ghost]
+        if deck.deck_job_id in packed:
+            n, last_delivered = packed[deck.deck_job_id]
+            for c in deck.cards:
+                c.delivered = not c.is_ghost and c.card_index <= last_delivered
+        elif PACK_REQUIRED_SINCE is not None and deck.served_at >= PACK_REQUIRED_SINCE:
+            live = in_flight_from is not None and deck.served_at >= in_flight_from
+            deck.exclusion = IN_FLIGHT if live else INCOMPLETE_DECK
+            continue
+        else:
+            n = idx[-1] + 1 if idx else 0
+        if idx != list(range(n)):
+            deck.exclusion = INCOMPLETE_DECK
     return result
 
 
+def _unpack(p) -> tuple[int, list[dict]] | None:
+    """(last delivered card_index, unpacked cards) for one pack row, or None
+    when it fails integrity."""
+    try:
+        run, cards = evidence_pack.unpack_run(evidence_pack.PackedRun(
+            pack_version=p.pack_version, header_json=p.header_json,
+            cards_blob=p.cards_blob, checksum=p.checksum, card_count=p.card_count))
+        last_delivered = evidence_pack.check_deliveries(run, p.card_count)
+        if any(u.get("deck_job_id") != p.run_id for u in cards):
+            raise evidence_pack.PackIntegrityError("the pack holds another run's cards")
+    except evidence_pack.PackIntegrityError:
+        return None
+    return last_delivered, cards
+
+
+def _reduce_outcomes(card: LoggedCard, orows) -> None:
+    for orow in orows:
+        action = orow.action
+        if action == "viewed":
+            card.viewed = True
+        elif action == "like":
+            card.liked = True
+        elif action == "pass":
+            card.passed = True
+        elif action == "propose":
+            card.proposed = True
+        elif action == "not_interested":
+            card.not_interested = True
+        elif action == "undo":
+            card.undone = True
+        if orow.dwell_ms is not None:
+            card.dwell_ms = max(card.dwell_ms or 0, int(orow.dwell_ms))
+
+
 def _packed_card(p, u: dict, project_features: bool) -> LoggedCard:
-    """An unpacked card as an unseen LoggedCard: a synthesized impression_id,
-    no outcomes, the logged fields from the pack, and every other packed key
-    (the frozen scorer inputs, the attribution and the per-run shared fields)
-    in features_compact."""
+    """An unpacked card as a LoggedCard: the deterministic impression_id
+    (outcomes join on it), the logged fields from the pack, and every other
+    packed key (the frozen scorer inputs, the attribution and the per-run
+    shared fields) in features_compact."""
     compact = {k: v for k, v in u.items() if k not in _PACKED_LOGGED}
     if project_features:
         compact = {k: v for k, v in compact.items() if k in PROJECTION_KEYS}
@@ -340,7 +402,7 @@ def _packed_card(p, u: dict, project_features: bool) -> LoggedCard:
         return float(u[k]) if u.get(k) is not None else None
 
     return LoggedCard(
-        impression_id=f"pack:{p.run_id}:{u['card_index']}",
+        impression_id=card_impression_id(p.run_id, u["card_index"]),
         deck_job_id=p.run_id,
         user_id=u.get("user_id", p.user_id),
         league_id=u.get("league_id", p.league_id),

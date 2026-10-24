@@ -48,6 +48,7 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "exclusion_rule_version": run.exclusion_rule_version,
         "missing_inputs_decks": run.missing_inputs_decks,
         "partial_run_decks": run.partial_run_decks,
+        "in_flight_decks": run.in_flight_decks,
         "pack_integrity_decks": run.pack_integrity_decks,
         "incomplete_decks": run.incomplete_decks,
         "tilt_clipped": run.tilt_clipped,

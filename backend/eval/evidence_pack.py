@@ -13,11 +13,16 @@ columns, field for field:
 
   pack_version  PACK_VERSION at write time (the header carries it too).
   header_json   written once per run: pack_version, the caller's run metadata
-                (`run`, returned verbatim by unpack_run: e.g. the values
-                snapshot id, built_at, the config reference), card_count, the
-                per-run fields hoisted off the cards (`shared`), the per-run
-                dictionaries, the taste_attrs vocabulary, and the layout
-                needed to slice the blob.
+                (`run`, returned verbatim by unpack_run: the values snapshot
+                id, built_at, the config reference, and `deliveries`),
+                card_count, the per-run fields hoisted off the cards
+                (`shared`), the per-run dictionaries, the taste_attrs
+                vocabulary, and the layout needed to slice the blob.
+                run["deliveries"] (R4.2 U1) is required: the delivered page
+                boundaries [[last_card_index, delivered_at], ...] with
+                last_card_index strictly increasing in [0, card_count).
+                Pages are delivered from card 0, so the cards delivered are
+                0..the last boundary (check_deliveries).
   cards_blob    zlib(raw), raw = per-card columns in card_index order.
   checksum      sha256 hex of ONE canonical JSON document holding the parsed
                 header and the unpacked cards:
@@ -93,6 +98,7 @@ CODED_GROUPS = (
 FLOAT_FIELDS = (
     "propensity", "base_score", "final_score",
     "give_value", "receive_value", "surplus_margin", "fairness_score",
+    "taste_pref_long", "taste_pref_short",
 )
 INT_FIELDS = ("arm_rank", "group_rank")
 CONTRACT_KEYS = frozenset(
@@ -124,7 +130,8 @@ class PackedRun:
 
 def pack_run(run: dict, cards: list[dict], *, card_count: int) -> PackedRun:
     """Pack one served run. `run` is the caller's run metadata (e.g. the values
-    snapshot id, built_at, the config reference), JSON-serializable; `cards`
+    snapshot id, built_at, the config reference, and the required
+    `deliveries`, see check_deliveries), JSON-serializable; `cards`
     are the packed card dicts in card_index order; `card_count` is the served
     deck's card count, ghosts excluded (full rows and packed cards together).
     Raises ValueError for anything it cannot pack exactly."""
@@ -135,6 +142,7 @@ def pack_run(run: dict, cards: list[dict], *, card_count: int) -> PackedRun:
             or (idx and (idx[0] < 0 or idx[-1] >= card_count))):
         raise ValueError(f"card_count {card_count!r} must be an int with every "
                          "packed card_index in [0, card_count)")
+    check_deliveries(run, card_count)
     header_json = json.dumps(
         {"pack_version": PACK_VERSION, "run": run, "card_count": card_count, **layout},
         sort_keys=True, separators=(",", ":"))
@@ -147,6 +155,25 @@ def pack_run(run: dict, cards: list[dict], *, card_count: int) -> PackedRun:
     except PackIntegrityError:
         raise ValueError("pack does not round-trip exactly; refusing to write it") from None
     return packed
+
+
+def check_deliveries(run, card_count: int) -> int:
+    """R4.2 U1: validate run["deliveries"] and return the last delivered
+    card_index (-1 when nothing was delivered). Raises PackIntegrityError
+    (a ValueError) when it is missing or malformed."""
+    deliveries = run.get("deliveries") if isinstance(run, dict) else None
+    if not isinstance(deliveries, (list, tuple)):
+        raise PackIntegrityError("run['deliveries'] must be a list of "
+                                 "[last_card_index, delivered_at] pairs")
+    last = -1
+    for d in deliveries:
+        if (not isinstance(d, (list, tuple)) or len(d) != 2 or type(d[0]) is not int
+                or not isinstance(d[1], str) or not last < d[0] < card_count):
+            raise PackIntegrityError(
+                f"deliveries entry {d!r}: needs [last_card_index, delivered_at] with "
+                f"last_card_index increasing in [0, {card_count})")
+        last = d[0]
+    return last
 
 
 def unpack_run(packed: PackedRun) -> tuple[dict, list[dict]]:
