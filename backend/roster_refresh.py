@@ -1,17 +1,22 @@
-"""S0 — record each Sleeper roster refresh in `league_roster_state`.
+"""S0 — the Sleeper roster refresh record, and the non-blocking floor kick.
 
-The refresh itself is the read `/api/session/init` already makes at app open
-and foreground (`session_input.resolve_session_input`). This module only
-records its outcome, so trades-eng's serve path can tell fresh rows from last
-good ones. Scope: docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md
+The main refresh is the read `/api/session/init` already makes at app open
+and foreground (`session_input.resolve_session_input`). This module records
+its outcome in `league_roster_state`, so trades-eng's serve path can tell
+fresh rows from last good ones, and offers `maybe_refresh_async` (Product's
+P41): a single-flight background re-read when a league is past the roster
+bound. Scope: docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md §B.1,
 §B.3.
 
 Never raises: a bookkeeping failure must never block session init or the tap.
-PR-B adds the fingerprint stamp (roster_snapshot → CAS → on_roster_change).
+PR-B adds the fingerprint stamp (roster_snapshot → CAS → on_roster_change)
+to `_refresh_league`, the one internal refresh both entry points share.
 """
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime, timezone
 
 from . import database as db
@@ -21,6 +26,11 @@ log = logging.getLogger(__name__)
 
 PICKS_UNAVAILABLE = "picks_unavailable"
 WRITE_FAILED = "write_failed"
+
+# Single-flight for maybe_refresh_async. The lock guards ONLY the set's
+# check-and-add / remove: no Sleeper call and no DB write ever runs under it.
+_inflight_lock = threading.Lock()
+_inflight: set[str] = set()
 
 
 def fetch_started_at() -> str:
@@ -65,3 +75,141 @@ def record_outcome(league_id: str, refreshed_at: str | None, *,
         log.warning("roster refresh state write failed league=%s: %s", league_id, err)
         return None
     return db.ROSTER_STATE_FRESH
+
+
+# ---------------------------------------------------------------------------
+# P41 — the non-blocking floor kick
+# ---------------------------------------------------------------------------
+
+def _within_bound(league_id: str, max_age_s: float) -> bool:
+    """True when the last full refresh is younger than `max_age_s` seconds.
+
+    No row, a NULL `refreshed_at`, an unparseable stamp or one in the future
+    all count as past the bound (refresh rather than trust it).
+    """
+    state = db.get_league_roster_state(league_id)
+    stamp = (state or {}).get("refreshed_at")
+    if not stamp:
+        return False
+    try:
+        when = datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return False
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - when).total_seconds()
+    return 0.0 <= age < float(max_age_s)
+
+
+def maybe_refresh_async(league_id: str, max_age_s: float) -> bool:
+    """Start one background Sleeper roster refresh if the league is past the bound.
+
+    Returns at once: True only when it started a refresh. No-ops (False, no
+    thread) for a linked platform league or an id that isn't a Sleeper league
+    id, while the 429 circuit is open, when `refreshed_at` is within
+    `max_age_s`, or when a refresh for this league is already in flight.
+    The caller (trades-eng's `/generate`) invokes it after the response is
+    built and never under a lock; its checks are two small DB reads.
+
+    Budget: ≤ 4 Sleeper reads per kick (rosters, users, traded_picks,
+    drafts), 5 when the league meta isn't cached; only past the bound; one
+    in flight per league.
+    """
+    lid = str(league_id or "")
+    try:
+        if not lid.isdigit() or db.is_linked_platform_league(lid):
+            return False                  # platform-linked (G-014/G-030) or demo/sentinel id
+        if sleeper_http.is_open():
+            return False
+        if _within_bound(lid, max_age_s):
+            return False
+    except Exception as exc:
+        log.warning("roster refresh kick skipped league=%s error=%s", lid, type(exc).__name__)
+        return False
+    with _inflight_lock:
+        if lid in _inflight:
+            return False
+        _inflight.add(lid)
+    try:
+        threading.Thread(target=_run_refresh, args=(lid,),
+                         name=f"roster-refresh-{lid}", daemon=True).start()
+    except Exception as exc:
+        with _inflight_lock:
+            _inflight.discard(lid)
+        log.warning("roster refresh kick failed league=%s error=%s", lid, type(exc).__name__)
+        return False
+    return True
+
+
+def _run_refresh(league_id: str) -> None:
+    """Thread body: one refresh, never raising, always leaving the in-flight set."""
+    try:
+        _refresh_league(league_id, fetch_started_at())
+    except Exception as exc:
+        log.warning("roster refresh crashed league=%s error=%s", league_id, type(exc).__name__)
+    finally:
+        with _inflight_lock:
+            _inflight.discard(league_id)
+
+
+def _refresh_league(league_id: str, started: str) -> str | None:
+    """One Sleeper roster refresh for a league: the session-init daemon's
+    Sleeper segment, re-run outside a session. Returns the status recorded.
+
+    Reads rosters and users (circuit-guarded `_sleeper_get`), replace-syncs
+    `league_members` in session init's row shape, syncs owned picks (meta from
+    the 15-min cache, else one read), then records the outcome. PR-B extends
+    this function with the fingerprint stamp and `on_roster_change`.
+    """
+    from . import server                  # lazy: server imports this module's siblings
+    from .feature_flags import is_enabled
+
+    base = f"https://api.sleeper.app/v1/league/{league_id}"
+    try:
+        rosters = server._sleeper_get(base + "/rosters")
+        users = server._sleeper_get(base + "/users")
+        if not isinstance(rosters, list) or not isinstance(users, list):
+            raise ValueError("invalid Sleeper response")
+    except Exception as exc:
+        return record_failure(league_id, exc)
+
+    names = {str(u.get("user_id")): (u.get("display_name") or u.get("username") or "")
+             for u in users if isinstance(u, dict)}
+    owned = [r for r in rosters if isinstance(r, dict) and r.get("owner_id")]
+    members = [{"user_id": str(r["owner_id"]),
+                "username": names.get(str(r["owner_id"]), ""),
+                "display_name": names.get(str(r["owner_id"]), ""),
+                # G-004: Sleeper can send null slots; never store "None".
+                "player_ids": [str(p) for p in (r.get("players") or []) if p not in (None, "")]}
+               for r in owned]
+    try:
+        members_ok = db.replace_league_members_snapshot(league_id, members)
+    except Exception as exc:
+        log.warning("roster refresh members write failed league=%s error=%s",
+                    league_id, type(exc).__name__)
+        members_ok = False
+    if members_ok:
+        try:
+            server._invalidate_league_members_cache(league_id)
+        except Exception:
+            pass
+
+    picks_ok = True
+    if is_enabled("picks.owned_sync"):            # the same gate session init uses
+        try:
+            hit = server._FA_LEAGUE_META_CACHE.get(league_id)
+            meta = hit[1] if hit and hit[1] else None
+            if meta is None:
+                meta = server._fetch_sleeper_league_meta(league_id)
+                if meta:
+                    server._FA_LEAGUE_META_CACHE[league_id] = (time.time(), meta)
+            scoring = db.get_league_scoring(league_id) or db.DEFAULT_SCORING
+            uid_to_name = {str(r["owner_id"]): names.get(str(r["owner_id"]), "") for r in owned}
+            picks_ok = server._sync_sleeper_owned_picks(
+                league_id, uid_to_name, scoring, rosters=rosters, meta=meta) is not None
+        except Exception as exc:                  # None above = failed (R10)
+            log.warning("roster refresh pick sync failed league=%s error=%s",
+                        league_id, type(exc).__name__)
+            picks_ok = False
+
+    return record_outcome(league_id, started, members_ok=members_ok, picks_ok=picks_ok)
