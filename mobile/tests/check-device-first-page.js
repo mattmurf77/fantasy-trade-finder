@@ -465,6 +465,9 @@ function fnBody(text, signature) {
     ok(/await Promise\.all\(\[[\s\S]*clearDevicePages\(\),[\s\S]*\]\);/.test(signOut), 'signOut awaits it with the other per-account keys');
     const setUser = between(sess, 'setUser: async (u) => {', '\n  },');
     ok(/const previous = get\(\)\.user;\s*if \(previous && previous\.user_id !== u\?\.user_id\) void clearDevicePages\(\);/.test(setUser), 'another account');
+    // A demo bypasses setUser (onboarding-eng A1): it clears before it writes the demo user.
+    const demo = between(sess, 'startDemoSession: async () => {', '\n  },');
+    ok(/const previous = get\(\)\.user;\s*if \(previous && previous\.user_id !== demoUser\.user_id\) void clearDevicePages\(\);\s*set\(\{\s*user:\s*demoUser,/.test(demo), 'a demo over another account');
   });
 
   console.log(failures ? `\n${failures} failed` : '\nall passed');

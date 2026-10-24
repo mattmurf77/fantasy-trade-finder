@@ -582,6 +582,11 @@ export const useSession = create<SessionState>((set, get) => ({
       AsyncStorage.setItem(SU_KEY, JSON.stringify(demoUser)),
       AsyncStorage.setItem(SL_KEY, JSON.stringify(demoLeague)),
     ]);
+    // 200 ms path C (onboarding-eng A1): a demo bypasses setUser, so a demo
+    // started while another account is still in the store (SignIn after an
+    // expiry that kept the user) drops that account's device-held trade pages.
+    const previous = get().user;
+    if (previous && previous.user_id !== demoUser.user_id) void clearDevicePages();
     set({
       user:     demoUser,
       league:   demoLeague,
