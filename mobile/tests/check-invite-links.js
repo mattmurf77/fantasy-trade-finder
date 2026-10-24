@@ -451,6 +451,22 @@ function runStatic() {
     .flatMap((c) => c.keys.filter((k) => /token/i.test(k)).map((k) => `${rel} ${c.name}.${k}`)));
   eq('H C1 no invite/share event prop key contains "token"', tokenKeys, []);
 
+  // I. FR-19 — `referral_activated` taps to Trades on both clients, never to
+  //    League (the join row keeps League). check-notif-glyphs pins the glyphs.
+  const kindSet = (name) => {
+    const m = new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\)`).exec(dl);
+    return m ? [...m[1].matchAll(/'([a-z_]+)'/g)].map((x) => x[1]) : [];
+  };
+  check('I FR-19 referral_activated is in V2_TRADE_KINDS', kindSet('V2_TRADE_KINDS').includes('referral_activated'),
+        `V2_TRADE_KINDS = ${JSON.stringify(kindSet('V2_TRADE_KINDS'))}`);
+  check('I FR-19 referral_activated is not in V2_LEAGUE_KINDS / V2_MATCH_KINDS',
+        !kindSet('V2_LEAGUE_KINDS').includes('referral_activated') && !kindSet('V2_MATCH_KINDS').includes('referral_activated'),
+        'the activation row must route to Trades only');
+  const web = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'js', 'app.js'), 'utf8');
+  const webTrade = /const TRADE_TYPES\s*=\s*\[([^\]]*)\]/.exec(web);
+  check('I FR-19 web clickNotif TRADE_TYPES has referral_activated',
+        !!webTrade && webTrade[1].includes("'referral_activated'"), webTrade ? webTrade[0] : 'TRADE_TYPES not found');
+
   finish();
 }
 

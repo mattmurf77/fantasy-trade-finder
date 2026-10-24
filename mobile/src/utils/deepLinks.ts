@@ -316,7 +316,11 @@ const V2_RANK_KINDS = new Set(['finish_ranking']);
 // Trades tab (hub home when trades.finder_hub is on, the deck otherwise —
 // where the pre-generated deck is served from the job cache). Inert while
 // the backend flag is off: the kind is never pushed.
-const V2_TRADE_KINDS = new Set(['deck_replenished']);
+// `referral_activated` (referral loop FR-19, inbox only): an invitee the
+// user brought in weighed in on their first trade. Trades, NOT League —
+// the join row (`referral_joined`) keeps League. Inert until the server
+// posts it.
+const V2_TRADE_KINDS = new Set(['deck_replenished', 'referral_activated']);
 
 export type NotificationTab = 'Matches' | 'League' | 'Rank' | 'Trades';
 

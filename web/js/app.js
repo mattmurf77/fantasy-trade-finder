@@ -5136,6 +5136,7 @@
       // clients is that a type is RECOGNISED, not that the two draw the
       // same path.
       if (type === 'referral_joined')               return ICON.plus;
+      if (type === 'referral_activated')            return ICON.trade;   // FR-19
       if (type === 'league_member_joined')          return ICON.plus;
       if (type === 'league_member_unlocked_trades') return ICON.rank;
       if (type === 'match_expiring')                return ICON.match;
@@ -5325,7 +5326,8 @@
       const LEAGUE_TYPES = ['referral_joined', 'league_member_joined',
                             'league_member_unlocked_trades',
                             'espn_reconnect'];   // ADR-011 sweep nudge
-      const TRADE_TYPES  = ['deck_replenished'];
+      const TRADE_TYPES  = ['deck_replenished',
+                            'referral_activated'];   // FR-19: Trades, not League
 
       if (MATCH_TYPES.indexOf(type) !== -1) {
         // FIXED 2026-08-13 (notif-inbox-growth): this branch used to call
