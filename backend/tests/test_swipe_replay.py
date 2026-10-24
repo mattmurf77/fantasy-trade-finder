@@ -264,21 +264,57 @@ def test_percentile_move_on_a_hand_built_case():
     assert sr.within_tier_moves(without, without) == (0, 10, 0.0)
 
 
-def test_kill_rule_thresholds():
-    def week(kendalls, moves):
-        return [{"week_start": "w", "kendall": k, "max_pct_move": m}
-                for k, m in zip(kendalls, moves)]
+def _kill_week(kendalls, moves_n4, introduced=None):
+    introduced = introduced or [0] * len(kendalls)
+    return [{"week_start": "w", "board": f"b{i}", "kendall": k,
+             "max_pct_move_n4": m, "pick_inversions_introduced": d}
+            for i, (k, m, d) in enumerate(zip(kendalls, moves_n4, introduced))]
 
-    calm = sr.kill_indicators(week([0.0] * 19 + [0.3], [0.0] * 20))
+
+def test_kill_rule_thresholds():
+    calm = sr.kill_indicators(_kill_week([0.0] * 19 + [0.3], [0.0] * 20))
     assert calm["weeks"][0]["p95_kendall"] == 0.0     # nearest rank: 19th of 20
-    assert calm["would_have_fired"] is False
-    edge = sr.kill_indicators(week([0.25] * 20, [74.9] * 20))
-    assert edge["weeks"][0]["fires_a"] is False and edge["weeks"][0]["fires_b"] is False
-    a = sr.kill_indicators(week([0.0] * 18 + [0.26, 0.26], [0.0] * 20))
-    assert a["weeks"][0]["fires_a"] is True and a["would_have_fired"] is True
-    b = sr.kill_indicators(week([0.0] * 20, [75.0] + [0.0] * 19))   # 1 of 20 = 5%
-    assert b["weeks"][0]["share_pct_move_ge_75"] == 0.05
-    assert b["weeks"][0]["fires_b"] is True and b["weeks"][0]["fires_a"] is False
+    assert calm["would_have_fired"] is False and calm["status"] == "OK"
+    edge = sr.kill_indicators(_kill_week([0.25] * 20, [74.9] * 20))
+    w = edge["weeks"][0]
+    assert (w["fires_a"], w["fires_b"], w["alert_b"], w["status"]) == (False, False, False, "OK")
+    a = sr.kill_indicators(_kill_week([0.0] * 18 + [0.26, 0.26], [0.0] * 20))
+    assert a["weeks"][0]["fires_a"] is True and a["status"] == "KILL"
+
+
+def test_revised_kill_b_one_board_is_an_alert_two_boards_kill():
+    one = sr.kill_indicators(_kill_week([0.0] * 3, [75.0, 0.0, 0.0])).get("weeks")[0]
+    assert (one["boards_ge75_n4"], one["fires_b"], one["alert_b"], one["status"]) == \
+        (1, False, True, "ALERT")
+    assert one["boards_ge75_n4_hashes"] == ["b0"] and one["share_ge75_n4"] == 1 / 3
+    two = sr.kill_indicators(_kill_week([0.0] * 40, [75.0, 80.0] + [0.0] * 38))
+    w = two["weeks"][0]
+    assert (w["boards_ge75_n4"], w["share_ge75_n4"]) == (2, 0.05)
+    assert (w["fires_b"], w["alert_b"], w["status"]) == (True, False, "KILL")
+    thin = sr.kill_indicators(_kill_week([0.0] * 41, [75.0, 80.0] + [0.0] * 39))
+    w = thin["weeks"][0]                       # 2 boards but under 5%: alert only
+    assert (w["fires_b"], w["alert_b"], w["status"]) == (False, True, "ALERT")
+
+
+def test_kill_b_ignores_groups_smaller_than_four():
+    # A WR group of 3: the top player drops to the bottom (a 100-point move
+    # for 5a-ii), but kill (b) only counts groups of n >= 4.
+    without = _hand_board(a=("WR", 1, "second"), b=("WR", 2, "second"),
+                          c=("WR", 3, "second"))
+    with_ = _hand_board(b=("WR", 1, "second"), c=("WR", 2, "second"),
+                        a=("WR", 3, "second"))
+    assert sr.within_tier_moves(with_, without)[2] == 100.0
+    assert sr.kill_b_move(with_, without) == 0.0
+    # The same slide in a group of four counts.
+    without4 = {**without, "d": (0.0, "WR", 4, "second")}
+    with4 = _hand_board(b=("WR", 1, "second"), c=("WR", 2, "second"),
+                        d=("WR", 3, "second"), a=("WR", 4, "second"))
+    assert sr.kill_b_move(with4, without4) == 100.0
+
+
+def test_kill_d_fires_on_any_introduced_pick_inversion():
+    w = sr.kill_indicators(_kill_week([0.0] * 3, [0.0] * 3, [0, 1, 0]))["weeks"][0]
+    assert (w["fires_d"], w["introduced_pick_inversions"], w["status"]) == (True, 1, "KILL")
 
 
 def test_tier_violation_counter():
@@ -295,15 +331,17 @@ def test_tier_violation_counter():
         "tier_membership_violations": 2, "verdict": "FAIL"}
 
 
-NO_PICK_INVERSIONS = {"pick_inversions_without": 0, "pick_inversions_introduced": 0}
+NO_PICK_INVERSIONS = {"pick_inversions_without": 0, "pick_inversions_introduced": 0,
+                      "board": "b", "max_pct_move_n4": 0.0}
 
 
 def test_bars_and_ship_rule():
     def weeks(kendalls, moves, introduced=0):
         return [{"trade_swipes": 1, "kendall": k, "max_pct_move": m,
-                 "tier_violations": 0, "week_start": "w",
+                 "tier_violations": 0, "week_start": "w", "board": f"b{i}",
+                 "max_pct_move_n4": 0.0,
                  "pick_inversions_without": 0, "pick_inversions_introduced": introduced}
-                for k, m in zip(kendalls, moves)]
+                for i, (k, m) in enumerate(zip(kendalls, moves))]
 
     ok = sr.summarize(weeks([0.0, 0.05, 0.15], [0.0, 10.0, 50.0]))
     assert ok["bar_5a_i"] == ok["bar_5a_ii"] == "PASS"
@@ -440,6 +478,92 @@ def test_pick_order_is_clean_on_a_clean_board(world):
         sr.build_board(players, seed, FMT, _stored_rows(engine))) == set()
 
 
+# ---------------------------------------------------------------------------
+# Monitor mode (the 14-day post-flip watch, stored K)
+# ---------------------------------------------------------------------------
+
+FLIP = datetime(2026, 10, 1, tzinfo=UTC)
+MON_UNTIL = datetime(2026, 10, 15, tzinfo=UTC)
+
+
+def _monitor_engine(*events):
+    """The base world plus post-flip rows: (user, win, lose, k, dtype, at, n)."""
+    engine = create_engine("sqlite://", poolclass=StaticPool,
+                           connect_args={"check_same_thread": False})
+    _seed(engine)
+    rows = []
+    for user, win, lose, k, dtype, at, n in events:
+        for i in range(n):
+            rows.append({"user_id": user, "winner_player_id": win,
+                         "loser_player_id": lose, "decision_type": dtype,
+                         "k_factor": k, "created_at": _iso(at + timedelta(minutes=i)),
+                         "scoring_format": FMT})
+    with engine.begin() as conn:
+        conn.execute(insert(db.swipe_decisions_table), rows)
+    sr._install_readonly_guard(engine)
+    return engine
+
+
+def _board_weeks(report, user):
+    key = sr._hash(f"{user}|{FMT}")
+    return next(b for b in report["boards"] if b["board"] == key)[f"k_scale_{sr.MONITOR_KEY}"]
+
+
+def test_monitor_reads_stored_k_and_reports_ok():
+    """Post-flip likes stored at K 4 move the live board; a pre-flip trio
+    inversion of the 1st-round rungs is pre-existing and never fires (d)."""
+    at = FLIP + timedelta(days=1)
+    engine = _monitor_engine(
+        ("user_live", "w2", "w1", 4.0, "trade", at, 3),
+        ("user_pre", "generic_pick_1_mid", "generic_pick_1_early", 32.0, "rank",
+         FLIP - timedelta(days=30), 6),
+        ("user_pre", "w2", "w1", 4.0, "trade", at, 1))
+    report = sr.run(engine, FLIP, MON_UNTIL, min_swipes=1, mode="monitor")
+    assert report["mode"] == "monitor"
+    assert report["check_5b_i"] is None and report["ship_rule"] is None
+    assert report["counts"]["boards_included"] == 2     # the frozen-period boards are out
+
+    live = _board_weeks(report, "user_live")
+    assert [(w["trade_swipes"], w["discordant_pairs"]) for w in live] == [(3, 1), (0, 0)]
+
+    pre = _board_weeks(report, "user_pre")
+    assert pre[0]["pick_inversions_without"] > 0       # trio votes inverted the rungs
+    assert pre[0]["pick_inversions_introduced"] == 0
+
+    res = report["results"][sr.MONITOR_KEY]
+    assert res["check_5b_ii"]["tier_membership_violations"] == 0
+    assert res["kill_rule"]["status"] == "OK"
+    assert [w["fires_d"] for w in res["kill_rule"]["weeks"]] == [False]
+    text = sr.summary_text(report)
+    assert "swipe monitor" in text and "overall: OK" in text
+    assert "week 2026-10-01: OK" in text
+
+
+def test_monitor_kill_d_on_an_introduced_pick_inversion():
+    engine = _monitor_engine(
+        ("user_rung", "generic_pick_1_mid", "generic_pick_1_early", 4.0, "trade",
+         FLIP + timedelta(days=2), 40))
+    report = sr.run(engine, FLIP, MON_UNTIL, min_swipes=1, mode="monitor")
+    weeks = _board_weeks(report, "user_rung")
+    assert weeks[0]["pick_inversions_without"] == 0
+    assert weeks[0]["pick_inversions_introduced"] == 1
+    kill = report["results"][sr.MONITOR_KEY]["kill_rule"]
+    assert kill["weeks"][0]["fires_d"] is True and kill["status"] == "KILL"
+    text = sr.summary_text(report)
+    assert "week 2026-10-01: KILL (kill d)" in text and "overall: KILL" in text
+
+
+def test_monitor_cli_needs_the_flip_time(tmp_path):
+    path = tmp_path / "snap.db"
+    _seed(create_engine(f"sqlite:///{path}"))
+    with pytest.raises(SystemExit):
+        sr.main(["--db", str(path), "--mode", "monitor", "--output",
+                 str(tmp_path / "m.json")])
+    assert sr.main(["--db", str(path), "--mode", "monitor", "--since", "2026-10-01",
+                    "--until", "2026-10-15", "--output", str(tmp_path / "m.json")]) == 0
+    assert json.loads((tmp_path / "m.json").read_text())["min_swipes"] == 1
+
+
 def test_readonly_guard_refuses_writes(tmp_path):
     path = tmp_path / "snap.db"
     _seed(create_engine(f"sqlite:///{path}"))
@@ -484,7 +608,8 @@ def test_cli_writes_report_and_leaves_the_file_untouched(tmp_path, capsys):
     assert ME not in out.read_text(), "boards are reported by hash, not user id"
     printed = capsys.readouterr().out
     for line in ("5a-i  Kendall", "5a-ii pct move", "5b(ii) tier-membership violations 0",
-                 "kill rule (a)/(b) would have fired: no", "5b(i)",
+                 "kill rule (a)/(b)/(d) would have fired: no; (b) alert weeks: none",
+                 "5b(i)",
                  "ship rule: ship at full K", "caveat: Upper bound: fit_mult = 1",
                  "pick order: pre-existing inversions 0, introduced 0 -> PASS",
                  "generic-pick pairs applied 0, skipped league-pick 0, skipped other 0"):

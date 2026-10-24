@@ -78,9 +78,13 @@ the week) are scored; with none, WITH equals WITHOUT.
   * 5b(ii), structural: players whose tier differs WITH vs WITHOUT (unranked
     counted as a tier). Must be 0: `_feedback_bounds` in
     `RankingService._compute_elo` holds trade feedback inside each band.
-  * Kill-rule indicators per replay week: (a) p95 Kendall > 0.25; (b) the
-    share of active boards with a max percentile move >= 75 is >= 5%. (c), an
-    operator report, has no replay analogue.
+  * Kill-rule indicators per week, over active boards (field 6, (b) revised
+    2026-10-24 before the monitor runs): (a) p95 Kendall > 0.25; (b) at least
+    2 boards AND at least 5% of active boards have a player moving >= 75
+    percentile points within a group of n >= 4 (smaller groups never count);
+    any qualifying board short of that is an ALERT for models-lead, not a
+    kill; (d) any generic-pick inversion introduced by trade swipes. (c), an
+    operator report, has no replay analogue. Each week reads KILL, ALERT or OK.
   * Pick order (BL-001 A2; `pick_order`, PICK_ORDER_DEFINITION): on every
     board-week's WITH and WITHOUT boards, the generic ladder must read Early
     >= Mid >= Late within a round and min(round r) >= max(round r + 1), i.e.
@@ -92,6 +96,17 @@ p95 is nearest rank. The --k-scale result and the half-K (0.5) result are both
 reported, and `ship_rule` applies the packet's rule: full K if 5a-i, 5a-ii,
 5b(i) and 5b(ii) hold and no pick inversion is introduced, else half K if
 they hold there, else hold.
+
+Monitor mode (--mode monitor, the 14-day post-flip watch)
+--------------------------------------------------------
+--since is the knob-flip time. Boards are every (user, format) with a trade
+swipe in the window (--min-swipes defaults to 1). WITH keeps every row at its
+STORED k_factor (the learning that actually happened); WITHOUT is the same
+week with that week's trade rows at K = 0. Same machinery and output, minus
+the replay-only parts (no restore, no 5b(i), no ship rule). 5a-i and 5a-ii
+are informational; kill (a), revised (b) with its alert, and (d) introduced
+pick inversions (pre-existing ones excluded) decide the per-week and overall
+KILL / ALERT / OK line.
 
 5b (i), reported as `check_5b_i`: restoring at K x 0 reproduces the stored
 board exactly (the restore path changes nothing but frozen-window K), and the
@@ -136,6 +151,11 @@ BAR_PCT_MOVE_P95 = 50.0
 KILL_KENDALL_P95 = 0.25
 KILL_PCT_MOVE = 75.0
 KILL_SHARE = 0.05
+#: Revised kill (b), field 6 (2026-10-24): at least this many boards AND
+#: KILL_SHARE of active boards, counting groups of n >= KILL_B_MIN_GROUP only.
+#: Fewer qualifying boards (one, typically) raise an alert, not a kill.
+KILL_B_MIN_BOARDS = 2
+KILL_B_MIN_GROUP = 4
 
 METRIC_DEFINITION = (
     "Per active board-week (one user x format board, one 7-day week from "
@@ -148,8 +168,10 @@ METRIC_DEFINITION = (
     "median <= 0.05 and p95 <= 0.15. 5a-ii = max over players of |pct_with - "
     "pct_without|, pct = rank / (n - 1) x 100 within a group of n >= 2; bar "
     "p95 <= 50. 5b(ii) = players whose tier differs WITH vs WITHOUT; must be "
-    "0. Kill indicators per week: (a) p95 Kendall > 0.25, (b) share of active "
-    "boards with a percentile move >= 75 is >= 5%. p95 is nearest rank.")
+    "0. Kill indicators per week: (a) p95 Kendall > 0.25, (b) >= 2 boards AND "
+    ">= 5% of active boards have a percentile move >= 75 in a group of n >= 4 "
+    "(fewer such boards: ALERT, not kill), (d) any introduced generic-pick "
+    "inversion. p95 is nearest rank.")
 
 #: Position tab of each generic rung by round. A copy of the `_PICK_POS`
 #: literal local to `server.build_universal_pool`, which this module can't
@@ -177,6 +199,13 @@ CAVEATS = [
     "Upper bound: like or pass is matched through trade_decisions; an "
     "unmatched swipe takes like K (the larger) and is counted under "
     "counts.frozen_swipes_unmatched.",
+]
+
+MONITOR_CAVEATS = [
+    "Monitor mode: WITH is the live board (every trade row at its stored "
+    "k_factor, i.e. the learning that happened); WITHOUT zeroes that week's "
+    "trade rows. 5a-i/5a-ii are informational after the flip; the kill rules "
+    "(a), (b) with its alert, and (d) introduced pick inversions are what count.",
 ]
 
 
@@ -300,14 +329,19 @@ def is_frozen_trade(row: dict, since: datetime, until: datetime) -> bool:
             and ts is not None and since <= ts < until)
 
 
-def load_frozen_events(conn, since: datetime, until: datetime) -> dict:
-    """{(user_id, format): {created_at: (winners, losers)}} for frozen swipes."""
+def load_frozen_events(conn, since: datetime, until: datetime,
+                       frozen_only: bool = True) -> dict:
+    """{(user_id, format): {created_at: (winners, losers)}} for frozen swipes
+    in the window (every trade swipe in it when `frozen_only` is False)."""
     events: dict = defaultdict(lambda: defaultdict(lambda: (set(), set())))
     for r in _select(conn,
             "SELECT user_id, scoring_format, winner_player_id, loser_player_id, "
             "decision_type, k_factor, created_at FROM swipe_decisions "
-            "WHERE decision_type = 'trade' AND k_factor = 0"):
-        if is_frozen_trade(r, since, until):
+            "WHERE decision_type = 'trade'"
+            + (" AND k_factor = 0" if frozen_only else "")):
+        ts = _ts(r["created_at"])
+        if (is_frozen_trade(r, since, until) if frozen_only
+                else ts is not None and since <= ts < until):
             winners, losers = events[(r["user_id"], _fmt(r["scoring_format"]))][r["created_at"]]
             winners.add(str(r["winner_player_id"]))
             losers.add(str(r["loser_player_id"]))
@@ -381,10 +415,13 @@ def in_week(row: dict, start: datetime, end: datetime) -> bool:
     return row.get("decision_type") == "trade" and ts is not None and start <= ts < end
 
 
-def week_rows(rows, since, start, end, kinds, k_like, k_pass, k_scale):
-    """(WITH rows, WITHOUT rows, trade swipes in the week) for one week."""
+def week_rows(rows, since, start, end, kinds, k_like, k_pass, k_scale,
+              restore=True):
+    """(WITH rows, WITHOUT rows, trade swipes in the week) for one week.
+    `restore=False` (monitor mode) keeps every row at its stored K."""
     with_rows = rows_before(
-        restore_rows(rows, since, end, kinds, k_like, k_pass, k_scale), end)
+        restore_rows(rows, since, end, kinds, k_like, k_pass, k_scale)
+        if restore else rows, end)
     without = [{**r, "k_factor": 0.0} if in_week(r, start, end) else r
                for r in with_rows]
     swipes = len({r["created_at"] for r in with_rows if in_week(r, start, end)})
@@ -431,6 +468,21 @@ def within_tier_moves(with_board: dict, without_board: dict) -> tuple[int, int, 
         for i in range(n):
             max_move = max(max_move, abs(with_pos[i] - i) / (n - 1) * 100)
     return discordant, pairs, max_move
+
+
+def kill_b_move(with_board: dict, without_board: dict) -> float:
+    """Revised kill (b)'s per-board number: the max within-tier percentile
+    move, counting only groups of n >= KILL_B_MIN_GROUP (one swap in a 2- or
+    3-player tier scores 50-100, so small tiers never count)."""
+    best = 0.0
+    for members in tier_groups(without_board):
+        n = len(members)
+        if n < KILL_B_MIN_GROUP:
+            continue
+        seq = [with_board[pid][2] for pid in members]
+        with_pos = {i: k for k, i in enumerate(sorted(range(n), key=seq.__getitem__))}
+        best = max(best, max(abs(with_pos[i] - i) / (n - 1) * 100 for i in range(n)))
+    return best
 
 
 def tier_violations(with_board: dict, without_board: dict) -> int:
@@ -482,7 +534,13 @@ def weekly_boundaries(since: datetime, until: datetime) -> list[datetime]:
 
 
 def kill_indicators(board_weeks: list[dict]) -> dict:
-    """Per replay week: would kill rule (a) or (b) have fired?"""
+    """Per week, over active boards (field 6, revised 2026-10-24):
+      (a) p95 Kendall > 0.25;
+      (b) >= 2 boards AND >= 5% of active boards have a player moving >= 75
+          percentile points within a group of n >= 4. Any qualifying board
+          short of that is an ALERT for models-lead, not a kill;
+      (d) any generic-pick inversion introduced by trade swipes.
+    `status` is KILL, ALERT or OK."""
     by_week = defaultdict(list)
     for w in board_weeks:
         by_week[w["week_start"]].append(w)
@@ -490,14 +548,26 @@ def kill_indicators(board_weeks: list[dict]) -> dict:
     for start in sorted(by_week):
         active = by_week[start]
         kendall = p95([w["kendall"] for w in active if w["kendall"] is not None])
-        share = sum(1 for w in active if w["max_pct_move"] >= KILL_PCT_MOVE) / len(active)
+        hits = [w["board"] for w in active if w["max_pct_move_n4"] >= KILL_PCT_MOVE]
+        share = len(hits) / len(active)
         fires_a = kendall is not None and kendall > KILL_KENDALL_P95
-        fires_b = share >= KILL_SHARE
+        fires_b = len(hits) >= KILL_B_MIN_BOARDS and share >= KILL_SHARE
+        alert_b = bool(hits) and not fires_b
+        introduced = sum(w["pick_inversions_introduced"] for w in active)
+        fires_d = introduced > 0
         weeks.append({"week_start": start, "active_boards": len(active),
-                      "p95_kendall": kendall, "share_pct_move_ge_75": share,
-                      "fires_a": fires_a, "fires_b": fires_b})
+                      "p95_kendall": kendall, "boards_ge75_n4": len(hits),
+                      "share_ge75_n4": share, "boards_ge75_n4_hashes": hits,
+                      "introduced_pick_inversions": introduced,
+                      "fires_a": fires_a, "fires_b": fires_b, "alert_b": alert_b,
+                      "fires_d": fires_d,
+                      "status": ("KILL" if fires_a or fires_b or fires_d
+                                 else "ALERT" if alert_b else "OK")})
+    statuses = {w["status"] for w in weeks}
     return {"weeks": weeks,
-            "would_have_fired": any(w["fires_a"] or w["fires_b"] for w in weeks)}
+            "would_have_fired": "KILL" in statuses,
+            "status": ("KILL" if "KILL" in statuses
+                       else "ALERT" if "ALERT" in statuses else "OK")}
 
 
 def summarize(board_weeks: list[dict]) -> dict:
@@ -562,12 +632,20 @@ def _hash(value: str) -> str:
 # The run
 # ---------------------------------------------------------------------------
 
+MONITOR_KEY = "stored"
+
+
 def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
-        k_scale: float = 1.0) -> dict:
-    scales = [k_scale] + ([HALF_K] if k_scale != HALF_K else [])
+        k_scale: float = 1.0, mode: str = "replay") -> dict:
+    """mode 'replay': frozen swipes restored to K x k_scale (and half K).
+    mode 'monitor' (post-flip watch): every trade row keeps its STORED K —
+    the learning that actually happened — against the same week at K = 0."""
+    monitor = mode == "monitor"
+    scales = ([MONITOR_KEY] if monitor
+              else [k_scale] + ([HALF_K] if k_scale != HALF_K else []))
     with engine.connect() as conn:
         model_config = load_model_config(conn)
-        events = load_frozen_events(conn, since, until)
+        events = load_frozen_events(conn, since, until, frozen_only=not monitor)
         with ranking_config(model_config):
             k_like, k_pass = rs._c("trade_k_like"), rs._c("trade_k_pass")
             pools, counts = {}, defaultdict(int)
@@ -578,7 +656,8 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                      "b_equals_a_at_since": 0}
             per_board = []
             for (user_id, fmt), board_events in sorted(events.items()):
-                counts["boards_with_frozen_swipes"] += 1
+                counts["boards_with_trade_swipes" if monitor
+                       else "boards_with_frozen_swipes"] += 1
                 if len(board_events) < min_swipes:
                     counts["boards_below_min_swipes"] += 1
                     continue
@@ -590,48 +669,54 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                 players, seed, _snap = pools[fmt]
                 pool_ids = {p.id for p in players}
                 rows = load_board_rows(conn, user_id, fmt)
-                kinds = classify_events(board_events, _select(conn,
+                kinds = {} if monitor else classify_events(board_events, _select(conn,
                     "SELECT created_at, decision, give_player_ids, "
                     "receive_player_ids FROM trade_decisions WHERE user_id = :u",
                     u=user_id))
-                frozen = [r for r in rows if is_frozen_trade(r, since, until)]
+                window = [r for r in rows if in_week(r, since, until)
+                          and (monitor or is_frozen_trade(r, since, until))]
                 counts["boards_included"] += 1
-                counts["frozen_swipes"] += len(board_events)
+                counts["trade_swipes" if monitor else "frozen_swipes"] += len(board_events)
                 for kind in kinds.values():
                     counts[f"frozen_swipes_{kind or 'unmatched'}"] += 1
-                counts["restored_rows"] += len(frozen)
-                for r in frozen:
+                counts["window_trade_rows" if monitor else "restored_rows"] += len(window)
+                for r in window:
                     kind = pair_kind(r, pool_ids)
                     if kind != "applied":
                         counts[{"generic_pick_applied": "generic_pick_rows_applied",
                                 "skipped_league_pick": "skipped_league_pick_rows",
                                 "skipped_other": "skipped_other_rows"}[kind]] += 1
 
-                # 5b(i): restoring at K x 0 is the stored board; nothing
-                # before --since moves.
                 def board(rs_rows):
                     return build_board(players, seed, fmt, rs_rows)
-                stored_until = rows_before(rows, until)
-                check["boards"] += 1
-                check["a_equals_restore_at_k0"] += int(board(restore_rows(
-                    stored_until, since, until, kinds, k_like, k_pass, 0.0))
-                    == board(stored_until))
-                check["b_equals_a_at_since"] += int(board(rows_before(restore_rows(
-                    rows, since, until, kinds, k_like, k_pass, k_scale), since))
-                    == board(rows_before(rows, since)))
+                if not monitor:
+                    # 5b(i): restoring at K x 0 is the stored board; nothing
+                    # before --since moves.
+                    stored_until = rows_before(rows, until)
+                    check["boards"] += 1
+                    check["a_equals_restore_at_k0"] += int(board(restore_rows(
+                        stored_until, since, until, kinds, k_like, k_pass, 0.0))
+                        == board(stored_until))
+                    check["b_equals_a_at_since"] += int(board(rows_before(restore_rows(
+                        rows, since, until, kinds, k_like, k_pass, k_scale), since))
+                        == board(rows_before(rows, since)))
 
                 cuts = weekly_boundaries(since, until)
-                row = {"board": _hash(f"{user_id}|{fmt}"), "scoring_format": fmt,
-                       "frozen_swipes": len(board_events), "weeks": len(cuts) - 1}
+                key = _hash(f"{user_id}|{fmt}")
+                row = {"board": key, "scoring_format": fmt,
+                       "trade_swipes" if monitor else "frozen_swipes": len(board_events),
+                       "weeks": len(cuts) - 1}
                 for s in scales:
                     weeks = []
                     for start, end in zip(cuts, cuts[1:]):
                         with_rows, without_rows, swipes = week_rows(
-                            rows, since, start, end, kinds, k_like, k_pass, s)
+                            rows, since, start, end, kinds, k_like, k_pass,
+                            1.0 if monitor else s, restore=not monitor)
                         with_b, without_b = board(with_rows), board(without_rows)
                         discordant, pairs, move = within_tier_moves(with_b, without_b)
                         inv_without = pick_inversions(without_b)
                         weeks.append({
+                            "board": key,
                             "pick_inversions_without": len(inv_without),
                             "pick_inversions_introduced": len(
                                 pick_inversions(with_b) - inv_without),
@@ -639,6 +724,7 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                             "kendall": discordant / pairs if pairs else None,
                             "discordant_pairs": discordant, "same_tier_pairs": pairs,
                             "max_pct_move": move,
+                            "max_pct_move_n4": kill_b_move(with_b, without_b),
                             "tier_violations": tier_violations(with_b, without_b)})
                     board_weeks[s].extend(weeks)
                     row[f"k_scale_{s}"] = weeks
@@ -648,20 +734,23 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                      and check["b_equals_a_at_since"] == check["boards"])
     results = {str(s): summarize(board_weeks[s]) for s in scales}
     return {
+        "mode": mode,
         "metric_definition": METRIC_DEFINITION,
         "pick_order_definition": PICK_ORDER_DEFINITION,
-        "caveats": CAVEATS,
+        "caveats": MONITOR_CAVEATS if monitor else CAVEATS,
         "window": {"since": since.isoformat(), "until": until.isoformat()},
-        "k": {"trade_k_like": k_like, "trade_k_pass": k_pass, "fit_mult": 1.0,
-              "k_scale": k_scale},
+        "k": ({"trade_k_like": k_like, "trade_k_pass": k_pass, "k": "stored"}
+              if monitor else
+              {"trade_k_like": k_like, "trade_k_pass": k_pass, "fit_mult": 1.0,
+               "k_scale": k_scale}),
         "min_swipes": min_swipes,
         "counts": dict(counts),
         "seed_snapshots": {f: (p[2] if p else None) for f, p in pools.items()},
         "model_config_sha256": hashlib.sha256(json.dumps(
             model_config, sort_keys=True).encode()).hexdigest(),
         "results": results,
-        "check_5b_i": check,
-        "ship_rule": ship_rule(results, check["pass"]),
+        "check_5b_i": None if monitor else check,
+        "ship_rule": None if monitor else ship_rule(results, check["pass"]),
         "boards": per_board,
     }
 
@@ -692,31 +781,49 @@ def summary_text(report: dict) -> str:
         return "n/a" if x is None else f"{x:.3g}"
 
     k, c = report["k"], report["counts"]
-    lines = [
-        "BL-001 swipe replay (read-only)",
-        f"  window {report['window']['since']} -> {report['window']['until']}",
-        f"  K like/pass {k['trade_k_like']:g}/{k['trade_k_pass']:g}",
-        f"  boards: {c.get('boards_included', 0)} included of "
-        f"{c.get('boards_with_frozen_swipes', 0)} with frozen swipes "
-        f"(min {report['min_swipes']}); frozen swipes "
-        f"{c.get('frozen_swipes', 0)} (like {c.get('frozen_swipes_like', 0)}, "
-        f"pass {c.get('frozen_swipes_pass', 0)}, unmatched "
-        f"{c.get('frozen_swipes_unmatched', 0)})",
-        f"  restored rows {c.get('restored_rows', 0)}: generic-pick pairs applied "
-        f"{c.get('generic_pick_rows_applied', 0)}, skipped league-pick "
-        f"{c.get('skipped_league_pick_rows', 0)}, skipped other "
-        f"{c.get('skipped_other_rows', 0)} (live skips the same pairs)",
+    monitor = report.get("mode") == "monitor"
+    if monitor:
+        head = [
+            "BL-001 swipe monitor (read-only; post-flip, stored K)",
+            f"  window {report['window']['since']} -> {report['window']['until']}",
+            f"  model_config K like/pass now {k['trade_k_like']:g}/{k['trade_k_pass']:g}",
+            f"  boards: {c.get('boards_included', 0)} included of "
+            f"{c.get('boards_with_trade_swipes', 0)} with trade swipes "
+            f"(min {report['min_swipes']}); trade swipes {c.get('trade_swipes', 0)}",
+            f"  window trade rows {c.get('window_trade_rows', 0)}: generic-pick pairs "
+            f"applied {c.get('generic_pick_rows_applied', 0)}, skipped league-pick "
+            f"{c.get('skipped_league_pick_rows', 0)}, skipped other "
+            f"{c.get('skipped_other_rows', 0)}",
+        ]
+    else:
+        head = [
+            "BL-001 swipe replay (read-only)",
+            f"  window {report['window']['since']} -> {report['window']['until']}",
+            f"  K like/pass {k['trade_k_like']:g}/{k['trade_k_pass']:g}",
+            f"  boards: {c.get('boards_included', 0)} included of "
+            f"{c.get('boards_with_frozen_swipes', 0)} with frozen swipes "
+            f"(min {report['min_swipes']}); frozen swipes "
+            f"{c.get('frozen_swipes', 0)} (like {c.get('frozen_swipes_like', 0)}, "
+            f"pass {c.get('frozen_swipes_pass', 0)}, unmatched "
+            f"{c.get('frozen_swipes_unmatched', 0)})",
+            f"  restored rows {c.get('restored_rows', 0)}: generic-pick pairs applied "
+            f"{c.get('generic_pick_rows_applied', 0)}, skipped league-pick "
+            f"{c.get('skipped_league_pick_rows', 0)}, skipped other "
+            f"{c.get('skipped_other_rows', 0)} (live skips the same pairs)",
+        ]
+    lines = head + [
         *(f"  caveat: {line}" for line in report["caveats"]),
         f"  metric: {report['metric_definition']}",
     ]
     for scale, res in report["results"].items():
         kd, mv, kill = res["kendall"], res["max_pct_move"], res["kill_rule"]
-        fired = [w["week_start"][:10] for w in kill["weeks"]
-                 if w["fires_a"] or w["fires_b"]]
+        fired = [w["week_start"][:10] for w in kill["weeks"] if w["status"] == "KILL"]
+        alerts = [w["week_start"][:10] for w in kill["weeks"] if w["alert_b"]]
+        title = ("  stored K" if monitor else
+                 f"  k_scale {scale} (K {k['trade_k_like'] * float(scale):g}/"
+                 f"{k['trade_k_pass'] * float(scale):g})")
         lines += [
-            f"  k_scale {scale} (K {k['trade_k_like'] * float(scale):g}/"
-            f"{k['trade_k_pass'] * float(scale):g}), "
-            f"{res['board_weeks_active']} active board-weeks:",
+            f"{title}, {res['board_weeks_active']} active board-weeks:",
             f"    5a-i  Kendall median {n(kd['median'])} p95 {n(kd['p95'])} "
             f"max {n(kd['max'])} -> {res['bar_5a_i']}",
             f"    5a-ii pct move median {n(mv['median'])} p95 {n(mv['p95'])} "
@@ -724,21 +831,39 @@ def summary_text(report: dict) -> str:
             f"    5b(ii) tier-membership violations "
             f"{res['check_5b_ii']['tier_membership_violations']} -> "
             f"{res['check_5b_ii']['verdict']}",
-            f"    kill rule (a)/(b) would have fired: "
-            f"{'yes, weeks ' + ', '.join(fired) if fired else 'no'}",
-            f"    pick order: pre-existing inversions "
-            f"{res['pick_order']['preexisting_inversions']}, introduced "
-            f"{res['pick_order']['introduced_inversions']} -> "
-            f"{res['pick_order']['verdict']}",
+            f"    kill rule (a)/(b)/(d) would have fired: "
+            f"{'yes, weeks ' + ', '.join(fired) if fired else 'no'}; (b) alert weeks: "
+            f"{', '.join(alerts) if alerts else 'none'}",
+            (f"    (d) introduced pick inversions "
+             f"{res['pick_order']['introduced_inversions']}" if monitor else
+             f"    pick order: pre-existing inversions "
+             f"{res['pick_order']['preexisting_inversions']}, introduced "
+             f"{res['pick_order']['introduced_inversions']} -> "
+             f"{res['pick_order']['verdict']}"),
         ]
-    chk = report["check_5b_i"]
-    lines += [
-        f"  5b(i): restore at K x 0 == stored on {chk['a_equals_restore_at_k0']}/"
-        f"{chk['boards']} boards; restored == stored at --since on "
-        f"{chk['b_equals_a_at_since']}/{chk['boards']} -> "
-        f"{'PASS' if chk['pass'] else 'FAIL'}",
-        f"  ship rule: {report['ship_rule']}",
-    ]
+        if monitor:
+            for w in kill["weeks"]:
+                why = [r for r, on in (("a", w["fires_a"]), ("b", w["fires_b"]),
+                                       ("d", w["fires_d"])) if on]
+                lines.append(
+                    f"    week {w['week_start'][:10]}: {w['status']}"
+                    + (f" (kill {', '.join(why)})" if why else "")
+                    + (f" (alert b: boards {', '.join(w['boards_ge75_n4_hashes'])})"
+                       if w["alert_b"] else "")
+                    + f"; active boards {w['active_boards']}, p95 Kendall "
+                    f"{n(w['p95_kendall'])}, boards >=75 in n>=4 "
+                    f"{w['boards_ge75_n4']}, introduced pick inversions "
+                    f"{w['introduced_pick_inversions']}")
+            lines.append(f"  overall: {kill['status']}")
+    if not monitor:
+        chk = report["check_5b_i"]
+        lines += [
+            f"  5b(i): restore at K x 0 == stored on {chk['a_equals_restore_at_k0']}/"
+            f"{chk['boards']} boards; restored == stored at --since on "
+            f"{chk['b_equals_a_at_since']}/{chk['boards']} -> "
+            f"{'PASS' if chk['pass'] else 'FAIL'}",
+            f"  ship rule: {report['ship_rule']}",
+        ]
     return "\n".join(lines)
 
 
@@ -754,16 +879,31 @@ def main(argv=None) -> int:
     ap.add_argument("--db", required=True, help="SQLite path or database URL")
     ap.add_argument("--allow-postgres-readonly", action="store_true",
                     help="permit a non-SQLite URL (reads only, enforced)")
-    ap.add_argument("--since", type=_parse_day, default=_parse_day(DEFAULT_SINCE))
+    ap.add_argument("--since", type=_parse_day, default=None,
+                    help=f"window start (replay default {DEFAULT_SINCE}; "
+                         "monitor: required, the knob-flip time)")
     ap.add_argument("--until", type=_parse_day,
                     default=datetime.now(timezone.utc))
-    ap.add_argument("--min-swipes", type=int, default=10)
+    ap.add_argument("--mode", choices=("replay", "monitor"), default="replay",
+                    help="replay: frozen swipes restored (13b); monitor: the "
+                         "post-flip watch at stored K, --since = the flip time")
+    ap.add_argument("--min-swipes", type=int, default=None,
+                    help="boards need this many trade swipes in the window "
+                         "(default 10 for replay, 1 for monitor)")
     ap.add_argument("--k-scale", type=float, choices=(1.0, 0.5), default=1.0)
     ap.add_argument("--output", required=True, help="JSON report path")
     args = ap.parse_args(argv)
+    if args.since is None:
+        if args.mode == "monitor":
+            ap.error("--mode monitor needs --since: the bakeoff_freeze_trade_k "
+                     "flip time (model_config_changes.changed_at)")
+        args.since = _parse_day(DEFAULT_SINCE)
+    if args.min_swipes is None:
+        args.min_swipes = 1 if args.mode == "monitor" else 10
 
     engine = open_readonly_engine(args.db, args.allow_postgres_readonly)
-    report = run(engine, args.since, args.until, args.min_swipes, args.k_scale)
+    report = run(engine, args.since, args.until, args.min_swipes, args.k_scale,
+                 mode=args.mode)
     report["provenance"] = _provenance(args.db, engine, args)
     with open(args.output, "w") as fh:
         json.dump(report, fh, indent=2, default=str)

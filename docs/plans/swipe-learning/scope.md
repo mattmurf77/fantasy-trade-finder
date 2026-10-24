@@ -14,7 +14,8 @@
   - At 1, behavior is byte-identical to today.
   - At 0, trade-card likes and passes move the board at `trade_k_like` 8 / `trade_k_pass` 4 × `fit_congruence_mult`, while `trade.bakeoff` stays on for arm attribution and the ghost infrastructure.
 - **The knob ships at 1. Nothing changes for users until `release-lead` writes 0** on the operator's go, after the 13b sign-off.
-- **A read-only offline replay, `backend/eval/swipe_replay.py`** (packet fields 5a and 7). It never imports `backend.server`.
+- **A read-only offline replay, `backend/eval/swipe_replay.py`** (packet fields 5a and 7), with a `--mode monitor` for the 14-day post-flip watch. It never imports `backend.server`.
+- **Ships at half K** (final 13b): `trade_k_like` 4, `trade_k_pass` 2, then `bakeoff_freeze_trade_k` 0 (§7).
 
 ## 1. Analytics scope
 
@@ -45,7 +46,12 @@
     - **Forward-only (5b i):** a like is frozen, then the knob flips and a pass is written. The frozen row is unchanged, the board rebuilt up to the flip is identical, and only the pass moves the board.
     - `replay_from_db` uses stored K, not the current `trade_k_*`.
     - **5b(ii), through `RankingService`'s real feedback path.** Trio votes establish a board. Then 600 likes and passes at K 8/4 hit players sitting on tier edges, both through live `record_trade_signal` and through the same rows replayed from storage. Every player keeps his tier, and unranked stays unranked. Within-tier order does change (asserted, so the test isn't vacuous).
-  - **`backend/tests/test_swipe_replay.py` (16 tests, synthetic SQLite):**
+  - **`backend/tests/test_swipe_replay.py` (22 tests, synthetic SQLite):**
+    - **Final 13b:**
+      - Revised kill (b): 1 board → ALERT, not a kill; 2 boards at ≥ 5% → KILL; 2 boards under 5% → ALERT. A 100-point move in a group of 3 doesn't count, and one in a group of 4 does.
+      - Kill (d) fires on any introduced inversion.
+      - **Monitor mode:** a post-flip window with stored K > 0 moves the board and reads OK. A pre-existing trio inversion of the 1st-round rungs doesn't fire (d). 40 stored-K Mid-over-Early likes introduce one inversion and read KILL (d).
+      - The monitor CLI refuses to run without `--since`, and defaults to `--min-swipes 1`.
     - **13b A2:**
       - The pool holds the 12 generic rungs, with `GENERIC_PICK_SEEDS` and the live tabs (pinned to server.py's `_PICK_POS` by reading the source).
       - Pick rows are classified by id form, both directly and through `run()` counters.
@@ -68,10 +74,10 @@
     - The CLI end to end.
     - The module never imports `backend.server` (subprocess check).
   - **`backend/tests/test_bakeoff_arm_a_golden.py`:** knob inventory. `bakeoff_freeze_trade_k` is EXCLUDED from `MODEL_A_PROFILE`: it's read only on the swipe routes, never in generation. The golden stands.
-  - **Targeted run, 2026-10-24: 781 passed across 29 files.** That's:
+  - **Targeted run, 2026-10-24: 819 passed across 32 files.** That's:
     - the two BL-001 files;
     - every test file that touches `elo_freeze_mult`, `record_trade_signal`, the config inventories and config-reference, and the decline-reason Elo path;
-    - the six test files main's last two merges added (RankingService threads, session-init single-flight, small responses, status lock).
+    - the nine test files main's merges added or changed (RankingService threads, session-init single-flight, small responses, status lock, daily tick, deck replenishment).
 
     The full suite is CI's.
 - [x] **Sabotage (not committed; every one reverted):**
@@ -81,6 +87,8 @@
   - 5b(ii) counter returning 0: **1 of 12 failed** (the violation counter).
   - Generic rungs dropped from the pool: **5 of 16 failed** (the pool mirror, the classification, the pick-order case, and the two end-to-end tests).
   - Early and Mid reversed in the ladder: **5 of 16 failed** (the clean-board and pick-order cases, the pool mirror, the end-to-end check and the CLI).
+  - Kill (b) firing on a single board: **1 of 22 failed** (the revised-(b) test).
+  - Kill (d) counting pre-existing inversions: **1 of 22 failed** (the monitor's pre-existing case).
 - [x] **Code-walk proof** (line numbers at `9c58e93e`, after main's merges; this build doesn't edit `server.py` or `ranking_service.py`):
   - **Knob read:** `bakeoff_runner.py:468`, inside `elo_freeze_mult` (`:450`).
   - **Its three callers:**
@@ -124,19 +132,41 @@
 ## 6. Model-change packet sign-off (B3)
 
 - **13a, plan:** `models-lead: approve with conditions — 2026-10-23 — via head-bizops → head-eng — conditions: the knob (field 1), forward-only (5b i), the replay (fields 5a and 7), the kill rule (6)`. **Done.**
-- **13b, result:** pending. It needs the replay result (§10) against the bars (§8), routed `head-eng` → `head-bizops` → `models-lead`, **before** `release-lead` writes the knob.
+- **13b, FINAL:** `models-lead: approve — ship at HALF K (trade_k_like 4, trade_k_pass 2) — 2026-10-24`, on analytics-lead's prod re-run at `fd54c52a`.
+  - **Full K fails 5a-ii** (p95 77.8 > 50); half K passes every bar (p95 38.9).
+  - **Conditions:**
+    1. the generic-pick guard (trades-eng) and its tests deploy before or with the knob write, and release-lead verifies them on the sha;
+    2. revised kill (b) with its single-board alert (§9);
+    3. the 14-day monitor reports weekly via `head-bizops`.
+  - **A step-up to full K needs a new packet** with live evidence; it never happens automatically.
 
-## 7. Rollout and rollback
+## 7. Shipping config, rollout and rollback
 
-1. **Merge and deploy.** The seed inserts `bakeoff_freeze_trade_k` = 1 (INSERT OR IGNORE), so there's no behavior change.
-2. **After 13b and the operator's go,** `release-lead` writes 0 with `scripts/set_knob.py`, which logs the write in `model_config_changes`. That timestamp is the re-enable time:
+**Ship at half K:**
+
+| Key | Today | Ship |
+|---|---|---|
+| `trade_k_like` | 8 | **4** |
+| `trade_k_pass` | 4 | **2** |
+| `bakeoff_freeze_trade_k` | 1 (frozen) | **0** (learning on) |
+
+1. **Merge and deploy.** The seed inserts `bakeoff_freeze_trade_k` = 1 (INSERT OR IGNORE), so there's no behavior change. trades-eng's generic-pick guard deploys before or with the knob write.
+2. **Write order for `release-lead`** (operator's go; `scripts/set_knob.py`, logged in `model_config_changes`):
+   1. **First,** `trade_k_like` = 4 and `trade_k_pass` = 2.
+   2. **Then,** `bakeoff_freeze_trade_k` = 0.
+
+   This order means no swipe ever learns at 8/4. The `bakeoff_freeze_trade_k` write's timestamp is the re-enable time:
    - Calibration round 4 starts there (packet field 10).
    - Bake-off readouts start a new series there (field 7).
-3. **Post-flip check (read-only):** the newest `swipe_decisions` rows with `decision_type = 'trade'` written after the flip carry K > 0 (8 or 4, times fit). All earlier frozen rows still carry 0.
-4. **Rollback:** write the knob back to 1. It's deploy-free and takes effect on the next swipe.
+   - The monitor's `--since` is set to it.
+3. **With `trade.bakeoff` off, the freeze knob is ignored** and swipes learn at `trade_k_*` directly. So setting half K in `trade_k_*` protects that path too.
+4. **Post-flip check (read-only):** the newest `swipe_decisions` rows with `decision_type = 'trade'` written after the flip carry K > 0 (4 or 2, times fit). All earlier frozen rows still carry 0.
+5. **Step-up to full K:** only by a new packet with 14 days of live evidence (live 5a-ii p95 ≤ 50 at half K, plus a replay or live estimate at full K). Never automatic.
+6. **Rollback:** write the knob back to 1. It's deploy-free and takes effect on the next swipe.
+   - **Caveat for `release-lead`:** that stops learning only while `trade.bakeoff` is on. If the flag is off when a kill fires, the freeze knob does nothing. The equivalent stop is `trade_k_like` = `trade_k_pass` = 0.
    - **Rollback stops future learning but doesn't revert boards.** Swipes made while the knob was 0 keep their stored K.
    - Undoing them would be a stored-K rewrite, a prod data change that needs the operator.
-5. **No backfill.** The frozen 2026-08-19 to flip swipes stay at K = 0 (condition 3). A catch-up would be a separate, decayed decision.
+7. **No backfill.** The frozen 2026-08-19 to flip swipes stay at K = 0 (condition 3). A catch-up would be a separate, decayed decision.
 
 ## 8. Bars and ship rule (packet fields 5 and 6, revised 2026-10-24)
 
@@ -171,16 +201,29 @@ p95 is nearest rank throughout.
 
 ## 9. Post-ship monitor and kill rule (packet field 6)
 
-- **Window:** 14 days from the re-enable time, weekly, every active user.
-- **Metrics:** 5a-i and 5a-ii on live boards.
-- **Kill rule:** set `bakeoff_freeze_trade_k` back to 1.0 if any of these holds:
+- **Window:** 14 days from the re-enable time (the `bakeoff_freeze_trade_k` = 0 write), weekly, every active user.
+- **Metrics:** 5a-i and 5a-ii on live boards (informational after the flip), and 5b(ii).
+- **Kill rule** (field 6, (b) revised 2026-10-24 before the monitor runs). Set `bakeoff_freeze_trade_k` back to 1.0 (§7 for the flag-off caveat) if any of these holds:
   - **(a)** the weekly p95 within-tier Kendall distance is **> 0.25**;
-  - **(b)** one player moves **≥ 75 percentile points** within his tier in a week from trade swipes alone, on **≥ 5%** of active users' boards;
-  - **(c)** the operator reports that rankings jumped.
+  - **(b)** in a week, **at least 2 boards AND at least 5% of active boards** each have a player move **≥ 75 percentile points** within his tier from trade swipes alone, **counting only groups of n ≥ 4.** A 2- or 3-player tier never counts: one swap there scores 50 to 100.
+    - **Alert, not a kill:** any board meeting that test without (b) firing (typically exactly one) is reported to `models-lead` that week for review.
+  - **(c)** the operator reports that rankings jumped;
+  - **(d)** any generic-pick-rung inversion **introduced** by trade swipes on a live board. Pre-existing inversions (BL-003) are excluded. An introduced one means the guard failed, so investigate before any re-enable.
 - No interim verdict beyond the kill rule. The kill thresholds sit above the bars to leave headroom for the replay's upper-bound gap.
-- **The replay reports (a) and (b) per week** as `kill_rule.weeks[]`, with `would_have_fired` overall. (c) has no replay analogue.
-- **Tripwire:** the monitor also runs the pick-order check. Any inversion introduced by trade swipes is investigated before the next weekly read.
-- **Monitor method:** run the same WITH/WITHOUT comparison on post-flip weeks. Today `swipe_replay.py` restores only frozen (K = 0) rows. On live rows WITH is the stored board, and WITHOUT zeroes the week's trade rows: `week_rows` already does that for any `'trade'` row in the week. Pointing it at post-flip weeks needs a small follow-up (S): select boards by trade swipes in the window rather than frozen ones. Not built here.
+- **Monitor mode:** `python3 -m backend.eval.swipe_replay --mode monitor`.
+  - **The comparison:** WITH is the live board, every trade row at its **stored** `k_factor` (the learning that actually happened). WITHOUT is the same week with that week's trade rows at K = 0. Everything else is the same machinery as the replay. Boards are every user × format with at least one trade swipe in the window.
+  - **What it prints:** a **KILL / ALERT / OK** line per week and overall, naming the kill rule that fired. A (b) alert names its board hashes.
+  - **In the JSON:** `results.stored.kill_rule.weeks[]` carries `p95_kendall`, `boards_ge75_n4`, `share_ge75_n4`, `boards_ge75_n4_hashes`, `introduced_pick_inversions`, `fires_a`, `fires_b`, `alert_b`, `fires_d` and `status`.
+  - **The replay reports the same indicators** for its own window. (c) has no analogue in either.
+- **The weekly monitor command** (`release-lead`, or `analytics-lead` under W3 read-only), from the repo root at the deployed sha. `<FLIP>` is the `model_config_changes.changed_at` of the `bakeoff_freeze_trade_k` = 0 write:
+
+  ```
+  python3 -m backend.eval.swipe_replay --mode monitor --db "$DATABASE_URL_PROD" \
+      --allow-postgres-readonly --since <FLIP> \
+      --output data/eval_runs/bl001-monitor-$(date -u +%F).json
+  ```
+
+  `--until` defaults to now, and `--min-swipes` defaults to 1 in monitor mode.
 
 ## 10. Offline replay (packet fields 5, 7 and 8)
 
@@ -194,14 +237,15 @@ p95 is nearest rank throughout.
   - **Restored rows are counted by id form:** `generic_pick_rows_applied`, `skipped_league_pick_rows` (league-owned `{league}_{season}_{round}_{orig}` ids live only in the trade engine's maps, never in the ranking pool) and `skipped_other_rows`.
   - **Before the flip, trades-eng will strip `generic_pick_*` ids on the queue and swipe routes,** so live churn will be a subset of what the replay measures.
 - **JSON output fields:**
-  - Top level: `metric_definition`, `pick_order_definition`, `caveats`, `window`, `k`, `min_swipes`, `counts`, `seed_snapshots`, `model_config_sha256`, `check_5b_i`, `ship_rule`, `provenance`.
+  - Top level: `mode`, `metric_definition`, `pick_order_definition`, `caveats`, `window`, `k`, `min_swipes`, `counts`, `seed_snapshots`, `model_config_sha256`, `check_5b_i` and `ship_rule` (both null in monitor mode), `provenance`.
+  - Each `boards[].k_scale_*` week row also carries `board` and `max_pct_move_n4` (kill (b)'s n ≥ 4 move).
   - `counts` adds `generic_pick_rows_applied`, `skipped_league_pick_rows` and `skipped_other_rows`.
   - **`results["1.0" | "0.5"]`:**
     - `board_weeks_active` and `board_weeks_inactive`;
     - `kendall` and `max_pct_move`, each as {median, p95, max};
     - `bar_5a_i` and `bar_5a_ii`;
     - `check_5b_ii` {tier_membership_violations, verdict};
-    - `kill_rule` {weeks[{week_start, active_boards, p95_kendall, share_pct_move_ge_75, fires_a, fires_b}], would_have_fired};
+    - `kill_rule` {weeks[{week_start, active_boards, p95_kendall, boards_ge75_n4, share_ge75_n4, boards_ge75_n4_hashes, introduced_pick_inversions, fires_a, fires_b, alert_b, fires_d, status}], would_have_fired, status};
     - `pick_order` {preexisting_inversions, board_weeks_with_preexisting, introduced_inversions, board_weeks_with_introduced, verdict}.
   - **`boards[]`:** each board by hash, with per-week rows: trade_swipes, kendall, discordant_pairs, same_tier_pairs, max_pct_move, tier_violations, pick_inversions_without, pick_inversions_introduced.
 - **Reading swipe_decisions:**
