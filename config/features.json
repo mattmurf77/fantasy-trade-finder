@@ -204,6 +204,8 @@
   "rankings.cross_format_derive": true,
   "_comment_testing": "QA/testing surfaces. testing.stage_users gates the synthetic stage-user spawner (POST/DELETE /api/test-users, backend/test_users.py) used to QA the onboarding flow with qa_* users at preset adoption stages. Requests must ALSO come from a tester-allowlist device/user (config/tester_allowlist.json or FTF_TESTER_ALLOWLIST), so flipping this on never exposes the surface to real users. Default false; flip only during onboarding QA windows.",
   "testing.stage_users": false,
+  "_comment_timing_readout": "2026-10-24 head-eng ruling 11 (time to trade suggestion, #339 §9.5). testing.timing_readout gates ONE Settings > Testing row (mobile components/TimingReadoutRow, mounted by onboarding-eng) showing this device's last tap-to-first-card ms_from_tap (R2) and its cell (network_type, launch_state), held in memory only: no server, no storage. Also opens the Settings hub's Testing entry (with __DEV__ || testing.stage_users). Client-only; no route reads it. Delivered per device via the experiment overlay, like testing.stage_users. Default false.",
+  "testing.timing_readout": false,
   "_comment_tiktok_discovery": "2026-07-26 TikTok-discovery deck engine (docs/plans/tiktok-discovery/). Flags flipped ON per-wave at each TestFlight ship. deck.value_model stays dark until an F8 replay win (PRD F6 gate). F8 eval harness is unflagged operator tooling.",
   "deck.signal_v2": true,
   "deck.thompson_v2": true,

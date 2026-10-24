@@ -70,6 +70,7 @@ function freshTrace(o = {}) {
     },
     './useOnboardingState': { useOnboardingState: { getState: () => ({ hydrated: true, ob: { firstSwipeDone: true } }) } },
     '../utils/firstCardEvent': pure,
+    '../utils/tapTiming': { recordTapTiming: () => {} },
     'react-native': { AppState: { addEventListener: () => {} } },
     '@react-native-community/netinfo': { __esModule: true, default: { addEventListener: () => {} } },
     ...(o.requires ?? {}),
@@ -193,6 +194,7 @@ console.log('check-trade-first-card-events:');
 }
 
 // ── 5. EXECUTED: exactly one R2/R2b per search_id ─────────────────────────
+const tapTiming = load('utils/tapTiming.ts', {});
 function freshTraceWithTimers() {
   const pending = [];
   const h = (() => {
@@ -208,6 +210,7 @@ function freshTraceWithTimers() {
       './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: {} }) }, onboardingEnabled: () => false },
       './useOnboardingState': { useOnboardingState: { getState: () => ({ hydrated: true, ob: { firstSwipeDone: true } }) } },
       '../utils/firstCardEvent': pure,
+      '../utils/tapTiming': tapTiming,
       'react-native': { AppState: { addEventListener: (_e, fn) => { appListener = fn; } } },
       '@react-native-community/netinfo': { __esModule: true, default: { addEventListener: (fn) => { netListener = fn; } } },
     }, {
@@ -333,6 +336,12 @@ function freshTraceWithTimers() {
       && /if \(next\.status === 'complete' && deckSearchRef\.current\?\.keys\.size === 0\) failDeckSearch\('empty'\);/.test(trades)
       && /if \(deckFullyDelivered\(next\) && next\.status !== 'error' && deckSearchRef\.current\?\.keys\.size === 0\) \{\s*failDeckSearch\('empty'\);/.test(trades)
       && /if \(claimedFair && res\.ideas\.length === 0\) failFirstCard\(claimedFair, 'empty'\);/.test(trades));
+}
+
+{
+  check('5j. the Testing readout\'s store holds R2\'s last ms_from_tap and its cell (in memory)',
+    tapTiming.lastTapTiming() && tapTiming.lastTapTiming().msFromTap === 180
+      && tapTiming.lastTapTiming().networkType === 'wifi' && tapTiming.lastTapTiming().launchState === 'first_tap');
 }
 
 // ── 8. deck_buffer_empty: once per search, when the buffer runs dry ─────
