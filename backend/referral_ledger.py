@@ -18,6 +18,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from . import analytics_queries as aq
 from . import database as db
 from . import feature_flags
 
@@ -48,7 +49,23 @@ COPY = {
     # gp.push.joined_inbox_title / gp.push.joined_inbox_body
     "joined_title": "@{new_username} joined Fleeced via your invite",
     "joined_body":  "Once they rank, trades with them can use their board, not just consensus.",
+    # gp.inbox.activated_title / gp.inbox.activated_body. The body quotes the
+    # likes-you pill label (mobile TradeCard.tsx, web app.js): if that label
+    # changes, this string changes with it.
+    "activated_title": "@{new_username} weighed in on their first trade",
+    "activated_body":  ("When they like a trade with you, it can show up with a "
+                        "\"They're interested\" tag."),
 }
+
+# FR-17: activation is the invitee's first stage-7 event within this many
+# days of joined_at (proposed).
+ACTIVATION_DAYS = 14
+
+# C5 / R3: the qualifying events ARE stage 7 of FUNNEL_STAGES, read in code,
+# never a hand list (today trade_proposed and match_swiped). trades_generated
+# (stage 6) can't activate: a replenish cron fires it with no user present.
+STAGE7_EVENTS: frozenset[str] = frozenset(
+    next(events for n, _name, events in aq.FUNNEL_STAGES if n == 7))
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -209,4 +226,77 @@ def _post_joined_row(credited: dict, user_id: str, new_username: str) -> bool:
         return True
     except Exception as e:
         log.warning("referral_joined row failed (continuing): %s", e)
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Activation — the invitee's first trade opinion (FR-17, FR-19, R-F7)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def maybe_activate_referral(user_id: str, event_name: str) -> None:
+    """Called right after each server emitter of a stage-7 event (the swipe
+    route, the calculator queue, the reasoned pass). If `user_id` is a
+    referred user whose ledger row is `joined` within ACTIVATION_DAYS of
+    joined_at: stamp it `activated` once (activated_at, qualifying_event),
+    post the inviter's FR-19 row (R-F7: folded into the join row if that is
+    still unread) and record referral_activated.
+
+    Cheap: a non-stage-7 name or the flag off returns before any I/O; else
+    ONE indexed read (referred_user_id + status 'joined') that finds nothing
+    for every non-referred user and for every already-activated one.
+    NEVER raises into the route, and never touches the Elo path.
+    """
+    try:
+        if event_name not in STAGE7_EVENTS:
+            return
+        if not feature_flags.is_enabled(LEDGER_FLAG):
+            return
+        row = db.get_referral_for_referred(str(user_id), status="joined")
+        if row is None:
+            return
+        joined = datetime.fromisoformat(str(row["joined_at"]).replace("Z", "+00:00"))
+        if joined.tzinfo is None:
+            joined = joined.replace(tzinfo=timezone.utc)
+        elapsed = datetime.now(timezone.utc) - joined
+        if elapsed > timedelta(days=ACTIVATION_DAYS):
+            return
+        if not db.activate_referral(row["id"], event_name):
+            return                      # another emitter stamped it first
+        notified = _post_activated_row(row, str(user_id))
+        db.record_event(
+            str(row["referrer_user_id"]), "referral_activated",
+            league_id=str(row["league_id"]), source="api",
+            props={"invite_id":        row.get("share_token"),
+                   "referral_id":      row["id"],
+                   "league_id":        str(row["league_id"]),
+                   "days_to_activate": max(0, min(ACTIVATION_DAYS, elapsed.days)),
+                   "notified":         notified},
+            platform="server", touch_user=False,
+        )
+    except Exception:
+        log.exception("referral activation failed (continuing)")
+
+
+def _post_activated_row(row: dict, user_id: str) -> bool:
+    """FR-19: the inviter's referral_activated inbox row (no push; Phase 2).
+    Routes to Trades on both clients (#364). R-F7: merged into the join row
+    while that is still unread, else posted on its own. True when written."""
+    names = db.get_user_names(user_id) or {}
+    new_username = names.get("username") or names.get("display_name") or user_id
+    referrer = str(row["referrer_user_id"])
+    title = COPY["activated_title"].format(new_username=new_username)
+    meta = {"new_user_id":  user_id,
+            "new_username": new_username,
+            "league_id":    str(row["league_id"]),
+            "referral_id":  row["id"]}
+    try:
+        if db.merge_into_unread_referral_join(referrer, row["id"], title=title,
+                                              body=COPY["activated_body"], meta=meta):
+            return True
+        db.create_notification(user_id=referrer, type_="referral_activated",
+                               title=title, body=COPY["activated_body"],
+                               metadata=meta)
+        return True
+    except Exception as e:
+        log.warning("referral_activated row failed (continuing): %s", e)
         return False

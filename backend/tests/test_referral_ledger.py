@@ -18,6 +18,13 @@ design §2 (D-056 evidence). What is pinned here:
     POST /api/session/init with an inline daemon;
   * referral_attributed: exact props at the writer, NON_INTENT, no token
     key, no invitee id, and the non-touching write (C6);
+  * activation (AC-17, AC-19, R-F7): the stage-7 set IS FUNNEL_STAGES[7];
+    a first opinion stamps once from each of the three emitters (the swipe
+    route, the calculator queue, the reasoned pass); outside 14 days, a
+    second opinion, trades_generated and the flag off do nothing; the hook
+    never raises and reads nothing when it can't matter; the FR-19 row
+    (title != body, no deck promise, meta) merges into an unread join row;
+    referral_activated's exact props and C6;
 
 Every test runs against a throwaway SQLite file, never data/trade_finder.db.
 """
@@ -45,6 +52,7 @@ REFERRER = "u_referrer_1"
 REFERRER_USERNAME = "mattref"
 TOKEN = "sess-referrer-token"
 LEDGER = "growth.referral_ledger"
+_REAL_IS_ENABLED = feature_flags.is_enabled     # captured before any patch
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -806,3 +814,300 @@ def test_e2e_flag_off_is_byte_identical_to_today(env, init_env, monkeypatch):
     assert legacy["title"] == legacy["body"] == (
         "@newbie joined Fantasy Trade Finder via your invite.")
     assert _events(env, "referral_attributed") == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Activation — maybe_activate_referral (FR-17, FR-19, R-F7; AC-17, AC-19)
+# ═══════════════════════════════════════════════════════════════════════════
+
+ACTIVATED_KEYS = {"invite_id", "referral_id", "league_id", "days_to_activate", "notified"}
+
+
+def _joined_row(engine, *, tok=T1, referrer=REFERRER, referred=INVITEE,
+                league=LEAGUE, joined_days=2, status="joined"):
+    with engine.begin() as conn:
+        return conn.execute(insert(referrals_table).values(
+            referrer_user_id=referrer, referred_user_id=referred, league_id=league,
+            invite_token=tok, share_token=tok, status=status, surface="league_home",
+            created_at=_iso_ago(joined_days + 1), joined_at=_iso_ago(joined_days, hours=1),
+            attribution_method="token",
+        )).inserted_primary_key[0]
+
+
+def _set_read(engine, notif_id, *, read=True, dismissed=False):
+    with engine.begin() as conn:
+        conn.execute(update(notifications_table)
+                     .where(notifications_table.c.id == notif_id)
+                     .values(is_read=1 if read else 0,
+                             dismissed_at=_iso_ago() if dismissed else None))
+
+
+def test_stage7_set_is_read_from_funnel_stages():
+    """C5 / R3: the qualifying set IS stage 7 of FUNNEL_STAGES."""
+    (stage7,) = [events for n, _name, events in aq.FUNNEL_STAGES if n == 7]
+    assert rl.STAGE7_EVENTS == frozenset(stage7)
+    assert rl.STAGE7_EVENTS == {"trade_proposed", "match_swiped"}     # today
+    (stage6,) = [events for n, _name, events in aq.FUNNEL_STAGES if n == 6]
+    assert not rl.STAGE7_EVENTS & set(stage6)                         # trades_generated
+
+
+@pytest.mark.parametrize("event", ["trade_proposed", "match_swiped"])
+def test_first_opinion_activates_once(env, writer, event):
+    rid = _joined_row(env, joined_days=2)
+    _add_user(env, INVITEE, "newbie")
+    rl.maybe_activate_referral(INVITEE, event)
+    (row,) = _rows(env)
+    assert (row["status"], row["qualifying_event"]) == ("activated", event)
+    assert row["activated_at"] is not None
+    ((owner, kw),) = _captured(writer, "referral_activated")
+    assert owner == REFERRER
+    assert kw["props"] == {"invite_id": T1, "referral_id": rid, "league_id": LEAGUE,
+                           "days_to_activate": 2, "notified": True}
+    assert kw["platform"] == "server" and kw["touch_user"] is False
+    # A second opinion is a no-op.
+    rl.maybe_activate_referral(INVITEE, "match_swiped")
+    assert len(_captured(writer, "referral_activated")) == 1
+    assert _rows(env)[0]["qualifying_event"] == event
+    assert len(_notifs(env)) == 1
+
+
+def test_outside_fourteen_days_does_nothing(env, writer):
+    _joined_row(env, joined_days=15)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert _rows(env)[0]["status"] == "joined"
+    assert writer == [] and _notifs(env) == []
+
+
+def test_day_fourteen_still_activates(env, writer):
+    with env.begin() as conn:
+        conn.execute(insert(referrals_table).values(
+            referrer_user_id=REFERRER, referred_user_id=INVITEE, league_id=LEAGUE,
+            invite_token=T1, share_token=T1, status="joined",
+            created_at=_iso_ago(20), joined_at=_iso_ago(13, hours=23)))
+    rl.maybe_activate_referral(INVITEE, "match_swiped")
+    assert _captured(writer, "referral_activated")[0][1]["props"]["days_to_activate"] == 13
+
+
+@pytest.mark.parametrize("event", ["trades_generated", "trio_swipe", "signup",
+                                   "ranking_complete_first_time", "match_viewed"])
+def test_non_stage7_events_never_activate(env, writer, event):
+    """Including a replenish deck: trades_generated never activates, whoever
+    (or whatever cron) fired it."""
+    _joined_row(env)
+    rl.maybe_activate_referral(INVITEE, event)
+    assert _rows(env)[0]["status"] == "joined" and writer == []
+
+
+def test_flag_off_does_nothing(env, monkeypatch, writer):
+    _set_flags(monkeypatch)
+    _joined_row(env)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert _rows(env)[0]["status"] == "joined" and writer == []
+
+
+def test_short_circuits_before_any_read(env, monkeypatch):
+    """Cheap: a non-stage-7 name or the flag off never reads the DB."""
+    calls = []
+    monkeypatch.setattr(db_module, "get_referral_for_referred",
+                        lambda *a, **k: calls.append(a) or None)
+    rl.maybe_activate_referral(INVITEE, "trades_generated")
+    _set_flags(monkeypatch)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert calls == []
+    _set_flags(monkeypatch, LEDGER)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert calls == [(INVITEE,)]                     # one read when it can matter
+
+
+def test_non_referred_and_already_activated_users_are_no_ops(env, writer):
+    rl.maybe_activate_referral("u_nobody", "trade_proposed")
+    _joined_row(env, status="activated")
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert writer == [] and _notifs(env) == []
+
+
+def test_activation_never_raises(env, monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(db_module, "get_referral_for_referred", _boom)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")         # no exception
+
+
+def test_activation_never_moves_the_referrer(env):
+    """C6 for referral_activated."""
+    _joined_row(env)
+    before = _user(env)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert _events(env, "referral_activated")
+    after = _user(env)
+    assert (after["last_active_at"], after["events_count"]) == (
+        before["last_active_at"], before["events_count"])
+
+
+# ── FR-19 + R-F7: the activation row ──────────────────────────────────────
+
+ACT_TITLE = "@newbie weighed in on their first trade"
+ACT_BODY = "When they like a trade with you, it can show up with a \"They're interested\" tag."
+
+
+def _credit_then_join_row(env):
+    """A real FR-18 join row via attribution; returns its notification id."""
+    _mint_row(env, T1)
+    _add_user(env, INVITEE, "newbie")
+    _attr(invite_id=T1)
+    (n,) = _notifs(env)
+    return n["id"]
+
+
+def test_activation_row_posts_separately_once_the_join_row_is_read(env):
+    join_id = _credit_then_join_row(env)
+    _set_read(env, join_id)
+    rl.maybe_activate_referral(INVITEE, "match_swiped")
+    rows = _notifs(env)
+    assert [n["type"] for n in rows] == ["referral_joined", "referral_activated"]
+    act = rows[1]
+    assert (act["title"], act["body"]) == (ACT_TITLE, ACT_BODY)
+    assert act["title"] != act["body"]
+    assert "deck" not in act["body"].lower()
+    meta = json.loads(act["metadata_json"])
+    assert meta["new_username"] == "newbie" and meta["league_id"] == LEAGUE
+    assert meta["new_user_id"] == INVITEE
+
+
+def test_rf7_merges_into_an_unread_join_row(env, writer):
+    """ux-lead R-F7: one person, one row, with the activation title."""
+    join_id = _credit_then_join_row(env)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    (row,) = _notifs(env)
+    assert row["id"] == join_id
+    assert (row["type"], row["title"], row["body"], row["is_read"]) == (
+        "referral_activated", ACT_TITLE, ACT_BODY, 0)
+    meta = json.loads(row["metadata_json"])
+    assert meta["new_username"] == "newbie" and meta["league_id"] == LEAGUE
+    assert _captured(writer, "referral_activated")[0][1]["props"]["notified"] is True
+
+
+def test_rf7_never_merges_into_a_dismissed_join_row(env):
+    join_id = _credit_then_join_row(env)
+    _set_read(env, join_id, read=False, dismissed=True)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert [n["type"] for n in _notifs(env)] == ["referral_joined", "referral_activated"]
+
+
+def test_activation_row_failure_reports_notified_false(env, monkeypatch, writer):
+    _joined_row(env)
+
+    def _boom(**kw):
+        raise RuntimeError("inbox down")
+    monkeypatch.setattr(db_module, "create_notification", _boom)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    assert _rows(env)[0]["status"] == "activated"
+    assert _captured(writer, "referral_activated")[0][1]["props"]["notified"] is False
+
+
+# ── #350 registration (C7): referral_activated ────────────────────────────
+
+def test_referral_activated_is_registered_server_fired_non_intent():
+    name = "referral_activated"
+    assert name in at.SERVER_FIRED_EVENTS and name not in at.ALLOWED_CLIENT_EVENTS
+    assert name not in at.CLIENT_EVENT_PROPS
+    assert name in aq.NON_INTENT_EVENTS and name not in aq.INTENT_EVENTS
+
+
+def test_referral_activated_props_are_exactly_the_grant(env, writer):
+    _joined_row(env)
+    rl.maybe_activate_referral(INVITEE, "trade_proposed")
+    ((_, kw),) = _captured(writer, "referral_activated")
+    assert set(kw["props"]) == ACTIVATED_KEYS
+    assert not any("token" in k for k in kw["props"])
+    assert INVITEE not in json.dumps(kw["props"])
+    assert isinstance(kw["props"]["days_to_activate"], int)
+    (row,) = _events(env, "referral_activated")
+    assert row["platform"] == "server" and row["user_id"] == REFERRER
+
+
+# ── AC-17: each of the three stage-7 emitters stamps once (G2) ────────────
+
+def _real_flags_plus_ledger(monkeypatch):
+    """The emitter routes read real flags; only the ledger is forced on."""
+    monkeypatch.setattr(server, "is_enabled", _REAL_IS_ENABLED)
+    monkeypatch.setattr(feature_flags, "is_enabled",
+                        lambda k: k == LEDGER or _REAL_IS_ENABLED(k))
+
+
+def test_swipe_route_like_and_pass_activate(env, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from backend.ranking_service import Player, RankingService
+    from backend.trade_service import League, LeagueMember, TradeService
+    _real_flags_plus_ledger(monkeypatch)
+    players = [Player(id=p, name=p.upper(), position="RB", team="AAA", age=25)
+               for p in ("g1", "r1")]
+    service = RankingService(players=players)
+    trade_svc = TradeService(players={p.id: p for p in players})
+    league = League(league_id=LEAGUE, name="L", platform="sleeper", members=[
+        LeagueMember(user_id=INVITEE, username="me", roster=[], elo_ratings={}),
+        LeagueMember(user_id=REFERRER, username="ref", roster=[], elo_ratings={})])
+    monkeypatch.setitem(server._sessions, "swipe-tok", {
+        "verified": True, "user_id": INVITEE, "league": league, "players": players,
+        "services": {"1qb_ppr": service}, "service": service,
+        "trade_svcs": {"1qb_ppr": trade_svc}, "trade_svc": trade_svc,
+        "active_format": "1qb_ppr", "last_active": 0.0})
+    monkeypatch.setattr(server, "save_trade_swipes", MagicMock())
+    monkeypatch.setattr(server, "create_notification", MagicMock())
+    _joined_row(env)
+    for i, decision in enumerate(("pass", "like")):
+        r = _client().post("/api/trades/swipe", headers={"X-Session-Token": "swipe-tok"},
+                           json={"trade_id": f"stale{i}", "decision": decision,
+                                 "league_id": LEAGUE, "give_player_ids": ["g1"],
+                                 "receive_player_ids": ["r1"], "target_user_id": REFERRER,
+                                 "target_username": "ref"})
+        assert r.status_code == 200, r.get_data(as_text=True)
+    (row,) = _rows(env)
+    assert (row["status"], row["qualifying_event"]) == ("activated", "match_swiped")
+    assert len(_events(env, "referral_activated")) == 1
+
+
+def test_calculator_queue_activates(env, monkeypatch):
+    from backend.tests import test_calc_trade_queue as cq
+    gen = cq._harness_ctx(caller_in_members=False)
+    client, engine, *_ = next(gen)
+    try:
+        _real_flags_plus_ledger(monkeypatch)
+        _joined_row(engine, referred=cq.ME, league=cq.LEAGUE, referrer=cq.OPP)
+        r = cq._queue(client)
+        assert r.status_code == 200, r.get_data(as_text=True)
+        (row,) = _rows(engine)
+        assert (row["status"], row["qualifying_event"]) == ("activated", "trade_proposed")
+        assert len(_events(engine, "referral_activated")) == 1
+    finally:
+        gen.close()
+
+
+def test_reasoned_pass_activates(env, monkeypatch):
+    _joined_row(env)
+    card = SimpleNamespace(league_id=LEAGUE, trade_id="t1", give_player_ids=["g1"],
+                           receive_player_ids=["r1"], target_user_id=REFERRER)
+    with server.app.test_request_context():
+        server._apply_reasoned_pass({"user_id": INVITEE}, card, {})
+        server._apply_reasoned_pass({"user_id": INVITEE}, card, {})
+    (row,) = _rows(env)
+    assert (row["status"], row["qualifying_event"]) == ("activated", "match_swiped")
+    assert len(_events(env, "referral_activated")) == 1
+
+
+def test_emitter_call_lines_sit_after_each_stage7_emitter():
+    """G2 structure: exactly three call lines, each right after a stage-7
+    record_event, and nowhere near the Elo writers."""
+    import inspect
+    src = inspect.getsource(server)
+    assert src.count("_referral_ledger.maybe_activate_referral(") == 3
+    for fn, emitted in ((server.swipe_trade, '"trade_proposed" if decision'),
+                        (server.queue_trade_for_opponent, '"trade_proposed",'),
+                        (server._apply_reasoned_pass, '"match_swiped", league_id')):
+        body = inspect.getsource(fn)
+        assert body.count("maybe_activate_referral(") == 1, fn.__name__
+        call = body.index("maybe_activate_referral(")
+        assert call > body.index(emitted), fn.__name__          # after the emit
+        if "save_trade_swipes(" in body:                         # after the Elo write
+            assert call > body.index("save_trade_swipes("), fn.__name__

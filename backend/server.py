@@ -16800,6 +16800,7 @@ def swipe_trade():
                     },
                     **(getattr(g, "device_info", {}) or {}),
                 )
+                _referral_ledger.maybe_activate_referral(g_user_id, "trade_proposed" if decision == "like" else "match_swiped")   # L7 FR-17; never raises
             except Exception as ev_err:
                 log.warning("record_event(trade swipe) failed: %s", ev_err)
 
@@ -17259,6 +17260,7 @@ def queue_trade_for_opponent():
                 },
                 **(getattr(g, "device_info", {}) or {}),
             )
+            _referral_ledger.maybe_activate_referral(g_user_id, "trade_proposed")   # L7 FR-17; never raises
         except Exception as db_err:
             log.warning("DB write failed for queued trade (continuing): %s", db_err)
 
@@ -17425,6 +17427,7 @@ def _apply_reasoned_pass(sess, card, body: dict) -> None:
             },
             **(getattr(g, "device_info", {}) or {}),
         )
+        _referral_ledger.maybe_activate_referral(g_user_id, "match_swiped")   # L7 FR-17; never raises
     except Exception as err:
         log.warning("record_event(reasoned pass) failed: %s", err)
 

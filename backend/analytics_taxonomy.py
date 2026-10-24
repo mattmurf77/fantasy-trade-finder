@@ -938,6 +938,13 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     #                        sleeper|espn|mfl|fleaflicker, notified (bool:
     #                        the FR-18 bell row was written). At a NEW
     #                        user's first session init, ledger credit only.
+    #   referral_activated   invite_id, referral_id, league_id,
+    #                        days_to_activate (int 0–14), notified (bool:
+    #                        the FR-19 row was written or merged). The
+    #                        invitee's first stage-7 event (C5: read from
+    #                        analytics_queries.FUNNEL_STAGES, today
+    #                        trade_proposed | match_swiped) within 14 days of
+    #                        joined_at; never trades_generated.
     #
     # `signup` (above, owner = the new user, class unchanged) gains two props
     # while growth.referral_ledger is on (FR-16): attribution
@@ -945,6 +952,7 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # unknown|expired|not_member|null. A signup row with no props predates
     # the flag (pre-instrumentation), not `none`.
     "referral_attributed",
+    "referral_activated",
 })
 
 # ---------------------------------------------------------------------------

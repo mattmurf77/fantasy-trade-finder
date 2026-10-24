@@ -696,6 +696,7 @@ Spec: `docs/plans/referral-loop/prd.md` @ `91f1cc29` §7, §8.1, §8.4, §11; ev
 |---|---|---|
 | The mint, `POST /api/invite/token` | Mints a 12-char invite id per share, 10 per inviter per league per UTC day. Also needs `model_config` `referral_mint_enabled` = 1 ([kill switch](#referral-invite-mint-l7-backendserverpy-db-seeded)) | `404 not_found`; clients emit today's league-only links |
 | Attribution at a new user's first session init ([api-reference](api-reference.md#apisessioninit--invite-attribution-referral-loop-l7)) | Credit by token (§7.4), else the league-match fallback (§7.5); server-derived `users.invited_by`; `signup.attribution` / `attribution_miss`; one `referral_joined` row (FR-18) and the `league_member_joined` fanout skipping that inviter's inbox row (FR-20); server event `referral_attributed` | Today's behaviour, byte for byte: the client's `invited_by`, no `signup` props, the legacy `referral_joined` row from `invited_by` alone |
+| Activation (FR-17, FR-19) | After each stage-7 server emitter (the swipe route, the calculator queue, the reasoned pass), `referral_ledger.maybe_activate_referral` stamps a `joined` row `activated` when it is the invitee's first opinion within 14 days of `joined_at` (the qualifying set is read from `analytics_queries.FUNNEL_STAGES` stage 7; `trades_generated` never activates), posts the inviter's inbox-only `referral_activated` row (merged into the still-unread join row, R-F7) and records `referral_activated` | One flag check per stage-7 event, no DB read, no write |
 
 ---
 

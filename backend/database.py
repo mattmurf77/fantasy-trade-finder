@@ -1644,7 +1644,7 @@ recorded_picks_table = Table("recorded_picks", metadata,
 #   sets, and web/js/app.js notifTypeIcon + clickNotif.
 #     trade_match · trade_accepted · trade_declined · referral_joined ·
 #     league_member_joined · league_member_unlocked_trades ·
-#     match_expiring · deck_replenished · counter_offer
+#     match_expiring · deck_replenished · counter_offer · referral_activated
 # metadata_json: JSON-encoded dict with context fields, e.g.:
 #   { "match_id": 42, "partner_username": "joe", "give": ["CeeDee Lamb"], "receive": ["Tyreek Hill"] }
 # is_read: 0 = unread, 1 = read
@@ -12935,6 +12935,58 @@ def league_match_candidates(league_id: str, invitee_user_id: str, *,
             .order_by(r.c.opened_at.desc(), r.c.id.desc())
         ).fetchall()
     return [dict(row._mapping) for row in rows]
+
+
+def activate_referral(referral_id: int, qualifying_event: str) -> bool:
+    """FR-17: joined → activated, stamping activated_at and the event's
+    name. One conditional UPDATE (WHERE status = 'joined'), so it stamps
+    once however many emitters race. True when this call stamped it."""
+    r = referrals_table
+    with engine.begin() as conn:
+        return conn.execute(
+            update(r)
+            .where(r.c.id == referral_id)
+            .where(r.c.status == "joined")
+            .values(status="activated", activated_at=_now(),
+                    qualifying_event=qualifying_event)
+        ).rowcount == 1
+
+
+def merge_into_unread_referral_join(user_id: str, referral_id: int, *,
+                                    title: str, body: str, meta: dict) -> bool:
+    """R-F7 (ux-lead): when the inviter's referral_joined row for this
+    referral is still UNREAD and live, rewrite it in place as the
+    referral_activated row (type, title, body, meta; created_at bumped like
+    the GD-8 coalescer), so one person gets one row. Conditional on
+    is_read = 0 and dismissed_at IS NULL, so a row read meanwhile is never
+    rewritten. False when there is no such row (the caller posts its own)."""
+    n = notifications_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(n.c.id, n.c.metadata_json)
+            .where(n.c.user_id == user_id)
+            .where(n.c.type == "referral_joined")
+            .where(n.c.is_read == 0)
+            .where(n.c.dismissed_at.is_(None))
+            .order_by(n.c.created_at.desc())
+            .limit(50)
+        ).fetchall()
+    for row in rows:
+        try:
+            if json.loads(row.metadata_json or "{}").get("referral_id") != referral_id:
+                continue
+        except (TypeError, ValueError):
+            continue
+        with engine.begin() as conn:
+            return conn.execute(
+                update(n)
+                .where(n.c.id == row.id)
+                .where(n.c.is_read == 0)
+                .where(n.c.dismissed_at.is_(None))
+                .values(type="referral_activated", title=title, body=body,
+                        metadata_json=json.dumps(meta), created_at=_now())
+            ).rowcount == 1
+    return False
 
 
 def get_user_names(user_id: str) -> dict | None:
