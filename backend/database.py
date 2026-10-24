@@ -7002,6 +7002,18 @@ def load_trade_page(user_id: str, league_id: str, scoring_format: str,
     return dict(row) if row is not None else None
 
 
+def load_trade_pages_for_user(user_id: str, league_id: str, scoring_format: str) -> list[dict]:
+    """Every page row of one user, league and format (one read on the unique
+    index's prefix, pages decoded): P2 finds a deck's row, and so its scope,
+    by matching deck_job_id."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        rows = conn.execute(select(t).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format)).mappings().all()
+    return [dict(r) for r in rows]
+
+
 def load_trade_page_for_job(user_id: str, deck_job_id: str) -> dict | None:
     """The viewer's page row built by `deck_job_id`, or None."""
     t = trade_page_store_table
