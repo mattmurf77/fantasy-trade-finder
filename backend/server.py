@@ -243,6 +243,7 @@ from .database import (
 from . import sleeper_write as _sleeper_write
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
+from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
@@ -2137,6 +2138,39 @@ def _refresh_players_cache_async(force: bool = False) -> bool:
             _players_refresh_active = False
         log.warning("players-refresh: could not start daemon: %s", e)
         return False
+
+
+def _daily_tick_players_guard(now: datetime):
+    """daily-tick step 5 — the M0 player-cache fallback guard, run INLINE on
+    the daily-tick runner thread (never a request thread). The tick's own
+    gate (deployed env, cache past TTL), then the guards and in-flight
+    protocol of `_refresh_players_cache_async(force=False)` copied as they
+    are, then the same `_players_refresh_worker` body, called inline instead
+    of on a daemon. The worker never raises and clears the in-flight flag in
+    its `finally`.
+
+    Deployed environments only (`_IS_PROD_ENV`): a local/SQLite run has a
+    long-stale dev cache by construction, and an implicit refresh there would
+    rewrite the shared dev cache from a test run. The dedicated route (with
+    `?force=1`) is how you exercise a refresh locally."""
+    global _players_refresh_active
+    _age = _players_cache_age_seconds()
+    if not (_IS_PROD_ENV and (_age is None or _age > _PLAYERS_CACHE_TTL_SECONDS)):
+        return "skipped", f"prod_env={_IS_PROD_ENV} cache_age_s={_age}"
+    if not _PLAYERS_REFRESH_ENABLED:
+        log.info("players-refresh: skipped — FTF_PLAYERS_REFRESH=0")
+        return "skipped", "FTF_PLAYERS_REFRESH=0"
+    age = _players_cache_age_seconds()
+    if age is not None and age < _PLAYERS_CACHE_TTL_SECONDS:
+        return "skipped", f"cache_age_s={age}"
+    with _players_refresh_lock:
+        if _players_refresh_active:
+            log.info("players-refresh: skipped — already in flight")
+            return "skipped", "in_flight"
+        _players_refresh_active = True
+    _players_refresh_worker()
+    status = _last_refresh_status
+    return ("ok" if status.get("ok") else "error"), status
 
 
 # ── THE rookie predicate ───────────────────────────────────────────────────
@@ -24107,7 +24141,8 @@ def _run_weekly_replenishment(now: datetime) -> dict:
 #                  transactions commit). No scheduler dependency — the only
 #                  mechanism whose correctness is independent of whether
 #                  the declared crons actually fire.
-#   B. weekly    — _kickoff_roster_snapshot_sweep, called from daily-tick
+#   B. weekly    — _daily_tick_roster_snapshot (daily-tick step 1, on the
+#                  tick's runner daemon thread, backend/daily_tick.py),
 #                  behind a >= weekday gate (the _run_weekly_replenishment
 #                  house pattern: one missed cron run doesn't skip the
 #                  week; the existing 'weekly' row for the period caps the
@@ -24482,6 +24517,20 @@ def _kickoff_roster_snapshot_sweep(now: datetime | None = None) -> dict:
     return {"started": True, "period_key": _rh.iso_period_key(now)}
 
 
+def _daily_tick_roster_snapshot(now: datetime):
+    """daily-tick step 1 — Writer B, run INLINE on the daily-tick runner
+    thread. The same gates as `_kickoff_roster_snapshot_sweep` (flag, then
+    the >= weekday gate), then the same body, budget and active-league
+    window its daemon runs."""
+    if not is_enabled("market.roster_history"):
+        return "skipped", "flag off"
+    gate = _roster_snapshot_weekday_gate()
+    if now.weekday() < gate:
+        return "skipped", f"weekday_gate={gate}"
+    return "ok", _run_roster_snapshot_sweep(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET,
+                                            ACTIVE_LEAGUE_WINDOW_DAYS)
+
+
 # ---------------------------------------------------------------------------
 # Cron-tick endpoints — called by Render Cron jobs over HTTP
 # ---------------------------------------------------------------------------
@@ -24809,15 +24858,65 @@ def cron_hourly_tick():
 
 @app.route("/api/cron/daily-tick", methods=["POST"])
 def cron_daily_tick():
-    """Once per day. Re-engagement pushes — winback variants, finish_ranking,
-    and season_start. Frequency caps in `_NOTIF_FREQ_CAPS` enforce per-window
-    limits (winback_matches: 1/7d, winback_dormant: 1/30d, finish_ranking:
-    1/30d, season_start: 1/365d). The cap check happens inside
-    _send_typed_push, so the loop here is the broad scan.
+    """Once per day (Render cron `notif-daily-tick`). Authenticates, starts
+    ONE single-flight runner thread (`backend/daily_tick.py`) and returns
+    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one sync
+    gunicorn worker (`--timeout 120`, render.yaml) serves every request, and
+    the inline tick was killed at 120 s every day (runbook § Cron schedule).
+    `started: false` means a run is already in flight (single-flight, not a
+    queue).
+
+    The runner runs `_daily_tick_steps()` serially, in table order. Each step
+    reads its own gate at run time, a raise in one never skips the rest, and
+    each logs one `daily-tick step=<key> ms=<int> outcome=<ok|skipped|error>
+    detail=<…>` line, which carries the counters this response used to.
+    `now` is taken here, on the request, and handed to every step.
     """
     _require_cron_auth()
-    _cron_work_started = _user_data_lifecycle.snapshot()
     now = datetime.now(timezone.utc)
+    started = _daily_tick.start(_daily_tick_steps(), now, log=log)
+    return jsonify({"ok": True, "started": started}), 202
+
+
+def _daily_tick_steps() -> list:
+    """The daily-tick step table, in run order (docs/plans/daily-tick-fix/
+    scope.md §0): permanent-loss writers first, the CPU-heavy steps last.
+    Built per call, so each entry is the module's CURRENT function and
+    `patch.object(server, …)` in tests still bites."""
+    S = _daily_tick.Step
+    return [
+        S("roster_snapshot",   _daily_tick_roster_snapshot),
+        S("usage_trends",      _daily_tick_usage_trends),
+        S("receipts_grade",    _daily_tick_receipts_grade),
+        S("rookie_monitor",    _daily_tick_rookie_monitor),
+        S("players_guard",     _daily_tick_players_guard),
+        S("reengagement",      _daily_tick_reengagement),
+        S("replenishment",     _daily_tick_replenishment),
+        S("eval_nightly",      _daily_tick_eval_nightly),
+        S("value_model_refit", _daily_tick_value_model_refit),
+    ]
+
+
+def _daily_tick_rookie_monitor(now: datetime):
+    """daily-tick step 4 — M0 rookie class-load monitor. The NEXT season's
+    class does not exist in Sleeper's dump until ~late April. Its arrival is
+    a one-shot, unobservable-in-advance event that the Draft Room's
+    pre-class-load state depends on, so log it loudly the first time a row
+    appears. One indexed query per tick; the log line IS the alert (there is
+    no pager)."""
+    return "ok", {"appeared": _check_rookie_class_load(_CURRENT_SEASON + 1)}
+
+
+def _daily_tick_reengagement(now: datetime):
+    """daily-tick step 6. Re-engagement pushes — winback variants,
+    finish_ranking, and season_start. Frequency caps in `_NOTIF_FREQ_CAPS`
+    enforce per-window limits (winback_matches: 1/7d, winback_dormant: 1/30d,
+    finish_ranking: 1/30d, season_start: 1/365d). The cap check happens
+    inside _send_typed_push, so the loop here is the broad scan. The
+    user-data lifecycle snapshot is taken at step start; the counters go to
+    the step's log line.
+    """
+    _cron_work_started = _user_data_lifecycle.snapshot()
     cutoff_7d  = (now - timedelta(days=7)).isoformat()
     cutoff_30d = (now - timedelta(days=30)).isoformat()
     cutoff_3d  = (now - timedelta(days=3)).isoformat()
@@ -24906,148 +25005,56 @@ def cron_daily_tick():
                         data  = {"unread_count": unread},
                     )
                     counters["winback_matches"] += 1
+    return "ok", counters
 
-    # ── F10 (flag deck.replenishment) — weekly deck pre-generation ──
-    # Flag off ⇒ this block is a no-op and the response stays byte-identical.
-    replenish_stats: dict | None = None
-    if _deck_replenishment_enabled():
-        try:
-            replenish_stats = _run_weekly_replenishment(now)
-        except Exception as e:
-            log.warning("daily-tick: replenishment pass failed: %s", e)
-            replenish_stats = {"error": str(e)}
 
-    # ── F8 — offline eval nightly (operator tooling, unflagged) ──
-    # Idempotent per (UTC day, scorer, window) via data/eval_runs/runs.jsonl,
-    # so daily-tick retries are free. Never fails the tick.
-    eval_summary: str | None = None
-    try:
-        from .eval.nightly import run_all as _eval_run_all
-        _eval_stats = _eval_run_all(window_days=30)
-        eval_summary = _eval_stats.get("summary")
-        if _eval_stats.get("ran"):
-            counters["eval_scorers_graded"] = _eval_stats["ran"]
-        if _eval_stats.get("errors"):
-            log.warning("daily-tick eval: %s scorer(s) errored (recorded in runs.jsonl)",
-                        _eval_stats["errors"])
-    except Exception as e:
-        log.warning("daily-tick: offline-eval pass failed (non-fatal): %s", e)
-    if eval_summary:
-        log.info("daily-tick eval: %s", eval_summary)
+def _daily_tick_replenishment(now: datetime):
+    """daily-tick step 7 — F10 weekly deck pre-generation, DEFERRED: an
+    unconditional hard skip (operator, 2026-10-23: ship S3 without it). It
+    reads no flag and never calls `_run_weekly_replenishment`, so no deck
+    builds, pushes, inbox rows or marker rows, whatever `deck.replenishment`
+    says.
 
-    # ── F6 (flag deck.value_model — SHIPS DARK) — nightly refit ──
-    # Runs AFTER the F8 eval block so the eval pass grades yesterday's
-    # model before today's supersedes it. Flag-gated (training AND serving
-    # are both dark until the F8 replay win), idempotent per UTC date via
-    # data/value_model/models.jsonl, never fails the tick, and never
-    # changes the flag-off response payload.
-    if _deck_value_model_enabled():
-        try:
-            vm_stats = _value_model.nightly_refit(now=now)
-            log.info("daily-tick value-model refit: %s", vm_stats)
-            if vm_stats.get("status") == "trained":
-                counters["value_model_trained"] = 1
-        except Exception as e:
-            log.warning("daily-tick: value-model refit failed (non-fatal): %s", e)
+    Why: trades-eng's C2 (no evidence for unserved builds) and the
+    replenishment self-renewal fix (db-capacity.md latent issue 1) must land
+    first; until then a working tick would run the full weekly sweep and
+    fill the DB.
 
-    # ── M0 — player-cache refresh fallback guard ──
-    # The dedicated POST /api/cron/players-refresh is the primary trigger, but
-    # a missed day means a whole rookie class stays invisible. Mirrors the
-    # hourly-tick value-snapshot fallback guard: fires only when the cache is
-    # already past its TTL, starts a DAEMON (never blocks the tick), and is
-    # wrapped so a failure here can never touch the push work above.
-    #
-    # Deployed environments only (`_IS_PROD_ENV`, the same signal
-    # `_require_cron_auth` keys off). A local/SQLite run has a long-stale dev
-    # cache by construction, and an implicit fallback there would make this
-    # response environment-dependent and rewrite the shared dev cache from a
-    # test run. The dedicated route (with `?force=1`) is how you exercise a
-    # refresh locally.
-    players_refresh_started: bool | None = None
-    try:
-        _age = _players_cache_age_seconds()
-        if _IS_PROD_ENV and (_age is None or _age > _PLAYERS_CACHE_TTL_SECONDS):
-            players_refresh_started = _refresh_players_cache_async()
-    except Exception as e:
-        log.warning("daily-tick: players-refresh guard failed (continuing): %s", e)
+    Re-enabling = restoring the flag-gated call:
+        if not _deck_replenishment_enabled():
+            return "skipped", "flag off"
+        stats = _run_weekly_replenishment(now)
+        return ("skipped" if stats.get("gated") else "ok"), stats
+    """
+    return "skipped", "deferred: C2"
 
-    # ── M0 — rookie class-load monitor ──
-    # The NEXT season's class does not exist in Sleeper's dump until ~late
-    # April. Its arrival is a one-shot, unobservable-in-advance event that the
-    # Draft Room's pre-class-load state depends on, so log it loudly the first
-    # time a row appears. One indexed query per tick; the log line IS the
-    # alert (there is no pager).
-    try:
-        _check_rookie_class_load(_CURRENT_SEASON + 1)
-    except Exception as e:
-        log.warning("daily-tick: class-load monitor failed (continuing): %s", e)
 
-    # ── ADR-011 Writer B — weekly roster-snapshot sweep kickoff ──
-    # Behind the >= weekday gate (FTF_ROSTER_SNAPSHOT_WEEKDAY, default 1),
-    # on a daemon so the tick never blocks on N league fetches. The
-    # response counter is operator telemetry; the real liveness read is
-    # `SELECT source, count(*) FROM league_roster_history GROUP BY 1`
-    # (runbook § roster-snapshot monitoring).
-    roster_snapshot_stats: dict | None = None
-    try:
-        roster_snapshot_stats = _kickoff_roster_snapshot_sweep(now)
-    except Exception as e:
-        log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
+def _daily_tick_eval_nightly(now: datetime):
+    """daily-tick step 8 — F8 offline eval nightly (operator tooling,
+    unflagged). Idempotent per (UTC day, scorer, window) via
+    data/eval_runs/runs.jsonl, so daily-tick retries are free."""
+    from .eval.nightly import run_all as _eval_run_all
+    _eval_stats = _eval_run_all(window_days=30)
+    if _eval_stats.get("errors"):
+        log.warning("daily-tick eval: %s scorer(s) errored (recorded in runs.jsonl)",
+                    _eval_stats["errors"])
+    if _eval_stats.get("summary"):
+        log.info("daily-tick eval: %s", _eval_stats["summary"])
+    return "ok", {k: _eval_stats.get(k) for k in ("ran", "skipped", "errors")}
 
-    # ── Usage Trends weekly store (docs/plans/usage-trends/weekly-update.md) ──
-    # Idempotent: fetches only completed weeks not yet stored, plus stat
-    # corrections for weeks loaded within the last 7 days. Daemon thread;
-    # reported only while usage_trends.enabled is on (flag-off payload
-    # stays byte-identical).
-    usage_refresh_stats: dict | None = None
-    try:
-        usage_refresh_stats = _kickoff_usage_refresh(now)
-    except Exception as e:
-        log.warning("daily-tick: usage-trends refresh kickoff failed (continuing): %s", e)
 
-    # ── Receipts grading guard (docs/plans/receipts/, HLD D-9) ──
-    # POST /api/cron/receipts-grade is the primary trigger, but no Render cron
-    # service is provisioned for it (operator ruling Q-4) — and the one
-    # value-snapshot "provisioned cron" this repo believed in turned out to be
-    # fictional (reverted in commit 1e50d3e). So grading rides the same
-    # three-trigger pattern roster_history uses (database.py:1320-1336): the
-    # dedicated endpoint, this guard, and the backfill script all call ONE
-    # idempotent writer. The guard is what actually fires day to day.
-    #
-    # Fire-and-forget on a daemon thread: a grading run must never lengthen
-    # the tick or be able to fail the push work above (and vice versa). Single-
-    # flight inside the service means an overlap with the dedicated endpoint
-    # no-ops rather than duplicating. No-op while `receipts.grading` is off.
-    #
-    # The counter is serialized ONLY when `receipts.grading` is on, so a
-    # flag-off tick payload stays byte-identical to today — the
-    # `_run_weekly_replenishment` convention, pinned by
-    # test_deck_replenishment.py::test_flag_off_no_replenish_work_no_push_no_payload_change.
-    receipts_grade_started: bool | None = None
-    try:
-        from .receipts_service import grading_enabled as _receipts_on
-        if _receipts_on():
-            receipts_grade_started = _kickoff_receipts_grading("daily_tick")
-    except Exception as e:
-        log.warning("daily-tick: receipts-grade guard failed (continuing): %s", e)
-
-    log.info("daily-tick: %s", counters)
-    extra: dict = {}
-    # Serialized only when the flag is on — flag-off tick payloads stay
-    # byte-identical (the _run_weekly_replenishment convention, and
-    # test_deck_replenishment pins the equivalent for its key).
-    if roster_snapshot_stats is not None and not roster_snapshot_stats.get("disabled"):
-        extra["roster_snapshot"] = roster_snapshot_stats
-    if players_refresh_started is not None:
-        extra["players_refresh_started"] = players_refresh_started
-    if receipts_grade_started is not None:
-        extra["receipts_grade_started"] = receipts_grade_started
-    if usage_refresh_stats is not None and not usage_refresh_stats.get("disabled"):
-        extra["usage_refresh"] = usage_refresh_stats
-    if replenish_stats is not None:
-        log.info("daily-tick replenish: %s", replenish_stats)
-        return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
-    return jsonify({"ok": True, **counters, **extra})
+def _daily_tick_value_model_refit(now: datetime):
+    """daily-tick step 9 — F6 (flag deck.value_model — SHIPS DARK) nightly
+    refit. Runs AFTER step 8 so the eval pass grades yesterday's model
+    before today's supersedes it. Flag read at run time (training AND
+    serving are both dark until the F8 replay win); idempotent per UTC date
+    via data/value_model/models.jsonl; `nightly_refit` never raises."""
+    if not _deck_value_model_enabled():
+        return "skipped", "flag off"
+    vm_stats = _value_model.nightly_refit(now=now)
+    status = vm_stats.get("status")
+    return ("error" if status == "error" else
+            "skipped" if status == "skipped" else "ok"), vm_stats
 
 
 @app.route("/api/cron/value-snapshot", methods=["POST"])
@@ -25087,6 +25094,22 @@ def _kickoff_receipts_grading(trigger: str, batch: int | None = None) -> bool:
         name=f"receipts-grade-{trigger}", daemon=True)
     t.start()
     return True
+
+
+def _daily_tick_receipts_grade(now: datetime):
+    """daily-tick step 3 — the Receipts grading guard (docs/plans/receipts/,
+    HLD D-9), run INLINE on the daily-tick runner thread. No Render cron is
+    provisioned for POST /api/cron/receipts-grade (operator ruling Q-4), so
+    this step is what actually grades day to day. The same guards as
+    `_kickoff_receipts_grading` (flag + env kill switch, single-flight), then
+    the same `run_grading` body with `trigger="daily_tick"`."""
+    from .receipts_service import grading_enabled, is_running, run_grading
+    if not grading_enabled():
+        return "skipped", "flag off"
+    if is_running():
+        return "skipped", "in_flight"
+    res = run_grading(trigger="daily_tick")
+    return ("skipped" if res.get("skipped") else "ok"), res
 
 
 @app.route("/api/cron/receipts-grade", methods=["POST"])
@@ -30999,23 +31022,30 @@ def _usage_week(season: int, week: int) -> tuple[dict, dict]:
 _usage_refresh_lock = threading.Lock()
 
 
+def _run_usage_refresh(source: str, **kwargs) -> dict:
+    """One usage_trends_refresh run; the caller holds `_usage_refresh_lock`.
+    A run that stored anything drops the cached computed windows so the
+    route serves the new numbers at once."""
+    from .usage_trends_refresh import refresh_usage_weeks
+    summary = refresh_usage_weeks(lambda url: _sleeper_get(url, 20), **kwargs)
+    if summary.get("stored"):
+        with _usage_lock:
+            for key in [k for k in _usage_cache if k and k[0] in ("players", "week")]:
+                _usage_cache.pop(key, None)
+    log.info("usage-refresh (%s): %s", source, summary)
+    return summary
+
+
 def _start_usage_refresh(source: str, **kwargs) -> bool:
-    """Run usage_trends_refresh on a daemon thread (one gunicorn worker: a
+    """Run `_run_usage_refresh` on a daemon thread (one gunicorn worker: a
     multi-week fetch must never block requests). Single-flight: returns False
-    when a run is already going. A run that stored anything drops the cached
-    computed windows so the route serves the new numbers at once."""
+    when a run is already going."""
     if not _usage_refresh_lock.acquire(blocking=False):
         return False
 
     def _body():
         try:
-            from .usage_trends_refresh import refresh_usage_weeks
-            summary = refresh_usage_weeks(lambda url: _sleeper_get(url, 20), **kwargs)
-            if summary.get("stored"):
-                with _usage_lock:
-                    for key in [k for k in _usage_cache if k and k[0] in ("players", "week")]:
-                        _usage_cache.pop(key, None)
-            log.info("usage-refresh (%s): %s", source, summary)
+            _run_usage_refresh(source, **kwargs)
         except Exception:
             log.exception("usage-refresh (%s) crashed", source)
         finally:
@@ -31023,6 +31053,22 @@ def _start_usage_refresh(source: str, **kwargs) -> bool:
 
     threading.Thread(target=_body, name="usage-trends-refresh", daemon=True).start()
     return True
+
+
+def _daily_tick_usage_trends(now: datetime):
+    """daily-tick step 2 — the steady-state weekly update, run INLINE on the
+    daily-tick runner thread. The same flag gate as `_kickoff_usage_refresh`
+    and the same single-flight lock as `_start_usage_refresh`, taken
+    non-blocking (a run already going ⇒ skipped), around the same body."""
+    if not is_enabled("usage_trends.enabled"):
+        return "skipped", "flag off"
+    if not _usage_refresh_lock.acquire(blocking=False):
+        return "skipped", "busy"
+    try:
+        summary = _run_usage_refresh("daily_tick", now=now)
+    finally:
+        _usage_refresh_lock.release()
+    return ("error" if summary.get("error") else "ok"), summary
 
 
 def _kickoff_usage_refresh(now: datetime | None = None) -> dict:
