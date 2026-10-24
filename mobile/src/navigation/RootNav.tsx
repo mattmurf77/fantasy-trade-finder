@@ -756,14 +756,34 @@ export default function RootNav({ booted }: { booted: boolean }) {
         <Stack.Screen
           name="FeedbackInbox"
           component={FeedbackInboxScreen}
-          options={{
+          options={({ navigation }) => ({
             presentation: 'modal',
             headerShown: true,
             title: 'Your feedback',
             headerTitle: () => <HeaderTitle>Your feedback</HeaderTitle>,
             headerStyle: { backgroundColor: ink.ink0 },
             headerTintColor: chalk.base,
-          }}
+            // #354 ux item 4 / #130: a modal carries an explicit header close
+            // control (docs/design/components.md, Sheets/modals): the Icon
+            // Button variant — 32×32, radius sm, `x` in chalk-dim, pressed
+            // = ink-3 fill — in headerRight. Swipe-dismiss alone isn't
+            // discoverable, and the inbox is public now.
+            headerRight: () => (
+              <Pressable
+                testID="feedback-inbox.close"
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                hitSlop={6}
+                onPress={() => navigation.goBack()}
+                style={({ pressed }) => [
+                  { width: 32, height: 32, borderRadius: radii.sm, alignItems: 'center', justifyContent: 'center' },
+                  pressed && { backgroundColor: ink.ink3 },
+                ]}
+              >
+                <Icon name="x" size={16} color={chalk.dim} />
+              </Pressable>
+            ),
+          })}
         />
         {/* #142/#144 — League rankings, pushed from the League tab's
             "League rankings" Explore row. Standard (non-modal) push; explicit
