@@ -12782,6 +12782,67 @@ def load_notifications(user_id: str, unread_only: bool = False) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Referral loop L7 — the ledger's SQL (rules: backend/referral_ledger.py)
+# ---------------------------------------------------------------------------
+
+def league_has_member(league_id: str, user_id: str) -> bool:
+    """True when `league_members` holds `user_id` for `league_id`: the DB
+    membership snapshot every session init writes and that platform leagues
+    are resolved from (session_input.resolve_session_input)."""
+    if not league_id or not user_id:
+        return False
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(league_members_table.c.user_id)
+            .where(league_members_table.c.league_id == str(league_id))
+            .where(league_members_table.c.user_id == str(user_id))
+            .limit(1)
+        ).fetchone()
+    return row is not None
+
+
+def count_referral_mints_today(referrer_user_id: str, league_id: str) -> int:
+    """Invite ids this inviter minted for this league since UTC midnight
+    (FR-6). Minted rows only (invite_token = share_token): group-chat
+    siblings are joins, not mints."""
+    r = referrals_table
+    day_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0).isoformat()
+    with engine.connect() as conn:
+        return int(conn.execute(
+            select(func.count()).select_from(r)
+            .where(r.c.referrer_user_id == referrer_user_id)
+            .where(r.c.league_id == str(league_id))
+            .where(r.c.invite_token == r.c.share_token)
+            .where(r.c.created_at >= day_start)
+        ).scalar() or 0)
+
+
+def create_referral_invite(referrer_user_id: str, league_id: str,
+                           surface: str) -> dict:
+    """Mint one invite id (PRD §7.1, §8.1): secrets.token_urlsafe(9), 12
+    URL-safe chars, stored as invite_token AND share_token on one `pending`
+    row. Re-minted on a uq_referral_token collision. Returns
+    {invite_id, created_at}."""
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+
+    for _ in range(4):   # a 72-bit collision is ~impossible; belt+braces
+        invite_id, now = secrets.token_urlsafe(9), _now()
+        try:
+            with engine.begin() as conn:
+                conn.execute(insert(referrals_table).values(
+                    referrer_user_id=referrer_user_id, league_id=str(league_id),
+                    invite_token=invite_id, share_token=invite_id,
+                    status="pending", surface=surface, created_at=now,
+                ))
+            return {"invite_id": invite_id, "created_at": now}
+        except IntegrityError:
+            continue
+    raise RuntimeError("could not mint a unique invite id")
+
+
+# ---------------------------------------------------------------------------
 # elo_history — snapshots for Trends tab
 # ---------------------------------------------------------------------------
 

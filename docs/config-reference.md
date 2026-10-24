@@ -112,6 +112,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
 - [Flags — API observability (2026-08-09, ships **ON**)](#flags-api-observability-2026-08-09-ships-on)
 - [Flags — P0 remediation (2026-08-11 mobile UX audit)](#flags-p0-remediation-2026-08-11-mobile-ux-audit-plans)
 - [Flags — Referral loop D-1: install CTA (2026-10-15, ships **OFF**)](#flags--referral-loop-d-1-install-cta-2026-10-15-ships-off)
+- [Flags — Referral loop L7: the ledger (2026-10-24, ships **OFF**)](#flags--referral-loop-l7-the-ledger-2026-10-24-ships-off)
 - [Flags — Counterparty breaker (2026-08-21, ships **OFF**)](#flags-counterparty-breaker-2026-08-21-ships-off)
 - [Flags — Negative-results memory (2026-08-22, ships **OFF**)](#flags-negative-results-memory-2026-08-22-ships-off)
   - [The allowlist is the OTHER half of the ON-condition](#the-allowlist-is-the-other-half-of-the-on-condition)
@@ -684,6 +685,16 @@ Spec: `docs/plans/referral-loop/prd.md` (branch `plan/referral-loop` @ `91f1cc29
 |---|---|---|
 | `growth.join_landing` | **false** | **ON:** `GET /app/league/join/<league_id>` renders a 200 Chalkline landing (`Cache-Control: no-store`, `noindex`, absolute OG tags, the FR-7 headline ladder and a device-aware CTA: the iPhone A1 step list or honest note, the desktop QR-primary layout when `IOS_INSTALL_URL` is set, the Android note) instead of the 302; `GET /app/league/join/<id>/go/<ios\|web>` answers (it 404s while off); and the `/s/*` share pages take FR-25's per-device CTA (iPhone with the URL set → the host's install pair; iPhone unset → "…Already have it? Open Fleeced."; desktop → the page's button plus "Sign-in uses the Fleeced extension for Chrome or Edge."; Android/other → "Available on iPhone and desktop web for now."; no QR on `/s/*`, GB-02). **OFF:** today's 302 to `/?league=<id>[&ref=<u>]` (T4–T7 in `test_invite_links.py`), `/go/*` 404s, and every `/s/*` visitor gets today's single button, href `/?share=<kind>`. All landing words are `marketing-lead`'s proposed `gp.join.*` strings and await operator approval (D-5). **Flip prerequisites:** the words approved, `design-lead`'s `/design-review`, the OG asset `web/img/og-invite.png` in place (the landing's `og:image` points at it), and an operator device pass (iPhone, desktop, Android, iMessage unfurl). **Rollback:** flip back to false. |
 | `growth.referral_ledger` | **false** | **In D-1 it gates three things.** (1) FR-8 open recording, both join modes: **every human GET** fires `invite_landing_opened` (with or without `t`; without one, `invite_status` is null and `invite_id` is omitted); a well-formed `t` (`^[A-Za-z0-9_-]{8,64}$`, `server.INVITE_ID_RE`) naming a referrals row in the **path's own league** (`invite_status` valid or expired) also stamps `opened_at` / `last_opened_at` / `open_count`, or `unfurled_at` for a link-preview fetch (which fires no event); a `league_mismatch` or unknown `t` stamps nothing; HEAD records nothing. (2) `invite_landing_cta` on `/go/<cta>` (#350 "Takes effect"; the route itself needs `growth.join_landing`). (3) The flag-off 302 forwarding a well-formed `t` (`/?league=<id>[&ref=<u>][&t=<id>]`). Event owner: the referrer of the row `t` names, else the user a legacy `ref` resolves to, else `system:invite`; written with `platform='server'`, `touch_user=False`. **Its mint / attribution meaning** (`POST /api/invite/token`, clients carrying `t`, credit by token or league match, activation) **lands with FR-1 / FR-13 under this same key.** Rollback: flip back to false; rows already written stay. |
+
+---
+
+## Flags — Referral loop L7: the ledger (2026-10-24, ships **OFF**)
+
+Spec: `docs/plans/referral-loop/prd.md` @ `91f1cc29` §7, §8.1, §8.4, §11; events PR #350. L7 adds **no new flag**: it gives `growth.referral_ledger` (registered by D-1, above, default **false**) its mint, attribution and activation meaning. Flipping it is the operator's call (planned 2026-11-18); L7 flips nothing.
+
+| `growth.referral_ledger` ON also gates | Behaviour | Off |
+|---|---|---|
+| The mint, `POST /api/invite/token` | Mints a 12-char invite id per share, 10 per inviter per league per UTC day. Also needs `model_config` `referral_mint_enabled` = 1 ([kill switch](#referral-invite-mint-l7-backendserverpy-db-seeded)) | `404 not_found`; clients emit today's league-only links |
 
 ---
 

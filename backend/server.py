@@ -27087,6 +27087,95 @@ def _compute_invite_impact(username: str, user_id: str) -> dict:
     }
 
 
+def _referral_mint_enabled() -> bool:
+    """model_config knob `referral_mint_enabled` (default 1), read per
+    request from the DB so a flip needs no restart or deploy (the
+    force_supersedes_running pattern). Exactly 1 enables."""
+    try:
+        return float(get_config().get("referral_mint_enabled", 1.0)) == 1.0
+    except Exception:
+        return True
+
+
+def _session_in_league(sess, league_id: str) -> bool:
+    """Is the session's user in `league_id`, by the source session init uses?
+    The session's own league was proven by resolve_session_input at init;
+    any other league is checked against the league_members snapshot that
+    session init persists (platform leagues are resolved from it)."""
+    league = sess.get("league")
+    if league is not None and str(getattr(league, "league_id", "")) == league_id:
+        return True
+    from . import database as _db
+    return _db.league_has_member(league_id, str(sess.get("user_id") or ""))
+
+
+@app.route("/api/invite/token", methods=["POST"])
+def mint_invite_token():
+    """POST /api/invite/token — mint a per-share invite id (referral loop
+    L7; PRD §8.1, FR-1 server half, FR-6).
+
+    Gate: `growth.referral_ledger` AND model_config `referral_mint_enabled`
+    (exactly 1, read per request). Either off → 404 not_found, checked
+    before anything else, so a dark route looks absent to every caller.
+
+    Body: {"league_id": str, "surface": InviteSurface}
+    201: {"invite_id": "<12 chars>", "league_id", "expires_at": ISO UTC,
+          created + 30 d}. Never a URL: each client builds its own (§7.2).
+    Errors: 401 session_expired · 403 verification_required (demo or
+    unverified) · 400 missing_league_id | invalid_surface · 403 not_member ·
+    429 rate_limited + retry_after_s (10 per inviter per league per UTC day,
+    until the next UTC midnight) · 500 store_failed.
+    Writes one `pending` referrals row (invite_token = share_token = the id).
+    """
+    from . import database as _db
+    from . import referral_ledger as _rl
+    if not (is_enabled("growth.referral_ledger") and _referral_mint_enabled()):
+        return jsonify({"error": "not_found"}), 404
+    sess = _require_session()
+    user_id = str(sess.get("user_id") or "")
+    if (not sess.get("verified") or sess.get("is_demo")
+            or user_id.startswith("demo_user_")):
+        return jsonify({"error": "verification_required"}), 403
+    body = request.get_json(force=True, silent=True)
+    body = body if isinstance(body, dict) else {}
+    league_id = body.get("league_id")
+    if not isinstance(league_id, str) or not league_id.strip():
+        return jsonify({"error": "missing_league_id"}), 400
+    league_id = league_id.strip()
+    surface = body.get("surface")
+    if not isinstance(surface, str) or surface not in _rl.INVITE_SURFACES:
+        return jsonify({"error": "invalid_surface"}), 400
+    try:
+        member = _session_in_league(sess, league_id)
+    except Exception as e:
+        log.warning("invite/token: membership check failed: %s", e)
+        member = False
+    if not member:
+        return jsonify({"error": "not_member"}), 403
+    try:
+        minted_today = _db.count_referral_mints_today(user_id, league_id)
+    except Exception as e:
+        log.warning("invite/token: rate-limit count failed: %s", e)
+        minted_today = 0
+    if minted_today >= _rl.MINT_DAILY_CAP:
+        now = datetime.now(timezone.utc)
+        midnight = (now + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        return jsonify({"error": "rate_limited",
+                        "retry_after_s": max(1, int((midnight - now).total_seconds()))}), 429
+    try:
+        minted = _db.create_referral_invite(user_id, league_id, surface)
+    except Exception as e:
+        log.error("invite/token: could not mint for %s: %s", user_id, e)
+        return jsonify({"error": "store_failed"}), 500
+    created = datetime.fromisoformat(minted["created_at"])
+    return jsonify({
+        "invite_id":  minted["invite_id"],
+        "league_id":  league_id,
+        "expires_at": (created + timedelta(days=_INVITE_ID_VALID_DAYS)).isoformat(),
+    }), 201
+
+
 @app.route("/api/invite/impact")
 @_gate_unverified_read
 def invite_impact_route():
