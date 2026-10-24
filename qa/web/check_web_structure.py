@@ -335,6 +335,31 @@ def run() -> int:
         r.check(f"POL-no-stale-claims[{page}]", not bad,
                 f"found {', '.join(bad)} (M7-AC1, D-12: the allow-list is empty)" if bad else "none")
 
+    # Reading links on the policy pages are chalk + underline, the same rule as
+    # contact's `.status a` and FAQ's `.faq-body a` (design-lead, #354 PR 3 link
+    # styles). Ice is for actions: no link selector or inline link style may set
+    # an ice `color` (an ice hover underline, text-decoration-color, is allowed).
+    ICE = re.compile(r"var\(\s*--(?:ice|ice-press|accent)\s*\)|#56d9ec|#3fc2d6", re.I)
+    LINK_SEL = re.compile(r"(?:^|[\s>+~])a(?:[:.\[#][^\s>+~]*)?$")
+    COLOR_DECL = re.compile(r"(?:^|;)\s*color\s*:\s*([^;]+)", re.I)
+    for page in POLICY:
+        css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", strip_comments(all_sources[page]), re.S | re.I))
+        rules = [(sel.strip(), decl) for sels, decl in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+                 for sel in sels.split(",")]
+        ice_links = [sel for sel, decl in rules if LINK_SEL.search(sel)
+                     and any(ICE.search(v) for v in COLOR_DECL.findall(decl))]
+        inline = [m for m in re.findall(r"<a\b[^>]*\bstyle=[\"']([^\"']*)", body_of(all_sources[page]), re.I)
+                  if any(ICE.search(v) for v in COLOR_DECL.findall(m))]
+        base = [decl for sel, decl in rules if sel == "a"]
+        base_ok = len(base) == 1 \
+            and any(re.search(r"var\(\s*--(?:chalk|text)\s*\)", v) for v in COLOR_DECL.findall(base[0])) \
+            and re.search(r"text-decoration\s*:\s*underline", base[0], re.I)
+        r.check(f"POL-reading-links-chalk[{page}]", base_ok and not ice_links and not inline,
+                ("ice-coloured link rule(s): " + ", ".join(ice_links) if ice_links else
+                 f"{len(inline)} inline ice link style(s)" if inline else
+                 "the base `a` rule is not chalk + underline") if not (base_ok and not ice_links and not inline)
+                else "reading links chalk + underline, no ice text links")
+
     for page in SUPPORT_PAGES:
         raw = all_sources[page]
         r.check(f"POL-no-fullwidth-at[{page}]", "\uff20" not in raw,
