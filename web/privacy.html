@@ -1,13 +1,5 @@
 <!DOCTYPE html>
-<!-- Drafted 2026-07-11 from code audit (backend/database.py, backend/server.py,
-     backend/sleeper_write.py, mobile/src/observability/sentry.ts); §6 + retention
-     re-synced to backend/accounts.py delete_user_data matrix on 2026-07-19.
-     2026-08-19: §6 and §10 now point at /contact.html, a working web channel
-     that posts to the public feedback API — web visitors previously had NO
-     route to a deletion or access request.
-     OPERATOR TODO before public launch:
-       1. Optional: add a plain support email alongside /contact.html.
-       2. Have a lawyer review this document (it has not had legal review). -->
+<!-- Text: docs/plans/org-bringup/leads/legal-lead-drafts.md (final 2026-10-23) -->
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -54,231 +46,311 @@
     li { margin-bottom: 8px; }
     ul { padding-left: 22px; margin-bottom: 16px; }
     strong { font-weight: 600; }
-    a { color: var(--ice); text-decoration: none; border-bottom: 1px solid var(--line-strong); }
-    a:hover { color: var(--ice-press); border-color: var(--ice-press); }
+    a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
+    a:hover { text-decoration-color: var(--ice); }
     .note {
       background: var(--ink-1); border: 1px solid var(--line);
       border-radius: 8px; padding: 12px 16px;
       color: var(--chalk-dim); font-size: 13px; margin-bottom: 16px;
     }
-    .back { display: inline-block; margin-top: 40px; font-size: 13px; color: var(--chalk-dim); border-bottom-color: var(--line); }
+    .back { display: inline-block; margin-top: 40px; font-size: 13px; color: var(--chalk-dim); text-decoration: none; border-bottom: 1px solid var(--line); }
     .legal-links { margin-top: 8px; font-size: 13px; color: var(--chalk-faint); }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>Privacy Policy</h1>
-    <p class="updated">Effective date: July 19, 2026</p>
+    <p class="updated">Effective date: [EFFECTIVE DATE]</p>
 
     <p>
-      Fantasy Trade Finder ("we", "us", or "the Service") operates
-      <a href="https://fantasy-trade-finder.onrender.com">fantasy-trade-finder.onrender.com</a>,
-      the Fantasy Trade Finder mobile app, and a companion browser extension.
-      Fantasy Trade Finder is a small, independent hobby project for dynasty
-      fantasy football managers. This policy explains what we collect, how we
-      use it, how long we keep it, and the choices you have.
+      Fleeced: Dynasty Trade Finder ("Fleeced", "we", "us", or "the Service") helps dynasty fantasy
+      football managers rank players and find trades. The Service includes the Fleeced iOS app, the
+      website at <a href="https://fantasy-trade-finder.onrender.com">fantasy-trade-finder.onrender.com</a>,
+      and a companion browser extension. It is operated by [OPERATOR NAME]. This policy explains what
+      we collect, how we use it, who receives it, how long we keep it, and the choices you have.
+      Questions or requests: <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>.
     </p>
 
     <h2>1. Information we collect</h2>
     <ul>
       <li>
-        <strong>Sleeper account and league data.</strong> You sign in with your
-        Sleeper username only. We look up your public Sleeper profile (user ID,
-        username, display name, avatar), your fantasy leagues for the current
-        season, league rosters, draft-pick assets, and the usernames and display
-        names of your leaguemates. All of this is read from Sleeper's public,
-        read-only API. A username can discover public league information;
-        private boards and account data require a verified session. Sleeper
-        ownership is verified using the token issued by Sleeper's own sign-in page.
+        <strong>How you sign in.</strong> You can sign in with Apple, with your Sleeper username, with
+        ESPN, or with MyFantasyLeague (MFL). Each method creates a Fleeced account with an internal
+        account ID. Depending on the method, we store:
+        <ul>
+          <li><strong>Apple:</strong> the stable identifier Apple issues for our app, the name you choose to share (used as your display name), and a one-way (SHA-256) hash of the email address Apple shares with us. We don't keep the email address itself, and we never receive your Apple password.</li>
+          <li><strong>Sleeper:</strong> your Sleeper user ID, username, display name and avatar, looked up from Sleeper's public API. A username alone shows public league information. Private boards and account features need a verified Sleeper session (see "Platform connections" below).</li>
+          <li><strong>ESPN:</strong> your ESPN member ID (called SWID), which ESPN includes in league data.</li>
+          <li><strong>MFL:</strong> your MFL username.</li>
+        </ul>
+      </li>
+      <li><strong>League data.</strong> From the platforms you connect we read your leagues, rosters, draft picks and league settings. We also read your leaguemates' usernames, display names and rosters, and your league's trades and roster history. We use leaguemates' data only to run trade discovery and league features for members of that league.</li>
+      <li>
+        <strong>Your rankings and in-app activity.</strong> We store:
+        <ul>
+          <li>every ranking comparison you make (three-player matchups, tier saves, manual reorders, pick-anchor answers);</li>
+          <li>the per-player ratings computed from them, and rating history over time;</li>
+          <li>rankings you import from a file you upload or paste;</li>
+          <li>trade likes and passes, trade cards shown to you, mutual trade matches and "bad trade" flags, including any reason or optional note you give when you pass on a trade or flag one;</li>
+          <li>your answers in Calibration, where you grade suggested trades;</li>
+          <li>players you skip or mark untouchable or target;</li>
+          <li>team-outlook and position preferences, Win Now scenarios, and team-overhaul plans you create.</li>
+        </ul>
+        <p>We also record activity events (sign-in, ranking, trade actions) with a device snapshot: device type, OS version and app version.</p>
       </li>
       <li>
-        <strong>Sign-in identity (Apple or Google).</strong> If you sign in with
-        Apple (or, in the future, Google), we store the stable anonymous
-        identifier the provider issues for our app (Apple/Google
-        <code>sub</code>), the provider name, and — if the provider shares an
-        email address — a one-way SHA-256 hash of it. When account email
-        collection is enabled, we also retain the address shared by your
-        provider or supplied to your account. We may retain an optional display
-        name, but never a provider password. The provider identifier exists
-        only to recognize your account across devices and sign-ins.
+        <strong>Usage analytics (first-party only).</strong> To understand where the app is confusing or broken, the app and website send us usage events: screens viewed, sign-in and setup steps completed, taps on core features, how long actions take, and app errors. Error messages are scrubbed of personal data and shortened before they leave your device. These events are processed and stored only on our own server; no analytics company receives them.
+        <ul>
+          <li><strong>Device identifier.</strong> Each install generates a random device identifier (a meaningless ID like dev_a1b2…) so we can count installs and see where new users get stuck before they sign in. It contains no information about you or your device. In the iOS app it is kept in the device's secure storage; on the website, in your browser's local storage; in the browser extension, in the extension's own storage.</li>
+          <li><strong>Session identifier.</strong> Events also carry a session identifier, which we store only as a one-way hash.</li>
+          <li><strong>Experiments.</strong> If we run product experiments, the variant you saw is recorded with these events.</li>
+          <li><strong>Country.</strong> Usage events from the app and website also record a two-letter country code (for example "US"), supplied in a network header by our hosting provider's network. It is never more precise than the country, and we never work out your location from your IP address ourselves.</li>
+        </ul>
       </li>
+      <li><strong>Server monitoring.</strong> When the app calls our server, we keep a short record of the request, including your account ID, to find and fix errors. These records are deleted automatically within 30 days.</li>
       <li>
-        <strong>Your rankings and in-app activity.</strong> Every ranking
-        comparison you make (three-player matchups, tier saves, manual reorders,
-        pick-anchor answers), the per-player ratings computed from them, rating
-        history over time, trade likes and passes, trade cards shown to you,
-        mutual trade matches, "bad trade" flags, players you skip or mark
-        untouchable/target, and your team-outlook and position preferences.
-        We also record activity events (sign-in, ranking, trade actions) along
-        with a device snapshot: device type, OS version, and app version.
+        <strong>Feedback and messages to us.</strong>
+        <ul>
+          <li><strong>In-app feedback:</strong> we store the note text, the screen it was sent from, a severity label, and device metadata (app version, platform, device type, OS version). Feedback can be sent anonymously; if you're signed in, it's linked to your account. The app also keeps a local copy on your device.</li>
+          <li><strong>Our website's <a href="/contact.html">contact form</a>:</strong> we receive your message and topic, linked to your account if you're signed in on the website.</li>
+          <li><strong>Email:</strong> we receive your email address, your message and any attachments. Our mailbox is hosted by Google (Gmail; see section 4).</li>
+        </ul>
+        <p>We use these only to answer you, handle your request and improve the Service.</p>
       </li>
+      <li><strong>Push notification tokens.</strong> If you turn on push notifications, we store an opaque Expo push token and your platform so we can deliver alerts. We also store your notification preferences and your time zone, which we use for quiet hours and for daily streaks.</li>
       <li>
-        <strong>Usage analytics (first-party only).</strong> To understand where
-        the app is confusing or broken, the apps send us usage events: screens
-        viewed, steps of sign-in and setup completed, taps on core features,
-        how long actions take, and app errors (error messages are scrubbed of
-        personal data and truncated before they leave your device). These
-        events are processed and stored only on our own server — no analytics
-        company receives them. Each install generates a random device
-        identifier (a meaningless ID like <code>dev_a1b2…</code>, stored in
-        your device's secure storage) so we can count installs and see where
-        new users get stuck before they sign in; it contains no information
-        about you or your device. If we run product experiments (showing
-        different versions of a feature to different users), the variant you
-        were shown is recorded with these events so we can tell whether the
-        change helped. The event record also has room for a coarse two-letter
-        country code (e.g. "US") supplied by a CDN header; we never derive it
-        from your IP address ourselves, and because the service currently runs
-        without such a CDN, this field is empty today. If we put a CDN in
-        front of the service, usage events would start carrying that
-        country-level (never more precise) code.
+        <strong>Platform connections.</strong>
+        <ul>
+          <li>
+            <strong>Sleeper.</strong> To verify that a Sleeper account is yours, or to send trades, you sign in on Sleeper's own site, in the app or the browser extension. Your Sleeper password is entered on Sleeper's site; we never see, receive or store it.
+            <ul>
+              <li>The app captures the session token Sleeper issues and we store it encrypted at rest. The encryption key lives only in our server environment, never in the database, and the server never returns the token to the app or website.</li>
+              <li>The iOS app may also keep the token in the device's secure storage to re-verify you. The extension uses it only briefly and doesn't save it.</li>
+              <li>This token is a full-account Sleeper credential. We use it to verify ownership and, when you ask, to submit or withdraw trade proposals.</li>
+              <li>You can disconnect at any time in Settings → Leagues, which deletes the stored token immediately.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>ESPN.</strong> To connect ESPN, you log in on ESPN's own page inside the app; we never see your password. We keep two ESPN sign-in cookies:
+            <ul>
+              <li>espn_s2, stored encrypted;</li>
+              <li>SWID, which is your ESPN member ID and is stored as is.</li>
+            </ul>
+            <p>We use them to import your ESPN leagues and to send trades you approve. You can disconnect in Settings → Leagues, which deletes both cookies.</p>
+          </li>
+          <li><strong>MFL.</strong> When you sign in with MFL, your password passes through our server to MFL's sign-in once, to start a session. We never store it. We keep the session MFL returns, encrypted, and use it to read your leagues and to send trades you approve. You can disconnect in Settings → Leagues.</li>
+        </ul>
       </li>
+      <li><strong>Crash and performance data (Sentry).</strong> The iOS app uses Sentry to report crashes and performance traces (a sample of app interactions). Reports include device model, OS version and app version. After sign-in they're tagged with an account identifier (your Fleeced account ID, Sleeper user ID or ESPN member ID, depending on how you signed in) so we can look into your bug reports. They never carry your name or email address. The tag is cleared when you sign out. Sentry is set up not to collect other personal data by default. Sentry may also record the IP address a report came from.</li>
       <li>
-        <strong>In-app feedback.</strong> If you submit feedback we store the
-        note text, which screen it was filed from, a severity label, and device
-        metadata (app version, platform, device type, OS version). Feedback can
-        be submitted anonymously; if you're signed in it's attributed to your
-        account. The mobile app also keeps a local copy on your device.
-      </li>
-      <li>
-        <strong>Push notification tokens.</strong> If you enable push
-        notifications, we store an opaque Expo push token and your platform
-        (iOS/Android) so we can deliver alerts, plus your notification
-        preferences including your time zone (used for quiet hours).
-      </li>
-      <li>
-        <strong>Sleeper connection token.</strong>
-        To verify ownership or connect trade sending, you sign in
-        to Sleeper's own site through the app or browser extension. Your Sleeper password is
-        entered on Sleeper's own site — we never see, receive, or store it. The
-        app captures the session token Sleeper issues and stores it encrypted at
-        rest (Fernet symmetric encryption; the key lives only in our server
-        environment, never in the database, and the server does not return the
-        token to clients). The mobile app can also retain it in device secure
-        storage for verification replay. The extension uses it transiently and
-        does not save it or pass it to the Fleeced web page. This token is a
-        full-account Sleeper credential: we use it to verify ownership and,
-        when you request it, submit or withdraw trade proposals.
-        You can disconnect at any time in the app's Settings
-        ("Disconnect Sleeper sending"), which deletes the stored token
-        immediately; it also expires on Sleeper's schedule.
-      </li>
-      <li>
-        <strong>Other league connections and purchases.</strong> ESPN and MFL
-        connections retain encrypted authentication cookies or tokens and imported
-        league data. If purchases are enabled, we retain account-linked
-        subscription status, product identifiers and billing-provider event records
-        to grant and reconcile access. Payment processing is handled by the
-        relevant app store and billing provider.
-      </li>
-      <li>
-        <strong>Crash and performance data (Sentry).</strong> The mobile app uses
-        Sentry to report crashes and performance traces (a sample of app
-        interactions). Reports include device model, OS version, and app version,
-        and after sign-in are tagged with your pseudonymous Sleeper user ID only
-        (never your username or any name) so we can investigate your bug
-        reports; the tag is cleared when you sign out. Sentry is configured not
-        to collect additional personal data by default.
+        <strong>Cookies and local storage.</strong>
+        <ul>
+          <li>Our website sets no cookies.</li>
+          <li>It uses your browser's local storage for your sign-in token, your account and selected league, the device identifier, queued usage events and, if you arrived through an invite link, the inviter's Sleeper username.</li>
+          <li>The app keeps similar data in its own storage on your device.</li>
+        </ul>
       </li>
     </ul>
 
     <h2>2. Information we do NOT collect</h2>
     <ul>
-      <li>We do not store passwords. Sleeper passwords stay on Sleeper's sign-in page; account verification uses the session token it issues. When you use MFL sign-in, we forward the password to MFL to authenticate and retain only the returned connection token.</li>
-      <li>We do not request card numbers or payment-account passwords. Account email and subscription records, when enabled, are described above.</li>
-      <li>No location, contacts, camera, microphone, or health data.</li>
-      <li>No advertising or third-party marketing analytics SDKs — there are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics, Mixpanel, or similar in the app or website. The usage analytics described above are collected and stored by us alone; the only third party receiving diagnostic data is Sentry, for crashes.</li>
-      <li>We do not sell your data, and we do not share it with advertisers or data brokers.</li>
+      <li><strong>We don't store passwords.</strong> Sleeper and ESPN passwords stay on their own sign-in pages. MFL passwords are forwarded to MFL once and never stored.</li>
+      <li><strong>We don't ask for card numbers</strong> or payment-account passwords.</li>
+      <li><strong>No precise location, contacts, camera, microphone or health data.</strong> The only location-related data is the country code described in section 1.</li>
+      <li><strong>No advertising or third-party marketing analytics tools.</strong> There are no ad networks and no trackers such as Google Analytics, Meta, Firebase Analytics or Mixpanel in the app or website. The usage analytics above are collected and stored by us alone. The only third party that receives diagnostic data is Sentry, for crashes and performance.</li>
+      <li><strong>We don't sell your personal information,</strong> and we don't share it for targeted advertising.</li>
     </ul>
 
     <h2>3. How we use your data</h2>
     <ul>
-      <li>To run the product: build your rankings, generate trade suggestions, match you with leaguemates on mutually liked trades, show value trends, and send the notifications you opted into.</li>
-      <li><strong>Rankings and trade discovery.</strong> Trade suggestions work by comparing your player values with your leaguemates' values to find trades both sides should like. Your raw ranking list is never displayed to other users, but it does influence which trade suggestions your leaguemates see. When you "like" a trade, the other manager may see an interest indicator on the mirrored trade, and a mutual like creates a match visible to both of you. Leaguemates can also see an aggregate "contrarian score" beside your username — a single number for how far your rankings deviate from the league consensus per position — never which players you rank high or low.</li>
-      <li><strong>AI-assisted matchup selection.</strong> To pick informative ranking matchups, we may send player names, positions, and anonymous rating signals to Anthropic's Claude API. These requests contain no account identifiers — no username, user ID, or league name.</li>
-      <li><strong>Sharing features.</strong> Share images contain only content you created and choose to share. If the public-profile feature is enabled, your profile page (at /u/your-username) would show your display name, avatar, league count, your saved tier snapshot, and your top over/under-consensus takes; it never exposes private league data or other users' rankings. This feature is currently off.</li>
-      <li>To debug and improve the Service (crash reports, feedback, activity events).</li>
+      <li>
+        <strong>To run the product:</strong>
+        <ul>
+          <li>build your rankings;</li>
+          <li>generate trade suggestions;</li>
+          <li>match you with leaguemates on mutually liked trades;</li>
+          <li>show value trends;</li>
+          <li>send trade proposals you approve;</li>
+          <li>send the notifications you turned on.</li>
+        </ul>
+      </li>
+      <li>
+        <strong>Rankings and trade discovery.</strong> Trade suggestions work by comparing your player values with your leaguemates' values to find trades both sides should like.
+        <ul>
+          <li>Your raw ranking list is never shown to other users, but it does influence which trade suggestions your leaguemates see.</li>
+          <li>When you "like" a trade, the other manager may see an interest indicator on the mirrored trade, and a mutual like creates a match visible to both of you.</li>
+          <li>Leaguemates can also see an aggregate "contrarian score" beside your username: one number for how far your rankings differ from the league consensus per position. They never see which players you rank high or low.</li>
+        </ul>
+      </li>
+      <li><strong>AI-assisted matchup selection.</strong> To pick informative ranking matchups, we may send Anthropic's Claude API player names and details (position, team, age, experience) together with your anonymous rating signals for those players. These requests contain no account identifiers: no username, user ID or league name.</li>
+      <li>
+        <strong>Sharing features.</strong>
+        <ul>
+          <li>Share images and shared trade pages contain only what you chose to share. Anyone with the link can view a shared page, and shared pages stay available so links keep working (see section 5).</li>
+          <li>Invite links you share include your Sleeper username so we can show who invited a new user.</li>
+          <li>If the public-profile feature is turned on, your profile page (at /u/your-username) would show your display name, avatar, league count, your saved tier snapshot and your top over- and under-consensus takes. It never shows private league data or other users' rankings. This feature is currently off.</li>
+        </ul>
+      </li>
+      <li><strong>To answer you:</strong> your messages, feedback and data requests.</li>
+      <li><strong>To keep the Service working and improve it:</strong> crash reports, feedback, activity events and server monitoring.</li>
     </ul>
 
     <h2>4. Third parties</h2>
+    <p><strong>Platforms you connect.</strong> We don't control these companies, and their own privacy policies apply to what they do.</p>
     <ul>
-      <li><strong>Sleeper</strong> — we read your public account and league data from Sleeper's API; with your opt-in, we send your trade proposals to Sleeper. We are not affiliated with Sleeper.</li>
-      <li><strong>DynastyProcess</strong> — we ingest their publicly published consensus player values to seed ratings. No data about you is sent to DynastyProcess.</li>
-      <li><strong>Render</strong> — hosts our server and database. Your data is stored on Render's infrastructure, and Render keeps standard server request logs.</li>
-      <li><strong>Expo and Apple/Google</strong> — push notifications are delivered through Expo's push service and the platform notification services (APNs / FCM), which process your push token and notification content.</li>
-      <li><strong>Sentry</strong> — receives crash and performance reports from the mobile app as described above.</li>
-      <li><strong>Anthropic</strong> — receives player names and anonymous ranking signals for matchup selection, as described above.</li>
-      <li><strong>Google Fonts</strong> — our web pages load fonts from Google, which receives your IP address as part of serving the font files. The mobile app bundles its fonts and makes no such request.</li>
+      <li><strong>Sleeper:</strong> we read your public account and league data from Sleeper's API. With your opt-in, we send your trade proposals to Sleeper. On our website, player and user images load from Sleeper's image servers, which receive your IP address.</li>
+      <li><strong>ESPN:</strong> with your connection, we read your ESPN leagues and send trade proposals you approve.</li>
+      <li><strong>MyFantasyLeague (MFL):</strong> with your connection, we read your MFL leagues and send trade proposals you approve. Your MFL password passes to MFL's sign-in as described above.</li>
+      <li><strong>Apple:</strong> if you use Sign in with Apple, Apple confirms your identity to us. Apple also delivers push notifications on iOS.</li>
     </ul>
+    <p><strong>Service providers that process data for us:</strong></p>
+    <ul>
+      <li><strong>Render:</strong> hosts our server and database in the United States (Oregon). Your data is stored on Render's infrastructure, and Render keeps standard server request logs.</li>
+      <li><strong>Expo, and Apple/Google push services (APNs / FCM):</strong> deliver push notifications. They process your push token and the notification content, which can include leaguemates' usernames.</li>
+      <li><strong>Sentry:</strong> receives crash and performance reports from the iOS app, as described above.</li>
+      <li><strong>Anthropic:</strong> receives player details and anonymous rating signals for matchup selection, as described above.</li>
+      <li><strong>Google:</strong> hosts our support mailbox (Gmail), which stores the emails you send us. It also serves our website's fonts, which means Google receives your IP address; the app bundles its fonts and makes no such request.</li>
+    </ul>
+    <p><strong>Data sources.</strong> These receive no data about you:</p>
+    <ul>
+      <li><strong>DynastyProcess:</strong> publicly published consensus player values, used to seed ratings.</li>
+      <li><strong>Other published consensus values:</strong> publicly available player values from other sources, blended into the starting ratings.</li>
+      <li><strong>nflverse:</strong> public NFL schedule data, used for bye weeks.</li>
+    </ul>
+    <p><strong>Where data is processed.</strong> We and our service providers process data in the United States.</p>
+    <p>We are not affiliated with any of the companies named in this section.</p>
 
     <h2>5. Data retention</h2>
     <ul>
-      <li><strong>Account and league data</strong> (profile, leagues, rosters) is kept while your account is active so the Service works across sessions.</li>
-      <li><strong>Rankings, rating history, and daily consensus value snapshots</strong> are retained indefinitely. This is deliberate: historical values power the trends, history charts, and season-recap features, and once a day passes those numbers cannot be reconstructed.</li>
-      <li><strong>Ranking comparisons, trade decisions, activity and usage events</strong> are append-only logs kept for product function and quality analysis. On account deletion, the records keyed to your account are deleted outright; a small set of shared records is anonymized instead so the other manager's history stays intact — see section 6.</li>
-      <li><strong>Feedback</strong> is kept through its triage lifecycle (new → planned/in&nbsp;progress → fixed/shipped or declined) and retained as a product record afterward.</li>
-      <li><strong>Push tokens</strong> are kept until you sign out on that device, disable notifications, or your data is deleted.</li>
-      <li><strong>Sleeper, ESPN and MFL connection tokens</strong> are kept encrypted until you disconnect in the app (immediate deletion), the token expires or your data is deleted.</li>
-      <li><strong>Sign-in sessions</strong> expire automatically; verified sessions may persist across app restarts until sign-out, deletion or the inactivity limit.</li>
-      <li><strong>Server logs</strong> used for debugging are transient; our hosting provider retains standard request logs per its own policy.</li>
+      <li><strong>Account and league data</strong> (profile, leagues, rosters): kept while your account is active, so the Service works across sessions.</li>
+      <li><strong>Rankings, rating history and daily consensus value snapshots:</strong> kept for as long as your account exists. Historical values power trends, history charts and season recaps, and once a day passes those numbers can't be rebuilt.</li>
+      <li><strong>Ranking comparisons, trade decisions, trade cards shown to you, and activity and usage events:</strong> append-only logs kept for product function and quality analysis while your account exists. On account deletion they're deleted or anonymized as described in section 6.</li>
+      <li><strong>Server monitoring records</strong> with your account ID: deleted automatically within 30 days.</li>
+      <li><strong>Feedback and <a href="/contact.html">contact-form</a> messages:</strong> kept through triage and afterwards as a product record. On account deletion, your account link and note text are removed.</li>
+      <li><strong>Emails</strong> to our support mailbox: kept as long as we need them to answer you and to keep a record of your request.</li>
+      <li><strong>Push tokens:</strong> kept until your account is deleted. Turning notifications off in Settings or on your device stops alerts.</li>
+      <li>
+        <strong>Platform connections (Sleeper, ESPN, MFL):</strong> kept encrypted until any of these happens:
+        <ul>
+          <li>you disconnect (they're deleted immediately);</li>
+          <li>your account is deleted;</li>
+          <li>we find that the platform has expired or rejected them.</li>
+        </ul>
+        <p>An expired connection we haven't used again stays stored until one of those happens.</p>
+      </li>
+      <li><strong>Shared trade pages and share snapshots:</strong> kept so links keep working. If you delete your account, they stay available with your account link removed; email us to remove one.</li>
+      <li><strong>Sign-in sessions:</strong> end after a period of inactivity. Saved sessions end after 90 days without use, at sign-out, or when your account is deleted.</li>
+      <li><strong>Server logs</strong> used for debugging are short-lived. Our hosting provider keeps standard request logs under its own policy.</li>
+      <li><strong>Backups:</strong> our database host keeps point-in-time recovery backups for 7 days. Data you delete can remain in those backups until they roll off, for up to 7 days. We use backups only to recover the Service from a failure.</li>
     </ul>
 
-    <h2>6. Deletion and your choices</h2>
+    <h2>6. Deletion, export and your choices</h2>
     <ul>
-      <li><strong>Delete your account:</strong> go to Settings &rarr; Delete
-        account in the app. Deletion is self-serve. It waits for active account
-        operations to finish; if they cannot finish in time, retry the request.
-        A successful deletion removes your user record,
-        rankings and rating history, ranking comparisons, trade decisions,
-        preferences, notifications and push tokens, activity and usage events,
-        and stored Sleeper, ESPN and MFL connection tokens. Linked anonymous usage history and stored sign-in sessions are removed too. A small set of
-        <em>shared</em> records is anonymized instead of erased so the other
-        manager's history stays intact: trade matches keep the other side's
-        record with your identifier replaced by a deleted-user placeholder,
-        references to you on other users' trade decks and "bad trade" flags
-        are cleared. Feedback you submitted retains its triage status, with your
-        account attribution and note text removed. Public league records and
-        other managers' records may still mention you. The app also clears its local analytics queue when
-        your account is deleted. If you can't use the in-app path, you can
-        request deletion from any browser through our
-        <a href="/contact.html">contact form</a>.</li>
-      <li><strong>Export your data:</strong> you can download a copy of the
-        data we hold about you (profile, rankings, decisions, events) from
-        the app's Settings; it's returned as a machine-readable file. The export
-        includes linked account aliases and newer recommendation records. Login
-        tokens, encrypted credentials, push tokens and raw billing payloads are excluded.</li>
-      <li><strong>Device identifier after deletion:</strong> the random install identifier lives in your device's secure storage, which apps cannot fully erase; it persists on the device even after account deletion (and survives reinstalls). It links to nothing on our servers after anonymization — if you sign up again from the same device, our systems see a new user on a previously seen device, nothing more. Erasing your device removes it entirely.</li>
-      <li><strong>Disconnect Sleeper sending:</strong> in the app's Settings at any time — the stored token is deleted immediately.</li>
-      <li><strong>Push notifications:</strong> can be turned off per-category in Settings or entirely in your device settings.</li>
-      <li><strong>Sign out:</strong> ends your session on that device and clears the Sentry account tag.</li>
+      <li>
+        <strong>Delete your account.</strong> In the app, go to Settings → Account &amp; data → Delete account.
+        <ul>
+          <li><strong>How it runs:</strong> deletion waits for any account operation in progress to finish. If that takes too long, you'll be asked to try again in a minute.</li>
+          <li>
+            <strong>What it removes:</strong>
+            <ul>
+              <li>your account record and sign-in links, including Sign in with Apple;</li>
+              <li>rankings and rating history, ranking comparisons, trade decisions, trade cards shown to you, Calibration answers, Win Now scenarios and preferences;</li>
+              <li>notifications, notification settings and push tokens;</li>
+              <li>activity and usage events, and linked anonymous usage history;</li>
+              <li>saved sign-in sessions;</li>
+              <li>stored Sleeper, ESPN and MFL connections.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>What is anonymized instead,</strong> so the other manager's history stays intact:
+            <ul>
+              <li>trade matches keep the other side's record, with your identifier replaced by a deleted-user placeholder;</li>
+              <li>references to you on other users' trade decks, and "bad trade" flags, are cleared;</li>
+              <li>feedback you sent keeps its triage status, with your account link and note text removed;</li>
+              <li>shared trade pages stay available, with your account link removed;</li>
+              <li>rank sets you shared publicly stay available, credited to "Deleted contributor";</li>
+              <li>referral records keep the referral, with your account link removed.</li>
+            </ul>
+          </li>
+          <li>
+            <strong>What may remain:</strong>
+            <ul>
+              <li>server monitoring records, until they expire within 30 days;</li>
+              <li>backup copies, until they roll off within 7 days;</li>
+              <li>messages you sent through our website's <a href="/contact.html">contact form</a> without signing in, which can't be matched to your account automatically. Email us to have them deleted;</li>
+              <li>if you invited someone, their account may still list your Sleeper username as their inviter. Email us to have it removed;</li>
+              <li>team-overhaul plans you created, which aren't yet removed by in-app deletion. Email us and we'll delete them;</li>
+              <li>public league records on Sleeper, ESPN or MFL, and other managers' records, which may still mention you.</li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+      <li><strong>If you're signed in with an ESPN or MFL league that hasn't been confirmed as yours,</strong> Delete account signs you out, removes this device's sign-in link, and deletes the usage events recorded from this device. Your rankings, trade decisions, trade cards shown to you and league data from that sign-in stay with that league's account, because they may belong to the team's real owner. To ask about them, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>; you'll be asked to confirm the account is yours.</li>
+      <li><strong>If you can't delete in the app</strong> (for example, you can't sign in), see "Requests outside the app" below.</li>
+      <li>
+        <strong>Export your data.</strong> In the app, Settings → Account &amp; data lets you download a copy of the data we hold about you (profile, rankings, decisions, events) as a machine-readable file.
+        <ul>
+          <li>It includes linked account aliases and recommendation records.</li>
+          <li>Sign-in tokens, encrypted credentials, push tokens, raw billing records and short-lived server monitoring records are left out.</li>
+          <li>Team-overhaul plans are not yet included; email us for a copy.</li>
+        </ul>
+      </li>
+      <li>
+        <strong>Requests outside the app.</strong> For deletion, correction, or any privacy question when you can't use the app, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a> from the address you'd like us to reply to.
+        <ul>
+          <li>Tell us how you sign in (Apple, Sleeper, ESPN or MFL) and your username, or the email on your Apple ID, so we can find your records.</li>
+          <li><strong>We check that a request comes from the account's owner before we act.</strong> For example, we may ask you to write from the email on your Apple ID, or to sign in to the app once so the request can be confirmed there. We don't act on requests we can't verify.</li>
+          <li><strong>We never send account data by email.</strong> A copy of your data is available only through the in-app export, which needs you to be signed in.</li>
+          <li>We acknowledge requests within 2 business days and complete them within 30 days.</li>
+          <li>Our website's <a href="/contact.html">contact form</a> has a "Delete my data" option. The form can't send replies, so we act on a form request only when it comes from a signed-in account we can verify. To hear back, email us.</li>
+        </ul>
+      </li>
+      <li><strong>Correct your data.</strong> Most account and league data comes from the platforms you connect: change it there, and we pick up the change. For anything else, email us.</li>
+      <li>
+        <strong>Turn things off at any time:</strong>
+        <ul>
+          <li>push notifications: per category in Settings, or entirely in your device settings;</li>
+          <li>platform connections: Settings → Leagues;</li>
+          <li>sign out: ends your session on that device and clears the crash-report tag.</li>
+        </ul>
+      </li>
+      <li><strong>Device identifier after deletion.</strong> In the iOS app, the random install identifier lives in the device's secure storage, which apps can't fully erase. It stays on the device after account deletion and survives reinstalls. After deletion it links to nothing on our servers. If you sign up again from the same device, we see a new user on a device we've seen before, nothing more. On the website, clearing your browser's site data removes it.</li>
+      <li>
+        <strong>Your rights.</strong>
+        <ul>
+          <li>Everyone can access, export, correct and delete their data as described above, and withdraw consent (for example, to push notifications) at any time.</li>
+          <li>Residents of some US states, such as California, may have additional rights under state law, for example to know what we collect and to opt out of the sale of personal information or targeted advertising. We do neither.</li>
+          <li>To use any of these rights, email us. We won't treat you differently for using them.</li>
+        </ul>
+      </li>
     </ul>
 
     <h2>7. Security</h2>
-    <p>
-      Traffic to the Service uses HTTPS. Sleeper connection tokens are encrypted
-      at rest with a key held only in the server environment. That said, this is
-      a small beta service run as a hobby project — we take reasonable measures,
-      but no method of storage or transmission is completely secure.
-    </p>
+    <ul>
+      <li>Traffic to the Service uses HTTPS.</li>
+      <li>Platform credentials (sign-in tokens and cookies) are encrypted at rest, with a key held only in our server environment. Account identifiers such as your Sleeper user ID, ESPN member ID (SWID) and MFL username aren't secrets and are stored as is.</li>
+      <li>Access to our server and database is limited to the operator and the tools the operator authorizes.</li>
+      <li>We take reasonable measures to protect your data, but no method of storage or transmission is completely secure.</li>
+    </ul>
 
     <h2>8. Children</h2>
     <p>
-      The Service is not directed at children under 13 and we do not knowingly
-      collect data from them. If you believe a child has provided us
-      information, contact us and we will delete it.
+      The Service is not directed at children under 13, and we don't knowingly collect data from them.
+      If you believe a child has given us information, email
+      <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a> or use our contact form at
+      <a href="/contact.html">fantasy-trade-finder.onrender.com/contact.html</a>, and we'll delete it.
     </p>
 
     <h2>9. Changes to this policy</h2>
-    <p>
-      We'll post updates on this page and change the effective date above.
-      Material changes will also be announced in the app.
-    </p>
+    <p>We'll post updates on this page and change the effective date above. Material changes will also be announced in the app.</p>
 
     <h2>10. Contact</h2>
-    <p>
-      Questions or requests: use our <a href="/contact.html">contact form</a>,
-      or the in-app feedback button (Settings → feedback).
-    </p>
+    <ul>
+      <li><strong>Questions or requests:</strong> email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>; we reply within 2 business days.</li>
+      <li><strong>Contact form:</strong> <a href="/contact.html">fantasy-trade-finder.onrender.com/contact.html</a>. It can't send replies.</li>
+      <li><strong>In the app:</strong> the feedback button on every screen.</li>
+    </ul>
+    <p>The Service is operated by [OPERATOR NAME].</p>
 
     <a class="back" href="/">&larr; Back to the app</a>
     <div class="legal-links"><a href="/terms">Terms of Use</a></div>

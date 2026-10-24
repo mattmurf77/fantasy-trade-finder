@@ -303,6 +303,142 @@ def run() -> int:
     r.check("HYG-excluded-documented", set(EXCLUDED) <= set(EXCLUDED),
             f"{len(EXCLUDED)} pages excluded with reasons")
 
+    # ── POL: launch policy, contact and FAQ pages (#354 M7, P28, SUP-M4) ─
+    # Text: legal-lead-drafts.md Parts 1-3 (privacy, terms) and
+    # marketing-lead-copy.md (§1b c1-c8, §2 FAQ). One support address,
+    # written with an ASCII @, always a real mailto. The placeholder check is
+    # meant to fail until [OPERATOR NAME] and the effective date are filled:
+    # it is the merge blocker for publishing unfinished legal text.
+    SUPPORT_EMAIL = "fleecedapp@gmail.com"
+    POLICY = ("privacy.html", "terms.html")
+    SUPPORT_PAGES = ("privacy.html", "terms.html", "contact.html", "faq.html")
+    MAILTO_A = re.compile(r'<a\b[^>]*href=["\']mailto:' + re.escape(SUPPORT_EMAIL)
+                          + r'["\'][^>]*>\s*' + re.escape(SUPPORT_EMAIL) + r'\s*</a>', re.I)
+    # Bracketed placeholders and review tags: [OPERATOR NAME], [EFFECTIVE DATE],
+    # [DEPLOY DATE], [STATE], [PRO], [M11 ALT], [APP STORE URL], and the copy
+    # file's [new] / [R10 …] / [R22.1 edit …] / [goes live …] / [legal …] tags.
+    PLACEHOLDER = re.compile(r"\[(?:[A-Z][A-Z0-9 _/.-]*|new|goes live[^\]]*|R\d[^\]]*|legal[^\]]*)\]")
+    BLOCK_TAG = re.compile(r"</?(?:p|li|ul|ol|h[1-6]|div|details|summary|section|main|form|br)\b[^>]*>", re.I)
+
+    def visible(page: str) -> str:
+        """Head text + body text a reader can see: no comments, styles or scripts."""
+        src = strip_comments(all_sources[page])
+        return strip_style_and_script(head_of(src) + body_of(src))
+
+    for page in POLICY:
+        text = visible(page)
+        bad = [label for label, pat in (
+            ('"Fantasy Trade Finder"', r"Fantasy\s+Trade\s+Finder"),
+            ('"hobby"', r"\bhobby\b"),
+            ('"beta"', r"\bbeta\b"),
+        ) if re.search(pat, text, flags=re.I)]
+        r.check(f"POL-no-stale-claims[{page}]", not bad,
+                f"found {', '.join(bad)} (M7-AC1, D-12: the allow-list is empty)" if bad else "none")
+
+    # Reading links on the policy pages are chalk + underline, the same rule as
+    # contact's `.status a` and FAQ's `.faq-body a` (design-lead, #354 PR 3 link
+    # styles). Ice is for actions: no link selector or inline link style may set
+    # an ice `color` (an ice hover underline, text-decoration-color, is allowed).
+    ICE = re.compile(r"var\(\s*--(?:ice|ice-press|accent)\s*\)|#56d9ec|#3fc2d6", re.I)
+    LINK_SEL = re.compile(r"(?:^|[\s>+~])a(?:[:.\[#][^\s>+~]*)?$")
+    COLOR_DECL = re.compile(r"(?:^|;)\s*color\s*:\s*([^;]+)", re.I)
+    for page in POLICY:
+        css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", strip_comments(all_sources[page]), re.S | re.I))
+        rules = [(sel.strip(), decl) for sels, decl in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+                 for sel in sels.split(",")]
+        ice_links = [sel for sel, decl in rules if LINK_SEL.search(sel)
+                     and any(ICE.search(v) for v in COLOR_DECL.findall(decl))]
+        inline = [m for m in re.findall(r"<a\b[^>]*\bstyle=[\"']([^\"']*)", body_of(all_sources[page]), re.I)
+                  if any(ICE.search(v) for v in COLOR_DECL.findall(m))]
+        base = [decl for sel, decl in rules if sel == "a"]
+        base_ok = len(base) == 1 \
+            and any(re.search(r"var\(\s*--(?:chalk|text)\s*\)", v) for v in COLOR_DECL.findall(base[0])) \
+            and re.search(r"text-decoration\s*:\s*underline", base[0], re.I)
+        r.check(f"POL-reading-links-chalk[{page}]", base_ok and not ice_links and not inline,
+                ("ice-coloured link rule(s): " + ", ".join(ice_links) if ice_links else
+                 f"{len(inline)} inline ice link style(s)" if inline else
+                 "the base `a` rule is not chalk + underline") if not (base_ok and not ice_links and not inline)
+                else "reading links chalk + underline, no ice text links")
+
+    for page in SUPPORT_PAGES:
+        raw = all_sources[page]
+        r.check(f"POL-no-fullwidth-at[{page}]", "\uff20" not in raw,
+                f"{raw.count(chr(0xFF20))}× U+FF20 (full-width @) — the address must use ASCII @"
+                if "\uff20" in raw else "none")
+
+        text = visible(page)
+        marks = sorted(set(PLACEHOLDER.findall(text)) | {m for m in ("⟪", "⟫") if m in text})
+        r.check(f"POL-no-placeholders[{page}]", not marks,
+                "unfilled placeholder / editorial mark: " + ", ".join(marks) if marks else "none")
+
+        body = strip_style_and_script(strip_comments(body_of(raw)))
+        hrefs = re.findall(r'href=["\']mailto:([^"\'?]*)', body, flags=re.I)
+        wrong = [h for h in hrefs if h != SUPPORT_EMAIL]
+        leftover = MAILTO_A.sub("", body)
+        bare = len(re.findall(re.escape(SUPPORT_EMAIL), leftover, flags=re.I))
+        anchors = len(MAILTO_A.findall(body))
+        need = 2 if page == "contact.html" else 1
+        r.check(f"POL-mailto[{page}]", not wrong and bare == 0 and anchors >= need,
+                (f"mailto to another address: {wrong}" if wrong else
+                 f"{bare} visible {SUPPORT_EMAIL} not inside its mailto link" if bare else
+                 f"{anchors} mailto link(s), want ≥ {need}") if (wrong or bare or anchors < need)
+                else f"{anchors} mailto link(s), every visible address linked")
+
+        missing = []
+        for seg in BLOCK_TAG.split(body):
+            if re.search(r"contact[\s-]form", re.sub(r"<[^>]+>", "", seg), flags=re.I) \
+                    and not re.search(r'href=["\']/contact\.html["\']', seg):
+                missing.append(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", seg)).strip()[:60])
+        r.check(f"POL-contact-form-linked[{page}]", not missing,
+                "\"contact form\" without a /contact.html link: " + " | ".join(missing)
+                if missing else "every mention links /contact.html")
+
+    privacy_text = visible("privacy.html")
+    r.check("POL-no-settings-feedback[privacy.html]",
+            not re.search(r"Settings\s*(?:→|&rarr;|->)\s*feedback", privacy_text, flags=re.I),
+            'still points at "Settings → feedback" (M7-AC4)')
+
+    contact = all_sources["contact.html"]
+    cbody = strip_style_and_script(strip_comments(body_of(contact)))
+    form_at = cbody.find("<form")
+    data_at = cbody.find(">Data requests</h2>")
+    first = MAILTO_A.search(cbody)
+    in_data = MAILTO_A.search(cbody, data_at) if data_at >= 0 else None
+    r.check("POL-contact-mailto-placement",
+            bool(first) and form_at >= 0 and first.start() < form_at and bool(in_data),
+            "want one mailto before the <form> and one in the Data requests section (P28-AC1)")
+    fields = (len(re.findall(r"<input\b", cbody, flags=re.I)),
+              len(re.findall(r"<select\b", cbody, flags=re.I)),
+              len(re.findall(r"<textarea\b", cbody, flags=re.I)))
+    r.check("POL-contact-no-new-field", fields == (0, 1, 1),
+            f"inputs/selects/textareas = {fields}; want exactly the topic select and the "
+            "message textarea, no email input (P28-R2, P28-AC3)")
+    script = "".join(re.findall(r"<script\b[^>]*>(.*?)</script>", contact, flags=re.S | re.I))
+    html_sinks = [s for s in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write")
+                  if s in script]
+    dom_built = ("createElement('a')" in script or 'createElement("a")' in script) \
+        and "textContent" in script
+    in_script = script.count(SUPPORT_EMAIL)
+    r.check("POL-contact-status-dom", not html_sinks and dom_built and in_script == 1,
+            (f"status lines use {html_sinks}" if html_sinks else
+             "status links not built with createElement('a') + textContent" if not dom_built else
+             f"the address is written {in_script}× in the script; want the one SUPPORT_EMAIL constant")
+            if (html_sinks or not dom_built or in_script != 1) else
+            "status links built from DOM nodes and one constant")
+    r.check("POL-contact-send-reenabled", script.count("btn.disabled = false") >= 2,
+            "Send must be re-enabled after a successful send too (P28-R7)")
+
+    faq = all_sources["faq.html"]
+    faq_text = visible("faq.html")
+    r.check("POL-faq-no-speed", not re.search(r"I AM SPEED", faq_text, flags=re.I),
+            'the "I AM SPEED" question is back')
+    r.check("POL-faq-no-testflight", "testflight" not in faq_text.lower(),
+            "the FAQ names TestFlight")
+    release = re.findall(r'href="(https://github\.com/[^"]+/releases/[^"]+)"', all_sources["index.html"])
+    faq_release = re.findall(r'href="(https://github\.com/[^"]+/releases/[^"]+)"', faq)
+    r.check("POL-faq-extension-link", bool(release) and set(faq_release) == {release[0]},
+            f"FAQ extension link {faq_release} != index.html's {release[:1]}")
+
     return r.report(), r
 
 

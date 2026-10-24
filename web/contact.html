@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Contact & data requests — Fleeced: Dynasty Trade Finder</title>
-  <meta name="description" content="Report a bug, suggest an idea, or make a data access or deletion request for your Fleeced account.">
+  <meta name="description" content="Report a bug, suggest an idea, or see how to get a copy of your Fleeced data or delete it.">
   <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/contact.html">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
   <meta property="og:title" content="Contact &amp; data requests — Fleeced: Dynasty Trade Finder">
-  <meta property="og:description" content="Report a bug, suggest an idea, or make a data access or deletion request for your Fleeced account.">
+  <meta property="og:description" content="Report a bug, suggest an idea, or see how to get a copy of your Fleeced data or delete it.">
   <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/contact.html">
   <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -48,7 +48,7 @@
     select { min-height: 44px; }
     textarea { min-height: 150px; resize: vertical; }
     select:focus, textarea:focus { border-color: var(--ice); outline: none; }
-    .counter { font-size: 12px; color: var(--chalk-faint); margin: -12px 0 18px; text-align: right; }
+    .counter { font-size: 12px; color: var(--chalk-dim); font-variant-numeric: tabular-nums; margin: -12px 0 18px; text-align: right; }
     button {
       background: var(--ice); color: var(--ink-0); border: none; border-radius: var(--r-sm);
       font-family: inherit; font-size: 14px; font-weight: 700;
@@ -61,12 +61,13 @@
     .status.err { color: var(--neg); }
     .foot { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; }
     .foot a { color: var(--chalk-dim); margin-right: 16px; }
+    main p a, .lede a, .status a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
   </style>
 </head>
 <body>
   <main>
     <h1>Contact us</h1>
-    <p class="lede">Report a bug, suggest an idea, or make a request about your data. This goes straight to the people who build the app.</p>
+    <p class="lede">Report a bug or suggest an idea. This form goes straight to the people who build Fleeced, but it can't send a reply. For a reply, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>.</p>
 
     <form id="contact-form">
       <label for="topic">What's this about?</label>
@@ -74,7 +75,7 @@
         <option value="bug">Something is broken</option>
         <option value="idea">I have an idea</option>
         <option value="polish">Something could be better</option>
-        <option value="data">Data request — access, export, or deletion</option>
+        <option value="data">Delete my data</option>
       </select>
 
       <label for="message">Your message</label>
@@ -83,7 +84,9 @@
       <div class="counter"><span id="count">0</span> / 1900</div>
 
       <p id="data-hint" style="display:none">
-        So we can find your records, include the Sleeper username you use with the app.
+        To find your account, say how you sign in (Apple, Sleeper, ESPN or MFL) and your username
+        (for ESPN, the league ID and team name). Requests are acted on only when they can be verified,
+        so send this while signed in, or email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>.
       </p>
 
       <button type="submit" id="submit-btn">Send</button>
@@ -92,10 +95,18 @@
 
     <h2>Data requests</h2>
     <p>
-      You can ask us for a copy of your data or ask us to delete it. Send a
-      <strong>Data request</strong> above with the Sleeper username you use with
-      the app, and we'll action it. In the mobile app you can also export or
-      delete your account directly from Settings.
+      Quickest route: in the app, open <strong>Settings › Account &amp; data</strong> and choose
+      <strong>Download my data</strong> or <strong>Delete account</strong>.
+    </p>
+    <p>
+      If you can't use the app, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a> from the address you'd like the reply sent to, and say
+      how you sign in and your username. You'll be asked to confirm the account is yours, and account
+      data is never sent by email. Requests are acknowledged within 2 business days and completed
+      within 30 days.
+    </p>
+    <p>
+      You can also pick <strong>Delete my data</strong> above while signed in on this site. The form
+      can't send a confirmation.
     </p>
 
     <div class="foot">
@@ -115,6 +126,21 @@
       var status = document.getElementById('status');
       var count = document.getElementById('count');
       var hint = document.getElementById('data-hint');
+      var SUPPORT_EMAIL = 'fleecedapp@gmail.com';
+
+      // A status line; when `afterEmail` is given, the support address follows
+      // `text` as a real mailto link. DOM nodes + textContent only, never an
+      // HTML string (design-lead #354 change 8).
+      function setStatus(cls, text, afterEmail) {
+        status.className = cls ? 'status ' + cls : 'status';
+        status.textContent = text;
+        if (afterEmail === undefined) return;
+        var a = document.createElement('a');
+        a.href = 'mailto:' + SUPPORT_EMAIL;
+        a.textContent = SUPPORT_EMAIL;
+        status.appendChild(a);
+        status.appendChild(document.createTextNode(afterEmail));
+      }
 
       msg.addEventListener('input', function () { count.textContent = msg.value.length; });
       topic.addEventListener('change', function () {
@@ -131,7 +157,7 @@
       form.addEventListener('submit', function (e) {
         e.preventDefault();
         var text = msg.value.trim();
-        if (!text) { status.className = 'status err'; status.textContent = 'Please write a message first.'; return; }
+        if (!text) { setStatus('err', 'Please write a message first.'); return; }
 
         // The API takes bug | polish | idea. A data request is none of those, so
         // it rides as `bug` with an explicit prefix the operator can triage on.
@@ -146,8 +172,7 @@
         };
 
         btn.disabled = true;
-        status.className = 'status';
-        status.textContent = 'Sending…';
+        setStatus('', 'Sending…');
 
         var headers = { 'Content-Type': 'application/json' };
         try {
@@ -158,17 +183,15 @@
         fetch('/api/feedback', { method: 'POST', headers: headers, body: JSON.stringify(body) })
           .then(function (res) {
             if (!res.ok) throw new Error('HTTP ' + res.status);
-            status.className = 'status ok';
-            status.textContent = isData
-              ? 'Sent. We’ll action your data request and follow up.'
-              : 'Sent — thank you. We read every message.';
+            if (isData) setStatus('ok', "Sent. This form can't reply. To hear back about your request, email ", '.');
+            else setStatus('ok', 'Sent, thanks. Every message is read. For a reply, email ', '.');
             form.reset();
             count.textContent = '0';
             hint.style.display = 'none';
+            btn.disabled = false;
           })
           .catch(function () {
-            status.className = 'status err';
-            status.textContent = 'Could not send. Please try again shortly.';
+            setStatus('err', "Couldn't send. Try again in a minute, or email ", '.');
             btn.disabled = false;
           });
       });

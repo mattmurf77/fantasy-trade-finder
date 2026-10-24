@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FAQ — Fleeced: Dynasty Trade Finder</title>
-  <meta name="description" content="How Fleeced ranks players with head-to-head matchups, how 1QB PPR and Superflex boards differ, how Sleeper sync works, and what we do with your data.">
+  <meta name="description" content="How rankings, trade values and Sleeper, ESPN and MyFantasyLeague (MFL) league connections work in Fleeced, and what happens to your data.">
   <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/faq.html">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
   <meta property="og:title" content="FAQ — Fleeced: Dynasty Trade Finder">
-  <meta property="og:description" content="How Fleeced ranks players with head-to-head matchups, how 1QB PPR and Superflex boards differ, how Sleeper sync works, and what we do with your data.">
+  <meta property="og:description" content="How rankings, trade values and Sleeper, ESPN and MyFantasyLeague (MFL) league connections work in Fleeced, and what happens to your data.">
   <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/faq.html">
   <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -102,6 +102,7 @@
     .faq-body p { margin-bottom: 8px; }
     .faq-body p:last-child { margin-bottom: 0; }
     .faq-body strong { color: var(--text); }
+    .faq-body a { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
     .faq-body code {
       background: var(--ink-3);
       font-family: var(--font-data);
@@ -129,93 +130,155 @@
     <details class="faq-item" open>
       <summary>What is Fleeced?</summary>
       <div class="faq-body">
-        <p>Fleeced is a dynasty fantasy football tool that compares how you and your leaguemates value every player, then surfaces trades where both sides come out ahead. You build your rankings, we cross-reference with everyone else's, and mutually-attractive trades bubble up automatically.</p>
+        <p>A dynasty fantasy football trade finder. Rank your players, and the app compares your board with your leaguemates' boards to find trades built to work for both sides.</p>
+        <p>Every value and every suggested trade is an estimate from rankings, not a guarantee. The call is yours.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>How does the ELO ranking system work?</summary>
+      <summary>Which league platforms work with Fleeced?</summary>
       <div class="faq-body">
-        <p>Every ranking decision you make — whether swiping trios, reordering manually, or assigning tiers — is decomposed into head-to-head "winner beats loser" comparisons. Those results feed an ELO rating so each player's value updates relative to the rest of the pool. The more comparisons, the more confident the rating.</p>
-        <p>Default K-factor for a trio swipe is 32. Trade-card swipes use smaller K-factors (8 for "interested", 4 for "pass") so a single trade view can't swing a rating as much as a direct ranking.</p>
+        <p>Sleeper, ESPN and MyFantasyLeague (MFL). On all three you can import your league, get suggested trades built from your board, and send a trade proposal in your league.</p>
+        <p>Sleeper also works in the desktop web app and the browser extension.</p>
+        <p>Fleeced is not affiliated with or endorsed by any of these platforms.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>What's the difference between 1QB PPR and SF TEP?</summary>
+      <summary>Where can I use Fleeced?</summary>
       <div class="faq-body">
-        <p><strong>1QB PPR</strong> is the classic dynasty format — one starting quarterback, one point per reception.</p>
-        <p><strong>SF TEP</strong> is Superflex with Tight End Premium — you can start a second QB in a flex spot, and tight ends score extra points per catch. QBs and TEs are dramatically more valuable in this format.</p>
-        <p>Your two rank sets are completely independent, so you can hold different opinions about the same player in each format.</p>
+        <p>On iPhone: the Fleeced app is coming to the App Store soon.</p>
+        <p>On a computer: the web app on this site, in Chrome or Edge with the Fleeced browser extension installed. The extension is installed by hand from a <a href="https://github.com/mattmurf77/fantasy-trade-finder/releases/tag/extension-v0.1.1" target="_blank" rel="noopener noreferrer">release download</a>; it isn't in the Chrome Web Store. The web app signs in with Sleeper only. ESPN and MFL leagues connect through the iPhone app when it's released.</p>
+        <p>There's no Android app, and phone browsers can't run the extension.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>Why two rank sets?</summary>
+      <summary>How do I connect a Sleeper league?</summary>
       <div class="faq-body">
-        <p>Because the same player is worth very different things in different scoring systems. Tier overrides, ELOs, and progress are all tracked per format. When you switch formats the UI shows your ratings for that format only.</p>
+        <p>In the iPhone app, sign in with Apple or continue with your Sleeper username, and the app finds that account's leagues. Pick a league and every roster in it comes in.</p>
+        <p>To verify the account and send trades, sign in to Sleeper on Sleeper's own page inside the app. Your Sleeper password stays on Sleeper's own sign-in page. The app keeps the sign-in token Sleeper issues, encrypted, to verify your account and send trades you approve.</p>
+        <p>On a computer: install the browser extension, sign in at sleeper.com in another tab, then verify your username on this site.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>How do I sync my Sleeper league?</summary>
+      <summary>How do I connect an ESPN league?</summary>
       <div class="faq-body">
-        <p>Enter your Sleeper username on the login screen. We fetch your leagues via the public Sleeper API — no OAuth or password required. Pick a league from the list and we'll import your roster and every leaguemate's roster automatically.</p>
-        <p><strong>One honest caveat:</strong> entering a username doesn't prove you own it. Until you verify with your Sleeper login, anyone who knows your username could open a session that sees this board — verifying locks it to you.</p>
+        <p>In the iPhone app, choose ESPN and sign in on ESPN's own page inside the app. Your ESPN password stays on ESPN's sign-in page, and the app lists your leagues.</p>
+        <p>The app keeps two ESPN sign-in cookies: espn_s2 (encrypted) and SWID (your ESPN member ID). They're used to import your leagues and to send trades you approve. Disconnect any time in Settings.</p>
+        <p>A public league can also be added by league ID with no sign-in. Sending a trade needs the ESPN sign-in.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>My league is private — what happens?</summary>
+      <summary>How do I connect an MFL league?</summary>
       <div class="faq-body">
-        <p>Sleeper's public API exposes roster data for every league, public or private, as long as you know the league ID. The app looks up leagues for the username entered at sign-in, so it only surfaces leagues that account is actually a member of — but note that username entry alone isn't authentication (see the sync question above about verifying). Private leagues show up exactly like public ones.</p>
+        <p>In the iPhone app, choose MFL and sign in with your MFL username and password, or enter a league ID or a myfantasyleague.com league URL.</p>
+        <p>Your password goes to MFL to sign you in. It's never stored; only the encrypted session MFL returns is kept.</p>
+        <p>Sending a trade needs the MFL sign-in.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>Do you share my data?</summary>
+      <summary>My league is private. Does it still work?</summary>
       <div class="faq-body">
-        <p>No — and your raw ranking list is <strong>never shown</strong> to leaguemates. The tool compares valuations server-side: your rankings influence which trade suggestions your leaguemates see, if you "like" a trade the other manager may see an interest indicator on the mirrored suggestion, and a mutual like reveals that matched trade to both of you. The League page also shows an aggregate "contrarian score" next to your username — how far your rankings deviate from the league consensus overall, not which players you're high or low on. We don't sell or share data with third parties. See the privacy summary at the bottom of this page.</p>
+        <p>Yes. Sleeper: your username finds that account's leagues, public or private. Signing in to Sleeper inside the app proves the account is yours and protects your board.</p>
+        <p>ESPN: private leagues need the ESPN sign-in. Public leagues can be added by league ID.</p>
+        <p>MFL: private leagues work with the MFL sign-in.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>Can I use values from Keep Trade Cut / Dynasty Daddy?</summary>
+      <summary>Can I send a trade from the app?</summary>
       <div class="faq-body">
-        <p>Your personal rank set starts from a consensus seed derived from market sources, so on day one your values look roughly like KTC or Dynasty Daddy. As you swipe, reorder, and assign tiers, your rankings diverge based on your actual opinions. The tool trusts you over the crowd — that's what surfaces trades nobody else sees.</p>
+        <p>Yes, on Sleeper, ESPN and MFL. Adjust any trade in the trade calculator, then send it as a real trade proposal in your league. Nothing goes out until you tap send. If you haven't signed in to that platform yet, the app asks you to first.</p>
+        <p>Some of these connections, including Sleeper's and ESPN's, aren't officially supported for outside apps, so they can stop working without notice. The <a href="/terms">Terms of Use</a> cover the details.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>How does the ranking system work?</summary>
+      <div class="faq-body">
+        <p>Your board comes from your calls: three-player matchups, tier placements and reorders. Each matchup splits into head-to-head results (winner beats loser), and those feed an Elo rating, so each player's value moves relative to the rest of the pool. The more matchups a player appears in, the more settled that player's rating.</p>
+        <p>By default a three-player matchup moves ratings with a K-factor of 32. Trade-card swipes count for less: 8 for a like, 4 for a pass. One trade card can't swing a rating as much as a direct ranking.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Where do the starting values come from?</summary>
+      <div class="faq-body">
+        <p>Every board starts from consensus values from DynastyProcess and other published sources, so on day one your values look roughly like other published consensus values.</p>
+        <p>As you rank, your board moves away from consensus wherever your calls disagree with it. That gap between your board and your leaguemates' boards is where trades come from.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>How are trade values worked out?</summary>
+      <div class="faq-body">
+        <p>A trade card prices your side with a blend of your board and consensus. The more often you've compared a player, the more the price follows your board: a player you've never ranked sits at consensus, and a player you've ranked many times carries your value. A player you've placed in a tier stays inside that tier.</p>
+        <p>Your leaguemate's side uses their board. Until a leaguemate ranks, their side uses consensus values.</p>
+        <p>Every value and every suggested trade is an estimate from rankings, not a guarantee. The call is yours.</p>
       </div>
     </details>
 
     <details class="faq-item">
       <summary>What's a "tier"?</summary>
       <div class="faq-body">
-        <p>A tier is a group of players you consider roughly interchangeable, labeled by what they're worth in draft-pick terms — worth 4+ 1sts, worth 2 1sts, worth a 1st, and so on down to FA. Assigning tiers is faster than ranking each player individually and locks in a clean ELO band for every bucket. You can override any individual player's value after setting tiers.</p>
+        <p>A group of players you consider roughly interchangeable, labeled in draft-pick terms: 4+ 1sts, 3 1sts, 2 1sts, a 1st, a 2nd, a 3rd, a 4th, and FA.</p>
+        <p>Sorting players into tiers is faster than ranking each one, and it sets a rating band for each tier. Matchups still move a player within that tier.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>What's the I AM SPEED button?</summary>
+      <summary>What's the difference between 1QB PPR and SF TEP?</summary>
       <div class="faq-body">
-        <p>Turn it on and ranking goes turbo: tap your top two players in a trio and the third is auto-ranked last, then the ranking submits and a fresh trio loads immediately. No Confirm click. Great for blowing through the first hundred comparisons.</p>
+        <p>1QB PPR is the classic dynasty format: one starting quarterback, one point per reception.</p>
+        <p>SF TEP is Superflex with Tight End Premium: you can start a second QB in a flex spot, and tight ends score extra points per catch. QBs and TEs are worth much more in this format.</p>
+        <p>Your two boards are separate, so you can hold different opinions about the same player in each format.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>Is there a mobile app?</summary>
+      <summary>Why two rank sets?</summary>
       <div class="faq-body">
-        <p>Yes — the web app works in any phone browser, and you can add the site to your home screen for an app-like experience. A native iOS app is in TestFlight beta and not yet on the App Store.</p>
+        <p>The same player is worth very different things in different scoring formats. Tiers, ratings and progress are all tracked per format. Switch formats and the app shows your board for that format only.</p>
       </div>
     </details>
 
     <details class="faq-item">
-      <summary>Privacy policy summary</summary>
+      <summary>Can my leaguemates see my rankings?</summary>
       <div class="faq-body">
-        <p>We store your Sleeper username, display name, avatar, league rosters, and ranking history so the tool can function across sessions. Your raw ranking list is never displayed to other users; it influences the trade suggestions your leaguemates see, and a mutual "like" reveals the matched trade to both sides. We do not sell, rent, or share your data with third parties outside of that use. Full details, including deletion and export, are in the <a href="/privacy">Privacy Policy</a>.</p>
+        <p>No. Your ranking list isn't shown to leaguemates. Boards are compared on the server: your board shapes which trades your leaguemates are shown. When you and a leaguemate like the same trade, it becomes a matched trade and shows for both of you.</p>
+        <p>The league page can show each member's contrarian score: one number for how far that board sits from the league's consensus, not which players it's high or low on.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>Is my data sold or shared?</summary>
+      <div class="faq-body">
+        <p>We don't sell your data. We share it only with the service providers and platforms listed in our <a href="/privacy">Privacy Policy</a>, to run the app.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>What data does the app keep, and how do I delete it?</summary>
+      <div class="faq-body">
+        <p>What it needs to run: how you sign in, your leagues and rosters (including leaguemates' rosters), your rankings and trade decisions, and usage events. Passwords aren't stored. The full list, and how long each item is kept, is in the <a href="/privacy">Privacy Policy</a>.</p>
+        <p>You can download a copy of your data or delete your account yourself in the app: Settings → Account &amp; data. If you can't sign in, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a> from the address you'd like the reply sent to. Account data is never sent by email. You may be asked to confirm the account is yours.</p>
+      </div>
+    </details>
+
+    <details class="faq-item">
+      <summary>How do I get help or report a bug?</summary>
+      <div class="faq-body">
+        <p>For anything that needs an answer, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a>. Replies come within 2 business days. Data requests are acknowledged within 2 business days and completed within 30 days.</p>
+        <p>For bugs and ideas, use the feedback button on any screen in the app. It's one-way: replies don't come back in the app, so email if you want to hear back.</p>
       </div>
     </details>
 
     <div class="faq-footer">
-      Still have questions? <a href="/" style="color: var(--accent);">Head back to the app</a>.
+      Still have questions? Email <a href="mailto:fleecedapp@gmail.com" style="color: var(--accent);">fleecedapp@gmail.com</a>.
       <br>
       <a href="/privacy" style="color: var(--muted);">Privacy Policy</a> &middot;
       <a href="/terms" style="color: var(--muted);">Terms of Use</a>
