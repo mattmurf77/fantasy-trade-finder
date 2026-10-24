@@ -67,7 +67,7 @@ def run_all(
         return stats
 
     decks = load_decks(engine=engine, db_url=db_url, since=since,
-                       project_features=True)
+                       project_features=True, as_of=now.isoformat())
     if not decks:
         stats["summary"] = f"no impressions in trailing {window_days}d — nothing to grade"
         return stats

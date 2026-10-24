@@ -9,7 +9,7 @@
     identical with and without it.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import Column, MetaData, Text, create_engine, event, insert
@@ -166,3 +166,35 @@ def test_nightly_estimates_identical_with_and_without_projection(synth, tmp_path
     assert full == lean
     assert set(full) == set(_candidates()) | {"production"}
     assert full["value_model"]["n_included"] > 0    # graded, not scorer_error
+
+
+# ---------------------------------------------------------------------------
+# The nightly passes its clock as as_of: a live deck is in_flight, not lost
+# ---------------------------------------------------------------------------
+
+def test_nightly_counts_a_deck_still_in_flight_as_in_flight(tmp_path, monkeypatch):
+    """With PACK_REQUIRED_SINCE set, a deck served 2 h ago with no pack yet
+    is in_flight (it may still be live); one served 3 days ago with no pack
+    lost it (incomplete_deck); a retired deck with its pack is graded."""
+    import backend.eval.data as data_mod
+    from backend.tests.test_eval_pack_reader import _deck_cards, make_engine, write_deck
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(data_mod, "PACK_REQUIRED_SINCE", (now - timedelta(days=10)).isoformat())
+    monkeypatch.setenv("EVAL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("VALUE_MODEL_DIR", str(tmp_path / "vm"))
+    monkeypatch.setattr(vm, "_model_cache", None)
+    eng, packs = make_engine()
+    for job, ago, packed in (("live", timedelta(hours=2), None),
+                             ("lost", timedelta(days=3), None),
+                             ("done", timedelta(days=4), range(30, 34))):
+        at = (now - ago).isoformat()
+        write_deck(eng, packs, _deck_cards(job, 34 if packed else 30, served_at=at),
+                   full=range(30), packed=packed, served_at=at, viewed=range(0, 30, 2))
+
+    stats = nightly.run_all(window_days=30, engine=eng, ess_min=1, bootstrap=20, seed=1)
+    assert stats["errors"] == 0
+    for record in load_runs():
+        assert record["in_flight_decks"] == 1 and record["excluded"]["in_flight"] == 30
+        assert record["incomplete_decks"] == 1 and record["excluded"]["incomplete_deck"] == 30
+        assert record["pack_integrity_decks"] == 0
