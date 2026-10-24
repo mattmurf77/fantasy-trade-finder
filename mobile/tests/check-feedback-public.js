@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// In-app feedback for the public (#354 BL-10, launch 2026-11-06).
+// In-app feedback for the public (#354 BL-10, App Store launch).
 //
 // WHY THIS EXISTS. Until BL-10 the feedback surface was a TestFlight helper:
 // the FAB carried a plan to be compiled out of App Store builds, and the only
@@ -10,10 +10,21 @@
 // claims about code SHAPE that tsc cannot see and D-056 left no simulator to
 // watch:
 //
+//   1. NO TESTER VOCABULARY. No string literal, template literal or JSX
+//      text matching "Testing →", "Test feedback", "TestFlight" or
+//      "tester(s)" in the feedback surface: FeedbackSheet, FeedbackFAB,
+//      FeedbackInboxScreen, state/useFeedback (the share export),
+//      AboutSection, the FeedbackInbox screen options in RootNav, and the
+//      flat SettingsScreen `aboutSection` (which holds its feedback row).
 //   2. ROW PLACEMENT (D-3). The inbox row lives in Help & about
 //      (settings/sections/AboutSection.tsx, plus the flat SettingsScreen
 //      `aboutSection` that is the `account.settings_hub` rollback), never in
 //      the Testing section, and never behind `__DEV__` / `stageUsersEnabled`.
+//   3. ONE SUPPORT ADDRESS (BL10-R7). Across mobile/src exactly one string
+//      literal, template literal or JSX text contains fleecedapp@gmail.com,
+//      and it is the whole literal of an exported const; no U+FF20 look-alike
+//      @ appears anywhere in mobile/src, comments included; and
+//      FeedbackSheet.tsx imports that constant from its module and uses it.
 //   4. SEVERITY CONTRACT. The sheet sends exactly bug | polish | idea (the
 //      /api/feedback contract, the triage vocabulary and the
 //      `feedback.severity.<value>` testIDs), the `FeedbackSeverity` union is
@@ -29,13 +40,6 @@
 //   7. COLD-LAUNCH RETRY (D-1(b)). FeedbackFAB's mount effect calls
 //      `retrySync()` after `hydrate()` resolves. App.tsx only retries on an
 //      AppState change to `active`, which a cold launch never fires.
-//
-// TODO(#354 BL-10 phase 2): pin 1 (no tester vocabulary — "Testing →",
-// "Test feedback", "TestFlight", "tester(s)" — in user-visible strings on the
-// feedback surface) and pin 3 (exactly one `fleecedapp@gmail.com` literal in
-// mobile/src, ASCII @, imported by FeedbackSheet.tsx) land with the phase-2
-// copy and support-address constant. They are deliberately absent here: the
-// strings they forbid are still on main until then.
 //
 // HOW. Every check walks the TypeScript AST (the check-settings-nav.js
 // pattern), so comments — which keep history like "Settings → Test feedback"
@@ -154,6 +158,126 @@ function mentions(node, { dev = false, stage = false, expoEnv = false }) {
 }
 
 const at = (sf, n) => `${sf.fileName}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`;
+
+// Every user-visible text node in a subtree: string and template literals
+// (head, middles and tail) and JSX text. Comments are trivia, never nodes.
+function textNodes(root) {
+  const out = [];
+  findAll(root, (n) => {
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) out.push({ node: n, text: n.text });
+    else if (ts.isTemplateExpression(n)) {
+      out.push({ node: n, text: [n.head.text, ...n.templateSpans.map((s) => s.literal.text)].join('${}') });
+    } else if (ts.isJsxText(n) && n.text.trim()) out.push({ node: n, text: n.text });
+    return false;
+  });
+  // A TemplateExpression's own literal parts are not separate nodes above,
+  // and import specifiers are module paths, not copy.
+  return out.filter(({ node }) => !(node.parent && ts.isImportDeclaration(node.parent)));
+}
+
+// ── 1. No tester vocabulary on the feedback surface ──────────────────────
+{
+  const TESTER = /Testing\s*→|Test feedback|TestFlight|\btesters?\b/i;
+  const scopes = [];
+  for (const rel of [F.sheet, F.fab, F.inbox, F.store, F.about]) scopes.push([rel, parse(rel)]);
+
+  const nav = parse(F.rootNav);
+  const inboxScreen = findAll(nav, (n) => (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n))
+    && n.tagName.getText(nav) === 'Stack.Screen'
+    && n.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText(nav) === 'name'
+      && a.initializer && isStr(a.initializer) && a.initializer.text === 'FeedbackInbox'));
+  const flat = parse(F.flat);
+  const [flatAbout] = varDecl(flat, 'aboutSection');
+
+  const problems = [];
+  if (inboxScreen.length !== 1) problems.push(`found ${inboxScreen.length} <Stack.Screen name="FeedbackInbox"> in RootNav (want 1)`);
+  else scopes.push([`${F.rootNav} (FeedbackInbox screen options)`, inboxScreen[0]]);
+  if (!flatAbout) problems.push(`no aboutSection in ${F.flat}`);
+  else scopes.push([`${F.flat} (aboutSection)`, flatAbout]);
+
+  let scanned = 0;
+  for (const [, node] of scopes) {
+    const sf = node.getSourceFile();
+    for (const { node: t, text } of textNodes(node)) {
+      scanned += 1;
+      const m = text.match(TESTER);
+      if (m) problems.push(`${at(sf, t)}: "${m[0]}" in ${JSON.stringify(text.trim().slice(0, 90))}`);
+    }
+  }
+  if (problems.length === 0 && scanned > 0) {
+    ok(`1. no tester vocabulary in ${scanned} user-visible strings across the ${scopes.length} feedback-surface scopes`);
+  } else {
+    fail('1. no tester vocabulary ("Testing →", "Test feedback", "TestFlight", "tester(s)") on the feedback surface',
+         problems.length ? problems.join('; ') : 'scanned no strings — the parse below is vacuous');
+  }
+}
+
+// ── 3. One support address, ASCII @, imported by the sheet ───────────────
+{
+  const ADDRESS = 'fleecedapp@gmail.com';
+  const walk = (dir, out = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p, out);
+      else if (/\.(ts|tsx)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  const srcFiles = walk(path.join(ROOT, 'src')).map((abs) => path.relative(ROOT, abs).split(path.sep).join('/'));
+
+  const fullWidth = [];
+  const hits = [];
+  for (const rel of srcFiles) {
+    const raw = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    raw.split('\n').forEach((line, i) => { if (line.includes('＠')) fullWidth.push(`${rel}:${i + 1}`); });
+    if (!raw.toLowerCase().includes('fleecedapp')) continue;
+    const sf = parse(rel);
+    for (const { node, text } of textNodes(sf)) {
+      if (text.toLowerCase().includes('fleecedapp')) hits.push({ sf, node, text });
+    }
+  }
+
+  // 3a. Exactly one literal holds the address, and it is an exported const.
+  let constName = null;
+  let constFile = null;
+  const only = hits.length === 1 ? hits[0] : null;
+  const decl = only && ts.isStringLiteral(only.node) && only.node.parent
+    && ts.isVariableDeclaration(only.node.parent) ? only.node.parent : null;
+  const exported = !!(decl && decl.parent && decl.parent.parent && ts.isVariableStatement(decl.parent.parent)
+    && (decl.parent.parent.modifiers || []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)
+    && (decl.parent.flags & ts.NodeFlags.Const));
+  if (only && only.text === ADDRESS && decl && exported && ts.isIdentifier(decl.name)) {
+    constName = decl.name.text;
+    constFile = only.sf.fileName;
+    ok(`3a. exactly one literal in mobile/src holds the support address: export const ${constName} (${at(only.sf, only.node)})`);
+  } else {
+    fail(`3a. exactly one literal in mobile/src holds ${ADDRESS}, the exported const`,
+         hits.length === 0 ? 'no literal holds the address'
+           : hits.length > 1 ? `${hits.length} literals hold it: ${hits.map((h) => at(h.sf, h.node)).join(', ')} — import the constant instead`
+           : `${at(only.sf, only.node)} is ${JSON.stringify(only.text)}, `
+             + (only.text !== ADDRESS ? 'not exactly the address' : 'not the initializer of an exported const'));
+  }
+
+  // 3b. No full-width @ anywhere, comments included.
+  if (fullWidth.length === 0) ok('3b. no U+FF20 (full-width @) anywhere in mobile/src');
+  else fail('3b. no U+FF20 (full-width @) anywhere in mobile/src', `found at ${fullWidth.join(', ')}`);
+
+  // 3c. FeedbackSheet imports the constant from its module and uses it.
+  if (constName) {
+    const sheet = parse(F.sheet);
+    const imp = sheet.statements.find((s) => ts.isImportDeclaration(s) && isStr(s.moduleSpecifier)
+      && s.importClause && s.importClause.namedBindings && ts.isNamedImports(s.importClause.namedBindings)
+      && s.importClause.namedBindings.elements.some((e) => (e.propertyName || e.name).text === constName)
+      && path.posix.normalize(path.posix.join(path.posix.dirname(F.sheet), s.moduleSpecifier.text))
+           === constFile.replace(/\.tsx?$/, ''));
+    const local = imp && imp.importClause.namedBindings.elements.find((e) => (e.propertyName || e.name).text === constName).name.text;
+    const uses = local ? findAll(sheet, (n) => ts.isIdentifier(n) && n.text === local
+      && !(n.parent && (ts.isImportSpecifier(n.parent)))).length : 0;
+    if (imp && uses > 0) ok(`3c. FeedbackSheet.tsx imports ${constName} from ${imp.moduleSpecifier.text} and uses it (${uses}×)`);
+    else fail(`3c. FeedbackSheet.tsx imports and uses ${constName}`,
+              !imp ? `no import of ${constName} from ${constFile}` : 'imported but never used');
+  }
+}
 
 // ── 2. Row placement (D-3) ────────────────────────────────────────────────
 {
@@ -466,6 +590,6 @@ const at = (sf, n) => `${sf.fileName}:${sf.getLineAndCharacterOfPosition(n.getSt
 }
 
 console.log(failures === 0
-  ? '\nAll feedback-public checks passed (pins 2, 4, 5, 6, 7; pins 1 and 3 are phase 2).'
+  ? '\nAll feedback-public checks passed (pins 1-7).'
   : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
