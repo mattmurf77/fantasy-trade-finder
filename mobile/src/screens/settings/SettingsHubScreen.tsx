@@ -44,6 +44,7 @@ import { useEntitlements } from '../../state/useEntitlements';
 import type { AccountInfo } from '../../api/auth';
 import type { NotificationPrefs } from '../../shared/types';
 import FeedbackFAB from '../../components/FeedbackFAB';
+import { useTesterSurface } from './useTesterSurface';
 import { hubStyles, styles } from './styles';
 
 // The ranking preview names the flow the SteerSlider names. Values are the
@@ -85,10 +86,10 @@ export default function SettingsHubScreen({ navigation }: any) {
   const rankingPref = useSession((s) => s.rankingMethodPref);
   const verification = useSession((s) => s.verification);
 
-  // Flag store — free. `testing.stage_users` gates the Testing row exactly
-  // as SettingsScreen.tsx:1546 does; `ux.help_surface` decides whether the
-  // About page actually has an FAQ link to advertise.
-  const stageUsersEnabled = useFlag('testing.stage_users');
+  // Flag store — free. The Testing row shows exactly when its page has
+  // something to render (useTesterSurface, #354 D-7); `ux.help_surface`
+  // decides whether the About page actually has an FAQ link to advertise.
+  const testerSurface = useTesterSurface();
   const helpSurfaceOn = useFlag('ux.help_surface');
   // Monetization (iap-enablement, flag `monetize.paywall`, dark). The flag
   // gates this ROW, not the Paywall route — same rule as Testing above.
@@ -327,10 +328,10 @@ export default function SettingsHubScreen({ navigation }: any) {
           onPress={go('SettingsAbout')}
         />
 
-        {/* Dev builds and allowlisted testers only — the same gate the
-            shipped flat list uses (SettingsScreen.tsx:1546). No banner: it
-            is not a group, it is a build-conditional escape hatch. */}
-        {__DEV__ || stageUsersEnabled ? (
+        {/* Dev builds and devices with a tester flag only — the same
+            predicate the Testing page body uses (useTesterSurface, D-7). No
+            banner: it is not a group, it is a build-conditional escape hatch. */}
+        {testerSurface ? (
           <NavRow
             testID="settings.hub.testing"
             title="Testing"
