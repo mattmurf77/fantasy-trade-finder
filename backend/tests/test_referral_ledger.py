@@ -25,6 +25,8 @@ design §2 (D-056 evidence). What is pinned here:
     never raises and reads nothing when it can't matter; the FR-19 row
     (title != body, no deck promise, meta) merges into an unread join row;
     referral_activated's exact props and C6;
+  * FR-23 through the real deletion path: a deleted referrer's link
+    credits no one; a deleted invitee leaves the referrer's side intact.
 
 Every test runs against a throwaway SQLite file, never data/trade_finder.db.
 """
@@ -1111,3 +1113,33 @@ def test_emitter_call_lines_sit_after_each_stage7_emitter():
         assert call > body.index(emitted), fn.__name__          # after the emit
         if "save_trade_swipes(" in body:                         # after the Elo write
             assert call > body.index("save_trade_swipes("), fn.__name__
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FR-23 — data rights, through the real deletion path
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_a_deleted_referrers_link_credits_no_one(env, writer):
+    from backend import accounts
+    tok = _mint().get_json()["invite_id"]
+    accounts.delete_user_data(REFERRER)
+    (row,) = _rows(env)
+    assert row["share_token"] is None and row["invite_token"] == tok
+    res = _attr(invite_id=tok)
+    assert res.signup_props == {"attribution": "none", "attribution_miss": "unknown"}
+    assert _captured(writer, "referral_attributed") == []
+
+
+def test_a_deleted_invitee_keeps_the_referrers_side(env):
+    from backend import accounts
+    _mint_row(env, T1)
+    _add_user(env, INVITEE, "newbie")
+    _attr(invite_id=T1)
+    accounts.delete_user_data(INVITEE)
+    (row,) = _rows(env)
+    assert row["referred_user_id"] is None
+    assert (row["referrer_user_id"], row["share_token"], row["status"],
+            row["attribution_method"]) == (REFERRER, T1, "joined", "token")
+    # A joined row with no invitee is never re-claimed by the next joiner.
+    _attr(invite_id=T1, user_id="u_next")
+    assert [r["referred_user_id"] for r in _rows(env)] == [None, "u_next"]

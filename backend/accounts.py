@@ -836,8 +836,12 @@ def _delete_user_data(sleeper_user_id: str,
         rows = conn.execute(select(referrals.c.id).where(
             referrals.c.referrer_user_id.in_(user_ids))).scalars().all()
         for rid in rows:
+            # Referral loop L7 (FR-23): the sender's public invite id dies
+            # with the account (as O8's share tokens do), so the link credits
+            # no one; the row, and the invitee's side of it, stay.
             conn.execute(update(referrals).where(referrals.c.id == rid).values(
-                referrer_user_id=f"{DELETED_USER_PLACEHOLDER}:{rid}"))
+                referrer_user_id=f"{DELETED_USER_PLACEHOLDER}:{rid}",
+                share_token=None))
         counts["referrals_referrer_anonymized"] = len(rows)
 
         _del("swipe_decisions", db.swipe_decisions_table)
@@ -1047,8 +1051,12 @@ def export_user_data(sleeper_user_id: str,
         for name, predicate, omit in (
             ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)
              | db.trade_matches_table.c.user_b_id.in_(user_ids), ()),
+            # invite_token and (L7) share_token are bearer ids for a public
+            # link, omitted like O8's trade share token; surface and
+            # attribution_method are exported.
             ("referrals", db.referrals_table.c.referrer_user_id.in_(user_ids)
-             | db.referrals_table.c.referred_user_id.in_(user_ids), ("invite_token",)),
+             | db.referrals_table.c.referred_user_id.in_(user_ids),
+             ("invite_token", "share_token")),
             ("accounts", db.accounts_table.c.account_id.in_(acct_ids), ()),
             ("linked_identities", db.linked_identities_table.c.account_id.in_(acct_ids), ()),
             ("identity_links", db.identity_links_table.c.sleeper_user_id.in_(user_ids)
