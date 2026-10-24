@@ -3653,7 +3653,9 @@ _deck_evidence_write_lock = threading.RLock()
 _ARCHIVE_RETENTION_DAYS = 90
 _ARCHIVE_PURGE_EVERY_S = 3600
 _ARCHIVE_PURGE_BATCHES = 20
-_archive_purge_last = 0.0
+# -inf, not 0.0: time.monotonic() counts from boot, so 0.0 would skip the first
+# purge for an hour on a freshly booted host (a CI runner, a new Render host).
+_archive_purge_last = float("-inf")
 
 
 def _deck_archive_selected(deck_job_id: str) -> bool:

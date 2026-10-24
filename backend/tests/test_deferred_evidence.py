@@ -864,7 +864,8 @@ def test_archive_retention_deletes_only_archive_rows_older_than_90_days(deferred
     seeded = [old_row(f"{tier}-{age}", tier, age) for tier in (*TIERS, None) for age in (91, 89)]
     with engine.begin() as conn:
         conn.execute(insert(db_module.deck_impressions_table), seeded)
-    monkeypatch.setattr(server, "_archive_purge_last", 0.0)
+    monkeypatch.setattr(server, "_archive_purge_last", float("-inf"))
+    monkeypatch.setattr(server.time, "monotonic", lambda: 120.0)   # a host booted 2 minutes ago (CI)
     server._purge_archive_evidence()
     assert {r["impression_id"] for r in rows(engine)} == {r["impression_id"] for r in seeded} - {"archive-91"}
     with engine.begin() as conn:                            # throttled: once an hour
@@ -878,7 +879,7 @@ def test_archive_retention_is_off_with_the_flag(deferred, monkeypatch):
     with engine.begin() as conn:
         conn.execute(insert(db_module.deck_impressions_table), [old_row("archive-91", "archive", 91)])
     monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
-    monkeypatch.setattr(server, "_archive_purge_last", 0.0)
+    monkeypatch.setattr(server, "_archive_purge_last", float("-inf"))
     server._purge_archive_evidence()
     assert [r["impression_id"] for r in rows(engine)] == ["archive-91"]
 
