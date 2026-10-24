@@ -16,17 +16,23 @@ design §2 (D-056 evidence). What is pinned here:
   * FR-18 (one join row, title != body) and FR-20 (the fanout skips only
     the credited inviter's coalesced row), end to end through
     POST /api/session/init with an inline daemon;
-  * referral_attributed: exact props at the writer, NON_INTENT, no token
-    key, no invitee id, and the non-touching write (C6);
-  * activation (AC-17, AC-19, R-F7): the stage-7 set IS FUNNEL_STAGES[7];
-    a first opinion stamps once from each of the three emitters (the swipe
+  * referral_attributed: its exact props in every attribution case, and
+    the non-touching write (C6);
+  * activation (AC-17, AC-19, R-F7): a first opinion stamps once from each
+    of the three emitters (the swipe
     route, the calculator queue, the reasoned pass); outside 14 days, a
     second opinion, trades_generated and the flag off do nothing; the hook
     never raises and reads nothing when it can't matter; the FR-19 row
     (title != body, no deck promise, meta) merges into an unread join row;
-    referral_activated's exact props and C6;
+    referral_activated's props and C6;
   * FR-23 through the real deletion path: a deleted referrer's link
     credits no one; a deleted invitee leaves the referrer's side intact.
+
+The #350 registration checks for referral_attributed / referral_activated
+(membership, the exact granted props at the writer, NON_INTENT, no token key,
+no device platform, C6, and C5: the qualifying set IS stage 7 of
+FUNNEL_STAGES) live with the other server rows in
+test_analytics_taxonomy_referral_loop.py.
 
 Every test runs against a throwaway SQLite file, never data/trade_finder.db.
 """
@@ -37,8 +43,6 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import create_engine, insert, select, update
 
-import backend.analytics_queries as aq
-import backend.analytics_taxonomy as at
 import backend.database as db_module
 import backend.feature_flags as feature_flags
 import backend.referral_ledger as rl
@@ -290,8 +294,6 @@ T1 = "AbCdEf123456"
 T2 = "ZyXwVu987654"
 ESPN_LEAGUE = "77001"
 MFL_LEAGUE = "mfl:2026:55001"
-ATTRIBUTED_KEYS = {"invite_id", "referral_id", "league_id", "attribution_method",
-                   "league_platform", "notified"}
 
 
 def _iso_ago(days=0, hours=0):
@@ -626,31 +628,6 @@ def test_notified_false_when_the_row_fails(env, monkeypatch, writer):
     assert _captured(writer, "referral_attributed")[0][1]["props"]["notified"] is False
 
 
-# ── #350 registration (C7): referral_attributed ───────────────────────────
-# Shaped like test_analytics_taxonomy_referral_loop.py's _SERVER_PROPS (L1
-# created that file after this branch's base); these move there on rebase.
-
-def test_referral_attributed_is_registered_server_fired_non_intent():
-    name = "referral_attributed"
-    assert name in at.SERVER_FIRED_EVENTS and name not in at.ALLOWED_CLIENT_EVENTS
-    assert name not in at.CLIENT_EVENT_PROPS
-    assert name in aq.NON_INTENT_EVENTS and name not in aq.INTENT_EVENTS
-    assert "signup" in aq.INTENT_EVENTS                       # class unchanged
-
-
-def test_referral_attributed_props_are_exactly_the_grant(env, writer):
-    _mint_row(env, T1)
-    _attr(invite_id=T1)
-    ((_, kw),) = _captured(writer, "referral_attributed")
-    assert set(kw["props"]) == ATTRIBUTED_KEYS
-    assert not any("token" in k for k in kw["props"])          # C1
-    assert "referred_user_id" not in kw["props"]               # C2
-    assert INVITEE not in json.dumps(kw["props"])              # C2: no invitee id
-    assert "platform" not in kw["props"]                       # the column says 'server'
-    (row,) = _events(env, "referral_attributed")
-    assert row["platform"] == "server" and row["user_id"] == REFERRER
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # End to end: POST /api/session/init with an inline daemon (G1 call line,
 # FR-13 step 5 on the INSERT, FR-15, FR-16, FR-18, FR-20)
@@ -822,9 +799,6 @@ def test_e2e_flag_off_is_byte_identical_to_today(env, init_env, monkeypatch):
 # Activation — maybe_activate_referral (FR-17, FR-19, R-F7; AC-17, AC-19)
 # ═══════════════════════════════════════════════════════════════════════════
 
-ACTIVATED_KEYS = {"invite_id", "referral_id", "league_id", "days_to_activate", "notified"}
-
-
 def _joined_row(engine, *, tok=T1, referrer=REFERRER, referred=INVITEE,
                 league=LEAGUE, joined_days=2, status="joined"):
     with engine.begin() as conn:
@@ -842,15 +816,6 @@ def _set_read(engine, notif_id, *, read=True, dismissed=False):
                      .where(notifications_table.c.id == notif_id)
                      .values(is_read=1 if read else 0,
                              dismissed_at=_iso_ago() if dismissed else None))
-
-
-def test_stage7_set_is_read_from_funnel_stages():
-    """C5 / R3: the qualifying set IS stage 7 of FUNNEL_STAGES."""
-    (stage7,) = [events for n, _name, events in aq.FUNNEL_STAGES if n == 7]
-    assert rl.STAGE7_EVENTS == frozenset(stage7)
-    assert rl.STAGE7_EVENTS == {"trade_proposed", "match_swiped"}     # today
-    (stage6,) = [events for n, _name, events in aq.FUNNEL_STAGES if n == 6]
-    assert not rl.STAGE7_EVENTS & set(stage6)                         # trades_generated
 
 
 @pytest.mark.parametrize("event", ["trade_proposed", "match_swiped"])
@@ -1005,27 +970,6 @@ def test_activation_row_failure_reports_notified_false(env, monkeypatch, writer)
     rl.maybe_activate_referral(INVITEE, "trade_proposed")
     assert _rows(env)[0]["status"] == "activated"
     assert _captured(writer, "referral_activated")[0][1]["props"]["notified"] is False
-
-
-# ── #350 registration (C7): referral_activated ────────────────────────────
-
-def test_referral_activated_is_registered_server_fired_non_intent():
-    name = "referral_activated"
-    assert name in at.SERVER_FIRED_EVENTS and name not in at.ALLOWED_CLIENT_EVENTS
-    assert name not in at.CLIENT_EVENT_PROPS
-    assert name in aq.NON_INTENT_EVENTS and name not in aq.INTENT_EVENTS
-
-
-def test_referral_activated_props_are_exactly_the_grant(env, writer):
-    _joined_row(env)
-    rl.maybe_activate_referral(INVITEE, "trade_proposed")
-    ((_, kw),) = _captured(writer, "referral_activated")
-    assert set(kw["props"]) == ACTIVATED_KEYS
-    assert not any("token" in k for k in kw["props"])
-    assert INVITEE not in json.dumps(kw["props"])
-    assert isinstance(kw["props"]["days_to_activate"], int)
-    (row,) = _events(env, "referral_activated")
-    assert row["platform"] == "server" and row["user_id"] == REFERRER
 
 
 # ── AC-17: each of the three stage-7 emitters stamps once (G2) ────────────
