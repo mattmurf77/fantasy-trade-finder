@@ -31,10 +31,15 @@ export interface WhatsNewEntry {
 
 // version → entry. ONE entry per release, matching app.json's `version`.
 const WHATS_NEW: Record<string, WhatsNewEntry> = {
-  // Placeholder for the teardown-remediation branch — replace the copy
-  // when the branch's release notes are settled.
-  '1.9.1': {
-    headline: 'New: search your boards — find any player on Tiers and Overall Ranks.',
+  // D-13 (#354): the launch release's slot carries the policy-change notice,
+  // not a feature note. legal-lead's R26.1 text, verbatim: no trailing period
+  // (contract above); the inner ". " is legal's. Tap opens Settings › Help &
+  // about, where the Privacy Policy and Terms rows live. ux.whats_new holds it
+  // back until the new policy pages are live (scope-d13-policy-notice §5).
+  // A version bump moves this key with it: tests/check-whats-new.js.
+  '1.22.0': {
+    headline: "We've updated our Privacy Policy and Terms of Use. Tap to read them",
+    route: 'SettingsAbout',
   },
 };
 
