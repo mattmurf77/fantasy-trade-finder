@@ -17,6 +17,12 @@
 // - Each category carries at least the reasons below (a floor, not an exact set).
 // - NSPrivacyTracking is false.
 // - Podfile.properties.json doesn't turn aggregation off.
+// - NSPrivacyCollectedDataTypes equals legal-lead's R3-FINAL App Privacy label
+//   set EXACTLY (2026-10-23, docs/plans/org-bringup/leads/legal-lead.md §R3/R5):
+//   the same types, each linked and not tracking, with the same purposes. The
+//   labels in App Store Connect and this manifest must agree, so any R3 change
+//   updates COLLECTED below in the same commit. Purchases is deliberately
+//   absent while the RevenueCat key is unset (R3 Q7).
 //
 // Run: node tests/check-privacy-manifest.js
 
@@ -35,6 +41,22 @@ const REQUIRED = {
   NSPrivacyAccessedAPICategoryUserDefaults: ['CA92.1'], // app-only defaults (RN Settings, cookies, expo-constants)
   NSPrivacyAccessedAPICategorySystemBootTime: ['35F9.1'], // elapsed-time measurement (RN, expo-device)
   NSPrivacyAccessedAPICategoryDiskSpace: ['E174.1'], // free-space checks before writes (expo-file-system)
+};
+
+// R3-FINAL: collected data type → purposes (all linked, none tracking).
+const COLLECTED = {
+  Name: ['AppFunctionality'],
+  EmailAddress: ['AppFunctionality'],
+  CoarseLocation: ['Analytics', 'AppFunctionality'],
+  CustomerSupport: ['AppFunctionality'],
+  OtherUserContent: ['AppFunctionality', 'ProductPersonalization'],
+  UserID: ['AppFunctionality', 'Analytics'],
+  DeviceID: ['AppFunctionality', 'Analytics'],
+  ProductInteraction: ['Analytics', 'ProductPersonalization', 'AppFunctionality'],
+  CrashData: ['AppFunctionality', 'Analytics'],
+  PerformanceData: ['AppFunctionality', 'Analytics'],
+  OtherDiagnosticData: ['AppFunctionality', 'Analytics'],
+  OtherDataTypes: ['AppFunctionality'],
 };
 
 let failures = 0;
@@ -68,6 +90,56 @@ for (const [cat, reasons] of Object.entries(REQUIRED)) {
 }
 if (!/<key>NSPrivacyTracking<\/key>\s*<false\/>/.test(plist)) fail('NSPrivacyTracking must be false (the app does no ATT tracking)');
 
+// NSPrivacyCollectedDataTypes: find the array, matching nested <array> tags.
+function collectedBlock(src) {
+  const start = src.indexOf('<key>NSPrivacyCollectedDataTypes</key>');
+  if (start < 0) return null;
+  const rest = src.slice(start);
+  const open = /<array\/>|<array>/.exec(rest);
+  if (!open) return null;
+  if (open[0] === '<array/>') return '';
+  let depth = 0;
+  const tag = /<array>|<\/array>/g;
+  tag.lastIndex = open.index;
+  let m;
+  while ((m = tag.exec(rest)) !== null) {
+    depth += m[0] === '<array>' ? 1 : -1;
+    if (depth === 0) return rest.slice(open.index + 7, m.index);
+  }
+  return null;
+}
+const block = collectedBlock(plist);
+if (block === null) {
+  fail('manifest has no NSPrivacyCollectedDataTypes array');
+} else {
+  const seen = {};
+  for (const d of block.matchAll(/<dict>([\s\S]*?)<\/dict>/g)) {
+    const body = d[1];
+    const type = (/<key>NSPrivacyCollectedDataType<\/key>\s*<string>NSPrivacyCollectedDataType(\w+)<\/string>/.exec(body) || [])[1];
+    if (!type) { fail('a collected-data entry has no NSPrivacyCollectedDataType'); continue; }
+    if (seen[type]) fail(`collected data type ${type} is listed twice`);
+    const linked = (/<key>NSPrivacyCollectedDataTypeLinked<\/key>\s*<(true|false)\/>/.exec(body) || [])[1];
+    const tracking = (/<key>NSPrivacyCollectedDataTypeTracking<\/key>\s*<(true|false)\/>/.exec(body) || [])[1];
+    const purposesBlock = (/<key>NSPrivacyCollectedDataTypePurposes<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(body) || [])[1] || '';
+    seen[type] = {
+      linked, tracking,
+      purposes: [...purposesBlock.matchAll(/<string>NSPrivacyCollectedDataTypePurpose(\w+)<\/string>/g)].map((p) => p[1]),
+    };
+  }
+  for (const [type, purposes] of Object.entries(COLLECTED)) {
+    const got = seen[type];
+    if (!got) { fail(`R3-FINAL type ${type} is missing from NSPrivacyCollectedDataTypes`); continue; }
+    if (got.linked !== 'true') fail(`${type}: NSPrivacyCollectedDataTypeLinked must be true (R3: linked to you)`);
+    if (got.tracking !== 'false') fail(`${type}: NSPrivacyCollectedDataTypeTracking must be false (R3: not used to track)`);
+    const want = [...purposes].sort().join(',');
+    const have = [...got.purposes].sort().join(',');
+    if (want !== have) fail(`${type}: purposes are [${have}], R3-FINAL says [${want}]`);
+  }
+  for (const type of Object.keys(seen)) {
+    if (!COLLECTED[type]) fail(`${type} is declared but isn't in R3-FINAL; update the labels (legal-lead) first`);
+  }
+}
+
 if (fs.existsSync(PODFILE_PROPS)) {
   const props = JSON.parse(fs.readFileSync(PODFILE_PROPS, 'utf8'));
   if (String(props['apple.privacyManifestAggregationEnabled']) === 'false') {
@@ -79,4 +151,4 @@ if (failures) {
   console.error(`\n${failures} privacy-manifest pin(s) broken.`);
   process.exit(1);
 }
-console.log(`ok    privacy manifest: in Resources, ${Object.keys(REQUIRED).length} required-reason categories declared, tracking off`);
+console.log(`ok    privacy manifest: in Resources, ${Object.keys(REQUIRED).length} required-reason categories, ${Object.keys(COLLECTED).length} collected types = R3-FINAL, tracking off`);

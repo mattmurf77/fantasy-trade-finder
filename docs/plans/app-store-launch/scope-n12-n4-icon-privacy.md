@@ -60,9 +60,19 @@
 | `docs/api-reference.md`, `docs/architecture.md`, `living-memory/LLD.md`, `living-memory/HLD.md`, `docs/cross-client-invariants.md`, `docs/glossary.md` | n/a | no route, module, convention, constant or term change |
 | ADR or `DECISIONS.md` | n/a | design-lead's #358 README records the icon decision |
 
-**Open, not in this change:** `NSPrivacyCollectedDataTypes` is empty. It should match the App Privacy labels
-legal-lead finalises (launch-readiness L4); the categories mustn't be guessed here. If legal-lead's list lands
-before 11-06, it's a small follow-up commit.
+**Collected data types, folded in 2026-10-24.** `NSPrivacyCollectedDataTypes` (empty before) now lists legal-lead's
+R3-FINAL set exactly: Name, EmailAddress, CoarseLocation, CustomerSupport, OtherUserContent, UserID, DeviceID,
+ProductInteraction, CrashData, PerformanceData, OtherDiagnosticData, OtherDataTypes.
+- Each is linked and not used for tracking, with R3's purposes. There's no Purchases while the RevenueCat key is
+  unset (R3 Q7).
+- `check-privacy-manifest.js` now pins the set exactly. Five more sabotages each fail it: the old empty array, a
+  type dropped, tracking true, an extra purpose, an undeclared PurchaseHistory.
+- The R5 trigger applies: any R3 change updates the manifest, and the check's table, in the same commit.
+- The code-vs-label diff found no mismatch:
+  - Name: `api/auth.ts:99-102` forwards Apple's first-sign-in name; `users.display_name` holds Sleeper names.
+  - Coarse Location: the time zone (`server.py:2905`, `notif.tz_sync`); also `user_events.country` from a CDN header
+    (`analytics_ingest.py:379-384`), which is NULL on bare Render.
+  - Search History really isn't collected: `analytics_taxonomy.py:281`, "the query string is never sent".
 
 ## 5. Ship gate declaration
 - CI green on the pushed sha.
