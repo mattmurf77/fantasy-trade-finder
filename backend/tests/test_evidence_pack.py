@@ -1,8 +1,10 @@
-"""DEC-2 (a) prototype: golden round trip for backend/eval/evidence_pack.py.
+"""ADR-025 C1 / C7: golden round trip for backend/eval/evidence_pack.py, and
+the C7 (ii) golden end to end through the DB and backend.eval.data.load_decks.
 
 Spec: docs/plans/org-bringup/leads/models-lead-launch.md §DEC-2 "Confirmation"
-§1 and §4; C7 (ii) is the bar: every registered scorer's output and replay's
-estimates are bit-identical between the full and the packed form.
+§1 and §4, and §Reviews-2 R2.2; C7 (ii) is the bar: every registered scorer's
+output and replay's estimates are bit-identical between the full and the
+packed form.
 
 Decks: real trade jobs (bakeoff_harness), a 1,200-card deck through the real
 impression writer, the F8 synthetic log (multi-deck, with outcomes), and
@@ -11,6 +13,7 @@ with shape_bucket present, None values, absent keys, gapped card_index).
 """
 
 import json
+import math
 import random
 import struct
 import zlib
@@ -20,8 +23,11 @@ from hashlib import sha256
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import insert
 
 import backend.value_model as vm
+from backend.database import deck_impressions_table, deck_outcomes_table
+from backend.eval import contract as C
 from backend.eval import evidence_pack as ep
 from backend.eval.data import LoggedCard, LoggedDeck, card_dict, load_decks
 from backend.eval.replay import evaluate
@@ -29,6 +35,7 @@ from backend.eval.scorers import get_scorer, registered_names
 from backend.eval.synth import build_synthetic_db
 from backend.taste_service import attrs_from_features
 from backend.tests.support import evidence_pack_decks as D
+from backend.tests.test_eval_pack_reader import insert_pack, make_engine
 
 LOGGED = ("impression_id", "deck_job_id", "user_id", "league_id", "card_index",
           "trade_hash", "propensity", "base_score", "final_score", "archetype",
@@ -135,10 +142,15 @@ def _all_decks(harness, writer, synth):
     return [d for decks in harness.values() for d in decks] + [writer] + synth
 
 
+def _pack(cards, run=None):
+    """card_count = the last card_index + 1 (these card lists end the deck)."""
+    return ep.pack_run(run if run is not None else {"values_snapshot_id": 7}, cards,
+                       card_count=cards[-1]["card_index"] + 1 if cards else 0)
+
+
 def _round_trip(cards, run=None):
-    packed = ep.pack_run(run or {"values_snapshot_id": 7}, cards)
-    out_run, out = ep.unpack_run(packed)
-    assert out_run == (run or {"values_snapshot_id": 7})
+    out_run, out = ep.unpack_run(_pack(cards, run))
+    assert out_run == (run if run is not None else {"values_snapshot_id": 7})
     return out
 
 
@@ -281,36 +293,96 @@ def test_contract_covers_every_key_the_scorers_read(writer, trained):
     assert Recorder.read - INJECTED <= ep.CONTRACT_KEYS
 
 
+def test_codec_carries_every_key_the_contract_names():
+    """C7 (iii) <-> the codec: every key backend/eval/contract.py lets a
+    scorer read (the frozen inputs, the identity keys, every PERMITTED_LOGGED
+    column) and every logged-policy column replay reads (propensity) is
+    carried by the pack. impression_id alone is synthesized by the reader.
+    A contract key the codec doesn't carry fails here."""
+    required = (C.FROZEN_INPUT_KEYS | C.IDENTITY_KEYS | C.LOGGED_POLICY_KEYS
+                | frozenset().union(*C.PERMITTED_LOGGED.values()))
+    missing = required - {"impression_id"} - ep.CONTRACT_KEYS
+    assert not missing, sorted(missing)
+
+
 # ---------------------------------------------------------------------------
 # Integrity and refusals
 # ---------------------------------------------------------------------------
 
+RUN = {"values_snapshot_id": "vsn1:9f2c", "built_at": "2026-10-24T01:02:03+00:00",
+       "config_ref": 41}
+
+
+def _with_header(packed, edit):
+    head = json.loads(packed.header_json)
+    edit(head)
+    return replace(packed, header_json=json.dumps(head, sort_keys=True, separators=(",", ":")),
+                   card_count=head["card_count"])
+
+
+def _flip_last_raw_byte(packed):
+    """One taste_attrs token on the last card: still decodes, different card."""
+    raw = bytearray(zlib.decompress(packed.cards_blob))
+    raw[-1] ^= 0x01
+    return replace(packed, cards_blob=zlib.compress(bytes(raw)))
+
+
+@pytest.mark.parametrize("tamper", [
+    lambda p: _with_header(p, lambda h: h["run"].update(values_snapshot_id="vsn1:9f2d")),
+    lambda p: _with_header(p, lambda h: h["run"].update(built_at="2026-10-24T01:02:04+00:00")),
+    lambda p: _with_header(p, lambda h: h["dicts"]["basis"][0][0].__setitem__(0, "x")),
+    lambda p: _with_header(p, lambda h: h["dicts"]["basis"].append([["unused"]])),
+    lambda p: _with_header(p, lambda h: h["shared"].update(user_id="user_99")),
+    lambda p: _with_header(p, lambda h: h.update(card_count=h["card_count"] + 1)),
+    _flip_last_raw_byte,
+    lambda p: replace(p, checksum="0" * 64),
+], ids=["run_snapshot_id", "run_built_at", "dictionary_entry", "unused_dictionary_entry",
+        "shared_field", "card_count", "card", "checksum"])
+def test_tampering_with_anything_a_reader_acts_on_is_refused(writer, tamper):
+    """R2.2 (a): the run metadata, every header field (an unused dictionary
+    entry changes no decoded card, so only header coverage catches it) and
+    every card are under the checksum."""
+    _deck, cards = writer
+    packed = ep.pack_run(RUN, cards[:200], card_count=1200)
+    assert len(json.loads(packed.header_json)["dicts"]["basis"]) == 2
+    assert ep.unpack_run(packed)[0] == RUN
+    bad = tamper(packed)
+    assert bad != packed
+    with pytest.raises(ep.PackIntegrityError, match="checksum mismatch"):
+        ep.unpack_run(bad)
+
+
 def test_a_flipped_byte_anywhere_is_refused(writer):
     _deck, cards = writer
-    packed = ep.pack_run({}, cards[:200])
-    blob = bytearray(packed.blob)
+    packed = _pack(cards[:200], run={})
+    blob = bytearray(packed.cards_blob)
     blob[len(blob) // 2] ^= 0x01
     with pytest.raises(ep.PackIntegrityError):
-        ep.unpack_run(replace(packed, blob=bytes(blob)))
-    # Flips that still decode: one taste_attrs token on the last card, one
-    # partner id in the header dictionary, the checksum itself.
-    raw = bytearray(zlib.decompress(packed.blob))
-    raw[-1] ^= 0x01
-    header = packed.header_json.replace('"user_01"', '"user_99"')
-    assert header != packed.header_json
-    for bad in (replace(packed, blob=zlib.compress(bytes(raw))),
-                replace(packed, header_json=header),
-                replace(packed, checksum="0" * 64)):
-        with pytest.raises(ep.PackIntegrityError, match="checksum mismatch"):
+        ep.unpack_run(replace(packed, cards_blob=bytes(blob)))
+
+
+def test_row_fields_must_agree_with_the_header():
+    packed = _pack(_legacy_cards())
+    for bad, field in ((replace(packed, card_count=packed.card_count + 1), "card_count"),
+                       (replace(packed, pack_version=0), "pack_version")):
+        with pytest.raises(ep.PackIntegrityError, match=field):
             ep.unpack_run(bad)
 
 
-def test_unknown_pack_version_is_refused():
-    packed = ep.pack_run({}, _legacy_cards())
-    head = json.loads(packed.header_json)
-    head["pack_version"] = ep.PACK_VERSION + 1
+def test_every_version_up_to_pack_version_has_a_decoder():
+    """R2.2 (c): the reader decodes every version 1..PACK_VERSION forever."""
+    for version in range(1, ep.PACK_VERSION + 1):
+        assert callable(ep.DECODERS.get(version)), version
+    packed = _pack(_legacy_cards())
+    assert packed.pack_version == ep.PACK_VERSION
+    assert json.loads(packed.header_json)["pack_version"] == ep.PACK_VERSION
+
+
+@pytest.mark.parametrize("version", [0, -1, ep.PACK_VERSION + 1, "1", 1.0, True, None])
+def test_unknown_pack_versions_are_refused(version):
+    packed = _with_header(_pack(_legacy_cards()), lambda h: h.update(pack_version=version))
     with pytest.raises(ep.PackIntegrityError, match="unknown pack_version"):
-        ep.unpack_run(replace(packed, header_json=json.dumps(head)))
+        ep.unpack_run(replace(packed, pack_version=version))
 
 
 @pytest.mark.parametrize("mutate, message", [
@@ -326,4 +398,149 @@ def test_cards_that_cannot_pack_exactly_are_refused(mutate, message):
     cards = _legacy_cards()
     mutate(cards)
     with pytest.raises(ValueError, match=message):
-        ep.pack_run({}, cards)
+        ep.pack_run({}, cards, card_count=5)
+
+
+@pytest.mark.parametrize("card_count", [4, -1, None, 5.0])
+def test_a_card_count_below_a_packed_index_is_refused(card_count):
+    with pytest.raises(ValueError, match="card_count"):
+        ep.pack_run({}, _legacy_cards(), card_count=card_count)
+
+
+# ---------------------------------------------------------------------------
+# C7 (ii) end to end: the same decks written as full rows and packed, both
+# read back through backend.eval.data.load_decks
+# ---------------------------------------------------------------------------
+
+FIRST_FULL = 30   # C4
+# Compared card by card: every key a registered scorer or replay may read.
+# impression_id differs by design (a packed card's is synthesized).
+GOLDEN_KEYS = (C.FROZEN_INPUT_KEYS | C.IDENTITY_KEYS | C.LOGGED_POLICY_KEYS) - {"impression_id"}
+_ROW_COLUMNS = ("impression_id", "user_id", "league_id", "card_index", "trade_hash",
+                "propensity", "base_score", "final_score", "archetype", "shape_bucket",
+                "served_at")
+_ACTIONS = (("viewed", "viewed"), ("liked", "like"), ("passed", "pass"),
+            ("proposed", "propose"), ("not_interested", "not_interested"), ("undone", "undo"))
+
+
+def _has_outcome(card):
+    return any(getattr(card, attr) for attr, _ in _ACTIONS)
+
+
+def _write_db(decks, *, packed, head=FIRST_FULL, nudge=None):
+    """A fresh DB holding `decks` = [(tag, LoggedDeck, packable card dicts)].
+
+    (A) packed=False: every card is a full deck_impressions row; no pack table.
+    (B) packed=True: the first `head` cards and every card with an outcome
+        (an outcome upgrades a card to a full row, R4.2) are rows; every
+        non-ghost card from `head` on goes into the run's pack, so an upgraded
+        card is in both and its row must win. Every deck gets a pack row.
+    Both: two ghost rows per deck, copies of cards 0 and n//2 at those
+    would-have-been ranks, and identical deck_outcomes rows. Deck ids are
+    prefixed by tag (the harness configs share one job id).
+    nudge = (deck_job_id, card_index): that packed card's base_score moves 1 ulp."""
+    eng, packs = make_engine(with_packs=packed)
+    with eng.begin() as conn:
+        for tag, deck, cards in decks:
+            job, n = f"{tag}/{deck.deck_job_id}", len(deck.cards)
+            served = deck.cards[0].served_at
+            rows, outcomes, to_pack = [], [], []
+            for c, d in zip(deck.cards, cards):
+                row = {k: getattr(c, k) for k in _ROW_COLUMNS}
+                row.update(deck_job_id=job, is_ghost=0, features_json=json.dumps(c.features),
+                           **{k: d[k] for k in D.ATTRIBUTION_COLUMNS if k in d})
+                if c.card_index in (0, n // 2):
+                    rows.append({**row, "impression_id": f"{c.impression_id}-ghost",
+                                 "is_ghost": 1})
+                if not packed or c.card_index < head or _has_outcome(c):
+                    rows.append(row)
+                    actions = [a for attr, a in _ACTIONS if getattr(c, attr)]
+                    outcomes += [{"impression_id": c.impression_id, "action": a,
+                                  "dwell_ms": c.dwell_ms if i == 0 else None,
+                                  "acted_at": served} for i, a in enumerate(actions)]
+                if packed and c.card_index >= head:
+                    p = {**d, "deck_job_id": job}
+                    if (job, c.card_index) == nudge:
+                        p["base_score"] = math.nextafter(p["base_score"], math.inf)
+                    to_pack.append(p)
+            conn.execute(insert(deck_impressions_table), rows)
+            if outcomes:
+                conn.execute(insert(deck_outcomes_table), outcomes)
+            if packed:
+                run = {"values_snapshot_id": "vsn1:golden", "built_at": served,
+                       "config_ref": None}
+                insert_pack(conn, packs, run_id=job, user_id=deck.user_id,
+                            league_id=deck.league_id, served_at=served,
+                            packed=ep.pack_run(run, to_pack, card_count=n))
+    return eng
+
+
+def _contract_view(card):
+    d = card_dict(card)
+    return json.dumps({k: d[k] for k in GOLDEN_KEYS if k in d}, sort_keys=True)
+
+
+def _outcomes(c):
+    return (c.viewed, c.liked, c.passed, c.proposed, c.not_interested, c.undone, c.dwell_ms)
+
+
+def assert_db_golden(full, packed, model):
+    """C7 (ii) over load_decks' output: the decks, the card dicts on every
+    contract key, every registered scorer's scores bit for bit, replay's
+    estimates by repr, and a value-model refit."""
+    assert ([(d.deck_job_id, d.served_at, d.integrity) for d in full]
+            == [(d.deck_job_id, d.served_at, d.integrity) for d in packed])
+    assert all(d.integrity is None for d in full)
+    for a, b in zip(full, packed):
+        assert [(c.card_index, c.is_ghost) for c in a.cards] == \
+               [(c.card_index, c.is_ghost) for c in b.cards], a.deck_job_id
+        for x, y in zip(a.cards, b.cards):
+            assert _contract_view(x) == _contract_view(y), (a.deck_job_id, x.card_index)
+            assert _outcomes(x) == _outcomes(y), (a.deck_job_id, x.card_index)
+            assert y.impression_id in (x.impression_id, f"pack:{b.deck_job_id}:{y.card_index}")
+    dicts_a = [card_dict(c) for d in full for c in d.cards]
+    dicts_b = [card_dict(c) for d in packed for c in d.cards]
+    with patch.object(vm, "load_latest_model", lambda: model):
+        for name in registered_names():
+            s_a, s_b = get_scorer(name, seed=5), get_scorer(name, seed=5)
+            assert (_bits(s_a.score(c) for c in dicts_a)
+                    == _bits(s_b.score(c) for c in dicts_b)), name
+            run_a = evaluate(get_scorer(name, seed=5), full, bootstrap=200, seed=1)
+            run_b = evaluate(get_scorer(name, seed=5), packed, bootstrap=200, seed=1)
+            assert run_a.n_included > 0 and repr(run_a) == repr(run_b), name
+    assert (vm.train_model(full, now=FIXED_NOW).to_dict()
+            == vm.train_model(packed, now=FIXED_NOW).to_dict())
+
+
+@pytest.fixture(scope="module")
+def db_decks(harness, writer, synth):
+    out = [(name, d, cs) for name, decks in harness.items() for d, cs in decks]
+    out.append(("writer", *writer))
+    return out + [("synth", d, cs) for d, cs in synth]
+
+
+@pytest.mark.parametrize("head, project", [(FIRST_FULL, False), (0, True)])
+def test_db_golden_full_rows_vs_packed(db_decks, trained, head, project):
+    """head=30 is C4. head=0 packs every non-ghost card (the rows left are
+    ghosts and upgraded cards), with the nightly's projected load."""
+    full = load_decks(engine=_write_db(db_decks, packed=False), project_features=project)
+    packed = load_decks(engine=_write_db(db_decks, packed=True, head=head),
+                        project_features=project)
+    n_packed = sum(c.impression_id.startswith("pack:") for d in packed for c in d.cards)
+    assert n_packed >= 1100
+    assert_db_golden(full, packed, trained)
+
+
+def test_db_golden_detects_a_one_ulp_change(db_decks, trained):
+    tag, deck, _cards = next(s for s in db_decks if s[0] == "writer")
+    index = next(c.card_index for c in deck.cards
+                 if c.card_index >= FIRST_FULL and not _has_outcome(c))
+    full = load_decks(engine=_write_db(db_decks, packed=False))
+    moved = load_decks(engine=_write_db(db_decks, packed=True,
+                                        nudge=(f"{tag}/{deck.deck_job_id}", index)))
+    scorer = get_scorer("base_score")
+    bits_a = _bits(scorer.score(card_dict(c)) for d in full for c in d.cards)
+    bits_b = _bits(scorer.score(card_dict(c)) for d in moved for c in d.cards)
+    assert sum(a != b for a, b in zip(bits_a, bits_b)) == 1
+    with pytest.raises(AssertionError):
+        assert_db_golden(full, moved, trained)

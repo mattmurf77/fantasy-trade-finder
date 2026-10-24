@@ -12,7 +12,9 @@ is about labels, and only viewed cards have honest labels (the F2 cascade
 rule). Unlike replay there are no ranks here, so a card with neither is
 excluded on its own as bad_features rather than taking its deck out, and
 a card from a partial run (evidence_tier 'partial_run') is excluded on
-its own as partial_run.
+its own as partial_run. Every card of a deck the loader flagged
+pack_integrity or incomplete_deck (LoggedDeck.integrity) is excluded under
+that reason.
 """
 
 from __future__ import annotations
@@ -20,7 +22,9 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from backend.eval.data import PARTIAL_RUN_TIER, LoggedDeck, card_dict
+from backend.eval.data import (
+    INCOMPLETE_DECK, PACK_INTEGRITY, PARTIAL_RUN_TIER, LoggedDeck, card_dict,
+)
 
 N_BINS = 10
 
@@ -82,13 +86,17 @@ def calibration_pairs(
         raise ValueError(
             f"scorer {getattr(scorer, 'name', scorer)!r} has no predict_proba(); "
             "calibration applies only to probability-emitting scorers")
-    excluded = {"partial_run": 0, "null_propensity": 0, "never_viewed": 0,
+    excluded = {"partial_run": 0, "pack_integrity": 0, "incomplete_deck": 0,
+                "null_propensity": 0, "never_viewed": 0,
                 "undo_reversed": 0, "bad_features": 0, "scorer_error": 0}
     pairs: list[tuple[float, float]] = []
     for deck in decks:
         for c in deck.cards:
             if c.evidence_tier == PARTIAL_RUN_TIER:
                 excluded["partial_run"] += 1
+                continue
+            if deck.integrity in (PACK_INTEGRITY, INCOMPLETE_DECK):
+                excluded[deck.integrity] += 1
                 continue
             if (c.propensity is None or not math.isfinite(c.propensity)
                     or c.propensity <= 0):

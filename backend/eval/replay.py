@@ -55,6 +55,13 @@ Exclusions (counted per reason and printed — never silently dropped):
                    partial run's delivered rows, head-eng ruling 21) — the
                    deck isn't a complete ranking, so it's out whole; decks
                    in EvalRun.partial_run_decks
+  pack_integrity   the deck's pack fails its checksum, has an unknown
+                   pack_version, or holds another run's cards (C7 (iv)) —
+                   whole deck out; decks in EvalRun.pack_integrity_decks
+  incomplete_deck  the deck's non-ghost card indexes aren't exactly 0..N-1
+                   after the pack merge (N = the pack's card_count, or
+                   max+1 without a pack) — whole deck out; decks in
+                   EvalRun.incomplete_decks
   missing_scorer_inputs
                    any card in the deck has neither features_json nor a
                    compact block (C7 (iv)) — whole deck out, counted by
@@ -68,6 +75,13 @@ silently shifted the counterfactual ranks of the viewed cards above them;
 their deck is now excluded instead. That retired the per-card
 `bad_features` reason: a card without features either has a compact block
 (scored normally) or takes its whole deck out under missing_scorer_inputs.
+A pack_integrity or incomplete_deck deck is also left out of the exposure
+curve: the cards that survive in it (first 30, viewed rows) are a selected
+subset, so their view rates would bias e(k).
+
+EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
+verdict() and render_report() say so when runs graded under different rules
+are compared (R2.5 (2)).
 """
 
 from __future__ import annotations
@@ -80,6 +94,8 @@ import sys
 from dataclasses import dataclass, field
 
 from backend.eval.data import (
+    INCOMPLETE_DECK,
+    PACK_INTEGRITY,
     PARTIAL_RUN_TIER,
     LoggedDeck,
     card_dict,
@@ -98,8 +114,18 @@ METRICS = ("like", "propose")
 
 EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
-    "partial_run", "missing_scorer_inputs", "scorer_error",
+    "partial_run", "pack_integrity", "incomplete_deck",
+    "missing_scorer_inputs", "scorer_error",
 )
+
+# The exclusion rules a run was graded under (models-lead R2.5 (2)):
+#   1  before 2026-10-20: a card without features sank to the bottom of the
+#      candidate order (per-card bad_features). Persisted records without an
+#      exclusion_rule_version field are version 1.
+#   2  whole-deck exclusion: missing_scorer_inputs, partial_run,
+#      pack_integrity and incomplete_deck.
+# Estimates graded under different versions are not comparable.
+EXCLUSION_RULE_VERSION = 2
 
 
 @dataclass
@@ -125,10 +151,13 @@ class EvalRun:
     tilt_clipped: int = 0            # propensity tilts hit TILT_MIN/TILT_MAX
     missing_inputs_decks: int = 0    # decks excluded as missing_scorer_inputs
     partial_run_decks: int = 0       # decks excluded as partial_run
+    pack_integrity_decks: int = 0    # decks excluded as pack_integrity
+    incomplete_decks: int = 0        # decks excluded as incomplete_deck
     exposure_positions: int = 0      # positions with an estimated e(k)
     metrics: dict = field(default_factory=dict)    # metric -> MetricEstimate
     eval_start: str | None = None
     ess_min: float = DEFAULT_ESS_MIN
+    exclusion_rule_version: int = EXCLUSION_RULE_VERSION
 
     @property
     def unreliable(self) -> bool:
@@ -142,10 +171,14 @@ class EvalRun:
 def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
     """e(k) = P(viewed | served at position k), Laplace(+1/+2)-smoothed,
     floored at EXPOSURE_FLOOR. Positions never observed fall back to the
-    floor at lookup time (exposure_at)."""
+    floor at lookup time (exposure_at). Decks with an integrity reason
+    (pack_integrity, incomplete_deck) are skipped: their surviving cards
+    are a selected subset."""
     served: dict[int, int] = {}
     viewed: dict[int, int] = {}
     for deck in decks:
+        if deck.integrity is not None:
+            continue
         for c in deck.cards:
             served[c.card_index] = served.get(c.card_index, 0) + 1
             if c.viewed:
@@ -252,6 +285,14 @@ def evaluate(
             run.excluded["partial_run"] += len(deck.cards)
             run.partial_run_decks += 1
             continue
+        if deck.integrity == PACK_INTEGRITY:
+            run.excluded["pack_integrity"] += len(deck.cards)
+            run.pack_integrity_decks += 1
+            continue
+        if deck.integrity == INCOMPLETE_DECK:
+            run.excluded["incomplete_deck"] += len(deck.cards)
+            run.incomplete_decks += 1
+            continue
         if any(c.features is None and c.features_compact is None
                for c in deck.cards):
             run.excluded["missing_scorer_inputs"] += len(deck.cards)
@@ -355,10 +396,23 @@ def _percentile_ci(samples: list[float], alpha: float = 0.05):
 # Verdicts + self-check
 # ---------------------------------------------------------------------------
 
+def rule_version_note(versions) -> str | None:
+    """None when every exclusion-rule version given is the same; otherwise
+    the warning any comparison or report across them must carry."""
+    found = sorted(set(versions))
+    if len(found) <= 1:
+        return None
+    return ("WARNING: exclusion rules differ across these runs (versions "
+            f"{', '.join(map(str, found))}); their estimates are not comparable")
+
+
 def verdict(run: EvalRun, baseline: EvalRun, metric: str = "like") -> str:
-    """UNRELIABLE below the ESS gate (per PRD: labeled, never silently
-    capped); else WIN/LOSS when the candidate's 95% CI clears the baseline
-    point estimate, FLAT otherwise."""
+    """RULE-MISMATCH when the two runs were graded under different
+    exclusion rules; else UNRELIABLE below the ESS gate (per PRD: labeled,
+    never silently capped); else WIN/LOSS when the candidate's 95% CI
+    clears the baseline point estimate, FLAT otherwise."""
+    if run.exclusion_rule_version != baseline.exclusion_rule_version:
+        return "RULE-MISMATCH"
     m = run.metrics.get(metric)
     b = baseline.metrics.get(metric)
     if m is None or m.snips is None or m.ess < run.ess_min:
@@ -434,6 +488,8 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"excluded[{excl or 'none'}] "
             f"missing_inputs_decks={run.missing_inputs_decks} "
             f"partial_run_decks={run.partial_run_decks} "
+            f"pack_integrity_decks={run.pack_integrity_decks} "
+            f"incomplete_decks={run.incomplete_decks} "
             f"tilt_clipped={run.tilt_clipped} "
             f"(bounds [{TILT_MIN}, {TILT_MAX}])"
         )
@@ -446,6 +502,8 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
     lines.append(
         f"ESS gate: {baseline.ess_min:.0f} (verdicts below it are UNRELIABLE; "
         f"exposure curve floor {EXPOSURE_FLOOR}, Laplace +1/+2 smoothing).")
+    note = rule_version_note(r.exclusion_rule_version for r in [baseline, *runs])
+    lines.append(note or f"Exclusion rules: version {baseline.exclusion_rule_version}.")
     return "\n".join(lines)
 
 

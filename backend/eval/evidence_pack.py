@@ -1,18 +1,35 @@
-"""DEC-2 (a) PROTOTYPE: packed evidence for the unseen cards of one served deck.
+"""DEC-2 (a) / ADR-025 C1: packed evidence for the unseen cards of one served deck.
 
-Unmerged; the format is pending models-lead's acceptance
-(docs/plans/org-bringup/leads/models-lead-launch.md, §DEC-2 "Confirmation"
-§1 and §4). Pure bytes <-> dicts: no table, no writer, no DB I/O.
+Format accepted by models-lead with conditions (models-lead-launch.md
+§Reviews-2 R2.2): (a) the checksum covers everything a reader can act on,
+(c) version discipline. Pure bytes <-> dicts: no table, no writer, no DB I/O.
+trades-eng's evidence writer calls pack_run and stores the PackedRun's fields
+verbatim as one deck_evidence_packs row; backend.eval.data.load_decks reads
+the row back through unpack_run. The row contract lives in
+docs/plans/trade-time-to-suggestion/eng-evidence-contract.md §6.
 
-One packed record per served run:
+One packed record per served run. PackedRun's fields are the row's pack
+columns, field for field:
 
-  header_json  written once per run: pack_version, the caller's run metadata
-               (`run`, returned verbatim by unpack_run), the per-run fields
-               hoisted off the cards (`shared`), the per-run dictionaries, the
-               taste_attrs vocabulary, and the layout needed to slice the blob.
-  blob         zlib(raw), raw = per-card columns in card_index order.
-  checksum     sha256 hex of the canonical JSONL of the unpacked cards
-               (json.dumps(card, sort_keys=True), one line per card).
+  pack_version  PACK_VERSION at write time (the header carries it too).
+  header_json   written once per run: pack_version, the caller's run metadata
+                (`run`, returned verbatim by unpack_run: e.g. the values
+                snapshot id, built_at, the config reference), card_count, the
+                per-run fields hoisted off the cards (`shared`), the per-run
+                dictionaries, the taste_attrs vocabulary, and the layout
+                needed to slice the blob.
+  cards_blob    zlib(raw), raw = per-card columns in card_index order.
+  checksum      sha256 hex of ONE canonical JSON document holding the parsed
+                header and the unpacked cards:
+                  json.dumps({"header": header, "cards": cards},
+                             sort_keys=True, separators=(",", ":"))
+                The header holds the run metadata, the shared fields, the
+                dictionaries and the layout, so a change to any of them, or
+                to any card, fails the checksum: it covers everything a
+                reader can act on.
+  card_count    the served deck's card count, ghosts excluded. The deck's
+                full rows and its packed cards together hold card_index
+                0..card_count-1; the reader flags a gap as incomplete_deck.
 
 Input cards are what eval sees today, backend.eval.data.card_dict (the frozen
 features_json merged with the logged columns), plus the deck_impressions
@@ -29,6 +46,12 @@ and any '?' entries survive; a set or bitmask encoding would not. shape and
 shape_bucket, lane and archetype are kept separately, because extract_features
 falls back from one to the other. pack_run decodes its own output and refuses
 to return a pack that does not round-trip.
+
+VERSION DISCIPLINE (R2.2 (c)). Any change to the layout, an encoding or the
+checksum bumps PACK_VERSION and registers a new decoder in DECODERS. Packs live
+as long as their decks, so the reader decodes every version from 1 to
+PACK_VERSION forever: an old decoder is never deleted or edited while packs of
+its version exist. unpack_run refuses a version with no decoder.
 """
 
 from __future__ import annotations
@@ -83,51 +106,75 @@ _HEX = frozenset("0123456789abcdef")
 
 
 class PackIntegrityError(ValueError):
-    """The pack is unreadable, has an unknown pack_version, or fails its
-    checksum. Replay excludes the deck; it never sinks it (C7 iv)."""
+    """The pack is unreadable, has an unknown pack_version, fails its
+    checksum, or its row fields disagree with its header. Replay excludes
+    the deck; it never sinks it (C7 iv)."""
 
 
 @dataclass(frozen=True)
 class PackedRun:
+    """One deck_evidence_packs row's pack columns; the writer stores each
+    field verbatim in the column of the same name."""
+    pack_version: int
     header_json: str
-    blob: bytes
+    cards_blob: bytes
     checksum: str
+    card_count: int
 
 
-def pack_run(header: dict, cards: list[dict]) -> PackedRun:
-    """Pack one served run. `header` is the caller's run metadata (e.g. the
-    values snapshot id and config reference); `cards` are card dicts in
-    card_index order. Raises ValueError for anything it cannot pack exactly."""
+def pack_run(run: dict, cards: list[dict], *, card_count: int) -> PackedRun:
+    """Pack one served run. `run` is the caller's run metadata (e.g. the values
+    snapshot id, built_at, the config reference), JSON-serializable; `cards`
+    are the packed card dicts in card_index order; `card_count` is the served
+    deck's card count, ghosts excluded (full rows and packed cards together).
+    Raises ValueError for anything it cannot pack exactly."""
     projected = [_project(c) for c in cards]
     sections, layout = _encode_sections(projected)
+    idx = [c["card_index"] for c in projected]
+    if (type(card_count) is not int or card_count < 0
+            or (idx and (idx[0] < 0 or idx[-1] >= card_count))):
+        raise ValueError(f"card_count {card_count!r} must be an int with every "
+                         "packed card_index in [0, card_count)")
+    header_json = json.dumps(
+        {"pack_version": PACK_VERSION, "run": run, "card_count": card_count, **layout},
+        sort_keys=True, separators=(",", ":"))
+    head = json.loads(header_json)      # exactly what a reader parses
     raw = b"".join(data for _label, data in sections)
-    header_json = json.dumps({"pack_version": PACK_VERSION, "run": header, **layout},
-                             sort_keys=True, separators=(",", ":"))
-    checksum = _checksum(projected)
-    if _checksum(_decode(json.loads(header_json), raw)) != checksum:
-        raise ValueError("pack does not round-trip exactly; refusing to write it")
-    return PackedRun(header_json, zlib.compress(raw, 9), checksum)
+    packed = PackedRun(PACK_VERSION, header_json, zlib.compress(raw, 9),
+                       _checksum_v1(head, projected), card_count)
+    try:
+        DECODERS[PACK_VERSION](head, packed.cards_blob, packed.checksum)
+    except PackIntegrityError:
+        raise ValueError("pack does not round-trip exactly; refusing to write it") from None
+    return packed
 
 
 def unpack_run(packed: PackedRun) -> tuple[dict, list[dict]]:
     """Return (run metadata, cards in card_index order). Raises
-    PackIntegrityError on an unknown pack_version, an undecodable pack, or a
-    checksum mismatch."""
+    PackIntegrityError on an unreadable header, a pack_version with no
+    decoder, an undecodable pack, a checksum mismatch, or a pack_version or
+    card_count field that disagrees with the (checksummed) header."""
     try:
         head = json.loads(packed.header_json)
-    except ValueError as e:
+    except (TypeError, ValueError) as e:
         raise PackIntegrityError(f"unreadable header: {e}") from None
     version = head.get("pack_version") if isinstance(head, dict) else None
-    if version != PACK_VERSION:
+    decode = DECODERS.get(version) if type(version) is int else None
+    if decode is None:
         raise PackIntegrityError(f"unknown pack_version {version!r}")
+    if packed.pack_version != version:
+        raise PackIntegrityError(
+            f"pack_version {packed.pack_version!r} disagrees with the header's {version!r}")
     try:
-        run, cards = head["run"], _decode(head, zlib.decompress(packed.blob))
+        cards = decode(head, packed.cards_blob, packed.checksum)
+        run, header_count = head["run"], head["card_count"]
     except PackIntegrityError:
         raise
     except Exception as e:
         raise PackIntegrityError(f"undecodable pack: {e!r}") from None
-    if _checksum(cards) != packed.checksum:
-        raise PackIntegrityError("checksum mismatch")
+    if packed.card_count != header_count:
+        raise PackIntegrityError(
+            f"card_count {packed.card_count!r} disagrees with the header's {header_count!r}")
     return run, cards
 
 
@@ -281,13 +328,16 @@ def _canon(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def _checksum(cards: list[dict]) -> str:
-    jsonl = "".join(json.dumps(c, sort_keys=True) + "\n" for c in cards)
-    return hashlib.sha256(jsonl.encode("utf-8")).hexdigest()
+def _checksum_v1(head: dict, cards: list[dict]) -> str:
+    """The parsed header (run metadata, card_count, shared fields,
+    dictionaries, layout) and the unpacked cards, as one canonical JSON
+    document."""
+    doc = json.dumps({"header": head, "cards": cards}, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(doc.encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
-# Decoding (mirrors _encode_sections, section by section)
+# Decoding (v1 mirrors _encode_sections, section by section)
 # ---------------------------------------------------------------------------
 
 class _Reader:
@@ -370,3 +420,15 @@ def _decode(head: dict, raw: bytes) -> list[dict]:
     if r.pos != len(raw):
         raise PackIntegrityError("trailing bytes after the last section")
     return cards
+
+
+def _decode_v1(head: dict, cards_blob: bytes, checksum: str) -> list[dict]:
+    cards = _decode(head, zlib.decompress(cards_blob))
+    if _checksum_v1(head, cards) != checksum:
+        raise PackIntegrityError("checksum mismatch")
+    return cards
+
+
+# Every pack_version ever written -> its decoder. Never delete or edit an entry
+# while packs of that version exist (VERSION DISCIPLINE, module docstring).
+DECODERS = {1: _decode_v1}

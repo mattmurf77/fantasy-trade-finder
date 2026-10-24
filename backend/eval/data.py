@@ -9,7 +9,24 @@ Narrow rows (C7 (i) scaffolding): a card may carry only a frozen compact
 scorer-input block (backend/eval/contract.py) instead of features_json.
 It is read from a `features_compact` column when the table has one; until
 that column exists, every card's features_compact is None. The same holds
-for `evidence_tier` (replay and calibration exclude 'partial_run').
+for `evidence_tier` (replay and calibration exclude 'partial_run'; every
+other tier, ghost/first30/delivered/archive/full_interim, is a usable row).
+
+Packed cards (ADR-025 C1, C7 (i)): when the engine has a deck_evidence_packs
+table, each pack in the window is unpacked (backend/eval/evidence_pack.py)
+and merged into its deck: a deck's cards are its rows ∪ its unpacked cards,
+in card_index order, and a non-ghost row wins over a packed card with the
+same card_index. A packed card is unseen: its impression_id is synthesized
+as "pack:<run_id>:<card_index>" and it has no outcomes. Ghost rows (C5) are
+never packed and never displace a packed card. Integrity, per deck:
+  pack_integrity   unpack_run refuses the pack (unreadable, unknown version,
+                   checksum mismatch, row fields disagreeing with its
+                   header), or it holds another run's cards; its cards are
+                   not merged
+  incomplete_deck  the non-ghost card indexes are not exactly 0..N-1, where
+                   N is the pack's card_count, or max+1 without a pack
+LoggedDeck.integrity carries the reason: replay excludes the deck whole and
+never sinks it; calibration excludes its cards.
 
 Lean load: only the columns eval reads are selected, and
 project_features=True (the nightly) also trims each parsed features dict
@@ -26,9 +43,12 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import (
+    Integer, LargeBinary, String, Text, column, create_engine, inspect, select, table,
+)
 
 from backend.database import deck_impressions_table, deck_outcomes_table
+from backend.eval import evidence_pack
 from backend.eval.contract import PROJECTION_KEYS
 
 # The deck_impressions columns eval reads (never select(imp): valuation_json,
@@ -36,13 +56,34 @@ from backend.eval.contract import PROJECTION_KEYS
 EVAL_COLUMNS = (
     "impression_id", "user_id", "league_id", "deck_job_id", "card_index",
     "trade_hash", "features_json", "propensity", "base_score", "final_score",
-    "archetype", "shape_bucket", "served_at",
+    "archetype", "shape_bucket", "served_at", "is_ghost",
 )
 # Read only when the table has them (neither column exists yet).
 OPTIONAL_COLUMNS = ("features_compact", "evidence_tier")
 # evidence_tier written on a partial run's delivered rows (head-eng ruling 21):
 # replay excludes the deck, calibration the card.
 PARTIAL_RUN_TIER = "partial_run"
+
+# The pack table (ADR-025 C1; trades-eng builds it, the row contract is in
+# docs/plans/trade-time-to-suggestion/eng-evidence-contract.md §6). Read only
+# when the engine has it: a missing table means no packs.
+PACK_TABLE = "deck_evidence_packs"
+_PACKS = table(
+    PACK_TABLE,
+    column("run_id", String), column("user_id", String), column("league_id", String),
+    column("served_at", String), column("pack_version", Integer),
+    column("header_json", Text), column("cards_blob", LargeBinary),
+    column("checksum", String), column("card_count", Integer),
+)
+# LoggedDeck.integrity values (also replay's exclusion reasons).
+PACK_INTEGRITY = "pack_integrity"
+INCOMPLETE_DECK = "incomplete_deck"
+# The LoggedCard fields a packed card takes from its unpacked dict; every other
+# unpacked key goes into its features_compact.
+_PACKED_LOGGED = (
+    "deck_job_id", "user_id", "league_id", "card_index", "trade_hash", "propensity",
+    "base_score", "final_score", "archetype", "shape_bucket", "served_at",
+)
 
 
 @dataclass
@@ -60,8 +101,9 @@ class LoggedCard:
     shape_bucket: str | None
     served_at: str
     features: dict | None          # None ⇔ features_json missing/unparseable
-    features_compact: dict | None = None   # frozen compact block (narrow rows)
+    features_compact: dict | None = None   # frozen compact block (narrow rows, packed cards)
     evidence_tier: str | None = None       # e.g. 'partial_run' (column pending)
+    is_ghost: bool = False                 # a withheld ghost row (C5): never packed
     # Aggregated outcome flags (deck_outcomes reduce)
     viewed: bool = False
     liked: bool = False
@@ -79,6 +121,7 @@ class LoggedDeck:
     league_id: str
     served_at: str
     cards: list[LoggedCard] = field(default_factory=list)
+    integrity: str | None = None   # None, PACK_INTEGRITY or INCOMPLETE_DECK
 
 
 def resolve_engine(engine=None, db_url: str | None = None):
@@ -141,11 +184,15 @@ def load_decks(
 ) -> list[LoggedDeck]:
     """Load deck_impressions (+reduced outcomes) as LoggedDecks, time-ordered
     by served_at then deck_job_id. ISO-8601 UTC strings compare lexically,
-    matching the storage format everywhere in this schema.
+    matching the storage format everywhere in this schema. Packs in the same
+    window (deck_evidence_packs.served_at, user_id, league_id) are merged
+    into their decks (module docstring); a card is ordered by card_index,
+    a non-ghost card before a ghost row at the same index.
 
     project_features=True keeps only contract.PROJECTION_KEYS inside each
-    parsed features dict: every registered scorer, and value_model's
-    training path, scores the projected decks identically."""
+    parsed features dict (and each packed card's features_compact): every
+    registered scorer, and value_model's training path, scores the
+    projected decks identically."""
     eng = resolve_engine(engine, db_url)
 
     imp = deck_impressions_table
@@ -176,6 +223,18 @@ def load_decks(
                     .where(out.c.impression_id.in_(chunk))
                 ).fetchall():
                     outcomes.setdefault(orow.impression_id, []).append(orow)
+        packs = []
+        if inspect(conn).has_table(PACK_TABLE):
+            pq = select(_PACKS)
+            if since:
+                pq = pq.where(_PACKS.c.served_at >= since)
+            if until:
+                pq = pq.where(_PACKS.c.served_at < until)
+            if user_id:
+                pq = pq.where(_PACKS.c.user_id == user_id)
+            if league_id:
+                pq = pq.where(_PACKS.c.league_id == league_id)
+            packs = conn.execute(pq).fetchall()
 
     decks: dict[str, LoggedDeck] = {}
     order: list[str] = []
@@ -201,6 +260,7 @@ def load_decks(
             features=features,
             features_compact=features_compact,
             evidence_tier=getattr(r, "evidence_tier", None),
+            is_ghost=(r.is_ghost == 1),
         )
         for orow in outcomes.get(r.impression_id, ()):
             action = orow.action
@@ -230,10 +290,71 @@ def load_decks(
             order.append(r.deck_job_id)
         deck.cards.append(card)
 
+    card_counts: dict[str, int] = {}
+    pack_only = False
+    for p in packs:
+        deck = decks.get(p.run_id)
+        if deck is None:   # no row in the window: a deck missing its full rows
+            deck = LoggedDeck(deck_job_id=p.run_id, user_id=p.user_id,
+                              league_id=p.league_id, served_at=p.served_at)
+            decks[p.run_id] = deck
+            order.append(p.run_id)
+            pack_only = True
+        try:
+            _run, unpacked = evidence_pack.unpack_run(evidence_pack.PackedRun(
+                pack_version=p.pack_version, header_json=p.header_json,
+                cards_blob=p.cards_blob, checksum=p.checksum, card_count=p.card_count))
+            if any(u.get("deck_job_id") != p.run_id for u in unpacked):
+                raise evidence_pack.PackIntegrityError("the pack holds another run's cards")
+        except evidence_pack.PackIntegrityError:
+            deck.integrity = PACK_INTEGRITY
+            continue
+        card_counts[p.run_id] = p.card_count
+        full = {c.card_index for c in deck.cards if not c.is_ghost}
+        deck.cards.extend(_packed_card(p, u, project_features)
+                          for u in unpacked if u["card_index"] not in full)
+
     result = [decks[j] for j in order]
+    if pack_only:
+        result.sort(key=lambda d: (d.served_at, d.deck_job_id))
     for deck in result:
-        deck.cards.sort(key=lambda c: c.card_index)
+        deck.cards.sort(key=lambda c: (c.card_index, c.is_ghost))
+        if deck.integrity is None:
+            idx = [c.card_index for c in deck.cards if not c.is_ghost]
+            n = card_counts.get(deck.deck_job_id, idx[-1] + 1 if idx else 0)
+            if idx != list(range(n)):
+                deck.integrity = INCOMPLETE_DECK
     return result
+
+
+def _packed_card(p, u: dict, project_features: bool) -> LoggedCard:
+    """An unpacked card as an unseen LoggedCard: a synthesized impression_id,
+    no outcomes, the logged fields from the pack, and every other packed key
+    (the frozen scorer inputs, the attribution and the per-run shared fields)
+    in features_compact."""
+    compact = {k: v for k, v in u.items() if k not in _PACKED_LOGGED}
+    if project_features:
+        compact = {k: v for k, v in compact.items() if k in PROJECTION_KEYS}
+
+    def num(k):
+        return float(u[k]) if u.get(k) is not None else None
+
+    return LoggedCard(
+        impression_id=f"pack:{p.run_id}:{u['card_index']}",
+        deck_job_id=p.run_id,
+        user_id=u.get("user_id", p.user_id),
+        league_id=u.get("league_id", p.league_id),
+        card_index=u["card_index"],
+        trade_hash=u.get("trade_hash"),
+        propensity=num("propensity"),
+        base_score=num("base_score"),
+        final_score=num("final_score"),
+        archetype=u.get("archetype"),
+        shape_bucket=u.get("shape_bucket"),
+        served_at=u.get("served_at", p.served_at),
+        features=None,
+        features_compact=compact,
+    )
 
 
 def split_decks(
