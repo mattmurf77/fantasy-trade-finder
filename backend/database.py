@@ -1070,6 +1070,18 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("trade_concept_id",          String),
     Column("policy_variant",            String),
     Column("source_like_impression_id", String),
+    # ── deferred evidence (ADR-025 stage 1; flag trade.first_page_store) ──
+    # Which evidence rule wrote this row: 'first30' | 'delivered' | 'ghost' |
+    # 'archive' | 'full_interim'. Set only on rows written at delivery from a
+    # deferred job's build-time snapshot (server._DeckEvidence); NULL on every
+    # row written at build (flag off, or a live-mode job) and on pre-change
+    # rows. 'archive' rows (C8 extras) are deleted after 90 days
+    # (purge_archive_deck_impressions); the other tiers never are.
+    Column("evidence_tier",             String),
+    # ISO UTC: when this card was first sent to a client (any tier, first30
+    # included). NULL for an undelivered card (first30, archive, full_interim),
+    # a ghost, and every row written at build (granted by head-eng, G2).
+    Column("delivered_at",              String),
 )
 
 Index(
@@ -1080,6 +1092,17 @@ Index(
 Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
+)
+# C8 retention (ADR-025): purge_archive_deck_impressions reads only archive
+# rows by age. Partial, so it indexes the archive extras alone (both dialects);
+# _migrate_db adds it to existing databases.
+_ARCHIVE_INDEX_WHERE = "evidence_tier = 'archive'"
+Index(
+    "ix_deck_impressions_archive",
+    deck_impressions_table.c.evidence_tier,
+    deck_impressions_table.c.served_at,
+    sqlite_where=text(_ARCHIVE_INDEX_WHERE),
+    postgresql_where=text(_ARCHIVE_INDEX_WHERE),
 )
 
 # Private debug evidence, content-addressed within one user/job. Core card
@@ -1163,8 +1186,10 @@ class CompressedJSON(TypeDecorator):
 # supersede guard: a row is replaced only by one built at the same time or
 # later. An input change (rankings, preferences, dispositions, rosters) marks
 # rows state='stale' and advances built_at to the change (mark_trade_pages_stale),
-# so no deck admitted before it can overwrite the mark. evidence_blob is
-# reserved for the packed-evidence piece (NULL in P1).
+# so no deck admitted before it can overwrite the mark. evidence_blob holds a
+# deferred deck's build-time evidence for its stored cards (server._DeckEvidence,
+# ADR-025 stage 1), shrunk as rows are written at delivery; NULL for a deck
+# with none.
 trade_page_store_table = Table("trade_page_store", metadata,
     Column("id",                 Integer, primary_key=True, autoincrement=True),
     Column("user_id",            String,  nullable=False),
@@ -1181,7 +1206,7 @@ trade_page_store_table = Table("trade_page_store", metadata,
     Column("last_served_at",     String,  nullable=True),    # ISO UTC
     Column("card_count",         Integer, nullable=False),
     Column("pages_blob",         CompressedJSON, nullable=False),  # {"v", "opponents_total", "cards"}
-    Column("evidence_blob",      LargeBinary, nullable=True),
+    Column("evidence_blob",      CompressedJSON, nullable=True),   # same BLOB / BYTEA type
     Column("stored_bytes",       Integer, nullable=False),   # len(pages_blob) + len(evidence_blob)
     Column("state",              String,  nullable=False),   # "ready" | "stale"
     UniqueConstraint("user_id", "league_id", "scoring_format", "request_scope",
@@ -3601,6 +3626,10 @@ def _migrate_db() -> None:
         ("deck_impressions",   "trade_concept_id",          "VARCHAR"),
         ("deck_impressions",   "policy_variant",            "VARCHAR"),
         ("deck_impressions",   "source_like_impression_id", "VARCHAR"),
+        # Deferred evidence (ADR-025 stage 1): NULL on every row written at
+        # build and on all existing rows; no backfill by design.
+        ("deck_impressions",   "evidence_tier",             "VARCHAR"),
+        ("deck_impressions",   "delivered_at",              "VARCHAR"),
         ("trade_decisions",    "impression_id",             "VARCHAR"),
         ("trade_decisions",    "trade_concept_id",          "VARCHAR"),
         ("trade_matches",      "trade_concept_id",          "VARCHAR"),
@@ -3825,6 +3854,17 @@ def _migrate_db() -> None:
                 ))
         except Exception:
             pass
+
+    # ADR-025 C8: the archive partial index (after the evidence_tier column
+    # migration above). Both dialects accept CREATE INDEX ... WHERE.
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_deck_impressions_archive "
+                f"ON deck_impressions (evidence_tier, served_at) WHERE {_ARCHIVE_INDEX_WHERE}"
+            ))
+    except Exception:
+        pass
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters
@@ -6954,6 +6994,86 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
         return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
 
 
+# Tiers a later delivery raises to 'delivered' (ruling 17's precedence: ghost >
+# first30 > delivered > archive, full_interim beside archive). Never 'ghost' or
+# 'first30': a later delivery never downgrades a tier.
+_EVIDENCE_TIERS_BELOW_DELIVERED = ("full_interim", "archive")
+# Tiers whose rows a later delivery stamps with delivered_at (never a ghost's,
+# never a build-time row's: their tier is NULL).
+_EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive")
+
+
+def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
+                       diagnostics: list | tuple = (), delivered: dict | None = None,
+                       deck_job_id: str | None = None) -> None:
+    """Deferred evidence (ADR-025 stage 1): one delivery write, one transaction.
+
+    `rows` are a deferred deck's build-time deck_impressions rows, each with its
+    `evidence_tier`. Each is inserted at most once per impression_id (ON CONFLICT
+    DO NOTHING), so a retried delivery writes nothing twice, and compacted
+    exactly as save_deck_impressions compacts. Rows are normalized to every
+    column, so full and narrow rows share one VALUES statement. `diagnostics`
+    are the deck's deck_diagnostic_snapshots rows the compacted rows reference
+    (content-addressed, so also at most once). `candidate_set` is the deck's
+    deck_candidate_sets row, also at most once. `delivered` maps impression
+    ids of `deck_job_id` written undelivered and since delivered to their
+    delivery time: each gets that `delivered_at` (once) and, from a lower
+    tier, the tier 'delivered'.
+    """
+    delivered = dict(delivered or {})
+    if not rows and candidate_set is None and not diagnostics and not delivered:
+        return
+    from .deck_diagnostics import compact_rows
+    columns = [c.name for c in deck_impressions_table.columns]
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as upsert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as upsert
+        _save_deck_diagnostic_snapshots(conn, list(diagnostics))
+        for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
+            compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
+            _save_deck_diagnostic_snapshots(conn, snapshots)
+            conn.execute(upsert(deck_impressions_table).values(
+                [{name: row.get(name) for name in columns} for row in compacted]
+            ).on_conflict_do_nothing(index_elements=["impression_id"]))
+        if candidate_set is not None:
+            conn.execute(upsert(deck_candidate_sets_table).values(**candidate_set)
+                         .on_conflict_do_nothing(index_elements=["candidate_set_id"]))
+        i = deck_impressions_table
+        by_time: dict = {}
+        for iid, at in delivered.items():
+            by_time.setdefault(at, []).append(iid)
+        for at, ids in by_time.items():
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.delivered_at.is_(None), i.c.evidence_tier.in_(_EVIDENCE_TIERS_DELIVERABLE),
+                ).values(delivered_at=at))
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_DELIVERED),
+                ).values(evidence_tier="delivered"))
+    log.info("deck evidence: deck=%s rows=%d candidate_set=%s delivered=%d",
+             deck_job_id, len(rows), candidate_set is not None, len(delivered))
+
+
+def purge_archive_deck_impressions(*, days: int = 90, batch_size: int = 500) -> int:
+    """C8 retention: delete one bounded batch of `evidence_tier = 'archive'` rows
+    (an archive deck's undelivered extras) served more than `days` ago. Never
+    'first30', 'delivered', 'ghost' or 'full_interim' rows."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    i = deck_impressions_table
+    with engine.begin() as conn:
+        # The archive predicate as the index's literal text, so both planners
+        # match ix_deck_impressions_archive (a bound parameter may not).
+        ids = select(i.c.impression_id).where(
+            text(_ARCHIVE_INDEX_WHERE), i.c.served_at < cutoff,
+        ).limit(max(1, min(batch_size, 1000)))
+        return conn.execute(delete(i).where(i.c.impression_id.in_(ids))).rowcount or 0
+
+
 # ---------------------------------------------------------------------------
 # P1 first-page store (trade_page_store; flag trade.first_page_store)
 # ---------------------------------------------------------------------------
@@ -7027,6 +7147,20 @@ def touch_trade_page(page_id: int, served_at: str) -> None:
     t = trade_page_store_table
     with engine.begin() as conn:
         conn.execute(update(t).where(t.c.id == page_id).values(last_served_at=served_at))
+
+
+def save_trade_page_evidence(user_id: str, deck_job_id: str, evidence_blob: bytes | None,
+                             pages_bytes: int) -> bool:
+    """Rewrite the evidence_blob of the viewer's row built by `deck_job_id` (and
+    its stored_bytes = pages_bytes + len(evidence_blob)), after a delivery wrote
+    some of its snapshots. A row since rebuilt by another deck is untouched.
+    True when the row was updated."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        return bool(conn.execute(update(t).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id,
+        ).values(evidence_blob=evidence_blob,
+                 stored_bytes=pages_bytes + len(evidence_blob or b""))).rowcount)
 
 
 def mark_trade_pages_stale(*, marked_at: str, user_id: str | None = None,

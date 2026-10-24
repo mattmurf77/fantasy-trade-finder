@@ -541,10 +541,12 @@ def test_trade_hash_equals_the_impression_rows(p1, spawned):
     with patch.object(server, "_deck_signal_v2_enabled", lambda: True):
         deck = run_job()
     assert stored()["deck_job_id"] == deck and stored()["card_count"] > 0
+    bodies = [generate(client, page=1).get_json(), deck_status(client, deck, 0).get_json()]
+    # ADR-025 stage 1: the deck's rows are written at its first delivery.
     with engine.connect() as conn:
         rows = {r.impression_id: r.trade_hash
                 for r in conn.execute(select(db_module.deck_impressions_table))}
-    for body in (generate(client, page=1).get_json(), deck_status(client, deck, 0).get_json()):
+    for body in bodies:
         assert body["cards"]
         for c in body["cards"]:
             assert c["trade_hash"] == rows[c["impression_id"]]
