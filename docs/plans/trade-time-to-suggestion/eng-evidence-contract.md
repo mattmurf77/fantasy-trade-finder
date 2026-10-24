@@ -73,7 +73,7 @@
 **Reproducibility (R4.1, R5.2): inputs are frozen per card; configuration is pinned and recorded per run.**
 - No fit or eval path reads live taste state. `ValueModel._inject` reads the frozen `taste_pref_long` / `taste_pref_short`; only `value_model.serving_scores` (live serving) calls `taste_service.load_taste_vectors`.
 - `value_model.train_model(decks, as_of=..., config=...)` takes its clock explicitly. It also takes its 3 hyperparameters as a recorded `pin_config` record (`meta["config"]`).
-- `replay.evaluate(..., config=...)` takes the V-vector the same way (`EvalRun.config`, `run_record["config"]`). Each record carries the values used and the `model_config` SHA-256.
+- The value_model scorer takes the V-vector the same way, as a constructor argument: `get_scorer("value_model", config=...)`. The replay CLI (`--config`) and the nightly pin once and pass the pin to every scorer; scorers that read no config ignore it. `replay.evaluate` records `scorer.config` on `EvalRun.config` and in `run_record["config"]`. Each record carries the values used and the `model_config` SHA-256.
 - A re-fit at the same `as_of`, on the same evidence and config, is bit-identical, whatever the taste rows, boards, clock or live `model_config` do in between.
 - The rule is in `docs/model-evaluation/evidence-contract.md` §"Frozen inputs". Tests: `backend/tests/test_value_model_frozen_taste.py`.
 

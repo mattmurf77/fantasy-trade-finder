@@ -93,13 +93,13 @@ def run_all(
     config = _value_model.pin_config(_value_model.SCORE_CONFIG)   # one pin for every run
     read = {"window_days": window_days, "source": "nightly", "seed": seed,
             "until": until, "as_of": as_of, "settle_lag_days": settle_lag_days}
-    baseline = evaluate(get_scorer(baseline_name), decks,
-                        ess_min=ess_min, bootstrap=bootstrap, seed=seed, config=config)
+    baseline = evaluate(get_scorer(baseline_name, config=config), decks,
+                        ess_min=ess_min, bootstrap=bootstrap, seed=seed)
     runs = [baseline]
     for name in due:
         try:
-            run = evaluate(get_scorer(name, seed=seed), decks,
-                           ess_min=ess_min, bootstrap=bootstrap, seed=seed, config=config)
+            run = evaluate(get_scorer(name, seed=seed, config=config), decks,
+                           ess_min=ess_min, bootstrap=bootstrap, seed=seed)
         except Exception as e:
             stats["errors"] += 1
             append_run({

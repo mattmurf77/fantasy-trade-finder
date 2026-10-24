@@ -206,8 +206,11 @@ How the code meets it today:
     `meta["config"]`, which is persisted in `models.jsonl`. `train_model(...,
     config=meta["config"])` refits from it with no live read.
   - An eval pins `value_model.SCORE_CONFIG`, the V-vector (`value_model_v_like`,
-    `value_model_v_propose`), on `EvalRun.config` and in every run record.
-    `replay.evaluate(..., config=run.config)` replays from it with no live read.
+    `value_model_v_propose`), on `EvalRun.config` and in its run record. A
+    scorer that reads no configuration records `config: null`.
+    `get_scorer("value_model", config=run.config)` builds the scorer with it
+    as a constructor argument, and `replay.evaluate` with that scorer replays
+    the run with no live read. The pin is never held in thread or global state.
     The replay CLI and the nightly pin once and share that one pin across every
     scorer in the run.
   - Live serving still reads the V-vector live, by design (F6 PRD §2: strategy

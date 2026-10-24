@@ -229,8 +229,8 @@ def test_config_is_pinned_and_recorded_and_replays_after_live_config_changes(wor
     def replay(config=None):
         with patch.object(vm, "load_latest_model",
                           lambda: vm.ValueModel.from_dict(model.to_dict())):
-            return evaluate(get_scorer("value_model"), decks, bootstrap=50, seed=2,
-                            config=config)
+            return evaluate(get_scorer("value_model", config=config), decks,
+                            bootstrap=50, seed=2)
 
     run = replay()
     assert set(run.config["values"]) == set(vm.SCORE_CONFIG)

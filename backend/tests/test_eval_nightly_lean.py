@@ -224,4 +224,8 @@ def test_nightly_with_a_settle_lag_grades_settled_decks_as_of_last_served_plus_l
     for record in load_runs():
         assert record["as_of"] == as_of and record["settle_lag_days"] == 7
         assert record["n_total"] == 2 * 30                       # "fresh" isn't settled yet
-        assert len(record["config"]["model_config_sha256"]) == 64
+        if record["scorer"] == "value_model":                    # the one scorer with config
+            assert set(record["config"]["values"]) == set(vm.SCORE_CONFIG)
+            assert len(record["config"]["model_config_sha256"]) == 64
+        else:
+            assert record["config"] is None

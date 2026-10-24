@@ -88,14 +88,16 @@ served at its position.
 
 EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
 verdict() and render_report() say so when runs graded under different rules
-are compared (R2.5 (2)). The model_config a run read is pinned and recorded
-on EvalRun.config (R5.2 (a)); the read's as_of and settle lag are chosen by
+are compared (R2.5 (2)). The model_config a scorer reads is pinned, passed
+to it explicitly (get_scorer(name, config=...)) and recorded on
+EvalRun.config (R5.2 (a)); the read's as_of and settle lag are chosen by
 settled_read (R5.2 (b)).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import random
@@ -271,26 +273,13 @@ def evaluate(
     bootstrap: int = DEFAULT_BOOTSTRAP,
     seed: int = 0,
     curve: dict[int, float] | None = None,
-    config: dict | None = None,
 ) -> EvalRun:
     """Replay `decks` under `scorer`. Enforces the time-ordered protocol:
     a fit-capable scorer requires eval_start, is fitted on pre-split decks
-    only, and is evaluated on post-split decks only.
-
-    `config` pins the model_config a scorer reads (value_model's V-vector,
-    a value_model.pin_config(SCORE_CONFIG) record, R5.2 (a)): given, the
-    run reads it and never live model_config; omitted, the live values are
-    pinned now. Either way it is recorded on EvalRun.config, so a replay
-    with the recorded config reproduces the run."""
-    config = config if config is not None else _value_model.pin_config(_value_model.SCORE_CONFIG)
-    with _value_model.pinned(config):
-        run = _evaluate(scorer, decks, eval_start=eval_start, ess_min=ess_min,
-                        bootstrap=bootstrap, seed=seed, curve=curve)
-    run.config = config
-    return run
-
-
-def _evaluate(scorer, decks, *, eval_start, ess_min, bootstrap, seed, curve) -> EvalRun:
+    only, and is evaluated on post-split decks only. The scorer's pinned
+    model_config (`scorer.config`, set by get_scorer(name, config=...);
+    R5.2 (a)) is recorded on EvalRun.config, so building the scorer with
+    the recorded config replays the run."""
     fit_capable = hasattr(scorer, "fit")
     if fit_capable and not eval_start:
         raise ValueError(
@@ -317,6 +306,7 @@ def _evaluate(scorer, decks, *, eval_start, ess_min, bootstrap, seed, curve) -> 
         exposure_positions=len(curve),
         eval_start=eval_start,
         ess_min=ess_min,
+        config=getattr(scorer, "config", None),
     )
 
     # weights/rewards per deck (bootstrap clusters)
@@ -601,6 +591,8 @@ def main(argv=None) -> int:
                     help="without --as-of: read decks served before now minus this lag "
                          "(or --until), with as_of = the window's last served_at plus "
                          f"the lag, so late outcomes are in (default {DEFAULT_SETTLE_LAG_DAYS:g})")
+    ap.add_argument("--config", help="a recorded run's `config` (JSON) to replay it under; "
+                                     "default: pin the live model_config once for this run")
     ap.add_argument("--user", help="restrict to one user_id")
     ap.add_argument("--league", help="restrict to one league_id")
     ap.add_argument("--ess-min", type=float, default=DEFAULT_ESS_MIN,
@@ -645,17 +637,19 @@ def main(argv=None) -> int:
         return 0 if ok else 1
 
     scorer_names = args.scorer or ["base_score", "random"]
-    config = _value_model.pin_config(_value_model.SCORE_CONFIG)   # one pin for every run
-    baseline = evaluate(get_scorer(args.baseline), decks,
+    # One pin for every scorer in the run: a recorded one to replay, else live now.
+    config = (json.loads(args.config) if args.config
+              else _value_model.pin_config(_value_model.SCORE_CONFIG))
+    baseline = evaluate(get_scorer(args.baseline, config=config), decks,
                         eval_start=args.eval_start, ess_min=args.ess_min,
-                        bootstrap=args.bootstrap, seed=args.seed, config=config)
+                        bootstrap=args.bootstrap, seed=args.seed)
     runs = [baseline]
     for name in scorer_names:
         if name == args.baseline:
             continue
-        runs.append(evaluate(get_scorer(name, seed=args.seed), decks,
+        runs.append(evaluate(get_scorer(name, seed=args.seed, config=config), decks,
                              eval_start=args.eval_start, ess_min=args.ess_min,
-                             bootstrap=args.bootstrap, seed=args.seed, config=config))
+                             bootstrap=args.bootstrap, seed=args.seed))
     report = render_report(runs, baseline)
     print(report)
 

@@ -43,8 +43,9 @@ on a head applies the Monolith log-odds correction
 
 The V-vector — strategy, not learning (PRD §2): hand-set values read
 LIVE from model_config at serving time (changeable without retraining);
-an eval pins them once per run and records them (replay.evaluate,
-pinned(); models-lead R5.2 (a)):
+an eval pins them once per run, records them, and passes them to
+rank_score explicitly (the value_model scorer takes the pin as a
+constructor argument; models-lead R5.2 (a)):
 
     rank_score = P(like)·V_like + P(like)·P(propose|like)·V_propose
     V_like     = model_config value_model_v_like     (default 1.0)
@@ -74,9 +75,7 @@ import json
 import logging
 import math
 import os
-import threading
 import uuid
-from contextlib import contextmanager
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
@@ -98,11 +97,7 @@ def _cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (the
     taste_service._cfg pattern — inline defaults, so a missing key can
     never break scoring or the refit; keys documented in
-    docs/config-reference.md §F6). Inside pinned(config), a pinned key
-    answers from the pin and live model_config is not read."""
-    values = getattr(_pin, "values", None)
-    if values is not None and key in values:
-        return float(values[key])
+    docs/config-reference.md §F6)."""
     try:
         from .trade_service import _cfg as _ts_cfg
         return float(_ts_cfg.get(key, default))
@@ -114,14 +109,15 @@ def _cfg(key: str, default: float) -> float:
 # Configuration is pinned and recorded per run (models-lead R5.2 (a)). A fit
 # reads FIT_CONFIG and an eval of rank_score reads SCORE_CONFIG; each pins the
 # values once (pin_config), records them with the SHA-256 of the whole live
-# model_config, and a refit or replay passes a recorded pin back explicitly.
+# model_config, and a refit or replay passes a recorded pin back explicitly:
+# train_model(config=...), rank_score(v_values=...), and the value_model
+# scorer's constructor. Only live serving reads the V-vector live.
 # ---------------------------------------------------------------------------
 
 FIT_CONFIG = {"value_model_calib_frac": 0.2, "value_model_l2": 0.01,
               "value_model_l2_cat": 0.5}
 SCORE_CONFIG = {"value_model_v_like": V_LIKE_DEFAULT,
                 "value_model_v_propose": V_PROPOSE_DEFAULT}
-_pin = threading.local()
 
 
 def model_config_sha256() -> str:
@@ -141,18 +137,6 @@ def pin_config(keys: dict) -> dict:
     or an eval keeps and a refit or replay passes back."""
     return {"values": {k: _cfg(k, d) for k, d in keys.items()},
             "model_config_sha256": model_config_sha256()}
-
-
-@contextmanager
-def pinned(config: dict):
-    """Within the block, on this thread, _cfg answers config["values"]'s
-    keys from the pin, never from live model_config."""
-    prev = getattr(_pin, "values", None)
-    _pin.values = {**(prev or {}), **config["values"]}
-    try:
-        yield
-    finally:
-        _pin.values = prev
 
 
 def models_path() -> str:
@@ -494,15 +478,19 @@ class ValueModel:
             extract_features(self._inject(f, user_id)))
 
     # -- the V-vector (strategy layer — live model_config reads) -------------
-    def rank_score(self, f: dict, user_id) -> float:
-        v_like = _cfg("value_model_v_like", V_LIKE_DEFAULT)
-        v_prop = _cfg("value_model_v_propose", V_PROPOSE_DEFAULT)
+    def rank_score(self, f: dict, user_id, *, v_values: dict | None = None) -> float:
+        """v_values: a pinned SCORE_CONFIG values dict (an eval passes the
+        one it recorded). None: read the V-vector live (serving only)."""
+        if v_values is None:
+            v_values = {k: _cfg(k, d) for k, d in SCORE_CONFIG.items()}
+        v_like = float(v_values["value_model_v_like"])
+        v_prop = float(v_values["value_model_v_propose"])
         pl = self.p_like(f, user_id)
         return pl * v_like + pl * self.p_propose_given_like(f, user_id) * v_prop
 
     # -- card-dict entry points (F8 scorer: user_id rides the card dict) -----
-    def rank_score_from_card(self, card: dict) -> float:
-        return self.rank_score(card, card.get("user_id"))
+    def rank_score_from_card(self, card: dict, *, v_values: dict | None = None) -> float:
+        return self.rank_score(card, card.get("user_id"), v_values=v_values)
 
     def p_like_from_card(self, card: dict) -> float:
         return self.p_like(card, card.get("user_id"))
