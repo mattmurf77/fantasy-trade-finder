@@ -1,7 +1,9 @@
 """Referral loop D-1 — device-aware install CTA on the join and share landings.
 
-Spec: docs/plans/referral-loop/prd.md @ 9adbf4ce (§5, J2, FR-7, FR-8, §8.2,
-§10, §11) and engagement-eng's D-1 design (§0 rulings, §7 evidence plan).
+Spec: docs/plans/referral-loop/prd.md @ 1514bc4e (§5, J2, FR-7, FR-8, FR-25,
+§8.2, §10, §11), the event contract (PR #350) and engagement-eng's D-1 design
+(§0 / §0b rulings, §7 evidence plan). Event-registry checks (#350
+Verification) live in test_analytics_taxonomy_referral_loop.py.
 
 What is pinned here (D-056 evidence; the 302's own contract stays in
 test_invite_links.py T4–T7, which must pass unmodified):
@@ -95,18 +97,33 @@ PREVIEW_UA = {
                   "+http://www.google.com/bot.html)"),
     "crawler": "SomeCrawler/3.1",
     "spider": "Baiduspider/2.0",
+    "applebot": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) "
+                 "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 "
+                 "Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)"),
+    "preview": "Mozilla/5.0 (compatible; SkypeUriPreview Preview/0.5)",
 }
 
-# Lines from marketing-lead's proposed gp.join.* table (verbatim).
+# Lines from marketing-lead's proposed gp.join.* strings (verbatim, as
+# HTML-escaped on the page). Pending the operator's approval (D-5).
 IOS_CTA = "Get the iOS beta"
 IOS_HELP = "Installs through Apple&#x27;s TestFlight app."
+STEP1 = "Install Fleeced"
+STEP2 = f"Tap the invite again, or rescan its code, to join {LEAGUE_NAME}."
 WEB_CTA = "Open the web app"
 WEB_HELP = "Sign-in uses the Fleeced extension for Chrome or Edge."
-IOS_SECONDARY = "On an iPhone or iPad?"
+QR_TITLE = "Join on your iPhone"
+QR_HELP = "Scan with your iPhone camera. After installing, scan again to join."
+QR_LABEL = "QR code: opens this invite on your iPhone"
+IPAD = "On an iPad? Get the iOS beta, then tap the invite again."
+EXT_LEAD = "Have the Fleeced extension for Chrome or Edge?"
 A2_NOTE = ("The iPhone beta isn&#x27;t open to the public yet. Already have "
-           "it? Open the invite in the app.")
-SHARE_IOS_NOTE = "The iPhone beta isn&#x27;t open to the public yet."
+           "it? Tap the invite again, or rescan its code.")
+SHARE_IOS_NOTE = ("The iPhone beta isn&#x27;t open to the public yet. Already "
+                  "have it? Open Fleeced.")
 ANDROID_NOTE = "Fleeced runs on iPhone and desktop web for now."
+# Gone in round 2 (must never render again).
+OLD_STRINGS = ("On an iPhone or iPad?", "Installed? Go back to the chat",
+               "Open the invite in the app")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -242,7 +259,8 @@ def test_preview_token_constant_covers_the_named_fetchers():
     tokens = {t.lower() for t in server.PREVIEW_UA_TOKENS}
     for need in ("facebookexternalhit", "twitterbot", "slackbot",
                  "slack-imgproxy", "discordbot", "whatsapp", "telegrambot",
-                 "linkedinbot", "bot", "crawler", "spider"):
+                 "applebot", "linkedinbot", "bot", "crawler", "spider",
+                 "preview"):
         assert need in tokens, need
 
 
@@ -309,31 +327,40 @@ def test_flag_off_302_drops_a_malformed_t(monkeypatch, bad):
 # Join route, flag ON — the landing
 # ═══════════════════════════════════════════════════════════════════════════
 
-# (UA key, URL set?) → which of the CTA pieces render. AC-7c.
+# (UA key, URL set?) → which of the CTA pieces render. AC-7c (round 2).
+A1 = {"step1", "ios_btn", "ios_help", "step2"}
+DESKTOP_QR = {"qr", "qr_title", "qr_help", "ipad", "ext_lead", "web_secondary"}
+DESKTOP_PLAIN = {"web_primary", "web_help"}
 CTA_MATRIX = [
-    ("iphone",         True,  {"ios_btn", "ios_help", "retap"}),
+    ("iphone",         True,  A1),
     ("iphone",         False, {"a2"}),
-    ("ipod",           True,  {"ios_btn", "ios_help", "retap"}),
+    ("ipod",           True,  A1),
     ("ipad_legacy",    False, {"a2"}),
     ("android",        True,  {"android"}),
     ("android",        False, {"android"}),
     ("other_mobile",   True,  {"android"}),
     ("other_mobile",   False, {"android"}),
-    ("desktop_chrome", True,  {"web_btn", "web_help", "ios_secondary"}),
-    ("desktop_chrome", False, {"web_btn", "web_help"}),
-    ("ipados_desktop", True,  {"web_btn", "web_help", "ios_secondary"}),
-    ("ipados_desktop", False, {"web_btn", "web_help"}),
+    ("desktop_chrome", True,  DESKTOP_QR),
+    ("desktop_chrome", False, DESKTOP_PLAIN),
+    ("ipados_desktop", True,  DESKTOP_QR),
+    ("ipados_desktop", False, DESKTOP_PLAIN),
 ]
 
 PIECES = {
-    "ios_btn": IOS_CTA,
+    "step1": f'<h2 class="step-title">{STEP1}</h2>',
+    "ios_btn": f">{IOS_CTA}</a>",
     "ios_help": IOS_HELP,
-    "retap": "Installed? Go back to the chat and tap the invite again",
+    "step2": STEP2,
     "a2": A2_NOTE,
     "android": ANDROID_NOTE,
-    "web_btn": WEB_CTA,
+    "web_primary": f'class="primary" href="/app/league/join/{LEAGUE}/go/web"',
     "web_help": WEB_HELP,
-    "ios_secondary": IOS_SECONDARY,
+    "qr": '<svg class="qr"',
+    "qr_title": f'<p class="tick-label">{QR_TITLE}</p>',
+    "qr_help": QR_HELP,
+    "ipad": IPAD,
+    "ext_lead": EXT_LEAD,
+    "web_secondary": f'class="btn-secondary" href="/app/league/join/{LEAGUE}/go/web"',
 }
 
 
@@ -347,15 +374,167 @@ def test_landing_cta_matrix(monkeypatch, ua_key, url_set, expected):
     html = r.get_data(as_text=True)
     for piece, needle in PIECES.items():
         assert (needle in html) is (piece in expected), (ua_key, url_set, piece)
-    # One primary action per device state, never more.
-    assert html.count('class="primary"') == (1 if expected & {"ios_btn", "web_btn"} else 0)
-    # The /go/ios path renders only when the URL is set (unset: it 404s).
-    assert ("/go/ios" in html) is bool(url_set and expected & {"ios_btn", "ios_secondary"})
-    assert ("/go/web" in html) is ("web_btn" in expected)
-    # Never a dtf:// link, never a TestFlight-request link, never the URL itself.
+    # At most one ice-filled button per state, and none in the desktop QR state.
+    assert html.count('class="primary"') == (
+        1 if expected & {"ios_btn", "web_primary"} else 0)
+    # /go/ios renders only when the URL is set (unset: it 404s).
+    assert ("/go/ios" in html) is bool(url_set and expected & {"ios_btn", "ipad"})
+    assert ("/go/web" in html) is bool(expected & {"web_primary", "web_secondary"})
+    # Never a dtf:// link, a TestFlight-request link, the URL itself, or a
+    # round-1 string.
     assert "dtf://" not in html
     assert "contact.html" not in html and "Request TestFlight" not in html
     assert IOS_URL not in html
+    for old in OLD_STRINGS:
+        assert old not in html, old
+
+
+def test_a1_is_a_two_row_step_list(monkeypatch):
+    """AC-7c: step 1 holds the heading, the ice button and its help line;
+    step 2 is text with no link or button; Plex Mono markers in chalk-dim,
+    one --line hairline between the rows, no card per step."""
+    _set_flags(monkeypatch, *LANDING)
+    monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
+    html = _get(f"/app/league/join/{LEAGUE}", ua=UA["iphone"]).get_data(as_text=True)
+    steps = html.split('<ol class="steps">', 1)[1].split("</ol>", 1)[0]
+    rows = steps.split("<li>")[1:]
+    assert len(rows) == 2
+    assert '<span class="marker">1</span>' in rows[0]
+    assert STEP1 in rows[0] and f">{IOS_CTA}</a>" in rows[0] and IOS_HELP in rows[0]
+    assert '<span class="marker">2</span>' in rows[1] and STEP2 in rows[1]
+    assert "<a" not in rows[1] and "<button" not in rows[1]
+    assert (".marker{font:500 13px/22px var(--font-data);"
+            "font-variant-numeric:tabular-nums;color:var(--chalk-dim)}") in html
+    assert ".steps li+li{border-top:1px solid var(--line)}" in html
+
+
+def test_a1_step2_falls_back_without_a_league_name(monkeypatch):
+    _set_flags(monkeypatch, *LANDING)
+    monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
+    monkeypatch.setattr(server, "_fetch_sleeper_league_meta", lambda lid: None)
+    html = _get(f"/app/league/join/{LEAGUE}", ua=UA["iphone"]).get_data(as_text=True)
+    assert "Tap the invite again, or rescan its code, to join your league." in html
+
+
+# ── The desktop QR (R-F3, AC-7c, AC-7f) ────────────────────────────────────
+
+def _spy_segno(monkeypatch):
+    calls = []
+    real = server._segno.make
+
+    def _make(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(server._segno, "make", _make)
+    return calls
+
+
+def _desktop_qr(monkeypatch, query="", **kw):
+    _set_flags(monkeypatch, *LANDING)
+    monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
+    calls = _spy_segno(monkeypatch)
+    r = _client().get(f"/app/league/join/{LEAGUE}{query}",
+                      headers={"User-Agent": UA["desktop_chrome"]}, **kw)
+    return r.get_data(as_text=True), calls
+
+
+@pytest.mark.parametrize("query,payload_query", [
+    (f"?t={T_VALID}", f"?t={T_VALID}"),
+    ("?ref=matt", "?ref=matt"),
+    (f"?t={T_VALID}&ref=matt", f"?t={T_VALID}"),
+    ("?t=bad!&ref=matt", "?ref=matt"),
+    ("", ""),
+    (f"?t={T_VALID}&utm_source=x&next=https://evil.example&url=//evil", f"?t={T_VALID}"),
+])
+def test_qr_payload_is_the_closed_contract_join_url(monkeypatch, query,
+                                                    payload_query):
+    """AC-7f: the encoder gets EC M (no boost, no micro) and the join URL
+    rebuilt from the closed contract — https, the request host, `t` (or
+    `ref` only without one), nothing else — never the raw request URL."""
+    html, calls = _desktop_qr(monkeypatch, query,
+                              base_url="http://fleeced.example")
+    assert len(calls) == 1
+    (payload,), kwargs = calls[0]
+    assert payload == (f"https://fleeced.example/app/league/join/{LEAGUE}"
+                       + payload_query)
+    assert kwargs == {"error": "m", "micro": False, "boost_error": False}
+    assert '<svg class="qr"' in html
+
+
+def _svg(html):
+    m = re.search(r'<svg class="qr" width="(\d+)" height="(\d+)" '
+                  r'viewBox="0 0 (\d+) (\d+)" shape-rendering="crispEdges" '
+                  r'role="img" aria-label="([^"]+)"><path d="([^"]+)"/></svg>', html)
+    assert m, "QR svg not in the expected shape"
+    w, h, vw, vh, label, d = m.groups()
+    return int(w), int(h), int(vw), int(vh), label, d
+
+
+def _run_bounds(d):
+    """(min x, min y, max x-end, max y-end) of the dark-module runs."""
+    runs = [tuple(int(v) for v in r) for r in re.findall(r"M(\d+) (\d+)h(\d+)v1h-\d+z", d)]
+    assert runs
+    return (min(x for x, _, _ in runs), min(y for _, y, _ in runs),
+            max(x + n for x, _, n in runs), max(y for _, y, _ in runs) + 1)
+
+
+def test_qr_svg_shape_size_and_quiet_zone(monkeypatch):
+    """AC-7f: inline <svg>, crispEdges, accessible name, whole-pixel modules
+    >= 4 px, >= 200 px overall, a 4-module quiet zone, dark modules on the
+    chalk panel (never inverted)."""
+    import segno
+    html, _ = _desktop_qr(monkeypatch, f"?t={T_VALID}")
+    w, h, vw, vh, label, d = _svg(html)
+    assert label == QR_LABEL
+    assert w == h and vw == vh and w % vw == 0
+    module_px = w // vw
+    assert module_px >= 4 and w >= 200
+    payload = f"https://localhost/app/league/join/{LEAGUE}?t={T_VALID}"
+    qr = segno.make(payload, error="m", micro=False, boost_error=False)
+    assert qr.error == "M"
+    assert vw == qr.symbol_size(scale=1, border=0)[0] + 8
+    x0, y0, x1, y1 = _run_bounds(d)
+    assert x0 >= 4 and y0 >= 4 and x1 <= vw - 4 and y1 <= vw - 4
+    assert ".qr{display:block;background:var(--chalk);border-radius:var(--r-sm)}" in html
+    assert ".qr path{fill:var(--ink-0)}" in html
+
+
+@pytest.mark.parametrize("league_id,version,module_px,px", [
+    ("1" * 19, 6, 5, 245),        # today's 92-byte URL (19-digit Sleeper id)
+    ("12345", 5, 5, 225),         # a 5-digit MFL id: 78 bytes
+    ("9" * 40, 7, 4, 212),        # 113 bytes: version 7 grows at 4 px modules
+])
+def test_qr_sizing_rule(league_id, version, module_px, px):
+    """design-lead's density rule: (modules + 8) x a whole-pixel module, the
+    smallest of >= 4 px that reaches 200 px; version 7+ stays at 4 px."""
+    import segno
+    payload = (f"https://fantasy-trade-finder.onrender.com/app/league/join/"
+               f"{league_id}?t={'A' * 12}")
+    assert segno.make(payload, error="m", micro=False,
+                      boost_error=False).version == version
+    w, _, vw, _, _, _ = _svg(server._qr_svg(payload))
+    assert (w // vw, w) == (module_px, px)
+    assert vw == 17 + 4 * version + 8
+
+
+def test_qr_desktop_layout_order_and_no_other_host(monkeypatch):
+    """AC-7c order: the TickLabel-headed QR block (scan line, iPad ghost link
+    inside it) first, then the extension line and the Secondary button.
+    AC-7f: no <img>/<script>; the only third-party host is Google Fonts."""
+    html, _ = _desktop_qr(monkeypatch, f"?t={T_VALID}")
+    block = html.split('<section class="qr-block">', 1)[1].split("</section>", 1)[0]
+    assert block.index(QR_TITLE) < block.index("<svg") < block.index(QR_HELP) \
+        < block.index(IPAD)
+    assert (f'<a class="ghost" href="/app/league/join/{LEAGUE}/go/ios?t={T_VALID}">'
+            f'{IPAD}</a>') in block
+    tail = html.split("</section>", 1)[1]
+    assert tail.index(EXT_LEAD) < tail.index('class="btn-secondary"')
+    assert "<img" not in html and "<script" not in html
+    hosts = set(re.findall(r"https?://([^/\"'\s>]+)", html))
+    assert hosts <= {"fonts.googleapis.com", "fonts.gstatic.com", "localhost"}, hosts
+    assert ".ghost{display:inline-flex;align-items:center;min-height:44px" in html
+    assert ("border:1px solid var(--line-strong);border-radius:var(--r-sm)"
+            in html)   # the Secondary button
 
 
 def test_landing_headers_and_og(monkeypatch):
@@ -490,6 +669,9 @@ def test_landing_onward_links_carry_t_not_ref(monkeypatch):
     assert f'href="/app/league/join/{LEAGUE}/go/web?t={T_VALID}"' in html
     assert f'href="/app/league/join/{LEAGUE}/go/ios?t={T_VALID}"' in html
     assert "matt" not in html
+    html = _get(f"/app/league/join/{LEAGUE}?t={T_VALID}&ref=matt",
+                ua=UA["iphone"]).get_data(as_text=True)
+    assert f'href="/app/league/join/{LEAGUE}/go/ios?t={T_VALID}"' in html
 
 
 def test_landing_encodes_hostile_league_ids(monkeypatch):
@@ -589,27 +771,42 @@ def test_every_go_location_is_relative_or_exactly_the_install_url(monkeypatch):
 
 
 def test_go_fires_invite_landing_cta(monkeypatch, env):
-    _set_flags(monkeypatch, *LANDING)
+    _set_flags(monkeypatch, *BOTH)
     monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
     _seed(env)
     _get(f"/app/league/join/{LEAGUE}/go/ios?t={T_VALID}", ua=UA["iphone"])
-    _get(f"/app/league/join/{LEAGUE}/go/web?ref=matt")
+    _get(f"/app/league/join/{LEAGUE}/go/web?ref=mattref")
+    _get(f"/app/league/join/{LEAGUE}/go/web?ref=nobody")
+    _get(f"/app/league/join/{LEAGUE}/go/web?t={T_MISMATCH}")
     rows = _events(env, "invite_landing_cta")
-    assert len(rows) == 2
-    ios, web = rows
-    assert ios["user_id"] == REFERRER          # valid t → the inviter owns it
+    assert len(rows) == 4
+    ios, web_ref, web_nobody, web_mismatch = rows
+    assert ios["user_id"] == REFERRER            # t names a row → its referrer
     assert json.loads(ios["props"]) == {
         "invite_id": T_VALID, "league_id": LEAGUE, "cta": "ios_install",
         "device_class": "ios"}
-    assert web["user_id"] == "system:invite"   # no t → system owner
-    assert json.loads(web["props"]) == {
+    assert web_ref["user_id"] == REFERRER        # no t → the user ref resolves to
+    assert json.loads(web_ref["props"]) == {
         "league_id": LEAGUE, "cta": "web_app", "device_class": "desktop"}
+    assert web_nobody["user_id"] == "system:invite"
+    assert web_mismatch["user_id"] == REFERRER   # any status with a row
     for row in rows:
         assert row["platform"] == "server"
         assert row["league_id"] == LEAGUE
     # C6: the inviter's users row did not move.
     u = _user(env)
     assert u["last_active_at"] == PRIOR_ACTIVE and u["events_count"] == 5
+
+
+def test_go_fires_nothing_while_the_ledger_is_off(monkeypatch, env):
+    """#350 "Takes effect": invite_landing_cta needs the ledger flag too."""
+    _set_flags(monkeypatch, *LANDING)
+    monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
+    _seed(env)
+    assert _get(f"/app/league/join/{LEAGUE}/go/ios?t={T_VALID}",
+                ua=UA["iphone"]).status_code == 302
+    assert _get(f"/app/league/join/{LEAGUE}/go/web?ref=mattref").status_code == 302
+    assert _events(env) == []
 
 
 def test_go_records_nothing_for_head_or_previews(monkeypatch, env):
@@ -619,8 +816,8 @@ def test_go_records_nothing_for_head_or_previews(monkeypatch, env):
     for cta in ("ios", "web"):
         url = f"/app/league/join/{LEAGUE}/go/{cta}?t={T_VALID}"
         assert _get(url, method="HEAD").status_code == 302
-        assert _get(url, ua=PREVIEW_UA["imessage"]).status_code == 302
-        assert _get(url, ua=None).status_code == 302
+        for ua in list(PREVIEW_UA.values()) + [None]:
+            assert _get(url, ua=ua).status_code == 302
     assert _events(env) == []
 
 
@@ -704,20 +901,83 @@ def test_nothing_records_while_the_ledger_is_off(monkeypatch, env, flags):
     assert _events(env) == []
 
 
-def test_nothing_records_without_a_well_formed_t(monkeypatch, env):
-    _set_flags(monkeypatch, *BOTH)
+@pytest.mark.parametrize("flags", [LEDGER, BOTH])
+def test_t_less_human_get_fires_with_null_status(monkeypatch, env, flags):
+    """R1 / AC-8: with the ledger on, EVERY human GET fires the event; with no
+    well-formed `t`, invite_status is null and invite_id is omitted, and no
+    row is stamped."""
+    _set_flags(monkeypatch, *flags)
     _seed(env)
-    for q in ("", "?ref=matt", "?t=short", f"?t={T_VALID}%0A", f"?t={T_VALID}!"):
+    queries = ("", "?ref=nobody", "?t=short", f"?t={T_VALID}%0A", f"?t={T_VALID}!")
+    for q in queries:
         _get(f"/app/league/join/{LEAGUE}{q}", ua=UA["iphone"])
     assert _referral(env, T_VALID)["open_count"] == 0
+    rows = _events(env, "invite_landing_opened")
+    assert len(rows) == len(queries)
+    for e in rows:
+        assert e["user_id"] == "system:invite"
+        assert json.loads(e["props"]) == {
+            "league_id": LEAGUE, "invite_status": None, "device_class": "ios"}
+
+
+@pytest.mark.parametrize("flags", [LEDGER, BOTH])
+def test_preview_without_t_records_nothing(monkeypatch, env, flags):
+    _set_flags(monkeypatch, *flags)
+    _seed(env)
+    for ua in list(PREVIEW_UA.values()) + [None]:
+        _get(f"/app/league/join/{LEAGUE}?ref=mattref", ua=ua)
     assert _events(env) == []
+
+
+@pytest.mark.parametrize("query,owner", [
+    ("?ref=mattref", REFERRER),                     # ref resolves by username
+    ("?ref=MattRef", REFERRER),                     # case-insensitive, as session init
+    (f"?t={T_UNKNOWN}&ref=mattref", REFERRER),      # no row → fall back to ref
+    ("?ref=nobody", "system:invite"),
+    ("", "system:invite"),
+])
+def test_owner_falls_back_to_the_legacy_ref(monkeypatch, env, query, owner):
+    _set_flags(monkeypatch, *LEDGER)
+    _seed(env)
+    with env.begin() as conn:      # a second user, owner of nothing here
+        conn.execute(insert(users_table).values(
+            sleeper_user_id="u_other", username="otheruser",
+            last_active_at=PRIOR_ACTIVE, events_count=1))
+    before = _user(env)
+    _get(f"/app/league/join/{LEAGUE}{query}", ua=UA["android"])
+    (e,) = _events(env, "invite_landing_opened")
+    assert e["user_id"] == owner
+    assert _user(env) == before                     # C6 for a ref-resolved owner
+
+
+def test_row_referrer_wins_over_ref(monkeypatch, env):
+    _set_flags(monkeypatch, *LEDGER)
+    _seed(env)
+    with env.begin() as conn:
+        conn.execute(insert(users_table).values(
+            sleeper_user_id="u_other", username="otheruser"))
+    _get(f"/app/league/join/{LEAGUE}?t={T_EXPIRED}&ref=otheruser", ua=UA["android"])
+    (e,) = _events(env, "invite_landing_opened")
+    assert e["user_id"] == REFERRER
+
+
+def test_ref_owner_lookup_failure_never_fails_the_join(monkeypatch, env):
+    _set_flags(monkeypatch, *BOTH)
+
+    def _boom(_u):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(server, "get_user_by_username", _boom)
+    r = _get(f"/app/league/join/{LEAGUE}?ref=mattref", ua=UA["iphone"])
+    assert r.status_code == 200
+    (e,) = _events(env, "invite_landing_opened")
+    assert e["user_id"] == "system:invite"
 
 
 @pytest.mark.parametrize("flags", [LEDGER, BOTH])
 @pytest.mark.parametrize("tok,status,owner,touched", [
     (T_VALID, "valid", REFERRER, True),
-    (T_EXPIRED, "expired", "system:invite", True),
-    (T_MISMATCH, "league_mismatch", "system:invite", False),
+    (T_EXPIRED, "expired", REFERRER, True),          # owner: the row's referrer,
+    (T_MISMATCH, "league_mismatch", REFERRER, False),  # whatever its status
     (T_UNKNOWN, "unknown", "system:invite", False),
 ])
 def test_invite_status_and_owner(monkeypatch, env, flags, tok, status, owner,
@@ -750,7 +1010,7 @@ def test_league_mismatch_never_stamps_the_row(monkeypatch, env, flags):
     assert after["opened_at"] is None and after["last_opened_at"] is None
     assert after["open_count"] == 0 and after["unfurled_at"] is None
     (e,) = _events(env, "invite_landing_opened")
-    assert e["user_id"] == "system:invite"
+    assert e["user_id"] == REFERRER
     assert json.loads(e["props"])["invite_status"] == "league_mismatch"
 
 
@@ -866,6 +1126,60 @@ def test_record_event_touch_user_false_writes_only_the_event(env):
     assert _user(env, "u_quiet") == before
 
 
+def test_record_event_rank_call_shape_is_unchanged(env):
+    """R2-9 / head-eng condition: today's rank-event call shape (tz, session,
+    source, props) writes the same user_events row (platform NULL), the same
+    users denorm update and the same streak result as before the kwargs."""
+    from zoneinfo import ZoneInfo
+    with env.begin() as conn:
+        conn.execute(insert(users_table).values(
+            sleeper_user_id="u_rank2", last_active_at=PRIOR_ACTIVE,
+            events_count=4))
+    tz = "America/New_York"
+    out = db_module.record_event("u_rank2", "trio_swipe", league_id="L9",
+                                 session_id="sess-abc", source="mobile",
+                                 props={"n": 3}, tz=tz)
+    today = datetime.now(ZoneInfo(tz)).date().isoformat()
+    assert out == {"current": 1, "longest": 1, "last_rank_local_date": today}
+    (row,) = _events(env)
+    assert {k: v for k, v in row.items() if v is not None} == {
+        "id": row["id"], "user_id": "u_rank2", "event_type": "trio_swipe",
+        "occurred_at": row["occurred_at"], "league_id": "L9",
+        "session_id": db_module.analytics_session_id("sess-abc"),
+        "source": "mobile", "props": '{"n": 3}'}
+    u = _user(env, "u_rank2")
+    assert u["last_active_at"] == u["last_rank_at"] == row["occurred_at"]
+    assert u["events_count"] == 5
+    assert (u["current_streak"], u["longest_streak"]) == (1, 1)
+    # Same local day again: the streak holds and the result says so.
+    again = db_module.record_event("u_rank2", "trio_swipe", tz=tz)
+    assert again == {"current": 1, "longest": 1, "last_rank_local_date": today}
+    assert _user(env, "u_rank2")["events_count"] == 6
+
+
+def test_record_event_device_header_call_shape_is_unchanged(env):
+    """R2-9: a non-rank event with device headers writes the device snapshot
+    on the row and on users, bumps the pointer column, returns None."""
+    with env.begin() as conn:
+        conn.execute(insert(users_table).values(
+            sleeper_user_id="u_dev", last_active_at=PRIOR_ACTIVE, events_count=0))
+    out = db_module.record_event("u_dev", "login", device_type="iphone",
+                                 os_version="18.1", app_version="1.13.2",
+                                 source="mobile")
+    assert out is None
+    (row,) = _events(env)
+    assert {k: v for k, v in row.items() if v is not None} == {
+        "id": row["id"], "user_id": "u_dev", "event_type": "login",
+        "occurred_at": row["occurred_at"], "device_type": "iphone",
+        "os_version": "18.1", "app_version": "1.13.2", "source": "mobile"}
+    assert row["platform"] is None
+    u = _user(env, "u_dev")
+    assert u["last_active_at"] == u["last_login_at"] == row["occurred_at"]
+    assert (u["last_device_type"], u["last_os_version"], u["last_app_version"]) == (
+        "iphone", "18.1", "1.13.2")
+    assert u["events_count"] == 1
+
+
 def test_record_event_platform_insert_is_unchanged_by_default(env, monkeypatch):
     """Byte-identical default: the INSERT names no `platform` column unless a
     caller passes one, so every existing call site emits the statement it
@@ -971,7 +1285,10 @@ def test_share_headers_and_href_flag_off(monkeypatch, env):
             html = r.get_data(as_text=True)
             assert (f'<a class="cta" href="/?share={kind}">{labels[kind]}</a>'
                     in html), (kind, ua)
-            assert IOS_CTA not in html and ANDROID_NOTE not in html
+            # AC-25 gate off: today's label, no help line, no note.
+            for absent in (IOS_CTA, ANDROID_NOTE, SHARE_IOS_NOTE, WEB_HELP,
+                           IOS_HELP):
+                assert absent not in html, (kind, absent)
             assert "dtf://" not in html
 
 
@@ -999,8 +1316,12 @@ def test_share_cta_matrix_flag_on(monkeypatch, env, ua_key, url_set, expect):
         assert (IOS_HELP in html) is (expect == "ios")
         assert (SHARE_IOS_NOTE in html) is (expect == "ios_note")
         assert (ANDROID_NOTE in html) is (expect == "android")
+        assert (f"<p>{WEB_HELP}</p>" in html) is (expect == "button")
         assert html.count('class="cta"') == (1 if expect in ("button", "ios") else 0)
         assert "dtf://" not in html and "contact.html" not in html
+        # FR-25: no re-tap line (a share page carries no invite), no QR (GB-02).
+        assert "Tap the invite again" not in html and "rescan" not in html
+        assert "<svg" not in html
 
 
 def test_share_trade_page_keeps_its_chrome(monkeypatch):

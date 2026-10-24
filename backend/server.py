@@ -12692,11 +12692,15 @@ def terms_page():
 # ---------------------------------------------------------------------------
 # Join path — referral loop D-1: the device-aware install CTA
 # ---------------------------------------------------------------------------
-# Spec: docs/plans/referral-loop/prd.md §5, FR-7, FR-8, §8.2 (branch
-# plan/referral-loop @ 9adbf4ce) and engagement-eng's D-1 design. Helpers for
-# GET /app/league/join/<id>, its /go/<cta> click-through, and the /s/* CTA.
-# They sit beside the route rather than in a module of their own (design §0).
+# Spec: docs/plans/referral-loop/prd.md §5, FR-7, FR-8, FR-25, §8.2 (branch
+# plan/referral-loop @ 1514bc4e), the event contract
+# docs/business/analytics/2026-10-15-referral-loop-events.md (PR #350) and
+# engagement-eng's D-1 design (§0, §0b). Helpers for GET /app/league/join/<id>,
+# its /go/<cta> click-through, and the /s/* CTA. They sit beside the route
+# rather than in a module of their own (design §0).
 import html as _html  # noqa: E402
+
+import segno as _segno  # noqa: E402  (pinned in requirements.txt; FR-7 QR)
 
 # THE invite-id pattern (contract C1). onboarding-eng's web capture reuses this
 # name; never define a second copy. Always use fullmatch: `$` alone would let a
@@ -12705,25 +12709,27 @@ INVITE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 # An invite id is valid for credit this long after mint (PRD §7.1, assumed).
 _INVITE_ID_VALID_DAYS = 30
-_INVITE_SYSTEM_OWNER = "system:invite"   # event owner when `t` isn't valid
+_INVITE_SYSTEM_OWNER = "system:invite"   # event owner when neither t nor ref resolves
 
-# Link-preview fetchers, matched case-insensitively as UA substrings. iMessage
-# presents "facebookexternalhit/1.1 Facebot Twitterbot/1.0"; X's is Twitterbot.
-# The generic tail (bot/crawler/spider) also catches the named ones — they are
-# listed so the set the design names stays visible and tested.
+# Link-preview fetchers (#350 C4), matched case-insensitively as UA
+# substrings. iMessage presents "facebookexternalhit/1.1 Facebot
+# Twitterbot/1.0"; X's is Twitterbot. The generic tail (bot/crawler/spider/
+# preview) also catches most named ones — they are listed so the set the
+# contract names stays visible and tested.
 PREVIEW_UA_TOKENS: tuple[str, ...] = (
     "facebookexternalhit", "facebot", "twitterbot", "slackbot",
-    "slack-imgproxy", "discordbot", "whatsapp", "telegrambot", "linkedinbot",
-    "bot", "crawler", "spider",
+    "slack-imgproxy", "discordbot", "whatsapp", "telegrambot", "applebot",
+    "linkedinbot", "bot", "crawler", "spider", "preview",
 )
 
 # UA markers of a phone that is neither iOS nor Android ("Mobi" is the MDN
 # rule of thumb; Opera Mini omits it).
 _OTHER_MOBILE_UA_TOKENS: tuple[str, ...] = ("Mobi", "Opera Mini")
 
-# Every word on the landing and the /s/* phone CTA: marketing-lead's proposed
-# gp.join.* strings (marketing-inputs.md §A + addendum A2), verbatim and all
-# pending the operator's approval (D-5). One dict so a copy change is one hunk.
+# Every word on the landing and the /s/* CTA: marketing-lead's proposed
+# gp.join.* strings (marketing-inputs.md @ 1514bc4e: §A, the lab addendum, its
+# FR-25 table and the ux-lead R-F1/R-F3 rows), verbatim and all pending the
+# operator's approval (D-5). One dict so a copy change is one hunk.
 _JOIN_COPY = {
     "page_title":         "{league} on Fleeced: Dynasty Trade Finder",
     "page_title_none":    "Your league on Fleeced: Dynasty Trade Finder",
@@ -12742,19 +12748,31 @@ _JOIN_COPY = {
                            "where both sides come out ahead."),
     "cta_ios":            "Get the iOS beta",
     "cta_ios_help":       "Installs through Apple's TestFlight app.",
-    "retap":              ("Installed? Go back to the chat and tap the invite "
-                           "again to join {league}."),
-    "retap_none":         ("Installed? Go back to the chat and tap the invite "
-                           "again to join your league."),
+    "step1":              "Install Fleeced",
+    "step2":              "Tap the invite again, or rescan its code, to join {league}.",
+    "step2_none":         ("Tap the invite again, or rescan its code, to join "
+                           "your league."),
     "ios_unset_note":     ("The iPhone beta isn't open to the public yet. Already "
-                           "have it? Open the invite in the app."),
-    # /s/* uses only A2's first sentence: the second is invite-specific (Q3).
-    "share_ios_unset_note": "The iPhone beta isn't open to the public yet.",
+                           "have it? Tap the invite again, or rescan its code."),
+    # /s/* (FR-25): a share page carries no invite, so it promises the app.
+    "share_ios_unset_note": ("The iPhone beta isn't open to the public yet. "
+                             "Already have it? Open Fleeced."),
     "cta_desktop":        "Open the web app",
     "cta_desktop_help":   "Sign-in uses the Fleeced extension for Chrome or Edge.",
-    "ios_secondary":      "On an iPhone or iPad?",
+    "qr_title":           "Join on your iPhone",
+    "qr_help":            "Scan with your iPhone camera. After installing, scan again to join.",
+    "qr_label":           "QR code: opens this invite on your iPhone",
+    "ipad":               "On an iPad? Get the iOS beta, then tap the invite again.",
+    "ext_lead":           "Have the Fleeced extension for Chrome or Edge?",
     "android_note":       "Fleeced runs on iPhone and desktop web for now.",
 }
+
+# The desktop QR (FR-7, AC-7f; design-lead 2026-10-15): error correction M, a
+# 4-module quiet zone, whole-pixel modules of at least 4 px and at least 200 px
+# overall. A version-7+ code grows at 4 px modules; it never shrinks them.
+_QR_BORDER = 4
+_QR_MIN_MODULE_PX = 4
+_QR_MIN_TOTAL_PX = 200
 
 # /go/<cta> → the `cta` value of the invite_landing_cta event. Closed set.
 _JOIN_GO_CTAS = {"ios": "ios_install", "web": "web_app"}
@@ -12805,11 +12823,12 @@ def ios_install_url() -> str | None:
     return None
 
 
-def _should_record_landing(t: str | None) -> bool:
-    """FR-8's single predicate (design §4): the ledger flag on AND a
-    well-formed `t`. Whether to also record opens without a `t` (Q2) is
-    growth-pm's call — this line is where that answer goes."""
-    return t is not None and is_enabled("growth.referral_ledger")
+def _should_record_landing() -> bool:
+    """The single gate for both landing events (FR-8, #350 "Takes effect"):
+    the ledger flag. Every human GET of the join path records with it on,
+    with or without a `t` (R1, so Q2 is closed); /go/<cta>'s
+    invite_landing_cta uses the same gate."""
+    return is_enabled("growth.referral_ledger")
 
 
 def _invite_status(referral: dict | None, league_id: str) -> str:
@@ -12831,11 +12850,12 @@ def _invite_status(referral: dict | None, league_id: str) -> str:
     return "valid"
 
 
-def _resolve_invite(t: str | None, league_id: str) -> tuple[str, dict | None]:
-    """(invite_status, referrals row incl. referrer_display_name) for `t`.
-    A failed lookup reads as unknown: the join path never errors on it."""
+def _resolve_invite(t: str | None, league_id: str) -> tuple[str | None, dict | None]:
+    """(invite_status, referrals row incl. referrer_display_name) for `t`;
+    (None, None) without one, with no DB read. A failed lookup reads as
+    unknown: the join path never errors on it."""
     if t is None:
-        return "unknown", None
+        return None, None
     from . import database as _db
     try:
         referral = _db.get_referral_by_invite_token(t)
@@ -12845,39 +12865,86 @@ def _resolve_invite(t: str | None, league_id: str) -> tuple[str, dict | None]:
     return _invite_status(referral, league_id), referral
 
 
-def _invite_event_owner(status: str, referral: dict | None) -> str:
-    """The inviter owns the event only for a valid id; otherwise the system
-    owner, which has no users row (the system:receipts precedent)."""
-    return referral["referrer_user_id"] if status == "valid" else _INVITE_SYSTEM_OWNER
+def _invite_event_owner(referral: dict | None) -> str:
+    """The owner rule for both landing events (FR-8, #350): the referrer of
+    the row `t` names, whatever its status; with no row, the user the legacy
+    `ref` resolves to (by username, as session init resolves invited_by);
+    else system:invite, which has no users row (the system:receipts
+    precedent). Never fails the request."""
+    if referral:
+        return str(referral["referrer_user_id"])
+    ref = (request.args.get("ref") or "").strip()
+    if ref:
+        try:
+            user = get_user_by_username(ref)
+        except Exception as e:
+            log.warning("join: ref owner lookup failed (non-fatal): %s", e)
+            user = None
+        if user and user.get("sleeper_user_id"):
+            return str(user["sleeper_user_id"])
+    return _INVITE_SYSTEM_OWNER
 
 
-def _record_join_landing_open(t: str, league_id: str, status: str,
-                              referral: dict | None) -> None:
-    """FR-8, both join modes. The caller has checked _should_record_landing(t)
-    and that this is not a HEAD, and resolved (status, referral) once. A
-    preview fetch stamps unfurled_at only; a human GET stamps the open columns
-    and fires invite_landing_opened. The row is stamped only when its league
-    is this path's league (valid or expired): a `t` pasted into another
-    league's path must not mark the invite opened, since §7.5's league-match
-    fallback reads opened_at. The event fires for every status. It never
-    moves the inviter's users row (touch_user=False, C6) and its props never
-    carry the UA, IP, a username or a name (C4/C9)."""
+def _record_join_landing_open(t: str | None, league_id: str,
+                              status: str | None, referral: dict | None) -> None:
+    """FR-8, both join modes. The caller has checked _should_record_landing()
+    and that this is not a HEAD, and resolved (status, referral) once.
+
+    A preview fetch (C4) stamps unfurled_at only and fires nothing. A human
+    GET fires invite_landing_opened — with or without `t`; without one,
+    invite_status is null and invite_id is omitted — and stamps the open
+    columns. The row is stamped only when `t` names a row in THIS path's
+    league (valid or expired): a `t` pasted into another league's path must
+    not mark the invite opened, since §7.5's league-match fallback reads
+    opened_at. The event never moves its owner's users row (touch_user=False,
+    C6) and its props never carry the UA, IP, a username or a name (C4/C9)."""
     from . import database as _db
     ua = request.headers.get("User-Agent")
-    stamp_row = status in ("valid", "expired")
+    stamp_row = t is not None and status in ("valid", "expired")
     if is_preview_fetcher(ua):
         if stamp_row:
             _db.record_referral_landing_open(t, "unfurl")
         return
     if stamp_row:
         _db.record_referral_landing_open(t, "open")
+    props = {"league_id": league_id, "invite_status": status,
+             "device_class": device_class(ua)}
+    if t is not None:
+        props["invite_id"] = t
     record_event(
-        _invite_event_owner(status, referral), "invite_landing_opened",
-        league_id=league_id, source="api",
-        props={"invite_id": t, "league_id": league_id,
-               "invite_status": status, "device_class": device_class(ua)},
+        _invite_event_owner(referral), "invite_landing_opened",
+        league_id=league_id, source="api", props=props,
         platform="server", touch_user=False,
     )
+
+
+def _qr_svg(payload: str) -> str:
+    """The desktop QR as inline SVG (FR-7, AC-7f), generated here with segno:
+    never a QR service, because the payload carries `t` and `t` must not
+    leave our server. EC M (boost off, so segno can't raise it), a 4-module
+    quiet zone, and whole-pixel modules: max(4, ceil(200 / (modules + 8)))
+    px each, so the code is at least 200 px and never below 4 px modules.
+    Dark modules are filled by the page CSS on a --chalk panel."""
+    qr = _segno.make(payload, error="m", micro=False, boost_error=False)
+    rows = [list(r) for r in qr.matrix_iter(scale=1, border=_QR_BORDER)]
+    n = len(rows)
+    module_px = max(_QR_MIN_MODULE_PX, -(-_QR_MIN_TOTAL_PX // n))
+    d = []
+    for y, row in enumerate(rows):
+        x = 0
+        while x < n:
+            if not row[x]:
+                x += 1
+                continue
+            start = x
+            while x < n and row[x]:
+                x += 1
+            d.append(f"M{start} {y}h{x - start}v1h-{x - start}z")
+    size = n * module_px
+    return (f'<svg class="qr" width="{size}" height="{size}" viewBox="0 0 {n} {n}" '
+            f'shape-rendering="crispEdges" role="img" '
+            f'aria-label="{_html.escape(_JOIN_COPY["qr_label"])}">'
+            f'<path d="{"".join(d)}"/></svg>')
 
 
 _JOIN_LANDING_CSS = """
@@ -12892,9 +12959,26 @@ h1{margin:0 0 12px;font:700 32px/34px var(--font-display);letter-spacing:.02em;t
 .primary{display:flex;align-items:center;justify-content:center;min-height:44px;padding:12px 16px;border-radius:var(--r-sm);background:var(--ice);color:var(--on-ice);font:600 16px/22px var(--font-ui);text-decoration:none;transition:background-color var(--t-fast)}
 .primary:hover,.primary:active{background:var(--ice-press)}
 .help{margin:8px 0 0;color:var(--chalk-dim);font-size:13px;line-height:18px}
-.step{margin:16px 0 0}
 .note{margin:0;color:var(--chalk)}
-.secondary{display:inline-flex;align-items:center;min-height:44px;margin-top:16px;color:var(--chalk);text-decoration:underline;text-underline-offset:3px}
+.steps{list-style:none;margin:0;padding:0}
+.steps li{display:flex;gap:12px;padding:16px 0}
+.steps li:first-child{padding-top:0}
+.steps li+li{border-top:1px solid var(--line)}
+.steps li>div{flex:1}
+.marker{font:500 13px/22px var(--font-data);font-variant-numeric:tabular-nums;color:var(--chalk-dim)}
+.step-title{margin:0 0 12px;font:600 16px/22px var(--font-ui)}
+.steps p{margin:0}
+.steps .help{margin-top:8px}
+.tick-label{display:flex;align-items:center;gap:8px;margin:0 0 16px;font:600 11px/14px var(--font-ui);text-transform:uppercase;letter-spacing:.08em;color:var(--chalk-dim)}
+.tick-label::before{content:"";width:3px;height:14px;background:var(--ice)}
+.qr{display:block;background:var(--chalk);border-radius:var(--r-sm)}
+.qr path{fill:var(--ink-0)}
+.qr-block{margin:0 0 32px}
+.ghost{display:inline-flex;align-items:center;min-height:44px;margin-top:8px;color:var(--chalk-dim);text-decoration:underline;text-underline-offset:3px;transition:color var(--t-fast)}
+.ghost:hover{color:var(--chalk)}
+.ext-lead{margin:0 0 12px;color:var(--chalk-dim)}
+.btn-secondary{display:flex;align-items:center;justify-content:center;min-height:44px;padding:0 16px;border:1px solid var(--line-strong);border-radius:var(--r-sm);color:var(--chalk);font:600 14px/20px var(--font-ui);text-decoration:none;transition:border-color var(--t-fast)}
+.btn-secondary:hover{border-color:var(--ice)}
 a:focus-visible{outline:2px solid var(--ice);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 """
@@ -12906,15 +12990,20 @@ def _render_join_landing(*, league_id: str, league_name: str | None,
                          host: str) -> str:
     """The FR-7 landing. Every interpolated value is HTML-escaped. The only
     query values that reach the page are `t` (or, without one, the legacy
-    `ref`) inside the onward /go/ hrefs, URL-encoded — never as text."""
+    `ref`) inside the onward /go/ hrefs, URL-encoded — never as text — and
+    inside the desktop QR's payload."""
     c, esc = _JOIN_COPY, _html.escape
     path = "/app/league/join/" + urllib.parse.quote(league_id, safe="")
     go_ios = path + "/go/ios" + ("?" + urllib.parse.urlencode({"t": t}) if t else "")
-    web_q = {"t": t} if t else ({"ref": ref} if ref else {})
-    go_web = path + "/go/web" + ("?" + urllib.parse.urlencode(web_q) if web_q else "")
-    # Absolute OG. Always https: there is no ProxyFix, so request.scheme
-    # reads http behind Render.
+    # The closed contract (C4): `t`, else the inbound legacy `ref`; nothing else.
+    onward_q = ("?" + urllib.parse.urlencode({"t": t} if t else {"ref": ref})
+                if t or ref else "")
+    go_web = path + "/go/web" + onward_q
+    # Absolute URLs. Always https: there is no ProxyFix, so request.scheme
+    # reads http behind Render. The QR payload is the join URL rebuilt from
+    # the closed contract, never the raw request URL.
     og_url = "https://" + host + path
+    qr_payload = og_url + onward_q
     og_image = "https://" + host + "/img/og-invite.png"
 
     if league_name:
@@ -12922,10 +13011,10 @@ def _render_join_landing(*, league_id: str, league_name: str | None,
         og_title = (c["og_title"].format(league=league_name) if len(league_name) <= 27
                     else league_name[:59] + ("…" if len(league_name) > 59 else ""))
         value = c["valueprop"].format(league=league_name)
-        retap = c["retap"].format(league=league_name)
+        step2 = c["step2"].format(league=league_name)
     else:
         page_title, og_title = c["page_title_none"], c["og_title_none"]
-        value, retap = c["valueprop_none"], c["retap_none"]
+        value, step2 = c["valueprop_none"], c["step2_none"]
     if inviter_name and league_name:
         headline = c["headline_both"].format(name=inviter_name, league=league_name)
     elif inviter_name:
@@ -12937,17 +13026,31 @@ def _render_join_landing(*, league_id: str, league_name: str | None,
 
     # One primary action per device state (AC-7c). No dtf:// link anywhere.
     if device == "ios" and ios_url:
-        cta = (f'<a class="primary" href="{esc(go_ios)}">{esc(c["cta_ios"])}</a>\n'
-               f'    <p class="help">{esc(c["cta_ios_help"])}</p>\n'
-               f'    <p class="step">{esc(retap)}</p>')
+        # A1: a two-row step list; row 2 is text, never a link or button.
+        cta = (f'<ol class="steps">\n'
+               f'      <li><span class="marker">1</span><div>'
+               f'<h2 class="step-title">{esc(c["step1"])}</h2>'
+               f'<a class="primary" href="{esc(go_ios)}">{esc(c["cta_ios"])}</a>'
+               f'<p class="help">{esc(c["cta_ios_help"])}</p></div></li>\n'
+               f'      <li><span class="marker">2</span><div>'
+               f'<p>{esc(step2)}</p></div></li>\n'
+               f'    </ol>')
     elif device == "ios":
         cta = f'<p class="note">{esc(c["ios_unset_note"])}</p>'
+    elif device == "desktop" and ios_url:
+        # R-F3: the QR block is the primary (its ice tick is the only
+        # accent); the web app is a Secondary button. No ice-filled button.
+        cta = (f'<section class="qr-block">\n'
+               f'      <p class="tick-label">{esc(c["qr_title"])}</p>\n'
+               f'      {_qr_svg(qr_payload)}\n'
+               f'      <p class="help">{esc(c["qr_help"])}</p>\n'
+               f'      <a class="ghost" href="{esc(go_ios)}">{esc(c["ipad"])}</a>\n'
+               f'    </section>\n'
+               f'    <p class="ext-lead">{esc(c["ext_lead"])}</p>\n'
+               f'    <a class="btn-secondary" href="{esc(go_web)}">{esc(c["cta_desktop"])}</a>')
     elif device == "desktop":
         cta = (f'<a class="primary" href="{esc(go_web)}">{esc(c["cta_desktop"])}</a>\n'
                f'    <p class="help">{esc(c["cta_desktop_help"])}</p>')
-        if ios_url:
-            cta += (f'\n    <a class="secondary" href="{esc(go_ios)}">'
-                    f'{esc(c["ios_secondary"])}</a>')
     else:
         cta = f'<p class="note">{esc(c["android_note"])}</p>'
 
@@ -13011,12 +13114,14 @@ def _join_landing_response(league_id: str, t: str | None, status: str,
 
 
 def _share_cta_html(*, cta_text: str, share_kind: str) -> str:
-    """The /s/* CTA element (design §0 + §1). Its web href is always
-    /?share=<kind> — a closed set from the route (contract C5) — so the web
-    shell can tell a share arrival. With `growth.join_landing` off every device
-    gets that single button; on, phones get the device-aware treatment and
-    never a web button (a phone can't sign in on the web). The iOS href is
-    the server's own config value, never user input."""
+    """The /s/* CTA element (FR-25). Its web href is always /?share=<kind> —
+    a closed set from the route (contract C5; AC-25's "/" is flagged upstream)
+    — so the web shell can tell a share arrival. With `growth.join_landing`
+    off every device gets that single button, with no help line and no note.
+    On, a label and help line or note per device branch: desktop keeps the
+    page's label plus the extension help line; phones never get a web button
+    (a phone can't sign in on the web). No QR on /s/* (GB-02). The iOS href
+    is the server's own config value, never user input."""
     esc, c = _html.escape, _JOIN_COPY
     button = (f'<a class="cta" href="{esc("/?" + urllib.parse.urlencode({"share": share_kind}))}">'
               f'{esc(cta_text)}</a>')
@@ -13024,7 +13129,7 @@ def _share_cta_html(*, cta_text: str, share_kind: str) -> str:
         return button
     device = device_class(request.headers.get("User-Agent"))
     if device == "desktop":
-        return button
+        return button + f'\n    <p>{esc(c["cta_desktop_help"])}</p>'
     if device == "ios":
         url = ios_install_url()
         if url:
@@ -13061,14 +13166,15 @@ def league_join_redirect(league_id):
     REFERRAL LOOP D-1 (2026-10-15). With `growth.join_landing` ON this route
     renders the device-aware landing instead (_join_landing_response). OFF
     keeps the 302 below unchanged, except that with `growth.referral_ledger`
-    on a well-formed `t` is forwarded too (PRD §8.2). In BOTH modes a GET with
-    a well-formed `t` and the ledger on records the open (FR-8). HEAD records
-    nothing: Flask runs this GET view for HEAD, so the method is checked here.
+    on a well-formed `t` is forwarded too (PRD §8.2). In BOTH modes, with the
+    ledger on, every human GET records the open (FR-8), with or without `t`.
+    HEAD records nothing: Flask runs this GET view for HEAD, so the method is
+    checked here.
     """
     t = _invite_id_from(request.args.get("t"))
     # One referral read per request, and none without a `t`.
     status, referral = _resolve_invite(t, str(league_id))
-    if _should_record_landing(t) and request.method != "HEAD":
+    if _should_record_landing() and request.method != "HEAD":
         _record_join_landing_open(t, str(league_id), status, referral)
     if is_enabled("growth.join_landing"):
         return _join_landing_response(str(league_id), t, status, referral)
@@ -13091,8 +13197,10 @@ def league_join_go(league_id, cta):
     here: `league`, plus `t` when well-formed, else the inbound legacy `ref`
     — never both, never an f-string, nothing else from the query (no next /
     url / redirect), so no request value can reach a scheme or host.
-    invite_landing_cta fires for non-HEAD, non-preview requests. Every
-    response is no-store: a cached 404 would outlive setting the URL.
+    invite_landing_cta fires only with `growth.referral_ledger` on (#350
+    "Takes effect"), for human GETs (no HEAD, no preview fetcher, C4), with
+    FR-8's owner rule. Every response is no-store: a cached 404 would
+    outlive setting the URL.
     """
     league_id = str(league_id)
     t = _invite_id_from(request.args.get("t"))
@@ -13112,14 +13220,15 @@ def league_join_go(league_id, cta):
         resp.status_code = 404
     else:
         ua = request.headers.get("User-Agent")
-        if request.method != "HEAD" and not is_preview_fetcher(ua):
-            status, referral = _resolve_invite(t, league_id)
+        if (_should_record_landing() and request.method != "HEAD"
+                and not is_preview_fetcher(ua)):
+            _status, referral = _resolve_invite(t, league_id)
             props = {"league_id": league_id, "cta": _JOIN_GO_CTAS[cta],
                      "device_class": device_class(ua)}
             if t is not None:
                 props["invite_id"] = t
             record_event(
-                _invite_event_owner(status, referral), "invite_landing_cta",
+                _invite_event_owner(referral), "invite_landing_cta",
                 league_id=league_id, source="api", props=props,
                 platform="server", touch_user=False,
             )
