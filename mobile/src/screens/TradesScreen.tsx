@@ -140,7 +140,7 @@ import SwapSuggestSheet from '../components/SwapSuggestSheet';
 import { getProgress } from '../api/rankings';
 import { track, msSinceOpen } from '../api/events';
 import { ApiError, getBaseUrl } from '../api/client';
-import { resolveShareUrl } from '../utils/shareLinks';
+import { resolveShareUrl, resolveTradeShareUrl } from '../utils/shareLinks';
 import { useInterruptSlot, useMutedDuringTour } from '../state/useInterruptCoordinator';
 import InviteLeaguematesBanner from '../components/InviteLeaguematesBanner';
 import TeamReviewEntryCard from '../components/TeamReviewEntryCard';
@@ -5297,10 +5297,13 @@ export default function TradesScreen({ navigation, route }: any) {
     const ref = user?.username ? `ref=${encodeURIComponent(user.username)}` : '';
     let landing = false;
     let url: string;
+    // O8: a mutual match shares a server-minted /s/trade/<token> link; null
+    // (mint failed) falls through to the package rung below, then the root.
+    const tradeUrl = shareLandingOn && matchId ? await resolveTradeShareUrl(matchId) : null;
     if (!shareLandingOn) {
       url = 'https://fantasy-trade-finder.onrender.com';
-    } else if (matchId) {
-      url = `${getBaseUrl()}/s/trade/${matchId}${ref ? `?${ref}` : ''}`;
+    } else if (tradeUrl) {
+      url = `${tradeUrl}${ref ? `?${ref}` : ''}`;
       landing = true;
     } else {
       const resolved = await resolveShareUrl({

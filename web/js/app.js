@@ -5850,13 +5850,6 @@
       return `${origin}/s/tiers/${posSeg}/${u}${qs}`;
     }
 
-    function buildTradeShareUrl(matchId) {
-      const origin = window.location.origin;
-      const mid = encodeURIComponent(String(matchId || '').trim());
-      if (!mid) return origin + '/';
-      return `${origin}/s/trade/${mid}`;
-    }
-
     function openInviteModal() {
       const modal = document.getElementById('invite-modal');
       if (!modal) return;

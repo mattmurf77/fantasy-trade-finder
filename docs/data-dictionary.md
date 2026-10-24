@@ -217,6 +217,7 @@ counterparty board disclosure or client analytics event is added.
 - [`referrals`](#referrals)
 - [`affiliate_clicks`](#affiliate_clicks)
 - [`shared_packages`](#shared_packages)
+- [`trade_share_tokens`](#trade_share_tokens)
 
 ---
 
@@ -1596,6 +1597,20 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 | `give_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
 | `receive_ids` | text, not null | JSON `list[str]` of player ids (≤5) |
 | `created_at` | str, not null | ISO UTC |
+
+---
+
+## `trade_share_tokens`
+
+**Build O8 (2026-10-20), minted under flag `growth.share_landing`.** The only way `/s/trade/<token>` and `/og/trade/<token>.png` reach a `trade_matches` row. Those routes used to take the sequential `trade_matches.id`, so walking the ids exposed every mutual match. `POST /api/share/trade` mints a row for a party to the match; the mint is idempotent per (match, sharer), so each party holds at most one live token per match (a race can leave two, which is harmless). **Retention:** no TTL; a link lives until `revoked_at` is set, the match row is gone, or the sharer deletes their account (`accounts.delete_user_data` deletes rows by `created_by`). Created by `metadata.create_all` on fresh and existing databases, like `shared_packages`. **Privacy:** `match_id` and `created_by` never leave the server — not in a URL, a response or a rendered page; the token is a bearer secret and is never logged.
+
+| Column | Type | Notes |
+|---|---|---|
+| `token` | str PK | `secrets.token_urlsafe(16)`: 22 URL-safe chars, 128 bits |
+| `match_id` | int, not null | `trade_matches.id` (no FK, like the other match-keyed tables). Indexed (`ix_trade_share_tokens_match`) |
+| `created_by` | str, not null | Sharer's session `user_id`. Part of `ix_trade_share_tokens_creator (created_by, created_at)`, the 30/hour mint-limit count |
+| `created_at` | str, not null | ISO UTC mint time |
+| `revoked_at` | str, nullable | ISO UTC; NULL = live. Set it to revoke a link (it then gets the generic expired page). Nothing in v1 writes it; see `docs/runbook.md` § Trade share links |
 
 ---
 
