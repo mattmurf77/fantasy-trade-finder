@@ -5583,7 +5583,7 @@
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
-            <div class="summary-card-label">Unlocked Trade Finder</div>
+            <div class="summary-card-label">Ranked</div>
             <div class="summary-card-sub">Ready to match</div>
           </div>`;
       }
