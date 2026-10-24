@@ -11154,7 +11154,6 @@ FEEDBACK_TEXT_MAX = 8000
 
 
 @app.route("/api/feedback", methods=["POST"])
-@_gate_unverified_write
 def submit_feedback_route():
     """POST /api/feedback — in-app feedback capture from mobile.
 
@@ -11165,9 +11164,15 @@ def submit_feedback_route():
       text                required, non-empty, ≤ FEEDBACK_TEXT_MAX chars
       client_created_at   required, ISO timestamp from the client
 
-    Auth is best-effort: if X-Session-Token resolves to a session we
-    attribute the note to that user, otherwise we accept anonymously.
-    External testers' submissions land regardless of sign-in state.
+    Auth is best-effort: if X-Session-Token resolves to a VERIFIED session
+    we attribute the note to that user; every other request (unverified,
+    no token, expired or unknown token) is accepted anonymously.
+
+    Deliberately NOT behind @_gate_unverified_write (#354 D-2(a)): the
+    route takes anonymous notes anyway, so the gate protected nothing and
+    only 403'd an unverified user's note on every retry. An unverified
+    session's user_id is a claim anyone can make by naming a username
+    (D-183), so it never attributes a note.
 
     Idempotent on client_id — retries return 200 with `duplicate: true`.
 
@@ -11199,14 +11204,14 @@ def submit_feedback_route():
         return jsonify({"error": "text_too_long",
                         "limit": FEEDBACK_TEXT_MAX}), 400
 
-    # ── Best-effort session lookup; anonymous on miss ──────────────────
+    # ── Best-effort session lookup; attribute verified sessions only ───
     user_id = None
     username = None
     token = request.headers.get("X-Session-Token", "")
     if token:
         with _sessions_lock:
             sess = _sessions.get(token)
-        if sess:
+        if sess and sess.get("verified"):
             user_id  = sess.get("user_id")
             username = sess.get("display_name") or sess.get("username")
 

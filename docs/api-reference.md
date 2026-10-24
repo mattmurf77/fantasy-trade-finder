@@ -144,7 +144,7 @@ Sessions live in an in-memory dict (the hot path). With the flag ON, **verified*
 
 A session is **verified** when the app captured a Sleeper JWT whose `user_id` claim matches the session's user **and** the token was proven live against Sleeper's authenticated GraphQL API (`sleeper_write.verify_token_live` — Sleeper is the signature oracle, since the JWT's HS256 signature can't be checked locally). Verification happens in `POST /api/sleeper/link`; it stamps `sess["verified"]` and persists `users.verified_at`/`verified_via='sleeper'` (shared with P2's Apple/Google anchors).
 
-Every mutating user route (`rank3`, `reset`, `rankings/reorder`, `rankings/import-apply`, `rankings/submit`, `tiers/save|copy-from-format|dismiss`, `anchor/save|scale`, `ranking-method`, `scoring/switch`, `trades/swipe|generate|flag|pass-reason|queue`, `trades/matches/*/dismiss|disposition`, `league/preferences|asset-prefs|scoring`, `notifications/read|read-all|dismiss-all|register-device|prefs`, `feedback`, `sleeper/link` DELETE) runs the gate (`@_gate_unverified_write`):
+Every mutating user route (`rank3`, `reset`, `rankings/reorder`, `rankings/import-apply`, `rankings/submit`, `tiers/save|copy-from-format|dismiss`, `anchor/save|scale`, `ranking-method`, `scoring/switch`, `trades/swipe|generate|flag|pass-reason|queue`, `trades/matches/*/dismiss|disposition`, `league/preferences|asset-prefs|scoring`, `notifications/read|read-all|dismiss-all|register-device|prefs`, `sleeper/link` DELETE) runs the gate (`@_gate_unverified_write`). **Exempt: `POST /api/feedback`** (#354 D-2(a), 2026-10-23): it accepts anonymous notes, so it never returns `403 verification_required`; only a verified session's note is attributed, every other note is stored anonymously (see [In-app feedback](#in-app-feedback)):
 
 | Caller | Result |
 |---|---|
@@ -1035,7 +1035,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/feedback` | Capture a single feedback note from the mobile FeedbackSheet. Idempotent on `client_id`. |
+| POST | `/api/feedback` | Capture a single feedback note from the mobile FeedbackSheet. Idempotent on `client_id`. Open to every caller: **not** behind the verified-write gate, so no `403 verification_required` (#354 D-2(a)). A verified session's note is attributed; unverified, missing, expired or unknown tokens are stored anonymously. |
 | GET | `/api/feedback/mine` | The caller's own notes with operator-set lifecycle status (session auth). Backs the status chips in the mobile feedback inbox. Strictly scoped to the session's `user_id` (anonymous/NULL-user notes never returned). Closed notes (`shipped`/`declined` — `FEEDBACK_CLOSED_STATUSES`) are excluded as of 2026-07-04; `fixed` stays visible until it ships. Admin readback is unaffected. |
 
 **Body** (JSON):
@@ -1057,7 +1057,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
   - `missing_field` carries the offending `field` (`client_id` / `screen` / `text`).
   - `text_too_long` carries the cap it enforced: `{ "error": "text_too_long", "limit": 8000 }`. Measured on the **trimmed** body, in characters. The client mirrors this number as `FEEDBACK_TEXT_MAX` in `mobile/src/api/feedback.ts`; the two are pinned together by `mobile/tests/check-feedback-capture.js`, so changing one without the other fails CI. **Raised 2000 → 8000 on 2026-08-22** after the old cap silently discarded a long operator report — see [`plans/feedback-capture-cap/scope.md`](plans/feedback-capture-cap/scope.md).
 
-Auth is best-effort. `X-Session-Token`, when present, attributes the row to the matching `user_id` + `username`; when absent the row stores `user_id = null` (anonymous submission allowed).
+Auth is best-effort. `X-Session-Token`, when it resolves to a **verified** session, attributes the row to that `user_id` + `username` and fires `feedback_submitted`. Every other request (an unverified username-only session, no token, an expired or unknown token) stores `user_id = null` and fires no event: an unverified `user_id` is a claim anyone can make by naming a username (D-183), so it never attributes a note.
 
 Stores into `app_feedback` (see data-dictionary). The mobile client also retains a local AsyncStorage copy and re-POSTs unsynced items on app foreground.
 

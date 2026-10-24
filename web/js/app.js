@@ -5579,11 +5579,11 @@
           <div class="summary-card">
             <div class="summary-card-value">${(data.leaguemates_joined || 0) + 1} / ${(data.leaguemates_total || 0) + 1}</div>
             <div class="summary-card-label">Leaguemates Joined</div>
-            <div class="summary-card-sub">Have a Trade Finder account (including you)</div>
+            <div class="summary-card-sub">Have a Fleeced account (including you)</div>
           </div>
           <div class="summary-card">
             <div class="summary-card-value">${_leagueUnlockedCount(data)}</div>
-            <div class="summary-card-label">Unlocked Trade Finder</div>
+            <div class="summary-card-label">Ranked</div>
             <div class="summary-card-sub">Ready to match</div>
           </div>`;
       }
