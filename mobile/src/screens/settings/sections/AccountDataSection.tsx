@@ -30,16 +30,20 @@
 //     out and SignIn shows the one-shot G4 notice. Download my data shows the
 //     G4 "unavailable" lines instead of the SleeperConnect step-up. Never
 //     "Account deleted" on this path.
+//   • LEG-S6. An Apple-linked account (the ['account'] query's identities) is
+//     asked for a fresh Apple credential right before the verified DELETE, so
+//     the server can revoke Sign in with Apple. Cancel or failure proceeds.
 
 import React, { useEffect, useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, Alert, Share } from 'react-native';
+import { View, Text, Pressable, ActivityIndicator, Alert, Share, Platform } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 import { chalk, semantic } from '../../../theme/chalkline';
 import { Icon } from '../../../components/chalkline';
 import { ApiError } from '../../../api/client';
-import { deleteAccount } from '../../../api/auth';
+import { deleteAccount, getAccount } from '../../../api/auth';
 import { exportAccountData, getProfileVisibility, setProfileVisibility } from '../../../api/accountPrefs';
 import { useSession } from '../../../state/useSession';
 import { useFlag } from '../../../state/useFeatureFlags';
@@ -74,6 +78,7 @@ export default function AccountDataSection({
 
   const dataExportEnabled    = useFlag('account.data_export');
   const profileToggleEnabled = useFlag('profiles.user_toggle');
+  const accountsEnabled      = useFlag('auth.accounts');
 
   const isDemo       = useSession((s) => s.isDemo);
   const user         = useSession((s) => s.user);
@@ -88,6 +93,16 @@ export default function AccountDataSection({
   // decides the branch by the same two facts (`entry:` id + unverified).
   const platform  = claimPlatform(user?.user_id);
   const claimOnly = !!platform && verification?.session_verified !== true;
+
+  // LEG-S6: is a Sign in with Apple identity linked? The same ['account']
+  // query AccountIdentitySection reads (shared cache, no second fetch).
+  const accountQuery = useQuery({
+    queryKey: ['account'],
+    queryFn: getAccount,
+    enabled: accountsEnabled && !isDemo,
+    staleTime: 60_000,
+  });
+  const appleLinked = (accountQuery.data?.account?.identities ?? []).some((i) => i.provider === 'apple');
 
   // ── Public-profile opt-in (teardown 06-04, flag `profiles.user_toggle`).
   // Optimistic local mirror with rollback on server error.
@@ -162,11 +177,25 @@ export default function AccountDataSection({
     }
   }
 
+  // LEG-S6: a fresh Apple authorization code for the server's revocation.
+  // Cancelling or failing the Apple prompt never blocks deletion: no code.
+  async function freshAppleAuthorizationCode(): Promise<string | null> {
+    if (!appleLinked || Platform.OS !== 'ios') return null;
+    try {
+      if (!(await AppleAuthentication.isAvailableAsync())) return null;
+      const cred = await AppleAuthentication.signInAsync({ requestedScopes: [] });
+      return cred.authorizationCode ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async function performDeleteAccount() {
     if (deleting) return;
     setDeleting(true);
     try {
-      await deleteAccount();
+      const appleAuthorizationCode = await freshAppleAuthorizationCode();
+      await deleteAccount({ appleAuthorizationCode });
       await signOut();
       onAccountDeleted();
     } catch (e: unknown) {
