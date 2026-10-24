@@ -12,6 +12,8 @@ missing one is stripped.
 
   * R1 `find_trades_tapped` / `calc_find_a_trade_tapped` — WIDENED with
     `search_id`; both stay INTENT (a tap is a user action).
+  * R2 `trade_first_card_shown` / R2b `trade_first_card_failed` — new,
+    NON_INTENT (a system outcome echoing the R1 tap).
 """
 import backend.analytics_queries as q
 import backend.analytics_taxonomy as tax
@@ -43,3 +45,37 @@ def test_r1_stays_intent():
 def test_r1_carries_no_device_platform_prop():
     for name in R1_ROWS:
         assert "platform" not in tax.CLIENT_EVENT_PROPS[name], name
+
+
+R2_ROWS: dict[str, frozenset[str]] = {
+    "trade_first_card_shown": frozenset({
+        "search_id", "ms_from_tap", "entry_point", "search_type",
+        "launch_state", "network_type", "serve_source", "freshness_state",
+        "job_id", "card_index"}),
+    "trade_first_card_failed": frozenset({
+        "search_id", "ms_from_tap", "reason", "entry_point", "search_type",
+        "launch_state", "network_type", "serve_source"}),
+}
+
+
+def test_r2_names_are_allowlisted_client_events():
+    assert set(R2_ROWS) <= tax.ALLOWED_CLIENT_EVENTS
+    assert not (set(R2_ROWS) & tax._SERVER_AUTHORITATIVE)
+
+
+def test_r2_prop_rows_are_exact():
+    for name, props in R2_ROWS.items():
+        assert tax.CLIENT_EVENT_PROPS[name] == props, name
+
+
+def test_r2_names_are_non_intent():
+    for name in R2_ROWS:
+        assert name in q.NON_INTENT_EVENTS, name
+        assert name not in q.INTENT_EVENTS, name
+
+
+def test_r2_carries_no_pii_or_platform_prop():
+    for name in R2_ROWS:
+        props = tax.CLIENT_EVENT_PROPS[name]
+        assert "platform" not in props, name
+        assert not ({"player_id", "player_ids", "league_id", "name"} & props), name

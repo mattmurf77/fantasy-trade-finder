@@ -109,13 +109,24 @@ import {
   claimPendingSearch,
   claimSearch,
   dropPendingSearch,
+  failFirstCard,
+  isSearchOpen,
+  noteFirstResponse,
+  reportFirstCardShown,
 } from '../state/tradeSearchTrace';
-import { searchTypeOf, type R1Source } from '../utils/firstCardEvent';
+import {
+  FIRST_CARD_MIN_VISIBLE,
+  searchTypeOf,
+  visibleFraction,
+  type FirstCardFailure,
+  type R1Source,
+} from '../utils/firstCardEvent';
 // 200 ms path — the paged deck's merge / prefetch / end-of-buffer rules.
 // Pure, zero runtime imports (tests/check-trade-pages.js runs them).
 import {
   deckCardKey,
   deckEndState,
+  deckFullyDelivered,
   isPagedEnvelope,
   isWholeDeck,
   mergeDeckPage,
@@ -670,10 +681,41 @@ export default function TradesScreen({ navigation, route }: any) {
   // mount-time resets (the league effect, the #330 choke point) read it.
   const [adopted] = useState(() => adoptedFirstPage(route));
   const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
+  // R2/R2b — the search this deck answers (claimed at dispatch, or the
+  // adopted page's), the job it ran, and the keys of the cards it delivered:
+  // only a fronted card FROM THIS SET can be the search's first card (an
+  // in-place search appends behind older cards that are still showing).
+  const deckSearchRef = useRef<{ id: string; jobId?: string; keys: Set<string> } | null>(
+    adopted?.snapshot.search_id
+      ? {
+          id: adopted.snapshot.search_id,
+          jobId: adopted.snapshot.job_id,
+          keys: new Set(adopted.snapshot.cards.map(deckCardKey)),
+        }
+      : null,
+  );
+  function noteSearchCards(jobId: string | undefined, cards: readonly { trade_id: string; trade_hash?: string }[]) {
+    const s = deckSearchRef.current;
+    if (!s || (s.jobId && jobId && s.jobId !== jobId)) return;
+    for (const c of cards) s.keys.add(deckCardKey(c));
+  }
+  function failDeckSearch(reason: FirstCardFailure) {
+    const s = deckSearchRef.current;
+    if (s) failFirstCard(s.id, reason);
+  }
   // R1 — the landing already sent the tap's search id with page 1; nothing
-  // else may claim it as a pending search.
+  // else may claim it as a pending search. Its first response is that page.
   useEffect(() => {
     claimSearch(adopted?.snapshot.search_id);
+    if (adopted) {
+      noteFirstResponse(adopted.snapshot.search_id, {
+        serve_source: adopted.snapshot.serve_source,
+        freshness_state: adopted.snapshot.freshness_state,
+        status: adopted.snapshot.status,
+        cardCount: adopted.snapshot.cards.length,
+        job_id: adopted.snapshot.job_id,
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [deck, setDeck] = useState<PagedTradeCard[]>(() => adopted?.snapshot.cards ?? []);
@@ -2179,6 +2221,21 @@ export default function TradesScreen({ navigation, route }: any) {
       }
       setJob(snapshot);
       setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
+      // R2/R2b — the search's first response: what R2 reports, the job its
+      // cards come from, and an honest `empty` when it finished with none.
+      const ds = deckSearchRef.current;
+      if (ds && ds.id === snapshot.search_id) {
+        ds.jobId = snapshot.job_id;
+        noteFirstResponse(ds.id, {
+          serve_source: snapshot.serve_source,
+          freshness_state: snapshot.freshness_state,
+          status: snapshot.status,
+          cardCount: snapshot.cards.length,
+          job_id: snapshot.job_id,
+        });
+        noteSearchCards(snapshot.job_id, snapshot.cards);
+        if (snapshot.status === 'complete' && snapshot.cards.length === 0) failFirstCard(ds.id, 'empty');
+      }
       // For instant cache-hit responses (status === 'complete') the deck
       // populates immediately via the snapshot effect below. For 'running'
       // responses the polling effect takes over.
@@ -2281,7 +2338,9 @@ export default function TradesScreen({ navigation, route }: any) {
     // 200 ms path — every dispatch is a search with a client search id (E2
     // `search_id`, echoed): the tap's, when a search-starting control began
     // one (R1), else a fresh one (a regeneration, the first-run auto-start).
-    generateMutation.mutate({ ...vars, searchId: claimPendingSearch() ?? uuidv4() }, mutateOpts);
+    const claimed = claimPendingSearch();
+    deckSearchRef.current = claimed ? { id: claimed, keys: new Set() } : null;
+    generateMutation.mutate({ ...vars, searchId: claimed ?? uuidv4() }, mutateOpts);
   }
 
   // Poll while a job is running. Self-scheduling setTimeout loop with
@@ -2330,6 +2389,8 @@ export default function TradesScreen({ navigation, route }: any) {
           next.cards.length !== job.cards.length
         );
         if (changed) setJob(next);
+        noteSearchCards(next.job_id, next.cards);
+        if (next.status === 'complete' && deckSearchRef.current?.keys.size === 0) failDeckSearch('empty');
 
         // Backoff: reset on progress, increase on no-change.
         if ((next.opponents_done ?? 0) > prevOpponentsDone) {
@@ -4010,10 +4071,12 @@ export default function TradesScreen({ navigation, route }: any) {
     // R1 — the sweep's search began at its tap (forkCanvasSearch or
     // handleFindTrades); this claims it. A sweep with no tap behind it (the
     // dormant #402 browse retry) begins its own, with this source.
-    if (!claimPendingSearch()) {
+    let claimedFair = claimPendingSearch();
+    if (!claimedFair) {
       beginTradeSearch({ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' });
-      claimPendingSearch();
+      claimedFair = claimPendingSearch();
     }
+    deckSearchRef.current = claimedFair ? { id: claimedFair, keys: new Set() } : null;
     try {
       const res = await getFairPackages({
         league_id: leagueId,
@@ -4036,6 +4099,10 @@ export default function TradesScreen({ navigation, route }: any) {
       flushPendingPassRef.current();
       lastDispositionedRef.current = null;
       setDeck(res.ideas.map((idea) => ideaToCard(idea, leagueId)));
+      // R2/R2b — a synchronous sweep is a `fresh` answer; none ⇒ `empty`.
+      noteFirstResponse(claimedFair, { serve_source: 'fresh', status: 'complete', cardCount: res.ideas.length });
+      noteSearchCards(undefined, res.ideas.map((idea) => ideaToCard(idea, leagueId)));
+      if (claimedFair && res.ideas.length === 0) failFirstCard(claimedFair, 'empty');
       setDeckIdx(0);
       setJob(null);
       setFairDeck(true);
@@ -4440,6 +4507,10 @@ export default function TradesScreen({ navigation, route }: any) {
     );
     deckRef.current = merged.cards;
     setDeck(merged.cards);
+    noteSearchCards(jobRef.current?.job_id, next.cards);
+    if (deckFullyDelivered(next) && next.status !== 'error' && deckSearchRef.current?.keys.size === 0) {
+      failDeckSearch('empty');
+    }
     setJob((prev) => ({
       ...(prev ?? {}),
       ...next,
@@ -4548,6 +4619,52 @@ export default function TradesScreen({ navigation, route }: any) {
     haptics.selection();
     setDeckIdx((i) => i + 1);
   }
+
+  // ── R2 at T1: the AC-L1 frame ───────────────────────────────────────────
+  // The first frame where a real card of THIS search is ≥ 50% visible with
+  // Like and Pass enabled. `topCardMeasureRef` sits inside SwipableTopCard,
+  // so it is set only while the real card is mounted — never in a wait,
+  // skeleton, withdrawn or end-card branch. Checked on the card's onLayout,
+  // on scroll, and when the deck changes; measured in window coordinates,
+  // then reported on the next frame (one rAF). `ms_from_tap` is the trace's
+  // performance.now() delta from the tap.
+  const topCardMeasureRef = useRef<View>(null);
+  function checkFirstCardShown() {
+    const s = deckSearchRef.current;
+    if (!s || !isSearchOpen(s.id) || !rawTopCard) return;
+    if (!s.keys.has(deckCardKey(rawTopCard))) return;
+    // Like and Pass enabled: the card's own dispositionDisabled predicate.
+    if (swipeMutation.isPending || (declineReasonsOn && reasonBankedId === rawTopCard.trade_id)) return;
+    const node = topCardMeasureRef.current;
+    if (!node) return;
+    const id = s.id;
+    const cardIndex = deckIdx;
+    node.measureInWindow((_x, y, _w, h) => {
+      if (visibleFraction(y, h, 0, Dimensions.get('window').height) < FIRST_CARD_MIN_VISIBLE) return;
+      requestAnimationFrame(() => reportFirstCardShown(id, { cardIndex }));
+    });
+  }
+  useEffect(() => {
+    checkFirstCardShown();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawTopCard?.trade_id, deck.length, swipeMutation.isPending]);
+
+  // ── R2b from the deck that owns the search ─────────────────────────────
+  // `error`: every failed search lands in deckFailure (generate, poll, job
+  // error, fair sweep). `abandoned`: the deck loses focus (a transition, not
+  // the mount) or unmounts before its first card. `empty` is decided where
+  // the answer lands; `timeout` and backgrounding live in the trace module.
+  useEffect(() => {
+    if (deckFailure) failDeckSearch('error');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckFailure]);
+  const wasFocusedRef = useRef(navFocused);
+  useEffect(() => {
+    if (wasFocusedRef.current && !navFocused) failDeckSearch('abandoned');
+    wasFocusedRef.current = navFocused;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFocused]);
+  useEffect(() => () => failDeckSearch('abandoned'), []);
 
   // The pushed deck's header row is the deck's existing header (design-lead
   // §5.4.2): "Updating" trails in it, so no row is ever inserted above the
@@ -7243,6 +7360,8 @@ export default function TradesScreen({ navigation, route }: any) {
           // The decline-reason panel's reveal callback needs the offset to
           // scroll from; the ref write is flag-scoped, the listener is not.
           if (declineReasonsOn) mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+          // R2 at T1 — scrolling can bring the first card past half visible.
+          if (deckSearchRef.current) checkFirstCardShown();
         }}
         scrollEventThrottle={16}
       >
@@ -9187,7 +9306,11 @@ export default function TradesScreen({ navigation, route }: any) {
                 shopGiveEntry={shopEnabled}
                 nudge={swipeHintActive}
                 onFirstTouch={dismissSwipeHint}
-                onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
+                onCardLayout={(e) => {
+                  setTopCardH(e.nativeEvent.layout.height);
+                  checkFirstCardShown();
+                }}
+                measureRef={topCardMeasureRef}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
                 dispositionDisabled={
@@ -10247,6 +10370,8 @@ interface SwipableProps {
   // 200 ms path — pass-throughs to TradeCard's summarizing header (U1 VO).
   a11ySummary?: string;
   a11ySummaryRef?: React.Ref<View>;
+  // R2 at T1 — the card's own view, measured in window coordinates.
+  measureRef?: React.Ref<View>;
 }
 
 function SwipableTopCard({
@@ -10272,6 +10397,7 @@ function SwipableTopCard({
   onFirstTouch,
   a11ySummary,
   a11ySummaryRef,
+  measureRef,
 }: SwipableProps) {
   const translateX = useSharedValue(0);
 
@@ -10348,6 +10474,9 @@ function SwipableTopCard({
           else if (nativeEvent.actionName === 'pass') onPass();
         }}
       >
+        {/* R2 at T1 — a plain, unstyled view around the card for measuring
+            (column / stretch, so the card's layout is unchanged). */}
+        <View ref={measureRef} collapsable={false}>
         <TradeCardComp
           data={card}
           // #169 — the in-card Pass/Like row; top card only (the peek card
@@ -10373,6 +10502,7 @@ function SwipableTopCard({
           a11ySummary={a11ySummary}
           a11ySummaryRef={a11ySummaryRef}
         />
+        </View>
       </Animated.View>
     </GestureDetector>
   );

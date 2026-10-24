@@ -213,7 +213,7 @@ const code = stripComments(trades);
   await check('5a. every dispatch is a paged search with its own client search id', () => {
     ok(/return generateTrades\(request, vars\.searchId \? \{ searchId: vars\.searchId \} : undefined\);/.test(code),
       'mutationFn passes the dispatch search id');
-    ok(/generateMutation\.mutate\(\{ \.\.\.vars, searchId: claimPendingSearch\(\) \?\? uuidv4\(\) \}, mutateOpts\);/.test(code),
+    ok(/const claimed = claimPendingSearch\(\);[\s\S]{0,200}?generateMutation\.mutate\(\{ \.\.\.vars, searchId: claimed \?\? uuidv4\(\) \}, mutateOpts\);/.test(code),
       'dispatchGenerate carries the tap\'s search id (R1), else mints one');
   });
   await check('5b. pages are fetched by deck + cursor, merged through mergeDeckPage at the fronted card', () => {

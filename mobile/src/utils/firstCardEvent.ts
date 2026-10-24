@@ -23,6 +23,12 @@ export type R1Source =
   | 'end_card_adjust';
 
 export type SearchType = 'organic' | 'pinned' | 'fair_sweep';
+export type ServeSource = 'device' | 'page' | 'cached' | 'joined' | 'fresh';
+/** R2b `reason`. `timeout` = FIRST_CARD_TIMEOUT_MS from the tap, no card. */
+export type FirstCardFailure = 'empty' | 'error' | 'abandoned' | 'timeout';
+export const FIRST_CARD_TIMEOUT_MS = 10_000;
+/** T1: the card must be at least this much on screen. */
+export const FIRST_CARD_MIN_VISIBLE = 0.5;
 export type LaunchState = 'cold_launch' | 'first_tap' | 'repeat_tap';
 export type NetworkType = 'wifi' | 'cellular' | 'offline' | 'unknown';
 
@@ -60,6 +66,28 @@ export function networkTypeOf(s: { type?: string | null; isConnected?: boolean |
   if (s.type === 'wifi') return 'wifi';
   if (s.type === 'cellular') return 'cellular';
   return 'unknown';
+}
+
+/** `serve_source`: the server's own value when it sends one (P1 `page`);
+ *  else inferred from the search's FIRST response — complete on arrival ⇒
+ *  `cached`, still running but already holding cards ⇒ `joined` (an
+ *  in-flight job), otherwise `fresh`. (`device` arrives with pass C.) */
+export function inferServeSource(first: {
+  serve_source?: string;
+  status: 'running' | 'complete' | 'error';
+  cardCount: number;
+}): string {
+  if (first.serve_source) return first.serve_source;
+  if (first.status === 'complete') return 'cached';
+  if (first.status === 'running' && first.cardCount > 0) return 'joined';
+  return 'fresh';
+}
+
+/** Share of a laid-out card inside the viewport [viewTop, viewBottom]. */
+export function visibleFraction(top: number, height: number, viewTop: number, viewBottom: number): number {
+  if (!(height > 0)) return 0;
+  const shown = Math.min(top + height, viewBottom) - Math.max(top, viewTop);
+  return Math.max(0, Math.min(1, shown / height));
 }
 
 /** The deck `mode` (#298) a hand-off will land on, decided at the tap the

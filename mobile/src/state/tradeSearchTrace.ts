@@ -17,6 +17,14 @@
 // Clock: `performance.now()` only — monotonic, immune to wall-clock jumps.
 // Never Date.now(), and never api/client.ts `_clockMs()`, whose fallback is
 // Date (AC-L1 needs a monotonic delta).
+//
+// R2 `trade_first_card_shown` / R2b `trade_first_card_failed`: EXACTLY ONE
+// per search_id (`settled`). R2 is reported by the deck at T1 (TradesScreen
+// measures the card); R2b comes from the deck (empty, error, abandoned on
+// blur/unmount) or from here (`timeout` 10 s after the tap; `abandoned` when
+// the app leaves `active` before a card, T4, or a newer tap supersedes it).
+import { AppState } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 import { track } from '../api/events';
 import { uuidv4 } from '../api/_queue';
 import { sessionInitCompletedThisProcess } from '../api/auth';
@@ -24,8 +32,13 @@ import { useFeatureFlags, onboardingEnabled } from './useFeatureFlags';
 import { useOnboardingState } from './useOnboardingState';
 import {
   deckModeForPins,
+  FIRST_CARD_TIMEOUT_MS,
+  inferServeSource,
   launchStateFor,
+  networkTypeOf,
+  type FirstCardFailure,
   type LaunchState,
+  type NetworkType,
   type R1Source,
   type SearchType,
 } from '../utils/firstCardEvent';
@@ -37,6 +50,29 @@ export interface TradeSearchTrace {
   entryPoint?: R1Source;
   searchType: SearchType;
   launchState: LaunchState;
+  /** The tap's network (the AC-L1 cell it belongs to). */
+  networkType: NetworkType;
+  /** From the search's first response (noteFirstResponse). */
+  serveSource?: string;
+  freshnessState?: string;
+  jobId?: string;
+  /** R2 or R2b sent: nothing more is ever sent for this id. */
+  settled: boolean;
+  /** performance.now() at R2. */
+  firstCardAt?: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
+// NetInfo's latest state, cached so the tap reads it synchronously. The
+// listener is registered once at module scope (module lifetime, no leak).
+let netState: { type?: string | null; isConnected?: boolean | null } | null = null;
+try {
+  NetInfo.addEventListener((s) => { netState = s; });
+} catch {
+  /* no NetInfo: network_type reads `unknown` */
+}
+export function currentNetworkType(): NetworkType {
+  return networkTypeOf(netState);
 }
 
 /** Monotonic milliseconds (Hermes always provides `performance.now`). */
@@ -57,6 +93,10 @@ export function beginTradeSearch(o: {
   searchType: SearchType;
   screen: string;
 }): string {
+  // A newer tap supersedes every search still waiting for its first card.
+  for (const t of traces.values()) {
+    if (!t.settled) failFirstCard(t.searchId, 'abandoned');
+  }
   const trace: TradeSearchTrace = {
     searchId: uuidv4(),
     tapAt: monotonicNow(),
@@ -66,10 +106,14 @@ export function beginTradeSearch(o: {
       sessionInitDone: sessionInitCompletedThisProcess(),
       priorSearches: searchesThisProcess,
     }),
+    networkType: currentNetworkType(),
+    settled: false,
+    timer: null,
   };
   searchesThisProcess += 1;
   traces.set(trace.searchId, trace);
   pending = trace;
+  trace.timer = setTimeout(() => failFirstCard(trace.searchId, 'timeout'), FIRST_CARD_TIMEOUT_MS);
   // `source` is absent for the deck's own Find a Trade (JSON drops undefined).
   track('find_trades_tapped', { source: o.source, mode: o.mode, search_id: trace.searchId }, o.screen);
   return trace.searchId;
@@ -90,9 +134,91 @@ export function claimSearch(searchId: string | undefined | null): void {
 }
 
 /** The tap's search will never be dispatched (the user left the screen
- *  before it ran). */
+ *  before it ran): it ends as `abandoned`. */
 export function dropPendingSearch(searchId: string): void {
   if (pending?.searchId === searchId) pending = null;
+  failFirstCard(searchId, 'abandoned');
+}
+
+export function isSearchOpen(searchId: string | null | undefined): boolean {
+  const t = searchId ? traces.get(searchId) : undefined;
+  return !!t && !t.settled;
+}
+
+/** The search's FIRST response (generate, an adopted page, a fair sweep):
+ *  what R2/R2b report as serve_source, freshness_state and job_id. */
+export function noteFirstResponse(searchId: string | null | undefined, first: {
+  serve_source?: string;
+  freshness_state?: string;
+  status: 'running' | 'complete' | 'error';
+  cardCount: number;
+  job_id?: string;
+}): void {
+  const t = searchId ? traces.get(searchId) : undefined;
+  if (!t || t.serveSource !== undefined) return;
+  t.serveSource = inferServeSource(first);
+  t.freshnessState = first.freshness_state;
+  t.jobId = first.job_id || undefined;
+}
+
+function settle(t: TradeSearchTrace): number {
+  t.settled = true;
+  if (t.timer) clearTimeout(t.timer);
+  t.timer = null;
+  if (pending === t) pending = null;
+  return Math.round(monotonicNow() - t.tapAt);
+}
+
+/** R2 — T1, reported by the deck at the first frame its real card is
+ *  ≥ 50% visible with Like and Pass enabled. Once per search_id. */
+export function reportFirstCardShown(searchId: string, o: { cardIndex: number }): void {
+  const t = traces.get(searchId);
+  if (!t || t.settled) return;
+  const ms = settle(t);
+  t.firstCardAt = monotonicNow();
+  track('trade_first_card_shown', {
+    search_id: t.searchId,
+    ms_from_tap: ms,
+    entry_point: t.entryPoint,
+    search_type: t.searchType,
+    launch_state: t.launchState,
+    network_type: t.networkType,
+    serve_source: t.serveSource,
+    freshness_state: t.freshnessState,
+    job_id: t.jobId,
+    card_index: o.cardIndex,
+  }, 'Trades');
+}
+
+/** R2b — instead of R2: empty | error | abandoned | timeout. Once per
+ *  search_id, and never after an R2. */
+export function failFirstCard(searchId: string, reason: FirstCardFailure): void {
+  const t = traces.get(searchId);
+  if (!t || t.settled) return;
+  const ms = settle(t);
+  track('trade_first_card_failed', {
+    search_id: t.searchId,
+    ms_from_tap: ms,
+    reason,
+    entry_point: t.entryPoint,
+    search_type: t.searchType,
+    launch_state: t.launchState,
+    network_type: t.networkType,
+    serve_source: t.serveSource,
+  }, 'Trades');
+}
+
+// T4 — leaving `active` (background, or iOS's inactive app switcher) before
+// a card ends every open search as `abandoned`, never a long R2.
+try {
+  AppState.addEventListener('change', (state) => {
+    if (state === 'active') return;
+    for (const t of traces.values()) {
+      if (!t.settled) failFirstCard(t.searchId, 'abandoned');
+    }
+  });
+} catch {
+  /* no AppState (tests): nothing to listen to */
 }
 
 export function traceFor(searchId: string | null | undefined): TradeSearchTrace | undefined {

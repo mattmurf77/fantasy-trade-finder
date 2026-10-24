@@ -277,7 +277,7 @@ assert(
 );
 assert(
   /async function runFairPackages\([\s\S]*?source: R1Source = 'calculator',/.test(tradesCode)
-    && /if \(!claimPendingSearch\(\)\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(tradesCode),
+    && /let claimedFair = claimPendingSearch\(\);\s*if \(!claimedFair\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(tradesCode),
   "#384 the fair sweep claims its tap's search; an untapped sweep begins one (default source:'calculator')",
   'a synchronous sweep with no search is a search that vanishes from the funnel',
 );

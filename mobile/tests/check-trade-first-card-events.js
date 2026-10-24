@@ -70,8 +70,10 @@ function freshTrace(o = {}) {
     },
     './useOnboardingState': { useOnboardingState: { getState: () => ({ hydrated: true, ob: { firstSwipeDone: true } }) } },
     '../utils/firstCardEvent': pure,
+    'react-native': { AppState: { addEventListener: () => {} } },
+    '@react-native-community/netinfo': { __esModule: true, default: { addEventListener: () => {} } },
     ...(o.requires ?? {}),
-  }, { performance: { now: () => now } });
+  }, { performance: { now: () => now }, setTimeout: () => null, clearTimeout: () => {} });
   return { mod, events, tick: (ms) => { now += ms; }, setSession: (v) => { sessionDone = v; } };
 }
 
@@ -180,14 +182,157 @@ console.log('check-trade-first-card-events:');
 
 // ── 4. The request carries the tap's id ───────────────────────────────────
 {
-  check('4a. dispatchGenerate sends the claimed tap id as /generate\'s search_id (else a fresh one for untapped dispatches)',
-    /generateMutation\.mutate\(\{ \.\.\.vars, searchId: claimPendingSearch\(\) \?\? uuidv4\(\) \}, mutateOpts\);/.test(trades));
+  check('4a. dispatchGenerate sends the claimed tap id as /generate\'s search_id (else a fresh one for untapped dispatches), and the deck now answers that search',
+    /const claimed = claimPendingSearch\(\);\s*deckSearchRef\.current = claimed \? \{ id: claimed, keys: new Set\(\) \} : null;\s*generateMutation\.mutate\(\{ \.\.\.vars, searchId: claimed \?\? uuidv4\(\) \}, mutateOpts\);/.test(trades));
   check('4b. the landing\'s page-1 request uses the canvas tap\'s id; the adopting deck claims it; a cancelled push drops it',
     /generateTrades\(request, \{ searchId: fork\.searchId \}\)/.test(trades)
       && /claimSearch\(adopted\?\.snapshot\.search_id\);/.test(trades)
       && /dropPendingSearch\(fork\.searchId\);/.test(trades));
   check('4c. the fair sweep claims its tap\'s search; only an untapped sweep begins one',
-    /if \(!claimPendingSearch\(\)\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(trades));
+    /let claimedFair = claimPendingSearch\(\);\s*if \(!claimedFair\) \{\s*beginTradeSearch\(\{ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' \}\);/.test(trades));
+}
+
+// ── 5. EXECUTED: exactly one R2/R2b per search_id ─────────────────────────
+function freshTraceWithTimers() {
+  const pending = [];
+  const h = (() => {
+    const events = [];
+    let now = 1000;
+    let n = 0;
+    let appListener = null;
+    let netListener = null;
+    const mod = load('state/tradeSearchTrace.ts', {
+      '../api/events': { track: (type, props) => events.push({ type, props: JSON.parse(JSON.stringify(props ?? {})) }) },
+      '../api/_queue': { uuidv4: () => `s${++n}` },
+      '../api/auth': { sessionInitCompletedThisProcess: () => true },
+      './useFeatureFlags': { useFeatureFlags: { getState: () => ({ flags: {} }) }, onboardingEnabled: () => false },
+      './useOnboardingState': { useOnboardingState: { getState: () => ({ hydrated: true, ob: { firstSwipeDone: true } }) } },
+      '../utils/firstCardEvent': pure,
+      'react-native': { AppState: { addEventListener: (_e, fn) => { appListener = fn; } } },
+      '@react-native-community/netinfo': { __esModule: true, default: { addEventListener: (fn) => { netListener = fn; } } },
+    }, {
+      performance: { now: () => now },
+      setTimeout: (fn, ms) => { const h = { fn, at: now + ms, live: true }; pending.push(h); return h; },
+      clearTimeout: (h) => { if (h) h.live = false; },
+    });
+    return {
+      mod, events,
+      tick: (ms) => {
+        now += ms;
+        for (const h of pending) if (h.live && h.at <= now) { h.live = false; h.fn(); }
+      },
+      app: (s) => appListener && appListener(s),
+      net: (s) => netListener && netListener(s),
+    };
+  })();
+  return h;
+}
+{
+  const h = freshTraceWithTimers();
+  h.net({ type: 'wifi', isConnected: true });
+  const id = h.mod.beginTradeSearch({ source: 'calculator', mode: 'deck', searchType: 'organic', screen: 'Trades' });
+  h.mod.noteFirstResponse(id, { serve_source: 'page', freshness_state: 'fresh', status: 'complete', cardCount: 30, job_id: 'j1' });
+  h.tick(180);
+  h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+  h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+  h.mod.failFirstCard(id, 'error');
+  h.tick(20000);
+  const r2 = h.events.filter((e) => e.type === 'trade_first_card_shown');
+  const r2b = h.events.filter((e) => e.type === 'trade_first_card_failed');
+  check('5a. one R2 per search_id; a second report, a later failure and the 10 s timer add nothing',
+    r2.length === 1 && r2b.length === 0);
+  check('5b. R2 carries exactly the addendum props, ms_from_tap the monotonic tap delta',
+    r2[0] && JSON.stringify(Object.keys(r2[0].props).sort()) === JSON.stringify(['card_index', 'entry_point', 'freshness_state',
+      'job_id', 'launch_state', 'ms_from_tap', 'network_type', 'search_id', 'search_type', 'serve_source'])
+      && r2[0].props.ms_from_tap === 180 && r2[0].props.entry_point === 'calculator'
+      && r2[0].props.network_type === 'wifi' && r2[0].props.serve_source === 'page'
+      && r2[0].props.launch_state === 'first_tap' && r2[0].props.job_id === 'j1' && r2[0].props.search_id === id);
+}
+{
+  const h = freshTraceWithTimers();
+  const id = h.mod.beginTradeSearch({ source: 'league_target', mode: 'deck', searchType: 'pinned', screen: 'X' });
+  h.tick(9999);
+  const before = h.events.filter((e) => e.type === 'trade_first_card_failed').length;
+  h.tick(1);
+  h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+  const r2b = h.events.filter((e) => e.type === 'trade_first_card_failed');
+  check('5c. timeout = 10,000 ms from the tap with no card: one R2b {reason: timeout}, and no R2 after it',
+    before === 0 && r2b.length === 1 && r2b[0].props.reason === 'timeout' && r2b[0].props.ms_from_tap === 10000
+      && !h.events.some((e) => e.type === 'trade_first_card_shown'));
+  check('5d. R2b carries exactly the addendum props',
+    JSON.stringify(Object.keys(r2b[0].props).sort()) === JSON.stringify(['entry_point', 'launch_state', 'ms_from_tap',
+      'network_type', 'reason', 'search_id', 'search_type']) /* serve_source absent: no response yet */);
+}
+{
+  const h = freshTraceWithTimers();
+  const id = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+  h.tick(300);
+  h.app('background');
+  h.app('active');
+  h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+  const r2b = h.events.filter((e) => e.type === 'trade_first_card_failed');
+  check('5e. T4: the app leaving `active` before a card ends the search as abandoned — never a long R2',
+    r2b.length === 1 && r2b[0].props.reason === 'abandoned' && !h.events.some((e) => e.type === 'trade_first_card_shown'));
+  const a = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+  h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+  const fa = h.events.filter((e) => e.type === 'trade_first_card_failed' && e.props.search_id === a);
+  check('5f. a newer tap supersedes an open search: it ends abandoned (one R2b), never left open',
+    fa.length === 1 && fa[0].props.reason === 'abandoned');
+  const d = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+  h.mod.dropPendingSearch(d);
+  check('5g. a tap whose search never runs (dropped) ends abandoned, and is no longer claimable',
+    h.events.some((e) => e.type === 'trade_first_card_failed' && e.props.search_id === d && e.props.reason === 'abandoned')
+      && h.mod.claimPendingSearch() === null);
+}
+{
+  check('5h. serve_source: the server value wins; else cached (complete) / joined (running with cards) / fresh',
+    pure.inferServeSource({ serve_source: 'page', status: 'running', cardCount: 0 }) === 'page'
+      && pure.inferServeSource({ status: 'complete', cardCount: 3 }) === 'cached'
+      && pure.inferServeSource({ status: 'running', cardCount: 3 }) === 'joined'
+      && pure.inferServeSource({ status: 'running', cardCount: 0 }) === 'fresh');
+  check('5i. T1 visibility: ≥ 50% of the card inside the window',
+    pure.visibleFraction(0, 400, 0, 800) === 1 && pure.visibleFraction(600, 400, 0, 800) === 0.5
+      && pure.visibleFraction(700, 400, 0, 800) === 0.25 && pure.visibleFraction(0, 0, 0, 800) === 0
+      && pure.FIRST_CARD_MIN_VISIBLE === 0.5 && pure.FIRST_CARD_TIMEOUT_MS === 10000);
+}
+
+// ── 6. R2 only on the enabled-and-visible path (T1), never a wait branch ─
+{
+  const fnAt = trades.indexOf('function checkFirstCardShown(');
+  const fn = trades.slice(fnAt, trades.indexOf('\n  }\n', fnAt));
+  check('6a. the first card must be one THIS search delivered, with Like and Pass enabled (the card\'s own predicate)',
+    /if \(!s\.keys\.has\(deckCardKey\(rawTopCard\)\)\) return;/.test(fn)
+      && /if \(swipeMutation\.isPending \|\| \(declineReasonsOn && reasonBankedId === rawTopCard\.trade_id\)\) return;/.test(fn));
+  check('6b. measured in window coordinates, ≥ FIRST_CARD_MIN_VISIBLE, then reported on the next frame (one rAF)',
+    /node\.measureInWindow\(/.test(fn)
+      && /visibleFraction\(y, h, 0, Dimensions\.get\('window'\)\.height\) < FIRST_CARD_MIN_VISIBLE\) return;/.test(fn)
+      && /requestAnimationFrame\(\(\) => reportFirstCardShown\(id, \{ cardIndex \}\)\)/.test(fn));
+  const cardBranch = trades.slice(trades.indexOf(') : topCard ? ('), trades.indexOf(') : pagedWithCards && deckEnd ? ('));
+  check('6c. the measured view exists only inside the real card (SwipableTopCard in the topCard branch) — never a skeleton, Looking, withdrawn or end card',
+    (trades.match(/measureRef=\{topCardMeasureRef\}/g) || []).length === 1
+      && /measureRef=\{topCardMeasureRef\}/.test(cardBranch)
+      && /<View ref=\{measureRef\} collapsable=\{false\}>\s*<TradeCardComp/.test(trades));
+  check('6d. R2 has one reporter in the deck (checkFirstCardShown), run on the card\'s layout, on scroll and on deck changes',
+    (trades.match(/reportFirstCardShown\(/g) || []).length === 1
+      && /setTopCardH\(e\.nativeEvent\.layout\.height\);\s*checkFirstCardShown\(\);/.test(trades)
+      && /if \(deckSearchRef\.current\) checkFirstCardShown\(\);/.test(trades)
+      && /checkFirstCardShown\(\);\s*\}, \[rawTopCard\?\.trade_id, deck\.length, swipeMutation\.isPending\]\);/.test(trades));
+  check('6e. no Date in the timing path (trace, pure helpers, the T1 check)',
+    !/\bDate\b/.test(traceCode) && !/\bDate\b/.test(stripComments(read('utils/firstCardEvent.ts'))) && !/\bDate\b/.test(fn));
+}
+
+// ── 7. R2b from the deck: empty, error, abandoned on blur / unmount ───────
+{
+  check('7a. abandoned when the owning deck BLURS (a focus transition, not the mount) or unmounts',
+    /if \(wasFocusedRef\.current && !navFocused\) failDeckSearch\('abandoned'\);/.test(trades)
+      && /useEffect\(\(\) => \(\) => failDeckSearch\('abandoned'\), \[\]\);/.test(trades));
+  check('7b. error whenever the search lands in deckFailure (generate, poll, job, fair sweep)',
+    /if \(deckFailure\) failDeckSearch\('error'\);/.test(trades));
+  check('7c. empty where each answer lands: generate, the legacy poll, a fully delivered paged deck, the fair sweep',
+    /if \(snapshot\.status === 'complete' && snapshot\.cards\.length === 0\) failFirstCard\(ds\.id, 'empty'\);/.test(trades)
+      && /if \(next\.status === 'complete' && deckSearchRef\.current\?\.keys\.size === 0\) failDeckSearch\('empty'\);/.test(trades)
+      && /if \(deckFullyDelivered\(next\) && next\.status !== 'error' && deckSearchRef\.current\?\.keys\.size === 0\) \{\s*failDeckSearch\('empty'\);/.test(trades)
+      && /if \(claimedFair && res\.ideas\.length === 0\) failFirstCard\(claimedFair, 'empty'\);/.test(trades));
 }
 
 console.log(failures ? `check-trade-first-card-events: ${failures} FAILED` : 'check-trade-first-card-events: all passed');

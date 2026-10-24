@@ -50,6 +50,13 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Trades
     "find_trades_tapped", "trade_card_viewed", "trade_flagged",
     "match_opened",
+    # Time to trade suggestion (addendum docs/business/analytics/
+    # 2026-10-20-time-to-suggestion-events.md v2): R2/R2b, the AC-L1 outcome
+    # of an R1 tap — exactly one of the two per `search_id`. NON_INTENT
+    # (analytics_queries.NON_INTENT_EVENTS): a system outcome echoing the tap,
+    # which already counts the user. Registered in the SAME commit as the
+    # emitters (mobile/src/state/tradeSearchTrace.ts).
+    "trade_first_card_shown", "trade_first_card_failed",
     # TikTok-discovery deck engine (docs/plans/tiktok-discovery/). The F1
     # /api/events derives verified, owned viewed/undo outcomes only after
     # taxonomy filtering and successful ingestion. These analytics rows
@@ -967,6 +974,26 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # (Usage Trends Trade), deep_link (app/trades/finder), end_card_adjust
     # (the P30 card's apply tap). Still INTENT.
     "find_trades_tapped":   frozenset({"source", "mode", "search_id"}),
+    # R2 — at T1, the first frame where a real card is >= 50% visible with
+    # Like and Pass enabled; once per search_id. `ms_from_tap` is a MONOTONIC
+    # client delta (performance.now()), int. `entry_point` = the tap's R1
+    # `source`; `search_type` organic | pinned | fair_sweep; `launch_state`
+    # cold_launch | first_tap | repeat_tap; `network_type` wifi | cellular |
+    # offline | unknown (the tap's); `serve_source` device | page | cached |
+    # joined | fresh; `freshness_state` fresh | updating; `job_id`;
+    # `card_index`. No player ids, names or league-identifying values.
+    "trade_first_card_shown":  frozenset({"search_id", "ms_from_tap", "entry_point",
+                                          "search_type", "launch_state",
+                                          "network_type", "serve_source",
+                                          "freshness_state", "job_id",
+                                          "card_index"}),
+    # R2b — instead of R2. `reason` empty | error | abandoned (unmount, blur,
+    # or the app leaving `active` before a card, T4) | timeout (10,000 ms
+    # from the tap). Every R2b counts as > 200 ms in the p95 (T2).
+    "trade_first_card_failed": frozenset({"search_id", "ms_from_tap", "reason",
+                                          "entry_point", "search_type",
+                                          "launch_state", "network_type",
+                                          "serve_source"}),
     # Receipts. `status` is ledger | ready — which of the two designed screen
     # states the user actually saw, so "did anyone see a number?" is
     # answerable without joining grades. `headline_bucket` is neg | flat | pos,
