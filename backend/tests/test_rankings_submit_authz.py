@@ -15,6 +15,7 @@ Isolation pattern mirrors test_league_prefs_authz.py: Flask test client,
 in-memory SQLite, injected sessions, no network.
 """
 import json
+import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -41,6 +42,7 @@ def _mk_service(player_ids):
         for i, pid in enumerate(player_ids)
     ]
     return SimpleNamespace(
+        _lock=threading.RLock(),
         get_rankings=lambda position=None: SimpleNamespace(rankings=rankings)
     )
 
