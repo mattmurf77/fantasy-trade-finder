@@ -1,5 +1,5 @@
 // Settings § About — Help & FAQ, Your feedback, Privacy Policy, Terms of Use,
-// data credits, Version.
+// Credits, Version (that order: design-lead #354 change 3, ux-lead D-3).
 //
 // Lifted verbatim from SettingsScreen.tsx (origin/main) `aboutSection` at
 // :1416-1458, plus:
@@ -24,21 +24,21 @@
 // No queries, no loading state, so there is nothing to place a per-section
 // placeholder against.
 //
-// Note: this module takes no `SettingsSectionProps`. Every row but one opens
-// an external URL via Linking; the "Your feedback" row (#354 BL-10, D-3:
-// moved here from the tester-only TestingSection so every user can reach the
-// inbox) is the one in-app push, and it reads `useNavigation()` itself so the
-// host page needs no notice surface or navigate prop for a single row.
+// Props: `navigate` only (no notice surface). The "Your feedback" row (#354
+// BL-10, D-3: moved here from the tester-only TestingSection so every user
+// can reach the inbox) is the one in-app push; both hosts pass `navigate`:
+// SettingsAboutScreen and the flat SettingsScreen `aboutSection`. Every other
+// pressable row opens an external URL via Linking. Credits is a plain block.
 
 import React from 'react';
 import { View, Text, Pressable, Linking } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
 
 import { chalk, type } from '../../../theme/chalkline';
 import { TickLabel, Icon } from '../../../components/chalkline';
 import { useFlag } from '../../../state/useFeatureFlags';
 import { styles } from '../styles';
+import type { SettingsSectionProps } from './types';
 
 const WEB_ORIGIN = 'https://fantasy-trade-finder.onrender.com';
 
@@ -52,8 +52,7 @@ function appVersionLabel(): string | null {
   return version ?? build ?? null;
 }
 
-export default function AboutSection() {
-  const navigation = useNavigation<any>();
+export default function AboutSection({ navigate }: Pick<SettingsSectionProps, 'navigate'>) {
   const helpSurfaceEnabled = useFlag('ux.help_surface');
   const versionLabel = appVersionLabel();
 
@@ -85,7 +84,7 @@ export default function AboutSection() {
       <Pressable
         testID="settings.feedback-inbox"
         accessibilityRole="button"
-        onPress={() => navigation.navigate('FeedbackInbox')}
+        onPress={() => navigate('FeedbackInbox')}
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
       >
         <View style={{ flex: 1 }}>
@@ -114,24 +113,22 @@ export default function AboutSection() {
         <Text style={[styles.rowKey, { flex: 1 }]}>Terms of Use</Text>
         <Icon name="chevron-right" color={chalk.dim} size={16} />
       </Pressable>
-      {/* Data credits (LEG-S3; legal-lead-drafts.md Part 3, wording verbatim).
-          Q5b: no league platform is named here. */}
-      <Pressable
-        accessibilityRole="link"
-        accessibilityHint="Opens in your browser"
-        onPress={() => Linking.openURL('https://github.com/nflverse/nfldata')}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
+      {/* Credits (LEG-S3; legal-lead-drafts.md Part 3, wording verbatim;
+          design-lead #354 changes 1-2): a NON-pressable block read as one
+          accessible element. The URL shows in full as the CC-BY attribution,
+          so there is no link, no partial-text tap target and no chevron.
+          Q5b: no league platform is named. */}
+      <View testID="settings.credits" accessible style={styles.linkRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>
-            Data by nflverse (https://github.com/nflverse/nfldata), CC-BY
-          </Text>
+          <Text style={styles.rowKey}>Credits</Text>
           <Text style={styles.rowSub}>
             Consensus values from DynastyProcess and other published sources.
           </Text>
+          <Text style={styles.rowSub}>
+            Data by nflverse (https://github.com/nflverse/nfldata), CC-BY.
+          </Text>
         </View>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
+      </View>
       {/* F7 — the build the user is actually running, for support triage. */}
       {versionLabel ? (
         <View testID="settings.version" style={styles.kvRow}>

@@ -300,16 +300,21 @@ function textNodes(root) {
            : `the module reads the tester gate: ${aboutReads.join(', ')}`);
   }
 
-  // 2b. ...and its host page mounts it ungated.
+  // 2b. ...and its host page mounts it ungated, handing it `navigate` (the
+  //     row's only way to push the inbox).
+  const aboutMounts = (sf, root) => findAll(root, (n) =>
+    (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(sf) === 'AboutSection');
+  const hasNavigate = (el) => el.attributes.properties.some((a) =>
+    ts.isJsxAttribute(a) && a.name.getText() === 'navigate' && a.initializer);
   const page = parse(F.aboutPage);
-  const mounts = findAll(page, (n) =>
-    (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(page) === 'AboutSection');
+  const mounts = aboutMounts(page, page);
   const mountGated = mounts.flatMap((n) => gated(n, page));
-  if (mounts.length === 1 && mountGated.length === 0) {
-    ok('2b. SettingsAboutScreen.tsx mounts <AboutSection /> ungated');
+  if (mounts.length === 1 && mountGated.length === 0 && hasNavigate(mounts[0])) {
+    ok('2b. SettingsAboutScreen.tsx mounts <AboutSection navigate={…} /> ungated');
   } else {
-    fail('2b. SettingsAboutScreen.tsx mounts <AboutSection /> once, ungated',
-         mounts.length !== 1 ? `found ${mounts.length} mounts` : `gated on ${mountGated.join(', ')}`);
+    fail('2b. SettingsAboutScreen.tsx mounts <AboutSection navigate={…} /> once, ungated',
+         mounts.length !== 1 ? `found ${mounts.length} mounts`
+           : mountGated.length ? `gated on ${mountGated.join(', ')}` : 'no navigate prop passed');
   }
 
   // 2c. TestingSection never opens the inbox.
@@ -319,8 +324,9 @@ function textNodes(root) {
   else fail('2c. TestingSection.tsx has no FeedbackInbox navigation',
             `still at ${testingNavs.map((n) => at(testing, n)).join(', ')} — the row is tester-only again`);
 
-  // 2d-2f. The flat SettingsScreen: aboutSection has it, testingSection doesn't,
-  //        and every place `{aboutSection}` is mounted is ungated.
+  // 2d-2f. The flat SettingsScreen: aboutSection renders the same AboutSection
+  //        (so the row comes from 2a's module), testingSection has no inbox
+  //        row, and every place `{aboutSection}` is mounted is ungated.
   const flat = parse(F.flat);
   const [aboutDecl, ...aboutExtra] = varDecl(flat, 'aboutSection');
   const [testingDecl, ...testingExtra] = varDecl(flat, 'testingSection');
@@ -329,13 +335,17 @@ function textNodes(root) {
          `aboutSection: ${aboutExtra.length + (aboutDecl ? 1 : 0)}, testingSection: `
            + `${testingExtra.length + (testingDecl ? 1 : 0)} — the parse below would be vacuous`);
   } else {
-    const navs = inboxNavs(aboutDecl);
-    const navGated = navs.flatMap((n) => gated(n, aboutDecl).map((g) => `${at(flat, n)} under ${g}`));
-    if (navs.length === 1 && navGated.length === 0) {
-      ok(`2d. SettingsScreen.tsx aboutSection opens FeedbackInbox (${at(flat, navs[0])}), ungated`);
+    const flatMounts = aboutMounts(flat, aboutDecl);
+    const flatGated = flatMounts.flatMap((n) => gated(n, aboutDecl).map((g) => `${at(flat, n)} under ${g}`));
+    const inlineNavs = inboxNavs(aboutDecl);
+    if (flatMounts.length === 1 && flatGated.length === 0 && hasNavigate(flatMounts[0]) && inlineNavs.length === 0) {
+      ok(`2d. SettingsScreen.tsx aboutSection renders <AboutSection navigate={…} /> (${at(flat, flatMounts[0])}), ungated`);
     } else {
-      fail('2d. SettingsScreen.tsx aboutSection opens FeedbackInbox exactly once, ungated',
-           navs.length !== 1 ? `found ${navs.length}` : navGated.join('; '));
+      fail('2d. SettingsScreen.tsx aboutSection renders <AboutSection navigate={…} /> once, ungated',
+           flatMounts.length !== 1 ? `found ${flatMounts.length} AboutSection mounts`
+             : flatGated.length ? flatGated.join('; ')
+             : !hasNavigate(flatMounts[0]) ? 'no navigate prop passed'
+             : `an inline FeedbackInbox row too (${inlineNavs.map((n) => at(flat, n)).join(', ')}) — it would render twice`);
     }
 
     const tNavs = inboxNavs(testingDecl);

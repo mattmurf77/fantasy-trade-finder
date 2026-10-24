@@ -15,13 +15,12 @@
 // <TickLabel>About</TickLabel>, verbatim from the shipped screen), so this page
 // adds none.
 //
-// Neither module takes SettingsSectionProps: GuideSection has no notice surface
-// and no outbound navigation. AboutSection's rows open external URLs via
-// Linking (the data-credits row opens the nflverse repo), except "Your
-// feedback" (#354 BL-10), which pushes FeedbackInbox through AboutSection's own
-// useNavigation(), so this page passes it nothing. This page mounts NO Toast —
-// there is nothing to announce, and a Toast with no producer is dead state. Add
-// one back with the first row that actually needs it.
+// GuideSection takes no props: it has no notice surface and no outbound
+// navigation. AboutSection takes `navigate` for its one in-app push, "Your
+// feedback" (#354 BL-10), which opens FeedbackInbox; its other pressable rows
+// open external URLs via Linking, and Credits is a plain text block. Neither
+// announces anything, so this page mounts NO Toast — a Toast with no producer
+// is dead state. Add one back with the first row that actually needs it.
 //
 // Data (plan §6): no queries.
 
@@ -34,12 +33,14 @@ import { styles } from './styles';
 import GuideSection from './sections/GuideSection';
 import AboutSection from './sections/AboutSection';
 
-export default function SettingsAboutScreen({ navigation: _navigation }: any) {
+export default function SettingsAboutScreen({ navigation }: any) {
+  // Pushed page (plan §5), so a plain navigate.
+  const navigate = (route: string, params?: object) => navigation.navigate(route, params);
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         <GuideSection />
-        <AboutSection />
+        <AboutSection navigate={navigate} />
       </ScrollView>
       <FeedbackFAB activeScreen="SettingsAbout" aboveTabBar={false} />
     </SafeAreaView>

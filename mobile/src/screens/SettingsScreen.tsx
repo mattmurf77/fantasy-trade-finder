@@ -24,6 +24,7 @@ import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/c
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FeedbackFAB from '../components/FeedbackFAB';
+import AboutSection from './settings/sections/AboutSection';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
 import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
 // P0-5 / S-20 — the Sleeper-identity link form now has one owner, shared
@@ -80,8 +81,6 @@ const RANK_PREF_ROUTE: Record<RankMethodPref, string> = {
   manual:   'ManualRanks',
 };
 
-const WEB_ORIGIN = 'https://fantasy-trade-finder.onrender.com';
-
 export default function SettingsScreen({ navigation }: any) {
   const queryClient = useQueryClient();
   const signOut = useSession((s) => s.signOut);
@@ -103,7 +102,6 @@ export default function SettingsScreen({ navigation }: any) {
   const sleeperDisconnectEnabled = useFlag('account.sleeper_disconnect');
   const profileToggleEnabled    = useFlag('profiles.user_toggle');
   const denialRecoveryEnabled   = useFlag('notif.denial_recovery');
-  const helpSurfaceEnabled      = useFlag('ux.help_surface');
   // Monetization (iap-enablement, flag `monetize.paywall`, dark). This screen
   // is the flag-OFF twin of SettingsHubScreen; the row is carried in BOTH so
   // the paywall stays reachable whichever `account.settings_hub` state the
@@ -1375,66 +1373,10 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
-  const aboutSection = (
-    <>
-      <View style={styles.section}>
-        <TickLabel>About</TickLabel>
-      </View>
-      {/* In-app help surface (teardown 04-01, flag `ux.help_surface`) —
-          the web FAQ is the canonical "how does this work" doc. */}
-      {helpSurfaceEnabled ? (
-        <Pressable
-          testID="settings.help-faq"
-          accessibilityRole="link"
-          accessibilityHint="Opens in your browser"
-          onPress={() => Linking.openURL(`${WEB_ORIGIN}/faq.html`)}
-          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.rowKey}>Help & FAQ</Text>
-            <Text style={styles.rowSub}>
-              How rankings, matches, and trade values work.
-            </Text>
-          </View>
-          <Icon name="chevron-right" color={chalk.dim} size={16} />
-        </Pressable>
-      ) : null}
-      {/* #354 BL-10 (D-3): public home of the feedback inbox, mirrored from
-          settings/sections/AboutSection.tsx for the hub-off rollback. */}
-      <Pressable
-        testID="settings.feedback-inbox"
-        accessibilityRole="button"
-        onPress={() => navigateFromSettings('FeedbackInbox')}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Your feedback</Text>
-          <Text style={styles.rowSub}>
-            Notes you've sent with the flag button, and where each one stands.
-          </Text>
-        </View>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
-      <Pressable
-        accessibilityRole="link"
-        accessibilityHint="Opens in your browser"
-        onPress={() => Linking.openURL(`${WEB_ORIGIN}/privacy`)}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <Text style={[styles.rowKey, { flex: 1 }]}>Privacy Policy</Text>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
-      <Pressable
-        accessibilityRole="link"
-        accessibilityHint="Opens in your browser"
-        onPress={() => Linking.openURL(`${WEB_ORIGIN}/terms`)}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <Text style={[styles.rowKey, { flex: 1 }]}>Terms of Use</Text>
-        <Icon name="chevron-right" color={chalk.dim} size={16} />
-      </Pressable>
-    </>
-  );
+  // The About rows come from the same section module the hub's Help & about
+  // page renders (#354 BL-10: one row order, the feedback row and the Credits
+  // block in one place), so this hub-off rollback list cannot drift from it.
+  const aboutSection = <AboutSection navigate={navigateFromSettings} />;
 
   const signOutBlock = (
     <>
