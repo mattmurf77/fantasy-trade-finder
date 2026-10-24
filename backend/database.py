@@ -4595,6 +4595,30 @@ def link_identity(
         print(f"[link_identity] {device_id} failed: {e}")
 
 
+def delete_device_claim_rows(user_id: str, device_id: str) -> dict:
+    """M11 claim-only delete (#354, head-eng 2026-10-24): remove ONLY what this
+    device wrote for this user id, in one transaction:
+
+      • identity_links rows for (device_id, sleeper_user_id = user_id);
+      • user_events rows for (user_id, device_id) — the client events this
+        install sent while signed in as user_id.
+
+    Never touches another device's rows, rows with no device_id (server-fired
+    events carry none), pre-auth 'device:<id>' rows, or any account data.
+    Returns the row counts.
+    """
+    with engine.begin() as conn:
+        links = conn.execute(delete(identity_links_table).where(and_(
+            identity_links_table.c.device_id == device_id,
+            identity_links_table.c.sleeper_user_id == user_id,
+        ))).rowcount or 0
+        events = conn.execute(delete(user_events_table).where(and_(
+            user_events_table.c.user_id == user_id,
+            user_events_table.c.device_id == device_id,
+        ))).rowcount or 0
+    return {"identity_links": links, "user_events": events}
+
+
 def _streak_lapsed(last_local_date_str: str | None, tz: str | None) -> bool:
     """True when a stored streak is stale for display: last_rank_local_date
     is missing/unparseable, or more than 1 day behind "today" in `tz`
