@@ -4552,7 +4552,7 @@ export default function TradesScreen({ navigation, route }: any) {
   }, [deckIsEmpty, rawTopCard?.trade_id]);
 
   // ── P30 end card actions (head-eng ruling 13, D14) ──────────────────────
-  // "Adjust what I'm looking for" opens the deck's OWN preferences (the full
+  // "Adjust your search" (p30.cta1) opens the deck's OWN preferences (the full
   // DNA sheet — fairness, filters, intent, team — or, off the consolidated
   // layout, the outlook sheet: the same two-way fork the inferred-outlook
   // banner uses). Applying a change runs the search IN PLACE (no
@@ -9077,11 +9077,9 @@ export default function TradesScreen({ navigation, route }: any) {
             // BEHIND it (D14c). No Like/Pass, no count, no third action.
             <DeckEndCard
               minHeight={topCardH}
-              tally={
-                replenishmentOn
-                  ? `${sessionTally.passed} passed · ${sessionTally.liked} liked · ${sessionTally.proposed} proposed`
-                  : null
-              }
+              // The D-171 tally source (sessionTally, also the deck-done
+              // card's); it is only kept while deck.replenishment is on.
+              tally={replenishmentOn ? sessionTally : null}
               onAdjust={handleDeckEndAdjust}
               onHome={homeTabOn ? handleDeckEndHome : undefined}
             />

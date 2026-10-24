@@ -153,24 +153,31 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
     if (ts.isFunctionDeclaration(n) && n.name?.text === 'DeckEndCard') fn = n.getText(sf);
     ts.forEachChild(n, visit);
   })(sf);
-  check('4a. P30 copy verbatim', /export const DECK_END_TITLE = "You've seen every trade we have for now\.";/.test(comp)
-    && /export const DECK_END_BODY = 'New ideas show up as rosters and values change\.';/.test(comp));
+  // marketing-lead's copy file, rows p30.* — pinned verbatim.
+  check('4a. P30 copy verbatim (p30.head, p30.body)',
+    /export const DECK_END_TITLE = "You've seen every trade for now\.";/.test(comp)
+      && /export const DECK_END_BODY = 'New ideas show up as rosters and values change\.';/.test(comp)
+      && /<Text variant="heading">\{DECK_END_TITLE\}<\/Text>/.test(fn)
+      && /<Text variant="bodySm" style=\{styles\.endBody\}>\{DECK_END_BODY\}<\/Text>/.test(fn));
   const buttons = fn.match(/<Button\b/g) || [];
-  check('4b. exactly two actions: "Adjust what I\'m looking for" (Primary) and "Back to Home" (Secondary) — no third',
+  check('4b. exactly two actions: "Adjust your search" (p30.cta1, Primary) and "Back to Home" (p30.cta2, Secondary) — no third',
     buttons.length === 2
-      && /label="Adjust what I'm looking for"\s*variant="primary"/.test(fn)
+      && /label="Adjust your search"\s*variant="primary"/.test(fn)
       && /label="Back to Home"\s*variant="secondary"/.test(fn),
     `${buttons.length} buttons`);
   check('4c. no Like/Pass, no count, no "new trades" notice on the end card',
     !/onLike|onPass|disposition|Toast|Badge|newTrades|onSeeNew|count/i.test(fn.replace(/DeckEndCard/g, ''))
       && !/new trade/i.test(fn),
     'the card takes minHeight, tally, onAdjust, onHome — nothing that could announce arrivals');
-  check('4d. D14b: the D-171 tally is one chalk-dim line (bodySm)',
-    /<Text variant="bodySm" testID="trades\.deck-end\.tally"/.test(fn));
+  check('4d. D14b / p30.tally: one chalk-dim line, "{passed} passed · {liked} liked · {proposed} proposed", Plex Mono numerals, shown at zero',
+    /<Text variant="bodySm" testID="trades\.deck-end\.tally" style=\{styles\.endBody\}>\s*<Text style=\{styles\.tallyNum\}>\{tally\.passed\}<\/Text>\s*\{' passed · '\}\s*<Text style=\{styles\.tallyNum\}>\{tally\.liked\}<\/Text>\s*\{' liked · '\}\s*<Text style=\{styles\.tallyNum\}>\{tally\.proposed\}<\/Text>\s*\{' proposed'\}\s*<\/Text>/.test(fn)
+      && /tallyNum: \{ fontFamily: fonts\.data, fontVariant: \['tabular-nums'\] \}/.test(comp)
+      && /\{tally \? \(/.test(fn) && !/tally\.passed \+|passed \+ tally|=== 0/.test(fn)
+      && /TODO\(trades-pm\): suppress at 0·0·0\?/.test(fn));
   const code = stripComments(read('screens/TradesScreen.tsx'));
   check('4e. the screen mounts it once, with exactly those props',
     (code.match(/<DeckEndCard\b/g) || []).length === 1
-      && /<DeckEndCard\s+minHeight=\{topCardH\}\s+tally=\{[\s\S]*?\}\s+onAdjust=\{handleDeckEndAdjust\}\s+onHome=\{homeTabOn \? handleDeckEndHome : undefined\}\s*\/>/.test(code));
+      && /<DeckEndCard\s+minHeight=\{topCardH\}\s+tally=\{replenishmentOn \? sessionTally : null\}\s+onAdjust=\{handleDeckEndAdjust\}\s+onHome=\{homeTabOn \? handleDeckEndHome : undefined\}\s*\/>/.test(code));
   check('4f. it renders only from showDeckEndCard = pagedWithCards && (latched || deckEnd === "end"), latched only on "end"',
     /const showDeckEndCard = pagedWithCards && \(endLatched \|\| deckEnd === 'end'\);/.test(code)
       && /if \(deckEnd === 'end'\) setEndLatched\(true\);/.test(code)

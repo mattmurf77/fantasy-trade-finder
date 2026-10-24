@@ -17,10 +17,11 @@
 import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, ActivityIndicator, StyleSheet, View, findNodeHandle } from 'react-native';
 import { Button, Card, Icon, Text } from './chalkline';
-import { chalk, ice, space } from '../theme/chalkline';
+import { chalk, fonts, ice, space } from '../theme/chalkline';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 
-export const DECK_END_TITLE = "You've seen every trade we have for now.";
+// P30 copy: marketing-lead's copy file, rows p30.* (final, 2026-10-23).
+export const DECK_END_TITLE = "You've seen every trade for now.";
 export const DECK_END_BODY = 'New ideas show up as rosters and values change.';
 export const WITHDRAWN_REASON = 'This trade is no longer available.';
 export const DECK_OFFLINE_LINE = "You're offline. More trades load when you're back online.";
@@ -111,8 +112,9 @@ export function DeckEndCard({
   onHome,
 }: {
   minHeight?: number | null;
-  /** D-171 ruling 4's end-of-deck tally (head-eng D14b), one chalk-dim line. */
-  tally: string | null;
+  /** D-171 ruling 4's end-of-deck tally (head-eng D14b), one chalk-dim line
+   *  (p30.tally). Null only when the tally source (deck.replenishment) is off. */
+  tally: { passed: number; liked: number; proposed: number } | null;
   onAdjust: () => void;
   /** Absent when the app has no Home tab (`nav.home_tab` off). */
   onHome?: () => void;
@@ -125,16 +127,22 @@ export function DeckEndCard({
         <View ref={copyRef} accessible accessibilityLabel={`${DECK_END_TITLE} ${DECK_END_BODY}`}>
           <Text variant="heading">{DECK_END_TITLE}</Text>
           <Text variant="bodySm" style={styles.endBody}>{DECK_END_BODY}</Text>
+          {/* TODO(trades-pm): suppress at 0·0·0? Shown at zero for now. */}
           {tally ? (
             <Text variant="bodySm" testID="trades.deck-end.tally" style={styles.endBody}>
-              {tally}
+              <Text style={styles.tallyNum}>{tally.passed}</Text>
+              {' passed · '}
+              <Text style={styles.tallyNum}>{tally.liked}</Text>
+              {' liked · '}
+              <Text style={styles.tallyNum}>{tally.proposed}</Text>
+              {' proposed'}
             </Text>
           ) : null}
         </View>
         <View style={styles.endActions}>
           <Button
             testID="trades.deck-end.adjust"
-            label="Adjust what I'm looking for"
+            label="Adjust your search"
             variant="primary"
             onPress={onAdjust}
             style={styles.fullWidth}
@@ -203,5 +211,7 @@ const styles = StyleSheet.create({
   withdrawnRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   fullWidth: { alignSelf: 'stretch', marginTop: space.md },
   endBody: { marginTop: space.sm },
+  // Plex Mono numerals (the tally's data), in the line's chalk-dim.
+  tallyNum: { fontFamily: fonts.data, fontVariant: ['tabular-nums'] },
   endActions: { marginTop: space.sm },
 });
