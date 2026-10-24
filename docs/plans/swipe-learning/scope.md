@@ -45,7 +45,13 @@
     - **Forward-only (5b i):** a like is frozen, then the knob flips and a pass is written. The frozen row is unchanged, the board rebuilt up to the flip is identical, and only the pass moves the board.
     - `replay_from_db` uses stored K, not the current `trade_k_*`.
     - **5b(ii), through `RankingService`'s real feedback path.** Trio votes establish a board. Then 600 likes and passes at K 8/4 hit players sitting on tier edges, both through live `record_trade_signal` and through the same rows replayed from storage. Every player keeps his tier, and unranked stays unranked. Within-tier order does change (asserted, so the test isn't vacuous).
-  - **`backend/tests/test_swipe_replay.py` (12 tests, synthetic SQLite):**
+  - **`backend/tests/test_swipe_replay.py` (16 tests, synthetic SQLite):**
+    - **13b A2:**
+      - The pool holds the 12 generic rungs, with `GENERIC_PICK_SEEDS` and the live tabs (pinned to server.py's `_PICK_POS` by reading the source).
+      - Pick rows are classified by id form, both directly and through `run()` counters.
+      - A pick-order case: 40 Mid-over-Early swipes invert the 1st-round Early and Mid rungs inside `first_1`, and the check catches it. The same pressure across a band edge (Early 2nd over Late 1st) is clamped, with no inversion.
+      - Zero inversions on a clean board.
+      - An introduced inversion fails the ship rule.
     - The stored rebuild equals prod's own rebuild of the stored rows.
     - The restored board moves within tiers only.
     - End to end: the exact per-week discordant and same-tier pair counts, Kendall, percentile move, 5b(ii) = 0, the verdicts and the ship rule.
@@ -62,20 +68,32 @@
     - The CLI end to end.
     - The module never imports `backend.server` (subprocess check).
   - **`backend/tests/test_bakeoff_arm_a_golden.py`:** knob inventory. `bakeoff_freeze_trade_k` is EXCLUDED from `MODEL_A_PROFILE`: it's read only on the swipe routes, never in generation. The golden stands.
-  - **Targeted run, 2026-10-24: 703 passed across 23 files.** That's the two BL-001 files plus every test file that touches `elo_freeze_mult`, `record_trade_signal`, the config inventories and config-reference, and the decline-reason Elo path. The full suite is CI's.
+  - **Targeted run, 2026-10-24: 781 passed across 29 files.** That's:
+    - the two BL-001 files;
+    - every test file that touches `elo_freeze_mult`, `record_trade_signal`, the config inventories and config-reference, and the decline-reason Elo path;
+    - the six test files main's last two merges added (RankingService threads, session-init single-flight, small responses, status lock).
+
+    The full suite is CI's.
 - [x] **Sabotage (not committed; every one reverted):**
   - `elo_freeze_mult` changed to ignore the knob: **6 of 17 tests failed** (b ×3, the defaults pin, (d) knob 0, forward-only).
   - `restore_rows` changed to a no-op: **2 of 7 replay tests failed**.
   - WITHOUT made equal to WITH (5a trivially 0): **2 of 12 failed** (the end-to-end Kendall counts and the week isolation).
   - 5b(ii) counter returning 0: **1 of 12 failed** (the violation counter).
-- [x] **Code-walk proof** (at this branch, `server.py` and `ranking_service.py` unchanged):
+  - Generic rungs dropped from the pool: **5 of 16 failed** (the pool mirror, the classification, the pick-order case, and the two end-to-end tests).
+  - Early and Mid reversed in the ladder: **5 of 16 failed** (the clean-board and pick-order cases, the pool mirror, the end-to-end check and the CLI).
+- [x] **Code-walk proof** (line numbers at `9c58e93e`, after main's merges; this build doesn't edit `server.py` or `ranking_service.py`):
   - **Knob read:** `bakeoff_runner.py:468`, inside `elo_freeze_mult` (`:450`).
   - **Its three callers:**
-    - `server.py:16019`, `/api/trades/swipe`. The persisted K is `trade_k_like × fit_mult` (`:16028`) or `trade_k_pass × fit_mult` (`:16038`), written by `save_trade_swipes` (`:16097`).
-    - `server.py:16540`, calc queue like (`:16569`).
-    - `server.py:16943`, deferred pass-reason Elo (`:16950`).
-  - **Replay** reads each row's stored `k_factor` (`ranking_service.py:1207`), so frozen K = 0 rows stay inert forever.
-  - **Trade-swipe updates are clamped** inside each player's post-ranking tier band (`_feedback_bounds`, `ranking_service.py:1421`, applied at `:1563`). That's the owner contract of 2026-09-05: feedback may reorder within a tier, never change it (`test_trade_feedback_tier_bounds.py`).
+    - `server.py:16144`, `/api/trades/swipe`. The persisted K is `trade_k_like × fit_mult` (`:16154`) or `trade_k_pass × fit_mult` (`:16164`), written by `save_trade_swipes` (`:16223`).
+    - `server.py:16666`, calc queue like (`:16696`).
+    - `server.py:17070`, deferred pass-reason Elo (`:17077`).
+  - **Replay** reads each row's stored `k_factor` (`ranking_service.py:1235`), so frozen K = 0 rows stay inert forever.
+  - **Trade-swipe updates are clamped** inside each player's post-ranking tier band (`_feedback_bounds`, `ranking_service.py:1450`, applied at `:1595`). That's the owner contract of 2026-09-05: feedback may reorder within a tier, never change it (`test_trade_feedback_tier_bounds.py`).
+  - **13b A2, picks:**
+    - **Generic rungs are in the session pool.** `build_universal_pool` appends the 12 rungs with `GENERIC_PICK_SEEDS` in `_PICK_POS` tabs (`server.py:1670-1690`). Session init builds each format's RankingService from that pool (`:22454`, `:22461`).
+    - **League picks never are.** `_inject_owned_picks` writes them only to `trade_service._players`, the job's `players_dict` (`:14225-14226`) and Elo maps (`:14238`).
+    - **Live skips pairs outside the pool:** `record_trade_signal` (`ranking_service.py:747`) and `replay_from_db` (`:1231`).
+    - **The calc queue passes client ids through unfiltered.** It takes them as strings (`server.py:16577`), rebuilds the card (`:16639`, `:16041`) and calls `record_trade_signal` (`:16669`) with no asset-kind check.
 - [x] **Maestro delta:** n/a, retired by D-056.
 - [x] **Manual TestFlight checklist: WAIVED.**
   - It's backend-only, and the knob ships at 1 (no behavior change).
@@ -141,11 +159,12 @@
 | **5b(i), forward-only** | Restoring at K × 0 reproduces the stored board, and nothing before `--since` moves | Every board |
 | **5b(ii), structural** | Players whose tier differs WITH vs WITHOUT (unranked counted as a tier) | 0. This replaces the old band-move bar, which couldn't fire. Tested in both files |
 | 5b(iii)–(v) | Trio K unchanged; first-deck gate unaffected; no Calibration session mixes boards | Not touched by this build: `elo_k` and the trio path are unchanged; brand-new users have no swipes; Calibration builds every arm in a session from one board (packet §M13) |
+| **Pick order (13b A2)** | The 12 generic rungs on every WITH and WITHOUT board: Early ≥ Mid ≥ Late within a round, and min(round r) ≥ max(round r + 1). An inversion is a ladder pair rated the wrong way round. Pre-existing (WITHOUT) and introduced (on WITH, not on WITHOUT) are both reported | **0 introduced.** Part of the ship rule, and the monitor keeps it as a tripwire |
 
 p95 is nearest rank throughout.
 
 **Ship rule:**
-- **Ship at full K (8/4)** when 5a-i, 5a-ii, 5b(i) and 5b(ii) all hold on the replay.
+- **Ship at full K (8/4)** when 5a-i, 5a-ii, 5b(i) and 5b(ii) all hold on the replay and no pick inversion is introduced.
 - **Otherwise, ship at half K (4/2)** if they hold there, and re-check.
 - **Otherwise, hold.** The replay is an upper bound (§10 caveats), so a fail calls for half K or a fidelity fix, not abandoning.
 - The tool always reports both scales and prints the rule's outcome (`ship_rule`).
@@ -160,6 +179,7 @@ p95 is nearest rank throughout.
   - **(c)** the operator reports that rankings jumped.
 - No interim verdict beyond the kill rule. The kill thresholds sit above the bars to leave headroom for the replay's upper-bound gap.
 - **The replay reports (a) and (b) per week** as `kill_rule.weeks[]`, with `would_have_fired` overall. (c) has no replay analogue.
+- **Tripwire:** the monitor also runs the pick-order check. Any inversion introduced by trade swipes is investigated before the next weekly read.
 - **Monitor method:** run the same WITH/WITHOUT comparison on post-flip weeks. Today `swipe_replay.py` restores only frozen (K = 0) rows. On live rows WITH is the stored board, and WITHOUT zeroes the week's trade rows: `week_rows` already does that for any `'trade'` row in the week. Pointing it at post-flip weeks needs a small follow-up (S): select boards by trade swipes in the window rather than frozen ones. Not built here.
 
 ## 10. Offline replay (packet fields 5, 7 and 8)
@@ -167,15 +187,23 @@ p95 is nearest rank throughout.
 - **Tool:** `python3 -m backend.eval.swipe_replay --db <path|URL> [--allow-postgres-readonly] --since 2026-08-19 [--until …] --min-swipes 10 --k-scale 1.0 --output <json>`.
   - It always reports the half-K (4/2) result next to the requested scale.
   - The module docstring and the report's `metric_definition` state the metrics.
+- **The pool mirrors the live session RankingService pool (13b A2):**
+  - **Players:** the `player_value_history` snapshot joined to `players`.
+  - **Plus the 12 generic rungs** `generic_pick_{1..4}_{early,mid,late}`, with `pick_values.GENERIC_PICK_SEEDS` and the live builder's position tabs. The tabs are `GENERIC_PICK_TABS`; a test pins them to server.py's `_PICK_POS` literal by reading the source, since that map is local to the builder.
+  - **A pair applies only when both ids are in the pool,** exactly as live: `record_trade_signal` and `replay_from_db` skip any other pair.
+  - **Restored rows are counted by id form:** `generic_pick_rows_applied`, `skipped_league_pick_rows` (league-owned `{league}_{season}_{round}_{orig}` ids live only in the trade engine's maps, never in the ranking pool) and `skipped_other_rows`.
+  - **Before the flip, trades-eng will strip `generic_pick_*` ids on the queue and swipe routes,** so live churn will be a subset of what the replay measures.
 - **JSON output fields:**
-  - Top level: `metric_definition`, `caveats`, `window`, `k`, `min_swipes`, `counts`, `seed_snapshots`, `model_config_sha256`, `check_5b_i`, `ship_rule`, `provenance`.
+  - Top level: `metric_definition`, `pick_order_definition`, `caveats`, `window`, `k`, `min_swipes`, `counts`, `seed_snapshots`, `model_config_sha256`, `check_5b_i`, `ship_rule`, `provenance`.
+  - `counts` adds `generic_pick_rows_applied`, `skipped_league_pick_rows` and `skipped_other_rows`.
   - **`results["1.0" | "0.5"]`:**
     - `board_weeks_active` and `board_weeks_inactive`;
     - `kendall` and `max_pct_move`, each as {median, p95, max};
     - `bar_5a_i` and `bar_5a_ii`;
     - `check_5b_ii` {tier_membership_violations, verdict};
-    - `kill_rule` {weeks[{week_start, active_boards, p95_kendall, share_pct_move_ge_75, fires_a, fires_b}], would_have_fired}.
-  - **`boards[]`:** each board by hash, with per-week rows: trade_swipes, kendall, discordant_pairs, same_tier_pairs, max_pct_move, tier_violations.
+    - `kill_rule` {weeks[{week_start, active_boards, p95_kendall, share_pct_move_ge_75, fires_a, fires_b}], would_have_fired};
+    - `pick_order` {preexisting_inversions, board_weeks_with_preexisting, introduced_inversions, board_weeks_with_introduced, verdict}.
+  - **`boards[]`:** each board by hash, with per-week rows: trade_swipes, kendall, discordant_pairs, same_tier_pairs, max_pct_move, tier_violations, pick_inversions_without, pick_inversions_introduced.
 - **Reading swipe_decisions:**
   - **Trade swipes vs trio votes:** `swipe_decisions.decision_type`. `'rank'` is a trio vote, `'trade'` is a trade-card like or pass, and `'disposition'` is a match accept/decline. Only frozen `'trade'` rows (K = 0, in the window) are restored.
 - **Fidelity caveats.** Both push churn up, so the replay is an **upper bound** on live churn. Both are printed and written to `caveats`.
@@ -199,4 +227,10 @@ p95 is nearest rank throughout.
 ## 11. Findings for models-lead
 
 1. **Resolved 2026-10-24.** The original band-move bar could never fire: trade feedback is held inside each tier band. models-lead restated 5a as within-tier Kendall and percentile move, and kept the band check as structural guardrail 5b(ii).
-2. **Packet field 2 overstates the downstream effect.** "Tier views and pins" don't change from trade swipes. Only the order within a tier does, along with anything that reads the Elo value itself (selection, value).
+2. **Resolved 2026-10-24: field 2 corrected by models-lead.** Trade swipes don't change tier views or pins. They change within-tier order, and anything that reads the Elo value itself (selection, value).
+3. **13b A2, pick pairs (code read at `9c58e93e`):**
+   - **Generic rungs move ratings live.** They're in the session RankingService pool, and `_feedback_bounds` lets a swipe invert two rungs that share a tier: Early and Mid 1st are both `first_1`. The replay now includes them, and the pick-order check catches that case.
+   - **Rungs in different bands can't invert.** The band edge holds Late 1st (`first_1`) against Early 2nd (`second`).
+   - **League-owned picks never move ratings.** They're never in the ranking pool, so both live and replay skip their pairs.
+   - **Deck cards are built from rosters** (Sleeper players plus league-owned picks), so deck swipes carry no generic rungs.
+   - **The calculator queue (`/api/trades/queue`) passes client ids straight to `record_trade_signal` with no asset-kind check.** That's the path generic rungs reach. trades-eng's strip closes it before the flip.

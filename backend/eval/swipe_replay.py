@@ -29,12 +29,22 @@ the week itself (trio votes, dispositions, everything).
   WITHOUT: this week's trade swipes carry K = 0.
 The difference is that week's trade-swipe effect and nothing else.
 
-Seeds are the `player_value_history` consensus snapshot for the format on or
-before --until; the pool is that snapshot joined to `players` (QB/RB/WR/TE).
-Generic pick assets have no `players` row, so pairs involving them are skipped
-(counted as `restored_rows_outside_pool`). Tier overrides (pins) are not
-applied: `users.tier_overrides` is replace-in-place, so a pin's history is not
-stored.
+The pool mirrors the live session ranking pool (`server.build_universal_pool`,
+reached through `_get_universal_pool` when session_init builds each format's
+RankingService):
+  * players: the `player_value_history` consensus snapshot for the format on
+    or before --until, joined to `players` (QB/RB/WR/TE), seeded from it;
+  * the 12 generic pick rungs `generic_pick_{1..4}_{early,mid,late}`, seeded
+    from `pick_values.GENERIC_PICK_SEEDS` and placed in the position tabs the
+    live builder uses (GENERIC_PICK_TABS, pinned to server.py's `_PICK_POS`
+    by a test, since that mapping is local to the builder).
+A pair applies only when both ids are in the pool, exactly as live
+(`RankingService.record_trade_signal` and `replay_from_db` skip any other
+pair). Restored rows are counted by id form: `generic_pick_rows_applied`,
+`skipped_league_pick_rows` (league-owned `{league}_{season}_{round}_{orig}`
+ids live only in the trade engine's maps, never in the ranking pool) and
+`skipped_other_rows`. Tier overrides (pins) are not applied:
+`users.tier_overrides` is replace-in-place, so a pin's history is not stored.
 
 Trade swipes vs trio votes
 --------------------------
@@ -71,9 +81,17 @@ the week) are scored; with none, WITH equals WITHOUT.
   * Kill-rule indicators per replay week: (a) p95 Kendall > 0.25; (b) the
     share of active boards with a max percentile move >= 75 is >= 5%. (c), an
     operator report, has no replay analogue.
+  * Pick order (BL-001 A2; `pick_order`, PICK_ORDER_DEFINITION): on every
+    board-week's WITH and WITHOUT boards, the generic ladder must read Early
+    >= Mid >= Late within a round and min(round r) >= max(round r + 1), i.e.
+    1E..4L non-increasing in Elo. An inversion is a ladder pair (higher rung,
+    lower rung) with the higher rung rated below. Pre-existing inversions
+    (WITHOUT) are reported; inversions introduced by trade swipes (on WITH,
+    not on WITHOUT) must be 0.
 p95 is nearest rank. The --k-scale result and the half-K (0.5) result are both
 reported, and `ship_rule` applies the packet's rule: full K if 5a-i, 5a-ii,
-5b(i) and 5b(ii) hold, else half K if they hold there, else hold.
+5b(i) and 5b(ii) hold and no pick inversion is introduced, else half K if
+they hold there, else hold.
 
 5b (i), reported as `check_5b_i`: restoring at K x 0 reproduces the stored
 board exactly (the restore path changes nothing but frozen-window K), and the
@@ -93,6 +111,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import statistics
 import subprocess
 import sys
@@ -104,6 +123,8 @@ from urllib.parse import quote
 from sqlalchemy import create_engine, event, text
 
 from backend import ranking_service as rs
+from backend.pick_values import (GENERIC_PICK_ID_PREFIX, GENERIC_PICK_SEEDS,
+                                 generic_pick_label)
 from backend.ranking_service import Player, RankingService
 
 DEFAULT_SCORING = "1qb_ppr"
@@ -129,6 +150,25 @@ METRIC_DEFINITION = (
     "p95 <= 50. 5b(ii) = players whose tier differs WITH vs WITHOUT; must be "
     "0. Kill indicators per week: (a) p95 Kendall > 0.25, (b) share of active "
     "boards with a percentile move >= 75 is >= 5%. p95 is nearest rank.")
+
+#: Position tab of each generic rung by round. A copy of the `_PICK_POS`
+#: literal local to `server.build_universal_pool`, which this module can't
+#: import; test_swipe_replay pins the two together.
+GENERIC_PICK_TABS = {1: "RB", 2: "WR", 3: "TE", 4: "QB"}
+#: The generic ladder, highest rung first: rounds 1-4, Early > Mid > Late.
+GENERIC_LADDER = [f"{GENERIC_PICK_ID_PREFIX}{rnd}_{tier.lower()}"
+                  for rnd in sorted(GENERIC_PICK_TABS)
+                  for tier in ("Early", "Mid", "Late")]
+#: A league-owned pick id: `{league_id}_{season}_{round}_{original_roster}`.
+LEAGUE_PICK_ID = re.compile(r"^.+_\d{4}_\d{1,2}_[^_]+$")
+
+PICK_ORDER_DEFINITION = (
+    "Per board-week, on WITH and WITHOUT: the generic ladder (rounds 1-4, "
+    "Early >= Mid >= Late within a round, min(round r) >= max(round r+1)) must "
+    "be non-increasing in Elo. An inversion is a ladder pair (higher rung, "
+    "lower rung) with the higher rung rated below. Pre-existing = inversions "
+    "on WITHOUT; introduced = inversions on WITH that are not on WITHOUT. "
+    "Zero introduced passes, and it is part of the ship rule.")
 
 CAVEATS = [
     "Upper bound: fit_mult = 1 for every restored swipe (the signed lane_shift "
@@ -230,7 +270,27 @@ def load_pool(conn, scoring_format: str, on_or_before: str):
             players.append(Player(id=pid, name=r["full_name"] or pid,
                                   position=r["position"], team=r["team"] or "FA",
                                   age=int(r["age"] or 0)))
-    return players, {p.id: seed[p.id] for p in players}, snap
+    seeds = {p.id: seed[p.id] for p in players}
+    # The 12 generic rungs, as the live builder appends them after players.
+    for (rnd, tier), elo in GENERIC_PICK_SEEDS.items():
+        pid = f"{GENERIC_PICK_ID_PREFIX}{rnd}_{tier.lower()}"
+        players.append(Player(id=pid, name=generic_pick_label(rnd, tier),
+                              position=GENERIC_PICK_TABS[rnd], team="PICK", age=0))
+        seeds[pid] = float(elo)
+    return players, seeds, snap
+
+
+def pair_kind(row: dict, pool_ids: set) -> str:
+    """How live treats one swipe row: 'applied', 'generic_pick_applied',
+    'skipped_league_pick' or 'skipped_other' (both ids must be in the pool)."""
+    ids = (str(row["winner_player_id"]), str(row["loser_player_id"]))
+    outside = [i for i in ids if i not in pool_ids]
+    if not outside:
+        return ("generic_pick_applied"
+                if any(i.startswith(GENERIC_PICK_ID_PREFIX) for i in ids) else "applied")
+    if any(LEAGUE_PICK_ID.match(i) for i in outside):
+        return "skipped_league_pick"
+    return "skipped_other"
 
 
 def is_frozen_trade(row: dict, since: datetime, until: datetime) -> bool:
@@ -378,6 +438,29 @@ def tier_violations(with_board: dict, without_board: dict) -> int:
     return sum(1 for pid, v in without_board.items() if with_board[pid][3] != v[3])
 
 
+def pick_inversions(board: dict) -> set:
+    """Generic-ladder pairs (higher rung, lower rung) rated the wrong way
+    round on this board: Early >= Mid >= Late within a round and every
+    round-r rung >= every round-(r+1) rung, i.e. 1E..4L non-increasing."""
+    rungs = [pid for pid in GENERIC_LADDER if pid in board]
+    return {(hi, lo) for i, hi in enumerate(rungs) for lo in rungs[i + 1:]
+            if board[hi][0] < board[lo][0]}
+
+
+def pick_order(board_weeks: list[dict]) -> dict:
+    """Pre-existing and trade-swipe-introduced ladder inversions; 0 introduced passes."""
+    introduced = sum(w["pick_inversions_introduced"] for w in board_weeks)
+    return {
+        "preexisting_inversions": sum(w["pick_inversions_without"] for w in board_weeks),
+        "board_weeks_with_preexisting": sum(1 for w in board_weeks
+                                            if w["pick_inversions_without"]),
+        "introduced_inversions": introduced,
+        "board_weeks_with_introduced": sum(1 for w in board_weeks
+                                           if w["pick_inversions_introduced"]),
+        "verdict": "PASS" if introduced == 0 else "FAIL",
+    }
+
+
 def p95(values) -> float | None:
     """Nearest-rank 95th percentile."""
     if not values:
@@ -438,12 +521,15 @@ def summarize(board_weeks: list[dict]) -> dict:
         "check_5b_ii": {"tier_membership_violations": violations,
                         "verdict": "PASS" if violations == 0 else "FAIL"},
         "kill_rule": kill_indicators(active),
+        "pick_order": pick_order(board_weeks),
     }
 
 
 def ship_rule(results: dict, check_5b_i_pass: bool) -> str:
     """The packet's rule: full K if every bar holds, else half K, else hold."""
     def holds(r):
+        if r["pick_order"]["verdict"] != "PASS":      # A2: no introduced inversions
+            return False
         return (check_5b_i_pass and r["bar_5a_i"] == "PASS"
                 and r["bar_5a_ii"] == "PASS" and r["check_5b_ii"]["verdict"] == "PASS")
     full, half = results.get("1.0"), results.get(str(HALF_K))
@@ -485,6 +571,8 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
         with ranking_config(model_config):
             k_like, k_pass = rs._c("trade_k_like"), rs._c("trade_k_pass")
             pools, counts = {}, defaultdict(int)
+            counts.update(generic_pick_rows_applied=0, skipped_league_pick_rows=0,
+                          skipped_other_rows=0)
             board_weeks = {s: [] for s in scales}
             check = {"boards": 0, "a_equals_restore_at_k0": 0,
                      "b_equals_a_at_since": 0}
@@ -512,9 +600,12 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                 for kind in kinds.values():
                     counts[f"frozen_swipes_{kind or 'unmatched'}"] += 1
                 counts["restored_rows"] += len(frozen)
-                counts["restored_rows_outside_pool"] += sum(
-                    1 for r in frozen if str(r["winner_player_id"]) not in pool_ids
-                    or str(r["loser_player_id"]) not in pool_ids)
+                for r in frozen:
+                    kind = pair_kind(r, pool_ids)
+                    if kind != "applied":
+                        counts[{"generic_pick_applied": "generic_pick_rows_applied",
+                                "skipped_league_pick": "skipped_league_pick_rows",
+                                "skipped_other": "skipped_other_rows"}[kind]] += 1
 
                 # 5b(i): restoring at K x 0 is the stored board; nothing
                 # before --since moves.
@@ -539,7 +630,11 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                             rows, since, start, end, kinds, k_like, k_pass, s)
                         with_b, without_b = board(with_rows), board(without_rows)
                         discordant, pairs, move = within_tier_moves(with_b, without_b)
+                        inv_without = pick_inversions(without_b)
                         weeks.append({
+                            "pick_inversions_without": len(inv_without),
+                            "pick_inversions_introduced": len(
+                                pick_inversions(with_b) - inv_without),
                             "week_start": start.isoformat(), "trade_swipes": swipes,
                             "kendall": discordant / pairs if pairs else None,
                             "discordant_pairs": discordant, "same_tier_pairs": pairs,
@@ -554,6 +649,7 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
     results = {str(s): summarize(board_weeks[s]) for s in scales}
     return {
         "metric_definition": METRIC_DEFINITION,
+        "pick_order_definition": PICK_ORDER_DEFINITION,
         "caveats": CAVEATS,
         "window": {"since": since.isoformat(), "until": until.isoformat()},
         "k": {"trade_k_like": k_like, "trade_k_pass": k_pass, "fit_mult": 1.0,
@@ -606,6 +702,10 @@ def summary_text(report: dict) -> str:
         f"{c.get('frozen_swipes', 0)} (like {c.get('frozen_swipes_like', 0)}, "
         f"pass {c.get('frozen_swipes_pass', 0)}, unmatched "
         f"{c.get('frozen_swipes_unmatched', 0)})",
+        f"  restored rows {c.get('restored_rows', 0)}: generic-pick pairs applied "
+        f"{c.get('generic_pick_rows_applied', 0)}, skipped league-pick "
+        f"{c.get('skipped_league_pick_rows', 0)}, skipped other "
+        f"{c.get('skipped_other_rows', 0)} (live skips the same pairs)",
         *(f"  caveat: {line}" for line in report["caveats"]),
         f"  metric: {report['metric_definition']}",
     ]
@@ -626,6 +726,10 @@ def summary_text(report: dict) -> str:
             f"{res['check_5b_ii']['verdict']}",
             f"    kill rule (a)/(b) would have fired: "
             f"{'yes, weeks ' + ', '.join(fired) if fired else 'no'}",
+            f"    pick order: pre-existing inversions "
+            f"{res['pick_order']['preexisting_inversions']}, introduced "
+            f"{res['pick_order']['introduced_inversions']} -> "
+            f"{res['pick_order']['verdict']}",
         ]
     chk = report["check_5b_i"]
     lines += [

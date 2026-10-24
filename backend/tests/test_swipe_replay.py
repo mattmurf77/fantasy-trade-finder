@@ -127,7 +127,9 @@ def test_a_reproduces_the_stored_board_and_b_equals_a_before_the_window(world):
 
     # Independently: prod's own rebuild (replay every stored row as-is).
     players, seed, snap = _pool(engine)
-    assert snap == "2026-08-01" and "generic_pick_1_early" not in seed
+    # The rung's snapshot row (1800) is ignored: live seeds rungs from
+    # GENERIC_PICK_SEEDS, so the replay does too.
+    assert snap == "2026-08-01" and seed["generic_pick_1_early"] == 1720.0
     svc = RankingService(players=players, seed_ratings=seed)
     svc._scoring_format = FMT
     svc.replay_from_db(_stored_rows(engine))
@@ -164,14 +166,19 @@ def test_b_moves_the_board_within_tiers_only(world):
     report = sr.run(engine, SINCE, UNTIL)
     full, half = report["results"]["1.0"], report["results"]["0.5"]
     assert full["board_weeks_active"] == 4 and half["board_weeks_active"] == 4
-    # Groups: six WRs in `second` (15 pairs) + three QBs in `first_1` (3);
-    # r1 and t1 are singletons. Week 1's like flips w1/w2: 1 of 18 pairs,
-    # and each moves one place in a group of six (20 percentile points).
+    # Groups, with the generic rungs in their live tabs: WR `second` holds six
+    # WRs + the three 2nds (36 pairs); RB `first_1` r1 + the three 1sts (6);
+    # QB `first_1` three QBs (3) and QB `fourth` the three 4ths (3); TE
+    # `third` the three 3rds (3); t1 is a singleton. 51 pairs. Week 1's like
+    # flips w1/w2: 1 of 51, one place in a group of nine (12.5 points).
     weeks = report["boards"][0]["k_scale_1.0"]
     assert [(w["discordant_pairs"], w["same_tier_pairs"]) for w in weeks] == \
-        [(1, 18), (0, 18), (0, 18), (0, 18)]
-    assert full["kendall"] == {"median": 0.0, "p95": 1 / 18, "max": 1 / 18}
-    assert full["max_pct_move"]["max"] == pytest.approx(20.0)
+        [(1, 51), (0, 51), (0, 51), (0, 51)]
+    assert full["kendall"] == {"median": 0.0, "p95": 1 / 51, "max": 1 / 51}
+    assert full["max_pct_move"]["max"] == pytest.approx(12.5)
+    assert full["pick_order"]["preexisting_inversions"] == 0
+    assert full["pick_order"]["introduced_inversions"] == 0
+    assert full["pick_order"]["verdict"] == "PASS"
     assert full["check_5b_ii"] == {"tier_membership_violations": 0, "verdict": "PASS"}
     assert full["bar_5a_i"] == full["bar_5a_ii"] == "PASS"
     assert half["bar_5a_i"] == half["bar_5a_ii"] == "PASS"
@@ -282,15 +289,21 @@ def test_tier_violation_counter():
                         u=("TE", 1, "waivers"))
     assert sr.tier_violations(moved, without) == 2   # a promoted, u became ranked
     weeks = [{"trade_swipes": 1, "kendall": 0.0, "max_pct_move": 0.0,
-              "tier_violations": v, "week_start": "w"} for v in (0, 2)]
+              "tier_violations": v, "week_start": "w", **NO_PICK_INVERSIONS}
+             for v in (0, 2)]
     assert sr.summarize(weeks)["check_5b_ii"] == {
         "tier_membership_violations": 2, "verdict": "FAIL"}
 
 
+NO_PICK_INVERSIONS = {"pick_inversions_without": 0, "pick_inversions_introduced": 0}
+
+
 def test_bars_and_ship_rule():
-    def weeks(kendalls, moves):
+    def weeks(kendalls, moves, introduced=0):
         return [{"trade_swipes": 1, "kendall": k, "max_pct_move": m,
-                 "tier_violations": 0, "week_start": "w"} for k, m in zip(kendalls, moves)]
+                 "tier_violations": 0, "week_start": "w",
+                 "pick_inversions_without": 0, "pick_inversions_introduced": introduced}
+                for k, m in zip(kendalls, moves)]
 
     ok = sr.summarize(weeks([0.0, 0.05, 0.15], [0.0, 10.0, 50.0]))
     assert ok["bar_5a_i"] == ok["bar_5a_ii"] == "PASS"
@@ -299,13 +312,132 @@ def test_bars_and_ship_rule():
     bad = sr.summarize(weeks([0.0] * 3, [0.0, 0.0, 51.0]))
     assert bad["bar_5a_ii"] == "FAIL"
     inactive = sr.summarize([{"trade_swipes": 0, "kendall": None, "max_pct_move": 0.0,
-                              "tier_violations": 0, "week_start": "w"}])
+                              "tier_violations": 0, "week_start": "w",
+                              **NO_PICK_INVERSIONS}])
     assert inactive["bar_5a_i"] == "NO DATA" and inactive["board_weeks_inactive"] == 1
     assert sr.ship_rule({"1.0": ok, "0.5": ok}, True) == "ship at full K"
     assert sr.ship_rule({"1.0": bad, "0.5": ok}, True) == "ship at half K (4/2)"
     assert sr.ship_rule({"1.0": bad, "0.5": bad}, True).startswith("hold")
     assert sr.ship_rule({"1.0": ok, "0.5": ok}, False).startswith("hold")
+    # A2: an introduced pick inversion fails the ship rule even when every
+    # other bar passes.
+    flipped = sr.summarize(weeks([0.0] * 3, [0.0] * 3, introduced=1))
+    assert flipped["bar_5a_i"] == flipped["bar_5a_ii"] == "PASS"
+    assert flipped["pick_order"]["verdict"] == "FAIL"
+    assert sr.ship_rule({"1.0": flipped, "0.5": ok}, True) == "ship at half K (4/2)"
+    assert sr.ship_rule({"1.0": flipped, "0.5": flipped}, True).startswith("hold")
     assert sr.p95([0, 0, 1, 1, 2]) == 2
+
+
+# ---------------------------------------------------------------------------
+# A2: the pool mirrors the live ranking pool; picks are classified; pick order
+# ---------------------------------------------------------------------------
+
+def test_pool_mirrors_the_live_ranking_pool(world):
+    """The 12 generic rungs are in, seeded from GENERIC_PICK_SEEDS, in the
+    live builder's tabs. The tab map is pinned to server.py's `_PICK_POS`
+    literal by reading the source (the module must not import server)."""
+    import ast
+    from backend.pick_values import GENERIC_PICK_SEEDS, parse_generic_pick_id
+
+    engine, _ = world
+    players, seed, _ = _pool(engine)
+    rungs = {p.id: p for p in players if p.id.startswith("generic_pick_")}
+    assert len(rungs) == 12 and list(rungs) == sr.GENERIC_LADDER
+    for pid, p in rungs.items():
+        rnd, tier = parse_generic_pick_id(pid)
+        assert seed[pid] == GENERIC_PICK_SEEDS[(rnd, tier)]
+        assert p.position == sr.GENERIC_PICK_TABS[rnd] and p.team == "PICK"
+
+    tree = ast.parse((REPO / "backend" / "server.py").read_text())
+    live = [ast.literal_eval(n.value) for n in ast.walk(tree)
+            if isinstance(n, ast.Assign)
+            and any(getattr(t, "id", None) == "_PICK_POS" for t in n.targets)]
+    assert live == [sr.GENERIC_PICK_TABS]
+
+
+def test_pick_rows_are_classified_by_id_form(world):
+    engine, _ = world
+    pool = {p.id for p in _pool(engine)[0]}
+
+    def kind(w, l):
+        return sr.pair_kind({"winner_player_id": w, "loser_player_id": l}, pool)
+
+    assert kind("w1", "w2") == "applied"
+    assert kind("generic_pick_2_mid", "w4") == "generic_pick_applied"
+    assert kind("w6", "lg1_2027_1_3") == "skipped_league_pick"
+    assert kind("espn_77_2028_2_0004", "w1") == "skipped_league_pick"
+    assert kind("w5", "9999") == "skipped_other"
+    assert kind("generic_pick_9_early", "w1") == "skipped_other"   # not a real rung
+
+    # And through run(): a third board whose frozen swipes mix the forms.
+    rows = []
+    at = SINCE + timedelta(days=3)
+
+    def swipe(win, lose, n):
+        nonlocal at
+        for _ in range(n):
+            at += timedelta(minutes=5)
+            for w in win:
+                for l in lose:
+                    rows.append({"user_id": "user_picks", "winner_player_id": w,
+                                 "loser_player_id": l, "decision_type": "trade",
+                                 "k_factor": 0.0, "created_at": _iso(at),
+                                 "scoring_format": FMT})
+
+    swipe(["generic_pick_2_mid"], ["w4"], 4)              # 4 generic rows applied
+    swipe(["w6"], ["lg1_2027_1_3"], 3)                    # 3 league-pick rows skipped
+    swipe(["w5"], ["9999"], 3)                            # 3 other rows skipped
+    swipe(["generic_pick_1_late"], ["w1", "lg1_2028_2_4"], 1)  # 1 applied + 1 skipped
+    mixed = create_engine("sqlite://", poolclass=StaticPool,
+                          connect_args={"check_same_thread": False})
+    _seed(mixed)
+    with mixed.begin() as conn:
+        conn.execute(insert(db.swipe_decisions_table), rows)
+    sr._install_readonly_guard(mixed)
+    report = sr.run(mixed, SINCE, UNTIL)
+    c = report["counts"]
+    assert (c["generic_pick_rows_applied"], c["skipped_league_pick_rows"],
+            c["skipped_other_rows"]) == (5, 4, 3)
+    assert c["boards_included"] == 2 and c["restored_rows"] == 13 + 12
+
+
+def test_pick_order_inversions_inside_a_tier_are_caught(world):
+    """What `_feedback_bounds` actually allows: Early and Mid 1st (1720 /
+    1650) share `first_1`, so repeated Mid-over-Early swipes invert them and
+    the check catches it, with no tier change. Late 1st (1580, `first_1`)
+    against Early 2nd (1470, `second`) straddles a band, so the same pressure
+    is clamped and cannot invert them."""
+    engine, _ = world
+    players, seed, _ = _pool(engine)
+
+    def rows(win, lose, k, n=40):
+        return [{"winner_player_id": win, "loser_player_id": lose,
+                 "decision_type": "trade", "k_factor": k,
+                 "created_at": "2026-09-01T00:00:00+00:00"} for _ in range(n)]
+
+    def boards(win, lose):
+        with_b = sr.build_board(players, seed, FMT, rows(win, lose, 8.0))
+        without_b = sr.build_board(players, seed, FMT, rows(win, lose, 0.0))
+        return with_b, without_b
+
+    with_b, without_b = boards("generic_pick_1_mid", "generic_pick_1_early")
+    assert sr.pick_inversions(without_b) == set()
+    assert sr.pick_inversions(with_b) - sr.pick_inversions(without_b) == {
+        ("generic_pick_1_early", "generic_pick_1_mid")}
+    assert sr.tier_violations(with_b, without_b) == 0
+
+    with_b, without_b = boards("generic_pick_2_early", "generic_pick_1_late")
+    assert with_b["generic_pick_2_early"][0] > without_b["generic_pick_2_early"][0]
+    assert sr.pick_inversions(with_b) == set(), "the band edge holds the ladder"
+
+
+def test_pick_order_is_clean_on_a_clean_board(world):
+    engine, _ = world
+    players, seed, _ = _pool(engine)
+    assert sr.pick_inversions(sr.build_board(players, seed, FMT, [])) == set()
+    assert sr.pick_inversions(
+        sr.build_board(players, seed, FMT, _stored_rows(engine))) == set()
 
 
 def test_readonly_guard_refuses_writes(tmp_path):
@@ -353,7 +485,9 @@ def test_cli_writes_report_and_leaves_the_file_untouched(tmp_path, capsys):
     printed = capsys.readouterr().out
     for line in ("5a-i  Kendall", "5a-ii pct move", "5b(ii) tier-membership violations 0",
                  "kill rule (a)/(b) would have fired: no", "5b(i)",
-                 "ship rule: ship at full K", "caveat: Upper bound: fit_mult = 1"):
+                 "ship rule: ship at full K", "caveat: Upper bound: fit_mult = 1",
+                 "pick order: pre-existing inversions 0, introduced 0 -> PASS",
+                 "generic-pick pairs applied 0, skipped league-pick 0, skipped other 0"):
         assert line in printed, line
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
 
