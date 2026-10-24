@@ -48,6 +48,28 @@ def test_r1_carries_no_device_platform_prop():
         assert "platform" not in tax.CLIENT_EVENT_PROPS[name], name
 
 
+# The addendum's exact R1 `source` values (+ team_review, granted Q-A). The
+# registry holds prop NAMES, not values, so the values live in the row's
+# comment; this keeps that list complete (mobile utils/firstCardEvent.ts
+# R1Source is pinned against the same list by check-trade-first-card-events).
+R1_SOURCES = (
+    "deck_error_retry", "prefs_changed_strip", "deck_summary_unpin",
+    "deck_search_all", "calculator", "league_offer", "league_target",
+    "usage_trends", "deep_link", "end_card_adjust", "team_review",
+)
+
+
+def test_r1_source_values_are_listed_on_the_row():
+    import inspect
+    src = inspect.getsource(tax)
+    start = src.index("# Time to trade suggestion (R1;")
+    end = src.index('"find_trades_tapped":   frozenset(', start)
+    comment = src[start:end]
+    missing = [v for v in R1_SOURCES if v not in comment]
+    assert not missing, missing
+    assert "team_review" in comment and "AC-L1" in comment
+
+
 R2_ROWS: dict[str, frozenset[str]] = {
     "trade_first_card_shown": frozenset({
         "search_id", "ms_from_tap", "entry_point", "search_type",

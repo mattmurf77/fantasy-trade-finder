@@ -174,11 +174,21 @@ console.log('check-trade-first-card-events:');
   check('3f. no find_trades_tapped is emitted at dispatch anywhere in TradesScreen (one tap, one R1)',
     !/track\(\s*'find_trades_tapped'/.test(trades));
   const r1Sources = ['deck_error_retry', 'prefs_changed_strip', 'deck_summary_unpin', 'deck_search_all', 'calculator',
-    'league_offer', 'league_target', 'usage_trends', 'deep_link', 'end_card_adjust'];
+    'league_offer', 'league_target', 'usage_trends', 'deep_link', 'end_card_adjust', 'team_review'];
   const union = read('utils/firstCardEvent.ts');
   check('3g. R1Source is exactly the addendum\'s source list',
     r1Sources.every((v) => union.includes(`'${v}'`))
       && (union.slice(union.indexOf('export type R1Source'), union.indexOf('export type SearchType')).match(/'[a-z_]+'/g) || []).length === r1Sources.length);
+  const tax = fs.readFileSync(path.join(__dirname, '..', '..', 'backend/analytics_taxonomy.py'), 'utf8');
+  const rowComment = tax.slice(tax.indexOf('# Time to trade suggestion (R1;'), tax.indexOf('"find_trades_tapped":   frozenset('));
+  check('3h. the taxonomy\'s find_trades_tapped comment lists every R1 source the client sends',
+    r1Sources.every((v) => rowComment.includes(v)), r1Sources.filter((v) => !rowComment.includes(v)).join(', '));
+  const team = stripComments(read('screens/TeamReviewScreen.tsx'));
+  const finish = team.slice(team.indexOf('testID="team-review.finish"'), team.indexOf("nav.navigate('TradesHome')"));
+  check('3i. Team Review fires R1 `team_review` only when a partner is scoped, before the hand-off (whose auto-run claims it)',
+    /if \(scoped\) \{[\s\S]*?beginTradeSearch\(\{\s*source: 'team_review',[\s\S]*?searchType: 'pinned',[\s\S]*?\}\);\s*useFinderTargets\.getState\(\)\.setHandoff\(\{/.test(finish)
+      && (team.match(/beginTradeSearch\(/g) || []).length === 1
+      && finish.indexOf('beginTradeSearch(') > finish.indexOf('if (scoped) {'));
 }
 
 // ── 4. The request carries the tap's id ───────────────────────────────────

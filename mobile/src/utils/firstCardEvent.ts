@@ -8,8 +8,9 @@
 // no runtime imports. tests/check-trade-first-card-events.js transpiles this
 // file and runs it under plain node; a runtime import added here breaks it.
 
-/** R1 `source` values (addendum "R1 source values"). Absent = the deck's own
- *  Find a Trade button (start-only since D13). */
+/** R1 `source` values (addendum "R1 source values"; `team_review` granted
+ *  later by analytics-lead, Q-A). Absent = the deck's own Find a Trade button
+ *  (start-only since D13). */
 export type R1Source =
   | 'deck_error_retry'
   | 'prefs_changed_strip'
@@ -20,7 +21,8 @@ export type R1Source =
   | 'league_target'
   | 'usage_trends'
   | 'deep_link'
-  | 'end_card_adjust';
+  | 'end_card_adjust'
+  | 'team_review';
 
 export type SearchType = 'organic' | 'pinned' | 'fair_sweep';
 export type ServeSource = 'device' | 'page' | 'cached' | 'joined' | 'fresh';

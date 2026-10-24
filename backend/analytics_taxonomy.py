@@ -976,7 +976,10 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # (the canvas Find a Trade), league_offer (League Summary Offer ONLY after
     # the seam), and new: league_target (League Summary Target), usage_trends
     # (Usage Trends Trade), deep_link (app/trades/finder), end_card_adjust
-    # (the P30 card's apply tap). Still INTENT.
+    # (the P30 card's apply tap), and team_review (Team Review's "Find my
+    # trades" hand-off, only when a partner is scoped; granted by
+    # analytics-lead, Q-A — per Product it is OUT of the AC-L1 cells for
+    # launch and reported separately). Still INTENT.
     "find_trades_tapped":   frozenset({"source", "mode", "search_id"}),
     # R2 — at T1, the first frame where a real card is >= 50% visible with
     # Like and Pass enabled; once per search_id. `ms_from_tap` is a MONOTONIC
