@@ -27277,6 +27277,17 @@ def league_invite_meta():
     nothing. The hourly limiter pattern needs a user id this route
     deliberately does not have. If abuse appears, the lever is
     `_fetch_sleeper_league_meta`'s upstream, not this route.
+
+    REFERRAL LOOP FR-11 (PRD §8.3). Optional query `t`, the invite id. A
+    well-formed `t` (INVITE_ID_RE) is resolved once, by the join landing's
+    own helpers (_resolve_invite → _invite_status), and the response adds
+    `invite_status` (valid | expired | unknown | league_mismatch; null when
+    `t` is absent; a malformed `t` is `unknown` with no DB read) and
+    `inviter_display_name`: the referrer's users.display_name, ONLY when the
+    status is `valid`, else null. Nothing else from the referrals or users
+    row (no username, no user id, no token) ever reaches the response, and
+    `league_name` keeps the Sleeper-only rule above. A failed lookup degrades
+    to `unknown` / null, never an error.
     """
     league_id = (request.args.get("league_id") or "").strip()
     if not league_id:
@@ -27288,10 +27299,25 @@ def league_invite_meta():
             name = meta.get("name") or None
     except Exception as e:                       # pragma: no cover - defensive
         log.info("invite-meta: lookup failed (non-fatal) league_id=%s: %s", league_id, e)
+    invite_status, inviter = None, None
+    raw_t = request.args.get("t")
+    if raw_t:
+        t = _invite_id_from(raw_t)
+        invite_status = "unknown"
+        if t is not None:
+            try:
+                invite_status, referral = _resolve_invite(t, league_id)
+                if invite_status == "valid":
+                    inviter = (referral or {}).get("referrer_display_name") or None
+            except Exception as e:               # pragma: no cover - defensive
+                log.info("invite-meta: invite lookup failed (non-fatal): %s", e)
+                invite_status, inviter = "unknown", None
     return jsonify({
         "league_id":   league_id,
         "league_name": name,
         "platform":    "sleeper" if name else None,
+        "inviter_display_name": inviter,
+        "invite_status":        invite_status,
     })
 
 
