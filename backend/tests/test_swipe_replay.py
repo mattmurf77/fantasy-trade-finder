@@ -163,10 +163,45 @@ def test_b_moves_the_board_within_tiers_only(world):
 
     report = sr.run(engine, SINCE, UNTIL)
     full, half = report["results"]["1.0"], report["results"]["0.5"]
-    assert full["user_weeks"] == 4 and half["user_weeks"] == 4
-    assert full["band_move"] == {"median": 0, "p95": 0, "max": 0}
-    assert full["rank_churn_per_board_mean"]["max"] > 0
-    assert full["bar_5a"] == "PASS" and half["bar_5a"] == "PASS"
+    assert full["board_weeks_active"] == 4 and half["board_weeks_active"] == 4
+    # Groups: six WRs in `second` (15 pairs) + three QBs in `first_1` (3);
+    # r1 and t1 are singletons. Week 1's like flips w1/w2: 1 of 18 pairs,
+    # and each moves one place in a group of six (20 percentile points).
+    weeks = report["boards"][0]["k_scale_1.0"]
+    assert [(w["discordant_pairs"], w["same_tier_pairs"]) for w in weeks] == \
+        [(1, 18), (0, 18), (0, 18), (0, 18)]
+    assert full["kendall"] == {"median": 0.0, "p95": 1 / 18, "max": 1 / 18}
+    assert full["max_pct_move"]["max"] == pytest.approx(20.0)
+    assert full["check_5b_ii"] == {"tier_membership_violations": 0, "verdict": "PASS"}
+    assert full["bar_5a_i"] == full["bar_5a_ii"] == "PASS"
+    assert half["bar_5a_i"] == half["bar_5a_ii"] == "PASS"
+    assert full["kill_rule"]["would_have_fired"] is False
+    assert report["ship_rule"] == "ship at full K"
+    assert any("fit_mult = 1" in c for c in report["caveats"])
+    assert any("unmatched" in c for c in report["caveats"])
+
+
+def test_week_rows_isolate_one_weeks_trade_swipes(world):
+    """WITH and WITHOUT share every row up to the week's end; they differ
+    only in that week's trade swipes, whose K is restored vs 0. Earlier
+    weeks' swipes are restored in both, and trio votes are in both."""
+    engine, frozen = world
+    rows = _stored_rows(engine)
+    kinds = {_iso(at): kind for user, kind, at in frozen if user == ME}
+    start, end = SINCE + timedelta(days=7), SINCE + timedelta(days=14)
+    with_rows, without, swipes = sr.week_rows(rows, SINCE, start, end, kinds,
+                                              8.0, 4.0, 1.0)
+    assert swipes == 3 and len(with_rows) == len(without)
+    for w, wo in zip(with_rows, without):
+        ts = sr._ts(w["created_at"])
+        assert w["id"] == wo["id"]
+        if w["decision_type"] == "trade" and start <= ts < end:
+            assert w["k_factor"] > 0 and wo["k_factor"] == 0.0
+        else:
+            assert w == wo
+            if w["decision_type"] == "trade" and SINCE <= ts < start:
+                assert w["k_factor"] > 0, "earlier weeks carry restored K"
+    assert all(sr._ts(r["created_at"]) < end for r in with_rows)
 
 
 def test_like_pass_recovery_and_restored_k(world):
@@ -192,24 +227,85 @@ def test_like_pass_recovery_and_restored_k(world):
             assert after["k_factor"] == (pass_k if kind == "pass" else like_k)
 
 
-def test_metric_on_a_hand_built_case():
-    def board(**players):            # pid -> (rank, tier)
-        return {pid: (0.0, "WR", rank, tier) for pid, (rank, tier) in players.items()}
+def _hand_board(**players):
+    """pid -> (position, positional rank, tier), as build_board shapes it."""
+    return {pid: (0.0, pos, rank, tier) for pid, (pos, rank, tier) in players.items()}
 
-    a0 = board(x=(1, "second"), y=(2, "second"))
-    a1 = board(x=(1, "second"), y=(2, "second"))
-    b0 = board(x=(1, "second"), y=(2, "second"))
-    b1 = board(x=(5, "fourth"), y=(1, "second"))   # x drops two bands, four ranks
-    assert sr.user_week_metrics(a0, a1, b0, b1, {"x", "y"}) == (2, 2.5)
-    # Moves A also made are not attributed to the restored swipes.
-    assert sr.user_week_metrics(a0, b1, b0, b1, {"x", "y"}) == (0, 0.0)
-    assert sr.band_index(None) == len(sr.ORDERED_TIERS)
 
+def test_kendall_on_a_hand_built_case():
+    without = _hand_board(
+        a=("WR", 1, "second"), b=("WR", 2, "second"), c=("WR", 3, "second"),
+        d=("WR", 4, "second"), x=("QB", 1, "first_1"), y=("QB", 2, "first_1"),
+        z=("RB", 1, "second"), u1=("TE", 1, None), u2=("TE", 2, None))
+    with_ = _hand_board(
+        b=("WR", 1, "second"), a=("WR", 2, "second"), d=("WR", 3, "second"),
+        c=("WR", 4, "second"), x=("QB", 1, "first_1"), y=("QB", 2, "first_1"),
+        z=("RB", 1, "second"), u2=("TE", 1, None), u1=("TE", 2, None))
+    # WR group: a/b and c/d flip (2 of 6 pairs); QB pair holds (0 of 1); the
+    # RB singleton has no pairs; the unranked TEs are not a tier and don't count.
+    discordant, pairs, move = sr.within_tier_moves(with_, without)
+    assert (discordant, pairs) == (2, 7)
+    assert move == pytest.approx(100 / 3)            # one place in a group of 4
+
+
+def test_percentile_move_on_a_hand_built_case():
+    without = _hand_board(**{p: ("WR", i + 1, "second") for i, p in enumerate("ebcdf")})
+    with_ = _hand_board(**{p: ("WR", i + 1, "second") for i, p in enumerate("bcdfe")})
+    discordant, pairs, move = sr.within_tier_moves(with_, without)
+    assert move == 100.0                             # e: top of 5 -> bottom
+    assert (discordant, pairs) == (4, 10)
+    assert sr.within_tier_moves(without, without) == (0, 10, 0.0)
+
+
+def test_kill_rule_thresholds():
+    def week(kendalls, moves):
+        return [{"week_start": "w", "kendall": k, "max_pct_move": m}
+                for k, m in zip(kendalls, moves)]
+
+    calm = sr.kill_indicators(week([0.0] * 19 + [0.3], [0.0] * 20))
+    assert calm["weeks"][0]["p95_kendall"] == 0.0     # nearest rank: 19th of 20
+    assert calm["would_have_fired"] is False
+    edge = sr.kill_indicators(week([0.25] * 20, [74.9] * 20))
+    assert edge["weeks"][0]["fires_a"] is False and edge["weeks"][0]["fires_b"] is False
+    a = sr.kill_indicators(week([0.0] * 18 + [0.26, 0.26], [0.0] * 20))
+    assert a["weeks"][0]["fires_a"] is True and a["would_have_fired"] is True
+    b = sr.kill_indicators(week([0.0] * 20, [75.0] + [0.0] * 19))   # 1 of 20 = 5%
+    assert b["weeks"][0]["share_pct_move_ge_75"] == 0.05
+    assert b["weeks"][0]["fires_b"] is True and b["weeks"][0]["fires_a"] is False
+
+
+def test_tier_violation_counter():
+    without = _hand_board(a=("WR", 1, "second"), b=("WR", 2, "second"),
+                          u=("TE", 1, None))
+    assert sr.tier_violations(without, without) == 0
+    moved = _hand_board(a=("WR", 1, "first_1"), b=("WR", 2, "second"),
+                        u=("TE", 1, "waivers"))
+    assert sr.tier_violations(moved, without) == 2   # a promoted, u became ranked
+    weeks = [{"trade_swipes": 1, "kendall": 0.0, "max_pct_move": 0.0,
+              "tier_violations": v, "week_start": "w"} for v in (0, 2)]
+    assert sr.summarize(weeks)["check_5b_ii"] == {
+        "tier_membership_violations": 2, "verdict": "FAIL"}
+
+
+def test_bars_and_ship_rule():
+    def weeks(kendalls, moves):
+        return [{"trade_swipes": 1, "kendall": k, "max_pct_move": m,
+                 "tier_violations": 0, "week_start": "w"} for k, m in zip(kendalls, moves)]
+
+    ok = sr.summarize(weeks([0.0, 0.05, 0.15], [0.0, 10.0, 50.0]))
+    assert ok["bar_5a_i"] == ok["bar_5a_ii"] == "PASS"
+    assert sr.summarize(weeks([0.0, 0.06, 0.06], [0.0] * 3))["bar_5a_i"] == "FAIL"
+    assert sr.summarize(weeks([0.0, 0.0, 0.16], [0.0] * 3))["bar_5a_i"] == "FAIL"
+    bad = sr.summarize(weeks([0.0] * 3, [0.0, 0.0, 51.0]))
+    assert bad["bar_5a_ii"] == "FAIL"
+    inactive = sr.summarize([{"trade_swipes": 0, "kendall": None, "max_pct_move": 0.0,
+                              "tier_violations": 0, "week_start": "w"}])
+    assert inactive["bar_5a_i"] == "NO DATA" and inactive["board_weeks_inactive"] == 1
+    assert sr.ship_rule({"1.0": ok, "0.5": ok}, True) == "ship at full K"
+    assert sr.ship_rule({"1.0": bad, "0.5": ok}, True) == "ship at half K (4/2)"
+    assert sr.ship_rule({"1.0": bad, "0.5": bad}, True).startswith("hold")
+    assert sr.ship_rule({"1.0": ok, "0.5": ok}, False).startswith("hold")
     assert sr.p95([0, 0, 1, 1, 2]) == 2
-    assert sr.summarize([{"band_move": v} for v in (0, 0, 1, 1, 2)], {})["bar_5a"] == "PASS"
-    assert sr.summarize([{"band_move": v} for v in (0, 0, 1, 2, 3)], {})["bar_5a"] == "FAIL"
-    assert sr.summarize([{"band_move": v} for v in (2, 2, 2)], {})["bar_5a"] == "FAIL"
-    assert sr.summarize([], {})["bar_5a"] == "NO DATA"
 
 
 def test_readonly_guard_refuses_writes(tmp_path):
@@ -255,7 +351,10 @@ def test_cli_writes_report_and_leaves_the_file_untouched(tmp_path, capsys):
     assert report["provenance"]["database_sha256"] == before
     assert ME not in out.read_text(), "boards are reported by hash, not user id"
     printed = capsys.readouterr().out
-    assert "bar 5a PASS" in printed and "5b(i)" in printed
+    for line in ("5a-i  Kendall", "5a-ii pct move", "5b(ii) tier-membership violations 0",
+                 "kill rule (a)/(b) would have fired: no", "5b(i)",
+                 "ship rule: ship at full K", "caveat: Upper bound: fit_mult = 1"):
+        assert line in printed, line
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
 
 

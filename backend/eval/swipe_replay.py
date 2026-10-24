@@ -6,7 +6,8 @@
         --allow-postgres-readonly --since 2026-08-19 --output bl001-replay.json
 
 Packet: docs/plans/org-bringup/leads/models-lead-launch.md §BL-001-packet,
-fields 5a, 5b (i), 6 and 7. Scope: docs/plans/swipe-learning/scope.md.
+fields 5a, 5b, 6 and 7 (bars revised 2026-10-24). Scope:
+docs/plans/swipe-learning/scope.md.
 
 Since 2026-08-19 `bakeoff_runner.elo_freeze_mult` has written every trade-card
 like and pass with K = 0. This tool asks what those swipes would have done to
@@ -14,24 +15,26 @@ each user's board had they carried their normal K, without writing anything.
 
 What it rebuilds
 ----------------
-For each (user, scoring format) board with at least --min-swipes frozen trade
-swipes in the window, the board is rebuilt at every weekly boundary from
---since to --until (the last week may be short) twice, using ranking_service's
-own replay and tier mapping (`RankingService.replay_from_db` -> `get_rankings`,
-`RankingService.tier_for_elo`). No Elo or tier math is restated here.
+Boards are rebuilt with ranking_service's own replay and tier mapping
+(`RankingService.replay_from_db` -> `get_rankings`, `tier_for_elo`). No Elo or
+tier math is restated here. A board is one (user, scoring format) with at
+least --min-swipes frozen trade swipes in the window. Weeks are 7-day windows
+from --since (the last one may be short).
 
-  (A) as stored: every `swipe_decisions` row with its stored `k_factor`. This
-      is the board prod rebuilds at session_init today.
-  (B) restored: the same rows, except each frozen trade swipe in the window
-      (`decision_type = 'trade'`, `k_factor = 0`, since <= created_at < until)
-      gets K = `trade_k_like` or `trade_k_pass` x fit_mult x --k-scale.
+For each board and week [start, end), two end-of-week boards share the same
+start: every row before `start` with frozen trade swipes restored to K =
+`trade_k_like` or `trade_k_pass` x fit_mult x --k-scale, plus every row of
+the week itself (trio votes, dispositions, everything).
+  WITH:    this week's trade swipes carry their restored K.
+  WITHOUT: this week's trade swipes carry K = 0.
+The difference is that week's trade-swipe effect and nothing else.
 
 Seeds are the `player_value_history` consensus snapshot for the format on or
 before --until; the pool is that snapshot joined to `players` (QB/RB/WR/TE).
 Generic pick assets have no `players` row, so pairs involving them are skipped
-identically in (A) and (B) (counted as `restored_rows_outside_pool`). Tier
-overrides (pins) are not applied: `users.tier_overrides` is replace-in-place,
-so a pin's history is not stored.
+(counted as `restored_rows_outside_pool`). Tier overrides (pins) are not
+applied: `users.tier_overrides` is replace-in-place, so a pin's history is not
+stored.
 
 Trade swipes vs trio votes
 --------------------------
@@ -39,44 +42,43 @@ Trade swipes vs trio votes
 trade-card like/pass, 'disposition' = match accept/decline correction. Only
 'trade' rows are restored. Trio and disposition rows keep their stored K.
 
-Like or pass: `swipe_decisions` doesn't say, and a frozen row's K is 0 either
-way. The rows of one swipe share a `created_at`; the swipe is matched to the
-user's latest `trade_decisions` row at or before it with the same two sides
-(like: receive side won; pass: give side won). An unmatched swipe gets like
-K, the larger, and is counted.
+Fidelity caveats (both push churn up, so the replay is an UPPER BOUND):
+  * Like or pass: `swipe_decisions` doesn't say, and a frozen row's K is 0
+    either way. The rows of one swipe share a `created_at`; the swipe is
+    matched to the user's latest `trade_decisions` row at or before it with
+    the same two sides (like: receive side won; pass: give side won). An
+    unmatched swipe gets like K, the larger, and is counted.
+  * fit_mult is not recoverable. `fit_congruence_mult` reads the card's signed
+    `lane_shift`, which is never persisted; `deck_impressions.features_json`
+    keeps only the coarse `lane` label, which can't separate a neutral pass
+    (1.0) from an anti-window one (`fit_k_explained_mult`). fit_mult = 1 is an
+    upper bound while both multipliers are <= 1 (defaults 0.4 / 1.0).
 
-fit_mult is not recoverable. `fit_congruence_mult` reads the card's signed
-`lane_shift`, which is never persisted. `deck_impressions.features_json` keeps
-only the coarse `lane` label, joinable only through
-`trade_decisions.impression_id` when `trade.valuation_telemetry` was on, and
-for a pass on a 'value' card it can't separate neutral (1.0) from anti-window
-(`fit_k_explained_mult`). The replay uses fit_mult = 1, an upper bound while
-both fit multipliers are <= 1 (defaults 0.4 / 1.0).
+Metrics (also written to the output as `metric_definition`)
+-----------------------------------------------------------
+Groups are (position, tier) on the WITHOUT board, ranked tiers only (an
+unranked player has no tier to reorder within). Within a group, players are
+ordered by board rank. Only ACTIVE board-weeks (at least one trade swipe in
+the week) are scored; with none, WITH equals WITHOUT.
+  * 5a-i, Kendall: discordant same-group pairs / all same-group pairs. Bar:
+    median <= 0.05 and p95 <= 0.15 across active board-weeks.
+  * 5a-ii, percentile move: within a group of n >= 2 (singletons skipped),
+    pct = rank / (n - 1) x 100 with rank 0 = top. A board-week's score is the
+    max |pct_with - pct_without| over players. Bar: p95 <= 50.
+  * 5b(ii), structural: players whose tier differs WITH vs WITHOUT (unranked
+    counted as a tier). Must be 0: `_feedback_bounds` in
+    `RankingService._compute_elo` holds trade feedback inside each band.
+  * Kill-rule indicators per replay week: (a) p95 Kendall > 0.25; (b) the
+    share of active boards with a max percentile move >= 75 is >= 5%. (c), an
+    operator report, has no replay analogue.
+p95 is nearest rank. The --k-scale result and the half-K (0.5) result are both
+reported, and `ship_rule` applies the packet's rule: full K if 5a-i, 5a-ii,
+5b(i) and 5b(ii) hold, else half K if they hold there, else hold.
 
-Metric (also written to the output as `metric_definition`)
-----------------------------------------------------------
-For each user-week (one board, one week [start, end)):
-  * top tier = the top `tier_size` players (model_config, default 24) per
-    position on board (A) at week start, by positional rank: ranking_service's
-    own "top tier" unit;
-  * for each of those players, the band move the restored swipes caused this
-    week: (band_B(end) - band_B(start)) - (band_A(end) - band_A(start)), with
-    band = index in ORDERED_TIERS and unranked = one below the last band;
-  * user-week band move = max |that| over the top tier;
-  * user-week rank churn = mean |same difference on positional rank|.
-Reported: median and p95 (nearest rank) of user-week band moves, and each
-board's mean rank churn across its weeks. Bar 5a: median <= 1 and p95 <= 2.
-The --k-scale result and the half-K (0.5) result are both reported.
-
-Note: the owner's within-tier feedback contract (`_feedback_bounds` in
-`RankingService._compute_elo`) clamps every trade-swipe update inside the
-player's post-ranking tier band, so trade swipes can reorder players inside a
-tier but cannot move them across bands. Expect band moves of 0; rank churn is
-where restored swipes show up.
-
-5b (i), reported as `check_5b_i`: restoring at K x 0 reproduces board (A)
-exactly (the restore path changes nothing but frozen-window K), and board (B)
-at --since equals board (A) there (no board before the re-enable time moves).
+5b (i), reported as `check_5b_i`: restoring at K x 0 reproduces the stored
+board exactly (the restore path changes nothing but frozen-window K), and the
+restored board at --since equals the stored one (no board before the
+re-enable time moves).
 
 Read-only: SQLite paths open with `mode=ro`, and every engine carries a
 statement guard that raises on anything but a read. A non-SQLite URL is
@@ -102,26 +104,40 @@ from urllib.parse import quote
 from sqlalchemy import create_engine, event, text
 
 from backend import ranking_service as rs
-from backend.ranking_service import ORDERED_TIERS, Player, RankingService
+from backend.ranking_service import Player, RankingService
 
-POSITIONS = ("QB", "RB", "WR", "TE")
 DEFAULT_SCORING = "1qb_ppr"
 DEFAULT_SINCE = "2026-08-19"
-BAR_MEDIAN = 1.0
-BAR_P95 = 2.0
 HALF_K = 0.5
+BAR_KENDALL_MEDIAN = 0.05
+BAR_KENDALL_P95 = 0.15
+BAR_PCT_MOVE_P95 = 50.0
+KILL_KENDALL_P95 = 0.25
+KILL_PCT_MOVE = 75.0
+KILL_SHARE = 0.05
 
 METRIC_DEFINITION = (
-    "Per user-week (one board, one week [start, end)): top tier = the top "
-    "tier_size players (model_config, default 24) per position on board A at "
-    "week start, by positional rank. For each, band move = "
-    "(band_B(end) - band_B(start)) - (band_A(end) - band_A(start)), band = "
-    "index in ORDERED_TIERS, unranked = one below the last band. User-week "
-    "band move = max |band move| over the top tier; user-week rank churn = "
-    "mean |same difference on positional rank|. A = stored K; B = frozen "
-    "trade swipes in the window restored to trade_k_like/trade_k_pass x "
-    "fit_mult x k_scale. Bar 5a: median <= 1 and p95 (nearest rank) <= 2 "
-    "across user-weeks.")
+    "Per active board-week (one user x format board, one 7-day week from "
+    "--since, at least one trade swipe in it): WITH and WITHOUT are the same "
+    "end-of-week board (earlier weeks' frozen trade swipes restored, all of "
+    "this week's rows included) with this week's trade swipes at restored K "
+    "(trade_k_like/trade_k_pass x fit_mult x k_scale) or at K = 0. Groups = "
+    "(position, tier) on WITHOUT, ranked tiers only, ordered by board rank. "
+    "5a-i Kendall = discordant same-group pairs / all same-group pairs; bar "
+    "median <= 0.05 and p95 <= 0.15. 5a-ii = max over players of |pct_with - "
+    "pct_without|, pct = rank / (n - 1) x 100 within a group of n >= 2; bar "
+    "p95 <= 50. 5b(ii) = players whose tier differs WITH vs WITHOUT; must be "
+    "0. Kill indicators per week: (a) p95 Kendall > 0.25, (b) share of active "
+    "boards with a percentile move >= 75 is >= 5%. p95 is nearest rank.")
+
+CAVEATS = [
+    "Upper bound: fit_mult = 1 for every restored swipe (the signed lane_shift "
+    "is never persisted, so fit_congruence_mult can't be recovered; live K is "
+    "scaled down by it for window-explained swipes).",
+    "Upper bound: like or pass is matched through trade_decisions; an "
+    "unmatched swipe takes like K (the larger) and is counted under "
+    "counts.frozen_swipes_unmatched.",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +295,7 @@ def classify_events(events: dict, decisions: list[dict]) -> dict:
 
 def restore_rows(rows, since, until, kinds, k_like, k_pass, k_scale,
                  fit_mult=1.0) -> list[dict]:
-    """Rows for board (B): frozen window trade swipes get their K back."""
+    """Frozen trade swipes in [since, until) get their K back."""
     out = []
     for r in rows:
         if is_frozen_trade(r, since, until):
@@ -300,6 +316,21 @@ def rows_before(rows, cutoff: datetime) -> list[dict]:
     return out
 
 
+def in_week(row: dict, start: datetime, end: datetime) -> bool:
+    ts = _ts(row.get("created_at"))
+    return row.get("decision_type") == "trade" and ts is not None and start <= ts < end
+
+
+def week_rows(rows, since, start, end, kinds, k_like, k_pass, k_scale):
+    """(WITH rows, WITHOUT rows, trade swipes in the week) for one week."""
+    with_rows = rows_before(
+        restore_rows(rows, since, end, kinds, k_like, k_pass, k_scale), end)
+    without = [{**r, "k_factor": 0.0} if in_week(r, start, end) else r
+               for r in with_rows]
+    swipes = len({r["created_at"] for r in with_rows if in_week(r, start, end)})
+    return with_rows, without, swipes
+
+
 def build_board(players, seed, scoring_format, rows) -> dict:
     """{player_id: (elo, position, positional rank, tier)} via ranking_service."""
     svc = RankingService(players=players, seed_ratings=seed)
@@ -314,24 +345,37 @@ def build_board(players, seed, scoring_format, rows) -> dict:
     return board
 
 
-def band_index(tier) -> int:
-    return ORDERED_TIERS.index(tier) if tier in ORDERED_TIERS else len(ORDERED_TIERS)
+def tier_groups(board: dict) -> list[list]:
+    """Players per (position, ranked tier), ordered by board rank."""
+    groups = defaultdict(list)
+    for pid, (_e, pos, rank, tier) in sorted(board.items(), key=lambda kv: kv[1][2]):
+        if tier is not None:
+            groups[(pos, tier)].append(pid)
+    return list(groups.values())
 
 
-def top_tier(board: dict, size: int) -> set:
-    return {pid for pid, (_e, _p, rank, _t) in board.items() if rank <= size}
+def within_tier_moves(with_board: dict, without_board: dict) -> tuple[int, int, float]:
+    """(discordant pairs, same-group pairs, max percentile move) over the
+    WITHOUT board's (position, tier) groups."""
+    discordant = pairs = 0
+    max_move = 0.0
+    for members in tier_groups(without_board):
+        n = len(members)
+        if n < 2:
+            continue
+        seq = [with_board[pid][2] for pid in members]      # WITH ranks, WITHOUT order
+        pairs += n * (n - 1) // 2
+        discordant += sum(1 for i in range(n) for j in range(i + 1, n)
+                          if seq[i] > seq[j])
+        with_pos = {i: k for k, i in enumerate(sorted(range(n), key=seq.__getitem__))}
+        for i in range(n):
+            max_move = max(max_move, abs(with_pos[i] - i) / (n - 1) * 100)
+    return discordant, pairs, max_move
 
 
-def user_week_metrics(a0, a1, b0, b1, top) -> tuple[int, float]:
-    """(max |band move|, mean |rank move|) the restored swipes caused this week."""
-    bands, ranks = [], []
-    for pid in top:
-        bands.append(abs((band_index(b1[pid][3]) - band_index(b0[pid][3]))
-                         - (band_index(a1[pid][3]) - band_index(a0[pid][3]))))
-        ranks.append(abs((b1[pid][2] - b0[pid][2]) - (a1[pid][2] - a0[pid][2])))
-    if not top:
-        return 0, 0.0
-    return max(bands), sum(ranks) / len(ranks)
+def tier_violations(with_board: dict, without_board: dict) -> int:
+    """5b(ii): players whose tier differs WITH vs WITHOUT (must be 0)."""
+    return sum(1 for pid, v in without_board.items() if with_board[pid][3] != v[3])
 
 
 def p95(values) -> float | None:
@@ -342,6 +386,10 @@ def p95(values) -> float | None:
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
+def _median(values):
+    return statistics.median(values) if values else None
+
+
 def weekly_boundaries(since: datetime, until: datetime) -> list[datetime]:
     out, t = [], since
     while t < until:
@@ -350,23 +398,62 @@ def weekly_boundaries(since: datetime, until: datetime) -> list[datetime]:
     return out + [until]
 
 
-def summarize(user_weeks: list[dict], per_board_churn: dict) -> dict:
-    bands = [w["band_move"] for w in user_weeks]
-    means = list(per_board_churn.values())
-    if not bands:
-        verdict = "NO DATA"
-    else:
-        verdict = ("PASS" if statistics.median(bands) <= BAR_MEDIAN
-                   and p95(bands) <= BAR_P95 else "FAIL")
+def kill_indicators(board_weeks: list[dict]) -> dict:
+    """Per replay week: would kill rule (a) or (b) have fired?"""
+    by_week = defaultdict(list)
+    for w in board_weeks:
+        by_week[w["week_start"]].append(w)
+    weeks = []
+    for start in sorted(by_week):
+        active = by_week[start]
+        kendall = p95([w["kendall"] for w in active if w["kendall"] is not None])
+        share = sum(1 for w in active if w["max_pct_move"] >= KILL_PCT_MOVE) / len(active)
+        fires_a = kendall is not None and kendall > KILL_KENDALL_P95
+        fires_b = share >= KILL_SHARE
+        weeks.append({"week_start": start, "active_boards": len(active),
+                      "p95_kendall": kendall, "share_pct_move_ge_75": share,
+                      "fires_a": fires_a, "fires_b": fires_b})
+    return {"weeks": weeks,
+            "would_have_fired": any(w["fires_a"] or w["fires_b"] for w in weeks)}
+
+
+def summarize(board_weeks: list[dict]) -> dict:
+    """5a-i, 5a-ii, 5b(ii) and the kill indicators for one k_scale."""
+    active = [w for w in board_weeks if w["trade_swipes"] > 0]
+    kendall = [w["kendall"] for w in active if w["kendall"] is not None]
+    moves = [w["max_pct_move"] for w in active]
+    violations = sum(w["tier_violations"] for w in board_weeks)
     return {
-        "user_weeks": len(bands),
-        "band_move": {"median": statistics.median(bands) if bands else None,
-                      "p95": p95(bands), "max": max(bands) if bands else None},
-        "rank_churn_per_board_mean": {
-            "median": statistics.median(means) if means else None,
-            "p95": p95(means), "max": max(means) if means else None},
-        "bar_5a": verdict,
+        "board_weeks_active": len(active),
+        "board_weeks_inactive": len(board_weeks) - len(active),
+        "kendall": {"median": _median(kendall), "p95": p95(kendall),
+                    "max": max(kendall) if kendall else None},
+        "max_pct_move": {"median": _median(moves), "p95": p95(moves),
+                         "max": max(moves) if moves else None},
+        "bar_5a_i": ("NO DATA" if not kendall else "PASS"
+                     if _median(kendall) <= BAR_KENDALL_MEDIAN
+                     and p95(kendall) <= BAR_KENDALL_P95 else "FAIL"),
+        "bar_5a_ii": ("NO DATA" if not moves else "PASS"
+                      if p95(moves) <= BAR_PCT_MOVE_P95 else "FAIL"),
+        "check_5b_ii": {"tier_membership_violations": violations,
+                        "verdict": "PASS" if violations == 0 else "FAIL"},
+        "kill_rule": kill_indicators(active),
     }
+
+
+def ship_rule(results: dict, check_5b_i_pass: bool) -> str:
+    """The packet's rule: full K if every bar holds, else half K, else hold."""
+    def holds(r):
+        return (check_5b_i_pass and r["bar_5a_i"] == "PASS"
+                and r["bar_5a_ii"] == "PASS" and r["check_5b_ii"]["verdict"] == "PASS")
+    full, half = results.get("1.0"), results.get(str(HALF_K))
+    if full is not None and holds(full):
+        return "ship at full K"
+    if half is not None and holds(half):
+        return "ship at half K (4/2)"
+    if full is None and half is None:
+        return "no result"
+    return "hold: fails at half K (fidelity fix or hold, per field 7)"
 
 
 @contextmanager
@@ -397,10 +484,8 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
         events = load_frozen_events(conn, since, until)
         with ranking_config(model_config):
             k_like, k_pass = rs._c("trade_k_like"), rs._c("trade_k_pass")
-            size = int(rs._c("tier_size"))
             pools, counts = {}, defaultdict(int)
-            user_weeks = {s: [] for s in scales}
-            churn = {s: {} for s in scales}
+            board_weeks = {s: [] for s in scales}
             check = {"boards": 0, "a_equals_restore_at_k0": 0,
                      "b_equals_a_at_since": 0}
             per_board = []
@@ -431,52 +516,56 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                     1 for r in frozen if str(r["winner_player_id"]) not in pool_ids
                     or str(r["loser_player_id"]) not in pool_ids)
 
-                cuts = weekly_boundaries(since, until)
-                a = [build_board(players, seed, fmt, rows_before(rows, t)) for t in cuts]
+                # 5b(i): restoring at K x 0 is the stored board; nothing
+                # before --since moves.
+                def board(rs_rows):
+                    return build_board(players, seed, fmt, rs_rows)
+                stored_until = rows_before(rows, until)
                 check["boards"] += 1
-                k0 = restore_rows(rows_before(rows, until), since, until, kinds,
-                                  k_like, k_pass, 0.0)
-                check["a_equals_restore_at_k0"] += int(
-                    build_board(players, seed, fmt, k0) == a[-1])
+                check["a_equals_restore_at_k0"] += int(board(restore_rows(
+                    stored_until, since, until, kinds, k_like, k_pass, 0.0))
+                    == board(stored_until))
+                check["b_equals_a_at_since"] += int(board(rows_before(restore_rows(
+                    rows, since, until, kinds, k_like, k_pass, k_scale), since))
+                    == board(rows_before(rows, since)))
+
+                cuts = weekly_boundaries(since, until)
                 row = {"board": _hash(f"{user_id}|{fmt}"), "scoring_format": fmt,
                        "frozen_swipes": len(board_events), "weeks": len(cuts) - 1}
                 for s in scales:
-                    restored = restore_rows(rows, since, until, kinds, k_like, k_pass, s)
-                    b = [build_board(players, seed, fmt, rows_before(restored, t))
-                         for t in cuts]
-                    if s == k_scale:
-                        check["b_equals_a_at_since"] += int(b[0] == a[0])
                     weeks = []
-                    for i in range(len(cuts) - 1):
-                        band, rank = user_week_metrics(a[i], a[i + 1], b[i], b[i + 1],
-                                                       top_tier(a[i], size))
-                        weeks.append({"week_start": cuts[i].isoformat(),
-                                      "band_move": band, "rank_churn": rank})
-                    user_weeks[s].extend(weeks)
-                    churn[s][row["board"]] = (sum(w["rank_churn"] for w in weeks)
-                                              / len(weeks)) if weeks else 0.0
-                    row[f"k_scale_{s}"] = {
-                        "max_band_move": max((w["band_move"] for w in weeks), default=0),
-                        "mean_rank_churn": churn[s][row["board"]],
-                        "weeks": weeks}
+                    for start, end in zip(cuts, cuts[1:]):
+                        with_rows, without_rows, swipes = week_rows(
+                            rows, since, start, end, kinds, k_like, k_pass, s)
+                        with_b, without_b = board(with_rows), board(without_rows)
+                        discordant, pairs, move = within_tier_moves(with_b, without_b)
+                        weeks.append({
+                            "week_start": start.isoformat(), "trade_swipes": swipes,
+                            "kendall": discordant / pairs if pairs else None,
+                            "discordant_pairs": discordant, "same_tier_pairs": pairs,
+                            "max_pct_move": move,
+                            "tier_violations": tier_violations(with_b, without_b)})
+                    board_weeks[s].extend(weeks)
+                    row[f"k_scale_{s}"] = weeks
                 per_board.append(row)
 
     check["pass"] = (check["a_equals_restore_at_k0"] == check["boards"]
                      and check["b_equals_a_at_since"] == check["boards"])
+    results = {str(s): summarize(board_weeks[s]) for s in scales}
     return {
         "metric_definition": METRIC_DEFINITION,
+        "caveats": CAVEATS,
         "window": {"since": since.isoformat(), "until": until.isoformat()},
         "k": {"trade_k_like": k_like, "trade_k_pass": k_pass, "fit_mult": 1.0,
-              "fit_mult_note": "not recoverable (signed lane_shift is never "
-                               "persisted); 1.0 is an upper bound",
-              "k_scale": k_scale, "tier_size": size},
+              "k_scale": k_scale},
         "min_swipes": min_swipes,
         "counts": dict(counts),
         "seed_snapshots": {f: (p[2] if p else None) for f, p in pools.items()},
         "model_config_sha256": hashlib.sha256(json.dumps(
             model_config, sort_keys=True).encode()).hexdigest(),
-        "results": {str(s): summarize(user_weeks[s], churn[s]) for s in scales},
+        "results": results,
         "check_5b_i": check,
+        "ship_rule": ship_rule(results, check["pass"]),
         "boards": per_board,
     }
 
@@ -503,36 +592,49 @@ def _provenance(db: str, engine, args) -> dict:
 
 
 def summary_text(report: dict) -> str:
+    def n(x):
+        return "n/a" if x is None else f"{x:.3g}"
+
     k, c = report["k"], report["counts"]
     lines = [
         "BL-001 swipe replay (read-only)",
         f"  window {report['window']['since']} -> {report['window']['until']}",
-        f"  K like/pass {k['trade_k_like']:g}/{k['trade_k_pass']:g}, fit_mult 1.0 "
-        "(not recoverable; upper bound)",
+        f"  K like/pass {k['trade_k_like']:g}/{k['trade_k_pass']:g}",
         f"  boards: {c.get('boards_included', 0)} included of "
         f"{c.get('boards_with_frozen_swipes', 0)} with frozen swipes "
         f"(min {report['min_swipes']}); frozen swipes "
         f"{c.get('frozen_swipes', 0)} (like {c.get('frozen_swipes_like', 0)}, "
         f"pass {c.get('frozen_swipes_pass', 0)}, unmatched "
-        f"{c.get('frozen_swipes_unmatched', 0)} -> like K)",
+        f"{c.get('frozen_swipes_unmatched', 0)})",
+        *(f"  caveat: {line}" for line in report["caveats"]),
         f"  metric: {report['metric_definition']}",
     ]
-    def n(x):
-        return "n/a" if x is None else f"{x:.3g}"
-
     for scale, res in report["results"].items():
-        band, churn = res["band_move"], res["rank_churn_per_board_mean"]
-        lines.append(
+        kd, mv, kill = res["kendall"], res["max_pct_move"], res["kill_rule"]
+        fired = [w["week_start"][:10] for w in kill["weeks"]
+                 if w["fires_a"] or w["fires_b"]]
+        lines += [
             f"  k_scale {scale} (K {k['trade_k_like'] * float(scale):g}/"
-            f"{k['trade_k_pass'] * float(scale):g}): {res['user_weeks']} user-weeks, "
-            f"band move median {n(band['median'])} p95 {n(band['p95'])} "
-            f"max {n(band['max'])}; rank churn per board median {n(churn['median'])} "
-            f"p95 {n(churn['p95'])} -> bar 5a {res['bar_5a']}")
+            f"{k['trade_k_pass'] * float(scale):g}), "
+            f"{res['board_weeks_active']} active board-weeks:",
+            f"    5a-i  Kendall median {n(kd['median'])} p95 {n(kd['p95'])} "
+            f"max {n(kd['max'])} -> {res['bar_5a_i']}",
+            f"    5a-ii pct move median {n(mv['median'])} p95 {n(mv['p95'])} "
+            f"max {n(mv['max'])} -> {res['bar_5a_ii']}",
+            f"    5b(ii) tier-membership violations "
+            f"{res['check_5b_ii']['tier_membership_violations']} -> "
+            f"{res['check_5b_ii']['verdict']}",
+            f"    kill rule (a)/(b) would have fired: "
+            f"{'yes, weeks ' + ', '.join(fired) if fired else 'no'}",
+        ]
     chk = report["check_5b_i"]
-    lines.append(
-        f"  5b(i): restore at K x 0 == A on {chk['a_equals_restore_at_k0']}/"
-        f"{chk['boards']} boards; B == A at --since on {chk['b_equals_a_at_since']}/"
-        f"{chk['boards']} -> {'PASS' if chk['pass'] else 'FAIL'}")
+    lines += [
+        f"  5b(i): restore at K x 0 == stored on {chk['a_equals_restore_at_k0']}/"
+        f"{chk['boards']} boards; restored == stored at --since on "
+        f"{chk['b_equals_a_at_since']}/{chk['boards']} -> "
+        f"{'PASS' if chk['pass'] else 'FAIL'}",
+        f"  ship rule: {report['ship_rule']}",
+    ]
     return "\n".join(lines)
 
 

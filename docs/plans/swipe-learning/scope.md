@@ -35,7 +35,7 @@
 
 - [ ] **Structural guard:** n/a. There's no mobile change.
 - [x] **Unit tests:**
-  - **`backend/tests/test_bl001_swipe_learning.py` (17 tests):**
+  - **`backend/tests/test_bl001_swipe_learning.py` (18 tests):**
     - (a) bake-off on, knob 1 → 0.0. This is the flag-off identity.
     - (b) bake-off on, knob 0 → `fit_mult` unchanged.
     - (c) bake-off off → `fit_mult`, whatever the knob.
@@ -44,20 +44,30 @@
     - (d) **Real `/api/trades/swipe` route** (the G-049 `route` fixture, in-memory DB). With knob 0, the persisted `swipe_decisions.k_factor` = `trade_k_like × fit_mult` (fit_mult 0.4 on a window-congruent like, so the test isn't vacuous). With knob 1 it's 0. Same for the in-memory signal.
     - **Forward-only (5b i):** a like is frozen, then the knob flips and a pass is written. The frozen row is unchanged, the board rebuilt up to the flip is identical, and only the pass moves the board.
     - `replay_from_db` uses stored K, not the current `trade_k_*`.
-  - **`backend/tests/test_swipe_replay.py` (7 tests, synthetic SQLite):**
-    - (A) equals prod's own rebuild of the stored rows.
-    - (B) moves the board within tiers only.
+    - **5b(ii), through `RankingService`'s real feedback path.** Trio votes establish a board. Then 600 likes and passes at K 8/4 hit players sitting on tier edges, both through live `record_trade_signal` and through the same rows replayed from storage. Every player keeps his tier, and unranked stays unranked. Within-tier order does change (asserted, so the test isn't vacuous).
+  - **`backend/tests/test_swipe_replay.py` (12 tests, synthetic SQLite):**
+    - The stored rebuild equals prod's own rebuild of the stored rows.
+    - The restored board moves within tiers only.
+    - End to end: the exact per-week discordant and same-tier pair counts, Kendall, percentile move, 5b(ii) = 0, the verdicts and the ship rule.
+    - WITH and WITHOUT differ only in that week's trade swipes.
     - Like/pass recovery and the restored K at 1.0 and 0.5.
-    - The metric on a hand-built case, and the PASS/FAIL/NO DATA verdicts.
+    - Hand-built cases:
+      - Kendall: 2 of 7 same-group pairs. Unranked players and singletons are excluded.
+      - Percentile move: top of 5 to bottom = 100.
+      - Kill-rule thresholds: 0.25 doesn't fire and 0.26 does; 74.9 doesn't count and 75 does; 5% fires.
+      - The 5b(ii) violation counter.
+      - Bars and the ship rule.
     - The read-only guard refuses INSERT/UPDATE/DELETE/CREATE, and the file hash is unchanged.
     - A Postgres URL is refused without the flag, and the password never reaches the report.
     - The CLI end to end.
     - The module never imports `backend.server` (subprocess check).
   - **`backend/tests/test_bakeoff_arm_a_golden.py`:** knob inventory. `bakeoff_freeze_trade_k` is EXCLUDED from `MODEL_A_PROFILE`: it's read only on the swipe routes, never in generation. The golden stands.
-  - **Targeted run, 2026-10-23: 697 passed across 23 files.** That's the two new files plus every test file that touches `elo_freeze_mult`, `record_trade_signal`, the config inventories and config-reference, and the decline-reason Elo path. The full suite is CI's.
-- [x] **Sabotage (not committed):**
-  - `elo_freeze_mult` changed to ignore the knob: **6 of 17 tests failed** (b ×3, the defaults pin, (d) knob 0, forward-only). Reverted.
-  - `restore_rows` changed to a no-op: **2 of 7 replay tests failed**. Reverted.
+  - **Targeted run, 2026-10-24: 703 passed across 23 files.** That's the two BL-001 files plus every test file that touches `elo_freeze_mult`, `record_trade_signal`, the config inventories and config-reference, and the decline-reason Elo path. The full suite is CI's.
+- [x] **Sabotage (not committed; every one reverted):**
+  - `elo_freeze_mult` changed to ignore the knob: **6 of 17 tests failed** (b ×3, the defaults pin, (d) knob 0, forward-only).
+  - `restore_rows` changed to a no-op: **2 of 7 replay tests failed**.
+  - WITHOUT made equal to WITH (5a trivially 0): **2 of 12 failed** (the end-to-end Kendall counts and the week isolation).
+  - 5b(ii) counter returning 0: **1 of 12 failed** (the violation counter).
 - [x] **Code-walk proof** (at this branch, `server.py` and `ranking_service.py` unchanged):
   - **Knob read:** `bakeoff_runner.py:468`, inside `elo_freeze_mult` (`:450`).
   - **Its three callers:**
@@ -96,7 +106,7 @@
 ## 6. Model-change packet sign-off (B3)
 
 - **13a, plan:** `models-lead: approve with conditions — 2026-10-23 — via head-bizops → head-eng — conditions: the knob (field 1), forward-only (5b i), the replay (fields 5a and 7), the kill rule (6)`. **Done.**
-- **13b, result:** pending. It needs the replay result (§9), routed `head-eng` → `head-bizops` → `models-lead`, **before** `release-lead` writes the knob.
+- **13b, result:** pending. It needs the replay result (§10) against the bars (§8), routed `head-eng` → `head-bizops` → `models-lead`, **before** `release-lead` writes the knob.
 
 ## 7. Rollout and rollback
 
@@ -110,27 +120,70 @@
    - Undoing them would be a stored-K rewrite, a prod data change that needs the operator.
 5. **No backfill.** The frozen 2026-08-19 to flip swipes stay at K = 0 (condition 3). A catch-up would be a separate, decayed decision.
 
-## 8. Post-ship monitor and kill rule (packet field 6)
+## 8. Bars and ship rule (packet fields 5 and 6, revised 2026-10-24)
 
-- **Window:** 14 days from the re-enable time, every active user.
-- **Kill rule:** p95 above 3 tier bands per week of trade-swipe-caused moves, or an operator report that rankings jumped, sets the knob back to 1. No interim verdict beyond the kill rule.
-- **The band measure can't trip it.** Under the 2026-09-05 within-tier contract (§3 code-walk), a trade swipe cannot move a player across a tier band. So trade-swipe band moves are 0 by construction, and the kill rule's band test can never fire.
-  - **The live signal is within-tier rank churn.** The monitor should read that, and models-lead should restate the kill rule in it. See §10.
-- **Method:** the mirror of the replay. Rebuild each board with stored K, and again with the post-flip trade rows at K = 0, then difference them per week.
-  - `swipe_replay.py` today only restores frozen rows. A `--mode monitor` is a small follow-up (S), not built here.
+**Trade feedback can't move a player across a tier band.** `_feedback_bounds` (§3 code-walk) holds every feedback-moved rating inside its band, and an unranked player can't become ranked. So stability is measured as reordering within tiers.
 
-## 9. Offline replay (packet fields 5a, 5b i and 7)
+**Unit of measure:** an active board-week.
+- A board is one user and scoring format with at least 10 frozen-period trade swipes.
+- A week is a 7-day window from `--since`.
+- An active board-week has at least one trade swipe in it.
+- For each board-week, two end-of-week boards share the same start:
+  - **WITH:** that week's trade swipes at restored K × `--k-scale`.
+  - **WITHOUT:** those swipes at K = 0.
+  - Both boards carry earlier weeks' restored swipes and every other row of the week (trio votes, dispositions).
+- **Groups** are (position, tier) on WITHOUT, ranked tiers only.
+
+| Bar | Definition | Pass |
+|---|---|---|
+| **5a-i, magnitude** | Normalized Kendall distance: discordant same-group pairs ÷ all same-group pairs | Median ≤ 0.05 **and** p95 ≤ 0.15 across active board-weeks |
+| **5a-ii, no ratchet** | Within a group of n ≥ 2 (singletons skipped), pct = rank / (n − 1) × 100. A board-week scores the max \|pct_with − pct_without\| over players | p95 ≤ 50 |
+| **5b(i), forward-only** | Restoring at K × 0 reproduces the stored board, and nothing before `--since` moves | Every board |
+| **5b(ii), structural** | Players whose tier differs WITH vs WITHOUT (unranked counted as a tier) | 0. This replaces the old band-move bar, which couldn't fire. Tested in both files |
+| 5b(iii)–(v) | Trio K unchanged; first-deck gate unaffected; no Calibration session mixes boards | Not touched by this build: `elo_k` and the trio path are unchanged; brand-new users have no swipes; Calibration builds every arm in a session from one board (packet §M13) |
+
+p95 is nearest rank throughout.
+
+**Ship rule:**
+- **Ship at full K (8/4)** when 5a-i, 5a-ii, 5b(i) and 5b(ii) all hold on the replay.
+- **Otherwise, ship at half K (4/2)** if they hold there, and re-check.
+- **Otherwise, hold.** The replay is an upper bound (§10 caveats), so a fail calls for half K or a fidelity fix, not abandoning.
+- The tool always reports both scales and prints the rule's outcome (`ship_rule`).
+
+## 9. Post-ship monitor and kill rule (packet field 6)
+
+- **Window:** 14 days from the re-enable time, weekly, every active user.
+- **Metrics:** 5a-i and 5a-ii on live boards.
+- **Kill rule:** set `bakeoff_freeze_trade_k` back to 1.0 if any of these holds:
+  - **(a)** the weekly p95 within-tier Kendall distance is **> 0.25**;
+  - **(b)** one player moves **≥ 75 percentile points** within his tier in a week from trade swipes alone, on **≥ 5%** of active users' boards;
+  - **(c)** the operator reports that rankings jumped.
+- No interim verdict beyond the kill rule. The kill thresholds sit above the bars to leave headroom for the replay's upper-bound gap.
+- **The replay reports (a) and (b) per week** as `kill_rule.weeks[]`, with `would_have_fired` overall. (c) has no replay analogue.
+- **Monitor method:** run the same WITH/WITHOUT comparison on post-flip weeks. Today `swipe_replay.py` restores only frozen (K = 0) rows. On live rows WITH is the stored board, and WITHOUT zeroes the week's trade rows: `week_rows` already does that for any `'trade'` row in the week. Pointing it at post-flip weeks needs a small follow-up (S): select boards by trade swipes in the window rather than frozen ones. Not built here.
+
+## 10. Offline replay (packet fields 5, 7 and 8)
 
 - **Tool:** `python3 -m backend.eval.swipe_replay --db <path|URL> [--allow-postgres-readonly] --since 2026-08-19 [--until …] --min-swipes 10 --k-scale 1.0 --output <json>`.
   - It always reports the half-K (4/2) result next to the requested scale.
-  - Its module docstring and the report's `metric_definition` state the metric.
+  - The module docstring and the report's `metric_definition` state the metrics.
+- **JSON output fields:**
+  - Top level: `metric_definition`, `caveats`, `window`, `k`, `min_swipes`, `counts`, `seed_snapshots`, `model_config_sha256`, `check_5b_i`, `ship_rule`, `provenance`.
+  - **`results["1.0" | "0.5"]`:**
+    - `board_weeks_active` and `board_weeks_inactive`;
+    - `kendall` and `max_pct_move`, each as {median, p95, max};
+    - `bar_5a_i` and `bar_5a_ii`;
+    - `check_5b_ii` {tier_membership_violations, verdict};
+    - `kill_rule` {weeks[{week_start, active_boards, p95_kendall, share_pct_move_ge_75, fires_a, fires_b}], would_have_fired}.
+  - **`boards[]`:** each board by hash, with per-week rows: trade_swipes, kendall, discordant_pairs, same_tier_pairs, max_pct_move, tier_violations.
 - **Reading swipe_decisions:**
   - **Trade swipes vs trio votes:** `swipe_decisions.decision_type`. `'rank'` is a trio vote, `'trade'` is a trade-card like or pass, and `'disposition'` is a match accept/decline. Only frozen `'trade'` rows (K = 0, in the window) are restored.
-  - **Like vs pass:** the swipe rows don't record which one it was. The rows of one swipe share a `created_at`, and the tool matches them to the user's latest `trade_decisions` row with the same two sides. An unmatched swipe gets like K, the larger, and is counted.
-- **fit_mult is not recoverable.**
-  - The card's signed `lane_shift` is never persisted.
-  - `deck_impressions.features_json` keeps only the coarse `lane` label, joinable only via `trade_decisions.impression_id` when `trade.valuation_telemetry` was on. It can't separate a neutral pass (1.0) from an anti-window pass (0.4).
-  - **The replay uses fit_mult = 1**, an upper bound at the default multipliers.
+- **Fidelity caveats.** Both push churn up, so the replay is an **upper bound** on live churn. Both are printed and written to `caveats`.
+  - **Like or pass is matched through `trade_decisions`.** The rows of one swipe share a `created_at`, and the tool takes the user's latest decision with the same two sides. An unmatched swipe takes like K (the larger) and is counted.
+  - **fit_mult is 1.**
+    - The card's signed `lane_shift` is never persisted.
+    - `deck_impressions.features_json` keeps only the coarse `lane` label, which can't separate a neutral pass (1.0) from an anti-window pass (0.4).
+    - Live K is scaled down for window-explained swipes, so 1 is an upper bound.
 - **Local run:** none. There is no local snapshot: `/Users/teresadickens/ftf-clean/data/` is empty.
 - **Prod run:** goes to analytics-lead's read-only W3 grant, from the repo root at this branch's head:
 
@@ -143,11 +196,7 @@
   - `data/` is gitignored, and the report names boards by hash, not user id.
   - The report carries the field 8 provenance: code sha, args (password redacted), database, `model_config` hash, seed snapshot dates, and no RNG.
 
-## 10. Findings for models-lead
+## 11. Findings for models-lead
 
-1. **Bar 5a is met by construction, not by data.**
-   - Since the owner's within-tier feedback contract (2026-09-05, `4026ebc8`), `RankingService._compute_elo` applies every trade-swipe update inside the player's post-ranking tier band, after all trio votes.
-   - So restored swipes can reorder players inside a tier, but they can never change anyone's band. The replay will report band moves of 0 at any K. The synthetic test shows it: a player at 1578, two Elo under `first_1`, is pushed by four likes and doesn't move.
-   - **What the bar can still catch is within-tier rank churn,** which the replay reports per board.
-   - **Suggest restating 5a and the kill rule in rank churn** (for example, mean positional-rank change among the top tier per week) before 13b.
+1. **Resolved 2026-10-24.** The original band-move bar could never fire: trade feedback is held inside each tier band. models-lead restated 5a as within-tier Kendall and percentile move, and kept the band check as structural guardrail 5b(ii).
 2. **Packet field 2 overstates the downstream effect.** "Tier views and pins" don't change from trade swipes. Only the order within a tier does, along with anything that reads the Elo value itself (selection, value).

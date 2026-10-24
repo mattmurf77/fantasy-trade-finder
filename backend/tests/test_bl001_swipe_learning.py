@@ -157,6 +157,65 @@ def test_frozen_rows_stay_inert_after_the_knob_flips(route):
     assert _board(rows) == _board(rows[1:]) != board_at_flip
 
 
+# ---------------------------------------------------------------------------
+# 5b (ii) Tier membership never changes from trade feedback
+# ---------------------------------------------------------------------------
+
+def test_5b_ii_heavy_trade_feedback_keeps_every_tier_and_reorders_within():
+    """Packet field 5b(ii), through RankingService's real feedback path:
+    trio votes establish the board, then 600 likes and passes at K 8 / 4
+    (the live `record_trade_signal` path, and the same rows replayed from
+    storage) hammer players sitting on tier edges. Every player keeps his
+    tier, unranked stays unranked, and order inside a tier does change."""
+    seeds = {
+        "edge_top": 1581.0,      # first_1, one Elo above its floor (1580)
+        "edge_ceil": 1574.0,     # second, one under its max (1575)
+        "mid_a": 1500.0, "mid_b": 1495.0, "mid_c": 1490.0,   # second
+        "edge_floor": 1371.0,    # second, one above its floor (1370)
+        "gap": 1366.0,           # in the 1365-1370 gap: third
+        "waiver": 1151.0,        # waivers, one above the ranked floor
+        "unranked": 1149.0,      # below every band
+    }
+    players = [Player(id=p, name=p, position="WR", team="T", age=25) for p in seeds]
+    pushes = [  # (winner, loser): pressure across every edge, both directions
+        ("edge_ceil", "edge_top"), ("gap", "edge_floor"),
+        ("unranked", "waiver"), ("mid_c", "mid_a"), ("mid_b", "mid_a")]
+
+    def board(svc):
+        return {rp.player.id: (rp.rank, svc.tier_for_elo(rp.elo, "WR"))
+                for rp in svc.get_rankings(position="WR").rankings}
+
+    live = RankingService(players=players, seed_ratings=seeds)
+    for trio in (["mid_a", "mid_b", "mid_c"], ["edge_top", "edge_ceil", "edge_floor"]):
+        live.record_ranking(trio)
+    before = board(live)
+    assert before["unranked"][1] is None and before["gap"][1] == "third"
+
+    rows = []
+    for i in range(120):
+        for win, lose in pushes:
+            decision = "like" if i % 2 else "pass"
+            live.record_trade_signal([win], [lose], decision=decision)
+            rows.append({"winner_player_id": win, "loser_player_id": lose,
+                         "decision_type": "trade",
+                         "k_factor": rs._c(f"trade_k_{decision}"),
+                         "created_at": "2026-09-01T00:00:00+00:00"})
+    stored = RankingService(players=players, seed_ratings=seeds)
+    stored.replay_from_db(
+        [{"winner_player_id": w, "loser_player_id": l, "decision_type": "rank",
+          "k_factor": rs._c("elo_k"), "created_at": "2026-08-01T00:00:00+00:00"}
+         for trio in (["mid_a", "mid_b", "mid_c"], ["edge_top", "edge_ceil", "edge_floor"])
+         for i, w in enumerate(trio) for l in trio[i + 1:]] + rows)
+
+    for svc in (live, stored):
+        after = board(svc)
+        assert {p: t for p, (_r, t) in after.items()} == \
+            {p: t for p, (_r, t) in before.items()}, "a tier changed"
+        reordered = [p for p in seeds if after[p][0] != before[p][0]]
+        assert reordered, "non-vacuous: within-tier order must move"
+        assert after["mid_b"][0] < after["mid_a"][0] and before["mid_a"][0] < before["mid_b"][0]
+
+
 def test_replay_uses_stored_k_not_the_current_knobs():
     """`replay_from_db` reads each row's `k_factor`, never `trade_k_*`: a
     K = 0 row is inert and a K = 5 row moves by 5, whatever the config says."""
