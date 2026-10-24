@@ -270,10 +270,12 @@ export default function LeaguePickerScreen({
     invitePinTried.current = true;
     void (async () => {
       const ageMs = inviteIntentAgeMs();
+      const id = useSession.getState().inviteId;   // FR-10: a peek, not a consume
       track('invite_league_pinned', {
         league_id: wanted,
         source:    'picker_autopin',
         ...(ageMs === null ? {} : { ms_since_open: ageMs }),
+        ...(id ? { invite_id: id } : {}),
       }, 'LeaguePicker');
       await useSession.getState().consumeInvitedLeague();   // consume ON PIN
       await pickLeague(lg, { auto: true });
@@ -298,9 +300,11 @@ export default function LeaguePickerScreen({
   useEffect(() => {
     if (!showInviteNotice || inviteFailReported.current) return;
     inviteFailReported.current = true;
+    const id = useSession.getState().inviteId;   // FR-10: a peek, not a consume
     track('invite_pin_failed', {
       ...(wantedInviteId ? { league_id: wantedInviteId } : {}),
       reason: 'not_member',
+      ...(id ? { invite_id: id } : {}),
     }, 'LeaguePicker');
   }, [showInviteNotice, wantedInviteId]);
 

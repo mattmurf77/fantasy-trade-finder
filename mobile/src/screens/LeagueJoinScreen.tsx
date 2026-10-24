@@ -85,6 +85,8 @@ export default function LeagueJoinScreen({ route, navigation }: Props) {
       league_id:  leagueId,
       has_ref:    !!inviteRef,
       format:     'path',
+      // FR-10 / #350 — the well-formed `t` as received, else omitted.
+      ...(inviteId ? { invite_id: inviteId } : {}),
       auth_state: authState,
     }, 'LeagueJoin');
 

@@ -434,6 +434,8 @@ export function handleDeepLink(url: string | null | undefined): void {
       league_id:  leagueId,
       has_ref:    !!(typeof refStr === 'string' && refStr.trim()),
       format:     'legacy',
+      // FR-10 / #350 — the well-formed `t` as received, else omitted.
+      ...(inviteId ? { invite_id: inviteId } : {}),
       auth_state: !st.user
         ? 'signed_out'
         : st.user.account_only
@@ -454,6 +456,28 @@ export function handleDeepLink(url: string | null | undefined): void {
   const isJoinPath = /^app\/league\/join\/[^/]+/i.test(path);
   if (inviteId && (isJoinPath || (typeof lgStr === 'string' && lgStr.trim()))) {
     useSession.getState().setInviteId(inviteId);
+  }
+
+  // B4 — `share_link_opened` (#350 grant, INTENT, the twin of
+  // invite_link_opened): a NON-league link opened the app. `/s/trade/<id>`
+  // → trade, `/s/p/<id>` → package, a bare `/?ref=` → ref_root. `has_ref`,
+  // never the username (C9). No league is in these links, so a signed-in
+  // user is never "verified a member" of one: `authed_non_member`, the same
+  // not-verified bucket LeagueJoinScreen uses.
+  if (!(typeof lgStr === 'string' && lgStr.trim())) {
+    const hasRef = !!(typeof refStr === 'string' && refStr.trim());
+    const kind = /^s\/trade\/[^/]+\/?$/i.test(path) ? 'trade'
+      : /^s\/p\/[^/]+\/?$/i.test(path) ? 'package'
+      : !path && hasRef ? 'ref_root'
+      : null;
+    if (kind) {
+      const st = useSession.getState();
+      track('share_link_opened', {
+        kind,
+        has_ref:    hasRef,
+        auth_state: !st.user ? 'signed_out' : st.user.account_only ? 'account_only' : 'authed_non_member',
+      });
+    }
   }
 
   if (useFeatureFlags.getState().flags['ux.deeplink_router_v2']) {
