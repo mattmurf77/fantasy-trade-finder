@@ -125,6 +125,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
   - [Board-override pins — `ranking_service._DEFAULT_CFG`, DB-seeded](#board-override-pins-ranking_service_default_cfg-db-seeded)
   - [Forced deck regeneration — `backend/server.py`, DB-seeded](#forced-deck-regeneration-backendserverpy-db-seeded)
   - [Paged trade responses (E2) — `backend/server.py`, DB-seeded](#paged-trade-responses-e2-backendserverpy-db-seeded)
+  - [Referral invite mint (L7) — `backend/server.py`, DB-seeded](#referral-invite-mint-l7-backendserverpy-db-seeded)
   - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
   - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
   - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
@@ -883,6 +884,12 @@ exhibits the behaviour it is supposed to record, so the proof cannot rot.
 | Key | Default | Meaning |
 |---|---|---|
 | `trade_page_size` | 30.0 | Max cards in one opt-in paged response: `POST /api/trades/generate` with `page: 1`, and `GET /api/trades/status` with `cursor` ([api-reference](api-reference.md#opt-in-paged-responses-e2-2026-10-20)). Read through `_deck_cfg` and clamped to 1–200 (NaN or infinity → 30). Unpaged (legacy) requests never read it. A change takes effect on the next request after `reload_config()`; like every `model_config` row it is part of the trade request signature, so changing it also misses the in-process deck cache once. |
+
+### Referral invite mint (L7) — `backend/server.py`, DB-seeded
+
+| Key | Default | Meaning |
+|---|---|---|
+| `referral_mint_enabled` | 1.0 (**ON**) | The deploy-free kill switch for `POST /api/invite/token` (referral loop L7, [api-reference](api-reference.md)). The route mints only while `growth.referral_ledger` is on **and** this knob is **exactly 1**; either off → `404 {"error":"not_found"}`, which every client already treats as "fall back to the league-only link", so sharing never breaks. **Read per request straight from the DB** (`server._referral_mint_enabled()` → `database.get_config()`, the `force_supersedes_running` pattern), never from a cache: a flip lands on the next mint with **no restart and no deploy**, whichever way it was written. Not a trade or ranking input: `ranking_service.reload_config` never loads it. (`trade_service.reload_config` copies every `model_config` row into `_cfg`, so like every new row it is part of `_trade_request_signature` and the owner-experiment config hash; seeding it changes those once at deploy, as `trade_page_size` did.) **Kill recipe:** `python3 scripts/set_knob.py referral_mint_enabled 0` (or `PUT /api/admin/config/referral_mint_enabled` with `{"value": 0}` and `X-Cron-Secret`); restore with `1`. Attribution, activation and landing-open recording keep running for links already in the wild: this stops new ids only, and the flag is the whole-loop switch. |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 

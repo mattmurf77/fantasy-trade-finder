@@ -2622,7 +2622,7 @@ referrals_table = Table("referrals", metadata,
     Column("id",                    Integer, primary_key=True, autoincrement=True),
     Column("referrer_user_id",      String,  nullable=False),
     Column("referred_user_id",      String),                  # filled when invitee identified
-    Column("league_id",             String,  nullable=False), # the shared Sleeper league
+    Column("league_id",             String,  nullable=False), # the shared league, any platform
     Column("invite_token",          String,  nullable=False), # carried by share-card deep link
     Column("status",                String,  nullable=False, server_default="pending"),
                                                               # pending → joined → activated →
@@ -2639,11 +2639,19 @@ referrals_table = Table("referrals", metadata,
     Column("last_opened_at",        String),                  # latest human landing open
     Column("open_count",            Integer, server_default="0"),  # human landing opens
     Column("unfurled_at",           String),                  # first link-preview fetch
+    # Referral loop L7 (PRD §9): the ledger. share_token is the id in the
+    # link (`t`): = invite_token on a minted row, the parent's id on a
+    # group-chat sibling (§7.6); NULLed on the referrer's account deletion.
+    Column("share_token",           String),
+    Column("surface",               String),                  # InviteSurface at mint
+    Column("attribution_method",    String),                  # token | league_match; NULL while pending
     UniqueConstraint("invite_token", name="uq_referral_token"),
     UniqueConstraint("referrer_user_id", "referred_user_id",
                      name="uq_referral_pair"),
     Index("ix_referrals_referrer", "referrer_user_id"),
     Index("ix_referrals_referred", "referred_user_id"),
+    Index("ix_referrals_share_token", "share_token"),
+    Index("ix_referrals_league_status", "league_id", "status"),   # §7.5 candidates
 )
 
 # Outbound affiliate click ledger. subid joins partner payout reports back to
@@ -3321,6 +3329,11 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Referral loop L7 — deploy-free kill switch for the invite-id mint ──
+    # Read per request from the DB (server._referral_mint_enabled, the
+    # force_supersedes_running pattern), never cached: a flip lands on the
+    # next mint with no restart. Not a trade or ranking input.
+    ("referral_mint_enabled",     1.0,  "referral loop L7: exactly 1 = POST /api/invite/token mints while growth.referral_ledger is on; any other value = 404 not_found (clients fall back to the league-only link). Kill: scripts/set_knob.py referral_mint_enabled 0"),
 ]
 
 
@@ -3570,6 +3583,13 @@ def _migrate_db() -> None:
         ("referrals",          "last_opened_at",            "VARCHAR"),
         ("referrals",          "open_count",                "INTEGER DEFAULT 0"),
         ("referrals",          "unfurled_at",               "VARCHAR"),
+        # ── referral loop L7 (§9): the ledger columns. All nullable: rows
+        # written before L7 have no share id, surface or method. Their two
+        # indexes are created explicitly below (create_all never adds an
+        # index to an existing table).
+        ("referrals",          "share_token",               "VARCHAR"),
+        ("referrals",          "surface",                   "VARCHAR"),
+        ("referrals",          "attribution_method",        "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -3782,6 +3802,20 @@ def _migrate_db() -> None:
                 ))
         except Exception:
             pass
+
+    # ── Referral loop L7 (PRD §9) — the ledger's two indexes on an existing
+    # `referrals` table. Declared on the Table too, so a fresh DB gets them
+    # from create_all; these run after the migration_cols ALTERs above, so
+    # share_token exists by now. Same idempotent pattern, both dialects.
+    for idx_name, cols in (("ix_referrals_share_token",   "share_token"),
+                           ("ix_referrals_league_status", "league_id, status")):
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"CREATE INDEX IF NOT EXISTS {idx_name} ON referrals ({cols})"
+                ))
+        except Exception as e:
+            print(f"[migrate] referrals index {idx_name} failed: {e}")
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters

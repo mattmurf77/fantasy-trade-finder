@@ -1769,7 +1769,7 @@ Give-get program state (foundation §5). Fraud controls are structural: `uq_refe
 | `id` | int PK | |
 | `referrer_user_id` | str, not null, indexed | |
 | `referred_user_id` | str, indexed | NULL until invitee identified |
-| `league_id` | str, not null | The shared Sleeper league |
+| `league_id` | str, not null | The shared league, any platform (Sleeper, ESPN, MFL, Fleaflicker id as the clients know it). Indexed with `status` (`ix_referrals_league_status`) |
 | `invite_token` | str UNIQUE | Carried by share-card deep links (`/join/<token>`) |
 | `status` | str, not null | `pending` → `joined` → `activated` → `rewarded` \| `rejected` \| `expired` |
 | `qualifying_event` | str | e.g. `'matchups_completed>=25'` |
@@ -1779,8 +1779,13 @@ Give-get program state (foundation §5). Fraud controls are structural: `uq_refe
 | `last_opened_at` | str | ISO UTC of the latest human open of the join landing |
 | `open_count` | int, `server_default 0` | Human landing opens, `COALESCE(open_count, 0) + 1` per open |
 | `unfurled_at` | str | ISO UTC of the **first** link-preview fetch (iMessage, Slack, Discord, WhatsApp, …; an empty user agent counts). First write wins. Preview fetches never touch the three open columns |
+| `share_token` | str, indexed (`ix_referrals_share_token`) | Referral loop L7 (§7.1, §7.6). The invite id in the link (`t`, `invite_id` in API bodies and event props): `secrets.token_urlsafe(9)`, 12 URL-safe chars. **= `invite_token` on a minted row**; on a group-chat **sibling** row it is the parent's id while the sibling's own `invite_token` is `<share_token>~<6 random>` (never emitted, never a link). "Joins per share" = rows grouped by `share_token`. NULL on rows written before L7, and **NULLed on the referrer's rows when the referrer deletes their account** (the link stops crediting; `uq_referral_token` keeps `invite_token`). A bearer id for a public link, so account export omits it (as `invite_token`) |
+| `surface` | str | `InviteSurface` at mint: `league_home` \| `matches_empty` \| `trades_banner` \| `members_overlay` \| `notif_empty` \| `web_invite` (closed; `referral_ledger.INVITE_SURFACES`). A sibling copies its parent's |
+| `attribution_method` | str | `token` (§7.4) \| `league_match` (§7.5); NULL while `pending` |
 
 The four landing columns are written only by `record_referral_landing_open()`: one atomic `UPDATE … WHERE invite_token = :t` (served by `uq_referral_token`; no new index), from `GET /app/league/join/<id>` while `growth.referral_ledger` is on and `t` is well-formed, and only when the row's `league_id` is the path's league (`invite_status` valid or expired): a `t` pasted into another league's path never stamps the row, because the league-match fallback reads `opened_at`. A HEAD request writes nothing. Added through `_migrate_db`'s `migration_cols` as well as the table, so existing databases gain them on boot.
+
+**The ledger (referral loop L7, PRD §7, §9; all behind `growth.referral_ledger`).** Writers, all in `backend/database.py` and driven by `backend/referral_ledger.py`: **mint** `create_referral_invite()` (`POST /api/invite/token`): one `pending` row, `referrer_user_id` = the session user, `invite_token` = `share_token` = the new id, `surface`, `created_at`. **Credit** at a NEW user's first session init (`referral_ledger.attribute_first_session`): `claim_referral()` is one conditional `UPDATE … WHERE id = :id AND referred_user_id IS NULL AND status = 'pending'` → `referred_user_id`, `status 'joined'`, `joined_at`, `attribution_method`; when the minted row is already claimed, `insert_referral_sibling()` adds the §7.6 sibling (`status 'joined'`, same referrer / league / `surface` / `created_at`, `share_token` = the parent's). `uq_referral_pair` keeps one row per (referrer, referred), and a referred user is credited at most once ever. **Activation** `activate_referral()`: `joined → activated`, `activated_at`, `qualifying_event` (`trade_proposed` \| `match_swiped`, stage 7 of `analytics_queries.FUNNEL_STAGES`), one conditional `UPDATE … WHERE status = 'joined'`. `expired` is derived on read (`created_at` + 30 d), never written. Both new indexes are declared on the table and created by an explicit `CREATE INDEX IF NOT EXISTS` in `_migrate_db` (an existing table gets no new index from `create_all`); both dialects, idempotent.
 
 ## `affiliate_clicks`
 
