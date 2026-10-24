@@ -1449,7 +1449,7 @@ Indexes: `(user_id, occurred_at)`, `(event_type, occurred_at)`, **full** unique 
 
 The envelope columns (`event_id` … `experiments`) are nullable and only populated by `POST /api/events` (client batches, `insert_client_events()`); server-fired `record_event()` rows leave them NULL. Pre-auth client events store `user_id = 'device:<device_id>'` — resolve through `identity_links`.
 
-**`platform = 'server'`** on server-fired rows whose emitter passes `record_event(..., platform="server")`. Since referral loop D-1 (2026-10-15) these are `invite_landing_opened` and `invite_landing_cta`; every other server-fired row still leaves `platform` NULL. The same two emitters pass `touch_user=False`, so their row is the only write: no `users` denorm bump (`last_active_at`, `events_count`, pointer columns) and no streak step. Their `user_id` is the inviter of a valid invite id, else `'system:invite'`.
+**`platform = 'server'`** on server-fired rows whose emitter passes `record_event(..., platform="server")`. Since referral loop D-1 (2026-10-15) these are `invite_landing_opened` and `invite_landing_cta`; every other server-fired row still leaves `platform` NULL. The same two emitters pass `touch_user=False`, so their row is the only write: no `users` denorm bump (`last_active_at`, `events_count`, pointer columns) and no streak step. Their `user_id` is the referrer of the referrals row the invite id `t` names (any status); with no row, the user a legacy `ref` resolves to; else `'system:invite'`.
 
 **event_type taxonomy** (registry: `backend/analytics_taxonomy.py` — client and server namespaces are disjoint, asserted at import):
 - Session: `signup`, `login`, `logout`, `app_open`
