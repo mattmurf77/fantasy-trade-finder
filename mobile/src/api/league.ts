@@ -1,4 +1,5 @@
 import { api } from './client';
+import { isInviteId } from '../utils/inviteId';
 import type { PickSource } from './pickAssignment';
 import type {
   ScoringFormat,
@@ -948,9 +949,18 @@ export interface InviteMeta {
   league_id: string;
   league_name: string | null;
   platform: string | null;
+  /** FR-11 / PRD §8.3 — the inviter, resolved SERVER-side from `t`. Only
+   *  present when the call sent `t` and the server supports it; absent on an
+   *  older server, which must render exactly as before. */
+  inviter_display_name?: string | null;
+  /** FR-11 / PRD §8.3 — present with `t` (C1 name; never `token_status`). */
+  invite_status?: 'valid' | 'expired' | 'unknown' | 'league_mismatch' | null;
 }
 
-export async function fetchInviteMeta(leagueId: string): Promise<InviteMeta | null> {
+export async function fetchInviteMeta(
+  leagueId: string,
+  inviteId?: string | null,
+): Promise<InviteMeta | null> {
   if (!leagueId) return null;
   const ac = new AbortController();
   // 4s deadline, not the client default: a sign-in screen must never wait on
@@ -959,8 +969,11 @@ export async function fetchInviteMeta(leagueId: string): Promise<InviteMeta | nu
   try {
     // skipAuth: the caller is a SIGNED-OUT screen; a stale token would be
     // meaningless and would let the 401-expiry hook fire on a cosmetic call.
+    // FR-11 — `t` rides only when well-formed (utils/inviteId): a hand-edited
+    // id is never sent, and without one the request is exactly today's.
+    const tq = isInviteId(inviteId) ? `&t=${encodeURIComponent(inviteId)}` : '';
     return await api.get<InviteMeta>(
-      `/api/league/invite-meta?league_id=${encodeURIComponent(leagueId)}`,
+      `/api/league/invite-meta?league_id=${encodeURIComponent(leagueId)}${tq}`,
       { skipAuth: true, signal: ac.signal },
     );
   } catch {
