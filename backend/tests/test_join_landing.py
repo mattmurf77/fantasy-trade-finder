@@ -1262,10 +1262,20 @@ def test_get_referral_by_invite_token(env):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _share_paths(env):
+    """(kind, path) for every /s/* page: tiers, a trade token hit, the O8
+    expired-trade page (a miss; share_kind "trade" too), and a package."""
     sid = "pkgAbc123"
     assert db_module.create_shared_package(sid, "u_sharer", ["4034"], ["7564"])
-    return {"tiers": "/s/tiers/qb/someuser", "trade": "/s/trade/m123",
-            "package": f"/s/p/{sid}"}
+    with env.begin() as conn:
+        match_id = conn.execute(insert(db_module.trade_matches_table).values(
+            league_id=LEAGUE, user_a_id="u_a", user_b_id="u_b",
+            user_a_give=json.dumps(["p1"]), user_a_receive=json.dumps(["p2"]),
+            matched_at="2026-10-20T00:00:00+00:00", status="pending",
+        )).inserted_primary_key[0]
+    token = db_module.create_trade_share_token(match_id, "u_a")
+    assert token
+    return [("tiers", "/s/tiers/qb/someuser"), ("trade", f"/s/trade/{token}"),
+            ("trade", "/s/trade/12345"), ("package", f"/s/p/{sid}")]
 
 
 SHARE_OPEN = ("growth.share_landing", "growth.tier_board_share")
@@ -1276,7 +1286,7 @@ def test_share_headers_and_href_flag_off(monkeypatch, env):
     monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
     labels = {"tiers": "Build your tiers", "trade": "Find your next trade",
               "package": "Build your own trade"}
-    for kind, path in _share_paths(env).items():
+    for kind, path in _share_paths(env):
         for ua in UA.values():
             r = _get(path, ua=ua)
             assert r.status_code == 200, path
@@ -1304,7 +1314,7 @@ def test_share_cta_matrix_flag_on(monkeypatch, env, ua_key, url_set, expect):
     _set_flags(monkeypatch, *(SHARE_OPEN + LANDING))
     if url_set:
         monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
-    for kind, path in _share_paths(env).items():
+    for kind, path in _share_paths(env):
         r = _get(path, ua=UA[ua_key])
         assert r.headers["Cache-Control"] == "private, max-age=300"
         assert r.headers["Vary"] == "User-Agent"
@@ -1324,12 +1334,19 @@ def test_share_cta_matrix_flag_on(monkeypatch, env, ua_key, url_set, expect):
         assert "<svg" not in html
 
 
-def test_share_trade_page_keeps_its_chrome(monkeypatch):
-    """GB-02: only the CTA element changed."""
-    html = _get("/s/trade/m1").get_data(as_text=True)
+def test_share_trade_pages_keep_their_chrome(monkeypatch, env):
+    """GB-02: only the CTA element changed, on the O8 token hit and on its
+    expired page (which keeps its noindex)."""
+    (_, hit), (_, miss) = [x for x in _share_paths(env) if x[0] == "trade"]
+    html = _get(hit).get_data(as_text=True)
     assert "<title>Trade Match · Fantasy Trade Finder</title>" in html
     assert '<div class="brand">Fantasy Trade Finder</div>' in html
-    assert 'content="/og/trade/m1.png"' in html
+    assert f'content="/og/trade/{hit.rsplit("/", 1)[1]}.png"' in html
+    assert 'name="robots"' not in html
+    html = _get(miss).get_data(as_text=True)
+    assert f"<title>{server._og_image.TRADE_LINK_EXPIRED_TITLE} · Fantasy Trade Finder</title>" in html
+    assert '<meta name="robots" content="noindex">' in html
+    assert '<a class="cta" href="/?share=trade">Find your next trade</a>' in html
 
 
 # ═══════════════════════════════════════════════════════════════════════════
