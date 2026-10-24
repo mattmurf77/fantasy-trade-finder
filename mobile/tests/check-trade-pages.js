@@ -193,12 +193,16 @@ const code = stripComments(trades);
     eq(P.wantsNextPage({ ...env, cursor: undefined, busy: false }), false, 'legacy (no cursor)');
     eq(P.wantsNextPage({ ...env, pool_exhausted: true, busy: false }), false);
     eq(P.wantsNextPage({ ...env, status: 'error', busy: false }), false);
-    eq(P.wantsNextPage({ ...env, cursor: 90, busy: false }), false, 'pre-P2 server: complete and fully paged');
-    eq(P.wantsNextPage({ ...env, cursor: 90, pool_exhausted: false, busy: false }), true, 'P2: building ⇒ keep asking');
+    eq(P.wantsNextPage({ ...env, cursor: 90, busy: false }), false, 'no deck_id (flag off): complete and fully paged');
+    eq(P.wantsNextPage({ ...env, cursor: 90, pool_exhausted: false, busy: false }), false,
+      'no deck_id: the job\'s own end ends the deck, whatever pool_exhausted says');
+    eq(P.wantsNextPage({ ...env, deck_id: 'd', cursor: 90, pool_exhausted: false, busy: false }), true,
+      'deck_id (P2): only pool_exhausted ends the deck ⇒ keep asking');
+    eq(P.wantsNextPage({ ...env, deck_id: 'd', cursor: 90, pool_exhausted: true, busy: false }), false);
   });
   await check('4c. empty-while-building backs off; a rebased short page does not', () => {
     eq(P.needsBackoff({ status: 'running', cursor: 12, total_ready: 12 }, 12), true);
-    eq(P.needsBackoff({ status: 'complete', cursor: 90, total_ready: 90, pool_exhausted: false }, 60), true);
+    eq(P.needsBackoff({ status: 'complete', deck_id: 'd', cursor: 90, total_ready: 90, pool_exhausted: false }, 60), true);
     eq(P.needsBackoff({ status: 'complete', cursor: 60, total_ready: 90 }, 30), false);
     eq(P.needsBackoff({ status: 'complete', rebased: true, cursor: 30, total_ready: 90 }, 60), false);
     eq(P.needsBackoff({ status: 'complete', cursor: 90, total_ready: 90, pool_exhausted: true }, 60), false);

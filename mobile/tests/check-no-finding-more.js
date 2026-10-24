@@ -120,24 +120,31 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
   const { deckEndState } = module.exports;
   const bad = [];
   let ends = 0;
+  let flagOffEnds = 0;
   for (const status of ['running', 'complete', 'error']) {
     for (const pool of [undefined, false, true]) {
       for (const phase of ['idle', 'loading', 'retrying', 'failed']) {
         for (const online of [true, false]) {
-          for (const [cursor, total] of [[30, 90], [90, 90], [undefined, undefined]]) {
-            const r = deckEndState({ status, pool_exhausted: pool, phase, online, cursor, total_ready: total });
-            if (r === 'end') {
-              ends++;
-              if (pool !== true || phase !== 'idle') bad.push(JSON.stringify({ status, pool, phase, online, cursor }));
+          for (const deckId of [undefined, 'd']) {
+            for (const [cursor, total] of [[30, 90], [90, 90], [undefined, undefined]]) {
+              const r = deckEndState({ status, deck_id: deckId, pool_exhausted: pool, phase, online, cursor, total_ready: total });
+              // head-eng's end rule: with deck_id only pool_exhausted ends the
+              // deck; without it, complete + cursor ≥ total_ready. Never while
+              // a page is in flight or retrying, never on an errored job.
+              const ended = status !== 'error' && phase === 'idle'
+                && (pool === true
+                  || (deckId === undefined && status === 'complete' && cursor !== undefined && cursor >= total));
+              if ((r === 'end') !== ended) bad.push(JSON.stringify({ status, deckId, pool, phase, online, cursor, total, r }));
+              if (r === 'end') { ends++; if (deckId === undefined && pool !== true) flagOffEnds++; }
+              if (!['end', 'offline', 'error', 'pending'].includes(r)) bad.push(`unknown state ${r}`);
             }
-            if (!['end', 'offline', 'error', 'legacy', 'pending'].includes(r)) bad.push(`unknown state ${r}`);
           }
         }
       }
     }
   }
-  check('3a. deckEndState is "end" ONLY with pool_exhausted: true and nothing in flight or retrying',
-    bad.length === 0 && ends > 0, bad.join('\n      '));
+  check('3a. deckEndState is "end" exactly by the end rule (deck_id ⇒ pool_exhausted; else complete + fully paged), never in flight or retrying',
+    bad.length === 0 && ends > 0 && flagOffEnds > 0, bad.join('\n      '));
   check('3b. offline past the last card is the Offline state, never the end, while pages may still come',
     deckEndState({ status: 'running', pool_exhausted: false, phase: 'idle', online: false, cursor: 30, total_ready: 30 }) === 'offline');
   check('3c. a page in flight past the last card renders nothing (no spinner, no copy)',
@@ -187,6 +194,10 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
   const topAt = code.indexOf(') : topCard ? (');
   check('4g. D14c: the latched end card precedes the card branch, so later cards wait BEHIND it',
     quick > -1 && endAt > quick && topAt > endAt);
+  check('4h. deck_exhausted_viewed fires only when the end card shows (a paged deck is exhausted iff showDeckEndCard; no deck-done summary)',
+    /const deckExhausted = pagedWithCards\s*\?\s*showDeckEndCard\s*:/.test(code)
+      && /const summaryVisible =\s*!pagedWithCards &&/.test(code)
+      && /track\('deck_exhausted_viewed'/.test(code));
 }
 
 // ── 5. D14a: Adjust searches IN PLACE; the AC-L1 boundary is marked ───────

@@ -5422,11 +5422,16 @@ export default function TradesScreen({ navigation, route }: any) {
   // Deck exhausted (items 7+9): record it once per episode, and give the
   // snoozed Quick Set prompt its F10 re-offer slot (the once-per-session
   // cap inside maybeShowQuicksetPrompt still applies).
-  const deckExhausted =
-    !topCard &&
-    deck.length > 0 &&
-    job?.status !== 'running' &&
-    !generateMutation.isPending;
+  // 200 ms path (head-eng fix b): a PAGED deck is exhausted only when the
+  // P30 end card actually shows — never on an empty buffer while pages are
+  // still coming — so `deck_exhausted_viewed` (and the completion moments
+  // below) fire exactly with the card. Legacy decks keep their rule.
+  const deckExhausted = pagedWithCards
+    ? showDeckEndCard
+    : !topCard &&
+      deck.length > 0 &&
+      job?.status !== 'running' &&
+      !generateMutation.isPending;
   const exhaustedTrackedRef = useRef(false);
   useEffect(() => {
     if (!deckExhausted) {
@@ -5479,6 +5484,8 @@ export default function TradesScreen({ navigation, route }: any) {
   // decks) or settles into the standalone exhausted state. Flag off ⇒
   // summaryVisible is always false and the exhausted state is untouched.
   const summaryVisible =
+    // A paged deck ends on the P30 card, never on the deck-done summary.
+    !pagedWithCards &&
     replenishmentOn &&
     deckExhausted &&
     !summaryDismissed &&
@@ -9324,7 +9331,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 </Pressable>
               ) : null}
             </>
-          ) : pagedWithCards && deckEnd !== 'legacy' ? (
+          ) : pagedWithCards && deckEnd ? (
             // U3 rows 1–3 — past the last held card of a paged deck. The page
             // in flight lands behind/into this slot silently ('pending'
             // renders nothing); offline (3a) and a page that won't come (3b)

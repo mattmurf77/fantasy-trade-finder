@@ -29,6 +29,9 @@ export function deckCardKey(card: DeckKeyed): string {
 
 export interface PageEnvelope {
   status: 'running' | 'complete' | 'error';
+  /** P2's deck identity. Present ⇔ the page store is on (head-eng's end
+   *  rule keys on it: with it, only `pool_exhausted` ends the deck). */
+  deck_id?: string;
   cursor?: number;
   total_ready?: number;
   replace?: boolean;
@@ -115,14 +118,17 @@ export function unseenCount(visibleLength: number, frontIndex: number): number {
   return Math.max(0, visibleLength - frontIndex - 1);
 }
 
-/** No further page can arrive for this search: the job errored, the server
- *  said `pool_exhausted`, or (a server without P2's end signal) the job is
- *  complete and every ready card has been paged. */
+/** No further page can arrive for this search (head-eng's end rule):
+ *  - the job errored; or
+ *  - responses carry `deck_id` (the page store is on, P2): the server said
+ *    `pool_exhausted`, and nothing else ends the deck; or
+ *  - no `deck_id` (flag off, E2 only): the job is `complete` and every ready
+ *    card has been paged (cursor ≥ total_ready). */
 export function deckFullyDelivered(s: PageEnvelope): boolean {
   if (s.status === 'error') return true;
   if (s.pool_exhausted === true) return true;
-  return s.pool_exhausted === undefined
-    && s.status === 'complete'
+  if (typeof s.deck_id === 'string') return false;
+  return s.status === 'complete'
     && typeof s.cursor === 'number'
     && typeof s.total_ready === 'number'
     && s.cursor >= s.total_ready;
@@ -172,25 +178,23 @@ export type PageFetchPhase = 'idle' | 'loading' | 'retrying' | 'failed';
 
 /** What the deck slot shows once the user is past the last held card of a
  *  paged deck (ux-lead U3; never a "Finding more" state):
- *  - 'end': P30's end card. Only on `pool_exhausted` with nothing in flight
- *    or retrying (U3 row 4).
+ *  - 'end': P30's end card, when the deck is fully delivered by the end rule
+ *    above (`pool_exhausted` with `deck_id`; else complete and fully paged)
+ *    and nothing is in flight or retrying (U3 row 4). Same card both ways.
  *  - 'offline': the Offline state (row 3a).
  *  - 'error': the recoverable error, "Couldn't load more trades" (row 3b):
  *    the job errored, or fetches keep failing or come back empty.
- *  - 'legacy': a server without P2's end signal delivered everything; the
- *    pre-existing exhausted states apply.
  *  - 'pending': the first request for the next page is in flight; the slot
  *    stays empty until it lands (no spinner, no copy). */
-export type DeckEnd = 'end' | 'offline' | 'error' | 'legacy' | 'pending';
+export type DeckEnd = 'end' | 'offline' | 'error' | 'pending';
 
 export function deckEndState(s: PageEnvelope & {
   phase: PageFetchPhase;
   online: boolean;
 }): DeckEnd {
-  if (s.pool_exhausted === true && s.phase === 'idle') return 'end';
   if (s.status === 'error') return 'error';
+  if (deckFullyDelivered(s) && s.phase === 'idle') return 'end';
   if (!s.online) return 'offline';
-  if (deckFullyDelivered(s)) return 'legacy';
   if (s.phase === 'retrying' || s.phase === 'failed') return 'error';
   return 'pending';
 }

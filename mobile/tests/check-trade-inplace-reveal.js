@@ -140,7 +140,7 @@ console.log('check-trade-inplace-reveal:');
   check('5a. the card branch precedes the skeleton, "Looking for trades…" and idle branches in the deck slot',
     topAt > -1 && skelAt > topAt && lookAt > topAt && idleAt > topAt,
     `topCard@${topAt} skeleton@${skelAt} looking@${lookAt} idle@${idleAt}`);
-  const pagedAt = chain.indexOf(') : pagedWithCards && deckEnd !== \'legacy\' ? (');
+  const pagedAt = chain.indexOf(') : pagedWithCards && deckEnd ? (');
   check('5b. past the last card of a paged deck, its own states precede every wait card',
     pagedAt > topAt && pagedAt < skelAt && pagedAt < lookAt);
   check('5c. the skeleton is first-run with NO cards only',
