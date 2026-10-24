@@ -15,6 +15,8 @@ import {
   Share,
   Keyboard,
   KeyboardAvoidingView,
+  AccessibilityInfo,
+  findNodeHandle,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -36,7 +38,7 @@ import Animated, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { haptics } from '../utils/haptics';
 import { useCardImpact, type CardImpactState } from '../state/useCardImpact';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, onlineManager } from '@tanstack/react-query';
 
 import {
   ink,
@@ -95,7 +97,47 @@ import {
   type AssetIdea,
   type SwipeSignal,
   type StandingOffer,
+  type GenerateBody,
+  type PagedTradeCard,
+  type PagedTradeJobSnapshot,
 } from '../api/trades';
+import { uuidv4 } from '../api/_queue';
+// Time to trade suggestion (#339 §4.6): R1 begins at the tap; the deck that
+// dispatches the search claims the tap's search id.
+import {
+  beginTradeSearch,
+  claimPendingSearch,
+  claimSearch,
+  dropPendingSearch,
+  failFirstCard,
+  isSearchOpen,
+  noteFirstResponse,
+  reportDeckBufferEmpty,
+  reportFirstCardShown,
+} from '../state/tradeSearchTrace';
+import {
+  FIRST_CARD_MIN_VISIBLE,
+  searchTypeOf,
+  visibleFraction,
+  type FirstCardFailure,
+  type R1Source,
+} from '../utils/firstCardEvent';
+// 200 ms path — the paged deck's merge / prefetch / end-of-buffer rules.
+// Pure, zero runtime imports (tests/check-trade-pages.js runs them).
+import {
+  deckCardKey,
+  deckEndState,
+  deckFullyDelivered,
+  isPagedEnvelope,
+  isWholeDeck,
+  mergeDeckPage,
+  needsBackoff,
+  nextRetryAttempt,
+  pageRetryDelayMs,
+  unseenCount,
+  wantsNextPage,
+  type PageFetchPhase,
+} from '../utils/tradePages';
 import StandingOfferSheet from '../components/StandingOfferSheet';
 // #384 W6-B — the fair-package deck builds its cards with the SAME helper the
 // featured-trade window uses, so a fair card and a window card can never
@@ -149,6 +191,13 @@ import { getActiveOverhaul } from '../api/overhaul';
 import FormatGate, { formatLabel } from '../components/FormatGate';
 import ProvenanceChip from '../components/ProvenanceChip';
 import SkeletonTradeCard from '../components/SkeletonTradeCard';
+import {
+  DeckEndCard,
+  DeckMoreErrorCard,
+  DeckOfflineCard,
+  DeckUpdatingLabel,
+  WithdrawnTradeCard,
+} from '../components/TradeDeckStates';
 import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
 import QuickSetPromptCard from '../components/QuickSetPromptCard';
@@ -190,7 +239,7 @@ import {
 import type { DeclineReasonResult } from '../api/declineReasons';
 import { useTradeQueue } from '../state/useTradeQueue';
 import { useFinderTargets } from '../state/useFinderTargets';
-import { useFlag, useOnboardingFeature, onboardingEnabled } from '../state/useFeatureFlags';
+import { useFlag, useOnboardingFeature, onboardingEnabled, useFeatureFlags } from '../state/useFeatureFlags';
 import {
   useOnboardingState,
   getOnboardingState,
@@ -442,6 +491,50 @@ function tradePackageKey(c: TradeCard): string {
   ].join('|');
 }
 
+// ── 200 ms path, U1 (ux-lead "U1: the in-place reveal") ────────────────
+// The landing's canvas Find a Trade fetches page 1 BEFORE it pushes
+// `TradeDeck`, and hands it over on the `resultsPush` param. The pushed
+// instance reads it ONCE, in its useState initializers, so when the page
+// holds cards its first frame is the complete first card: no idle card, no
+// "Looking for trades…", no progress strip, no skeleton. A page that holds
+// none yet (a gate miss: the job is still building) is adopted too, so the
+// pushed deck pages the SAME job in its honest wait instead of starting a
+// second one. Errored or finished-empty pages are never adopted: the pushed
+// deck then dispatches its own search exactly as before.
+type FirstPageHandoff = { request: GenerateBody; snapshot: PagedTradeJobSnapshot };
+function adoptablePage(s: PagedTradeJobSnapshot): boolean {
+  return isPagedEnvelope(s) && s.status !== 'error'
+    && (s.cards.length > 0 || s.status === 'running');
+}
+function adoptedFirstPage(route: any): FirstPageHandoff | null {
+  const fp = route?.params?.resultsPush?.firstPage as FirstPageHandoff | undefined;
+  return fp && adoptablePage(fp.snapshot) ? fp : null;
+}
+// How long the landing holds the tap for page 1 before pushing without it.
+// The 200 ms budget makes the page the tap's feedback (design-lead U1.3); past
+// three budgets a pushed deck in its honest wait state beats a frozen builder.
+// Tunable for trades-pm / ux-lead.
+const FIRST_PAGE_PUSH_DEADLINE_MS = 600;
+// Failed next-page requests retried silently before the loop rests (the
+// U3 3b error state's Try again restarts it).
+const MAX_SILENT_PAGE_FAILURES = 6;
+// TanStack's onlineManager is bridged to NetInfo in App.tsx; the deck's
+// offline state (U3 rows 3a/5) reads it rather than a second listener.
+const subscribeOnline = (cb: () => void) => onlineManager.subscribe(cb);
+const readOnline = () => onlineManager.isOnline();
+
+// VoiceOver label for the fronted card's header (ux-lead U1): partner, give,
+// get, verdict — in TradeValueBar's own verdict words.
+function tradeA11ySummary(card: TradeCard): string {
+  const names = (ps: Player[]) => ps.map((p) => p.name).join(', ') || 'nothing';
+  const verdict = card.favors === 'receive' ? ' You win.'
+    : card.favors === 'give' ? ' They win.'
+    : card.favors === 'even' ? ' Even.'
+    : '';
+  return `Trade with ${card.opponent_username}. You give ${names(card.give_players)}.`
+    + ` You get ${names(card.receive_players)}.${verdict}`;
+}
+
 export default function TradesScreen({ navigation, route }: any) {
   const queryClient = useQueryClient();
   const league = useSession((s) => s.league);
@@ -584,7 +677,49 @@ export default function TradesScreen({ navigation, route }: any) {
   // restored by the hydrate below; nobody's stored value is rewritten.
   const [fairnessOn, setFairnessOn] = useState(fairnessOnFromPref(null));
   const [fairnessReady, setFairnessReady] = useState(false);
-  const [deck, setDeck] = useState<TradeCard[]>([]);
+  // U1 — a pushed deck that arrived holding the landing's first page (see
+  // adoptedFirstPage). Snapshotted once; the initializers below and the two
+  // mount-time resets (the league effect, the #330 choke point) read it.
+  const [adopted] = useState(() => adoptedFirstPage(route));
+  const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
+  // R2/R2b — the search this deck answers (claimed at dispatch, or the
+  // adopted page's), the job it ran, and the keys of the cards it delivered:
+  // only a fronted card FROM THIS SET can be the search's first card (an
+  // in-place search appends behind older cards that are still showing).
+  const deckSearchRef = useRef<{ id: string; jobId?: string; keys: Set<string> } | null>(
+    adopted?.snapshot.search_id
+      ? {
+          id: adopted.snapshot.search_id,
+          jobId: adopted.snapshot.job_id,
+          keys: new Set(adopted.snapshot.cards.map(deckCardKey)),
+        }
+      : null,
+  );
+  function noteSearchCards(jobId: string | undefined, cards: readonly { trade_id: string; trade_hash?: string }[]) {
+    const s = deckSearchRef.current;
+    if (!s || (s.jobId && jobId && s.jobId !== jobId)) return;
+    for (const c of cards) s.keys.add(deckCardKey(c));
+  }
+  function failDeckSearch(reason: FirstCardFailure) {
+    const s = deckSearchRef.current;
+    if (s) failFirstCard(s.id, reason);
+  }
+  // R1 — the landing already sent the tap's search id with page 1; nothing
+  // else may claim it as a pending search. Its first response is that page.
+  useEffect(() => {
+    claimSearch(adopted?.snapshot.search_id);
+    if (adopted) {
+      noteFirstResponse(adopted.snapshot.search_id, {
+        serve_source: adopted.snapshot.serve_source,
+        freshness_state: adopted.snapshot.freshness_state,
+        status: adopted.snapshot.status,
+        cardCount: adopted.snapshot.cards.length,
+        job_id: adopted.snapshot.job_id,
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const [deck, setDeck] = useState<PagedTradeCard[]>(() => adopted?.snapshot.cards ?? []);
   const [deckSourcePosition, setDeckSourcePosition] = useState(0);
   const localPassSnapshot = useSyncExternalStore(subscribeLocalPasses, () => localPassSession);
   const deckProjectionRef = useRef<DispositionProjection<TradeCard>>({ cards: [], sourceIndices: [], index: 0, sourceLength: 0 });
@@ -843,7 +978,7 @@ export default function TradesScreen({ navigation, route }: any) {
   // opponent chosen (unscoped, today's behavior).
   const [sheetOpponent, setSheetOpponent] = useState<
     { userId: string; name: string } | null
-  >(null);
+  >(() => (adopted ? route?.params?.resultsPush?.opponent ?? null : null));
   // #384 (review #7) — where THIS deck came from. Set only by consuming a
   // handoff stamped `origin:'calculator'`; it is the single signal that makes
   // the ✕ decline-reason OVERLAY legal (round-2 ruling 1: "this calculator
@@ -851,7 +986,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // switch, on the pins being emptied, on a later handoff with a different
   // origin, and on a mode-bar switch — the four ways a deck stops being the
   // one the calculator sent.
-  const [deckOrigin, setDeckOrigin] = useState<'calculator' | null>(null);
+  const [deckOrigin, setDeckOrigin] = useState<'calculator' | null>(
+    // U1 — the adopted first frame already renders the calculator deck's
+    // card (✕ → overlay); the resultsPush consumption sets the same value.
+    () => (adopted && route?.params?.resultsPush?.origin === 'calculator' ? 'calculator' : null),
+  );
   // #384 W6-B (D-153) — this deck is a FAIR-PACKAGE deck: cards came from one
   // synchronous `POST /api/trades/fair-packages` sweep around the calculator
   // canvas, not from the model's job pipeline. It is the deck-level basis
@@ -954,6 +1093,9 @@ export default function TradesScreen({ navigation, route }: any) {
       }
     | undefined;
   const isResultsPushed = finderHubOn && !!resultsPushParam;
+  // The `app/trades/finder` deep link pushes a param-less TradeDeck (R1
+  // source `deep_link` for the search it starts).
+  const isDeepLinkDeck = route?.name === 'TradeDeck' && !resultsPushParam;
   // #270/#272 — both `trades_home_inline` variants are scoped to the guided
   // landing only; team/player deck modes (already rare post-#269, reachable
   // only via a stored deep link since the mode-bar's chips are hidden) keep
@@ -1021,9 +1163,18 @@ export default function TradesScreen({ navigation, route }: any) {
   const [returnToSheetAfterPicker, setReturnToSheetAfterPicker] = useState<
     'team' | 'league' | null
   >(null);
+  // D14a — set while the preferences were opened from the P30 end card;
+  // closing them with a change runs the search in place (applyDeckEndAdjust).
+  const endAdjustRef = useRef<{ fairnessOn: boolean } | null>(null);
   function handleEditSheetClose() {
     setDnaOpenSource('sheet');
     setDnaSheetOpen(false);
+    const endAdjust = endAdjustRef.current;
+    endAdjustRef.current = null;
+    if (endAdjust && (prefsChangedSinceGenerateRef.current || endAdjust.fairnessOn !== fairnessOn)) {
+      applyDeckEndAdjust();
+      return;
+    }
     // Only worth a nudge if there's an existing deck to go stale and no
     // search is already in flight (that search will land under whatever
     // prefs are current by the time it started).
@@ -1210,18 +1361,31 @@ export default function TradesScreen({ navigation, route }: any) {
   // #257 — shared Find-a-Trade entry point so every trigger (the on-screen
   // button in both flag states, and the "Preferences changed" strip)
   // clears the refresh nudge the same way.
-  function handleFindTrades(source?: string) {
+  function handleFindTrades(source?: R1Source) {
     if (fairPendingRef.current) return;
     setDeckFailure(null); // P0-2 — a search in flight has no failure
     setScopedEmpty(null); // #330 — re-set by the completion effect if the re-run is empty too
-    // #298 — `mode` always present; `source` only when a caller named one.
-    // `source` has been sent here since #257 and STRIPPED on every row by
-    // an empty prop registry until 2026-08-11; it is registered now.
-    if (!lastFairRequestRef.current) {
-      track('find_trades_tapped',
-            source ? { source, mode: deckMode } : { mode: deckMode },
-            'Trades');
-    }
+    // R1 (time to suggestion, addendum v2) — every in-deck control calls this
+    // AT ITS TAP, fair repeat or model, so the search begins here: one client
+    // `search_id` for `find_trades_tapped {source, mode, search_id}` and for
+    // the request the dispatch below sends. #298's `mode` is the ONE deckMode
+    // derivation; `source` stays absent for the deck's own Find a Trade,
+    // except on the param-less deep-link deck (`deep_link`).
+    const fairReq = lastFairRequestRef.current;
+    const modelReq = lastModelRequestRef.current;
+    const { pinnedGive: pg, pinnedReceive: pr } = useFinderTargets.getState();
+    beginTradeSearch({
+      source: source ?? (isDeepLinkDeck ? 'deep_link' : undefined),
+      mode: deckMode,
+      searchType: searchTypeOf(fairReq
+        ? { fair: true }
+        : modelReq
+          ? { giveIds: modelReq.pinned_give_players, receiveIds: modelReq.pinned_receive_players,
+              opponentId: modelReq.opponent_user_id, intent: tradeIntent }
+          : { giveIds: pg.map((p) => p.id), receiveIds: pr.map((p) => p.id),
+              opponentId: scopedOpponent, intent: tradeIntent }),
+      screen: 'Trades',
+    });
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
     setPinIdeaResumed(false); // #317 — a new search's deck re-takes the slot
@@ -1947,7 +2111,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // The backend runs generation in a background thread and we poll for
   // results. The job snapshot drives both the deck (cards stream in) and
   // the progress strip ("4/11 opponents searched").
-  const [job, setJob] = useState<TradeJobSnapshot | null>(null);
+  // 200 ms path: a paged job's snapshot also carries the paging envelope
+  // (cursor, deck_id, pool_exhausted, freshness_state, …); `cards` is the
+  // cumulative list delivered for this search. A legacy (cursor-less) job is
+  // the server's cumulative snapshot, unchanged.
+  const [job, setJob] = useState<PagedTradeJobSnapshot | null>(() => adopted?.snapshot ?? null);
 
   // P0-2 — the last search's failure, or null. Set by all three failure
   // paths, cleared by every path that starts or invalidates a search.
@@ -2002,7 +2170,7 @@ export default function TradesScreen({ navigation, route }: any) {
     // `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean }) => {
+    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string }) => {
       // Pins are read from the store (not the render closure) so a
       // pin-then-generate in the same tick (#186 keep-side) always sends
       // the fresh lists.
@@ -2035,9 +2203,13 @@ export default function TradesScreen({ navigation, route }: any) {
           };
       lastModelRequestRef.current = request;
       // A handoff supplies one explicit canvas request. Subsequent new
-      // targeting uses the pin store; Retry/Find more use the saved request.
+      // targeting uses the pin store; Retry and regenerations use the saved
+      // request.
       canvasSelectionRef.current = null;
-      return generateTrades(request);
+      // 200 ms path (E2): page 1 under the dispatch's client search id
+      // (minted in dispatchGenerate, never saved into the request above, so
+      // a repeat is a new search).
+      return generateTrades(request, vars.searchId ? { searchId: vars.searchId } : undefined);
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
@@ -2050,6 +2222,21 @@ export default function TradesScreen({ navigation, route }: any) {
       }
       setJob(snapshot);
       setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
+      // R2/R2b — the search's first response: what R2 reports, the job its
+      // cards come from, and an honest `empty` when it finished with none.
+      const ds = deckSearchRef.current;
+      if (ds && ds.id === snapshot.search_id) {
+        ds.jobId = snapshot.job_id;
+        noteFirstResponse(ds.id, {
+          serve_source: snapshot.serve_source,
+          freshness_state: snapshot.freshness_state,
+          status: snapshot.status,
+          cardCount: snapshot.cards.length,
+          job_id: snapshot.job_id,
+        });
+        noteSearchCards(snapshot.job_id, snapshot.cards);
+        if (snapshot.status === 'complete' && snapshot.cards.length === 0) failFirstCard(ds.id, 'empty');
+      }
       // For instant cache-hit responses (status === 'complete') the deck
       // populates immediately via the snapshot effect below. For 'running'
       // responses the polling effect takes over.
@@ -2149,7 +2336,12 @@ export default function TradesScreen({ navigation, route }: any) {
         s ? { ...s, origin: 'model' } : { origin: 'model', passed: 0, edits: {} },
       );
     }
-    generateMutation.mutate(vars, mutateOpts);
+    // 200 ms path — every dispatch is a search with a client search id (E2
+    // `search_id`, echoed): the tap's, when a search-starting control began
+    // one (R1), else a fresh one (a regeneration, the first-run auto-start).
+    const claimed = claimPendingSearch();
+    deckSearchRef.current = claimed ? { id: claimed, keys: new Set() } : null;
+    generateMutation.mutate({ ...vars, searchId: claimed ?? uuidv4() }, mutateOpts);
   }
 
   // Poll while a job is running. Self-scheduling setTimeout loop with
@@ -2167,6 +2359,10 @@ export default function TradesScreen({ navigation, route }: any) {
   // every poll tick even when the job snapshot is identical.
   useEffect(() => {
     if (!job || job.status !== 'running' || !job.job_id) return;
+    // 200 ms path — a PAGED job (its response carried a cursor) is driven by
+    // the page loop below (prefetch by `prefetch_remaining`, silent backoff);
+    // this cumulative-snapshot poller serves legacy responses only.
+    if (isPagedEnvelope(job)) return;
     let cancelled = false;
     let failures = 0;
     const MAX_POLL_FAILURES = 4;
@@ -2194,6 +2390,8 @@ export default function TradesScreen({ navigation, route }: any) {
           next.cards.length !== job.cards.length
         );
         if (changed) setJob(next);
+        noteSearchCards(next.job_id, next.cards);
+        if (next.status === 'complete' && deckSearchRef.current?.keys.size === 0) failDeckSearch('empty');
 
         // Backoff: reset on progress, increase on no-change.
         if ((next.opponents_done ?? 0) > prevOpponentsDone) {
@@ -2292,16 +2490,21 @@ export default function TradesScreen({ navigation, route }: any) {
   // with a status flip from 'running' → 'complete', which is included.
   useEffect(() => {
     if (!job) return;
+    // 200 ms path — dedupe by `deckCardKey` (the server's `trade_hash`, else
+    // `trade_id`, which is exactly today's key for a server without hashes).
+    // Appends only: delivered cards are never reordered or replaced here.
+    // (Paged pages after the first are merged by the page loop, which keeps
+    // `job.cards` a subset of `deck`, so this is a no-op for them.)
     setDeck((prev) => {
-      const seen = new Set(prev.map((c) => c.trade_id));
-      const fresh = job.cards.filter((c) => !seen.has(c.trade_id));
+      const seen = new Set(prev.map(deckCardKey));
+      const fresh = job.cards.filter((c) => !seen.has(deckCardKey(c)));
       return fresh.length === 0 ? prev : [...prev, ...fresh];
     });
     // #276 — the generated card is now on screen (or about to be, once this
     // render commits): scroll it fully into view. Armed by handleFindTrades,
     // consumed the first time THIS job reports any cards at all (covers
-    // both an empty-deck first search and a "Find more trades" tap that
-    // streams fresh cards on top of an existing deck).
+    // an empty-deck first search and any search that streams fresh cards
+    // on top of an existing deck).
     if (pendingScrollToDeckRef.current && job.cards.length > 0) {
       pendingScrollToDeckRef.current = false;
       requestAnimationFrame(() => {
@@ -2319,6 +2522,13 @@ export default function TradesScreen({ navigation, route }: any) {
   // stale state. (The fairness toggle handles its own reset inline.)
   // FB-47 targets are roster-specific, so they clear with the league too.
   useEffect(() => {
+    // U1 — the MOUNT run of a pushed deck that arrived holding the landing's
+    // first page keeps that page: deck and job were initialized from it so
+    // the first frame is the card, and clearing them here would blank it one
+    // frame later. Everything else below still runs; a later league switch
+    // resets the deck exactly as before.
+    const keepAdoptedPage = adoptedMountRef.current.league;
+    adoptedMountRef.current.league = false;
     // Commit any undoable pass against the OLD league before the reset,
     // and let the guard/match maps start fresh for the new one.
     flushPendingPassRef.current();
@@ -2332,11 +2542,13 @@ export default function TradesScreen({ navigation, route }: any) {
     setFairPending(false);
     setCanvasPrefill(null);
     setSheetOpponent(null);
-    setDeck([]);
-    setDeckIdx(0);
+    if (!keepAdoptedPage) {
+      setDeck([]);
+      setDeckIdx(0);
+    }
     setLaneFilter(null);
     setTradeIntent(null); // #172 — a declared shape is league-specific
-    setJob(null);
+    if (!keepAdoptedPage) setJob(null);
     setFairDeck(false); // #384 W6-B — a fair deck is canvas-specific too
     setDeckFailure(null); // P0-2 — last league's failure never follows you
     setScopedEmpty(null); // #330 — ditto for the scoped zero-result card
@@ -3268,7 +3480,15 @@ export default function TradesScreen({ navigation, route }: any) {
   const finderScopeSeen = useRef(false);
   useEffect(() => {
     if (!finderHubOn || !finderMode || !fairnessReady) return;
-    resetDeckForNewTargets();
+    // U1 — a pushed deck that ARRIVED holding the landing's first page (its
+    // model search already ran, before the push): this first gate-passing
+    // run must neither reset that page away nor dispatch the search again.
+    // It runs the auto-run branch below with the landing's request adopted
+    // in place of the dispatch (same attribution event). Later runs are
+    // unchanged.
+    const adoptedRun = adoptedMountRef.current.choke;
+    adoptedMountRef.current.choke = false;
+    if (!adoptedRun) resetDeckForNewTargets();
     // D-171 ruling 1 (2026-08-31) — the LANDING dispatches nothing under the
     // push posture: Find a Trade and forwarded handoffs push `TradeDeck`
     // (whose own instance runs this same effect with canvasHost null and
@@ -3322,23 +3542,16 @@ export default function TradesScreen({ navigation, route }: any) {
     ) {
       autoRunPendingRef.current = false;
       autoRunOriginRef.current = null;
-      if (autoRun) {
-        // R-4 — the auto-run is a find-trades dispatch the user asked for
-        // with the Offer/Target tap (or the calculator's Find a Trade); same
-        // event, attributable source.
-        track(
-          'find_trades_tapped',
-          {
-            source: autoRunOrigin === 'calculator' ? 'calculator' : 'league_offer',
-            mode: deckMode,
-          },
-          'Trades',
-        );
-      }
+      // R1 (addendum v2) fires AT THE TAP now, not here at dispatch: the
+      // canvas Find a Trade in forkCanvasSearch (`calculator`), the League
+      // Summary Offer/Target (`league_offer` / `league_target`) and the Usage
+      // Trends Trade (`usage_trends`) in their own screens. dispatchGenerate
+      // below claims that tap's search id for the request.
       // #402 QA round — the model-origin session for this dispatch is
       // created inside dispatchGenerate (the one session-creation site for
       // the model path), same rule as the fair branch above.
-      dispatchGenerate({});
+      if (adoptedRun) lastModelRequestRef.current = adopted?.request ?? null;
+      else dispatchGenerate({});
       // The sweep about to land IS the current prefs — don't leave the #257
       // "Preferences changed" nudge armed by the pick that triggered it
       // (handleFindTrades clears these on the manual path).
@@ -3400,6 +3613,66 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultsPushParam?.seq]);
 
+  // ── U1 — the instant route (ux-lead "U1", canvas Find a Trade) ─────────
+  // The model search's page 1 is fetched HERE, before the push, so the
+  // pushed deck (route option `animation: 'none'`) mounts with the card in
+  // hand and its first frame is the complete first card. The tap's only
+  // feedback until then is the control's pressed state (design-lead U1.3).
+  // The request is the one the pushed instance's dispatch would build from
+  // the same resultsPush payload (canvas selection, scope, fairness,
+  // intent); it becomes that deck's saved request. Past
+  // FIRST_PAGE_PUSH_DEADLINE_MS, or on a failure or a card-less page, the
+  // deck is pushed without it and searches for itself (the honest wait).
+  // A fair (anchored) search has no stored page (ux-lead U1: pinned
+  // searches aren't pre-built), so it pushes at once, as before.
+  function pushWithFirstPage(
+    fork: {
+      giveIds: string[];
+      receiveIds: string[];
+      opponent: { userId: string } | null;
+      anchor: unknown;
+      searchId: string;
+    },
+    pushDeck: (firstPage?: FirstPageHandoff) => void,
+  ) {
+    // Before the fairness pref hydrates the pushed deck can't be told which
+    // threshold this page used; it searches for itself (rare, first ms).
+    if (fork.anchor || !fairnessReady) {
+      pushDeck();
+      return;
+    }
+    const request: GenerateBody = {
+      league_id: leagueId!,
+      fairness_threshold: effectiveFairness,
+      ...modelSelectionParams(
+        { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
+        { giveIds: [], receiveIds: [] },
+        targetingEnabled,
+        false,
+      ),
+      opponent_user_id: (sheetTargetingOn ? fork.opponent?.userId : undefined) || undefined,
+      trade_intent: tradeIntent ?? undefined,
+    };
+    let pushed = false;
+    const go = (firstPage?: FirstPageHandoff) => {
+      if (pushed) return;
+      pushed = true;
+      clearTimeout(deadline);
+      // The user left the landing while page 1 was on its way: no push,
+      // and the tap's search will never run.
+      if (!mountedRef.current || navigation?.isFocused?.() === false) {
+        resultsPushPendingRef.current = false;
+        dropPendingSearch(fork.searchId);
+        return;
+      }
+      pushDeck(firstPage);
+    };
+    const deadline = setTimeout(() => go(), FIRST_PAGE_PUSH_DEADLINE_MS);
+    generateTrades(request, { searchId: fork.searchId })
+      .then((snapshot) => go(adoptablePage(snapshot) ? { request, snapshot } : undefined))
+      .catch(() => go());
+  }
+
   // ── D-158 — the inline canvas's own Find a Trade (no navigation) ────────
   //
   // The pushed page's handler wrote a `FinderHandoff` and `popTo`'d here; on
@@ -3429,19 +3702,22 @@ export default function TradesScreen({ navigation, route }: any) {
     if (resultsPushLive) {
       resultsPushPendingRef.current = true;
       const summary = anchorSummary(opts.give);
-      navigation?.push?.('TradeDeck', {
-        mode: 'guided',
-        resultsPush: {
-          seq: Date.now(),
-          opponent: fork.opponent,
-          origin: 'calculator',
-          fairAnchor: fork.anchor,
-          canvasSelection: { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
-          ...(fairnessReady ? { fairnessOn } : {}),
-          tradeIntent,
-          anchorLabel: fork.anchor && summary ? summary : null,
-        },
-      });
+      const pushDeck = (firstPage?: FirstPageHandoff) =>
+        navigation?.push?.('TradeDeck', {
+          mode: 'guided',
+          resultsPush: {
+            seq: Date.now(),
+            opponent: fork.opponent,
+            origin: 'calculator',
+            fairAnchor: fork.anchor,
+            canvasSelection: { giveIds: fork.giveIds, receiveIds: fork.receiveIds },
+            ...(fairnessReady ? { fairnessOn } : {}),
+            tradeIntent,
+            anchorLabel: fork.anchor && summary ? summary : null,
+            ...(firstPage ? { firstPage } : {}),
+          },
+        });
+      pushWithFirstPage(fork, pushDeck);
       return;
     }
     // The canvas's Team dropdown is the search scope, exactly as the hand-off
@@ -3776,7 +4052,7 @@ export default function TradesScreen({ navigation, route }: any) {
   async function runFairPackages(
     anchor: SearchSelection,
     opponentId: string | undefined = scopedOpponent,
-    source: string = 'calculator',
+    source: R1Source = 'calculator',
   ) {
     if (!leagueId || fairPendingRef.current) return;
     const epoch = ++deckEpochRef.current;
@@ -3793,10 +4069,15 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckFailure(null);
     setScopedEmpty(null);
     setSummaryDismissed(false);
-    // R-4 — the sweep is a find-trades dispatch the user asked for with the
-    // calculator's Find a Trade, same event and same attributable source as
-    // the model path below.
-    track('find_trades_tapped', { source, mode: deckMode }, 'Trades');
+    // R1 — the sweep's search began at its tap (forkCanvasSearch or
+    // handleFindTrades); this claims it. A sweep with no tap behind it (the
+    // dormant #402 browse retry) begins its own, with this source.
+    let claimedFair = claimPendingSearch();
+    if (!claimedFair) {
+      beginTradeSearch({ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' });
+      claimedFair = claimPendingSearch();
+    }
+    deckSearchRef.current = claimedFair ? { id: claimedFair, keys: new Set() } : null;
     try {
       const res = await getFairPackages({
         league_id: leagueId,
@@ -3819,6 +4100,10 @@ export default function TradesScreen({ navigation, route }: any) {
       flushPendingPassRef.current();
       lastDispositionedRef.current = null;
       setDeck(res.ideas.map((idea) => ideaToCard(idea, leagueId)));
+      // R2/R2b — a synchronous sweep is a `fresh` answer; none ⇒ `empty`.
+      noteFirstResponse(claimedFair, { serve_source: 'fresh', status: 'complete', cardCount: res.ideas.length });
+      noteSearchCards(undefined, res.ideas.map((idea) => ideaToCard(idea, leagueId)));
+      if (claimedFair && res.ideas.length === 0) failFirstCard(claimedFair, 'empty');
       setDeckIdx(0);
       setJob(null);
       setFairDeck(true);
@@ -4082,6 +4367,14 @@ export default function TradesScreen({ navigation, route }: any) {
     // Trial scores are model-local, not comparable across arms. Keep the
     // server's attributed order even when the fairness preference is off.
     if (deck.some((c) => c.preserve_server_order === true)) return pool;
+    // 200 ms path — a PAGED deck (its cards carry `from_page`, stamped by
+    // the API normalizer) keeps the server's order, always: pages append
+    // behind the fronted card, and the fairness-off re-sort below (and its
+    // likes-you lift — the server already fronts those) would move a later
+    // page's cards in front of delivered ones, or slide a different card
+    // under the user's thumb (AC-9; U3 row 1 "no reorder, no jump"; scope
+    // §6.3). Legacy (cursor-less) decks are sorted exactly as before.
+    if (deck.some((c) => c.from_page === true)) return pool;
     if (fairnessOn) return pool;
     const pinned = pool.filter((c) => c.likesYou);
     const rest = pool
@@ -4141,6 +4434,320 @@ export default function TradesScreen({ navigation, route }: any) {
     format: calcFormat,
   });
   const nextCard = sortedDeck[deckIdx + 1];
+
+  // ── 200 ms path: the paged deck (scope-eng-200ms §6.4–§6.6) ─────────────
+  // A job is PAGED when its response carried a cursor (E2/P1/P2). Its next
+  // pages are fetched here, never by the legacy poller above:
+  //   - prefetch while FEWER than `prefetch_remaining` unseen cards are held
+  //     (the server's value, client fallback 50 — head-eng ruling 10). Page 1
+  //     is below that, so page 2 is requested by the effect right after the
+  //     first card's frame commits — outside the tap clock;
+  //   - ONE request in flight or scheduled at a time (`busy`);
+  //   - a page that finds the deck still building and nothing new ready, or
+  //     a failed request, schedules a SILENT retry (pageRetryDelayMs) — no
+  //     UI state (U3 rows 1–2; there is no "Finding more" anything);
+  //   - every result passes the epoch guard and is dropped if the search it
+  //     was for has been replaced.
+  // The pure rules live in utils/tradePages.ts (check-trade-pages.js,
+  // check-trade-buffer.js run them).
+  const online = useSyncExternalStore(subscribeOnline, readOnline);
+  const pagedDeck = isPagedEnvelope(job);
+  const pagedWithCards = pagedDeck && deck.length > 0;
+  const unseen = unseenCount(sortedDeck.length, deckIdx);
+  const [pagePhase, setPagePhase] = useState<PageFetchPhase>('idle');
+  const [pageKick, setPageKick] = useState(0);
+  // U2 — fronted cards the server stopped serving (raw trade_id). Each one
+  // renders withdrawn in its own slot until the user moves on.
+  const [withdrawnIds, setWithdrawnIds] = useState<ReadonlySet<string>>(() => new Set());
+  // P30 — once the end card has been fronted it stays put: cards that arrive
+  // later go BEHIND it (head-eng D14c), so it never swaps under the thumb.
+  const [endLatched, setEndLatched] = useState(false);
+  const pageLoopRef = useRef<{
+    inFlight: boolean;
+    timer: ReturnType<typeof setTimeout> | null;
+    attempt: number;
+    failures: number;
+  }>({ inFlight: false, timer: null, attempt: 0, failures: 0 });
+  const jobRef = useRef(job);
+  jobRef.current = job;
+  const deckRef = useRef(deck);
+  deckRef.current = deck;
+
+  // A new search (new job_id) or a reset (job → null) starts a fresh loop.
+  // The old loop object is replaced, so a request still in flight for it
+  // finds `pageLoopRef.current !== loop` and drops its result.
+  useEffect(() => {
+    const old = pageLoopRef.current;
+    if (old.timer) clearTimeout(old.timer);
+    pageLoopRef.current = { inFlight: false, timer: null, attempt: 0, failures: 0 };
+    setPagePhase('idle');
+    setWithdrawnIds(new Set());
+    setEndLatched(false);
+  }, [job?.job_id]);
+  useEffect(() => () => {
+    const t = pageLoopRef.current.timer;
+    if (t) clearTimeout(t);
+  }, []);
+
+  // Merge one paged response (utils/tradePages.mergeDeckPage): appends go
+  // behind everything held; a whole-deck response (`replace`, or a rebased
+  // page spanning the new deck) is taken only for what is BEHIND the fronted
+  // card (head-eng ruling 16) — the fronted card and the seen ones never
+  // move. `job.cards` is set to the same list, so the append effect above
+  // has nothing left to add. The job keeps its id across a P2 rebase (the
+  // search's identity: tally, re-rank and first-session state key on it);
+  // the page identity rides `deck_id`.
+  function applyPage(next: PagedTradeJobSnapshot): number {
+    const projection = deckProjectionRef.current;
+    const front = projection.cards[projection.index];
+    const merged = mergeDeckPage(
+      deckRef.current,
+      next.cards,
+      front ? deckCardKey(front) : null,
+      isWholeDeck(next),
+    );
+    deckRef.current = merged.cards;
+    setDeck(merged.cards);
+    noteSearchCards(jobRef.current?.job_id, next.cards);
+    if (deckFullyDelivered(next) && next.status !== 'error' && deckSearchRef.current?.keys.size === 0) {
+      failDeckSearch('empty');
+    }
+    setJob((prev) => ({
+      ...(prev ?? {}),
+      ...next,
+      job_id: prev?.job_id || next.job_id,
+      deck_id: next.deck_id ?? prev?.deck_id,
+      search_id: prev?.search_id ?? next.search_id,
+      freshness_state: next.freshness_state,
+      pool_exhausted: next.pool_exhausted,
+      replace: undefined,
+      rebased: undefined,
+      cards: merged.cards,
+    }));
+    // U2 — the fronted card is gone from the server's whole current deck:
+    // withdraw it in place (it keeps its slot; behind-cards the server
+    // dropped were removed silently by the merge).
+    if (merged.withdrawFront && front) {
+      setWithdrawnIds((s) => new Set(s).add(front.trade_id));
+    }
+    return merged.added;
+  }
+
+  async function fetchNextPage() {
+    const snap = jobRef.current;
+    if (!snap || typeof snap.cursor !== 'number') return;
+    const loop = pageLoopRef.current;
+    const epoch = deckEpochRef.current;
+    const forJob = snap.job_id;
+    const requested = snap.cursor;
+    loop.inFlight = true;
+    setPagePhase((p) => (p === 'idle' ? 'loading' : p));
+    let backoff = false;
+    try {
+      const next = await getTradeStatus(snap.job_id, { deck: snap.deck_id, cursor: requested });
+      if (!mountedRef.current || pageLoopRef.current !== loop) return;
+      if (applyJobResult(next, epoch, deckEpochRef.current) === null) return;
+      if (jobRef.current?.job_id !== forJob) return;
+      loop.failures = 0;
+      const added = applyPage(next);
+      backoff = needsBackoff(next, requested);
+      loop.attempt = nextRetryAttempt(loop.attempt, backoff, added);
+      setPagePhase(backoff ? 'retrying' : 'idle');
+    } catch {
+      if (!mountedRef.current || pageLoopRef.current !== loop) return;
+      loop.failures += 1;
+      loop.attempt += 1;
+      backoff = true;
+      setPagePhase(loop.failures >= 3 ? 'failed' : 'retrying');
+    } finally {
+      loop.inFlight = false;
+    }
+    // A deck still building is asked again for as long as it builds; a
+    // request that keeps FAILING stops after a few silent tries (the error
+    // state's Try again restarts it) rather than polling forever.
+    if (backoff && pageLoopRef.current === loop && loop.failures < MAX_SILENT_PAGE_FAILURES) {
+      loop.timer = setTimeout(() => {
+        loop.timer = null;
+        setPageKick((k) => k + 1);
+      }, pageRetryDelayMs(loop.attempt - 1));
+    }
+  }
+
+  useEffect(() => {
+    const snap = jobRef.current;
+    if (!snap?.job_id || !online) return; // offline: reconnect re-runs this
+    const loop = pageLoopRef.current;
+    if (!wantsNextPage({
+      ...snap,
+      unseen,
+      busy: loop.inFlight || loop.timer !== null,
+    })) return;
+    void fetchNextPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.job_id, job?.cursor, job?.deck_id, job?.status, job?.pool_exhausted,
+      job?.prefetch_remaining, unseen, online, pageKick]);
+
+  // U3 Retry / Try again: an errored job can't page any further, so it runs
+  // the search again in place; otherwise the next page is requested now.
+  function handleDeckMoreRetry() {
+    haptics.selection();
+    if (jobRef.current?.status === 'error') {
+      handleFindTrades('deck_error_retry');
+      return;
+    }
+    const loop = pageLoopRef.current;
+    if (loop.timer) clearTimeout(loop.timer);
+    loop.timer = null;
+    loop.attempt = 0;
+    loop.failures = 0;
+    setPageKick((k) => k + 1);
+  }
+
+  // What the deck slot shows past the last held card of a paged deck
+  // (ux-lead U3, utils/tradePages.deckEndState). Never a "Finding more".
+  const deckEnd = pagedWithCards && !rawTopCard && job
+    ? deckEndState({ ...job, phase: pagePhase, online })
+    : null;
+  useEffect(() => {
+    if (deckEnd === 'end') setEndLatched(true);
+  }, [deckEnd]);
+  const showDeckEndCard = pagedWithCards && (endLatched || deckEnd === 'end');
+  // U2 — the quiet "Updating" label: the page is being rebuilt behind the
+  // cards on screen. Informational only; nothing reads it to gate Like/Pass.
+  const deckUpdating = pagedDeck && job?.freshness_state === 'updating';
+  const topCardWithdrawn = !!rawTopCard && withdrawnIds.has(rawTopCard.trade_id);
+  function handleWithdrawnNext() {
+    haptics.selection();
+    setDeckIdx((i) => i + 1);
+  }
+
+  // ── R2 at T1: the AC-L1 frame ───────────────────────────────────────────
+  // The first frame where a real card of THIS search is ≥ 50% visible with
+  // Like and Pass enabled. `topCardMeasureRef` sits inside SwipableTopCard,
+  // so it is set only while the real card is mounted — never in a wait,
+  // skeleton, withdrawn or end-card branch. Checked on the card's onLayout,
+  // on scroll, and when the deck changes; measured in window coordinates,
+  // then reported on the next frame (one rAF). `ms_from_tap` is the trace's
+  // performance.now() delta from the tap.
+  const topCardMeasureRef = useRef<View>(null);
+  function checkFirstCardShown() {
+    const s = deckSearchRef.current;
+    if (!s || !isSearchOpen(s.id) || !rawTopCard) return;
+    if (!s.keys.has(deckCardKey(rawTopCard))) return;
+    // Like and Pass enabled: the card's own dispositionDisabled predicate.
+    if (swipeMutation.isPending || (declineReasonsOn && reasonBankedId === rawTopCard.trade_id)) return;
+    const node = topCardMeasureRef.current;
+    if (!node) return;
+    const id = s.id;
+    const cardIndex = deckIdx;
+    node.measureInWindow((_x, y, _w, h) => {
+      if (visibleFraction(y, h, 0, Dimensions.get('window').height) < FIRST_CARD_MIN_VISIBLE) return;
+      requestAnimationFrame(() => reportFirstCardShown(id, { cardIndex }));
+    });
+  }
+  useEffect(() => {
+    checkFirstCardShown();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawTopCard?.trade_id, deck.length, swipeMutation.isPending]);
+
+  // ── R2b from the deck that owns the search ─────────────────────────────
+  // `error`: every failed search lands in deckFailure (generate, poll, job
+  // error, fair sweep). `abandoned`: the deck loses focus (a transition, not
+  // the mount) or unmounts before its first card. `empty` is decided where
+  // the answer lands; `timeout` and backgrounding live in the trace module.
+  useEffect(() => {
+    if (deckFailure) failDeckSearch('error');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deckFailure]);
+  const wasFocusedRef = useRef(navFocused);
+  useEffect(() => {
+    if (wasFocusedRef.current && !navFocused) failDeckSearch('abandoned');
+    wasFocusedRef.current = navFocused;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navFocused]);
+  useEffect(() => () => failDeckSearch('abandoned'), []);
+
+  // deck_buffer_empty (AC-L4): the fronted card is the last ready card on
+  // the device (nothing unseen behind it) while more is still coming (not
+  // fully delivered by the end rule) — the next page was not local in time.
+  // Once per search_id (the trace dedupes).
+  useEffect(() => {
+    if (!pagedWithCards || !rawTopCard || !job || unseen > 0 || deckFullyDelivered(job)) return;
+    const searchId = deckSearchRef.current?.id ?? job.search_id;
+    if (!searchId) return;
+    reportDeckBufferEmpty(searchId, { deckId: job.deck_id ?? job.job_id, cardsSeen: deckIdx + 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagedWithCards, rawTopCard?.trade_id, unseen, job?.status, job?.pool_exhausted, job?.cursor]);
+
+  // The pushed deck's header row is the deck's existing header (design-lead
+  // §5.4.2): "Updating" trails in it, so no row is ever inserted above the
+  // card. Hosts without a header show it under the card (handled inline).
+  useEffect(() => {
+    if (!isResultsPushed) return;
+    navigation?.setOptions?.({
+      headerRight: deckUpdating ? () => <DeckUpdatingLabel /> : undefined,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isResultsPushed, deckUpdating]);
+
+  // VoiceOver (ux-lead U1): when a search reveals its first card — the
+  // adopted first frame, or an in-place search that refilled an emptied deck
+  // — focus moves to that card's summarizing header, never staying on the
+  // control that started the search. Appends and swipes never move focus.
+  const revealFocusRef = useRef<View>(null);
+  const revealedRef = useRef(false);
+  const deckIsEmpty = deck.length === 0;
+  useEffect(() => {
+    if (deckIsEmpty) {
+      revealedRef.current = false;
+      return;
+    }
+    if (revealedRef.current || !rawTopCard) return;
+    revealedRef.current = true;
+    const t = setTimeout(() => {
+      const node = revealFocusRef.current ? findNodeHandle(revealFocusRef.current) : null;
+      if (node != null) AccessibilityInfo.setAccessibilityFocus(node);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [deckIsEmpty, rawTopCard?.trade_id]);
+
+  // ── P30 end card actions (head-eng ruling 13, D14) ──────────────────────
+  // "Adjust your search" (p30.cta1) opens the deck's OWN preferences (the full
+  // DNA sheet — fairness, filters, intent, team — or, off the consolidated
+  // layout, the outlook sheet: the same two-way fork the inferred-outlook
+  // banner uses). Applying a change runs the search IN PLACE (no
+  // navigation; ux-lead U1 "in-deck searches"). Closing with no change
+  // leaves the end card where it was.
+  // Read imperatively, once — as TabNav decides the Home tab
+  // (check-home-tab.js: never a reactive read).
+  const [homeTabOn] = useState(() => !!useFeatureFlags.getState().flags['nav.home_tab']);
+  function handleDeckEndAdjust() {
+    haptics.selection();
+    endAdjustRef.current = { fairnessOn };
+    prefsChangedSinceGenerateRef.current = false;
+    if (consolidateOn) setDnaSheetOpen(true);
+    else setOutlookOpen(true);
+  }
+  // AC-L1 CLOCK START (M pass): the apply tap — closing the preferences the
+  // end card opened, with a change (or the outlook sheet's submit) — is a
+  // search-starting control. This function is that boundary; R1 lands here
+  // in the M pass. No event yet.
+  function applyDeckEndAdjust() {
+    // The in-place reset must keep the deck's saved request (canvas
+    // selection, scope): the repeat below re-sends it under the new prefs.
+    const model = lastModelRequestRef.current;
+    const fair = lastFairRequestRef.current;
+    resetDeckForNewTargets();
+    lastModelRequestRef.current = model;
+    lastFairRequestRef.current = fair;
+    handleFindTrades('end_card_adjust');
+  }
+  // "Back to Home": the Home tab, a tab switch (tabs never animate). A
+  // different exit from the header Back, which returns to the builder.
+  function handleDeckEndHome() {
+    haptics.selection();
+    navigation?.navigate?.('Home');
+  }
 
   // ── Swap suggestions (2026-07-27 player-changer) ─────────────────────
   // Operator follow-up to the calculator eveners: counter-suggestions
@@ -4975,11 +5582,16 @@ export default function TradesScreen({ navigation, route }: any) {
   // Deck exhausted (items 7+9): record it once per episode, and give the
   // snoozed Quick Set prompt its F10 re-offer slot (the once-per-session
   // cap inside maybeShowQuicksetPrompt still applies).
-  const deckExhausted =
-    !topCard &&
-    deck.length > 0 &&
-    job?.status !== 'running' &&
-    !generateMutation.isPending;
+  // 200 ms path (head-eng fix b): a PAGED deck is exhausted only when the
+  // P30 end card actually shows — never on an empty buffer while pages are
+  // still coming — so `deck_exhausted_viewed` (and the completion moments
+  // below) fire exactly with the card. Legacy decks keep their rule.
+  const deckExhausted = pagedWithCards
+    ? showDeckEndCard
+    : !topCard &&
+      deck.length > 0 &&
+      job?.status !== 'running' &&
+      !generateMutation.isPending;
   const exhaustedTrackedRef = useRef(false);
   useEffect(() => {
     if (!deckExhausted) {
@@ -5032,6 +5644,8 @@ export default function TradesScreen({ navigation, route }: any) {
   // decks) or settles into the standalone exhausted state. Flag off ⇒
   // summaryVisible is always false and the exhausted state is untouched.
   const summaryVisible =
+    // A paged deck ends on the P30 card, never on the deck-done summary.
+    !pagedWithCards &&
     replenishmentOn &&
     deckExhausted &&
     !summaryDismissed &&
@@ -6533,6 +7147,11 @@ export default function TradesScreen({ navigation, route }: any) {
     });
     queryClient.invalidateQueries({ queryKey: ['league-prefs', leagueId] });
     setToast({ msg: 'Outlook saved', tone: 'success' });
+    // D14a — opened from the P30 end card: the submit is the apply tap.
+    if (endAdjustRef.current) {
+      endAdjustRef.current = null;
+      applyDeckEndAdjust();
+    }
   }
 
   const topCardQueued = topCard ? isQueued(topCard.trade_id) : false;
@@ -6650,7 +7269,10 @@ export default function TradesScreen({ navigation, route }: any) {
           // Phase-2: with no saved outlook, preselect the backend's
           // roster-inferred guess so "Change" opens on the right option.
           initial={prefsQuery.data?.team_outlook ?? inferredOutlook}
-          onClose={() => setOutlookOpen(false)}
+          onClose={() => {
+            endAdjustRef.current = null;
+            setOutlookOpen(false);
+          }}
           onSubmit={handleOutlookSubmit}
         />
       ) : null}
@@ -6751,6 +7373,8 @@ export default function TradesScreen({ navigation, route }: any) {
           // The decline-reason panel's reveal callback needs the offset to
           // scroll from; the ref write is flag-scoped, the listener is not.
           if (declineReasonsOn) mainScrollYRef.current = e.nativeEvent.contentOffset.y;
+          // R2 at T1 — scrolling can bring the first card past half visible.
+          if (deckSearchRef.current) checkFirstCardShown();
         }}
         scrollEventThrottle={16}
       >
@@ -7598,19 +8222,23 @@ export default function TradesScreen({ navigation, route }: any) {
               `trades.edit_full_sheet`; were that ever off with
               `calc.inline_home` on, this copy would render beside the hosted
               canvas. Flag off, `canvasHost` is never 'flag' — unchanged. */}
+          {/* Head-eng ruling 13 (D13, ux-lead U3): the deck never ends and
+              refreshes itself, so there is no "more" button — this CTA only
+              STARTS a search, and leaves once the deck holds cards. Retry
+              lives in the error and offline states alone. */}
+          {deck.length === 0 ? (
+          <>
           {canvasHost !== 'flag' ? (
           <Button
             variant="primary"
             testID="trades.find-btn"
-            label={
-              singlePinFeatured || (deck.length > 0 && (fairDeck || job?.status === 'complete'))
-                ? 'Find more trades'
-                : 'Find a Trade'
-            }
+            label="Find a Trade"
             disabled={!leagueId || !fairnessReady || fairPending || generateMutation.isPending || job?.status === 'running'}
             onPress={() => handleFindTrades()}
             style={styles.findBtn}
           />
+          ) : null}
+          </>
           ) : null}
 
           {/* Progress strip — visible only during a running job. Cards are
@@ -7620,7 +8248,9 @@ export default function TradesScreen({ navigation, route }: any) {
               lands somewhere. */}
           {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
               the live canvas host (spec §2); everywhere else, unchanged. */}
-          {job?.status === 'running' && !landingDeckRetired && (
+          {/* U1 — never above cards in hand: a paged deck with cards is
+              searching nothing the user waits on (pages append silently). */}
+          {!pagedWithCards && job?.status === 'running' && !landingDeckRetired && (
             <View testID="trades.progress-strip" style={styles.progressStrip}>
               <View style={styles.progressInfo}>
                 <ActivityIndicator color={chalk.dim} size="small" />
@@ -7781,9 +8411,9 @@ export default function TradesScreen({ navigation, route }: any) {
             screen shows the landing as a trade, not a control panel.
             #298 — no longer hidden in single-pin featured mode: removing it
             there left the pinned surface with no way to get a swipeable,
-            accept/declinable trade at all. In that mode it reads "Find more
-            trades" from the start, because the featured window is already
-            showing one (V1 mock: "CTA relabelled for the pinned context").
+            accept/declinable trade at all. (Its pinned-context "more"
+            relabel is gone with D13, 2026-10-22: the CTA reads "Find a
+            Trade" and renders only while the deck holds no cards.)
 
             T-2 (merged-view trim, operator ruling 2026-08-28,
             docs/feedback/items/402-more-offers-shop/merged-view-trim-
@@ -7794,30 +8424,30 @@ export default function TradesScreen({ navigation, route }: any) {
             ONLY primary (ice-rationing rule). That cell covers BOTH search
             paths this bar served: a canvas with a give side runs the fair
             sweep, and an EMPTY canvas runs the model deck (D-153 fork via
-            `handleInlineFindATrade`), so the "Find more trades" relabel
-            state and the empty-deck "Hit Find a Trade to start" recovery
-            both still have a live entry. The deck-summary card's copy
+            `handleInlineFindATrade`), so the empty-deck "Hit Find a Trade
+            to start" recovery still has a live entry. The deck-summary card's copy
             quotes whichever control renders (see #316 note there). The
             progress strip below stays — it narrates the inline search too.
             Flag off, `canvasHost` is never 'flag' — byte-identical. */}
+        {/* D13 — start-only, as above: gone once the deck holds cards. */}
+        {deck.length === 0 ? (
+        <>
         {canvasHost !== 'flag' ? (
         <Button
           variant="primary"
           testID="trades.find-btn"
-          label={
-            singlePinFeatured || (deck.length > 0 && (fairDeck || job?.status === 'complete'))
-              ? 'Find more trades'
-              : 'Find a Trade'
-          }
+          label="Find a Trade"
           disabled={!leagueId || !fairnessReady || fairPending || generateMutation.isPending || job?.status === 'running'}
           onPress={() => handleFindTrades()}
           style={styles.findBtn}
         />
         ) : null}
+        </>
+        ) : null}
 
         {/* #402 canvas-results — the strip narrates in the RESULTS AREA under
               the live canvas host (spec §2); everywhere else, unchanged. */}
-          {job?.status === 'running' && !landingDeckRetired && (
+          {!pagedWithCards && job?.status === 'running' && !landingDeckRetired && (
           <View testID="trades.progress-strip" style={styles.progressStrip}>
             <View style={styles.progressInfo}>
               <ActivityIndicator color={chalk.dim} size="small" />
@@ -8609,6 +9239,19 @@ export default function TradesScreen({ navigation, route }: any) {
               onAccept={() => acceptQuicksetPrompt('prompt')}
               onDismiss={snoozeQuicksetPrompt}
             />
+          ) : showDeckEndCard ? (
+            // P30 — the honest end of a paged deck, in the card slot: only on
+            // the server's `pool_exhausted` with nothing in flight or
+            // retrying (deckEndState), then latched so later cards queue
+            // BEHIND it (D14c). No Like/Pass, no count, no third action.
+            <DeckEndCard
+              minHeight={topCardH}
+              // The D-171 tally source (sessionTally, also the deck-done
+              // card's); it is only kept while deck.replenishment is on.
+              tally={replenishmentOn ? sessionTally : null}
+              onAdjust={handleDeckEndAdjust}
+              onHome={homeTabOn ? handleDeckEndHome : undefined}
+            />
           ) : adaptationMoment && topCard && !mutedForTour ? (
             // F9 (deck.first_session) — the adaptation moment: ONE inline
             // card between deck cards (QuickSetPromptCard precedent — it
@@ -8639,6 +9282,11 @@ export default function TradesScreen({ navigation, route }: any) {
                 />
               </View>
             </Card>
+          ) : topCard && topCardWithdrawn ? (
+            // U2 — the fronted card left the server's deck (I-1 or a
+            // disposition): withdrawn IN PLACE, in its own slot and height,
+            // with one reason line. The user moves on with Next trade.
+            <WithdrawnTradeCard minHeight={topCardH} onNext={handleWithdrawnNext} />
           ) : topCard ? (
             <>
               {/* Peek of the next card behind the top one. Clipped to the
@@ -8671,7 +9319,11 @@ export default function TradesScreen({ navigation, route }: any) {
                 shopGiveEntry={shopEnabled}
                 nudge={swipeHintActive}
                 onFirstTouch={dismissSwipeHint}
-                onCardLayout={(e) => setTopCardH(e.nativeEvent.layout.height)}
+                onCardLayout={(e) => {
+                  setTopCardH(e.nativeEvent.layout.height);
+                  checkFirstCardShown();
+                }}
+                measureRef={topCardMeasureRef}
                 onLike={() => advance('like')}
                 onPass={() => advance('pass')}
                 dispositionDisabled={
@@ -8718,6 +9370,8 @@ export default function TradesScreen({ navigation, route }: any) {
                 }
                 onEditInCalculator={() => handleEditInCalculator(topCard)}
                 onRemoveAsset={handleRemoveAsset}
+                a11ySummary={tradeA11ySummary(topCard)}
+                a11ySummaryRef={revealFocusRef}
               />
               {/* Queue action — Pass / Interested are driven by swipe
                   gestures on the top card; Queue is a third option that
@@ -8787,6 +9441,14 @@ export default function TradesScreen({ navigation, route }: any) {
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
+              {/* U2 — "Updating" on hosts with no deck header row: below the
+                  card, so it can never push the swipe target. (The pushed
+                  deck shows it in its header instead.) */}
+              {deckUpdating && !isResultsPushed ? (
+                <View style={styles.deckUpdatingInline}>
+                  <DeckUpdatingLabel />
+                </View>
+              ) : null}
               {/* S3 PRD-02 (ux.player_context_menu): the Matches hold-hint
                   carried onto the deck — the long-press menu needs a visible
                   pointer on its primary surface. */}
@@ -8835,6 +9497,16 @@ export default function TradesScreen({ navigation, route }: any) {
                 </Pressable>
               ) : null}
             </>
+          ) : pagedWithCards && deckEnd ? (
+            // U3 rows 1–3 — past the last held card of a paged deck. The page
+            // in flight lands behind/into this slot silently ('pending'
+            // renders nothing); offline (3a) and a page that won't come (3b)
+            // are the only states. Never a "Finding more"/"Looking" card.
+            deckEnd === 'offline' ? (
+              <DeckOfflineCard minHeight={topCardH} onRetry={handleDeckMoreRetry} />
+            ) : deckEnd === 'error' ? (
+              <DeckMoreErrorCard minHeight={topCardH} onRetry={handleDeckMoreRetry} />
+            ) : null
           ) : firstRun &&
             !fairDeck &&
             deck.length === 0 &&
@@ -8884,10 +9556,9 @@ export default function TradesScreen({ navigation, route }: any) {
                 </Text>
                 {/* #316 — never "after waivers": dynasty leagues barely use
                     waivers and the deck actually refreshes via the weekly
-                    replenishment cron + the always-mounted Find-more-trades
-                    CTA above. "Find more trades" is quoted verbatim from
-                    that CTA's label in this exact state. Pinned by the
-                    smoke/12 flow's deck-done step.
+                    replenishment cron. D13 (2026-10-22) removed the page
+                    CTA's "more" state, so off the merged view the copy
+                    names no control at all.
                     T-2 (ruling 2026-08-28): with the page bar gone on the
                     merged view, the quoted control is the canvas action
                     row's cell, whose label is a fixed "Find a Trade" —
@@ -8895,7 +9566,7 @@ export default function TradesScreen({ navigation, route }: any) {
                 <Text style={styles.emptyBody}>
                   {canvasHost === 'flag'
                     ? 'Fresh ideas land every week — or tap Find a Trade to search again now.'
-                    : 'Fresh ideas land every week — or tap Find more trades to search again now.'}
+                    : 'Fresh ideas land every week.'}
                 </Text>
                 {/* N4 (PRD §5.3) — the pin line reads as content on the
                     card, not chrome, and its verb has a reachable control:
@@ -9709,6 +10380,11 @@ interface SwipableProps {
   // swipe itself remains the tutorial; no overlay, no modal.
   nudge?: boolean;
   onFirstTouch?: () => void;
+  // 200 ms path — pass-throughs to TradeCard's summarizing header (U1 VO).
+  a11ySummary?: string;
+  a11ySummaryRef?: React.Ref<View>;
+  // R2 at T1 — the card's own view, measured in window coordinates.
+  measureRef?: React.Ref<View>;
 }
 
 function SwipableTopCard({
@@ -9732,6 +10408,9 @@ function SwipableTopCard({
   shopGiveEntry,
   nudge,
   onFirstTouch,
+  a11ySummary,
+  a11ySummaryRef,
+  measureRef,
 }: SwipableProps) {
   const translateX = useSharedValue(0);
 
@@ -9808,6 +10487,9 @@ function SwipableTopCard({
           else if (nativeEvent.actionName === 'pass') onPass();
         }}
       >
+        {/* R2 at T1 — a plain, unstyled view around the card for measuring
+            (column / stretch, so the card's layout is unchanged). */}
+        <View ref={measureRef} collapsable={false}>
         <TradeCardComp
           data={card}
           // #169 — the in-card Pass/Like row; top card only (the peek card
@@ -9830,7 +10512,10 @@ function SwipableTopCard({
           onEditInCalculator={onEditInCalculator}
           onRemoveAsset={onRemoveAsset}
           cardImpact={cardImpact}
+          a11ySummary={a11ySummary}
+          a11ySummaryRef={a11ySummaryRef}
         />
+        </View>
       </Animated.View>
     </GestureDetector>
   );
@@ -10294,6 +10979,10 @@ const styles = StyleSheet.create({
     ...type.bodySm,
     textAlign: 'center',
     marginTop: space.md,
+  },
+  deckUpdatingInline: {
+    alignItems: 'center',
+    marginTop: space.sm,
   },
   emptyInner: {
     alignItems: 'center',

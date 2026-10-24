@@ -2,6 +2,37 @@ import { api } from './client';
 import type { TradeCard, TradeJobSnapshot, TradeMatch, AwaitingTrade, Player } from '../shared/types';
 import type { CalcGap } from './calc';
 
+// ── Paged deck responses (200 ms path: E2, P1, P2) ───────────────────
+// docs/api-reference.md "Opt-in paged responses (E2…)" and "First-page
+// store (P1…)"; P2 (`deck`, `deck_id`, `rebased`, `pool_exhausted`) per the
+// trades-eng P2 design draft §2–§4. Every field is optional: a server that
+// does not page (today's main) never sends any of them, and a response
+// without `cursor` IS the cumulative snapshot, handled exactly as before.
+export interface TradePageFields {
+  cursor?: number;          // raw index after the last card included
+  total_ready?: number;     // raw cards the deck holds right now
+  replace?: boolean;        // E2: `cards` is the deck's FULL current list
+  deck_id?: string;         // P2: the deck these pages belong to
+  rebased?: boolean;        // P2: the deck changed; `cards` = its first page
+  pool_exhausted?: boolean; // P2: every candidate delivered, nothing pending
+  serve_source?: string;    // P1: "page" when served from the page store
+  freshness_state?: 'fresh' | 'updating';
+  prefetch_remaining?: number; // fetch the next page at this many ready cards
+  search_id?: string;       // E2: echoed client search id
+}
+export type PagedTradeJobSnapshot = TradeJobSnapshot & TradePageFields & {
+  cards: PagedTradeCard[];
+};
+// Per-card stable identity (`_deck_trade_hash`: sorted give | sorted
+// receive | partner). Deck dedupe keys on it, because `trade_id` is minted
+// per build and so differs for the same trade across two decks.
+export type PagedTradeCard = TradeCard & {
+  trade_hash?: string;
+  // Client-side stamp: the card arrived in a PAGED response (one with a
+  // cursor). TradesScreen keeps such a deck in server order (AC-9).
+  from_page?: true;
+};
+
 export interface GenerateBody {
   league_id: string;
   fairness_threshold?: number;      // 0.5 – 1.0
@@ -54,7 +85,7 @@ function asArray<T>(res: any): T[] {
 //     opponent_username, match_score, fairness, reasons? }
 // This adapter bridges the two so screen code never has to know about
 // the legacy field names.
-export function normalizeTradeCard(raw: any): TradeCard {
+export function normalizeTradeCard(raw: any): PagedTradeCard {
   const give: Player[]    = Array.isArray(raw?.give_players) ? raw.give_players
                           : Array.isArray(raw?.give)         ? raw.give
                           : [];
@@ -203,6 +234,9 @@ export function normalizeTradeCard(raw: any): TradeCard {
     // F1 signal spine (flag deck.signal_v2): server sends impression_id per
     // card only when the flag is on; absent → undefined and nothing changes.
     impression_id:      typeof raw?.impression_id === 'string' ? raw.impression_id : undefined,
+    // 200 ms path (P2): the deck's dedupe key. Absent on servers that don't
+    // send it; the deck then falls back to trade_id, exactly as today.
+    ...(typeof raw?.trade_hash === 'string' && raw.trade_hash ? { trade_hash: raw.trade_hash } : {}),
     ...(typeof raw?.model_arm === 'string' && raw.model_arm ? { model_arm: raw.model_arm } : {}),
     ...(typeof raw?.generator_version === 'string' && raw.generator_version
       ? { generator_version: raw.generator_version } : {}),
@@ -235,8 +269,13 @@ export function normalizeTradeCard(raw: any): TradeCard {
 // Backend returns a TradeJobSnapshot for both /api/trades/generate and
 // /api/trades/status. Both run cards through the same normalizer so
 // downstream code keeps using the unified TradeCard shape.
-function normalizeJobSnapshot(raw: any): TradeJobSnapshot {
-  const cards = Array.isArray(raw?.cards) ? raw.cards.map(normalizeTradeCard) : [];
+function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
+  const paged = Number.isInteger(raw?.cursor);
+  const cards: PagedTradeCard[] = Array.isArray(raw?.cards)
+    ? raw.cards.map((c: any) => (paged
+      ? { ...normalizeTradeCard(c), from_page: true as const }
+      : normalizeTradeCard(c)))
+    : [];
   // F3 (flag deck.fatigue) — additive honoring note; validated defensively so
   // a malformed payload degrades to "no note" (banner hidden).
   const rawNote = raw?.suppression_note;
@@ -280,21 +319,65 @@ function normalizeJobSnapshot(raw: any): TradeJobSnapshot {
     ...(suppressionNote ? { suppression_note: suppressionNote } : {}),
     ...(raw?.first_deck === true ? { first_deck: true } : {}),
     ...(boardRefresh ? { board_refresh: boardRefresh } : {}),
+    // Paged-response envelope (E2/P1/P2). Validated, never coerced: a
+    // legacy response carries none of these, so its snapshot is unchanged.
+    ...(Number.isInteger(raw?.cursor) && raw.cursor >= 0 ? { cursor: raw.cursor } : {}),
+    ...(Number.isInteger(raw?.total_ready) && raw.total_ready >= 0
+      ? { total_ready: raw.total_ready } : {}),
+    ...(raw?.replace === true ? { replace: true } : {}),
+    ...(typeof raw?.deck_id === 'string' && raw.deck_id ? { deck_id: raw.deck_id } : {}),
+    ...(raw?.rebased === true ? { rebased: true } : {}),
+    ...(typeof raw?.pool_exhausted === 'boolean' ? { pool_exhausted: raw.pool_exhausted } : {}),
+    ...(typeof raw?.serve_source === 'string' && raw.serve_source
+      ? { serve_source: raw.serve_source } : {}),
+    ...(raw?.freshness_state === 'fresh' || raw?.freshness_state === 'updating'
+      ? { freshness_state: raw.freshness_state as 'fresh' | 'updating' } : {}),
+    ...(Number.isInteger(raw?.prefetch_remaining) && raw.prefetch_remaining >= 0
+      ? { prefetch_remaining: raw.prefetch_remaining } : {}),
+    ...(typeof raw?.search_id === 'string' && raw.search_id ? { search_id: raw.search_id } : {}),
   };
 }
 
 // POST /api/trades/generate — kicks off trade discovery for the active league.
 // Returns a job snapshot; if status==='running', poll getTradeStatus(job_id).
-export async function generateTrades(body: GenerateBody): Promise<TradeJobSnapshot> {
-  const res = await api.post<any>('/api/trades/generate', body);
-  return normalizeJobSnapshot(res);
+//
+// `paging` (200 ms path, E2): sends `page: 1` plus the caller's client
+// `search_id` (a UUID the caller mints with `uuidv4` from `./_queue`; this
+// module stays require-free beyond `./client` for check-owner-offer-signals'
+// transpiled harness). The response is then the first page with `cursor`.
+// Omitted ⇒ the body is sent untouched and the response is the cumulative
+// snapshot, exactly as before (usePresentationDeck relies on that).
+export async function generateTrades(
+  body: GenerateBody,
+  paging?: { searchId: string },
+): Promise<PagedTradeJobSnapshot> {
+  const res = await api.post<any>(
+    '/api/trades/generate',
+    paging ? { ...body, page: 1, search_id: paging.searchId } : body,
+  );
+  const snap = normalizeJobSnapshot(res);
+  // An old server doesn't echo the id; the search still owns it.
+  return paging && !snap.search_id ? { ...snap, search_id: paging.searchId } : snap;
 }
 
 // GET /api/trades/status?job_id=X — cheap dict lookup; the request thread
 // just reads the in-memory job state and returns the current cards.
-export async function getTradeStatus(jobId: string): Promise<TradeJobSnapshot> {
+//
+// `page` (200 ms path): `cursor=K` returns only the cards after raw index K
+// (E2), and `deck=<deck_id>` names the deck those pages belong to (P2, which
+// answers `rebased: true` when that deck was replaced). `job_id` is still
+// sent, because E2/P1 servers page by it and ignore `deck`. Omitted ⇒ the
+// cumulative snapshot, exactly as before.
+export async function getTradeStatus(
+  jobId: string,
+  page?: { deck?: string; cursor: number },
+): Promise<PagedTradeJobSnapshot> {
+  const paged = page
+    ? `&deck=${encodeURIComponent(page.deck || jobId)}`
+      + `&cursor=${Math.max(0, Math.floor(page.cursor))}`
+    : '';
   const res = await api.get<any>(
-    `/api/trades/status?job_id=${encodeURIComponent(jobId)}`,
+    `/api/trades/status?job_id=${encodeURIComponent(jobId)}${paged}`,
   );
   return normalizeJobSnapshot(res);
 }
