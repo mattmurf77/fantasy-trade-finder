@@ -57,6 +57,9 @@ checksum bumps PACK_VERSION and registers a new decoder in DECODERS. Packs live
 as long as their decks, so the reader decodes every version from 1 to
 PACK_VERSION forever: an old decoder is never deleted or edited while packs of
 its version exist. unpack_run refuses a version with no decoder.
+
+Candidate-set packing (pack_candidates / unpack_candidates, ruling 25) is a
+separate codec at the end of this module, with its own CAND_PACK_VERSION.
 """
 
 from __future__ import annotations
@@ -459,3 +462,252 @@ def _decode_v1(head: dict, cards_blob: bytes, checksum: str) -> list[dict]:
 # Every pack_version ever written -> its decoder. Never delete or edit an entry
 # while packs of that version exist (VERSION DISCIPLINE, module docstring).
 DECODERS = {1: _decode_v1}
+
+
+# ===========================================================================
+# Candidate-set packing (head-eng ruling 25): deck_candidate_sets.candidates_packed
+#
+# Separate from the deck pack above (its layout is frozen and untouched): its
+# own CAND_PACK_VERSION and CAND_DECODERS, under the same version discipline.
+# One candidate set = the members server._log_deck_signal_impressions writes,
+# each {trade_hash, partner, give, receive, base_score, in_deck} in that key
+# order. The packed form is ONE bytes value (the column):
+#
+#   zlib( uvarint(len(header)) + header + raw )
+#
+#   header  canonical JSON: cand_pack_version, the caller's `run`, n, set_hash,
+#           the per-field state layout, the per-run partner dictionary, the
+#           per-run asset-id dictionary, and `checksum`: sha256 of canonical
+#           JSON {"header": <header without checksum>, "members": <members>},
+#           so the run, the dictionaries, set_hash and every member are covered.
+#   raw     per field, in member order: a 2-bit state section (absent / null /
+#           value / int) unless the state is uniform; trade_hash as 8 raw
+#           bytes; partner as a uvarint dictionary code; give and receive each
+#           as uvarint length + uvarint asset codes (exact order and
+#           duplicates kept); base_score as float8 (an int as int64); in_deck
+#           as one bit.
+#
+# set_hash is computed exactly as the writer computes it (candidate_set_hash)
+# and verified on unpack. pack_candidates refuses anything whose unpacked
+# json.dumps differs from the input's by a byte (key order, types, values).
+# ===========================================================================
+
+CAND_PACK_VERSION = 1
+CAND_FIELDS = ("trade_hash", "partner", "give", "receive", "base_score", "in_deck")
+
+
+@dataclass(frozen=True)
+class PackedCandidates:
+    """deck_candidate_sets' two packed columns, stored verbatim."""
+    cand_pack_version: int
+    candidates_packed: bytes
+
+
+def candidate_set_hash(members: list[dict]) -> str:
+    """deck_candidate_sets.set_hash exactly as the writer computes it: sha256
+    of the members' trade_hashes, sorted and joined by '|', first 16 hex."""
+    return hashlib.sha256(
+        "|".join(sorted(m["trade_hash"] for m in members)).encode()).hexdigest()[:16]
+
+
+def pack_candidates(run: dict, members: list[dict]) -> PackedCandidates:
+    """Pack one candidate set. `run` is the caller's JSON-serializable
+    metadata (e.g. candidate_set_id, deck_job_id), returned verbatim by
+    unpack_candidates. Raises ValueError for anything it can't round-trip
+    byte for byte; the writer then keeps candidates_json for that row."""
+    raw, layout = _encode_candidates(members)
+    try:
+        set_hash = candidate_set_hash(members)
+    except (KeyError, TypeError) as e:
+        raise ValueError(f"set_hash can't be computed as the writer does: {e!r}") from None
+    head = json.loads(_canon({"cand_pack_version": CAND_PACK_VERSION, "run": run,
+                              "n": len(members), "set_hash": set_hash, **layout}))
+    head["checksum"] = _cand_checksum_v1(head, members)
+    header = _canon(head).encode("utf-8")
+    packed = PackedCandidates(CAND_PACK_VERSION,
+                              zlib.compress(_uvarint(len(header)) + header + raw, 9))
+    try:
+        _run, back = unpack_candidates(packed)
+    except PackIntegrityError as e:
+        raise ValueError(f"candidate set does not round-trip: {e}") from None
+    if json.dumps(back) != json.dumps(members):
+        raise ValueError("candidate set does not round-trip exactly (key order, types "
+                         "or values); refusing to pack it")
+    return packed
+
+
+def unpack_candidates(packed: PackedCandidates) -> tuple[dict, list[dict]]:
+    """(run, members in stored order). Raises PackIntegrityError on an
+    unreadable pack, an unknown cand_pack_version or one that disagrees
+    with its column, a checksum mismatch, or a set_hash mismatch."""
+    try:
+        data = zlib.decompress(packed.candidates_packed)
+        r = _Reader(data)
+        head = json.loads(r.take(_read_uvarint(r)))
+        raw = data[r.pos:]
+    except PackIntegrityError:
+        raise
+    except Exception as e:
+        raise PackIntegrityError(f"unreadable candidate pack: {e!r}") from None
+    version = head.get("cand_pack_version") if isinstance(head, dict) else None
+    decode = CAND_DECODERS.get(version) if type(version) is int else None
+    if decode is None:
+        raise PackIntegrityError(f"unknown cand_pack_version {version!r}")
+    if packed.cand_pack_version != version:
+        raise PackIntegrityError(f"cand_pack_version {packed.cand_pack_version!r} "
+                                 f"disagrees with the pack's {version!r}")
+    try:
+        members = decode(head, raw)
+    except PackIntegrityError:
+        raise
+    except Exception as e:
+        raise PackIntegrityError(f"undecodable candidate pack: {e!r}") from None
+    return head["run"], members
+
+
+def _uvarint(n: int) -> bytes:
+    out = bytearray()
+    while True:
+        low, n = n & 0x7F, n >> 7
+        out.append(low | (0x80 if n else 0))
+        if not n:
+            return bytes(out)
+
+
+def _read_uvarint(r: "_Reader") -> int:
+    n = shift = 0
+    while True:
+        byte = r.take(1)[0]
+        n |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return n
+        shift += 7
+
+
+def _cand_checksum_v1(head: dict, members: list[dict]) -> str:
+    body = {k: v for k, v in head.items() if k != "checksum"}
+    doc = json.dumps({"header": body, "members": members}, sort_keys=True,
+                     separators=(",", ":"))
+    return hashlib.sha256(doc.encode("utf-8")).hexdigest()
+
+
+def _is_id(v) -> bool:
+    return type(v) in (str, int)
+
+
+def _encode_candidates(members: list[dict]) -> tuple[bytes, dict]:
+    n = len(members)
+    layout: dict = {"states": {}, "partners": [], "assets": []}
+    index: dict = {"partners": {}, "assets": {}}
+
+    def code(table: str, value) -> bytes:
+        key = _canon(value)
+        if key not in index[table]:
+            index[table][key] = len(layout[table])
+            layout[table].append(value)
+        return _uvarint(index[table][key])
+
+    states = {f: [] for f in CAND_FIELDS}
+    out = {f: bytearray() for f in CAND_FIELDS}
+    bits: list[bool] = []
+    for m in members:
+        if type(m) is not dict or set(m) - set(CAND_FIELDS):
+            raise ValueError(f"a candidate member holds only {CAND_FIELDS}")
+        for f in CAND_FIELDS:
+            if f not in m:
+                states[f].append(_ABSENT)
+                continue
+            v = m[f]
+            if v is None:
+                states[f].append(_NULL)
+                continue
+            state = _VALUE
+            if f == "trade_hash":
+                if not (type(v) is str and len(v) == 16 and set(v) <= _HEX):
+                    raise ValueError(f"trade_hash {v!r} is not 16 lowercase hex characters")
+                out[f] += bytes.fromhex(v)
+            elif f == "partner":
+                if not _is_id(v):
+                    raise ValueError(f"partner {v!r} is not a str or int id")
+                out[f] += code("partners", v)
+            elif f in ("give", "receive"):
+                if type(v) is not list or not all(_is_id(a) for a in v):
+                    raise ValueError(f"{f} must be a list of str or int asset ids")
+                out[f] += _uvarint(len(v)) + b"".join(code("assets", a) for a in v)
+            elif f == "base_score":
+                if type(v) is float:
+                    out[f] += struct.pack("<d", v)
+                elif type(v) is int and -2**63 <= v < 2**63:
+                    out[f] += struct.pack("<q", v)
+                    state = _INT
+                else:
+                    raise ValueError(f"base_score {v!r} can't be packed exactly")
+            elif type(v) is bool:                          # in_deck
+                bits.append(v)
+            else:
+                raise ValueError(f"in_deck {v!r} is not a bool")
+            states[f].append(state)
+
+    sections = []
+    for f in CAND_FIELDS:
+        if len(set(states[f])) <= 1:
+            layout["states"][f] = states[f][0] if n else _ABSENT
+        else:
+            layout["states"][f] = None
+            packed = bytearray((n + 3) // 4)
+            for i, s in enumerate(states[f]):
+                packed[i >> 2] |= s << ((i & 3) * 2)
+            sections.append(bytes(packed))
+    flags = bytearray((len(bits) + 7) // 8)
+    for i, b in enumerate(bits):
+        flags[i >> 3] |= b << (i & 7)
+    sections += [bytes(out[f]) for f in CAND_FIELDS[:-1]] + [bytes(flags)]
+    return b"".join(sections), layout
+
+
+def _decode_candidates_v1(head: dict, raw: bytes) -> list[dict]:
+    r = _Reader(raw)
+    n = head["n"]
+    states = {}
+    for f in CAND_FIELDS:
+        uniform = head["states"][f]
+        if uniform is not None:
+            states[f] = [uniform] * n
+        else:
+            packed = r.take((n + 3) // 4)
+            states[f] = [(packed[i >> 2] >> ((i & 3) * 2)) & 3 for i in range(n)]
+    partners, assets = head["partners"], head["assets"]
+    members: list[dict] = [{} for _ in range(n)]
+    for f in CAND_FIELDS[:-1]:
+        for m, s in zip(members, states[f]):
+            if s == _ABSENT:
+                continue
+            if s == _NULL:
+                m[f] = None
+            elif f == "trade_hash":
+                m[f] = r.take(8).hex()
+            elif f == "partner":
+                m[f] = partners[_read_uvarint(r)]
+            elif f in ("give", "receive"):
+                m[f] = [assets[_read_uvarint(r)] for _ in range(_read_uvarint(r))]
+            else:                                          # base_score
+                m[f] = struct.unpack("<q" if s == _INT else "<d", r.take(8))[0]
+    k = sum(s == _VALUE for s in states["in_deck"])
+    flags, i = r.take((k + 7) // 8), 0
+    for m, s in zip(members, states["in_deck"]):
+        if s == _NULL:
+            m["in_deck"] = None
+        elif s == _VALUE:
+            m["in_deck"] = bool(flags[i >> 3] >> (i & 7) & 1)
+            i += 1
+    if r.pos != len(raw):
+        raise PackIntegrityError("trailing bytes after the last candidate section")
+    if _cand_checksum_v1(head, members) != head.get("checksum"):
+        raise PackIntegrityError("checksum mismatch")
+    if candidate_set_hash(members) != head["set_hash"]:
+        raise PackIntegrityError("set_hash mismatch")
+    return members
+
+
+# Every cand_pack_version ever written -> its decoder (same discipline as DECODERS).
+CAND_DECODERS = {1: _decode_candidates_v1}

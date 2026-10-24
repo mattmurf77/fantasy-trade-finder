@@ -10,6 +10,9 @@ backend.eval.data.load_decks:
   writer_deck(n)   n synthetic TradeCards handed straight to the writer with
                    bake-off attribution, fatigue, taste and telemetry stamps
                    on: deck-scale goldens and byte measurements.
+  harness_candidate_sets() / writer_candidate_set(n, pool=k)
+                   the deck_candidate_sets rows the same two sources write
+                   (the writer's with k over-generated in_deck=False members).
 
 Each deck is (LoggedDeck, cards): cards are card_dict(c) plus the
 deck_impressions attribution columns the pack carries (ATTRIBUTION_COLUMNS).
@@ -47,7 +50,9 @@ with hermetic_values():
 
 import backend.bakeoff_runner as bo  # noqa: E402
 import backend.database as db_module  # noqa: E402
-from backend.database import deck_impressions_table, metadata  # noqa: E402
+from backend.database import (  # noqa: E402
+    deck_candidate_sets_table, deck_impressions_table, metadata,
+)
 from backend.eval.data import card_dict, load_decks  # noqa: E402
 from backend.ranking_service import Player  # noqa: E402
 from backend.trade_service import TradeCard  # noqa: E402
@@ -77,7 +82,30 @@ def decks_with_attribution(engine):
 
 
 def harness_decks():
-    configs = {
+    out = {}
+    with hermetic_values():
+        for name, extra in _harness_configs().items():
+            _capture, _job, engine = H.run_capture(extra_patches=extra)
+            out[name] = decks_with_attribution(engine)
+    return out
+
+
+def harness_candidate_sets():
+    """The deck_candidate_sets rows real trade jobs write (the configs with
+    suggestion.telemetry on)."""
+    rows = []
+    with hermetic_values():
+        for name, extra in _harness_configs().items():
+            if name == "flags_default":
+                continue
+            _capture, _job, engine = H.run_capture(extra_patches=extra)
+            with engine.connect() as conn:
+                rows += [dict(r._mapping) for r in conn.execute(select(deck_candidate_sets_table))]
+    return rows
+
+
+def _harness_configs():
+    return {
         "flags_default": [],
         "telemetry_taste_fatigue": [
             patch.object(bo, "bakeoff_enabled", lambda: False),
@@ -94,12 +122,6 @@ def harness_decks():
             patch.object(server, "_deck_fatigue_enabled", lambda: True),
         ],
     }
-    out = {}
-    with hermetic_values():
-        for name, extra in configs.items():
-            _capture, _job, engine = H.run_capture(extra_patches=extra)
-            out[name] = decks_with_attribution(engine)
-    return out
 
 
 class _FakeBakeoffRun:
@@ -157,6 +179,23 @@ def _pool(rng):
 def writer_deck(n, *, seed=0, taste=True, ranked=(37, "2026-10-19T12:00:00+00:00"),
                 job_id="job-evpack", user_id="user_me", league_id="league_evpack"):
     """One served deck of n cards written by the real impression writer."""
+    engine = _writer_engine(n, seed=seed, taste=taste, ranked=ranked, job_id=job_id,
+                            user_id=user_id, league_id=league_id)
+    [(deck, dicts)] = decks_with_attribution(engine)
+    return deck, dicts
+
+
+def writer_candidate_set(n, *, pool=0, seed=0):
+    """The deck_candidate_sets row the real writer stores for an n-card deck
+    whose job over-generated `pool` more candidates (in_deck False)."""
+    engine = _writer_engine(n, seed=seed, pool=pool)
+    with engine.connect() as conn:
+        [row] = [dict(r._mapping) for r in conn.execute(select(deck_candidate_sets_table))]
+    return row
+
+
+def _writer_engine(n, *, seed=0, taste=True, ranked=(37, "2026-10-19T12:00:00+00:00"),
+                   job_id="job-evpack", user_id="user_me", league_id="league_evpack", pool=0):
     rng = random.Random(seed)
     players, seed_map = _pool(rng)
     ids = sorted(players)
@@ -186,6 +225,18 @@ def writer_deck(n, *, seed=0, taste=True, ranked=(37, "2026-10-19T12:00:00+00:00
         capture["final_key"][id(card)] = card.composite_score * capture["propensity"][id(card)]
         cards.append(card)
 
+    # The over-generation pool draws from its own rng, so pool=0 leaves the
+    # deck exactly as it always was.
+    pool_rng = random.Random(f"pool:{seed}")
+    candidate_pool = [
+        TradeCard(trade_id=f"p{i}", league_id=league_id, proposing_user_id=user_id,
+                  target_user_id=pool_rng.choice(partners), target_username="opp",
+                  give_player_ids=pool_rng.sample(ids, pool_rng.choice([1, 2, 2, 3])),
+                  receive_player_ids=pool_rng.sample(ids, pool_rng.choice([1, 2, 3])),
+                  mismatch_score=0.0, fairness_score=0.8,
+                  composite_score=round(pool_rng.random(), pool_rng.choice([3, 17])))
+        for i in range(pool)] or None
+
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     metadata.create_all(engine)
     with patch.object(db_module, "engine", engine), \
@@ -196,6 +247,5 @@ def writer_deck(n, *, seed=0, taste=True, ranked=(37, "2026-10-19T12:00:00+00:00
             user_id=user_id, league_id=league_id, job_id=job_id, cards=cards,
             players_dict=players, capture=capture, scoring_format="1qb_ppr",
             seed_map=seed_map, policy_version=POLICY_VERSION,
-            bakeoff_run=_FakeBakeoffRun(rng, cards))
-    [(deck, dicts)] = decks_with_attribution(engine)
-    return deck, dicts
+            bakeoff_run=_FakeBakeoffRun(rng, cards), candidate_pool=candidate_pool)
+    return engine
