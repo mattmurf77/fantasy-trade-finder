@@ -251,6 +251,7 @@ from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
+from . import referral_ledger as _referral_ledger   # referral loop L7 (growth.referral_ledger)
 from types import SimpleNamespace   # proposal-time policy shim (see
                                    # _record_trade_proposal)
 from . import trade_policy as _trade_policy   # personal-market policy — the ONE
@@ -23269,13 +23270,15 @@ def session_init():
                 _is_new_user = not user_exists(user_id)
             except Exception as _check_err:
                 log.warning("  referral receipt: user_exists check failed (%s)", _check_err)
+            # Referral loop L7 (FR-13–FR-16, FR-18): ledger attribution, before the INSERT. Never raises.
+            _ref = _referral_ledger.attribute_first_session(is_new_user=_is_new_user, user_id=user_id, league_id=league_id, league_platform=authoritative["platform"], invite_id=_invite_id_from(body.get("invite_id")), invited_by=invited_by, new_username=username or display_name or user_id)
             try:
                 upsert_user(
                     sleeper_user_id=user_id,
                     username=username,
                     display_name=display_name,
                     avatar=avatar,
-                    invited_by=invited_by,
+                    invited_by=_ref.invited_by,
                 )
                 upsert_league(
                     league_id        = league_id,
@@ -23298,6 +23301,7 @@ def session_init():
                         league_id  = league_id,
                         session_id = token,
                         source     = "api",
+                        props      = _ref.signup_props,
                         **_ev_info,
                     )
                 except Exception as _ev_err:
@@ -23325,7 +23329,7 @@ def session_init():
                 # session_init when they arrived with an invited_by
                 # attribution. Posts a bell notification to the
                 # referrer resolved-by-username.
-                if _is_new_user and invited_by:
+                if _is_new_user and invited_by and _ref.legacy_notify:
                     try:
                         referrer = get_user_by_username(invited_by)
                         if referrer and referrer.get("sleeper_user_id"):
@@ -23371,13 +23375,16 @@ def session_init():
                             # three receipts that bury everything else on a
                             # recency-ordered list. The push stays
                             # per-pair; only the inbox folds.
-                            create_or_coalesce_league_join_notification(
-                                user_id      = _p["user_id"],
-                                league_id    = league_id,
-                                league_name  = league_name or "",
-                                new_username = _new_username,
-                                body         = "A new leaguemate can mean new trade matches.",
-                            )
+                            # L7 FR-20: the credited inviter already has the
+                            # referral_joined row; skip only their inbox row.
+                            if _p["user_id"] != _ref.inviter_user_id:
+                                create_or_coalesce_league_join_notification(
+                                    user_id      = _p["user_id"],
+                                    league_id    = league_id,
+                                    league_name  = league_name or "",
+                                    new_username = _new_username,
+                                    body         = "A new leaguemate can mean new trade matches.",
+                                )
                             _send_typed_push(
                                 _p["user_id"],
                                 "league_member_joined",
@@ -27128,7 +27135,6 @@ def mint_invite_token():
     Writes one `pending` referrals row (invite_token = share_token = the id).
     """
     from . import database as _db
-    from . import referral_ledger as _rl
     if not (is_enabled("growth.referral_ledger") and _referral_mint_enabled()):
         return jsonify({"error": "not_found"}), 404
     sess = _require_session()
@@ -27143,7 +27149,7 @@ def mint_invite_token():
         return jsonify({"error": "missing_league_id"}), 400
     league_id = league_id.strip()
     surface = body.get("surface")
-    if not isinstance(surface, str) or surface not in _rl.INVITE_SURFACES:
+    if not isinstance(surface, str) or surface not in _referral_ledger.INVITE_SURFACES:
         return jsonify({"error": "invalid_surface"}), 400
     try:
         member = _session_in_league(sess, league_id)
@@ -27157,7 +27163,7 @@ def mint_invite_token():
     except Exception as e:
         log.warning("invite/token: rate-limit count failed: %s", e)
         minted_today = 0
-    if minted_today >= _rl.MINT_DAILY_CAP:
+    if minted_today >= _referral_ledger.MINT_DAILY_CAP:
         now = datetime.now(timezone.utc)
         midnight = (now + timedelta(days=1)).replace(
             hour=0, minute=0, second=0, microsecond=0)

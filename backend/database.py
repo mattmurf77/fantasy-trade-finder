@@ -12842,6 +12842,125 @@ def create_referral_invite(referrer_user_id: str, league_id: str,
     raise RuntimeError("could not mint a unique invite id")
 
 
+def get_referral_for_referred(user_id: str, status: str | None = None) -> dict | None:
+    """The ledger row crediting `user_id` (a user is credited at most once
+    ever, §7.6), optionally only in `status`. Served by ix_referrals_referred."""
+    if not user_id:
+        return None
+    r = referrals_table
+    q = select(r).where(r.c.referred_user_id == user_id)
+    if status is not None:
+        q = q.where(r.c.status == status)
+    with engine.connect() as conn:
+        row = conn.execute(q.order_by(r.c.id).limit(1)).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def claim_referral(referral_id: int, referred_user_id: str, method: str) -> bool:
+    """§7.4 step 4 / §7.5: credit a `pending`, unclaimed row to the invitee.
+    One conditional UPDATE, so two concurrent first sessions can't both
+    claim it. False when the row was already claimed (or isn't pending), or
+    when uq_referral_pair refuses a second row for this (referrer, referred)."""
+    from sqlalchemy.exc import IntegrityError
+    r = referrals_table
+    try:
+        with engine.begin() as conn:
+            return conn.execute(
+                update(r)
+                .where(r.c.id == referral_id)
+                .where(r.c.referred_user_id.is_(None))
+                .where(r.c.status == "pending")
+                .values(referred_user_id=referred_user_id, status="joined",
+                        joined_at=_now(), attribution_method=method)
+            ).rowcount == 1
+    except IntegrityError:
+        return False
+
+
+def insert_referral_sibling(parent: dict, referred_user_id: str) -> int | None:
+    """§7.6: a further joiner through an already-claimed id gets its own
+    `joined` row — same referrer, league, surface and created_at (the link's
+    mint time), share_token = the parent's id, and a fresh unique
+    invite_token `<share_token>~<6 random>` that is never emitted or linked.
+    Returns the new id, or None when uq_referral_pair already holds this
+    (referrer, referred) pair."""
+    import secrets
+    from sqlalchemy.exc import IntegrityError
+    r = referrals_table
+    for _ in range(4):
+        values = dict(
+            referrer_user_id=parent["referrer_user_id"],
+            referred_user_id=referred_user_id,
+            league_id=parent["league_id"],
+            invite_token=f"{parent['share_token']}~{secrets.token_urlsafe(6)[:6]}",
+            share_token=parent["share_token"],
+            status="joined", surface=parent.get("surface"),
+            created_at=parent["created_at"], joined_at=_now(),
+            attribution_method="token",
+        )
+        try:
+            with engine.begin() as conn:
+                return conn.execute(insert(r).values(**values)).inserted_primary_key[0]
+        except IntegrityError:
+            with engine.connect() as conn:
+                pair = conn.execute(
+                    select(r.c.id)
+                    .where(r.c.referrer_user_id == parent["referrer_user_id"])
+                    .where(r.c.referred_user_id == referred_user_id)
+                ).fetchone()
+            if pair is not None:
+                return None
+    return None
+
+
+def league_match_candidates(league_id: str, invitee_user_id: str, *,
+                            opened_since: str, created_since: str) -> list[dict]:
+    """§7.5 candidates in the invitee's first-session league: minted rows
+    (share_token set), `pending`, unclaimed, opened since `opened_since`,
+    created since `created_since`, referrer ≠ invitee. Newest open first;
+    each carries the referrer's users.username as `referrer_username` (the
+    legacy invited_by tie-breaker). Served by ix_referrals_league_status."""
+    r, u = referrals_table, users_table
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(r, u.c.username.label("referrer_username"))
+            .select_from(r.outerjoin(u, u.c.sleeper_user_id == r.c.referrer_user_id))
+            .where(r.c.league_id == str(league_id))
+            .where(r.c.status == "pending")
+            .where(r.c.referred_user_id.is_(None))
+            .where(r.c.share_token.is_not(None))
+            .where(r.c.opened_at >= opened_since)
+            .where(r.c.created_at >= created_since)
+            .where(r.c.referrer_user_id != invitee_user_id)
+            .order_by(r.c.opened_at.desc(), r.c.id.desc())
+        ).fetchall()
+    return [dict(row._mapping) for row in rows]
+
+
+def get_user_names(user_id: str) -> dict | None:
+    """{username, display_name} of a users row, or None without one."""
+    if not user_id:
+        return None
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(users_table.c.username, users_table.c.display_name)
+            .where(users_table.c.sleeper_user_id == user_id)
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def get_league_platform(league_id: str) -> str:
+    """The `leagues.platform` of a stored league ('sleeper' when unset or
+    unknown): the platform-linked leagues carry espn / mfl / fleaflicker."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(leagues_table.c.platform)
+            .where(leagues_table.c.sleeper_league_id == str(league_id))
+            .limit(1)
+        ).fetchone()
+    return (row.platform if row and row.platform else "sleeper")
+
+
 # ---------------------------------------------------------------------------
 # elo_history — snapshots for Trends tab
 # ---------------------------------------------------------------------------

@@ -695,6 +695,7 @@ Spec: `docs/plans/referral-loop/prd.md` @ `91f1cc29` §7, §8.1, §8.4, §11; ev
 | `growth.referral_ledger` ON also gates | Behaviour | Off |
 |---|---|---|
 | The mint, `POST /api/invite/token` | Mints a 12-char invite id per share, 10 per inviter per league per UTC day. Also needs `model_config` `referral_mint_enabled` = 1 ([kill switch](#referral-invite-mint-l7-backendserverpy-db-seeded)) | `404 not_found`; clients emit today's league-only links |
+| Attribution at a new user's first session init ([api-reference](api-reference.md#apisessioninit--invite-attribution-referral-loop-l7)) | Credit by token (§7.4), else the league-match fallback (§7.5); server-derived `users.invited_by`; `signup.attribution` / `attribution_miss`; one `referral_joined` row (FR-18) and the `league_member_joined` fanout skipping that inviter's inbox row (FR-20); server event `referral_attributed` | Today's behaviour, byte for byte: the client's `invited_by`, no `signup` props, the legacy `referral_joined` row from `invited_by` alone |
 
 ---
 

@@ -121,7 +121,7 @@ pre-generation eligibility, cache TTLs and polling contracts are unchanged.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/session/init` | Initialize an existing verified session. Optional `trade_fairness_threshold` (0.5–1.0; omitted/invalid → 0.5) starts background trade preparation with the native search preference. Requires matching `user_id` and `league_id`; profile, roster, opponents and co-owner identity are resolved server-side. 401 `session_expired`, 403 `verification_required` / `identity_mismatch` / `league_membership_required`, 503 `league_data_unavailable`. No tokenless bootstrap or identity reassignment. Concurrent inits for one token are single-flighted: identical requests share one result; different leagues run one after the other. |
+| POST | `/api/session/init` | Initialize an existing verified session. Optional `invite_id` (referral loop L7, [invite attribution](#apisessioninit--invite-attribution-referral-loop-l7)). Optional `trade_fairness_threshold` (0.5–1.0; omitted/invalid → 0.5) starts background trade preparation with the native search preference. Requires matching `user_id` and `league_id`; profile, roster, opponents and co-owner identity are resolved server-side. 401 `session_expired`, 403 `verification_required` / `identity_mismatch` / `league_membership_required`, 503 `league_data_unavailable`. No tokenless bootstrap or identity reassignment. Concurrent inits for one token are single-flighted: identical requests share one result; different leagues run one after the other. |
 | GET | `/api/session/ping` | Liveness / session check |
 | POST/GET | `/api/session/demo` | Demo session bootstrap |
 | POST | `/api/session/signout` | **Teardown 06-03 (W2C), unflagged.** Evict the calling `X-Session-Token` server-side → `{ok: true, evicted: bool}`. Idempotent, never errors (missing/stale token → `evicted: false`) — clients call it best-effort during sign-out so the token doesn't stay live until idle eviction. Also deletes the token's durable `sessions` row (W3B; unconditional, so rows from a flag-on period can't outlive a sign-out) |
@@ -207,6 +207,17 @@ Background: `docs/plans/sleeper-co-owner-rosters/scope.md`.
   "enforced":         true     // private authorization is always enforced
 }
 ```
+
+### `/api/session/init` — invite attribution (referral loop L7)
+
+New optional body field **`invite_id`** (PRD §8.4): the invite id `t` the client captured, used only when it fully matches `server.INVITE_ID_RE` (else ignored, like `t` on the join path). `invited_by` (the legacy username) is still accepted. **The response is unchanged.** Everything below runs on the session-init daemon, only while `growth.referral_ledger` is on, and only for a **new** user (no `users` row before this init; account-only sessions skip the daemon, so an Apple-first user is new at their first real league session). One call, `referral_ledger.attribute_first_session`, runs **before** the `users` INSERT:
+
+1. **Credit by token (§7.4).** The minted row whose `share_token` is the id → else miss `unknown`; minted over 30 days ago → miss `expired`; membership: the session's league proves it, any other league is checked against `league_members` for the invitee's account id → else miss `not_member`. Then one conditional claim (`referred_user_id IS NULL AND status = 'pending'`), or a §7.6 sibling row when the minted row is already claimed. `attribution_method 'token'`.
+2. **League-match fallback (§7.5)**, only when nothing was credited: minted rows in the session's league, `pending`, unclaimed, opened within 14 days, minted within 30, referrer ≠ invitee. A legacy `invited_by` naming a candidate's referrer (case-insensitive) wins the tie; else the latest `opened_at`. `attribution_method 'league_match'`.
+3. **A credit** writes `users.invited_by` = the referrer's username (server-derived, on the INSERT), posts one `referral_joined` bell row to the referrer (title "@{new_username} joined Fleeced via your invite", body "Once they rank, trades with them can use their board, not just consensus."; meta `new_user_id`, `new_username`, `league_id`, `referral_id`; route unchanged, League), and records server event `referral_attributed` (owner = the referrer, non-touching). The `league_member_joined` fanout then **skips that referrer's coalesced inbox row** (FR-20); their per-pair push is unchanged and every other leaguemate's row is unchanged.
+4. **No credit:** the client's `invited_by` is stored as before, unverified, and **notifies no one** (FR-15): the legacy `referral_joined` row from `invited_by` alone fires only while the flag is off.
+
+The `signup` event gains `attribution` (`token` \| `league_match` \| `legacy_ref` \| `none`) and `attribution_miss` (`unknown` \| `expired` \| `not_member` \| null) while the flag is on (FR-16). A user is credited at most once ever; a repeat first session (the INSERT failed after a credit) reports the credit and writes nothing again. Attribution never fails the daemon: any error degrades to "not attributed". **Flag off:** byte-identical to today (client `invited_by`, no `signup` props, the legacy row).
 
 ## Account auth (identity anchors — `auth.accounts` flag, ships dark)
 
