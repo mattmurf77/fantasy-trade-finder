@@ -193,10 +193,11 @@ export async function shareInvite(args: ShareInviteArgs): Promise<void> {
       }
     }
     const url = buildInviteUrl(args.leagueId, args.username, ledgerOn ? { inviteId } : undefined);
-    const where = args.leagueName || 'our league';
     try {
+      // m3.invite.msg (copy file §6 D): one line on every channel, no league
+      // name, so it fits ~140 characters with the URL.
       const res = await Share.share({
-        message: `Join me on Dynasty Trade Finder to find trades in ${where} → ${url}`,
+        message: `Join me on Fleeced to find trades we both like → ${url}`,
       });
       if (res.action !== Share.dismissedAction) {
         track('invite_shared', {

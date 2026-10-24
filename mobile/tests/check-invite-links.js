@@ -46,6 +46,9 @@ try {
 }
 
 const SRC = path.join(__dirname, '..', 'src');
+// AC-3: no invite share text names the old product, in any spacing or case
+// (the web SMS line said "fantasy trade finder", the X line "@FantasyTradeFinder").
+const OLD_NAME = /(dynasty|fantasy)\s*trade\s*finder/i;
 const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8');
 
 let failures = 0;
@@ -336,6 +339,15 @@ function runBanner() {
     const keys = state.log.filter((e) => e[0] === 'track').flatMap((e) => Object.keys(e[2] || {}));
     check('E C1 no emitted invite prop key contains "token"', !keys.some((k) => /token/i.test(k)), keys.join(','));
 
+    // K. AC-3 / copy §6 D — the share text is the approved m3.invite.msg and
+    //    never names the old product.
+    reset({ flags: {} });
+    await shareInvite(args());
+    const msg = (state.log.find((e) => e[0] === 'share') || [])[1];
+    eq('K m3.invite.msg is the approved line, no league name',
+       msg, `Join me on Fleeced to find trades we both like → ${BASE}/?league=${L}&ref=${U}`);
+    check('K AC-3 the mobile invite text has no old product name', !OLD_NAME.test(msg || ''), msg);
+
     runStatic();
   })().catch((e) => { fail('banner harness', e && e.stack); finish(); });
 }
@@ -466,6 +478,25 @@ function runStatic() {
   const webTrade = /const TRADE_TYPES\s*=\s*\[([^\]]*)\]/.exec(web);
   check('I FR-19 web clickNotif TRADE_TYPES has referral_activated',
         !!webTrade && webTrade[1].includes("'referral_activated'"), webTrade ? webTrade[0] : 'TRADE_TYPES not found');
+
+  // K (web). AC-3 / copy §6 D — the web invite builders.
+  const webFn = (name) => {
+    const at = web.indexOf(`\n    function ${name}(`);
+    if (at === -1) return '';
+    const next = web.indexOf('\n    function ', at + 10);
+    return web.slice(at, next === -1 ? web.length : next);
+  };
+  const inviteMsg = webFn('buildInviteMessage');
+  const channelMsg = webFn('buildChannelMessage');
+  check('K web m3.app.invite_msg is the approved line',
+        inviteMsg.includes('`Join me on Fleeced to find trades we both like → ${url}`'), inviteMsg.trim().split('\n').slice(-3).join(' '));
+  check('K web m3.app.invite_sms is the approved line',
+        /case 'sms':\s*body = `Join me on Fleeced to find trades we both like → \$\{url\}`;/.test(channelMsg), 'sms body drifted');
+  check('K web m3.app.invite_x is the approved line',
+        /case 'twitter':\s*body = `Finding dynasty trades in \$\{leagueName\} on Fleeced\. Join me → \$\{url\}`;/.test(channelMsg), 'x body drifted');
+  check('K AC-3 no web invite text names the old product',
+        !!inviteMsg && !!channelMsg && !OLD_NAME.test(inviteMsg) && !OLD_NAME.test(channelMsg),
+        'buildInviteMessage / buildChannelMessage still carry the old name');
 
   // J. AC-3b — the banner spells it "leaguemates" in every RENDERED string
   //    and accessibility label (comments are not rendered and not checked).

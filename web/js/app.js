@@ -5832,8 +5832,8 @@
 
     function buildInviteMessage() {
       const url = buildInviteUrl();
-      const leagueName = document.getElementById('league-summary-title')?.textContent || 'our league';
-      return `Join me on Dynasty Trade Finder to find trades in ${leagueName} → ${url}`;
+      // m3.app.invite_msg (copy file §6 D): no league name, every channel.
+      return `Join me on Fleeced to find trades we both like → ${url}`;
     }
 
     // ── OG share-card helpers (Agent 3) ──────────────────────────────
@@ -6081,11 +6081,11 @@
 
       switch (channel) {
         case 'sms':
-          body = `${leagueName} fantasy trade finder — join me: ${url}`;
+          body = `Join me on Fleeced to find trades we both like → ${url}`;   // m3.app.invite_sms
           break;
         case 'x':
         case 'twitter':
-          body = `Joined @FantasyTradeFinder to find trades in ${leagueName}. Come ruin the league with me: ${url}`;
+          body = `Finding dynasty trades in ${leagueName} on Fleeced. Join me → ${url}`;   // m3.app.invite_x
           break;
         case 'whatsapp':
           body = `Hey! Been using Fleeced for ${leagueName} — it finds trades both sides actually like. Join me: ${url}`;
