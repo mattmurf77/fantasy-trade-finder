@@ -487,7 +487,12 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
   meta, off the tap path.
 - **R9, members-write race (residual, PR-A):** two concurrent inits for one league can commit their
   `league_members` snapshots out of fetch order. Only `refreshed_at` is monotonic. The next init corrects it
-  (B.3 step 4).
+  (B.3 step 4). onboarding-eng's advisory A2 (2026-10-24) covers the same case for two different members' inits:
+  last write wins, and it's harmless because both are authoritative reads seconds apart. F5's single-flight (#355)
+  is per token, so it doesn't serialize across members. Accepted; no lock added.
+- **R11, the meta-cache seed is a bare dict write** (onboarding-eng advisory A1, 2026-10-24): `_FA_LEAGUE_META_CACHE`
+  has no lock. Its other writers (`server.py:29222`, `:30437` on this branch) are bare `dict` assignments too, which
+  are atomic under the GIL, so the S0 seed (`:22225`) matches the cache's existing pattern. No change.
 - **R10, a pick clobber on non-429 flakes: FIXED in PR-A** (2026-10-23, B.7). The validate side uses the existing
   `checked: false` outcome rather than a blocking warning, because no existing validate warning code says "pick
   ownership couldn't be confirmed" (`pick_moved` would be a false claim). A blocking warning needs a new code,
@@ -498,6 +503,12 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
   head-eng.
 
 ## Q. Open questions
+
+> **Status 2026-10-24:** trades-eng answered all of these on 2026-10-23, and they're folded into fingerprint contract
+> v0.3 (head-eng's notes folder). The landing order is E2 → S0-serve → PR-A (the snapshot tolerates an absent
+> table). Q7's trade-path fetches stay in background jobs for launch, and switching them goes to models-eng.
+> Q9 (C) needs no session-init field. Q10 is moot while `trade.value_core` is off. onboarding-eng approved the
+> session-init diff on 2026-10-24 (A1/A2 → R9, R11; A3 is a positional rebase only).
 
 **For trades-eng:**
 
