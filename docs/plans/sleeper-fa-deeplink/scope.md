@@ -5,18 +5,27 @@
 > - The spec is [prd.md](prd.md). The evidence base is [feasibility.md](feasibility.md): F1–F9, device tests 1–16, decisions D1–D4.
 > - **2026-10-20:** the operator decided D1: FTF performs Sleeper add/drops and waiver claims itself, behind a 7-day consent checkbox. The spec is [consent.md](consent.md). The operator also decided D2: an in-app message when Sleeper isn't installed.
 > - **Inputs folded in on 2026-10-20** (review notes held outside the repo, cited by role and section): `legal-lead` R15 and LEG-L12, ux-lead K-F1 to K-F7, `design-lead`'s #351 consent and D2 review, and `head-product` P31.
+> - **Launch scope (2026-10-24, from `head-eng`'s plan of 2026-10-18):**
+>   - the `sleeper://` hand-off ships in the **2026-11-06 binary**;
+>   - the D1 direct write (all of consent.md) is **post-launch**.
+>
+>   See §5 and [prd.md § Launch scope](prd.md#launch-scope).
 > - This file plans the work and changes no code.
 
-**Date:** 2026-10-15. Amended 2026-10-15 (send-a-trade scope) and 2026-10-20 (D1 direct write + consent, D2 in-app message).
+**Date:** 2026-10-15. Amended:
+- 2026-10-15: send-a-trade scope;
+- 2026-10-20: D1 direct write + consent, D2 in-app message;
+- 2026-10-24: the operator's D3/D4/no-flag decisions, and launch scope.
 **Entry point:** direct ask, the operator's top priority (2026-10-15), routed through `platforms-pm` to a spec worker. Clarification relayed by `head-product`: "It opens from the send a trade feature. That's the one we tested it on. Have an eng research all external links to compare differences to ensure a consistent experience"
 **Builder:** not assigned yet; the build stays with `head-eng` (`platforms-eng` / `eng-mobile`).
-- **The hand-off** can start now (P31). R0, device tests 1–12 and T1–T4 gate its **merge**.
-- **The direct write** waits for the spike in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet). Its flag turns on only under D6 (§5). See [prd.md § Sequencing](prd.md#9-sequencing-and-dependencies).
+- **The hand-off** can start now (P31) and ships in the **2026-11-06 binary**. R0, device tests 1–12 and T1–T4 gate its **merge**; the operator runs them as Launch Desk **OA-4, due 2026-11-03**.
+- **The direct write is post-launch.** It waits for the spike in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet). Its flag turns on only under D6 (§5). See [prd.md § Sequencing](prd.md#9-sequencing-and-dependencies).
 **Operator sign-off on waivers:** not needed (no waivers). D1 and D2 are decided.
 - **Decided by `head-product` (P34, 2026-10-20):** D6 (the flag goes on only after three conditions, §5), D9 (consent is its own step), D10 (the named button is the per-move confirmation; no dialog) and D11 (consent per account).
 - **Ruled or confirmed by `legal-lead` (R15.8, 2026-10-20):** D10 and D11 are confirmed. D5: claims must be named, so the final copy is v1 for add/drop and v2 once claims are enabled. D12: records are deleted with the account [PRO].
-- **Still open:** the secondary button's words. These belong to `marketing-lead` and are waiting on the `head-bizops` slot.
-- **Open for the operator:** D3, D4, and the no-flag confirmation for the hand-off.
+- **Decided by the operator (form, 2026-10-23, verbatim):** "D3 desktop webview: No", "D4 generic link: No", "Handoff no flag: OK".
+- **Approved by `legal-lead`:** the secondary button's words, "Do it in Sleeper instead" (copy deck row `s351.secondary`, R22.1). They ship with D1, post-launch.
+- **The only remaining open item:** the `sleeper.fa_write` flip. It is the operator's, under D6, and comes post-launch.
 
 All of these are in [prd.md § Decisions needed](prd.md#10-decisions-needed).
 - The operator also approves every live write when it runs: the spike captures, TestFlight 23–25 and 29, and the flag flip.
@@ -115,12 +124,12 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 
     **The flip itself is the operator's.** After that it stays as a permanent kill switch.
   - **It is the write's deploy-free rollback lever.**
-- **The `sleeper://` hand-off itself gets no flag.** `trades.queue_2k` stays as it is (`false`, `config/features.json:14`); lighting it is `trades-pm`'s call. No hand-off flag, because:
+- **The `sleeper://` hand-off itself gets no flag.** **Confirmed by the operator, 2026-10-23: "Handoff no flag: OK".** `sleeper.fa_write` gates **only D1** and never the hand-off. `trades.queue_2k` stays as it is (`false`, `config/features.json:14`); lighting it is `trades-pm`'s call. The reasons for no hand-off flag were:
   1. **Turning it off would restore a known-broken flow.** Every behavior being replaced is verified broken (feasibility F1, F3, F5): Safari, then Sleeper's home screen or the App Store, with every param dropped. A kill switch earns its keep when its off state is safe and useful. Here the off state is the bug the operator reported.
   2. **The main failure mode is already handled in code.** If no app handles `sleeper://`, `Linking.openURL` rejects (F8, `RCTLinkingManager.mm:90-115`) and the helper runs the D2 fallback.
   3. **The remaining risk is retired before merge.** The risk is that the scheme opens Sleeper on an unhelpful screen. Device tests 3–10 and T1–T4 fix each target's rung before the hand-off merges (P31: they gate the merge, not the start of the build). The floor, bare `sleeper://`, lands no worse than today: the same home screen, minus the Safari hop.
   4. **What we give up.** FTF has no OTA channel (below), so a client-read flag would be the only rollback that needs no build. We are giving that up knowingly, for reason 1. If the operator wants one anyway, it would be a new client-read key (for example `sleeper.app_handoff`, default `true`) in `config/features.json`, `FLAG_KEYS`, the mobile launched defaults and `docs/config-reference.md`. The 30-minute flag revalidate throttle bounds how fast it takes effect. It is a flag surface, so it should not be added quietly.
-- **Revert path: the next EAS build. There is no OTA.** Verified 2026-10-15:
+- **Revert path for the hand-off: a new EAS build. There is no OTA.** Verified 2026-10-15:
   - `expo-updates` has zero occurrences in `mobile/package.json` and `mobile/app.json`.
   - `mobile/eas.json` has no `channel`.
   - `mobile/ios/DTFDynastyTradeFinder/Supporting/Expo.plist` sets `EXUpdatesEnabled` to `false`.
@@ -259,6 +268,14 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 
 ## 5. Ship gate declaration
 
+- **Launch scope**, mirroring prd.md § Launch scope (`head-eng`'s plan, 2026-10-18):
+  - **The hand-off fix ships in the 2026-11-06 binary.**
+    - `platforms-eng` builds it.
+    - The device tests (R0, 1–12, T1–T4) gate the merge (P31). The operator runs them as Launch Desk **OA-4, due 2026-11-03**.
+    - It ships with no flag; the revert path is a new EAS build.
+  - **The D1 direct write is post-launch.** That covers consent.md and AC-19 to AC-40. The spec is unchanged, and the D6 graduation applies as written.
+  - **The secondary button's words** are approved by `legal-lead` and ship with D1.
+  - **K-F5** is in #339's spec and waits for D1.
 - **CI green:** `backend-tests`, `mobile-typecheck` (which runs every `check-*.js`, including the new guard) and `maestro-testid-lint`, all passing on the pushed sha.
 - **Pre-merge gate (`head-product` P31: device tests gate the merge, not the start of the build; `platforms-eng` may start the shared helper now):**
   - **Hand-off:** R0, device tests 1–12 and T1–T4 recorded in `device-results.md` before the hand-off merges. The rung constant is set from that file, and guard S10 checks it.
@@ -283,7 +300,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 
 | Platform | Reads | Writes | Behavior in this change |
 |---|---|---|---|
-| **Sleeper** | Unchanged. The pre-write checks reuse the public reads the FA route already makes | **Added (D1):** add, add+drop and waiver claim through Sleeper's private GraphQL. Each one is user-tapped, behind `sleeper.fa_write`, needs a valid 7-day consent, and uses the stored JWT the way `propose_trade` does. `propose_trade` is untouched | **This change.** The claim-sheet CTA performs the direct write when the flag is on, the user is linked and consent is valid or ticked. Otherwise, and on a Sleeper refusal, it falls back to the hand-off. The hand-off covers the claim sheet's fallback, the Send-in-Sleeper no-target hand-off and the trade queue's Send All. All three open the Sleeper app with `sleeper://…` (scheme first, no Safari). They put the free agent's name or the trade summary on the clipboard and show the steps. When Sleeper isn't installed, they show the D2 in-app message, never a web hop. |
+| **Sleeper** | Unchanged. The pre-write checks reuse the public reads the FA route already makes | **Added (D1, post-launch):** add, add+drop and waiver claim through Sleeper's private GraphQL. Each one is user-tapped, behind `sleeper.fa_write`, needs a valid 7-day consent, and uses the stored JWT the way `propose_trade` does. `propose_trade` is untouched | **This change.** The claim-sheet CTA performs the direct write when the flag is on, the user is linked and consent is valid or ticked. Otherwise, and on a Sleeper refusal, it falls back to the hand-off. The hand-off covers the claim sheet's fallback, the Send-in-Sleeper no-target hand-off and the trade queue's Send All. All three open the Sleeper app with `sleeper://…` (scheme first, no Safari). They put the free agent's name or the trade summary on the clipboard and show the steps. When Sleeper isn't installed, they show the D2 in-app message, never a web hop. |
 | **ESPN** | unchanged | unchanged | **n/a.** The claim Add keeps `NO_ADD_REASON.espn` (`ClaimSheet.tsx:67-74`, via `explainNoAdd` `:100-103`) byte for byte. `SendInEspnButton` is unchanged; its `fantasy.espn.com` link (`:89`) goes to the `head-eng` inventory. Noted for `platforms-pm`, not in scope: community evidence (C3) says ESPN's AASA claims `/*/players/add`. That is unverified and would be a separate item. |
 | **MFL** | unchanged | unchanged | **n/a.** Keeps `NO_ADD_REASON.mfl` (`:75-81`) byte for byte. `SendInMflButton` is unchanged; its `myfantasyleague.com` link (`:86`) goes to the `head-eng` inventory. |
 | **Fleaflicker** | unchanged | unchanged | **n/a.** Dark (`fleaflicker.link` false). Keeps `NO_ADD_REASON.fleaflicker` (`:82-88`) and the send copy fallback, both byte for byte. |

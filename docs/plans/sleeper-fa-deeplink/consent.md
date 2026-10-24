@@ -1,5 +1,7 @@
 # Direct add/drop in Sleeper (D1): the connect, consent and move flow — spec (2026-10-20)
 
+> **POST-LAUNCH (launch scope, 2026-10-24).** Under `head-eng`'s launch plan of 2026-10-18, **everything in this file ships after launch**: the direct add/drop write, consent, the Settings row, the `sleeper_fa_*` events, and **every D1 acceptance criterion (AC-19 to AC-40)**. The spec stays as written, with `legal-lead` R15.8 folded in, and `sleeper.fa_write` graduation (D6) is unchanged. At launch, the 2026-11-06 binary ships only the `sleeper://` hand-off ([prd.md § Launch scope](prd.md#launch-scope)).
+
 > **What this file covers:** the product spec for decision D1. When the user taps the move, FTF performs the free-agent add, the add with a drop, or the waiver claim in Sleeper itself, using the user's connected Sleeper sign-in. The first move in each rolling 7-day window needs a ticked consent box, and the server enforces it.
 >
 > **Where everything else lives:**
@@ -73,7 +75,7 @@ A pure function, `faWriteGate({flagOn, linked, linkExpired, consentValid, ticked
 | State at CTA tap | What the user sees | Then |
 |---|---|---|
 | Flag `sleeper.fa_write` off (or the route answers 404) | The sheet is in **hand-off mode**: the steps block plus the prd's **Open in Sleeper** CTA (prd §4.2) | the hand-off |
-| Flag on, **no Sleeper connection** (K-F1) | A **connect step** inside the sheet: "To make the move for you, Fleeced needs your Sleeper sign-in". Buttons: **Connect**, plus the secondary **Do it in Sleeper instead** (K-F4) | **Connect** opens `SleeperConnect`, the same WebView Send in Sleeper uses (`SendInSleeperButton.tsx:215-218`) |
+| Flag on, **no Sleeper connection** (K-F1) | A **connect step** inside the sheet, showing the approved line "Connect your Sleeper sign-in to make moves from here." (`s351.connect`, approved by `legal-lead`). Buttons: **Connect**, plus the secondary **Do it in Sleeper instead** (K-F4) | **Connect** opens `SleeperConnect`, the same WebView Send in Sleeper uses (`SendInSleeperButton.tsx:215-218`) |
 | Flag on, connection **expired**, or 403 `verification_required` | The same step, with **Verify** instead of **Connect**, as Send in Sleeper does (`SendInSleeperButton.tsx:271-292`) | the same |
 | Connected, consent **valid** | No extra step. The CTA **is** the move | the write |
 | Connected, consent **missing, lapsed or withdrawn** | A **consent step** (K-F2), described in §4.1. **Make the move** is disabled until the box is ticked. **Not now** returns to the sheet unchanged | the write, with the tick |
@@ -127,12 +129,10 @@ The secondary **Do it in Sleeper instead** is always on the sheet and in every s
 
 The same rule covers writes switched off under the platform risk register.
 
-**The secondary button's words are still open.** They are `marketing-lead`'s call and are waiting on a slot with `head-bizops`. The candidates are:
-- ux-lead: "Do it in Sleeper instead";
-- `design-lead`: "Open in Sleeper";
-- R15.8 v1 copy: "Not now" for the consent step.
-
-"Do it in Sleeper instead" is the working label in this spec.
+**The secondary button's words are approved: "Do it in Sleeper instead".**
+- Source: marketing-lead's copy deck row `s351.secondary`, approved by `legal-lead` under R22.1. Legal approved the wording and noted that it ships with the D1 write after launch.
+- The consent step's own "Not now" stays as in the R15.8 v1 copy.
+- The words ship with D1, post-launch.
 
 ## 3. What the write route must do (implemented in `sleeper-fa-write`)
 
@@ -315,7 +315,7 @@ Withdrawing takes effect at once and never undoes moves already made.
   - The added player no longer offers Add.
   - A waiver claim shows as **pending** for the rest of the session, from the success response. A durable pending state is a later item.
   - **The trade deck drops the dropped player at once.** The in-app roster change invalidates the affected trade cards immediately (#339 §5.1, "a change the app itself knows about"), so no deck card offers the dropped player as the user's.
-  - **Handed off to `trades-pm` as I-2/U2.** The mechanism is theirs. TestFlight step 29 checks the result.
+  - **Handed off to `trades-pm` as I-2/U2.** It is in #339's spec and waits for D1, post-launch. The mechanism is theirs, and TestFlight step 29 checks the result.
 - **K-F6, say exactly what happened.**
   - The in-progress and result copy separate a **waiver claim placed** from a **player added**, as Sleeper reports it.
   - A partial result names both halves exactly.
@@ -363,7 +363,7 @@ They follow the P0-7 split:
 
 ## 7. Acceptance criteria (AC-19 to AC-40)
 
-AC-1 to AC-18 are in [prd.md § 6](prd.md#6-acceptance-criteria).
+**All of AC-19 to AC-40 are post-launch** (they ship with D1). AC-1 to AC-18, the hand-off, ship at launch and are in [prd.md § 6](prd.md#6-acceptance-criteria).
 
 | AC | Criterion | Verified by |
 |---|---|---|
@@ -453,6 +453,8 @@ This is section G of [prd.md § 7.2](prd.md#72-code-walk-proof-skeleton).
 
 ### 8.4 TestFlight checklist (direct write)
 
+**These steps are post-launch.** They run after D1 ships and the operator flips the flag under D6.
+
 **Every real add, drop or claim below is a production platform write.** Each one needs:
 - the operator's approval when it runs;
 - the operator's **test league** only;
@@ -481,9 +483,9 @@ There are no ESPN, MFL or Fleaflicker steps: they keep `NO_ADD_REASON`, and they
 | `legal-lead` | **R15.8 rulings folded:** D10 and D11 confirmed; D5 ruled (v1/v2 copy); D12 ruled (delete with the account). Legal reviews the build against R15. Its remaining items are the LEG-L12 [PRO] confirmations under R15.7 | `head-bizops` |
 | ux-lead | K-F1 to K-F7 as landed (§2, §5), and TestFlight 21–29 | `head-product` |
 | `design-lead` | The checkbox, step, window line, result and refusal states, the Settings row, and the D2 alert | `platforms-pm` |
-| `marketing-lead` | All words except the R15.8 consent copy: button labels, the connect-step line, result lines and the D2 alert (through `platforms-pm`). None may contradict D10(a)–(c) or imply a move can be undone. The secondary button's words (§2.4) are **open**, waiting on the `head-bizops` slot | `head-bizops` |
+| `marketing-lead` | All words except the R15.8 consent copy: button labels, the connect-step line, result lines and the D2 alert (through `platforms-pm`). None may contradict D10(a)–(c) or imply a move can be undone. Already approved by `legal-lead`: the secondary button ("Do it in Sleeper instead", `s351.secondary`) and the connect line (`s351.connect`). Both ship with D1, post-launch | `head-bizops` |
 | `analytics-lead` | The seven §6 events: **granted** 2026-10-20 (G1–G7, F1–F5). Reviews the addenda | `platforms-pm` |
-| `trades-pm` | The K-F5 deck invalidation (#339 §5.1), **handed off** as I-2/U2 | `head-product` |
+| `trades-pm` | The K-F5 deck invalidation (#339 §5.1): **handed off** as I-2/U2, in #339's spec, waiting for D1 | `head-product` |
 | `platforms-pm` | The write-feature-gate pass and the risk-register row | — |
 | `platforms-eng` / `eng-architect` | `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet): spike, route and adapter. Also the two table shapes | `head-eng` |
 
