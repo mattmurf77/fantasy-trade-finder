@@ -226,13 +226,25 @@ There is no 429 or backoff handling on any Sleeper path today. `_sleeper_get` re
 - **Fixture mode** (`_SLEEPER_FIXTURES_DIR`) goes **through** the circuit (as built), so tests exercise the real
   path. A cassette may carry `"__headers__": {"Retry-After": "30"}` next to `"__http_error__": 429`
   (`server.py:611-612`). No checked-in cassette holds a 429, so the UI-test worlds are unaffected.
-- **Never a clobber amplifier** (added in the build). Both `_fetch_sleeper_traded_picks` and `_fetch_sleeper_drafts`
-  fail soft to `[]`. While the circuit is open, that `[]` would have reached `sync_draft_picks`' REPLACE and reset
-  every traded pick to its original team. `_sync_sleeper_owned_picks` now returns `None` (prior snapshot kept)
-  when the circuit is open after those reads (`server.py:14354`). `_refresh_league_draft_status` keeps the cached
-  verdict likewise (`server.py:19224-19229`).
-  - **Pre-existing, not fixed here:** a non-429 flake on `traded_picks` (5xx, timeout) still returns `[]`, and the
-    sync still replaces with it. That's a G-015-class hazard on `main` today; reported to head-eng.
+- **Never a clobber amplifier** (added in the build). `_fetch_sleeper_traded_picks` returns `None` on any failure,
+  the open circuit included (R10, below), so `_sync_sleeper_owned_picks` keeps the prior snapshot instead of
+  replace-syncing on a skipped read. `_refresh_league_draft_status` keeps the cached verdict while the circuit is
+  open (`server.py:19224-19229` at `9d998886`). `_fetch_sleeper_drafts` keeps its documented D-089 fail-soft `[]`.
+- **R10, fixed in PR-A (head-eng ruling, 2026-10-23).** It was a data-loss bug on `main`: a failed `traded_picks`
+  read returned `[]`, and the owned-pick REPLACE-sync wrote that as "every traded pick is back with its original
+  team".
+  - Contract: the fetcher returns `None` on ANY failure (HTTP error, timeout, unparseable or non-list body, the
+    open circuit, a non-Sleeper id), distinct from a successful `[]`.
+  - Every caller treats `None` as an error. **The callers (all three):**
+    - `server.py:14315` (`_sync_sleeper_owned_picks`): skips, keeping the stored picks.
+    - `server.py:19601` (`_sleeper_propose_core`): used by `/api/trades/propose` **and** the overhaul send
+      (`sleeper_propose=_sleeper_propose_core`, `server.py:33628`). A pick-bearing send refuses before any provider
+      call.
+    - `server.py:32080` (`/api/trades/validate`): returns nothing checked.
+  - Other `traded_picks` readers don't use this fetcher, and none feeds a replace or a send on `[]`:
+    - `overhaul_api.py:153` (`live_pick_owners`) is already `None` on failure;
+    - `prepared_trade_cohort.py:299` raises `SourceUnavailable`;
+    - `draft_board_service.py:309` is Draft Room display only.
 - Only Sleeper-side status codes are logged (league ids are safe to log). No token is involved: these are public
   endpoints.
 
@@ -320,6 +332,27 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
   | `backend/tests/test_session_init_sleeper_calls.py` (updated, 5) | `test_daemon_makes_one_rosters_and_one_meta_call` (now rosters 1, meta 1, users 1, traded_picks 1, drafts 1, transactions ≤ 2, GraphQL 1, **sum ≤ 8**, state `fresh`); `test_numeric_mfl_league_makes_no_sleeper_calls_on_s0_paths` (new) | The D-178 budget after S0. A numeric MFL id makes no rosters/users/meta/picks/GraphQL call and gets no state row. Its `transactions` read is the pre-existing trade-capture `isdigit()` leak (R8), asserted as the only allowed key so a later fix still passes |
   | `backend/tests/test_co_owner_rosters.py` (updated in the replace commit) | The capture also intercepts `replace_league_members_snapshot` | One row per roster, still keyed on the primary owner |
 
+  | `backend/tests/test_traded_picks_unavailable.py` (new, 11; R10) | `test_fetcher_none_on_failure_and_list_on_success`, `test_drafts_fetcher_keeps_its_fail_soft_empty_list`, `test_owned_pick_sync_failure_keeps_existing_picks[5xx\|timeout\|circuit_open]`, `test_successful_empty_traded_picks_still_replace_syncs`, `test_session_init_traded_picks_5xx_keeps_picks_and_marks_stale`, `test_propose_with_picks_and_failed_fetch_refuses_before_graphql`, `test_propose_without_picks_is_unaffected`, `test_validate_with_picks_and_failed_fetch_reports_nothing_checked`, `test_validate_without_picks_is_unaffected` | A failure keeps `draft_picks` byte-identical: a 5xx, a timeout and an open circuit, directly and through session init (state `stale` / `picks_unavailable`). A successful `[]` still replace-syncs (the traded pick returns to its original team). Propose with picks → 502 `sleeper_write_failed` / `kind: "network"`, `detail == message`, **GraphQL propose never called**. Validate → `{"ok": true, "checked": false, "warnings": []}`, never a false `pick_moved`. Sends and validates without picks never make the read. `drafts` stays fail-soft `[]`. **Sabotage-proven:** with the three `None` guards disabled, 6 of the 11 fail |
+
+  **R10 code-walk (the `None` path, file:line at the R10 commit):**
+  1. `_fetch_sleeper_traded_picks` (`server.py:17149-17173`) returns `None` for a non-Sleeper id (`:17166-17167`),
+     any exception from `_sleeper_get` (an HTTP error, a timeout, or `SleeperRateLimited` while the circuit is
+     open; `:17168-17172`, logging the exception type only) and a non-list body (`:17173`).
+  2. **Owned-pick sync:** `_tp` (`:14315`) → `if _tp is None` (`:14323-14329`) returns `None` before `/drafts`,
+     the slot-order write or `sync_draft_picks`, so `draft_picks` is untouched. In session init that sets
+     `_s0_picks_ok = False` (`:22962`) → `record_outcome` → `stale` / `picks_unavailable`.
+  3. **Propose / overhaul send:** in `_sleeper_propose_core`, only on a pick-bearing send (`:19595`), `traded`
+     (`:19601`) → `if traded is None` (`:19602-19609`) returns the existing 502 body before the window reads and
+     before `_sleeper_write.propose_trade`. The overhaul send reaches the same lines through
+     `sleeper_propose=_sleeper_propose_core` (`:33628`).
+  4. **Validate:** `traded` (`:32080`) → `if traded is None` (`:32081-32085`) returns the existing unreachable outcome
+     (`checked: false`), the same body the route already returns when meta/rosters can't be read.
+  - **Docs:** `docs/integrations/sleeper.md` §4 gains the `traded_picks` row; §4.1 is reworded.
+  - **Owed to `docs/api-reference.md`** (head-eng reviews; not edited here), on the propose 502 row, append: "Also
+    returned, before any provider call, when a pick-bearing send's live `traded_picks` read fails (`kind:
+    "network"`, nothing sent; S0/R10)." On the validate row, append to "`checked:false` = platform data
+    unreachable": "including a pick-bearing validate whose `traded_picks` read fails."
+
   **Moved out of PR-A:**
   - `test_tap_path_no_sleeper.py` (the AC-L3 guard) needs B.4's switches, which are trades-eng's S0-serve (§Q7).
   - The fingerprint and hook cases go to PR-B.
@@ -362,7 +395,7 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
      - Every later read in the process raises `SleeperRateLimited` from `check()` (`sleeper_http.py:80-86`)
        before any I/O.
      - In session init that lands at step 4 with `last_error_code='rate_limited'`. In the daemon it reaches the
-       pick sync, which returns `None` (`server.py:14354`) → `picks_unavailable`, and draft status keeps its
+       pick sync, whose `traded_picks` read returns `None` (`server.py:14323`) → `picks_unavailable`, and draft status keeps its
        verdict (`server.py:19224-19229`).
      - The urllib-direct readers share it: `trade_block_service.py:87,111`, `sleeper_trades_service.py:80`,
        `suggestion_telemetry.py:300`.
@@ -446,10 +479,11 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
 - **R9, members-write race (residual, PR-A):** two concurrent inits for one league can commit their
   `league_members` snapshots out of fetch order. Only `refreshed_at` is monotonic. The next init corrects it
   (B.3 step 4).
-- **R10, a pre-existing pick clobber on non-429 flakes:** `_fetch_sleeper_traded_picks` returns `[]` on any
-  failure, and `_sync_sleeper_owned_picks` still replace-syncs with it when the circuit is closed (5xx, timeout).
-  PR-A closes only the 429 case. The full fix changes that fetcher's contract (it's shared with the send path at
-  `server.py:19591` at HEAD), so it goes to head-eng.
+- **R10, a pick clobber on non-429 flakes: FIXED in PR-A** (2026-10-23, B.7). The validate side uses the existing
+  `checked: false` outcome rather than a blocking warning, because no existing validate warning code says "pick
+  ownership couldn't be confirmed" (`pick_moved` would be a false claim). A blocking warning needs a new code,
+  which is an API contract change, so it's left to the coordinator / head-eng. The send itself is hard-refused by
+  propose either way.
 - **R8, an existing G-030 trap, observed and not fixed here:** the trade-capture gate at `server.py:22918` uses a
   bare `isdigit()`, so an MFL numeric id reaches the Sleeper transactions sweep. It's out of S0 scope; flagged to
   head-eng.

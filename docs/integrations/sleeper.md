@@ -255,6 +255,7 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
 | Sleeper unreachable (`URLError`) | `backend/server.py:13693-13696`, and per-endpoint elsewhere | `503 sleeper_unavailable` |
 | Empty leagues list because Sleeper failed vs. genuinely no leagues | `backend/server.py:13724-13730` | `503` only when BOTH the live fetch failed AND no locally-cached leagues exist — an empty-but-successful response is not conflated with an outage |
 | Rosters/`traded_picks`/`drafts`/`league_players` fetch failure (best-effort helpers) | `backend/server.py:10178-10219`, `backend/trade_block_service.py`, `backend/sleeper_trades_service.py` | Fail-soft to `[]` / `None` — the caller degrades to "previous snapshot kept" or "nothing to show," never a fabricated result |
+| `traded_picks` read fails (any HTTP error, timeout, non-list body, circuit open) | `server._fetch_sleeper_traded_picks` returns **`None`**, distinct from a successful `[]` (S0 / R10, 2026-10-23) | The owned-pick replace-sync **skips** and keeps the stored `draft_picks` (it used to write `[]` as "every pick back with its original team"). A pick-bearing `/api/trades/propose` (and the overhaul send, which calls the same core) refuses before any provider call with the route's existing `502 sleeper_write_failed`, `kind: "network"`. `/api/trades/validate` returns `checked: false`. A send without picks never makes the read. `drafts` keeps its fail-soft `[]` (D-089) |
 | SSL cert store unavailable (macOS dev) | `backend/server.py:447-471,557-569` | One-time fallback to an unverified SSL context with a logged warning; retried automatically on the same request |
 | Fixture miss in `FTF_TEST_MODE`/replay mode | `backend/server.py:527-539` | Raises `HTTPError(599, "ftf-fixture-miss")` — a **test bug**, never routed as a real Sleeper failure |
 | JWT expired (`exp` claim past) | `backend/server.py:11960-11961` (link), `12088-12090` (propose) | `400 token_expired` (link) / `409 sleeper_expired` (propose, credential deleted) |
@@ -285,9 +286,9 @@ readers (`trade_block_service._fetch_rosters` / `fetch_league_players`,
   read). There are **no in-line retries or sleeps**: the app runs one sync worker, and a sleeping request would
   stall every tap.
 - **A success resets `n`.** Reads only: `sleeper_write.py` (GraphQL writes) is not gated.
-- **Never a clobber amplifier.** Both `traded_picks` and `drafts` fail soft to `[]`, so while the circuit is open
-  the owned-pick sync returns `None` (the prior `draft_picks` snapshot is kept) instead of replace-syncing on
-  skipped reads, and `_refresh_league_draft_status` keeps the cached verdict.
+- **Never a clobber amplifier.** While the circuit is open, `_fetch_sleeper_traded_picks` returns `None` (as on any
+  failure, §4), so the owned-pick sync keeps the prior `draft_picks` snapshot instead of replace-syncing on a
+  skipped read, and `_refresh_league_draft_status` keeps the cached verdict.
 - The fixture seam goes through the circuit too. A cassette `{"__http_error__": 429, "__headers__":
   {"Retry-After": "30"}}` replays a throttled read.
 - **Logs:** `sleeper 429: circuit open <s> league=<id> status=429 strikes=<n>`. League id and status only, never

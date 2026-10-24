@@ -14320,6 +14320,13 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                     "unavailable (keeping prior snapshot)", league_id,
                     "rosters" if not _prosters else "league meta")
         return None
+    if _tp is None:
+        # S0 / R10 — traded_picks couldn't be read (any failure, incl. the open
+        # 429 circuit). Replace-syncing without it would reset every traded pick
+        # to its original team (the G-015 clobber class): keep the prior snapshot.
+        log.warning("  owned-pick sync skipped for %s — Sleeper traded_picks "
+                    "unavailable (keeping prior snapshot)", league_id)
+        return None
     _rid_to_user = {
         str(r.get("roster_id")): str(r.get("owner_id") or "")
         for r in _prosters if isinstance(r, dict)
@@ -14347,14 +14354,6 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     # class for the whole league (the replace-sync made that league-wide).
     # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = drafts if drafts is not None else _fetch_sleeper_drafts(league_id)
-    # S0 — both fetchers fail soft to []. While the 429 circuit is open that
-    # [] is a skipped read, not data: replace-syncing on it would reset every
-    # traded pick to its original team (the G-015 clobber class). Keep the
-    # prior snapshot; the next init retries.
-    if (traded_picks is None or drafts is None) and _sleeper_http.is_open():
-        log.warning("  owned-pick sync skipped for %s — Sleeper circuit open "
-                    "(keeping prior snapshot)", league_id)
-        return None
     _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
     if not _drafts:
         _cached = _sleeper_cached_draft_verdict(league_id)
@@ -17147,20 +17146,31 @@ def _fetch_league_rosters(league_id: str):
     return rosters if isinstance(rosters, list) else None
 
 
-def _fetch_sleeper_traded_picks(league_id: str) -> list[dict]:
-    """Public traded-picks list for a Sleeper league (fail-soft → []).
+def _fetch_sleeper_traded_picks(league_id: str) -> list[dict] | None:
+    """Public traded-picks list for a Sleeper league, or None when it can't be read.
 
     Endpoint: https://api.sleeper.app/v1/league/<id>/traded_picks — unauth,
     same trust level as _fetch_league_rosters. Each entry is roster_id-keyed:
     {round, season(str), roster_id(orig), owner_id(current), previous_owner_id}.
+
+    S0 / R10 — None on ANY failure (HTTP error, timeout, unparseable or
+    non-list body, the open 429 circuit, a non-Sleeper id): "ownership
+    unknown", distinct from a successful `[]` ("no pick has been traded"). It
+    used to fail soft to `[]`, which the owned-pick REPLACE-sync then wrote as
+    "every pick is back with its original team" and a pick-bearing send
+    encoded as if nothing had moved. Every caller treats None as an error:
+    `_sync_sleeper_owned_picks` skips (keeps the prior snapshot), the propose
+    core refuses before any provider call, and validate reports nothing
+    checked.
     """
     if not league_id or not str(league_id).isdigit():
-        return []
+        return None
     try:
         tp = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/traded_picks")
-    except Exception:
-        return []
-    return tp if isinstance(tp, list) else []
+    except Exception as e:
+        log.warning("  traded_picks unavailable for %s: %s", league_id, type(e).__name__)
+        return None
+    return tp if isinstance(tp, list) else None
 
 
 def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
@@ -19589,6 +19599,14 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # never follow the `picks.assign_tradeable` pricing flag.
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
+        if traded is None:
+            # S0 / R10 — pick ownership is unknown, so the send can't be checked:
+            # refuse before any provider call, never send as if no pick had moved.
+            # The route's existing 502 provider-error shape (`detail` == `message`).
+            _msg = ("Sleeper's draft-pick ownership couldn’t be confirmed right now, so "
+                    "nothing was sent. Try again in a moment.")
+            return {"error": "sleeper_write_failed", "kind": "network",
+                    "detail": _msg, "message": _msg}, 502
         # #428 — third ground truth: Sleeper's tradable window. A spent
         # current-season pick keeps its grid row (one flaked drafts read
         # re-populates it) AND its traded_picks holder, so only the live
@@ -32060,6 +32078,11 @@ def trades_validate():
         # Literal platform read, same reason as the propose route (#328 precedent).
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
+        if traded is None:
+            # S0 / R10 — pick ownership is unknown: never judge the picks against
+            # an empty overlay. The existing unreachable outcome (checked:false,
+            # nothing validated); the propose route hard-refuses the send.
+            return jsonify({"ok": True, "checked": False, "warnings": []})
         # #428 — the tradable window; `meta` is already in hand here, so this
         # is one extra `/drafts` read, only on a pick-bearing validate.
         window = _sleeper_pick_window_for_send(league_id, meta, traded)
