@@ -1,6 +1,6 @@
 """Referral loop D-1 — device-aware install CTA on the join and share landings.
 
-Spec: docs/plans/referral-loop/prd.md @ 1514bc4e (§5, J2, FR-7, FR-8, FR-25,
+Spec: docs/plans/referral-loop/prd.md @ 91f1cc29 (§5, J2, FR-7, FR-8, FR-25,
 §8.2, §10, §11), the event contract (PR #350) and engagement-eng's D-1 design
 (§0 / §0b rulings, §7 evidence plan). Event-registry checks (#350
 Verification) live in test_analytics_taxonomy_referral_loop.py.
@@ -30,6 +30,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import create_engine, insert, select, text, update
+from sqlalchemy.pool import StaticPool
 
 import backend.analytics_queries as aq
 import backend.analytics_taxonomy as at
@@ -50,7 +51,8 @@ T_VALID = "AbCdEf123456"
 T_EXPIRED = "ExPiReD12345"
 T_MISMATCH = "MiSmAtCh1234"
 T_UNKNOWN = "UnKnOwN12345"
-IOS_URL = "https://testflight.apple.com/join/AbCdEfGh"
+IOS_URL = "https://testflight.apple.com/join/AbCdEfGh"          # the beta host
+STORE_URL = "https://apps.apple.com/us/app/fleeced/id1234567890"   # the store host
 PRIOR_ACTIVE = "2026-01-01T00:00:00+00:00"
 
 UA = {
@@ -120,10 +122,16 @@ A2_NOTE = ("The iPhone beta isn&#x27;t open to the public yet. Already have "
            "it? Tap the invite again, or rescan its code.")
 SHARE_IOS_NOTE = ("The iPhone beta isn&#x27;t open to the public yet. Already "
                   "have it? Open Fleeced.")
-ANDROID_NOTE = "Fleeced runs on iPhone and desktop web for now."
+ANDROID_NOTE = "Available on iPhone and desktop web for now."
+OG_DESC = ("Rank your players on Fleeced and see trades built to work for both "
+           "sides. Works with Sleeper, ESPN and MFL.")
+STORE_CTA = "Get the iPhone app"
+STORE_HELP = "Opens the App Store."
+IPAD_STORE = "On an iPad? Get the iPhone app, then tap the invite again."
 # Gone in round 2 (must never render again).
 OLD_STRINGS = ("On an iPhone or iPad?", "Installed? Go back to the chat",
-               "Open the invite in the app")
+               "Open the invite in the app", "Fleeced runs on iPhone",
+               "where both sides come out ahead. Works with")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -133,7 +141,7 @@ OLD_STRINGS = ("On an iPhone or iPad?", "Installed? Go back to the chat",
 @pytest.fixture(autouse=True)
 def env(tmp_path, monkeypatch):
     """A throwaway DB, no Sleeper egress, the URL unset, flags OFF."""
-    engine = create_engine(f"sqlite:///{tmp_path / 'join.db'}",
+    engine = create_engine("sqlite://", poolclass=StaticPool,
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
@@ -272,11 +280,70 @@ def test_ios_install_url_https_only(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="trade_finder"):
         for bad in ("http://testflight.apple.com/join/x",
                     "javascript:alert(1)", "testflight.apple.com/join/x",
-                    "//evil.example/x"):
+                    "//evil.example/x", "https://evil.example/join/x",
+                    "https://testflight.apple.com.evil.example/x",
+                    "https://evil.example/https://apps.apple.com/x",
+                    "https://play.google.com/store/apps/x",
+                    "https://testflight.apple.com@evil.example/x"):
             monkeypatch.setenv("IOS_INSTALL_URL", bad)
             assert server.ios_install_url() is None, bad
+            server.ios_install_url()                         # still once
     warnings = [r for r in caplog.records if "IOS_INSTALL_URL" in r.getMessage()]
-    assert len(warnings) == 1, "a bad value must warn exactly once"
+    assert len(warnings) == 1, "a bad value must warn once per process"
+    monkeypatch.setenv("IOS_INSTALL_URL", STORE_URL)
+    assert server.ios_install_url() == STORE_URL
+    assert server._ios_install_kind(STORE_URL) == "store"
+    assert server._ios_install_kind(IOS_URL) == "beta"
+
+
+# ── AC-7g: the label pair follows the IOS_INSTALL_URL host ─────────────────
+
+def test_store_host_renders_the_store_pair_on_the_landing(monkeypatch):
+    _set_flags(monkeypatch, *LANDING)
+    monkeypatch.setenv("IOS_INSTALL_URL", STORE_URL)
+    html = _get(f"/app/league/join/{LEAGUE}?t={T_VALID}", ua=UA["iphone"]).get_data(as_text=True)
+    assert f'href="/app/league/join/{LEAGUE}/go/ios?t={T_VALID}">{STORE_CTA}</a>' in html
+    assert STORE_HELP in html and STEP1 in html and STEP2 in html
+    assert IOS_CTA not in html and IOS_HELP not in html
+    html = _get(f"/app/league/join/{LEAGUE}?t={T_VALID}").get_data(as_text=True)
+    assert f">{IPAD_STORE}</a>" in html and IPAD not in html
+    assert '<svg class="qr"' in html
+    r = _get(f"/app/league/join/{LEAGUE}/go/ios", ua=UA["iphone"])
+    assert r.status_code == 302 and r.headers["Location"] == STORE_URL
+
+
+def test_beta_host_renders_the_beta_pair(monkeypatch):
+    _set_flags(monkeypatch, *LANDING)
+    monkeypatch.setenv("IOS_INSTALL_URL", IOS_URL)
+    html = _get(f"/app/league/join/{LEAGUE}", ua=UA["iphone"]).get_data(as_text=True)
+    assert f">{IOS_CTA}</a>" in html and IOS_HELP in html
+    assert STORE_CTA not in html and STORE_HELP not in html
+    html = _get(f"/app/league/join/{LEAGUE}").get_data(as_text=True)
+    assert f">{IPAD}</a>" in html and IPAD_STORE not in html
+
+
+@pytest.mark.parametrize("value", [
+    "https://evil.example/join/x", "https://play.google.com/store/apps/x",
+    "http://apps.apple.com/us/app/x", "https://testflight.apple.com.evil.example/x",
+])
+def test_other_host_is_exactly_the_unset_states(monkeypatch, env, value):
+    """AC-7g: any other host renders AC-7c's unset states on every user agent,
+    /go/ios 404s, and /s/* takes its unset branch too."""
+    _set_flags(monkeypatch, *(LANDING + ("growth.share_landing",)))
+    pages = {}
+    for key in UA:
+        monkeypatch.delenv("IOS_INSTALL_URL", raising=False)
+        unset = _get(f"/app/league/join/{LEAGUE}?t={T_VALID}", ua=UA[key]).get_data(as_text=True)
+        monkeypatch.setenv("IOS_INSTALL_URL", value)
+        other = _get(f"/app/league/join/{LEAGUE}?t={T_VALID}", ua=UA[key]).get_data(as_text=True)
+        assert other == unset, key
+        assert value not in other
+        pages[key] = other
+    assert _get(f"/app/league/join/{LEAGUE}/go/ios", ua=UA["iphone"]).status_code == 404
+    sid = "pkgOther1"
+    assert db_module.create_shared_package(sid, "u_sharer", ["4034"], ["7564"])
+    html = _get(f"/s/p/{sid}", ua=UA["iphone"]).get_data(as_text=True)
+    assert SHARE_IOS_NOTE in html and value not in html
 
 
 @pytest.mark.parametrize("raw,ok", [
@@ -1332,6 +1399,22 @@ def test_share_cta_matrix_flag_on(monkeypatch, env, ua_key, url_set, expect):
         # FR-25: no re-tap line (a share page carries no invite), no QR (GB-02).
         assert "Tap the invite again" not in html and "rescan" not in html
         assert "<svg" not in html
+
+
+@pytest.mark.parametrize("value,cta,help_", [
+    (IOS_URL, IOS_CTA, IOS_HELP), (STORE_URL, STORE_CTA, STORE_HELP)])
+def test_share_iphone_pair_follows_the_host(monkeypatch, env, value, cta, help_):
+    """AC-25 x AC-7g on /s/p and /s/trade: the iPhone label and help line by
+    host, href exactly IOS_INSTALL_URL, no re-tap line."""
+    _set_flags(monkeypatch, *(SHARE_OPEN + LANDING))
+    monkeypatch.setenv("IOS_INSTALL_URL", value)
+    for kind, path in _share_paths(env):
+        if kind == "tiers":
+            continue
+        html = _get(path, ua=UA["iphone"]).get_data(as_text=True)
+        assert f'<a class="cta" href="{value}">{cta}</a>' in html, path
+        assert f"<p>{help_}</p>" in html
+        assert "Tap the invite again" not in html
 
 
 def test_share_trade_pages_keep_their_chrome(monkeypatch, env):

@@ -12693,7 +12693,7 @@ def terms_page():
 # Join path — referral loop D-1: the device-aware install CTA
 # ---------------------------------------------------------------------------
 # Spec: docs/plans/referral-loop/prd.md §5, FR-7, FR-8, FR-25, §8.2 (branch
-# plan/referral-loop @ 1514bc4e), the event contract
+# plan/referral-loop @ 91f1cc29), the event contract
 # docs/business/analytics/2026-10-15-referral-loop-events.md (PR #350) and
 # engagement-eng's D-1 design (§0, §0b). Helpers for GET /app/league/join/<id>,
 # its /go/<cta> click-through, and the /s/* CTA. They sit beside the route
@@ -12727,16 +12727,18 @@ PREVIEW_UA_TOKENS: tuple[str, ...] = (
 _OTHER_MOBILE_UA_TOKENS: tuple[str, ...] = ("Mobi", "Opera Mini")
 
 # Every word on the landing and the /s/* CTA: marketing-lead's proposed
-# gp.join.* strings (marketing-inputs.md @ 1514bc4e: §A, the lab addendum, its
-# FR-25 table and the ux-lead R-F1/R-F3 rows), verbatim and all pending the
-# operator's approval (D-5). One dict so a copy change is one hunk.
+# gp.join.* strings (marketing-inputs.md: §A, the lab addendum, its FR-25 table
+# and the ux-lead R-F1/R-F3 rows; the 2026-10-23 copy batch's m4.348.* and
+# m3.web.og_desc rows, as folded into PRD @ 91f1cc29), verbatim and all pending
+# the operator's approval (D-5). One dict so a copy change is one hunk. The
+# ".beta" / ".store" pairs follow the IOS_INSTALL_URL host (AC-7g).
 _JOIN_COPY = {
     "page_title":         "{league} on Fleeced: Dynasty Trade Finder",
     "page_title_none":    "Your league on Fleeced: Dynasty Trade Finder",
     "og_title":           "{league}: trades that work for both sides",
     "og_title_none":      "Dynasty trades that work for both sides",
-    "og_desc":            ("Rank your players on Fleeced and see trades where both "
-                           "sides come out ahead. Works with Sleeper, ESPN and MFL."),
+    "og_desc":            ("Rank your players on Fleeced and see trades built to "
+                           "work for both sides. Works with Sleeper, ESPN and MFL."),
     "og_site":            "Fleeced: Dynasty Trade Finder",
     "headline_both":      "{name} invited you to {league}",
     "headline_name":      "{name} invited you to their league",
@@ -12746,8 +12748,10 @@ _JOIN_COPY = {
                            "both sides come out ahead."),
     "valueprop_none":     ("Rank your players, then see trades in your league "
                            "where both sides come out ahead."),
-    "cta_ios":            "Get the iOS beta",
-    "cta_ios_help":       "Installs through Apple's TestFlight app.",
+    "cta_ios.beta":       "Get the iOS beta",
+    "cta_ios_help.beta":  "Installs through Apple's TestFlight app.",
+    "cta_ios.store":      "Get the iPhone app",
+    "cta_ios_help.store": "Opens the App Store.",
     "step1":              "Install Fleeced",
     "step2":              "Tap the invite again, or rescan its code, to join {league}.",
     "step2_none":         ("Tap the invite again, or rescan its code, to join "
@@ -12762,9 +12766,11 @@ _JOIN_COPY = {
     "qr_title":           "Join on your iPhone",
     "qr_help":            "Scan with your iPhone camera. After installing, scan again to join.",
     "qr_label":           "QR code: opens this invite on your iPhone",
-    "ipad":               "On an iPad? Get the iOS beta, then tap the invite again.",
+    "ipad.beta":          "On an iPad? Get the iOS beta, then tap the invite again.",
+    # growth-pm's placeholder for the store form, pending marketing-lead (D-5).
+    "ipad.store":         "On an iPad? Get the iPhone app, then tap the invite again.",
     "ext_lead":           "Have the Fleeced extension for Chrome or Edge?",
-    "android_note":       "Fleeced runs on iPhone and desktop web for now.",
+    "android_note":       "Available on iPhone and desktop web for now.",
 }
 
 # The desktop QR (FR-7, AC-7f; design-lead 2026-10-15): error correction M, a
@@ -12776,6 +12782,10 @@ _QR_MIN_TOTAL_PX = 200
 
 # /go/<cta> → the `cta` value of the invite_landing_cta event. Closed set.
 _JOIN_GO_CTAS = {"ios": "ios_install", "web": "web_app"}
+
+# AC-7g: the only hosts IOS_INSTALL_URL may point at, and the label pair each
+# one picks. Any other host (or a non-https value) is treated as unset.
+_IOS_INSTALL_HOSTS = {"testflight.apple.com": "beta", "apps.apple.com": "store"}
 
 _ios_install_url_warned = False
 
@@ -12810,17 +12820,31 @@ def device_class(ua: str | None) -> str:
 
 def ios_install_url() -> str | None:
     """IOS_INSTALL_URL, read per request so setting or unsetting it needs no
-    deploy (PRD §5). Only an https:// value counts; anything else is treated
-    as unset and logged once per process. No install URL lives in code."""
+    deploy (PRD §5). It counts only as an https:// URL on testflight.apple.com
+    or apps.apple.com (AC-7g); any other value is treated as unset everywhere
+    and logged once per process. No install URL lives in code."""
     global _ios_install_url_warned
     raw = (os.environ.get("IOS_INSTALL_URL") or "").strip()
-    if raw.startswith("https://"):
+    if _ios_install_kind(raw):
         return raw
     if raw and not _ios_install_url_warned:
         _ios_install_url_warned = True
-        log.warning("IOS_INSTALL_URL is set but not an https:// URL; "
-                    "treating it as unset")
+        log.warning("IOS_INSTALL_URL is set but is not an https:// URL on "
+                    "testflight.apple.com or apps.apple.com; treating it as unset")
     return None
+
+
+def _ios_install_kind(url: str | None) -> str | None:
+    """'beta' (testflight.apple.com) | 'store' (apps.apple.com) | None. The
+    label pair follows the host, so launch day's switch to the App Store URL
+    flips the words with no deploy and no date in code (AC-7g)."""
+    try:
+        parts = urllib.parse.urlsplit(url or "")
+    except ValueError:
+        return None
+    if parts.scheme != "https":
+        return None
+    return _IOS_INSTALL_HOSTS.get(parts.hostname or "")
 
 
 def _should_record_landing() -> bool:
@@ -12993,6 +13017,7 @@ def _render_join_landing(*, league_id: str, league_name: str | None,
     `ref`) inside the onward /go/ hrefs, URL-encoded — never as text — and
     inside the desktop QR's payload."""
     c, esc = _JOIN_COPY, _html.escape
+    kind = _ios_install_kind(ios_url)    # beta | store; None when unset
     path = "/app/league/join/" + urllib.parse.quote(league_id, safe="")
     go_ios = path + "/go/ios" + ("?" + urllib.parse.urlencode({"t": t}) if t else "")
     # The closed contract (C4): `t`, else the inbound legacy `ref`; nothing else.
@@ -13030,8 +13055,8 @@ def _render_join_landing(*, league_id: str, league_name: str | None,
         cta = (f'<ol class="steps">\n'
                f'      <li><span class="marker">1</span><div>'
                f'<h2 class="step-title">{esc(c["step1"])}</h2>'
-               f'<a class="primary" href="{esc(go_ios)}">{esc(c["cta_ios"])}</a>'
-               f'<p class="help">{esc(c["cta_ios_help"])}</p></div></li>\n'
+               f'<a class="primary" href="{esc(go_ios)}">{esc(c[f"cta_ios.{kind}"])}</a>'
+               f'<p class="help">{esc(c[f"cta_ios_help.{kind}"])}</p></div></li>\n'
                f'      <li><span class="marker">2</span><div>'
                f'<p>{esc(step2)}</p></div></li>\n'
                f'    </ol>')
@@ -13044,7 +13069,7 @@ def _render_join_landing(*, league_id: str, league_name: str | None,
                f'      <p class="tick-label">{esc(c["qr_title"])}</p>\n'
                f'      {_qr_svg(qr_payload)}\n'
                f'      <p class="help">{esc(c["qr_help"])}</p>\n'
-               f'      <a class="ghost" href="{esc(go_ios)}">{esc(c["ipad"])}</a>\n'
+               f'      <a class="ghost" href="{esc(go_ios)}">{esc(c[f"ipad.{kind}"])}</a>\n'
                f'    </section>\n'
                f'    <p class="ext-lead">{esc(c["ext_lead"])}</p>\n'
                f'    <a class="btn-secondary" href="{esc(go_web)}">{esc(c["cta_desktop"])}</a>')
@@ -13133,8 +13158,9 @@ def _share_cta_html(*, cta_text: str, share_kind: str) -> str:
     if device == "ios":
         url = ios_install_url()
         if url:
-            return (f'<a class="cta" href="{esc(url)}">{esc(c["cta_ios"])}</a>\n'
-                    f'    <p>{esc(c["cta_ios_help"])}</p>')
+            kind = _ios_install_kind(url)
+            return (f'<a class="cta" href="{esc(url)}">{esc(c[f"cta_ios.{kind}"])}</a>\n'
+                    f'    <p>{esc(c[f"cta_ios_help.{kind}"])}</p>')
         return f'<p>{esc(c["share_ios_unset_note"])}</p>'
     return f'<p>{esc(c["android_note"])}</p>'
 
