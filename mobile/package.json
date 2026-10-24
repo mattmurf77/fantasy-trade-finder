@@ -84,6 +84,7 @@
     "test:position-split-parity": "node tests/check-position-split-parity.js",
     "test:premium-import": "node tests/check-premium-import.js",
     "test:presentation-v2": "node tests/check-presentation-v2.js",
+    "test:privacy-manifest": "node tests/check-privacy-manifest.js",
     "test:quickset-hold": "node tests/check-quickset-hold.js",
     "test:quickset-via": "node tests/check-quickset-via.js",
     "test:rank-nav-exit": "node tests/check-rank-nav-exit.js",
