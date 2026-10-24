@@ -2633,6 +2633,12 @@ referrals_table = Table("referrals", metadata,
     Column("joined_at",             String),
     Column("activated_at",          String),
     Column("rewarded_at",           String),
+    # Referral loop D-1 (PRD FR-8, §9): the landing-open record, ISO UTC,
+    # written only by record_referral_landing_open().
+    Column("opened_at",             String),                  # first human landing open
+    Column("last_opened_at",        String),                  # latest human landing open
+    Column("open_count",            Integer, server_default="0"),  # human landing opens
+    Column("unfurled_at",           String),                  # first link-preview fetch
     UniqueConstraint("invite_token", name="uq_referral_token"),
     UniqueConstraint("referrer_user_id", "referred_user_id",
                      name="uq_referral_pair"),
@@ -3557,6 +3563,13 @@ def _migrate_db() -> None:
         # ── team overhaul, all-platform sends (2026-09-07): MFL/ESPN cores
         # report a status word without a transaction id.
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
+        # ── referral loop D-1 (FR-8): landing-open stamps on the minted row.
+        # NULL until the first open / unfurl; open_count's DEFAULT matches the
+        # Table's server_default (the writer COALESCEs anyway).
+        ("referrals",          "opened_at",                 "VARCHAR"),
+        ("referrals",          "last_opened_at",            "VARCHAR"),
+        ("referrals",          "open_count",                "INTEGER DEFAULT 0"),
+        ("referrals",          "unfurled_at",               "VARCHAR"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
@@ -4423,9 +4436,18 @@ def record_event(
     source:      str | None = None,
     props:       dict | None = None,
     tz:          str | None = None,
+    platform:    str | None = None,
+    touch_user:  bool = True,
 ) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
+
+    `platform` (e.g. 'server') is written to user_events.platform; omitted,
+    the INSERT names no platform column, exactly as before. `touch_user=False`
+    writes ONLY the event row — no users denorm UPDATE, no streak step — for
+    server-fired events whose owner did nothing (referral loop D-1's
+    invite_landing_*: an invitee's open must not make a dormant inviter look
+    active to the cron ticks). Both defaults keep today's behaviour.
 
     Always inserts a new row — never overwrites prior events. The denorm
     columns on `users` are pointers to the most recent event of each type
@@ -4442,6 +4464,7 @@ def record_event(
         return None
     now = _now()
     streak_result: dict | None = None
+    extra: dict = {"platform": platform} if platform is not None else {}
     try:
         with engine.begin() as conn:
             conn.execute(
@@ -4456,8 +4479,11 @@ def record_event(
                     app_version = app_version,
                     source      = source,
                     props       = json.dumps(props) if props else None,
+                    **extra,
                 )
             )
+            if not touch_user:
+                return None
             # Build the denorm UPDATE: always bumps last_active_at + events_count,
             # plus the event-specific pointer column when one is mapped, plus the
             # device snapshot columns when those headers were sent.
@@ -12640,6 +12666,52 @@ def get_user_by_username(username: str) -> dict | None:
             )
         ).fetchone()
     return dict(row._mapping) if row else None
+
+
+def get_referral_by_invite_token(invite_token: str) -> dict | None:
+    """The `referrals` row for an invite id (`t`, = invite_token), plus the
+    referrer's users.display_name as `referrer_display_name` (None without a
+    users row). Read-only; None when no row matches. Referral loop D-1."""
+    if not invite_token:
+        return None
+    r, u = referrals_table, users_table
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(r, u.c.display_name.label("referrer_display_name"))
+            .select_from(r.outerjoin(u, u.c.sleeper_user_id == r.c.referrer_user_id))
+            .where(r.c.invite_token == invite_token)
+        ).fetchone()
+    return dict(row._mapping) if row else None
+
+
+def record_referral_landing_open(invite_token: str, kind: str) -> int:
+    """FR-8: stamp a join-landing visit on the row minted for `invite_token`.
+
+    kind 'open'   (human GET): opened_at first-wins, last_opened_at = now,
+                  open_count + 1.
+    kind 'unfurl' (link-preview fetch): unfurled_at first-wins, nothing else.
+
+    One atomic UPDATE keyed by uq_referral_token's column; an unknown id
+    matches 0 rows. Returns the row count. Failures are logged and swallowed
+    (0) — recording must never break the join path.
+    """
+    t, now = referrals_table, _now()
+    if kind == "open":
+        values = {"opened_at":      func.coalesce(t.c.opened_at, now),
+                  "last_opened_at": now,
+                  "open_count":     func.coalesce(t.c.open_count, 0) + 1}
+    elif kind == "unfurl":
+        values = {"unfurled_at": func.coalesce(t.c.unfurled_at, now)}
+    else:
+        raise ValueError(f"record_referral_landing_open: unknown kind {kind!r}")
+    try:
+        with engine.begin() as conn:
+            return conn.execute(
+                update(t).where(t.c.invite_token == invite_token).values(**values)
+            ).rowcount
+    except Exception as e:
+        print(f"[record_referral_landing_open] {kind} failed: {e}")
+        return 0
 
 
 def push_notification(

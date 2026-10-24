@@ -158,6 +158,8 @@
   "growth.rating_prompt": true,
   "growth.tier_board_share": false,
   "growth.invite_join_link": false,
+  "growth.join_landing": false,
+  "growth.referral_ledger": false,
   "account.data_export": true,
   "account.sleeper_disconnect": true,
   "account.settings_v2": true,
