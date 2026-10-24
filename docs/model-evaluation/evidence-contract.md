@@ -155,3 +155,49 @@ Fixtures use only scratch SQLite/JSON and synthetic identities. They cover
 read-only connections, table allowlisting, source linkage, immutable original
 snapshots, diagnostic loss/scope, malformed data, view versus generation,
 send versus completion, and missing-cohort/independent-label discipline.
+
+## Frozen inputs: what a scorer or a fit may read
+
+The rule (models-lead, `docs/plans/org-bringup/leads/models-lead-launch.md`
+§Reviews-4 R4.1, 2026-10-23), for every registered scorer and every model fit:
+
+- **Every value a registered scorer or a fit reads is frozen at serve or build
+  time,** or is a deterministic function of frozen inputs plus pre-split
+  training data.
+- **No fit or eval path reads mutable live state:** taste rows, current values
+  or boards, current rosters, flags.
+- **A fit takes an explicit `as_of`.** Nothing in it reads the wall clock.
+
+How the code meets it today:
+
+- The frozen scorer inputs are `backend/eval/contract.py` `FROZEN_INPUT_KEYS`
+  (18 keys). They include the serve-time taste matches `taste_pref_long` and
+  `taste_pref_short`: the two prefMatch values `taste_service.taste_multipliers`
+  ordered the card by, float8, absent when the taste layer didn't run.
+- `value_model.ValueModel._inject` reads the frozen pair (absent = 0.0, the
+  no-signal anchor, identical in training and eval). Only live serving
+  (`value_model.serving_scores`) reads taste vectors; no fit or eval path
+  calls `taste_service.load_taste_vectors`, so an eval no longer garbage-collects
+  taste rows either.
+- `value_model.train_model(decks, as_of=...)` takes the clock explicitly, and
+  `trained_at` / `train_date` come from it. A re-fit at the same `as_of` on the
+  same evidence is bit-identical: coefficients, calibration tables and every
+  registered scorer's replay estimates. `backend/tests/test_value_model_frozen_taste.py`
+  checks it after the clock moves, new outcomes arrive, a board prior is
+  rewritten and taste rows are GC'd.
+- The writer's parity check: `backend/tests/support/taste_parity.py`
+  (`assert_frozen_prefs_match_multipliers`) passes only when each card's frozen
+  pair is, bit for bit, the pair its taste multiplier was built from.
+
+**Known exceptions, not yet closed:**
+
+- `train_model` reads three hyperparameters (`value_model_calib_frac`,
+  `value_model_l2`, `value_model_l2_cat`) from live `model_config`. They are
+  recorded in the model's `meta`, so a re-fit reproduces only under the same
+  config.
+- The `value_model` scorer's rank score reads the V-vector
+  (`value_model_v_like`, `value_model_v_propose`) live, by design (F6 PRD §2).
+  An eval of `rank_score` is therefore only reproducible under the same V-vector.
+- Decks served before the freeze ships carry no frozen pair and score with the
+  0.0 anchor. models-lead recommends starting any D-016 gate window at the
+  freeze date.
