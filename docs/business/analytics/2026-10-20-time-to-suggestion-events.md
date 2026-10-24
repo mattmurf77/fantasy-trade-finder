@@ -23,11 +23,39 @@
 
 | Event | Class | Properties | Fires when | Client |
 |---|---|---|---|---|
-| `find_trades_tapped` (**widened**, R1) | INTENT (unchanged) | existing `source`, `mode`, plus **`search_id`** (a client UUID). **New `source` values** are listed exactly in the M commit, which updates this table in the same PR | **At the tap** on every search-starting control (#339 table A), no longer at dispatch on the push path | mobile |
+| `find_trades_tapped` (**widened**, R1) | INTENT (unchanged) | existing `source`, `mode`, plus **`search_id`** (a client UUID). `source` values are listed exactly in "R1 `source` values" below | **At the tap** on every search-starting control (#339 table A), no longer at dispatch on the push path | mobile |
 | `calc_find_a_trade_tapped` (**widened**, R1) | INTENT (unchanged) | existing, plus **`search_id`** | At the tap (already, `utils/canvasSearch.ts:52-61`) | mobile |
 | `trade_first_card_shown` (**new**, R2) | **NON_INTENT** | `search_id`; `ms_from_tap` (int, a **monotonic** client clock: `performance.now()` deltas, as `api/client.ts` `_clockMs()` uses); `entry_point`; `search_type` (`organic` \| `pinned` \| `fair_sweep`); `launch_state` (`cold_launch` \| `first_tap` \| `repeat_tap`); **`network_type`** (`wifi` \| `cellular` \| `offline` \| `unknown`); `serve_source` (`device` \| `page` \| `cached` \| `joined` \| `fresh`); `freshness_state` (`fresh` \| `updating`); `job_id`; `card_index` | **Exactly at AC-L1's frame (T1):** the first frame where a real card is ≥ 50% visible with Like and Pass enabled. Once per `search_id` | mobile |
-| `trade_first_card_failed` (**new**, R2b) | **NON_INTENT** | `search_id`, `ms_from_tap`, `reason` (`empty` \| `error` \| `abandoned` \| `timeout`), plus R2's `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source` | Instead of R2: **exactly one of R2/R2b per `search_id`**. `abandoned` fires on unmount or blur, or when the app leaves `active`, before a card (T4). **`timeout` = 10,000 ms** from the tap with no card | mobile |
-| `trades_generated` (**widened**, R3) | as today | existing (`count`, `gen_ms`, `engine_version`, `lanes`, `deck_source`), plus **`first_publish_ms`**, **`serve_source`** (`page` \| `cached` \| `joined` \| `fresh` \| `prepared`), **`oldest_input_age_s`** (seconds since the oldest of: the roster refresh and the value snapshot; null if unknown), and the echoed **`search_id`** | **Binding (analytics-lead's condition): exactly one per user-visible deck, whatever `serve_source`.** A page serve emits it at serve. **A pre-build that is never served emits none** (a job log line only). `deck_source` keeps its meaning; `serve_source` is a separate dimension | server |
+| `trade_first_card_failed` (**new**, R2b) | **NON_INTENT** | `search_id`, `ms_from_tap`, `reason` (`empty` \| `error` \| `abandoned` \| `timeout`), plus R2's `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source` | Instead of R2: **exactly one of R2/R2b per `search_id`**. `abandoned` fires on unmount or blur, or when the app leaves `active`, before a card (T4). **`timeout` = 10,000 ms** from the tap with no card. §3 of the readout checks that threshold against the observed tail (ruling 30) | mobile |
+| `deck_buffer_empty` (**new**, granted in ruling 30) | **NON_INTENT** | `search_id`, `deck_id`, `cards_seen`, `ms_since_first_card`, `network_type` | The user reaches the last ready card while the deck is still building and no next page is local. That's an AC-L4 failure. At most once per `search_id` | mobile |
+| `trades_generated` (**widened**, R3) | as today | existing (`count`, `gen_ms`, `engine_version`, `lanes`, `deck_source`), plus **`first_publish_ms`**, **`serve_source`** (`page` \| `cached` \| `joined` \| `fresh` \| `prepared`), **`oldest_input_age_s`** (seconds since the oldest of: the roster refresh and the value snapshot; null if unknown), and the echoed **`search_id`** | **Binding (analytics-lead's condition): exactly one per user-visible deck, whatever `serve_source`.** A page serve emits it at serve. **A pre-build that is never served emits none** (a job log line only). **Calibration's `grading_refresh` decks emit none** (Calibration has its own events; ruling 30), so R3 stays "exactly one per user-visible trade deck" and the funnel and PFO queries need no exclusion. `deck_source` keeps its meaning; `serve_source` is a separate dimension | server |
+
+## R1 `source` values (exact; analytics-lead ruling 30, before the emitter ships)
+
+**Existing values, meanings unchanged** (`TradesScreen.tsx` at `712dcbed`):
+
+| `source` | Control | Where |
+|---|---|---|
+| *(absent)* | The deck's "Find a Trade" / "Find more trades" button. **D13 removes it in this build**, so after the seam it no longer fires | `:7611`, `:7813` |
+| `deck_error_retry` | Retry in the deck's error state | `:6403`, `:9066` |
+| `prefs_changed_strip` | The "preferences changed" strip | `:6991` |
+| `deck_summary_unpin` | Unpin on the deck summary | `:3915` |
+| `deck_search_all` | Search all on the deck summary | `:3933` |
+| `calculator` | The canvas Find a Trade (`calc.action.find-a-trade`) | `:3332` (auto-run) |
+| `league_offer` | **League Summary "Offer" hand-off only**, after the seam | `:3332` |
+
+**New values** (fired at the tap, from the first release that contains R1):
+
+| `source` | Control |
+|---|---|
+| `league_target` | League Summary "Target" hand-off |
+| `usage_trends` | Usage Trends "Trade" / "Find a trade for {player}" hand-off |
+| `deep_link` | The `app/trades/finder` deep link, and inbox arrivals |
+| `end_card_adjust` | The P30 end card's "Adjust what I'm looking for" apply tap (D14 a; the AC-L1 clock starts here) |
+
+**Mislabel, so don't trend across the seam:** before the seam, **every non-calculator auto-run** (League Summary Offer
+and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3330-3336`). After the seam,
+`league_offer` means the Offer hand-off alone. Its counts aren't comparable across the seam.
 
 ## Classes and funnel
 
@@ -55,7 +83,6 @@
 - **Privacy delta:** `network_type` (diagnostics) and `search_id` (an identifier linked to the user) go to
   onboarding-pm under P12: "check the App Store label, likely no change".
 
-## Not tracked here (open)
+## Not tracked here
 
-- **`deck_buffer_empty`,** for when the user reaches the last ready card while the deck is still building (an AC-L4
-  failure). It's proposed for a later grant, not part of this one.
+Nothing open: `deck_buffer_empty` is granted (ruling 30) and listed above.
