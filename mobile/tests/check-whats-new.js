@@ -22,6 +22,9 @@
 //      dismiss itself; the only dismiss is the tip's own tap on League home,
 //      which also navigates to the entry's route; LeagueScreen is the only
 //      screen that mounts the hook.
+//   7. The VoiceOver hint tells the truth: CoachMark's default hint is still
+//      "Tap to dismiss" (every other caller), and the what's-new tip, whose tap
+//      also opens Help & about, passes its own hint that doesn't say dismiss.
 //
 // FTF_MOBILE_TEST_ROOT can point at a copy of mobile/ (sabotage runs).
 // Run: node tests/check-whats-new.js
@@ -44,6 +47,7 @@ const F = {
   hook:    'src/hooks/useWhatsNew.ts',
   league:  'src/screens/LeagueScreen.tsx',
   rootNav: 'src/navigation/RootNav.tsx',
+  coach:   'src/components/CoachMark.tsx',
   appJson: 'app.json',
 };
 
@@ -232,6 +236,33 @@ check('6. the only dismiss is the tip\'s tap on League home, which also opens th
     && /(^|\.)navigate$/.test(n.expression.getText(sf))
     && n.arguments[0] && n.arguments[0].getText(sf) === `${entryName}.route`);
   expect(navigates.length === 1, `the tip's onDismiss does not navigate to ${entryName}.route`);
+});
+
+// ── 7. the VoiceOver hint ───────────────────────────────────────────────────
+check('7. CoachMark keeps its "Tap to dismiss" default; the what\'s-new tip passes a non-dismiss hint', () => {
+  const cm = parse(F.coach);
+  const fn = findAll(cm, (n) => ts.isFunctionDeclaration(n) && n.name && n.name.text === 'CoachMark')[0];
+  expect(fn && fn.parameters[0] && ts.isObjectBindingPattern(fn.parameters[0].name),
+    'CoachMark does not destructure its props');
+  const el = fn.parameters[0].name.elements.find((e) => (e.propertyName || e.name).getText(cm) === 'accessibilityHint');
+  expect(el && el.initializer && ts.isStringLiteral(el.initializer) && el.initializer.text === 'Tap to dismiss',
+    `CoachMark's accessibilityHint default is ${el && el.initializer ? el.initializer.getText(cm) : 'missing'}`);
+  const pressHints = findAll(fn, (n) => ts.isJsxAttribute(n) && n.name.getText(cm) === 'accessibilityHint');
+  expect(pressHints.length === 1 && pressHints[0].initializer
+    && pressHints[0].initializer.getText(cm) === `{${el.name.getText(cm)}}`,
+    `CoachMark renders accessibilityHint ${JSON.stringify(pressHints.map((h) => h.getText(cm)))}, not the prop`);
+
+  const sf = parse(F.league);
+  const tip = findAll(sf, (n) => (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n))
+    && n.tagName.getText(sf) === 'CoachMark'
+    && n.attributes.properties.some((a) => ts.isJsxAttribute(a) && a.name.getText(sf) === 'testID'
+      && a.initializer && ts.isStringLiteral(a.initializer) && a.initializer.text === 'league.whats-new'))[0];
+  expect(tip, 'no CoachMark testID="league.whats-new" in LeagueScreen');
+  const hint = tip.attributes.properties.find((a) => ts.isJsxAttribute(a) && a.name.getText(sf) === 'accessibilityHint');
+  expect(hint && hint.initializer && ts.isStringLiteral(hint.initializer) && hint.initializer.text.trim(),
+    `the what's-new tip passes no literal accessibilityHint (${hint ? hint.getText(sf) : 'missing'})`);
+  expect(!/dismiss/i.test(hint.initializer.text),
+    `the what's-new tip's hint says dismiss: ${JSON.stringify(hint.initializer.text)}`);
 });
 
 console.log(failures === 0
