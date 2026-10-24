@@ -180,11 +180,17 @@ _PII_NUMERIC_RUN_RE = re.compile(r"\b\d(?:[ -]?\d){15,}\b")   # 16+ digit runs
 # analysis for no privacy gain. These keys skip the numeric-run rule ONLY;
 # every other shape rule (emails, bearer creds, JWTs) still applies, since
 # none of those can legitimately appear inside an id.
+_NUMERIC_ID_PROPS = frozenset({"league_id"})
 # Time to suggestion (addendum v2): `search_id` (a client uuid4), `job_id`
 # and `deck_id` (server uuid4().hex) are random join keys. About 1% of
 # uuid4s hold a 16+ digit run, and scrubbing those would collapse searches
 # onto one "[scrubbed]" id and break the one-R2/R2b-per-search_id rule.
-_NUMERIC_ID_PROPS = frozenset({"league_id", "search_id", "job_id", "deck_id"})
+# They skip the numeric-run rule ONLY when the whole value is id-shaped
+# (a hyphenated uuid or 32 hex chars), so free text under these keys is
+# still scrubbed (analytics-lead's hardening note).
+_HEX_ID_PROPS = frozenset({"search_id", "job_id", "deck_id"})
+_HEX_ID_RE = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}"
+                        r"-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")
 
 _PII_REPLACEMENT = "[scrubbed]"
 _CLIENT_ERROR_MSG_MAX = 200
@@ -203,7 +209,9 @@ def _scrub_pii(props: dict, event_type: str) -> tuple[dict, int]:
             new_v = v
             for rx in _PII_VALUE_RES:
                 new_v = rx.sub(_PII_REPLACEMENT, new_v)
-            if str(k) not in _NUMERIC_ID_PROPS:
+            id_exempt = str(k) in _NUMERIC_ID_PROPS or (
+                str(k) in _HEX_ID_PROPS and _HEX_ID_RE.fullmatch(v) is not None)
+            if not id_exempt:
                 new_v = _PII_NUMERIC_RUN_RE.sub(_PII_REPLACEMENT, new_v)
             if new_v != v:
                 scrubbed += 1

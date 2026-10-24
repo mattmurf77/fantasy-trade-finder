@@ -121,3 +121,15 @@ def test_join_ids_survive_the_numeric_run_scrub():
     assert clean == digit_heavy and n == 0
     clean, n = _scrub_pii({"search_id": "x@example.com"}, "trade_first_card_shown")
     assert clean["search_id"] == "[scrubbed]" and n == 1
+
+
+def test_join_id_exemption_needs_an_id_shaped_value():
+    """The numeric-run exemption is for uuid / 32-hex values only: free text
+    under search_id / job_id / deck_id that carries a card-number-shaped run
+    is still scrubbed (analytics-lead hardening note)."""
+    from backend.analytics_ingest import _scrub_pii
+    for key in ("search_id", "job_id", "deck_id"):
+        clean, n = _scrub_pii({key: "card 4111 1111 1111 1111"}, "deck_buffer_empty")
+        assert clean[key] == "card [scrubbed]" and n == 1, key
+        clean, n = _scrub_pii({key: "4111111111111111"}, "deck_buffer_empty")
+        assert clean[key] == "[scrubbed]" and n == 1, key
