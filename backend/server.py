@@ -127,6 +127,7 @@ from .database import (
     replenish_week_done, log_deck_replenish,
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
+    replace_league_members_snapshot,   # S0 — authoritative Sleeper membership
     load_member_rankings, load_league_members, get_ranking_coverage,
     find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
@@ -250,6 +251,7 @@ from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
+from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from types import SimpleNamespace   # proposal-time policy shim (see
                                    # _record_trade_proposal)
@@ -581,6 +583,18 @@ def _sleeper_record(url: str, data) -> None:
 
 
 def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
+    """Fetch JSON from Sleeper API, behind the per-process 429 circuit (S0).
+
+    While the circuit is open this raises `sleeper_http.SleeperRateLimited`
+    (a URLError) without touching the network; a 429 opens it. Fixture mode
+    goes through the circuit too, so cassette 429s exercise the real path.
+    """
+    league = _api_obs.sleeper_endpoint_class(url)[1]
+    with _sleeper_http.guard(league):
+        return _sleeper_get_unguarded(url, timeout)
+
+
+def _sleeper_get_unguarded(url: str, timeout: int = 15) -> dict | list:
     """Fetch JSON from Sleeper API with full request/response logging."""
     global _SSL_CTX  # may be replaced on first SSL failure
     if _SLEEPER_FIXTURES_DIR and not _SLEEPER_RECORD:
@@ -594,7 +608,8 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
         doc = json.loads(fpath.read_text())
         log.info("sleeper-fixture HIT %s", url)
         if isinstance(doc, dict) and "__http_error__" in doc:
-            raise urllib.error.HTTPError(url, int(doc["__http_error__"]), "fixture", None, None)
+            raise urllib.error.HTTPError(url, int(doc["__http_error__"]), "fixture",
+                                         doc.get("__headers__"), None)
         return doc
     if _TEST_MODE:
         # Unreachable given the startup rules; belt-and-braces rail counter.
@@ -14401,6 +14416,13 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                     "unavailable (keeping prior snapshot)", league_id,
                     "rosters" if not _prosters else "league meta")
         return None
+    if _tp is None:
+        # S0 / R10 — traded_picks couldn't be read (any failure, incl. the open
+        # 429 circuit). Replace-syncing without it would reset every traded pick
+        # to its original team (the G-015 clobber class): keep the prior snapshot.
+        log.warning("  owned-pick sync skipped for %s — Sleeper traded_picks "
+                    "unavailable (keeping prior snapshot)", league_id)
+        return None
     _rid_to_user = {
         str(r.get("roster_id")): str(r.get("owner_id") or "")
         for r in _prosters if isinstance(r, dict)
@@ -17252,20 +17274,31 @@ def _fetch_league_rosters(league_id: str):
     return rosters if isinstance(rosters, list) else None
 
 
-def _fetch_sleeper_traded_picks(league_id: str) -> list[dict]:
-    """Public traded-picks list for a Sleeper league (fail-soft → []).
+def _fetch_sleeper_traded_picks(league_id: str) -> list[dict] | None:
+    """Public traded-picks list for a Sleeper league, or None when it can't be read.
 
     Endpoint: https://api.sleeper.app/v1/league/<id>/traded_picks — unauth,
     same trust level as _fetch_league_rosters. Each entry is roster_id-keyed:
     {round, season(str), roster_id(orig), owner_id(current), previous_owner_id}.
+
+    S0 / R10 — None on ANY failure (HTTP error, timeout, unparseable or
+    non-list body, the open 429 circuit, a non-Sleeper id): "ownership
+    unknown", distinct from a successful `[]` ("no pick has been traded"). It
+    used to fail soft to `[]`, which the owned-pick REPLACE-sync then wrote as
+    "every pick is back with its original team" and a pick-bearing send
+    encoded as if nothing had moved. Every caller treats None as an error:
+    `_sync_sleeper_owned_picks` skips (keeps the prior snapshot), the propose
+    core refuses before any provider call, and validate reports nothing
+    checked.
     """
     if not league_id or not str(league_id).isdigit():
-        return []
+        return None
     try:
         tp = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/traded_picks")
-    except Exception:
-        return []
-    return tp if isinstance(tp, list) else []
+    except Exception as e:
+        log.warning("  traded_picks unavailable for %s: %s", league_id, type(e).__name__)
+        return None
+    return tp if isinstance(tp, list) else None
 
 
 def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
@@ -19326,6 +19359,12 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
         if not force and _draft_status_is_fresh(ctx):
             return None
         verdict = _detect_league_draft_status(league_id, ctx)
+        if ((ctx.get("platform") or "sleeper").lower() == "sleeper"
+                and _sleeper_http.is_open()):
+            # S0 — the Sleeper signals above were skipped reads, not evidence.
+            # Keep the cached verdict; the TTL lets the next pass retry.
+            log.info("  draft status for %s not written — Sleeper circuit open", league_id)
+            return None
         set_league_draft_status(league_id, verdict.status, verdict.confidence)
         _invalidate_draft_context_cache(league_id)
         log.info("  ✅ draft status for %s: %s (%s via %s) %s", league_id,
@@ -19688,6 +19727,14 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # never follow the `picks.assign_tradeable` pricing flag.
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
+        if traded is None:
+            # S0 / R10 — pick ownership is unknown, so the send can't be checked:
+            # refuse before any provider call, never send as if no pick had moved.
+            # The route's existing 502 provider-error shape (`detail` == `message`).
+            _msg = ("Sleeper's draft-pick ownership couldn’t be confirmed right now, so "
+                    "nothing was sent. Try again in a moment.")
+            return {"error": "sleeper_write_failed", "kind": "network",
+                    "detail": _msg, "message": _msg}, 502
         # #428 — third ground truth: Sleeper's tradable window. A spent
         # current-season pick keeps its grid row (one flaked drafts read
         # re-populates it) AND its traded_picks holder, so only the live
@@ -22298,11 +22345,16 @@ def session_init():
     incoming_token = request.headers.get("X-Session-Token", "")
     existing_sess = _get_session(incoming_token)
     from .session_input import resolve_session_input, SessionInputError
+    _s0_raw: dict = {}   # S0 — this init's Sleeper rosters + meta, handed to the daemon
     try:
-        authoritative = resolve_session_input(existing_sess, body, _sleeper_get)
+        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw)
     except SessionInputError as exc:
         return jsonify({"error": exc.error}), exc.status
     body = {**body, **authoritative}
+    if _s0_raw.get("meta"):
+        # S0 — seed the 15-min league-meta cache from the read just made, so
+        # the trade paths' lineup lookups (_sleeper_lineup_slots) don't refetch.
+        _FA_LEAGUE_META_CACHE[authoritative["league_id"]] = (time.time(), _s0_raw["meta"])
 
     user_id           = body.get("user_id",          DEMO_USER_ID)
     league_id         = body.get("league_id",        "sleeper_league")
@@ -22708,7 +22760,7 @@ def session_init():
             nonlocal _meta_fetched, _meta_payload
             if not _meta_fetched:
                 _meta_fetched = True
-                _meta_payload = _fetch_sleeper_league_meta(league_id)
+                _meta_payload = _s0_raw.get("meta") or _fetch_sleeper_league_meta(league_id)
             return _meta_payload
 
         try:
@@ -22900,6 +22952,7 @@ def session_init():
                 log.warning("  DB upsert failed (continuing): %s", db_err)
 
             # ── Persist full league membership roster ────────────────
+            _s0_members_ok, _s0_picks_ok = False, True   # S0 refresh outcome
             try:
                 all_members_for_db = [
                     {
@@ -22933,8 +22986,16 @@ def session_init():
                     for opp in opponent_rosters
                     if opp.get("user_id")
                 ]
-                upsert_league_members(league_id=league_id, members=all_members_for_db)
-                log.info("  ✅ league_members upserted (%d members)", len(all_members_for_db))
+                if _s0_raw and not _platform_linked:
+                    # S0 — the request thread's Sleeper read is the complete,
+                    # authoritative membership: replace, so departed managers'
+                    # rows go (G-075). Refuses an empty snapshot (G-015).
+                    _s0_members_ok = replace_league_members_snapshot(
+                        league_id, all_members_for_db)
+                else:
+                    upsert_league_members(league_id=league_id, members=all_members_for_db)
+                    _s0_members_ok = True
+                log.info("  ✅ league_members written (%d members)", len(all_members_for_db))
                 # Roster changed → drop cached _league_members projections
                 # so the next /api/league/members call rebuilds the
                 # join-status list. (Picked up from PR #63 #B4 cache.)
@@ -22962,7 +23023,8 @@ def session_init():
                              or is_enabled("market.roster_history")
                              or is_enabled("picks.owned_sync"))):
                     from .trade_block_service import _fetch_rosters as _tb_fetch
-                    _rh_roster_rows = _tb_fetch(league_id)
+                    # S0 — reuse the request thread's read (D-178: once per init).
+                    _rh_roster_rows = _s0_raw.get("rosters") or _tb_fetch(league_id)
             except Exception as _rr_err:
                 log.warning("  shared rosters fetch failed (continuing): %s", _rr_err)
 
@@ -23028,7 +23090,10 @@ def session_init():
                     if _n_picks is not None:
                         log.info("  ✅ owned draft picks synced (%d picks)",
                                  len(_n_picks))
+                    else:
+                        _s0_picks_ok = False
             except Exception as pk_err:
+                _s0_picks_ok = False
                 log.warning("  owned-pick sync failed (continuing): %s", pk_err)
 
             # ── #207: refresh the league's rookie-draft status ────────
@@ -23039,6 +23104,14 @@ def session_init():
             # self-contained failure handling inside the helper, so it can
             # never affect the syncs above.
             _refresh_league_draft_status(league_id)
+
+            # ── S0: record this init's Sleeper roster refresh ─────────
+            # After members, picks and draft state are committed. Never raises.
+            if _s0_raw and not _platform_linked:
+                from . import roster_refresh as _roster_refresh
+                _roster_refresh.record_outcome(
+                    league_id, _s0_raw.get("fetch_started_at"),
+                    members_ok=_s0_members_ok, picks_ok=_s0_picks_ok)
 
             # ── Market-data readiness: capture executed league trades ──
             # Raw Sleeper trade transactions → sleeper_trades (PRD #43
@@ -27378,7 +27451,8 @@ def _refresh_sleeper_members(league_id: str) -> int:
              for u in users if isinstance(u, dict)}
     members = [{"user_id": str(r["owner_id"]), "username": names.get(str(r["owner_id"]), ""),
                 "display_name": names.get(str(r["owner_id"]), ""),
-                "player_ids": [str(x) for x in (r.get("players") or [])]}
+                "player_ids": [str(x) for x in (r.get("players") or [])
+                               if x not in (None, "")]}   # G-004
                for r in rosters if isinstance(r, dict) and r.get("owner_id")]
     if not members:
         return 0
@@ -32136,6 +32210,11 @@ def trades_validate():
         # Literal platform read, same reason as the propose route (#328 precedent).
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
+        if traded is None:
+            # S0 / R10 — pick ownership is unknown: never judge the picks against
+            # an empty overlay. The existing unreachable outcome (checked:false,
+            # nothing validated); the propose route hard-refuses the send.
+            return jsonify({"ok": True, "checked": False, "warnings": []})
         # #428 — the tradable window; `meta` is already in hand here, so this
         # is one extra `/drafts` read, only on a pick-bearing validate.
         window = _sleeper_pick_window_for_send(league_id, meta, traded)
