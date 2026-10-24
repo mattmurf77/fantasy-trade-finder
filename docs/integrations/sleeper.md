@@ -342,7 +342,7 @@ ONCE, on the request thread, by the authoritative membership read
 to the daemon and to every consumer (S0, 2026-10-20). The meta blob also seeds
 the 15-min league-meta cache the trade paths' lineup lookups read. Everything
 else is a fresh live fetch with no shared cache. The outcome is recorded in
-`league_roster_state` (`fresh` / `stale` / `missing`, see the data dictionary).
+`league_roster_state` (`fresh` / `stale`, see the data dictionary).
 
 | Sync | Flag | Endpoints hit | Site |
 |---|---|---|---|

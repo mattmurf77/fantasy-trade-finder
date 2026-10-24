@@ -3,7 +3,8 @@
 Pins (scope-eng-s0-fetch.md §B.2-§B.3):
   • success → 'fresh', refreshed_at set, last_error_code NULL
   • a failed read → the last good rows are untouched and the state says
-    'stale' (rows existed) or 'missing' (never had rows) + last_error_code
+    'stale' + last_error_code. The row never stores 'missing' (contract v0.3
+    §3: "missing" is derived from absent league_members rows by the reader)
   • a throttled pick read → 'stale' / 'picks_unavailable'
   • a membership refusal (403) is not a refresh failure — nothing is written
   • G-004: a null Sleeper player slot is never stored as the string "None"
@@ -139,15 +140,16 @@ def test_success_marks_fresh_and_never_stores_none_ids(harness):
     assert server._FA_LEAGUE_META_CACHE[LEAGUE_ID][1] == META
 
 
-def test_failure_with_no_prior_rows_is_missing(harness):
+def test_failure_with_no_prior_rows_is_stale_never_missing(harness):
     client, put = harness
     put(f"league/{LEAGUE_ID}/rosters", {"__http_error__": 503})
     resp = _init(client)
     assert resp.status_code == 503
     assert resp.get_json() == {"error": "league_data_unavailable"}   # contract unchanged
     state = db_module.get_league_roster_state(LEAGUE_ID)
-    assert (state["status"], state["last_error_code"]) == ("missing", "http_5xx")
-    assert _members() == {}
+    assert (state["status"], state["last_error_code"]) == ("stale", "http_5xx")
+    assert state["refreshed_at"] is None                             # never refreshed
+    assert _members() == {}                                          # the reader derives "missing"
 
 
 def test_failure_after_success_keeps_rows_and_marks_stale(harness):
@@ -166,7 +168,7 @@ def test_failure_after_success_keeps_rows_and_marks_stale(harness):
     assert _members() == before_rows                                 # rows untouched
 
 
-def test_rows_without_any_state_count_as_stale_not_missing(harness):
+def test_failure_with_pre_s0_rows_is_stale(harness):
     client, put = harness
     db_module.upsert_league_members(LEAGUE_ID, [
         {"user_id": USER_ID, "username": "Me", "player_ids": ["p1"]}])   # pre-S0 rows
@@ -181,7 +183,7 @@ def test_429_marks_rate_limited_and_the_next_init_makes_no_read(harness, monkeyp
         {"__http_error__": 429, "__headers__": {"Retry-After": "120"}})
     assert _init(client).status_code == 503
     state = db_module.get_league_roster_state(LEAGUE_ID)
-    assert (state["status"], state["last_error_code"]) == ("missing", "rate_limited")
+    assert (state["status"], state["last_error_code"]) == ("stale", "rate_limited")
 
     reads = []
     monkeypatch.setattr(server, "_sleeper_get_unguarded",
@@ -255,9 +257,12 @@ def test_failure_keeps_fp_and_refreshed_at(db):
     assert db.get_league_roster_state("L")["roster_fp"] == "rfp1:abc"   # fresh never touches it
 
 
-def test_failure_on_a_never_seen_league_is_missing(db):
-    assert db.mark_league_roster_failed("L", "network") == "missing"
-    assert db.get_league_roster_state("L")["last_error_code"] == "network"
+def test_failure_on_a_never_seen_league_is_stale(db):
+    assert db.mark_league_roster_failed("L", "network") == "stale"
+    state = db.get_league_roster_state("L")
+    assert (state["status"], state["last_error_code"]) == ("stale", "network")
+    assert state["refreshed_at"] is None and state["roster_fp"] is None
+    assert not hasattr(db, "ROSTER_STATE_MISSING")                # never a stored value
 
 
 # ---------------------------------------------------------------------------

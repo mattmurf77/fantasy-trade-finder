@@ -635,8 +635,11 @@ league_members_table = Table("league_members", metadata,
 
 # S0 (launch §3a) — the per-league roster refresh record. One row per league,
 # written by the session-init Sleeper refresh (success: 'fresh' + refreshed_at;
-# a failed read: 'stale', or 'missing' when the league never had rows, plus
-# last_error_code — the last good rows are never touched on failure).
+# a failed read: 'stale' + last_error_code — the last good rows are never
+# touched on failure). The row only ever holds 'fresh' | 'stale' (fingerprint
+# contract v0.3 §3): "missing" is DERIVED by trades-eng's roster_snapshot from
+# absent league_members rows, never stored, so rows that arrive by another
+# path can't be blanked by a stale stored verdict.
 # roster_fp is NULL until the PR-B stamp writes trades-eng's rfp1 fingerprint.
 # League-keyed, no user_id: not part of account deletion/export. New table, so
 # metadata.create_all creates it on both dialects — no migration_cols row.
@@ -645,7 +648,7 @@ league_roster_state_table = Table("league_roster_state", metadata,
     Column("league_id",       String, primary_key=True),  # platform-native id (leagues PK semantics)
     Column("roster_fp",       String),                    # "rfp1:…" — PR-B; NULL until stamped
     Column("refreshed_at",    String),                    # ISO UTC: fetch start of the last fully committed refresh
-    Column("status",          String, nullable=False),    # 'fresh' | 'stale' | 'missing'
+    Column("status",          String, nullable=False),    # 'fresh' | 'stale' (never 'missing': derived, contract v0.3)
     Column("last_error_code", String),                    # closed set (sleeper_http.classify + picks_unavailable/write_failed); NULL after success
     Column("updated_at",      String, nullable=False),    # ISO UTC of this write
 )
@@ -8442,9 +8445,9 @@ def load_league_members(league_id: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 # One small row per league; every write is a single-row upsert (G-072: bounded).
 # Timestamps are ISO-8601 UTC text (dual-dialect; no SQL JSON or date functions).
+# The stored status is only ever one of these two (contract v0.3 §3).
 ROSTER_STATE_FRESH = "fresh"
 ROSTER_STATE_STALE = "stale"
-ROSTER_STATE_MISSING = "missing"
 
 
 def _dialect_insert(conn):
@@ -8495,19 +8498,16 @@ def mark_league_roster_fresh(league_id: str, refreshed_at: str) -> None:
 def mark_league_roster_failed(league_id: str, error_code: str) -> str:
     """A refresh failed: the last good rows are untouched. Returns the status written.
 
-    'stale' when the league has a prior successful refresh or any stored
-    `league_members` rows; 'missing' when it never had rows. `roster_fp` and
-    `refreshed_at` keep their stored values.
+    Always 'stale' + `last_error_code`; `roster_fp` and `refreshed_at` keep
+    their stored values (NULL on a league never refreshed). Whether the league
+    has any rows at all ("missing") is derived from `league_members` by the
+    reader, never stored here (fingerprint contract v0.3 §3).
     """
     t = league_roster_state_table
     lid = str(league_id)
     now = _now()
+    status = ROSTER_STATE_STALE
     with engine.begin() as conn:
-        prior = conn.execute(select(t.c.refreshed_at).where(t.c.league_id == lid)).first()
-        had_rows = (prior is not None and prior.refreshed_at is not None) or conn.execute(
-            select(league_members_table.c.id)
-            .where(league_members_table.c.league_id == lid).limit(1)).first() is not None
-        status = ROSTER_STATE_STALE if had_rows else ROSTER_STATE_MISSING
         stmt = _dialect_insert(conn)(t).values(
             league_id=lid, roster_fp=None, refreshed_at=None, status=status,
             last_error_code=str(error_code), updated_at=now)

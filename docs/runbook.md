@@ -1054,7 +1054,7 @@ per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
     live server session, so taps keep working from stored state.
   - Sleeper sends are blocked with "couldn't confirm rosters" (the live roster check can't run), and the daemon's
     trade-block, pick and transaction syncs skip.
-  - `league_roster_state` rows go `stale` (or `missing`) with `last_error_code = 'rate_limited'`. That's a read,
+  - `league_roster_state` rows go `stale` with `last_error_code = 'rate_limited'`. That's a read,
     not a fix: no prod writes are needed.
 - **What clears it:** time. The window ends on its own, and the next successful read resets the strike count.
   There's no manual reset in prod; a deploy or restart also clears it (it's in-process state). Don't restart to

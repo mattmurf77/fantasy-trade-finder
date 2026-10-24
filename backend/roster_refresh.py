@@ -32,8 +32,8 @@ def record_failure(league_id: str, exc_or_code) -> str | None:
     """A Sleeper read for this league failed. Keeps the last good rows.
 
     `exc_or_code` is the exception (classified by `sleeper_http.classify`) or
-    a ready error code. Returns the status written ('stale' | 'missing'), or
-    None when the write itself failed.
+    a ready error code. Returns the status written (always 'stale'), or None
+    when the write itself failed.
     """
     code = exc_or_code if isinstance(exc_or_code, str) else sleeper_http.classify(exc_or_code)
     try:

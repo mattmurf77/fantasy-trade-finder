@@ -84,14 +84,19 @@ league_roster_state
   league_id        String  PK        -- platform-native id, same semantics as leagues.sleeper_league_id
   roster_fp        String  NULL      -- "rfp1:…" from roster_snapshot(...).fp after the last committed refresh
   refreshed_at     String  NULL      -- ISO UTC: start time of the fetch whose rows are committed
-  status           String  NOT NULL  -- 'fresh' | 'stale' | 'missing'
+  status           String  NOT NULL  -- 'fresh' | 'stale' only (contract v0.3 §3; "missing" is derived)
   last_error_code  String  NULL      -- see below; NULL after a success
   updated_at       String  NOT NULL
 ```
 
 - **`status`** describes the last attempt, not the PRD bound. `fresh` = the last attempt committed members and
-  picks. `stale` = the last attempt failed, and the last good rows are kept. `missing` = never refreshed under S0
-  (no row, or no success yet). The ≤ 5 min bound is trades-eng's, computed from `refreshed_at` (§Q2).
+  picks. `stale` = the last attempt failed, and the last good rows are kept.
+  - **Contract v0.3 §3 (2026-10-23): the row never stores `missing`.** A never-refreshed league that fails is
+    `stale` with `refreshed_at` NULL.
+  - "Missing" (strict: no cards) is derived by trades-eng's `roster_snapshot` only from absent `league_members`
+    rows. No state row (or no table) reads as `unknown`.
+  - That way, rows arriving by another path (an import, an operator refresh) can't be blanked by a stored verdict.
+  - The ≤ 5 min bound is trades-eng's, computed from `refreshed_at` (§Q2).
 - **`last_error_code`** (closed set): `rate_limited` (429 or circuit open), `blocked` (403, incl. Cloudflare 1010),
   `http_4xx`, `http_5xx`, `timeout`, `network`, `invalid_payload`, `picks_unavailable` (owned-pick sync skipped on a
   failed read, `server.py:14267-14290`), `write_failed`.
@@ -115,7 +120,7 @@ league_roster_state
 2. Seed `_FA_LEAGUE_META_CACHE[league_id] = (now, meta)` from that payload, at zero calls. Every server restart
    kills sessions, so the next tap always follows a session init that reseeds it.
 3. **On a read failure:** classify it (`last_error_code`), upsert `league_roster_state` to `status='stale'` (rows
-   untouched, `roster_fp` and `refreshed_at` kept, `missing` if there was no prior success), then return today's
+   untouched, `roster_fp` and `refreshed_at` kept; always `stale` since v0.3), then return today's
    503 `league_data_unavailable`. Session-init behavior is otherwise unchanged in v1. The mobile client keeps its
    token and its live server session, so taps keep working from stored state (§Q-ONB for the restart case).
 
@@ -328,7 +333,7 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
   | File | Tests | Pins |
   |---|---|---|
   | `backend/tests/test_sleeper_backoff.py` (new, 34) | `test_429_with_retry_after_seconds_opens_for_at_least_that`, `test_429_with_http_date_retry_after`, `test_unusable_retry_after_falls_back_to_backoff[×4]`, `test_429_without_retry_after_backs_off_exponentially`, `test_jitter_stays_inside_equal_jitter_bounds`, `test_soft_cap_and_hard_ceiling`, `test_fail_fast_while_open_and_recovery`, `test_rate_limited_is_a_urlerror`, `test_classify[×10]`, `test_sleeper_get_429_cassette_opens_the_shared_circuit`, `test_sleeper_get_success_resets_strikes`, `test_direct_fetchers_fail_fast_while_open[×4]`, `test_direct_fetchers_open_the_circuit_on_429[×4]`, `test_owned_pick_sync_keeps_prior_snapshot_while_open`, `test_owned_pick_sync_429_on_traded_picks_itself_is_not_written`, `test_draft_status_not_written_while_open` | The rule: Retry-After as seconds or HTTP date; 2, 4, 8 … s; equal-jitter bounds over 14 strike levels; 600 s soft cap; 3,600 s ceiling; fail fast with **zero reads** (not even a fixture read); recovery resets strikes. Shared by `_sleeper_get` and all four urllib-direct readers. The pick replace-sync and the draft-status write skip while open |
-  | `backend/tests/test_roster_refresh_state.py` (new, 14) | `test_success_marks_fresh_and_never_stores_none_ids`, `test_failure_with_no_prior_rows_is_missing`, `test_failure_after_success_keeps_rows_and_marks_stale`, `test_rows_without_any_state_count_as_stale_not_missing`, `test_429_marks_rate_limited_and_the_next_init_makes_no_read`, `test_recovery_after_failure_clears_the_error`, `test_throttled_pick_read_marks_picks_unavailable`, `test_membership_refusal_is_not_a_refresh_failure`, `test_refreshed_at_only_moves_forward`, `test_failure_keeps_fp_and_refreshed_at`, `test_failure_on_a_never_seen_league_is_missing`; replace commit: `test_session_init_replaces_sleeper_members_dropping_ghosts`, `test_replace_refuses_an_empty_snapshot`, `test_platform_league_rows_are_not_replaced_by_session_init` | Success → `fresh`. Failure → rows byte-identical; `stale` / `missing` + the classified code (`http_5xx`, `invalid_payload`, `rate_limited`, `picks_unavailable`). The 503 body is unchanged. A 403 membership refusal writes nothing. G-004: a null slot is never stored as `"None"`. Meta-cache seed. `refreshed_at` never rewinds and `roster_fp` is never touched. Replace drops a ghost and refuses an empty snapshot (G-015); platform leagues are untouched |
+  | `backend/tests/test_roster_refresh_state.py` (new, 14) | `test_success_marks_fresh_and_never_stores_none_ids`, `test_failure_with_no_prior_rows_is_stale_never_missing`, `test_failure_after_success_keeps_rows_and_marks_stale`, `test_failure_with_pre_s0_rows_is_stale`, `test_429_marks_rate_limited_and_the_next_init_makes_no_read`, `test_recovery_after_failure_clears_the_error`, `test_throttled_pick_read_marks_picks_unavailable`, `test_membership_refusal_is_not_a_refresh_failure`, `test_refreshed_at_only_moves_forward`, `test_failure_keeps_fp_and_refreshed_at`, `test_failure_on_a_never_seen_league_is_stale`; replace commit: `test_session_init_replaces_sleeper_members_dropping_ghosts`, `test_replace_refuses_an_empty_snapshot`, `test_platform_league_rows_are_not_replaced_by_session_init` | Success → `fresh`. Failure → rows byte-identical; `stale` / `missing` + the classified code (`http_5xx`, `invalid_payload`, `rate_limited`, `picks_unavailable`). The 503 body is unchanged. A 403 membership refusal writes nothing. G-004: a null slot is never stored as `"None"`. Meta-cache seed. `refreshed_at` never rewinds and `roster_fp` is never touched. Replace drops a ghost and refuses an empty snapshot (G-015); platform leagues are untouched |
   | `backend/tests/test_session_init_sleeper_calls.py` (updated, 5) | `test_daemon_makes_one_rosters_and_one_meta_call` (now rosters 1, meta 1, users 1, traded_picks 1, drafts 1, transactions ≤ 2, GraphQL 1, **sum ≤ 8**, state `fresh`); `test_numeric_mfl_league_makes_no_sleeper_calls_on_s0_paths` (new) | The D-178 budget after S0. A numeric MFL id makes no rosters/users/meta/picks/GraphQL call and gets no state row. Its `transactions` read is the pre-existing trade-capture `isdigit()` leak (R8), asserted as the only allowed key so a later fix still passes |
   | `backend/tests/test_co_owner_rosters.py` (updated in the replace commit) | The capture also intercepts `replace_league_members_snapshot` | One row per roster, still keyed on the primary owner |
 
@@ -386,9 +391,10 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
      - The response is the unchanged `503 league_data_unavailable` (`session_input.py:93`).
      - `league_members` and `draft_picks` are never written on this path: the daemon doesn't start
        (`server.session_init` returns at `:22201-22202`).
-  5. **Never refreshed → missing:** the same path on a league with no state row and no `league_members` rows
-     writes `status='missing'` (`database.py:8495-8520`).
-     - A daemon whose members write or pick sync failed writes `stale`/`missing` with `write_failed` or
+  5. **Never refreshed:** since v0.3 the same path on a league with no state row and no `league_members` rows
+     still writes `status='stale'` (`mark_league_roster_failed`, `database.py`), with `refreshed_at` NULL. "Missing"
+     is derived by the reader from the absent member rows.
+     - A daemon whose members write or pick sync failed writes `stale` with `write_failed` or
        `picks_unavailable` (`roster_refresh.py:56-59`). `refreshed_at` does not move.
   6. **Circuit open:** a Sleeper 429 anywhere → `guard` → `record_429` (`sleeper_http.py:118-129`) opens the
      window.
@@ -444,7 +450,7 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
   1. **PR-A (platforms-eng, no dependency): BUILT** on `build/s0-roster-refresh`, not pushed. Three commits:
      - the `sleeper_http` circuit (plus the two clobber guards);
      - `league_roster_state` + the hand-down (budget ≤ 10 → ≤ 8) + the meta-cache seed + null filtering +
-       `fresh`/`stale`/`missing` writes;
+       `fresh`/`stale` writes (no stored `missing` since contract v0.3);
      - **replace semantics, its own commit**, droppable with one `git revert` pending head-eng's sign-off.
      - The session-init diff is ~25 lines in `server.py` (`:22198-22207`, `:22613`, `:22805`, `:22839-22847`,
        `:22877`, `:22944-22946`, `:22958-22964`). engagement-eng (O8) edits the same region.
