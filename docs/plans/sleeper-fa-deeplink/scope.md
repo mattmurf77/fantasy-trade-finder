@@ -18,7 +18,7 @@
 - 2026-10-24: the operator's D3/D4/no-flag decisions, and launch scope.
 **Entry point:** direct ask, the operator's top priority (2026-10-15), routed through `platforms-pm` to a spec worker. Clarification relayed by `head-product`: "It opens from the send a trade feature. That's the one we tested it on. Have an eng research all external links to compare differences to ensure a consistent experience"
 **Builder:** not assigned yet; the build stays with `head-eng` (`platforms-eng` / `eng-mobile`).
-- **The hand-off** can start now (P31) and ships in the **2026-11-06 binary**. R0, device tests 1–12 and T1–T4 gate its **merge**; the operator runs them as Launch Desk **OA-4, due 2026-11-03**.
+- **The hand-off** can start now (P31) and ships in the **2026-11-06 binary**. R0, device tests 1–12 and T1–T4 gate its **merge**; the operator runs them as Launch Desk **OA-4, due 2026-10-28**.
 - **The direct write is post-launch.** It waits for the spike in `docs/plans/sleeper-fa-write/` (being opened by `platforms-eng`; not on origin/main yet). Its flag turns on only under D6 (§5). See [prd.md § Sequencing](prd.md#9-sequencing-and-dependencies).
 **Operator sign-off on waivers:** not needed (no waivers). D1 and D2 are decided.
 - **Decided by `head-product` (P34, 2026-10-20):** D6 (the flag goes on only after three conditions, §5), D9 (consent is its own step), D10 (the named button is the per-move confirmation; no dialog) and D11 (consent per account).
@@ -271,7 +271,7 @@ So nothing records whether a hand-off reached the Sleeper app or hit the not-ins
 - **Launch scope**, mirroring prd.md § Launch scope (`head-eng`'s plan, 2026-10-18):
   - **The hand-off fix ships in the 2026-11-06 binary.**
     - `platforms-eng` builds it.
-    - The device tests (R0, 1–12, T1–T4) gate the merge (P31). The operator runs them as Launch Desk **OA-4, due 2026-11-03**.
+    - The device tests (R0, 1–12, T1–T4) gate the merge (P31). The operator runs them as Launch Desk **OA-4, due 2026-10-28**.
     - It ships with no flag; the revert path is a new EAS build.
   - **The D1 direct write is post-launch.** That covers consent.md and AC-19 to AC-40. The spec is unchanged, and the D6 graduation applies as written.
   - **The secondary button's words** are approved by `legal-lead` and ship with D1.

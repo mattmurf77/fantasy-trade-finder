@@ -35,7 +35,7 @@ From `head-eng`'s launch plan of 2026-10-18. Mirrored in the scope.md §5 ship g
 
 | Item | Ships | Gate | Owner |
 |---|---|---|---|
-| **The `sleeper://` hand-off fix.** It covers the claim sheet, Send in Sleeper and Send All, through the shared helper, plus hand-off mode with clipboard + steps and the D2 message. It has no flag of its own (operator, 2026-10-23) | **The 2026-11-06 binary** | The device tests R0, 1–12 and T1–T4 (§7.3) gate the **merge** (P31). The operator runs them as **Launch Desk item OA-4, due 2026-11-03** | `platforms-eng` builds; the operator runs OA-4 |
+| **The `sleeper://` hand-off fix.** It covers the claim sheet, Send in Sleeper and Send All, through the shared helper, plus hand-off mode with clipboard + steps and the D2 message. It has no flag of its own (operator, 2026-10-23) | **The 2026-11-06 binary** | The device tests R0, 1–12 and T1–T4 (§7.3) gate the **merge** (P31). The operator runs them as **Launch Desk item OA-4, due 2026-10-28** | `platforms-eng` builds; the operator runs OA-4 |
 | **The D1 direct add/drop write.** All of [consent.md](consent.md), and every D1 AC (AC-19–AC-40) | **Post-launch** | The spec stays as written, with legal R15.8 folded in. `sleeper.fa_write` graduation is unchanged (D6) | `platforms-eng` (spike + build); the operator flips the flag |
 | **The secondary button's words** ("Do it in Sleeper instead", approved by `legal-lead`) | Post-launch, with D1 | Approved | — |
 | **K-F5:** the trade deck drops a dropped player after an in-app move | Post-launch, with D1 | In #339's spec | `trades-pm` |
@@ -473,7 +473,7 @@ The builder fills this in at current line numbers, in `docs/plans/sleeper-fa-dee
 
 Per `head-product` P31, **device tests 1–12 and T1–T4 gate the merge, not the start of the build**. `platforms-eng` may start the shared helper now.
 
-**Launch scope:** the hand-off ships in the **2026-11-06 binary**. The operator runs the device tests (R0, 1–12, T1–T4) as **Launch Desk OA-4, due 2026-11-03**. D1 (step 6) is **post-launch**.
+**Launch scope:** the hand-off ships in the **2026-11-06 binary**. The operator runs the device tests (R0, 1–12, T1–T4) as **Launch Desk OA-4, due 2026-10-28**. D1 (step 6) is **post-launch**.
 
 1. **This PR** is reviewed: `platforms-pm`, then `head-product`. `trades-pm` reviews the send-a-trade surfaces.
 2. **The hand-off build starts now:** `platforms-eng` / `eng-mobile`, from a fresh `origin/main`. It covers:
@@ -507,7 +507,7 @@ Per `head-product` P31, **device tests 1–12 and T1–T4 gate the merge, not th
 
    The hand-off doesn't wait for this track. It is the fallback the direct write needs anyway.
 7. **Merge the hand-off:**
-   - CI green, the TEST_LEDGER entry, and the device results recorded (OA-4, due 2026-11-03);
+   - CI green, the TEST_LEDGER entry, and the device results recorded (OA-4, due 2026-10-28);
    - then merge, into the **2026-11-06 binary** (EAS build, TestFlight);
    - the operator runs 13–20 on that build, and 21–29 after the D1 track lands post-launch.
 
@@ -555,7 +555,7 @@ Outside dependency: E2 (risk register) stays logged. The operator's D1 "Yes" is 
 ## 11. Handoffs
 
 - **Operator / app-manager:**
-  - run R0, device tests 1–12 and T1–T4 (with the label capture) as **Launch Desk OA-4, due 2026-11-03**, recorded in `device-results.md`;
+  - run R0, device tests 1–12 and T1–T4 (with the label capture) as **Launch Desk OA-4, due 2026-10-28**, recorded in `device-results.md`;
   - D3, D4 and the hand-off no-flag call are done (2026-10-23);
   - make the `sleeper.fa_write` flip under D6, post-launch;
   - approve each live write when it runs: the spike captures, and TestFlight 23–25 and 29.
