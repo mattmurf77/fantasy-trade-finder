@@ -14,6 +14,10 @@ trade_narrative at import time; keeping the dependency lazy keeps this module
 import-safe from anywhere).
 """
 
+import logging
+
+_log = logging.getLogger(__name__)
+
 # ── Generic draft-pick assets (shared constants) ───────────────────────────
 # Elo seeds for the 12 generic Early/Mid/Late picks (rounds 1–4) injected into
 # the universal pool, calibrated to typical dynasty trade values. Module-scoped
@@ -224,6 +228,42 @@ def parse_generic_pick_id(pick_id: str) -> tuple[int, str] | None:
     if (rnd, tier) not in GENERIC_PICK_SEEDS:
         return None
     return rnd, tier
+
+
+# ── Generic rungs never take a trade Elo signal (models-eng A2) ────────────
+# The 12 rungs sit in every user's RankingService pool so they can be RANKED,
+# but no engine ever puts one on a trade card. The only way one reaches a
+# trade signal is client-echoed card context (FB-46 reconstruction,
+# /api/trades/queue, and a match minted from such a like). Stripped once, at
+# the signal layer (record_trade_signal / record_disposition_signal /
+# save_trade_swipes), never per route. Plan:
+# docs/plans/generic-pick-signal-strip.md.
+#: Per-call-site count of signals the strip changed. A log counter only;
+#: deliberately not an analytics event.
+GENERIC_PICK_STRIP_COUNTS: dict[str, int] = {}
+
+
+def strip_generic_pick_pair(winner_ids, loser_ids, *,
+                            site: str = "") -> tuple[list, list]:
+    """Drop every generic pick rung from both sides of one trade signal.
+
+    Mixed sides keep their players. If either side ends up empty the whole
+    pair is skipped — `([], [])` — so a caller can never record a one-sided
+    signal. Sides with no generic id come back unchanged (as new lists).
+    One `log.info` per call that drops anything.
+    """
+    winner_ids, loser_ids = list(winner_ids), list(loser_ids)
+    winners = [i for i in winner_ids if parse_generic_pick_id(i) is None]
+    losers = [i for i in loser_ids if parse_generic_pick_id(i) is None]
+    dropped = len(winner_ids) - len(winners) + len(loser_ids) - len(losers)
+    if not dropped:
+        return winners, losers
+    if not winners or not losers:
+        winners, losers = [], []
+    fired = GENERIC_PICK_STRIP_COUNTS[site] = GENERIC_PICK_STRIP_COUNTS.get(site, 0) + 1
+    _log.info("generic-pick strip [%s]: dropped %d generic id(s)%s (fired %d)",
+              site, dropped, "" if winners else "; pair skipped", fired)
+    return winners, losers
 
 
 def year_pick_label(year: int, rnd: int, tier: str) -> str:
