@@ -210,6 +210,9 @@ export interface SessionInitBody {
     player_ids: string[];
   }>;
   invited_by?: string | null;
+  /** Referral FR-12 — the invite id `t`, from inviteIdField(). Omitted,
+   *  never null or '', when no id was captured. */
+  invite_id?: string;
   active_format?: '1qb_ppr' | 'sf_tep';
   trade_fairness_threshold?: number;
   /**
@@ -425,6 +428,29 @@ function buildSleeperRosterPayload(
   };
 }
 
+// Referral FR-12 (B3) — the ONE source of `invite_id` for a session-init
+// body. Consumes the id captured from the invite link
+// (useSession.consumeInviteId, B2) and returns `{ invite_id }` only when
+// there is one: no id means no key, never null or ''. Spread ONCE into every
+// body this file sends, at the point the body is composed: both Sleeper
+// bodies, and the ESPN / MFL / Fleaflicker builder results at their call
+// sites here (api/espn.ts and api/platformLink.ts stay untouched). The
+// platform branches return before the Sleeper body is built, so each path
+// consumes the id exactly once, and only after its builder succeeded. The
+// server ignores the field while the referral ledger is off (prd §8.4).
+// Loaded inline to avoid a circular import (useSession → auth.ts), the same
+// pattern as consumeInvitedBy. Pinned by tests/check-session-init-invite-id.js.
+function inviteIdField(): { invite_id?: string } {
+  let id: string | null = null;
+  try {
+    const { useSession } = require('../state/useSession');
+    id = useSession.getState().consumeInviteId();
+  } catch {
+    /* require may fail in test contexts; non-fatal */
+  }
+  return id ? { invite_id: id } : {};
+}
+
 // Resolves to a `SessionInitSeed` — the Sleeper reads it already made, so
 // the caller can seed the query cache. Additive: every existing caller
 // awaits this for its side effects and ignores the value.
@@ -440,18 +466,18 @@ export async function initLeagueSession(
   // /api/session/init call is identical from here on. Detection reads the
   // cached league list's `platform` field (hydrated from AsyncStorage).
   if (isEspnLeague(lg.league_id)) {
-    const espnBody = await buildEspnSessionInitBody(user, lg);
+    const espnBody = { ...(await buildEspnSessionInitBody(user, lg)), ...inviteIdField() };
     await submitSessionInit(espnBody, control);
     return {};
   }
   // MFL / Fleaflicker imports work the same way — rosters come from the
   // backend snapshot (api/platformLink.ts), not Sleeper proxies.
   if (isMflLeague(lg.league_id)) {
-    await submitSessionInit(await buildPlatformSessionInitBody('mfl', user, lg), control);
+    await submitSessionInit({ ...(await buildPlatformSessionInitBody('mfl', user, lg)), ...inviteIdField() }, control);
     return {};
   }
   if (isFleaflickerLeague(lg.league_id)) {
-    await submitSessionInit(await buildPlatformSessionInitBody('fleaflicker', user, lg), control);
+    await submitSessionInit({ ...(await buildPlatformSessionInitBody('fleaflicker', user, lg)), ...inviteIdField() }, control);
     return {};
   }
   // An account-only working key is not a Sleeper identity. Imported leagues
@@ -512,6 +538,7 @@ export async function initLeagueSession(
     user_player_ids:   myPlayerIds,
     opponent_rosters:  opponentRosters,
     invited_by:        invitedBy ?? undefined,
+    ...inviteIdField(),
     league_user_id:      leagueUserId,
     league_display_name: leagueDisplayName,
   };
@@ -561,15 +588,15 @@ export async function buildSessionInitBody(
   // Sleeper (see initLeagueSession's espn branch for the why).
   if (isEspnLeague(lg.league_id)) {
     await warmPlayerCache().catch(() => { /* best-effort */ });
-    return buildEspnSessionInitBody(user, lg);
+    return { ...(await buildEspnSessionInitBody(user, lg)), ...inviteIdField() };
   }
   if (isMflLeague(lg.league_id)) {
     await warmPlayerCache().catch(() => { /* best-effort */ });
-    return buildPlatformSessionInitBody('mfl', user, lg);
+    return { ...(await buildPlatformSessionInitBody('mfl', user, lg)), ...inviteIdField() };
   }
   if (isFleaflickerLeague(lg.league_id)) {
     await warmPlayerCache().catch(() => { /* best-effort */ });
-    return buildPlatformSessionInitBody('fleaflicker', user, lg);
+    return { ...(await buildPlatformSessionInitBody('fleaflicker', user, lg)), ...inviteIdField() };
   }
   const [rosters, leagueUsers] = await Promise.all([
     getLeagueRosters(lg.league_id),
@@ -605,6 +632,7 @@ export async function buildSessionInitBody(
     user_player_ids:  myPlayerIds,
     opponent_rosters: opponentRosters,
     invited_by:       invitedBy ?? undefined,
+    ...inviteIdField(),
     league_user_id:      leagueUserId,
     league_display_name: leagueDisplayName,
   };
