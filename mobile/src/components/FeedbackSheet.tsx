@@ -33,7 +33,8 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   // Best-effort label of the screen the user was on when they opened the
-  // sheet. Auto-filled by the FAB; the user can override before saving.
+  // sheet. Auto-filled by the FAB and submitted as-is: there is no visible
+  // Screen field (#354 D-6), because the value is an internal route name.
   defaultScreen: string;
 }
 
@@ -101,8 +102,8 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
       // Stale notice from a previous attempt — never greet a fresh open with it.
       setSaveFailed(false);
       if (guardOn && text.trim()) {
-        // Draft restore: keep note + severity + screen override. Only
-        // backfill the screen field if the user blanked it.
+        // Draft restore: keep note + severity, and the screen the draft
+        // started on (backfilled if it is somehow blank).
         if (!screen.trim()) setScreen(defaultScreen);
       } else {
         setScreen(defaultScreen);
@@ -206,18 +207,6 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
                 );
               })}
             </View>
-
-            <Text style={styles.label}>Screen</Text>
-            <TextInput
-              value={screen}
-              onChangeText={setScreen}
-              accessibilityLabel="Screen"
-              style={styles.screenInput}
-              placeholder="e.g. Trades / Tiers / Rank-Trios"
-              placeholderTextColor={chalk.faint}
-              autoCorrect={false}
-              autoCapitalize="none"
-            />
 
             <Text style={styles.label}>Note</Text>
             <TextInput
@@ -324,17 +313,6 @@ const styles = StyleSheet.create({
   sevText:       { fontFamily: fonts.uiSemi, fontSize: 14, color: chalk.dim },
   sevTextActive: { color: ice.base },
 
-  screenInput: {
-    backgroundColor: ink.ink2,
-    borderWidth: 1,
-    borderColor: ink.lineStrong,
-    borderRadius: radii.sm,
-    minHeight: 44,
-    padding: space.md,
-    color: chalk.base,
-    fontFamily: fonts.ui,
-    fontSize: 14,
-  },
   noteInput: {
     backgroundColor: ink.ink2,
     borderWidth: 1,

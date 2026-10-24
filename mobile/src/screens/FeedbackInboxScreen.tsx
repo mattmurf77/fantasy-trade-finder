@@ -85,7 +85,7 @@ export default function FeedbackInboxScreen() {
   }
 
   async function onShare() {
-    const md = formatFeedbackAsMarkdown(visibleItems);
+    const md = formatFeedbackAsMarkdown(visibleItems, (s) => STATUS_LABEL[s]);
     try {
       await Share.share({ message: md });
     } catch {
@@ -185,7 +185,6 @@ export default function FeedbackInboxScreen() {
                 accessibilityLabel={[
                   responded ? 'Responded' : null,
                   SEV_LABEL[it.severity],
-                  it.screen,
                   it.text,
                   relativeTime(it.created_at),
                   syncText,
@@ -223,7 +222,6 @@ export default function FeedbackInboxScreen() {
                     </Pressable>
                   ) : null}
                 </View>
-                <Text style={styles.rowScreen}>{it.screen}</Text>
                 <Text style={styles.rowText}>{it.text}</Text>
                 {it.status ? (
                   <Text style={[styles.statusLine, { color: STATUS_COLOR[it.status] }]}>
@@ -306,7 +304,6 @@ const styles = StyleSheet.create({
   },
   deleteBtnPressed: { backgroundColor: ink.ink3 },
   rowWhen:   { ...type.data, color: chalk.faint },
-  rowScreen: { ...type.label, marginBottom: space.xs },
   rowText:   { ...type.body },
   // Operator-set lifecycle status — the "what happened to my note" line.
   // Sits above the sync badge; color carries the state (see STATUS_COLOR).
