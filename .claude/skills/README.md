@@ -1,6 +1,6 @@
 # .claude/skills/ — project skill index
 
-36 project-local Claude Code skills. Each is a directory with a `SKILL.md`
+38 project-local Claude Code skills. Each is a directory with a `SKILL.md`
 (`living-memory-format-check` uses lowercase `skill.md`); a few carry `references/`,
 `templates/`, `evals/`, or `scripts/` alongside.
 
@@ -18,6 +18,7 @@ a move, not a copy.
 | `feature-evaluator` | Reviews a feature area and emits a structured improvement report. Has `references/code-quality-principles.md` + evals |
 | `project-architect` | Generates/maintains the `docs/` reference layer. Carries the `root-CLAUDE.md`, `docs-CLAUDE.md`, `docs-README.md` templates and a `doc-inventory.md` reference |
 | `project-reorganizer` | Restructures a flat/messy project tree |
+| `project-agent-hierarchy` | Runs a multi-session programme as a layered agent org: the coordinator → Heads of Product, Eng and Business Operations → area and function leads, each its own session → worker subagents. `references/` holds the org chart and file map, setup, execution, records, and starter prompts |
 
 ## Role skills — 30 company roles
 
