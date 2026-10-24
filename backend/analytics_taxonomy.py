@@ -894,29 +894,33 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # would feed the league-match fallback (§7.5). Never in
     # ALLOWED_CLIENT_EVENTS — the disjointness assert below would raise.
     #
-    # Owner: the referrer of a VALID invite id (`t`), else
+    # Owner: the referrer of the referrals row `t` names (any status); with
+    # no row, the user a legacy `ref` resolves to (by username); else
     # user_id="system:invite" (no users row). Written with platform="server"
-    # and touch_user=False: the inviter did nothing, so their
+    # and touch_user=False: the owner did nothing, so their
     # users.last_active_at / events_count and streak never move (C6).
     #
     # NON_INTENT in analytics_queries (that row lands in this same commit):
     # admitting them would mint a user-day for an inviter out of someone
     # else's tap.
     #
+    # Both fire only while growth.referral_ledger is on (#350 "Takes
+    # effect"), for human GETs only (C4: never HEAD, never a link-preview
+    # fetcher in server.PREVIEW_UA_TOKENS, never an empty UA).
+    #
     # Props (no UA string, IP, username, display name or league name — C4,
-    # C9; no key contains "token" — C1). Server-fired names need no
-    # CLIENT_EVENT_PROPS row, so the props are documented here:
-    #   invite_landing_opened  invite_id (the well-formed `t`), league_id,
+    # C9; no key contains "token" — C1; no "platform" prop — the column
+    # carries 'server'). Server-fired names need no CLIENT_EVENT_PROPS row,
+    # so the props are documented here and pinned at the writer by
+    # tests/test_analytics_taxonomy_referral_loop.py:
+    #   invite_landing_opened  invite_id? (the well-formed `t`), league_id,
     #                          invite_status valid|expired|league_mismatch|
-    #                          unknown, device_class ios|android|desktop|other.
-    #                          Human GET of the join path only, with
-    #                          growth.referral_ledger on; never HEAD, never a
-    #                          link-preview fetch.
-    #   invite_landing_cta     invite_id? (only when `t` is well-formed),
-    #                          league_id, cta ios_install|web_app,
+    #                          unknown, or null without a `t`; device_class
+    #                          ios|android|desktop|other. Every human GET of
+    #                          the join path, landing or 302 mode.
+    #   invite_landing_cta     invite_id?, league_id, cta ios_install|web_app,
     #                          device_class. GET /app/league/join/<id>/go/<cta>
-    #                          (flag growth.join_landing); never HEAD, never a
-    #                          link-preview fetch.
+    #                          (the route also needs growth.join_landing).
     "invite_landing_opened",
     "invite_landing_cta",
 })
