@@ -209,6 +209,49 @@ def test_ii_taste_mutated_after_serve_changes_no_eval_score(world, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# R5.2 (a): configuration is pinned and recorded per run
+# ---------------------------------------------------------------------------
+
+def test_config_is_pinned_and_recorded_and_replays_after_live_config_changes(world,
+                                                                             monkeypatch):
+    """A fit records the 3 hyperparameters it used, and an eval the
+    V-vector, each with the model_config SHA-256. Given those records, a
+    refit and a replay are bit-identical after live model_config changes."""
+    import backend.trade_service as ts
+    from backend.eval.persistence import run_record
+
+    decks, model = _fit(world)
+    pin = model.meta["config"]
+    assert set(pin["values"]) == set(vm.FIT_CONFIG)
+    assert pin["model_config_sha256"] == vm.model_config_sha256()
+    assert json.loads(json.dumps(model.to_dict()))["meta"]["config"] == pin   # persisted
+
+    def replay(config=None):
+        with patch.object(vm, "load_latest_model",
+                          lambda: vm.ValueModel.from_dict(model.to_dict())):
+            return evaluate(get_scorer("value_model"), decks, bootstrap=50, seed=2,
+                            config=config)
+
+    run = replay()
+    assert set(run.config["values"]) == set(vm.SCORE_CONFIG)
+    assert run_record(run, run)["config"] == run.config
+
+    for key, value in (("value_model_calib_frac", 0.35), ("value_model_l2", 0.2),
+                       ("value_model_l2_cat", 2.0), ("value_model_v_like", 3.0),
+                       ("value_model_v_propose", 0.5)):
+        monkeypatch.setitem(ts._cfg, key, value)
+    assert vm.model_config_sha256() != pin["model_config_sha256"]
+
+    assert vm.train_model(decks, as_of=world["as_of"], config=pin).to_dict() == model.to_dict()
+    assert repr(replay(run.config)) == repr(run)
+    # Without the records, the live change shows.
+    assert vm.train_model(decks, as_of=world["as_of"]).to_dict() != model.to_dict()
+    live = replay()
+    assert live.config["values"]["value_model_v_like"] == 3.0
+    assert repr(live.metrics) != repr(run.metrics)
+
+
+# ---------------------------------------------------------------------------
 # (iii) parity with taste_multipliers, and live serving
 # ---------------------------------------------------------------------------
 

@@ -198,3 +198,30 @@ def test_nightly_counts_a_deck_still_in_flight_as_in_flight(tmp_path, monkeypatc
         assert record["in_flight_decks"] == 1 and record["excluded"]["in_flight"] == 30
         assert record["incomplete_decks"] == 1 and record["excluded"]["incomplete_deck"] == 30
         assert record["pack_integrity_decks"] == 0
+
+
+def test_nightly_with_a_settle_lag_grades_settled_decks_as_of_last_served_plus_lag(
+        tmp_path, monkeypatch):
+    """R5.2 (b): with --settle-lag-days 7 the nightly grades the window
+    ending 7 days ago, as of its last served_at + 7 days, and records it."""
+    from backend.tests.test_eval_pack_reader import _deck_cards, make_engine, write_deck
+
+    monkeypatch.setenv("EVAL_RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("VALUE_MODEL_DIR", str(tmp_path / "vm"))
+    monkeypatch.setattr(vm, "_model_cache", None)
+    now = datetime.now(timezone.utc)
+    eng, packs = make_engine()
+    served = {job: (now - timedelta(days=days)).isoformat()
+              for job, days in (("old", 20), ("settled", 9), ("fresh", 2))}
+    for job, at in served.items():
+        write_deck(eng, packs, _deck_cards(job, 30, served_at=at), full=range(30),
+                   served_at=at, viewed=range(0, 30, 2))
+
+    stats = nightly.run_all(window_days=30, engine=eng, ess_min=1, bootstrap=20, seed=1,
+                            settle_lag_days=7)
+    assert stats["errors"] == 0
+    as_of = (datetime.fromisoformat(served["settled"]) + timedelta(days=7)).isoformat()
+    for record in load_runs():
+        assert record["as_of"] == as_of and record["settle_lag_days"] == 7
+        assert record["n_total"] == 2 * 30                       # "fresh" isn't settled yet
+        assert len(record["config"]["model_config_sha256"]) == 64

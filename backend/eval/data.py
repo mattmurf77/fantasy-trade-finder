@@ -24,8 +24,9 @@ row. Ghost rows (C5) are never packed and never displace a packed card.
 
 Delivery (R4.2 U1): in a deck with a pack, a card is delivered when it is
 not a ghost and its card_index is within the pack's run["deliveries"]; the
-exposure model counts delivered positions only. In a deck without a pack
-every card counts as delivered (the pre-paging rule).
+exposure model counts delivered positions only. The legacy rule (models-lead
+R5.2 (d)): a deck without a pack, from before paging, delivered every served
+card, so delivered = served at every position, as e(k) always counted it.
 
 LoggedDeck.exclusion, per deck: replay excludes the deck whole and never
 sinks it; calibration excludes its cards.
@@ -60,7 +61,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from sqlalchemy import (
-    Integer, LargeBinary, String, Text, column, create_engine, inspect, select, table,
+    Integer, LargeBinary, String, Text, column, create_engine, func, inspect, select, table,
 )
 
 from backend.database import deck_impressions_table, deck_outcomes_table
@@ -207,15 +208,21 @@ def load_decks(
     user_id: str | None = None,
     league_id: str | None = None,
     project_features: bool = False,
-    as_of: str | None = None,      # ISO UTC — the eval's clock (in_flight)
+    as_of: str | None = None,      # ISO UTC — the read's clock
 ) -> list[LoggedDeck]:
     """Load deck_impressions (+reduced outcomes) as LoggedDecks, time-ordered
     by served_at then deck_job_id. ISO-8601 UTC strings compare lexically,
     matching the storage format everywhere in this schema. Packs in the same
     window (deck_evidence_packs.served_at, user_id, league_id) are merged
     into their decks (module docstring); a card is ordered by card_index,
-    a non-ghost card before a ghost row at the same index. `as_of` is the
-    explicit clock the in_flight rule needs; the loader reads no wall clock.
+    a non-ghost card before a ghost row at the same index.
+
+    `as_of` is the read's explicit clock (the loader reads no wall clock):
+    only decks served at or before it, and outcomes acted at or before it
+    (deck_outcomes.acted_at), are read, so a re-read at the same as_of is
+    the same however many outcomes arrive later (models-lead R5.2 (b)); and
+    the in_flight rule measures from it. Choosing as_of so labels are
+    complete (a settle lag) is the caller's job: replay.settled_read.
 
     project_features=True keeps only contract.PROJECTION_KEYS inside each
     parsed features dict (and each packed card's features_compact): every
@@ -232,6 +239,8 @@ def load_decks(
         q = q.where(imp.c.served_at >= since)
     if until:
         q = q.where(imp.c.served_at < until)
+    if as_of:
+        q = q.where(imp.c.served_at <= as_of)
     if user_id:
         q = q.where(imp.c.user_id == user_id)
     if league_id:
@@ -246,6 +255,8 @@ def load_decks(
                 pq = pq.where(_PACKS.c.served_at >= since)
             if until:
                 pq = pq.where(_PACKS.c.served_at < until)
+            if as_of:
+                pq = pq.where(_PACKS.c.served_at <= as_of)
             if user_id:
                 pq = pq.where(_PACKS.c.user_id == user_id)
             if league_id:
@@ -262,10 +273,11 @@ def load_decks(
             out = deck_outcomes_table
             for i in range(0, len(imp_ids), 500):
                 chunk = imp_ids[i:i + 500]
-                for orow in conn.execute(
-                    select(out.c.impression_id, out.c.action, out.c.dwell_ms)
-                    .where(out.c.impression_id.in_(chunk))
-                ).fetchall():
+                oq = (select(out.c.impression_id, out.c.action, out.c.dwell_ms)
+                      .where(out.c.impression_id.in_(chunk)))
+                if as_of:
+                    oq = oq.where(out.c.acted_at <= as_of)
+                for orow in conn.execute(oq).fetchall():
                     outcomes.setdefault(orow.impression_id, []).append(orow)
 
     decks: dict[str, LoggedDeck] = {}
@@ -353,6 +365,26 @@ def load_decks(
         if idx != list(range(n)):
             deck.exclusion = INCOMPLETE_DECK
     return result
+
+
+def last_served_at(engine=None, db_url: str | None = None, since: str | None = None,
+                   until: str | None = None, user_id: str | None = None,
+                   league_id: str | None = None) -> str | None:
+    """The latest deck_impressions.served_at in the window (load_decks'
+    since / until / scope filters), or None when nothing was served in it:
+    the anchor a settle lag is added to (replay.settled_read)."""
+    imp = deck_impressions_table
+    q = select(func.max(imp.c.served_at))
+    if since:
+        q = q.where(imp.c.served_at >= since)
+    if until:
+        q = q.where(imp.c.served_at < until)
+    if user_id:
+        q = q.where(imp.c.user_id == user_id)
+    if league_id:
+        q = q.where(imp.c.league_id == league_id)
+    with resolve_engine(engine, db_url).connect() as conn:
+        return conn.execute(q).scalar()
 
 
 def _unpack(p) -> tuple[int, list[dict]] | None:

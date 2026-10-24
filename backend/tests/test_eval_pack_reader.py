@@ -14,6 +14,7 @@ over real decks (C7 (ii)) is in test_evidence_pack.py.
 
 import json
 from dataclasses import asdict, replace
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import (
@@ -343,19 +344,19 @@ def test_calibration_excludes_integrity_deck_cards():
 def test_exclusion_rule_version_is_stamped_and_mixed_versions_are_flagged():
     decks = load_decks(engine=_mixed_engine())
     run = evaluate(_Spy(), decks, ess_min=1, bootstrap=20, seed=0)
-    assert EXCLUSION_RULE_VERSION == 2 and run.exclusion_rule_version == 2
+    assert EXCLUSION_RULE_VERSION == 3 and run.exclusion_rule_version == 3
     record = run_record(run, run)
-    assert record["exclusion_rule_version"] == 2 and record_rule_version(record) == 2
+    assert record["exclusion_rule_version"] == 3 and record_rule_version(record) == 3
     assert record_rule_version({"scorer": "production"}) == 1      # written before the field
 
-    assert rule_version_note([2, 2]) is None
-    assert "not comparable" in rule_version_note([1, 2])
+    assert rule_version_note([3, 3]) is None
+    assert "not comparable" in rule_version_note([2, 3])
     assert rule_version_note(map(record_rule_version, [record, {}])) is not None
 
-    old = replace(run, exclusion_rule_version=1)
+    old = replace(run, exclusion_rule_version=2)      # before delivered-position exposure
     assert verdict(run, run) != "RULE-MISMATCH"
     assert verdict(run, old) == "RULE-MISMATCH" == verdict(old, run)
-    assert "Exclusion rules: version 2." in render_report([run], run)
+    assert "Exclusion rules: version 3." in render_report([run], run)
     mixed = render_report([run], old)
     assert "WARNING: exclusion rules differ" in mixed and "RULE-MISMATCH" in mixed
 
@@ -376,6 +377,105 @@ def test_delivered_positions_are_the_served_set():
     assert all(c.delivered for c in old.cards)
     assert set(exposure_curve([deck])) == set(range(20))
     assert set(exposure_curve([old])) == set(range(12))
+
+
+def _ek_before_delivery(decks):
+    """e(k) as replay computed it before R5.2 (d): every loaded card served."""
+    served, viewed = {}, {}
+    for d in decks:
+        for c in d.cards:
+            served[c.card_index] = served.get(c.card_index, 0) + 1
+            viewed[c.card_index] = viewed.get(c.card_index, 0) + c.viewed
+    return {k: max((viewed[k] + 1) / (served[k] + 2), replay_mod.EXPOSURE_FLOOR) for k in served}
+
+
+def test_a_legacy_deck_keeps_its_exposure_and_a_paged_deck_uses_delivered_positions():
+    """R5.2 (d): a deck from before paging (no pack) delivered every served
+    card, so its e(k) is what it always was; a paged deck's undelivered
+    tail no longer counts as served."""
+    eng, packs = make_engine()
+    for job in ("old1", "old2"):
+        write_deck(eng, packs, _deck_cards(job, 12), full=range(12), ghosts=[3],
+                   viewed=[0, 1, 2, 5])
+    write_deck(eng, packs, _deck_cards("paged", 40), full=range(30), packed=range(30, 40),
+               viewed=[0, 1, 2, 5, 12], deliveries=[[14, SERVED]])
+    decks = load_decks(engine=eng)
+    legacy = [d for d in decks if d.deck_job_id.startswith("old")]
+    (paged,) = [d for d in decks if d.deck_job_id == "paged"]
+    assert exposure_curve(legacy) == _ek_before_delivery(legacy)
+    assert set(exposure_curve([paged])) == set(range(15))
+    assert exposure_curve([paged]) != _ek_before_delivery([paged])
+
+
+# ---------------------------------------------------------------------------
+# R5.2 (b): the read's as_of, and the settle lag that picks it
+# ---------------------------------------------------------------------------
+
+def test_outcomes_acted_and_decks_served_after_as_of_are_not_read():
+    eng, packs = make_engine()
+    write_deck(eng, packs, _deck_cards("j", 32), full=range(30), packed=range(30, 32),
+               viewed=[0, 1])
+    late = "2026-11-02T00:00:00+00:00"
+    with eng.begin() as conn:
+        conn.execute(insert(deck_outcomes_table), [
+            {"impression_id": card_impression_id("j", 0), "action": "like", "acted_at": late},
+            {"impression_id": card_impression_id("j", 31), "action": "viewed", "acted_at": late},
+        ])
+    later = "2026-10-30T00:00:00+00:00"
+    write_deck(eng, packs, _deck_cards("later", 30, served_at=later), full=range(30),
+               served_at=later)
+
+    (deck,) = load_decks(engine=eng, as_of="2026-10-26T12:00:00+00:00")
+    cards = {c.card_index: c for c in deck.cards}
+    assert deck.deck_job_id == "j"
+    assert cards[0].viewed and not cards[0].liked and not cards[31].viewed
+    everything = {d.deck_job_id: d for d in load_decks(engine=eng)}
+    assert set(everything) == {"j", "later"}
+    cards = {c.card_index: c for c in everything["j"].cards}
+    assert cards[0].liked and cards[31].viewed
+
+
+def test_the_settle_lag_picks_as_of():
+    eng, packs = make_engine()
+    for job, at in (("a", "2026-10-01T09:00:00+00:00"), ("b", "2026-10-10T18:30:00+00:00"),
+                    ("c", "2026-10-20T08:00:00+00:00")):
+        write_deck(eng, packs, _deck_cards(job, 30, served_at=at), full=range(30), served_at=at)
+    now = datetime(2026, 10, 24, 12, tzinfo=timezone.utc)
+    until, as_of = replay_mod.settled_read(now=now, settle_lag_days=7, engine=eng)
+    assert until == "2026-10-17T12:00:00+00:00"            # the window ends a lag ago
+    assert as_of == "2026-10-17T18:30:00+00:00"            # its last served_at + the lag
+    assert [d.deck_job_id for d in load_decks(engine=eng, until=until, as_of=as_of)] == ["a", "b"]
+    assert replay_mod.settled_read(now=now, settle_lag_days=7, engine=eng,
+                                   until="2026-10-01T00:00:00+00:00") == (
+        "2026-10-01T00:00:00+00:00", None)
+
+
+# ---------------------------------------------------------------------------
+# R5.2 (c): a refit is the same whether viewed cards were upgraded or not
+# ---------------------------------------------------------------------------
+
+def test_a_refit_is_the_same_upgraded_or_left_packed():
+    late = {31, 33, 35, 37, 38}
+
+    def engine(upgrade):
+        eng, packs = make_engine()
+        for d in range(8):
+            job, viewed = f"r{d}", [*range(0, 30, 2), *sorted(late)]
+            write_deck(eng, packs, _deck_cards(job, 40),
+                       full=set(range(30)) | (late if upgrade else set()),
+                       packed=range(30, 40), viewed=viewed)
+            with eng.begin() as conn:
+                conn.execute(insert(deck_outcomes_table), [
+                    {"impression_id": card_impression_id(job, i),
+                     "action": "like" if (i + d) % 3 == 0 else "pass", "acted_at": SERVED}
+                    for i in viewed])
+        return eng
+
+    as_of = datetime(2026, 10, 24, tzinfo=timezone.utc)
+    upgraded = vm.train_model(load_decks(engine=engine(True)), as_of=as_of)
+    left_packed = vm.train_model(load_decks(engine=engine(False)), as_of=as_of)
+    assert upgraded is not None and upgraded.meta["n_like_rows"] == 8 * 20
+    assert upgraded.to_dict() == left_packed.to_dict()
 
 
 # ---------------------------------------------------------------------------

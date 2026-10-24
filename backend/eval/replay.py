@@ -88,7 +88,9 @@ served at its position.
 
 EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
 verdict() and render_report() say so when runs graded under different rules
-are compared (R2.5 (2)).
+are compared (R2.5 (2)). The model_config a run read is pinned and recorded
+on EvalRun.config (R5.2 (a)); the read's as_of and settle lag are chosen by
+settled_read (R5.2 (b)).
 """
 
 from __future__ import annotations
@@ -99,8 +101,9 @@ import os
 import random
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+from backend import value_model as _value_model
 from backend.eval.data import (
     IN_FLIGHT,
     INCOMPLETE_DECK,
@@ -108,6 +111,7 @@ from backend.eval.data import (
     PARTIAL_RUN_TIER,
     LoggedDeck,
     card_dict,
+    last_served_at,
     load_decks,
     split_decks,
 )
@@ -127,14 +131,21 @@ EXCLUSION_REASONS = (
     "missing_scorer_inputs", "scorer_error",
 )
 
-# The exclusion rules a run was graded under (models-lead R2.5 (2)):
+# The eval rules a run was graded under (models-lead R2.5 (2), R5.2 (d)):
 #   1  before 2026-10-20: a card without features sank to the bottom of the
 #      candidate order (per-card bad_features). Persisted records without an
 #      exclusion_rule_version field are version 1.
 #   2  whole-deck exclusion: missing_scorer_inputs, partial_run, in_flight,
-#      pack_integrity and incomplete_deck; e(k) counts delivered positions.
+#      pack_integrity and incomplete_deck.
+#   3  2, plus e(k) counts delivered positions only (a deck from before
+#      paging delivered every served card) and the read filters outcomes by
+#      acted_at <= as_of and decks by served_at <= as_of. e(k) rises where
+#      undelivered tails used to pull it down.
 # Estimates graded under different versions are not comparable.
-EXCLUSION_RULE_VERSION = 2
+EXCLUSION_RULE_VERSION = 3
+# R5.2 (b): a read whose labels must be complete settles them this long
+# after the window's last served deck (late views, proposes days later).
+DEFAULT_SETTLE_LAG_DAYS = 7.0
 
 
 @dataclass
@@ -168,6 +179,7 @@ class EvalRun:
     eval_start: str | None = None
     ess_min: float = DEFAULT_ESS_MIN
     exclusion_rule_version: int = EXCLUSION_RULE_VERSION
+    config: dict | None = None       # the pinned model_config the run read (R5.2 (a))
 
     @property
     def unreliable(self) -> bool:
@@ -259,10 +271,26 @@ def evaluate(
     bootstrap: int = DEFAULT_BOOTSTRAP,
     seed: int = 0,
     curve: dict[int, float] | None = None,
+    config: dict | None = None,
 ) -> EvalRun:
     """Replay `decks` under `scorer`. Enforces the time-ordered protocol:
     a fit-capable scorer requires eval_start, is fitted on pre-split decks
-    only, and is evaluated on post-split decks only."""
+    only, and is evaluated on post-split decks only.
+
+    `config` pins the model_config a scorer reads (value_model's V-vector,
+    a value_model.pin_config(SCORE_CONFIG) record, R5.2 (a)): given, the
+    run reads it and never live model_config; omitted, the live values are
+    pinned now. Either way it is recorded on EvalRun.config, so a replay
+    with the recorded config reproduces the run."""
+    config = config if config is not None else _value_model.pin_config(_value_model.SCORE_CONFIG)
+    with _value_model.pinned(config):
+        run = _evaluate(scorer, decks, eval_start=eval_start, ess_min=ess_min,
+                        bootstrap=bootstrap, seed=seed, curve=curve)
+    run.config = config
+    return run
+
+
+def _evaluate(scorer, decks, *, eval_start, ess_min, bootstrap, seed, curve) -> EvalRun:
     fit_capable = hasattr(scorer, "fit")
     if fit_capable and not eval_start:
         raise ValueError(
@@ -526,6 +554,24 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reads whose labels must be complete (R5.2 (b))
+# ---------------------------------------------------------------------------
+
+def settled_read(*, now: datetime, settle_lag_days: float = DEFAULT_SETTLE_LAG_DAYS,
+                 until: str | None = None, **scope) -> tuple[str, str | None]:
+    """(until, as_of) for a read whose labels must be complete: the window
+    ends at `until` (default: now minus the lag), and as_of = the window's
+    last served_at plus the lag, so every deck read has had the lag to
+    collect late outcomes. as_of is None when nothing was served in the
+    window. `scope` takes load_decks' engine, db_url, since, user_id and
+    league_id. The lag is the read's parameter, never the loader's."""
+    lag = timedelta(days=settle_lag_days)
+    until = until or (now - lag).isoformat()
+    last = last_served_at(until=until, **scope)
+    return until, (None if last is None else (datetime.fromisoformat(last) + lag).isoformat())
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -547,8 +593,14 @@ def main(argv=None) -> int:
                                          "evaluate on decks at/after (time-ordered protocol)")
     ap.add_argument("--since", help="only load impressions served at/after this ISO timestamp")
     ap.add_argument("--until", help="only load impressions served before this ISO timestamp")
-    ap.add_argument("--as-of", help="ISO UTC clock for the in_flight rule "
-                                    "(default: now, read here at the CLI)")
+    ap.add_argument("--as-of", help="ISO UTC clock of the read: decks served and outcomes "
+                                    "acted after it are not read, and the in_flight rule "
+                                    "measures from it (default: settled, see "
+                                    "--settle-lag-days)")
+    ap.add_argument("--settle-lag-days", type=float, default=DEFAULT_SETTLE_LAG_DAYS,
+                    help="without --as-of: read decks served before now minus this lag "
+                         "(or --until), with as_of = the window's last served_at plus "
+                         f"the lag, so late outcomes are in (default {DEFAULT_SETTLE_LAG_DAYS:g})")
     ap.add_argument("--user", help="restrict to one user_id")
     ap.add_argument("--league", help="restrict to one league_id")
     ap.add_argument("--ess-min", type=float, default=DEFAULT_ESS_MIN,
@@ -565,8 +617,14 @@ def main(argv=None) -> int:
     if args.db:
         db_url = args.db if "://" in args.db else f"sqlite:///{args.db}"
 
-    as_of = args.as_of or datetime.now(timezone.utc).isoformat()
-    decks = load_decks(db_url=db_url, since=args.since, until=args.until,
+    until, as_of = args.until, args.as_of
+    if as_of is None:
+        until, as_of = settled_read(
+            now=datetime.now(timezone.utc), settle_lag_days=args.settle_lag_days,
+            until=args.until, db_url=db_url, since=args.since,
+            user_id=args.user, league_id=args.league)
+    print(f"Reading decks served before {until or 'now'} as of {as_of}")
+    decks = load_decks(db_url=db_url, since=args.since, until=until,
                        user_id=args.user, league_id=args.league, as_of=as_of)
     n_imps = sum(len(d.cards) for d in decks)
     print(f"Loaded {len(decks)} decks / {n_imps} impressions"
@@ -587,16 +645,17 @@ def main(argv=None) -> int:
         return 0 if ok else 1
 
     scorer_names = args.scorer or ["base_score", "random"]
+    config = _value_model.pin_config(_value_model.SCORE_CONFIG)   # one pin for every run
     baseline = evaluate(get_scorer(args.baseline), decks,
                         eval_start=args.eval_start, ess_min=args.ess_min,
-                        bootstrap=args.bootstrap, seed=args.seed)
+                        bootstrap=args.bootstrap, seed=args.seed, config=config)
     runs = [baseline]
     for name in scorer_names:
         if name == args.baseline:
             continue
         runs.append(evaluate(get_scorer(name, seed=args.seed), decks,
                              eval_start=args.eval_start, ess_min=args.ess_min,
-                             bootstrap=args.bootstrap, seed=args.seed))
+                             bootstrap=args.bootstrap, seed=args.seed, config=config))
     report = render_report(runs, baseline)
     print(report)
 
@@ -605,8 +664,9 @@ def main(argv=None) -> int:
         path = None
         for run in runs:
             path = append_run(run_record(run, baseline, extra={
-                "db": args.db, "since": args.since, "until": args.until,
-                "as_of": as_of, "seed": args.seed, "bootstrap": args.bootstrap,
+                "db": args.db, "since": args.since, "until": until, "as_of": as_of,
+                "settle_lag_days": None if args.as_of else args.settle_lag_days,
+                "seed": args.seed, "bootstrap": args.bootstrap,
             }))
         print(f"Run records appended to {path} (runs.jsonl)")
     return 0

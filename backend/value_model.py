@@ -42,7 +42,9 @@ on a head applies the Monolith log-odds correction
 (logit += ln(rate)) at predict time so probabilities stay honest.
 
 The V-vector — strategy, not learning (PRD §2): hand-set values read
-LIVE from model_config at scoring time (changeable without retraining):
+LIVE from model_config at serving time (changeable without retraining);
+an eval pins them once per run and records them (replay.evaluate,
+pinned(); models-lead R5.2 (a)):
 
     rank_score = P(like)·V_like + P(like)·P(propose|like)·V_propose
     V_like     = model_config value_model_v_like     (default 1.0)
@@ -67,11 +69,14 @@ Nightly refit is idempotent per UTC date (an existing record for today
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
 import os
+import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
@@ -93,12 +98,61 @@ def _cfg(key: str, default: float) -> float:
     """model_config key via trade_service's live config dict (the
     taste_service._cfg pattern — inline defaults, so a missing key can
     never break scoring or the refit; keys documented in
-    docs/config-reference.md §F6)."""
+    docs/config-reference.md §F6). Inside pinned(config), a pinned key
+    answers from the pin and live model_config is not read."""
+    values = getattr(_pin, "values", None)
+    if values is not None and key in values:
+        return float(values[key])
     try:
         from .trade_service import _cfg as _ts_cfg
         return float(_ts_cfg.get(key, default))
     except Exception:
         return float(default)
+
+
+# ---------------------------------------------------------------------------
+# Configuration is pinned and recorded per run (models-lead R5.2 (a)). A fit
+# reads FIT_CONFIG and an eval of rank_score reads SCORE_CONFIG; each pins the
+# values once (pin_config), records them with the SHA-256 of the whole live
+# model_config, and a refit or replay passes a recorded pin back explicitly.
+# ---------------------------------------------------------------------------
+
+FIT_CONFIG = {"value_model_calib_frac": 0.2, "value_model_l2": 0.01,
+              "value_model_l2_cat": 0.5}
+SCORE_CONFIG = {"value_model_v_like": V_LIKE_DEFAULT,
+                "value_model_v_propose": V_PROPOSE_DEFAULT}
+_pin = threading.local()
+
+
+def model_config_sha256() -> str:
+    """SHA-256 of the whole live model_config (trade_service's live dict) as
+    canonical JSON."""
+    try:
+        from .trade_service import _cfg as live
+        doc = json.dumps(dict(live), sort_keys=True, separators=(",", ":"), default=str)
+    except Exception:
+        doc = "{}"
+    return hashlib.sha256(doc.encode("utf-8")).hexdigest()
+
+
+def pin_config(keys: dict) -> dict:
+    """Read `keys` ({key: default}) from live model_config once:
+    {"values": {key: value}, "model_config_sha256": ...}, the record a fit
+    or an eval keeps and a refit or replay passes back."""
+    return {"values": {k: _cfg(k, d) for k, d in keys.items()},
+            "model_config_sha256": model_config_sha256()}
+
+
+@contextmanager
+def pinned(config: dict):
+    """Within the block, on this thread, _cfg answers config["values"]'s
+    keys from the pin, never from live model_config."""
+    prev = getattr(_pin, "values", None)
+    _pin.values = {**(prev or {}), **config["values"]}
+    try:
+        yield
+    finally:
+        _pin.values = prev
 
 
 def models_path() -> str:
@@ -561,15 +615,19 @@ def _vectorize(rows: list[dict], model: "ValueModel") -> list[tuple[dict, float]
     ]
 
 
-def train_model(decks, *, as_of: datetime) -> ValueModel | None:
+def train_model(decks, *, as_of: datetime, config: dict | None = None) -> ValueModel | None:
     """Fit both heads on all supplied decks (callers pass history served
-    before `as_of` — the nightly refit loads until=as_of; the time
-    discipline for EVAL is F8's job, not this function's). `as_of` is the
-    fit's explicit clock: it stamps trained_at / train_date, and nothing
-    in the fit reads the wall clock or live taste state, so a re-fit at
-    the same as_of on the same evidence is bit-identical (R4.1). Returns
-    None when the like head lacks MIN_LIKE_ROWS/MIN_LIKE_POS — no model
-    is better than a fake one."""
+    before `as_of` — the nightly refit loads until=as_of, as_of=as_of; the
+    time discipline for EVAL is F8's job, not this function's). `as_of` is
+    the fit's explicit clock: it stamps trained_at / train_date, and
+    nothing in the fit reads the wall clock or live taste state (R4.1).
+    `config` is a pin_config(FIT_CONFIG) record: given, the fit reads its
+    values and never live model_config; omitted, the live values are
+    pinned now. Either way it is recorded in meta["config"] (R5.2 (a)), so
+    a re-fit on the same corpus, as_of and config is bit-identical.
+    Returns None when the like head lacks MIN_LIKE_ROWS/MIN_LIKE_POS — no
+    model is better than a fake one."""
+    config = config if config is not None else pin_config(FIT_CONFIG)
     like_rows, propose_rows = build_training_rows(decks)
     n_like_pos = int(sum(r["y"] for r in like_rows))
     if len(like_rows) < MIN_LIKE_ROWS or n_like_pos < MIN_LIKE_POS:
@@ -577,9 +635,10 @@ def train_model(decks, *, as_of: datetime) -> ValueModel | None:
                  "not training", len(like_rows), n_like_pos)
         return None
 
-    calib_frac = _clip(_cfg("value_model_calib_frac", 0.2), 0.05, 0.5)
-    l2 = max(0.0, _cfg("value_model_l2", 0.01))
-    l2_cat = max(0.0, _cfg("value_model_l2_cat", 0.5))
+    values = config["values"]
+    calib_frac = _clip(float(values["value_model_calib_frac"]), 0.05, 0.5)
+    l2 = max(0.0, float(values["value_model_l2"]))
+    l2_cat = max(0.0, float(values["value_model_l2_cat"]))
     split = max(1, int(len(like_rows) * (1.0 - calib_frac)))
     fit_rows, cal_rows = like_rows[:split], like_rows[split:]
 
@@ -616,6 +675,7 @@ def train_model(decks, *, as_of: datetime) -> ValueModel | None:
         "n_calibration_rows": len(cal_rows),
         "calib_frac": calib_frac, "l2": l2, "l2_cat": l2_cat,
         "propose_head": "lr" if model.propose_head else "constant",
+        "config": config,
     }
     return model
 
@@ -711,7 +771,7 @@ def nightly_refit(*, engine=None, db_url: str | None = None,
                     "train_date": today}
         from backend.eval.data import load_decks
         decks = load_decks(engine=engine, db_url=db_url,
-                           until=now.isoformat())
+                           until=now.isoformat(), as_of=now.isoformat())
         model = train_model(decks, as_of=now)
         if model is None:
             return {"status": "skipped", "reason": "insufficient labels",

@@ -18,15 +18,19 @@ and in docs/runbook.md §"Offline eval harness". Until wired, run manually:
 
 from __future__ import annotations
 
+import argparse
 from datetime import datetime, timedelta, timezone
 
+from backend import value_model as _value_model
 from backend.eval.data import load_decks
 from backend.eval.persistence import append_run, load_runs, run_record
 from backend.eval.replay import (
     DEFAULT_BOOTSTRAP,
     DEFAULT_ESS_MIN,
+    DEFAULT_SETTLE_LAG_DAYS,
     evaluate,
     render_report,
+    settled_read,
 )
 from backend.eval.scorers import get_scorer, registered_names
 
@@ -43,13 +47,21 @@ def run_all(
     bootstrap: int = DEFAULT_BOOTSTRAP,
     seed: int = 0,
     baseline_name: str = "production",
+    settle_lag_days: float | None = None,
 ) -> dict:
     """Returns {"ran": int, "skipped": int, "errors": int, "report": str,
     "summary": str}. Never raises for a single scorer's failure — the
-    failure is recorded (status=error) and counted, runbook-style."""
+    failure is recorded (status=error) and counted, runbook-style.
+
+    settle_lag_days (the CLI defaults it to 7; R5.2 (b)): grade the
+    window_days ending at now minus the lag, as of the window's last
+    served_at plus the lag, so late outcomes are in. None (the daily tick):
+    the trailing window_days, as of now. Either way the read's as_of and one
+    pinned model_config (R5.2 (a)) go into every run record."""
     now = datetime.now(timezone.utc)
     today = now.date().isoformat()
     since = (now - timedelta(days=window_days)).isoformat()
+    until, as_of = None, now.isoformat()
 
     done = {
         (r.get("run_date"), r.get("scorer"), r.get("window_days"))
@@ -66,19 +78,28 @@ def run_all(
         stats["summary"] = f"nothing due for {today} (trailing {window_days}d)"
         return stats
 
-    decks = load_decks(engine=engine, db_url=db_url, since=since,
-                       project_features=True, as_of=now.isoformat())
+    if settle_lag_days is not None:
+        end = now - timedelta(days=settle_lag_days)
+        since = (end - timedelta(days=window_days)).isoformat()
+        until, as_of = settled_read(now=now, settle_lag_days=settle_lag_days,
+                                    engine=engine, db_url=db_url, since=since)
+    decks = [] if as_of is None else load_decks(
+        engine=engine, db_url=db_url, since=since, until=until,
+        project_features=True, as_of=as_of)
     if not decks:
         stats["summary"] = f"no impressions in trailing {window_days}d — nothing to grade"
         return stats
 
+    config = _value_model.pin_config(_value_model.SCORE_CONFIG)   # one pin for every run
+    read = {"window_days": window_days, "source": "nightly", "seed": seed,
+            "until": until, "as_of": as_of, "settle_lag_days": settle_lag_days}
     baseline = evaluate(get_scorer(baseline_name), decks,
-                        ess_min=ess_min, bootstrap=bootstrap, seed=seed)
+                        ess_min=ess_min, bootstrap=bootstrap, seed=seed, config=config)
     runs = [baseline]
     for name in due:
         try:
             run = evaluate(get_scorer(name, seed=seed), decks,
-                           ess_min=ess_min, bootstrap=bootstrap, seed=seed)
+                           ess_min=ess_min, bootstrap=bootstrap, seed=seed, config=config)
         except Exception as e:
             stats["errors"] += 1
             append_run({
@@ -88,16 +109,12 @@ def run_all(
             })
             continue
         runs.append(run)
-        append_run(run_record(run, baseline,
-                              extra={"window_days": window_days,
-                                     "source": "nightly", "seed": seed}))
+        append_run(run_record(run, baseline, extra=read))
         stats["ran"] += 1
 
     # Baseline record too (once/day) so the trailing series is complete.
     if (today, baseline_name, window_days) not in done:
-        append_run(run_record(baseline, baseline,
-                              extra={"window_days": window_days,
-                                     "source": "nightly", "seed": seed}))
+        append_run(run_record(baseline, baseline, extra=read))
 
     stats["report"] = render_report(runs, baseline)
     verdict_bits = []
@@ -111,7 +128,11 @@ def run_all(
 
 
 if __name__ == "__main__":
-    result = run_all()
+    ap = argparse.ArgumentParser(prog="python3 -m backend.eval.nightly")
+    ap.add_argument("--settle-lag-days", type=float, default=DEFAULT_SETTLE_LAG_DAYS,
+                    help="grade the window ending this many days ago, as of its last "
+                         f"served_at plus the lag (default {DEFAULT_SETTLE_LAG_DAYS:g})")
+    result = run_all(settle_lag_days=ap.parse_args().settle_lag_days)
     print(result["summary"])
     if result["report"]:
         print()
