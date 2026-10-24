@@ -172,6 +172,8 @@ The value core's own band is asymmetric: the viewer gives at most 20% more and t
 
 ## 4. Data rights
 
+**Operator decision, 2026-10-15** (relayed via head-bizops): the operator confirmed that owner approvals exist for Sleeper, KTC and MFL. Uses beyond today's are pending operator yes/no (eval-plan §6.1). The published-terms findings below stand as research.
+
 This section states what the published terms say and how FTF's uses line up against them. It draws no legal conclusion beyond "the published terms prohibit X without written permission".
 
 ### 4.1 KTC: Terms and FAQ
@@ -381,6 +383,8 @@ Planning estimate, to be replaced by measurement on the existing 555 trades:
 ---
 
 ## 8. Decisions needed
+
+**Operator decision, 2026-10-15** (relayed via head-bizops): the operator confirmed that owner approvals exist for Sleeper, KTC and MFL. Uses beyond today's are pending operator yes/no (eval-plan §6.1). The published-terms findings below stand as research.
 
 trades-pm's decisions are below. The full merged list, with models-lead's D-W1 to D-W7, is in [eval-plan.md §6](eval-plan.md#6-decisions-needed).
 

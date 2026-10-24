@@ -353,7 +353,7 @@ Graders judge FTF's numbers as much as the trade. That anchors Q-B and Q-K towar
 
 This covers models-lead's R3 (a trade-driven input to consensus, or a fairness guardrail) and R4 (a comparator fairness filter in `deck_quality`).
 
-- **No KTC data, values, verdicts or branding on any user surface** without a written KTC license that covers production use. An evaluation license (TP-3) doesn't cover shipping.
+- **No KTC data, values, verdicts or branding on any user surface** without a written KTC license that covers production use. An evaluation license (TP-3) doesn't cover shipping. *2026-10-15: no licence request will be made (D-W1, §6.1); any user-surface use of KTC data or branding goes to the operator as a yes/no question first.*
 - **Today no KTC value is labelled anywhere in the apps.**
   - The one user-facing mention is a comparison sentence in `web/faq.html:185`, which carries no data.
   - If the blend is killed (TP-1), trades-pm re-checks that sentence for accuracy. That is a content check, not a terms one.
@@ -384,6 +384,8 @@ This maps models-lead's pre-registered outcomes (§1.5, §3.1) to product action
 | **H-L3a** clears its bar | A global consolidation term in trade pricing. Deck composition shifts on uneven trades | No new copy | The next round measures the effect on uneven cards |
 | **H-L2, H-L3b** | Parked until OQ-1 and D-W7 clear, or until organic growth fills the cells | — | — |
 
+*2026-10-15: the operator kept the scrape (§6.1), so the K rows above now read as §6.1 restates them: Q-K informs the blend's weight and source, and `ktc_blend_weight` changes only through a model-change packet.*
+
 ---
 
 ## 5. Run tiers and blockers [trades-pm]
@@ -400,11 +402,11 @@ This maps models-lead's pre-registered outcomes (§1.5, §3.1) to product action
 | A | H-L4 step 1: variance components on the 555 trades | Do league effects exist? | The S2 prerequisites | After them |
 | A | **H-L1a:** 1QB leagues with TE premium priced at superflex QB values, and superflex leagues without it given the TE uplift (`backend/server.py:750-786`) | Is the binary format key mis-pricing real leagues? | **The format census.** Testable if an affected league has ≥ 30 graded cards or ≥ 30 executed trades; otherwise models-lead's prior-grounds rule applies (§3.2) | After the census |
 | A | **H-L3a:** a global consolidation premium; E-1a on uneven cards, S2 balance error by shape | Does a consolidation term improve verdicts on uneven trades? | D-W4; the S2 prerequisites | Once D-W4 is granted |
-| **B** | E-4 with K2 (Q-B, Q-D, the KTC variants of R3 and R4), and any K1 use beyond the existing scrape | The operator's ask 1, against KTC itself | **D-W1** (KTC's written permission), after TP-1 and TP-3. **R3 is provisional on shown cards:** the promotion pause applies, but the spec waits for hidden-value cards or a dated executed-trade check (§1.5B) | Waits |
-| **C** | E-4 with F2 | Ask 1, against a substitute | **D-W6** (a terms check, and the operator accepting a substitute) | Waits |
+| **B** | <ul><li>K1 as the existing production fetch already uses it.</li><li>K1 kept as a dated private snapshot for eval (E-2; E-4 for Q-B and Q-D), never committed.</li><li>K2 (Tradesourced).</li><li>KTC calculator verdicts at scale.</li></ul> | The operator's ask 1, against KTC itself (§6.1) | <ul><li>**K1 as today's fetch:** continues.</li><li>**K1 dated private snapshot:** **pending operator yes/no** (§6.1).</li><li>**K2:** **pending operator yes/no** (§6.1). Open Q3 (does the existing fetch already carry Tradesourced fields?) is answered by `models-eng` from an existing log or cache, with no new request.</li><li>**Calculator verdicts at scale:** **pending operator yes/no** (§6.1).</li><li>**R3 is provisional on shown cards:** the promotion pause applies, but the spec waits for hidden-value cards or a dated executed-trade check (§1.5B).</li></ul> | Each item after its operator yes/no; prod reads also need D-W4 |
+| **C** | E-4 with F2 | Ask 1, against a substitute | Not needed: D-W6 decided 2026-10-15 (§6.1) | **Dropped (D-W6)** |
 | Clean labels | Q-B and Q-K on hidden-value cards | A board contrast free of anchoring | **D-W5** (scope block, build, round 4). Read at 150 Yes / 150 No | Waits |
 | Graduation | The criterion 2 read | Engine graduation | **D-W2** (ratify O1) | At the horizon |
-| Corpus | Any corpus beyond consent scope: H-L2, H-L3b, LS-3 to LS-5, a census of non-member leagues | League-specific adjustments beyond format | **OQ-1** (TP-2, TP-3) and **D-W7** | Waits |
+| Corpus | Any corpus beyond consent scope: H-L2, H-L3b, LS-3 to LS-5, a census of non-member leagues | League-specific adjustments beyond format | **pending operator yes/no** (§6.1) | Waits |
 
 ---
 
@@ -414,16 +416,62 @@ This merges models-lead's D-W1 to D-W7 (its IDs, owners and recommendations, con
 
 | # | Decision | Who decides | Recommendation | Unblocks |
 |---|---|---|---|---|
-| **D-W1** | **KTC data rights.** (a) Keep, kill or license the production scrape, and the KTC fixtures in this public repo. (b) Ask KTC for an evaluation license: a dated Tradesourced snapshot plus calculator access for about 500 trades. (c) The grey-area hand sample | Operator. Any KTC contact is outbound | **models-lead:** (a) the terms case is trades-pm's, and the model evidence is Q-K, read by §1.5A. (b) Ask if Q-K lands on K-2. (c) Don't use the hand sample as decision evidence. **trades-pm:** (a) is TP-1; for (b), see TP-3 | Tier B |
+| **D-W1** | **KTC data rights.** (a) Keep, kill or license the production scrape, and the KTC fixtures in this public repo. (b) Ask KTC for an evaluation license: a dated Tradesourced snapshot plus calculator access for about 500 trades. (c) The grey-area hand sample | Operator. Any KTC contact is outbound | **DECIDED 2026-10-15** (operator, relayed via head-bizops; see §6.1): keep the production scrape; no licence request; the hand sample is moot | Tier B items, each after its operator yes/no (§5) |
 | **D-W2** | **Ratify O1:** option A plus the criterion 3 restatement (§2) | Operator, via `head-bizops` | **models-lead:** option A, before the round-3 read (2026-11-05 at the latest) | The graduation read |
 | **D-W3** | **Round-3 shape:** 3 arms, 175 cards per arm or 3 weeks, no interim reads | Operator. Arm composition is `models-eng`'s config | **models-lead:** yes. **trades-pm:** yes, and no grading-content changes inside round 3 | E-3 |
 | **D-W4** | **Prod-read authority for `models-eng`** to run E-1a, E-1b and E-3 | Operator, in `models-eng`'s session | **models-lead:** grant it read-only, under W3's terms (W3 is a models-lead org reference, outside this repo) | All tier-A prod reads |
 | **D-W5** | **A hidden-values Calibration variant** for rounds that judge value boards | `head-product` (`trades-pm` owns grading content), with models-lead's review | **models-lead:** yes, trades-pm's option A from round 4, with four read thresholds (its D-W5 review, §4.2), started even before D-W1 or D-W6 settle. **trades-pm:** option A, a randomized 50% hidden share from round 4 (§4.3) | Clean labels |
-| **D-W6** | **Accept a substitute trade-driven comparator** (for example FantasyCalc, after a terms check) if KTC declines or doesn't answer | Operator, because the ask named KTC | **models-lead:** yes, if its terms permit evaluation use. **trades-pm:** yes, with the two-part terms check in §4.4 | Tier C |
-| **D-W7** | **Sleeper's commercial-use terms** for a broader trade crawl. FTF's existing reads may carry the same exposure | Operator, or `head-bizops` | **models-lead:** flagged only; it gates H-L2 and H-L3b. **trades-pm:** decide it together with OQ-1 (TP-2, TP-3) | The corpus tier |
-| **TP-1** (= D-W1a) | **The production KTC scrape: keep, kill or license,** plus the KTC fixtures in this public repo | Operator. **Escalated to `head-product` on 2026-10-15** | **trades-pm:** decide before any KTC contact. The published terms prohibit the scrape without written permission whichever way Q-K lands. The fixtures are a `head-eng` clean-up either way | Tier B; TP-3 |
+| **D-W6** | **Accept a substitute trade-driven comparator** (for example FantasyCalc, after a terms check) if KTC declines or doesn't answer | Operator, because the ask named KTC | **DECIDED 2026-10-15** (operator, relayed via head-bizops; see §6.1): no substitute is needed | Nothing: tier C is dropped |
+| **D-W7** | **Sleeper's commercial-use terms** for a broader trade crawl. FTF's existing reads may carry the same exposure | Operator, or `head-bizops` | **DECIDED 2026-10-15** (operator, relayed via head-bizops; see §6.1): today's Sleeper use continues; any broader use is **pending operator yes/no** | The corpus tier, after its operator yes/no |
+| **TP-1** (= D-W1a) | **The production KTC scrape: keep, kill or license,** plus the KTC fixtures in this public repo | Operator. **Escalated to `head-product` on 2026-10-15** | Decided in part: keep the production scrape (D-W1). The KTC-valued fixtures already in the public repo: **pending operator yes/no**. | The fixtures question (operator yes/no) |
 | **TP-2** | **Log OQ-1** in `living-memory/OPEN_QUESTIONS.md`: re-opened, extended to model building and non-member leagues, noting the 2026-10-06 Terms revision | `head-product` → the scribe. trades-pm doesn't edit living-memory | **trades-pm:** yes. The next free ID at `origin/main` is Q-040; the scribe re-greps first | The record |
-| **TP-3** | **Outbound contact:** does the operator contact Sleeper, KTC, or both? | Operator only | **trades-pm:** Sleeper, yes, now: OQ-1 affects every session init, not just this plan. KTC: after TP-1; request an evaluation license if the operator wants ask 1 answered against KTC itself. models-lead would condition the KTC ask on K-2 (D-W1b); the operator picks the timing | The corpus tier; tier B |
+| **TP-3** | **Outbound contact:** does the operator contact Sleeper, KTC, or both? | Operator only | Moot for KTC. Sleeper: today's use continues; any broader use is pending operator yes/no (§6.1). | — |
+
+### 6.1 Operator decision on D-W1, D-W6 and D-W7: addendum for eval-plan §6 [models-lead]
+
+*Revision 2, 2026-10-15. It replaces revision 1, which must not be committed.*
+
+**The decision.** The operator confirmed on 2026-10-15 that owner approvals exist for Sleeper, KTC and MFL. It was relayed coordinator → `head-bizops` → me. This record says nothing more about the approvals.
+
+**What it settles:**
+- **D-W1:** keep the production scrape; no licence request; the hand sample is moot.
+- **D-W6:** no substitute is needed. **Tier C (F2) is dropped.**
+- **D-W7:** today's Sleeper use continues.
+
+**The rule from here.** Any use beyond today's goes to the operator as a **direct yes/no question through `head-bizops`**. Examples:
+- a new scraper or a new kind of request;
+- a broader Sleeper crawl;
+- new KTC values committed to the public repo;
+- a new provider;
+- a change in how fetched data is retained.
+
+Each item below that needs that answer is marked **pending operator yes/no**.
+
+**How tier B reads now:**
+
+| Comparator or use | Status |
+|---|---|
+| **K1 (crowd values) as the existing production fetch already uses it** | Today's use, so it continues |
+| **K1 kept as a dated private snapshot for eval** (E-2; E-4 for Q-B and Q-D), from that same fetch, never committed to the public repo | **Pending operator yes/no.** It's the same request at the same cadence, but it changes how long the data is kept, so I'm asking rather than assuming. Question: *"May FTF keep dated private copies of the existing KTC fetch for model evaluation?"* |
+| **K2 (Tradesourced)** | If the existing fetch already carries Tradesourced fields (trades-pm's open Q3, which `models-eng` can answer from an existing log or cache, with no new request), it follows the K1 snapshot answer. If it doesn't, fetching them is a new kind of request: **pending operator yes/no** |
+| **KTC calculator verdicts or the Value Adjustment, at scale** | A new kind of collection: **pending operator yes/no**. Until then, Q-D uses FTF's own computation on K values with the pre-registered 5% band |
+| **H-L2 and H-L3b (a broader Sleeper corpus)** | A broader crawl: **pending operator yes/no** |
+
+**How §1.5A reads now.** The rules and thresholds are unchanged; only what each outcome leads to has changed. The scrape stays whatever happens, so **Q-K now informs the blend's weight and source, not keep-or-kill:**
+
+| Outcome | What it means now |
+|---|---|
+| **K-1** (C1 non-inferior) | The blend at weight 0.5 adds no measurable verdict quality. **No action required.** A later packet may test a different weight or source. `ktc_blend_weight` never changes without a model-change packet and my sign-off |
+| **K-2** (C0 better) | The blend carries signal. A packet tests a higher weight, or a Tradesourced blend, the latter subject to the K2 answer above |
+| **K-3** | No action |
+| **R3 and R4** | They run once their KTC inputs are answered above, still **provisional on shown cards** (§1.5B). Any production use of KTC values beyond today's blend (a Tradesourced input, or a fairness filter) needs a model-change packet **and** an operator yes/no |
+
+**Remaining operator decisions:**
+- D-W2 (the O1 bar);
+- D-W4 (`models-eng` prod reads), which unblocks tier A;
+- D-W3 (the round-3 shape);
+- D-W5 (the hidden-values variant);
+- the yes/no questions above.
 
 ---
 
@@ -433,11 +481,12 @@ Through org boxes only.
 
 | From → to | What |
 |---|---|
-| `head-product` → operator | The decisions: D-W1 to D-W7, TP-1 and TP-3 |
+| `head-product` → operator | The remaining decisions: D-W2 to D-W5 (D-W1, D-W6 and D-W7 were decided 2026-10-15, §6.1) |
+| `head-bizops` → operator | Operator yes/no questions via head-bizops (§6.1), including the TP-1 fixtures question |
 | `head-bizops` → `head-eng` → `models-eng` | <ul><li>Evals E-1a, E-1b, E-2 and E-3 (§1.6), and the format census.</li><li>Freeze the round-3 arms (D-W3).</li><li>Report when `player_value_history` starts, and how many executed trades postdate 2026-07-17.</li><li>Offseason DP boards and fixtures for the three franchises.</li></ul> |
 | `head-product` → `platforms-pm` | The 2026-10-06 Sleeper Terms revision and OQ-1 (research-memo §4.2–§4.3) |
 | `head-product` → `analytics-lead` | <ul><li>The format mix of active leagues.</li><li>The operator's round-2 would-send per arm.</li><li>The definitional gaps in §4.2.</li></ul> |
-| `head-eng` | The KTC fixtures and the review-doc KTC numbers in this public repo (research-memo §4.1a). Removing the fixtures touches `test_ktc_blend.py` and `test_mock_draft.py` |
+| `head-eng` | The KTC fixtures and the review-doc KTC numbers in this public repo (research-memo §4.1a). Acted on once the operator answers the TP-1 fixtures yes/no. Removing the fixtures touches `test_ktc_blend.py` and `test_mock_draft.py` |
 | `head-product` → `monetization-pm` | Sleeper's API commercial-use clause (research-memo §4.2) |
 | Task 2 (DB storage) | The storage table (research-memo §6) |
 | `head-product` → `rankings-eng`, `design-lead`, `ux-lead`, `models-lead`, `analytics-lead` | The D-W5 scope block, once the operator approves it |
