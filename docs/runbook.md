@@ -638,7 +638,7 @@ The `not_drafted` draft-status TTL is also season-gated: 3 h inside the rookie-d
 - **Backfill before launch, or after an outage:** `python3 scripts/refresh_usage_trends.py --remote` (works with the flag off).
 - **A late stat correction** (after day 7): `--remote --weeks N --force`.
 - **Results** are in the server log as `usage-refresh (daily_tick|cron_route): {…}`.
-- **The daily-tick step has never completed in production**: see *Known outage* under Cron schedule. Week 5 was loaded by hand on 2026-10-15.
+- **The daily-tick step has never completed in production**: see *Known outage* under Cron schedule. Weeks 5 and 6 were loaded by hand (2026-10-15, 2026-10-21); the tick still returned 500 on 2026-10-21.
 - **If the store is behind,** the route serves the same numbers from a live fetch, so a stalled job degrades to the old behavior rather than an error.
 
 **`roster-snapshot` monitoring (ADR-011, 2026-08-14):** the weekly league-state sweep (Writer B) rides `daily-tick` behind the `FTF_ROSTER_SNAPSHOT_WEEKDAY` `>=` gate; on-sync capture (Writer A) needs no scheduler at all. **The `source` column is the liveness instrument** — one week after ship, run:
