@@ -19,10 +19,17 @@
 // the three modules that split it — carries it. Emitting a second banner here
 // would change the Phase 0 flat render.
 //
-// Intentional behavior changes: NONE. The public-profile row still renders
-// only once the stored value has loaded (`profilePublic !== null`) so the
-// switch never lies — that is the shipped per-row loading posture, not a
-// full-screen gate.
+// Intentional behavior changes: the public-profile row still renders only
+// once the stored value has loaded (`profilePublic !== null`) so the switch
+// never lies — that is the shipped per-row loading posture, not a full-screen
+// gate. Since then:
+//   • #354 M11 claim-only path. An UNVERIFIED ESPN/MFL entry session
+//     (claimOnlyCopy.claimPlatform) can't delete or export an account. Delete
+//     account opens ClaimDeleteDialog (typed DELETE) and sends `confirm`; the
+//     server signs it out and removes only this device's rows; the app signs
+//     out and SignIn shows the one-shot G4 notice. Download my data shows the
+//     G4 "unavailable" lines instead of the SleeperConnect step-up. Never
+//     "Account deleted" on this path.
 
 import React, { useEffect, useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator, Alert, Share } from 'react-native';
@@ -36,8 +43,17 @@ import { deleteAccount } from '../../../api/auth';
 import { exportAccountData, getProfileVisibility, setProfileVisibility } from '../../../api/accountPrefs';
 import { useSession } from '../../../state/useSession';
 import { useFlag } from '../../../state/useFeatureFlags';
+import { setSignInNotice } from '../../../state/signInNotice';
 import { styles } from '../styles';
 import Row from '../Row';
+import ClaimDeleteDialog from '../ClaimDeleteDialog';
+import {
+  claimPlatform,
+  CLAIM_DELETE_FAILED,
+  G4_AFTER_NOTICE,
+  G4_EXPORT_UNAVAILABLE,
+  G4_EXPORT_WHY,
+} from '../claimOnlyCopy';
 import type { SettingsSectionProps } from './types';
 
 export interface AccountDataSectionProps extends SettingsSectionProps {
@@ -59,12 +75,19 @@ export default function AccountDataSection({
   const dataExportEnabled    = useFlag('account.data_export');
   const profileToggleEnabled = useFlag('profiles.user_toggle');
 
-  const isDemo  = useSession((s) => s.isDemo);
-  const user    = useSession((s) => s.user);
-  const signOut = useSession((s) => s.signOut);
+  const isDemo       = useSession((s) => s.isDemo);
+  const user         = useSession((s) => s.user);
+  const signOut      = useSession((s) => s.signOut);
+  const verification = useSession((s) => s.verification);
 
   const [deleting, setDeleting]   = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [claimDialogOpen, setClaimDialogOpen] = useState(false);
+
+  // #354 M11: an ESPN/MFL entry claim whose session isn't verified. The server
+  // decides the branch by the same two facts (`entry:` id + unverified).
+  const platform  = claimPlatform(user?.user_id);
+  const claimOnly = !!platform && verification?.session_verified !== true;
 
   // ── Public-profile opt-in (teardown 06-04, flag `profiles.user_toggle`).
   // Optimistic local mirror with rollback on server error.
@@ -160,6 +183,25 @@ export default function AccountDataSection({
     }
   }
 
+  // #354 M11 claim-only delete. The client always sends the confirm; any
+  // failure (including the 400 confirmation_required) shows one generic line,
+  // never the verified path's deletion wording.
+  async function performClaimDelete() {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      const res = await deleteAccount({ confirm: true });
+      setClaimDialogOpen(false);
+      if (res?.deleted === 'session_only') setSignInNotice(G4_AFTER_NOTICE);
+      await signOut();
+      onAccountDeleted();
+    } catch {
+      onNotice(CLAIM_DELETE_FAILED, 'warn');
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   function confirmDeleteAccount() {
     Alert.alert(
       'Delete account?',
@@ -205,6 +247,19 @@ export default function AccountDataSection({
 
   // Data-rights export row (flag `account.data_export`) — directly ABOVE
   // Delete account so the two data-rights actions read as a pair.
+  // On the claim-only path there is nothing to export: say so, in G4's words,
+  // where the row would be — no SleeperConnect step-up, no chevron.
+  const claimExportRow =
+    dataExportEnabled && !isDemo ? (
+      <View testID="settings.export-data" accessible style={styles.linkRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Download my data</Text>
+          <Text style={styles.rowSub}>{G4_EXPORT_UNAVAILABLE}</Text>
+          <Text style={styles.rowSub}>{G4_EXPORT_WHY}</Text>
+        </View>
+      </View>
+    ) : null;
+
   const exportRow =
     dataExportEnabled && !isDemo ? (
       <Pressable
@@ -234,23 +289,28 @@ export default function AccountDataSection({
   return (
     <>
       {publicProfileRow}
-      {exportRow}
+      {claimOnly ? claimExportRow : exportRow}
       <Pressable
         // S8 PRD-02 acceptance: Delete account announces as a button
-        // with a clear destructive label (was a plain text group).
+        // with a clear destructive label (was a plain text group). The label
+        // stays "Delete account" on the claim-only path (G4: users look for
+        // it by that name); the permanent-deletion hint and subtitle don't,
+        // because that path deletes no account.
         accessibilityRole="button"
         accessibilityLabel="Delete account"
-        accessibilityHint="Permanently deletes your account and all of its data"
+        accessibilityHint={claimOnly ? undefined : 'Permanently deletes your account and all of its data'}
         accessibilityState={{ disabled: deleting, busy: deleting }}
-        onPress={confirmDeleteAccount}
+        onPress={claimOnly ? () => setClaimDialogOpen(true) : confirmDeleteAccount}
         disabled={deleting}
         style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
       >
         <View style={{ flex: 1 }}>
           <Text style={[styles.rowKey, styles.destructiveKey]}>Delete account</Text>
-          <Text style={styles.rowSub}>
-            Permanently delete your account and all of its data.
-          </Text>
+          {claimOnly ? null : (
+            <Text style={styles.rowSub}>
+              Permanently delete your account and all of its data.
+            </Text>
+          )}
         </View>
         {deleting ? (
           <ActivityIndicator color={semantic.neg} />
@@ -258,6 +318,15 @@ export default function AccountDataSection({
           <Icon name="chevron-right" color={chalk.dim} size={16} />
         )}
       </Pressable>
+      {platform && claimOnly ? (
+        <ClaimDeleteDialog
+          visible={claimDialogOpen}
+          platform={platform}
+          busy={deleting}
+          onCancel={() => setClaimDialogOpen(false)}
+          onConfirm={() => void performClaimDelete()}
+        />
+      ) : null}
     </>
   );
 }

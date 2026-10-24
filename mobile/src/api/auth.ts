@@ -184,13 +184,35 @@ export async function getAccount(): Promise<AccountInfo> {
 // Always available (not flag-gated). Deletes the user's data per the
 // privacy policy; the backend also invalidates every session server-side,
 // so the caller must sign out locally on success.
-export interface DeleteAccountResponse {
-  ok: boolean;
-  deleted: Record<string, number>;
+//
+// Every call carries X-Device-Id. An UNVERIFIED ESPN/MFL entry session gets
+// the server's claim-only branch (#354 M11): it needs `confirm` and answers
+// `deleted: "session_only"` after removing only this device's rows. The
+// verified path ignores `confirm`; `appleAuthorizationCode` (LEG-S6) lets the
+// server revoke Sign in with Apple, and its absence never blocks deletion.
+export interface DeleteAccountOptions {
+  confirm?: boolean;
+  appleAuthorizationCode?: string | null;
 }
 
-export async function deleteAccount(): Promise<DeleteAccountResponse> {
-  return apiRequest<DeleteAccountResponse>('/api/account', { method: 'DELETE' });
+export interface DeleteAccountResponse {
+  ok: boolean;
+  /** Per-table counts on a full deletion; "session_only" on the claim-only branch. */
+  deleted: Record<string, number> | 'session_only';
+  removed?: { identity_links: number | null; user_events: number | null; push_tokens: number };
+  apple_revoked?: boolean;
+}
+
+export async function deleteAccount(opts: DeleteAccountOptions = {}): Promise<DeleteAccountResponse> {
+  const body: Record<string, string> = {};
+  if (opts.confirm) body.confirm = 'delete';
+  if (opts.appleAuthorizationCode) body.apple_authorization_code = opts.appleAuthorizationCode;
+  const deviceId = await getDeviceId().catch(() => null);
+  return apiRequest<DeleteAccountResponse>('/api/account', {
+    method: 'DELETE',
+    headers: deviceId ? { 'X-Device-Id': deviceId } : undefined,
+    body: Object.keys(body).length ? body : undefined,
+  });
 }
 
 // POST /api/session/init — full app session. Called after the user picks

@@ -11,36 +11,31 @@ import {
   TextInput,
   Linking,
   Alert,
-  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CommonActions } from '@react-navigation/native';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Notifications from 'expo-notifications';
-import * as FileSystem from 'expo-file-system/legacy';
 
 import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/chalkline';
 import { TickLabel, Button, Card, Icon } from '../components/chalkline';
 import Toast from '../components/Toast';
 import FeedbackFAB from '../components/FeedbackFAB';
+import AccountDataSection from './settings/sections/AccountDataSection';
 import { getNotifPrefs, updateNotifPrefs } from '../api/notifications';
-import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
+import { appleSignIn, getAccount } from '../api/auth';
 // P0-5 / S-20 — the Sleeper-identity link form now has one owner, shared
 // with LeaguePicker's account-only companion state. Settings mounts the FORM
 // (its surface is this inline card, not a modal); the picker mounts the
 // sheet. The 409 two-boards Alert lives in that component.
 import { LinkSleeperForm } from '../components/LinkSleeperSheet';
-import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import { getSleeperLinkStatus, unlinkSleeper } from '../api/sendInSleeper';
 import { getEspnLinkStatus, unlinkEspn } from '../api/sendInEspn';
 import { getMflLinkStatus, unlinkMfl } from '../api/sendInMfl';
 import {
-  exportAccountData,
-  getProfileVisibility,
   getStudTaxMode,
-  setProfileVisibility,
   setStudTaxMode,
 } from '../api/accountPrefs';
 import type { StudTaxMode } from '../api/calc';
@@ -99,9 +94,7 @@ export default function SettingsScreen({ navigation }: any) {
   const settingsV2              = useFlag('account.settings_v2');
   // D-155 — names the guide bubble's speaker; off keeps "The Analyst".
   const ramOn                   = useOnboardingFeature('onboarding.mascot_ram');
-  const dataExportEnabled       = useFlag('account.data_export');
   const sleeperDisconnectEnabled = useFlag('account.sleeper_disconnect');
-  const profileToggleEnabled    = useFlag('profiles.user_toggle');
   const denialRecoveryEnabled   = useFlag('notif.denial_recovery');
   const helpSurfaceEnabled      = useFlag('ux.help_surface');
   // Monetization (iap-enablement, flag `monetize.paywall`, dark). This screen
@@ -237,8 +230,6 @@ export default function SettingsScreen({ navigation }: any) {
   const setLeague = useSession((s) => s.setLeague);
   const verification = useSession((s) => s.verification);
   const setVerification = useSession((s) => s.setVerification);
-  const [deleting, setDeleting] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const accountQuery = useQuery({
     queryKey: ['account'],
@@ -280,35 +271,6 @@ export default function SettingsScreen({ navigation }: any) {
     staleTime: 60_000,
     retry: false,
   });
-
-  // ── Public-profile opt-in (teardown 06-04, flag `profiles.user_toggle`).
-  // Optimistic local mirror with rollback on server error.
-  const profileVisQuery = useQuery({
-    queryKey: ['profile-visibility'],
-    queryFn: getProfileVisibility,
-    enabled: profileToggleEnabled && !isDemo,
-    staleTime: 60_000,
-    retry: false,
-  });
-  const [profilePublic, setProfilePublic] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (profileVisQuery.data) setProfilePublic(!!profileVisQuery.data.public);
-  }, [profileVisQuery.data]);
-
-  function flipProfilePublic() {
-    const next = !(profilePublic ?? false);
-    setProfilePublic(next); // instant — optimistic
-    setProfileVisibility(next)
-      .then((res) => queryClient.setQueryData(['profile-visibility'], res))
-      .catch((e: any) => {
-        setProfilePublic(!next); // rollback
-        if (e instanceof ApiError && e.status === 403) {
-          promptVerifyStepUp('change your public profile');
-        } else {
-          setToast({ msg: "Couldn't save — try again.", tone: 'warn' });
-        }
-      });
-  }
 
   // ── OS notification-permission state (teardown 05-03, flag
   // `notif.denial_recovery`). Read once per mount; denied → inline banner
@@ -418,49 +380,6 @@ export default function SettingsScreen({ navigation }: any) {
   // league picker can offer the identical flow. What stays here is the card
   // that hosts it and the post-success work below, which is the CALLER's:
   // this screen replaces into LeaguePicker, the picker does not navigate.
-
-  // ── Verified-session step-up (S6A-09 / teardown 06-02) ─────────────────
-  // Account-data actions 403 `verification_required` when the account is
-  // verified but this session isn't. The old dead-end toast is replaced by
-  // an alert that routes straight into the SleeperConnect verify flow.
-  function promptVerifyStepUp(action: string) {
-    Alert.alert(
-      'Verify this session first',
-      `Your account is verified, but this session isn't. Verify with your ` +
-        `Sleeper login to ${action}.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Verify now',
-          onPress: () => navigateFromSettings('SleeperConnect'),
-        },
-      ],
-    );
-  }
-
-  // ── Data export (teardown 06-02, flag `account.data_export`) ───────────
-  // GET /api/account/export → write the JSON archive to the cache dir →
-  // hand it to the system share sheet (AirDrop / Save to Files / Mail).
-  async function handleExportData() {
-    if (exporting) return;
-    setExporting(true);
-    try {
-      const archive = await exportAccountData();
-      const uri = `${FileSystem.cacheDirectory}fantasy-trade-finder-export.json`;
-      await FileSystem.writeAsStringAsync(uri, JSON.stringify(archive, null, 2));
-      await Share.share({ url: uri });
-    } catch (e: any) {
-      if (e instanceof ApiError && e.status === 403) {
-        promptVerifyStepUp('download your data');
-      } else if (e instanceof ApiError && e.status === 400) {
-        setToast({ msg: 'Demo sessions have no stored data.', tone: 'warn' });
-      } else {
-        setToast({ msg: e?.message || "Couldn't export your data — try again.", tone: 'warn' });
-      }
-    } finally {
-      setExporting(false);
-    }
-  }
 
   // ── Disconnect Sleeper sending (teardown 09-01, flag
   // `account.sleeper_disconnect`) — the policy's promised "disconnect at
@@ -579,56 +498,6 @@ export default function SettingsScreen({ navigation }: any) {
     );
   }
 
-  async function performDeleteAccount() {
-    if (deleting) return;
-    setDeleting(true);
-    try {
-      await deleteAccount();
-      await signOut();
-      navigation.replace?.('SignIn');
-    } catch (e: any) {
-      if (dataExportEnabled && e instanceof ApiError && e.status === 403) {
-        // S6A-09: the verified-step-up 403 used to dead-end in a toast.
-        // Same recovery path as export (both PRD 06-02 data-rights gates).
-        promptVerifyStepUp('delete your account');
-      } else {
-        setToast({ msg: e?.message || "Couldn't delete your account — try again.", tone: 'warn' });
-      }
-    } finally {
-      setDeleting(false);
-    }
-  }
-
-  function confirmDeleteAccount() {
-    Alert.alert(
-      'Delete account?',
-      'This permanently deletes your rankings, comparison history, trade activity, ' +
-        'notifications, push tokens, and any stored Sleeper connection from our ' +
-        'servers. Trade matches shared with leaguemates are anonymized on your side. ' +
-        'This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Continue',
-          style: 'destructive',
-          onPress: () =>
-            Alert.alert(
-              'Are you absolutely sure?',
-              'Your account and all of its data will be deleted immediately. ' +
-                'There is no way to recover them.',
-              [
-                { text: 'Keep my account', style: 'cancel' },
-                {
-                  text: 'Delete everything',
-                  style: 'destructive',
-                  onPress: () => void performDeleteAccount(),
-                },
-              ],
-            ),
-        },
-      ],
-    );
-  }
   // Local mirror of server prefs so toggles feel instant. Hydrated from the
   // query below; updates push through `mutation` and the query is invalidated
   // on success.
@@ -1189,44 +1058,6 @@ export default function SettingsScreen({ navigation }: any) {
       </Pressable>
     ) : null;
 
-  // Public-profile opt-in toggle (flag `profiles.user_toggle`). Only renders
-  // once the stored value has loaded so the switch never lies.
-  const publicProfileRow =
-    profileToggleEnabled && !isDemo && profilePublic !== null ? (
-      <Row
-        title="Public profile"
-        sub={`Let anyone see your tiers at /u/${user?.username || 'your-username'}. Off keeps your board private.`}
-        value={profilePublic}
-        onChange={flipProfilePublic}
-      />
-    ) : null;
-
-  // Data-rights export row (flag `account.data_export`) — directly ABOVE
-  // Delete account so the two data-rights actions read as a pair.
-  const exportRow =
-    dataExportEnabled && !isDemo ? (
-      <Pressable
-        testID="settings.export-data"
-        accessibilityRole="button"
-        accessibilityState={{ disabled: exporting, busy: exporting }}
-        onPress={() => void handleExportData()}
-        disabled={exporting}
-        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-      >
-        <View style={{ flex: 1 }}>
-          <Text style={styles.rowKey}>Download my data</Text>
-          <Text style={styles.rowSub}>
-            Export everything we store about you as a JSON file.
-          </Text>
-        </View>
-        {exporting ? (
-          <ActivityIndicator color={chalk.dim} />
-        ) : (
-          <Icon name="chevron-right" color={chalk.dim} size={16} />
-        )}
-      </Pressable>
-    ) : null;
-
   const accountSection = (
     <>
       <View style={styles.section}>
@@ -1358,31 +1189,13 @@ export default function SettingsScreen({ navigation }: any) {
           {sleeperDisconnectRow}
           {espnDisconnectRow}
           {mflDisconnectRow}
-          {publicProfileRow}
-          {exportRow}
-          <Pressable
-            // S8 PRD-02 acceptance: Delete account announces as a button
-            // with a clear destructive label (was a plain text group).
-            accessibilityRole="button"
-            accessibilityLabel="Delete account"
-            accessibilityHint="Permanently deletes your account and all of its data"
-            accessibilityState={{ disabled: deleting, busy: deleting }}
-            onPress={confirmDeleteAccount}
-            disabled={deleting}
-            style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={[styles.rowKey, styles.destructiveKey]}>Delete account</Text>
-              <Text style={styles.rowSub}>
-                Permanently delete your account and all of its data.
-              </Text>
-            </View>
-            {deleting ? (
-              <ActivityIndicator color={semantic.neg} />
-            ) : (
-              <Icon name="chevron-right" color={chalk.dim} size={16} />
-            )}
-          </Pressable>
+          {/* Public profile, Download my data and Delete account: the same
+              section module the hub's Account page renders (#354 M11, LEG-S6). */}
+          <AccountDataSection
+            onNotice={(msg, tone) => setToast({ msg, tone })}
+            navigate={navigateFromSettings}
+            onAccountDeleted={() => navigation.replace?.('SignIn')}
+          />
         </>
       ) : null}
     </>
