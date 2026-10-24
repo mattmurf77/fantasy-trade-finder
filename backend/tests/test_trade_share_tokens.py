@@ -285,7 +285,7 @@ def test_every_miss_is_the_same_generic_page_and_png(env):
     assert og_image.TRADE_LINK_EXPIRED_BODY in html
     assert '<meta name="robots" content="noindex">' in html
     assert 'content="/og/trade/expired.png"' in html
-    assert 'href="/"' in html
+    assert 'href="/?share=trade"' in html
     assert ref_png.data == og_image.render_expired_trade_card()
     for m in misses:
         _same_response(env.get(f"/s/trade/{m}"), ref_page)
