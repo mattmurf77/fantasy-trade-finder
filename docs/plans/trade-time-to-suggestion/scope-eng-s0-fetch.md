@@ -69,36 +69,40 @@ Indirect, every flag state:
   exists, and session init already re-reads Sleeper rosters on it.** S0 makes that read the refresh: no new route,
   no new binary.
 - **Mid-session top-up — BUILT (Stage D, 2026-10-24; Product's P41, the non-blocking floor kick):**
-  `roster_refresh.maybe_refresh_async(league_id, max_age_s) -> bool` (`backend/roster_refresh.py:104-141`).
+  `roster_refresh.maybe_refresh_async(league_id, max_age_s, *, retry_after_s=60.0) -> bool`
+  (`backend/roster_refresh.py:123-165`).
   - **Caller:** trades-eng calls it from `/generate` after the response is built, never under a lock, with
     model_config `trade_roster_bound_s` (default 300) as `max_age_s`. It is user-triggered (R7-compliant) and
     never awaited, so it's not on the tap path (AC-L3).
   - **Returns at once,** True only if it started a refresh.
   - **No-ops (False, no thread):**
     - a linked platform league (`db.is_linked_platform_league`), or an id that isn't a Sleeper league id
-      (demo/sentinel; `:120`);
-    - the 429 circuit is open (`:122`);
-    - `league_roster_state.refreshed_at` is within `max_age_s` (`_within_bound`, `:84-101`). No row, NULL, an
+      (demo/sentinel; `:143`);
+    - the 429 circuit is open (`:145`);
+    - `league_roster_state.refreshed_at` is within `max_age_s` (`_within_bound`, `:102-107`). No row, NULL, an
       unparseable stamp or a future stamp counts as past the bound;
-    - a refresh for this league is already in flight (`:129-132`).
-  - **Single-flight:** the module `_inflight_lock` (`:32`) guards only the in-flight set's check-and-add (`:129-132`)
-    and remove (`:137-138`, and the thread's `finally` at `:151-152`). No Sleeper call and no DB write runs under
+    - **retry cooldown (follow-up commit):** the last attempt failed (`status == 'stale'`) and its `updated_at`
+      (stamped by `mark_league_roster_failed`) is younger than `retry_after_s`, default 60 s (`_cooling_down`,
+      `:110-120`). It is read from the same single `get_league_roster_state` call as the bound (`:147-148`).
+      An unparseable or future stamp never blocks, and a `fresh`-but-past-bound league ignores the cooldown;
+    - a refresh for this league is already in flight (`:153-156`).
+  - **Single-flight:** the module `_inflight_lock` (`:32`) guards only the in-flight set's check-and-add (`:153-156`)
+    and remove (`:161-162`, and the thread's `finally` at `:175-176`). No Sleeper call and no DB write runs under
     it. Its two pre-checks are small DB reads, outside the lock.
-  - **The thread** (`daemon=True`) runs `_run_refresh` → `_refresh_league(league_id, started)` (`:155-215`), which
+  - **The thread** (`daemon=True`) runs `_run_refresh` → `_refresh_league(league_id, started)` (`:179-239`), which
     never raises and always leaves the in-flight set:
     1. rosters + users via the circuit-guarded `server._sleeper_get` (lazy `from . import server`; a read
-       exception → `record_failure`, `:174`);
+       exception → `record_failure`, `:198`);
     2. members in session init's row shape, `player_ids` with nulls dropped (G-004), written by
-       `db.replace_league_members_snapshot` (`:186`), which refuses an empty snapshot;
+       `db.replace_league_members_snapshot` (`:210`), which refuses an empty snapshot;
     3. behind `picks.owned_sync`: meta from `_FA_LEAGUE_META_CACHE`, else one `_fetch_sleeper_league_meta` read
-       that re-warms the cache (`:200-205`); scoring from `db.get_league_scoring`; then
-       `_sync_sleeper_owned_picks(…, rosters=, meta=)` (`:208`), where `None` means picks failed (R10);
-    4. `record_outcome(league_id, started, members_ok=, picks_ok=)` (`:215`).
+       that re-warms the cache (`:224-229`); scoring from `db.get_league_scoring`; then
+       `_sync_sleeper_owned_picks(…, rosters=, meta=)` (`:232`), where `None` means picks failed (R10);
+    4. `record_outcome(league_id, started, members_ok=, picks_ok=)` (`:239`).
   - **PR-B seam:** `_refresh_league` is the one internal refresh both this kick and PR-B extend with the stamp and
     `on_roster_change`. No stamp yet.
-  - **Repeated failures:** a league whose reads keep failing (5xx) has no age gate, so it is re-kicked on each tap
-    past the bound. It stays single-flight, and a 429 trips the circuit. A retry back-off on `updated_at` is
-    possible later, but it's not in the P41 contract.
+  - **Repeated failures:** closed by the retry cooldown above. A league whose reads keep failing (5xx, timeouts; the
+    circuit only catches 429s) is kicked at most once per `retry_after_s`, instead of on every tap past the bound.
 
 ### B.2 What is stored, and where (schema granted by head-eng, 2026-10-20)
 
@@ -215,7 +219,8 @@ state except value core and prepared adoption, which carry the open items above.
 **The P41 kick (B.1, built):** at most **4 Sleeper reads per kick** (rosters, users, traded_picks, drafts), **5 on a
 meta-cache miss**. It fires only past the bound (`trade_roster_bound_s`, default 300 s), only on user action (a
 `/generate` call), one in flight per league, and never while the 429 circuit is open. A league refreshed by session
-init within the bound costs 0.
+init within the bound costs 0. **Worst case for a league whose reads keep failing:** ≤ 4–5 reads per
+`retry_after_s` (default 60 s), because of the cooldown on the last failed attempt's `updated_at`.
 
 ### B.6 Non-Sleeper writers of fp inputs (open item for trades-eng)
 
@@ -386,7 +391,7 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
     "network"`, nothing sent; S0/R10)." On the validate row, append to "`checked:false` = platform data
     unreachable": "including a pick-bearing validate whose `traded_picks` read fails."
 
-  | `backend/tests/test_roster_refresh_async.py` (new, 14; Stage D / P41) | `test_concurrent_callers_start_exactly_one_refresh`, `test_fresh_enough_league_starts_none`, `test_no_row_starts_one`, `test_null_refreshed_at_starts_one`, `test_stale_past_the_bound_starts_one`, `test_linked_platform_league_starts_none`, `test_open_circuit_starts_none`, `test_success_writes_fresh_and_advances_refreshed_at`, `test_picks_failure_writes_stale_picks_unavailable`, `test_read_exception_writes_stale_and_thread_does_not_raise`, `test_unexpected_crash_never_escapes_and_clears_inflight`, `test_league_leaves_inflight_after_success_and_failure`, `test_no_sleeper_read_or_write_under_the_module_lock`, `test_reads_per_kick_meta_cached_vs_miss` | Single-flight: 8 barrier-released callers → `sum(returns) == 1` and one refresh. The no-op set (fresh, platform, demo id, open circuit, in flight); NULL or no row starts one. `fresh` advances `refreshed_at`, with G-004-filtered rows. `stale`/`picks_unavailable`; `stale`/`http_5xx` with no thread exception (excepthook captured). The in-flight set always empties. No Sleeper stub runs while the module lock is held by the calling thread (owner-tracking lock). 1+1(+0/1 meta) reads per kick plus the pick sync's 2. **Sabotage:** with the in-flight check removed, `test_concurrent_callers_start_exactly_one_refresh` fails `assert 8 == 1`; restored byte-identical. Five repeat runs: 14/14 each |
+  | `backend/tests/test_roster_refresh_async.py` (new, 18; Stage D / P41 + retry cooldown) | `test_concurrent_callers_start_exactly_one_refresh`, `test_fresh_enough_league_starts_none`, `test_no_row_starts_one`, `test_null_refreshed_at_starts_one`, `test_stale_past_the_bound_starts_one`, `test_linked_platform_league_starts_none`, `test_open_circuit_starts_none`, `test_success_writes_fresh_and_advances_refreshed_at`, `test_picks_failure_writes_stale_picks_unavailable`, `test_read_exception_writes_stale_and_thread_does_not_raise`, `test_unexpected_crash_never_escapes_and_clears_inflight`, `test_league_leaves_inflight_after_success_and_failure`, cooldown: `test_stale_league_inside_retry_cooldown_starts_none` (10 s ago → none), `test_stale_league_past_retry_cooldown_starts_one` (61 s ago → one), `test_fresh_but_past_bound_league_ignores_the_cooldown`, `test_unparseable_updated_at_never_blocks`, `test_no_sleeper_read_or_write_under_the_module_lock`, `test_reads_per_kick_meta_cached_vs_miss` | Single-flight: 8 barrier-released callers → `sum(returns) == 1` and one refresh. The no-op set (fresh, platform, demo id, open circuit, in flight); NULL or no row starts one. `fresh` advances `refreshed_at`, with G-004-filtered rows. `stale`/`picks_unavailable`; `stale`/`http_5xx` with no thread exception (excepthook captured). The in-flight set always empties. No Sleeper stub runs while the module lock is held by the calling thread (owner-tracking lock). 1+1(+0/1 meta) reads per kick plus the pick sync's 2. **Sabotage:** with the in-flight check removed, `test_concurrent_callers_start_exactly_one_refresh` fails `assert 8 == 1`; restored byte-identical. Five repeat runs: 14/14 each |
 
   **Moved out of PR-A:**
   - `test_tap_path_no_sleeper.py` (the AC-L3 guard) needs B.4's switches, which are trades-eng's S0-serve (§Q7).

@@ -81,14 +81,12 @@ def record_outcome(league_id: str, refreshed_at: str | None, *,
 # P41 — the non-blocking floor kick
 # ---------------------------------------------------------------------------
 
-def _within_bound(league_id: str, max_age_s: float) -> bool:
-    """True when the last full refresh is younger than `max_age_s` seconds.
+def _younger_than(stamp, seconds: float) -> bool:
+    """True when the ISO `stamp` is between 0 and `seconds` old.
 
-    No row, a NULL `refreshed_at`, an unparseable stamp or one in the future
-    all count as past the bound (refresh rather than trust it).
+    A missing, unparseable or future stamp is never "young": callers then
+    refresh rather than trust it, and a cooldown never blocks on it.
     """
-    state = db.get_league_roster_state(league_id)
-    stamp = (state or {}).get("refreshed_at")
     if not stamp:
         return False
     try:
@@ -98,22 +96,47 @@ def _within_bound(league_id: str, max_age_s: float) -> bool:
     if when.tzinfo is None:
         when = when.replace(tzinfo=timezone.utc)
     age = (datetime.now(timezone.utc) - when).total_seconds()
-    return 0.0 <= age < float(max_age_s)
+    return 0.0 <= age < float(seconds)
 
 
-def maybe_refresh_async(league_id: str, max_age_s: float) -> bool:
+def _within_bound(state: dict | None, max_age_s: float) -> bool:
+    """True when the last full refresh (`refreshed_at`) is younger than `max_age_s`.
+
+    No row or a NULL / unparseable / future stamp counts as past the bound.
+    """
+    return _younger_than((state or {}).get("refreshed_at"), max_age_s)
+
+
+def _cooling_down(state: dict | None, retry_after_s: float) -> bool:
+    """True when the last attempt FAILED less than `retry_after_s` ago.
+
+    `mark_league_roster_failed` writes `status='stale'` and stamps
+    `updated_at`, so a league whose reads keep failing (5xx, timeouts — the
+    circuit only catches 429s) is retried at most once per `retry_after_s`
+    instead of on every tap. An unparseable stamp never blocks.
+    """
+    state = state or {}
+    return (state.get("status") == db.ROSTER_STATE_STALE
+            and _younger_than(state.get("updated_at"), retry_after_s))
+
+
+def maybe_refresh_async(league_id: str, max_age_s: float, *,
+                        retry_after_s: float = 60.0) -> bool:
     """Start one background Sleeper roster refresh if the league is past the bound.
 
     Returns at once: True only when it started a refresh. No-ops (False, no
     thread) for a linked platform league or an id that isn't a Sleeper league
     id, while the 429 circuit is open, when `refreshed_at` is within
-    `max_age_s`, or when a refresh for this league is already in flight.
-    The caller (trades-eng's `/generate`) invokes it after the response is
-    built and never under a lock; its checks are two small DB reads.
+    `max_age_s`, when the last attempt failed less than `retry_after_s` ago
+    (status 'stale', `updated_at`), or when a refresh for this league is
+    already in flight. The caller (trades-eng's `/generate`) invokes it after
+    the response is built and never under a lock; its checks are two small DB
+    reads (platform link, then the one state row).
 
     Budget: ≤ 4 Sleeper reads per kick (rosters, users, traded_picks,
     drafts), 5 when the league meta isn't cached; only past the bound; one
-    in flight per league.
+    in flight per league. A league whose reads keep failing costs at most
+    one kick (≤ 4–5 reads) per `retry_after_s`.
     """
     lid = str(league_id or "")
     try:
@@ -121,7 +144,8 @@ def maybe_refresh_async(league_id: str, max_age_s: float) -> bool:
             return False                  # platform-linked (G-014/G-030) or demo/sentinel id
         if sleeper_http.is_open():
             return False
-        if _within_bound(lid, max_age_s):
+        state = db.get_league_roster_state(lid)
+        if _within_bound(state, max_age_s) or _cooling_down(state, retry_after_s):
             return False
     except Exception as exc:
         log.warning("roster refresh kick skipped league=%s error=%s", lid, type(exc).__name__)

@@ -3,7 +3,8 @@
 Pins (scope-eng-s0-fetch.md §B.1, §B.5):
   • concurrent callers start exactly ONE refresh per league (single-flight)
   • no-ops without a thread: fresh-enough league, linked platform league,
-    open 429 circuit, refresh already in flight; NULL / no row is past the bound
+    open 429 circuit, refresh already in flight, a failed attempt younger than
+    `retry_after_s` (the cooldown); NULL / no row is past the bound
   • the refresh records 'fresh' (refreshed_at advances), 'stale' /
     'picks_unavailable' on a pick failure, 'stale' on a read exception — and
     the thread never raises
@@ -183,6 +184,7 @@ def test_no_row_starts_one(env):
 def test_null_refreshed_at_starts_one(env):
     calls, _b, _e = env
     db_module.mark_league_roster_failed(LID, "timeout")      # row with refreshed_at NULL
+    _set_updated_at(seconds_ago=120)                          # past the retry cooldown
     assert _state()["refreshed_at"] is None
     assert rr.maybe_refresh_async(LID, 300) is True
     _wait_idle()
@@ -192,6 +194,51 @@ def test_null_refreshed_at_starts_one(env):
 def test_stale_past_the_bound_starts_one(env):
     calls, _b, _e = env
     db_module.mark_league_roster_fresh(LID, OLD)
+    assert rr.maybe_refresh_async(LID, 300) is True
+    _wait_idle()
+
+
+def _set_updated_at(seconds_ago):
+    from sqlalchemy import update
+    stamp = (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).isoformat()
+    t = db_module.league_roster_state_table
+    with db_module.engine.begin() as conn:
+        conn.execute(update(t).where(t.c.league_id == LID).values(updated_at=stamp))
+
+
+def test_stale_league_inside_retry_cooldown_starts_none(env):
+    calls, _b, _e = env
+    db_module.mark_league_roster_failed(LID, "http_5xx")
+    _set_updated_at(seconds_ago=10)
+    assert rr.maybe_refresh_async(LID, 300) is False              # default retry_after_s = 60
+    assert rr._inflight == set() and calls["rosters"] == 0
+
+
+def test_stale_league_past_retry_cooldown_starts_one(env):
+    calls, _b, _e = env
+    db_module.mark_league_roster_failed(LID, "http_5xx")
+    _set_updated_at(seconds_ago=61)
+    assert rr.maybe_refresh_async(LID, 300) is True
+    _wait_idle()
+    assert calls["rosters"] == 1
+
+
+def test_fresh_but_past_bound_league_ignores_the_cooldown(env):
+    calls, _b, _e = env
+    db_module.mark_league_roster_fresh(LID, OLD)                  # status fresh, updated_at = now
+    assert _state()["status"] == "fresh"
+    assert rr.maybe_refresh_async(LID, 300) is True
+    _wait_idle()
+    assert calls["rosters"] == 1
+
+
+def test_unparseable_updated_at_never_blocks(env):
+    from sqlalchemy import update
+    calls, _b, _e = env
+    db_module.mark_league_roster_failed(LID, "timeout")
+    t = db_module.league_roster_state_table
+    with db_module.engine.begin() as conn:
+        conn.execute(update(t).where(t.c.league_id == LID).values(updated_at="not-a-date"))
     assert rr.maybe_refresh_async(LID, 300) is True
     _wait_idle()
 
@@ -277,7 +324,7 @@ def test_league_leaves_inflight_after_success_and_failure(env):
     _wait_idle()
     assert rr._inflight == set()
     behaviour["raise"] = None
-    assert rr.maybe_refresh_async(LID, 0) is True                    # and again after a failure
+    assert rr.maybe_refresh_async(LID, 0, retry_after_s=0) is True   # and again after a failure
     _wait_idle()
     assert calls["rosters"] == 3
 
