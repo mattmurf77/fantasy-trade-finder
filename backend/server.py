@@ -2247,6 +2247,55 @@ app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path=
 
 _sessions: dict[str, dict] = {}  # token → per-session dict
 _sessions_lock = threading.RLock()  # request views may write while callers hold it
+# E1 F5 — per-token single-flight for POST /api/session/init (see the decorator).
+_session_init_inflight: dict[str, dict] = {}  # token → {sig, done, result}
+_session_init_inflight_lock = threading.Lock()
+_SESSION_INIT_WAIT_S = 60  # follower wait bound; past it the follower runs its own init
+
+
+def _single_flight_session_init(fn):
+    """Per-token single-flight around the session_init view (E1 F5).
+
+    Concurrent inits for one X-Session-Token never run side by side. An
+    identical request (same user_id, league_id, active_format) replays the
+    in-flight leader's response; a different one waits for the leader, then
+    runs its own init. No token or a non-object body skips single-flight.
+    """
+    @functools.wraps(fn)
+    def single_flight_view():
+        incoming_token = request.headers.get("X-Session-Token", "")
+        body = request.get_json(silent=True)
+        if not incoming_token or not isinstance(body, dict):
+            return fn()
+        sig = (body.get("user_id"), body.get("league_id"), body.get("active_format"))
+        stale = None  # a leader whose wait timed out; never wait on it again
+        while True:
+            with _session_init_inflight_lock:
+                entry = _session_init_inflight.get(incoming_token)
+                if entry is None or entry is stale:
+                    mine = {"sig": sig, "done": threading.Event(), "result": None}
+                    _session_init_inflight[incoming_token] = mine
+                    break
+            finished = entry["done"].wait(_SESSION_INIT_WAIT_S)
+            if finished and entry["sig"] == sig and entry["result"] is not None:
+                log.info("session/init: coalesced onto in-flight init (token %s…)",
+                         incoming_token[:6])
+                data, status, ctype = entry["result"]
+                return app.response_class(data, status=status, content_type=ctype)
+            if not finished:
+                stale = entry
+        try:
+            resp = app.make_response(fn())
+            mine["result"] = (resp.get_data(), resp.status_code,
+                              resp.headers.get("Content-Type"))
+            return resp
+        finally:
+            with _session_init_inflight_lock:
+                if _session_init_inflight.get(incoming_token) is mine:
+                    del _session_init_inflight[incoming_token]
+            mine["done"].set()
+
+    return single_flight_view
 
 if _TEST_MODE:
     # UI-test harness blueprint (/__test__/*) — see backend/test_support.py.
@@ -3269,6 +3318,47 @@ def _trade_job_public_view(job: dict) -> dict:
         out.update(cards=[], status="error", error="owner_model_changed")
     elif not _trade_significance_matches(job):
         out.update(cards=[], status="error", error="significance_policy_changed")
+    return out
+
+
+def _trade_page_size() -> int:
+    """E2: max cards per paged response (`trade_page_size`, default 30), held to 1-200."""
+    try:
+        return max(1, min(200, int(_deck_cfg("trade_page_size", 30.0))))
+    except (ValueError, OverflowError):  # NaN / inf
+        return 30
+
+
+def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
+    """E2 opt-in paging: `page=1` on /generate (cursor 0), `cursor` on /status.
+
+    `job` is a SHALLOW snapshot taken under the job lock; call outside it. The
+    cursor is a raw index into the job's pre-filter card list. Slice first,
+    then run the unchanged public view over the slice only, so a disposition
+    or guard filter never shifts a later card's index.
+
+    A raw index stays valid only while every publish extends the previous
+    list. Owner-serve batches (`_publish_owner_batch`; every card stamped
+    `preserve_server_order`), the value-core single publish and prepared
+    adoption do. Every other worker path re-sorts or filters (the progress
+    callback, the post-layer snapshots, the final publish), so for those, and
+    for a cursor past the end, the full current list returns with replace.
+    An errored job never pages its partial cards.
+    """
+    raw = job.get("cards") or []
+    append_only = bool(job.get("value_core") or job.get("prepared_inventory_id")
+                       or (raw and all(c.get("preserve_server_order") for c in raw)))
+    replace = cursor > len(raw) or (cursor > 0 and not append_only)
+    start = 0 if replace else cursor
+    end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
+    served = [] if job.get("status") == "error" else raw[start:end]
+    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)})
+    if out["status"] == "error":
+        out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
+    else:
+        out.update(cursor=end, total_ready=len(raw), replace=replace)
+    if search_id is not None:
+        out["search_id"] = search_id
     return out
 
 
@@ -14639,6 +14729,11 @@ def generate_trades():
         error: str | null,
       }
 
+    E2 (opt-in): body `page: 1` (+ optional `search_id`) returns at most
+    `trade_page_size` cards plus `cursor`, `total_ready`, `replace` and the
+    echoed `search_id` (see _trade_job_page_view). Without `page` the
+    response is unchanged.
+
     Caching:
       - A complete job for the same (user, league, format) within 30 min
         is returned instantly with status='complete'.
@@ -14654,6 +14749,16 @@ def generate_trades():
         return jsonify({"error": "session missing user/league"}), 400
 
     body               = request.get_json(force=True) or {}
+    # E2 — opt-in paged response. Validated before any side effect. Without
+    # `page` the body is the legacy one and `search_id` is not read.
+    paged              = "page" in body
+    search_id          = body.get("search_id") if paged else None
+    if paged and (type(body["page"]) is not int or body["page"] != 1):
+        return jsonify({"error": "invalid_page", "message": "page must be 1"}), 400
+    if search_id is not None and not (isinstance(search_id, str)
+                                      and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", search_id)):
+        return jsonify({"error": "invalid_search_id",
+                        "message": "search_id must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
     league_id          = body.get("league_id") or g_league.league_id
     pinned_give        = body.get("pinned_give_players") or []
     # FB-47 — "I want to acquire X". Honored only when trade.finder_targeting
@@ -14791,6 +14896,8 @@ def generate_trades():
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
+        if paged:
+            return jsonify(_trade_job_page_view(reuse_snapshot, 0, search_id))
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
@@ -14818,6 +14925,8 @@ def generate_trades():
     )
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
+    if paged:
+        return jsonify(_trade_job_page_view(snapshot, 0, search_id))
     return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
 
@@ -15796,10 +15905,16 @@ def undo_deck_suppression():
 def trade_job_status():
     """GET /api/trades/status?job_id=X
     Snapshot plus one batched disposition read. Used to poll an in-flight
-    /api/trades/generate job. 404 if the job has been evicted."""
+    /api/trades/generate job. 404 if the job has been evicted.
+    E2 (opt-in): `cursor=K` returns only the raw cards after index K, at most
+    `trade_page_size` (see _trade_job_page_view)."""
     sess = _require_session()
     sess["last_active"] = time.time()
     job_id = request.args.get("job_id") or ""
+    cursor = request.args.get("cursor")
+    if cursor is not None and not re.fullmatch(r"[0-9]{1,9}", cursor):
+        return jsonify({"error": "invalid_cursor",
+                        "message": "cursor must be a non-negative integer"}), 400
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if not job:
@@ -15808,8 +15923,12 @@ def trade_job_status():
         # user_id, but we double-check here in case of a stale id.
         if job["key"][0] != sess["user_id"]:
             return jsonify({"error": "job not found"}), 404
-        snapshot = copy.deepcopy(job)
-    return jsonify(_trade_job_public_view(snapshot))
+        # Published card lists are replaced, never mutated in place. Capture
+        # their reference under the lock and do the expensive copy outside it.
+        snapshot = dict(job)
+    if cursor is not None:
+        return jsonify(_trade_job_page_view(snapshot, int(cursor)))
+    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
 
 def _pending_owner_cards(cards, config, exemptions):
@@ -22163,6 +22282,7 @@ VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
 
 
 @app.route("/api/session/init", methods=["POST"])
+@_single_flight_session_init
 def session_init():
     """Initialize/switch a league for the proven session identity.
 
