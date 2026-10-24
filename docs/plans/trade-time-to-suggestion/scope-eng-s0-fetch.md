@@ -363,7 +363,10 @@ A starters-only change (a lineup move) never reaches `league_members`, so it can
   - The fingerprint and hook cases go to PR-B.
 - [x] **Full suite:** `python3 -m pytest backend/tests -q` on `build/s0-roster-refresh`. Local Python 3.14.4 (CI is
   3.12.3). After the circuit + state commits: **7763 passed, 1 skipped**, exit 0, 882 s. After the replace commit
-  (`9d998886`): **7766 passed, 1 skipped**, exit 0, 691 s. The SQLite "no such table" lines in the log are
+  (`9d998886`): **7766 passed, 1 skipped**, exit 0, 691 s. Stage C, after R10 (`2a05ca80`) and fresh|stale-only
+  (`6a281855`): **7777 passed, 1 skipped**, exit 0, 636 s (+11 R10 tests). The targeted suites (owned picks,
+  propose, validate, pick tradability, overhaul API/service, pick assignment, MFL propose, session-init calls,
+  S0) gave 271 passed before the v0.3 change; the four S0 files gave 64 passed after it. The SQLite "no such table" lines in the log are
   pre-existing fail-soft logging from other tests' in-memory engines, not failures.
 - [x] **Code-walk proof** (file:line at `build/s0-roster-refresh` HEAD):
   1. **Trigger:** cold launch `mobile/App.tsx:115-117` and foreground `:199-210` → `useSession.revalidateSession`
