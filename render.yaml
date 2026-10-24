@@ -13,7 +13,7 @@ services:
     runtime: python
     plan: free
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.3"

@@ -183,6 +183,14 @@ from historical decisions/inbound offers, which must retain original terms.
 - **Static:** `web/` served by Flask.
 - Set `ANTHROPIC_API_KEY` in Render dashboard if smart matchups should be enabled in prod.
 
+### The gthread switch (E1)
+
+The web service runs one gunicorn worker with **`--threads 4`** (E1). The service was created in the dashboard
+(G-018), so the live start command may not come from `render.yaml`. Read the service's start command first: if
+it doesn't follow the blueprint, set it on the service through the Render API or dashboard (on the operator's
+word), then deploy. **Rollback:** the same command without `--threads 4`, then deploy. Watch the first 13:30 UTC
+daily tick and the request p95 after the switch.
+
 ### First-action latency release (2026-09-21)
 
 This backend release changes job admission, diagnostic preparation and incremental

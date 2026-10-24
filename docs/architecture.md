@@ -776,8 +776,10 @@ available to pending/swipe routes and suppression sees live decisions. Ranking
 services retain execution-time reads; player objects, other request service
 mutations, DB preferences and feature/config reads are not immutable snapshots.
 This is a limited in-process prerequisite, **not** stateless request handling,
-durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
-all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
+durable jobs, or a separate worker. Thread safety for the single worker's four
+`gthread` threads comes from E1's locks (`RankingService`, single-flight session
+init, the shared dicts and job safety; [E1](plans/e1-concurrency/scope.md)). One
+Gunicorn worker and all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
 
 Trade-job revocation epochs are captured before input reads and retained through
 admission, worker publication and copied public responses. Kickoff adds the
