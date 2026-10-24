@@ -112,6 +112,7 @@ import {
   failFirstCard,
   isSearchOpen,
   noteFirstResponse,
+  reportDeckBufferEmpty,
   reportFirstCardShown,
 } from '../state/tradeSearchTrace';
 import {
@@ -4665,6 +4666,18 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFocused]);
   useEffect(() => () => failDeckSearch('abandoned'), []);
+
+  // deck_buffer_empty (AC-L4): the fronted card is the last ready card on
+  // the device (nothing unseen behind it) while more is still coming (not
+  // fully delivered by the end rule) — the next page was not local in time.
+  // Once per search_id (the trace dedupes).
+  useEffect(() => {
+    if (!pagedWithCards || !rawTopCard || !job || unseen > 0 || deckFullyDelivered(job)) return;
+    const searchId = deckSearchRef.current?.id ?? job.search_id;
+    if (!searchId) return;
+    reportDeckBufferEmpty(searchId, { deckId: job.deck_id ?? job.job_id, cardsSeen: deckIdx + 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagedWithCards, rawTopCard?.trade_id, unseen, job?.status, job?.pool_exhausted, job?.cursor]);
 
   // The pushed deck's header row is the deck's existing header (design-lead
   // §5.4.2): "Updating" trails in it, so no row is ever inserted above the

@@ -403,6 +403,8 @@ NON_INTENT_EVENTS = frozenset({
     # (`find_trades_tapped`, INTENT), which already counts the user.
     "trade_first_card_shown",
     "trade_first_card_failed",
+    # deck_buffer_empty (ruling 30): an AC-L4 system outcome, never a choice.
+    "deck_buffer_empty",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

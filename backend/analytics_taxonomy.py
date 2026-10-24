@@ -57,6 +57,10 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # which already counts the user. Registered in the SAME commit as the
     # emitters (mobile/src/state/tradeSearchTrace.ts).
     "trade_first_card_shown", "trade_first_card_failed",
+    # deck_buffer_empty (granted, analytics-lead ruling 30): the user reached
+    # the last ready card while the deck was still building and no next page
+    # was local — an AC-L4 failure. NON_INTENT. Same commit as its emitter.
+    "deck_buffer_empty",
     # TikTok-discovery deck engine (docs/plans/tiktok-discovery/). The F1
     # /api/events derives verified, owned viewed/undo outcomes only after
     # taxonomy filtering and successful ingestion. These analytics rows
@@ -994,6 +998,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                           "entry_point", "search_type",
                                           "launch_state", "network_type",
                                           "serve_source"}),
+    # At most once per search_id. `deck_id` = the deck being paged (P2's, else
+    # the job's id); `cards_seen` = cards fronted so far, the empty one
+    # included; `ms_since_first_card` = monotonic ms since R2 (absent when R2
+    # had not fired yet); `network_type` at the moment.
+    "deck_buffer_empty":       frozenset({"search_id", "deck_id", "cards_seen",
+                                          "ms_since_first_card",
+                                          "network_type"}),
     # Receipts. `status` is ledger | ready — which of the two designed screen
     # states the user actually saw, so "did anyone see a number?" is
     # answerable without joining grades. `headline_bucket` is neg | flat | pos,

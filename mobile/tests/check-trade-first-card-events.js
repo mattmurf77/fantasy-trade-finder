@@ -335,5 +335,29 @@ function freshTraceWithTimers() {
       && /if \(claimedFair && res\.ideas\.length === 0\) failFirstCard\(claimedFair, 'empty'\);/.test(trades));
 }
 
+// ── 8. deck_buffer_empty: once per search, when the buffer runs dry ─────
+{
+  const h = freshTraceWithTimers();
+  h.net({ type: 'cellular', isConnected: true });
+  const id = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+  h.tick(150);
+  h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+  h.tick(4000);
+  h.mod.reportDeckBufferEmpty(id, { deckId: 'd1', cardsSeen: 12 });
+  h.mod.reportDeckBufferEmpty(id, { deckId: 'd1', cardsSeen: 13 });
+  const e = h.events.filter((x) => x.type === 'deck_buffer_empty');
+  check('8a. EXECUTED: at most once per search_id, with exactly the addendum props',
+    e.length === 1 && JSON.stringify(Object.keys(e[0].props).sort())
+      === JSON.stringify(['cards_seen', 'deck_id', 'ms_since_first_card', 'network_type', 'search_id'])
+      && e[0].props.ms_since_first_card === 4000 && e[0].props.cards_seen === 12
+      && e[0].props.network_type === 'cellular' && e[0].props.deck_id === 'd1');
+  const eff = trades.slice(trades.indexOf('reportDeckBufferEmpty(searchId'), trades.length).slice(0, 400);
+  const effAt = trades.indexOf('if (!pagedWithCards || !rawTopCard || !job || unseen > 0 || deckFullyDelivered(job)) return;');
+  check('8b. the deck reports it only at the last ready card (nothing unseen) of a paged deck still to be delivered',
+    effAt > -1 && trades.indexOf('reportDeckBufferEmpty(searchId', effAt) > effAt
+      && /reportDeckBufferEmpty\(searchId, \{ deckId: job\.deck_id \?\? job\.job_id, cardsSeen: deckIdx \+ 1 \}\);/.test(trades)
+      && eff.length > 0);
+}
+
 console.log(failures ? `check-trade-first-card-events: ${failures} FAILED` : 'check-trade-first-card-events: all passed');
 process.exit(failures ? 1 : 0);

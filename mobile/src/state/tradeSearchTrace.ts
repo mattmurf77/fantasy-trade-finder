@@ -208,6 +208,23 @@ export function failFirstCard(searchId: string, reason: FirstCardFailure): void 
   }, 'Trades');
 }
 
+// `deck_buffer_empty` (granted, ruling 30): the user reached the last ready
+// card while the deck is still building and no next page is local — an
+// AC-L4 failure. At most once per search_id.
+const bufferEmptyReported = new Set<string>();
+export function reportDeckBufferEmpty(searchId: string, o: { deckId?: string; cardsSeen: number }): void {
+  if (!searchId || bufferEmptyReported.has(searchId)) return;
+  bufferEmptyReported.add(searchId);
+  const t = traces.get(searchId);
+  track('deck_buffer_empty', {
+    search_id: searchId,
+    deck_id: o.deckId,
+    cards_seen: o.cardsSeen,
+    ms_since_first_card: t?.firstCardAt !== undefined ? Math.round(monotonicNow() - t.firstCardAt) : undefined,
+    network_type: currentNetworkType(),
+  }, 'Trades');
+}
+
 // T4 — leaving `active` (background, or iOS's inactive app switcher) before
 // a card ends every open search as `abandoned`, never a long R2.
 try {

@@ -14,6 +14,7 @@ missing one is stripped.
     `search_id`; both stay INTENT (a tap is a user action).
   * R2 `trade_first_card_shown` / R2b `trade_first_card_failed` — new,
     NON_INTENT (a system outcome echoing the R1 tap).
+  * `deck_buffer_empty` — new (ruling 30), NON_INTENT (an AC-L4 outcome).
 """
 import backend.analytics_queries as q
 import backend.analytics_taxonomy as tax
@@ -55,6 +56,9 @@ R2_ROWS: dict[str, frozenset[str]] = {
     "trade_first_card_failed": frozenset({
         "search_id", "ms_from_tap", "reason", "entry_point", "search_type",
         "launch_state", "network_type", "serve_source"}),
+    "deck_buffer_empty": frozenset({
+        "search_id", "deck_id", "cards_seen", "ms_since_first_card",
+        "network_type"}),
 }
 
 
