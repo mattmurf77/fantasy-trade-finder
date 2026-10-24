@@ -727,6 +727,13 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #                                       over a payload already in memory)
     "usage_trends_action", "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Minimum-version gate (B8, 2026-10-24; head-eng ruling 35 + the
+    # analytics-lead B8 grant). Registered in the SAME commit as the emitters
+    # (mobile/src/screens/UpdateGateScreen.tsx); both land in
+    # analytics_queries.NON_INTENT_EVENTS in this same commit.
+    #   update_gate_shown  — once per gate show, after the flag fetch resolves
+    #   update_gate_tapped — the Update tap (opens the App Store listing)
+    "update_gate_shown", "update_gate_tapped",
 })
 
 # ---------------------------------------------------------------------------
@@ -1711,6 +1718,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Projected is the only path that runs the outlook simulation, so this
     # row is also the denominator for that request's cost.
     "standings_segment_changed":   frozenset({"segment"}),
+    # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
+    # Both props are version INTS (major*10000 + minor*100 + patch, see
+    # docs/cross-client-invariants.md): `min_version` is the served
+    # app_min_version, `app_version_int` the build's own. No version string,
+    # no ids, no device platform (a user_events COLUMN, never a prop).
+    "update_gate_shown":           frozenset({"min_version", "app_version_int"}),
+    "update_gate_tapped":          frozenset({"min_version", "app_version_int"}),
 }
 
 

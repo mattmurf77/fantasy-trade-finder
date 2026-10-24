@@ -26594,6 +26594,9 @@ def feature_flags_route():
 
     Frontend fetches this at boot + on the ≥30-min foreground refetch
     (analytics-platform §4.6b) and stashes flags in window.FTF_FLAGS.
+
+    B8 adds one more additive top-level key, `app_min_version` (int; 0 =
+    off): the mobile minimum-version gate. See `_app_min_version`.
     """
     experiments: dict[str, str] = {}
     configs: dict[str, dict] = {}
@@ -26639,7 +26642,26 @@ def feature_flags_route():
         "flags":       flags_dict(),
         "experiments": experiments,
         "configs":     configs,
+        "app_min_version": _app_min_version(),
     })
+
+
+def _app_min_version() -> int:
+    """B8 minimum-version gate: the `app_min_version` model_config knob as a
+    non-negative int (major*10000 + minor*100 + patch; 0 = off).
+
+    Defensive by contract: a missing row, a read error, NaN/infinity, a
+    fractional value or a negative one all serve 0. model_config.value is a
+    Float, and PUT /api/admin/config accepts any float() — so a bad write can
+    only ever turn the gate OFF, never block a build by accident.
+    """
+    try:
+        raw = float(get_config().get("app_min_version", 0))
+    except Exception:
+        return 0
+    if not math.isfinite(raw) or raw < 0 or raw != int(raw):
+        return 0
+    return int(raw)
 
 
 @app.route("/api/feature-flags/reload", methods=["POST"])

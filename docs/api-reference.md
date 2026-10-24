@@ -1001,7 +1001,7 @@ Triggered by an external scheduler (Render cron). All POST.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/feature-flags` | Read flags. Response is **additive** (analytics FR-35): `{flags, experiments: {key: variant}, configs: {key: {...}}}`. `experiments`/`configs` are always objects but stay empty until the P3 evaluator lands. Send `X-Device-Id` (+ optional `X-Session-Token`) so the server can resolve per-unit experiment assignments; old parsers reading `.flags` ignore the added keys. |
+| GET | `/api/feature-flags` | Read flags. Response is **additive** (analytics FR-35): `{flags, experiments: {key: variant}, configs: {key: {...}}, app_min_version: int}`. `experiments`/`configs` are always objects but stay empty until the P3 evaluator lands. Send `X-Device-Id` (+ optional `X-Session-Token`) so the server can resolve per-unit experiment assignments; old parsers reading `.flags` ignore the added keys. **`app_min_version`** (B8, always present): the minimum-version gate, the `model_config` knob of the same name as a non-negative int (`major*10000 + minor*100 + patch`, 1.22.0 = 12200; **0 = off**). A missing, NaN, infinite, fractional or negative stored value, or a read error, serves 0. Mobile builds whose own version int is below a positive value show a blocking "Update required" screen ([config-reference](config-reference.md#minimum-version-gate-b8-backendserverpy-db-seeded), [invariant](cross-client-invariants.md#app-version-int--the-minimum-version-gate-b8)). No auth; same response for every caller. |
 | POST | `/api/feature-flags/reload` | Reload from `config/features.json`. **Auth: X-Cron-Secret** |
 
 ## Admin

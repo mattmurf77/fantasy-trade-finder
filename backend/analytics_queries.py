@@ -397,6 +397,15 @@ NON_INTENT_EVENTS = frozenset({
     # Add / Re-rank) stays deliberately ABSENT and counts as INTENT.
     "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Minimum-version gate (B8, 2026-10-24) — added in the SAME commit as
+    # the emitters and the ALLOWED_CLIENT_EVENTS rows.
+    #   update_gate_shown — an impression the SERVER forces on an outdated
+    #     build (the `paywall_viewed` class). As intent, raising
+    #     app_min_version would mint a user-day for every blocked device.
+    #   update_gate_tapped — leaves the app for the App Store; the outcome is
+    #     the store's, and the user cannot do anything else on that screen.
+    "update_gate_shown",
+    "update_gate_tapped",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
