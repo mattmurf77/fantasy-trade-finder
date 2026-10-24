@@ -176,11 +176,11 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
     !/onLike|onPass|disposition|Toast|Badge|newTrades|onSeeNew|count/i.test(fn.replace(/DeckEndCard/g, ''))
       && !/new trade/i.test(fn),
     'the card takes minHeight, tally, onAdjust, onHome — nothing that could announce arrivals');
-  check('4d. D14b / p30.tally: one chalk-dim line, "{passed} passed · {liked} liked · {proposed} proposed", Plex Mono numerals, shown at zero',
+  check('4d. D14b / p30.tally: one chalk-dim line, "{passed} passed · {liked} liked · {proposed} proposed", Plex Mono numerals, suppressed at 0 · 0 · 0 (P36)',
     /<Text variant="bodySm" testID="trades\.deck-end\.tally" style=\{styles\.endBody\}>\s*<Text style=\{styles\.tallyNum\}>\{tally\.passed\}<\/Text>\s*\{' passed · '\}\s*<Text style=\{styles\.tallyNum\}>\{tally\.liked\}<\/Text>\s*\{' liked · '\}\s*<Text style=\{styles\.tallyNum\}>\{tally\.proposed\}<\/Text>\s*\{' proposed'\}\s*<\/Text>/.test(fn)
       && /tallyNum: \{ fontFamily: fonts\.data, fontVariant: \['tabular-nums'\] \}/.test(comp)
-      && /\{tally \? \(/.test(fn) && !/tally\.passed \+|passed \+ tally|=== 0/.test(fn)
-      && /TODO\(trades-pm\): suppress at 0·0·0\?/.test(fn));
+      && /\{tally && \(tally\.passed \|\| tally\.liked \|\| tally\.proposed\) \? \(/.test(fn) && !/tally\.passed \+|passed \+ tally/.test(fn)
+      && /P36 \(head-product, 2026-10-23; PRD row 4\): suppressed at 0 · 0 · 0\./.test(fn));
   const code = stripComments(read('screens/TradesScreen.tsx'));
   check('4e. the screen mounts it once, with exactly those props',
     (code.match(/<DeckEndCard\b/g) || []).length === 1

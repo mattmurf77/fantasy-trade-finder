@@ -134,8 +134,8 @@ export function DeckEndCard({
         <View ref={copyRef} accessible accessibilityLabel={`${DECK_END_TITLE} ${DECK_END_BODY}`}>
           <Text variant="heading">{DECK_END_TITLE}</Text>
           <Text variant="bodySm" style={styles.endBody}>{DECK_END_BODY}</Text>
-          {/* TODO(trades-pm): suppress at 0·0·0? Shown at zero for now. */}
-          {tally ? (
+          {/* P36 (head-product, 2026-10-23; PRD row 4): suppressed at 0 · 0 · 0. */}
+          {tally && (tally.passed || tally.liked || tally.proposed) ? (
             <Text variant="bodySm" testID="trades.deck-end.tally" style={styles.endBody}>
               <Text style={styles.tallyNum}>{tally.passed}</Text>
               {' passed · '}
