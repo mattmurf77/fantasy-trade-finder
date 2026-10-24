@@ -188,13 +188,14 @@ def test_versions():
 
 def _snapshot(path, sets, *, form):
     """A local SQLite snapshot. form: "json" (today's rows), "packed" (the
-    new writer's rows: candidates_json NULL), "legacy" (no packed columns)."""
+    new writer's rows: candidates_json stays NOT NULL and holds ''),
+    "legacy" (no packed columns)."""
     md = MetaData()
     cands = deck_candidate_sets_table.to_metadata(md)
     if form != "legacy":
         cands.append_column(Column("candidates_packed", LargeBinary))
         cands.append_column(Column("cand_pack_version", Integer))
-        cands.c.candidates_json.nullable = True
+    assert not cands.c.candidates_json.nullable
     imps = deck_impressions_table.to_metadata(md)
     eng = create_engine(f"sqlite:///{path}")
     md.create_all(eng)
@@ -203,7 +204,7 @@ def _snapshot(path, sets, *, form):
             if form == "packed":
                 packed = ep.pack_candidates({"candidate_set_id": row["candidate_set_id"]},
                                             json.loads(row["candidates_json"]))
-                row = {**row, "candidates_json": None,
+                row = {**row, "candidates_json": "",
                        "candidates_packed": packed.candidates_packed,
                        "cand_pack_version": packed.cand_pack_version}
             conn.execute(insert(cands).values(**row))
@@ -238,3 +239,48 @@ def test_scorecard_flags_an_unreadable_pack(real_sets, tmp_path):
     assert manifest["counts"]["candidate_set_pack_unreadable"] == 1
     first = manifest["private_records"]["source_tables"]["deck_candidate_sets"][0]
     assert first["candidates_json"] is None and "candidates_pack_error" in first
+
+
+# head-eng's schema ruling: candidates_json stays NOT NULL; a packed row stores
+# '' there, and candidates_packed IS NOT NULL is authoritative.
+
+def _set_row(members, cid="cs-x"):
+    return {"candidate_set_id": cid, "deck_job_id": "job-1", "user_id": "u", "league_id": "lg",
+            "size": len(members), "set_hash": ep.candidate_set_hash(members),
+            "candidates_json": json.dumps(members), "created_at": "2026-10-24T00:00:00+00:00"}
+
+
+def _packed_row(members, **override):
+    packed = ep.pack_candidates({"candidate_set_id": "cs-x"}, members)
+    return {**_set_row(members), "candidates_json": "",
+            "candidates_packed": packed.candidates_packed,
+            "cand_pack_version": packed.cand_pack_version, **override}
+
+
+def test_a_packed_row_with_empty_candidates_json_reads_exactly_like_the_json_row():
+    members = _synthetic_members(50)
+    packed = se._select_rows({"deck_candidate_sets": [_packed_row(members)]})
+    legacy = se._select_rows({"deck_candidate_sets": [_set_row(members)]})
+    assert packed == legacy
+    assert se.audit_rows({"deck_candidate_sets": [_packed_row(members)]}, include_records=True) \
+        == se.audit_rows({"deck_candidate_sets": [_set_row(members)]}, include_records=True)
+
+
+def test_a_row_without_a_pack_reads_its_legacy_json_unchanged():
+    row = _set_row(_synthetic_members(10))
+    no_pack = {**row, "candidates_packed": None, "cand_pack_version": None}
+    assert se._select_rows({"deck_candidate_sets": [no_pack]})["deck_candidate_sets"] == [row]
+
+
+@pytest.mark.parametrize("json_column", ["", "legacy JSON"])
+def test_a_corrupt_pack_is_flagged_and_candidates_json_is_never_read(json_column):
+    """The pack is authoritative: a corrupt one is flagged, and the reader
+    never falls back to candidates_json, whether it holds '' or valid JSON."""
+    members = _synthetic_members(10)
+    corrupt = _flip_raw(ep.pack_candidates({"candidate_set_id": "cs-x"}, members))
+    row = _packed_row(members, candidates_packed=corrupt.candidates_packed,
+                      candidates_json=json.dumps(members) if json_column else "")
+    manifest = se.audit_rows({"deck_candidate_sets": [row]}, include_records=True)
+    [out] = manifest["private_records"]["source_tables"]["deck_candidate_sets"]
+    assert out["candidates_json"] is None and out["candidates_pack_error"]
+    assert manifest["counts"]["candidate_set_pack_unreadable"] == 1

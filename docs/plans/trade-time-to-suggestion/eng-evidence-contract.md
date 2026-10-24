@@ -321,16 +321,18 @@ head-eng ruling 25, under the same gate as the deck pack. **This is separate fro
 |---|---|---|
 | `candidates_packed` | LargeBinary (BLOB on SQLite, BYTEA on Postgres), **nullable** | `PackedCandidates.candidates_packed`, stored verbatim |
 | `cand_pack_version` | Integer, **nullable** | `PackedCandidates.cand_pack_version`, stored verbatim |
-| `candidates_json` | Text, becomes **nullable** | Legacy rows keep it. New rows leave it NULL when packed |
+| `candidates_json` | Text, **stays NOT NULL** (head-eng's schema ruling) | Legacy rows keep their JSON. **Packed rows store `''`** |
+
+**`candidates_packed IS NOT NULL` is authoritative.** Readers key on it first. They use `candidates_json` only when `candidates_packed` is NULL (legacy rows), and never parse a packed row's `''`.
 
 - **Writer:**
-  - `packed = evidence_pack.pack_candidates({"candidate_set_id": ..., "deck_job_id": ...}, members)`; store both fields, and stop writing `candidates_json` for new rows.
+  - `packed = evidence_pack.pack_candidates({"candidate_set_id": ..., "deck_job_id": ...}, members)`; store both fields, and `candidates_json = ''` for new rows.
   - `set_hash` and `size` are still computed and stored as today. Import `candidate_set_hash` rather than restating it.
-  - If `pack_candidates` raises `ValueError`, store `candidates_json` for that row instead (nothing is lost).
+  - If `pack_candidates` raises `ValueError`, store the JSON in `candidates_json` and leave `candidates_packed` NULL for that row (nothing is lost).
   - Every new row is packed, even a tiny set: a 1-member set packs to 270 B against 142 B of JSON, and the absolute cost is negligible.
-- **Readers** prefer the packed column and fall back to `candidates_json` for legacy rows: `members = unpack_candidates(PackedCandidates(row.cand_pack_version, row.candidates_packed))[1] if row.candidates_packed is not None else json.loads(row.candidates_json)`. A `PackIntegrityError` is a corrupt row: refuse it like a malformed JSON row.
+- **Readers** key on `candidates_packed IS NOT NULL` first (authoritative), and use `candidates_json` only when `candidates_packed` is NULL (legacy rows): `members = unpack_candidates(PackedCandidates(row.cand_pack_version, row.candidates_packed))[1] if row.candidates_packed is not None else json.loads(row.candidates_json)`. A packed row's `''` is never parsed. A `PackIntegrityError` is a corrupt row: refuse it like a malformed JSON row, and never fall back to the `''`.
   - **`backend/eval/scorecard_evidence.py` (built):** see `docs/model-evaluation/evidence-contract.md` §"Implemented adapter".
-  - **`prepared_trade_payload._candidate` and `prepared_trade_payload_v2` (trades-eng; spec only):** get `members` from the packed column when it is set. Keep every existing check on the members (exact keys, ids, `partner` text, `base_score` number, `in_deck` bool, the `trade_hash` terms, and the row's `set_hash`). Extend the key allowlist to the two new columns, and apply `MAX_CANDIDATE_BYTES` to the packed bytes and to the unpacked JSON.
+  - **`prepared_trade_payload._candidate` and `prepared_trade_payload_v2` (trades-eng; spec only):** key on `candidates_packed IS NOT NULL` first, which is authoritative. When it is set, get `members` from the pack and don't read `candidates_json` (it is `''`). Read `candidates_json` only when `candidates_packed` is NULL, for legacy rows. Keep every existing check on the members (exact keys, ids, `partner` text, `base_score` number, `in_deck` bool, the `trade_hash` terms, and the row's `set_hash`). Extend the key allowlist to the two new columns, and apply `MAX_CANDIDATE_BYTES` to the packed bytes and to the unpacked JSON.
 - **Deletion and export:** unchanged. It is the same row; an export carries the packed bytes, or the reader's unpacked JSON.
 
 **Tests** (`backend/tests/test_candidate_pack.py`):
@@ -379,6 +381,6 @@ The ~43 KiB per pair today packs to about 7 KiB.
   - page-store tests that call `assert_page_is_top_n` and `assert_prefix_stable`;
   - import `is_archive_deck`, `card_impression_id` and `FROZEN_INPUT_KEYS` from `backend/eval/contract.py`. Don't restate them;
   - at go-live, a PR that sets `backend/eval/data.PACK_REQUIRED_SINCE`.
-- **trades-eng, candidate sets (§9):** the two new `deck_candidate_sets` columns and a nullable `candidates_json`, the writer switch with its JSON fallback, and the `prepared_trade_payload(_v2)` readers.
+- **trades-eng, candidate sets (§9):** the two new `deck_candidate_sets` columns, with `candidates_json` staying NOT NULL (packed rows store `''`). Also the writer switch with its JSON fallback, and the `prepared_trade_payload(_v2)` readers, which key on `candidates_packed IS NOT NULL` first and use `candidates_json` only when it is NULL (legacy rows).
 - **head-eng:** the schema grant for `evidence_tier`, `deck_evidence_packs`, the `deck_candidate_sets` packed columns and the new evidence columns. The C9 ADR should cite this spec.
 - **release-lead's scribe, at merge:** the living-memory write-back (CHANGELOG and TEST_LEDGER).
