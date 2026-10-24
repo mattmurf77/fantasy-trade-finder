@@ -102,6 +102,15 @@ import {
   type PagedTradeJobSnapshot,
 } from '../api/trades';
 import { uuidv4 } from '../api/_queue';
+// Time to trade suggestion (#339 §4.6): R1 begins at the tap; the deck that
+// dispatches the search claims the tap's search id.
+import {
+  beginTradeSearch,
+  claimPendingSearch,
+  claimSearch,
+  dropPendingSearch,
+} from '../state/tradeSearchTrace';
+import { searchTypeOf, type R1Source } from '../utils/firstCardEvent';
 // 200 ms path — the paged deck's merge / prefetch / end-of-buffer rules.
 // Pure, zero runtime imports (tests/check-trade-pages.js runs them).
 import {
@@ -661,6 +670,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // mount-time resets (the league effect, the #330 choke point) read it.
   const [adopted] = useState(() => adoptedFirstPage(route));
   const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
+  // R1 — the landing already sent the tap's search id with page 1; nothing
+  // else may claim it as a pending search.
+  useEffect(() => {
+    claimSearch(adopted?.snapshot.search_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [deck, setDeck] = useState<PagedTradeCard[]>(() => adopted?.snapshot.cards ?? []);
   const [deckSourcePosition, setDeckSourcePosition] = useState(0);
   const localPassSnapshot = useSyncExternalStore(subscribeLocalPasses, () => localPassSession);
@@ -1035,6 +1050,9 @@ export default function TradesScreen({ navigation, route }: any) {
       }
     | undefined;
   const isResultsPushed = finderHubOn && !!resultsPushParam;
+  // The `app/trades/finder` deep link pushes a param-less TradeDeck (R1
+  // source `deep_link` for the search it starts).
+  const isDeepLinkDeck = route?.name === 'TradeDeck' && !resultsPushParam;
   // #270/#272 — both `trades_home_inline` variants are scoped to the guided
   // landing only; team/player deck modes (already rare post-#269, reachable
   // only via a stored deep link since the mode-bar's chips are hidden) keep
@@ -1300,18 +1318,31 @@ export default function TradesScreen({ navigation, route }: any) {
   // #257 — shared Find-a-Trade entry point so every trigger (the on-screen
   // button in both flag states, and the "Preferences changed" strip)
   // clears the refresh nudge the same way.
-  function handleFindTrades(source?: string) {
+  function handleFindTrades(source?: R1Source) {
     if (fairPendingRef.current) return;
     setDeckFailure(null); // P0-2 — a search in flight has no failure
     setScopedEmpty(null); // #330 — re-set by the completion effect if the re-run is empty too
-    // #298 — `mode` always present; `source` only when a caller named one.
-    // `source` has been sent here since #257 and STRIPPED on every row by
-    // an empty prop registry until 2026-08-11; it is registered now.
-    if (!lastFairRequestRef.current) {
-      track('find_trades_tapped',
-            source ? { source, mode: deckMode } : { mode: deckMode },
-            'Trades');
-    }
+    // R1 (time to suggestion, addendum v2) — every in-deck control calls this
+    // AT ITS TAP, fair repeat or model, so the search begins here: one client
+    // `search_id` for `find_trades_tapped {source, mode, search_id}` and for
+    // the request the dispatch below sends. #298's `mode` is the ONE deckMode
+    // derivation; `source` stays absent for the deck's own Find a Trade,
+    // except on the param-less deep-link deck (`deep_link`).
+    const fairReq = lastFairRequestRef.current;
+    const modelReq = lastModelRequestRef.current;
+    const { pinnedGive: pg, pinnedReceive: pr } = useFinderTargets.getState();
+    beginTradeSearch({
+      source: source ?? (isDeepLinkDeck ? 'deep_link' : undefined),
+      mode: deckMode,
+      searchType: searchTypeOf(fairReq
+        ? { fair: true }
+        : modelReq
+          ? { giveIds: modelReq.pinned_give_players, receiveIds: modelReq.pinned_receive_players,
+              opponentId: modelReq.opponent_user_id, intent: tradeIntent }
+          : { giveIds: pg.map((p) => p.id), receiveIds: pr.map((p) => p.id),
+              opponentId: scopedOpponent, intent: tradeIntent }),
+      screen: 'Trades',
+    });
     prefsChangedSinceGenerateRef.current = false;
     setShowPrefsChangedStrip(false);
     setPinIdeaResumed(false); // #317 — a new search's deck re-takes the slot
@@ -2247,9 +2278,10 @@ export default function TradesScreen({ navigation, route }: any) {
         s ? { ...s, origin: 'model' } : { origin: 'model', passed: 0, edits: {} },
       );
     }
-    // 200 ms path — every dispatch is a new search with its own client
-    // search id (E2 `search_id`, echoed; R1/R2 key on it in the M pass).
-    generateMutation.mutate({ ...vars, searchId: uuidv4() }, mutateOpts);
+    // 200 ms path — every dispatch is a search with a client search id (E2
+    // `search_id`, echoed): the tap's, when a search-starting control began
+    // one (R1), else a fresh one (a regeneration, the first-run auto-start).
+    generateMutation.mutate({ ...vars, searchId: claimPendingSearch() ?? uuidv4() }, mutateOpts);
   }
 
   // Poll while a job is running. Self-scheduling setTimeout loop with
@@ -3448,19 +3480,11 @@ export default function TradesScreen({ navigation, route }: any) {
     ) {
       autoRunPendingRef.current = false;
       autoRunOriginRef.current = null;
-      if (autoRun) {
-        // R-4 — the auto-run is a find-trades dispatch the user asked for
-        // with the Offer/Target tap (or the calculator's Find a Trade); same
-        // event, attributable source.
-        track(
-          'find_trades_tapped',
-          {
-            source: autoRunOrigin === 'calculator' ? 'calculator' : 'league_offer',
-            mode: deckMode,
-          },
-          'Trades',
-        );
-      }
+      // R1 (addendum v2) fires AT THE TAP now, not here at dispatch: the
+      // canvas Find a Trade in forkCanvasSearch (`calculator`), the League
+      // Summary Offer/Target (`league_offer` / `league_target`) and the Usage
+      // Trends Trade (`usage_trends`) in their own screens. dispatchGenerate
+      // below claims that tap's search id for the request.
       // #402 QA round — the model-origin session for this dispatch is
       // created inside dispatchGenerate (the one session-creation site for
       // the model path), same rule as the fair branch above.
@@ -3545,6 +3569,7 @@ export default function TradesScreen({ navigation, route }: any) {
       receiveIds: string[];
       opponent: { userId: string } | null;
       anchor: unknown;
+      searchId: string;
     },
     pushDeck: (firstPage?: FirstPageHandoff) => void,
   ) {
@@ -3571,15 +3596,17 @@ export default function TradesScreen({ navigation, route }: any) {
       if (pushed) return;
       pushed = true;
       clearTimeout(deadline);
-      // The user left the landing while page 1 was on its way: no push.
+      // The user left the landing while page 1 was on its way: no push,
+      // and the tap's search will never run.
       if (!mountedRef.current || navigation?.isFocused?.() === false) {
         resultsPushPendingRef.current = false;
+        dropPendingSearch(fork.searchId);
         return;
       }
       pushDeck(firstPage);
     };
     const deadline = setTimeout(() => go(), FIRST_PAGE_PUSH_DEADLINE_MS);
-    generateTrades(request, { searchId: uuidv4() })
+    generateTrades(request, { searchId: fork.searchId })
       .then((snapshot) => go(adoptablePage(snapshot) ? { request, snapshot } : undefined))
       .catch(() => go());
   }
@@ -3963,7 +3990,7 @@ export default function TradesScreen({ navigation, route }: any) {
   async function runFairPackages(
     anchor: SearchSelection,
     opponentId: string | undefined = scopedOpponent,
-    source: string = 'calculator',
+    source: R1Source = 'calculator',
   ) {
     if (!leagueId || fairPendingRef.current) return;
     const epoch = ++deckEpochRef.current;
@@ -3980,10 +4007,13 @@ export default function TradesScreen({ navigation, route }: any) {
     setDeckFailure(null);
     setScopedEmpty(null);
     setSummaryDismissed(false);
-    // R-4 — the sweep is a find-trades dispatch the user asked for with the
-    // calculator's Find a Trade, same event and same attributable source as
-    // the model path below.
-    track('find_trades_tapped', { source, mode: deckMode }, 'Trades');
+    // R1 — the sweep's search began at its tap (forkCanvasSearch or
+    // handleFindTrades); this claims it. A sweep with no tap behind it (the
+    // dormant #402 browse retry) begins its own, with this source.
+    if (!claimPendingSearch()) {
+      beginTradeSearch({ source, mode: deckMode, searchType: 'fair_sweep', screen: 'Trades' });
+      claimPendingSearch();
+    }
     try {
       const res = await getFairPackages({
         league_id: leagueId,
@@ -4580,7 +4610,7 @@ export default function TradesScreen({ navigation, route }: any) {
     resetDeckForNewTargets();
     lastModelRequestRef.current = model;
     lastFairRequestRef.current = fair;
-    handleFindTrades();
+    handleFindTrades('end_card_adjust');
   }
   // "Back to Home": the Home tab, a tab switch (tabs never animate). A
   // different exit from the header Back, which returns to the builder.

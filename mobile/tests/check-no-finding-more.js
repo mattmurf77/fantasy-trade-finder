@@ -213,7 +213,7 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
   check('5a. Adjust opens the deck\'s own preferences (DNA sheet, else outlook sheet) — no navigation',
     /if \(consolidateOn\) setDnaSheetOpen\(true\);\s*else setOutlookOpen\(true\);/.test(adjust) && !/navigat/.test(adjust));
   check('5b. applying runs the search in place: reset + the saved request repeated, no navigation',
-    /resetDeckForNewTargets\(\);[\s\S]*lastModelRequestRef\.current = model;[\s\S]*handleFindTrades\(\);/.test(apply)
+    /resetDeckForNewTargets\(\);[\s\S]*lastModelRequestRef\.current = model;[\s\S]*handleFindTrades\('end_card_adjust'\);/.test(apply)
       && !/navigat/.test(apply));
   check('5c. the apply tap reaches it from both sheets (DNA close with a change; outlook submit)',
     /if \(endAdjust && \(prefsChangedSinceGenerateRef\.current \|\| endAdjust\.fairnessOn !== fairnessOn\)\) \{\s*applyDeckEndAdjust\(\);/.test(code)

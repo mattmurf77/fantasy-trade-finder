@@ -66,7 +66,7 @@ console.log('check-trade-inplace-reveal:');
       && /pushWithFirstPage\(fork, pushDeck\);\s*return;/.test(arm));
   const helper = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
   check('2b. pushWithFirstPage requests page 1 (paged, client search id) and pushes from its result',
-    /generateTrades\(request, \{ searchId: uuidv4\(\) \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\) \? \{ request, snapshot \} : undefined\)\)/.test(helper));
+    /generateTrades\(request, \{ searchId: fork\.searchId \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\) \? \{ request, snapshot \} : undefined\)\)/.test(helper));
   check('2c. …with a bounded wait: past the deadline (or on failure) it pushes without the page',
     /setTimeout\(\(\) => go\(\), FIRST_PAGE_PUSH_DEADLINE_MS\)/.test(helper) && /\.catch\(\(\) => go\(\)\)/.test(helper)
       && /if \(pushed\) return;/.test(helper));

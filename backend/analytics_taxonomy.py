@@ -953,7 +953,20 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # pinned surface could not fire this event AT ALL (the CTA was gated
     # out), so a non-zero find_trades_tapped{mode:single_pin} count IS the
     # regression fix's telemetry.
-    "find_trades_tapped":   frozenset({"source", "mode"}),
+    #
+    # Time to trade suggestion (R1; addendum docs/business/analytics/
+    # 2026-10-20-time-to-suggestion-events.md v2, analytics-lead ruling 30):
+    # WIDENED with `search_id`, a client UUID minted AT THE TAP that the same
+    # search sends as /api/trades/generate's `search_id`, so the tap, its job
+    # and R2/R2b join on one key. Fires at the tap on every #339 table-A
+    # control (no longer at dispatch on the push path). Exact `source` values:
+    # absent (the deck's own Find a Trade), deck_error_retry,
+    # prefs_changed_strip, deck_summary_unpin, deck_search_all, calculator
+    # (the canvas Find a Trade), league_offer (League Summary Offer ONLY after
+    # the seam), and new: league_target (League Summary Target), usage_trends
+    # (Usage Trends Trade), deep_link (app/trades/finder), end_card_adjust
+    # (the P30 card's apply tap). Still INTENT.
+    "find_trades_tapped":   frozenset({"source", "mode", "search_id"}),
     # Receipts. `status` is ledger | ready — which of the two designed screen
     # states the user actually saw, so "did anyone see a number?" is
     # answerable without joining grades. `headline_bucket` is neg | flat | pos,
@@ -1601,9 +1614,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # selected. NO player ids, NO names, NO league id (that rides the envelope
     # column), and NO device platform — that is a user_events COLUMN
     # derived server-side (the NULL-`platform` incident).
+    # R1 widening (time to suggestion, addendum v2): + `search_id`, the same
+    # client UUID as the tap's find_trades_tapped {source: calculator}.
     "calc_find_a_trade_tapped":    frozenset({"path",
                                               "give_count", "receive_count",
-                                              "has_partner"}),
+                                              "has_partner", "search_id"}),
     # The ✓ cell's outcome (#384 W6-A / D-152). `queued` is a BOOLEAN — did
     # the server record the package as a like. `reason` is present ONLY on
     # `queued: false` and is a LOW-CARDINALITY enum: the six server refusal
