@@ -25,6 +25,8 @@
 //   5. SignIn consumes the one-shot notice at mount and renders it; the notice
 //      module is set-once/consume-once (executed); the claim path sets the G4
 //      notice before it signs out.
+//   6. The entry mint (lifted and EXECUTED) sends X-Device-Id, so the server
+//      can record which install a claim belongs to.
 //
 // HONEST LABEL (G-035). 1, 2 and 5 pin wiring and copy shape; 3, 4 and the
 // notice module run the real code against stubs. The TestFlight checklist in
@@ -56,6 +58,7 @@ const F = {
   auth:    'src/api/auth.ts',
   notice:  'src/state/signInNotice.ts',
   signin:  'src/screens/SignInScreen.tsx',
+  entry:   'src/api/platformEntry.ts',
 };
 const SUPPORT_EMAIL = 'fleecedapp@gmail.com';
 // marketing-lead-copy.md §6 addendum 3 (legal R27), verbatim.
@@ -333,6 +336,31 @@ function runModule(rel, requireMap) {
     const setAt = body.indexOf('setSignInNotice(G4_AFTER_NOTICE)');
     const outAt = body.indexOf('signOut()');
     expect(setAt >= 0 && outAt > setAt, 'performClaimDelete does not set the G4 notice before signOut()');
+  });
+
+  // ── 6. The entry mint sends the device id (executed) ────────────────────
+  // The server records it on the new entry session; the claim-only delete
+  // then removes THAT install's rows. The shared client doesn't send
+  // X-Device-Id by default, so the mint must.
+  await check('6. the /api/entry/platform mint sends X-Device-Id from getDeviceId()', async () => {
+    const entry = parse(F.entry);
+    const fn = fnDecl(entry, 'entryPlatformMint');
+    expect(fn, 'no entryPlatformMint in api/platformEntry.ts');
+    const posts = [];
+    const mod = { exports: {} };
+    vm.runInNewContext(transpile(`${fn.getText(entry)}\nmodule.exports = { entryPlatformMint };`), {
+      module: mod, exports: mod.exports,
+      api: { post: async (p, body, opts) => { posts.push({ p, body, opts }); return { session_token: 'tok' }; } },
+      getDeviceId: async () => 'dev_guard',
+      setSessionToken: async () => {}, track: () => {}, entryErrorCode: () => 'x',
+    });
+    await mod.exports.entryPlatformMint({ platform: 'mfl', leagueInput: '61408', year: 2026, teamId: '0003' });
+    await mod.exports.entryPlatformMint({ platform: 'espn', espnLeagueId: '987', teamId: 1 });
+    expect(posts.length === 2 && posts.every((c) => c.p === '/api/entry/platform'), `mint posts: ${JSON.stringify(posts.map((c) => c.p))}`);
+    for (const c of posts) {
+      expect(c.opts && c.opts.headers && c.opts.headers['X-Device-Id'] === 'dev_guard',
+        `${c.body.platform} mint sends headers ${JSON.stringify(c.opts && c.opts.headers)}`);
+    }
   });
 
   console.log(failures === 0
