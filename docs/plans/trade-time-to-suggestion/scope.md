@@ -146,8 +146,10 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - ownership-after-roster-change on every serve path (AC-5);
   - the **P41 non-blocking floor kick**: a tap past bound with the floor healthy is served without
     waiting (serve latency is independent of a stubbed slow refresh), a floor refresh is enqueued,
-    and a changed roster withdraws the affected card in place and builds the next page from the
-    fresh roster. A paired failed-floor case keeps the gate-miss withhold;
+    and a changed roster withdraws the affected card in place **on the next whole-deck response**
+    (option (a); not instantly) and builds the next page from the fresh roster. Before that
+    response, an action on the stale fronted card is blocked by I-2. A paired failed-floor case
+    keeps the gate-miss withhold;
   - action-time revalidation: per platform send path, including team overhaul, with moved-asset and
     read-failure fixtures (prd AC-6a); likes on moved-asset cards record no like and no match
     (AC-6b);
