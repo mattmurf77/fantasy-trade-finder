@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Referral loop B7 — SignIn names the inviter from the invite id `t`
 // (PRD FR-11 / AC-11 / §8.3; scope §3 item 8; marketing approval row
-// `gp.join.headline` + U2; head-eng ruling 2026-10-24).
+// `gp.join.headline` + U2; head-eng ruling (B), 2026-10-24).
 //
 // WHY THIS EXISTS. B1 stops putting the inviter's username (`ref`) in invite
 // links, so the only way SignIn can still say who invited you is to send the
@@ -12,10 +12,16 @@
 //   * a second invite-meta call site (the P0-3 rail: one call, SignIn's);
 //   * a malformed `t` sent upstream, or `t` CONSUMED here instead of peeked
 //     (session init must still carry it, B3);
-//   * a banner that changes for a server that has never heard of `t`. The
-//     head-eng ruling: whenever invite-meta yields no inviter name because of
-//     an OLD server, a MISSING/INVALID `t`, or a REQUEST ERROR, the headline
-//     is today's ladder EXACTLY. Sign-in never breaks or blanks;
+//   * the wrong rung when no name comes back. head-eng ruling (B): once a
+//     well-formed `t` is SENT, no name for ANY reason (an OLD server with
+//     neither new key, any `invite_status`, a REQUEST ERROR, a throw, the
+//     deadline) shows the no-name rungs "A leaguemate invited you[ to
+//     {league}]". Today's lines show ONLY when there is no well-formed `t`
+//     (missing, or malformed and so never sent). This supersedes the first
+//     build's "degrade to today's copy" reading, which was about failure
+//     safety, not copy;
+//   * sign-in breaking or blanking: a failed call with `t` still renders a
+//     banner, the only null is no `t` and no league name, nothing throws;
 //   * the legacy `?ref=` line drifting by a byte;
 //   * a display name or the id itself taken from the URL and rendered.
 //
@@ -26,14 +32,15 @@
 //      over the ladder grid. A reference copy of TODAY'S expression (base
 //      441b9766, SignInScreen.tsx:249-255, verbatim) is the oracle for
 //      "today's lines".
-//   C  LIFTS the real invite-meta EFFECT callback out of SignInScreen.tsx and
-//      runs it against the real fetchInviteMeta, a stub server (old shape,
-//      §8.3 shape, error, throw, hang) and stub store/state setters. Its
-//      output feeds the real ladder, so the ruling's three cases are pinned
-//      end to end, minus React.
+//   C  LIFTS the real invite-meta EFFECT callback and the real `inviteIdSent`
+//      expression out of SignInScreen.tsx and runs them against the real
+//      fetchInviteMeta, a stub server (old shape, §8.3 shape, error, throw,
+//      hang) and stub store/state setters. Their output feeds the real
+//      ladder, so ruling (B) is pinned end to end per failure mode, minus
+//      React.
 //   D  STATIC (TypeScript AST): one call site; `t` peeked by selector, never
 //      consumed; the inviter state written only from the response; the
-//      ladder fed from exactly those three values; the effect's deps; no URL
+//      ladder fed from exactly those four values; the effect's deps; no URL
 //      read on the screen.
 //
 // HONEST LABEL (G-035). C runs the effect body, not React: dep-change re-runs
@@ -226,6 +233,7 @@ async function sectionA() {
 // ── B. SignInScreen.tsx — the headline ladder, lifted and executed ──────
 const signinSf = parse(SIGNIN);
 let ladder = null;
+const LEAGUEMATE = (lg) => `A leaguemate invited you${lg ? ` to ${lg}` : ''}${TAIL}`;
 function sectionB() {
   const decl = findAll(signinSf, (n) =>
     ts.isFunctionDeclaration(n) && !!n.name && n.name.text === 'inviteHeadlineFor')[0];
@@ -236,9 +244,9 @@ function sectionB() {
   }
   check('B0 inviteHeadlineFor is module-level (liftable)', decl.parent === signinSf,
         'it moved inside the component, where it can close over URL or store values');
-  eq('B0 its inputs are exactly (invitedBy, invitedLeagueName, inviter)',
+  eq('B0 its inputs are exactly (invitedBy, invitedLeagueName, inviteIdSent, inviter)',
      decl.parameters.map((p) => p.name.getText(signinSf)),
-     ['invitedBy', 'invitedLeagueName', 'inviter']);
+     ['invitedBy', 'invitedLeagueName', 'inviteIdSent', 'inviter']);
   try {
     const js = ts.transpileModule(decl.getText(signinSf), {
       compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2019 },
@@ -255,52 +263,17 @@ function sectionB() {
   };
 
   const NAMES = [LG, null, ''];
-  const ANY_META = [
-    null,
-    { ...OLD_BODY },
-    { ...OLD_BODY, inviter_display_name: 'Teresa', invite_status: 'valid' },
-    { ...OLD_BODY, inviter_display_name: null, invite_status: 'unknown' },
-    { ...OLD_BODY, inviter_display_name: null, invite_status: 'expired' },
-    { ...OLD_BODY, inviter_display_name: null, invite_status: 'league_mismatch' },
-  ];
-
-  // (a) legacy ref outranks everything, byte-identical to today.
-  const aGot = []; const aWant = [];
-  for (const lg of NAMES) for (const m of ANY_META) {
-    aGot.push(run('teresa', lg, m)); aWant.push(today('teresa', lg));
-  }
-  eq('B1 (a) legacy ref → today\'s line, byte-identical, whatever the server says', aGot, aWant);
-  eq('B1 (a) literal', run('teresa', LG, null),
-     "@teresa invited you to Dynasty Bros — sign in and we'll take you straight there.");
-  eq('B1 (a) literal, no league name', run('teresa', null, null),
-     "@teresa invited you to their league — sign in and we'll take you straight there.");
-
-  // (b) server-resolved name → ladder rungs 1 and 2, tail kept.
-  eq('B2 (b) ladder 1: {name} invited you to {league}',
-     run(null, LG, ANY_META[2]), `Teresa invited you to Dynasty Bros${TAIL}`);
-  eq('B2 (b) ladder 2: {name} invited you to their league',
-     run(null, null, ANY_META[2]), `Teresa invited you to their league${TAIL}`);
-  eq('B2 (b) a name outranks a no-name status',
-     run(null, LG, { ...OLD_BODY, inviter_display_name: 'Teresa', invite_status: 'expired' }),
-     `Teresa invited you to Dynasty Bros${TAIL}`);
-
-  // (c) `t` known to the server, no name → ladder rungs 3 and 4.
-  for (const st of ['unknown', 'expired', 'league_mismatch']) {
-    const m = { ...OLD_BODY, inviter_display_name: null, invite_status: st };
-    eq(`B3 (c) ${st} → ladder 3: A leaguemate invited you to {league}`,
-       run(null, LG, m), `A leaguemate invited you to Dynasty Bros${TAIL}`);
-    eq(`B3 (c) ${st} → ladder 4: A leaguemate invited you`,
-       run(null, null, m), `A leaguemate invited you${TAIL}`);
-  }
-
-  // (d) the ruling: no inviter name from an old server / no or invalid `t` /
-  // a failed call → today's ladder EXACTLY (including null = no banner).
+  const NAMED = { ...OLD_BODY, inviter_display_name: 'Teresa', invite_status: 'valid' };
+  // Every way invite-meta can come back WITHOUT a usable inviter name.
   const NO_NAME = [
-    ['request error / no t (null)', null],
+    ['request error / throw / deadline (null)', null],
     ['old server (neither new key)', { ...OLD_BODY }],
     ['old server, league_name null', { ...OLD_BODY, league_name: null }],
     ['status valid, name null', { ...OLD_BODY, inviter_display_name: null, invite_status: 'valid' }],
-    ['status null', { ...OLD_BODY, inviter_display_name: null, invite_status: null }],
+    ['status null, name null', { ...OLD_BODY, inviter_display_name: null, invite_status: null }],
+    ['status unknown', { ...OLD_BODY, inviter_display_name: null, invite_status: 'unknown' }],
+    ['status expired', { ...OLD_BODY, inviter_display_name: null, invite_status: 'expired' }],
+    ['status league_mismatch', { ...OLD_BODY, inviter_display_name: null, invite_status: 'league_mismatch' }],
     ['status unrecognised', { ...OLD_BODY, invite_status: 'revoked' }],
     ['legacy key name token_status (never emitted, C1)', { ...OLD_BODY, token_status: 'unknown' }],
     ['name blank', { ...OLD_BODY, inviter_display_name: '   ' }],
@@ -309,62 +282,118 @@ function sectionB() {
     ['name an array', { ...OLD_BODY, inviter_display_name: ['Teresa'] }],
     ['empty object', {}],
   ];
+  const ANY_META = [NAMED, ...NO_NAME.map(([, m]) => m)];
+
+  // (a) legacy ref outranks everything, byte-identical to today.
+  const aGot = []; const aWant = [];
+  for (const sent of [false, true]) for (const lg of NAMES) for (const m of ANY_META) {
+    aGot.push(run('teresa', lg, sent, m)); aWant.push(today('teresa', lg));
+  }
+  eq('B1 (a) legacy ref → today\'s line, byte-identical, whatever t and the server say', aGot, aWant);
+  eq('B1 (a) literal', run('teresa', LG, false, null),
+     "@teresa invited you to Dynasty Bros — sign in and we'll take you straight there.");
+  eq('B1 (a) literal, no league name', run('teresa', null, false, null),
+     "@teresa invited you to their league — sign in and we'll take you straight there.");
+
+  // (b) server-resolved name → ladder rungs 1 and 2, tail kept.
+  eq('B2 (b) ladder 1: {name} invited you to {league}',
+     run(null, LG, true, NAMED), `Teresa invited you to Dynasty Bros${TAIL}`);
+  eq('B2 (b) ladder 2: {name} invited you to their league',
+     run(null, null, true, NAMED), `Teresa invited you to their league${TAIL}`);
+  eq('B2 (b) a name outranks a no-name status',
+     run(null, LG, true, { ...OLD_BODY, inviter_display_name: 'Teresa', invite_status: 'expired' }),
+     `Teresa invited you to Dynasty Bros${TAIL}`);
+
+  // (c) ruling (B): `t` SENT and no name, for ANY reason → ladder rungs 3/4.
   for (const [label, m] of NO_NAME) {
-    eq(`B4 (d) ${label} → today's lines`,
-       NAMES.map((lg) => run(null, lg, m)), NAMES.map((lg) => today(null, lg)));
+    eq(`B3 (c) t sent + ${label} → "A leaguemate invited you[ to {league}]"`,
+       NAMES.map((lg) => run(null, lg, true, m)), NAMES.map((lg) => LEAGUEMATE(lg)));
+  }
+  eq('B3 (c) literal, ladder 3', run(null, LG, true, null),
+     "A leaguemate invited you to Dynasty Bros — sign in and we'll take you straight there.");
+  eq('B3 (c) literal, ladder 4', run(null, null, true, null),
+     "A leaguemate invited you — sign in and we'll take you straight there.");
+
+  // (d) ruling (B): NO well-formed `t` → today's lines EXACTLY (incl. null).
+  for (const [label, m] of NO_NAME) {
+    eq(`B4 (d) no t + ${label} → today's lines`,
+       NAMES.map((lg) => run(null, lg, false, m)), NAMES.map((lg) => today(null, lg)));
   }
 
-  // Never throws, never renders junk, never renders the id.
-  const junk = [];
-  for (const by of [null, '', 'teresa']) for (const lg of NAMES)
-    for (const [, m] of [...NO_NAME, ...ANY_META.map((x) => ['', x])]) {
+  // Never broken: no throw, no junk, never the id; never blank with `t`.
+  const junk = []; const blank = [];
+  for (const by of [null, '', 'teresa']) for (const sent of [false, true])
+    for (const lg of NAMES) for (const m of ANY_META) {
       const m2 = m && typeof m === 'object' ? { ...m, t: ID, invite_id: ID } : m;
-      const out = run(by, lg, m2);
+      const out = run(by, lg, sent, m2);
       if (out !== null && (typeof out !== 'string' || /THREW|undefined|null|\[object|Ab3dEf6hIj9k/.test(out))) {
         junk.push(out);
       }
+      if (out === null && (sent || by || lg)) blank.push([by, lg, sent]);
     }
   eq('B5 never throws, never renders undefined/null/[object], never renders the id', junk, []);
+  eq('B5 never blank: null ONLY with no ref, no t and no league name', blank, []);
 
   // The ladder reads nothing it was not handed: no store, no URL, no id.
   const body = decl.body ? decl.body.getText(signinSf) : '';
   check('B6 the ladder references no inviteId / store / URL',
         !/\binviteId\b|\buseSession\b|\bLinking\b|\broute\b|\bparams\b|\binvitedLeagueId\b/.test(body),
-        'inviteHeadlineFor reads something other than its three arguments');
+        'inviteHeadlineFor reads something other than its four arguments');
 }
 
-// ── C. the invite-meta effect, lifted and executed ──────────────────────
+// ── C. the invite-meta effect + inviteIdSent, lifted and executed ───────
 let effectFactory = null;
 let effectCall = null;
+let sentExpr = null;
 function liftEffect() {
   const metaCalls = callsTo(signinSf, 'fetchInviteMeta');
   const effects = callsTo(signinSf, 'useEffect').filter((c) =>
     metaCalls.some((m) => within(m, c)));
   if (effects.length !== 1) {
     fail('C0 exactly one useEffect owns the invite-meta call', `${effects.length} found`);
+  } else {
+    effectCall = effects[0];
+    const fn = effectCall.arguments[0];
+    try {
+      const js = ts.transpileModule(`const __effect = ${fn.getText(signinSf)};`, {
+        compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2019 },
+      }).outputText;
+      // The effect's ONLY free variables. A new one is a new input — re-point
+      // the lift and decide whether it can carry a URL value; don't widen blindly.
+      // eslint-disable-next-line no-new-func
+      effectFactory = new Function(
+        'invitedLeagueId', 'inviteId', 'useSession', 'setInviterMeta', 'fetchInviteMeta',
+        `'use strict';\n${js}\nreturn __effect;`);
+      ok('C0 the invite-meta effect lifts with inputs (invitedLeagueId, inviteId, useSession, setInviterMeta, fetchInviteMeta)');
+    } catch (e) {
+      fail('C0 the invite-meta effect lifts', String(e && e.message));
+    }
+  }
+
+  // `inviteIdSent` must be true EXACTLY when the effect sends `t`.
+  const decls = findAll(signinSf, (n) =>
+    ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'inviteIdSent');
+  if (decls.length !== 1 || !decls[0].initializer) {
+    fail('C0 one inviteIdSent declaration', `${decls.length} found`);
     return;
   }
-  effectCall = effects[0];
-  const fn = effectCall.arguments[0];
   try {
-    const js = ts.transpileModule(`const __effect = ${fn.getText(signinSf)};`, {
+    const js = ts.transpileModule(`const __sent = ${decls[0].initializer.getText(signinSf)};`, {
       compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2019 },
     }).outputText;
-    // The effect's ONLY free variables. A new one is a new input — re-point the
-    // lift and decide whether it can carry a URL value; don't widen blindly.
     // eslint-disable-next-line no-new-func
-    effectFactory = new Function(
-      'invitedLeagueId', 'inviteId', 'useSession', 'setInviterMeta', 'fetchInviteMeta',
-      `'use strict';\n${js}\nreturn __effect;`);
-    ok('C0 the invite-meta effect lifts with inputs (invitedLeagueId, inviteId, useSession, setInviterMeta, fetchInviteMeta)');
+    sentExpr = new Function('invitedLeagueId', 'inviteId', 'isInviteId',
+      `'use strict';\n${js}\nreturn __sent;`);
+    ok('C0 inviteIdSent lifts with inputs (invitedLeagueId, inviteId, isInviteId)');
   } catch (e) {
-    fail('C0 the invite-meta effect lifts', String(e && e.message));
+    fail('C0 inviteIdSent lifts', String(e && e.message));
   }
 }
 
-/** Run the real effect once against the real fetchInviteMeta + a stub server. */
+/** Run the real effect once against the real fetchInviteMeta + a stub server,
+ *  then render the real ladder with the real inviteIdSent. */
 async function runEffect({ leagueId = LEAGUE, inviteId = null, cachedName = null,
-                           srv = oldServer, cancelEarly = false }) {
+                           srv = oldServer, cancelEarly = false, invitedBy = null }) {
   server = srv; apiCalls.length = 0;
   const store = { invitedLeagueName: cachedName, consumed: false, nameWrites: [] };
   const useSession = {
@@ -386,110 +415,137 @@ async function runEffect({ leagueId = LEAGUE, inviteId = null, cachedName = null
   }
   if (cancelEarly && typeof cleanup === 'function') cleanup();
   await flush(); await flush();
+  const sent = sentExpr(leagueId, inviteId, inviteIdMod.isInviteId);
+  let headline;
+  try { headline = ladder(invitedBy, store.invitedLeagueName, sent, inviterMeta); }
+  catch (e) { headline = `THREW ${e && e.message}`; }
   return {
-    paths: apiCalls.map((c) => c.path),
+    paths: apiCalls.map((c) => c.path), sent, headline,
     inviterMeta, metaWrites, leagueName: store.invitedLeagueName,
     nameWrites: store.nameWrites, consumed: store.consumed,
   };
 }
 
 async function sectionC() {
-  if (!effectFactory || !ladder) {
-    fail('C* skipped', 'the effect or the ladder did not lift (see C0 / B0)');
+  if (!effectFactory || !ladder || !sentExpr) {
+    fail('C* skipped', 'the effect, inviteIdSent or the ladder did not lift (see C0 / B0)');
     return;
   }
-  const headline = (r, invitedBy = null) => ladder(invitedBy, r.leagueName, r.inviterMeta);
 
-  // Ruling case 1 — OLD server, valid `t`: today's line, and today's caching.
-  for (const cached of [null, LG]) {
-    const r = await runEffect({ inviteId: ID, cachedName: cached, srv: oldServer });
-    eq(`C1 old server + valid t (name ${cached ? 'cached' : 'not cached'}) → today's line`,
-       headline(r), today(null, LG));
-    check(`C1 old server + valid t (name ${cached ? 'cached' : 'not cached'}) → t still sent, once`,
-          r.paths.length === 1 && r.paths[0] === `${TODAY_URL}&t=${ID}`, JSON.stringify(r.paths));
-  }
-
-  // Ruling case 2 — MISSING `t`: today's call and today's skip, exactly.
+  // inviteIdSent ≡ "the effect sends `t`", over the whole input table.
   {
-    const r = await runEffect({ inviteId: null, cachedName: null, srv: newServer('valid', 'Teresa') });
-    eq('C2 no t, name not cached → today\'s request', r.paths, [TODAY_URL]);
-    eq('C2 no t, name not cached → league name cached (today\'s P0-3 behaviour)', r.nameWrites, [LG]);
-    eq('C2 no t → no inviter state written', r.metaWrites.filter((v) => v !== null), []);
-    eq('C2 no t → today\'s line', headline(r), today(null, LG));
-    const s = await runEffect({ inviteId: null, cachedName: LG, srv: newServer('valid', 'Teresa') });
-    eq('C2 no t, name cached → no request (today\'s skip)', s.paths, []);
-    eq('C2 no t, name cached → today\'s line', headline(s), today(null, LG));
-    const u = await runEffect({ leagueId: null, inviteId: ID, srv: newServer('valid', 'Teresa') });
-    eq('C2 no invited league → no request, no banner', [u.paths, headline(u)], [[], null]);
-  }
-
-  // Ruling case 2b — INVALID `t` (only reachable from a tampered blob): never
-  // sent, so even a §8.3 server answers today's shape → today's line.
-  {
-    const lines = []; const urls = [];
-    for (const bad of BAD_IDS.filter((b) => b)) {      // a falsy id is case 2
-      const r = await runEffect({ inviteId: bad, cachedName: null, srv: newServer('valid', 'Teresa') });
-      urls.push(r.paths[0]); lines.push(headline(r));
+    const rows = [];
+    for (const lg of [LEAGUE, null, '']) for (const t of [ID, ...BAD_IDS]) {
+      const r = await runEffect({ leagueId: lg, inviteId: t, srv: oldServer });
+      const sentT = r.paths.some((p) => /[?&]t=/.test(p));
+      if (r.sent !== sentT) rows.push([lg, t, r.sent, sentT]);
     }
-    eq('C3 invalid t → never sent', urls, urls.map(() => TODAY_URL));
-    eq('C3 invalid t → today\'s line', lines, lines.map(() => today(null, LG)));
+    eq('C1 inviteIdSent is true exactly when the request carries t', rows, []);
   }
 
-  // Ruling case 3 — REQUEST ERROR / throw / deadline: today's line (here the
-  // league name was cached by an earlier launch, so it is still shown), and
-  // with nothing cached, no banner — never a broken one.
-  const errs = [
+  // Ruling (B): `t` sent, no name — EVERY failure mode → the no-name rung,
+  // never today's line, never blank. Name cached by an earlier launch or not.
+  const FAILURES = [
+    ['old server (neither new key)', oldServer],
+    ['§8.3 unknown', newServer('unknown', null)],
+    ['§8.3 expired', newServer('expired', null)],
+    ['§8.3 league_mismatch', newServer('league_mismatch', null)],
+    ['§8.3 valid but no name', newServer('valid', null)],
+    ['§8.3 null status, no name', newServer(null, null)],
     ['500', rejectServer(new ApiError(500))],
-    ['404', rejectServer(new ApiError(404))],
+    ['404 (route not deployed)', rejectServer(new ApiError(404))],
     ['offline', rejectServer(new TypeError('Network request failed'))],
-    ['sync throw', throwServer],
+    ['sync throw in api.get', throwServer],
   ];
-  for (const [label, srv] of errs) {
+  for (const [label, srv] of FAILURES) {
     for (const cached of [LG, null]) {
       const r = await runEffect({ inviteId: ID, cachedName: cached, srv });
-      check(`C4 request error (${label}, name ${cached ? 'cached' : 'not cached'}) → effect does not throw`,
-            !r.threw, r.threw);
-      eq(`C4 request error (${label}, name ${cached ? 'cached' : 'not cached'}) → today's line`,
-         headline(r), today(null, cached));
+      const lg = r.leagueName;          // what the store holds after the call
+      check(`C2 t sent + ${label} (name ${cached ? 'cached' : 'not cached'}) → no throw`,
+            !r.threw && !/^THREW/.test(String(r.headline)), r.threw || r.headline);
+      eq(`C2 t sent + ${label} (name ${cached ? 'cached' : 'not cached'}) → "A leaguemate invited you…"`,
+         r.headline, LEAGUEMATE(lg));
+      check(`C2 t sent + ${label} (name ${cached ? 'cached' : 'not cached'}) → never blank`,
+            typeof r.headline === 'string' && r.headline.length > 0, String(r.headline));
     }
   }
+  // The old server still answers the league name: rung 3, not 4.
+  eq('C2 old server + t, name not cached → the league name is cached and shown',
+     (await runEffect({ inviteId: ID, srv: oldServer })).headline, LEAGUEMATE(LG));
   {
     timers.length = 0;
-    server = hangServer;
     const pending = runEffect({ inviteId: ID, cachedName: LG, srv: hangServer });
     await flush();
     const deadline = timers.find((t) => t.live);
     if (deadline) deadline.fn();
     const r = await pending;
-    eq('C4 deadline (hung call) → today\'s line', headline(r), today(null, LG));
+    eq('C2 t sent + deadline (hung call) → "A leaguemate invited you to {league}"', r.headline, LEAGUEMATE(LG));
+    timers.length = 0;
+    const p2 = runEffect({ inviteId: ID, cachedName: null, srv: hangServer });
+    await flush();
+    const d2 = timers.find((t) => t.live);
+    if (d2) d2.fn();
+    eq('C2 t sent + deadline, nothing cached → "A leaguemate invited you"', (await p2).headline, LEAGUEMATE(null));
   }
 
-  // Positive controls — the same harness DOES move off today's line when the
-  // §8.3 server answers, so C1-C4 are not vacuous.
+  // No well-formed `t` → today's request, today's caching, today's lines.
+  {
+    const r = await runEffect({ inviteId: null, cachedName: null, srv: newServer('valid', 'Teresa') });
+    eq('C3 no t, name not cached → today\'s request', r.paths, [TODAY_URL]);
+    eq('C3 no t, name not cached → league name cached (today\'s P0-3 behaviour)', r.nameWrites, [LG]);
+    eq('C3 no t → no inviter state written', r.metaWrites.filter((v) => v !== null), []);
+    eq('C3 no t → today\'s line', r.headline, today(null, LG));
+    const s = await runEffect({ inviteId: null, cachedName: LG, srv: newServer('valid', 'Teresa') });
+    eq('C3 no t, name cached → no request (today\'s skip)', s.paths, []);
+    eq('C3 no t, name cached → today\'s line', s.headline, today(null, LG));
+    for (const [label, srv] of [['500', rejectServer(new ApiError(500))], ['sync throw', throwServer]]) {
+      for (const cached of [LG, null]) {
+        const e = await runEffect({ inviteId: null, cachedName: cached, srv });
+        eq(`C3 no t + ${label} (name ${cached ? 'cached' : 'not cached'}) → today's line, no throw`,
+           e.headline, today(null, cached));
+      }
+    }
+    const u = await runEffect({ leagueId: null, inviteId: ID, srv: newServer('valid', 'Teresa') });
+    eq('C3 no invited league (so t is never sent) → no request, no banner', [u.paths, u.headline], [[], null]);
+  }
+  // A malformed `t` (only reachable from a tampered blob) is never sent, so
+  // even a §8.3 server answers today's shape → today's line.
+  {
+    const lines = []; const urls = [];
+    for (const bad of BAD_IDS.filter((b) => b)) {      // a falsy id is "no t"
+      const r = await runEffect({ inviteId: bad, cachedName: null, srv: newServer('valid', 'Teresa') });
+      urls.push(r.paths[0]); lines.push(r.headline);
+    }
+    eq('C4 invalid t → never sent', urls, urls.map(() => TODAY_URL));
+    eq('C4 invalid t → today\'s line', lines, lines.map(() => today(null, LG)));
+  }
+
+  // Positive controls — a resolved name moves to rung 1, also when cached.
   {
     const r = await runEffect({ inviteId: ID, cachedName: null, srv: newServer('valid', 'Teresa') });
-    eq('C5 §8.3 valid → ladder 1', headline(r), `Teresa invited you to Dynasty Bros${TAIL}`);
+    eq('C5 §8.3 valid → ladder 1', r.headline, `Teresa invited you to Dynasty Bros${TAIL}`);
     const s = await runEffect({ inviteId: ID, cachedName: LG, srv: newServer('valid', 'Teresa') });
     eq('C5 name cached + t → still asks, with t (scope §3 item 8)', s.paths, [`${TODAY_URL}&t=${ID}`]);
-    eq('C5 name cached + t → ladder 1', headline(s), `Teresa invited you to Dynasty Bros${TAIL}`);
-    const u = await runEffect({ inviteId: ID, cachedName: null, srv: newServer('unknown', null) });
-    eq('C6 §8.3 unknown → ladder 3', headline(u), `A leaguemate invited you to Dynasty Bros${TAIL}`);
-    eq('C7 legacy ref still outranks a resolved name', headline(r, 'teresa'), today('teresa', LG));
+    eq('C5 name cached + t → ladder 1', s.headline, `Teresa invited you to Dynasty Bros${TAIL}`);
+    const ref = await runEffect({ inviteId: ID, srv: newServer('valid', 'Teresa'), invitedBy: 'teresa' });
+    eq('C6 legacy ref still outranks a resolved name', ref.headline, today('teresa', LG));
+    const refFail = await runEffect({ inviteId: ID, srv: rejectServer(new ApiError(500)), invitedBy: 'teresa' });
+    eq('C6 legacy ref outranks a failed t call', refFail.headline, today('teresa', null));
   }
 
   // Peek, never consume; an unmounted screen writes nothing (today's alive flag).
   {
     const r = await runEffect({ inviteId: ID, srv: newServer('valid', 'Teresa') });
-    eq('C8 the effect never consumes the invite id', r.consumed, false);
+    eq('C7 the effect never consumes the invite id', r.consumed, false);
     const c = await runEffect({ inviteId: ID, srv: newServer('valid', 'Teresa'), cancelEarly: true });
-    eq('C9 cleanup before the response → no inviter state, no name write',
+    eq('C8 cleanup before the response → no inviter state, no name write',
        [c.metaWrites.filter((v) => v !== null), c.nameWrites], [[], []]);
   }
 
   // The display name is the server's, never the id or anything URL-shaped.
   {
     const r = await runEffect({ inviteId: ID, srv: newServer('expired', null) });
-    check('C10 the id itself is never rendered', !String(headline(r)).includes(ID), headline(r));
+    check('C9 the id itself is never rendered', !String(r.headline).includes(ID), r.headline);
   }
 }
 
@@ -548,12 +604,13 @@ function sectionD() {
     fail('D3 fetchInviteMeta call found', 'none');
   }
 
-  // D4 — the banner is fed by the ladder, from exactly those three values,
-  // and the two store values are the P0-3 selectors.
+  // D4 — the banner is fed by the ladder, from exactly those four values,
+  // and the two store values are the P0-3 selectors. (inviteIdSent's VALUE
+  // is executed in C1.)
   const ladderCalls = callsTo(signinSf, 'inviteHeadlineFor');
-  eq('D4 one ladder call: inviteHeadlineFor(invitedBy, invitedLeagueName, inviterMeta)',
+  eq('D4 one ladder call: inviteHeadlineFor(invitedBy, invitedLeagueName, inviteIdSent, inviterMeta)',
      ladderCalls.map((c) => c.arguments.map((a) => a.getText(signinSf))),
-     [['invitedBy', 'invitedLeagueName', 'inviterMeta']]);
+     [['invitedBy', 'invitedLeagueName', 'inviteIdSent', 'inviterMeta']]);
   const lc = ladderCalls[0];
   check('D4 its result is the banner\'s inviteHeadline',
         lc && ts.isVariableDeclaration(lc.parent) && lc.parent.name.getText(signinSf) === 'inviteHeadline',
@@ -577,10 +634,13 @@ function sectionD() {
   check('D5 inviter_display_name / invite_status are read only inside the ladder',
         !!ladderDecl && fieldRefs.length > 0 && fieldRefs.every((n) => within(n, ladderDecl)),
         'an inviter field is read (or rendered) outside inviteHeadlineFor');
-  const metaRefs = findAll(signinSf, (n) => ts.isIdentifier(n) && n.text === 'inviterMeta');
-  check('D5 inviterMeta is used only as the ladder\'s input',
-        metaRefs.length === 2 && !!lc && metaRefs.some((n) => within(n, lc)),
-        `${metaRefs.length} reference(s)`);
+  for (const v of ['inviterMeta', 'inviteIdSent']) {
+    const refs = findAll(signinSf, (n) => ts.isIdentifier(n) && n.text === v &&
+      !(ladderDecl && within(n, ladderDecl)));        // the ladder's own param
+    check(`D5 ${v} is used only as the ladder's input`,
+          refs.length === 2 && !!lc && refs.some((n) => within(n, lc)),
+          `${refs.length} reference(s) outside the ladder`);
+  }
 
   // D6 — the effect re-runs on the league or the id, NOT on the cached name:
   // with the name as a dep, caching it from the response would re-ask.

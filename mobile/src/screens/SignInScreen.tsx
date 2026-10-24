@@ -33,6 +33,7 @@ import { getLeagues, getLeagueRosters, getLeagueUsers } from '../api/sleeper';
 import { fetchInviteMeta, type InviteMeta } from '../api/league';
 import { getLastUsername, getSessionToken, setLastUsername } from '../api/client';
 import { testLaunchArg } from '../utils/testRouteEntry';
+import { isInviteId } from '../utils/inviteId';
 import EspnLinkSheet from '../components/EspnLinkSheet';
 import PlatformLinkSheet from '../components/PlatformLinkSheet';
 
@@ -54,18 +55,19 @@ export type EntryPlatformIntent = 'espn' | 'mfl';
  *  order. `inviter` is the invite-meta response of a call that carried the
  *  invite id `t`, else null; it is the ONLY source of an inviter display
  *  name, so the name is always server-resolved and never read from a URL.
+ *  `inviteIdSent` is true when a well-formed `t` is (or was) sent.
  *
  *    (a) legacy `?ref=` captured  → today's line, unchanged
  *    (b) server named the inviter → "{name} invited you to {league | their league}"
- *    (c) server knows `t` but can't name the inviter (expired / unknown /
- *        league_mismatch)         → "A leaguemate invited you[ to {league}]"
- *    (d) anything else — an older server with neither new key, no `t`, a
- *        failed call             → today's lines, unchanged
+ *    (c) `t` sent, no name for ANY reason (an older server, any status, a
+ *        failed or timed-out call) → "A leaguemate invited you[ to {league}]"
+ *    (d) no well-formed `t`       → today's lines, unchanged
  *
  *  Pure, no free variables: tests/check-signin-inviter.js lifts and runs it. */
 function inviteHeadlineFor(
   invitedBy: string | null,
   invitedLeagueName: string | null,
+  inviteIdSent: boolean,
   inviter: InviteMeta | null,
 ): string | null {
   if (invitedBy) {
@@ -77,8 +79,7 @@ function inviteHeadlineFor(
     return `${name.trim()} invited you to ${invitedLeagueName || 'their league'} — ` +
       "sign in and we'll take you straight there.";
   }
-  const status = inviter?.invite_status;
-  if (status === 'expired' || status === 'unknown' || status === 'league_mismatch') {
+  if (inviteIdSent) {
     return `A leaguemate invited you${invitedLeagueName ? ` to ${invitedLeagueName}` : ''} — ` +
       "sign in and we'll take you straight there.";
   }
@@ -268,6 +269,9 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   const inviteId = useSession((s) => s.inviteId);
   // FR-11 — the response of the call that carried `t`. Component state only.
   const [inviterMeta, setInviterMeta] = useState<InviteMeta | null>(null);
+  // Exactly when the effect below sends `t` (fetchInviteMeta drops a
+  // malformed one), so a failed call still reads as an invite.
+  const inviteIdSent = !!invitedLeagueId && isInviteId(inviteId);
 
   // Resolve the invited league's name ONCE, for the banner. The result is
   // cached into the persisted invite intent so the LeaguePicker companion
@@ -295,7 +299,9 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     };
   }, [invitedLeagueId, inviteId]);
 
-  const inviteHeadline = inviteHeadlineFor(invitedBy, invitedLeagueName, inviterMeta);
+  const inviteHeadline = inviteHeadlineFor(
+    invitedBy, invitedLeagueName, inviteIdSent, inviterMeta,
+  );
 
   useEffect(() => {
     getLastUsername().then((last) => {
