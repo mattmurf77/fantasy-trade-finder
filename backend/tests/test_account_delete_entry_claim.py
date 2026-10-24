@@ -144,6 +144,33 @@ def test_claim_delete_without_a_device_id_only_ends_the_session(client):
     assert c.get("/api/session/ping", headers=_h(token)).status_code == 401
 
 
+def test_claim_delete_is_all_or_nothing(client, monkeypatch):
+    """legal's condition (R27.2): the two deletes share one transaction, and
+    the session ends only after it commits. Point the SECOND delete
+    (user_events) at a table that doesn't exist: the first delete
+    (identity_links) must roll back, the call fails, and the session lives."""
+    from sqlalchemy import Column, MetaData, Table, Text
+    c, _, _ = client
+    token = "sess-entry-claim-atomic"
+    _entry_session(token, MFL_UID)
+    _seed(MFL_UID)
+    links_before, events_before = _links(MFL_UID), _events(MFL_UID)
+
+    missing = Table("user_events_missing_for_test", MetaData(),
+                    Column("user_id", Text), Column("device_id", Text))
+    monkeypatch.setattr(db_module, "user_events_table", missing)
+    r = _claim_delete(c, token)
+    monkeypatch.undo()
+
+    assert r.status_code == 500, r.get_data(as_text=True)
+    assert r.get_json() == {"error": "deletion_failed"}
+    assert _links(MFL_UID) == links_before      # the first delete rolled back
+    assert _events(MFL_UID) == events_before
+    with server._sessions_lock:
+        assert token in server._sessions        # not signed out
+    assert c.get("/api/session/ping", headers=_h(token)).status_code == 200
+
+
 @pytest.mark.parametrize("body", [None, "{}", json.dumps({"confirm": "yes"})])
 def test_claim_delete_requires_the_confirmation(client, body):
     c, _, _ = client

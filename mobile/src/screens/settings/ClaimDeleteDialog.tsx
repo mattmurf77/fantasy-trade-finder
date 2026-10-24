@@ -3,9 +3,9 @@
 // Shown instead of the two-step deletion alerts when the session is an
 // unverified ESPN/MFL entry claim (claimOnlyCopy.claimPlatform + no verified
 // session). It says what the server's claim-only branch actually does — sign
-// out and remove what this device added — and asks for a typed DELETE before
-// the destructive button enables. Bottom sheet on the FeedbackSheet pattern:
-// Chalkline tokens, solid scrim (no blur), radius ≤ 8.
+// out and remove this device's sign-in link and usage events — and asks for a
+// typed DELETE before the destructive button enables. Bottom sheet on the
+// FeedbackSheet pattern: Chalkline tokens, solid scrim (no blur), radius ≤ 8.
 //
 // Every visible string comes from claimOnlyCopy.ts. Never "Account deleted"
 // here (the G4 hard rule), pinned by tests/check-account-delete-paths.js.

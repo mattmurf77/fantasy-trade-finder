@@ -61,7 +61,7 @@ const F = {
   entry:   'src/api/platformEntry.ts',
 };
 const SUPPORT_EMAIL = 'fleecedapp@gmail.com';
-// marketing-lead-copy.md §6 addendum 3 (legal R27), verbatim.
+// marketing-lead-copy.md §6 addendum 3 (folds in legal R27.1 / R27.2), verbatim.
 const G4 = {
   G4_DELETE_TITLE: 'Sign out and remove this device?',
   G4_CONFIRM_PROMPT: 'Type DELETE to confirm.',
@@ -69,12 +69,15 @@ const G4 = {
   G4_CONFIRM_PRIMARY: 'Sign out and remove',
   G4_CONFIRM_CANCEL: 'Cancel',
   G4_EXPORT_UNAVAILABLE: "Download my data isn't available for this sign-in.",
-  G4_EXPORT_WHY: `A copy is available only for an account confirmed as yours. To ask about your data, email ${SUPPORT_EMAIL}.`,
-  G4_AFTER_NOTICE: "Signed out. This device's data is removed.",
+  G4_EXPORT_WHY: "A copy is available in the app only for an account confirmed as yours. It's never sent by email. "
+    + `For questions about your data, email ${SUPPORT_EMAIL}.`,
+  G4_AFTER_NOTICE: "Signed out. This device's sign-in and usage history are removed.",
+  G4_DELETE_ERROR: `Sign out and remove didn't go through. Try again in a minute, or email ${SUPPORT_EMAIL}.`,
 };
-const g4Body = (p) => `You're signed in with a ${p} league that hasn't been confirmed as yours. `
-  + 'This signs you out and removes what this device added. Records about the team stay, '
-  + `because they may belong to the team's owner. For anything else, email ${SUPPORT_EMAIL}.`;
+const g4Body = (p) => `This ${p} league hasn't been confirmed as yours. `
+  + "Deleting signs you out and removes this device's sign-in and usage history. "
+  + "Rankings, trades and league data stay, as they may be the team owner's. "
+  + `Questions: ${SUPPORT_EMAIL}.`;
 const DELETED_OUTCOME = /\bdeleted\b|account\s+deleted|permanently\s+delet/i;
 
 let failures = 0;
@@ -226,10 +229,14 @@ function runModule(rel, requireMap) {
     const subs = findAll(row.parent, (n) => ts.isConditionalExpression(n) && n.condition.getText(section) === 'claimOnly'
       && n.whenTrue.getText(section) === 'null' && /Permanently delete/.test(n.whenFalse.getText(section)));
     if (subs.length !== 1) bad.push('Delete row: the permanent-deletion subtitle is not hidden when claimOnly');
-    // Failures show the fixed generic line, never the server's message.
+    // Failures show g4.delete.error, never the server's message; the error
+    // line says nothing about data (no deleted, no removed: marketing §6 (e)).
     const notices = findAll(performClaimDelete, (n) => ts.isCallExpression(n) && n.expression.getText(section) === 'onNotice');
-    if (!notices.length || notices.some((c) => c.arguments[0].getText(section) !== 'CLAIM_DELETE_FAILED')) {
-      bad.push('performClaimDelete: onNotice is not called with CLAIM_DELETE_FAILED only');
+    if (!notices.length || notices.some((c) => c.arguments[0].getText(section) !== 'G4_DELETE_ERROR')) {
+      bad.push('performClaimDelete: onNotice is not called with G4_DELETE_ERROR only');
+    }
+    if (/\b(deleted|removed)\b/i.test(String(copy.G4_DELETE_ERROR))) {
+      bad.push(`G4_DELETE_ERROR claims an outcome: ${JSON.stringify(copy.G4_DELETE_ERROR)}`);
     }
     expect(!bad.length, bad.join('; '));
   });

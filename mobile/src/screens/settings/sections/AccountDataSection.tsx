@@ -53,7 +53,7 @@ import Row from '../Row';
 import ClaimDeleteDialog from '../ClaimDeleteDialog';
 import {
   claimPlatform,
-  CLAIM_DELETE_FAILED,
+  G4_DELETE_ERROR,
   G4_AFTER_NOTICE,
   G4_EXPORT_UNAVAILABLE,
   G4_EXPORT_WHY,
@@ -213,7 +213,7 @@ export default function AccountDataSection({
   }
 
   // #354 M11 claim-only delete. The client always sends the confirm; any
-  // failure (including the 400 confirmation_required) shows one generic line,
+  // failure (including the 400 confirmation_required) shows g4.delete.error,
   // never the verified path's deletion wording.
   async function performClaimDelete() {
     if (deleting) return;
@@ -225,7 +225,7 @@ export default function AccountDataSection({
       await signOut();
       onAccountDeleted();
     } catch {
-      onNotice(CLAIM_DELETE_FAILED, 'warn');
+      onNotice(G4_DELETE_ERROR, 'warn');
     } finally {
       setDeleting(false);
     }
