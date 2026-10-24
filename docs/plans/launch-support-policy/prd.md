@@ -694,9 +694,14 @@ This is code-derived. How many `entry:*` users are stuck needs an `analytics-lea
 
 #### 6.9.10 The fallback (operator decision; not taken)
 
-If `head-eng` can't fit M11 into the 11-06 binary, Product's fallback is: **hide ESPN/MFL entry at
-sign-in, and drop "ESPN and MFL" from the App Store listing until M11 ships.** It is the operator's
-call, and it is not taken.
+If `head-eng` can't fit M11 into the 11-06 binary, Product's fallback is **option (b)** (`head-product`,
+P39, 2026-10-24; Launch Desk OA-8), which replaces Product's earlier (c): hide the chips and also drop
+ESPN/MFL from the listing. "(b)" and "(c)" are OA-8's labels, not §6.9.7's rejected options.
+**If M11 misses 11-06, turn `landing.platform_options` off for launch.** Users sign in with Apple, then
+connect ESPN or MFL from Settings, and the listing and FAQ keep ESPN/MFL with accurate wording.
+`head-product` has asked `app-manager` to add the TestFlight step Apple → Settings → connect ESPN/MFL
+→ import. It is still a fallback, not taken: **the decision point is 11-06**, and the flip is the
+operator's call.
 
 - **The lever exists.** `landing.platform_options` (`config/features.json:28`, comment `:29`) is the
   switch for the entry chips (`mobile/src/screens/SignInScreen.tsx:114`, `:126`), the web mirror
@@ -721,10 +726,11 @@ call, and it is not taken.
   - **Sign-in surface.** Under `onboarding.landing` the Apple path is a text link, "Already have an
     account? Sign in with Apple" (`SignInScreen.tsx:836-852`). A new Apple ID still mints an
     account-only session (`server.py:27634-27637`), but the link reads as being for returning users.
-  - **So the fallback can keep "ESPN and MFL" in the listing and the FAQ**, with accurate wording
+  - **So the fallback keeps "ESPN and MFL" in the listing and the FAQ**, with accurate wording
     such as "sign in with Apple, then connect ESPN or MFL" (copy: marketing-lead; `legal-lead`
-    reviews the listing). If the fallback is taken, add a TestFlight step: a fresh Apple account
-    links an ESPN league and an MFL league from Settings, and the league opens.
+    reviews the listing). The TestFlight step is `app-manager`'s, asked by `head-product`: Apple →
+    Settings → connect ESPN/MFL → import (a fresh Apple account links an ESPN league and an MFL league
+    from Settings, and the league opens).
 - **What else the fallback touches:**
   - **FAQ:** Q2 and the meta description name all three platforms ([faq-copy.md](faq-copy.md)). Q3's
     "Sign in with Apple, Sleeper, ESPN or MFL" and Q5 and Q6 ("choose ESPN" / "choose MFL" in the
@@ -732,7 +738,8 @@ call, and it is not taken.
   - **The landing page:** the chip row and the ESPN and MFL panels (`web/index.html:115-118`,
     `:189`, `:231`) hide with the flag. Its meta description ("Works with Sleeper, ESPN, and
     MyFantasyLeague", `:7`, `:12`) stays true only with the Apple-then-connect wording.
-  - **The listing copy** (`app-manager` / `marketing-lead`; `legal-lead` reviews).
+  - **The listing copy** (`app-manager` / `marketing-lead`; `legal-lead` reviews): ESPN and MFL stay,
+    with the Apple-then-connect wording.
 - **What the fallback doesn't fix:** entry accounts that already exist. It stops new entry accounts,
   but existing `entry:*` users still can't delete or export until M11 ships, so they stay on the D-9
   email fallback (inference; their number is `analytics-lead`'s read).
@@ -1120,8 +1127,8 @@ Each row is a **candidate** for `analytics-lead`; "appears covered" is a reading
 
 **Status: decided by Product** (`head-product`, 2026-10-23); time-sensitive, it ships in the 11-06
 binary. Spec: `onboarding-pm`. Build: `onboarding-eng`. Words: `legal-lead`, via `head-bizops`. Scope
-block: [scope-d13-policy-notice.md](scope-d13-policy-notice.md) (gate 1 pending; W-D13-1 to W-D13-3
-pending operator sign-off).
+block: [scope-d13-policy-notice.md](scope-d13-policy-notice.md) (gate 1 accepted, P39, and W-D13-1 to
+W-D13-3 signed, 2026-10-24).
 
 `legal-lead`'s R18 rules the policy change material, so it is announced in the app. Privacy §9
 promises that (`web/privacy.html:273-274` at `712dcbed`). The banner ships after launch, so the launch
@@ -1150,11 +1157,10 @@ not a feature note: the notice is required, and a first public release needs no 
 - **D13-R1.** One `WHATS_NEW` entry keyed to the **release binary's app.json `version`**, set in the
   same change that bumps the version, with `route: 'SettingsAbout'`. Tapping opens Settings › Help &
   about (where the policy rows live) and dismisses it. It shows once per version.
-- **D13-R2.** The headline is `legal-lead`'s wording: **wording: legal-lead (in progress via
-  head-bizops).** The template from bizops B6 is "We've updated our Privacy Policy and Terms": one
-  line, no period. (Legal's own R26.1 draft, `leads/legal-lead.md:1254-1256` in the org-bringup
-  worktree, reads "We've updated our Privacy Policy and Terms of Use. Tap to read them". `head-bizops`
-  relays the final text.)
+- **D13-R2.** The headline is `legal-lead`'s final text (R26.1, `leads/legal-lead.md:1255` in the
+  org-bringup worktree; legal's own wording, so "we" is allowed):
+  `We've updated our Privacy Policy and Terms of Use. Tap to read them` (67 characters). The hook's contract is one line with no period (`useWhatsNew.ts:26`), so
+  there is **no trailing period**; the inner ". " is legal's.
 - **D13-R3.** Notice, not consent: never blocking, no Accept button, dismissible.
 - **D13-R4.** The stale `'1.9.1'` placeholder: remove it or leave it. It is harmless, since it never
   matches the release version. **Recommended:** remove it in the same change.
@@ -1163,11 +1169,17 @@ not a feature note: the notice is required, and a first public release needs no 
   `712dcbed` (7.8.1); the build keeps it so.
 - **D13-R7 (M-b).** The policy pages carry their new effective date. M7 fixes the stale "July 19,
   2026" (`web/privacy.html:71`; M7-R4, M7-AC3).
-- **D13-R8 (M-c).** The TestFlight "What to Test" note for the last TestFlight build carries
-  `legal-lead`'s release-notes line; `app-manager` formats it. The first App Store **update**'s
-  What's New carries it too.
-- **Option, not the default:** if `legal-lead` says a League-only tip isn't enough notice, also show
-  it on the Home hub.
+- **D13-R8 (M-c).** Two release-notes lines, both `legal-lead`'s (R26.1, `leads/legal-lead.md:1257-1258`):
+  - **First App Store update's What's New:** `Updated Privacy Policy and Terms of Use. Read them any time in Settings › Help & about.` (87 characters). A first App Store release has
+    no What's New field (`leads/app-manager-app-store-submission.md:268`, E3b, "[verify on screen]";
+    §7.8.3 call 2), so this line goes in the first **update**, not in v1.
+  - **TestFlight "What to Test" note** for the last TestFlight build (`app-manager` formats it):
+    `The Privacy Policy and Terms of Use are updated. Check the League tab shows the notice once, and that tapping it opens Settings › Help & about with both links.`
+  - **Flagged, not edited:** the tip renders on League home (`LeagueScreen`, the `LeagueHome`
+    sub-route, `TabNav.tsx:575-592`), one tap below the League tab's root, so "the League tab" in
+    legal's line is approximate. `legal-lead` / `app-manager` may adjust the tester wording.
+- **Placement (legal's R26.2, §7.8.3):** League-home-only is fine. The **Home-hub option stays an
+  option only**, not a requirement.
 
 #### 7.8.3 Product's calls on the limits (`head-product`, 2026-10-23)
 
@@ -1175,35 +1187,53 @@ not a feature note: the notice is required, and a first public release needs no 
    notice is for **existing users**, today's TestFlight testers. New App Store users meet the new
    policy at sign-up, before they agree. **Correction found on verification:** the tip is on League
    home, one tap below the League tab's landing screen (7.8.1), so the surface is narrower than "the
-   League tab". Legal's draft "What to Test" line (`leads/legal-lead.md:1258`) says "Check the League
-   tab shows the notice once", so it needs "League home" too. Flagged for `head-product` (§9).
+   League tab". Legal's final TestFlight line (`leads/legal-lead.md:1258`) says "Check the League tab
+   shows the notice once", which is approximate; flagged, not edited (D13-R8).
 2. **No What's New field on a first App Store release: accepted.** `legal-lead`'s release-notes line
-   goes in the TestFlight "What to Test" note (existing users) and in the first App Store update's
-   What's New. The field's absence is `app-manager`'s note (`leads/app-manager-app-store-submission.md:268`,
+   goes in the first App Store update's What's New, and the TestFlight "What to Test" note (existing
+   users) uses legal's separate TestFlight line (R26.1, D13-R8; updated 2026-10-24). The field's absence is `app-manager`'s note (`leads/app-manager-app-store-submission.md:268`,
    E3b, "[verify on screen]"), relayed to Product (`launch-readiness-product.md:146`); both in the
    org-bringup worktree.
 3. **New installs see it too.** That's harmless: it's notice, not consent.
 
-**Open:** `legal-lead` confirms calls 1 and 2, via `head-bizops`; `head-product` routes it.
+**Legal's ruling (R26.2, `leads/legal-lead.md:1264-1276`, 2026-10-23).** A once-per-version inline tip
+satisfies Privacy §9 and Terms §8, so the League-home-only placement (call 1) is fine and the
+**Home-hub option stays an option only**, not a requirement. Two **[PRO]** notes, neither blocking:
 
-#### 7.8.4 Timing (from legal's R26.1; flagged)
+- **(a)** League-only reach is a nice-to-have, not a requirement.
+- **(b)** Enforceability of the changed terms on existing users is review item #15; a click-through
+  isn't required for launch.
 
-Legal's R26.1 (`leads/legal-lead.md:1259-1262`) also asks that the tip **not appear before the new
-text is live** (about 11-09), or it says "we've updated" while the links still open the old pages. The
-11-06 binary reaches TestFlight testers about 11-07. Legal's preferred fix holds `ux.whats_new` false
-in prod until the deploy that publishes the new pages (`release-lead`, on the operator's go); the
-acceptable fallback is a two-day gap for TestFlight testers only. That uses the existing flag as a
-sequencing lever, so W-D13-2 (no new flag) still holds. Product's calls don't cover it yet: **flagged
-for `head-product`** (§9).
+Nothing about D-13 is waiting on `legal-lead`, apart from the optional tester-wording adjustment in D13-R8.
+
+#### 7.8.4 Timing and flag sequencing (legal's R26.1; decided by Product, P39)
+
+Legal's R26.1 (`leads/legal-lead.md:1259-1262`) requires that the tip **not appear before the new text
+is live** (about 11-09), or it says "we've updated" while the links still open the old pages. The
+11-06 binary reaches TestFlight testers about 11-07, and App Store users only on 11-18.
+
+**Product's call (`head-product`, P39, 2026-10-24):** use the existing `ux.whats_new` flag, with no
+new flag, so W-D13-2 stands. Two steps:
+
+- **(i)** `ux.whats_new` **OFF in prod before the release build reaches TestFlight testers (~11-07).**
+- **(ii)** `ux.whats_new` **ON once the new Privacy Policy and Terms pages are live (~11-09),**
+  ideally in the same deploy.
+
+Both flips happen on the operator's word, in `release-lead`'s session (Launch Desk OA-9). Legal's
+acceptable fallback, if (i) can't be sequenced, is a gap of about two days for TestFlight testers
+only (a small group); public users can't see it early.
+
+**Consequence (inference):** until (ii), TestFlight testers don't see the tip, so the D-13 TestFlight
+check (D13-AC3) and legal's tester line, which asks them to check for the notice, apply only after (ii).
 
 #### 7.8.5 Acceptance criteria
 
 - **D13-AC1.** A structural guard holds: `WHATS_NEW` has an entry whose key equals `mobile/app.json`
-  `expo.version`, with `route === 'SettingsAbout'` and a headline equal to `legal-lead`'s final text,
-  with no trailing period.
+  `expo.version`, with `route === 'SettingsAbout'` and a headline exactly equal to
+  `We've updated our Privacy Policy and Terms of Use. Tap to read them`, and no trailing period.
 - **D13-AC2.** The code-walk in the scope block (hook → `LeagueScreen` render → tap → navigate →
   dismiss) is re-walked against the built files.
-- **D13-AC3.** On an **updated** TestFlight install, League → League home shows the line once; a tap
+- **D13-AC3.** On an **updated** TestFlight install (after flip (ii), §7.8.4), League → League home shows the line once; a tap
   opens Settings › Help & about with the policy rows; after a relaunch it doesn't show again.
 - **D13-AC4.** Nothing blocks: no Accept button, no modal.
 
@@ -1316,8 +1346,8 @@ at `712dcbed`.
 | **M7** | Checklist work now | `legal-lead` wording; `analytics-lead` inventory (7.3, 7.4); D-11, D-12, D-13 | **App Privacy label submission** (M6(b)) and App Store submission |
 | **Q6 tour line** (§6.8) | Yes: approved, strings fixed | Nothing (operator-approved); gate-1 acceptance and waiver sign-off for its scope block | The 11-06 binary |
 | **FAQ** (§7b) | `FAQ-*` assertions; the post-launch text | Operator §6 (I); `legal-lead` on Q16/Q17; Q9's `model_config` confirmation; marketing's pre-launch Q3 variant (via `head-bizops`, in progress); pricing-line placement; `head-eng`'s flip mechanism | Live by 11-09 with M7, before the 11-10 App Store submission (P37); Q3 flips 11-18 |
-| **M11** (§6.9) | Server design and the `eng-security` review of the proofs (gate 1 and waivers done, P38) | `head-eng`'s server-file allocation; `platforms-pm` review; `legal-lead` on M11-R5 and the proofs; `marketing-lead` step-up copy (M11-R6) | Client: the 11-06 binary. Server: can deploy before it. Size M, tight (§9). Fallback: §6.9.10 (operator's call, not taken) |
-| **D-13 policy notice** (§7.8) | Yes: one map entry and its guard | `legal-lead`'s final headline (via `head-bizops`); the release version number; `head-product` on the R26.1 timing (§7.8.4); gate 1 and W-D13-1 to W-D13-3 | The 11-06 binary |
+| **M11** (§6.9) | Server design and the `eng-security` review of the proofs (gate 1 and waivers done, P38) | `head-eng`'s server-file allocation; `platforms-pm` review; `legal-lead` on M11-R5 and the proofs; `marketing-lead` step-up copy (M11-R6) | Client: the 11-06 binary. Server: can deploy before it. Size M, tight (§9). Fallback: option (b), §6.9.10 (decision point 11-06; not taken) |
+| **D-13 policy notice** (§7.8) | Yes: one map entry and its guard (legal's text is final, D13-R2) | The release version number (the entry's key). Gate 1, W-D13-1 to W-D13-3 and the flag sequencing are done (P39) | The 11-06 binary; the `ux.whats_new` flips bracket the TestFlight window (below) |
 
 All three are App Store launch MUST or support items. P28 and BL-10 should share one review pass for
 the address, since both put it in front of users. M7-R3 should land after P28's address is live, or
@@ -1338,6 +1368,13 @@ in the same deploy.
   and FAQ link to it and to the mailto, so this spec recommends P28 also be live by 11-09; flagged
   for `head-product` and `head-eng` (§9). The spec doesn't change P28's date.
 - **2026-11-07 to 2026-11-09:** the operator runs the TestFlight checklists.
+- **`ux.whats_new` flips (D-13, §7.8.4),** both on the operator's word, in `release-lead`'s session
+  (Launch Desk OA-9):
+  - **(i) OFF in prod before the release build reaches TestFlight testers (~2026-11-07).**
+  - **(ii) ON once the new privacy and terms pages are live (~2026-11-09),** ideally in the same
+    deploy.
+- **M11 fallback decision point: 2026-11-06** (option (b), §6.9.10). If M11 isn't merged by then,
+  `landing.platform_options` goes off for launch.
 - **Launch-day flips follow 2026-11-18,** not marketing's older 2026-11-06. That covers the FAQ's
   App Store line (FAQ-R3), alongside `IOS_INSTALL_URL` and the `m4.348.*` rows.
 
@@ -1362,7 +1399,7 @@ For `head-product`, with a recommendation each.
 | D-13 | **Announcing the policy change in the app** (privacy §9 promises it, `:273-274`). | In-app notice, what's-new, or none (if `legal-lead` deems changes non-material). | `legal-lead` rules; any in-app surface is a separate spec. | legal-lead, head-product |
 | D-14 | **App Store Connect:** Support URL = `contact.html`; whether the listing also shows the address. | — | Support URL = contact page; address per `app-manager`. | app-manager |
 
-**Decisions recorded (as of 2026-10-23)**
+**Decisions recorded (as of 2026-10-24)**
 
 - **Gate 1:** `head-product` accepted this PRD and all three scope blocks at `f9762d77` on 2026-10-20 (P35).
 - **Operator waiver sign-off, 2026-10-22,** given in `head-product`'s session, verbatim: "I sign off on #354's waivers." It covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1.
@@ -1376,14 +1413,23 @@ For `head-product`, with a recommendation each.
 - **M11, option (e),** decided by `onboarding-pm`, 2026-10-23 (§6.9, M11-R1 to M11-R6). Options (a), (b) and (d) are rejected; (c) is folded into (e).
 - **Operator waiver sign-off (M11), 2026-10-23,** relayed by the coordinator, verbatim: "Decision 1: Agree to the waivers." It covers W-M11-1 and W-M11-2.
 - **P38,** `head-product`, 2026-10-23: **gate 1 accepted** for [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md). Option (e) fixes deletion under 5.1.1(v) and the broken ESPN/MFL import together.
-- **M11 fallback (Product's; an operator call; not taken):** if `head-eng` can't fit M11 by 11-06, hide ESPN/MFL entry at sign-in and drop "ESPN and MFL" from the listing until M11 ships (§6.9.10). Apple sign-in followed by connecting ESPN or MFL from Settings works in code, so the listing and FAQ could keep them with accurate wording.
+- **M11 fallback: option (b)** (`head-product`, P39, 2026-10-24; Launch Desk OA-8; still a fallback, not taken). Product adopts (b) over its earlier (c); "(b)" and "(c)" are OA-8's labels, not §6.9.7's rejected options. If M11 misses 11-06, turn `landing.platform_options` off for launch. Users can sign in with Apple, then connect ESPN/MFL from Settings, and the listing and FAQ keep ESPN/MFL with accurate wording (§6.9.10). `head-product` has asked `app-manager` to add the TestFlight step Apple → Settings → connect ESPN/MFL → import. The decision point is 11-06.
 - **ux-lead's and design-lead's #354 reviews accepted by Product** (2026-10-23) and folded in as build instructions (§6.10).
 - **onboarding-pm on ux-lead item 8** (the "See your notes" link): optional and outside the launch ACs; included only if it fits the 11-03 slot without risk, otherwise after launch.
 - **The credits row** joins BL-10's About-section work (BL10-R12, BL10-AC10), with `legal-lead`'s exact Part 3 text.
 - **D-13 decided** (`head-product`, 2026-10-23): legal's R18 says the change is material, so it is announced in the app. The launch vehicle is the existing what's-new tip, and that release's slot carries the policy notice, not a feature note (§7.8). `legal-lead` writes the words via `head-bizops`; `onboarding-pm` owns the spec; `onboarding-eng` builds it in the 11-06 binary.
 - **D-13's limits, Product's calls** (`head-product`, 2026-10-23; §7.8.3):
-  - **The League-only tip is accepted for v1,** with mitigations: it stays until tapped or dismissed (M-a, verified to hold in code), the policy pages carry the new effective date (M-b, via M7), and the last TestFlight build's "What to Test" note carries legal's release-notes line (M-c, `app-manager` formats it). If `legal-lead` says it isn't enough, the option is to also show it on the Home hub.
-  - **No What's New field on a first App Store release: accepted.** Legal's release-notes line goes in the TestFlight "What to Test" note and in the first App Store update's What's New.
+  - **The League-only tip is accepted for v1,** with mitigations: it stays until tapped or dismissed (M-a, verified to hold in code), the policy pages carry the new effective date (M-b, via M7), and the last TestFlight build's "What to Test" note carries legal's TestFlight line (M-c, `app-manager` formats it). Legal's R26.2 says this is enough, so the Home-hub option stays an option only.
+  - **No What's New field on a first App Store release: accepted.** Legal's release-notes line goes in the first App Store update's What's New; the TestFlight "What to Test" note uses legal's separate TestFlight line (R26.1; updated 2026-10-24).
+- **Operator waiver sign-off (D-13), 2026-10-24,** given in `head-product`'s session, verbatim: "I sign off on #354's D-13 waivers (W-D13-1 to W-D13-3)." It covers W-D13-1, W-D13-2 and W-D13-3.
+- **P39,** `head-product`, 2026-10-24: **gate 1 accepted** for [scope-d13-policy-notice.md](scope-d13-policy-notice.md) at `34479ab0`.
+  - **Flag sequencing:** use the existing `ux.whats_new` flag, with no new flag, so W-D13-2 stands (§7.8.4). **(i)** OFF in prod before the release build reaches TestFlight testers (~11-07); **(ii)** ON once the new Privacy Policy and Terms pages are live (~11-09), ideally in the same deploy. Both flips happen on the operator's word, in `release-lead`'s session (Launch Desk OA-9). Rationale: legal's R26.1 condition that the tip never points to the old text. Legal's acceptable fallback is a short gap for TestFlight testers only.
+  - **M11 fallback:** option (b), recorded above.
+- **Legal's final D-13 text and ruling** (`legal-lead`, R26.1 and R26.2, 2026-10-23; `leads/legal-lead.md:1252-1276` in the org-bringup worktree):
+  - **Text:** the headline, the first-App-Store-update release-notes line and the TestFlight line are recorded verbatim in §7.8.2 (D13-R2, D13-R8). The TestFlight line's "League tab" is approximate (the tip is on League home); `legal-lead` / `app-manager` may adjust the tester wording.
+  - **R26.2:** a once-per-version inline tip satisfies Privacy §9 and Terms §8, so League-home-only placement is fine. The Home-hub option stays an option only, not a requirement.
+  - **[PRO] (a):** League-only reach is a nice-to-have, not a requirement.
+  - **[PRO] (b):** enforceability of the changed terms on existing users is review item #15; a click-through isn't required for launch.
 - **D-1 (b)** (one `retrySync()` after the FAB's `hydrate()`): chosen by `head-product`, agreed by `head-eng`.
 - **D-2 (a)** (exempt `POST /api/feedback` from `@_gate_unverified_write`; attribute verified sessions, take the rest anonymously): `head-eng` confirmed the 403; `head-product` chose (a). **W-BL10-2 has lapsed**, so a pytest is required, and so are the `docs/api-reference.md` rows named in D-2 (`:146`, `:984`). It is an API contract change, so full gates apply.
 - **D-3:** the inbox row goes to Settings → Help & about, directly after Help & FAQ, decided by `onboarding-pm` and confirmed by `ux-lead` (§6.10.1), with a header close control on the inbox.
@@ -1406,7 +1452,7 @@ For `head-product`, with a recommendation each.
   - **Q18** ("Replies come within 2 business days.") is the operator's own commitment. It matches D-10.
 - **Copy rows pending operator §6 (A–I), as labelled** in the §5.4 and §6.7 adopted tables and in [faq-copy.md](faq-copy.md) (block I). `name`, `typo`, `voice` and `keep` rows are adopted without approval.
 - **Launch dates:** per `head-product` (`launch-plan-1118.md`), recorded in §8.
-- **Scope-block gates.** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md): gate 1 accepted (P37) and waivers signed (2026-10-23). [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md): gate 1 accepted (P38) and waivers signed (2026-10-23). [scope-d13-policy-notice.md](scope-d13-policy-notice.md): `head-product`'s gate-1 acceptance and the operator's sign-off on W-D13-1 to W-D13-3 are **pending** (`head-product` takes the waivers to the operator).
+- **Scope-block gates.** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md): gate 1 accepted (P37) and waivers signed (2026-10-23). [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md): gate 1 accepted (P38) and waivers signed (2026-10-23). [scope-d13-policy-notice.md](scope-d13-policy-notice.md): gate 1 accepted (P39) and waivers signed (2026-10-24).
 - **Flags for `head-product` from marketing's R22 revision** (source as of 2026-10-23 18:17, R22 applied, its §0 item 11):
   - **C2–C5 and C8, legal review.** P36 said they "still need legal-lead's review". Marketing's R22 column now marks c2 and c5 "approved (R22.1)" and c3, c4 and c8 "edited per R22" (legal's exact text), and its §0.11 says "No row is pending". Confirm that legal-lead's review is done.
   - **D-8.** c2 now reads `Delete my data` "(D-8(a); R22.1)", and c8 no longer branches on D-8. That reads as legal-lead choosing D-8(a). Confirm, and D-8 leaves "Still open".
@@ -1419,12 +1465,11 @@ For `head-product`, with a recommendation each.
   - **M11 (iii): M11-R5 needs `legal-lead`:** that a claim-only "Delete" (end the session, remove the device link, no account row) meets 5.1.1(v), which proofs are accepted for erasure and export, and the residual exposure for users who can't prove ownership.
 - **Flags for `head-product` (2026-10-23, §6.10 and D-13):**
   - **Credits row waivers.** The credits row adds no events and no flags, so this spec treats BL-10's signed W-BL10-1 and W-ALL-1 as holding on their stated reasons. Confirm, rather than opening new waivers.
-  - **D-13, the tip's surface.** It renders on League home, one tap below the League tab's landing screen (§7.8.1), not "on the League tab". Product's League-only call (§7.8.3) rests on that narrower surface; the Home-hub option may matter more. Legal's draft "What to Test" line also says "League tab".
-  - **D-13, timing.** Legal's R26.1 asks that the tip not appear before the new pages are live, preferably by holding `ux.whats_new` false until the 11-09 pages deploy (§7.8.4). Product's calls don't cover it yet.
+  - **D-13, the tip's surface.** It renders on League home, one tap below the League tab's landing screen (§7.8.1), not "on the League tab". Product's League-only call (§7.8.3) rests on that narrower surface; the Home-hub option may matter more. Legal's draft "What to Test" line also says "League tab". **Resolved:** legal's R26.2 rules League-home-only placement fine (the Home-hub option stays an option only), and the final TestFlight line's "League tab" is flagged in D13-R8, not edited.
+  - **D-13, timing.** Legal's R26.1 asks that the tip not appear before the new pages are live, preferably by holding `ux.whats_new` false until the 11-09 pages deploy (§7.8.4). **Resolved by P39 (2026-10-24):** the existing `ux.whats_new` flag, OFF before ~11-07 and ON at ~11-09 (§7.8.4).
 - **Still open:**
   - D-8, D-9, D-11 and D-12 with `legal-lead` via `head-bizops`; D-14 with `app-manager`.
   - **M11:** `legal-lead` confirms M11-R5 (via `head-bizops`); an `analytics-lead` count of affected `entry:*` users (`head-product` has requested it).
-  - **D-13:** `legal-lead` confirms Product's two calls on the limits (§7.8.3), via `head-bizops` (`head-product` routes it), and supplies the final headline and release-notes line.
   - **§6.10 open items** (6.10.3): file ownership of `SettingsHubScreen.tsx` / `SettingsTestingScreen.tsx` (`head-eng`), the inbox close-control glyph (`design-lead`), the credits string's final period (`legal-lead`), and the marketing strings.
 
 **Waivers** (surfaced here per the feature-scope rule; each is restated with its reason in its
@@ -1448,22 +1493,22 @@ scope block):
 | W-FAQ-3 | FAQ §3 mobile guard, pytest, TestFlight checklist | Web-only text. The app's Help & FAQ row only opens the web URL, which the manual read-through covers. **Signed 2026-10-23.** |
 | W-M11-1 | M11 §1 analytics | No new events. The re-auths reuse proof paths that already carry the `signin_*` funnel; that each step-up fires it is verified at build, and the waiver is reopened if one doesn't. **Signed 2026-10-23.** |
 | W-M11-2 | M11 §2 flags | None added. The existing proof-path flags `mfl.auth_link` and `espn.webview_capture` act as kill switches: with one off, that entry stays claim-only. A recommendation; `head-eng` decides. **Signed 2026-10-23.** |
-| W-D13-1 | D-13 §1 analytics | No new events. A tap already fires `league_home_action_tapped` (`whats_new`); `whats_new_shown` / `whats_new_tapped` are optional per bizops §10, and need `analytics-lead`'s grant if added later. **Pending operator sign-off.** |
-| W-D13-2 | D-13 §2 flags | None new; `ux.whats_new` is already on (`config/features.json:175`). Legal's R26.1 timing would only hold the existing flag off until the pages deploy (§7.8.4). **Pending operator sign-off.** |
-| W-D13-3 | D-13 §3 pytest | No backend code. **Pending operator sign-off.** |
+| W-D13-1 | D-13 §1 analytics | No new events. A tap already fires `league_home_action_tapped` (`whats_new`); `whats_new_shown` / `whats_new_tapped` are optional per bizops §10, and need `analytics-lead`'s grant if added later. **Signed 2026-10-24.** |
+| W-D13-2 | D-13 §2 flags | None new; `ux.whats_new` is already on (`config/features.json:175`). Product's P39 sequencing only holds the existing flag off until the pages deploy (§7.8.4). **Signed 2026-10-24.** |
+| W-D13-3 | D-13 §3 pytest | No backend code. **Signed 2026-10-24.** |
 
 W-Q6-* and W-FAQ-* are covered by the 2026-10-23 sign-off, not the 2026-10-22 one. W-M11-* are
 covered by the M11 sign-off of 2026-10-23 ("Decision 1: Agree to the waivers."). W-D13-* are
-covered by none yet.
+covered by the 2026-10-24 sign-off ("I sign off on #354's D-13 waivers (W-D13-1 to W-D13-3).").
 
 ## 10. Handoffs
 
 | To | What |
 |---|---|
-| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. Gate-1 acceptance of the D-13 scope block (Q6 and FAQ were accepted in P37, M11 in P38). The R22 flags in §9: the C2–C5/C8 legal review, D-8 and a home for `r22.settings.rows` (the FAQ ship order is resolved by P37). The 2026-10-23 flags in §9: P28's date; M11 (i) to (iii); the credits-row waivers; D-13's surface and timing. Route D-13's limits to `legal-lead` for confirmation; take W-D13-1 to W-D13-3 to the operator. |
-| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; sign-off on W-D13-1 to W-D13-3 (W-Q6-*, W-FAQ-* and W-M11-* were signed on 2026-10-23); the M11 fallback, if `head-eng` can't fit M11 by 11-06 (§6.9.10). |
+| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. (Gate 1 is accepted for the Q6, FAQ, M11 and D-13 scope blocks: P37, P38, P39.) The R22 flags in §9: the C2–C5/C8 legal review, D-8 and a home for `r22.settings.rows` (the FAQ ship order is resolved by P37). The 2026-10-23 flags in §9: P28's date; M11 (i) to (iii); the credits-row waivers. D-13 is closed: P39 and legal's R26.2. |
+| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; the `ux.whats_new` flips (§7.8.4; W-D13-* were signed on 2026-10-24, W-Q6-*, W-FAQ-* and W-M11-* on 2026-10-23); the M11 fallback, if `head-eng` can't fit M11 by 11-06 (§6.9.10). |
 | `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18): delivered 2026-10-23 and recorded in the adopted tables. Still owed for the FAQ (§7b): the **pre-launch variant** of Q3's App Store line (in progress via `head-bizops`; needed for the 11-09 go-live, P37), and where the **pricing line** goes. M11: the step-up copy that names the account's own sign-in (M11-R6). §6.10: the D-7 unavailable line (the row and inbox titles are already f17.title and f8/f9; the About preview is f18). If the M11 fallback is taken: the Apple-then-connect wording for the listing and FAQ (§6.9.10). **Copy: marketing-lead (not inventoried):** type the three "§3 note" rows (contact `:68` and `:82`, inbox `:110`; new text given in its §3, no type or §6 entry) and say whether they need operator §6. |
-| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12, D-13; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4; marketing's R22 column marks them reviewed, `head-product` to confirm); FAQ Q16 and Q17 (§7b). M11 (§6.9): which proofs are accepted for erasure and export, M11-R5, and the residual 5.1.1(v) exposure. §6.10.3: the credits text's exact final string. D-13 (§7.8): the final headline and release-notes line; confirm Product's two calls on the limits (§7.8.3); the R26.1 timing as Product decides it. |
+| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4; marketing's R22 column marks them reviewed, `head-product` to confirm); FAQ Q16 and Q17 (§7b). M11 (§6.9): which proofs are accepted for erasure and export, M11-R5, and the residual 5.1.1(v) exposure. §6.10.3: the credits text's exact final string. D-13 is done (R26.1 text and R26.2 ruling, recorded in §7.8); only an adjustment to the TestFlight line's "League tab" wording is open, with `app-manager` (D13-R8). |
 | `analytics-lead` / `models-lead` (via head-bizops) | Read prod `model_config` and confirm or correct the FAQ's Q9 K-factors (32 / 8 / 4) before 11-09 (FAQ-R6). |
 | `analytics-lead` | Confirm or correct every candidate in §7.3 and §7.4; publish the data inventory (P12/P18) the policy is reconciled against. M11: a prod count of stuck `entry:*` users, and of `AUTH-DENY` lines on `/api/espn/link` and `/api/mfl/link` (§6.9.9); `head-product` has requested it. |
 | `design-lead` | Mailto link styling on `contact.html` and the policy pages; the sheet's support-address line; the About row; the pill. Chalkline only. P36: c4's length (the split) and the f4 chips at 320pt. M11: the step-up sheets. §6.10: the inbox close-control glyph; the `/design-review` verdict on the build diff; confirm the chalk link style on `contact.html` vs ice on the policy pages (§6.10.3). |
@@ -1472,7 +1517,7 @@ covered by none yet.
 | `eng-security` | M11 review of the identity proofs (M11-R1, M11-R2), including what counts as a cookie-gated ESPN read. |
 | `head-eng` → `onboarding-eng` | Build P28 code, BL-10 code and guard, checker assertions; retire the FAB exclusion plan (D-5); the support-address constant and the `cross-client-invariants.md` row; confirm D-1 and D-2. |
 | `head-eng` → `onboarding-eng` (added 2026-10-23) | The Q6 strings and their assertion (§6.8); the FAQ build and the 11-18 flip mechanism (§7b); at build, **confirm the extension release is still `extension-v0.1.1`** and that the FAQ links the same release as `web/index.html`; BL10-R11 if cheap; confirm the scope of FAQ Q15's contrarian score (FAQ-R10). P37: move the legal-pages milestone to 11-09; decide P28's date with `head-product` (§9). M11 (§6.9): allocate the server files (`/api/espn/*` and `/api/mfl/*` are Platforms'; auth is cross-area); the client part in the 11-06 binary, the server part deployable earlier. §6.10: ux-lead's items 1–8 (item 8 optional) and design-lead's changes 1–9 plus the counter fix; decide who owns `SettingsHubScreen.tsx` and `SettingsTestingScreen.tsx` this wave (trades-eng's readout shares them). D-13 (§7.8): the `WHATS_NEW` entry and its guard in the version-bump change. |
-| `app-manager` / `release-lead` | Support URL and support email in App Store Connect (D-14); App Privacy submission after M7 (M7-AC6); a build number for the BL-10 TestFlight checklist. D-13 (M-c): format legal's release-notes line into the last TestFlight build's "What to Test" note and the first App Store update's What's New. `release-lead`: the `ux.whats_new` timing, if Product adopts legal's R26.1 (§7.8.4); the `landing.platform_options` flip, if the operator takes the M11 fallback (§6.9.10). |
+| `app-manager` / `release-lead` | Support URL and support email in App Store Connect (D-14); App Privacy submission after M7 (M7-AC6); a build number for the BL-10 TestFlight checklist. D-13 (M-c): format legal's TestFlight line into the last TestFlight build's "What to Test" note, and legal's release-notes line into the first App Store update's What's New. If the M11 fallback is taken (`head-product` has asked): the TestFlight step Apple → Settings → connect ESPN/MFL → import. `release-lead`: the two `ux.whats_new` flips on the operator's word (§7.8.4; Launch Desk OA-9); the `landing.platform_options` flip, if the operator takes the M11 fallback (option (b), decision point 11-06, §6.9.10). |
 | `head-bizops` | D-9, D-10, D-11 routing. |
 
 ## 11. Facts in the brief that changed on verification

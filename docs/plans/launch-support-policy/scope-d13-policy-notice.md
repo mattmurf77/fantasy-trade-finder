@@ -3,8 +3,8 @@
 **Date:** 2026-10-23
 **Entry point:** D-13 (prd.md §9), decided by Product (`head-product`, 2026-10-23) on `legal-lead`'s R18; source `docs/plans/org-bringup/bizops-banner-use-cases.md` §0 item 1 and §B6, and `in-app-banner-product.md` (org-bringup worktree, untracked)
 **Builder:** `onboarding-eng` (build, in the 11-06 binary, under `head-eng`). Spec by `launch-onboarding-pm-4` for `onboarding-pm`. Words: `legal-lead`, via `head-bizops`.
-**Operator sign-off on waivers:** pending. W-D13-1 to W-D13-3 are listed in [prd.md §9](prd.md#9-decisions-needed); `head-product` takes them to the operator.
-**Gate 1 (head-product acceptance of this block):** pending.
+**Operator sign-off on waivers:** signed 2026-10-24 (operator, in head-product's session; quoted verbatim: "I sign off on #354's D-13 waivers (W-D13-1 to W-D13-3)."). Covers W-D13-1, W-D13-2 and W-D13-3.
+**Gate 1 (head-product acceptance of this block):** accepted 2026-10-24 (P39) at 34479ab0.
 
 The decision, the verified facts and Product's calls on the limits:
 [prd.md §7.8](prd.md#78-d-13-the-in-app-policy-change-notice). In short: `legal-lead`'s R18 rules the
@@ -18,9 +18,10 @@ feature note.
 - **D13-R1.** One `WHATS_NEW` entry keyed to the **release binary's app.json `version`**, set in the
   same change that bumps the version, with `route: 'SettingsAbout'`. Tapping opens Settings › Help &
   about (where the policy rows live) and dismisses it. It shows once per version.
-- **D13-R2.** The headline is `legal-lead`'s wording: **wording: legal-lead (in progress via
-  head-bizops)**. The template from bizops B6 is "We've updated our Privacy Policy and Terms": one line,
-  no period (`useWhatsNew.ts:26`).
+- **D13-R2.** The headline is `legal-lead`'s final text (R26.1, `leads/legal-lead.md:1255` in the
+  org-bringup worktree; legal's own wording, so "we" is allowed):
+  `We've updated our Privacy Policy and Terms of Use. Tap to read them` (67 characters). The hook's contract is one line with no period
+  (`useWhatsNew.ts:26`), so there is **no trailing period**; the inner ". " is legal's.
 - **D13-R3.** Notice, not consent: never blocking, no Accept button, dismissible.
 - **D13-R4.** The stale `'1.9.1'` placeholder (`useWhatsNew.ts:34-38`) is harmless, because it never
   matches the release version. Recommended: remove it in the same change.
@@ -29,11 +30,21 @@ feature note.
   `712dcbed` this already holds (prd.md §7.8.1); the build keeps it so.
 - **D13-R7 (M-b).** The policy pages carry their new effective date (M7-R4, M7-AC3; today
   "July 19, 2026", `web/privacy.html:71`).
-- **D13-R8 (M-c).** The TestFlight "What to Test" note for the last TestFlight build carries
-  `legal-lead`'s release-notes line; `app-manager` formats it. The first App Store **update**'s What's
-  New carries it too (a first release has no What's New field).
-- **Option, not the default:** if `legal-lead` says a League-only tip isn't enough notice, also show
-  it on the Home hub.
+- **D13-R8 (M-c).** Two release-notes lines, both `legal-lead`'s (R26.1, `leads/legal-lead.md:1257-1258`):
+  - **First App Store update's What's New:** `Updated Privacy Policy and Terms of Use. Read them any time in Settings › Help & about.` (87 characters). A first App Store release has
+    no What's New field (`leads/app-manager-app-store-submission.md:268`, E3b, "[verify on screen]";
+    Product's accepted call, prd.md §7.8.3), so this line goes in the first **update**, not in v1.
+  - **TestFlight "What to Test" note** for the last TestFlight build (`app-manager` formats it):
+    `The Privacy Policy and Terms of Use are updated. Check the League tab shows the notice once, and that tapping it opens Settings › Help & about with both links.`
+  - **Flagged, not edited:** the tip renders on League home (`LeagueScreen`, the `LeagueHome`
+    sub-route, `TabNav.tsx:575-592`), one tap below the League tab's root, so "the League tab" in
+    legal's line is approximate. `legal-lead` / `app-manager` may adjust the tester wording.
+- **Legal's placement ruling (R26.2, `leads/legal-lead.md:1264-1276`, 2026-10-23).** A once-per-version
+  inline tip satisfies Privacy §9 and Terms §8, so League-home-only placement is fine. The **Home-hub
+  option stays an option only**, not a requirement. Two **[PRO]** notes, neither blocking:
+  - **(a)** League-only reach is a nice-to-have, not a requirement.
+  - **(b)** Enforceability of the changed terms on existing users is review item #15; a click-through
+    isn't required for launch.
 
 ---
 
@@ -55,9 +66,9 @@ feature note.
 
 - New/changed tables or columns: **none.** → `docs/data-dictionary.md` n/a.
 - New/changed feature flags: **none.** `ux.whats_new` is already `true` (`config/features.json:175`).
-  (Waiver **W-D13-2**.) **Flagged:** `legal-lead`'s R26.1 asks that the tip not appear before the new
-  text is live, preferably by holding `ux.whats_new` false until the 11-09 pages deploy (prd.md
-  §7.8.4). That would use the existing flag as a sequencing lever, not add one; `head-product` decides.
+  (Waiver **W-D13-2**, signed 2026-10-24.) **Decided (`head-product`, P39, 2026-10-24):** the existing
+  `ux.whats_new` flag is the sequencing lever for `legal-lead`'s R26.1 timing requirement, with no new
+  flag, so W-D13-2 stands. The two steps are in §5 and prd.md §7.8.4.
 - New env vars / `model_config` keys: **none.**
 - **Storage:** the existing AsyncStorage key `ftf_whats_new_seen_version` (`useWhatsNew.ts:41`). No new
   key.
@@ -73,7 +84,8 @@ D-056: no simulator, no Maestro, no screen captures.
   1. `WHATS_NEW` has an entry whose key equals `mobile/app.json` `expo.version` (`1.21.4` at
      `712dcbed`, `app.json:5`; the release bump moves both together).
   2. That entry's `route === 'SettingsAbout'`.
-  3. Its `headline` equals `legal-lead`'s final text exactly, with no trailing period.
+  3. Its `headline` is exactly equal to `We've updated our Privacy Policy and Terms of Use. Tap to read them` (strict equality against D13-R2's string), and it
+     has no trailing period.
   4. If D13-R4 is taken: no other entry remains.
 - [ ] **Unit tests:** WAIVED, see below.
 - [x] **Code-walk proof** (file:line at `712dcbed`; the builder re-walks it against the built files):
@@ -93,7 +105,9 @@ D-056: no simulator, no Maestro, no screen captures.
      Privacy Policy and Terms rows (`AboutSection.tsx:82`, `:91`).
   5. **Dismiss.** `dismiss()` stores the running version (`useWhatsNew.ts:71-77`), so the tip doesn't
      return for that version. Nothing else calls it: no timer and no render-time dismiss (M-a).
-- [x] **Manual TestFlight checklist** (operator; log the result in `living-memory/TEST_LEDGER.md`):
+- [x] **Manual TestFlight checklist** (operator; log the result in `living-memory/TEST_LEDGER.md`).
+  It can run only after flip (ii) in §5, because until then `ux.whats_new` holds the tip back
+  (inference: the hook reads the flag at `useWhatsNew.ts:50`):
   1. Install the **previous** TestFlight build, then update to the release build (an updated install,
      not a fresh one).
   2. Open the League tab, then **League home**. Expected: the policy line shows, once, with legal's
@@ -122,16 +136,25 @@ D-056: no simulator, no Maestro, no screen captures.
 
 - **Rides in the 11-06 binary.** The entry's key is the release version, set in the version-bump
   change.
-- **Timing:** see the R26.1 flag in §2. The tip should not say "We've updated" while the links still
-  open the old pages (`head-product` decides how).
+- **Flag sequencing** (`head-product`, P39, 2026-10-24). Use the existing `ux.whats_new` flag, with no
+  new flag (W-D13-2 stands), so the tip never points to the old Privacy Policy and Terms text (legal's
+  R26.1 condition, `leads/legal-lead.md:1259-1262`). Two steps:
+  - **(i)** `ux.whats_new` **OFF in prod before the release build reaches TestFlight testers (~11-07).**
+  - **(ii)** `ux.whats_new` **ON once the new Privacy Policy and Terms pages are live (~11-09),**
+    ideally in the same deploy.
+
+  Both flips happen on the operator's word, in `release-lead`'s session (Launch Desk OA-9). Legal's
+  acceptable fallback, if (i) can't be sequenced: a gap of about two days for TestFlight testers only
+  (a small group); public users can't see it early, because App Store users get the binary only on 11-18.
 - **CI green:** `backend-tests` + `mobile-typecheck` (runs `tsc --noEmit` and every
   `mobile/tests/check-*.js`, including the new guard) + `web-structure` + `maestro-testid-lint`
   (testid-lint only), all passing on the pushed sha.
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry with the guard result, the code-walk
   and the TestFlight run. `githooks/pre-push` still checks the retired simulator marker; under D-056
   push with `FTF_SKIP_SIM_GATE=1` and name this evidence instead.
-- **Still open:** `legal-lead` confirms Product's two calls on the limits (prd.md §7.8.3), via
-  `head-bizops`, and supplies the final headline and release-notes line.
-- **Gates still owed:** `head-product`'s gate-1 acceptance of this block; the operator's sign-off on
-  W-D13-1 to W-D13-3.
+- **Still open:** nothing on legal's side (R26.1 text and R26.2 ruling are final; D13-R2, D13-R8). The
+  tester wording of the TestFlight line is flagged in D13-R8 and may be adjusted by `legal-lead` /
+  `app-manager`. The release version number is set at build.
+- **Gates still owed:** none on this block. Gate 1 was accepted (P39) and W-D13-1 to W-D13-3 were
+  signed on 2026-10-24 (see the header).
 - Express lane declared by the operator? **No.** Full gates.

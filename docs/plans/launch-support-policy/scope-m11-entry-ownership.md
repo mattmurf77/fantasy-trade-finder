@@ -185,9 +185,13 @@ D-056: no simulator, no Maestro, no screen captures. Full evidence; nothing belo
 - **Still open:**
   - `legal-lead` confirms M11-R5 (via `head-bizops`);
   - an `analytics-lead` count of affected `entry:*` users (`head-product` has requested it).
-- **The fallback (operator decision; not taken).** If `head-eng` can't fit M11 by 11-06: hide ESPN/MFL
-  entry at sign-in, and drop "ESPN and MFL" from the listing until M11 ships. The lever is
-  `landing.platform_options` (`config/features.json:28`); `release-lead` flips it on the operator's
-  word. The facts, what Apple sign-in still allows, and what else the fallback touches are in
+- **The fallback: option (b) (Product, P39, 2026-10-24; Launch Desk OA-8; still a fallback, not
+  taken).** Product adopts (b) over its earlier (c). "(b)" and "(c)" here are OA-8's labels, not the
+  rejected options in the header above. If M11 misses 11-06 (the decision point), turn
+  `landing.platform_options` (`config/features.json:28`) off for launch. Users can sign in with Apple,
+  then connect ESPN/MFL from Settings, and the listing and FAQ keep ESPN/MFL with accurate wording.
+  `release-lead` flips it on the operator's word. `head-product` has asked `app-manager` to add the
+  TestFlight step Apple → Settings → connect ESPN/MFL → import. The facts, what Apple sign-in still
+  allows, and what else the fallback touches are in
   [prd.md §6.9.10](prd.md#6910-the-fallback-operator-decision-not-taken).
 - Express lane declared by the operator? **No.** Full gates (API contracts; see §2).
