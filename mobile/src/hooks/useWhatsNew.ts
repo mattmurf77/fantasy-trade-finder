@@ -37,7 +37,7 @@ const WHATS_NEW: Record<string, WhatsNewEntry> = {
   // about, where the Privacy Policy and Terms rows live. ux.whats_new holds it
   // back until the new policy pages are live (scope-d13-policy-notice §5).
   // A version bump moves this key with it: tests/check-whats-new.js.
-  '1.21.4': {
+  '1.22.0': {
     headline: "We've updated our Privacy Policy and Terms of Use. Tap to read them",
     route: 'SettingsAbout',
   },
