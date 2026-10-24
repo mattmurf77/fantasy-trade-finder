@@ -252,7 +252,7 @@ export default function ShareTradeImage(props: Props) {
               (backend/og_image.py _draw_footer) so the two artifacts read
               as one product, and so a screenshot has somewhere to go. */}
           <View style={styles.footer}>
-            <Text style={styles.watermark}>Dynasty Trade Finder</Text>
+            <Text style={styles.watermark}>Fleeced: Dynasty Trade Finder</Text>
             <Text
               testID="share.card-url"
               style={styles.footerUrl}

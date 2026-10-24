@@ -51,6 +51,7 @@
     "test:home-tab": "node tests/check-home-tab.js",
     "test:usage-trends": "node tests/check-usage-trends.js",
     "test:inline-home": "node tests/check-inline-home.js",
+    "test:invite-links": "node tests/check-invite-links.js",
     "test:invite-social-proof": "node tests/check-invite-social-proof.js",
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
     "test:landing-platform-options": "node tests/check-landing-platform-options.js",

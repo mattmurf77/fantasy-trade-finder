@@ -91,6 +91,11 @@ const ROW_GLYPHS: Record<string, { name: IconName; color: string }> = {
   // the informational highlight, reserved here for the one row that says
   // the user's own invite worked. Everything else is ice.
   referral_joined:               { name: 'plus',  color: flare.base },
+  // Referral loop FR-19: that invitee weighed in on their first trade. Same
+  // rule as `league_member_unlocked_trades` below — the glyph names what
+  // happened (a trade opinion, and the tap opens Trades), so `trade`, not
+  // another person glyph; flare because it is the user's own invite working.
+  referral_activated:            { name: 'trade', color: flare.base },
   league_member_joined:          { name: 'plus',  color: ice.base },
   // They finished a board — a RANKED counterparty is what the matching
   // engine actually needs, so the rank glyph, not another person glyph.
