@@ -111,6 +111,7 @@
     "test:trade-text": "node tests/check-trade-text.js",
     "test:trades-banner-region": "node tests/check-trades-banner-region.js",
     "test:vault-subsumes-legacy": "node tests/check-vault-subsumes-legacy.js",
+    "test:whats-new": "node tests/check-whats-new.js",
     "test:window-composite": "node tests/check-window-composite.js",
     "test:win-now": "node tests/check-win-now.js",
     "test:win-now-recovery": "node tests/check-win-now-recovery.js",
