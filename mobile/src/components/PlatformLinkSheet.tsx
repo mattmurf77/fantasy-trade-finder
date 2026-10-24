@@ -538,8 +538,9 @@ export default function PlatformLinkSheet({
           {step === 'input' ? (
             <>
               <Text style={[type.bodySm, styles.sub]}>
-                Read-only import: we read team names and rosters — we never post
-                or change anything in {LABEL[platform]}.
+                Imports team names and rosters. Nothing is posted
+                to {LABEL[platform]} unless you sign in and send a trade you
+                approve.
               </Text>
               {/* v2.1 — entry mode only: signing in is a first-class option
                   ABOVE the league-id field, mirroring the ESPN sheet. */}
