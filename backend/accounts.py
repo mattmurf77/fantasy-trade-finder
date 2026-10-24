@@ -974,6 +974,9 @@ _EXPORT_TABLES: tuple = (
     ("mfl_credentials", "mfl_credentials_table", "user_id", ("cookie_encrypted",)),
     ("deck_impressions", "deck_impressions_table", "user_id", ()),
     ("shared_packages", "shared_packages_table", "user_id", ()),
+    # The share token is a bearer capability for a public link: omitted like
+    # referrals.invite_token; match_id + timestamps carry the user's history.
+    ("trade_share_tokens", "trade_share_tokens_table", "created_by", ("token",)),
     ("affiliate_clicks", "affiliate_clicks_table", "user_id", ()),
     ("trade_block", "trade_block_table", "user_id", ()),
     ("rank_sets", "rank_sets_table", "owner_user_id", ()),
