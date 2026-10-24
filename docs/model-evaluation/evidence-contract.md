@@ -158,15 +158,25 @@ send versus completion, and missing-cohort/independent-label discipline.
 
 ## Frozen inputs: what a scorer or a fit may read
 
+**Inputs are frozen per card; configuration is pinned and recorded per run.**
 The rule (models-lead, `docs/plans/org-bringup/leads/models-lead-launch.md`
-§Reviews-4 R4.1, 2026-10-23), for every registered scorer and every model fit:
+§Reviews-4 R4.1, 2026-10-23, and §Reviews-5 R5.2 (a) and (b), 2026-10-24), for
+every registered scorer and every model fit:
 
-- **Every value a registered scorer or a fit reads is frozen at serve or build
-  time,** or is a deterministic function of frozen inputs plus pre-split
-  training data.
+- **Every per-card value a registered scorer or a fit reads is frozen at serve
+  or build time,** or is a deterministic function of frozen inputs plus
+  pre-split training data.
 - **No fit or eval path reads mutable live state:** taste rows, current values
   or boards, current rosters, flags.
-- **A fit takes an explicit `as_of`.** Nothing in it reads the wall clock.
+- **Configuration a fit or an eval reads is pinned and recorded per run.** The
+  run reads each value once, records the exact values used plus the SHA-256 of
+  the whole live `model_config`, and a refit or replay takes those recorded
+  values explicitly. When it is given them, it reads no live config.
+- **A fit and a read take an explicit `as_of`.** Nothing reads the wall clock.
+  A read sees only decks served at or before `as_of` and outcomes acted at or
+  before it. When labels must be complete, choose `as_of` with a settle lag
+  (at least 7 days after the window's last `served_at`). The lag is a parameter
+  of the read, never of the loader.
 
 How the code meets it today:
 
@@ -188,16 +198,33 @@ How the code meets it today:
 - The writer's parity check: `backend/tests/support/taste_parity.py`
   (`assert_frozen_prefs_match_multipliers`) passes only when each card's frozen
   pair is, bit for bit, the pair its taste multiplier was built from.
+- **Pinned configuration (R5.2 (a)).** A record is `value_model.pin_config(keys)`:
+  `{"values": {key: value}, "model_config_sha256": <SHA-256 of the live
+  model_config dict, canonical JSON>}`.
+  - A fit pins `value_model.FIT_CONFIG` (`value_model_calib_frac`,
+    `value_model_l2`, `value_model_l2_cat`) and records it in the model's
+    `meta["config"]`, which is persisted in `models.jsonl`. `train_model(...,
+    config=meta["config"])` refits from it with no live read.
+  - An eval pins `value_model.SCORE_CONFIG`, the V-vector (`value_model_v_like`,
+    `value_model_v_propose`), on `EvalRun.config` and in every run record.
+    `replay.evaluate(..., config=run.config)` replays from it with no live read.
+    The replay CLI and the nightly pin once and share that one pin across every
+    scorer in the run.
+  - Live serving still reads the V-vector live, by design (F6 PRD §2: strategy
+    changeable without retraining). It is pinned for evals only.
+  - Test: `test_config_is_pinned_and_recorded_and_replays_after_live_config_changes`.
+    After live `model_config` changes, the refit and the replay are bit-identical
+    given the recorded values.
+- **The read's clock (R5.2 (b)).** `eval.data.load_decks(as_of=...)` filters
+  `deck_outcomes.acted_at <= as_of` and `served_at <= as_of`.
+  `replay.settled_read(now=..., settle_lag_days=7)` picks the window
+  (`until` = now minus the lag) and `as_of` = its last `served_at` plus the
+  lag. The replay and nightly CLIs take `--settle-lag-days` (default 7); the
+  replay CLI also takes an explicit `--as-of`. The daily tick's
+  `nightly.run_all()` keeps `as_of` = now.
 
 **Known exceptions, not yet closed:**
 
-- `train_model` reads three hyperparameters (`value_model_calib_frac`,
-  `value_model_l2`, `value_model_l2_cat`) from live `model_config`. They are
-  recorded in the model's `meta`, so a re-fit reproduces only under the same
-  config.
-- The `value_model` scorer's rank score reads the V-vector
-  (`value_model_v_like`, `value_model_v_propose`) live, by design (F6 PRD §2).
-  An eval of `rank_score` is therefore only reproducible under the same V-vector.
 - Decks served before the freeze ships carry no frozen pair and score with the
   0.0 anchor. models-lead recommends starting any D-016 gate window at the
   freeze date.
