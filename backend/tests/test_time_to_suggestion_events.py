@@ -105,3 +105,19 @@ def test_r2_carries_no_pii_or_platform_prop():
         props = tax.CLIENT_EVENT_PROPS[name]
         assert "platform" not in props, name
         assert not ({"player_id", "player_ids", "league_id", "name"} & props), name
+
+
+def test_join_ids_survive_the_numeric_run_scrub():
+    """search_id / job_id / deck_id are random uuid4 join keys. A uuid4 whose
+    hex happens to hold a 16+ digit run must reach the row unscrubbed (G-036's
+    league_id precedent); every other PII shape rule still applies to them."""
+    from backend.analytics_ingest import _scrub_pii
+    digit_heavy = {
+        "search_id": "6f1c2d3e-4123-4456-8789-012345678901",
+        "job_id": "a1234567890123456789012345678bcd",
+        "deck_id": "b9876543210987654321098765432abc",
+    }
+    clean, n = _scrub_pii(dict(digit_heavy), "trade_first_card_shown")
+    assert clean == digit_heavy and n == 0
+    clean, n = _scrub_pii({"search_id": "x@example.com"}, "trade_first_card_shown")
+    assert clean["search_id"] == "[scrubbed]" and n == 1

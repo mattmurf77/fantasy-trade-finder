@@ -180,7 +180,11 @@ _PII_NUMERIC_RUN_RE = re.compile(r"\b\d(?:[ -]?\d){15,}\b")   # 16+ digit runs
 # analysis for no privacy gain. These keys skip the numeric-run rule ONLY;
 # every other shape rule (emails, bearer creds, JWTs) still applies, since
 # none of those can legitimately appear inside an id.
-_NUMERIC_ID_PROPS = frozenset({"league_id"})
+# Time to suggestion (addendum v2): `search_id` (a client uuid4), `job_id`
+# and `deck_id` (server uuid4().hex) are random join keys. About 1% of
+# uuid4s hold a 16+ digit run, and scrubbing those would collapse searches
+# onto one "[scrubbed]" id and break the one-R2/R2b-per-search_id rule.
+_NUMERIC_ID_PROPS = frozenset({"league_id", "search_id", "job_id", "deck_id"})
 
 _PII_REPLACEMENT = "[scrubbed]"
 _CLIENT_ERROR_MSG_MAX = 200
