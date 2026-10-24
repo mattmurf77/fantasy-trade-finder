@@ -818,7 +818,7 @@ export default function SettingsScreen({ navigation }: any) {
           <View style={{ flex: 1 }}>
             <Text style={styles.rowKey}>Link an ESPN league</Text>
             <Text style={styles.rowSub}>
-              Read-only import: rankings, tiers, and trios work today.
+              Import a league to rank and find trades. Sending a trade needs that platform's sign-in.
             </Text>
           </View>
           <Icon name="chevron-right" color={chalk.dim} size={16} />
@@ -843,7 +843,7 @@ export default function SettingsScreen({ navigation }: any) {
                   : 'Link a Fleaflicker league'}
             </Text>
             <Text style={styles.rowSub}>
-              Read-only import: rankings, tiers, and trios work today.
+              Import a league to rank and find trades. Sending a trade needs that platform's sign-in.
             </Text>
           </View>
           <Icon name="chevron-right" color={chalk.dim} size={16} />
