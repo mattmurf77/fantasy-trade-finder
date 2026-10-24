@@ -195,9 +195,29 @@ import {
   DeckEndCard,
   DeckMoreErrorCard,
   DeckOfflineCard,
+  DeckRefreshFailedLine,
   DeckUpdatingLabel,
   WithdrawnTradeCard,
 } from '../components/TradeDeckStates';
+// 200 ms path, C — the device-held first page: its pure rules
+// (tests/check-device-first-page.js runs them) and the store that holds it.
+import {
+  DEVICE_REVALIDATE_MAX_MS,
+  deckMayWrite,
+  devicePageFrom,
+  devicePageKey,
+  devicePageScope,
+  devicePageSnapshot,
+  devicePageUsable,
+  mergeRevalidation,
+} from '../utils/devicePage';
+import {
+  hydrateDevicePages,
+  readDevicePage,
+  refreshDevicePage,
+  removeDeviceCard,
+  saveDevicePage,
+} from '../state/devicePageStore';
 import CoachMark from '../components/CoachMark';
 import IdentityConfirmStrip from '../components/IdentityConfirmStrip';
 import QuickSetPromptCard from '../components/QuickSetPromptCard';
@@ -501,7 +521,15 @@ function tradePackageKey(c: TradeCard): string {
 // pushed deck pages the SAME job in its honest wait instead of starting a
 // second one. Errored or finished-empty pages are never adopted: the pushed
 // deck then dispatches its own search exactly as before.
-type FirstPageHandoff = { request: GenerateBody; snapshot: PagedTradeJobSnapshot };
+// C: `device` marks a page read from the DEVICE (no request behind it yet;
+// the pushed deck revalidates it), `validatedAt` when the server last
+// validated the cards (device clock).
+type FirstPageHandoff = {
+  request: GenerateBody;
+  snapshot: PagedTradeJobSnapshot;
+  device?: true;
+  validatedAt?: number;
+};
 function adoptablePage(s: PagedTradeJobSnapshot): boolean {
   return isPagedEnvelope(s) && s.status !== 'error'
     && (s.cards.length > 0 || s.status === 'running');
@@ -553,6 +581,13 @@ export default function TradesScreen({ navigation, route }: any) {
   const seasonProjectionsOn = useFlag('outlook.season_projections');
   const userId   = user?.user_id || '';
   const isDemo   = useSession((s) => s.isDemo);
+  // 200 ms path, C — this league and format's device page (utils/devicePage).
+  // It rides the server's page store flag: without P2's `deck_id` nothing is
+  // kept, so with the flag off nothing is refreshed or read either.
+  const devicePageStoreOn = useFlag('trade.first_page_store');
+  const deviceKey = devicePageStoreOn && !isDemo
+    ? devicePageKey(userId, leagueId, activeFormat)
+    : null;
 
   // ── Onboarding item 4 (docs/plans/onboarding-conversion/plan.md) ─────
   // Everything in this block is dark unless onboarding.v2 AND the feature
@@ -682,6 +717,23 @@ export default function TradesScreen({ navigation, route }: any) {
   // mount-time resets (the league effect, the #330 choke point) read it.
   const [adopted] = useState(() => adoptedFirstPage(route));
   const adoptedMountRef = useRef({ league: !!adopted, choke: !!adopted });
+  // C — a deck adopted from the DEVICE page renders at once and revalidates
+  // in the background: 'running' until that response lands ('done') or
+  // fails or outlasts DEVICE_REVALIDATE_MAX_MS ('failed'). 'none' for every
+  // other deck. See revalidateDevicePage.
+  const [devicePhase, setDevicePhase] = useState<'none' | 'running' | 'failed' | 'done'>(
+    // Offline at the tap: the refresh-failed line from the first frame.
+    () => (adopted?.device ? (readOnline() ? 'running' : 'failed') : 'none'),
+  );
+  // The organic scope this deck's cards answer (null: pinned, scoped, forced,
+  // fair or demo) and when the server last validated them: the deck keeps
+  // the device page current from both (the device page effect below).
+  const deckScopeRef = useRef<string | null>(adopted ? devicePageScope(adopted.request) : null);
+  const validatedAtRef = useRef<number | null>(adopted?.validatedAt ?? null);
+  // Cards acted on in this deck (deckCardKey): never written back to the
+  // device page, even while a deferred advance (decline reasons) still
+  // fronts one.
+  const actedDeviceKeysRef = useRef<Set<string>>(new Set());
   // R2/R2b — the search this deck answers (claimed at dispatch, or the
   // adopted page's), the job it ran, and the keys of the cards it delivered:
   // only a fronted card FROM THIS SET can be the search's first card (an
@@ -2222,6 +2274,12 @@ export default function TradesScreen({ navigation, route }: any) {
       }
       setJob(snapshot);
       setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
+      // C — the answer is the server's: its scope and validation time feed
+      // the device page effect.
+      deckScopeRef.current = lastModelRequestRef.current
+        ? devicePageScope(lastModelRequestRef.current)
+        : null;
+      validatedAtRef.current = Date.now();
       // R2/R2b — the search's first response: what R2 reports, the job its
       // cards come from, and an honest `empty` when it finished with none.
       const ds = deckSearchRef.current;
@@ -3399,6 +3457,34 @@ export default function TradesScreen({ navigation, route }: any) {
   useEffect(() => {
     if (navFocused) resultsPushPendingRef.current = false;
   }, [navFocused]);
+
+  // ── C — the device page's background refresh (approach B) ──────────────
+  // From the Trades landing only (never a pushed deck): on its focus, and on
+  // app foreground AFTER that foreground's session-init (App.tsx starts it;
+  // revalidateSession joins it, throttled), so the refresh joins the job its
+  // pre-gen kicked instead of racing it. The request is the organic one the
+  // tap sends, under no search id; the store throttles it to once per key
+  // per 60 s and keeps only what devicePageFrom allows. Never on the tap.
+  const devicePageTarget = useMemo(() => {
+    if (!deviceKey || !leagueId || !fairnessReady) return null;
+    const request: GenerateBody = { league_id: leagueId, fairness_threshold: effectiveFairness };
+    const scope = devicePageScope(request);
+    return scope ? { key: deviceKey, scope, request } : null;
+  }, [deviceKey, leagueId, fairnessReady, effectiveFairness]);
+  useEffect(() => {
+    if (isResultsPushed || !navFocused || !devicePageTarget) return;
+    void hydrateDevicePages().then(() => refreshDevicePage(devicePageTarget));
+  }, [isResultsPushed, navFocused, devicePageTarget]);
+  useEffect(() => {
+    if (isResultsPushed || !devicePageTarget) return;
+    const sub = AppState.addEventListener('change', (st) => {
+      if (st !== 'active') return;
+      void useSession.getState().revalidateSession()
+        .then(() => hydrateDevicePages())
+        .then(() => refreshDevicePage(devicePageTarget));
+    });
+    return () => sub.remove();
+  }, [isResultsPushed, devicePageTarget]);
   const finderHandoff = useFinderTargets((s) => s.handoff);
   const [autoRunSeq, setAutoRunSeq] = useState(0);
   const autoRunPendingRef = useRef(false);
@@ -3625,6 +3711,12 @@ export default function TradesScreen({ navigation, route }: any) {
   // deck is pushed without it and searches for itself (the honest wait).
   // A fair (anchored) search has no stored page (ux-lead U1: pinned
   // searches aren't pre-built), so it pushes at once, as before.
+  //
+  // C — the device page: an organic search whose page this phone holds,
+  // validated within DEVICE_PAGE_MAX_AGE_S, pushes it AT ONCE (no request,
+  // no wait; the pushed deck revalidates it). Offline with no such page, the
+  // deck is pushed at once too and shows the Offline state (PRD §5.x row 5):
+  // the tap never waits on a request that cannot be sent.
   function pushWithFirstPage(
     fork: {
       giveIds: string[];
@@ -3653,6 +3745,20 @@ export default function TradesScreen({ navigation, route }: any) {
       opponent_user_id: (sheetTargetingOn ? fork.opponent?.userId : undefined) || undefined,
       trade_intent: tradeIntent ?? undefined,
     };
+    const held = readDevicePage(deviceKey);
+    if (devicePageUsable(held, devicePageScope(request), Date.now())) {
+      pushDeck({
+        request,
+        snapshot: devicePageSnapshot(held, fork.searchId),
+        device: true,
+        validatedAt: held.validated_at,
+      });
+      return;
+    }
+    if (!readOnline()) {
+      pushDeck();
+      return;
+    }
     let pushed = false;
     const go = (firstPage?: FirstPageHandoff) => {
       if (pushed) return;
@@ -3669,7 +3775,9 @@ export default function TradesScreen({ navigation, route }: any) {
     };
     const deadline = setTimeout(() => go(), FIRST_PAGE_PUSH_DEADLINE_MS);
     generateTrades(request, { searchId: fork.searchId })
-      .then((snapshot) => go(adoptablePage(snapshot) ? { request, snapshot } : undefined))
+      .then((snapshot) => go(adoptablePage(snapshot)
+        ? { request, snapshot, validatedAt: Date.now() }
+        : undefined))
       .catch(() => go());
   }
 
@@ -4475,12 +4583,18 @@ export default function TradesScreen({ navigation, route }: any) {
 
   // A new search (new job_id) or a reset (job → null) starts a fresh loop.
   // The old loop object is replaced, so a request still in flight for it
-  // finds `pageLoopRef.current !== loop` and drops its result.
+  // finds `pageLoopRef.current !== loop` and drops its result. (C: a device
+  // deck's revalidation that had to adopt the server's job id — a response
+  // with no `deck_id` — is the same deck: its withdrawn card stays.)
+  const rebindJobRef = useRef<string | null>(null);
   useEffect(() => {
     const old = pageLoopRef.current;
     if (old.timer) clearTimeout(old.timer);
     pageLoopRef.current = { inFlight: false, timer: null, attempt: 0, failures: 0 };
     setPagePhase('idle');
+    const rebind = rebindJobRef.current !== null && rebindJobRef.current === job?.job_id;
+    rebindJobRef.current = null;
+    if (rebind) return;
     setWithdrawnIds(new Set());
     setEndLatched(false);
   }, [job?.job_id]);
@@ -4497,26 +4611,33 @@ export default function TradesScreen({ navigation, route }: any) {
   // has nothing left to add. The job keeps its id across a P2 rebase (the
   // search's identity: tally, re-rank and first-session state key on it);
   // the page identity rides `deck_id`.
-  function applyPage(next: PagedTradeJobSnapshot): number {
+  //
+  // C — `revalidation`: the response that revalidates a device deck is
+  // authoritative for every card it holds (utils/devicePage.mergeRevalidation,
+  // whole-deck semantics), and paging continues from ITS deck_id/cursor.
+  function applyPage(next: PagedTradeJobSnapshot, opts?: { revalidation?: boolean }): number {
     const projection = deckProjectionRef.current;
     const front = projection.cards[projection.index];
-    const merged = mergeDeckPage(
-      deckRef.current,
-      next.cards,
-      front ? deckCardKey(front) : null,
-      isWholeDeck(next),
-    );
+    const frontKey = front ? deckCardKey(front) : null;
+    const merged = opts?.revalidation
+      ? mergeRevalidation(deckRef.current, next.cards, frontKey)
+      : mergeDeckPage(deckRef.current, next.cards, frontKey, isWholeDeck(next));
     deckRef.current = merged.cards;
     setDeck(merged.cards);
     noteSearchCards(jobRef.current?.job_id, next.cards);
     if (deckFullyDelivered(next) && next.status !== 'error' && deckSearchRef.current?.keys.size === 0) {
       failDeckSearch('empty');
     }
+    // A revalidation with no `deck_id` (no P2 behind it) can only page by
+    // the server's job id, so it adopts that one (rebindJobRef above).
+    const rebind = !!opts?.revalidation && !next.deck_id && !!next.job_id
+      && next.job_id !== jobRef.current?.job_id;
+    if (rebind) rebindJobRef.current = next.job_id;
     setJob((prev) => ({
       ...(prev ?? {}),
       ...next,
-      job_id: prev?.job_id || next.job_id,
-      deck_id: next.deck_id ?? prev?.deck_id,
+      job_id: rebind ? next.job_id : prev?.job_id || next.job_id,
+      deck_id: opts?.revalidation ? next.deck_id : next.deck_id ?? prev?.deck_id,
       search_id: prev?.search_id ?? next.search_id,
       freshness_state: next.freshness_state,
       pool_exhausted: next.pool_exhausted,
@@ -4576,6 +4697,9 @@ export default function TradesScreen({ navigation, route }: any) {
   useEffect(() => {
     const snap = jobRef.current;
     if (!snap?.job_id || !online) return; // offline: reconnect re-runs this
+    // C — a device deck's envelope is the stored one: it pages only from
+    // the revalidation response's deck_id/cursor.
+    if (devicePhase === 'running' || devicePhase === 'failed') return;
     const loop = pageLoopRef.current;
     if (!wantsNextPage({
       ...snap,
@@ -4585,12 +4709,16 @@ export default function TradesScreen({ navigation, route }: any) {
     void fetchNextPage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [job?.job_id, job?.cursor, job?.deck_id, job?.status, job?.pool_exhausted,
-      job?.prefetch_remaining, unseen, online, pageKick]);
+      job?.prefetch_remaining, unseen, online, pageKick, devicePhase]);
 
   // U3 Retry / Try again: an errored job can't page any further, so it runs
   // the search again in place; otherwise the next page is requested now.
   function handleDeckMoreRetry() {
     haptics.selection();
+    if (devicePhase === 'failed') {
+      revalidateDevicePage();
+      return;
+    }
     if (jobRef.current?.status === 'error') {
       handleFindTrades('deck_error_retry');
       return;
@@ -4603,23 +4731,108 @@ export default function TradesScreen({ navigation, route }: any) {
     setPageKick((k) => k + 1);
   }
 
+  // C — the offline-at-tap card's Retry: run the paused search now if the
+  // network is back (TanStack resumes it on reconnect by itself, too).
+  function handleOfflineTapRetry() {
+    haptics.selection();
+    void queryClient.resumePausedMutations();
+  }
+
   // What the deck slot shows past the last held card of a paged deck
   // (ux-lead U3, utils/tradePages.deckEndState). Never a "Finding more".
+  // A device deck that is still revalidating is "loading" (its stored
+  // envelope can't end it); a failed revalidation is a fetch that failed.
+  const endPhase: PageFetchPhase = devicePhase === 'running' ? 'loading'
+    : devicePhase === 'failed' ? 'failed'
+    : pagePhase;
   const deckEnd = pagedWithCards && !rawTopCard && job
-    ? deckEndState({ ...job, phase: pagePhase, online })
+    ? deckEndState({ ...job, phase: endPhase, online })
     : null;
   useEffect(() => {
     if (deckEnd === 'end') setEndLatched(true);
   }, [deckEnd]);
   const showDeckEndCard = pagedWithCards && (endLatched || deckEnd === 'end');
   // U2 — the quiet "Updating" label: the page is being rebuilt behind the
-  // cards on screen. Informational only; nothing reads it to gate Like/Pass.
-  const deckUpdating = pagedDeck && job?.freshness_state === 'updating';
+  // cards on screen, or (C) a device deck is being revalidated — only while
+  // that request runs. Informational only; nothing reads it to gate
+  // Like/Pass.
+  const deckUpdating = devicePhase === 'running'
+    || (pagedDeck && job?.freshness_state === 'updating');
+  // C — the revalidation failed or timed out: the refresh-failed line, with
+  // the cards still usable (PRD §5.4 "Refresh failed", §5.x row 5).
+  const deviceRefreshFailed = devicePhase === 'failed';
   const topCardWithdrawn = !!rawTopCard && withdrawnIds.has(rawTopCard.trade_id);
   function handleWithdrawnNext() {
     haptics.selection();
     setDeckIdx((i) => i + 1);
   }
+
+  // ── C — revalidating a device deck (approach B) ─────────────────────────
+  // The deck was adopted from the device page with no request; right after
+  // its first frame it sends the tap's own organic page 1 (same search id,
+  // so it joins the page store or the running / pre-built job). "Updating"
+  // shows only while this runs, for at most DEVICE_REVALIDATE_MAX_MS; then
+  // the refresh-failed line shows. Offline it fails at once (row 5). A late
+  // answer still lands. Retry and reconnect run it again.
+  const deviceRevalidationRef = useRef(0);
+  function revalidateDevicePage() {
+    if (!adopted?.device) return;
+    const seq = ++deviceRevalidationRef.current;
+    const epoch = deckEpochRef.current;
+    const forJob = jobRef.current?.job_id;
+    if (!readOnline()) {
+      setDevicePhase('failed');
+      return;
+    }
+    setDevicePhase('running');
+    const timer = setTimeout(() => {
+      if (seq === deviceRevalidationRef.current) {
+        setDevicePhase((p) => (p === 'running' ? 'failed' : p));
+      }
+    }, DEVICE_REVALIDATE_MAX_MS);
+    generateTrades(adopted.request, { searchId: adopted.snapshot.search_id })
+      .then((next) => {
+        if (!mountedRef.current || seq !== deviceRevalidationRef.current) return;
+        if (applyJobResult(next, epoch, deckEpochRef.current) === null) return;
+        if (!forJob || jobRef.current?.job_id !== forJob) return; // another search took the deck
+        validatedAtRef.current = Date.now();
+        applyPage(next, { revalidation: true });
+        setDevicePhase('done');
+      })
+      .catch(() => {
+        if (mountedRef.current && seq === deviceRevalidationRef.current) setDevicePhase('failed');
+      })
+      .finally(() => clearTimeout(timer));
+  }
+  useEffect(() => {
+    if (adopted?.device) revalidateDevicePage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (online && devicePhase === 'failed') revalidateDevicePage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online]);
+
+  // C — the deck keeps the device page current: the next unseen cards (the
+  // fronted one onward, never a withdrawn one) of an organic deck the server
+  // validated, under its newest envelope. Every swipe moves the front, so an
+  // acted-on card never comes back on the next tap. A server answer that may
+  // not be kept (still building, "updating", errored) discards the page.
+  useEffect(() => {
+    const scope = deckScopeRef.current;
+    const validatedAt = validatedAtRef.current;
+    if (!deviceKey || !scope || validatedAt == null || !job || !isPagedEnvelope(job)) return;
+    // A page validated later (a background refresh) is never overwritten by
+    // an older deck; its swipes still leave it (removeDeviceCard in advance).
+    if (!deckMayWrite(readDevicePage(deviceKey), validatedAt)) return;
+    const frontAt = rawTopCard ? deck.findIndex((c) => c.trade_id === rawTopCard.trade_id) : -1;
+    const acted = actedDeviceKeysRef.current;
+    const unacted = frontAt < 0 ? [] : deck.slice(frontAt)
+      .filter((c) => !withdrawnIds.has(c.trade_id) && !acted.has(deckCardKey(c)));
+    saveDevicePage(deviceKey, devicePageFrom(job, { scope, validatedAt, cards: unacted }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deviceKey, job?.job_id, job?.status, job?.cursor, job?.deck_id, job?.freshness_state,
+      job?.error, deck, rawTopCard?.trade_id, withdrawnIds]);
 
   // ── R2 at T1: the AC-L1 frame ───────────────────────────────────────────
   // The first frame where a real card of THIS search is ≥ 50% visible with
@@ -6259,6 +6472,11 @@ export default function TradesScreen({ navigation, route }: any) {
     // blocks preceded it is over. Keeps `blocked_n` a count of CONSECUTIVE
     // blocks on one predicament rather than a session tally.
     guardBlockRef.current.key = null;
+    // C — the acted-on card leaves the device page, whichever deck this is
+    // (its `trade_hash` is the same trade in every deck).
+    const actedKey = deckCardKey(rawTopCard ?? topCard);
+    actedDeviceKeysRef.current.add(actedKey);
+    removeDeviceCard(deviceKey, actedKey);
     // N6.1's lifetime bound (PRD §5.3): the bubble auto-dismisses on the
     // next swipe as well as after 8 s, so a cta step can never hold the
     // interrupt slot across further swipes and starve the push primer or
@@ -9441,6 +9659,13 @@ export default function TradesScreen({ navigation, route }: any) {
               <Text style={styles.deckHint}>
                 Swipe right to like · Swipe left to pass
               </Text>
+              {/* C — a device deck whose revalidation failed or timed out (or
+                  that was opened offline): the refresh-failed line, below the
+                  card so it never moves the swipe target; Like/Pass stay
+                  live. Its Retry runs the revalidation again. */}
+              {deviceRefreshFailed ? (
+                <DeckRefreshFailedLine onRetry={handleDeckMoreRetry} />
+              ) : null}
               {/* U2 — "Updating" on hosts with no deck header row: below the
                   card, so it can never push the swipe target. (The pushed
                   deck shows it in its header instead.) */}
@@ -9507,6 +9732,12 @@ export default function TradesScreen({ navigation, route }: any) {
             ) : deckEnd === 'error' ? (
               <DeckMoreErrorCard minHeight={topCardH} onRetry={handleDeckMoreRetry} />
             ) : null
+          ) : !online && deck.length === 0 && !deckFailure && generateMutation.isPending ? (
+            // C / PRD §5.x row 5 — offline at the tap with no device page:
+            // the Offline state at once, in the card rect. The search waits
+            // paused for the network (TanStack's onlineManager) and runs on
+            // reconnect; its cards then replace this in place.
+            <DeckOfflineCard minHeight={topCardH} onRetry={handleOfflineTapRetry} />
           ) : firstRun &&
             !fairDeck &&
             deck.length === 0 &&

@@ -19,6 +19,11 @@ export interface TradePageFields {
   freshness_state?: 'fresh' | 'updating';
   prefetch_remaining?: number; // fetch the next page at this many ready cards
   search_id?: string;       // E2: echoed client search id
+  // P1 page fingerprints, read only if a response carries them (the public
+  // projection doesn't today). The device page (C) stores them as-is.
+  built_at?: string;
+  roster_fp?: string;
+  values_snapshot_id?: string;
 }
 export type PagedTradeJobSnapshot = TradeJobSnapshot & TradePageFields & {
   cards: PagedTradeCard[];
@@ -335,6 +340,10 @@ function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
     ...(Number.isInteger(raw?.prefetch_remaining) && raw.prefetch_remaining >= 0
       ? { prefetch_remaining: raw.prefetch_remaining } : {}),
     ...(typeof raw?.search_id === 'string' && raw.search_id ? { search_id: raw.search_id } : {}),
+    ...(typeof raw?.built_at === 'string' ? { built_at: raw.built_at } : {}),
+    ...(typeof raw?.roster_fp === 'string' ? { roster_fp: raw.roster_fp } : {}),
+    ...(typeof raw?.values_snapshot_id === 'string'
+      ? { values_snapshot_id: raw.values_snapshot_id } : {}),
   };
 }
 
@@ -347,17 +356,21 @@ function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
 // transpiled harness). The response is then the first page with `cursor`.
 // Omitted ⇒ the body is sent untouched and the response is the cumulative
 // snapshot, exactly as before (usePresentationDeck relies on that).
+// `paging` without a `searchId` (the device page's background refresh, C)
+// asks for page 1 under no search: it is not a user's search.
 export async function generateTrades(
   body: GenerateBody,
-  paging?: { searchId: string },
+  paging?: { searchId?: string },
 ): Promise<PagedTradeJobSnapshot> {
   const res = await api.post<any>(
     '/api/trades/generate',
-    paging ? { ...body, page: 1, search_id: paging.searchId } : body,
+    paging
+      ? { ...body, page: 1, ...(paging.searchId ? { search_id: paging.searchId } : {}) }
+      : body,
   );
   const snap = normalizeJobSnapshot(res);
   // An old server doesn't echo the id; the search still owns it.
-  return paging && !snap.search_id ? { ...snap, search_id: paging.searchId } : snap;
+  return paging?.searchId && !snap.search_id ? { ...snap, search_id: paging.searchId } : snap;
 }
 
 // GET /api/trades/status?job_id=X — cheap dict lookup; the request thread

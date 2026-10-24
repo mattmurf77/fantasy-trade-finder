@@ -11,13 +11,17 @@
 //     count, no third action, no "new trades" notice).
 //   - DeckOfflineCard / DeckMoreErrorCard: ux-lead U3 rows 3a and 3b (one
 //     honest static line in the card rect, Retry as a Secondary).
+//   - DeckRefreshFailedLine: PRD #339 §5.4 "Refresh failed" (design-lead 3
+//     and 5): the Banner construction (ink-2, hairline, body-sm chalk-dim),
+//     inline in the deck under the card, non-dismissable, Secondary Retry.
+//     Shown when a device-held page could not be revalidated (C).
 // VoiceOver per ux-lead U3: every announcement is polite and fires once,
 // when the state appears. Copy owner: marketing-lead (the P30 lines are
 // Product's verbatim); the other lines are placeholders from ux-lead's spec.
 import React, { useEffect, useRef } from 'react';
 import { AccessibilityInfo, ActivityIndicator, StyleSheet, View, findNodeHandle } from 'react-native';
 import { Button, Card, Icon, Text } from './chalkline';
-import { chalk, fonts, ice, space } from '../theme/chalkline';
+import { chalk, fonts, ice, ink, radii, space } from '../theme/chalkline';
 import { useReducedMotionSafe } from '../hooks/useReducedMotionSafe';
 
 // P30 copy: marketing-lead's copy file, rows p30.* (final, 2026-10-23).
@@ -26,6 +30,9 @@ export const DECK_END_BODY = 'New ideas show up as rosters and values change.';
 export const WITHDRAWN_REASON = 'This trade is no longer available.';
 export const DECK_OFFLINE_LINE = "You're offline. More trades load when you're back online.";
 export const DECK_MORE_ERROR_LINE = "Couldn't load more trades.";
+// Placeholder per §5.4 ("says the deck may be out of date"); copy owner
+// marketing-lead.
+export const DECK_REFRESH_FAILED_LINE = "Couldn't refresh. These trades may be out of date.";
 
 function announcePolitely(line: string) {
   // `queue: true` lets VoiceOver finish what it is reading (polite).
@@ -203,6 +210,24 @@ export function DeckMoreErrorCard({ minHeight, onRetry }: { minHeight?: number |
   );
 }
 
+/** C — the device-held page could not be revalidated (offline at the tap,
+ *  a failed request, or past DEVICE_REVALIDATE_MAX_MS). The cards stay
+ *  usable; Like/Pass are governed by I-2 at action time, not by this. */
+export function DeckRefreshFailedLine({ onRetry }: { onRetry: () => void }) {
+  useAnnounceOnMount(DECK_REFRESH_FAILED_LINE);
+  return (
+    <View testID="trades.deck-refresh-failed" style={styles.refreshFailed}>
+      <Text variant="bodySm" style={styles.flex}>{DECK_REFRESH_FAILED_LINE}</Text>
+      <Button
+        testID="trades.deck-refresh-failed.retry"
+        label="Retry"
+        variant="secondary"
+        onPress={onRetry}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   updating: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   // The standard Spinner is 20px; RN's "small" indicator is that size.
@@ -214,4 +239,15 @@ const styles = StyleSheet.create({
   // Plex Mono numerals (the tally's data), in the line's chalk-dim.
   tallyNum: { fontFamily: fonts.data, fontVariant: ['tabular-nums'] },
   endActions: { marginTop: space.sm },
+  refreshFailed: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    marginTop: space.md,
+    padding: space.md,
+    backgroundColor: ink.ink2,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: ink.line,
+    borderRadius: radii.md,
+  },
 });

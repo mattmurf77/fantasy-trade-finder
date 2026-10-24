@@ -22,6 +22,7 @@ import { getLeagues } from '../api/sleeper';
 import { initPurchases } from '../api/purchases';
 import { setUser as sentrySetUser } from '../observability/sentry';
 import { queryClient, seedLeagueSessionCaches } from './queryClient';
+import { clearDevicePages } from './devicePageStore';
 import { getActiveScoringFormat } from '../api/rankings';
 import type { LeagueSummary, ScoringFormat } from '../shared/types';
 
@@ -383,6 +384,10 @@ export const useSession = create<SessionState>((set, get) => ({
   setUser: async (u) => {
     leagueSessions.invalidate();
     const generation = leagueSessions.currentGeneration();
+    // 200 ms path C — an account switch (a re-auth as someone else, with no
+    // sign-out between) drops the previous account's device-held trade pages.
+    const previous = get().user;
+    if (previous && previous.user_id !== u?.user_id) void clearDevicePages();
     set({user: u, switching: false});
     if (u) await AsyncStorage.setItem(SU_KEY, JSON.stringify(u));
     else   await AsyncStorage.removeItem(SU_KEY);
@@ -669,6 +674,8 @@ export const useSession = create<SessionState>((set, get) => ({
       // P0-3 — an invite intent belongs to the session that captured it.
       AsyncStorage.removeItem(INVITE_KEY),
       clearSessionToken(),
+      // 200 ms path C — the device-held trade pages belong to this account.
+      clearDevicePages(),
     ]);
     if (generation !== leagueSessions.currentGeneration() || get().user) return;
     _inviteTs = 0;

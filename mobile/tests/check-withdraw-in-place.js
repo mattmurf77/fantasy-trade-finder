@@ -110,13 +110,15 @@ console.log('check-withdraw-in-place:');
   const uses = code.match(/\bdeckUpdating\b/g) || [];
   check('4b. deckUpdating is read only to SHOW the label (declaration + header + inline)', uses.length === 4,
     `${uses.length} references — a new reader could be gating something`);
-  check('4c. it is derived from the server\'s freshness_state on a paged deck only',
-    /const deckUpdating = pagedDeck && job\?\.freshness_state === 'updating';/.test(code));
+  // C adds the one other source: a device deck while its revalidation runs
+  // (check-device-first-page 3d pins that it ends).
+  check('4c. it is derived from the server\'s freshness_state on a paged deck, or a running device revalidation, only',
+    /const deckUpdating = devicePhase === 'running'\s*\|\| \(pagedDeck && job\?\.freshness_state === 'updating'\);/.test(code));
   check('4d. the label takes no props (it cannot reach the deck\'s controls)',
     /export function DeckUpdatingLabel\(\) \{/.test(comp));
   check('4e. placement never inserts a row above the card: the pushed deck\'s header, else under the card',
     /headerRight: deckUpdating \? \(\) => <DeckUpdatingLabel \/> : undefined/.test(code)
-      && /Swipe right to like · Swipe left to pass\s*<\/Text>\s*(\{\s*\}\s*)?\{deckUpdating && !isResultsPushed \? \(/.test(code));
+      && /Swipe right to like · Swipe left to pass\s*<\/Text>\s*(\{\s*\}\s*)?(\{deviceRefreshFailed \? \(\s*<DeckRefreshFailedLine onRetry=\{handleDeckMoreRetry\} \/>\s*\) : null\}\s*)?(\{\s*\}\s*)?\{deckUpdating && !isResultsPushed \? \(/.test(code));
   check('4f. reduced motion: the spinner drops to the static word',
     /\{reduceMotion \? null : <ActivityIndicator/.test(comp) && /<Text variant="bodySm">Updating<\/Text>/.test(comp));
 }

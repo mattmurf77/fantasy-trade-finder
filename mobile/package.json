@@ -110,6 +110,7 @@
     "test:trade-text": "node tests/check-trade-text.js",
     "test:trades-banner-region": "node tests/check-trades-banner-region.js",
     "test:trade-pages": "node tests/check-trade-pages.js",
+    "test:device-first-page": "node tests/check-device-first-page.js",
     "test:trade-buffer": "node tests/check-trade-buffer.js",
     "test:trade-inplace-reveal": "node tests/check-trade-inplace-reveal.js",
     "test:no-finding-more": "node tests/check-no-finding-more.js",

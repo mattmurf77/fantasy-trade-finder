@@ -778,6 +778,24 @@ Verified live against every prod league on 2026-08-19 ([evidence](feedback/items
 
 ---
 
+## Device-held first page — max age and key (200 ms path, C)
+
+The mobile app keeps the next unseen cards of the last validated organic deck on the phone, so a Find a trade tap can render a card with no network wait (PRD #339 §10.1 approach B, AC-L1's P32 clause). The pushed deck then revalidates it with the tap's own page-1 request, and that response is authoritative.
+
+| Constant | Value | Must match |
+|---|---|---|
+| `DEVICE_PAGE_MAX_AGE_S` | **300** | PRD #339 §5.1's viewer-roster bound (≤ 5 min since last confirmed). A device page renders at the tap only if `now − validated_at ≤ 300 s` on the device clock (a clock that went backwards reads as stale). Change the bound and this constant together |
+| Request scope | `organic:f=<fairness_threshold, 2 dp>` | The server's page-store scope (`_trade_page_scope` / `_trade_page_request_scope`, `feat/trades-200ms-p1-page-store`): no pins, no opponent, no intent, no `force`, never `league_demo`. Any other request never reads a device page |
+| Storage key | `ftf_trade_device_page_v1:<user_id>:<league_id>:<scoring_format>` | One page per key; a league or format switch reads another key. A shape change bumps `v1` |
+| Refresh throttle | 60 s per key | Trades focus and app foreground only, never on the tap |
+| Revalidation "Updating" max | 10 s | Then the refresh-failed line (PRD §5.4 shared constraint 4) |
+
+A page is kept only from a complete, non-error, non-"updating" response carrying P2's `deck_id`. It is discarded on the client's own rankings or preference writes (every route that calls `_invalidate_trade_jobs` for one: `/api/rank3`, `/api/tiers/save`, `/api/tiers/copy-from-format`, `/api/anchor/save`, `/api/rankings/reorder`, `/api/rankings/import-apply`, `/api/league/preferences`, `/api/league/asset-prefs`), on sign-out and account switch, and on any server answer for its key that can't be kept. A route added to that server list joins `RANKING_WRITE_PATHS`.
+
+**Locations:** `mobile/src/utils/devicePage.ts` (the constants, `devicePageScope`, `RANKING_WRITE_PATHS`), `mobile/src/state/devicePageStore.ts`, `backend/server.py` `_trade_page_scope` + the `_invalidate_trade_jobs` call sites, `mobile/tests/check-device-first-page.js`.
+
+---
+
 ## Progress gating thresholds
 
 Minimum rank decisions per position before Trade Finder unlocks. Tracked per scoring format; result lands in `users.unlocked_formats`.

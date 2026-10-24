@@ -219,7 +219,10 @@ const code = stripComments(trades);
   await check('5b. pages are fetched by deck + cursor, merged through mergeDeckPage at the fronted card', () => {
     ok(/getTradeStatus\(snap\.job_id, \{ deck: snap\.deck_id, cursor: requested \}\)/.test(code), 'status call');
     const fn = code.slice(code.indexOf('function applyPage('), code.indexOf('async function fetchNextPage('));
-    ok(/mergeDeckPage\(\s*deckRef\.current,\s*next\.cards,\s*front \? deckCardKey\(front\) : null,\s*isWholeDeck\(next\),?\s*\)/.test(fn),
+    // (C: a device deck's revalidation takes mergeRevalidation instead —
+    // check-device-first-page 3e; every other page takes this one.)
+    ok(/const frontKey = front \? deckCardKey\(front\) : null;/.test(fn)
+      && /: mergeDeckPage\(deckRef\.current, next\.cards, frontKey, isWholeDeck\(next\)\);/.test(fn),
       'applyPage merges at the fronted card with the whole-deck rule');
     ok(/setDeck\(merged\.cards\)/.test(fn) && /cards: merged\.cards/.test(fn), 'deck and job.cards stay one list');
     ok(/applyJobResult\(next, epoch, deckEpochRef\.current\) === null/.test(code), 'epoch guard on every page');
