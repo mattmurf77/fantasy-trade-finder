@@ -21,10 +21,22 @@
 //   3. the four moves §4 actually makes, asserted individually, plus the
 //      ordering the operator fixed on 2026-08-18.
 //
+// Plus two #354 review items (ux-lead, 2026-10-23), walked on the TypeScript
+// AST so comments can't satisfy them:
+//   5. D-7 — ONE tester-surface predicate. `useTesterSurface()` is defined once
+//      (settings/useTesterSurface.ts) and EXECUTED here over a flag truth
+//      table: true for __DEV__, `testing.stage_users` or
+//      `testing.timing_readout`, false otherwise. The hub's Testing row and
+//      the Testing page body are each gated by it directly, and the page's
+//      other branch is the honest unavailable line, never an empty page.
+//   6. D-6 — FeedbackSheet renders no Screen field (its only TextInput is the
+//      note) but still submits `screen`, falling back to 'Unknown'.
+//
 // If §4 changes, change the tables below in the same commit. A row added to
 // the app and not added here fails as "not in the §4 migration map" — that
 // is the check working, not the check being stale.
 //
+// FTF_MOBILE_TEST_ROOT can point at a copy of mobile/ (sabotage runs).
 // Run: node tests/check-settings-ia.js   (or: npm run test:settings-ia)
 
 'use strict';
@@ -32,7 +44,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const SETTINGS_DIR = path.join(__dirname, '..', 'src', 'screens', 'settings');
+const MOBILE_ROOT = process.env.FTF_MOBILE_TEST_ROOT || path.join(__dirname, '..');
+const SETTINGS_DIR = path.join(MOBILE_ROOT, 'src', 'screens', 'settings');
 const SECTIONS_DIR = path.join(SETTINGS_DIR, 'sections');
 
 let failures = 0;
@@ -331,6 +344,209 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
            `SettingsHubScreen.tsx ${mechanisms.join(' and ')} — the operator moved sign-out `
              + 'to the Account page on 2026-08-18; the hub is navigation only');
     }
+  }
+}
+
+// ── 5 + 6. #354 review items, on the TypeScript AST ──────────────────────
+{
+  let ts;
+  try { ts = require('typescript'); } catch {
+    console.error('typescript not resolvable — run `npm install` in mobile/ first.');
+    process.exit(2);
+  }
+  const vm = require('vm');
+  const SRC = path.join(MOBILE_ROOT, 'src');
+  const parseFile = (abs) => ts.createSourceFile(abs, fs.readFileSync(abs, 'utf8'), ts.ScriptTarget.Latest, true,
+    abs.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const findAll = (root, pred) => {
+    const out = [];
+    const visit = (n) => { if (pred(n)) out.push(n); ts.forEachChild(n, visit); };
+    visit(root);
+    return out;
+  };
+  const isStr = (n) => !!n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n));
+  const line = (sf, n) => `${path.relative(MOBILE_ROOT, sf.fileName)}:${sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1}`;
+  const attr = (el, name) => el.attributes.properties.find((a) => ts.isJsxAttribute(a) && a.name.getText() === name);
+  const attrStr = (el, name) => {
+    const a = attr(el, name);
+    if (!a || !a.initializer) return null;
+    if (isStr(a.initializer)) return a.initializer.text;
+    if (ts.isJsxExpression(a.initializer) && isStr(a.initializer.expression)) return a.initializer.expression.text;
+    return null;
+  };
+  const jsxOpen = (n) => (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n));
+  const byTestId = (sf, id) => findAll(sf, (n) => jsxOpen(n) && attrStr(n, 'testID') === id);
+  const byTag = (sf, tag) => findAll(sf, (n) => jsxOpen(n) && n.tagName.getText(sf) === tag);
+  // The INNERMOST conditional that renders this element (G-035: read the
+  // nearest one only, never a concatenation of every ancestor's): the first
+  // ternary / && ancestor whose branch holds it, walking out through wrapper
+  // elements (a ScrollView around the section) but not out of the component.
+  const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n);
+  const innermostGuard = (el) => {
+    let child = ts.isJsxOpeningElement(el) ? el.parent : el;
+    for (let p = child.parent; p; child = p, p = p.parent) {
+      if (isFnLike(p)) return null;
+      if (ts.isConditionalExpression(p) && child !== p.condition) {
+        return { test: p.condition, other: child === p.whenTrue ? p.whenFalse : p.whenTrue, inTrue: child === p.whenTrue };
+      }
+      if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && child === p.right) {
+        return { test: p.left, other: null, inTrue: true };
+      }
+    }
+    return null;
+  };
+  // Is `test` the predicate itself: `useTesterSurface()`, or a const bound to it?
+  const isPredicate = (sf, test) => {
+    let t = test;
+    while (ts.isParenthesizedExpression(t)) t = t.expression;
+    const isCall = (n) => n && ts.isCallExpression(n) && ts.isIdentifier(n.expression)
+      && n.expression.text === 'useTesterSurface' && n.arguments.length === 0;
+    if (isCall(t)) return true;
+    if (!ts.isIdentifier(t)) return false;
+    const decls = findAll(sf, (n) => ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === t.text);
+    return decls.length === 1 && isCall(decls[0].initializer);
+  };
+  const importsPredicate = (sf) => sf.statements.some((s) => ts.isImportDeclaration(s) && isStr(s.moduleSpecifier)
+    && s.moduleSpecifier.text === './useTesterSurface' && s.importClause && s.importClause.namedBindings
+    && ts.isNamedImports(s.importClause.namedBindings)
+    && s.importClause.namedBindings.elements.some((e) => e.name.text === 'useTesterSurface' && !e.propertyName));
+
+  // 5a. Defined exactly once in mobile/src, in settings/useTesterSurface.ts.
+  const PRED_FILE = path.join(SETTINGS_DIR, 'useTesterSurface.ts');
+  const walkSrc = (dir, out = []) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walkSrc(p, out);
+      else if (/\.(ts|tsx)$/.test(e.name)) out.push(p);
+    }
+    return out;
+  };
+  const defs = [];
+  for (const abs of walkSrc(SRC)) {
+    if (!fs.readFileSync(abs, 'utf8').includes('useTesterSurface')) continue;
+    const sf = parseFile(abs);
+    for (const d of findAll(sf, (n) => (ts.isFunctionDeclaration(n) && n.name && n.name.text === 'useTesterSurface')
+      || (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'useTesterSurface'))) {
+      defs.push({ sf, d });
+    }
+  }
+  if (defs.length === 1 && defs[0].sf.fileName === PRED_FILE) {
+    ok('5a. useTesterSurface() is defined once, in settings/useTesterSurface.ts');
+  } else {
+    fail('5a. useTesterSurface() is defined once, in settings/useTesterSurface.ts',
+         defs.length === 0 ? 'no definition found'
+           : defs.map(({ sf, d }) => line(sf, d)).join(', ') + ' — two predicates can drift apart');
+  }
+
+  // 5b. EXECUTE it over a flag truth table (G-050: run it, don't pattern-match).
+  if (fs.existsSync(PRED_FILE)) {
+    const js = ts.transpileModule(fs.readFileSync(PRED_FILE, 'utf8'), {
+      compilerOptions: { target: ts.ScriptTarget.ES2019, module: ts.ModuleKind.CommonJS },
+    }).outputText;
+    const run = (dev, on) => {
+      const asked = [];
+      const mod = { exports: {} };
+      vm.runInNewContext(js, {
+        module: mod, exports: mod.exports, __DEV__: dev,
+        require: (name) => {
+          if (name !== '../../state/useFeatureFlags') throw new Error(`unexpected import ${name}`);
+          return { useFlag: (k) => { asked.push(k); return on.includes(k); } };
+        },
+      });
+      return { value: mod.exports.useTesterSurface(), asked };
+    };
+    const table = [
+      [false, [], false],
+      [true, [], true],
+      [false, ['testing.stage_users'], true],
+      [false, ['testing.timing_readout'], true],
+      [false, ['testing.stage_users', 'testing.timing_readout'], true],
+      [false, ['ux.help_surface'], false],
+    ];
+    const wrong = [];
+    let askedKeys = new Set();
+    for (const [dev, on, want] of table) {
+      try {
+        const r = run(dev, on);
+        r.asked.forEach((k) => askedKeys.add(k));
+        if (r.value !== want) wrong.push(`__DEV__=${dev}, flags=[${on.join(', ')}] → ${r.value}, want ${want}`);
+      } catch (e) { wrong.push(`threw: ${e.message}`); }
+    }
+    for (const k of ['testing.stage_users', 'testing.timing_readout']) {
+      if (!askedKeys.has(k)) wrong.push(`never reads ${k}`);
+    }
+    if (wrong.length === 0) {
+      ok('5b. useTesterSurface() (executed) = __DEV__ || testing.stage_users || testing.timing_readout');
+    } else {
+      fail('5b. useTesterSurface() = __DEV__ || testing.stage_users || testing.timing_readout', wrong.join('; '));
+    }
+  }
+
+  // 5c. The hub's Testing row is gated by the predicate, imported from its module.
+  {
+    const hub = parseFile(path.join(SETTINGS_DIR, 'SettingsHubScreen.tsx'));
+    const rows = byTestId(hub, 'settings.hub.testing');
+    const g = rows.length === 1 ? innermostGuard(rows[0]) : null;
+    if (rows.length === 1 && g && g.inTrue && isPredicate(hub, g.test) && importsPredicate(hub)) {
+      ok(`5c. the hub's Testing row (${line(hub, rows[0])}) renders only under useTesterSurface()`);
+    } else {
+      fail("5c. the hub's Testing row renders only under useTesterSurface()",
+           rows.length !== 1 ? `found ${rows.length} settings.hub.testing rows`
+             : !g ? 'the row is unconditional — every user would see Testing'
+             : !importsPredicate(hub) ? "the hub doesn't import useTesterSurface from './useTesterSurface'"
+             : `gated on \`${g.test.getText(hub)}\`, not the shared predicate`);
+    }
+  }
+
+  // 5d. The page body: TestingSection only under the predicate, and the other
+  //     branch is the unavailable line.
+  {
+    const page = parseFile(path.join(SETTINGS_DIR, 'SettingsTestingScreen.tsx'));
+    const mounts = byTag(page, 'TestingSection');
+    const g = mounts.length === 1 ? innermostGuard(mounts[0]) : null;
+    const otherHasUnavailable = !!(g && g.other
+      && findAll(g.other, (n) => jsxOpen(n) && attrStr(n, 'testID') === 'settings.testing-unavailable').length);
+    if (mounts.length === 1 && g && g.inTrue && isPredicate(page, g.test) && importsPredicate(page) && otherHasUnavailable) {
+      ok('5d. SettingsTestingScreen renders TestingSection only under useTesterSurface(), else settings.testing-unavailable');
+    } else {
+      fail('5d. SettingsTestingScreen renders TestingSection only under useTesterSurface(), else the unavailable line',
+           mounts.length !== 1 ? `found ${mounts.length} TestingSection mounts`
+             : !g ? 'TestingSection renders unconditionally — a non-tester deep link sees an empty Testing page'
+             : !isPredicate(page, g.test) ? `gated on \`${g.test.getText(page)}\`, not the shared predicate`
+             : !importsPredicate(page) ? "the page doesn't import useTesterSurface from './useTesterSurface'"
+             : 'the false branch is not the settings.testing-unavailable line');
+    }
+  }
+
+  // 6. D-6: no Screen field in the sheet, but `screen` is still submitted.
+  {
+    const sheet = parseFile(path.join(MOBILE_ROOT, 'src', 'components', 'FeedbackSheet.tsx'));
+    const inputs = byTag(sheet, 'TextInput');
+    const extra = inputs.filter((n) => attrStr(n, 'testID') !== 'feedback.note-input');
+    const screenLabel = findAll(sheet, (n) => (ts.isJsxText(n) && n.text.trim() === 'Screen')
+      || (jsxOpen(n) && attrStr(n, 'accessibilityLabel') === 'Screen'));
+    if (inputs.length === 1 && extra.length === 0 && screenLabel.length === 0) {
+      ok('6a. FeedbackSheet renders no Screen field — its only TextInput is feedback.note-input');
+    } else {
+      fail('6a. FeedbackSheet renders no Screen field',
+           [...extra.map((n) => `extra TextInput at ${line(sheet, n)}`),
+            ...screenLabel.map((n) => `"Screen" label at ${line(sheet, n)}`),
+            ...(inputs.length === 0 ? ['no note TextInput found — the parse is vacuous'] : [])].join('; '));
+    }
+
+    const adds = findAll(sheet, (n) => ts.isCallExpression(n) && ts.isIdentifier(n.expression)
+      && n.expression.text === 'add' && n.arguments[0] && ts.isObjectLiteralExpression(n.arguments[0]));
+    const screenProp = adds.length === 1 ? adds[0].arguments[0].properties.find((p) =>
+      ts.isPropertyAssignment(p) && p.name.getText(sheet) === 'screen') : null;
+    let init = screenProp && screenProp.initializer;
+    const fallsBack = !!(init && ts.isBinaryExpression(init) && init.operatorToken.kind === ts.SyntaxKind.BarBarToken
+      && isStr(init.right) && init.right.text === 'Unknown'
+      && findAll(init.left, (n) => ts.isIdentifier(n) && n.text === 'screen').length > 0);
+    if (fallsBack) ok("6b. FeedbackSheet still submits `screen` (screen … || 'Unknown') in its add() call");
+    else fail("6b. FeedbackSheet still submits `screen`, falling back to 'Unknown'",
+              adds.length !== 1 ? `found ${adds.length} add({...}) calls`
+                : !screenProp ? 'the add() body has no screen property — the API needs a non-empty screen'
+                : `screen: ${screenProp.initializer.getText(sheet)} — want the state value with an 'Unknown' fallback`);
   }
 }
 

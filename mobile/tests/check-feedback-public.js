@@ -41,6 +41,17 @@
 //      `retrySync()` after `hydrate()` resolves. App.tsx only retries on an
 //      AppState change to `active`, which a cold launch never fires.
 //
+// And three from the #354 design/UX reviews (2026-10-23):
+//   8. HELP & ABOUT ROW ORDER. Help & FAQ → Your feedback → Privacy Policy →
+//      Terms of Use → Credits → Version, in AboutSection's JSX.
+//   9. CREDITS IS A PLAIN BLOCK. `settings.credits` is a non-pressable View,
+//      one accessible element, no chevron and no link, holding "Credits" and
+//      legal's two lines verbatim in order. Nothing in AboutSection opens the
+//      nflverse URL.
+//  10. ONLY THE ADDRESS IS A LINK. In FeedbackSheet exactly one element has
+//      accessibilityRole="link": a Text nested in another Text, hint "Opens
+//      Mail", rendering {SUPPORT_EMAIL} and opening 'mailto:' + SUPPORT_EMAIL.
+//
 // HOW. Every check walks the TypeScript AST (the check-settings-nav.js
 // pattern), so comments — which keep history like "Settings → Test feedback"
 // — can neither satisfy nor trip a pin. The "is it gated?" checks are
@@ -599,7 +610,123 @@ function textNodes(root) {
   }
 }
 
+// ── Shared JSX helpers for 8–10 ──────────────────────────────────────────
+const jsxOpen = (n) => ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n);
+const attrOf = (el, name) => el.attributes.properties.find((a) => ts.isJsxAttribute(a) && a.name.getText() === name);
+const attrStr = (el, name) => {
+  const a = attrOf(el, name);
+  if (!a || !a.initializer) return null;
+  if (isStr(a.initializer)) return a.initializer.text;
+  if (ts.isJsxExpression(a.initializer) && isStr(a.initializer.expression)) return a.initializer.expression.text;
+  return null;
+};
+const elementOf = (open) => (ts.isJsxOpeningElement(open) ? open.parent : open);
+
+// ── 8. Help & about row order ─────────────────────────────────────────────
+{
+  const sf = parse(F.about);
+  const posOf = (label, pred) => {
+    const hits = findAll(sf, pred);
+    return { label, hits, pos: hits.length === 1 ? hits[0].getStart(sf) : null };
+  };
+  const byId = (id) => (n) => jsxOpen(n) && attrStr(n, 'testID') === id;
+  const byText = (t) => (n) => ts.isJsxText(n) && n.text.trim() === t;
+  const order = [
+    posOf('Help & FAQ', byId('settings.help-faq')),
+    posOf('Your feedback', byId('settings.feedback-inbox')),
+    posOf('Privacy Policy', byText('Privacy Policy')),
+    posOf('Terms of Use', byText('Terms of Use')),
+    posOf('Credits', byId('settings.credits')),
+    posOf('Version', byId('settings.version')),
+  ];
+  const missing = order.filter((o) => o.pos === null);
+  const ascending = missing.length === 0 && order.every((o, i) => i === 0 || o.pos > order[i - 1].pos);
+  if (ascending) ok(`8. Help & about row order: ${order.map((o) => o.label).join(' → ')}`);
+  else fail('8. Help & about row order is Help & FAQ → Your feedback → Privacy → Terms → Credits → Version',
+            missing.length ? missing.map((o) => `${o.label}: ${o.hits.length} matches`).join('; ')
+              : `found ${[...order].sort((a, b) => a.pos - b.pos).map((o) => o.label).join(' → ')}`);
+}
+
+// ── 9. Credits is a plain block with legal's text ────────────────────────
+{
+  const sf = parse(F.about);
+  const LINES = [
+    'Credits',
+    'Consensus values from DynastyProcess and other published sources.',
+    'Data by nflverse (https://github.com/nflverse/nfldata), CC-BY.',
+  ];
+  const opens = findAll(sf, (n) => jsxOpen(n) && attrStr(n, 'testID') === 'settings.credits');
+  const problems = [];
+  if (opens.length !== 1) problems.push(`found ${opens.length} settings.credits elements`);
+  else {
+    const open = opens[0];
+    const el = elementOf(open);
+    if (open.tagName.getText(sf) !== 'View') problems.push(`it is a <${open.tagName.getText(sf)}>, not a plain View`);
+    const acc = attrOf(open, 'accessible');
+    if (!acc || (acc.initializer && acc.initializer.getText(sf) !== '{true}')) problems.push('not marked accessible (one element for VoiceOver)');
+    for (const a of ['onPress', 'onLongPress', 'accessibilityRole']) if (attrOf(open, a)) problems.push(`has ${a}`);
+    for (let p = el.parent; p; p = p.parent) {
+      if (ts.isJsxElement(p) && /Pressable|Touchable|Button/.test(p.openingElement.tagName.getText(sf))) {
+        problems.push(`sits inside a <${p.openingElement.tagName.getText(sf)}>`);
+        break;
+      }
+    }
+    const inner = findAll(el, (n) => jsxOpen(n) && n !== open).map((n) => n.tagName.getText(sf));
+    const stray = inner.filter((t) => t !== 'View' && t !== 'Text');
+    if (stray.length) problems.push(`contains ${stray.map((t) => `<${t}>`).join(', ')} (no chevron, no control)`);
+    const texts = findAll(el, (n) => ts.isJsxText(n) && n.text.trim()).map((n) => n.text.trim().replace(/\s+/g, ' '));
+    if (JSON.stringify(texts) !== JSON.stringify(LINES)) {
+      problems.push(`text is ${JSON.stringify(texts)}, want ${JSON.stringify(LINES)} (legal's wording, in order)`);
+    }
+  }
+  const nflLinks = findAll(sf, (n) => ts.isCallExpression(n) && /Linking\.openURL/.test(n.expression.getText(sf))
+    && n.arguments.some((a) => /nflverse/.test(a.getText(sf))));
+  if (nflLinks.length) problems.push(`AboutSection still opens the nflverse URL at ${nflLinks.map((n) => at(sf, n)).join(', ')}`);
+  if (problems.length === 0) ok('9. Credits is a non-pressable, single accessible block with legal\'s two lines, in order');
+  else fail('9. Credits is a non-pressable, single accessible block with legal\'s two lines', problems.join('; '));
+}
+
+// ── 10. Only the support address is a link, and it opens Mail ────────────
+{
+  const sf = parse(F.sheet);
+  const links = findAll(sf, (n) => jsxOpen(n) && attrStr(n, 'accessibilityRole') === 'link');
+  const problems = [];
+  if (links.length !== 1) problems.push(`found ${links.length} accessibilityRole="link" elements (want exactly the address)`);
+  else {
+    const open = links[0];
+    const el = elementOf(open);
+    if (open.tagName.getText(sf) !== 'Text') problems.push(`the link is a <${open.tagName.getText(sf)}>, not a nested Text`);
+    if (!(ts.isJsxElement(el.parent) && el.parent.openingElement.tagName.getText(sf) === 'Text')) {
+      problems.push('the link is not nested inside the support line\'s Text');
+    } else {
+      const lineText = findAll(el.parent, (n) => ts.isJsxText(n) && n.parent === el.parent)
+        .map((n) => n.text).join(' ').replace(/\s+/g, ' ');
+      if (!lineText.includes('Settings › Help & about › Your feedback')) {
+        problems.push('the path "Settings › Help & about › Your feedback" is not plain text in the same line');
+      }
+    }
+    if (attrStr(open, 'accessibilityHint') !== 'Opens Mail') problems.push('accessibilityHint is not "Opens Mail"');
+    const kids = ts.isJsxElement(el) ? el.children.filter((c) => !(ts.isJsxText(c) && !c.text.trim())) : [];
+    if (!(kids.length === 1 && ts.isJsxExpression(kids[0]) && kids[0].expression
+          && ts.isIdentifier(kids[0].expression) && kids[0].expression.text === 'SUPPORT_EMAIL')) {
+      problems.push('the link does not render exactly {SUPPORT_EMAIL}');
+    }
+    const press = attrOf(open, 'onPress');
+    const opensMail = press && findAll(press, (n) => ts.isCallExpression(n)
+      && n.expression.getText(sf) === 'Linking.openURL' && n.arguments.length === 1
+      && ((ts.isBinaryExpression(n.arguments[0]) && isStr(n.arguments[0].left) && n.arguments[0].left.text === 'mailto:'
+           && ts.isIdentifier(n.arguments[0].right) && n.arguments[0].right.text === 'SUPPORT_EMAIL')
+          || (ts.isTemplateExpression(n.arguments[0]) && n.arguments[0].head.text === 'mailto:'
+              && n.arguments[0].templateSpans.length === 1
+              && n.arguments[0].templateSpans[0].expression.getText(sf) === 'SUPPORT_EMAIL'
+              && n.arguments[0].templateSpans[0].literal.text === ''))).length > 0;
+    if (!opensMail) problems.push("onPress does not call Linking.openURL('mailto:' + SUPPORT_EMAIL)");
+  }
+  if (problems.length === 0) ok('10. only the support address is a link: a nested Text, "Opens Mail", mailto:SUPPORT_EMAIL');
+  else fail('10. only the support address is a link, and it opens Mail', problems.join('; '));
+}
+
 console.log(failures === 0
-  ? '\nAll feedback-public checks passed (pins 1-7).'
+  ? '\nAll feedback-public checks passed (pins 1-10).'
   : `\n${failures} check(s) failed.`);
 process.exit(failures === 0 ? 0 : 1);
