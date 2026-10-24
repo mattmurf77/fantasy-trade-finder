@@ -1,5 +1,5 @@
 import { api, setSessionToken } from './client';
-import { track } from './events';
+import { getDeviceId, track } from './events';
 import type { EspnLinkPreview, EspnMyLeague } from './espn';
 import { PlatformLinkPreview, normalizePreview } from './platformLink';
 import type { MflAuthLeague } from './platformLink';
@@ -152,8 +152,12 @@ export async function entryPlatformMint(
             year: args.year,
             franchise_id: args.teamId,
           };
+    // X-Device-Id: the server records it on the new entry session, so a later
+    // claim-only "Delete account" (#354 M11) removes THIS install's rows. The
+    // shared client doesn't send it by default (api/client _CLIENT_HEADERS).
     const res = await api.post<EntryMintResponse>('/api/entry/platform', body, {
       skipAuth: true,
+      headers: { 'X-Device-Id': await getDeviceId() },
     });
     await setSessionToken(res.session_token);
     track('signin_succeeded', { method: args.platform }, 'SignIn');

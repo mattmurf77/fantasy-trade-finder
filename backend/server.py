@@ -210,6 +210,8 @@ from .database import (
     # Device→identity stitching (tracking plan v2). Client-event ingestion
     # moved to backend/analytics_ingest.py in P1 (insert_client_events retired).
     link_identity,
+    # M11 claim-only delete (#354): this device's rows for an entry user id.
+    delete_device_claim_rows,
     # Streak — driven by record_event, read for the chip + leaderboard
     get_user_streak,
     # Notification prefs / send log / quiet-hours queue
@@ -26273,6 +26275,12 @@ def entry_platform():
         log.error("entry_platform: session build failed: %s", e)
         return jsonify({"error": "session_build_failed",
                         "message": str(e)}), 500
+    # M11 advisory (head-eng 2026-10-24): remember which install minted this
+    # claim, so a later claim-only delete removes THAT device's rows and can't
+    # be pointed at another device's by a different id in its own request.
+    minted_device = _request_device_id()
+    if minted_device:
+        payload["device_id"] = minted_device
     _link_device_identity(sleeper_user_id=entry_uid)
     log.info("entry_platform: minted %s session for %s (%s)",
              platform, entry_uid, display_name)
@@ -28129,6 +28137,62 @@ def export_account_route():
     return resp
 
 
+def _request_device_id() -> str:
+    """This request's install id: body `device_id`, else the X-Device-Id
+    header — the derivation `_link_device_identity` uses. '' when neither."""
+    body = request.get_json(force=True, silent=True) or {}
+    return (str(body.get("device_id") or "").strip()
+            or (request.headers.get("X-Device-Id") or "").strip())
+
+
+def _entry_claim_delete(sess):
+    """M11 minimal path (#354, head-eng's ruling 2026-10-24): "Delete account"
+    for an UNVERIFIED ESPN/MFL entry session (`entry:espn:…` / `entry:mfl:…`).
+
+    Entry ids are deterministic from public league data, so an unverified
+    session's user_id may be another person's account: this deletes NOTHING
+    keyed only by that id. It removes what this device wrote for it — the
+    identity_links row(s) and the user_events it sent, keyed by the device id
+    the mint recorded on this session (`sess["device_id"]`). A session minted
+    before that was recorded falls back to the request's own id (body
+    `device_id`, else X-Device-Id, via `_request_device_id`). Then it ends
+    THIS session the way
+    /api/session/signout does. With no device id it skips the rows (their
+    counts are null). Push tokens: none to remove, because device_tokens is
+    keyed by the Expo token, not the device, and register-device is
+    write-gated, so an unverified session can never have stored one.
+
+    Requires {"confirm": "delete"} so a stray call can't end a session. The
+    full proof design (M11-R1/R2) is post-launch.
+    """
+    body = request.get_json(silent=True) or {}
+    if body.get("confirm") != "delete":
+        return jsonify({"error": "confirmation_required",
+                        "message": "Confirm the deletion to continue."}), 400
+    user_id = str(sess.get("user_id") or "")
+    # The minted id wins; a body or header id is only the legacy fallback.
+    device_id = str(sess.get("device_id") or "").strip() or _request_device_id()
+    removed = {"identity_links": None, "user_events": None, "push_tokens": 0}
+    if device_id:
+        try:
+            removed.update(delete_device_claim_rows(user_id, device_id))
+        except Exception:
+            log.exception("delete_account: claim-only delete failed for %s", user_id)
+            return jsonify({"error": "deletion_failed"}), 500
+    token = request.headers.get("X-Session-Token", "")
+    with _sessions_lock:
+        live = _sessions.pop(token, None)
+        if live is not None:
+            live["_revoked"] = True
+    try:
+        delete_persisted_session(token)
+    except Exception as e:
+        log.warning("delete_account: claim-only durable session delete failed: %s", e)
+    log.info("delete_account: claim-only for %s (device id %s): %s",
+             user_id, "present" if device_id else "absent", removed)
+    return jsonify({"ok": True, "deleted": "session_only", "removed": removed})
+
+
 @app.route("/api/account", methods=["DELETE"])
 def delete_account_route():
     """In-app account deletion (App Store 5.1.1(v)) — NOT flag-gated.
@@ -28138,6 +28202,10 @@ def delete_account_route():
     a username-only session cannot delete any claimed user's data.
     Also evicts every live session for the user (server-side sign-out).
 
+    Exception (M11 minimal path): an UNVERIFIED `entry:` session gets
+    `_entry_claim_delete` instead of the 403 — this device's rows and this
+    session only. Every other unverified session keeps the 403.
+
     SIWA revocation (5.1.1(v) companion, teardown 06-02): when a linked
     Apple identity exists, best-effort revoke via Apple's /auth/revoke —
     needs the APPLE_* signing env keys plus a fresh
@@ -28146,6 +28214,8 @@ def delete_account_route():
     """
     sess = _require_session()
     user_id = sess.get("user_id")
+    if not sess.get("verified") and str(user_id or "").startswith("entry:"):
+        return _entry_claim_delete(sess)
     gated = _account_data_gates(sess)
     if gated is not None:
         return gated

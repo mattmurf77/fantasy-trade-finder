@@ -18,6 +18,7 @@ import { TickLabel, Text as ChalkText } from '../components/chalkline';
 import { appleSignIn, resolveSmartStart, signIn } from '../api/auth';
 import { track } from '../api/events';
 import { consumeAppleReauthHint, NO_LEAGUE_ID, useSession } from '../state/useSession';
+import { consumeSignInNotice } from '../state/signInNotice';
 import { useFlag, useOnboardingFeature } from '../state/useFeatureFlags';
 import {
   useGuide,
@@ -208,6 +209,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
     return !!u && !u.account_only && !u.user_id.startsWith('demo_user_') && !isDemo;
   });
   const [reauthNotice, setReauthNotice] = useState(() => consumeAppleReauthHint());
+  // #354 M11: a one-shot line from the flow that just signed out here (the
+  // claim-only delete's G4 notice). Consumed at mount, like the reauth hint,
+  // so an ordinary later visit shows nothing.
+  const [signInNotice] = useState(() => consumeSignInNotice());
   useEffect(() => {
     if (reauthNotice || !sleeperKeyedUser) return;
     let alive = true;
@@ -591,6 +596,11 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
           </View>
 
           <View style={styles.form}>
+            {signInNotice ? (
+              <ChalkText testID="signin.notice" style={styles.reauthNotice}>
+                {signInNotice}
+              </ChalkText>
+            ) : null}
             {reauthNotice ? (
               <Text testID="signin.reauth-notice" style={styles.reauthNotice}>
                 {sleeperKeyedUser
