@@ -76,6 +76,7 @@ the operator reaches it by running the server locally.
 - [Tiers](#tiers)
 - [Trades](#trades)
   - [Opt-in paged responses (E2, 2026-10-20)](#opt-in-paged-responses-e2-2026-10-20)
+  - [First-page store (P1, flag `trade.first_page_store`, 2026-10-20)](#first-page-store-p1-flag-tradefirst_page_store-2026-10-20)
   - [Trade card object](#trade-card-object)
     - [Value-core cards (flag `trade.value_core`)](#value-core-cards-flag-tradevalue_core)
 - [Open trade calculator (public — no auth)](#open-trade-calculator-public-no-auth)
@@ -492,6 +493,69 @@ revocation or a policy change), `cards` is `[]`, `total_ready` is `0` and
 unpaged response is unchanged.)
 
 The cursor is stateless: the server keeps no per-client paging state.
+
+### First-page store (P1, flag `trade.first_page_store`, 2026-10-20)
+
+**Everything in this section applies only while `trade.first_page_store` is on
+(default off).** With it off, paged and unpaged responses are exactly the E2
+section above (`backend/tests/test_trade_page_flag_off.py` pins them byte for
+byte). The server keeps the first `trade_pages_stored` × `trade_page_size`
+cards (90 at the defaults) of each user's latest complete organic deck in
+[`trade_page_store`](data-dictionary.md#trade_page_store), so page 1 can come
+from one DB read, including after a restart.
+
+**On every paged response** (`page: 1` on generate, `cursor` on status, from
+the store or from a job): `prefetch_remaining` (model_config
+`trade_prefetch_remaining`, seeded at 50). The client requests the next page when
+this many ready cards remain.
+
+**`POST /api/trades/generate` with `page: 1`.** Only an organic body reads the
+store: no `pinned_give_players`, `pinned_receive_players`, `opponent_user_id`,
+`trade_intent` or `force` (which `refresh_fatigue` implies while `deck.fatigue`
+is on), and not the demo league. Its scope
+is the `fairness_threshold`, to two decimals. Unpaged requests never read it.
+
+- **Served from the store:** the envelope plus `serve_source: "page"` and
+  `freshness_state`:
+
+  | Field | Value |
+  |---|---|
+  | `job_id` | The job that built the stored deck. Page by it on `/status` |
+  | `status` | `"complete"` |
+  | `opponents_done`, `opponents_total` | From the stored deck |
+  | `cards` | The stored cards from index 0, at most `trade_page_size`, after the pass/interest projection and the **strict** I-1 ownership filter (a league with no stored rosters is a check failure here) |
+  | `cursor`, `total_ready` | The raw index after the slice; the stored card count |
+  | `replace` | `false` |
+  | `search_id` | Echoed when sent |
+  | `serve_source` | `"page"` |
+  | `freshness_state` | `"fresh"`, or `"updating"` when an input change marked the page stale (rankings, preferences, dispositions, roster moves) or the rosters or values moved since it was built. An `"updating"` page still serves its filtered cards; a rebuild runs and the next request gets the rebuilt page |
+
+  `suppression_note`, `first_deck` and `board_refresh` are never sent on a
+  store response (they belong to the job that ran).
+- **Check failure:** `cards: []`, `freshness_state: "updating"`,
+  `serve_source: "page"`, `cursor: 0`, `total_ready: 0`, and **`job_id` is the
+  rebuild job's id**, with that job's own `status` (normally `"running"`) and
+  `error`. Poll it on `/status` like any job.
+- **Not served from the store** (today's E2 response, plus
+  `prefetch_remaining`): no stored page for the scope; the engine (including
+  the engine modules' code hash and deck-shape version) or the request
+  configuration changed since the build; or the stored cards have expired.
+
+**`GET /api/trades/status?job_id=X&cursor=K` on a page-served deck** (`X` is the
+`job_id` a store response returned):
+
+- `K < total_ready`: the stored cards from `K`, at most `trade_page_size`,
+  sliced first and filtered after (the E2 raw-index rule), with
+  `serve_source: "page"`, `status: "complete"`, `replace: false` and
+  `freshness_state` (`"updating"` when the page is stale or the rosters moved).
+  A failed check returns `cards: []`, `freshness_state: "updating"`, and
+  `cursor` echoes `K`.
+- `K ≥ total_ready`: the job's E2 cursor response if the job is still in this
+  server process. Otherwise `cards: []`, `cursor: K`, `total_ready` = the stored
+  count, `serve_source: "page"`, `freshness_state: "fresh"`. Paging past the
+  stored pages arrives with P2.
+- A rebuild replaces the stored row and its job id. A cursor on the older job id
+  then reads that job if it is still in this process, else 404, as before P1.
 
 ### Trade card object
 

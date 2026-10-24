@@ -2805,6 +2805,9 @@ def _cleanup_loop() -> None:
         if evicted or timed_out:
             log.info("Trade jobs swept: %d evicted, %d timed out", evicted, timed_out)
 
+        # P1 first-page store: age, then the byte ceiling; flag off ⇒ untouched.
+        _evict_trade_page_store()
+
         # Silent durable inventory refresh is deliberately separate from the
         # notification-bearing daily tick and weekly replenishment.
         try:
@@ -3283,7 +3286,7 @@ def _trade_job_public_view(job: dict) -> dict:
     return out
 
 
-def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str):
+def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str, snap=None):
     """I-1 at serve: keep a card only if the viewer still owns every give asset
     and its opponent still owns every receive asset, per the stored rosters and
     pick ownership read now (roster_snapshot). Raises when the check cannot
@@ -3294,11 +3297,15 @@ def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str):
       lead ruling 2026-10-20: lenient on today's path, strict in P1);
     - generic ladder picks (`generic_pick_{rnd}_{tier}`), which are universal
       pool assets and never on a roster.
+
+    `snap`: a roster_snapshot the caller already read (P1 shares it with the
+    fingerprint compare); None reads one now.
     """
-    from . import roster_snapshot
-    from .database import engine as _engine
-    with _engine.connect() as conn:
-        snap = roster_snapshot.roster_snapshot(conn, league_id)
+    if snap is None:
+        from . import roster_snapshot
+        from .database import engine as _engine
+        with _engine.connect() as conn:
+            snap = roster_snapshot.roster_snapshot(conn, league_id)
     missing = snap.status == "missing"
     owners, nobody = snap.asset_owner, frozenset()
 
@@ -3369,7 +3376,430 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
         out.update(cursor=end, total_ready=len(raw), replace=replace)
     if search_id is not None:
         out["search_id"] = search_id
+    if _trade_page_store_enabled():
+        out["prefetch_remaining"] = _trade_prefetch_remaining()
     return out
+
+
+# ── P1 first-page store (flag trade.first_page_store) ─────────────────────────
+# Scope: docs/plans/trade-time-to-suggestion/scope-eng-200ms.md §2, §6.2, §6.8.
+# Rows live in trade_page_store (database.py). Flag off ⇒ nothing here reads or
+# writes the table and no response gains a field.
+
+_TRADE_PAGE_FORMAT = 1           # pages_blob = {"v", "opponents_total", "cards"}
+_TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card without one
+
+# Bump whenever _run_trade_job's deck-shaping layers change (gates, ordering,
+# quality filters, ghosting, publication): stored pages carry it in their
+# engine_version, so a bump makes every older page fall through. server.py
+# itself is not hashed below; hashing it would cold every page on every deploy.
+TRADE_DECK_SHAPE_VERSION = 1
+
+# The engine modules whose bytes are hashed into every page's engine_version
+# (backend/-relative globs, sorted within each pattern).
+_ENGINE_CODE_MODULES = (
+    "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
+    "deck_quality.py", "trade_bilateral_presentment.py", "small_trade_presentment.py",
+    "trade_policy.py", "trade_significance.py",
+    "ranking_service.py", "pick_values.py", "trade_breaker.py", "trade_narrative.py",
+)
+_engine_code_hash_value: str | None = None
+
+
+def _engine_code_hash_of(root: pathlib.Path) -> str:
+    """sha256[:12] over each engine module's backend-relative path and bytes."""
+    digest = hashlib.sha256()
+    for pattern in _ENGINE_CODE_MODULES:
+        paths = sorted(root.glob(pattern))
+        if not paths:
+            digest.update(f"{pattern}\0missing\0".encode())
+        for path in paths:
+            digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+            digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def _trade_engine_code_hash() -> str:
+    """The engine modules' code hash, computed once per process on first use."""
+    global _engine_code_hash_value
+    if _engine_code_hash_value is None:
+        _engine_code_hash_value = _engine_code_hash_of(pathlib.Path(__file__).resolve().parent)
+    return _engine_code_hash_value
+
+
+def _trade_page_store_enabled() -> bool:
+    return is_enabled("trade.first_page_store")
+
+
+def _trade_page_knob(key: str, default: float, low: int, high: int) -> int:
+    """A P1 model_config knob as an int, held to [low, high]."""
+    try:
+        return max(low, min(high, int(_deck_cfg(key, default))))
+    except (ValueError, OverflowError):  # NaN / inf
+        return int(default)
+
+
+def _trade_pages_stored() -> int:
+    return _trade_page_knob("trade_pages_stored", 3.0, 1, 10)
+
+
+def _trade_prefetch_remaining() -> int:
+    return _trade_page_knob("trade_prefetch_remaining", 50.0, 1, 200)   # ruling 19
+
+
+def _trade_page_scope(fairness_threshold) -> str:
+    """The canonical organic request scope: the fairness threshold, 2 decimals."""
+    return f"organic:f={float(fairness_threshold):.2f}"
+
+
+def _trade_page_request_scope(body: dict, league_id: str, fairness_threshold,
+                              force_fresh: bool) -> str | None:
+    """The scope a /generate request may read the store under, or None.
+
+    Only the organic default search: no pins, no opponent, no intent, no
+    `force` (which a fatigue refresh implies), never the demo league.
+    """
+    if (not _trade_page_store_enabled() or force_fresh or league_id == "league_demo"
+            or any(body.get(name) for name in ("pinned_give_players", "pinned_receive_players",
+                                               "opponent_user_id", "trade_intent"))):
+        return None
+    return _trade_page_scope(fairness_threshold)
+
+
+def _trade_engine_name(value_core: bool) -> str:
+    """The deck's engine as trades_generated names it; the value core also
+    carries its ENGINE_VERSION, so a core release misses every older page."""
+    if value_core:
+        from .value_core.types import ENGINE_VERSION
+        return "value_core:" + ENGINE_VERSION
+    return ("v3" if is_enabled("trade_engine.v3")
+            else "v2" if is_enabled("trade_engine.v2") else "v1")
+
+
+def _trade_page_engine_version(engine_name: str, safety_policy, presentation_capture) -> str:
+    """`engine_version`: the engine; a hash of the serving policy that the job
+    cache also requires to match (_trade_job_is_fresh's safety signature and
+    presentation mode); the engine modules' code hash; and
+    TRADE_DECK_SHAPE_VERSION. A stored page never outlives a policy rollout or
+    an engine code change across a deploy."""
+    presentation = (presentation_capture[:2] if presentation_capture is not None
+                    else _simple_presentment.OFF)
+    policy = json.dumps([list(safety_policy or []), list(presentation)], default=str)
+    return (f"{engine_name}+policy:{hashlib.sha256(policy.encode()).hexdigest()[:12]}"
+            f"+code:{_trade_engine_code_hash()}+shape:{TRADE_DECK_SHAPE_VERSION}")
+
+
+def _trade_page_viewer(sess: Mapping, league_id: str) -> str:
+    """The viewer's league identity in `league_id` (co-owners differ), for I-1."""
+    league = sess.get("league")
+    if getattr(league, "league_id", None) == league_id:
+        return _league_user_id(sess)
+    return str(sess.get("user_id") or "")
+
+
+def _job_page_eligible(job: dict) -> bool:
+    """Store pages only from a complete, organic, fully stamped job (§6.8).
+
+    INTEGRATION POINT: models-eng's count-bounded conversion (not merged) marks
+    a deck cut short by the value core's safety ceiling. Each place that flag
+    may land refuses the page.
+    """
+    value_core = job.get("value_core") or {}
+    diag = value_core.get("diag") or {}
+    ceiling = (job.get("safety_ceiling_hit") or value_core.get("safety_ceiling_hit")
+               or (diag.get("safety_ceiling_hit") if isinstance(diag, Mapping)
+                   else getattr(diag, "safety_ceiling_hit", False)))
+    return bool(job.get("page_scope") and job.get("status") == "complete"
+                and job.get("error") is None and not job.get("superseded")
+                and not job.get("prepared_inventory_id") and not job.get("is_pinned")
+                and not job.get("trade_intent") and not job.get("source")
+                and not job.get("presentation_exempt")
+                and job.get("roster_fp") is not None and job.get("values_snapshot_id") is not None
+                and job.get("request_signature") is not None and not ceiling)
+
+
+def _trade_card_expiry(card) -> float | None:
+    try:
+        return datetime.fromisoformat(card["expires_at"].replace("Z", "+00:00")).timestamp()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _store_trade_page(job_id: str) -> bool:
+    """P1 write: store a just-finished job's first pages, in final served order.
+
+    Called on the worker thread once _run_trade_job returns, inside the job's
+    user-data lease. True when a row was written. Never raises.
+    """
+    if not _trade_page_store_enabled():
+        return False
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if job is None or _trade_job_revoked(job):
+            return False
+        job = dict(job)   # published card lists are replaced, never mutated
+    if not _job_page_eligible(job):
+        return False
+    from . import database as _db
+    try:
+        user_id, league_id, scoring_format = job["key"]
+        cards = list(job.get("cards") or [])[:_trade_pages_stored() * _trade_page_size()]
+        built = job["page_built_at"]   # the admission: when the deck's inputs were read
+        expiries = [t for t in map(_trade_card_expiry, cards) if t is not None]
+        blob = _db.CompressedJSON.encode({"v": _TRADE_PAGE_FORMAT,
+                                          "opponents_total": job.get("opponents_total") or 0,
+                                          "cards": cards})
+        written = _db.save_trade_page({
+            "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
+            "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
+            "values_snapshot_id": job["values_snapshot_id"],
+            "engine_version": _trade_page_engine_version(
+                _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
+                job.get("presentation_capture")),
+            "config_signature": job["request_signature"], "deck_job_id": job_id,
+            "built_at": _db.page_store_iso(built),
+            "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
+            "card_count": len(cards), "pages_blob": blob, "evidence_blob": None,
+            "stored_bytes": len(blob), "state": "ready",
+        })
+        log.info("trade-page %s: stored=%s scope=%s cards=%d bytes=%d", job_id, written,
+                 job["page_scope"], len(cards), len(blob))
+        return written
+    except Exception:
+        log.warning("trade-page %s: store failed", job_id, exc_info=True)
+        return False
+
+
+def _mark_trade_pages_stale(marked_at: float, *, user_id: str | None = None,
+                            league_id: str | None = None) -> None:
+    """P1: an input change makes the stored pages it touches stale (one
+    bounded UPDATE). Call with _trade_jobs_lock released. `marked_at` is
+    taken before the in-process fence, so the supersede guard also refuses a
+    deck admitted before the change. Flag off ⇒ no-op. Never raises."""
+    if not _trade_page_store_enabled():
+        return
+    from . import database as _db
+    try:
+        _db.mark_trade_pages_stale(marked_at=_db.page_store_iso(marked_at),
+                                   user_id=user_id, league_id=league_id)
+    except Exception as err:
+        log.warning("trade-page stale mark failed (user=%s league=%s): %s", user_id, league_id, err)
+
+
+def _trade_current_snapshot(league_id: str, scoring_format: str):
+    """(roster_snapshot, vsn1) read now, or None on a failed read: the one read
+    behind S0's fingerprints and P1's serve, whose I-1 reuses the snapshot."""
+    from . import roster_snapshot
+    from .database import engine as _engine
+    try:
+        with _engine.connect() as conn:
+            return roster_snapshot.snapshot_ids(
+                conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
+                generation=pool_generation())
+    except Exception as err:
+        log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
+        return None
+
+
+def _trade_page_read(user_id: str, league_id: str, scoring_format: str, scope: str):
+    """The serve's reads, before the job lock: the page row (one unique-index
+    read; a failed read is no row) and the current snapshot."""
+    from . import database as _db
+    try:
+        row = _db.load_trade_page(user_id, league_id, scoring_format, scope)
+    except Exception as err:
+        log.warning("trade-page read failed for league %s: %s", league_id, err)
+        row = None
+    return row, _trade_current_snapshot(league_id, scoring_format)
+
+
+def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, snap,
+                     search_id=None) -> dict:
+    """A stored page as a paged response (`freshness_state` "fresh").
+
+    Slices the stored raw list at `cursor`, then runs the disposition
+    projection and STRICT I-1 on the slice only, so a filtered card never
+    shifts a later card's index (E2's rule). Raises when the check cannot run,
+    including a league with no stored rosters; the caller then serves no cards.
+    """
+    pages = row["pages_blob"]
+    if not isinstance(pages, Mapping) or not isinstance(pages.get("cards"), list):
+        raise ValueError("stored pages do not decode")
+    if snap is None or snap.status == "missing":
+        raise ValueError("roster snapshot unavailable" if snap is None
+                         else "league has no stored rosters")
+    league_id = row["league_id"]
+    end = min(len(pages["cards"]), cursor + _trade_page_size())
+    cards = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
+    if cards:
+        cards = _filter_cards_to_current_owners(cards, league_id, viewer_id, snap=snap)
+    opponents = pages.get("opponents_total") or 0
+    out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
+           "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,
+           "total_ready": row["card_count"], "replace": False, "serve_source": "page",
+           "freshness_state": "fresh", "prefetch_remaining": _trade_prefetch_remaining()}
+    if search_id is not None:
+        out["search_id"] = search_id
+    return out
+
+
+def _trade_page_no_cards(*, job_id: str, status: str, opponents: tuple, error, cursor: int,
+                         total_ready: int, freshness: str, search_id=None) -> dict:
+    """A paged page-store response that carries no cards."""
+    out = {"job_id": job_id, "status": status, "opponents_done": opponents[0],
+           "opponents_total": opponents[1], "cards": [], "error": error, "cursor": cursor,
+           "total_ready": total_ready, "replace": False, "serve_source": "page",
+           "freshness_state": freshness, "prefetch_remaining": _trade_prefetch_remaining()}
+    if search_id is not None:
+        out["search_id"] = search_id
+    return out
+
+
+def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewer_id: str,
+                      request_signature, presentation_capture, search_id, has_current_job: bool,
+                      kick) -> dict | None:
+    """§6.2 for /generate `page: 1`. The response body, or None to fall through
+    to today's path (engine or config moved, or the stored cards expired).
+
+    A page is "updating" when its row is marked stale (an input change:
+    rankings, preferences, dispositions, rosters; _mark_trade_pages_stale) or
+    its roster or values stamp moved.
+
+    `current` is the caller's _trade_current_snapshot(); `kick()` starts (or
+    joins, preserve_running) the organic rebuild and returns its job id. A
+    rebuild is kicked when a check fails, and whenever no fresh or matching
+    running job backs the page in this process: after a restart, after an
+    input change revoked it, and always when the page is stale (a job on the
+    current inputs is either running already, and joined, or absent). The
+    page serves now; the rebuild replaces it, `ready`, for the next request.
+    """
+    from . import database as _db
+    started = time.perf_counter()
+    engine_now = _trade_page_engine_version(
+        _trade_engine_name(_value_core_live(league_id=league_id, user_id=user_id,
+                                            league_user_id=viewer_id, trade_intent=None,
+                                            preparation=False)),
+        _trade_safety_signature(), presentation_capture)
+    if (request_signature is None or row["config_signature"] != request_signature
+            or row["engine_version"] != engine_now):
+        log.info("trade-page %s: blocked (engine or config moved)", row["deck_job_id"])
+        return None
+    if row["expires_at"] <= _db.page_store_iso(time.time()):
+        return None
+    snap, vsn = current or (None, None)
+    try:
+        out = _trade_page_view(row, 0, user_id=user_id, viewer_id=viewer_id, snap=snap,
+                               search_id=search_id)
+    except Exception as err:
+        log.warning("trade-page %s: check unavailable, serving no cards: %s", row["deck_job_id"], err)
+        job_id = kick()
+        with _trade_jobs_lock:
+            job = dict(_trade_jobs.get(job_id) or {})
+        return _trade_page_no_cards(
+            job_id=job_id, status=job.get("status", "running"), error=job.get("error"),
+            opponents=(job.get("opponents_done", 0), job.get("opponents_total", 0)),
+            cursor=0, total_ready=0, freshness="updating", search_id=search_id)
+    if (row["state"] == "stale" or snap.fp != row["roster_fp"]
+            or vsn != row["values_snapshot_id"]):
+        out["freshness_state"] = "updating"
+    if not has_current_job:
+        kick()
+    try:
+        _db.touch_trade_page(row["id"], _db.page_store_iso(time.time()))
+    except Exception as err:
+        log.warning("trade-page %s: last_served_at not updated: %s", row["deck_job_id"], err)
+    log.info("trade-page %s: served source=page freshness=%s cards=%d rebuild=%s ms=%.1f",
+             row["deck_job_id"], out["freshness_state"], len(out["cards"]),
+             not has_current_job, (time.perf_counter() - started) * 1000)
+    return out
+
+
+def _trade_page_status_view(row: dict, cursor: int, sess: Mapping) -> dict:
+    """/status?cursor=K inside a page-served deck's stored pages: the slice,
+    dispositions and strict I-1 on a roster snapshot read now. A check error
+    serves no cards, "updating". (P2 extends this past the stored pages.)"""
+    from . import roster_snapshot
+    from .database import engine as _engine
+    league_id = row["league_id"]
+    try:
+        with _engine.connect() as conn:
+            snap = roster_snapshot.roster_snapshot(conn, league_id)
+        out = _trade_page_view(row, cursor, user_id=sess["user_id"],
+                               viewer_id=_trade_page_viewer(sess, league_id), snap=snap)
+    except Exception as err:
+        log.warning("trade-page %s: check unavailable, serving no cards: %s", row["deck_job_id"], err)
+        return _trade_page_past_stored(row, cursor, freshness="updating")
+    if row["state"] == "stale" or snap.fp != row["roster_fp"]:
+        out["freshness_state"] = "updating"
+    return out
+
+
+def _trade_page_past_stored(row: dict, cursor: int, *, freshness: str = "fresh") -> dict:
+    """No cards for a page-served deck at `cursor`, on the deck's own job id."""
+    pages = row["pages_blob"] if isinstance(row["pages_blob"], Mapping) else {}
+    opponents = pages.get("opponents_total") or 0
+    return _trade_page_no_cards(job_id=row["deck_job_id"], status="complete",
+                                opponents=(opponents, opponents), error=None, cursor=cursor,
+                                total_ready=row["card_count"], freshness=freshness)
+
+
+def _rebuild_league_trade_pages(league_id: str) -> int:
+    """P1 trigger (b): after a roster move, kick an organic rebuild for each
+    stored page in the league whose viewer has a live session here.
+
+    Debounced per key by `trade_prebuild_debounce_s`, against the last rebuild
+    this trigger kicked (stamped on that job in the existing job registry; no
+    new state). A key inside the debounce, or with no live session, rebuilds at
+    its next serve, which sees the roster_fp move. Returns the number kicked.
+    """
+    from . import database as _db
+    try:
+        rows = _db.list_trade_pages_for_league(league_id)
+    except Exception as err:
+        log.warning("trade-page rebuild: page list unavailable for league %s: %s", league_id, err)
+        return 0
+    debounce = _trade_page_knob("trade_prebuild_debounce_s", 20.0, 0, 3600)
+    kicked = 0
+    for row in rows:
+        key = _trade_job_key(row["user_id"], league_id, row["scoring_format"])
+        now = time.monotonic()
+        with _trade_jobs_lock:
+            recent = any(job.get("key") == key
+                         and now - job.get("page_rebuild_kicked_at", float("-inf")) < debounce
+                         for job in _trade_jobs.values())
+        token = None if recent else _find_live_session_token(row["user_id"], league_id)
+        if token is None:
+            continue
+        try:
+            job_id = _kickoff_trade_job(
+                sess_token=token, user_id=row["user_id"], league_id=league_id,
+                scoring_format=row["scoring_format"],
+                fairness_threshold=float(row["request_scope"].rpartition("=")[2]),
+                preserve_running=True)
+        except Exception:
+            log.warning("trade-page rebuild: kickoff failed for league %s", league_id, exc_info=True)
+            continue
+        with _trade_jobs_lock:
+            job = _trade_jobs.get(job_id)
+            if job is not None:
+                job["page_rebuild_kicked_at"] = now
+        kicked += 1
+    return kicked
+
+
+def _evict_trade_page_store() -> None:
+    """P1 eviction (§7): one bounded pass per cleanup tick. Flag off ⇒ no-op."""
+    if not _trade_page_store_enabled():
+        return
+    from . import database as _db
+    try:
+        aged, over_budget = _db.evict_trade_pages(
+            evict_days=_trade_page_knob("trade_page_store_evict_days", 30.0, 1, 3650),
+            max_bytes=_trade_page_knob("trade_page_store_max_bytes", 262144000.0, 0, 2 ** 62))
+        if aged or over_budget:
+            log.info("trade page store evicted: %d aged, %d over the byte ceiling", aged, over_budget)
+    except Exception:
+        log.exception("trade page store eviction failed")
 
 
 def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared=False):
@@ -3634,17 +4064,8 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[st
     Callers read this BEFORE taking _trade_jobs_lock and pass it to the
     freshness and join checks, which only compare. None means the read failed.
     """
-    from . import roster_snapshot
-    from .database import engine as _engine
-    try:
-        with _engine.connect() as conn:
-            snap, vsn = roster_snapshot.snapshot_ids(
-                conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                generation=pool_generation())
-    except Exception as err:
-        log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
-        return None
-    return snap.fp, vsn
+    current = _trade_current_snapshot(league_id, scoring_format)
+    return None if current is None else (current[0].fp, current[1])
 
 
 def _trade_fingerprints_match(job: dict, current) -> bool:
@@ -9394,7 +9815,12 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
     one. Jobs consuming this member's inputs retain the same scoped token.
     Selected jobs are fenced too even though they have no cache pointer.
     Durable offer IDs and the session's action store are never replaced here.
+
+    P1 (flag trade.first_page_store): the stored pages the change affects are
+    then marked stale, after the lock is released: the user's rows, or a
+    league-scoped change's whole league.
     """
+    marked_at = time.time()   # before the fence: decks admitted earlier never write
     dropped = 0
     with _trade_jobs_lock:
         token = _trade_input_epochs.pop((user_id, league_id), None)
@@ -9412,6 +9838,10 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
             if _trade_jobs_by_key.get(key) == job.get("job_id"):
                 _trade_jobs_by_key.pop(key)
                 dropped += 1
+    if league_id is None:
+        _mark_trade_pages_stale(marked_at, user_id=user_id)
+    else:
+        _mark_trade_pages_stale(marked_at, league_id=league_id)
     return dropped
 
 
@@ -9422,11 +9852,16 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
     a new member epoch and read old stored rankings before this write commits;
     the final fence closes that gap, including failed or uncertain writes.
     Ordinary initialization and database writers do not use this helper.
+    P1: league-mates' decks read the published board, so the league's stored
+    pages are marked stale too.
     """
     try:
         return upsert_member_rankings(user_id=user_id, **kwargs)
     finally:
+        marked_at = time.time()
         _invalidate_trade_jobs(user_id=user_id)
+        if kwargs.get("league_id"):
+            _mark_trade_pages_stale(marked_at, league_id=kwargs["league_id"])
 
 
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
@@ -9434,7 +9869,8 @@ def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
     roster_snapshot.on_roster_change, after committing rows whose rfp1 moved.
     Every job in the league read those rosters, so revoke them all: viewers
     with a job, plus every (identity, league) epoch, which covers admissions
-    not yet registered. P1 adds the debounced page rebuild here.
+    not yet registered. P1 (flag trade.first_page_store) then kicks the
+    debounced rebuild of the league's stored pages.
     """
     with _trade_jobs_lock:
         user_ids = {key[0] for key in (job.get("key") or () for job in _trade_jobs.values())
@@ -9442,6 +9878,8 @@ def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
         user_ids.update(uid for uid, lid in list(_trade_input_epochs.keys()) if lid == league_id)
     for user_id in user_ids:
         _invalidate_trade_jobs(user_id=user_id, league_id=league_id)
+    if _trade_page_store_enabled():
+        _rebuild_league_trade_pages(league_id)
 
 
 from . import roster_snapshot as _roster_snapshot  # noqa: E402
@@ -9516,6 +9954,8 @@ def _kickoff_trade_job(
                             context=execution_context, fairness=fairness_threshold, prefs=prefs_preload):
                         return
                 _run_trade_job(*args, **kwargs)
+                # P1: a complete organic job stores its first pages (flag off ⇒ no-op).
+                _store_trade_page(job_id)
             else:
                 _finish_trade_job(job_id, error="account_deleted")
 
@@ -9591,6 +10031,12 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
+    # P1: the organic scope this job's completion may store pages under. A
+    # forced organic job stores too: it is the newest deck for the scope.
+    if (_trade_page_store_enabled() and not is_pinned and not trade_intent
+            and not presentation_exempt and not source and league_id != "league_demo"):
+        job["page_scope"] = _trade_page_scope(fairness_threshold)
+        job["page_built_at"] = time.time()   # wall-clock admission: the row's built_at
     admission_owner_config = dict(_trade_service_mod._cfg)
     selected_owner = _bakeoff.owner_arm(admission_owner_config)
     if selected_owner == _bakeoff.ARM_OWNER_BILATERAL:
@@ -14926,8 +15372,38 @@ def generate_trades():
     presentation_exempt = bool(body.get("pinned_receive_players"))
     presentation_uncached = bool(presentation_capture[0] and presentation_exempt)
     reuse_snapshot = None
-    # S0: read before the lock; the checks under it only compare.
-    fingerprints = None if _any_pinned else _trade_current_fingerprints(league_id, fmt)
+    # P1 (flag trade.first_page_store): only a paged organic request reads the
+    # store. Its one snapshot read also feeds the job-cache checks below.
+    page_scope = (_trade_page_request_scope(body, league_id, fairness_threshold, force_fresh)
+                  if paged else None)
+    if page_scope is not None:
+        page_row, page_current = _trade_page_read(g_user_id, league_id, fmt, page_scope)
+        fingerprints = (page_current[0].fp, page_current[1]) if page_current else None
+    else:
+        # S0: read before the lock; the checks under it only compare.
+        fingerprints = None if _any_pinned else _trade_current_fingerprints(league_id, fmt)
+    if page_scope is not None and page_row is not None:
+        with _trade_jobs_lock:
+            current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
+            has_current_job = bool(
+                current_job is not None and not any(token.revoked for token in input_epochs)
+                and (_trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
+                                         presentation_capture, request_signature, fingerprints)
+                     or _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
+                                               presentation_capture, request_signature, fingerprints)))
+        served = _serve_trade_page(
+            page_row, page_current, user_id=g_user_id, league_id=league_id,
+            viewer_id=_trade_page_viewer(sess, league_id), request_signature=request_signature,
+            presentation_capture=presentation_capture, search_id=search_id,
+            has_current_job=has_current_job,
+            kick=lambda: _kickoff_trade_job(
+                sess_token=sess_token, user_id=g_user_id, league_id=league_id,
+                scoring_format=fmt, fairness_threshold=fairness_threshold,
+                opponents_total=opponents_total, prefs_preload=prefs_preload,
+                session_context=sess, presentation_capture=presentation_capture,
+                input_epochs=input_epochs, preserve_running=True))
+        if served is not None:
+            return jsonify(served)
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -15980,7 +16456,11 @@ def trade_job_status():
     Snapshot plus one batched disposition read. Used to poll an in-flight
     /api/trades/generate job. 404 if the job has been evicted.
     E2 (opt-in): `cursor=K` returns only the raw cards after index K, at most
-    `trade_page_size` (see _trade_job_page_view)."""
+    `trade_page_size` (see _trade_job_page_view).
+    P1 (flag trade.first_page_store): a cursor into a page-served deck (the
+    job id of a stored page) inside its stored pages is served from them;
+    past them, from the live job if one exists, else no cards (P2 completes
+    this)."""
     sess = _require_session()
     sess["last_active"] = time.time()
     job_id = request.args.get("job_id") or ""
@@ -15988,8 +16468,19 @@ def trade_job_status():
     if cursor is not None and not re.fullmatch(r"[0-9]{1,9}", cursor):
         return jsonify({"error": "invalid_cursor",
                         "message": "cursor must be a non-negative integer"}), 400
+    page_row = None
+    if cursor is not None and _trade_page_store_enabled():
+        from . import database as _db
+        try:
+            page_row = _db.load_trade_page_for_job(sess["user_id"], job_id)
+        except Exception as err:
+            log.warning("trade-page read failed for job %s: %s", job_id, err)
+        if page_row is not None and int(cursor) < page_row["card_count"]:
+            return jsonify(_trade_page_status_view(page_row, int(cursor), sess))
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
+        if not job and page_row is not None:
+            return jsonify(_trade_page_past_stored(page_row, int(cursor)))
         if not job:
             return jsonify({"error": "job not found"}), 404
         # Defense: don't leak another user's job. The lookup key includes
