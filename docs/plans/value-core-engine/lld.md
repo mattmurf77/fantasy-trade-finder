@@ -81,7 +81,7 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 - `infer_contender_cut` / `infer_rebuilder_cut` (±0.08), via `trade_service._c` in `windows.py`
 
 **Code constants.** Not knobs; each is named in its module:
-- `core.py`: `TIME_BUDGET_S = 8.0`, `MAX_CHECKS_PER_PARTNER = 40_000`, `MAX_PACKAGE_SIZE = 3`, `MAX_THROWIN_OPTIONS = 3` (qualifying throw-ins tried per side, per candidate pair), `THROWIN_MIN_COMPARISONS = 3` (the recipient's evidence a throw-in needs), `PREMIUM_EXPONENT = 2.0`, `RATIO_TOL = 1e-9`
+- `core.py`: `SAFETY_CEILING_S = 30.0` (a pathology marker, not a budget: §4.6), `MAX_CHECKS_PER_PARTNER = 40_000`, `MAX_PACKAGE_SIZE = 3`, `MAX_THROWIN_OPTIONS = 3` (qualifying throw-ins tried per side, per candidate pair), `THROWIN_MIN_COMPARISONS = 3` (the recipient's evidence a throw-in needs), `PREMIUM_EXPONENT = 2.0`, `RATIO_TOL = 1e-9`
 - `ranking.py`: `DELTA_SATURATION = math.log(1.25)`, `RANK_GAP_SATURATION = 0.30`, `SIDE_THRESHOLD = 0.60`, `FAIR_PCT = 3`, `RANK_SPOTS_MIN = 5`, `YOUTH_WEIGHTS`
 - `deck.py`: `PARTNER_PENALTY_FACTOR = 0.5`, `PICK_IDEA = "PICK"`
 - `windows.py`: `STANDINGS_RAMP_WEEKS = 8`
@@ -94,7 +94,7 @@ All dataclasses live in `backend/value_core/types.py`, written verbatim from [sp
 ### 4.1 Public API
 
 ```python
-TIME_BUDGET_S = 8.0
+SAFETY_CEILING_S = 30.0   # not a budget: only pathology reaches it (the check caps bound the work)
 MAX_CHECKS_PER_PARTNER = 40_000
 MAX_PACKAGE_SIZE = 3
 MAX_THROWIN_OPTIONS = 3   # qualifying throw-ins tried per side, per candidate pair (best recipient surplus first)
@@ -137,11 +137,15 @@ def evaluate_trade(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig, 
 
 
 def find_fair_trades(snapshot: LeagueSnapshot, request: Request, cfg: CoreConfig, *,
-                     time_budget_s: float = TIME_BUDGET_S,
+                     safety_ceiling_s: float = SAFETY_CEILING_S,
                      max_checks_per_partner: int = MAX_CHECKS_PER_PARTNER,
                      ) -> tuple[list[FairTrade], CoreDiagnostics]:
     """The unranked fair pool for the viewer against every partner (or request.partner_team_id).
-    Deterministic: same inputs -> same list, same order. Never raises for an empty result.
+    Deterministic: same inputs -> same list, same order, regardless of machine load. The work
+    is bounded by counts (max_checks_per_partner per check kind per partner, then
+    cfg.max_per_partner), never by the clock. safety_ceiling_s is not a budget: it only marks
+    pathology. If it fires, enumeration stops, diag.safety_ceiling_hit and diag.budget_exhausted
+    are set, an ERROR is logged, and the pool is partial. Never raises for an empty result.
     Raises ValueError only when request.viewer_team_id is not in snapshot.teams."""
 ```
 
@@ -229,7 +233,7 @@ V = packages(candidates(viewer, exclude=∅, must=request.pinned_give_ids))
 V = [g for g in V if pinned_give satisfied]   # "any": g∩pins≠∅ ; "all": pins ⊆ g ; no pins: all
 V sorted by (-total, ids), then round-robin interleaved by headliner (g.ids[0])   # lead change 2026-09-30
 for partner in partners (deterministic order):
-    if budget exceeded: diag.budget_exhausted = True; break
+    if elapsed > safety_ceiling_s: diag.safety_ceiling_hit = diag.budget_exhausted = True; break   # pathology only
     P = packages(candidates(partner, exclude=request.not_interested_ids, must=request.pinned_receive_ids))
     if request.pinned_receive_ids: P = [r for r in P if r ∩ pinned_receive ≠ ∅]; skip partner if P empty
     P sorted by (total, ids); totals = [r.total for r in P]
@@ -256,7 +260,7 @@ for partner in partners (deterministic order):
                     truncated = True
                     if kind == base: stop this partner
                     else: skip this variant                 # throw-ins never starve base pairs
-                if sum(checks) % 1000 == 0 and elapsed > time_budget_s: diag.budget_exhausted = True; stop all
+                if sum(checks) % 1000 == 0 and elapsed > safety_ceiling_s: diag.safety_ceiling_hit = diag.budget_exhausted = True; stop all
                 verdict = rules §4.2–§4.4 on (gg, rr)
                 if ok: fair.append(FairTrade(..., throwin=the added piece or None))
     if len(fair) > cfg.max_per_partner:
@@ -264,6 +268,7 @@ for partner in partners (deterministic order):
         fair = round_robin(fair, group=(give[0], receive[0]))[:cfg.max_per_partner]; truncated = True
     diag.truncated_partners += int(truncated)          # at most once per partner, either cap
     out.extend(fair)
+if diag.safety_ceiling_hit: log.error(partners done/total, pairs_checked)   # the core's only log line
 out.sort(key=(partner_team_id, -market(H), n_assets, abs(log(adjusted_ratio)), give, receive))
 ```
 
@@ -280,15 +285,15 @@ out.sort(key=(partner_team_id, -market(H), n_assets, abs(log(adjusted_ratio)), g
 | Pair checks per partner | ≤ **40,000** base pairs, plus ≤ 40,000 throw-in variants (a separate budget; only when a board qualifies throw-ins) | `max_checks_per_partner` |
 | Pair checks per league (14 teams) | ≤ 13 × 40,000 = **520,000** base pairs (twice that with throw-in variants) | the above |
 | Per-check cost | O(1), plus ≤ 4 re-pricings (reducible), plus a lineup fill only when the fast accept fails | §4.3–§4.4 |
-| Wall clock | stops at **8 s**, checked every 1,000 checks | `time_budget_s` |
+| Wall clock | **not a bound** (count-bounded, never clock-bounded; G-065). A **30 s** safety ceiling, checked per partner and every 1,000 checks, only marks pathology: it sets `safety_ceiling_hit` and logs at ERROR, and must never fire on a normal run | `safety_ceiling_s` |
 | Output | ≤ `max_per_partner` × partners, so **≤ 2,600** for 14 teams | per-partner cap |
 
-**Expected load.** A 12-team league with about 250 packages per side after the within-package pre-prune, and a raw window of about ±27% (band ±10% × premium ≤ 15%), sees around 30 candidates per give package. That is about 7.5k checks per partner and about 80k per league: roughly 0.5–1.5 s in CPython. That estimate predates the asymmetric band: the default pay-20% / take-10% band moves the low edge of the raw window from about 0.79× to about 0.72× of the give total, and each pair can add up to 2 × `MAX_THROWIN_OPTIONS` throw-in variants. Those run on their own check budget (§4.5) and inside the same time budget. The perf test ([specs.md](specs.md), WP1) pins the deterministic bounds.
+**Expected load.** A 12-team league with about 250 packages per side after the within-package pre-prune, and a raw window of about ±27% (band ±10% × premium ≤ 15%), sees around 30 candidates per give package. That is about 7.5k checks per partner and about 80k per league: roughly 0.5–1.5 s in CPython. That estimate predates the asymmetric band: the default pay-20% / take-10% band moves the low edge of the raw window from about 0.79× to about 0.72× of the give total, and each pair can add up to 2 × `MAX_THROWIN_OPTIONS` throw-in variants. Those run on their own check budget (§4.5). The perf test ([specs.md](specs.md), WP1) pins the deterministic bounds.
 
 ### 4.7 Diagnostics and logging
 
-- `CoreDiagnostics` is filled as it goes: `partners` is the number actually enumerated, `packages_viewer = len(V)`, `pairs_checked`, `fair`, `rejected`, `truncated_partners`, `budget_exhausted`, and `elapsed_ms`.
-- `core.py` does **no logging** and no I/O. The caller logs the diagnostics ([§10](#10-logging-and-error-handling-summary)).
+- `CoreDiagnostics` is filled as it goes: `partners` is the number actually enumerated, `packages_viewer = len(V)`, `pairs_checked`, `fair`, `rejected`, `truncated_partners`, `budget_exhausted`, `safety_ceiling_hit`, and `elapsed_ms`. `budget_exhausted` and `safety_ceiling_hit` are set together, only by the safety ceiling; `elapsed_ms` is a measurement and never changes the result.
+- `core.py` does no I/O. Its **only** log line is the safety ceiling's `log.error` (partners done/total, pairs checked). The caller logs the diagnostics ([§10](#10-logging-and-error-handling-summary)).
 
 ---
 
@@ -520,10 +525,11 @@ while heap or deferred:
 
 ```python
 def run(snapshot: LeagueSnapshot, request: Request, core_cfg: CoreConfig, rank_cfg: RankConfig, *,
-        time_budget_s: float = 8.0) -> PipelineResult:      # literal; equals core.TIME_BUDGET_S (core is imported lazily)
+        safety_ceiling_s: float | None = None) -> PipelineResult:   # None => core.SAFETY_CEILING_S
     """core.find_fair_trades -> ranking.score_trades -> deck.assemble_deck.
     `from . import core, ranking, deck` happens INSIDE this function (never at module
-    level). elapsed_ms is wall time for the three steps. No logging, no I/O, no
+    level). safety_ceiling_s is passed through to the core (None => core.SAFETY_CEILING_S).
+    elapsed_ms is wall time for the three steps. No logging, no I/O, no
     exception handling: errors propagate to the caller."""
 ```
 
@@ -1163,7 +1169,7 @@ In `supported(server, league_id)` (`prepared_trade_runtime.py:86-96`), append `a
 
 | Where | What |
 |---|---|
-| `core`, `windows`, `ranking`, `deck`, `pipeline` | No logging and no I/O. Invalid inputs raise `ValueError` with a message naming the id: unknown viewer, invalid `evaluate_trade` ids, or weights summing to ≤ 0. |
+| `core`, `windows`, `ranking`, `deck`, `pipeline` | No logging and no I/O, except `core`'s one `log.error` when the safety ceiling fires (pathology; §4.7). Invalid inputs raise `ValueError` with a message naming the id: unknown viewer, invalid `evaluate_trade` ids, or weights summing to ≤ 0. |
 | `windows.infer_windows` | An `infer_team_outlook` exception becomes `DEFAULT_WINDOW` for that team. This is the one swallowed error, and it is visible in the evidence as `source == "default"`. |
 | `adapter` | `log.warning` on a duplicate asset id across rosters (first owner wins). Nothing else is logged. |
 | `server._value_core_standings` | `log.warning` and `({}, 0)` on any failure |
