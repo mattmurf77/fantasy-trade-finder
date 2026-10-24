@@ -27997,7 +27997,7 @@ def _entry_claim_delete(sess):
     body = request.get_json(silent=True) or {}
     if body.get("confirm") != "delete":
         return jsonify({"error": "confirmation_required",
-                        "message": 'Send {"confirm": "delete"} to end this session.'}), 400
+                        "message": "Confirm the deletion to continue."}), 400
     user_id = str(sess.get("user_id") or "")
     device_id = (str(body.get("device_id") or "").strip()
                  or (request.headers.get("X-Device-Id") or "").strip())
