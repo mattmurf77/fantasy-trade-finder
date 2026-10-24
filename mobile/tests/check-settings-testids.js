@@ -83,10 +83,16 @@ const NEW = [
   // Added later by #354 BL-10 (D-3), not this plan: the feedback inbox row's
   // public home on Help & about (it had no testID while it sat under Testing).
   { id: 'settings.feedback-inbox',       file: 'AboutSection.tsx',       why: '#354 BL-10 feedback inbox row on Help & about' },
+  // #354 review items, also not this plan: the plain Credits block on Help &
+  // about (design-lead change 2), and the Testing page's honest unavailable
+  // line for a non-tester deep link (D-7).
+  { id: 'settings.credits',              file: 'AboutSection.tsx',       why: '#354 Credits block on Help & about' },
+  { id: 'settings.testing-unavailable',  file: 'SettingsTestingScreen.tsx', why: '#354 D-7 Testing page unavailable line' },
 ];
 
 // The Testing hub row is the seventh group row but is gated
-// (`__DEV__ || testing.stage_users`), so it is listed apart from the six
+// (useTesterSurface(): `__DEV__ || testing.stage_users ||
+// testing.timing_readout`, #354 D-7), so it is listed apart from the six
 // that every release build renders.
 const NEW_GATED = [
   { id: 'settings.hub.testing', file: 'SettingsHubScreen.tsx', why: 'hub group row, dev/tester builds only' },
