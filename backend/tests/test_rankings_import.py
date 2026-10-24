@@ -26,6 +26,7 @@ client, in-memory SQLite, injected sessions, no network.
 """
 import csv
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -410,6 +411,8 @@ def _h(token=TOKEN):
 
 class _FakeService:
     """get_rankings in a fixed current order + apply_reorder capture."""
+
+    _lock = threading.RLock()
 
     def __init__(self, ordered_ids):
         self._ordered = list(ordered_ids)
