@@ -4,8 +4,8 @@
 **Status:** spec, awaiting acceptance by `head-product`. Specs only: no product code is written here.
 **Author:** `launch-onboarding-pm-1`, for `onboarding-pm` (product lead, Onboarding & accounts)
 **Source:** `head-product`'s App Store launch-readiness review (2026-10-20), items **P28**, **BL-10**, **M7**
-**Base:** every `file:line` below was read at `origin/main` `678834ab`, except the 2026-10-23 additions (the adopted-copy tables in §5.4 and §6.7, §6.8, §6.9 and §7b), which were read at `origin/main` `712dcbed`. The contact, feedback and Settings files those tables cite are unchanged between the two shas. Re-verify before building.
-**Scope blocks:** [P28 contact page](scope-p28-contact.md) · [BL-10 public feedback](scope-bl10-feedback.md) · [M7 policy pages](scope-m7-policy-pages.md) · [Q6 tour line](scope-q6-tour-line.md) · [FAQ, SUP-M4](scope-faq-sup-m4.md) (build input: [faq-copy.md](faq-copy.md)) · [M11 entry ownership](scope-m11-entry-ownership.md)
+**Base:** every `file:line` below was read at `origin/main` `678834ab`, except the 2026-10-23 additions (the adopted-copy tables in §5.4 and §6.7, §6.8, §6.9, §6.10, §7.8 and §7b), which were read at `origin/main` `712dcbed`. The contact, feedback and Settings files those tables cite are unchanged between the two shas. Re-verify before building.
+**Scope blocks:** [P28 contact page](scope-p28-contact.md) · [BL-10 public feedback](scope-bl10-feedback.md) · [M7 policy pages](scope-m7-policy-pages.md) · [Q6 tour line](scope-q6-tour-line.md) · [FAQ, SUP-M4](scope-faq-sup-m4.md) (build input: [faq-copy.md](faq-copy.md)) · [M11 entry ownership](scope-m11-entry-ownership.md) · [D-13 policy notice](scope-d13-policy-notice.md)
 
 ---
 
@@ -109,6 +109,9 @@ writes the words. Placeholders read **copy: marketing-lead** or **wording: legal
 - Added 2026-10-23 (`head-product`'s new launch MUST M11): ESPN/MFL entry ownership proof, so that
   entry users can delete their account, download their data and import their league (§6.9), with
   its own scope block.
+- Added 2026-10-23: `ux-lead`'s and `design-lead`'s reviews of #354 as build instructions (§6.10),
+  including the credits row (BL10-R12), and D-13's in-app policy-change notice (§7.8), with its own
+  scope block.
 
 **Not in scope**
 
@@ -343,8 +346,19 @@ gets "Could not send". No backend test covers `/api/feedback` under the verified
   `712dcbed`). If `onboarding-eng` finds it cheap, a resend of the unsent note reuses that note's
   id instead of minting a new one. Launch doesn't depend on it: f1.alt ("…so no need to send it
   again") already steers users away from resending.
+- **BL10-R12. Credits row (added 2026-10-23, design-lead's review).** `AboutSection` gets a
+  non-pressable Credits block after Terms of Use and before Version, with `legal-lead`'s exact Part 3
+  text. The construction and the text are in §6.10.2 (design-lead changes 1–2); the one exact string
+  to settle is in §6.10.3. No events, no flags.
+- **BL10-R13. Review-driven build list.** The full build list, guards and TestFlight steps from
+  `ux-lead`'s and `design-lead`'s reviews are in §6.10. They govern for the build where they refine
+  this section (§6.10.3).
 
 ### 6.4 Open items for `ux-lead`
+
+**Answered (2026-10-23):** ux-lead's review (§6.10.1) gives the inbox a header close control (D-3;
+the glyph is `design-lead`'s) and gates the `settings/testing` page body (D-7). The two items below
+are kept as the record.
 
 - The `FeedbackInbox` route is `presentation: 'modal'` (`RootNav.tsx:762`) without the header close
   control `docs/design/components.md:77` requires (#130). The settings-IA scope records it as an
@@ -371,10 +385,14 @@ No new events. `feedback_submitted` stays server-fired and unchanged. Waived in 
 - **BL10-AC6.** The FAB pill equals the inbox rows whose status chip is not "Fixed — in next
   update" (the pill excludes `fixed`; the inbox shows it).
 - **BL10-AC7.** No Testing section or row is visible to a non-tester; "Test stages" still appears
-  for a `testing.stage_users` device.
+  for a `testing.stage_users` device. "Tester" means ux-lead's `useTesterSurface()` predicate,
+  `__DEV__ || testing.stage_users || testing.timing_readout` (§6.10.1 D-7); a non-tester who opens
+  `settings/testing` sees the unavailable state.
 - **BL10-AC8.** `POST /api/feedback` bodies still carry `severity` ∈ {`bug`,`polish`,`idea`}.
 - **BL10-AC9.** CI green: `pytest backend/tests`, `tsc --noEmit`, every `mobile/tests/check-*.js`
   (the `mobile-typecheck` job runs them all, `.github/workflows/ci.yml:42-48`), testid-lint.
+- **BL10-AC10.** Settings → Help & about shows a Credits block between Terms of Use and Version, and
+  a structural assertion holds its text equal to `legal-lead`'s Part 3 text (BL10-R12).
 
 ### 6.7 Copy inventory (copy: marketing-lead)
 
@@ -504,7 +522,8 @@ TestFlight is waived while the tour is dark (W-Q6-3). The detail is in the scope
 
 ### 6.9 M11: ESPN/MFL entry ownership proof: in-app deletion, data export and league import
 
-**Status:** spec. **Decision: option (e)** (`onboarding-pm`, 2026-10-23). Source: `head-product`'s
+**Status:** spec; gate 1 accepted (P38) and W-M11-1, W-M11-2 signed, 2026-10-23. **Decision: option
+(e)** (`onboarding-pm`, 2026-10-23). Source: `head-product`'s
 new launch MUST M11 (2026-10-23); `legal-lead` tracks it as LEG-M5. Apple guideline 5.1.1(v) requires
 in-app deletion for every account the app creates. `legal-lead`'s D-9 email procedure is the support
 fallback, not the fix. Scope block: [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md).
@@ -673,6 +692,291 @@ This is code-derived. How many `entry:*` users are stuck needs an `analytics-lea
 - **Size: M.** Server about 150–250 lines plus tests; client about 100–200 lines. **Tight for the
   11-06 binary** (flagged in §9).
 
+#### 6.9.10 The fallback (operator decision; not taken)
+
+If `head-eng` can't fit M11 into the 11-06 binary, Product's fallback is: **hide ESPN/MFL entry at
+sign-in, and drop "ESPN and MFL" from the App Store listing until M11 ships.** It is the operator's
+call, and it is not taken.
+
+- **The lever exists.** `landing.platform_options` (`config/features.json:28`, comment `:29`) is the
+  switch for the entry chips (`mobile/src/screens/SignInScreen.tsx:114`, `:126`), the web mirror
+  (`web/js/app.js:1212`, `:1253`) and the sessionless `/api/entry/platform` route
+  (`backend/server.py:25933-25934`). It needs no app build. On Render a flag change still needs a
+  server deploy to reach the running process (`docs/config-reference.md:1703`). Flipping it is
+  `release-lead`'s, on the operator's word.
+- **Apple sign-in, then connect ESPN or MFL from Settings: yes in code, partly covered by tests, not
+  checked at runtime.**
+  - **Server.** An Apple account-only session is verified at mint (`server.py:27529-27537`), so the
+    write gates on `/api/espn/link` (`:28370`), `/api/mfl/link` (`:31336`) and `/api/mfl/auth-link`
+    (`:31680`) pass. None of the three routes checks for an `acct_` user id.
+  - **Tests.** `backend/tests/test_account_only_harness.py:188-234` asserts an account-only session's
+    `POST /api/espn/link` gets 200, not 401/403. It is the preview call, with no `team_id`. `:299-342`
+    asserts that session_init keeps `verified` for an `acct_` user with an imported ESPN league. No
+    test covers the ESPN team-claim import or any MFL link for an `acct_` user.
+  - **Client.** Settings → Leagues shows "Link an ESPN league" and "Link an MFL league", gated only on
+    `espn.link` / `mfl.link` (`mobile/src/screens/settings/sections/PlatformLinkSection.tsx:39-47`,
+    `:58-70`). They open LeaguePicker, whose account-only empty state offers the link sheets
+    (`mobile/src/screens/LeaguePickerScreen.tsx:118-129`) and lists imported platform leagues for
+    account-only users (`:340-348`).
+  - **Sign-in surface.** Under `onboarding.landing` the Apple path is a text link, "Already have an
+    account? Sign in with Apple" (`SignInScreen.tsx:836-852`). A new Apple ID still mints an
+    account-only session (`server.py:27634-27637`), but the link reads as being for returning users.
+  - **So the fallback can keep "ESPN and MFL" in the listing and the FAQ**, with accurate wording
+    such as "sign in with Apple, then connect ESPN or MFL" (copy: marketing-lead; `legal-lead`
+    reviews the listing). If the fallback is taken, add a TestFlight step: a fresh Apple account
+    links an ESPN league and an MFL league from Settings, and the league opens.
+- **What else the fallback touches:**
+  - **FAQ:** Q2 and the meta description name all three platforms ([faq-copy.md](faq-copy.md)). Q3's
+    "Sign in with Apple, Sleeper, ESPN or MFL" and Q5 and Q6 ("choose ESPN" / "choose MFL" in the
+    app) describe the entry chips, so they change too.
+  - **The landing page:** the chip row and the ESPN and MFL panels (`web/index.html:115-118`,
+    `:189`, `:231`) hide with the flag. Its meta description ("Works with Sleeper, ESPN, and
+    MyFantasyLeague", `:7`, `:12`) stays true only with the Apple-then-connect wording.
+  - **The listing copy** (`app-manager` / `marketing-lead`; `legal-lead` reviews).
+- **What the fallback doesn't fix:** entry accounts that already exist. It stops new entry accounts,
+  but existing `entry:*` users still can't delete or export until M11 ships, so they stay on the D-9
+  email fallback (inference; their number is `analytics-lead`'s read).
+
+### 6.10 Review-driven build instructions (ux-lead + design-lead, accepted by Product 2026-10-23)
+
+Two reviews of #354 at `3ca8383c`, both accepted by Product on 2026-10-23, are build instructions for
+`onboarding-eng`. Their sources sit in the org-bringup worktree (`docs/plans/org-bringup/reports/`) and
+aren't tracked in git, so the text is copied here **verbatim**, read 2026-10-23. Only the heading
+levels changed, to fit this document; each reviewer's numbering is kept. Both reviews read code at
+`origin/main` `712dcbed`. How they sit with the earlier BL-10 text is in 6.10.3.
+
+#### 6.10.1 ux-lead: D-3, D-6, D-7 (verbatim, `reports/ux-lead.md:22-119`)
+
+- **Input:** PR #354, `plan/launch-support-policy` @ `3ca8383c`: `prd.md` §6.1–§6.4 and §9.
+- **Code:** read at `origin/main` `712dcbed`.
+- **Constraint:** `head-eng`'s `timing-readout-delivery.md`, which puts the 200 ms readout on the Testing page behind `testing.timing_readout`, delivered by an allowlist experiment.
+- **Date:** 2026-10-23. **Reviewer:** ux-lead, using `/ux-flow-review`.
+- **Verdict:** **approve with changes.** D-3 is confirmed, D-6 is confirmed with one extension, and D-7 is specified so the readout stays reachable. The numbered list at the end is exactly what `onboarding-eng` builds.
+
+##### D-3: the inbox row goes to Help & about — **confirmed**
+
+- **Why:** Help & about already holds the help rows (Help & FAQ), and a person's own feedback history is help: it's where "Fixed — in next update" closes the loop (BL10-R5). A new hub group for one row would add a group for nothing.
+- **Position:** directly **after Help & FAQ**, before Privacy and Terms. The order is help, feedback, legal, version.
+- **The hub's About preview names the row,** e.g. "FAQ, feedback, privacy, terms" (copy: `marketing-lead`).
+- **Required with the move (§6.4, item 1):** the `FeedbackInbox` route is a modal with no header close control (`navigation/RootNav.tsx:759-767`; `docs/design/components.md:77`, #130). Today only testers meet that. Once a public row opens it, every user does. Give it the close control in the header; its glyph is `design-lead`'s.
+- **Recommended if cheap:** a "See your notes" link on the feedback sheet that opens the inbox.
+  - The FAB's count pill counts open notes (`FeedbackFAB.tsx:126`), but tapping the FAB opens a *new note* sheet, so nothing near the pill leads to what it counts (E1).
+  - If the 11-03 slot is too tight, skip it. The Help & about row alone still makes the inbox reachable.
+
+##### D-6: hide the Screen field — **confirmed, and extended to where route names still leak**
+
+- **Confirmed:** hide the field and keep sending the value.
+  - The API needs a non-empty `screen` (`backend/server.py:11097-11098`). The sheet already falls back to `'Unknown'` (`components/FeedbackSheet.tsx:136`).
+  - "Hidden" means **not rendered**: no label and no `TextInput`, so VoiceOver can't reach it either. It doesn't mean zero opacity.
+- **Extension (required): route names reach the public in two other places,** so hiding the field alone doesn't do what D-6 intends:
+  1. The inbox prints each note's `screen` on its row (`screens/FeedbackInboxScreen.tsx:226`). **Remove that line.**
+  2. The share export groups notes under `## {screen}` headings (`state/useFeedback.ts:259-271`). **Remove the route-name grouping.** The export is a plain list of notes, newest first, with status.
+- **Nothing is lost:** the server copy keeps `screen`, and that's what the `/feedback` triage reads.
+
+##### D-7: gate the `settings/testing` page body — **specified, with the readout kept reachable**
+
+**The predicate.** There's one tester-surface predicate, defined once and used in both places:
+- `__DEV__ || testing.stage_users || testing.timing_readout`
+- It's the same condition `head-eng`'s plan gives the hub row (`timing-readout-delivery.md`, step 2).
+- Define it as a small exported hook, e.g. `useTesterSurface()`, next to `TestingSection`.
+
+**Where it's used:**
+- **The hub's Testing row** (`settings/SettingsHubScreen.tsx:333`) uses it. Today it reads `__DEV__ || stageUsersEnabled`.
+- **The page body** (`settings/SettingsTestingScreen.tsx`):
+  - **Predicate true:** render `TestingSection` as today, minus the moved inbox row. The "Test stages" row keeps its own `testing.stage_users` gate (`TestingSection.tsx:66-81`), and trades-eng's readout row keeps its own `testing.timing_readout` gate.
+    - So on the operator's phone, with only `timing_readout` delivered, the page shows the readout row and nothing else, and it's never empty.
+  - **Predicate false:** render an honest unavailable state, not an empty "Testing" banner. One line, e.g. "This page isn't available.", using the stale-link precedent of `RookieRanksScreen.tsx:84-86` and the state standard's *not applicable* row. The header Back stays. No other action. Copy: `marketing-lead`.
+
+**Why the predicate must include `timing_readout`.** Gating the body on `__DEV__ || testing.stage_users` alone (the PRD's wording) would show the operator's phone the unavailable state, because `stage_users` is off there. That hides the readout, which `head-eng` ruled out.
+
+**The flag key doesn't block the build.** `useFlag` takes any string (`state/useFeatureFlags.ts:210`), so the predicate compiles before trades-eng registers `testing.timing_readout`. The predicate stays false until the experiment delivers the key.
+
+**File coordination (`head-eng`).** `SettingsHubScreen.tsx` and `SettingsTestingScreen.tsx` are in both onboarding-eng's D-7 and trades-eng's planned readout hunks. One owner per file per wave. I recommend:
+- `onboarding-eng` lands the shared predicate and both gates.
+- trades-eng's hunks then shrink to the readout row itself, which uses the hook.
+
+##### What `onboarding-eng` builds (numbered)
+
+1. **`AboutSection`:**
+   - Add a feedback-inbox row after Help & FAQ: `testID="settings.feedback-inbox"`, title from `marketing-lead`, opening `FeedbackInbox`.
+   - The section gets a `navigate` prop. Both hosts pass it: `SettingsAboutScreen`, and the flat `SettingsScreen` `aboutSection` (`:1391`).
+2. **`TestingSection` and the flat `testingSection` (`SettingsScreen.tsx:1018-1053`):** remove the "Test feedback" row.
+3. **The hub's About preview** (`SettingsHubScreen.tsx:211`) names the new row (copy: `marketing-lead`).
+4. **`FeedbackInbox` route** (`RootNav.tsx:759-767`):
+   - the public title (copy: `marketing-lead`; BL10-R2);
+   - a header close control (`components.md:77`; glyph `design-lead`'s).
+5. **D-6:**
+   - `FeedbackSheet`: stop rendering the Screen label and input (`:207-212`), and keep sending `screen` (`:136`).
+   - `FeedbackInboxScreen`: drop the per-note screen line (`:226`).
+   - `useFeedback` share export: drop the `## {screen}` grouping (`:259-271`).
+6. **D-7:**
+   - Add `useTesterSurface()`, returning `__DEV__ || testing.stage_users || testing.timing_readout`.
+   - The hub's Testing row uses it.
+   - `SettingsTestingScreen` renders `TestingSection` only when it's true, and otherwise the honest unavailable state with the header Back.
+7. **Guards:**
+   - `mobile/tests/check-settings-ia.js`: the row table's `Test feedback` entry (`:116`) becomes the inbox row, owned by `AboutSection.tsx` with marker `settings.feedback-inbox`.
+   - Add assertions that:
+     - (a) `SettingsTestingScreen` and the hub row both use the one predicate, and that it includes `testing.timing_readout`;
+     - (b) `FeedbackSheet` renders no Screen `TextInput` but still submits `screen`;
+     - (c) no user-visible "Test feedback" string remains.
+8. **Optional, if cheap:** a "See your notes" link on the feedback sheet that opens the inbox.
+
+##### TestFlight steps
+
+- **T1. [public account, no tester flags]** Settings → Help & about.
+  - Expect: the feedback row sits after Help & FAQ and opens the inbox.
+  - Expect: the inbox has a close control, and no "Test" wording or route names anywhere.
+- **T2. [same]** Open the `settings/testing` link.
+  - Expect: the unavailable state, and Back works. Fail if an empty "Testing" page shows.
+- **T3. [the operator's phone, with `timing_readout_rollout` live]** Settings hub.
+  - Expect: the Testing row shows, and the page shows the timing readout row.
+  - "Test stages" shows only if `testing.stage_users` is on.
+- **T4. [any]** FAB → the sheet has no Screen field. Send a note.
+  - Expect: the server's copy carries a non-empty `screen` (an `/api/feedback/admin` read by the operator).
+
+##### Decisions needed
+
+1. **`head-eng`:** who owns `SettingsHubScreen.tsx` and `SettingsTestingScreen.tsx` this wave (I recommend `onboarding-eng` for the predicate and gates; trades-eng adds the readout row on top).
+2. **`onboarding-pm`:** whether item 8 fits the 11-03 slot.
+
+##### Handoffs (through `head-product`)
+
+- **`onboarding-eng` via `head-eng`:** items 1–8.
+- **`marketing-lead`:** the row title, the About preview, the inbox title, and the unavailable line.
+- **`design-lead`:** the inbox's close control.
+- **trades-eng via `head-eng`:** use `useTesterSurface()` for the readout page gate.
+
+#### 6.10.2 design-lead: the credits row and the support/feedback copy presentation (verbatim, `reports/design-lead.md:5-82`)
+
+**What:** [PR #354](https://github.com/mattmurf77/fantasy-trade-finder/pull/354) `plan/launch-support-policy` at `3ca8383c`: `prd.md` §5.4 (c1–c8), §6.3 BL10-R4/R5/R10, and §6.7 (f-rows), plus `leads/legal-lead-drafts.md` Part 3 (the credits row). Checked against `origin/main` `712dcbed`: `AboutSection.tsx`, `FeedbackSheet.tsx`, `TestingSection.tsx`, `web/contact.html`.
+
+**Verdict: pass with 9 changes.** None changes approved words; all are presentation. For `onboarding-eng` (critical path, about 11-03).
+
+##### Changes
+
+1. **Credits text: use legal's exact wording.**
+   - `AboutSection.tsx` gets legal Part 3's text verbatim:
+     - "Consensus values from DynastyProcess and other published sources."
+     - "Data by nflverse (https://github.com/nflverse/nfldata), CC-BY."
+   - head-product's relay paraphrased the first as "other published consensus values". Legal's text governs, and KTC isn't named. Names no platforms, as legal requires.
+2. **Credits row: placement and construction** (`AboutSection.tsx`, after the Terms of Use row (`:94`), before Version (`:99`)):
+   - a **non-pressable** block in the existing row styles: `rowKey` "Credits", then the two sentences as two `rowSub` lines (chalk-dim, ≥4.5:1);
+   - no chevron, since it isn't a navigation row;
+   - the URL is shown in full as text, which satisfies the CC-BY attribution;
+   - no partial-text link, which would make a tap target under 44pt;
+   - one accessible element reading both lines;
+   - Version stays the last row (F7 triage).
+3. **Help & about row order** (`AboutSection.tsx`), matching the hub preview f18 "FAQ, feedback, privacy, terms":
+   1. Help & FAQ
+   2. **Your feedback** (new, BL10-R5)
+   3. Privacy Policy
+   4. Terms of Use
+   5. Credits
+   6. Version
+4. **The "Your feedback" row** (moved from `TestingSection.tsx:53` onward, the "Test feedback" row):
+   - the same `linkRow` construction: `rowKey` "Your feedback" (f17.title), `rowSub` f17.sub, `chevron-right` in chalk-dim;
+   - in-app navigation to `FeedbackInbox`, so `AboutSection` gains a `navigate` prop;
+   - testID `settings.feedback-inbox`, and `accessibilityRole="button"` (it navigates in-app; the external rows keep `link`);
+   - if the open-count pill comes along, it stays the specced count pill (`--r-pill`, flare count emphasis is allowed) at the row's trailing edge, before the chevron.
+   
+   The same row goes in the flat `aboutSection` (`SettingsScreen.tsx:1391`) for rollback parity.
+5. **FeedbackSheet support line (f3)** (`FeedbackSheet.tsx:178`):
+   - the text stays `type.bodySm` chalk-dim;
+   - **only `fleecedapp@gmail.com` is a tappable `mailto:`**, as nested `Text` in **chalk with an underline**, with `accessibilityRole="link"` and accessibility hint "Opens Mail";
+   - not ice: the sheet's ice is already the Send button and the active kind chip, and a text link doesn't need the accent;
+   - "Settings › Help & about › Your feedback" stays plain text. The sheet is a modal, so don't link the path.
+   
+   Import the address from BL10-R7's single constant.
+6. **Hide the Screen field (f5, D-6)** (`FeedbackSheet.tsx:207-216`):
+   - **remove** the "Screen" label and `TextInput` from the layout entirely (not disabled, not read-only); the pre-filled value is still sent;
+   - the Note label keeps its `marginTop: space.md`, so there's no orphan gap.
+   
+   For `ux-lead` / D-6: the inbox row still prints the stored internal route name (`FeedbackInboxScreen.tsx:226`). Design asks that it be hidden too: an internal route name is tester vocabulary (BL10-R2's spirit).
+7. **Sheet labels (f2, f4, fb.save):**
+   - "Send feedback" (`:177`) keeps `type.heading`, which renders in condensed caps. Correct.
+   - "What's this about?" (`:181`) is `type.label`, which renders in uppercase. Correct, keep the "?".
+   - The three kind chips "Broken / Tweak / Idea" fit three `flex: 1` chips at 320pt (the longest is 6 characters at 14px Archivo 600, about 50pt in a ≈90pt chip). The chip construction stays unchanged.
+   - Button "Send" (`:266`) stays primary.
+8. **Contact page links need a Chalkline style** (`web/contact.html`):
+   - today the body has **no `a` style** (only `.foot a`, `:63`), so the new mailto links would render in the browser's default blue or purple, a new hue (Prohibition 9);
+   - add `main p a, .lede a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }`. The global `:focus-visible` ice ring (`:22`) covers focus;
+   - **every** visible `fleecedapp@gmail.com` on the page is a `mailto:` (c1, c3, c4);
+   - in the status lines c5–c7 (set from JS, `:163-171`), build the link with `createElement('a')` and `textContent`, never `innerHTML`. If that's too much for the slot, plain text is acceptable there, because c1 carries the link above.
+9. **Split c4 into 3 paragraphs** (`web/contact.html:95-98`). It's about 522 characters now; head-product's ~390 predates R22.3. The words are unchanged; only paragraph breaks are added:
+   - P1: "Quickest route: … Delete account."
+   - P2: "If you can't use the app, email … completed within 30 days."
+   - P3: "You can also pick Delete my data above while signed in on this site. The form can't send a confirmation."
+   
+   Wrap the in-app labels in `<strong>` (**Settings › Account & data**, **Download my data**, **Delete account**, **Delete my data**), as the page already does for its option name.
+
+**Also fix while touching the page (SHOULD, existing debt):** the character counter `.counter` (`web/contact.html:51`) is content in `--chalk-faint` at 12px. Change it to `--chalk-dim` with `font-variant-numeric: tabular-nums` (data numerals). Chalk-faint is placeholders and disabled only.
+
+##### What onboarding-eng builds (presentation only; words from the PRD tables, verbatim)
+- **`AboutSection.tsx`**, plus the flat `aboutSection`: the row order in 3, the Your feedback row in 4, the Credits block in 1–2, and a `navigate` prop. Remove the inbox row from `TestingSection` and the flat `testingSection`. Update the hub preview f18.
+- **`FeedbackSheet.tsx`:** f2, f4, f4.a11y and fb.save labels; f3 with the mailto as in 5; the Screen field removed as in 6; f1.alt in the notice slot (unchanged construction).
+- **`web/contact.html`:**
+  - c1–c8 verbatim;
+  - the link style and mailtos in 8;
+  - the c4 split in 9;
+  - the counter fix;
+  - the two "§3 note" strings only once marketing-lead types them.
+- **Evidence (D-056):** `check_web_structure.py`; a code-walk of the hidden Screen field and the mailto targets; TestFlight steps covering:
+  - Help & about shows the row order and Credits;
+  - the f3 address opens Mail;
+  - the sheet has no Screen field;
+  - Your feedback opens the inbox.
+- **Design review:** I give the `/design-review` verdict on the build diff.
+
+#### 6.10.3 Reconciliation notes (`onboarding-pm`)
+
+- **Agreement.** Both reviews give Help & about the same order: Help & FAQ → Your feedback → Privacy
+  → Terms → Credits → Version (ux-lead D-3 "Position"; design-lead change 3). Both drop the inbox's
+  route-name line (`mobile/src/screens/FeedbackInboxScreen.tsx:226`; ux-lead D-6 extension 1;
+  design-lead change 6).
+- **D-3, D-6 and D-7 are decided,** as recorded in §9: D-3 Help & about, after Help & FAQ; D-6 hide,
+  extended per ux-lead; D-7 per ux-lead's `useTesterSurface()` = `__DEV__ || testing.stage_users ||
+  testing.timing_readout`.
+- **ux-lead item 8 (the "See your notes" link), `onboarding-pm`'s call:** optional and outside the
+  launch ACs. `onboarding-eng` includes it only if it fits the 11-03 slot without risk; otherwise it
+  goes after launch. This answers ux-lead's decision 2.
+- **The credits row** (design-lead changes 1–2) enters #354 through design-lead's review and the
+  launch plan, which names "the credits row" for `onboarding-eng` (`launch-plan-1118.md:19`, `:36`,
+  org-bringup worktree). It uses `legal-lead`'s exact Part 3 text, as quoted in design-lead's change 1.
+  It is recorded under BL-10's About-section work as BL10-R12 and BL10-AC10 (§6.3, §6.6), with its
+  evidence: a structural assertion that the credits text equals legal's text, and a TestFlight step
+  (Help & about shows Credits).
+  - It adds no events and no flags, so BL-10's signed waivers W-BL10-1 and W-ALL-1 hold on their
+    stated reasons. **Flagged for `head-product` to confirm** (§9), rather than opening new waivers.
+  - **One exact string to settle.** Design-lead's change 1 ends the nflverse sentence with a period.
+    Legal's Part 3 hand-off row (`leads/legal-lead-drafts.md:373`, org-bringup worktree) quotes it
+    without one. The assertion needs one exact string: `legal-lead` confirms, via `head-bizops`.
+- **Where the reviews change earlier text in this PRD.** For the build, the reviews govern:
+  - **D-7's predicate.** §9 D-7 recommended gating on `__DEV__ || testing.stage_users`. ux-lead's
+    predicate adds `testing.timing_readout`, so the operator's readout stays reachable. BL10-AC7 now
+    reads with that predicate (§6.6).
+  - **The inbox row's screen line.** The BL-10 TestFlight step 7 expected the inbox row to show the
+    screen a note was sent from. Both reviews remove that line, so the step now checks the server copy
+    instead ([scope-bl10-feedback.md](scope-bl10-feedback.md) §3).
+  - **§6.4's two open items for `ux-lead`** (the inbox's close control, the `settings/testing` deep
+    link) are answered by ux-lead's D-3 and D-7.
+  - **The share export (f16).** ux-lead's D-6 extension 2 drops the `## {screen}` grouping. f16's
+    header and labels don't change.
+  - **Marketing copy already delivered.** ux-lead's handoff asks `marketing-lead` for the row title
+    and the inbox title, but §6.7 already adopts "Your feedback" for both (f17.title, f8, f9), and the
+    About preview is f18 (pending operator §6). What's new for `marketing-lead` is the D-7 unavailable
+    line.
+  - **Link color across the web pages.** Design-lead's change 8 styles `contact.html` links in chalk
+    with an underline, while `privacy.html` and `terms.html` style links in ice
+    (`web/privacy.html:57`, `web/terms.html:54`). Not a conflict with P28-R9, which leaves the style to
+    `design-lead`; **flagged for `design-lead` to confirm the difference is intended.**
+- **Open items:**
+  - **`head-eng`:** file ownership of `SettingsHubScreen.tsx` and `SettingsTestingScreen.tsx` this
+    wave (shared with trades-eng's readout). ux-lead recommends `onboarding-eng` for the predicate and
+    gates, with trades-eng adding the readout row on top.
+  - **`design-lead`:** the inbox close-control glyph.
+  - **`marketing-lead`:** the row title, the About preview, the inbox title, the D-7 unavailable line,
+    and the two "§3 note" contact strings (see the note above on what §6.7 already holds).
+
 ## 7. M7: privacy and terms pages
 
 ### 7.1 Verified current state
@@ -812,6 +1116,97 @@ Each row is a **candidate** for `analytics-lead`; "appears covered" is a reading
 - **M7-AC7.** Manual read-through of both pages on desktop and mobile Safari; both mailto links open
   Mail; the Settings → Help & about Privacy and Terms rows in the app open the updated pages.
 
+### 7.8 D-13: the in-app policy-change notice
+
+**Status: decided by Product** (`head-product`, 2026-10-23); time-sensitive, it ships in the 11-06
+binary. Spec: `onboarding-pm`. Build: `onboarding-eng`. Words: `legal-lead`, via `head-bizops`. Scope
+block: [scope-d13-policy-notice.md](scope-d13-policy-notice.md) (gate 1 pending; W-D13-1 to W-D13-3
+pending operator sign-off).
+
+`legal-lead`'s R18 rules the policy change material, so it is announced in the app. Privacy §9
+promises that (`web/privacy.html:273-274` at `712dcbed`). The banner ships after launch, so the launch
+vehicle is the **existing what's-new tip**. That release's what's-new slot carries the policy notice,
+not a feature note: the notice is required, and a first public release needs no feature note. Sources:
+`bizops-banner-use-cases.md` §0 item 1 (`:44-51`) and §B6 (`:221-240`), and `in-app-banner-product.md`
+(`:169-174`), all in the org-bringup worktree and untracked.
+
+#### 7.8.1 Verified facts (at `origin/main` `712dcbed`)
+
+| Fact | Where |
+|---|---|
+| The hook is `mobile/src/hooks/useWhatsNew.ts` (not `state/`). Its contract: one entry per release, keyed by the app version (`Constants.expoConfig.version`), added in the same change that bumps app.json's `version`. | `useWhatsNew.ts:8-23`, `:42` |
+| The headline is one line with no period. `route` is optional; on tap the anchor navigates there and dismisses. | `:26`, `:28`; `:17-19` |
+| The `WHATS_NEW` map holds one stale `'1.9.1'` placeholder, whose own headline ends in a period. The app is at `1.21.4`, so it never matches. | `useWhatsNew.ts:33-39`; `mobile/app.json:5` |
+| It shows once per version: `dismiss()` stores the running version under `ftf_whats_new_seen_version`, and the entry shows only while the stored value differs. | `:41`, `:71-77`, `:79-85` |
+| Flag `ux.whats_new` is `true`. | `config/features.json:175` |
+| **Where it renders: only on League home, not on the League tab's landing screen.** The only consumer is `LeagueScreen`. Since #181 the League tab lands on `LeagueSummaryScreen` ("League rankings"), and `LeagueScreen` is the pushed `LeagueHome` sub-route, opened from the "League home" row or from Rank. | `LeagueScreen.tsx:115`, `:521-531`; `mobile/src/navigation/TabNav.tsx:575-592`; `LeagueSummaryScreen.tsx:1664`; `RankScreen.tsx:430` |
+| The whole tip is one `Pressable` (the ✕ is an icon inside it, not a separate control). A tap logs `league_home_action_tapped` with `action: 'whats_new'`, dismisses, and navigates to `route`. | `mobile/src/components/CoachMark.tsx:18-32`; `LeagueScreen.tsx:525-529`, `:469-470` |
+| **M-a holds today:** nothing dismisses the tip except that tap. `dismiss()` is called only from `LeagueScreen`'s `onDismiss`; `CoachMark` has no timer or effect; the hook has none. The tip lasts while the installed version equals the entry's key, so a later update without its own entry ends it. | `LeagueScreen.tsx:527`; `CoachMark.tsx:18-34`; `useWhatsNew.ts:49-88` |
+| `SettingsAbout` ("Help & about") is a root-stack route holding the Privacy Policy and Terms rows. | `RootNav.tsx:698-701`; `AboutSection.tsx:82`, `:91` |
+| `whats_new_shown` and `whats_new_tapped` are not registered anywhere (no `git grep` match). The tap's `league_home_action_tapped` is. | `backend/analytics_taxonomy.py:127`, `:1108` |
+
+#### 7.8.2 Requirements
+
+- **D13-R1.** One `WHATS_NEW` entry keyed to the **release binary's app.json `version`**, set in the
+  same change that bumps the version, with `route: 'SettingsAbout'`. Tapping opens Settings › Help &
+  about (where the policy rows live) and dismisses it. It shows once per version.
+- **D13-R2.** The headline is `legal-lead`'s wording: **wording: legal-lead (in progress via
+  head-bizops).** The template from bizops B6 is "We've updated our Privacy Policy and Terms": one
+  line, no period. (Legal's own R26.1 draft, `leads/legal-lead.md:1254-1256` in the org-bringup
+  worktree, reads "We've updated our Privacy Policy and Terms of Use. Tap to read them". `head-bizops`
+  relays the final text.)
+- **D13-R3.** Notice, not consent: never blocking, no Accept button, dismissible.
+- **D13-R4.** The stale `'1.9.1'` placeholder: remove it or leave it. It is harmless, since it never
+  matches the release version. **Recommended:** remove it in the same change.
+- **D13-R5.** The release slot carries no feature note (Product's call).
+- **D13-R6 (M-a).** The tip stays until tapped or dismissed, with no silent expiry. This holds at
+  `712dcbed` (7.8.1); the build keeps it so.
+- **D13-R7 (M-b).** The policy pages carry their new effective date. M7 fixes the stale "July 19,
+  2026" (`web/privacy.html:71`; M7-R4, M7-AC3).
+- **D13-R8 (M-c).** The TestFlight "What to Test" note for the last TestFlight build carries
+  `legal-lead`'s release-notes line; `app-manager` formats it. The first App Store **update**'s
+  What's New carries it too.
+- **Option, not the default:** if `legal-lead` says a League-only tip isn't enough notice, also show
+  it on the Home hub.
+
+#### 7.8.3 Product's calls on the limits (`head-product`, 2026-10-23)
+
+1. **The tip shows only on League: accepted for v1, with the mitigations D13-R6 to D13-R8.** The
+   notice is for **existing users**, today's TestFlight testers. New App Store users meet the new
+   policy at sign-up, before they agree. **Correction found on verification:** the tip is on League
+   home, one tap below the League tab's landing screen (7.8.1), so the surface is narrower than "the
+   League tab". Legal's draft "What to Test" line (`leads/legal-lead.md:1258`) says "Check the League
+   tab shows the notice once", so it needs "League home" too. Flagged for `head-product` (§9).
+2. **No What's New field on a first App Store release: accepted.** `legal-lead`'s release-notes line
+   goes in the TestFlight "What to Test" note (existing users) and in the first App Store update's
+   What's New. The field's absence is `app-manager`'s note (`leads/app-manager-app-store-submission.md:268`,
+   E3b, "[verify on screen]"), relayed to Product (`launch-readiness-product.md:146`); both in the
+   org-bringup worktree.
+3. **New installs see it too.** That's harmless: it's notice, not consent.
+
+**Open:** `legal-lead` confirms calls 1 and 2, via `head-bizops`; `head-product` routes it.
+
+#### 7.8.4 Timing (from legal's R26.1; flagged)
+
+Legal's R26.1 (`leads/legal-lead.md:1259-1262`) also asks that the tip **not appear before the new
+text is live** (about 11-09), or it says "we've updated" while the links still open the old pages. The
+11-06 binary reaches TestFlight testers about 11-07. Legal's preferred fix holds `ux.whats_new` false
+in prod until the deploy that publishes the new pages (`release-lead`, on the operator's go); the
+acceptable fallback is a two-day gap for TestFlight testers only. That uses the existing flag as a
+sequencing lever, so W-D13-2 (no new flag) still holds. Product's calls don't cover it yet: **flagged
+for `head-product`** (§9).
+
+#### 7.8.5 Acceptance criteria
+
+- **D13-AC1.** A structural guard holds: `WHATS_NEW` has an entry whose key equals `mobile/app.json`
+  `expo.version`, with `route === 'SettingsAbout'` and a headline equal to `legal-lead`'s final text,
+  with no trailing period.
+- **D13-AC2.** The code-walk in the scope block (hook → `LeagueScreen` render → tap → navigate →
+  dismiss) is re-walked against the built files.
+- **D13-AC3.** On an **updated** TestFlight install, League → League home shows the line once; a tap
+  opens Settings › Help & about with the policy rows; after a relaunch it doesn't show again.
+- **D13-AC4.** Nothing blocks: no Accept button, no modal.
+
 ## 7b. FAQ (SUP-M4)
 
 `web/faq.html` is rewritten for launch with `marketing-lead`'s text (marketing-lead-copy.md §2,
@@ -921,7 +1316,8 @@ at `712dcbed`.
 | **M7** | Checklist work now | `legal-lead` wording; `analytics-lead` inventory (7.3, 7.4); D-11, D-12, D-13 | **App Privacy label submission** (M6(b)) and App Store submission |
 | **Q6 tour line** (§6.8) | Yes: approved, strings fixed | Nothing (operator-approved); gate-1 acceptance and waiver sign-off for its scope block | The 11-06 binary |
 | **FAQ** (§7b) | `FAQ-*` assertions; the post-launch text | Operator §6 (I); `legal-lead` on Q16/Q17; Q9's `model_config` confirmation; marketing's pre-launch Q3 variant (via `head-bizops`, in progress); pricing-line placement; `head-eng`'s flip mechanism | Live by 11-09 with M7, before the 11-10 App Store submission (P37); Q3 flips 11-18 |
-| **M11** (§6.9) | Server design and the `eng-security` review of the proofs | `head-eng`'s server-file allocation; `platforms-pm` review; `legal-lead` on M11-R5 and the proofs; `marketing-lead` step-up copy (M11-R6); operator sign-off on W-M11-1, W-M11-2 and gate 1 | Client: the 11-06 binary. Server: can deploy before it. Size M, tight (§9) |
+| **M11** (§6.9) | Server design and the `eng-security` review of the proofs (gate 1 and waivers done, P38) | `head-eng`'s server-file allocation; `platforms-pm` review; `legal-lead` on M11-R5 and the proofs; `marketing-lead` step-up copy (M11-R6) | Client: the 11-06 binary. Server: can deploy before it. Size M, tight (§9). Fallback: §6.9.10 (operator's call, not taken) |
+| **D-13 policy notice** (§7.8) | Yes: one map entry and its guard | `legal-lead`'s final headline (via `head-bizops`); the release version number; `head-product` on the R26.1 timing (§7.8.4); gate 1 and W-D13-1 to W-D13-3 | The 11-06 binary |
 
 All three are App Store launch MUST or support items. P28 and BL-10 should share one review pass for
 the address, since both put it in front of users. M7-R3 should land after P28's address is live, or
@@ -931,7 +1327,8 @@ in the same deploy.
 
 - **Launch: Wed 2026-11-18.**
 - **Fri 2026-11-06: the binary is feature-complete.** Every in-app copy row lands by then: BL-10,
-  including f1.alt and D-1(b), Q6, and M11's client part (§6.9).
+  including f1.alt and D-1(b), Q6, M11's client part (§6.9), the credits row (BL10-R12) and the
+  D-13 what's-new line (§7.8).
 - **By Mon 2026-11-09: the privacy and terms pages (M7) and the FAQ are live** (P37,
   `head-product`), before the App Store submission. The effective date is `legal-lead`'s; M7-AC3
   needs it on or after the date the text ships. `head-product` has asked `head-eng` to move the
@@ -977,13 +1374,24 @@ For `head-product`, with a recommendation each.
   - **Q3 uses marketing's pre-launch variant** until the 11-18 flip. `head-bizops` is obtaining it (copy: marketing-lead, in progress).
   - `head-product` has asked `head-eng` to move the legal-pages milestone to 11-09.
 - **M11, option (e),** decided by `onboarding-pm`, 2026-10-23 (§6.9, M11-R1 to M11-R6). Options (a), (b) and (d) are rejected; (c) is folded into (e).
+- **Operator waiver sign-off (M11), 2026-10-23,** relayed by the coordinator, verbatim: "Decision 1: Agree to the waivers." It covers W-M11-1 and W-M11-2.
+- **P38,** `head-product`, 2026-10-23: **gate 1 accepted** for [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md). Option (e) fixes deletion under 5.1.1(v) and the broken ESPN/MFL import together.
+- **M11 fallback (Product's; an operator call; not taken):** if `head-eng` can't fit M11 by 11-06, hide ESPN/MFL entry at sign-in and drop "ESPN and MFL" from the listing until M11 ships (§6.9.10). Apple sign-in followed by connecting ESPN or MFL from Settings works in code, so the listing and FAQ could keep them with accurate wording.
+- **ux-lead's and design-lead's #354 reviews accepted by Product** (2026-10-23) and folded in as build instructions (§6.10).
+- **onboarding-pm on ux-lead item 8** (the "See your notes" link): optional and outside the launch ACs; included only if it fits the 11-03 slot without risk, otherwise after launch.
+- **The credits row** joins BL-10's About-section work (BL10-R12, BL10-AC10), with `legal-lead`'s exact Part 3 text.
+- **D-13 decided** (`head-product`, 2026-10-23): legal's R18 says the change is material, so it is announced in the app. The launch vehicle is the existing what's-new tip, and that release's slot carries the policy notice, not a feature note (§7.8). `legal-lead` writes the words via `head-bizops`; `onboarding-pm` owns the spec; `onboarding-eng` builds it in the 11-06 binary.
+- **D-13's limits, Product's calls** (`head-product`, 2026-10-23; §7.8.3):
+  - **The League-only tip is accepted for v1,** with mitigations: it stays until tapped or dismissed (M-a, verified to hold in code), the policy pages carry the new effective date (M-b, via M7), and the last TestFlight build's "What to Test" note carries legal's release-notes line (M-c, `app-manager` formats it). If `legal-lead` says it isn't enough, the option is to also show it on the Home hub.
+  - **No What's New field on a first App Store release: accepted.** Legal's release-notes line goes in the TestFlight "What to Test" note and in the first App Store update's What's New.
 - **D-1 (b)** (one `retrySync()` after the FAB's `hydrate()`): chosen by `head-product`, agreed by `head-eng`.
 - **D-2 (a)** (exempt `POST /api/feedback` from `@_gate_unverified_write`; attribute verified sessions, take the rest anonymously): `head-eng` confirmed the 403; `head-product` chose (a). **W-BL10-2 has lapsed**, so a pytest is required, and so are the `docs/api-reference.md` rows named in D-2 (`:146`, `:984`). It is an API contract change, so full gates apply.
-- **D-3:** the inbox row goes to Settings → Help & about, decided by `onboarding-pm`; pending `ux-lead`'s review.
+- **D-3:** the inbox row goes to Settings → Help & about, directly after Help & FAQ, decided by `onboarding-pm` and confirmed by `ux-lead` (§6.10.1), with a header close control on the inbox.
 - **D-4:** unflagged, chosen by `head-product`.
 - **D-5** (retire the FAB's App Store build exclusion): chosen by `head-product`, agreed by `head-eng`.
 - **D-10,** decided by `head-bizops`: the operator monitors fleecedapp@gmail.com; general replies go out within 2 business days; data requests are acknowledged within 2 business days and completed within 30 days (the 30 days is pending `legal-lead`'s confirmation). **Gap SUP-M7:** there is no alert for in-app feedback.
-- **D-6 decided: hide** (`onboarding-pm`, matching marketing's f5): the Screen field is hidden and the sheet keeps sending the value, because the API still requires a non-empty `screen` (`backend/server.py:11097-11098`). `ux-lead`'s review is still owed.
+- **D-6 decided: hide** (`onboarding-pm`, matching marketing's f5): the Screen field is hidden and the sheet keeps sending the value, because the API still requires a non-empty `screen` (`backend/server.py:11097-11098`). **Extended per `ux-lead`** (§6.10.1): the inbox drops its per-note screen line, and the share export drops its route-name grouping.
+- **D-7 decided, per `ux-lead`** (§6.10.1): one predicate, `useTesterSurface()` = `__DEV__ || testing.stage_users || testing.timing_readout`, used by the hub's Testing row and by the `settings/testing` page body; when it is false the page shows an honest unavailable state. This replaces the D-7 row's narrower `__DEV__ || testing.stage_users`.
 - **Q6 approved** (operator, "Q6 tour line: Yes", form 2026-10-23, relayed by `head-product`): both `n23` strings become "…We never see your password." (§6.8, legal-lead LEG-S15).
 - **P36,** `head-product`'s calls on `marketing-lead`'s launch copy batch (2026-10-23). The copy wording stays marketing's.
   - **f1.alt ships;** f1 is not used (D-1(b) is decided and agreed by `head-eng`).
@@ -998,7 +1406,7 @@ For `head-product`, with a recommendation each.
   - **Q18** ("Replies come within 2 business days.") is the operator's own commitment. It matches D-10.
 - **Copy rows pending operator §6 (A–I), as labelled** in the §5.4 and §6.7 adopted tables and in [faq-copy.md](faq-copy.md) (block I). `name`, `typo`, `voice` and `keep` rows are adopted without approval.
 - **Launch dates:** per `head-product` (`launch-plan-1118.md`), recorded in §8.
-- **Scope-block gates.** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md): gate 1 accepted (P37) and waivers signed (2026-10-23). [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md): `head-product`'s gate-1 acceptance and the operator's sign-off on W-M11-1 and W-M11-2 are **pending**.
+- **Scope-block gates.** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md): gate 1 accepted (P37) and waivers signed (2026-10-23). [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md): gate 1 accepted (P38) and waivers signed (2026-10-23). [scope-d13-policy-notice.md](scope-d13-policy-notice.md): `head-product`'s gate-1 acceptance and the operator's sign-off on W-D13-1 to W-D13-3 are **pending** (`head-product` takes the waivers to the operator).
 - **Flags for `head-product` from marketing's R22 revision** (source as of 2026-10-23 18:17, R22 applied, its §0 item 11):
   - **C2–C5 and C8, legal review.** P36 said they "still need legal-lead's review". Marketing's R22 column now marks c2 and c5 "approved (R22.1)" and c3, c4 and c8 "edited per R22" (legal's exact text), and its §0.11 says "No row is pending". Confirm that legal-lead's review is done.
   - **D-8.** c2 now reads `Delete my data` "(D-8(a); R22.1)", and c8 no longer branches on D-8. That reads as legal-lead choosing D-8(a). Confirm, and D-8 leaves "Still open".
@@ -1009,7 +1417,15 @@ For `head-product`, with a recommendation each.
   - **M11 (i): the import break is a launch MUST on its own.** Since #279 a fresh ESPN or MFL entry can't import its league (§6.9.4). The same change fixes it (M11-R1). `platforms-pm` should be told.
   - **M11 (ii): schedule risk.** Size M (server about 150–250 lines plus tests, client about 100–200), tight for the 11-06 binary. The server part can deploy separately.
   - **M11 (iii): M11-R5 needs `legal-lead`:** that a claim-only "Delete" (end the session, remove the device link, no account row) meets 5.1.1(v), which proofs are accepted for erasure and export, and the residual exposure for users who can't prove ownership.
-- **Still open:** D-7 with `ux-lead` (plus its reviews of D-3 and D-6); D-8, D-9, D-11, D-12 and D-13 with `legal-lead` via `head-bizops`; D-14 with `app-manager`; M11-R5 with `legal-lead`.
+- **Flags for `head-product` (2026-10-23, §6.10 and D-13):**
+  - **Credits row waivers.** The credits row adds no events and no flags, so this spec treats BL-10's signed W-BL10-1 and W-ALL-1 as holding on their stated reasons. Confirm, rather than opening new waivers.
+  - **D-13, the tip's surface.** It renders on League home, one tap below the League tab's landing screen (§7.8.1), not "on the League tab". Product's League-only call (§7.8.3) rests on that narrower surface; the Home-hub option may matter more. Legal's draft "What to Test" line also says "League tab".
+  - **D-13, timing.** Legal's R26.1 asks that the tip not appear before the new pages are live, preferably by holding `ux.whats_new` false until the 11-09 pages deploy (§7.8.4). Product's calls don't cover it yet.
+- **Still open:**
+  - D-8, D-9, D-11 and D-12 with `legal-lead` via `head-bizops`; D-14 with `app-manager`.
+  - **M11:** `legal-lead` confirms M11-R5 (via `head-bizops`); an `analytics-lead` count of affected `entry:*` users (`head-product` has requested it).
+  - **D-13:** `legal-lead` confirms Product's two calls on the limits (§7.8.3), via `head-bizops` (`head-product` routes it), and supplies the final headline and release-notes line.
+  - **§6.10 open items** (6.10.3): file ownership of `SettingsHubScreen.tsx` / `SettingsTestingScreen.tsx` (`head-eng`), the inbox close-control glyph (`design-lead`), the credits string's final period (`legal-lead`), and the marketing strings.
 
 **Waivers** (surfaced here per the feature-scope rule; each is restated with its reason in its
 scope block):
@@ -1030,29 +1446,33 @@ scope block):
 | W-FAQ-1 | FAQ §1 analytics | A static page: `web/faq.html` loads no script, so there is no events SDK and no new user action to measure. **Signed 2026-10-23.** |
 | W-FAQ-2 | FAQ §2 flags | None added. Lapses if `head-eng`'s 11-18 flip uses a flag; the scope block's §2 then names it. **Signed 2026-10-23.** |
 | W-FAQ-3 | FAQ §3 mobile guard, pytest, TestFlight checklist | Web-only text. The app's Help & FAQ row only opens the web URL, which the manual read-through covers. **Signed 2026-10-23.** |
-| W-M11-1 | M11 §1 analytics | No new events. The re-auths reuse proof paths that already carry the `signin_*` funnel; that each step-up fires it is verified at build, and the waiver is reopened if one doesn't. **Pending operator sign-off.** |
-| W-M11-2 | M11 §2 flags | None added. The existing proof-path flags `mfl.auth_link` and `espn.webview_capture` act as kill switches: with one off, that entry stays claim-only. A recommendation; `head-eng` decides. **Pending operator sign-off.** |
+| W-M11-1 | M11 §1 analytics | No new events. The re-auths reuse proof paths that already carry the `signin_*` funnel; that each step-up fires it is verified at build, and the waiver is reopened if one doesn't. **Signed 2026-10-23.** |
+| W-M11-2 | M11 §2 flags | None added. The existing proof-path flags `mfl.auth_link` and `espn.webview_capture` act as kill switches: with one off, that entry stays claim-only. A recommendation; `head-eng` decides. **Signed 2026-10-23.** |
+| W-D13-1 | D-13 §1 analytics | No new events. A tap already fires `league_home_action_tapped` (`whats_new`); `whats_new_shown` / `whats_new_tapped` are optional per bizops §10, and need `analytics-lead`'s grant if added later. **Pending operator sign-off.** |
+| W-D13-2 | D-13 §2 flags | None new; `ux.whats_new` is already on (`config/features.json:175`). Legal's R26.1 timing would only hold the existing flag off until the pages deploy (§7.8.4). **Pending operator sign-off.** |
+| W-D13-3 | D-13 §3 pytest | No backend code. **Pending operator sign-off.** |
 
 W-Q6-* and W-FAQ-* are covered by the 2026-10-23 sign-off, not the 2026-10-22 one. W-M11-* are
-covered by neither.
+covered by the M11 sign-off of 2026-10-23 ("Decision 1: Agree to the waivers."). W-D13-* are
+covered by none yet.
 
 ## 10. Handoffs
 
 | To | What |
 |---|---|
-| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. Gate-1 acceptance of the M11 scope block (Q6 and FAQ were accepted in P37). The R22 flags in §9: the C2–C5/C8 legal review, D-8 and a home for `r22.settings.rows` (the FAQ ship order is resolved by P37). The 2026-10-23 flags in §9: P28's date, and M11 (i) to (iii). |
-| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; sign-off on W-M11-1 and W-M11-2 (W-Q6-* and W-FAQ-* were signed on 2026-10-23). |
-| `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18): delivered 2026-10-23 and recorded in the adopted tables. Still owed for the FAQ (§7b): the **pre-launch variant** of Q3's App Store line (in progress via `head-bizops`; needed for the 11-09 go-live, P37), and where the **pricing line** goes. M11: the step-up copy that names the account's own sign-in (M11-R6). **Copy: marketing-lead (not inventoried):** type the three "§3 note" rows (contact `:68` and `:82`, inbox `:110`; new text given in its §3, no type or §6 entry) and say whether they need operator §6. |
-| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12, D-13; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4; marketing's R22 column marks them reviewed, `head-product` to confirm); FAQ Q16 and Q17 (§7b). M11 (§6.9): which proofs are accepted for erasure and export, M11-R5, and the residual 5.1.1(v) exposure. |
+| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. Gate-1 acceptance of the D-13 scope block (Q6 and FAQ were accepted in P37, M11 in P38). The R22 flags in §9: the C2–C5/C8 legal review, D-8 and a home for `r22.settings.rows` (the FAQ ship order is resolved by P37). The 2026-10-23 flags in §9: P28's date; M11 (i) to (iii); the credits-row waivers; D-13's surface and timing. Route D-13's limits to `legal-lead` for confirmation; take W-D13-1 to W-D13-3 to the operator. |
+| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; sign-off on W-D13-1 to W-D13-3 (W-Q6-*, W-FAQ-* and W-M11-* were signed on 2026-10-23); the M11 fallback, if `head-eng` can't fit M11 by 11-06 (§6.9.10). |
+| `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18): delivered 2026-10-23 and recorded in the adopted tables. Still owed for the FAQ (§7b): the **pre-launch variant** of Q3's App Store line (in progress via `head-bizops`; needed for the 11-09 go-live, P37), and where the **pricing line** goes. M11: the step-up copy that names the account's own sign-in (M11-R6). §6.10: the D-7 unavailable line (the row and inbox titles are already f17.title and f8/f9; the About preview is f18). If the M11 fallback is taken: the Apple-then-connect wording for the listing and FAQ (§6.9.10). **Copy: marketing-lead (not inventoried):** type the three "§3 note" rows (contact `:68` and `:82`, inbox `:110`; new text given in its §3, no type or §6 entry) and say whether they need operator §6. |
+| `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12, D-13; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4; marketing's R22 column marks them reviewed, `head-product` to confirm); FAQ Q16 and Q17 (§7b). M11 (§6.9): which proofs are accepted for erasure and export, M11-R5, and the residual 5.1.1(v) exposure. §6.10.3: the credits text's exact final string. D-13 (§7.8): the final headline and release-notes line; confirm Product's two calls on the limits (§7.8.3); the R26.1 timing as Product decides it. |
 | `analytics-lead` / `models-lead` (via head-bizops) | Read prod `model_config` and confirm or correct the FAQ's Q9 K-factors (32 / 8 / 4) before 11-09 (FAQ-R6). |
-| `analytics-lead` | Confirm or correct every candidate in §7.3 and §7.4; publish the data inventory (P12/P18) the policy is reconciled against. M11: a prod count of stuck `entry:*` users, and of `AUTH-DENY` lines on `/api/espn/link` and `/api/mfl/link` (§6.9.9). |
-| `design-lead` | Mailto link styling on `contact.html` and the policy pages; the sheet's support-address line; the About row; the pill. Chalkline only. P36: c4's length (the split) and the f4 chips at 320pt. M11: the step-up sheets. |
-| `ux-lead` | Review the row move (§6.3 BL10-R5, D-3); review D-6 (decided: hide); D-7; the inbox modal's missing close control (§6.4). M11: the step-up flow (M11-R2). |
+| `analytics-lead` | Confirm or correct every candidate in §7.3 and §7.4; publish the data inventory (P12/P18) the policy is reconciled against. M11: a prod count of stuck `entry:*` users, and of `AUTH-DENY` lines on `/api/espn/link` and `/api/mfl/link` (§6.9.9); `head-product` has requested it. |
+| `design-lead` | Mailto link styling on `contact.html` and the policy pages; the sheet's support-address line; the About row; the pill. Chalkline only. P36: c4's length (the split) and the f4 chips at 320pt. M11: the step-up sheets. §6.10: the inbox close-control glyph; the `/design-review` verdict on the build diff; confirm the chalk link style on `contact.html` vs ice on the policy pages (§6.10.3). |
+| `ux-lead` | Done 2026-10-23: the row move (D-3), D-6, D-7 and the inbox's close control (§6.10.1). M11: the step-up flow (M11-R2). |
 | `platforms-pm` | M11 review (P10): the credential sheets and linking inside sign-in (§6.9). Also: ESPN and MFL entry can't import a league since #279 (§6.9.4). |
 | `eng-security` | M11 review of the identity proofs (M11-R1, M11-R2), including what counts as a cookie-gated ESPN read. |
 | `head-eng` → `onboarding-eng` | Build P28 code, BL-10 code and guard, checker assertions; retire the FAB exclusion plan (D-5); the support-address constant and the `cross-client-invariants.md` row; confirm D-1 and D-2. |
-| `head-eng` → `onboarding-eng` (added 2026-10-23) | The Q6 strings and their assertion (§6.8); the FAQ build and the 11-18 flip mechanism (§7b); at build, **confirm the extension release is still `extension-v0.1.1`** and that the FAQ links the same release as `web/index.html`; BL10-R11 if cheap; confirm the scope of FAQ Q15's contrarian score (FAQ-R10). P37: move the legal-pages milestone to 11-09; decide P28's date with `head-product` (§9). M11 (§6.9): allocate the server files (`/api/espn/*` and `/api/mfl/*` are Platforms'; auth is cross-area); the client part in the 11-06 binary, the server part deployable earlier. |
-| `app-manager` / `release-lead` | Support URL and support email in App Store Connect (D-14); App Privacy submission after M7 (M7-AC6); a build number for the BL-10 TestFlight checklist. |
+| `head-eng` → `onboarding-eng` (added 2026-10-23) | The Q6 strings and their assertion (§6.8); the FAQ build and the 11-18 flip mechanism (§7b); at build, **confirm the extension release is still `extension-v0.1.1`** and that the FAQ links the same release as `web/index.html`; BL10-R11 if cheap; confirm the scope of FAQ Q15's contrarian score (FAQ-R10). P37: move the legal-pages milestone to 11-09; decide P28's date with `head-product` (§9). M11 (§6.9): allocate the server files (`/api/espn/*` and `/api/mfl/*` are Platforms'; auth is cross-area); the client part in the 11-06 binary, the server part deployable earlier. §6.10: ux-lead's items 1–8 (item 8 optional) and design-lead's changes 1–9 plus the counter fix; decide who owns `SettingsHubScreen.tsx` and `SettingsTestingScreen.tsx` this wave (trades-eng's readout shares them). D-13 (§7.8): the `WHATS_NEW` entry and its guard in the version-bump change. |
+| `app-manager` / `release-lead` | Support URL and support email in App Store Connect (D-14); App Privacy submission after M7 (M7-AC6); a build number for the BL-10 TestFlight checklist. D-13 (M-c): format legal's release-notes line into the last TestFlight build's "What to Test" note and the first App Store update's What's New. `release-lead`: the `ux.whats_new` timing, if Product adopts legal's R26.1 (§7.8.4); the `landing.platform_options` flip, if the operator takes the M11 fallback (§6.9.10). |
 | `head-bizops` | D-9, D-10, D-11 routing. |
 
 ## 11. Facts in the brief that changed on verification

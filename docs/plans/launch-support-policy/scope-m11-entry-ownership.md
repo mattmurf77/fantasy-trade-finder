@@ -3,8 +3,8 @@
 **Date:** 2026-10-23
 **Entry point:** direct ask: `head-product`'s new launch MUST M11 (2026-10-23); `legal-lead` LEG-M5; Apple guideline 5.1.1(v)
 **Builder:** `onboarding-eng` (build, under `head-eng`; `head-eng` allocates the server files). Spec by `launch-onboarding-pm-4` for `onboarding-pm`.
-**Operator sign-off on waivers:** **pending.** W-M11-1 and W-M11-2 are listed in [prd.md §9](prd.md#9-decisions-needed). Neither the 2026-10-22 nor the 2026-10-23 sign-off covers them.
-**Gate 1 (head-product acceptance of this block):** pending.
+**Operator sign-off on waivers:** signed 2026-10-23 (operator, relayed by the coordinator; quoted verbatim: "Decision 1: Agree to the waivers."). Covers W-M11-1 and W-M11-2.
+**Gate 1 (head-product acceptance of this block):** accepted 2026-10-23 (P38). Option (e) fixes deletion under 5.1.1(v) and the broken ESPN/MFL import together.
 
 The facts, the decision and the requirements:
 [prd.md §6.9](prd.md#69-m11-espnmfl-entry-ownership-proof-in-app-deletion-data-export-and-league-import).
@@ -180,6 +180,14 @@ D-056: no simulator, no Maestro, no screen captures. Full evidence; nothing belo
 - **Reviews before merge:** `platforms-pm` (P10); `eng-security` (the identity proofs); `legal-lead`
   (the proofs accepted for erasure and export, M11-R5, the residual 5.1.1(v) exposure); `ux-lead`
   (the step-up flow); `design-lead` (the sheets).
-- **Gates still owed:** `head-product`'s gate-1 acceptance of this block; the operator's sign-off on
-  W-M11-1 and W-M11-2.
+- **Gates still owed:** none on this block. Gate 1 was accepted (P38) and W-M11-1 and W-M11-2 were
+  signed on 2026-10-23 (see the header).
+- **Still open:**
+  - `legal-lead` confirms M11-R5 (via `head-bizops`);
+  - an `analytics-lead` count of affected `entry:*` users (`head-product` has requested it).
+- **The fallback (operator decision; not taken).** If `head-eng` can't fit M11 by 11-06: hide ESPN/MFL
+  entry at sign-in, and drop "ESPN and MFL" from the listing until M11 ships. The lever is
+  `landing.platform_options` (`config/features.json:28`); `release-lead` flips it on the operator's
+  word. The facts, what Apple sign-in still allows, and what else the fallback touches are in
+  [prd.md §6.9.10](prd.md#6910-the-fallback-operator-decision-not-taken).
 - Express lane declared by the operator? **No.** Full gates (API contracts; see §2).

@@ -37,6 +37,10 @@ Requirements, verified facts, copy inventory (F1-F18) and acceptance criteria:
     doc/legal copy (`docs/adr/adr-008-teardown-remediation-wave.md:21-23`) is the closer precedent.
   - Rollback is the next build. The change touches no data, no API, no server state.
   - If `head-product` wants a flag anyway, that is decision **D-4** in prd.md.
+- **D-7 (decided 2026-10-23, prd.md §6.10.1):** the hub's Testing row and the `settings/testing`
+  page body move to one `useTesterSurface()` predicate, `__DEV__ || testing.stage_users ||
+  testing.timing_readout`. No new flag: `testing.timing_readout` is trades-eng's, and `useFlag` takes
+  any key.
 - **Existing flags this feature reads, unchanged:** `testing.stage_users` (`false`,
   `config/features.json:206`) keeps gating the Testing hub row
   (`mobile/src/screens/settings/SettingsHubScreen.tsx:333-340`), the flat Testing section
@@ -58,6 +62,24 @@ Requirements, verified facts, copy inventory (F1-F18) and acceptance criteria:
 ## 3. Evidence scope
 
 D-056: no simulator, no Maestro, no screen captures, for any part of this change.
+
+**The full build and guard list is in [prd.md §6.10](prd.md#610-review-driven-build-instructions-ux-lead--design-lead-accepted-by-product-2026-10-23)**
+(ux-lead's items 1–8, design-lead's changes 1–9 and the counter fix, accepted by Product 2026-10-23).
+Where it refines this block, it governs. It adds to the evidence below:
+
+- **New guard assertions** (in `check-feedback-public.js` or `check-settings-ia.js`, as ux-lead's
+  item 7 places them):
+  - (a) `SettingsTestingScreen` and the hub's Testing row use the one `useTesterSurface()` predicate,
+    and it includes `testing.timing_readout`;
+  - (b) `FeedbackSheet` renders no Screen `TextInput` but still submits `screen` (pin 8 below);
+  - (c) no user-visible "Test feedback" string remains (pin 1 below);
+  - the `check-settings-ia.js:116` row becomes the inbox row, owned by `AboutSection.tsx`, marker
+    `settings.feedback-inbox` (the "Existing suites" bullet below);
+  - **credits text:** the Credits block's text equals `legal-lead`'s Part 3 text exactly (BL10-R12;
+    the one exact string to settle is in prd.md §6.10.3).
+- **New TestFlight steps:** ux-lead's T1–T4 (prd.md §6.10.1) and design-lead's evidence steps
+  (§6.10.2: Help & about shows the row order and Credits; the f3 address opens Mail; the sheet has no
+  Screen field; Your feedback opens the inbox). Steps 7, 9 and 10 below are updated to match.
 
 - [x] **Structural guard:** new `mobile/tests/check-feedback-public.js`, with
   `"test:feedback-public": "node tests/check-feedback-public.js"` in `mobile/package.json` (beside
@@ -157,14 +179,19 @@ D-056: no simulator, no Maestro, no screen captures, for any part of this change
   6. Open Settings. Expected: no "Testing" row anywhere on the hub.
   7. Tap Help & about. Expected: the feedback row is present with the approved title; tap it.
      Expected: the inbox opens, titled with the approved public name (once, not twice), and the note
-     from step 3 shows as sent (no "HTTP" text anywhere). **The note still records the screen:** its
-     row shows the screen it was sent from (`FeedbackInboxScreen.tsx:226`), although the sheet had
-     no Screen field.
+     from step 3 shows as sent (no "HTTP" text anywhere). The inbox has a header close control, and
+     **no row shows a route name** (D-6 extension: the per-note screen line at
+     `FeedbackInboxScreen.tsx:226` is gone). The server copy still carries a non-empty `screen`
+     (ux-lead T4: an `/api/feedback/admin` read by the operator). Help & about reads Help & FAQ →
+     Your feedback → Privacy Policy → Terms of Use → Credits → Version.
   8. Compare the pill with the inbox. Expected: pill = number of inbox notes whose status line is
      not "Fixed — in next update".
-  9. Deep link `settings/testing` (if D-7 gates it). Expected: no rows are shown.
+  9. Deep link `settings/testing` (D-7 decided). Expected: the honest unavailable state, and Back
+     works. Fail if an empty "Testing" page shows (ux-lead T2).
   10. **Regression, tester device:** on a device with `testing.stage_users` on, Settings shows the
-      Testing row and "Test stages"; the feedback row is under Help & about, not under Testing.
+      Testing row and "Test stages"; the feedback row is under Help & about, not under Testing. On
+      the operator's phone with only `testing.timing_readout` delivered, the Testing row shows and
+      the page shows the timing readout row (ux-lead T3).
 - [ ] **WAIVED because:** — (nothing else waived; only W-BL10-1 remains waived, W-BL10-2 has lapsed)
 - `testID`s added/renamed: **added** one, the new About row (proposed `settings.feedback-inbox`).
   **Renamed: none.** All IDs in pin 6 stay, because `mobile/scripts/testid-lint.sh` (kept by D-056)
