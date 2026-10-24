@@ -486,8 +486,9 @@ FLIP = datetime(2026, 10, 1, tzinfo=UTC)
 MON_UNTIL = datetime(2026, 10, 15, tzinfo=UTC)
 
 
-def _monitor_engine(*events):
-    """The base world plus post-flip rows: (user, win, lose, k, dtype, at, n)."""
+def _monitor_engine(*events, matches=()):
+    """The base world plus post-flip rows: (user, win, lose, k, dtype, at, n),
+    and trade_matches rows: (user_a, user_b, a_give, a_receive)."""
     engine = create_engine("sqlite://", poolclass=StaticPool,
                            connect_args={"check_same_thread": False})
     _seed(engine)
@@ -500,6 +501,10 @@ def _monitor_engine(*events):
                          "scoring_format": FMT})
     with engine.begin() as conn:
         conn.execute(insert(db.swipe_decisions_table), rows)
+        for a, b, give, recv in matches:
+            conn.execute(insert(db.trade_matches_table).values(
+                league_id="lg", user_a_id=a, user_b_id=b,
+                user_a_give=json.dumps(give), user_a_receive=json.dumps(recv)))
     sr._install_readonly_guard(engine)
     return engine
 
@@ -551,6 +556,80 @@ def test_monitor_kill_d_on_an_introduced_pick_inversion():
     assert kill["weeks"][0]["fires_d"] is True and kill["status"] == "KILL"
     text = sr.summary_text(report)
     assert "week 2026-10-01: KILL (kill d)" in text and "overall: KILL" in text
+
+
+E1, L1 = "generic_pick_1_early", "generic_pick_1_late"
+
+
+def _disposition_world(users):
+    """Each user: 30 disposition rows pushing Late 1st over Early 1st (K 20,
+    a 100-point move in the n = 4 RB `first_1` group) plus three trade
+    swipes that week (w2 over w1, K 4: they swap, a 12.5-point move in a
+    group of nine). d1's rows are accepts (its match side gives E1 for L1),
+    d2's declines (it gives L1 for E1), and d2 has one disposition no match
+    explains."""
+    at = FLIP + timedelta(days=2)
+    events, matches = [], []
+    for u in users:
+        events += [(u, L1, E1, 20.0, "disposition", at, 30),
+                   (u, "w2", "w1", 4.0, "trade", at + timedelta(hours=1), 3)]
+    if "d1" in users:
+        matches.append(("d1", "x", [E1], [L1]))              # accept: receive won
+    if "d2" in users:
+        matches.append(("d2", "x", [L1], [E1]))              # decline: give won
+        events.append(("d2", "w4", "w5", 20.0, "disposition",
+                       at + timedelta(hours=2), 1))           # unmatched
+    return _monitor_engine(*events, matches=matches)
+
+
+def test_monitor_counts_dispositions_and_alerts_on_two_boards():
+    report = sr.run(_disposition_world(["d1", "d2"]), FLIP, MON_UNTIL,
+                    min_swipes=1, mode="monitor")
+    c = report["counts"]
+    assert (c["dispositions_accept"], c["dispositions_decline"],
+            c["dispositions_unmatched"]) == (30, 30, 1)
+    disp = report["results"][sr.MONITOR_KEY]["dispositions"]
+    w = disp["weeks"][0]
+    assert (w["boards"], w["accepts"], w["declines"], w["unmatched"]) == (2, 30, 30, 1)
+    assert w["max_pct_move_n4"] == 100.0 and w["boards_ge75_n4"] == 2
+    assert w["alert"] is True and disp["alert"] is True
+    text = sr.summary_text(report)
+    assert "DISPOSITION ALERT: yes" in text
+    assert "disposition alert (models-lead review, not a kill): ALERT" in text
+
+
+def test_monitor_one_disposition_board_is_no_alert():
+    report = sr.run(_disposition_world(["d1"]), FLIP, MON_UNTIL,
+                    min_swipes=1, mode="monitor")
+    w = report["results"][sr.MONITOR_KEY]["dispositions"]["weeks"][0]
+    assert (w["boards_ge75_n4"], w["alert"]) == (1, False)
+    assert "DISPOSITION ALERT: no" in sr.summary_text(report)
+
+
+def test_dispositions_never_reach_the_kill_metrics():
+    """Two boards with a 100-point disposition-driven move in an n = 4 group
+    would trip kill (b) if dispositions were toggled. They aren't: the kill
+    sees only the trade swipe's 12.5-point move, and the pick inversion the
+    dispositions made sits in WITH and WITHOUT alike, so (d) stays quiet."""
+    report = sr.run(_disposition_world(["d1", "d2"]), FLIP, MON_UNTIL,
+                    min_swipes=1, mode="monitor")
+    res = report["results"][sr.MONITOR_KEY]
+    for user in ("d1", "d2"):
+        week = _board_weeks(report, user)[0]
+        assert week["max_pct_move_n4"] == pytest.approx(12.5)
+        assert week["disposition_max_pct_move_n4"] == 100.0
+        assert week["pick_inversions_without"] > 0
+        assert week["pick_inversions_introduced"] == 0
+    kill = res["kill_rule"]["weeks"][0]
+    assert (kill["boards_ge75_n4"], kill["fires_b"], kill["fires_d"]) == (0, False, False)
+    assert res["kill_rule"]["status"] == "OK"
+    # A disposition-only board is watched but never active for the kill.
+    alone = sr.run(_monitor_engine(("d3", L1, E1, 20.0, "disposition",
+                                    FLIP + timedelta(days=2), 30)),
+                   FLIP, MON_UNTIL, min_swipes=1, mode="monitor")
+    res = alone["results"][sr.MONITOR_KEY]
+    assert res["board_weeks_active"] == 0 and res["kill_rule"]["status"] == "OK"
+    assert res["dispositions"]["weeks"][0]["max_pct_move_n4"] == 100.0
 
 
 def test_monitor_cli_needs_the_flip_time(tmp_path):

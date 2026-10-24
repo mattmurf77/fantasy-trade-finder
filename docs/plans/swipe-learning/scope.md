@@ -46,7 +46,8 @@
     - **Forward-only (5b i):** a like is frozen, then the knob flips and a pass is written. The frozen row is unchanged, the board rebuilt up to the flip is identical, and only the pass moves the board.
     - `replay_from_db` uses stored K, not the current `trade_k_*`.
     - **5b(ii), through `RankingService`'s real feedback path.** Trio votes establish a board. Then 600 likes and passes at K 8/4 hit players sitting on tier edges, both through live `record_trade_signal` and through the same rows replayed from storage. Every player keeps his tier, and unranked stays unranked. Within-tier order does change (asserted, so the test isn't vacuous).
-  - **`backend/tests/test_swipe_replay.py` (22 tests, synthetic SQLite):**
+  - **`backend/tests/test_swipe_replay.py` (25 tests, synthetic SQLite):**
+    - **Dispositions (monitor):** accept/decline/unmatched counts from the match sides; 1 board ≥ 75 → no alert, 2 boards → DISPOSITION ALERT; a 100-point disposition move on two boards leaves kill (b) and (d) quiet, and a disposition-only board is never active for the kill.
     - **Final 13b:**
       - Revised kill (b): 1 board → ALERT, not a kill; 2 boards at ≥ 5% → KILL; 2 boards under 5% → ALERT. A 100-point move in a group of 3 doesn't count, and one in a group of 4 does.
       - Kill (d) fires on any introduced inversion.
@@ -74,7 +75,7 @@
     - The CLI end to end.
     - The module never imports `backend.server` (subprocess check).
   - **`backend/tests/test_bakeoff_arm_a_golden.py`:** knob inventory. `bakeoff_freeze_trade_k` is EXCLUDED from `MODEL_A_PROFILE`: it's read only on the swipe routes, never in generation. The golden stands.
-  - **Targeted run, 2026-10-24: 819 passed across 32 files.** That's:
+  - **Targeted run, 2026-10-24: 917 passed across 36 files.** That's:
     - the two BL-001 files;
     - every test file that touches `elo_freeze_mult`, `record_trade_signal`, the config inventories and config-reference, and the decline-reason Elo path;
     - the nine test files main's merges added or changed (RankingService threads, session-init single-flight, small responses, status lock, daily tick, deck replenishment).
@@ -89,6 +90,7 @@
   - Early and Mid reversed in the ladder: **5 of 16 failed** (the clean-board and pick-order cases, the pool mirror, the end-to-end check and the CLI).
   - Kill (b) firing on a single board: **1 of 22 failed** (the revised-(b) test).
   - Kill (d) counting pre-existing inversions: **1 of 22 failed** (the monitor's pre-existing case).
+  - Kill metrics toggling disposition rows too: **1 of 25 failed** (dispositions never reach the kill metrics).
 - [x] **Code-walk proof** (line numbers at `9c58e93e`, after main's merges; this build doesn't edit `server.py` or `ranking_service.py`):
   - **Knob read:** `bakeoff_runner.py:468`, inside `elo_freeze_mult` (`:450`).
   - **Its three callers:**
@@ -215,6 +217,13 @@ p95 is nearest rank throughout.
   - **What it prints:** a **KILL / ALERT / OK** line per week and overall, naming the kill rule that fired. A (b) alert names its board hashes.
   - **In the JSON:** `results.stored.kill_rule.weeks[]` carries `p95_kendall`, `boards_ge75_n4`, `share_ge75_n4`, `boards_ge75_n4_hashes`, `introduced_pick_inversions`, `fires_a`, `fires_b`, `alert_b`, `fires_d` and `status`.
   - **The replay reports the same indicators** for its own window. (c) has no analogue in either.
+  - **The kill metrics are trade-swipe-only.** They toggle `decision_type = 'trade'` rows, with disposition and trio rows in both boards, so a match accept or decline can never trip a kill. A test pins it: a 100-point disposition-driven move on two boards leaves kill (b) at 0.
+- **Dispositions: a descriptive weekly line, monitor only** (models-lead's disposition ruling, 2026-10-24).
+  - **What it is:** match accept and decline rows (`decision_type = 'disposition'`, K `trade_k_accept` / `trade_k_decline_correction`, 20 each). They were never frozen, and they keep learning after the flip.
+  - **Counts:** accepts and declines are told apart by the match's sides, as the disposition signal builder writes them: an accept is receive over give from the user's side; a decline is give over receive. Rows no match explains count as unmatched.
+  - **Metrics:** within-tier Kendall (median and p95), and the largest move in groups of n ≥ 4, from that week's disposition rows alone. WITHOUT has those rows at K 0, with trade and trio rows in both boards.
+  - **No bar and no kill.** A **DISPOSITION ALERT** for `models-lead` fires when ≥ 2 boards in a week show a disposition-driven move ≥ 75. It's printed beside the KILL / ALERT / OK line and labelled as the disposition alert. In the JSON it's `results.stored.dispositions`, with `counts.dispositions_{accept,decline,unmatched}`.
+  - **Context, BL-004:** the decline correction is a fixed K 20 that assumes a prior +8 like. A declined match nets −20 while frozen and −16 at half K, against a designed −12. The alert is there to catch that over-correction if it bites. The fix (correction = 12 + the like's stored K) is its own packet and doesn't block BL-001.
 - **The weekly monitor command** (`release-lead`, or `analytics-lead` under W3 read-only), from the repo root at the deployed sha. `<FLIP>` is the `model_config_changes.changed_at` of the `bakeoff_freeze_trade_k` = 0 write:
 
   ```

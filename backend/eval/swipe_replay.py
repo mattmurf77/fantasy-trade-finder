@@ -106,7 +106,18 @@ week with that week's trade rows at K = 0. Same machinery and output, minus
 the replay-only parts (no restore, no 5b(i), no ship rule). 5a-i and 5a-ii
 are informational; kill (a), revised (b) with its alert, and (d) introduced
 pick inversions (pre-existing ones excluded) decide the per-week and overall
-KILL / ALERT / OK line.
+KILL / ALERT / OK line. Those kill metrics toggle `decision_type = 'trade'`
+rows only; disposition and trio rows sit in both boards, so a match accept or
+decline can never trip a kill.
+
+Dispositions (match accept / decline rows, K `trade_k_accept` /
+`trade_k_decline_correction`, never frozen) get a separate, descriptive
+weekly line: accept and decline counts (told apart by the match's sides, as
+the disposition signal builder writes them), and within-tier Kendall and the
+largest n >= 4 move from that week's disposition rows alone (WITHOUT = those
+rows at K 0, trade and trio rows in both). No bar, no kill: a DISPOSITION
+ALERT for models-lead when >= 2 boards in a week show a disposition-driven
+move >= 75 (BL-004: the fixed decline correction over-corrects).
 
 5b (i), reported as `check_5b_i`: restoring at K x 0 reproduces the stored
 board exactly (the restore path changes nothing but frozen-window K), and the
@@ -330,15 +341,16 @@ def is_frozen_trade(row: dict, since: datetime, until: datetime) -> bool:
 
 
 def load_frozen_events(conn, since: datetime, until: datetime,
-                       frozen_only: bool = True) -> dict:
+                       frozen_only: bool = True, decision_type: str = "trade") -> dict:
     """{(user_id, format): {created_at: (winners, losers)}} for frozen swipes
-    in the window (every trade swipe in it when `frozen_only` is False)."""
+    in the window (every row of `decision_type` in it when `frozen_only` is
+    False)."""
     events: dict = defaultdict(lambda: defaultdict(lambda: (set(), set())))
     for r in _select(conn,
             "SELECT user_id, scoring_format, winner_player_id, loser_player_id, "
             "decision_type, k_factor, created_at FROM swipe_decisions "
-            "WHERE decision_type = 'trade'"
-            + (" AND k_factor = 0" if frozen_only else "")):
+            "WHERE decision_type = :dt"
+            + (" AND k_factor = 0" if frozen_only else ""), dt=decision_type):
         ts = _ts(r["created_at"])
         if (is_frozen_trade(r, since, until) if frozen_only
                 else ts is not None and since <= ts < until):
@@ -356,6 +368,34 @@ def load_board_rows(conn, user_id: str, scoring_format: str) -> list[dict]:
         "created_at FROM swipe_decisions WHERE user_id = :u AND "
         f"(scoring_format = :f{legacy}) ORDER BY id",
         u=user_id, f=scoring_format)
+
+
+def classify_dispositions(events: dict, matches: list[dict], user_id: str) -> dict:
+    """{created_at: 'accept' | 'decline' | None} for one board's disposition
+    rows. Mirrors `database` (the disposition signal builder): an accept
+    writes receive > give from the user's side of the match, a decline
+    give > receive. Both default to K 20, so the side, not K, tells them
+    apart. user_b's sides are user_a's mirrored."""
+    sides = []
+    for m in matches:
+        try:
+            a_give = set(map(str, json.loads(m["user_a_give"] or "[]")))
+            a_recv = set(map(str, json.loads(m["user_a_receive"] or "[]")))
+        except (TypeError, ValueError):
+            continue
+        sides.append((a_give, a_recv) if m["user_a_id"] == user_id else (a_recv, a_give))
+    out = {}
+    for created_at, (winners, losers) in events.items():
+        kind = None
+        for give, recv in sides:
+            if (winners, losers) == (recv, give):
+                kind = "accept"
+            elif (winners, losers) == (give, recv):
+                kind = "decline"
+            if kind:
+                break
+        out[created_at] = kind
+    return out
 
 
 def classify_events(events: dict, decisions: list[dict]) -> dict:
@@ -413,6 +453,14 @@ def rows_before(rows, cutoff: datetime) -> list[dict]:
 def in_week(row: dict, start: datetime, end: datetime) -> bool:
     ts = _ts(row.get("created_at"))
     return row.get("decision_type") == "trade" and ts is not None and start <= ts < end
+
+
+def without_dispositions(rows, start, end) -> list[dict]:
+    """The week's disposition rows at K 0; trade and trio rows untouched."""
+    return [{**r, "k_factor": 0.0}
+            if r.get("decision_type") == "disposition"
+            and (ts := _ts(r.get("created_at"))) is not None and start <= ts < end
+            else r for r in rows]
 
 
 def week_rows(rows, since, start, end, kinds, k_like, k_pass, k_scale,
@@ -570,6 +618,33 @@ def kill_indicators(board_weeks: list[dict]) -> dict:
                        else "ALERT" if "ALERT" in statuses else "OK")}
 
 
+def disposition_summary(board_weeks: list[dict]) -> dict:
+    """Monitor-only, descriptive: match accept/decline rows per week. No bar
+    and no kill. ALERT when >= KILL_B_MIN_BOARDS boards show a disposition-
+    driven move >= 75 in a group of n >= 4 (catches BL-004's over-correction)."""
+    by_week = defaultdict(list)
+    for w in board_weeks:
+        if w.get("disposition_events"):
+            by_week[w["week_start"]].append(w)
+    weeks = []
+    for start in sorted(by_week):
+        ws = by_week[start]
+        kendall = [w["disposition_kendall"] for w in ws
+                   if w["disposition_kendall"] is not None]
+        hits = [w["board"] for w in ws
+                if w["disposition_max_pct_move_n4"] >= KILL_PCT_MOVE]
+        weeks.append({
+            "week_start": start, "boards": len(ws),
+            "accepts": sum(w["disposition_accepts"] for w in ws),
+            "declines": sum(w["disposition_declines"] for w in ws),
+            "unmatched": sum(w["disposition_unmatched"] for w in ws),
+            "kendall_median": _median(kendall), "kendall_p95": p95(kendall),
+            "max_pct_move_n4": max(w["disposition_max_pct_move_n4"] for w in ws),
+            "boards_ge75_n4": len(hits), "boards_ge75_n4_hashes": hits,
+            "alert": len(hits) >= KILL_B_MIN_BOARDS})
+    return {"weeks": weeks, "alert": any(w["alert"] for w in weeks)}
+
+
 def summarize(board_weeks: list[dict]) -> dict:
     """5a-i, 5a-ii, 5b(ii) and the kill indicators for one k_scale."""
     active = [w for w in board_weeks if w["trade_swipes"] > 0]
@@ -646,6 +721,13 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
     with engine.connect() as conn:
         model_config = load_model_config(conn)
         events = load_frozen_events(conn, since, until, frozen_only=not monitor)
+        # Monitor only: match accept/decline rows, reported descriptively.
+        # A board with dispositions but no trade swipe is still watched.
+        disp_events = (load_frozen_events(conn, since, until, frozen_only=False,
+                                          decision_type="disposition")
+                       if monitor else {})
+        for key in disp_events:
+            events.setdefault(key, {})
         with ranking_config(model_config):
             k_like, k_pass = rs._c("trade_k_like"), rs._c("trade_k_pass")
             pools, counts = {}, defaultdict(int)
@@ -656,9 +738,13 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                      "b_equals_a_at_since": 0}
             per_board = []
             for (user_id, fmt), board_events in sorted(events.items()):
-                counts["boards_with_trade_swipes" if monitor
-                       else "boards_with_frozen_swipes"] += 1
-                if len(board_events) < min_swipes:
+                disp = disp_events.get((user_id, fmt), {})
+                if board_events:
+                    counts["boards_with_trade_swipes" if monitor
+                           else "boards_with_frozen_swipes"] += 1
+                if disp:
+                    counts["boards_with_dispositions"] += 1
+                if len(board_events) < min_swipes and not disp:
                     counts["boards_below_min_swipes"] += 1
                     continue
                 if fmt not in pools:
@@ -679,6 +765,12 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                 counts["trade_swipes" if monitor else "frozen_swipes"] += len(board_events)
                 for kind in kinds.values():
                     counts[f"frozen_swipes_{kind or 'unmatched'}"] += 1
+                dkinds = classify_dispositions(disp, _select(conn,
+                    "SELECT user_a_id, user_a_give, user_a_receive FROM trade_matches "
+                    "WHERE user_a_id = :u OR user_b_id = :u", u=user_id),
+                    user_id) if disp else {}
+                for kind in dkinds.values():
+                    counts[f"dispositions_{kind or 'unmatched'}"] += 1
                 counts["window_trade_rows" if monitor else "restored_rows"] += len(window)
                 for r in window:
                     kind = pair_kind(r, pool_ids)
@@ -726,6 +818,26 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
                             "max_pct_move": move,
                             "max_pct_move_n4": kill_b_move(with_b, without_b),
                             "tier_violations": tier_violations(with_b, without_b)})
+                        if monitor:
+                            # Descriptive only: toggle this week's disposition
+                            # rows; trade and trio rows stay in both boards.
+                            week_disp = [kind for at, kind in dkinds.items()
+                                         if (ts := _ts(at)) is not None
+                                         and start <= ts < end]
+                            d_disc = d_pairs = 0
+                            d_move = 0.0
+                            if week_disp:
+                                wd_b = board(without_dispositions(with_rows, start, end))
+                                d_disc, d_pairs, _ = within_tier_moves(with_b, wd_b)
+                                d_move = kill_b_move(with_b, wd_b)
+                            weeks[-1].update({
+                                "disposition_events": len(week_disp),
+                                "disposition_accepts": week_disp.count("accept"),
+                                "disposition_declines": week_disp.count("decline"),
+                                "disposition_unmatched": week_disp.count(None),
+                                "disposition_kendall": (d_disc / d_pairs
+                                                        if week_disp and d_pairs else None),
+                                "disposition_max_pct_move_n4": d_move})
                     board_weeks[s].extend(weeks)
                     row[f"k_scale_{s}"] = weeks
                 per_board.append(row)
@@ -733,6 +845,9 @@ def run(engine, since: datetime, until: datetime, min_swipes: int = 10,
     check["pass"] = (check["a_equals_restore_at_k0"] == check["boards"]
                      and check["b_equals_a_at_since"] == check["boards"])
     results = {str(s): summarize(board_weeks[s]) for s in scales}
+    if monitor:
+        results[MONITOR_KEY]["dispositions"] = disposition_summary(
+            board_weeks[MONITOR_KEY])
     return {
         "mode": mode,
         "metric_definition": METRIC_DEFINITION,
@@ -855,6 +970,20 @@ def summary_text(report: dict) -> str:
                     f"{w['boards_ge75_n4']}, introduced pick inversions "
                     f"{w['introduced_pick_inversions']}")
             lines.append(f"  overall: {kill['status']}")
+            disp = res["dispositions"]
+            for w in disp["weeks"]:
+                lines.append(
+                    f"    dispositions week {w['week_start'][:10]} (descriptive, no "
+                    f"kill): accepts {w['accepts']}, declines {w['declines']}, "
+                    f"unmatched {w['unmatched']}; Kendall median "
+                    f"{n(w['kendall_median'])} p95 {n(w['kendall_p95'])}; largest "
+                    f"move (n>=4) {n(w['max_pct_move_n4'])}; DISPOSITION ALERT: "
+                    + (f"yes (boards {', '.join(w['boards_ge75_n4_hashes'])})"
+                       if w["alert"] else "no"))
+            if not disp["weeks"]:
+                lines.append("    dispositions: none in the window")
+            lines.append(f"  disposition alert (models-lead review, not a kill): "
+                         f"{'ALERT' if disp['alert'] else 'none'}")
     if not monitor:
         chk = report["check_5b_i"]
         lines += [
