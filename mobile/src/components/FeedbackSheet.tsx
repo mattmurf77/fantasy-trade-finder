@@ -27,6 +27,7 @@ import { Button } from './chalkline';
 import { useFeedback, type FeedbackSeverity } from '../state/useFeedback';
 import { FEEDBACK_TEXT_MAX } from '../api/feedback';
 import { useFlag } from '../state/useFeatureFlags';
+import { SUPPORT_EMAIL } from '../utils/supportContact';
 
 interface Props {
   visible: boolean;
@@ -61,7 +62,7 @@ function overflowMessage(length: number): string {
 // says "saved, not sent" — the item IS still in AsyncStorage and retrySync()
 // will re-attempt it, so telling the user it was lost would be wrong.
 const SAVE_FAILED_MESSAGE =
-  'Saved on this device, but not sent yet. Nothing is lost — retry it from Settings → Testing → Test feedback.';
+  'Saved on this device but not sent yet. It retries the next time you open the app, so no need to send it again.';
 
 // Modal-based bottom sheet for capturing a single feedback note. Keyboard-
 // avoiding so the text area doesn't get hidden on smaller phones.
@@ -175,7 +176,9 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
         <View style={styles.sheet}>
           <View style={styles.grabber} />
           <Text style={styles.title} accessibilityRole="header">Send feedback</Text>
-          <Text style={styles.sub}>Saved on this device. Share or export from Settings.</Text>
+          <Text style={styles.sub}>
+            {`No replies here. Track each note in Settings › Help & about › Your feedback, or email ${SUPPORT_EMAIL} for a reply.`}
+          </Text>
 
           <ScrollView keyboardShouldPersistTaps="handled">
             <Text style={styles.label}>What's this about?</Text>
@@ -263,7 +266,7 @@ export default function FeedbackSheet({ visible, onClose, defaultScreen }: Props
             <Button
               testID="feedback.save-btn"
               variant="primary"
-              label="Save"
+              label="Send"
               onPress={onSave}
               loading={saving}
               disabled={!noteLength || overLimit}

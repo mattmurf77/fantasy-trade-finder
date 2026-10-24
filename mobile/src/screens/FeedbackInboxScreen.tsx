@@ -96,8 +96,8 @@ export default function FeedbackInboxScreen() {
   function onClear() {
     if (items.length === 0) return;
     Alert.alert(
-      'Clear all feedback?',
-      `This will delete ${items.length} note${items.length === 1 ? '' : 's'}. Cannot be undone.`,
+      'Clear notes from this device?',
+      `Removes ${items.length} note${items.length === 1 ? '' : 's'} from this device. It can't be undone. Notes already sent stay on file.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear', style: 'destructive', onPress: () => void clear() },
@@ -170,7 +170,7 @@ export default function FeedbackInboxScreen() {
                           styles.syncPending;
             const syncText =
               it.synced ? 'Sent' :
-              failed    ? `Sync failed: ${it.last_sync_error}` :
+              failed    ? 'Not sent yet' :
                           'Waiting to send';
             // "Unread" analog for this inbox: the operator responded —
             // a lifecycle status beyond the automatic "new" receipt.

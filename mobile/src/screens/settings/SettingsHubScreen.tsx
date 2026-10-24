@@ -208,7 +208,7 @@ export default function SettingsHubScreen({ navigation }: any) {
 
   // ── About preview ──────────────────────────────────────────────────────
   const versionLabel = appVersionLabel();
-  const aboutLinks = helpSurfaceOn ? 'FAQ, privacy, terms' : 'Privacy, terms';
+  const aboutLinks = helpSurfaceOn ? 'FAQ, feedback, privacy, terms' : 'Feedback, privacy, terms';
   const aboutPreview = versionLabel ? `${aboutLinks} · v${versionLabel}` : aboutLinks;
 
   return (

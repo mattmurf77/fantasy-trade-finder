@@ -1410,7 +1410,7 @@ export default function SettingsScreen({ navigation }: any) {
         <View style={{ flex: 1 }}>
           <Text style={styles.rowKey}>Your feedback</Text>
           <Text style={styles.rowSub}>
-            Review and share notes you captured with the floating button.
+            Notes you've sent with the flag button, and where each one stands.
           </Text>
         </View>
         <Icon name="chevron-right" color={chalk.dim} size={16} />
