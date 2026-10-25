@@ -14,7 +14,7 @@
       "backgroundColor": "#0C0E11"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.fantasytradefinder.app",
       "buildNumber": "2",
       "usesAppleSignIn": true,

@@ -49,7 +49,7 @@ BASE_GOLDENS = {
 
 @pytest.fixture()
 def flag_off(e2, monkeypatch):
-    monkeypatch.setitem(ff._flags_cache, FLAG, False)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
     # Fixed job ids, so a new job's body is comparable byte for byte.
     ids = iter(uuid.UUID(int=n) for n in range(1, 100))
     monkeypatch.setattr(uuid, "uuid4", lambda: next(ids))
@@ -113,7 +113,7 @@ def test_seeded_job_routes_never_touch_the_table(flag_off, page_statements):
 
 def test_a_real_job_trigger_and_cleanup_never_touch_the_table(live, monkeypatch, page_statements):
     client, _engine, _sess = live
-    monkeypatch.setitem(ff._flags_cache, FLAG, False)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
     job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
                                        scoring_format="1qb_ppr", fairness_threshold=0.5,
                                        opponents_total=1, synchronous=True)

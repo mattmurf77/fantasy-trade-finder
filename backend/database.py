@@ -635,6 +635,26 @@ league_members_table = Table("league_members", metadata,
     UniqueConstraint("league_id", "user_id", name="uq_league_member"),
 )
 
+# S0 (launch §3a) — the per-league roster refresh record. One row per league,
+# written by the session-init Sleeper refresh (success: 'fresh' + refreshed_at;
+# a failed read: 'stale' + last_error_code — the last good rows are never
+# touched on failure). The row only ever holds 'fresh' | 'stale' (fingerprint
+# contract v0.3 §3): "missing" is DERIVED by trades-eng's roster_snapshot from
+# absent league_members rows, never stored, so rows that arrive by another
+# path can't be blanked by a stale stored verdict.
+# roster_fp is NULL until the PR-B stamp writes trades-eng's rfp1 fingerprint.
+# League-keyed, no user_id: not part of account deletion/export. New table, so
+# metadata.create_all creates it on both dialects — no migration_cols row.
+# Scope: docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md §B.2.
+league_roster_state_table = Table("league_roster_state", metadata,
+    Column("league_id",       String, primary_key=True),  # platform-native id (leagues PK semantics)
+    Column("roster_fp",       String),                    # "rfp1:…" — PR-B; NULL until stamped
+    Column("refreshed_at",    String),                    # ISO UTC: fetch start of the last fully committed refresh
+    Column("status",          String, nullable=False),    # 'fresh' | 'stale' (never 'missing': derived, contract v0.3)
+    Column("last_error_code", String),                    # closed set (sleeper_http.classify + picks_unavailable/write_failed); NULL after success
+    Column("updated_at",      String, nullable=False),    # ISO UTC of this write
+)
+
 # FB-147 — Sleeper trade-block snapshot, per league. One row per asset a
 # manager currently has "on the block" in the Sleeper app. Replaced
 # atomically on every sync (delete + insert, snapshot semantics like
@@ -3044,6 +3064,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("force_supersedes_running", 1.0, "/api/trades/generate: 1 = `force: true` supersedes an already-RUNNING job for the same key (the superseded worker finishes quietly — no further snapshots, no impression rows, no trades_generated event); 0 restores the pre-2026-08-18 behaviour where a forced request silently returned the in-flight job and the regeneration never happened"),
     # ── Paged trade responses (E2, docs/plans/trade-time-to-suggestion) ──
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
+    ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
     ("trade_pages_stored", 3.0, "Pages of trade_page_size cards stored per trade_page_store row; clamped to 1-10 at read"),
     ("trade_prefetch_remaining", 50.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read. 50 per head-eng ruling 10's sizing: 44-card swipe bursts at 0.4 s/card plus the prefetch round trip"),
@@ -8767,6 +8788,105 @@ def load_league_members(league_id: str) -> list[dict]:
             d["player_ids"] = []
         result.append(d)
     return result
+
+
+# ---------------------------------------------------------------------------
+# League roster refresh state (S0) — `league_roster_state`
+# ---------------------------------------------------------------------------
+# One small row per league; every write is a single-row upsert (G-072: bounded).
+# Timestamps are ISO-8601 UTC text (dual-dialect; no SQL JSON or date functions).
+# The stored status is only ever one of these two (contract v0.3 §3).
+ROSTER_STATE_FRESH = "fresh"
+ROSTER_STATE_STALE = "stale"
+
+
+def _dialect_insert(conn):
+    """The dialect-specific `insert` that supports on_conflict_do_update."""
+    if conn.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    return dialect_insert
+
+
+def get_league_roster_state(league_id: str) -> dict | None:
+    """The league's refresh record, or None when it was never written."""
+    t = league_roster_state_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(t.c.league_id == str(league_id))).first()
+    return dict(row._mapping) if row else None
+
+
+def mark_league_roster_fresh(league_id: str, refreshed_at: str) -> None:
+    """A refresh committed its rows: status 'fresh', error cleared.
+
+    `refreshed_at` only moves forward (ISO strings in one fixed format compare
+    in time order), so a slow older refresh finishing last can't rewind it.
+    `roster_fp` is left as stored.
+    """
+    from sqlalchemy import case
+    t = league_roster_state_table
+    now = _now()
+    with engine.begin() as conn:
+        stmt = _dialect_insert(conn)(t).values(
+            league_id=str(league_id), roster_fp=None, refreshed_at=refreshed_at,
+            status=ROSTER_STATE_FRESH, last_error_code=None, updated_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["league_id"],
+            set_={
+                "refreshed_at": case(
+                    (t.c.refreshed_at.is_(None), stmt.excluded.refreshed_at),
+                    (stmt.excluded.refreshed_at > t.c.refreshed_at, stmt.excluded.refreshed_at),
+                    else_=t.c.refreshed_at),
+                "status": stmt.excluded.status,
+                "last_error_code": None,
+                "updated_at": stmt.excluded.updated_at,
+            })
+        conn.execute(stmt)
+
+
+def mark_league_roster_failed(league_id: str, error_code: str) -> str:
+    """A refresh failed: the last good rows are untouched. Returns the status written.
+
+    Always 'stale' + `last_error_code`; `roster_fp` and `refreshed_at` keep
+    their stored values (NULL on a league never refreshed). Whether the league
+    has any rows at all ("missing") is derived from `league_members` by the
+    reader, never stored here (fingerprint contract v0.3 §3).
+    """
+    t = league_roster_state_table
+    lid = str(league_id)
+    now = _now()
+    status = ROSTER_STATE_STALE
+    with engine.begin() as conn:
+        stmt = _dialect_insert(conn)(t).values(
+            league_id=lid, roster_fp=None, refreshed_at=None, status=status,
+            last_error_code=str(error_code), updated_at=now)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["league_id"],
+            set_={"status": stmt.excluded.status,
+                  "last_error_code": stmt.excluded.last_error_code,
+                  "updated_at": stmt.excluded.updated_at})
+        conn.execute(stmt)
+    return status
+
+
+def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool:
+    """S0 — replace a league's membership with an authoritative snapshot.
+
+    Sleeper session init used to UPSERT, so the rows of managers who left a
+    league (or legacy rows keyed on a co-owner's own id) were never deleted
+    (G-075), and one player could sit on two teams' stored rosters. The
+    session-init read is now complete and authoritative, so it replaces.
+
+    Refuses an empty snapshot (G-015: an empty REPLACE is a wipe): returns
+    False and touches nothing. Otherwise one delete-then-insert transaction
+    (`replace_espn_league_members`, already platform-agnostic); returns True.
+    """
+    rows = [m for m in (members or []) if m.get("user_id")]
+    if not rows:
+        return False
+    replace_espn_league_members(league_id, rows)
+    return True
 
 
 def replace_trade_block(league_id: str, entries: list[dict]) -> None:

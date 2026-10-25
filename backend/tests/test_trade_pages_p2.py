@@ -270,7 +270,7 @@ def test_an_intent_search_never_moves_the_organic_decks_scope(p1, spawned, monke
     """The scope comes from D (its job, else its stored row), not from the
     session's fairness, which any non-pinned search rewrites."""
     client, _, sess = p1
-    monkeypatch.setitem(ff._flags_cache, "trades.intent_modes", True)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trades.intent_modes": True})
     deck = build_deck()                                   # organic, f=0.50
     intent = generate(client, page=1, trade_intent="tier_up", fairness_threshold=0.75)
     assert intent.status_code == 200 and "deck_id" not in intent.get_json()
@@ -436,7 +436,7 @@ def test_each_backing_job_start_logs_one_line_with_its_reason(p1, spawned, caplo
 
 @pytest.fixture()
 def e2_on(e2, monkeypatch):
-    monkeypatch.setitem(ff._flags_cache, FLAG, True)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True})
     yield e2
 
 
@@ -476,7 +476,7 @@ def test_every_replacing_paged_response_logs_one_replace_line(e2_on, caplog):
 
 def test_flag_off_logs_no_replace_line(e2, monkeypatch, caplog):
     client, *_ = e2
-    monkeypatch.setitem(ff._flags_cache, FLAG, False)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
     caplog.set_level("INFO", logger=server.log.name)
     seed_job([card(i, owner=False) for i in range(75)])
     assert e2_status(client, 30).get_json()["replace"] is True
@@ -630,7 +630,7 @@ def p2_flag_off_bodies(client):
 
 @pytest.fixture()
 def flag_off(e2, monkeypatch):
-    monkeypatch.setitem(ff._flags_cache, FLAG, False)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
     ids_ = iter(uuid.UUID(int=n) for n in range(1, 100))
     monkeypatch.setattr(uuid, "uuid4", lambda: next(ids_))
     yield e2
@@ -651,7 +651,7 @@ def test_flag_off_kickoff_stamps_no_append_only(p1, spawned, monkeypatch):
 def test_flag_off_a_stamped_job_pages_by_its_card_markers(e2, monkeypatch):
     """A job admitted while the flag was on, paged after it is turned off: P1's rule."""
     client, *_ = e2
-    monkeypatch.setitem(ff._flags_cache, FLAG, False)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
     seed_job([card(i, owner=False) for i in range(75)], append_only=True)
     body = e2_status(client, 30).get_json()
     assert body["replace"] is True and len(body["cards"]) == 75
