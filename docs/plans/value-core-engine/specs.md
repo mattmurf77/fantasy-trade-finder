@@ -213,7 +213,8 @@ class CoreDiagnostics:
     fair: int = 0
     rejected: dict[str, int] = field(default_factory=dict)   # reason code -> count
     truncated_partners: int = 0     # partners that hit max_per_partner or the check cap
-    budget_exhausted: bool = False  # the time budget stopped enumeration early
+    budget_exhausted: bool = False  # enumeration stopped early (only the safety ceiling does this)
+    safety_ceiling_hit: bool = False  # core.SAFETY_CEILING_S fired: pathology, partial pool
     elapsed_ms: int = 0
 
 
@@ -318,9 +319,9 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
 1. `types.py` is byte-identical to §3.
 2. `core.py` exposes exactly the §4.1 public names and constants, and imports only stdlib, `.types` and `backend.power_rankings`.
 3. The rules are applied in the order of `REJECT_CODES`, and the rejection counts are recorded in `CoreDiagnostics.rejected`.
-4. The output is deterministic, and ordered as in lld §4.5.
-5. The complexity bounds in lld §4.6 are enforced by code: `max_checks_per_partner`, `time_budget_s`, `max_per_partner`.
-6. No logging, no I/O, no flag or config reads.
+4. The output is deterministic, and ordered as in lld §4.5, regardless of machine load.
+5. The complexity bounds in lld §4.6 are enforced by code, by counts only: `max_checks_per_partner`, `max_per_partner`. The work is never clock-bounded (G-065); `safety_ceiling_s` only marks pathology.
+6. No I/O, no flag or config reads. The only logging is the safety ceiling's ERROR line.
 
 **Tests: `backend/tests/test_value_core_core.py`.** Every team carries `BODIES(t)` unless stated. The default config is `CFG10 = CoreConfig(band=0.10)`, a symmetric ±10% band (`gain_band` defaults to 0.10), because these tests pin band mechanics; the "outside ±10%" notes below refer to it.
 
@@ -343,7 +344,8 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
 | `test_lineup_blocks_losing_only_qb` | no `BODIES`; slots `("QB","WR")`; V: `vq` QB 3000, `vw` WR 300 · P: `pw` WR 3100, `pw2` WR 300, `pq` QB 300 | `(("vq",), ("pw",))` absent (`rejected["lineup"] >= 1`). Add V `vq2` QB 300: present |
 | `test_fairness_threshold_only_tightens` | V `a1` 3000 · P `b1` 3150 | `fairness_threshold=0.97`: absent (band 0.03). `0.5`: present. `effective_band(0.10, 0.5) == 0.10`; `effective_band(0.10, 0.99) == 0.02` |
 | `test_per_partner_cap_spreads_headliner_pairs` | V: 4 WRs 3000/3000/2000/2000 · P: 4 WRs 3050/3050/2050/2050; `max_per_partner=2` | 2 trades kept with distinct (give, receive) headliner pairs, both with headliner market ≥ 3000; `diag.truncated_partners == 1` |
-| `test_check_cap_and_budget` | synthetic 2-team league, 14 assets per side | `max_checks_per_partner=50` gives `pairs_checked <= 50` and `truncated_partners == 1`; `time_budget_s=0.0` gives `budget_exhausted is True` |
+| `test_check_cap` | synthetic 2-team league, 14 assets per side | `max_checks_per_partner=50` gives `pairs_checked <= 50`, `truncated_partners == 1`, and neither `budget_exhausted` nor `safety_ceiling_hit` |
+| `test_safety_ceiling_marks_pathology` | the same league; the core's clock jumps past `SAFETY_CEILING_S` after 1 read (partner-loop check) or 2 reads (check-loop check at 1,000 checks) | `safety_ceiling_hit` and `budget_exhausted` are True; `pairs_checked` is 0 or 999; one ERROR record naming the ceiling, `0/1 partners done` and the pairs checked |
 | `test_deterministic` | any fixture | two calls return equal lists in equal order |
 | `test_evaluate_trade_agrees_with_find` | the stud fixture | for every kept trade, `evaluate_trade(...).ok` and an equal `adjusted_ratio`; for the 4200+4200 package, `ok is False`, `reason == "band"`, `trade is not None` |
 | `test_evaluate_trade_rejects_foreign_ids` | — | a give id not on the viewer's team raises `ValueError` |
@@ -365,6 +367,12 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
   - `len(trades) <= 13 * 200`;
   - elapsed < 10 s. This is a loose CI bound; the log prints the actual ms.
 - **`test_package_count_bound`.** 17 candidates give ≤ 833 packages, checked through `diag.packages_viewer` with 3 pins.
+
+**Tests: `backend/tests/test_value_core_count_bound.py`** (count-bounded, never clock-bounded; G-065). Fixture: `value_core_bench.synthetic_league()` seat `team00` (11 partners, a board) with `CoreConfig(max_assets_per_side=8)`.
+- **`test_same_deck_when_the_clock_runs_past_the_old_budget`** (the CI gate; models-lead R3.2 condition 5). A normal run, then a run whose core clock is stubbed to advance 1 s per read, with `safety_ceiling_s=1e9`. The test asserts the same pool, the same order and equal diagnostics bar `elapsed_ms`. The old 8 s budget would have cut every partner from the 9th on; a sabotage run with an 8 s partner-loop `break` fails this test.
+- **`test_safety_ceiling_is_the_only_clock_driven_stop`.** Default ceiling, stubbed clock at 0 / 0.5 / 1 / 2 / 5 / 31 s per read. At 2 s or more, `safety_ceiling_hit` and `budget_exhausted` are both set. Below that the run equals the baseline. `budget_exhausted` is never set without `safety_ceiling_hit`.
+- **`test_same_deck_under_real_cpu_contention`.** The same comparison while two busy threads spin, asserting equality only. It is a local stress check, skipped unless `FTF_STRESS=1`, and never a CI gate (R3.2 condition 5).
+- **`test_pipeline_passes_the_ceiling_through`.** `pipeline.run` hands `core.SAFETY_CEILING_S` by default and an explicit `safety_ceiling_s` otherwise; `0.0` trips the ceiling.
 
 **Isolated verification.**
 ```
