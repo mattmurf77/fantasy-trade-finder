@@ -19,6 +19,8 @@ import argparse
 import json
 import re
 import sys
+from datetime import datetime
+from html import unescape
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -304,11 +306,13 @@ def run() -> int:
             f"{len(EXCLUDED)} pages excluded with reasons")
 
     # ── POL: launch policy, contact and FAQ pages (#354 M7, P28, SUP-M4) ─
-    # Text: legal-lead-drafts.md Parts 1-3 (privacy, terms) and
+    # Text: legal-lead-drafts.md Parts 1-3 (privacy, terms), Part 5 (R28:
+    # terms §14 subscriptions and the privacy RevenueCat lines) and
     # marketing-lead-copy.md (§1b c1-c8, §2 FAQ). One support address,
     # written with an ASCII @, always a real mailto. The placeholder check is
-    # meant to fail until [OPERATOR NAME] and the effective date are filled:
-    # it is the merge blocker for publishing unfinished legal text.
+    # meant to fail until [OPERATOR NAME], Part 5's {…} fill values and its
+    # ⟪VERIFY⟫ mark are resolved: it is the merge blocker for publishing
+    # unfinished legal text. POL-effective-date pins the filled date.
     SUPPORT_EMAIL = "fleecedapp@gmail.com"
     POLICY = ("privacy.html", "terms.html")
     SUPPORT_PAGES = ("privacy.html", "terms.html", "contact.html", "faq.html")
@@ -318,6 +322,10 @@ def run() -> int:
     # [DEPLOY DATE], [STATE], [PRO], [M11 ALT], [APP STORE URL], and the copy
     # file's [new] / [R10 …] / [R22.1 edit …] / [goes live …] / [legal …] tags.
     PLACEHOLDER = re.compile(r"\[(?:[A-Z][A-Z0-9 _/.-]*|new|goes live[^\]]*|R\d[^\]]*|legal[^\]]*)\]")
+    # Legal Part 5's fill values: {December 31, 2026}, {$4.99 a month or …}.
+    # No visible text on these pages uses braces otherwise; styles and scripts
+    # are stripped by visible().
+    FILL = re.compile(r"\{[^{}]+\}")
     BLOCK_TAG = re.compile(r"</?(?:p|li|ul|ol|h[1-6]|div|details|summary|section|main|form|br)\b[^>]*>", re.I)
 
     def visible(page: str) -> str:
@@ -367,7 +375,8 @@ def run() -> int:
                 if "\uff20" in raw else "none")
 
         text = visible(page)
-        marks = sorted(set(PLACEHOLDER.findall(text)) | {m for m in ("⟪", "⟫") if m in text})
+        marks = sorted(set(PLACEHOLDER.findall(text)) | set(FILL.findall(text))
+                       | {m for m in ("⟪", "⟫") if m in text})
         r.check(f"POL-no-placeholders[{page}]", not marks,
                 "unfilled placeholder / editorial mark: " + ", ".join(marks) if marks else "none")
 
@@ -397,6 +406,57 @@ def run() -> int:
     r.check("POL-no-settings-feedback[privacy.html]",
             not re.search(r"Settings\s*(?:→|&rarr;|->)\s*feedback", privacy_text, flags=re.I),
             'still points at "Settings → feedback" (M7-AC4)')
+
+    # Legal Part 5 (R28). Pinned per section, so a paste that drops, moves or
+    # renumbers a subscription disclosure goes red.
+    def plain(fragment: str) -> str:
+        text = unescape(re.sub(r"<[^>]+>", " ", fragment)).replace("’", "'")
+        return re.sub(r"\s+", " ", text).strip()
+
+    def numbered(page: str) -> list[tuple[str, str]]:
+        """(number, html) per numbered <h2>, each running to the next <h2>."""
+        body = strip_style_and_script(strip_comments(body_of(all_sources[page])))
+        parts = re.split(r"(<h2\b[^>]*>.*?</h2>)", body, flags=re.S | re.I)
+        out = []
+        for i in range(1, len(parts) - 1, 2):
+            m = re.match(r"(\d+)\.", plain(parts[i]))
+            if m:
+                out.append((m.group(1), parts[i] + parts[i + 1]))
+        return out
+
+    priv = dict(numbered("privacy.html"))
+    item = re.search(r"<li>\s*<strong>Subscriptions and purchases\.</strong>(.*?)</li>",
+                     priv.get("1", ""), flags=re.S)
+    providers = re.search(r"Service providers that process data for us:.*?<ul>(.*?)</ul>",
+                          priv.get("4", ""), flags=re.S)
+    problems = [label for label, ok in (
+        ('§1 "Subscriptions and purchases" item naming RevenueCat',
+         bool(item) and "RevenueCat" in item.group(1)),
+        ("RevenueCat in the §4 service providers",
+         bool(providers) and "<strong>RevenueCat:</strong>" in providers.group(1)),
+        ('§5 "Subscription and purchase records" line',
+         "Subscription and purchase records:" in plain(priv.get("5", ""))),
+        ("§6 \"doesn't cancel an active subscription\" line",
+         "doesn't cancel an active subscription" in plain(priv.get("6", ""))),
+    ) if not ok]
+    r.check("POL-privacy-revenuecat[privacy.html]", not problems,
+            "missing: " + "; ".join(problems) if problems else "RevenueCat in §1, §4, §5 and §6")
+
+    EFFECTIVE = re.compile(r"Effective date:\s*([A-Z][a-z]+ \d{1,2}, \d{4})\b")
+    dates = {}
+    for page in POLICY:
+        m = EFFECTIVE.search(plain(visible(page)))
+        try:
+            dates[page] = (m.group(1), datetime.strptime(m.group(1), "%B %d, %Y").date()) if m else None
+        except ValueError:
+            dates[page] = None
+    real = all(dates.values())
+    same = real and len({d for _, d in dates.values()}) == 1
+    r.check("POL-effective-date", same,
+            (f"same date on both pages: {dates[POLICY[0]][0]}" if same else
+             "dates differ: " + ", ".join(f"{p} {v[0]}" for p, v in dates.items()) if real else
+             "no real \"Effective date: <Month> <D>, <YYYY>\" on: "
+             + ", ".join(p for p, v in dates.items() if not v)))
 
     contact = all_sources["contact.html"]
     cbody = strip_style_and_script(strip_comments(body_of(contact)))
