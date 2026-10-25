@@ -10,6 +10,10 @@ Covers:
       a NULL expiry becomes now + 24 h, never perpetual; the renewal and
       BILLING_ISSUE extend paths stay inside the cap; rows are tagged
       `sandbox:<event_id>` in granted_by; production is uncapped
+  (2) perpetual-grant guard — a non-founder grant with no expiry is refused
+      with process_error `perpetual_grant_refused…` and writes no row (nor
+      turns an existing row perpetual); founder lifetime still grants
+      perpetually; tips still grant nothing
 
 In-memory SQLite via the same patched-engine harness as test_entitlements.py.
 No network, no backend.server import.
@@ -170,3 +174,43 @@ def test_production_events_uncapped(eng, env):
     _ingest(ev2)
     assert _rows()[0]["expires_at"] == entl._ms_to_iso(
         ev2["grace_period_expiration_at_ms"])
+
+
+# ── (2) perpetual-grant guard ──────────────────────────────────────────────
+
+def test_production_non_founder_no_expiry_refused(eng):
+    r = _ingest(_rc("g1", "NON_RENEWING_PURCHASE", expires=None,
+                    product="ftf_season_pass_2026"))
+    assert r == {"stored": True, "projected": False, "duplicate": False}
+    assert _process_error(eng, "g1").startswith("perpetual_grant_refused")
+    assert _rows() == []
+    assert entl.get_entitlements(USER)["pro"] is False
+
+
+def test_guard_never_turns_existing_row_perpetual(eng):
+    ev = _rc("g2", "INITIAL_PURCHASE", expires=timedelta(days=30))
+    _ingest(ev)
+    r = _ingest(_rc("g3", "RENEWAL", expires=None))
+    assert r["projected"] is False
+    assert _process_error(eng, "g3").startswith("perpetual_grant_refused")
+    (row,) = _rows()
+    assert row["expires_at"] == entl._ms_to_iso(ev["expiration_at_ms"])
+    assert row["granted_by"] == "g2"
+
+
+def test_founder_no_expiry_still_perpetual(eng):
+    r = _ingest(_rc("g4", "NON_RENEWING_PURCHASE", expires=None,
+                    product="ftf_founder"))
+    assert r["projected"] is True
+    assert _process_error(eng, "g4") is None
+    (row,) = _rows()
+    assert row["source"] == "founder_iap" and row["expires_at"] is None
+
+
+@pytest.mark.parametrize("env", ["PRODUCTION", "SANDBOX"])
+def test_tip_still_grants_nothing(eng, env):
+    r = _ingest(_rc("g5", "NON_RENEWING_PURCHASE", env=env, expires=None,
+                    product="ftf_tip_small"))
+    assert r["projected"] is False
+    assert _process_error(eng, "g5").startswith("tip:")
+    assert _rows() == []

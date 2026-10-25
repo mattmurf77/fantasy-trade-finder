@@ -571,6 +571,15 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
             "checkout.session.completed", "customer.subscription.updated",
             "invoice.paid"):
         src = "stripe" if source == "stripe" else mapped_source
+        # Perpetual-grant guard: only the lifetime founder product may write
+        # a NULL expiry. Anything else without one (a non-renewing Season
+        # Pass carries no expiration_at_ms) is refused, not granted forever.
+        # Stripe is out of scope: its projector reads no expiry by design
+        # and ends access on customer.subscription.deleted.
+        if (expires_at is None and mapped_source != "founder_iap"
+                and source != "stripe"):
+            return False, (f"perpetual_grant_refused: {product_id} has no "
+                           f"expiry and is not a founder product")
         with db.engine.begin() as conn:
             existing = conn.execute(
                 select(db.entitlements_table.c.id)
