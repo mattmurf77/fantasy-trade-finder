@@ -1,7 +1,8 @@
 # Tracking-plan addendum: time to trade suggestion (2026-10-20)
 
-**Status:** draft for analytics-lead's review, written before any emitter ships (G-031).
-- **Grant:** analytics-lead's Ask 1b, 2026-10-15 (`docs/plans/org-bringup/reports/analytics-lead.md`). R1–R3 are
+**Status:** accepted by analytics-lead (ruling 30, 2026-10-20; Q-A and Q-B, 2026-10-24). Written before any emitter
+shipped (G-031); the emitters ship in #363.
+- **Grant:** analytics-lead's Ask 1b, 2026-10-15 (`reports/analytics-lead.md`, the agent org's working record, kept outside the repo; cited for provenance). R1–R3 are
   granted with conditions; R4 is refused, and `network_type` is a prop instead.
 - **Scope:** `docs/plans/trade-time-to-suggestion/scope-eng-200ms.md` §1. PRD: PR #339 (§4.6). The gate is 200 ms,
   which supersedes #339's 250 ms.

@@ -28,27 +28,27 @@
   M (coordinator, 2026-10-20).
 - On DEC-2: "yes, with tiny rows for unseen trades."
 - On a "finding more trades" card: "This should never happen."
-- Briefs (head-eng): `docs/plans/org-bringup/briefs/build-200ms-trades-eng.md`,
-  `build-200ms-trades-eng-amend-1.md` and `build-200ms-amend-2-packed-evidence.md`.
+- Briefs (head-eng): `build-200ms-trades-eng.md`, `build-200ms-trades-eng-amend-1.md` and
+  `build-200ms-amend-2-packed-evidence.md` (the agent org's working record, kept outside the repo; cited for provenance).
 **Builder:** trades-eng (lead), with `eng-backend` and `eng-mobile` workers in their own worktrees.
 **Operator sign-off on waivers:** pending. §9 is surfaced to head-eng, who takes it to the operator.
 **Status:** v1.3. E2 is built (`feat/trades-200ms-e2-small-responses` @ `1aaa6538`) and S0 serve is built
 (`feat/trades-200ms-s0-serve` @ `7e5f581e`); both are accepted by trades-eng and unpushed. Rows marked **OPEN** block the piece named beside them.
 
 **Supersedes and cites:**
-- **Product's acceptance** (binding): `docs/plans/org-bringup/launch-readiness-product.md` §"200 ms by launch":
+- **Product's acceptance** (binding): `launch-readiness-product.md` §"200 ms by launch" (the agent org's working record, kept outside the repo; cited for provenance):
   U1–U5 and AC-L1 to AC-L8. trades-pm folds them into PR #339 and owns the final wording.
 - **PR #339** (`prd.md`, `scope.md`; trades-pm's, not edited here) set 250 ms. **200 ms supersedes it.** Its
   §4.2 clock, §5 freshness bounds and invariants (I-1 to I-5), AC-9 and R1–R3 stand.
 - **Eng input:** `eng-input.md` on `plan/trade-time-eng-input` @ `36af2e83`.
-- **Plan of record:** `docs/plans/org-bringup/launch-readiness-eng.md` §3a.
+- **Plan of record:** `launch-readiness-eng.md` §3a (the agent org's working record, kept outside the repo; cited for provenance).
 - **Evidence policy (the build spec):** `leads/models-lead-launch.md` §DEC-2, the Confirmation block from line 217.
   - The **packed** form is the target: a per-run part once per served job, plus per-card arrays at about 92 B per
     unseen card.
   - The final C1–C9 are binding.
   - Separate narrow rows are the fallback, only if C7 (i)–(ii) slip.
-  - The ADR-025 draft is `docs/plans/org-bringup/adr-025-draft.md`. trades-eng lands it in `docs/adr/` with the
-    first packed-write PR.
+  - ADR-025 is landed as [`docs/adr/adr-025-packed-unseen-evidence.md`](../../adr/adr-025-packed-unseen-evidence.md)
+    (Accepted, 2026-10-25).
 - **Event grants:** `reports/analytics-lead.md` Ask 1b (R1–R3 granted with conditions, R4 refused in favor of a
   prop) and the AC-L1 conditions T1–T6.
 
@@ -105,7 +105,7 @@ platforms-eng's S0 background fetch.
 | **R3** `trades_generated` (widened) | as today | existing + `first_publish_ms`, `serve_source`, `oldest_input_age_s`, echoed `search_id` | **Binding condition: exactly one per user-visible deck, whatever `serve_source`.** Page serves emit it at serve. **A never-served pre-build emits none** (a job log line only, mirroring C2). Both of today's emitters are covered: the owner/live path (`server.py:9226-9238`, skipped for superseded jobs at `:9232` and for `gen_ms is None` at `:9205-9206`) and the value-core path (`:7617`). `deck_source` (F10, replenish, `:9228-9231`) keeps its meaning; `serve_source` is a separate dimension | server |
 
 - **Follow-through:**
-  - the addendum `docs/business/analytics/2026-10-2x-time-to-suggestion-events.md` (trades-eng writes it;
+  - the addendum [`docs/business/analytics/2026-10-20-time-to-suggestion-events.md`](../../business/analytics/2026-10-20-time-to-suggestion-events.md) (trades-eng writes it;
     analytics-lead reviews), **before** the emitter ships (G-031), with a seam line: no R1–R3 history before ship;
   - `search_id` on `/generate` goes in `docs/api-reference.md`;
   - the privacy delta (`network_type`, `search_id`) goes to onboarding-pm under P12 ("check, likely no change").
@@ -134,7 +134,7 @@ platforms-eng's S0 background fetch.
 | `features_compact` on `deck_impressions` | Narrow fallback | The §DEC-2 §2 key list, frozen at build | Only if C7 (i)–(ii) slip past launch (models-lead line 313) |
 | C8 archive marker | Packed | From models-eng's C8 spec | **OPEN** (models-eng) |
 | Roster refresh state (`league_roster_state`) | S0 | contract §4 | **Granted to platforms-eng** (amendment 2 §5). `roster_snapshot` reads it once it exists |
-| `evidence_tier` on `deck_impressions` (archive / delivered / first-30 / ghost) | Packed | Spec: `docs/plans/org-bringup/adr-025-draft.md` §C8 | **Granted** (head-eng, 2026-10-20) |
+| `evidence_tier` on `deck_impressions` (archive / delivered / first-30 / ghost) | Packed | Spec: [ADR-025](../../adr/adr-025-packed-unseen-evidence.md) §C8 | **Granted** (head-eng, 2026-10-20) |
 | Account deletion and export registration for the new tables (D-183; C7 (v)) | P1, packed | `_ADDITIONAL_PRIVATE_TABLES` (`accounts.py:652`); export is derived from it by `user_id` (`:988-992`). **So the page store and the pack table each carry their own `user_id` column.** | **Granted** (head-eng, 2026-10-20) |
 
 **Feature flag: `trade.first_page_store`** (named by release-lead, 2026-10-20). Default **false**.

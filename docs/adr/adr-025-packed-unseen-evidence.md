@@ -7,10 +7,10 @@ first delivery) is built on #370; the packed writer follows (`deck_evidence_pack
 
 ## Context
 
-The 200 ms launch target (`docs/plans/org-bringup/launch-readiness-eng.md` §3a) pre-builds each user-league's
+The 200 ms launch target (`launch-readiness-eng.md` §3a, the agent org's working record, kept outside the repo; cited for provenance) pre-builds each user-league's
 first page in the background and pages the deck to the client. Today every generated card writes a full
 `deck_impressions` row of about 7.6–10.8 KB, about 17.8 MB per job. Background pre-builds would multiply jobs and
-fill the 5 GB database within days at modest usage (`docs/plans/org-bringup/db-capacity.md`).
+fill the 5 GB database within days at modest usage (`db-capacity.md`, the agent org's working record, kept outside the repo; cited for provenance).
 
 Replay/OPE and the ghost holdout need every **served** position, viewed or not: the exposure model e(k),
 counterfactual re-ranking of the whole deck, and the never-displayed ghost controls. Calibration's current arm needs
