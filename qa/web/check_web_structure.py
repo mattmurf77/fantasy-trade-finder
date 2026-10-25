@@ -463,6 +463,14 @@ def run() -> int:
     r.check("POL-privacy-revenuecat[privacy.html]", not problems,
             "missing: " + "; ".join(problems) if problems else "RevenueCat in §1, §4, §5 and §6")
 
+    # R28.9: service providers (RevenueCat among them) may process data outside
+    # the US, so the old US-only processing sentence must not come back.
+    us_only = re.search(r"We and our service providers process data in the United States",
+                        plain(visible("privacy.html")), flags=re.I)
+    r.check("POL-no-us-only-processing[privacy.html]", not us_only,
+            'still says "We and our service providers process data in the United States" (R28.9)'
+            if us_only else "none")
+
     EFFECTIVE = re.compile(r"Effective date:\s*([A-Z][a-z]+ \d{1,2}, \d{4})\b")
     dates = {}
     for page in POLICY:
