@@ -141,6 +141,7 @@
           <li><strong>MFL.</strong> When you sign in with MFL, your password passes through our server to MFL's sign-in once, to start a session. We never store it. We keep the session MFL returns, encrypted, and use it to read your leagues and to send trades you approve. You can disconnect in Settings → Leagues.</li>
         </ul>
       </li>
+      <li><strong>Subscriptions and purchases.</strong> If you subscribe, Apple handles the payment; we never see your card or billing details. We and our subscription service provider, RevenueCat, receive your subscription status, plan, trial, purchase and renewal dates, and transaction identifiers from Apple, linked to your account, so we can give you access and keep billing records. RevenueCat also receives your account identifier when you sign in.</li>
       <li><strong>Crash and performance data (Sentry).</strong> The iOS app uses Sentry to report crashes and performance traces (a sample of app interactions). Reports include device model, OS version and app version. After sign-in they're tagged with an account identifier (your Fleeced account ID, Sleeper user ID or ESPN member ID, depending on how you signed in) so we can look into your bug reports. They never carry your name or email address. The tag is cleared when you sign out. Sentry is set up not to collect other personal data by default. Sentry may also record the IP address a report came from.</li>
       <li>
         <strong>Cookies and local storage.</strong>
@@ -171,6 +172,7 @@
           <li>match you with leaguemates on mutually liked trades;</li>
           <li>show value trends;</li>
           <li>send trade proposals you approve;</li>
+          <li>manage your trial and subscription;</li>
           <li>send the notifications you turned on.</li>
         </ul>
       </li>
@@ -210,6 +212,7 @@
       <li><strong>Sentry:</strong> receives crash and performance reports from the iOS app, as described above.</li>
       <li><strong>Anthropic:</strong> receives player details and anonymous rating signals for matchup selection, as described above.</li>
       <li><strong>Google:</strong> hosts our support mailbox (Gmail), which stores the emails you send us. It also serves our website's fonts, which means Google receives your IP address; the app bundles its fonts and makes no such request.</li>
+      <li><strong>RevenueCat:</strong> manages subscriptions and purchases for us. It receives your account identifier and the purchase records Apple provides.</li>
     </ul>
     <p><strong>Data sources.</strong> These receive no data about you:</p>
     <ul>
@@ -229,6 +232,7 @@
       <li><strong>Feedback and <a href="/contact.html">contact-form</a> messages:</strong> kept through triage and afterwards as a product record. On account deletion, your account link and note text are removed.</li>
       <li><strong>Emails</strong> to our support mailbox: kept as long as we need them to answer you and to keep a record of your request.</li>
       <li><strong>Push tokens:</strong> kept until your account is deleted. Turning notifications off in Settings or on your device stops alerts.</li>
+      <li><strong>Subscription and purchase records:</strong> kept while your account exists, and deleted with it.</li>
       <li>
         <strong>Platform connections (Sleeper, ESPN, MFL):</strong> kept encrypted until any of these happens:
         <ul>
@@ -247,7 +251,7 @@
     <h2>6. Deletion, export and your choices</h2>
     <ul>
       <li>
-        <strong>Delete your account.</strong> In the app, go to Settings → Account &amp; data → Delete account.
+        <strong>Delete your account.</strong> Deleting your account doesn't cancel an active subscription. To stop future charges, cancel it in your Apple ID settings first. In the app, go to Settings → Account &amp; data → Delete account.
         <ul>
           <li><strong>How it runs:</strong> deletion waits for any account operation in progress to finish. If that takes too long, you'll be asked to try again in a minute.</li>
           <li>
