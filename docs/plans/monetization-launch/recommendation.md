@@ -18,9 +18,8 @@
 
 **The operator's decision** (2026-10-25, relayed verbatim via head-bizops → head-product): "Approve M2-M5 as recommended:
 trade features only locked (C2), $4.99/$24.99 Founder then $6.99/$34.99 from 2027-01-01, rest of PR #393 incl. decision
-16. Name: Founding GMs. Listing line: legal's R28.8 version." **The route (M1 = R1):** "Ok. Then we need to build it."
-The 4th Eng slot is approved (operator, in head-eng's session): engagement-eng builds the client from 10-28, weekends
-included, with the 11-03 checkpoint (R3 if it isn't green).
+16. Name: Founding GMs. Listing line: legal's R28.8 version." **Route (M1 = R1):** "Ok. Then we need to build it." The 4th
+Eng slot is approved (engagement-eng from 10-28, weekends, the 11-03 checkpoint; R3 if it isn't green).
 
 ## TL;DR
 
@@ -59,7 +58,7 @@ included, with the 11-03 checkpoint (R3 if it isn't green).
 | 6 | Lifetime, Season Pass, tips | **Drop / defer / keep dark** | Ship tips as built | More IAPs to review on the first submission, and a perpetual grant with storage liability |
 | 7 | TestFlight users | **No clock, no comp**; Founding GMs on the same terms | 90-day comp (#347) | A comp past the cut-off makes them miss the founder price |
 | 8 | Web and extension | **Web gated by the server rule** under `paywall_web_enforce_enabled`, **ungated until 11-18** (head-product); extension unchanged | A web trial | A web-only free window is a bypass with no purchase path |
-| 9 | Identity | **Pro counts only on verified or demo sessions** (head-eng's P47). **Every** unverified session gets the same free page, then a **status-blind** 402 `verify_required` at any gated action, subscriber or not (legal R28.9 row 4, a MUST; `org/leads/legal-lead.md:1677`) | Pro on any session; a verify gate only for subscribers | A paid entitlement usable from a claimable username; a subscriber-only gate reveals who pays |
+| 9 | Identity | **Pro counts only on verified or demo sessions** (head-eng's P47). Unverified sessions get **no free page** (P53): the existing account check answers 403 `verification_required` at the first trade action, and the client opens the same verify sheet as for the **status-blind** backstop 402 `verify_required`, subscriber or not (legal R28.9 row 4, a MUST; `org/leads/legal-lead.md:1677`) | Pro on any session; a verify gate only for subscribers | A paid entitlement usable from a claimable username; a subscriber-only gate reveals who pays |
 | 10 | Route | **R1** ("Ok. Then we need to build it."); the 4th slot approved; checkpoint 11-03, else R3 | R3 | R1 slipping late puts an unproven gate in the review binary |
 | 11 | Kill criteria | **K0–K3** with the deploy-free knob | None | Damage from the gate goes unseen at n ≈ 8 |
 
@@ -69,7 +68,7 @@ included, with the 11-03 checkpoint (R3 if it isn't green).
 
 | | A at sign-in | **A-preview (decided)** | B: app-managed 30 days |
 |---|---|---|---|
-| Apple's rule | 3.1.2(a): "Auto-renewable subscription apps may offer a free trial period … in App Store Connect" | Same. The free first page is a usage-metered free tier [interp.] | No text forbids it, none permits it for subscription apps. Tier-0 trials are for "Non-subscription apps" (3.1.1). 2.2 is a hook |
+| Apple's rule | 3.1.2(a): "Auto-renewable subscription apps may offer a free trial period … in App Store Connect" | Same. The free first page (verified sessions) is a usage-metered free tier [interp.] | No text forbids it, none permits it for subscription apps. Tier-0 trials are for "Non-subscription apps" (3.1.1). 2.2 is a hook |
 | App Review evidence | The sanctioned path | Metered free previews are common in the category: Dynasty Nerds' free tier has "3 preview trades/day" [B, #347 §2.1, 2026-10-15] | Three 2020 rejections: "please use App Store Connect to implement free trials" (forum thread 129010). One unverified 2025 "fine" report. Nothing found for 2024–2026 |
 | Day-0 decision moment | Yes | **Yes, same session** | No. The ask moves to the window's end, about 12-18, mid fantasy playoffs [A] |
 | Trial → paid | Opt-out: 48.8% SaaS [B]; 17–32-day trials 42.5–45.7% [B] | Same | Opt-in: 18.2% SaaS [B]; 8.9% mobile (secondhand, attributed to Adapty but not found on Adapty's page; unverified) |
@@ -115,6 +114,8 @@ preservation** on the two existing SKUs, not an offer code, a separate SKU or a 
 Trades need leaguemates' boards, and the referral loop is a launch MUST. From the code (repo-facts §1–2):
 - **Activation survives A-preview.** FR-17 activates on the invitee's first `trade_proposed` or `match_swiped`
   (`origin/plan/referral-loop:docs/plans/referral-loop/prd.md:889-899`), both fired by the swipe route before the offer; A at sign-in blocks it.
+  **An unverified (username-only) invitee must verify before their first swipe,** so FR-17 activation needs
+  verification. That's existing behavior from the account check (`_verified_read_denial`), not caused by monetization.
 - **Boards persist.** `load_member_rankings` (`database.py:9281-9380`) loads every leaguemate's row, with no activity
   or entitlement filter. A gated user's last board keeps powering payers' two-board cards. **The gate must not filter
   this load** (scope §3 pins it). Under C2 the board doesn't freeze: every rank write republishes it.
@@ -180,10 +181,10 @@ ranking and Calibration); and the August trial ruling (14 days monthly), now 1 m
 
 | Gated (a user action → 402 → the standard paywall) | Free, forever, for signed-in users |
 |---|---|
-| The deck and Find a trade beyond the preview page; Shop a player; team overhaul suggestions; Win Now trade targets; Send in Sleeper, ESPN or MFL (and MFL respond); the trade queue; standing offers; Today's Trade (dark); **from Matches: accept, send or swipe**; **from the calculator: Find a trade and its suggestions** | Rank, all modes (trios, tiers, quick, manual, rookie, anchors); **Calibration** (data-generating and feeds model evals); Trends and Usage Trends data; league standings, rosters, outlook, power rankings, free agents, receipts, team review; Settings; the Home hub (its trade tile opens the standard paywall); **the calculator's value comparison of a trade the user builds**; **viewing existing Matches** (a reactivation hook; dismiss is free); **the Draft Room** (not a trade suggestion); invites; profile; **P48 (Product-confirmed): `/api/trades/validate` (the calculator's value check), standing-offer revoke (your own offer), matches dismiss, `/api/trades/liked` (your own list)**; Portfolio and mock draft by the same rule [A, ux-lead to confirm] |
+| The deck and Find a trade beyond the preview page; Shop a player; team overhaul suggestions; Win Now trade targets (the four `/api/win-now/*` routes, P52); Send in Sleeper, ESPN or MFL (and MFL respond); the trade queue; standing offers; Today's Trade (dark); **from Matches: accept, send or swipe**; **from the calculator: Find a trade and its suggestions** | Rank, all modes (trios, tiers, quick, manual, rookie, anchors); **Calibration** (data-generating and feeds model evals); Trends and Usage Trends data; league standings, rosters, outlook, power rankings, free agents, receipts, team review; Settings; the Home hub (its trade tile opens the standard paywall); **the calculator's value comparison of a trade the user builds**; **viewing existing Matches** (a reactivation hook; dismiss is free); **the Draft Room** (not a trade suggestion); the "Season projections & Win Now" standings (`/api/league/season-projections`, P52); invites; profile; **P48 (Product-confirmed): `/api/trades/validate` (the calculator's value check), standing-offer revoke (your own offer), matches dismiss, `/api/trades/liked` (your own list)**; Portfolio and mock draft by the same rule [A, ux-lead to confirm] |
 
 **The client source for engagement-eng:** ux-lead's surface classification, with its "Decide" column
-(`org/reports/ux-lead.md:289`) **decided by Product:** the calculator's value comparison of a user-built trade FREE
+(`org/reports/ux-lead.md:495`) **decided by Product:** the calculator's value comparison of a user-built trade FREE
 (its deck suggestions and sends gated); viewing existing Matches FREE (dismiss free; swipe, accept, send gated); the
 Draft Room FREE; Calibration FREE.
 
@@ -212,16 +213,15 @@ non-deck gated entry points open the standard paywall, so no bespoke in-place st
 ## (d) Existing TestFlight users
 
 - **How many:** about 8 MAU [M, W3 2026-10-20]; ux-lead counts about 4 testers. No TestFlight signal exists in code.
-- **No app-managed clock under A.** Their month starts when they start Apple's trial on the App Store build; TestFlight
-  purchases are sandbox, so production intro eligibility is untouched [interp., research §2; release-lead to confirm].
-  Their preview counts from enforcement start, so they get the same first page and offer as everyone (ux §6).
-- **Founding GMs on the same terms,** with the tester welcome (`mz.founder.welcome_tester`, ux §4.1). **No comp:** #347's
-  90-day comp would push their first subscription past 12-31 and cost them the Founder price.
+- **No app-managed clock under A:** their month starts with Apple's trial on the App Store build (sandbox history leaves
+  production eligibility untouched [interp.; release-lead to confirm]); their preview counts from enforcement start (ux §6).
+- **Founding GMs on the same terms** (tester welcome, ux §4.1). **No comp:** #347's 90-day comp would cost them the founder price.
 - **Manual grants only for** the operator's 2 allowlisted ids (`config/tester_allowlist.json`) and the entitled App
   Review demo (`/api/admin/entitlements/grant`, `server.py:31254`), by release-lead on the operator's word. **Two
   "demos", no conflict:** the **App Review demo accounts** (one granted, one never entitled) **stay gated**, so the
   reviewer sees the real gate (preview → offer → sandbox purchase; 5f caps sandbox grants at 24 h). The **try-before-sync
-  session** (`_synthetic_demo_session`) **is exempt** (head-eng coded it; moot while `try_before_sync` is off).
+  session** (`_synthetic_demo_session`) **is exempt** (head-eng coded it; moot while `try_before_sync` is off). **Demo B
+  is reserved for App Review** (P56): never used for testing; every never-entitled check runs on a fresh account.
 - **Testers move to the App Store build;** the operator tells them (ux §6; outbound). Old TestFlight builds have no 402
   handling and will error once enforcement is on. **head-bizops' "clock from 11-18" applies only under B;** under R3
   with A there's still no app clock (11-18 to the gate go-live is simply free launch use).
@@ -232,9 +232,8 @@ non-deck gated entry points open the standard paywall, so no bespoke in-place st
   native app's `X-Device` counts as web). **head-product ruled the web stays ungated until 11-18;** the knob flips on
   11-18 once `IOS_INSTALL_URL` resolves. Then, after the first web deck, web shows "continue on iPhone" (it needs a 402
   handler; none exists, repo-facts §7); free surfaces, sign-in, settings, legal and delete stay reachable.
-- **No web trial:** no web purchase path exists (Stripe isn't live), and a web-only free window would be an inconsistent
-  bypass. Desktop invitees are steered to the iPhone; the #386 QR is primary once `IOS_INSTALL_URL` is set (ux §5 B9).
-  Web has no Apple sign-in, so `acct_`-only users still can't use it (unchanged).
+- **No web trial** (no web purchase path; a web-only free window would be a bypass). Desktop invitees are steered to the
+  iPhone (the #386 QR, ux §5 B9). Web has no Apple sign-in, so `acct_`-only users still can't use it (unchanged).
 - **Server/web, not binary:** eng-web, 0.5–1 d [A], live ≤ 11-16; not in head-eng's estimate. Later: revisit Stripe "or
   subscribe on the web" (a US link-out is allowed today at 0% Apple commission, research §5).
 - **The extension needs no change:** its five routes (`/api/extension/auth`, `/api/sleeper/link`, `/api/extension/rankings`,
@@ -300,7 +299,7 @@ invitees and bounce points B1–B9 §5, TestFlight users §6, the B column, copy
 | 12 | The offer as an interrupt surface right after `guide_step`; deck state kept across the detour (ux §0.2, §1) | 0.25 [A] | A | eng | Y |
 | 13 | Rule 0.3: "free" copy keyed off RevenueCat's intro-eligibility check, not `trial_eligible` (`PaywallScreen.tsx:166`) | 0.25 [A] | A | eng | Y |
 | 14 | C2 per ux-lead's classification: the wider free set; non-deck gated entry points open the standard paywall (required by the ruling) | 0.25 [A] | both | eng | Y |
-| 15 | P47 + legal R28.9 row 4: Pro only on verified or demo sessions; a status-blind 402 `verify_required` for every unverified session at a gated action; the "Verify this session first" screen (ux-lead addendum §3) | 0.25 [A] | both | eng; ux-lead specs | Y |
+| 15 | P47 + legal R28.9 row 4 + P53–P55: Pro only on verified or demo sessions; the client opens one verify sheet for the account check's 403 `verification_required` and the status-blind backstop 402 `verify_required`; Sleeper: Verify with Sleeper only; others: Apple as a new sign-in (ux-lead addendum §3, amended) | 0.25 [A] | both | eng; ux-lead specs | Y |
 | 16 | The Founder window in `/api/paywall/config`, display prices, and a `founder` flag on entitlements | 0.25 [A] | A | eng | Y |
 | 17 | 5b, the `enforcing` predicate; 5c, a truthful feature grid | 0.25 [A] | both | eng | 5b Y; 5c N (server config, live by 11-09) |
 | 18 | ~~Trial state (`in_trial`, `will_renew`)~~ | **0** | — | — | Dropped (operator ruling 2026-10-24): nothing else needs it. Settings shows no trial dates; the gate's `trial_expired` / `lapsed` split is server-side, in row 1 |
@@ -366,9 +365,10 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
   it must land first. **The listing line (decided, legal's R28.8):** "Finding and sending trades needs a subscription,
   starting with 1 month free. It renews automatically until cancelled." It replaces the approved "Free to use."
   `web/terms.html` needs subscription, billing, renewal, refund, founder-price and lapse terms (legal-lead) by 11-09.
-- **Unverified sessions** (legal R28.9 row 4, MUST): the same free first page, then at any gated action the same
-  "Verify this session first" screen (`mon.verify.title` / `.body`, legal-approved; ux-lead addendum §3), subscriber or
-  not. Nothing in any response differs by status; `/api/me/entitlements` stays blank; status shows only after verifying.
+- **Unverified sessions** (legal R28.9 row 4; P53–P55): **no free page;** the first trade action meets the account
+  check's 403 and the same "Verify this session first" sheet as the backstop 402 (`mon.verify.*`; ux-lead §3, amended:
+  Sleeper gets Verify with Sleeper only; others get Apple's button as a new sign-in). Nothing differs by status. After
+  verifying: entitled → the action continues; not entitled → the free page if unused, else the standard paywall.
 - **App Store creative:** no founder price in the screenshots or preview (2.3.14), incl. the operator's 11-08 shots.
   **Review Notes** (release-lead): the preview, the gate, the window, two App Review demo accounts (one granted, both
   gated). **Invites:** the referral copy (#348, #386) must not promise "free" (marketing-lead).
@@ -390,8 +390,8 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 8. **TestFlight users:** no clock, no comp; grants only for the operator's 2 ids and the granted App Review demo (both
    App Review demos stay gated; the try-before-sync session is exempt). **DECIDED.**
 9. **Web:** `paywall_web_enforce_enabled`, ungated until 11-18 (head-product), then "continue on iPhone". **DECIDED.**
-10. **Identity:** Pro only on verified or demo sessions (P47); every unverified session gets the status-blind
-    `verify_required` (legal R28.9 row 4, MUST, applied 2026-10-25). **DECIDED.**
+10. **Identity:** Pro only on verified or demo sessions (P47); no free page for unverified sessions, the 403 account
+    check first and the status-blind `verify_required` as backstop (legal R28.9 row 4; P53–P55). **DECIDED.**
 11. **Route:** R1 with the approved 4th slot (engagement-eng from 10-28, weekends) and the 11-03 checkpoint, else R3.
     **DECIDED** ("Ok. Then we need to build it.").
 12. **Kill criteria** K0–K3 with the knob. 13. **The ADR plus D-entry** for the overturn (head-eng). **Both DECIDED.**
