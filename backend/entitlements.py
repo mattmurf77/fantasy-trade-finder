@@ -248,6 +248,17 @@ def get_entitlements(user_id: str) -> dict:
     }
 
 
+def _enforce_knob_on() -> bool:
+    """model_config `paywall_enforce_enabled` == 1, read live on every call
+    through database.get_config() (no cache), so setting it to 0 stops
+    enforcement without a deploy. A missing row or a failed read is 0, not
+    enforcing (G-064: the inline fallback must match the seed)."""
+    try:
+        return float(db.get_config().get("paywall_enforce_enabled", 0.0)) == 1.0
+    except Exception:
+        return False
+
+
 def check_pro(user_id: str, route: str, logger=None) -> bool:
     """Flag-aware gate. Returns True when the request may proceed.
 

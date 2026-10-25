@@ -14,6 +14,9 @@ Covers:
       with process_error `perpetual_grant_refused…` and writes no row (nor
       turns an existing row perpetual); founder lifetime still grants
       perpetually; tips still grant nothing
+  (4) kill knob — model_config `paywall_enforce_enabled` seeded 0, read live
+      per call (flip the stored row, the answer changes, no reload); a
+      missing row or failed read is 0, not enforcing (G-064)
 
 In-memory SQLite via the same patched-engine harness as test_entitlements.py.
 No network, no backend.server import.
@@ -27,7 +30,9 @@ from sqlalchemy import create_engine, insert, select
 
 import backend.database as db_module
 import backend.entitlements as entl
-from backend.database import metadata, subscription_events_table, users_table
+from backend.database import (
+    metadata, model_config_table, subscription_events_table, users_table,
+)
 
 USER = "safety_user_1"
 DAY = timedelta(days=1)
@@ -214,3 +219,56 @@ def test_tip_still_grants_nothing(eng, env):
     assert r["projected"] is False
     assert _process_error(eng, "g5").startswith("tip:")
     assert _rows() == []
+
+
+# ── (4) kill knob: paywall_enforce_enabled ─────────────────────────────────
+
+KNOB = "paywall_enforce_enabled"
+
+
+def _set_knob(eng, value):
+    """Write the knob row straight to the table (no reload_config call), so
+    a changed answer proves the read is live."""
+    with eng.begin() as conn:
+        conn.execute(model_config_table.delete()
+                     .where(model_config_table.c.key == KNOB))
+        if value is not None:
+            conn.execute(insert(model_config_table).values(key=KNOB, value=value))
+
+
+def _other_config_row(eng):
+    """A non-empty model_config, so get_config() serves DB rows rather than
+    falling back to the seed list — a missing knob row then hits the inline
+    fallback in entitlements, which is what G-064 is about."""
+    with eng.begin() as conn:
+        conn.execute(insert(model_config_table).values(key="vet_age", value=27))
+
+
+def test_knob_seeded_zero():
+    seeded = {k: v for k, v, _ in db_module._MODEL_CONFIG_DEFAULTS}
+    assert seeded[KNOB] == 0
+
+
+def test_knob_missing_row_reads_not_enforcing(eng):
+    _other_config_row(eng)
+    assert KNOB not in db_module.get_config()
+    assert entl._enforce_knob_on() is False
+
+
+def test_knob_failed_read_is_not_enforcing(eng):
+    def boom():
+        raise RuntimeError("db down")
+    with patch.object(db_module, "get_config", boom):
+        assert entl._enforce_knob_on() is False
+
+
+def test_knob_read_live_between_calls(eng):
+    _other_config_row(eng)
+    _set_knob(eng, 1.0)
+    assert entl._enforce_knob_on() is True
+    _set_knob(eng, 0.0)
+    assert entl._enforce_knob_on() is False
+    _set_knob(eng, 1.0)
+    assert entl._enforce_knob_on() is True
+    _set_knob(eng, 2.0)                                 # exactly 1, not truthy
+    assert entl._enforce_knob_on() is False
