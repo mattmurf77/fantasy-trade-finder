@@ -332,11 +332,23 @@ def test_same_user_unverified_gets_verify_required(eng, client, stubbed, headers
             assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
 
 
-def test_unverified_never_pro_keeps_normal_reason(eng, client, stubbed):
+@pytest.mark.parametrize("path", ["/api/trades/generate", "/api/trades/propose"])
+def test_unverified_never_pro_also_gets_verify_required(eng, client, stubbed, path):
+    """Legal R28.9: every unverified session gets verify_required at a gated
+    action (here with no preview), subscriber or not."""
     with _enforcing(eng):
-        r = client.post("/api/trades/generate",
-                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
-    assert r.get_json() == {"error": "pro_required", "gate": "preview_used"}
+        r = client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
+    assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
+
+
+def test_unverified_path_never_reads_entitlements(eng, client, stubbed):
+    _make_user("active_paid")
+    ent, hist = _Spy(entl.get_entitlements), _Spy(entl.list_for_user)
+    with _enforcing(eng), patch.object(entl, "get_entitlements", ent), \
+            patch.object(entl, "list_for_user", hist):
+        for path in ("/api/trades/generate", "/api/trades/propose"):
+            client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
+    assert (ent.calls, hist.calls) == (0, 0)
 
 
 def test_demo_synthetic_session_passes(eng, client, stubbed):

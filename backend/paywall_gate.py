@@ -19,9 +19,10 @@ overridden by head-eng (2026-10-24):
     and cron-built jobs never consume it.
   * A blocked request gets exactly 402 {"error": "pro_required", "gate": <reason>}.
   * Pro counts only on a verified session (head-eng security ruling,
-    2026-10-24); a pro user_id on an unverified session gets `verify_required`.
-    The preview is not pro: it applies to a never-entitled user whether or not
-    the session is verified (it reveals nothing about any subscriber).
+    2026-10-24). Legal R28.9 (2026-10-25): an unverified, non-demo session is
+    decided from verified-ness and its paywall_previews record only, never
+    from entitlements. It gets the preview like a brand-new account, then
+    `verify_required` at every gated action, subscriber or not.
   * The server-made demo session (try-before-sync) is exempt on deck routes.
 
 One before_request hook in server.py reads ROUTES, a per-route table keyed by
@@ -398,9 +399,13 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
 
     Pro counts only on a verified session (or the server-made demo session):
     entitlements resolve by user_id, and an unverified username-only session
-    carries the same user_id as the subscriber it names. Such a session gets
-    `verify_required` when the user_id holds pro, the normal reason when not.
-    A never-entitled user on a deck route gets the preview, verified or not."""
+    carries the same user_id as the subscriber it names.
+
+    An unverified session (legal R28.9) is decided from verified-ness and the
+    `paywall_previews` record ONLY, never from entitlements: it gets the deck
+    preview exactly as a brand-new account would, and after that every gated
+    action is `verify_required`, whatever the user_id's subscription. Its
+    answer therefore never reveals subscriber status."""
     if not user_id:
         return None
     deck = (("GET" if method == "HEAD" else method), rule) in DECK_ROUTES
@@ -408,11 +413,12 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
         return None
     if not is_mobile and not _web_knob_on():
         return None
-    has_pro = entitlements.get_entitlements(user_id)["pro"]
-    if has_pro and verified:
-        return None
-    if has_pro:
+    if not verified:
+        if deck:
+            return _preview(rule, user_id, ask, gate=VERIFY_REQUIRED)
         return 402, {"error": "pro_required", "gate": VERIFY_REQUIRED}
+    if entitlements.get_entitlements(user_id)["pro"]:
+        return None
     held = _held_pro(user_id)
     if held is None and deck:
         return _preview(rule, user_id, ask)
@@ -450,13 +456,15 @@ def preview_pages() -> int:
         return 1
 
 
-def _preview(rule: str, user_id: str, ask: DeckAsk | None) -> tuple[int, dict] | Preview:
-    """A never-entitled user on a deck route. Before anything is served, a
-    /generate or /status is allowed (the handler records the deck it serves);
-    after, only that deck's /status inside the window, and swipes or pass
-    reasons on its window's cards. GET /api/trades (the pending-cards view)
-    is not the preview deck."""
-    blocked = 402, {"error": "pro_required", "gate": PREVIEW_USED}
+def _preview(rule: str, user_id: str, ask: DeckAsk | None,
+             gate: str = PREVIEW_USED) -> tuple[int, dict] | Preview:
+    """A never-entitled user (or any unverified session) on a deck route.
+    Before anything is served, a /generate or /status is allowed (the handler
+    records the deck it serves); after, only that deck's /status inside the
+    window, and swipes or pass reasons on its window's cards. GET /api/trades
+    (the pending-cards view) is not the preview deck. Outside it: 402 `gate`.
+    Reads only the knob and the paywall_previews row, never entitlements."""
+    blocked = 402, {"error": "pro_required", "gate": gate}
     pages = preview_pages()
     if pages == 0 or ask is None:
         return blocked
