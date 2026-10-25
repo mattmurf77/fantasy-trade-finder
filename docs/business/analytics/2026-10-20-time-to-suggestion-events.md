@@ -52,6 +52,7 @@
 | `usage_trends` | Usage Trends "Trade" / "Find a trade for {player}" hand-off |
 | `deep_link` | The `app/trades/finder` deep link, and inbox arrivals |
 | `end_card_adjust` | The P30 end card's "Adjust what I'm looking for" apply tap (D14 a; the AC-L1 clock starts here) |
+| `team_review` | Team Review's "Find my trades", only when a partner is scoped (the hand-off auto-runs a search). **Granted Q-A, 2026-10-24.** INTENT. **Out of the AC-L1 cells for launch** (Product), reported separately |
 
 **Mislabel, so don't trend across the seam:** before the seam, **every non-calculator auto-run** (League Summary Offer
 and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3330-3336`). After the seam,
@@ -66,7 +67,7 @@ and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3
 - **`trades_generated` is funnel-v2 stage 6** (`analytics_queries.py:414`). The exactly-one rule keeps stage 6 and
   the PFO guardrail's `props.count` unchanged in meaning.
 
-## Readout conditions (from analytics-lead; T1–T6)
+## Readout conditions (from analytics-lead; T1–T7)
 
 - **T1:** the R2 frame (above).
 - **T2:** p95 is taken over R2 ∪ R2b.
@@ -75,6 +76,8 @@ and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3
 - **T5:** don't exclude tester devices from the AC-L1 query.
 - **T6:** nearest-rank p95 plus a 90% order-statistic CI, with "pass, not robust" when the CI's upper end is
   > 200 ms.
+- **T7** (Q-B, 2026-10-24): `entry_point=prefs_changed_strip` is excluded from the AC-L1 cells and reported
+  separately. Its new cards append behind the ones showing, so R2 includes the user's own swipes.
 
 ## PII and privacy
 
@@ -82,6 +85,10 @@ and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3
   `card_index` are fine.
 - **Privacy delta:** `network_type` (diagnostics) and `search_id` (an identifier linked to the user) go to
   onboarding-pm under P12: "check the App Store label, likely no change".
+- **Ingest** (2026-10-24, analytics-lead accepted): `search_id`, `job_id` and `deck_id` skip the 16+ digit-run PII
+  scrub **only when the whole value is a uuid or 32 hex chars** (`analytics_ingest._HEX_ID_PROPS`). About 1% of
+  uuid4s hold such a run, and scrubbing them would collapse searches onto one id and break T2. The email, bearer and
+  JWT rules still apply.
 
 ## Not tracked here
 

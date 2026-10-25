@@ -1,6 +1,28 @@
 # Feature Scope — Trades eng: the 200 ms path (S0, E2, P1, P2, end of deck, UX, C, M, narrow evidence)
 
 **Date:** 2026-10-20 (v1.3: E2 and S0 as built, head-eng's grants and final `vsn1` folded in; supersedes v1.2 and earlier of the same day)
+> **Status, 2026-10-25:** the body below is v1.3. Rulings made since (head-eng unless noted) **supersede it where they
+> differ**. The detail is in trades-eng's status report.
+>
+> **Built and shipped:**
+> - **#363 (mobile: pass A, M, C)** is ready for review, with evidence in `code-walk-mobile.md` and TEST_LEDGER
+>   2026-10-25.
+> - **E2** merged as #356.
+>
+> **Rulings since v1.3:**
+> - **Roster contract v0.4 §3b:** for Sleeper, when the status is `stale` AND the roster is past `trade_roster_bound_s`
+>   (default 300), stored and cached cards are withheld (gate-miss). A NULL `refreshed_at` ages from
+>   `league_members.updated_at`. An aged roster with no failure is served (Q1).
+> - **P41 (Product):** a past-bound tap with no failure serves **and** kicks `roster_refresh.maybe_refresh_async`
+>   after the response is built, through a guarded import. The withdraw lands at the next whole-deck response.
+> - **R3** (`trades_generated` widening) sits on top of the server stack and emits once per `deck_job_id`, only for
+>   requests that carry a `search_id`.
+> - **The B8 minimum-version gate** has its own PR off main (`app_min_version`, `update_gate_shown/_tapped`).
+> - **C's device page:** max age 300 s, a client constant plus a cross-client invariant.
+> - **Generic-pick signal strip:** PR #389, which gates BL-001.
+> - **Packed-evidence writer:** `deck_evidence_packs`, `candidates_packed`/`cand_pack_version` (head-eng's schema
+>   grant).
+
 **Entry point:** direct operator ask, 2026-10-20, relayed by the coordinator.
 - "Yes building should resume on the 200 ms path." This covers the whole §3a critical path, including UX, C and
   M (coordinator, 2026-10-20).
