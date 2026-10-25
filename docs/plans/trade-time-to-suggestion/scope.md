@@ -35,37 +35,27 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
 
 ## 1. Analytics scope
 
-- [x] **(a) New events specced.** analytics-lead reviewed them (Ask 1b, 2026-10-15): R1–R3 are
-  granted with conditions, and R4 is refused as specced with an alternative granted. Each event is
-  registered in `backend/analytics_taxonomy.py` and classified in
-  `analytics_queries.NON_INTENT_EVENTS` **in the same commit as its emitter**.
+- [x] **(a) New events: landed contract, cited rather than restated.** The contract is
+  `docs/business/analytics/2026-10-20-time-to-suggestion-events.md` (#399, accepted in #401).
 
-  | Event | Properties | Fires when | Client | Verdict (analytics-lead) |
-  |---|---|---|---|---|
-  | **R1** `find_trades_tapped` + `calc_find_a_trade_tapped`, widened | + `search_id` (client UUID per tap); new `source` values, one per prd §4.1 entry point. Monotonic tap time stays client-local and feeds R2's `ms_from_tap` | touch-up on any table A control (and table B controls if D10 makes them search-starting); `find_trades_tapped` moves to the tap, not dispatch | iOS | **Granted as a widening; both stay INTENT.** No `trade_search_started`. New `source` values are listed in the addendum and the prop-row comment. Exact prop rows are asserted (`==`) |
-  | **R2** `trade_first_card_shown` (new) | `search_id`, `ms_from_tap`, `entry_point`, `search_type` (organic / pinned / fair_sweep), `launch_state` (cold_launch / first_tap / repeat_tap), `network_type` (wifi / cellular / offline / unknown), `serve_source` (prepared / cached / joined / fresh), `freshness_state` (fresh / updating / withdrawn_some), `job_id`, `card_index` | first frame with an actionable card meeting prd §4.2 | iOS | **Granted, NON_INTENT.** No player ids. Exactly one of R2/R2b per `search_id`, test-asserted |
-  | **R2b** `trade_first_card_failed` (new, a separate event) | `search_id`, `ms_from_tap`, `reason` (empty / error / abandoned / timeout), `network_type` | a tap ends without an actionable card; `abandoned` fires on unmount or blur before a card | iOS | **Granted as a separate NON_INTENT event**, not a `result` prop. The addendum states the `timeout` threshold in ms |
-  | **R3** `trades_generated` (server, widened) | + `first_publish_ms`, `serve_source`, `oldest_input_age_s`, echoed `search_id` | existing server emit points, **plus every serve path that shows a deck** | server | **Granted, binding condition:** exactly one `trades_generated` per user-visible deck, whatever the `serve_source`, or an `/an-funnel` stage-6 amendment before the build (prd AC-1b). `deck_source` keeps its meaning. The echoed `search_id` puts `docs/api-reference.md` in scope (§4) |
-  | ~~R4 envelope column `network_type`~~ | — | — | — | **Refused as specced** (it contends with PR #337 R-E1, and is the G-068 risk). Replaced by the `network_type` prop on R2/R2b. No schema change, no data-dictionary row |
+  Which ACs each event proves:
+
+  | Event | Proves |
+  |---|---|
+  | `find_trades_tapped` / `calc_find_a_trade_tapped`, widened (R1) | prd AC-1; the AC-L1 clock start |
+  | `trade_first_card_shown` (R2) | AC-L1, AC-L7, AC-2, AC-8 |
+  | `trade_first_card_failed` (R2b) | AC-L1 (T2), AC-8b |
+  | `deck_buffer_empty` | AC-L4. It replaces the earlier R5 request (prd §15) |
+  | `trades_generated`, widened (R3) | AC-1b |
 
   → follow-through:
-  - **Addendum** `docs/business/analytics/<date>-time-to-suggestion-events.md`, written before any
-    emitter ships (G-031), with a seam line: R1–R3 have no history before ship.
-  - **Privacy delta (P12)** to onboarding-pm: `network_type` (diagnostics) and `search_id` (linked
-    identifier) need an App Store label check, "check, likely no change".
-  - The new Sleeper send-block value on `sleeper_send_failed.error_code` (platforms-pm R4) goes to
-    analytics-lead. ESPN and MFL block events are not requested in v1; they would need a grant.
-  - **R5 page-end readiness (AC-L4), a REQUEST pending analytics-lead's grant (2026-10-20).** A
-    `next_page_ready_at_end` boolean, plus `page_index` and `search_id`, when the user reaches a
-    page's last card. Preferred: props on an existing event, e.g. `trade_card_viewed` on the
-    page's last `card_index`, or on R2's sibling outcomes.
-  - **AC-L1 measurement terms (analytics-lead T1–T6)** apply to R1/R2/R2b. Notably, every R2b counts
-    as above 200 ms (T2), and the readout query includes tester devices (T5).
-  - **The hidden ms readout (prd §9.5) adds no event.** It reads R2's `ms_from_tap` locally.
+  - The addendum is the contract above, which covers T1–T7, the 10,000 ms timeout, privacy and
+    ingest.
+  - The Sleeper send-block code value on `sleeper_send_failed.error_code` (platforms-pm R4) goes to
+    analytics-lead.
+  - **The hidden ms readout (prd §9.5) adds no event.**
   - **Serve-path tag (models-lead R.b, AC-9e):** if eng carries it as an analytics prop rather than
     an impression field (§2), it needs analytics-lead's grant.
-  - No player ids or names in props (`tracking-plan-v2.md:183`). Device platform stays a
-    server-derived column (`tracking-plan-v2.md:218`).
 - [ ] (b) Existing events cover it: **no**. `deck_card_viewed` requires 500 ms of exposure.
   `find_trades_tapped` misses non-TradesScreen entry points. `trades_generated.gen_ms` is
   full-worker time (prd §4.6).
@@ -86,10 +76,14 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
   - Any persistent cache or prepared-page storage must state its footprint per user-league and its
     daily write volume, using prd §10.4's formulas, before it is built. The first page is about
     37 KB per user-league pair, pre-built with page 2 (prd §10.7).
-  - **DEC-2 (operator-approved 2026-10-20): unseen candidates are stored as narrow rows, not full
-    evidence, and nothing changes for the user.** Displayed cards keep full evidence. The narrow-row
-    shape is a schema change: `docs/data-dictionary.md` plus a migration entry (BUILD OBLIGATION).
-    analytics-lead and models-lead confirm their readouts work from it (prd AC-L8, D7).
+  - **DEC-2 → ADR-025** (`docs/adr/adr-025-packed-unseen-evidence.md`, Accepted 2026-10-25).
+    - Never-served pre-builds write no evidence.
+    - Full rows go to viewed or acted-on cards, the first 30, and the C8 2% archive.
+    - Every other served card is packed (`deck_evidence_packs`). Narrow rows are only the fallback.
+    - The P23 byte budget is set by head-eng: ≤ about 0.2 MB compressed per active pair and an
+      about-250 MB page-store ceiling (`scope-eng-200ms.md` §7).
+
+    prd AC-L8, D7.
   - Per head-product P23 (2026-10-15), cache data is the first class shed under disk pressure. It
     must be rebuildable and never the system of record, with a fresh-path fallback (prd AC-11b).
   - No rollout without an explicit byte budget, per user-league and in total. head-eng checks it

@@ -18,7 +18,7 @@ trade-offs; nothing here picks an architecture.
 - **"Yes building should resume on the 200 ms path."**
 - On any "finding more trades" card: **"This should never happen."** There is no such card (U3,
   AC-L4).
-- **DEC-2:** narrow rows for unseen trades are approved (D7).
+- **DEC-2:** narrow rows for unseen trades are approved (D7). Since landed as ADR-025: packed evidence, with narrow rows as the fallback (§10.4, §15).
 
 This revision folds in head-product's launch-readiness requirements U1–U5 (§4.7, §5.5) and launch
 criteria AC-L1 to AC-L8 (§8). It records the engineering constraints from the trades-eng memo as
@@ -161,7 +161,8 @@ operator decides because it amends D-171's builder-first landing):
 
 **Other arrivals (measured, not gated; ux-lead F-8):** the `app/trades/finder` deep link, which
 pushes a param-less `TradeDeck` (`navigation/TabNav.tsx:464-470`), and any inbox notification that
-lands on the deck.
+lands on the deck. Also **Team Review's "Find my trades"** with a partner scoped (`source=team_review`,
+granted Q-A), which is out of the AC-L1 cells for launch (events contract, §15).
 
 **Gate cohort (proposed):** every table A control whose search is the **default organic deck**
 (empty canvas, no pinned asset or partner). Pinned and targeted searches are **measured and reported
@@ -219,7 +220,7 @@ counts as above 200 ms. This replaces the earlier "neither pass nor failure" wor
 | Network | Wi-Fi · cellular · offline | Not captured today. Carried as a `network_type` prop on R2/R2b (§4.6; analytics-lead R4 alternative). **Both Wi-Fi and cellular are gated at 200 ms** (D3 decided 2026-10-20; AC-L1 cells include cellular). |
 | Launch state | **cold-launch tap**: first tap after a process start, before that session's session-init completes · **first tap** after launch, once session-init is done · **repeat tap** in the same session · **new account's first tap after onboarding** | First-tap and repeat-tap cells are gated (AC-L1). **A new account's first Find a trade after onboarding is gated too** (AC-L7, U5; D2 decided in part, 2026-10-20). Other cold-launch taps are reported, and their gate stays open under D2. |
 | Search type | organic · pinned/targeted · filled-canvas fair sweep | Organic is gated (D1). |
-| Serve source | prepared / cached / joined in-flight job / fresh generation | Diagnostic, so a high cache-hit rate cannot hide a slow miss (`research-plan.md:78`). |
+| Serve source | the events contract's values: client `device` / `page` / `cached` / `joined` / `fresh`; server adds `prepared` (§15 item 2) | Diagnostic, so a high cache-hit rate cannot hide a slow miss (`research-plan.md:78`). |
 
 ### 4.5 Measurement rules carried forward unchanged
 
@@ -250,30 +251,29 @@ The rules in `trade-search-latency/research-plan.md` §3–§4 stay binding:
 | `user_events` `api_request` {ms, route, status} (`obs.api_events`) | `backend/api_observability.py:360-380` | Per-request handler time for `/generate`, `/status`, `/fair-packages`, `/session/init` | Successes sampled 1-in-10 (`database.py:3073`). No job id |
 | Prepared `adoption_json.publication.served_at` | `database.py:70-88` | Adoption timestamps | No durations; logs only record "adopted: cards=…" |
 
-**Requests and analytics-lead's verdicts (Ask 1b, 2026-10-15):** R1–R3 are granted with
-conditions; R4 is refused as specced, with an alternative granted. Each event is registered in
-`backend/analytics_taxonomy.py` and classified in `analytics_queries.NON_INTENT_EVENTS` in the same
-commit as its emitter.
+**The events contract is landed; it is cited, not restated here.** The contract is
+`docs/business/analytics/2026-10-20-time-to-suggestion-events.md` (#399, accepted in #401). It holds:
+- names, properties, classes and `source` values;
+- the `timeout` threshold (10,000 ms);
+- readout conditions T1–T7;
+- privacy and ingest rules.
 
-| # | Request | Verdict and conditions (analytics-lead) | Why existing events can't answer it |
-|---|---|---|---|
-| R1 | A tap-time record from every table A control (and table B controls if D10 ships), carrying a client-generated `search_id` and a monotonic tap timestamp | **Granted as a widening.** `find_trades_tapped` (`analytics_taxonomy.py:956`) and `calc_find_a_trade_tapped` (`:1604`) gain `search_id` plus new `source` values; no `trade_search_started` event. Both stay **INTENT**. `search_id` is a client UUID, not PII. Every new `source` value is listed in the addendum and the prop-row comment. A per-feature test asserts the exact prop rows (`==`). If D10 ships, the table B `entry_point`/`source` values are added (ux-lead). Fire `find_trades_tapped` at the tap, not at dispatch | `find_trades_tapped` fires only from TradesScreen's own controls (`analytics_taxonomy.py:604-613`), and on the push path it fires at dispatch. Handoff taps carry no search-starting event, and nothing correlates a tap with the server job |
-| R2 | `trade_first_card_shown`. Props: `search_id`, `ms_from_tap` (monotonic), `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source`, `freshness_state` (§5.4), `job_id`, `card_index` | **Granted, NON_INTENT:** a system outcome echoing the R1 tap, which already counts the user. No player ids; `job_id` and `card_index` are fine. **Exactly one of R2/R2b fires per `search_id`**, asserted by the per-feature test. `network_type` (`wifi` / `cellular` / `offline` / `unknown`) rides here as a prop (see R4) | No event marks first render with enabled controls. `deck_card_viewed` needs 500 ms of exposure, and `trade_card_viewed.ms_since_open` is `Date.now() - APP_OPEN_TS`, measured from JS bundle load (`mobile/src/api/events.ts:95,108-110`), not from the tap |
-| R2b | `trade_first_card_failed` {`search_id`, `ms_from_tap`, `reason`: empty / error / abandoned / timeout, `network_type`} | **Granted as a separate NON_INTENT event**, the twin of R2. Preferred over a `result` prop: "shown" carrying `result=failed` reads wrong in every query. The addendum states the `timeout` threshold in ms. `abandoned` fires on unmount or blur before a card shows | Nothing records a tap that never produced a card |
-| R3 | Server timing on `trades_generated`: `first_publish_ms` (job start → first committed card), `serve_source`, `oldest_input_age_s` (§5.1) and the echoed `search_id` | **Granted, with one binding condition.** `trades_generated` is funnel-v2 stage 6 (`analytics_queries.py:414`), and the PFO guardrail parses `props.count`. It fires only at the end of a generation job (`server.py:7617`, `:9234`), and `backend/prepared_trade_*.py` fires none. **Exactly one `trades_generated` per user-visible deck, whatever the `serve_source`, or an `/an-funnel` stage-6 amendment before the build** (AC-1b). Keep `deck_source` (replenish vs pull); `serve_source` is a separate dimension, and the addendum says so. Echoing `search_id` adds a request field, so `docs/api-reference.md` is in scope | `gen_ms` is full-worker completion (`trade-search-latency/README.md:13`). The "first durable owner batch" time exists only as a log line (`docs/runbook.md:195-197`) |
-| R4 | `network_type` as a `user_events` envelope column | **Refused as specced.** A column on the largest analytics table, on every row, for one feature's question contends with task 2 (PR #337, R-E1). An SDK- or header-stamped default is the G-068 failure mode. **Alternative granted:** the `network_type` prop on R2 and R2b only. No schema change, no data-dictionary row | — |
-| R5 | **Page-end readiness (AC-L4), a REQUEST pending analytics-lead's grant.** A `next_page_ready_at_end` boolean, plus `page_index` and `search_id`, recorded when the user reaches the last card of a page. Preferred: props on R2's sibling outcomes or an existing deck event, e.g. `trade_card_viewed` on a page's last `card_index`, over a new event. analytics-lead chooses the carrier | **Requested 2026-10-20 (trades-pm); not yet granted** | Nothing records whether the next page was in the deck when a page ran out. AC-L4 needs zero misses across all test sessions |
+The grant history (analytics-lead's Ask 1b: R1–R3 granted with conditions, R4 refused in favour of a
+`network_type` prop) is recorded there. Differences between this PRD's earlier text and the
+contract are in §15.
 
-**Also required (analytics-lead):**
-- **Addendum** `docs/business/analytics/<date>-time-to-suggestion-events.md`, written before any
-  emitter ships (G-031), with a seam line saying R1–R3 have no history before ship.
-- **Privacy delta (P12):** `network_type` is diagnostics data and `search_id` is an identifier
-  linked to the user. onboarding-pm checks the App Store privacy label ("check, likely no change");
-  only the operator can see App Store Connect.
-- **Send-block code (platforms-pm R4):** a Sleeper send blocked under I-2 reuses
-  `sleeper_send_failed.error_code` with a new code value, and analytics-lead is told the value.
-  ESPN and MFL have no client failure event. v1 does not request one; measuring their blocks per
-  platform would need a new grant.
+| Event (contract name) | Proves |
+|---|---|
+| `find_trades_tapped` and `calc_find_a_trade_tapped`, widened with `search_id` (R1) | AC-1 (every search-starting tap emits); the AC-L1 clock start |
+| `trade_first_card_shown` (R2) | AC-L1 (with its `network_type` and `launch_state` cells), AC-L7, AC-2, AC-8 (`freshness_state`) |
+| `trade_first_card_failed` (R2b) | AC-L1 under T2 (every R2b counts above 200 ms); AC-8b (timeout) |
+| `deck_buffer_empty` | AC-L4 (zero page ends without the next page). It replaces this PRD's R5 request |
+| `trades_generated`, widened (R3) | AC-1b (exactly one per user-visible deck); server timing (`first_publish_ms`, `serve_source`, `oldest_input_age_s`) |
+
+**Separate from the contract:** a Sleeper send blocked under I-2 reuses
+`sleeper_send_failed.error_code` with a new code value, and analytics-lead is told the value
+(platforms-pm R4). ESPN and MFL have no client failure event; measuring their blocks per platform
+would need a new grant.
 
 No event may carry player ids, names or league-identifying values in props
 (`docs/business/analytics/2026-07-17-tracking-plan-v2.md:183`).
@@ -402,8 +402,8 @@ U2 and U4 are in §5.5. These requirements are product's; eng chooses how to mee
     with no swipe or custom actions.
 
   **AC-L4's measure** (trades-pm decision, 2026-10-20): zero page ends reached without the next page
-  already in the deck, across all test sessions. Telemetry: R5 (§4.6), pending analytics-lead's
-  grant.
+  already in the deck, across all test sessions. Telemetry: `deck_buffer_empty` (granted in ruling
+  30; events contract, §4.6), which replaces the earlier R5 request (§15).
 - **U5. A new user's very first tap is warm too.**
   - The first page is pre-built when a league is connected or the session starts, so the first-ever
     Find a trade also meets 200 ms (AC-L7).
@@ -673,6 +673,10 @@ is accepted (design-lead 3).
     - Trades focus;
     - session-init;
     - **a tap past bound, as a non-blocking kick** (head-product P41, 2026-10-24).
+  - **Built:** the floor is S0. It reuses session init on app open and foreground, with a 60 s
+    throttle, and adds the P41 kick through `roster_refresh.maybe_refresh_async`
+    (`scope-eng-s0-fetch.md:61-108`; #378, with a Sleeper 429 circuit). Trades focus is not a floor
+    trigger on main (§15 item 10).
   - **The kick:** when a tap finds the viewer's roster past its bound and the floor hasn't failed,
     the tap is **served as now** and a background floor refresh is **enqueued off the critical
     path; the tap never awaits it**. If the refresh shows a roster change, affected cards are
@@ -796,21 +800,21 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 
 | ID | Criterion | Check | Relation to §8.2 |
 |---|---|---|---|
-| AC-L1 | **p95 ≤ 200 ms** from the tap on a search-starting control (table A, plus table B if D10 ships) to the first frame where a real card is ≥ 50% visible with Like and Pass enabled (the §4.2 clock). Measured by client telemetry on a TestFlight build. Cells: Wi-Fi and cellular × first tap and repeat tap. n ≥ 40 per cell, from at least 2 devices including the operator's. **A device-held first card counts** if it meets U2: within the freshness bounds, passing I-2, and withdrawn in place if invalidated (head-product P32). **Measurement terms (analytics-lead, launch, T1–T6):** <br>**T1:** R2 fires at exactly this frame. <br>**T2:** p95 is taken over R2 ∪ R2b, one per `search_id`, and every R2b (timeout, error, empty, abandoned) counts as above 200 ms. <br>**T3:** `cold_launch` is its own row and is not joined to first tap; AC-L7 reads `cold_launch` for accounts created that day. <br>**T4:** if the app leaves `active` between tap and card, the search ends as R2b `abandoned`, never a long R2. <br>**T5:** the AC-L1 query runs **with tester devices included** (the default `device_exclusion` would strip them and return n ≈ 0). <br>**T6:** nearest-rank p95 (the 38th-fastest at n = 40) with a 90% order-statistic CI. A point p95 ≤ 200 ms whose CI upper end is > 200 ms reads "pass, not robust", so collect more before calling it. <br>`network_type` `offline` and `unknown` stay out of the cells. Distinct `device_id` per cell proves ≥ 2 devices | **The proof is the scripted two-device session in §9.6** (organic volume is too low; §6). A: R1, R2 and R2b with the `network_type` prop, read by analytics-lead under T1–T6. Cross-check: the §9.5 readout per tap. Organic telemetry after launch is monitoring, not the gate | **Supersedes AC-3's threshold and cells** |
+| AC-L1 | **p95 ≤ 200 ms** from the tap on a search-starting control (table A, plus table B if D10 ships) to the first frame where a real card is ≥ 50% visible with Like and Pass enabled (the §4.2 clock). Measured by client telemetry on a TestFlight build. Cells: Wi-Fi and cellular × first tap and repeat tap. n ≥ 40 per cell, from at least 2 devices including the operator's. **A device-held first card counts** if it meets U2: within the freshness bounds, passing I-2, and withdrawn in place if invalidated (head-product P32). **Measurement terms (analytics-lead, launch, T1–T6):** <br>**T1:** R2 fires at exactly this frame. <br>**T2:** p95 is taken over R2 ∪ R2b, one per `search_id`, and every R2b (timeout, error, empty, abandoned) counts as above 200 ms. <br>**T3:** `cold_launch` is its own row and is not joined to first tap; AC-L7 reads `cold_launch` for accounts created that day. <br>**T4:** if the app leaves `active` between tap and card, the search ends as R2b `abandoned`, never a long R2. <br>**T5:** the AC-L1 query runs **with tester devices included** (the default `device_exclusion` would strip them and return n ≈ 0). <br>**T6:** nearest-rank p95 (the 38th-fastest at n = 40) with a 90% order-statistic CI. A point p95 ≤ 200 ms whose CI upper end is > 200 ms reads "pass, not robust", so collect more before calling it. <br>**T7** (events contract): `entry_point=prefs_changed_strip` and `team_review` are excluded from the cells and reported separately. <br>`network_type` `offline` and `unknown` stay out of the cells. Distinct `device_id` per cell proves ≥ 2 devices | **The proof is the scripted two-device session in §9.6** (organic volume is too low; §6). A: R1, R2 and R2b with the `network_type` prop, read by analytics-lead under T1–T6. Cross-check: the §9.5 readout per tap. Organic telemetry after launch is monitoring, not the gate | **Supersedes AC-3's threshold and cells** |
 | AC-L2 | No animated push or transition on the Find a trade path (U1), decided per entry point (ux-lead, launch; §4.7): an instant route (`animation: 'none'`) for the canvas, D10, hand-off and deep-link entries, and in place for in-deck searches. Back from the deck is instant too. No motion on the deck at all, including no on-load stagger (design-lead's deck exemption) | Code-walk plus a guard (`check-trade-first-card.js`: `animation: 'none'` on every search-starting route, no transition on the in-place reveal, no stagger on the deck). TF step 1: zero transition frames | **Supersedes AC-2b.** Its "short fade" option is withdrawn |
 | AC-L3 | No live Sleeper or platform call on the tap path. The background floor's triggers are app foreground, Trades focus, session-init, and **a tap past bound as a non-blocking kick** (head-product P41, 2026-10-24): enqueued off the critical path and never awaited, so the tap's critical path still makes no platform call | Code-walk, plus the server trace for the first-page request (the kick's refresh appears as a separate, later background call, never inside the first-page request), plus the §9.2 kick test | **New.** It strengthens platforms-pm R7. AC-L3 governs over §5.2 exception 1 (head-product P40, 2026-10-24): the §5.5 U2 fallback applies to the viewer's roster, and I-6's lineup lookup moves to the background floor |
-| AC-L4 | The next page is always ready: across all test sessions, **zero** page ends are reached without the next page already in the deck. There is no "Finding more" card in the build. The prefetch threshold is in §4.7. ux-lead's state table (§4.7) defines the outcomes: an online fetch failure at a page end (row 3b) **fails** AC-L4; offline at a page end (row 3a) is reported separately and doesn't. The P30 end card shows only when every candidate is seen and **never while a page is pending**, with no Like or Pass | G: no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when page N is fronted; the P30 card never renders while a page is pending, and renders no Like/Pass. A: R5 (pending grant). TF: the U3 three-page run and the P30 step | **New; supersedes AC-13** (strengthened) |
+| AC-L4 | The next page is always ready: across all test sessions, **zero** page ends are reached without the next page already in the deck. There is no "Finding more" card in the build. The prefetch threshold is in §4.7. ux-lead's state table (§4.7) defines the outcomes: an online fetch failure at a page end (row 3b) **fails** AC-L4; offline at a page end (row 3a) is reported separately and doesn't. The P30 end card shows only when every candidate is seen and **never while a page is pending**, with no Like or Pass | G: no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when page N is fronted; the P30 card never renders while a page is pending, and renders no Like/Pass. A: `deck_buffer_empty` (events contract; any occurrence is a miss). TF: the U3 three-page run and the P30 step | **New; supersedes AC-13** (strengthened) |
 | AC-L5 | Zero cards shown with an asset either side no longer owns (I-1 at display, I-2 at action). **Including after a roster move FTF itself completes** (the #351 add/drop, K-F5): the viewer-roster refresh runs immediately, and affected cards are withdrawn in place before they are displayed or acted on again | T: the roster-change fixture, plus a **backend fixture where an FTF add/drop completes and the card with the dropped player is withdrawn** (K-F5 parts activates when #351 D1 ships; not a launch gate). TF: the U2 roster-change run (steps 11, 12 and 18) and the K-F5 step (L4b, activates when #351 D1 ships; not a launch gate) | **Same as AC-5** for display; AC-6a/6b cover actions. The K-F5 fixture is new |
 | AC-L6 | Quality parity: first-page cards pass `deck.quality_filters`; Calibration integrity holds per D12 | As AC-9a to AC-9e | **Same as AC-9a to AC-9e and D12.** No new test |
 | AC-L7 | A new account's first Find a trade after onboarding meets AC-L1 (U5) | A: a new-account first-tap cell. TF: the U5 fresh-account run | **New.** D2 decided in part |
-| AC-L8 | Storage: the first-page artifact and evidence writes fit the P23 byte budget and the DB capacity plan. Unseen candidates are stored as narrow rows (DEC-2, operator-approved 2026-10-20) | As AC-11 and AC-11b, plus Q8 table sizes before and after | **Same as AC-11 and AC-11b (P23), plus DEC-2** |
+| AC-L8 | Storage: the first-page artifact and evidence writes fit the P23 byte budget and the DB capacity plan. Unseen candidates follow DEC-2 as ADR-025: packed evidence, with narrow rows only as the fallback (operator-approved 2026-10-20) | As AC-11 and AC-11b, plus Q8 table sizes before and after | **Same as AC-11 and AC-11b (P23), plus DEC-2 as ADR-025** (packed evidence; budget in `scope-eng-200ms.md` §7) |
 
 ### 8.2 Criteria from the PRD and its reviews
 
 | ID | Criterion | Check |
 |---|---|---|
 | AC-1 | Every table A control in §4.1, and every table B control if D10 makes them search-starting, emits the widened R1 tap record with a `search_id`. Exactly one of R2 or R2b fires per `search_id` (analytics-lead R2). The deep-link and inbox arrivals (§4.1, ux-lead F-8) emit too, and are measured, not gated. | G: `mobile/tests/check-trade-first-card.js` enumerates the controls and arrivals and fails if any `onPress` or arrival path lacks the emit. T: a per-feature test asserts the exact prop rows (`==`), INTENT/NON_INTENT classification, and the one-of-R2/R2b invariant (analytics-lead R1, R2). TF step 9 |
-| AC-1b | **One `trades_generated` per user-visible deck** (analytics-lead R3, binding). Every deck the user sees emits exactly one `trades_generated`, whatever its `serve_source` (fresh, cached, joined or prepared), so funnel stage 6 and the PFO guardrail don't undercount. Alternatively, an `/an-funnel` stage-6 amendment lands before the build. `deck_source` keeps its meaning, and `serve_source` is a separate prop. | T: a backend test per serve path asserting exactly one event per deck with `props.count` set, or the merged stage-6 amendment |
+| AC-1b | **One `trades_generated` per user-visible deck** (analytics-lead R3, binding). Every deck the user sees emits exactly one `trades_generated`, whatever its `serve_source` (the contract's `page`, `cached`, `joined`, `fresh` or `prepared`), so funnel stage 6 and the PFO guardrail don't undercount. Alternatively, an `/an-funnel` stage-6 amendment lands before the build. `deck_source` keeps its meaning, and `serve_source` is a separate prop. | T: a backend test per serve path asserting exactly one event per deck with `props.count` set, or the merged stage-6 amendment |
 | AC-2 | `ms_from_tap` uses a monotonic clock and ends on the §4.2 definition: controls enabled and card visible. It does not end on `deck_card_viewed`, a skeleton or server readiness. | G: the same check asserts the emitter sits on the card's enabled-and-visible path and not in the skeleton branch. Code-walk proof (§9.3). |
 | AC-2b | **Superseded by AC-L2** (2026-10-20); the "short fade" option is withdrawn. Original text: **The push can't spend the budget** (ux-lead F-1). Search-starting pushes keep `push` and the back stack (D-171), but run with no animation or with a short fade that design-lead specs. | Code-walk names the animation option on every search-starting push. TF step 1 counts tap → transition-end frames separately from tap → card; ux-lead's target is ≤ 6 frames (≈ 100 ms) |
 | AC-3 | **Superseded by AC-L1** (2026-10-20): p95 ≤ 200 ms, Wi-Fi and cellular × first and repeat tap, n ≥ 40 per cell from at least 2 devices including the operator's. The earlier 250 ms threshold is withdrawn. | See AC-L1. |
@@ -823,7 +827,9 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 | AC-8b | **Gate-miss wait** (ux-lead F-5). It names its real reason, makes no timing promise, and ends: on timeout it shows the error with Retry, and Back stays usable. The false "within a few seconds" copy is gone. | G: a string check on the placeholder, plus a recovery guard in the pattern of `check-win-now-recovery.js`. TF step 5 |
 | AC-8c | **Offline** (ux-lead F-6). Inside the bounds, cards may show with the refresh-failed state at once, and a match-creating like or a send fails visibly and keeps the choice. Past the viewer's roster bound, the offline state shows, with no cards. | G: a pattern of `check-swipe-failure-recovery.js` for the offline like/send. TF steps 14 and 17 |
 
-**[models-lead]** AC-9a to AC-9e replace AC-9. The rows below are pasted verbatim from models-lead R.b
+**[models-lead]** AC-9a to AC-9e replace AC-9. The page contract that AC-9b's check uses is landed
+in #382: `assert_page_is_top_n` and `assert_prefix_stable` in `backend/tests/support/deck_contracts.py`
+(`eng-evidence-contract.md` §2). The rows below are pasted verbatim from models-lead R.b
 (`docs/plans/org-bringup/leads/models-lead-wave2.md` § "R.b PR #339, AC-9", reviewed at `6f8ae71a`). Under
 them, models-lead's sign-off follows the two-line packet route in R.a (ii).
 
@@ -840,7 +846,7 @@ them, models-lead's sign-off follows the two-line packet route in R.a (ii).
 | ID | Criterion | Check |
 |---|---|---|
 | AC-10 | No offer cap or budget cut: the complete eligible inventory stays reachable (the `research-plan.md:66-69` non-negotiables). | T: the inventory-count parity test (pattern of `release-20260921/README.md:16`). |
-| AC-11 | **Storage within budget.** The build states its server-side footprint per user-league and in total, plus its daily write volume, using §10.4's formulas, and stays inside that byte budget (P23). Unseen candidates are stored as narrow rows, not full evidence (DEC-2, approved 2026-10-20; AC-L8). | The byte budget is stated, and head-eng accepts it against H1–H3 (`docs/plans/db-storage-budget/requirements.md:314-317` on draft PR #337) before rollout. A: Q8 table sizes before and after (`baseline-request.md` Q8). |
+| AC-11 | **Storage within budget.** The build states its server-side footprint per user-league and in total, plus its daily write volume, using §10.4's formulas, and stays inside that byte budget (P23). Unseen candidates follow DEC-2 as landed in ADR-025: packed evidence, with narrow rows as the fallback (AC-L8). | The byte budget is stated, and head-eng accepts it against H1–H3 (`docs/plans/db-storage-budget/requirements.md:314-317` on draft PR #337) before rollout. A: Q8 table sizes before and after (`baseline-request.md` Q8). |
 | AC-11b | **Shedding is safe.** Dropping prepared or cache data under disk pressure (P23) never breaks serving: Find a trade falls back to the fresh path and still meets every §5.3 invariant. | T: a backend test that drops the cache tables or rows and asserts that serving still works through the fresh path. |
 | AC-12 | No regressions: CI green (`pytest backend/tests`, `tsc --noEmit`, testid-lint) plus all existing `check-*.js` suites. Any new flag has a guard pinning flag-off byte-identity (ux-lead rubric, flag-off note). TEST_LEDGER records the evidence. | CI, plus the named flag-off guard. |
 | AC-13 | **Superseded by AC-L4** (2026-10-20): the next page is always in the deck before the current one ends, and there is no "Finding more" card. The buffer-empty stall count is now zero misses across all test sessions. | See AC-L4. |
@@ -1099,9 +1105,10 @@ protocol into the phone-in-hand checklist. Organic telemetry continues after lau
 not as the gate.
 
 **Preconditions (all must hold before the session):**
-1. **Background replenishment is restored**, bounded by DEC-2 narrow rows (§12, Handoffs). The
-   operator paused it as a DB stopgap on 2026-10-20. U2's freshness floor and U3's prefetch depend on
-   it, so a session run without it doesn't measure the shipping system.
+1. **Background replenishment is restored**, bounded by ADR-025's C2 (§12, Handoffs). The
+   operator paused it as a DB stopgap on 2026-10-20. On main it is #361's S3 deferral: tick step 7
+   is a hard skip "until C2 and the self-renewal fix" (`docs/plans/daily-tick-fix/scope.md:42,69-71`).
+   See §15, item 16 for whether it still gates now that U2's floor is S0 and U3's pages are P1/P2.
 2. The TestFlight build carries R1, R2 and R2b (with `network_type`) and the §9.5 readout. The T1
    evidence passes: the guard or code-walk shows R2 fires at exactly the §4.2 frame.
 3. **Both devices are tagged as tester devices (T5),** and analytics-lead's query includes tester
@@ -1271,13 +1278,16 @@ What it means for any build:
 
   head-eng also confirms the H1–H4 numbers themselves (that task's DEC-7, `requirements.md:336`).
 
-**DEC-2, operator-approved 2026-10-20: narrow rows for unseen trades.** Unseen candidates are stored as
-narrow rows, not full evidence, and nothing changes for the user. This is option 1 in the
-launch-readiness capacity section (`launch-readiness-product.md` § "DB capacity"). It shrinks the
-dominant term above: the ~17.8 MB of full-evidence rows per Find a trade. Displayed cards keep full
-evidence. D7's lazy-evidence half is now decided. analytics-lead and models-lead (through
-head-bizops) confirm that their readouts (AC-9c, Calibration) work from narrow rows. That is a
-confirmation, not a blocker.
+**DEC-2 → ADR-025.** The decision is landed and Accepted as
+[`docs/adr/adr-025-packed-unseen-evidence.md`](../../adr/adr-025-packed-unseen-evidence.md)
+(head-eng, 2026-10-25; models-lead C1–C9). It is cited, not restated:
+- never-served pre-builds write no evidence;
+- full rows go to viewed or acted-on cards, the first 30 and the C8 2% archive;
+- every other served card is **packed** (about 64 B per card all-in, against about 9 KB);
+- separate narrow rows are only the fallback.
+
+The P23 byte budget is set (`scope-eng-200ms.md` §7). This PRD's earlier "narrow rows" wording and
+its "displayed cards only" idea are reconciled in §15.
 
 ### 10.5 Deck quality vs speed
 
@@ -1352,8 +1362,11 @@ deploy-free kill switch.
 
 ### 10.7 Engineering constraints for the 200 ms build (trades-eng memo, via head-product, 2026-10-20)
 
-These are **eng constraints, not product decisions**. head-eng's critical-path build plan owns them
-and aligns through head-product.
+These are **eng constraints, not product decisions**. The landed eng scope is
+[`scope-eng-200ms.md`](scope-eng-200ms.md) (#399/#401), and it governs the build. The floor is
+[`scope-eng-s0-fetch.md`](scope-eng-s0-fetch.md) and #378. The AC-9 page contract is
+[`eng-evidence-contract.md`](eng-evidence-contract.md) §2 and #382. The bullets below are the
+product-side summary; §15 lists where they differ from main.
 
 - **No live Sleeper or platform calls on the tap path,** with a background freshness floor
   ("Step 0") that keeps the pre-built page inside the §5.1 bounds. This is AC-L3. Under
@@ -1366,7 +1379,7 @@ and aligns through head-product.
   **head-product P32:** a device-held first card counts toward 200 ms if it meets U2: within the
   freshness bounds, passing I-2, and withdrawn in place if invalidated (AC-L1).
 
-The storage side (DEC-2 narrow rows, P23 byte budget) is in §10.4 and AC-L8.
+The storage side (DEC-2 as ADR-025's packed evidence, and the P23 byte budget in `scope-eng-200ms.md` §7) is in §10.4 and AC-L8.
 
 ## 11. Required reviews
 
@@ -1384,8 +1397,8 @@ Review status as of 2026-10-15, folded in. The 2026-10-20 launch revision adds t
 | DB-storage task owner + head-eng | Footprint (§10.4) against the storage budget (AC-11, AC-L8, P23) | Before any persistent cache expands |
 | **ux-lead (launch)** | U1 per entry point, and the U3 six-state table with VoiceOver rules | **Delivered 2026-10-20 and folded** (§4.7, AC-L2, AC-L4). D13 and D14 are decided by trades-pm and accepted (head-product P33, 2026-10-20) |
 | **design-lead (launch)** | The U1 visual spec with the deck motion exemption, the P30 end card, and the U5 card | **Delivered 2026-10-20 and cited** (§4.7). The visual specs stay design-lead's. Owed: the `components.md` rows and the Motion exemption |
-| **analytics-lead (launch)** | AC-L1 measurement terms; the R5 page-end readiness prop (AC-L4); confirming AC-9c works from DEC-2 narrow rows | **T1–T6 folded** into AC-L1. R5 grant needed before the emitter |
-| **models-lead (launch, through head-bizops)** | Confirm Calibration and AC-9c readouts work from DEC-2 narrow rows | Confirmation, not a blocker |
+| **analytics-lead (launch)** | AC-L1 measurement terms; AC-L4 page-end telemetry; confirming AC-9c works from ADR-025's packed evidence | **Done:** T1–T7 and `deck_buffer_empty` are in the landed events contract (#399/#401) |
+| **models-lead (launch, through head-bizops)** | Confirm Calibration and AC-9c readouts work from ADR-025's packed evidence (ADR-025 C7) | Confirmation, not a blocker |
 | **app-manager (launch)** | Writes the launch device checklist (§9.4 launch runs L1–L4) | Before the launch device run |
 
 ## 12. Risks
@@ -1404,14 +1417,15 @@ Review status as of 2026-10-15, folded in. The 2026-10-20 launch revision adds t
 - **The freshness work can cost speed.** With AC-L3, the tap path makes no platform call, so the
   background floor has to keep rosters inside the bound. When it hasn't, the §5.5 U2 fallback shows
   the gate-miss state, and the tap misses the gate.
-- **P41 depends on platforms-eng's `maybe_refresh_async` hook** (about 2026-11-01). That is five
-  days before the 2026-11-06 feature-complete date. If it slips, the non-blocking kick misses the
-  binary and head-eng's Q1 gap stays open at launch: a user on Trades with no focus event gets
-  cards checked against an aging roster. I-2 still blocks any action on a moved asset.
-- **Background replenishment is paused** (an operator DB stopgap, 2026-10-20). U2's freshness floor
-  and U3's prefetch depend on it. It **must be restored, bounded by DEC-2 narrow rows, before the
-  200 ms build ships** and before the §9.6 proof runs. Shipping without it ships stale first pages
-  and page-end misses.
+- **P41's `maybe_refresh_async` hook is built and on main** (`backend/roster_refresh.py:123`, #378;
+  `scope-eng-s0-fetch.md:71-107`), so the 2026-11-01 risk is retired. **What remains:** the
+  `/generate` caller in trades-eng's server stack (`scope-eng-200ms.md:15-16`). If the caller misses
+  the 2026-11-06 binary, the Q1 aging-roster gap stays open at launch; I-2 still blocks actions on
+  moved assets.
+- **Background replenishment is paused** (an operator DB stopgap, 2026-10-20). On main this is #361's
+  S3 deferral, step 7 skipped until C2 and the self-renewal fix (`daily-tick-fix/scope.md:42,69-71`).
+  This PRD keeps "restore before the 200 ms build ships" as head-product's precondition. Whether it
+  still gates, given S0's floor and P1/P2's pages, is §15 item 16 (head-eng).
 - **Page-end misses** (AC-L4). With zero misses allowed, a slow page N+2 build under load or an
   offline gap must not leave the user facing a wait. Only end-of-deck and offline are permitted
   outcomes; neither is "finding more".
@@ -1495,7 +1509,7 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
    - The only permitted wait card is U5's "Building your first trades". It counts against p95, and
      its design target is that it never shows.
 4. **AC-L4's measure:** zero page ends without the next page in the deck, across all test sessions.
-   Telemetry R5 is requested from analytics-lead (§4.6).
+   Telemetry is `deck_buffer_empty` (granted in ruling 30), which replaced the R5 request (§15).
 5. **The hidden ms readout** is specified in §9.5. head-eng decides the build.
 6. **D13, adopted; accepted (head-product P33, 2026-10-20):** remove the deck's "Find more trades" once U3 ships.
    Retry stays only in the error and offline states, and `trades.find-btn` leaves table A.
@@ -1513,6 +1527,35 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 9. **Dates (launch-plan-1118.md, relayed 2026-10-23).** Launch is **Wed 2026-11-18**, and the binary
    is **feature-complete on 2026-11-06**. The P30 copy above ships in that binary.
 
+## 15. Reconciliation with main (2026-10-25)
+
+This branch merged `origin/main` @ `db7425d4`. The eng contracts landed through #356, #361, #378,
+#382, #399 and #401. Each row below says where this PRD's text differed from main, with file:line
+on main, and whether this PRD **aligned** (main is the shipped contract) or **kept** its text as a
+product requirement main doesn't yet meet, with the owner. Main's docs were not edited.
+
+| # | Topic | This PRD (before) | Main (file:line) | Resolution |
+|---|---|---|---|---|
+| 1 | AC-L4 telemetry | R5 request: a `next_page_ready_at_end` prop | `deck_buffer_empty`, granted in ruling 30 (`docs/business/analytics/2026-10-20-time-to-suggestion-events.md:31`) | **Aligned.** §4.6, AC-L4, §4.7, §14 and scope §1 now cite `deck_buffer_empty` |
+| 2 | `serve_source` values | prepared / cached / joined / fresh | R2: `device` / `page` / `cached` / `joined` / `fresh` (`…-events.md:29`); R3 adds `prepared` (`:32`) | **Aligned** (§4.4, AC-1b) |
+| 3 | `freshness_state` values | fresh / updating / withdrawn_some | `fresh` / `updating` (`…-events.md:29`) | **Aligned.** The restated table is removed (§4.6) |
+| 4 | R2b timeout | "the addendum states the threshold" | **10,000 ms** from the tap (`…-events.md:30`) | **Aligned** (cited in §4.6) |
+| 5 | AC-L1 exclusions | T1–T6 | **T7**: `prefs_changed_strip` excluded from the cells (`…-events.md:80-81`) | **Aligned.** AC-L1 adds T7 |
+| 6 | Team Review entry | Not listed | `source=team_review`, out of the AC-L1 cells for launch (`…-events.md:56`) | **Aligned.** §4.1 other arrivals: measured, not gated |
+| 7 | P30 end card | P36 copy ("You've seen every trade for now." / "Adjust your search"). D14(a): "Adjust" opens the **deck's own preferences** and the search runs in place | `scope-eng-200ms.md:308-309`: the old P30 copy, with "Adjust…" opening "**the targeting builder**". The events doc labels `end_card_adjust` with the old string (`…-events.md:55`) | **Kept** (head-product P33 accepted D14(a); P36 set the copy). **Owners:** trades-eng (§6.5 and the #363 strings); analytics-lead (the label only; the `end_card_adjust` value is unchanged) |
+| 8 | Unseen-card evidence | DEC-2 "narrow rows, not full evidence; displayed cards keep full evidence"; §10.4 floated "displayed cards only" | **ADR-025, Accepted:** never-served pre-builds write nothing (`adr-025…md:25`); full rows on view, the first 30 and the C8 archive (`:27`); everything else packed (`:54`), about 64 B per card (`:75`); narrow rows are the fallback (`:109`). "Displayed cards only" was rejected (`:118`) | **Aligned** (§10.4, D7, AC-L8, AC-11, scope §2) |
+| 9 | P23 byte budget | "Still open" (D7) | ≤ about 0.2 MB compressed per active pair; about-250 MB page-store ceiling; measured numbers before the flag flips (`scope-eng-200ms.md:349-355`) | **Aligned.** D7's budget is decided by head-eng |
+| 10 | Floor triggers | App foreground, **Trades focus**, session-init, and the P41 kick | Session init on app open (`scope-eng-s0-fetch.md:63`) and foreground (`:64-65`, 60 s throttle `:66`), plus the P41 kick (`:71-107`). **No Trades-focus trigger**, and no mobile change | **Kept** as a product requirement main doesn't yet meet. **Owner:** head-eng → platforms-eng/trades-eng. Alternatively, head-product accepts the P41 kick plus foreground as covering it |
+| 11 | P41 hook timing | §12: "depends on the hook, about 2026-11-01" | Built: `backend/roster_refresh.py:123` (#378; `scope-eng-s0-fetch.md:71-107`), with no-ops for an open 429 circuit, a 60 s retry cooldown and in-flight | **Aligned.** The §12 risk is now the `/generate` caller only (`scope-eng-200ms.md:15-16`) |
+| 12 | Check-error serve state | No cards → the honest gate-miss state, naming its reason; "Updating" only while cards show (§5.4) | "The check errors → **'Updating', no cards**" (`scope-eng-200ms.md:283`) | **Kept** (§5.4 constraints, ux-lead F-3/F-5). **Owners:** trades-eng + ux-lead |
+| 13 | Prefetch rule | Pages 1–2 pre-built; request page N+2 when page N is fronted | Pages 1–3 stored; `ready_cards_after_prefetch ≥ prefetch_remaining + page_size` (`scope-eng-200ms.md:294-297`) | **Aligned in outcome.** Main's rule keeps at least one full unseen page ahead, which meets the trades-pm requirement. AC-L4's zero-miss measure stands, and the guard asserts main's rule |
+| 14 | U5 card in the p95 | "Counts against the p95" | As R2b only if no card arrives; otherwise R2 carries the wait (`scope-eng-200ms.md:323-324`) | **Aligned.** Same effect; no text change |
+| 15 | R3 emission scope | Exactly one per user-visible deck, whatever `serve_source` (AC-1b) | "Emits once per `deck_job_id`, only for requests that carry a `search_id`" (`scope-eng-200ms.md:18-19`); the binding rule restated at `…-events.md:32` | **Kept as AC-1b; to confirm.** Old binaries (no `search_id`) sit behind the B8 minimum-version gate. **Owners:** analytics-lead + trades-eng confirm stage-6 counts across the seam |
+| 16 | Replenishment | "Restore, bounded by DEC-2, before the 200 ms build ships"; "U2's floor and U3's prefetch depend on it" | #361: tick step 7 is a hard skip ("deferred: C2") until C2 and the self-renewal fix (`docs/plans/daily-tick-fix/scope.md:42,69-71`). On main, U2's floor is S0 (#378) and U3's pages are P1/P2 (`scope-eng-200ms.md:86-89`), not weekly replenishment | **Kept** as head-product's precondition (scope §5, §9.6), restated as ADR-025 C2 plus the self-renewal fix. **Owner:** head-eng confirms whether it still gates the 200 ms ship, given S0 and P1/P2 |
+| 17 | Device-held page age | Within the U2 bounds (P32) | Max age 300 s, a client constant plus a cross-client invariant (`scope-eng-200ms.md:21`) | **Aligned** (300 s = the 5-minute bound) |
+| 18 | AC-9 page contract | AC-9b's differential test | `assert_page_is_top_n` / `assert_prefix_stable` (#382; `eng-evidence-contract.md:106-142`) | **Aligned.** AC-9b cites it |
+| 19 | Calibration decks and R3 | Not stated | `grading_refresh` decks emit no `trades_generated` (`…-events.md:32`) | **Aligned.** Consistent with AC-1b's "user-visible trade deck" |
+
 ## Decisions needed (operator)
 
 | ID | Decision | Proposed |
@@ -1523,7 +1566,7 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 | D4 | The stale-deck rule | Serve-and-refresh with the two hard exceptions (§5.2). It is supported by design-lead and ux-lead, with ux-lead F-3, F-4 and F-6 pinned (trades-pm decision, 2026-10-15). Alternatives: block, or serve-with-label. |
 | D5 | The §5.1 freshness bounds | As proposed in the table. |
 | D6 | May the first card differ from the full deck's top card (progressive order)? | No by default. A first card that isn't the full deck's best-first card is a model-behavior change. It needs a model-change packet (PR #331, `.claude/skills/pm-technical/references/model-change-packet.md`) and models-lead's sign-off before it ships (AC-9d; models-lead R.b). |
-| D7 | Storage budget for a faster path, and whether evidence rows may be written only for displayed cards | **Decided in part by head-product P23 (2026-10-15):** cache data sheds first, and nothing rolls out without an explicit byte budget checked by head-eng against H1–H3 (#337, §10.4). **Lazy-evidence half decided (DEC-2, operator 2026-10-20):** unseen candidates are stored as narrow rows, not full evidence, and nothing changes for the user (§10.4, AC-L8). analytics-lead and models-lead confirm their readouts work from narrow rows; a confirmation, not a blocker. **Still open:** the budget number, which head-eng sets against H1–H3. |
+| D7 | Storage budget for a faster path, and how unseen candidates are stored | **Decided.** <br>**Storage form (DEC-2, operator 2026-10-20):** landed and Accepted as **ADR-025**. Never-served pre-builds write no evidence; full rows go to viewed or acted-on cards, the first 30 and the C8 archive; everything else is packed; narrow rows are the fallback. <br>**P23 budget (head-eng, `scope-eng-200ms.md` §7):** ≤ about 0.2 MB compressed per active pair, and an about-250 MB page-store ceiling. Measured numbers replace the estimates before the flag flips. <br>analytics-lead and models-lead confirm their readouts work from packed evidence (ADR-025 C7). |
 | D8 | Does the new target supersede the 3 s goal in `trade-search-latency/research-plan.md` §4? | **Decided (2026-10-20):** 200 ms supersedes the 3 s goal and the earlier 250 ms. It is the tap-to-first-card KPI and a launch MUST, and that thread's non-negotiables stay. |
 | D9 | Must every fast-path card pass `deck.quality_filters`? | Yes, evaluated at display-time inputs, with no silent skip (AC-9a; models-lead R.b). |
 | D10 | Should a table B control (Home tile, League, Matches, calculator row) start a search and show cards directly, instead of opening the builder? | **Yes for onboarded users** on the Home tile, League ×2 and Matches. First-run keeps the builder (onboarding-pm signs off). The stack is builder → pushed deck, using `push`, not `navigate`. The calculator row stays navigation-only and is relabelled (design-lead; copy via head-product → marketing-lead). A Home tile preview is an optional follow-up (design-lead). **The operator's call, because it amends D-171.** Alternative: keep D-171 and relabel table B (ux-lead, design-lead). |
@@ -1534,9 +1577,13 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 
 ## Handoffs
 
-- **head-eng (launch): restore background replenishment, bounded by DEC-2 narrow rows,** before the
-  200 ms build ships and before the §9.6 proof. It was paused as a DB stopgap on 2026-10-20, and U2's
-  freshness floor and U3's prefetch depend on it.
+- **head-eng (launch): restore background replenishment,** bounded by ADR-025's C2 and #361's
+  self-renewal fix, before the 200 ms build ships and before the §9.6 proof. It was paused as a DB
+  stopgap on 2026-10-20. Confirm whether it still gates (§15 item 16).
+- **trades-eng + ux-lead:** resolve §15 item 7 (P30 copy and destination in `scope-eng-200ms.md`
+  §6.5) and item 12 (check-error state) against this PRD.
+- **head-eng → platforms-eng / trades-eng:** §15 item 10, Trades focus as a floor trigger, or
+  head-product accepts the P41 kick as covering it.
 - **analytics-lead + trades-eng (W3 finding):** 10 taps had no source, and 9 of them got no card
   (§6). Investigate it as an instrumentation or flow gap; this PRD doesn't diagnose it.
 - **head-eng (launch, through head-product):** the critical-path build plan for 200 ms against
@@ -1569,10 +1616,10 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
   non-animated route.
 - **design-lead (launch, through head-product):** the U1–U5 visuals, including the "Building your
   first trades" card.
-- **analytics-lead (launch):** grant or amend R5, the AC-L4 page-end readiness prop. Confirm that
-  AC-9c works from DEC-2 narrow rows.
+- **analytics-lead (launch):** done for events (contract landed in #399/#401). Confirm that AC-9c
+  works from ADR-025's packed evidence. Update the contract's P30 label (§15, item 7).
 - **models-lead (launch, through head-bizops):** confirm that the Calibration and AC-9c readouts work
-  from DEC-2 narrow rows. A confirmation, not a blocker.
+  from ADR-025's packed evidence (C7). A confirmation, not a blocker.
 - **app-manager (launch):** write the device checklist: the §9.6 scripted two-device session (the
   AC-L1 proof), plus the §9.4 launch runs L2–L4b (U3, P30, U5, U2 and K-F5).
 - **onboarding-pm:** D10's first-run limit, F-4's guide interplay, and the P12 privacy-label check
