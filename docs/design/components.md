@@ -16,7 +16,7 @@ authoritative terms; this adds no counterparty tier/value disclosure.
 
 ## Buttons
 
-Height 40px (36px compact), radius `--r-sm`, Archivo 600 14px, padding 0 16px. Focus: ice ring. Disabled: 45% opacity, no pointer. Mobile: 44px touch floor; under flag `a11y.text_scaling` fixed heights become `minHeight` + vertical padding so Dynamic-Type text can grow the button, and under `ux.touch_polish` the 36px compact variant carries default 4pt vertical hitSlop (44pt effective).
+Height 40px (36px compact), radius `--r-sm`, Archivo 600 14px, padding 0 16px. Focus: ice ring. Disabled: 45% opacity, no pointer. Mobile: 44px touch floor; under flag `a11y.text_scaling` fixed heights become `minHeight`. Mobile `Button` takes an optional `accessibilityLabel` for a label that's ambiguous out of context ("Retry" → "Retry refreshing trades"); unset, VoiceOver reads the visible label + vertical padding so Dynamic-Type text can grow the button, and under `ux.touch_polish` the 36px compact variant carries default 4pt vertical hitSlop (44pt effective).
 
 | Variant | Spec | Replaces |
 |---|---|---|

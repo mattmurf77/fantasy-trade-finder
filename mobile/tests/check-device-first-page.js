@@ -470,6 +470,14 @@ function fnBody(text, signature) {
     ok(/const previous = get\(\)\.user;\s*if \(previous && previous\.user_id !== demoUser\.user_id\) void clearDevicePages\(\);\s*set\(\{\s*user:\s*demoUser,/.test(demo), 'a demo over another account');
   });
 
+  await check('4c. the refresh-failed line carries the final copy, and Retry its spoken label (marketing §6 add. 4)', () => {
+    const states = read('components/TradeDeckStates.tsx');
+    ok(/DECK_REFRESH_FAILED_LINE = "Couldn't refresh\. These trades may be out of date\.";/.test(states), 'line');
+    ok(/DECK_REFRESH_FAILED_RETRY_A11Y = 'Retry refreshing trades';/.test(states), 'a11y string');
+    ok(/testID="trades\.deck-refresh-failed\.retry"\s*label="Retry"\s*accessibilityLabel=\{DECK_REFRESH_FAILED_RETRY_A11Y\}/.test(states), 'wired on the Retry button');
+    ok(/accessibilityLabel=\{accessibilityLabel\}/.test(read('components/chalkline/Button.tsx')), 'Button passes it to the Pressable');
+  });
+
   console.log(failures ? `\n${failures} failed` : '\nall passed');
   process.exit(failures ? 1 : 0);
 })();

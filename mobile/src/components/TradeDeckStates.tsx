@@ -33,6 +33,8 @@ export const DECK_MORE_ERROR_LINE = "Couldn't load more trades.";
 // Placeholder per §5.4 ("says the deck may be out of date"); copy owner
 // marketing-lead.
 export const DECK_REFRESH_FAILED_LINE = "Couldn't refresh. These trades may be out of date.";
+// marketing-lead-copy.md §6 addendum 4 (final): the line above, "Retry", and this spoken label.
+export const DECK_REFRESH_FAILED_RETRY_A11Y = 'Retry refreshing trades';
 
 function announcePolitely(line: string) {
   // `queue: true` lets VoiceOver finish what it is reading (polite).
@@ -221,6 +223,7 @@ export function DeckRefreshFailedLine({ onRetry }: { onRetry: () => void }) {
       <Button
         testID="trades.deck-refresh-failed.retry"
         label="Retry"
+        accessibilityLabel={DECK_REFRESH_FAILED_RETRY_A11Y}
         variant="secondary"
         onPress={onRetry}
       />
