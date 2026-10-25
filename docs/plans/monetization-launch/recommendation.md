@@ -89,7 +89,7 @@ the sheet; StoreKit's sheet opens when the user taps the trial button on our pay
 **Decided: after the first value moment**, at ux-lead's §1 trigger: the first Like or Pass has settled, or the user
 leaves the deck after at least one card. **A short look is allowed if it is metered by use, never by time** [interp.]:
 - The 2020 rejections were for time windows ("Free until <calculated date 30 days after first launch>").
-- The preview is **one deck page** (`paywall_preview_pages`, default 1 [A]): the user can Like or Pass its cards; the
+- The preview is **one deck page** (`paywall_preview_pages` = 1, decided P49): the user can Like or Pass its cards; the
   next page or a new search returns 402 `preview_used`. Sends are gated from the first tap. Cron-built decks never count.
 - Copy never calls it a trial or "free access"; Review Notes describe the preview and the gate (2.3.1(a); 2.5.19).
   **Knob = 0 turns the preview off** (the fallback if App Review objects). **Residual risk is low, not zero** [A].
@@ -105,8 +105,7 @@ data splits opt-in from opt-out; nothing rigorous exists for social or network a
   offer viewers pay**. B: every verified sign-in "starts" × 9–18% opt-in conversion (18.2% SaaS [B]; 8.9% mobile,
   secondhand, attributed to Adapty but not found on Adapty's page; unverified) ≈ **9–18% of verified sign-ins pay**,
   measured when the window ends, in the fantasy playoffs [A].
-- **At ≈ 8 MAU [M, analytics-lead W3, 2026-10-20] none of these is measurable before Q1 2027** [A]. The difference that
-  matters now is not conversion. It's review risk, build cost, and the network (below).
+- **At ≈ 8 MAU [M, W3 2026-10-20] none of this is measurable before Q1 2027** [A]; what matters is review risk, cost, network.
 
 **3. The decision and the Founder offer form.** A-preview, with the Founder price delivered by **Apple price
 preservation** on the two existing SKUs, not an offer code, a separate SKU or a lifetime (§(b)).
@@ -125,11 +124,10 @@ Trades need leaguemates' boards, and the referral loop is a launch MUST. From th
   users** (`trade_match`, `league_member_unlocked_trades`) land on Matches, free to view; acting on one opens the
   standard paywall, a reactivation moment. No new push is added.
 
-**Why not B:** the rejection precedent with 8 days from submission to launch; untrustworthy first-sign-in timestamps;
-claimable usernames that need abuse keying; ~2 more eng days; an end-of-window ask in the playoffs. Its one real advantage,
-30 days of matches with every leaguemate, doesn't outweigh that. **Why gate the core loop at all** (pm-monetization's
-guardrail says not before retention data): the operator directed it. The preview protects activation, C2 the network,
-and K0–K3 with the deploy-free knob protect retention.
+**Why not B:** the rejection precedent with 8 days to launch; untrustworthy first-sign-in timestamps; claimable
+usernames; ~2 more eng days; an end-of-window ask in the playoffs. Its one advantage (30 days of matches with every
+leaguemate) doesn't outweigh that. **Why gate the core loop at all:** the operator directed it; the preview protects
+activation, C2 the network, and K0–K3 with the knob protect retention.
 
 **This overturns four standing rules** (an ADR plus a D-entry, head-eng): foundation §2.2's "never wrapped" core loop
 (`00-platform-foundation.md:131-134`) and the `_require_pro` docstring (`server.py:31144-31146`); the 2026-08-14
@@ -143,9 +141,8 @@ ranking and Calibration); and the August trial ruling (14 days monthly), now 1 m
 | `ftf_pro_annual` (**hero**, pre-selected) | **$24.99/yr** ($2.08/mo) | $34.99/yr | 1-month free trial | $21.24 → $29.74 |
 | `ftf_pro_monthly` | **$4.99/mo** | $6.99/mo | 1-month free trial | $4.24 → $5.94 |
 
-- **Arithmetic** [computed]: the discount is 28.6% on both plans. Annual saves 58% against 12 × monthly at both levels.
-  Break-even at the Founder price: #347's run-rate of $43.45–87.45/mo (§7, its labels) ÷ $1.77 net per annual-month is
-  **25–49 annual subscribers**, vs 17.5–35.3 at $34.99. The 10-23 disk step (5 → 10 GB) moves it slightly.
+- **Arithmetic** [computed]: a 28.6% discount on both plans; annual saves 58% vs 12 × monthly. Break-even at the Founder
+  price: #347's run-rate $43.45–87.45/mo (§7) ÷ $1.77 net per annual-month = **25–49 annual subscribers** (17.5–35.3 at $34.99).
 - **Main today** [M]: $4.99 monthly with `trial_days` 14 and $34.99 annual with 30 (`server.py:31188-31193`), rendered
   as "30 days free" (`PaywallScreen.tsx:166-176`). The live App Store Connect intro offer is unverified (head-eng: 3 days).
 - **"1 month", never "30 days":** Apple has no 30-day duration ("3 Days. 1 or 2 Weeks. 1, 2, 3, or 6 Months. 1 Year").
@@ -220,10 +217,11 @@ non-deck gated entry points open the standard paywall, so no bespoke in-place st
   Their preview counts from enforcement start, so they get the same first page and offer as everyone (ux §6).
 - **Founding GMs on the same terms,** with the tester welcome (`mz.founder.welcome_tester`, ux §4.1). **No comp:** #347's
   90-day comp would push their first subscription past 12-31 and cost them the Founder price.
-- **Manual grants only for** the operator's 2 allowlisted ids (`config/tester_allowlist.json`) and the entitled review
-  demo (`/api/admin/entitlements/grant`, `server.py:31254`), by release-lead on the operator's word. **Two demo
-  accounts:** one granted, one ungranted. **Demo decks aren't exempt from the gate:** the ungranted demo goes through
-  preview → offer → sandbox purchase like any user (5f caps sandbox grants at 24 h).
+- **Manual grants only for** the operator's 2 allowlisted ids (`config/tester_allowlist.json`) and the entitled App
+  Review demo (`/api/admin/entitlements/grant`, `server.py:31254`), by release-lead on the operator's word. **Two
+  "demos", no conflict:** the **App Review demo accounts** (one granted, one never entitled) **stay gated**, so the
+  reviewer sees the real gate (preview → offer → sandbox purchase; 5f caps sandbox grants at 24 h). The **try-before-sync
+  session** (`_synthetic_demo_session`) **is exempt** (head-eng coded it; moot while `try_before_sync` is off).
 - **Testers move to the App Store build;** the operator tells them (ux §6; outbound). Old TestFlight builds have no 402
   handling and will error once enforcement is on. **head-bizops' "clock from 11-18" applies only under B;** under R3
   with A there's still no app clock (11-18 to the gate go-live is simply free launch use).
@@ -266,19 +264,15 @@ invitees and bounce points B1–B9 §5, TestFlight users §6, the B column, copy
 
 ## Analytics (spec in [scope.md](scope.md) §1; for analytics-lead to grant)
 
-- **Conversion truth is the ledger** (`entitlements`, `subscription_events`): trial start, conversion and cancellation
-  are queries on INITIAL_PURCHASE `period_type=TRIAL`, the first RENEWAL and CANCELLATION.
-- **Register `entitlement_granted`** in `SERVER_FIRED_EVENTS` (#347 5h): INTENT, no NON_INTENT row (analytics-lead to
-  confirm, since manual and comp grants also fire it). **One new server event, `paywall_gate_hit`:** NON_INTENT, props
-  `gate` and `route_family`, capped once per user, gate and family per UTC day.
-- **Reuse `paywall_viewed`, widening `source`** to `first_opinion` | `left_deck` | `gate` | `settings` (`gate` = the
-  standard paywall opened from a gated surface; no push or club values under the ruling). **No `paywall_shown`** (it duplicates `paywall_viewed`, against head-eng's and ux-lead's proposals),
-  and no client `trial_started` or `declined`: a decline is a `paywall_viewed` with no `paywall_purchase_initiated`.
+- **Conversion truth is the ledger** (`entitlements`, `subscription_events`: INITIAL_PURCHASE `period_type=TRIAL`, the
+  first RENEWAL, CANCELLATION). **Register `entitlement_granted`** (#347 5h; INTENT). **One new server event,
+  `paywall_gate_hit`** (NON_INTENT; `gate`, `route_family`; capped per user, gate and family per UTC day).
+- **Reuse `paywall_viewed`, widening `source`** to `first_opinion` | `left_deck` | `gate` | `settings`. **No
+  `paywall_shown`** (a duplicate), no client `trial_started` or `declined` (a viewed with no purchase initiated).
 
 ## Kill criteria
 
-#347's K1–K3, re-based (the gate removes non-payers' swipes and sends from WAT by design, `analytics_queries.py:53-55`).
-Action: `paywall_enforce_enabled` → 0, deploy-free; purchases and grants keep working. Thresholds [A] until baselines.
+#347's K1–K3, re-based (the gate removes non-payers' swipes from WAT by design); action: knob → 0; thresholds [A].
 
 | Criterion | Trigger | Read by |
 |---|---|---|
@@ -302,7 +296,7 @@ Action: `paywall_enforce_enabled` → 0, deploy-free; purchases and grants keep 
 | 8 | Eng-side App Store Connect and RevenueCat wiring, plus a sandbox end-to-end | 0.25 [E] | both | eng | Y |
 | 9 | Reserve for IAP-review rejection fixes (plus 1–2 calendar days) | 0.5 [E] | both | eng | N (after 11-10) |
 | 10 | Founder annual SKU (head-eng's addendum) | ~~0.5~~ **0** | — | — | Dropped (§(b)) |
-| 11 | Preview: the first-page allowance (server) and the §1 trigger (client) | 0.5 [A] | A | eng | Y |
+| 11 | Preview (P49): server `paywall_preview_pages` = 1, the first page of the first deck through E2 paging, a per-user "preview used" record (merges by 11-06; fixes #395's `PREVIEW_PAGES = 0`); client end card and §1 offer trigger with knob = 1 as primary | 0.5 [A] | A | server: platforms-eng; client: engagement-eng | Y |
 | 12 | The offer as an interrupt surface right after `guide_step`; deck state kept across the detour (ux §0.2, §1) | 0.25 [A] | A | eng | Y |
 | 13 | Rule 0.3: "free" copy keyed off RevenueCat's intro-eligibility check, not `trial_eligible` (`PaywallScreen.tsx:166`) | 0.25 [A] | A | eng | Y |
 | 14 | C2 per ux-lead's classification: the wider free set; non-deck gated entry points open the standard paywall (required by the ruling) | 0.25 [A] | both | eng | Y |
@@ -328,12 +322,10 @@ deck state +0.25, rule 0.3 +0.25, C2 +0.25, identity +0.25, Founder config +0.25
 0.5, celebration −0.25 (1.0 vs Eng's 1.25), web +0.5–1.0. **The ruling removed 1.5 d** (rows 14, 18, 19 and 20 −0.25
 each; row 23 −0.5), 0.75 of it binary. **B's equivalent is about 11.5 d.**
 
-**head-bizops' expected gap, item by item:**
-- **Founder SKU, projector, config display: corrected.** No SKU and no projector work; the config display is 0.25.
-- **#347's 5a, 5b, 5c, 5f, 5h: confirmed** (rows 2, 17, 5, 4); 5a as head-eng's `is_enforcing()`. 5d's guard stays; 5e and 5g drop.
-- **Events and tests: confirmed, resized** (events 0.25, fewer than Eng proposed; tests 1.0).
-- **Celebration design and copy: confirmed, split** (0.5 d binary, 0.5 d update 1; design and copy outside Eng slots).
-- **Review buffer: confirmed** (0.5 d reserve plus 1–2 calendar days). **Missing from the gap:** rows 7, 8, 11–15, 22.
+**head-bizops' expected gap:** Founder SKU / projector / config display **corrected** (no SKU or projector work; config
+0.25). #347's 5a, 5b, 5c, 5f, 5h **confirmed** (rows 2, 17, 5, 4; 5a as `is_enforcing()`; 5d's guard stays, 5e and 5g
+drop). Events and tests **resized** (0.25; 1.0). Celebration **split** (0.5 binary, 0.5 update 1; design and copy outside
+the Eng slots). Review buffer **confirmed** (0.5 d plus 1–2 calendar days). **Missing from the gap:** rows 7, 8, 11–15, 22.
 
 **No optional cuts remain:** the ruling made the row-14 cut required and removed row 18.
 
@@ -351,7 +343,7 @@ still needs head-eng's rows 11–17 confirmed, design-lead's visuals by 10-28, t
 operator lane:** Paid Applications Agreement, banking, tax, SBP; the subscription group with both SKUs at $4.99/$24.99, a
 1-month intro on each, and the 2027-01-01 increase scheduled with "keep current price"; multiseat and Family Sharing
 off; tips not submitted; RevenueCat (`pro`, offering, webhook); `REVENUECAT_WEBHOOK_SECRET` on Render;
-`EXPO_PUBLIC_REVENUECAT_IOS_KEY` in EAS production by ~11-07; two demo accounts; Gate 0. **Checkpoint 11-03:** if the
+`EXPO_PUBLIC_REVENUECAT_IOS_KEY` in EAS production by ~11-07; two App Review demo accounts (both gated); Gate 0. **Checkpoint 11-03:** if the
 client gate PR isn't CI-green, pull it from the binary and run R3; a half-built gate in the review binary is the worst outcome.
 
 ## Product knock-ons, one line each
@@ -378,8 +370,14 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
   "Verify this session first" screen (`mon.verify.title` / `.body`, legal-approved; ux-lead addendum §3), subscriber or
   not. Nothing in any response differs by status; `/api/me/entitlements` stays blank; status shows only after verifying.
 - **App Store creative:** no founder price in the screenshots or preview (2.3.14), incl. the operator's 11-08 shots.
-  **Review Notes** (release-lead): the preview, the gate, the window, two demo accounts (one granted). **Invites:** the
-  referral copy (#348, #386) must not promise "free" (marketing-lead).
+  **Review Notes** (release-lead): the preview, the gate, the window, two App Review demo accounts (one granted, both
+  gated). **Invites:** the referral copy (#348, #386) must not promise "free" (marketing-lead).
+- **Terms alignment (P50; the lead checked #373 @ `d866706b`):** §14.8 matches this memo ($4.99/$24.99 by 2026-12-31;
+  $6.99/$34.99 for new subscribers from 2027-01-01; "won't go up … active on that plan" = keep-current-price; legal's lapse
+  wording; §14.3's "1-month" trial) and `org/leads/app-manager-monetization-setup.md` steps 2d, 2e, 3a–3c. **Dependency:**
+  "starting a free trial counts as subscribing" holds only if both increases start exactly 2027-01-01. §14.8 names no
+  plans. **ASC step 2g display names:** `Fleeced Pro Monthly` (`ftf_pro_monthly`), `Fleeced Pro Annual`
+  (`ftf_pro_annual`), plain space, no dash; group `Fleeced Pro` (proposed); marketing-lead writes the descriptions.
 
 ## Decisions (DECIDED 2026-10-25 unless noted; quote above)
 
@@ -389,7 +387,8 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 4. **Founder mechanism:** price preservation; no Founder SKU or lifetime; Season Pass deferred; tips dark. **DECIDED.**
 5. **Name:** "Founding GMs". 6. **Cut-off:** last day 2026-12-31. 7. **Keep the founder price while subscribed on your
    plan,** with legal's lapse wording. **All three DECIDED.**
-8. **TestFlight users:** no clock, no comp; manual grants only for the operator's 2 ids and the granted demo. **DECIDED.**
+8. **TestFlight users:** no clock, no comp; grants only for the operator's 2 ids and the granted App Review demo (both
+   App Review demos stay gated; the try-before-sync session is exempt). **DECIDED.**
 9. **Web:** `paywall_web_enforce_enabled`, ungated until 11-18 (head-product), then "continue on iPhone". **DECIDED.**
 10. **Identity:** Pro only on verified or demo sessions (P47); every unverified session gets the status-blind
     `verify_required` (legal R28.9 row 4, MUST, applied 2026-10-25). **DECIDED.**
@@ -406,7 +405,8 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 | Owner box | Deliverable |
 |---|---|
 | **Operator** (via head-bizops' single brief) | Decided 2026-10-25. Still yours: the operator lane (R1 list); Gate 0; every flag, knob, App Store Connect and EAS action, on your word in the acting session; the message to testers (your outbound) |
-| **head-eng** | Rows 1–23 (#394 and #395 under way). engagement-eng in the approved 4th slot from 10-28; eng-web. The per-route classification and the preview counter's storage. ux-lead's required items: rule 0.3, the interrupt surface, 402 on user actions only, deck state, the kept-price signal. The ADR and D-entry. Build to [scope.md](scope.md) |
+| **engagement-eng** (4th slot, via head-eng) | The client per [scope.md](scope.md): the end card and offer trigger with `paywall_preview_pages` = 1 as primary; the plan-title fallbacks to exactly `Fleeced Pro Monthly` / `Fleeced Pro Annual` (`PaywallScreen.tsx:73-74` still has the em-dash form; `org/leads/engagement-eng-paywall.md:47`), landed before the binary |
+| **head-eng** | Rows 1–23 (#394 and #395 under way; platforms-eng's `paywall_preview_pages` allowance merges by 11-06). engagement-eng in the approved 4th slot from 10-28; eng-web. The per-route classification. ux-lead's required items: rule 0.3, the interrupt surface, 402 on user actions only, deck state, the kept-price signal. The ADR and D-entry. Build to [scope.md](scope.md) |
 | **analytics-lead** | Grant the `entitlement_granted` registration, `paywall_gate_hit` and the `source` enum widening. The ledger queries (trial start, conversion, cancellation). K0–K3 baselines. The invitee funnel cut (ux §5) |
 | **ux-lead** | Drop the flows the operator ruling of 2026-10-24 supersedes (ux §2, §3's day-30 state, the T-3 items, §4.4); non-deck gated entry points open the standard paywall. Confirm Portfolio, mock draft and standing offers are classified right |
 | **design-lead** | Visuals for the offer, welcome, deck end card, Settings › Subscription and the Home mark (~10-28). Drop the visuals the ruling supersedes (ux §2, §3's day-30 state, the gated card) |
@@ -414,7 +414,7 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 | **legal-lead** (via head-bizops) | `web/terms.html` subscription terms. The lapsed-founder rule (60 days vs active). Reference-price framing. The offer's one-time trial terms. The delete-flow subscription note |
 | **onboarding-pm** | The verify path behind ux-lead's "Verify this session first" screen (addendum §3), including the M11 dependency for ESPN/MFL entries |
 | **growth-pm** | Confirm the invitee path (ux §5 B1–B9) and the B9 desktop steer against #348 and #386 |
-| **release-lead** | The App Store Connect checklist with the R28.8 listing line ("Finding and sending trades needs a subscription, starting with 1 month free. It renews automatically until cancelled."), Review Notes, the two demo accounts (one granted, one ungranted), manual grants, the 11-18 `paywall_web_enforce_enabled` flip, FTF_FLAGS-aware flips, and the knob-kill runbook entry, each on the operator's word |
+| **release-lead** | The App Store Connect checklist with the R28.8 listing line ("Finding and sending trades needs a subscription, starting with 1 month free. It renews automatically until cancelled."), Review Notes, the two App Review demo accounts (one granted, one never entitled; both gated), manual grants, the flip precondition (`paywall_preview_pages` = 1 confirmed, page 1 served, page 2 → 402, before `paywall_enforce_enabled` = 1), the 11-18 `paywall_web_enforce_enabled` flip, FTF_FLAGS-aware flips, and the knob-kill runbook entry, each on the operator's word |
 | **app-manager** | Fold [scope.md](scope.md) §3's TestFlight steps into its checklist |
 | **head-bizops** | Unit economics re-run at the Founding GMs prices |
 | **monetization-pm** (this box) | Mark #347's superseded rows; the stale-doc sweep listed in #347 §12 |

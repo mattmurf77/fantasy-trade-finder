@@ -79,8 +79,9 @@ the T-3 items are superseded.
 ## 2. Schema & flag scope
 
 - **New or changed tables and columns: none expected.** **head-eng to confirm** the storage for:
-  - the **preview counter:** derived from existing rows, i.e. user-initiated deck pages served since enforcement start
-    (`deck_impressions`, or `trades_generated` excluding `deck_source='replenish'`). Cron-built decks never count;
+  - the **per-user "preview used" record** (P49, platforms-eng): user-initiated deck pages served since enforcement
+    start; cron-built decks never count. If platforms-eng stores it in a new column or table, that's a
+    data-dictionary row plus a migration entry;
   - **`founder`** (and the gate's `trial_expired` / `lapsed` split): derived from `subscription_events.payload`
     (`entitlements.py:421`), or stored in the existing `entitlements.metadata` JSON column. No `in_trial` / `will_renew`:
     nothing after the offer reflects trial time (the ruling).
@@ -107,8 +108,11 @@ the T-3 items are superseded.
   - **`paywall_web_enforce_enabled`** (int 0/1, default **0**): web enforcement, on top of `is_enforcing()`. A request
     without the native app's `X-Device` counts as web (#395). **head-product ruled the web stays ungated until 11-18;**
     it flips on 11-18 once `IOS_INSTALL_URL` resolves, on the operator's word.
-  - **`paywall_preview_pages`** (int, default **1** [A]): the free deck pages for a never-entitled user. 0 = no preview
-    (the offer at the first trade action). It's the fallback if App Review objects.
+  - **`paywall_preview_pages`** (int, **= 1**, decided: head-eng 10-25, Product's P49): the free deck pages for a
+    never-entitled user, i.e. the first page of the first deck, served through E2 paging, with a per-user "preview
+    used" record. #395's `PREVIEW_PAGES = 0` is known and fixed: **platforms-eng builds the allowance and merges it by
+    11-06.** engagement-eng builds the end card and the offer trigger with knob = 1 as primary. **A 0 fallback (the
+    offer at the first trade action) would be a Product decision, with copy rewrites.**
   - **The club window is server config,** not a knob: `closes_at` in `/api/paywall/config` must equal App Store
     Connect's scheduled price-change date, so it moves only with a reviewed deploy.
 - **New env vars: none.** Existing key names only, values never in docs or chat:
@@ -139,6 +143,9 @@ the T-3 items are superseded.
        `/fair-packages`, `/asset-ideas`, `/standing-offer`; `/matches/<id>/disposition`; `/api/overhauls*`;
        `/api/win-now/*`; Today's Trade.
      - **Never gated:** `/api/admin/*`, `/api/cron/*`, `/api/billing/*` (secret-guarded, provider or operator traffic).
+     - **Two "demos", no conflict:** the **try-before-sync session** (`_synthetic_demo_session`) is **exempt** from the
+       gate (head-eng coded it; moot while `try_before_sync` is off). The **App Review demo accounts** (one entitled,
+       one never entitled) **stay gated**, so the reviewer sees the real gate.
      - **Everything else is `free`.** That includes `DELETE /api/account`, `/api/account/export`, `/api/me/entitlements`,
        `/api/paywall/config`, `/api/feature-flags`, `/api/events`, `/api/session/*`, `/api/auth/*`, `/api/sleeper/link`,
        `/api/extension/*`, every rank write, `/api/trade/evaluate`, `GET /api/trades/matches[/all]`, `/api/invite/*`,
@@ -191,17 +198,20 @@ the T-3 items are superseded.
   6. **No trial-time copy** (the ruling): a string scan of the paywall, welcome, Home, deck and Settings sources fails on
      a countdown, days-left or ends-soon phrase, or a trial-end date outside the offer.
   7. The tip row is hidden at launch. Update `check-tipjar.js` to match.
+  8. The plan-title fallbacks read exactly `Fleeced Pro Monthly` / `Fleeced Pro Annual`, plain space, no dash
+     (`PaywallScreen.tsx:73-74` still has the em-dash form; engagement-eng's D14,
+     `docs/plans/org-bringup/leads/engagement-eng-paywall.md:47`, lands before the binary).
 - [x] **Unit tests** (backend pytest; targeted locally, the full suite in GitHub CI per the throttle rule):
   - `backend/tests/test_paywall_gate.py` **(the gate matrix).** Cross every combination of:
     - the flags × the knob (0/1);
     - user state: never-entitled before and after the preview; in trial; paid; trial expired; lapsed; manual grant;
-      sandbox-capped; **unverified sessions, on a subscriber and a non-subscriber account**; the ungranted demo (not
-      exempt);
+      sandbox-capped; **unverified sessions, on a subscriber and a non-subscriber account**; the never-entitled App
+      Review demo (gated); the try-before-sync session (exempt: never 402);
     - client: native (`X-Device`) vs web, × `paywall_web_enforce_enabled` (0/1);
     - route class, including the four P48 routes (always free).
 
-    Expect 200 or 402, with the exact `gate` value. Also: cron-built decks never consume the preview; page 2 → 402
-    `preview_used`; a send in preview → `never_trialed`; an unverified session gets the free page, then
+    Expect 200 or 402, with the exact `gate` value. Also: **`paywall_preview_pages` = 1 → page 1 served, page 2 → 402
+    `preview_used`** (or `verify_required` for an unverified session); cron-built decks never consume the preview; a send in preview → `never_trialed`; an unverified session gets the free page, then
     `verify_required` at every gated action, never another value; knob 0 → never 402; web
     knob 0 → no web 402; the 402 body carries no route family.
   - `backend/tests/test_paywall_gate_allowlist.py` **(completeness).** Iterate `app.url_map`, and fail on any rule
@@ -271,11 +281,13 @@ the T-3 items are superseded.
   14. **T14 (after verifying; ux addendum V3–V5)** Verify each T13 session. **Expect:** the subscriber's action
       continues (a Send returns to its confirmation, nothing sent until you tap); the non-subscriber gets the standard
       paywall with the trial offer if eligible; a different Sleeper login shows the wrong-account message.
-  15. **T15 (review demo, ungranted)** The demo deck isn't exempt: preview → offer → sandbox purchase. **Expect:**
-      entitled within one refresh, and the sandbox grant expires ≤ 24 h later (5f).
-  16. **T16 (review demo, granted)** Manual grant. **Expect:** no offer, a full deck; Settings shows the plan.
-  17. **T17 (terms once)** **Expect:** "1 month", never "30 days"; the trial terms (duration, end behavior, price) and the
-      cut-off appear once, on the offer; the Terms and Privacy links open.
+  15. **T15 (App Review demo, never entitled)** Gated like any user (only the try-before-sync session is exempt):
+      preview → offer → sandbox purchase. **Expect:** entitled within one refresh, and the sandbox grant expires ≤ 24 h
+      later (5f).
+  16. **T16 (App Review demo, entitled)** Manual grant. **Expect:** no offer, a full deck; Settings shows the plan.
+  17. **T17 (terms once; titles)** **Expect:** "1 month", never "30 days"; the trial terms (duration, end behavior,
+      price) and the cut-off appear once, on the offer; the plan titles read exactly `Fleeced Pro Monthly` / `Fleeced
+      Pro Annual`, matching App Store Connect step 2g; the Terms and Privacy links open.
   18. **T18 (the ruling)** Walk Home, the deck, Matches, League, the welcome and Settings › Subscription, during the trial
       and after it. **Expect:** no countdown, days-left or ends-soon text on any surface, including Settings; Settings ›
       Subscription shows status, plan, Manage and Restore only.
@@ -296,7 +308,7 @@ the T-3 items are superseded.
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` | **updated** (at build) | The 402 contract (`pro_required` + `gate`) on every gated route; `/api/me/entitlements` (`enforcing`, `founder`); `/api/paywall/config` (`club`, `trial_period`, the grid, `tips`) |
-| `living-memory/LLD.md` | **updated** | A convention shift: one `before_request` per-route classification gate replaces per-route `@require_pro`; a new route must be classified (CI-enforced). "The server never mints trials" stays true. The preview counter |
+| `living-memory/LLD.md` | **updated** | A convention shift: one `before_request` per-route classification gate replaces per-route `@require_pro`; a new route must be classified (CI-enforced). "The server never mints trials" stays true. The `paywall_preview_pages` allowance and its per-user "preview used" record |
 | `docs/architecture.md` | **updated** | A cross-cutting gate in the request pipeline. The billing ledger → entitlements → gate data flow |
 | `living-memory/HLD.md` | **updated** | Monetization becomes live access control across iOS, web and the extension: a major flow |
 | `docs/cross-client-invariants.md` | **updated** | § "Monetization SKU ids…" (`:1204`): the 402 `gate` enum (with the status-blind `verify_required`); the `paywall_viewed.source` enum; `ftf_pro_monthly` / `ftf_pro_annual` at founder $4.99 / $24.99 → standard $6.99 / $34.99; `trial_period` "1 month"; `club` field names; tips not served at launch |
@@ -306,6 +318,7 @@ the T-3 items are superseded.
 | `docs/config-reference.md` | **updated** | `paywall_enforce_enabled`, `paywall_web_enforce_enabled`, `paywall_preview_pages`; the `monetize.*` semantics (`:438-448`), with `monetize.pro` marked retired; the `FTF_FLAGS` note |
 | `docs/integrations/revenuecat.md` | **new** | RevenueCat is an external service with no file today: the intro-eligibility check, the webhook, the sandbox cap, and the safe-to-log / must-redact split |
 | `docs/runbook.md` | **updated** | The kill: `paywall_enforce_enabled` → 0, on the operator's word, and how to verify it |
+| Terms alignment (`web/terms.html`, #373 @ `d866706b`; P50) | **aligned** (checked by the lead) | §14.8 matches this scope: $4.99/$24.99 for subscribing by 2026-12-31; $6.99/$34.99 for new subscribers from 2027-01-01; "won't go up for as long as your subscription stays active on that plan" = keep-current-price; legal's lapse wording; §14.3's "1-month" trial. It also matches `docs/plans/org-bringup/leads/app-manager-monetization-setup.md` steps 2d, 2e and 3a–3c. **Dependency:** "Starting a free trial counts as subscribing" holds only if both increases start exactly 2027-01-01. §14.8 names no plans. **ASC step 2g display names:** `Fleeced Pro Monthly` (`ftf_pro_monthly`), `Fleeced Pro Annual` (`ftf_pro_annual`), plain space, no dash (marketing §9.4 `mon.pay.plan.*`, D-h, legal R28.8 "match exactly"); proposed group `Fleeced Pro`; marketing-lead writes the descriptions via head-bizops |
 
 ## 5. Ship gate declaration
 
@@ -320,6 +333,8 @@ the T-3 items are superseded.
   **before the 11-10 submission**. The update-1 moments (the Home mark, the kept-price line) get T18 again on that build.
 - **Order:**
   - the server registration and gate deploy (enforcement off) **before** the 11-06 binary;
+  - **the preview precondition (P49), in release-lead's flip checklist, before `paywall_enforce_enabled` = 1:**
+    `paywall_preview_pages` = 1 confirmed, page 1 served, then 402 on page 2;
   - enforcement on (flags plus knob) for review, on the operator's word;
   - `paywall_web_enforce_enabled` on 11-18, once `IOS_INSTALL_URL` resolves, on the operator's word;
   - the R1 checkpoint 11-03: if the client gate isn't CI-green, it comes out of the binary, and the route is R3.
