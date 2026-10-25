@@ -41,7 +41,7 @@ server), eng-web (web). Rows refer to [recommendation.md](recommendation.md) §I
   - **Gate enum semantics:** `preview_used` = never held `pro`, and the preview page is spent. `trial_expired` = held
     `pro` only through an intro trial that ended unconverted. `lapsed` = held a paid period, now expired or refunded.
     `never_trialed` = never held `pro`, and the action is outside the preview (a send before any opinion), or the
-    preview knob is 0. **`lapsed` is added to head-product's three:** a churned payer isn't `trial_expired`.
+    preview knob is 0. **`lapsed` is added to the lead's three:** a churned payer isn't `trial_expired`.
   - **Not added, on purpose:**
     - `paywall_shown` (it duplicates `paywall_viewed`; this overrides head-eng's and ux-lead's proposals);
     - client `trial_started`, `purchase_*` duplicates, `declined`, `trial_expired*`.

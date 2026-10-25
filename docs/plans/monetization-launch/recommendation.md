@@ -33,7 +33,7 @@
 - **TestFlight users:** no app clock, no comp; they join on the same terms with the tester welcome. **Web:** the same
   server gate, the first web deck, then "continue on iPhone"; no web trial. The extension's routes are all free.
 - **Cost: about 10.75–11.25 eng-days; about 8.5 binary-critical** (8.0 with two cuts), against 8 working days from
-  10-28 to 11-06 for a 4th slot. head-product's steer ("~8 total, 6.5–7 binary-critical") left out head-eng's own ramp-up, wiring
+  10-28 to 11-06 for a 4th slot. The lead's provisional estimate ("~8 total, 6.5–7 binary-critical") left out head-eng's own ramp-up, wiring
   and review-reserve rows (1.25 d) and ux-lead's required items.
 - **Verdict:** R1 (gate live at launch) only if the operator says yes **by 10-27** to a 4th Eng slot from 10-28 that
   works weekends, the operator's App Store Connect lane starts now, and design-lead's visuals land 10-28. Checkpoint
@@ -65,7 +65,7 @@
 | Apple's rule | 3.1.2(a): "Auto-renewable subscription apps may offer a free trial period … in App Store Connect" | Same. The free first page is a usage-metered free tier [interp.] | No text forbids it, none permits it for subscription apps. Tier-0 trials are for "Non-subscription apps" (3.1.1). 2.2 is a hook |
 | App Review evidence | The sanctioned path | Metered free previews are common in the category: Dynasty Nerds' free tier has "3 preview trades/day" [B, #347 §2.1, 2026-10-15] | Three 2020 rejections: "please use App Store Connect to implement free trials" (forum thread 129010). One unverified 2025 "fine" report. Nothing found for 2024–2026 |
 | Day-0 decision moment | Yes | **Yes, same session** | No. The ask moves to day 30, about 12-18, mid fantasy playoffs [A] |
-| Trial → paid | Opt-out: 48.8% SaaS [B]; 17–32-day trials 42.5–45.7% [B] | Same | Opt-in: 18.2% SaaS [B]; 8.9% mobile, low confidence [B] |
+| Trial → paid | Opt-out: 48.8% SaaS [B]; 17–32-day trials 42.5–45.7% [B] | Same | Opt-in: 18.2% SaaS [B]; 8.9% mobile (secondhand, attributed to Adapty but not found on Adapty's page; unverified) |
 | Trial starts | Lowest (a purchase sheet before any value) | Middle (only users who've seen a deck) | Every verified sign-in, automatically |
 | Invitee activation (FR-17) | **Blocked:** no swipe before the sheet | **Kept:** the first opinion fires before the ask (ux §5 B6) | Kept |
 | Leaguemate boards | Free under C2, but the invitee never got to value | Free forever under C2 | Full for 30 days, then the same as A |
@@ -97,7 +97,7 @@ data splits opt-in from opt-out; nothing rigorous exists for social or network a
   conversions [B, RevenueCat SOSA 2026]. B gives that up; A-preview keeps it, one deck later. 17–32-day trials convert
   best: 42.5% median [B, SOSA 2026], 43.7–44.6% [B, RevenueCat 2026-09-28], 45.7% [B, Adapty].
 - **FTF estimate, labelled:** A-preview: 20–35% of offer viewers start the month [A] × ~44% convert [B] ≈ **9–15% of
-  offer viewers pay**. B: every verified sign-in "starts" × 9–18% opt-in conversion [B, low confidence] ≈ **9–18% of
+  offer viewers pay**. B: every verified sign-in "starts" × 9–18% opt-in conversion (18.2% SaaS [B]; 8.9% mobile, secondhand, attributed to Adapty but not found on Adapty's page; unverified) ≈ **9–18% of
   verified sign-ins pay**, measured at a day 30 that lands in the fantasy playoffs [A].
 - **At ≈ 8 MAU [M, analytics-lead W3, 2026-10-20] none of these is measurable before Q1 2027** [A]. The difference that
   matters now is not conversion. It's review risk, build cost, and the network (below).
@@ -253,7 +253,7 @@ drafts (`marketing-lead-copy.md` §9) with `mz.*`. **legal-lead** reviews the pu
 - **At launch nothing server-driven exists beyond** paywall config copy, pushes and inbox rows; the in-app banner ships
   in the first update after launch (operator, 10-23). **Moments 3 (Home line), 5 and 6 fall after update 1** (~11-28
   [E]), so they ride it: about 0.75 d off the binary.
-- **Two yields to ux-lead:** head-product's "7 days / 3 days left" gives way to ux §2's quieter ladder (rule §0.5), and its
+- **Two yields to ux-lead:** the lead's first draft's "7 days / 3 days left" gives way to ux §2's quieter ladder (rule §0.5), and its
   badge on cards to §4.2's private mark.
 
 ## Analytics (spec in [scope.md](scope.md) §1; for analytics-lead to grant)
@@ -339,7 +339,7 @@ instead of an in-place state (ux-lead to accept); row 18 → ~0.1 if the client 
 | **R3** | Launch free on 11-18; the gate ships in update 1 (built 11-18 → 11-21, live ~11-28 [E]) | The same total, no 4th slot | ~11-28 | Opens at gate go-live (≥ 4.5 weeks to 12-31) | **Misses "from day 1".** Needs B8's forced update to the gate-aware build before enforcing; the IAPs are reviewed with update 1 | **Upside:** a free launch week. Every new user and invitee builds a board, swipes and matches for ~10 days |
 
 **The verdict.** 10-28 → 11-06 is **8 working days**, or 10 calendar days if the slot works weekends (the launch plan
-allows it). R1's binary-critical work is ≈ 8.5 eng-days (≈ 8.0 with the cuts). That's tighter than head-product's "~1 day
+allows it). R1's binary-critical work is ≈ 8.5 eng-days (≈ 8.0 with the cuts). That's tighter than the lead's provisional "~1 day
 of slack": **zero working-day slack, 1–2 calendar days if weekends are worked.** **R1 holds only if** the operator says
 yes by 10-27 to a 4th slot (engagement-eng) from 10-28 that works weekends; head-eng confirms rows 11–18 by 10-27;
 design-lead's visuals land 10-28 and the `mz.*` copy by ~11-02; and **the operator lane starts now:** the Paid
@@ -356,7 +356,7 @@ review binary is the worst outcome. **Without the 4th slot, choose R3 now.**
 
 - **Gated vs reachable:** gated surfaces show the gated state in place, and free ones say they're free (ux §0.4, §3).
   Settings › Subscription (Restore, Manage) is always visible once `monetize.paywall` is on. **The offer stays
-  dismissible** ("Not now", ux §1), so the config gets **no non-dismissible mode** (against head-product's steer): a paywall you
+  dismissible** ("Not now", ux §1), so the config gets **no non-dismissible mode** (against the lead's first draft): a paywall you
   can't close would wall off the free surfaces and Settings.
 - **The Founder display window:** `/api/paywall/config` serves the club block from 11-18 (or the R3 go-live) to the
   cut-off. It must equal App Store Connect's scheduled price-change date. Afterwards it shows standard prices, and the
