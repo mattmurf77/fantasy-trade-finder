@@ -3371,6 +3371,16 @@ def _trade_job_public_view(job: dict) -> dict:
     return out
 
 
+def _trade_paged_responses_on() -> bool:
+    """Deploy-free kill switch for E2's opt-in paging (`trade_paged_responses`,
+    default 1). At 0, /generate ignores `page` and /status ignores `cursor`, so
+    a paging client (#363) gets the legacy cumulative body, which it handles
+    as the pre-paging deck path. A missing, NaN or unreadable value keeps
+    paging on."""
+    value = _deck_cfg("trade_paged_responses", 1.0)
+    return not (value == value and value <= 0)
+
+
 def _trade_page_size() -> int:
     """E2: max cards per paged response (`trade_page_size`, default 30), held to 1-200."""
     try:
@@ -14839,6 +14849,10 @@ def generate_trades():
                                       and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", search_id)):
         return jsonify({"error": "invalid_search_id",
                         "message": "search_id must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
+    if paged and not _trade_paged_responses_on():
+        # Kill switch (trade_paged_responses = 0): validated, then served the
+        # legacy body exactly as a request without `page`.
+        paged, search_id = False, None
     league_id          = body.get("league_id") or g_league.league_id
     pinned_give        = body.get("pinned_give_players") or []
     # FB-47 — "I want to acquire X". Honored only when trade.finder_targeting
@@ -16006,7 +16020,7 @@ def trade_job_status():
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         snapshot = dict(job)
-    if cursor is not None:
+    if cursor is not None and _trade_paged_responses_on():
         return jsonify(_trade_job_page_view(snapshot, int(cursor)))
     return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
