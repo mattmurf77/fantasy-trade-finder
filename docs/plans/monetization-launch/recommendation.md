@@ -59,7 +59,7 @@ included, with the 11-03 checkpoint (R3 if it isn't green).
 | 6 | Lifetime, Season Pass, tips | **Drop / defer / keep dark** | Ship tips as built | More IAPs to review on the first submission, and a perpetual grant with storage liability |
 | 7 | TestFlight users | **No clock, no comp**; Founding GMs on the same terms | 90-day comp (#347) | A comp past the cut-off makes them miss the founder price |
 | 8 | Web and extension | **Web gated by the server rule** under `paywall_web_enforce_enabled`, **ungated until 11-18** (head-product); extension unchanged | A web trial | A web-only free window is a bypass with no purchase path |
-| 9 | Identity | **Pro counts only on verified or demo sessions** (head-eng's P47): an unverified session whose user_id holds Pro gets 402 `verify_required` | Pro on any session | A paid entitlement usable from a claimable Sleeper username |
+| 9 | Identity | **Pro counts only on verified or demo sessions** (head-eng's P47). **Every** unverified session gets the same free page, then a **status-blind** 402 `verify_required` at any gated action, subscriber or not (legal R28.9 row 4, a MUST; `org/leads/legal-lead.md:1677`) | Pro on any session; a verify gate only for subscribers | A paid entitlement usable from a claimable username; a subscriber-only gate reveals who pays |
 | 10 | Route | **R1** ("Ok. Then we need to build it."); the 4th slot approved; checkpoint 11-03, else R3 | R3 | R1 slipping late puts an unproven gate in the review binary |
 | 11 | Kill criteria | **K0–K3** with the deploy-free knob | None | Damage from the gate goes unseen at n ≈ 8 |
 
@@ -115,8 +115,7 @@ preservation** on the two existing SKUs, not an offer code, a separate SKU or a 
 
 Trades need leaguemates' boards, and the referral loop is a launch MUST. From the code (repo-facts §1–2):
 - **Activation survives A-preview.** FR-17 activates on the invitee's first `trade_proposed` or `match_swiped`
-  (`origin/plan/referral-loop:docs/plans/referral-loop/prd.md:889-899`). Both fire from the swipe route, before the
-  offer. Under A at sign-in, no invitee could reach a swipe without buying.
+  (`origin/plan/referral-loop:docs/plans/referral-loop/prd.md:889-899`), both fired by the swipe route before the offer; A at sign-in blocks it.
 - **Boards persist.** `load_member_rankings` (`database.py:9281-9380`) loads every leaguemate's row, with no activity
   or entitlement filter. A gated user's last board keeps powering payers' two-board cards. **The gate must not filter
   this load** (scope §3 pins it). Under C2 the board doesn't freeze: every rank write republishes it.
@@ -132,12 +131,10 @@ claimable usernames that need abuse keying; ~2 more eng days; an end-of-window a
 guardrail says not before retention data): the operator directed it. The preview protects activation, C2 the network,
 and K0–K3 with the deploy-free knob protect retention.
 
-**This overturns four standing rules,** so it needs an ADR plus a D-entry (head-eng): foundation §2.2, "core loop …
-never wrapped" (`docs/plans/monetization/00-platform-foundation.md:131-134`), with the `_require_pro` docstring
-(`server.py:31144-31146`); the 2026-08-14 never-gated list ("the deck, Find-a-Trade, matches, the calculator, sends,
-every tab"); **never tolled, for swipes** (BL-001 makes likes and passes move ratings at half K, so a gated swipe is a
-gated data-generating action; C2 keeps never-tolled for ranking and Calibration only); and the August trial ruling
-(14 days monthly), now 1 month on both.
+**This overturns four standing rules** (an ADR plus a D-entry, head-eng): foundation §2.2's "never wrapped" core loop
+(`00-platform-foundation.md:131-134`) and the `_require_pro` docstring (`server.py:31144-31146`); the 2026-08-14
+never-gated list; **never tolled, for swipes** (BL-001 makes swipes move ratings at half K; C2 keeps never-tolled for
+ranking and Calibration); and the August trial ruling (14 days monthly), now 1 month on both.
 
 ## (b) Plans and prices
 
@@ -309,7 +306,7 @@ Action: `paywall_enforce_enabled` → 0, deploy-free; purchases and grants keep 
 | 12 | The offer as an interrupt surface right after `guide_step`; deck state kept across the detour (ux §0.2, §1) | 0.25 [A] | A | eng | Y |
 | 13 | Rule 0.3: "free" copy keyed off RevenueCat's intro-eligibility check, not `trial_eligible` (`PaywallScreen.tsx:166`) | 0.25 [A] | A | eng | Y |
 | 14 | C2 per ux-lead's classification: the wider free set; non-deck gated entry points open the standard paywall (required by the ruling) | 0.25 [A] | both | eng | Y |
-| 15 | P47: Pro counts only on verified or demo sessions; 402 `verify_required` and a "sign in to use your subscription" state | 0.25 [A] | both | eng; onboarding-pm specs | Y |
+| 15 | P47 + legal R28.9 row 4: Pro only on verified or demo sessions; a status-blind 402 `verify_required` for every unverified session at a gated action; the "Verify this session first" screen (ux-lead addendum §3) | 0.25 [A] | both | eng; ux-lead specs | Y |
 | 16 | The Founder window in `/api/paywall/config`, display prices, and a `founder` flag on entitlements | 0.25 [A] | A | eng | Y |
 | 17 | 5b, the `enforcing` predicate; 5c, a truthful feature grid | 0.25 [A] | both | eng | 5b Y; 5c N (server config, live by 11-09) |
 | 18 | ~~Trial state (`in_trial`, `will_renew`)~~ | **0** | — | — | Dropped (operator ruling 2026-10-24): nothing else needs it. Settings shows no trial dates; the gate's `trial_expired` / `lapsed` split is server-side, in row 1 |
@@ -377,10 +374,12 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
   it must land first. **The listing line (decided, legal's R28.8):** "Finding and sending trades needs a subscription,
   starting with 1 month free. It renews automatically until cancelled." It replaces the approved "Free to use."
   `web/terms.html` needs subscription, billing, renewal, refund, founder-price and lapse terms (legal-lead) by 11-09.
-- **App Store creative:** no founder price in the screenshots or preview (2.3.14). The operator's 11-08 screenshots must
-  not show the offer's price.
-- **Review Notes** (release-lead): the preview, the gate, the Founding GMs window, the two demo accounts (one granted).
-- **Invites:** the referral copy (#348, #386) must not promise "free" (marketing-lead).
+- **Unverified sessions** (legal R28.9 row 4, MUST): the same free first page, then at any gated action the same
+  "Verify this session first" screen (`mon.verify.title` / `.body`, legal-approved; ux-lead addendum §3), subscriber or
+  not. Nothing in any response differs by status; `/api/me/entitlements` stays blank; status shows only after verifying.
+- **App Store creative:** no founder price in the screenshots or preview (2.3.14), incl. the operator's 11-08 shots.
+  **Review Notes** (release-lead): the preview, the gate, the window, two demo accounts (one granted). **Invites:** the
+  referral copy (#348, #386) must not promise "free" (marketing-lead).
 
 ## Decisions (DECIDED 2026-10-25 unless noted; quote above)
 
@@ -392,7 +391,8 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
    plan,** with legal's lapse wording. **All three DECIDED.**
 8. **TestFlight users:** no clock, no comp; manual grants only for the operator's 2 ids and the granted demo. **DECIDED.**
 9. **Web:** `paywall_web_enforce_enabled`, ungated until 11-18 (head-product), then "continue on iPhone". **DECIDED.**
-10. **Identity:** Pro only on verified or demo sessions; 402 `verify_required` otherwise (P47). **DECIDED.**
+10. **Identity:** Pro only on verified or demo sessions (P47); every unverified session gets the status-blind
+    `verify_required` (legal R28.9 row 4, MUST, applied 2026-10-25). **DECIDED.**
 11. **Route:** R1 with the approved 4th slot (engagement-eng from 10-28, weekends) and the 11-03 checkpoint, else R3.
     **DECIDED** ("Ok. Then we need to build it.").
 12. **Kill criteria** K0–K3 with the knob. 13. **The ADR plus D-entry** for the overturn (head-eng). **Both DECIDED.**
@@ -412,7 +412,7 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 | **design-lead** | Visuals for the offer, welcome, deck end card, Settings › Subscription and the Home mark (~10-28). Drop the visuals the ruling supersedes (ux §2, §3's day-30 state, the gated card) |
 | **marketing-lead** (via head-bizops) | `mz.*` copy reconciled with `mon.*`, minus the slots the ruling supersedes (ux §2, §3's day-30 state, `mz.founder.recap`); the welcome and Settings copy carry no dates. The founder-price framing (no "was"). **The listing line is legal's R28.8:** "Finding and sending trades needs a subscription, starting with 1 month free. It renews automatically until cancelled." (replaces "Free to use."). The landing, macro T5 and invite-copy sweep. A 2.3.14 check of the screenshots |
 | **legal-lead** (via head-bizops) | `web/terms.html` subscription terms. The lapsed-founder rule (60 days vs active). Reference-price framing. The offer's one-time trial terms. The delete-flow subscription note |
-| **onboarding-pm** | Spec the "sign in to use your subscription" state for 402 `verify_required` (P47) and its verify path, including the M11 dependency for ESPN/MFL entries |
+| **onboarding-pm** | The verify path behind ux-lead's "Verify this session first" screen (addendum §3), including the M11 dependency for ESPN/MFL entries |
 | **growth-pm** | Confirm the invitee path (ux §5 B1–B9) and the B9 desktop steer against #348 and #386 |
 | **release-lead** | The App Store Connect checklist with the R28.8 listing line ("Finding and sending trades needs a subscription, starting with 1 month free. It renews automatically until cancelled."), Review Notes, the two demo accounts (one granted, one ungranted), manual grants, the 11-18 `paywall_web_enforce_enabled` flip, FTF_FLAGS-aware flips, and the knob-kill runbook entry, each on the operator's word |
 | **app-manager** | Fold [scope.md](scope.md) §3's TestFlight steps into its checklist |
