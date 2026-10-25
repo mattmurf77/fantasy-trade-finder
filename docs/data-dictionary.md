@@ -126,6 +126,7 @@ counterparty board disclosure or client analytics event is added.
 - [`users`](#users)
 - [`leagues`](#leagues)
 - [`league_members`](#league_members)
+- [`league_roster_state`](#league_roster_state)
 - [`accounts`](#accounts)
 - [`linked_identities`](#linked_identities)
 - [`sessions`](#sessions)
@@ -352,7 +353,7 @@ The guard is not a distributed lock — two genuinely simultaneous requests on s
 
 ## `league_members`
 
-Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, keyed by roster `owner_id`) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
+Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `replace_league_members_snapshot` (delete-then-insert in one transaction; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
 
 For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 
@@ -364,8 +365,30 @@ MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same w
 | `league_id` | str | |
 | `user_id` | str | Real FTF id, or a synthetic id for imported-league counterparties (`espn:` / `mfl:` / `flea:`) |
 | `username`, `display_name` | str | |
-| `roster_data` | JSON text | |
+| `roster_data` | JSON text | Sleeper player ids (strings). For Sleeper this is the roster's `players` array, which includes reserve/IR and taxi players. Null/empty slots are dropped at the writer (G-004, S0) |
 | `updated_at` | str | |
+
+---
+
+## `league_roster_state`
+
+S0 (launch §3a, `docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md`). One row per league recording the
+last **Sleeper roster refresh**: the read `/api/session/init` makes at app open and foreground. Written by
+`backend/roster_refresh.py` through `database.mark_league_roster_fresh` / `mark_league_roster_failed`; read
+with `get_league_roster_state`. Every write is a single-row dialect-aware upsert. A failed read **never** touches
+`league_members` or `draft_picks`: the last good rows stay and only this row changes. ESPN/MFL/Fleaflicker
+leagues get no row from session init (they're not refreshed from the platform there). League-keyed with no
+`user_id`, so it is outside account deletion/export. Created by `metadata.create_all` (new table; no migration
+row).
+
+| Column | Type | Notes |
+|---|---|---|
+| `league_id` | str PK | Platform-native league id (same semantics as `leagues.sleeper_league_id`) |
+| `roster_fp` | str, nullable | `rfp1:…` roster fingerprint (trades-eng's `roster_snapshot`), stamped after a committed refresh. NULL until that stamp ships (S0 PR-B). Never changed by a failure |
+| `refreshed_at` | str, nullable | ISO-8601 UTC (fixed microsecond precision): fetch **start** time of the last refresh whose members **and** owned picks both committed. Only moves forward. NULL = never fully refreshed |
+| `status` | str | `fresh` (the last attempt committed) · `stale` (the last attempt failed; any stored rows are the last good ones). **Only these two values are stored** (fingerprint contract v0.3 §3). "Missing" (no cards) is **derived** by trades-eng's `roster_snapshot` from absent `league_members` rows, never stored here, and no state row (or no table) reads as `unknown`. This describes the last attempt, not an age bound; consumers compute age from `refreshed_at` |
+| `last_error_code` | str, nullable | NULL after a success. Otherwise one of `rate_limited` (429 or the circuit is open) · `blocked` (403, incl. Cloudflare 1010) · `http_4xx` · `http_5xx` · `timeout` · `network` · `invalid_payload` · `picks_unavailable` (owned-pick sync skipped on a throttled read) · `write_failed` |
+| `updated_at` | str | ISO-8601 UTC of this write |
 
 ---
 
