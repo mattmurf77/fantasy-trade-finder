@@ -10,13 +10,16 @@
 // parser does not know. Under D-056 there is no simulator to catch that, so
 // this guard:
 //   1–2  EXECUTES utils/appVersion's versionInt + shouldBlockForUpdate over a
-//        case table (equal, older, newer, 0 = off, null / garbage → open);
+//        case table (equal, older, newer, 0 = off, null / garbage → open),
+//        and appStoreLive over the release-date boundary;
 //   3    pins every fail-open path in the wiring (success-path-only writes,
 //        never persisted, never hydrated, one decision site);
 //   4    pins that each gate event fires from exactly one place, with exactly
 //        the two registered props, and that the backend registered them;
-//   5    pins the screen (testIDs, no FeedbackFAB, Chalkline only, copy
-//        marker, the App Store URL comes from eas.json's ascAppId);
+//   5    pins the screen: testIDs, no FeedbackFAB, Chalkline only, the three
+//        final copy strings, and the Update target (TestFlight before
+//        APP_STORE_LIVE_FROM, the eas.json ascAppId listing from it; a failed
+//        open keeps the gate up);
 //   6    pins that the version the gate parses equals the version the binary
 //        ships (G-012: the bare workflow takes the marketing version from
 //        ios/, while Constants.expoConfig.version comes from app.json);
@@ -94,6 +97,9 @@ const store = stripComments(read('src/state/useFeatureFlags.ts'));
 const app = stripComments(read('App.tsx'));
 const screenRaw = read('src/screens/UpdateGateScreen.tsx');
 const screen = stripComments(screenRaw);
+// The Update tap handler's body (`const onUpdate = () => { … };`, flat).
+const tapAt = screen.indexOf('const onUpdate = () => {');
+const tapBody = tapAt < 0 ? '' : screen.slice(tapAt, screen.indexOf('\n  };', tapAt));
 const allSrc = [...walk(SRC), path.join(MOBILE, 'App.tsx')].map((p) => ({
   rel: path.relative(MOBILE, p),
   code: stripComments(readAbs(p)),
@@ -143,6 +149,16 @@ const MIN_CASES = [
   [12200, 12200], [1, 1], [0, 0], [-5, 0], [0.5, 0], [12200.5, 0], [NaN, 0],
   [Infinity, 0], [1e20, 0], [undefined, 0], [null, 0], ['12200', 0], [false, 0],
 ];
+// [liveFrom, now (LOCAL time, so the table holds in any TZ), App Store?, label]
+const LIVE_CASES = [
+  ['2026-11-18', new Date(2026, 9, 25), false, 'weeks before → TestFlight'],
+  ['2026-11-18', new Date(2026, 10, 17, 23, 59, 59, 999), false, 'last ms before local midnight → TestFlight'],
+  ['2026-11-18', new Date(2026, 10, 18, 0, 0, 0, 0), true, 'local midnight → App Store'],
+  ['2026-11-18', new Date(2026, 10, 18, 12), true, 'release day → App Store'],
+  ['2026-11-18', new Date(2027, 0, 1), true, 'after → App Store'],
+  ['garbage', new Date(2026, 9, 25), true, 'unparseable date → App Store (the permanent target)'],
+  ['2026-11-18T00:00', new Date(2026, 9, 25), true, 'not YYYY-MM-DD → App Store'],
+];
 
 /** Every case-table miss for a loaded module; [] means all cases pass. */
 const runCases = (mod) => {
@@ -168,15 +184,19 @@ const runCases = (mod) => {
     const got = mod.shouldBlockForUpdate(min, mod.versionInt(ver));
     if (got !== want) miss.push(`block(${min}, versionInt(${JSON.stringify(ver)})) = ${got}, want ${want}`);
   }
+  for (const [liveFrom, now, want, label] of LIVE_CASES) {
+    const got = mod.appStoreLive(liveFrom, now);
+    if (got !== want) miss.push(`appStoreLive(${liveFrom}, ${now.toString()}) = ${got}, want ${want} (${label})`);
+  }
   return miss;
 };
+const CASE_COUNT = VERSION_CASES.length + BLOCK_CASES.length + MIN_CASES.length + 6 + LIVE_CASES.length;
 
 const util = load(utilSrc);
 {
   const miss = runCases(util);
   assert(miss.length === 0,
-    `1–2. versionInt / minVersionOrOff / shouldBlockForUpdate pass all ${
-      VERSION_CASES.length + BLOCK_CASES.length + MIN_CASES.length + 6} executed cases`,
+    `1–2. versionInt / minVersionOrOff / shouldBlockForUpdate / appStoreLive pass all ${CASE_COUNT} executed cases`,
     miss.join('\n      '));
 }
 
@@ -263,11 +283,9 @@ const util = load(utilSrc);
   assert(effAt > 0 && effEnd > effAt
       && screen.slice(effAt, effEnd).includes("track('update_gate_shown'"),
     '4a. update_gate_shown fires from a mount-once effect (once per gate show)');
-  const tapAt = screen.indexOf('const onUpdate = () => {');
-  const tapBody = screen.slice(tapAt, screen.indexOf('};', tapAt));
   assert(tapAt > 0 && tapBody.indexOf("track('update_gate_tapped'") >= 0
-      && tapBody.indexOf("track('update_gate_tapped'") < tapBody.indexOf('Linking.openURL(APP_STORE_URL)'),
-    '4b. update_gate_tapped fires on the Update tap, before the App Store hand-off');
+      && tapBody.indexOf("track('update_gate_tapped'") < tapBody.indexOf('Linking.openURL(url)'),
+    '4b. update_gate_tapped fires on the Update tap, before the store hand-off');
 
   const tax = readAbs(path.join(REPO, 'backend', 'analytics_taxonomy.py'));
   const q = readAbs(path.join(REPO, 'backend', 'analytics_queries.py'));
@@ -294,14 +312,39 @@ const util = load(utilSrc);
     '5a. static testIDs update-gate.screen + update-gate.update');
   assert(!/FeedbackFAB/.test(screen),
     '5b. no FeedbackFAB (blocking gate = modal/onboarding exception, root CLAUDE.md #188)');
-  assert(screenRaw.includes('// COPY: placeholder, marketing-lead to supply'),
-    '5c. the placeholder copy carries the marketing-lead marker');
+  // 5c — the final copy (marketing-lead via head-eng). Title and button are
+  // the b8.* rows; the body is option (B) until the operator's A8 pick.
+  const COPY_PINS = [
+    "const UPDATE_GATE_TITLE = 'Update required';",
+    "const UPDATE_GATE_BUTTON = 'Update';",
+    "// COPY: option (B), operator pick A8 due 11-03\n"
+      + "const UPDATE_GATE_BODY = 'This version of the app is out of date. Update to keep using it.';",
+  ];
+  const missingCopy = COPY_PINS.filter((pin) => count(screenRaw, pin) !== 1);
+  assert(missingCopy.length === 0,
+    '5c. the three copy strings are the final copy, each in one named constant (body carries the A8 marker)',
+    `missing or changed: ${missingCopy.join(' | ')}`);
+  assert(!/COPY: placeholder/.test(screenRaw)
+      && count(screen, '{UPDATE_GATE_TITLE}') === 1 && count(screen, '{UPDATE_GATE_BODY}') === 1
+      && count(screen, 'label={UPDATE_GATE_BUTTON}') === 1,
+    '5c2. no placeholder marker remains, and the screen renders exactly those three constants');
+
+  // 5d — where Update goes: TestFlight before the App Store release date,
+  // the App Store listing (eas.json ascAppId) from it. Failure keeps the gate.
   const eas = JSON.parse(read('eas.json'));
   const ascAppId = eas?.submit?.production?.ios?.ascAppId;
   assert(typeof ascAppId === 'string' && /^\d+$/.test(ascAppId)
-      && count(screen, `export const APP_STORE_URL = 'https://apps.apple.com/app/id${ascAppId}';`) === 1
-      && count(screen, 'Linking.openURL(APP_STORE_URL)') === 1,
-    '5d. Update opens the App Store listing for eas.json\'s ascAppId');
+      && count(screen, `export const APP_STORE_URL = 'https://apps.apple.com/app/id${ascAppId}';`) === 1,
+    '5d. the App Store URL is the listing for eas.json\'s ascAppId');
+  assert(count(screen, "export const APP_STORE_LIVE_FROM = '2026-11-18';") === 1
+      && count(screen, "export const TESTFLIGHT_URL = 'itms-beta://';") === 1,
+    '5d2. APP_STORE_LIVE_FROM is 2026-11-18 and the pre-release target is the TestFlight app');
+  assert(count(tapBody, 'const url = appStoreLive(APP_STORE_LIVE_FROM, new Date()) ? APP_STORE_URL : TESTFLIGHT_URL;') === 1
+      && count(screen, 'Linking.openURL(') === 1,
+    '5d3. Update picks App Store from the live date, TestFlight before it, through utils/appVersion.appStoreLive');
+  assert(/try \{\s*Linking\.openURL\(url\)\.catch\(\(\) => \{\}\);\s*\} catch \{\s*\}/.test(tapBody)
+      && !/\bset[A-Z]\w*\(|\bset\(|setState|getState/.test(tapBody),
+    '5d4. a failed open (sync throw or rejection) is swallowed and changes no gate state, so the gate stays up');
   assert(!/#[0-9a-fA-F]{3,8}\b|rgba?\(/.test(screen)
       && /from '\.\.\/theme\/chalkline'/.test(screen)
       && /import \{ Button, Text \} from '\.\.\/components\/chalkline';/.test(screen)
@@ -372,6 +415,8 @@ const util = load(utilSrc);
     ['unparseable app version blocks',
       "if (typeof appVersionInt !== 'number' || !Number.isSafeInteger(appVersionInt)) return false;", ''],
     ['3-digit patch parses', '\\.(\\d{1,2})$/', '\\.(\\d{1,3})$/'],
+    ['release-day midnight still TestFlight',
+      'return now.getTime() >= liveFrom.getTime();', 'return now.getTime() > liveFrom.getTime();'],
   ];
   for (const [label, from, to] of MUTANTS) {
     const applies = count(utilSrc, from) === 1;

@@ -11,7 +11,7 @@
 // flag store's half (`appMinVersion` stays 0 until one does).
 //
 // Zero runtime imports on purpose: mobile/tests/check-update-gate.js
-// transpiles this file and EXECUTES both functions under plain node.
+// transpiles this file and EXECUTES every function under plain node.
 
 /** "1.22.0" → 12200. Anything that is not exactly three dot-separated
  *  integers with minor and patch below 100 (the encoding's field width) →
@@ -36,4 +36,17 @@ export function shouldBlockForUpdate(minVersion: unknown, appVersionInt: unknown
   if (min === 0) return false;
   if (typeof appVersionInt !== 'number' || !Number.isSafeInteger(appVersionInt)) return false;
   return appVersionInt < min;
+}
+
+/** Where the gate's Update button goes. The same binary serves TestFlight
+ *  testers before the App Store release and App Store users after it, and
+ *  the app has no dependency that can tell the two installs apart. So the
+ *  button switches on the date: true from LOCAL midnight of `liveFromYmd`
+ *  ('YYYY-MM-DD') onward. An unparseable date reads as live, because the
+ *  App Store is the permanent target. */
+export function appStoreLive(liveFromYmd: string, now: Date): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(liveFromYmd);
+  if (!m) return true;
+  const liveFrom = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return now.getTime() >= liveFrom.getTime();
 }

@@ -5,7 +5,7 @@ import Constants from 'expo-constants';
 import { Button, Text } from '../components/chalkline';
 import { ink, space } from '../theme/chalkline';
 import { track } from '../api/events';
-import { versionInt } from '../utils/appVersion';
+import { appStoreLive, versionInt } from '../utils/appVersion';
 
 // ── B8 minimum-version gate — the blocking "Update required" screen ──────
 // Head-eng ruling 35. App.tsx renders this IN PLACE OF RootNav (so nothing
@@ -25,17 +25,32 @@ import { versionInt } from '../utils/appVersion';
  *  the gate never blocks. */
 export const APP_VERSION_INT = versionInt(Constants.expoConfig?.version);
 
+// ── Where Update goes ────────────────────────────────────────────────────
+// The same binary serves TestFlight testers first and App Store users from
+// the public release. No installed dependency can tell a TestFlight install
+// from an App Store one (expo-constants' executionEnvironment is
+// 'bare'/'standalone' for both; expo-application is not a dependency), so
+// the button switches on the release date instead: before it, the TestFlight
+// app; from it, the App Store listing.
+
+/** App Store public release, LOCAL midnight (utils/appVersion.appStoreLive).
+ *  Move this if the release date moves. */
+export const APP_STORE_LIVE_FROM = '2026-11-18';
+
+/** Opens the TestFlight app, where a tester installs the newer build. The
+ *  repo has no public TestFlight link. */
+export const TESTFLIGHT_URL = 'itms-beta://';
+
 /** The App Store listing. The id is the App Store Connect app id
  *  (`ascAppId` in mobile/eas.json → submit.production.ios), which is the
  *  id App Store URLs use. */
 export const APP_STORE_URL = 'https://apps.apple.com/app/id6771488431';
 
-// COPY: placeholder, marketing-lead to supply
-const COPY = {
-  title: 'Update required',
-  body: 'This version of Fleeced is no longer supported. Update to keep trading.',
-  button: 'Update',
-} as const;
+// Final copy (marketing-lead via head-eng, the b8.* rows).
+const UPDATE_GATE_TITLE = 'Update required';
+const UPDATE_GATE_BUTTON = 'Update';
+// COPY: option (B), operator pick A8 due 11-03
+const UPDATE_GATE_BODY = 'This version of the app is out of date. Update to keep using it.';
 
 interface Props {
   /** The served app_min_version that blocked this build. */
@@ -52,21 +67,28 @@ export default function UpdateGateScreen({ minVersion, appVersionInt }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A failed or rejected open leaves the gate up: nothing here changes gate
+  // state, and both the sync throw and the async rejection are swallowed.
   const onUpdate = () => {
     track('update_gate_tapped', { min_version: minVersion, app_version_int: appVersionInt });
-    Linking.openURL(APP_STORE_URL).catch(() => {});
+    const url = appStoreLive(APP_STORE_LIVE_FROM, new Date()) ? APP_STORE_URL : TESTFLIGHT_URL;
+    try {
+      Linking.openURL(url).catch(() => {});
+    } catch {
+      /* the gate stays up */
+    }
   };
 
   return (
     <SafeAreaView style={styles.root} testID="update-gate.screen">
       <View style={styles.body}>
         <Text variant="heading" style={styles.title}>
-          {COPY.title}
+          {UPDATE_GATE_TITLE}
         </Text>
         <Text variant="bodySm" style={styles.line}>
-          {COPY.body}
+          {UPDATE_GATE_BODY}
         </Text>
-        <Button label={COPY.button} onPress={onUpdate} testID="update-gate.update" />
+        <Button label={UPDATE_GATE_BUTTON} onPress={onUpdate} testID="update-gate.update" />
       </View>
     </SafeAreaView>
   );
