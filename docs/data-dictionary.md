@@ -213,6 +213,7 @@ counterparty board disclosure or client analytics event is added.
 
 - [Monetization platform foundation](#monetization-platform-foundation)
 - [`entitlements`](#entitlements)
+- [`paywall_previews`](#paywall_previews)
 - [`subscription_events`](#subscription_events)
 - [`referrals`](#referrals)
 - [`affiliate_clicks`](#affiliate_clicks)
@@ -1726,6 +1727,17 @@ Single source of truth for paid access. Writers: billing webhook projector, refe
 | `note` | str | Operator note on manual grants |
 | `metadata` | JSON text | Store payloads (original_transaction_id, stripe sub id, referral id) |
 | `created_at` / `updated_at` | str | ISO UTC |
+
+## `paywall_previews`
+
+The deck preview's consumption record (`backend/paywall_gate.py`, 2026-10-25). One row per never-entitled user once a `/api/trades/generate` or `/status` response has served cards from their first deck while the paywall gate enforces. Warm-up and cron-built jobs never write it. Created by `metadata.create_all` (both dialects). **Private:** deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`, every alias).
+
+| Column | Type | Notes |
+|---|---|---|
+| `user_id` | str PK | Working key (sleeper id or `acct_*`), the session user_id entitlements resolve by |
+| `deck_key` | str, not null | The trade job's `job_id` whose preview page(s) were served: "the first deck" |
+| `pages_served` | int, not null | Highest preview page served (1..`paywall_preview_pages`); only grows |
+| `first_served_at` / `updated_at` | str, not null | ISO UTC |
 
 ## `subscription_events`
 

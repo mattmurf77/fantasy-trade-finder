@@ -2592,6 +2592,20 @@ subscription_events_table = Table("subscription_events", metadata,
     Index("ix_subscription_events_user", "user_id"),
 )
 
+# Paywall deck preview (backend/paywall_gate.py): one row per never-entitled
+# user once the first page of their first deck has been SERVED to them by
+# /api/trades/generate or /status. Warm-up and cron-built jobs never write it.
+# Created by metadata.create_all on both dialects (no migration_cols row).
+# Private: deleted and exported via accounts._ADDITIONAL_PRIVATE_TABLES.
+paywall_previews_table = Table("paywall_previews", metadata,
+    Column("user_id",         String,  primary_key=True),  # working key (sleeper id or acct_*),
+                                                            # as entitlements keys it
+    Column("deck_key",        String,  nullable=False),    # the trade job_id whose page(s) were served
+    Column("pages_served",    Integer, nullable=False),    # highest preview page served (1..paywall_preview_pages)
+    Column("first_served_at", String,  nullable=False),
+    Column("updated_at",      String,  nullable=False),
+)
+
 # Give-get referral program (foundation §5). Fraud control is structural:
 # rewards only for verified co-members of the referrer's real Sleeper league,
 # one reward per unique referred user ever (uq below), activation-gated.
@@ -3294,6 +3308,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
     ("paywall_enforce_enabled",   0.0,  "monetization kill knob: exactly 1 lets entitlements.check_pro enforce (402) when monetize.entitlements AND monetize.paywall are both on; 0 = observe only. Read live per request, so 0 stops enforcement without a deploy; a missing row reads as 0"),
     ("paywall_web_enforce_enabled", 0.0, "web paywall knob: exactly 1 lets the global gate (paywall_gate.py) 402 web requests too, while entitlements.is_enforcing(); 0 = only the native app (X-Device iphone/ipad/macos/android) is gated. Read live per request; a missing row reads as 0"),
+    ("paywall_preview_pages",       1.0, "paywall deck preview: pages (trade_page_size cards each) of a never-entitled user's FIRST deck served free while enforcing; 0 = no preview (402 preview_used at the first deck request). Read live per request; a missing row reads as 1"),
 ]
 
 
