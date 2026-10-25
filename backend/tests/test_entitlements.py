@@ -304,6 +304,10 @@ def test_me_entitlements_route(client):
     client.post("/api/admin/entitlements/grant", json={"user": USER,
                                                        "perpetual": True})
     r = client.get("/api/me/entitlements", headers={"X-Session-Token": TOKEN})
+    assert r.get_json()["pro"] is False     # pro needs a verified session
+    with server._sessions_lock:
+        server._sessions[TOKEN]["verified"] = True
+    r = client.get("/api/me/entitlements", headers={"X-Session-Token": TOKEN})
     assert r.get_json()["pro"] is True
 
 
