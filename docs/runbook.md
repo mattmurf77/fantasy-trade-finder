@@ -110,6 +110,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Offline eval harness — replay/IPS on the F1 impression spine (F8, 2026-07-26)](#offline-eval-harness-replayips-on-the-f1-impression-spine-f8-2026-07-26)
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
+- [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
 - [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
 - [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
@@ -610,17 +611,35 @@ External scheduler (Render cron) must hit:
 
 If these stop firing, queued pushes pile up in `notification_queue` and digests/re-engagement go silent.
 
-**Known outage: `daily-tick` is killed every day (found 2026-10-15, not yet fixed).**
-- **Symptom:** every day from at least 2026-10-01 to 2026-10-14, gunicorn logged `WORKER TIMEOUT` about 13:33 UTC, ~150 s after the 13:30 run, and the tick returned **500**.
-- **Cause:**
-  - The tick does too much work inline on the request thread, past `--timeout 120`.
-  - The Wednesday 2026-10-14 traceback is inside `_run_weekly_replenishment` → `_kickoff_trade_job`, which builds decks synchronously. That pass runs Wed–Sun (`replenish_weekday`).
-  - The Monday and Tuesday kills left no traceback. That points at an earlier inline step, most likely the re-engagement scan.
-- **Consequence:**
-  - Every later step in the tick never runs: value-model refit, the players-cache guard, the rookie class-load monitor, the weekly roster-snapshot sweep, the **Usage Trends store refresh** and receipts grading.
-  - Each kill also restarts the single worker, which clears in-process caches.
-- **Diagnose:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:29–13:40 UTC, text `WORKER TIMEOUT` / `POST /api/cron/daily-tick`.
-- **Until it's fixed,** run the skipped writers by hand. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
+**`daily-tick` runner (S3 fix, 2026-10-22, [scope](plans/daily-tick-fix/scope.md)) — replaces the *Known outage* note.**
+- **What changed:**
+  - **Before:** the tick ran every step inline on the request thread, past gunicorn's `--timeout 120`. From at least 2026-10-01 the worker was killed about 13:33 UTC every day (`WORKER TIMEOUT`, tick **500**): Wed–Sun inside `_run_weekly_replenishment` → `_kickoff_trade_job`, Mon–Tue most likely the re-engagement scan or the eval nightly. Every step after the kill never ran, and each kill restarted the single worker (clearing in-process caches).
+  - **Now:** the handler authenticates, starts ONE single-flight runner thread (`backend/daily_tick.py`) and returns **202 `{"ok": true, "started": <bool>}`** at once. The steps run serially on that thread; each is isolated, so a raise is logged `outcome=error` and the next step still runs. The response no longer carries counters; they moved to the per-step log line.
+  - **Order:** 1 `roster_snapshot` · 2 `usage_trends` · 3 `receipts_grade` · 4 `rookie_monitor` · 5 `players_guard` · 6 `reengagement` · 7 `replenishment` (**deferred**) · 8 `eval_nightly` · 9 `value_model_refit`. Permanent-loss writers first, the CPU-heavy steps last. Each step reads its own gate at run time (gates: [api-reference](api-reference.md) § `daily-tick`).
+  - **Step 7 is deferred (operator, 2026-10-23):** a hard skip that logs `outcome=skipped detail=deferred: C2` every day, until trades-eng's C2 (no evidence for unserved builds) and the replenishment self-renewal fix (`db-capacity.md` latent issue 1) land. It reads no flag, so `deck.replenishment` has no effect through the tick. See § Weekly deck replenishment below.
+- **Reading the log:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:30–14:30 UTC, search `daily-tick step=`:
+  ```
+  daily-tick step=<key> ms=<int> outcome=<ok|skipped|error> detail=<short>
+  daily-tick done ms=<int> steps=9 errors=<k>
+  ```
+  - One line per step, in order 1→9, then one `done` line. `ms` is that step's wall time.
+  - `skipped` = its gate was closed; `detail` says which (`flag off`, `weekday_gate=N`, `busy`, `in_flight`, `prod_env=False …`), or `deferred: C2` for step 7.
+  - `error` = it raised (`detail` is the exception class and message; the traceback is the `daily-tick: step <key> raised` line just above it) or it reported a failure (players refresh, usage state read, refit).
+  - `detail` carries what the response used to: the re-engagement counters, the roster sweep stats, the usage summary, the grading summary, the refit status. Replenish `eligible/generated/pushed/skipped_done/errors` come back only once step 7 is re-enabled.
+  - `daily-tick: a run is already in flight (started Ns ago)` = a second POST arrived while a run was still going; it answered `started: false` and started nothing.
+- **Liveness checks** (the first full UTC day after deploy, and again after the first Wednesday):
+  1. Render logs, 13:30–14:30 UTC: `POST /api/cron/daily-tick` returns **202** and there is **no** `WORKER TIMEOUT`; nine `daily-tick step=` lines appear in order 1→9, then `daily-tick done`; note every `ms=` value.
+  2. Roster history (from Tuesday on, the weekday gate): `SELECT source, count(*), max(snapshot_at) FROM league_roster_history GROUP BY 1` shows `weekly` rows with a `snapshot_at` in this ISO week (§ roster-snapshot monitoring below).
+  3. Usage Trends (from the first tick after Sleeper rolls `week`): `SELECT season, week, team_count, fetched_at FROM usage_week_loads ORDER BY season, week` shows the just-finished week with 26–32 teams and today's `fetched_at`, not a hand load.
+  4. Value snapshots (hourly-tick guard, not a daily-tick step, but confirms the worker is no longer restarted daily): `player_value_history` has rows for today's UTC date.
+  5. If `receipts.grading` is on: a `receipts_grade_runs` start/end pair with `trigger = 'daily_tick'` for today.
+  6. Every day, the `replenishment` step logs `outcome=skipped detail=deferred: C2` and no `deck_replenish_log` row is written.
+- **No scheduler of their own:** `POST /api/cron/players-refresh` and `POST /api/cron/receipts-grade` have no Render cron. Day to day they run as tick steps 5 and 3; their routes stay as manual levers.
+- **Known limits:**
+  - A hung step blocks the steps after it, and single-flight then blocks the next day's run too (the "already in flight" warning names its age). Every network call in the steps carries a timeout; restarting the worker clears it.
+  - A worker restart mid-run (a deploy at 13:30, an OOM) loses the rest of that run. Each step is idempotent and the weekday gates are `>=`, so the next day retries.
+  - The run shares the free instance's CPU with request traffic while it runs; the CPU-heavy steps (7 once re-enabled, 8) run last.
+- **Until it is deployed,** the manual workarounds still apply. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
 
 **Sweep scope (2026-09-03).** Both league sweeps are now bounded: the hourly draft-status queue and the weekly roster-snapshot work-list only return leagues whose `leagues.updated_at` is inside `database.ACTIVE_LEAGUE_WINDOW_DAYS` (30 — stamped by `upsert_league` on every `session_init`), so a league nobody opens any more stops costing platform reads. `POST /api/cron/roster-snapshot` passes `active_within_days=None` and still sweeps everything; per-league forcing is `_refresh_league_draft_status(league_id, force=True)`, which skips the cheap-skip entirely.
 
@@ -638,7 +657,7 @@ The `not_drafted` draft-status TTL is also season-gated: 3 h inside the rookie-d
 - **Backfill before launch, or after an outage:** `python3 scripts/refresh_usage_trends.py --remote` (works with the flag off).
 - **A late stat correction** (after day 7): `--remote --weeks N --force`.
 - **Results** are in the server log as `usage-refresh (daily_tick|cron_route): {…}`.
-- **The daily-tick step has never completed in production**: see *Known outage* under Cron schedule. Week 5 was loaded by hand on 2026-10-15.
+- **The daily-tick step has never completed in production**: see *Known outage* under Cron schedule. Weeks 5 and 6 were loaded by hand (2026-10-15, 2026-10-21); the tick still returned 500 on 2026-10-21.
 - **If the store is behind,** the route serves the same numbers from a live fetch, so a stalled job degrades to the old behavior rather than an error.
 
 **`roster-snapshot` monitoring (ADR-011, 2026-08-14):** the weekly league-state sweep (Writer B) rides `daily-tick` behind the `FTF_ROSTER_SNAPSHOT_WEEKDAY` `>=` gate; on-sync capture (Writer A) needs no scheduler at all. **The `source` column is the liveness instrument** — one week after ship, run:
@@ -659,14 +678,16 @@ Same gap rule as value-snapshot: **a missed week stays a gap — never fabricate
 
 ## Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)
 
-Runs **inside** `POST /api/cron/daily-tick` — no separate schedule. Dark by default; flag off is byte-identical (no work, no pushes, no `replenish` key in the tick response).
+Runs as `POST /api/cron/daily-tick` step 7 (`replenishment`) — no separate schedule.
+
+- **Deferred since 2026-10-23 (operator: ship S3 without it):** step 7 is an unconditional hard skip. Every day it logs `outcome=skipped detail=deferred: C2` and does no work (no deck builds, no pushes, no inbox rows, no marker rows). It reads no flag, so `deck.replenishment` has **no effect through the tick**, on or off. It stays deferred until trades-eng's C2 (no evidence for unserved builds) and the self-renewal fix (`db-capacity.md` latent issue 1) land. **Re-enabling** = restoring the flag-gated call in `_daily_tick_replenishment` (`backend/server.py`; the docstring holds the exact lines). The bullets below describe the pass as it runs once re-enabled.
 
 - **Weekly gate:** the pass unlocks when `now.weekday() >= replenish_weekday` (`model_config`, default `2` = Wednesday, chosen post-waivers). The gate is `>=` on purpose: a missed Wednesday cron run self-heals Thu–Sun. **Tune the day** by setting the `replenish_weekday` model_config key (0 = Monday … 6 = Sunday); no deploy needed.
 - **Idempotency:** one `deck_replenish_log` row per (user, league, ISO week) is written *before* the push; reruns in the same week skip both regeneration and push. The `deck_replenished` dedup key (`{league_id}:{iso_week}`) is a second, independent 1/week/league backstop in `notification_events_log`.
 - **Eligibility:** user-leagues with a trade disposition or deck generation in the trailing 30 days (`load_active_deck_user_leagues`). Everyone else is untouched — no zombie churn.
 - **Generation:** the existing job machinery, run synchronously per pair — a live session is reused when present, otherwise a headless session is rebuilt from `league_members` + replayed swipes. Decks land in the normal 30-min pre-gen cache (`_PREGEN_TTL_SECONDS`), so a push tapped hours later triggers a normal fresh generation rather than serving the cached one — acceptable; the push copy claims inventory, not a frozen deck.
 - **Push policy:** kind `deck_replenished`, **reengagement bucket** — with `notif.reengagement_default_off` on (the shipping default) users must have opted in. Empty decks write the marker but never push; the expired-card count appears in copy only when > 0.
-- **Monitoring:** the tick response's `replenish` object (`eligible / generated / pushed / skipped_done / errors`). `pushed` counts dispatcher *attempts* — preference-gated skips still decrement nothing there; check `notification_events_log` kind `deck_replenished` for actual sends. Sustained `errors` usually means a league whose `league_members` rosters were never persisted.
+- **Monitoring:** once re-enabled, the `daily-tick step=replenishment` log line's `detail` (`eligible / generated / pushed / skipped_done / errors`). `pushed` counts dispatcher *attempts* — preference-gated skips still decrement nothing there; check `notification_events_log` kind `deck_replenished` for actual sends. Sustained `errors` usually means a league whose `league_members` rosters were never persisted.
 
 ---
 
@@ -1019,11 +1040,11 @@ Adding `FTF_TESTER_ALLOWLIST` to `render.yaml` envVars and deploying did NOT set
 
 `backend/eval/` grades candidate deck rankers on logged data before any user sees them (docs/plans/tiktok-discovery/prds/F8-offline-eval.md). Read-only against product tables; only writes are JSON-lines run records under `data/eval_runs/` (gitignored).
 
-- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` / `bad_features` / `scorer_error` — the counts must sum to the loaded total; a printed WARNING means a harness bug, file it.
+- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` per card, then whole-deck reasons, each also counted in decks: `partial_run` (a card from a partial run, `evidence_tier='partial_run'`) / `in_flight` (a deck served at or after `backend/eval/data.PACK_REQUIRED_SINCE` with no pack yet, served within 25 h of the read's `as_of`; it may still be live, so this is **not** an error) / `pack_integrity` (its pack fails its checksum, has an unknown version, or holds another run's cards) / `incomplete_deck` (a gap in its card indexes after the pack merge, or a required pack missing past 25 h) / `missing_scorer_inputs` (a card with neither `features_json` nor a compact block, C7 (iv)) / `scorer_error`. The counts must sum to the loaded total; a printed WARNING means a harness bug, file it. Any `pack_integrity` or `incomplete_deck` count is evidence loss: investigate the pack writer. Every report and run record carries the eval-rule version (`replay.EXCLUSION_RULE_VERSION`, now 3: delivered-position exposure and the `as_of` read filter); comparing runs across versions prints `RULE-MISMATCH`. **The read is settled by default:** without `--as-of`, it grades decks served before now minus `--settle-lag-days` (default 7), as of the window's last `served_at` plus the lag. Outcomes acted after `as_of` aren't read, so late views and proposes have time to land. Each record also carries the pinned V-vector and the `model_config` SHA-256 it was graded under (`config`). The rules are in `docs/plans/trade-time-to-suggestion/eng-evidence-contract.md` §8.
 - **Sanity first, always:** `python3 -m backend.eval.replay --self-check` replays the logged policy against its own logs; the observed like/propose rate must fall inside the replayed CI (exit 1 otherwise). Run it before trusting any candidate readout — a self-check failure means the log or the estimator is broken, not the candidate.
 - **`UNRELIABLE` verdict** = ESS below the gate (`EVAL_ESS_MIN`, default 100). That is the harness refusing to bless the number, not a failure — collect more log or narrow the question. The `random` scorer is a permanent canary: it must grade worse than `production`; if it ever grades level on healthy volume, stop and debug the harness.
 - **Trainable scorers (F6):** the harness enforces the time-ordered protocol — `--eval-start` is mandatory for any scorer with `fit()`; fitting sees only pre-split decks, scoring only post-split. There is deliberately no shuffled-CV mode.
-- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d, idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
+- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d (the CLI grades the 30d ending `--settle-lag-days`, default 7, ago, as of its last served deck plus the lag; `run_all()` with no lag, as the daily tick calls it, grades up to now), idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
 - **The gate (process):** no ranking-affecting change (F5 η's, F6, tweaks) graduates without (a) a replay win with adequate ESS, then (b) an interleaving/experiment win. Cite run records, not vibes.
 
 ## MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)
@@ -1040,6 +1061,33 @@ Operator re-report post-#200: "Picks still not present on the bar chart" (League
 
 - **Fix (2026-08-01):** the daemon step is extracted to `server._sync_sleeper_owned_picks`, which **skips the sync (keeps the prior snapshot)** whenever the rosters or league-meta read is unavailable, and `database.sync_draft_picks` no-ops on empty `roster_ids` (defense in depth for every caller). A skip logs `owned-pick sync skipped … (keeping prior snapshot)` and the next init retries. Tests: `backend/tests/test_owned_picks.py::test_sync_empty_roster_ids_keeps_prior_snapshot`, `::test_daemon_step_skips_when_sleeper_rosters_unavailable`, `::test_daemon_step_skips_when_league_meta_unavailable`.
 - **Operational rule:** any daemon whose write is replace-style must treat "fetch came back empty" as SKIP, never as "the league truly has nothing" — the #200/#220 clobber class is exactly that conflation.
+
+## Sleeper 429 / circuit open (S0, 2026-10-20)
+
+Since S0, every server-side Sleeper **read** goes through one per-process circuit (`backend/sleeper_http.py`; rule
+in `docs/integrations/sleeper.md` §4.1). A Sleeper `429` opens it for at least the `Retry-After` (else 2 s, doubling
+per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
+
+- **Symptom:** Render logs show `sleeper 429: circuit open <s> league=<id> status=429 strikes=<n>`, then
+  `sleeper circuit open: read skipped …` lines. While it's open:
+  - `/api/session/init` for Sleeper leagues returns `503 league_data_unavailable`. The app keeps its token and any
+    live server session, so taps keep working from stored state.
+  - Sleeper sends are blocked with "couldn't confirm rosters" (the live roster check can't run), and the daemon's
+    trade-block, pick and transaction syncs skip.
+  - `league_roster_state` rows go `stale` with `last_error_code = 'rate_limited'`. That's a read,
+    not a fix: no prod writes are needed.
+- **What clears it:** time. The window ends on its own, and the next successful read resets the strike count.
+  There's no manual reset in prod; a deploy or restart also clears it (it's in-process state). Don't restart to
+  "fix" a 429: a fresh process that resumes full fan-out against a throttled IP just trips it again, with a
+  shorter window.
+- **Data safety:** while it's open, the owned-pick sync keeps the prior `draft_picks` snapshot, and the draft-status
+  refresh keeps the cached verdict (both would otherwise act on reads that never happened; the #220 clobber
+  class). No repair is needed afterwards.
+- **If it recurs:** the per-init budget is ≤ 8 Sleeper calls (`test_session_init_sleeper_calls.py`). Check
+  `api_events` for `service = 'sleeper'` with `status = 429` by endpoint class to find the hot path (read-only,
+  through analytics-lead). A sustained ceiling (3,600 s windows) means Sleeper is throttling the IP, not one
+  request: escalate to platforms-eng. Cloudflare 1010 is a separate failure (`blocked`, a 403); it doesn't open
+  the circuit.
 
 ## Player-cache refresh (rookie-draft M0, 2026-08-06)
 

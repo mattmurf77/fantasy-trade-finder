@@ -8,10 +8,11 @@ import hashlib
 import json
 
 import pytest
-from sqlalchemy import create_engine, insert, text, update
+from sqlalchemy import create_engine, insert, update
 
 from backend import roster_snapshot as rs
-from backend.database import draft_picks_table, league_members_table, metadata
+from backend.database import (draft_picks_table, league_members_table, league_roster_state_table,
+                              metadata)
 from backend.ranking_service import Player
 
 LEAGUE = "L1"
@@ -150,15 +151,24 @@ def test_status_missing_unknown_and_refresh_record(engine):
         snap = rs.roster_snapshot(conn, LEAGUE)
     assert (snap.status, snap.refreshed_at) == ("unknown", None)
 
-    # platforms-eng's table, once it exists, is read (checked once per engine).
+    # The table absent (a DB from before #378): still `unknown`, never `missing`.
+    bare = create_engine("sqlite:///:memory:")
+    metadata.create_all(bare, tables=[t for t in metadata.sorted_tables
+                                      if t.name != "league_roster_state"])
+    with bare.begin() as conn:
+        _seed(conn)
+    with bare.connect() as conn:
+        snap = rs.roster_snapshot(conn, LEAGUE)
+    assert (snap.status, snap.refreshed_at) == ("unknown", None)
+
+    # platforms-eng's table (#378) with a row is read (checked once per engine).
     fresh = create_engine("sqlite:///:memory:")
     metadata.create_all(fresh)
     with fresh.begin() as conn:
         _seed(conn)
-        conn.execute(text("CREATE TABLE league_roster_state "
-                          "(league_id TEXT, refreshed_at TEXT, status TEXT)"))
-        conn.execute(text("INSERT INTO league_roster_state VALUES "
-                          "('L1', '2026-10-20T12:00:00+00:00', 'fresh')"))
+        conn.execute(insert(league_roster_state_table).values(
+            league_id="L1", refreshed_at="2026-10-20T12:00:00+00:00", status="fresh",
+            updated_at="2026-10-20T12:00:05+00:00"))
     with fresh.connect() as conn:
         snap = rs.roster_snapshot(conn, LEAGUE)
     assert (snap.status, snap.refreshed_at) == ("fresh", "2026-10-20T12:00:00+00:00")
