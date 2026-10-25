@@ -8,8 +8,11 @@ limit. Scope: docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md §B.7.
 THE RULE:
   * A 429 opens the circuit for
         min(CEILING_S, max(Retry-After, uniform(b/2, b))),  b = min(SOFT_CAP_S, BASE_S * 2**(n-1))
-    where n counts consecutive 429s (equal jitter: never near zero). A
-    Retry-After above the soft cap is honored up to the ceiling.
+    where n counts consecutive throttling EPISODES (equal jitter: never near
+    zero). A 429 arriving while the circuit is already open is the same
+    episode: no new strike, it only extends the window to its own
+    Retry-After when that ends later. A Retry-After above the soft cap is
+    honored up to the ceiling.
   * While it is open, every guarded read fails fast with `SleeperRateLimited`
     BEFORE any network call. There are no in-line retries or sleeps: the app
     runs one sync worker, and a sleeping request thread would stall every tap.
@@ -116,16 +119,33 @@ def delay_for(strikes: int, retry_after_s: float | None) -> float:
 
 
 def record_429(retry_after=None, *, league_id: str | None = None) -> float:
-    """Open (or extend) the circuit after a 429. Returns the window in seconds."""
+    """Open (or extend) the circuit after a 429.
+
+    One throttling episode is ONE strike. A 429 that arrives while the
+    circuit is already open (reads that were in flight when it opened — the
+    session-init request thread and daemons, or gthread workers) adds no
+    strike and draws no new jittered delay; it only pushes the window out
+    when its own Retry-After ends later. Otherwise a single burst of 3–4
+    throttled reads would count as 3–4 strikes and walk the window to the
+    soft cap within a few episodes.
+
+    Returns the seconds the circuit now stays open.
+    """
     global _open_until, _strikes
     parsed = parse_retry_after(retry_after)
     with _lock:
-        _strikes += 1
-        window = delay_for(_strikes, parsed)
-        _open_until = max(_open_until, _monotonic() + window)
+        now = _monotonic()
+        struck = now >= _open_until          # closed when this 429 arrived: a new episode
+        if struck:
+            _strikes += 1
+            _open_until = now + delay_for(_strikes, parsed)
+        elif parsed is not None:
+            _open_until = max(_open_until, now + min(CEILING_S, parsed))
+        window = _open_until - now
         strikes = _strikes
-    log.warning("sleeper 429: circuit open %.0fs league=%s status=429 strikes=%d",
-                window, league_id, strikes)
+    log.warning("sleeper 429: circuit open %.0fs (%s) league=%s status=429 strikes=%d",
+                window, "new strike" if struck else "already open: no strike, window extended only by Retry-After",
+                league_id, strikes)
     return window
 
 

@@ -3,6 +3,8 @@
 Pins (scope-eng-s0-fetch.md §B.7):
   • a 429 opens the circuit for max(Retry-After, equal-jitter backoff),
     soft cap 600 s, hard ceiling 3,600 s; Retry-After as seconds or HTTP date
+  • ONE strike per throttling episode: 429s that land while the circuit is
+    already open add no strike (a larger Retry-After only extends the window)
   • while open every guarded read fails fast — no network, no fixture read
   • a success resets the strike count (recovery)
   • `_sleeper_get` (via the shipped FTF_SLEEPER_FIXTURES_DIR seam) and the
@@ -75,10 +77,59 @@ def test_unusable_retry_after_falls_back_to_backoff(value, monkeypatch):
     assert sh.record_429(value) == 2.0          # strike 1: b = 2
 
 
-def test_429_without_retry_after_backs_off_exponentially(monkeypatch):
+def test_429_without_retry_after_backs_off_exponentially(clock, monkeypatch):
+    # Separate episodes: each 429 arrives after the previous window closed.
     monkeypatch.setattr(sh, "_uniform", lambda lo, hi: hi)
-    windows = [sh.record_429(None) for _ in range(5)]
+    windows = []
+    for _ in range(5):
+        windows.append(sh.record_429(None))
+        clock.mono += windows[-1] + 0.01
     assert windows == [2.0, 4.0, 8.0, 16.0, 32.0]
+
+
+def test_concurrent_429s_while_open_are_one_strike(clock, monkeypatch):
+    """QA P2 (#378): a burst of throttled reads already in flight when the
+    circuit opened (request thread + daemons, gthread workers) is ONE episode."""
+    import threading
+    monkeypatch.setattr(sh, "_uniform", lambda lo, hi: hi)
+    n = 8
+    barrier = threading.Barrier(n)
+    windows = []
+
+    def hit():
+        barrier.wait()
+        windows.append(sh.record_429(None))
+
+    threads = [threading.Thread(target=hit) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert len(windows) == n
+    assert sh._strikes == 1
+    assert sh.remaining_s() == 2.0                      # the 1-strike window
+    for _ in range(3):                                  # back-to-back, same episode
+        assert sh.record_429(None) == 2.0
+    assert sh._strikes == 1
+
+
+def test_next_429_after_the_window_closed_is_strike_two(clock, monkeypatch):
+    monkeypatch.setattr(sh, "_uniform", lambda lo, hi: hi)
+    sh.record_429(None)
+    sh.record_429(None)                                 # same episode
+    clock.mono += 2.01                                  # window over
+    assert sh.record_429(None) == 4.0                   # strike 2: the progression still works
+    assert sh._strikes == 2
+
+
+def test_larger_retry_after_while_open_extends_without_a_strike(clock, monkeypatch):
+    monkeypatch.setattr(sh, "_uniform", lambda lo, hi: hi)
+    sh.record_429(None)                                 # strike 1, 2 s
+    assert sh.record_429("30") == 30.0                  # extended to its Retry-After
+    assert sh._strikes == 1
+    assert sh.record_429("5") == 30.0                   # a smaller one never shrinks it
+    assert sh.record_429("99999") == sh.CEILING_S       # and the ceiling still holds
+    assert sh._strikes == 1
 
 
 def test_jitter_stays_inside_equal_jitter_bounds(monkeypatch):
@@ -101,8 +152,8 @@ def test_soft_cap_and_hard_ceiling(monkeypatch):
 
 def test_fail_fast_while_open_and_recovery(clock, monkeypatch):
     monkeypatch.setattr(sh, "_uniform", lambda lo, hi: hi)
-    sh.record_429(None)
-    sh.record_429(None)                                  # strikes = 2 → 4 s
+    sh.record_429(None)                                  # strike 1 → 2 s
+    sh.record_429(None)                                  # same episode: still 2 s
     ran = []
     with pytest.raises(sh.SleeperRateLimited):
         with sh.guard(LID):
