@@ -185,11 +185,15 @@ from historical decisions/inbound offers, which must retain original terms.
 
 ### The gthread switch (E1)
 
-The web service runs one gunicorn worker with **`--threads 4`** (E1). The service was created in the dashboard
-(G-018), so the live start command may not come from `render.yaml`. Read the service's start command first: if
-it doesn't follow the blueprint, set it on the service through the Render API or dashboard (on the operator's
-word), then deploy. **Rollback:** the same command without `--threads 4`, then deploy. Watch the first 13:30 UTC
-daily tick and the request p95 after the switch.
+The web service runs one gunicorn worker with **`--threads 4`** (E1). The live start command comes from the
+service settings, **not** `render.yaml` (G-018; confirmed 2026-10-24 by an API read, which showed the dashboard
+command while the blueprint said `plan: free` against a live `standard`). So merging this file changes nothing
+by itself. On the operator's word, set the start command on the service (Render API `PATCH /v1/services/<id>`
+or the dashboard), then deploy and read the live command back. **Rollback:** the same command without
+`--threads 4`, then deploy. Watch the first 13:30 UTC daily tick and the request p95 after the switch.
+
+As of 2026-10-24 the service reports **`autoDeploy: yes`**: every merge to `main` deploys at once. That
+supersedes the 2026-09-20 note above.
 
 ### First-action latency release (2026-09-21)
 
