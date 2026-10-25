@@ -31,6 +31,7 @@ everything stateful lives here so it is unit-testable without Flask.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import insert, or_, select, update
@@ -38,6 +39,8 @@ from sqlalchemy import insert, or_, select, update
 from . import database as db
 from .accounts import ACCOUNT_USER_PREFIX, is_account_user_id
 from .feature_flags import is_enabled
+
+log = logging.getLogger(__name__)
 
 # Entitlement values (docs/glossary.md). 'pro' unlocks the Pro gate list;
 # 'ad_free' is the lightweight ads-only value (ads plan HLD §4).
@@ -477,6 +480,15 @@ def ingest_billing_event(source: str, event_id: str, event_type: str,
             account_id=None, product_id=product_id, event_id=event_id,
             payload=json.dumps(payload), occurred_at=occurred_at or now,
         ))
+        unknown = (source == "revenuecat" and bool(user_id)
+                   and not _is_working_key(conn, user_id))
+    if unknown:
+        # Observability only (App Review purchase path): the event is still
+        # ledgered and projected exactly as before. Never the payload.
+        log.warning("BILLING-UNKNOWN-USER source=revenuecat event_id=%s type=%s "
+                    "env=%s user=%s", event_id, event_type,
+                    str((payload or {}).get("environment") or "UNKNOWN").upper(),
+                    user_id)
 
     projected, error = _project(source, event_id, event_type, payload,
                                 user_id=user_id, product_id=product_id,
