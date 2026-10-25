@@ -11,11 +11,15 @@ scorer reads nothing the narrow row lacks. The contract:
 - COMPACT_KEYS: exactly the card keys `value_model.extract_features`
   reads (value_model.py:133-177). Guarded: a key extract_features reads
   that is not listed here fails backend/tests/test_eval_scorer_contract.py.
-- INJECTED_KEYS: what `ValueModel._inject` (value_model.py:408-420) adds
-  or reads. INJECTED_COMPUTED_KEYS are computed at eval time from other
-  tables and are never stored. INJECTED_CARD_INPUTS are read raw from the
-  card to compute them, so they must be frozen with the compact block:
-  a row without them replays value_model to a different score.
+- INJECTED_KEYS: what `ValueModel._inject` adds or reads.
+  INJECTED_COMPUTED_KEYS are the model inputs it writes and are never
+  stored. INJECTED_CARD_INPUTS are read raw from the card to compute them,
+  so they must be frozen with the compact block: a row without them
+  replays value_model to a different score. The taste matches are frozen
+  per card at serve time (models-lead R4.1), never read from live taste
+  rows in a fit or an eval.
+- FROZEN_PROVENANCE_KEYS: frozen with the block but read by no scorer
+  (taste_attrs, the source of the frozen taste matches).
 - IDENTITY_KEYS: the deck_impressions columns card_dict always merges in
   that do not encode the logged policy. Every narrow row keeps them, so
   any scorer may read them (extract_features falls back to shape_bucket
@@ -29,8 +33,9 @@ it to COMPACT_KEYS (and to the writer that freezes the compact block)
 first. Unseen cards written before that date cannot be backtested on the
 new feature, except on the C8 whole-deck archive.
 
-C8 archive selection (`is_archive_deck`) lives here too, as the one
-definition the evidence writer and eval share.
+C8 archive selection (`is_archive_deck`) and the card impression id
+(`card_impression_id`) live here too, as the one definition the evidence
+writer and eval share.
 """
 
 from __future__ import annotations
@@ -50,14 +55,18 @@ INJECTED_COMPUTED_KEYS = frozenset({
     "_pref_long", "_pref_short", "_partner_rate", "_position",
 })
 # _inject reads these from the card: partner_user_id for the partner-rate
-# lookup (and taste_service.attrs_from_features' partner attr), taste_attrs
-# for the prefMatch scores.
-INJECTED_CARD_INPUTS = frozenset({"partner_user_id", "taste_attrs"})
+# lookup, and the serve-time taste matches taste_service.taste_multipliers
+# used (float8; absent when the taste layer didn't run, read as 0.0).
+INJECTED_CARD_INPUTS = frozenset({
+    "partner_user_id", "taste_pref_long", "taste_pref_short",
+})
 INJECTED_KEYS = INJECTED_COMPUTED_KEYS | INJECTED_CARD_INPUTS
+# Frozen with the block, read by no scorer: the card's taste attributes.
+FROZEN_PROVENANCE_KEYS = frozenset({"taste_attrs"})
 
-# What a narrow row's frozen block must hold for every registered scorer
-# to replay exactly: the extract_features inputs plus _inject's card inputs.
-FROZEN_INPUT_KEYS = COMPACT_KEYS | INJECTED_CARD_INPUTS
+# What a narrow row's frozen block (and a packed card) must hold: the
+# extract_features inputs, _inject's card inputs and the provenance keys.
+FROZEN_INPUT_KEYS = COMPACT_KEYS | INJECTED_CARD_INPUTS | FROZEN_PROVENANCE_KEYS
 
 # The logged columns card_dict merges into every card (backend/eval/data.py).
 LOGGED_POLICY_KEYS = frozenset({
@@ -87,10 +96,11 @@ def allowed_keys(scorer_name: str) -> frozenset:
 
 
 # What load_decks(project_features=True) keeps inside each parsed features
-# dict: every key some registered scorer may read (⊇ FROZEN_INPUT_KEYS ∪
-# IDENTITY_KEYS). value_model training reads the same keys (extract_features
-# and _inject), so a refit on projected decks is unchanged.
-PROJECTION_KEYS = frozenset().union(*(allowed_keys(n) for n in PERMITTED_LOGGED))
+# dict: every key some registered scorer may read, plus the frozen block
+# (⊇ FROZEN_INPUT_KEYS ∪ IDENTITY_KEYS). value_model training reads the same
+# keys (extract_features and _inject), so a refit on projected decks is
+# unchanged.
+PROJECTION_KEYS = FROZEN_INPUT_KEYS.union(*(allowed_keys(n) for n in PERMITTED_LOGGED))
 
 
 # C8 whole-deck archive (models-lead-launch §DEC-2 C8): a fixed share of
@@ -99,6 +109,14 @@ PROJECTION_KEYS = frozenset().union(*(allowed_keys(n) for n in PERMITTED_LOGGED)
 # block can still be backtested.
 ARCHIVE_RATE_BP = 200    # basis points of served decks (2%)
 ARCHIVE_DAYS = 90
+
+
+def card_impression_id(run_id: str, card_index: int) -> str:
+    """R4.2 U2, the one definition the evidence writer, the client and eval
+    share: every non-ghost card of a served deck, row or packed, has this
+    impression_id, and outcomes are posted with it. A ghost row never does
+    (its would-have-been rank can equal a served card's index)."""
+    return f"{run_id}:{card_index}"
 
 
 def is_archive_deck(deck_job_id: str) -> bool:
