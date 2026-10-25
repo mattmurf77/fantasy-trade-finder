@@ -2,12 +2,16 @@
 
 docs/plans/tiktok-discovery/prds/F10-deck-replenishment.md. Covers:
 
-  • Flag OFF: daily-tick produces no replenish work, no pushes, no marker
-    rows, and the tick response payload is byte-identical (no `replenish`
-    key).
-  • Flag ON: one pre-generated deck + one push per ACTIVE user-league per
-    ISO week; idempotent on a repeat tick in the same week (marker gate);
-    inactive (>30d) user-leagues are skipped entirely.
+  • Tick step 7 is DEFERRED (operator, 2026-10-23: a hard skip until C2 and
+    the self-renewal fix land): daily-tick produces no replenish work, no
+    pushes, no marker rows; its `replenishment` step logs `outcome=skipped
+    detail=deferred: C2`, and the tick response is the plain 202 `{ok,
+    started}`. The flag-ON route case lives in test_daily_tick_route.py.
+  • The pass itself (`_run_weekly_replenishment`, called DIRECTLY because the
+    tick no longer reaches it; it is the code C2 will re-enable): one
+    pre-generated deck + one push per ACTIVE user-league per ISO week;
+    idempotent on a repeat pass in the same week (marker gate); inactive
+    (>30d) user-leagues are skipped entirely.
   • Push behavior: names concrete inventory ("N fresh trades…"), reflects
     the expired-card count only when true, is skipped for zero-card decks,
     and honors the notification-preference surface — a reengagement opt-out
@@ -32,10 +36,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine, select, text
+from sqlalchemy.pool import StaticPool
 
+import backend.api_observability as api_obs
 import backend.database as db_module
 import backend.feature_flags as feature_flags
 import backend.server as server
+from backend import daily_tick
 from backend.database import deck_replenish_log_table, deck_impressions_table, metadata
 from backend.ranking_service import Player, RankingService
 from backend.trade_service import League, LeagueMember, TradeService
@@ -85,7 +92,10 @@ def _weekday_cfg(value: float):
 
 @pytest.fixture()
 def client():
-    engine = create_engine("sqlite:///:memory:",
+    # StaticPool: the tick's steps run on its runner thread, and SQLite's
+    # default per-thread pool would hand that thread a FRESH, empty :memory:
+    # database.
+    engine = create_engine("sqlite:///:memory:", poolclass=StaticPool,
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
 
@@ -104,13 +114,31 @@ def client():
 
 
 def _tick(c):
-    r = c.post("/api/cron/daily-tick", headers={"X-Cron-Secret": "x"})
-    assert r.status_code == 200
-    return r.get_json()
+    """POST the tick (202 `{ok, started}`), then JOIN its runner thread so
+    every patch in the caller's `with` block is still live while the steps
+    run. Returns the replenishment step's Result (outcome, detail).
+    API-event capture is off for the POST: its after_request write would
+    share the StaticPool connection with the runner thread."""
+    with patch.object(api_obs, "is_enabled", lambda k: False):
+        r = c.post("/api/cron/daily-tick", headers={"X-Cron-Secret": "x"})
+    assert r.status_code == 202
+    assert r.get_json() == {"ok": True, "started": True}
+    results = daily_tick.wait(30)
+    assert results is not None, "daily-tick run did not finish"
+    return {res.key: res for res in results}["replenishment"]
+
+
+def _pass():
+    """Run the replenishment pass DIRECTLY with the clock the tick handler
+    would hand it (`datetime.now(timezone.utc)`). Tick step 7 is a hard skip
+    (deferred: C2), so the flag-ON tests below call the pass the step will
+    call again once re-enabled; their `_replenish(True)` patch records that
+    state. Returns the pass's stats (what the step logged as `detail`)."""
+    return server._run_weekly_replenishment(datetime.now(timezone.utc))
 
 
 # ---------------------------------------------------------------------------
-# Flag OFF — byte-identical daily-tick
+# Flag OFF, through the tick — no replenish work at all
 # ---------------------------------------------------------------------------
 
 def test_flag_off_no_replenish_work_no_push_no_payload_change(client):
@@ -125,18 +153,17 @@ def test_flag_off_no_replenish_work_no_push_no_payload_change(client):
         # receipts.grading is LIT in features.json since 2026-08-22; pin it
         # off HERE so this test keeps asserting the replenishment-off payload
         # exactly, independent of the receipts ship state.
-        body = _tick(c)
+        repl = _tick(c)   # pins the payload: exactly {"ok": True, "started": True}
 
-    assert "replenish" not in body           # response payload unchanged
-    assert body == {"ok": True, "winback_matches": 0, "winback_dormant": 0,
-                    "finish_ranking": 0, "season_start": 0}
+    assert (repl.outcome, repl.detail) == ("skipped", "deferred: C2")
     gen.assert_not_called()
     push.assert_not_called()
     assert _marker_rows(engine) == []
 
 
 # ---------------------------------------------------------------------------
-# Flag ON — one deck + one push per active user-league per week
+# Flag ON, the pass directly — one deck + one push per active user-league
+# per week
 # ---------------------------------------------------------------------------
 
 def test_flag_on_one_deck_one_push_per_active_user_league(client):
@@ -148,7 +175,7 @@ def test_flag_on_one_deck_one_push_per_active_user_league(client):
          patch.object(server, "_replenish_deck_for",
                       MagicMock(return_value=(5, 0))) as gen, \
          patch.object(server, "_send_typed_push", MagicMock()) as push:
-        body = _tick(c)
+        stats = _pass()
 
     gen.assert_called_once_with(UID, LEAGUE)
     push.assert_called_once()
@@ -165,8 +192,8 @@ def test_flag_on_one_deck_one_push_per_active_user_league(client):
     assert rows[0].iso_week == _iso_week()
     assert (rows[0].deck_size, rows[0].expired_count) == (5, 0)
 
-    assert body["replenish"] == {"eligible": 1, "generated": 1, "pushed": 1,
-                                 "skipped_done": 0, "errors": 0}
+    assert stats == {"eligible": 1, "generated": 1, "pushed": 1,
+                     "skipped_done": 0, "errors": 0}
 
 
 def test_repeat_tick_same_week_is_idempotent(client):
@@ -178,15 +205,15 @@ def test_repeat_tick_same_week_is_idempotent(client):
          patch.object(server, "_replenish_deck_for",
                       MagicMock(return_value=(5, 0))) as gen, \
          patch.object(server, "_send_typed_push", MagicMock()) as push:
-        _tick(c)
-        body2 = _tick(c)
+        _pass()
+        stats2 = _pass()
 
     gen.assert_called_once()                 # no regeneration on rerun
     push.assert_called_once()                # hard 1/week/league cap
     assert len(_marker_rows(engine)) == 1
-    assert body2["replenish"]["skipped_done"] == 1
-    assert body2["replenish"]["generated"] == 0
-    assert body2["replenish"]["pushed"] == 0
+    assert stats2["skipped_done"] == 1
+    assert stats2["generated"] == 0
+    assert stats2["pushed"] == 0
 
 
 def test_inactive_user_leagues_are_skipped(client):
@@ -197,11 +224,11 @@ def test_inactive_user_leagues_are_skipped(client):
     with _replenish(True), _weekday_cfg(0), \
          patch.object(server, "_replenish_deck_for", MagicMock()) as gen, \
          patch.object(server, "_send_typed_push", MagicMock()) as push:
-        body = _tick(c)
+        stats = _pass()
 
     gen.assert_not_called()
     push.assert_not_called()
-    assert body["replenish"]["eligible"] == 0
+    assert stats["eligible"] == 0
     assert _marker_rows(engine) == []
 
 
@@ -243,7 +270,7 @@ def test_pref_opt_out_gets_deck_but_no_push(client):
                                                "ExponentPushToken[x1]"}])), \
          patch.object(server, "_send_expo_push", MagicMock()) as expo, \
          patch.object(server, "queue_notification", MagicMock()) as q:
-        _tick(c)
+        _pass()
 
     assert len(_marker_rows(engine)) == 1    # deck happened
     expo.assert_not_called()                 # push did not
@@ -266,7 +293,7 @@ def test_reengagement_default_off_policy_gates_push(client):
                                                "ExponentPushToken[x1]"}])), \
          patch.object(server, "_send_expo_push", MagicMock()) as expo, \
          patch.object(server, "queue_notification", MagicMock()) as q:
-        _tick(c)
+        _pass()
 
     assert len(_marker_rows(engine)) == 1
     expo.assert_not_called()
@@ -282,7 +309,7 @@ def test_expired_count_reflected_in_copy_only_when_true(client):
          patch.object(server, "_replenish_deck_for",
                       MagicMock(return_value=(11, 4))), \
          patch.object(server, "_send_typed_push", MagicMock()) as push:
-        _tick(c)
+        _pass()
 
     body = push.call_args.kwargs["body"]
     assert body == "11 fresh trades for your league. 4 expired — values moved."
@@ -297,11 +324,11 @@ def test_zero_card_deck_writes_marker_but_never_pushes(client):
          patch.object(server, "_replenish_deck_for",
                       MagicMock(return_value=(0, 0))), \
          patch.object(server, "_send_typed_push", MagicMock()) as push:
-        body = _tick(c)
+        stats = _pass()
 
     push.assert_not_called()                 # no fake inventory
     assert len(_marker_rows(engine)) == 1    # still idempotent for the week
-    assert body["replenish"]["pushed"] == 0
+    assert stats["pushed"] == 0
 
 
 # ---------------------------------------------------------------------------

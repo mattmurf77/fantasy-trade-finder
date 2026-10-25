@@ -13,12 +13,14 @@ Progress is tracked in "interactions" (not raw swipes) for clean UX.
 """
 
 from dataclasses import dataclass, field
+from functools import wraps
 from typing import Optional
 from datetime import datetime, timezone
 from pathlib import Path
 import json
 import math
 import random
+import threading
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +314,21 @@ class MatchupTrio:
 # Ranking Service
 # ---------------------------------------------------------------------------
 
+def _locked(method):
+    """Run a public RankingService method under the instance's RLock (E1).
+
+    One service is shared by a session's request threads and its trade-job
+    threads, and every method reads or writes the memo caches. The lock is
+    looked up on `self` at call time so a test can swap it out. Routes that
+    must keep mutate -> persist -> publish atomic hold the same RLock.
+    """
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return wrapper
+
+
 class RankingService:
     """
     Manages player rankings for a single user session.
@@ -381,6 +398,7 @@ class RankingService:
         seed_ratings: { player.id: initial_elo } from consensus data.
         Players not present in seed_ratings start at ELO_INITIAL (1500).
         """
+        self._lock = threading.RLock()
         self._players    = {p.id: p for p in players}
         self._swipes: list[SwipeDecision] = []
         self._trade_swipes: list[tuple[SwipeDecision, float]] = []  # (swipe, k_factor)
@@ -609,6 +627,7 @@ class RankingService:
             bounds[pid] = (min(lo, pin), max(hi, pin))
         return bounds
 
+    @_locked
     def placement_bands(self) -> dict[str, tuple[float, float]]:
         """Per-player Elo band for every player this user actually PLACED.
 
@@ -651,10 +670,12 @@ class RankingService:
     # Public API
     # ------------------------------------------------------------------
 
+    @_locked
     def has_player(self, player_id: str) -> bool:
         """Return True if player_id is in the current player pool."""
         return player_id in self._players
 
+    @_locked
     def record_ranking(self, ordered_ids: list[str]) -> RankSet:
         """
         Record a 3-player (or 2-player) ranking.
@@ -684,6 +705,7 @@ class RankingService:
 
         return self.get_rankings(position=pos)
 
+    @_locked
     def record_trade_signal(
         self,
         winner_ids: list[str],
@@ -730,6 +752,7 @@ class RankingService:
                 ))
         self._version += 1
 
+    @_locked
     def record_disposition_signal(
         self,
         winner_ids: list[str],
@@ -759,6 +782,7 @@ class RankingService:
                 ))
         self._version += 1
 
+    @_locked
     def get_next_trio(
         self,
         position: Optional[str] = None,
@@ -1077,6 +1101,7 @@ class RankingService:
             )
         return None
 
+    @_locked
     def get_rankings(self, position: Optional[str] = None) -> RankSet:
         """Return current ordered rankings for a position."""
         pool      = self._pool(position)
@@ -1107,6 +1132,7 @@ class RankingService:
             computed_at=datetime.now(timezone.utc).isoformat(),
         )
 
+    @_locked
     def get_progress(self, position: Optional[str] = None) -> dict:
         threshold = self.POSITION_THRESHOLDS.get(position, 10)
         count     = self._interactions.get(position, 0)
@@ -1119,6 +1145,7 @@ class RankingService:
             "percent":           pct,
         }
 
+    @_locked
     def comparison_counts(self) -> dict[str, int]:
         """Per-player count of unique opponents whose comparison actually
         MOVED that player's Elo — the player's LIVE comparisons.
@@ -1182,6 +1209,7 @@ class RankingService:
         self._conf_cache_version = conf_key
         return counts
 
+    @_locked
     def replay_from_db(self, swipes: list[dict]) -> int:
         """
         Replay persisted swipe decisions into the in-memory ELO engine.
@@ -1237,6 +1265,7 @@ class RankingService:
         self._version = replayed
         return replayed
 
+    @_locked
     def reset(self, position: Optional[str] = None) -> dict:
         if position is None:
             self._swipes.clear()
@@ -1455,10 +1484,13 @@ class RankingService:
         # compute. The returned object is shared by reference (identity is
         # intentional — see AC-1); all current callers treat the result as
         # read-only (audited: get_rankings, _algorithmic_trio, apply_reorder).
+        # E1: stamp the version read at compute START, never at store time, so
+        # a result built from pre-mutation state cannot be labelled current.
+        v = self._version
         cache_key = (tuple(p.id for p in pool), self._pin_cfg_key())
         if (
             self._elo_cache is not None
-            and self._elo_cache_version == self._version
+            and self._elo_cache_version == v
             and self._elo_cache_key == cache_key
         ):
             return self._elo_cache
@@ -1574,7 +1606,7 @@ class RankingService:
                 _apply(l, k * (0.0 - (1.0 - ea)), w, False, feedback_bounds[l])
 
         self._elo_cache = ratings
-        self._elo_cache_version = self._version
+        self._elo_cache_version = v
         self._elo_cache_key = cache_key
         self._elo_moved = moved
         return ratings
@@ -1584,10 +1616,12 @@ class RankingService:
         # returned dict contains mutable sets ("compared"); all current callers
         # are read-only (audited: get_rankings, _tiered_pool, _tier_info,
         # _algorithmic_trio), so the cached object is shared by reference.
+        # E1: version read at compute start (see _compute_elo).
+        v = self._version
         cache_key = tuple(p.id for p in pool)
         if (
             self._stats_cache is not None
-            and self._stats_cache_version == self._version
+            and self._stats_cache_version == v
             and self._stats_cache_key == cache_key
         ):
             return self._stats_cache
@@ -1604,7 +1638,7 @@ class RankingService:
             stats[l]["compared"].add(w)
 
         self._stats_cache = stats
-        self._stats_cache_version = self._version
+        self._stats_cache_version = v
         self._stats_cache_key = cache_key
         return stats
 
@@ -1820,6 +1854,7 @@ class RankingService:
     # the D-085 tier-bounded-voting goldens read the constant.
     DEMOTED_ELO = 1100.0
 
+    @_locked
     def apply_tiers(
         self,
         position: Optional[str],
@@ -1876,6 +1911,7 @@ class RankingService:
 
         self._version += 1
 
+    @_locked
     def apply_tiers_subset(
         self,
         position: Optional[str],
@@ -2001,6 +2037,7 @@ class RankingService:
         self._version += 1
         return merged_orders
 
+    @_locked
     def apply_anchor(self, player_id: str, target_elo: float):
         """
         Pin one player's Elo from a pick-anchor statement (anchor wizard:
@@ -2019,6 +2056,7 @@ class RankingService:
         self._version += 1
         return player
 
+    @_locked
     def board_override_count(self) -> int:
         """How many of this service's Elo overrides are for players still in
         the pool. The durable evidence behind the 'anchor' and 'manual' unlock
@@ -2042,6 +2080,7 @@ class RankingService:
         pool_ids = {p.id for p in self._pool(None)}
         return sum(1 for pid in self._elo_overrides if pid in pool_ids)
 
+    @_locked
     def apply_reorder(self, position: Optional[str], ordered_ids: list[str]) -> None:
         """
         Apply a manual reorder by setting ELO overrides that match the
@@ -2087,6 +2126,7 @@ class RankingService:
 
         self._version += 1
 
+    @_locked
     def apply_value_map(self, position: Optional[str], ordered_ids: list[str]) -> int:
         """
         Cross-format value mapping for the copy-from-format flow (#124).

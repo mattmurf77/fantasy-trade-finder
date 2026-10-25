@@ -260,6 +260,9 @@ def test_fetch_dynasty_process_serves_capped_1qb_qbs(monkeypatch):
     csv = ("player,pos,team,age,value_1qb,value_2qb\n"
            "Josh Allen,QB,BUF,30.1,7025,10208\n"
            "Bijan Robinson,RB,ATL,24.5,9580,8089\n")
+    # conftest pins FTF_DP_VALUES_FILE suite-wide; this test feeds the network
+    # parse path, so it needs the seam unset.
+    monkeypatch.delenv("FTF_DP_VALUES_FILE", raising=False)
     monkeypatch.setattr(
         dl.urllib.request, "urlopen",
         lambda req, timeout=10: io.BytesIO(csv.encode("utf-8")))
