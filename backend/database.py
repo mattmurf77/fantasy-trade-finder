@@ -3293,6 +3293,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
     ("paywall_enforce_enabled",   0.0,  "monetization kill knob: exactly 1 lets entitlements.check_pro enforce (402) when monetize.entitlements AND monetize.paywall are both on; 0 = observe only. Read live per request, so 0 stops enforcement without a deploy; a missing row reads as 0"),
+    ("paywall_web_enforce_enabled", 0.0, "web paywall knob: exactly 1 lets the global gate (paywall_gate.py) 402 web requests too, while entitlements.is_enforcing(); 0 = only the native app (X-Device iphone/ipad/macos/android) is gated. Read live per request; a missing row reads as 0"),
 ]
 
 
