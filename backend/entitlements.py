@@ -387,6 +387,31 @@ def _ms_to_iso(ms) -> str | None:
     return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc).isoformat()
 
 
+# RevenueCat SANDBOX events (App Review, TestFlight) arrive at this same
+# prod webhook. They still project, so a reviewer's purchase unlocks, but
+# never for longer than this and never perpetually (monetization-day1
+# feasibility §2 + addendum). Sandbox writes are tagged through granted_by
+# (`sandbox:<event_id>`); no reader matches granted_by against a bare id.
+_SANDBOX_MAX_GRANT = timedelta(hours=24)
+SANDBOX_GRANT_PREFIX = "sandbox:"
+
+
+def _is_sandbox(source: str, payload: dict) -> bool:
+    """RevenueCat stamps every event `environment: SANDBOX | PRODUCTION`,
+    and the whole event object is the stored payload."""
+    return (source == "revenuecat"
+            and str((payload or {}).get("environment") or "").upper() == "SANDBOX")
+
+
+def _sandbox_cap(expires_at: str | None) -> str:
+    """min(expires_at, now + 24 h). A missing expiry becomes now + 24 h, so a
+    sandbox grant is never perpetual."""
+    cap = datetime.now(timezone.utc) + _SANDBOX_MAX_GRANT
+    if expires_at is not None and datetime.fromisoformat(expires_at) < cap:
+        return expires_at
+    return cap.isoformat()
+
+
 def ingest_billing_event(source: str, event_id: str, event_type: str,
                          payload: dict, *,
                          user_id: str | None = None,
@@ -473,17 +498,20 @@ def _project_transfer(event_id: str, payload: dict,
 
 
 def _project_grace(event_id: str, payload: dict, user_id: str,
-                   product_id: str) -> tuple[bool, str | None]:
+                   product_id: str, *, sandbox: bool = False) -> tuple[bool, str | None]:
     """BILLING_ISSUE — a renewal failed; the store may still be retrying.
 
     Access persists through the grace period (pro-subscription LLD §6: keep
     active until EXPIRATION), so the only thing to project is the new floor
     on `expires_at` when RevenueCat tells us one. Extends, never shortens,
     and never touches a perpetual row. No grace field → stored no-op.
+    A sandbox grace floor is capped at now + 24 h like every sandbox write.
     """
     grace = _ms_to_iso(payload.get("grace_period_expiration_at_ms"))
     if not grace:
         return False, None
+    if sandbox:
+        grace = _sandbox_cap(grace)
     with db.engine.begin() as conn:
         row = conn.execute(
             select(db.entitlements_table.c.id, db.entitlements_table.c.expires_at)
@@ -510,10 +538,13 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
     """Apply one billing event to entitlements. Upserts by
     (user_id, product_id) among billing-source rows only — promo and manual
     rows are never touched by billing traffic."""
+    sandbox = _is_sandbox(source, payload)
+    marked_by = f"{SANDBOX_GRANT_PREFIX}{event_id}" if sandbox else event_id
+
     # TRANSFER carries its identities in payload arrays rather than
     # app_user_id, so it is handled ahead of the user_id guard below.
     if event_type == "TRANSFER":
-        return _project_transfer(event_id, payload, product_id)
+        return _project_transfer(marked_by, payload, product_id)
 
     if not user_id or not product_id:
         return False, "ignored: missing user_id/product_id"
@@ -533,6 +564,8 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
 
     entitlement, mapped_source = _product_mapping(product_id)
     expires_at = _ms_to_iso(payload.get("expiration_at_ms"))
+    if sandbox:
+        expires_at = _sandbox_cap(expires_at)
 
     if event_type in _RC_ACTIVATING or event_type in (
             "checkout.session.completed", "customer.subscription.updated",
@@ -550,11 +583,11 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
                     update(db.entitlements_table)
                     .where(db.entitlements_table.c.id == existing.id)
                     .values(status="active", expires_at=expires_at,
-                            granted_by=event_id, updated_at=_now())
+                            granted_by=marked_by, updated_at=_now())
                 )
                 return True, None
         grant(user_id, entitlement, source=src, product_id=product_id,
-              expires_at=expires_at, granted_by=event_id)
+              expires_at=expires_at, granted_by=marked_by)
         return True, None
 
     deactivate_status = _RC_DEACTIVATING.get(event_type) or {
@@ -568,13 +601,14 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
                 .where(db.entitlements_table.c.user_id == user_id)
                 .where(db.entitlements_table.c.product_id == product_id)
                 .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
-                .values(status=deactivate_status, granted_by=event_id,
+                .values(status=deactivate_status, granted_by=marked_by,
                         updated_at=_now())
             )
         return True, None
 
     if event_type == "BILLING_ISSUE":
-        return _project_grace(event_id, payload, user_id, product_id)
+        return _project_grace(marked_by, payload, user_id, product_id,
+                              sandbox=sandbox)
 
     if event_type in _RC_NOOP:
         return False, None
