@@ -424,6 +424,27 @@ def run() -> int:
                 out.append((m.group(1), parts[i] + parts[i + 1]))
         return out
 
+    terms_secs = numbered("terms.html")
+    s14 = dict(terms_secs).get("14", "")
+    s14_text = plain(s14)
+    subs = [int(n) for n in re.findall(r"<strong>\s*14\.(\d+)\b", s14)]
+    problems = []
+    if [n for n, _ in terms_secs] != [str(n) for n in range(1, 15)]:
+        problems.append(f"sections {[n for n, _ in terms_secs]}, want 1-14 in order")
+    if not s14_text.startswith("14. Subscriptions, free trial and billing"):
+        problems.append('no "14. Subscriptions, free trial and billing" heading')
+    if subs != list(range(1, 11)):
+        problems.append(f"§14 subsections {subs}, want 1-10 in order")
+    problems += [f'§14 lacks "{t}"' for t in (
+        "Deleting the app or your Fleeced account does not cancel your subscription",
+        "reportaproblem.apple.com",
+        "Media Services Terms",
+    ) if t not in s14_text]
+    if s14_text.count("at least 24 hours before") < 2:
+        problems.append('"at least 24 hours before" not in both 14.3 (trial) and 14.4 (renewal)')
+    r.check("POL-terms-subscriptions[terms.html]", not problems,
+            "; ".join(problems) if problems else "§14 with 14.1-14.10 and the cancel/refund/Apple lines")
+
     priv = dict(numbered("privacy.html"))
     item = re.search(r"<li>\s*<strong>Subscriptions and purchases\.</strong>(.*?)</li>",
                      priv.get("1", ""), flags=re.S)
