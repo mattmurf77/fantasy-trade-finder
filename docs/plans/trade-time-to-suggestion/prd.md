@@ -422,9 +422,9 @@ approval (Decision D5) and eng feasibility review.
 
 **How the roster bounds are met** (trades-pm decision, 2026-10-15, on platforms-pm R7):
 - **Refresh off the tap path (head-product P40, 2026-10-24):** the background floor refreshes the
-  viewer's roster **off the tap path**. It runs on app foreground, Trades focus and session-init,
-  and on a **tap that finds the viewer's roster past its bound with the floor healthy** (a non-blocking kick, head-product P41, 2026-10-24): the refresh is enqueued off the critical path and never awaited. Cards it invalidates are withdrawn in place **at the client's next whole-deck response or focus/revalidation**, not instantly, and **I-2 blocks any action on them until then** (head-product, 2026-10-24: option (a)). It **never runs on the search tap's critical path or the first-page
-  serve**. That is the same user-triggered posture as session-init today.
+  viewer's roster **off the tap path**. It runs on session start and app foreground (session-init,
+  with a 60 s throttle), and on a **tap that finds the viewer's roster past its bound with the floor healthy** (a non-blocking kick, head-product P41, 2026-10-24): the refresh is enqueued off the critical path and never awaited. Cards it invalidates are withdrawn in place **at the client's next whole-deck response or focus/revalidation**, not instantly, and **I-2 blocks any action on them until then** (head-product, 2026-10-24: option (a)). It **never runs on the search tap's critical path or the first-page
+  serve**. That is the same user-triggered posture as session-init today. Trades focus is a **post-launch candidate** (launch decision, head-product, 2026-10-25).
 - **No scheduled or headless server-side Sleeper roster reads beyond today's pattern** until the
   operator rules on E2 (the platform risk register, PR #345). Sleeper's published Terms, revised
   2026-10-06, bar automated access without express written consent (§11.1), as platforms-pm cites
@@ -434,7 +434,7 @@ approval (Decision D5) and eng feasibility review.
 
 | Input | Today (code) | Proposed bound at first-card display | Past the bound |
 |---|---|---|---|
-| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately. **Any roster move FTF completes (the #351 add/drop, platforms-pm K-F5) immediately triggers the viewer-roster refresh, and affected cards are withdrawn in place before they are displayed or acted on again** (K-F5 activates when #351 D1 ships; not a launch gate; #351's D1 write is post-launch per head-eng's critical-path plan, 2026-10-23) | **The §5.5 U2 fallback** (head-product P40, 2026-10-24; AC-L3 governs over §5.2 exception 1). To keep this roster inside the bound, the background floor refreshes the viewer's roster **off the tap path**: on app foreground, Trades focus and session-init, and as a **non-blocking kick when a tap finds the roster past its bound with the floor healthy** (head-product P41, 2026-10-24). The tap is served as now and never waits on the kick. If the refresh shows a change, affected cards are withdrawn in place **at the client's next whole-deck response or focus/revalidation**, not instantly, and **I-2 blocks any action on them until then** (head-product, 2026-10-24: option (a)). It **never runs on the search tap's critical path or the first-page serve**, and never on a schedule (platforms-pm R7). **Withhold rule (unchanged):** if the floor has failed and the roster is past its bound at tap, those cards aren't shown, the honest gate-miss state shows while the floor refreshes, and the tap counts as a gate miss |
+| **Viewer's roster**, including trades just executed on the platform and add/drops | Sleeper rosters are fetched live at every session-init: cold launch, or foreground after a real background, throttled to 60 s (`mobile/src/state/useSession.ts:65,369`; `backend/session_input.py:42-80`). ESPN and MFL come from the DB import. `/api/trades/generate` never refetches. **Rosters are not in the job cache key or signature, so a cached deck up to 30 min old is still served after a roster change** (`backend/server.py:3489-3526`, `:23021-23024`; TTL `:2285`) | **≤ 5 min** since last confirmed against the platform. A change the app itself knows about (an in-app send accepted, a refetch diff) invalidates the affected cards immediately. **Any roster move FTF completes (the #351 add/drop, platforms-pm K-F5) immediately triggers the viewer-roster refresh, and affected cards are withdrawn in place before they are displayed or acted on again** (K-F5 activates when #351 D1 ships; not a launch gate; #351's D1 write is post-launch per head-eng's critical-path plan, 2026-10-23) | **The §5.5 U2 fallback** (head-product P40, 2026-10-24; AC-L3 governs over §5.2 exception 1). To keep this roster inside the bound, the background floor refreshes the viewer's roster **off the tap path**: on session start and app foreground (session-init, 60 s throttle), and as a **non-blocking kick when a tap finds the roster past its bound with the floor healthy** (head-product P41, 2026-10-24). Trades focus is a **post-launch candidate** (launch decision, head-product, 2026-10-25). The tap is served as now and never waits on the kick. If the refresh shows a change, affected cards are withdrawn in place **at the client's next whole-deck response or focus/revalidation**, not instantly, and **I-2 blocks any action on them until then** (head-product, 2026-10-24: option (a)). It **never runs on the search tap's critical path or the first-page serve**, and never on a schedule (platforms-pm R7). **Withhold rule (unchanged):** if the floor has failed and the roster is past its bound at tap, those cards aren't shown, the honest gate-miss state shows while the floor refreshes, and the tap counts as a gate miss |
 | **Partner rosters** | Same session-init fetch for Sleeper. `league_members` is also written by the background daemon (`server.py:22801-22835`). Headless builds read whatever is stored (G-075) | **≤ 5 min** | Serve-and-refresh. Filter against the freshest held roster; I-2 catches the rest before any action |
 | **Viewer's rankings**: trio swipes, tiers, anchors, reorder, import, outlook and prefs | Every change invalidates jobs (`server.py:10119,10183,10969,11720,11907,12262,12483,20856,21062,21141`), which forces fresh generation | **Zero tolerance:** every change made before the tap is reflected, or the deck is past-bound | Serve-and-refresh with the "updating" state. Never presented as current |
 | **Partner boards** (leaguemates' published rankings) | Member epochs fence dependent jobs (`server.py:9283-9294,9381-9384`) | Same as the viewer's rankings | Same |
@@ -668,15 +668,18 @@ is accepted (design-lead 3).
     player after the move.
   - **With AC-L3, the tap path makes no platform call.** The §5.1 roster bounds are met by the
     background freshness floor, refreshed on user action off the tap path (consistent with
-    platforms-pm R7). Its triggers:
-    - app foreground;
-    - Trades focus;
-    - session-init;
+    platforms-pm R7). **Its launch triggers** (launch decision, head-product, 2026-10-25):
+    - session start;
+    - app foreground (session-init, 60 s throttle);
     - **a tap past bound, as a non-blocking kick** (head-product P41, 2026-10-24).
+
+    ~~Trades focus~~ is a **post-launch candidate**, revisitable from R2b data. It would add Sleeper
+    calls (429 risk) and a mobile change before the freeze, for little gain. I-2 still blocks any
+    stale send.
   - **Built:** the floor is S0. It reuses session init on app open and foreground, with a 60 s
     throttle, and adds the P41 kick through `roster_refresh.maybe_refresh_async`
-    (`scope-eng-s0-fetch.md:61-108`; #378, with a Sleeper 429 circuit). Trades focus is not a floor
-    trigger on main (§15 item 10).
+    (`scope-eng-s0-fetch.md:61-108`; #378, with a Sleeper 429 circuit). These are exactly the launch
+    triggers above (§15 item 10, aligned).
   - **The kick:** when a tap finds the viewer's roster past its bound and the floor hasn't failed,
     the tap is **served as now** and a background floor refresh is **enqueued off the critical
     path; the tap never awaits it**. If the refresh shows a roster change, affected cards are
@@ -802,7 +805,7 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 |---|---|---|---|
 | AC-L1 | **p95 ≤ 200 ms** from the tap on a search-starting control (table A, plus table B if D10 ships) to the first frame where a real card is ≥ 50% visible with Like and Pass enabled (the §4.2 clock). Measured by client telemetry on a TestFlight build. Cells: Wi-Fi and cellular × first tap and repeat tap. n ≥ 40 per cell, from at least 2 devices including the operator's. **A device-held first card counts** if it meets U2: within the freshness bounds, passing I-2, and withdrawn in place if invalidated (head-product P32). **Measurement terms (analytics-lead, launch, T1–T6):** <br>**T1:** R2 fires at exactly this frame. <br>**T2:** p95 is taken over R2 ∪ R2b, one per `search_id`, and every R2b (timeout, error, empty, abandoned) counts as above 200 ms. <br>**T3:** `cold_launch` is its own row and is not joined to first tap; AC-L7 reads `cold_launch` for accounts created that day. <br>**T4:** if the app leaves `active` between tap and card, the search ends as R2b `abandoned`, never a long R2. <br>**T5:** the AC-L1 query runs **with tester devices included** (the default `device_exclusion` would strip them and return n ≈ 0). <br>**T6:** nearest-rank p95 (the 38th-fastest at n = 40) with a 90% order-statistic CI. A point p95 ≤ 200 ms whose CI upper end is > 200 ms reads "pass, not robust", so collect more before calling it. <br>**T7** (events contract): `entry_point=prefs_changed_strip` and `team_review` are excluded from the cells and reported separately. <br>`network_type` `offline` and `unknown` stay out of the cells. Distinct `device_id` per cell proves ≥ 2 devices | **The proof is the scripted two-device session in §9.6** (organic volume is too low; §6). A: R1, R2 and R2b with the `network_type` prop, read by analytics-lead under T1–T6. Cross-check: the §9.5 readout per tap. Organic telemetry after launch is monitoring, not the gate | **Supersedes AC-3's threshold and cells** |
 | AC-L2 | No animated push or transition on the Find a trade path (U1), decided per entry point (ux-lead, launch; §4.7): an instant route (`animation: 'none'`) for the canvas, D10, hand-off and deep-link entries, and in place for in-deck searches. Back from the deck is instant too. No motion on the deck at all, including no on-load stagger (design-lead's deck exemption) | Code-walk plus a guard (`check-trade-first-card.js`: `animation: 'none'` on every search-starting route, no transition on the in-place reveal, no stagger on the deck). TF step 1: zero transition frames | **Supersedes AC-2b.** Its "short fade" option is withdrawn |
-| AC-L3 | No live Sleeper or platform call on the tap path. The background floor's triggers are app foreground, Trades focus, session-init, and **a tap past bound as a non-blocking kick** (head-product P41, 2026-10-24): enqueued off the critical path and never awaited, so the tap's critical path still makes no platform call | Code-walk, plus the server trace for the first-page request (the kick's refresh appears as a separate, later background call, never inside the first-page request), plus the §9.2 kick test | **New.** It strengthens platforms-pm R7. AC-L3 governs over §5.2 exception 1 (head-product P40, 2026-10-24): the §5.5 U2 fallback applies to the viewer's roster, and I-6's lineup lookup moves to the background floor |
+| AC-L3 | No live Sleeper or platform call on the tap path. The background floor's launch triggers are session start, app foreground (session-init, 60 s throttle) and **a tap past bound as a non-blocking kick** (head-product P41, 2026-10-24). Trades focus is a post-launch candidate (head-product, 2026-10-25): enqueued off the critical path and never awaited, so the tap's critical path still makes no platform call | Code-walk, plus the server trace for the first-page request (the kick's refresh appears as a separate, later background call, never inside the first-page request), plus the §9.2 kick test | **New.** It strengthens platforms-pm R7. AC-L3 governs over §5.2 exception 1 (head-product P40, 2026-10-24): the §5.5 U2 fallback applies to the viewer's roster, and I-6's lineup lookup moves to the background floor |
 | AC-L4 | The next page is always ready: across all test sessions, **zero** page ends are reached without the next page already in the deck. There is no "Finding more" card in the build. The prefetch threshold is in §4.7. ux-lead's state table (§4.7) defines the outcomes: an online fetch failure at a page end (row 3b) **fails** AC-L4; offline at a page end (row 3a) is reported separately and doesn't. The P30 end card shows only when every candidate is seen and **never while a page is pending**, with no Like or Pass | G: no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when page N is fronted; the P30 card never renders while a page is pending, and renders no Like/Pass. A: `deck_buffer_empty` (events contract; any occurrence is a miss). TF: the U3 three-page run and the P30 step | **New; supersedes AC-13** (strengthened) |
 | AC-L5 | Zero cards shown with an asset either side no longer owns (I-1 at display, I-2 at action). **Including after a roster move FTF itself completes** (the #351 add/drop, K-F5): the viewer-roster refresh runs immediately, and affected cards are withdrawn in place before they are displayed or acted on again | T: the roster-change fixture, plus a **backend fixture where an FTF add/drop completes and the card with the dropped player is withdrawn** (K-F5 parts activates when #351 D1 ships; not a launch gate). TF: the U2 roster-change run (steps 11, 12 and 18) and the K-F5 step (L4b, activates when #351 D1 ships; not a launch gate) | **Same as AC-5** for display; AC-6a/6b cover actions. The K-F5 fixture is new |
 | AC-L6 | Quality parity: first-page cards pass `deck.quality_filters`; Calibration integrity holds per D12 | As AC-9a to AC-9e | **Same as AC-9a to AC-9e and D12.** No new test |
@@ -1105,10 +1108,10 @@ protocol into the phone-in-hand checklist. Organic telemetry continues after lau
 not as the gate.
 
 **Preconditions (all must hold before the session):**
-1. **Background replenishment is restored**, bounded by ADR-025's C2 (§12, Handoffs). The
-   operator paused it as a DB stopgap on 2026-10-20. On main it is #361's S3 deferral: tick step 7
-   is a hard skip "until C2 and the self-renewal fix" (`docs/plans/daily-tick-fix/scope.md:42,69-71`).
-   See §15, item 16 for whether it still gates now that U2's floor is S0 and U3's pages are P1/P2.
+1. ~~Background replenishment is restored~~ **No longer a precondition (head-product, 2026-10-25, §15 item
+   16).** The 200 ms build doesn't rely on it: U2's floor is S0 (#378), and U3's pages are P1/P2.
+   Replenishment returns after C2 and the self-renewal fix, per #361
+   (`docs/plans/daily-tick-fix/scope.md:42,69-71`).
 2. The TestFlight build carries R1, R2 and R2b (with `network_type`) and the §9.5 readout. The T1
    evidence passes: the guard or code-walk shows R2 fires at exactly the §4.2 frame.
 3. **Both devices are tagged as tester devices (T5),** and analytics-lead's query includes tester
@@ -1220,7 +1223,7 @@ Two facts constrain any split:
     platforms-pm R7). No scheduled or headless server-side Sleeper roster reads beyond today's
     pattern until the operator rules on E2, and ESPN and MFL refetches stay user-triggered.
   - So a prepared deck can only be as fresh as the last user-triggered roster read. Under head-product P40, 2026-10-24,
-    the §5.1 roster bounds are met because the background floor refreshes the viewer's roster **off the tap path**, on app foreground, Trades focus and session-init, and **never on the search tap or the first-page serve**.
+    the §5.1 roster bounds are met because the background floor refreshes the viewer's roster **off the tap path**, on session start, app foreground and the P41 kick (Trades focus is a post-launch candidate), and **never on the search tap or the first-page serve**.
   - A prepared deck whose rosters are past the bound gets the §5.5 U2 fallback for the viewer
     (gate-miss, never a refetch on the tap), and filter-and-refresh for partners.
 - **Precompute timing can change which offers are served**, independent of any model edit. The same
@@ -1370,8 +1373,9 @@ product-side summary; §15 lists where they differ from main.
 
 - **No live Sleeper or platform calls on the tap path,** with a background freshness floor
   ("Step 0") that keeps the pre-built page inside the §5.1 bounds. This is AC-L3. Under
-  platforms-pm R7 and head-product P40, 2026-10-24, the floor refreshes on app foreground, Trades focus and
-  session-init, never on a schedule, and never on the search tap or the first-page serve.
+  platforms-pm R7 and head-product P40, 2026-10-24, the floor refreshes on session start, app
+  foreground and the P41 kick (Trades focus is a post-launch candidate, head-product 2026-10-25). It
+  never runs on a schedule, and never on the search tap or the first-page serve.
 - **The first page is pre-built server-side** before the tap ("Option 1"): about 37 KB per
   user-league pair, instead of the whole deck. Pages 1 and 2 are built together (§4.7).
 - **No animated push.** The ~350 ms transition alone breaks the budget (AC-L2, U1).
@@ -1417,15 +1421,12 @@ Review status as of 2026-10-15, folded in. The 2026-10-20 launch revision adds t
 - **The freshness work can cost speed.** With AC-L3, the tap path makes no platform call, so the
   background floor has to keep rosters inside the bound. When it hasn't, the §5.5 U2 fallback shows
   the gate-miss state, and the tap misses the gate.
-- **P41's `maybe_refresh_async` hook is built and on main** (`backend/roster_refresh.py:123`, #378;
-  `scope-eng-s0-fetch.md:71-107`), so the 2026-11-01 risk is retired. **What remains:** the
-  `/generate` caller in trades-eng's server stack (`scope-eng-200ms.md:15-16`). If the caller misses
-  the 2026-11-06 binary, the Q1 aging-roster gap stays open at launch; I-2 still blocks actions on
-  moved assets.
-- **Background replenishment is paused** (an operator DB stopgap, 2026-10-20). On main this is #361's
-  S3 deferral, step 7 skipped until C2 and the self-renewal fix (`daily-tick-fix/scope.md:42,69-71`).
-  This PRD keeps "restore before the 200 ms build ships" as head-product's precondition. Whether it
-  still gates, given S0's floor and P1/P2's pages, is §15 item 16 (head-eng).
+- **The P41 `/generate` caller.** The hook is built and on main (`backend/roster_refresh.py:123`,
+  #378), so the hook-slip risk is closed. What remains is the caller in trades-eng's server stack
+  (`scope-eng-200ms.md:15-16`). If it misses the 2026-11-06 binary, the Q1 aging-roster gap stays
+  open at launch. I-2 still blocks actions on moved assets.
+- ~~Background replenishment is paused~~ **Not a 200 ms ship gate (head-product, 2026-10-25).** It is #361's
+  S3 deferral, returning after C2 and the self-renewal fix (`daily-tick-fix/scope.md:42,69-71`).
 - **Page-end misses** (AC-L4). With zero misses allowed, a slow page N+2 build under load or an
   offline gap must not leave the user facing a wait. Only end-of-deck and offline are permitted
   outcomes; neither is "finding more".
@@ -1458,8 +1459,8 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
    the operator's call.
 6. **Roster freshness:** met by user-triggered refresh. No scheduled or headless Sleeper roster reads
    beyond today's pattern until E2 (§5.1, §10.3). *Amended by head-product P40, 2026-10-24:* the refresh runs
-   off the tap path (app foreground, Trades focus, session-init), never on the search tap or the
-   first-page serve.
+   off the tap path (session start, app foreground, and the P41 kick; Trades focus is a post-launch
+   candidate, head-product 2026-10-25), never on the search tap or the first-page serve.
 7. **Send seam:** the deck (`TradesScreen`), match and awaiting cards (`TradeCard`) and the
    calculator (`InLeagueCalculator`), all through `SendInSleeperButton` (§5.3).
 8. **Dependency:** `NEXT.md` 0f (the `isdigit()` G-030 trap on the Sleeper propose route) lands before
@@ -1542,16 +1543,16 @@ product requirement main doesn't yet meet, with the owner. Main's docs were not 
 | 4 | R2b timeout | "the addendum states the threshold" | **10,000 ms** from the tap (`…-events.md:30`) | **Aligned** (cited in §4.6) |
 | 5 | AC-L1 exclusions | T1–T6 | **T7**: `prefs_changed_strip` excluded from the cells (`…-events.md:80-81`) | **Aligned.** AC-L1 adds T7 |
 | 6 | Team Review entry | Not listed | `source=team_review`, out of the AC-L1 cells for launch (`…-events.md:56`) | **Aligned.** §4.1 other arrivals: measured, not gated |
-| 7 | P30 end card | P36 copy ("You've seen every trade for now." / "Adjust your search"). D14(a): "Adjust" opens the **deck's own preferences** and the search runs in place | `scope-eng-200ms.md:308-309`: the old P30 copy, with "Adjust…" opening "**the targeting builder**". The events doc labels `end_card_adjust` with the old string (`…-events.md:55`) | **Kept** (head-product P33 accepted D14(a); P36 set the copy). **Owners:** trades-eng (§6.5 and the #363 strings); analytics-lead (the label only; the `end_card_adjust` value is unchanged) |
+| 7 | P30 end card | P36 copy ("You've seen every trade for now." / "Adjust your search"). D14(a): "Adjust" opens the **deck's own preferences** and the search runs in place | `scope-eng-200ms.md:308-309`: the old P30 copy, with "Adjust…" opening "**the targeting builder**". The events doc labels `end_card_adjust` with the old string (`…-events.md:55`) | **Kept** (head-product, 2026-10-25). D14(a) stands: "Adjust your search" opens the deck's own preferences, and the search runs in place. P36 sets the copy. **Owner: trades-eng via head-eng**, aligning `scope-eng-200ms.md` §6.5 and confirming what #363 does. analytics-lead updates the label only; the `end_card_adjust` value is unchanged |
 | 8 | Unseen-card evidence | DEC-2 "narrow rows, not full evidence; displayed cards keep full evidence"; §10.4 floated "displayed cards only" | **ADR-025, Accepted:** never-served pre-builds write nothing (`adr-025…md:25`); full rows on view, the first 30 and the C8 archive (`:27`); everything else packed (`:54`), about 64 B per card (`:75`); narrow rows are the fallback (`:109`). "Displayed cards only" was rejected (`:118`) | **Aligned** (§10.4, D7, AC-L8, AC-11, scope §2) |
 | 9 | P23 byte budget | "Still open" (D7) | ≤ about 0.2 MB compressed per active pair; about-250 MB page-store ceiling; measured numbers before the flag flips (`scope-eng-200ms.md:349-355`) | **Aligned.** D7's budget is decided by head-eng |
-| 10 | Floor triggers | App foreground, **Trades focus**, session-init, and the P41 kick | Session init on app open (`scope-eng-s0-fetch.md:63`) and foreground (`:64-65`, 60 s throttle `:66`), plus the P41 kick (`:71-107`). **No Trades-focus trigger**, and no mobile change | **Kept** as a product requirement main doesn't yet meet. **Owner:** head-eng → platforms-eng/trades-eng. Alternatively, head-product accepts the P41 kick plus foreground as covering it |
+| 10 | Floor triggers | App foreground, **Trades focus**, session-init, and the P41 kick | Session init on app open (`scope-eng-s0-fetch.md:63`) and foreground (`:64-65`, 60 s throttle `:66`), plus the P41 kick (`:71-107`). **No Trades-focus trigger**, and no mobile change | **Aligned (launch decision, head-product, 2026-10-25).** Main's triggers cover it for launch: session start, foreground with the 60 s throttle, and the P41 kick. I-2 still blocks any stale send. A Trades-focus trigger would add Sleeper calls (429 risk) and a mobile change before the freeze, for little gain. Trades focus is removed from the launch lists in §5.1, §5.5, AC-L3, §10.3, §10.7 and scope §6, and marked a **post-launch candidate**, revisitable from R2b data |
 | 11 | P41 hook timing | §12: "depends on the hook, about 2026-11-01" | Built: `backend/roster_refresh.py:123` (#378; `scope-eng-s0-fetch.md:71-107`), with no-ops for an open 429 circuit, a 60 s retry cooldown and in-flight | **Aligned.** The §12 risk is now the `/generate` caller only (`scope-eng-200ms.md:15-16`) |
-| 12 | Check-error serve state | No cards → the honest gate-miss state, naming its reason; "Updating" only while cards show (§5.4) | "The check errors → **'Updating', no cards**" (`scope-eng-200ms.md:283`) | **Kept** (§5.4 constraints, ux-lead F-3/F-5). **Owners:** trades-eng + ux-lead |
+| 12 | Check-error serve state | No cards → the honest gate-miss state, naming its reason; "Updating" only while cards show (§5.4) | "The check errors → **'Updating', no cards**" (`scope-eng-200ms.md:283`) | **Kept** (head-product, 2026-10-25). A bare "Updating" with no cards fails the U rules and the operator's checklist ("a blank, a spinner or 'Finding more'"). The honest gate-miss state shows. **Owners:** trades-eng and ux-lead |
 | 13 | Prefetch rule | Pages 1–2 pre-built; request page N+2 when page N is fronted | Pages 1–3 stored; `ready_cards_after_prefetch ≥ prefetch_remaining + page_size` (`scope-eng-200ms.md:294-297`) | **Aligned in outcome.** Main's rule keeps at least one full unseen page ahead, which meets the trades-pm requirement. AC-L4's zero-miss measure stands, and the guard asserts main's rule |
 | 14 | U5 card in the p95 | "Counts against the p95" | As R2b only if no card arrives; otherwise R2 carries the wait (`scope-eng-200ms.md:323-324`) | **Aligned.** Same effect; no text change |
-| 15 | R3 emission scope | Exactly one per user-visible deck, whatever `serve_source` (AC-1b) | "Emits once per `deck_job_id`, only for requests that carry a `search_id`" (`scope-eng-200ms.md:18-19`); the binding rule restated at `…-events.md:32` | **Kept as AC-1b; to confirm.** Old binaries (no `search_id`) sit behind the B8 minimum-version gate. **Owners:** analytics-lead + trades-eng confirm stage-6 counts across the seam |
-| 16 | Replenishment | "Restore, bounded by DEC-2, before the 200 ms build ships"; "U2's floor and U3's prefetch depend on it" | #361: tick step 7 is a hard skip ("deferred: C2") until C2 and the self-renewal fix (`docs/plans/daily-tick-fix/scope.md:42,69-71`). On main, U2's floor is S0 (#378) and U3's pages are P1/P2 (`scope-eng-200ms.md:86-89`), not weekly replenishment | **Kept** as head-product's precondition (scope §5, §9.6), restated as ADR-025 C2 plus the self-renewal fix. **Owner:** head-eng confirms whether it still gates the 200 ms ship, given S0 and P1/P2 |
+| 15 | R3 emission scope | Exactly one per user-visible deck, whatever `serve_source` (AC-1b) | "Emits once per `deck_job_id`, only for requests that carry a `search_id`" (`scope-eng-200ms.md:18-19`); the binding rule restated at `…-events.md:32` | **Kept, to confirm** (head-product, 2026-10-25). head-eng is asking trades-eng whether every launch-binary deck request carries a `search_id`. **If it does, item 15 closes with no analytics change.** Owners: trades-eng via head-eng; analytics-lead |
+| 16 | Replenishment | "Restore, bounded by DEC-2, before the 200 ms build ships"; "U2's floor and U3's prefetch depend on it" | #361: tick step 7 is a hard skip ("deferred: C2") until C2 and the self-renewal fix (`docs/plans/daily-tick-fix/scope.md:42,69-71`). On main, U2's floor is S0 (#378) and U3's pages are P1/P2 (`scope-eng-200ms.md:86-89`), not weekly replenishment | **Aligned** (head-product, 2026-10-25). Product's precondition was "before the 200 ms build relies on it". On main the build doesn't: U2's floor is S0 (#378), and U3's pages are P1/P2. **Replenishment does not gate the 200 ms ship.** It returns after C2 and the self-renewal fix, per #361. It is removed as a ship precondition (scope §5) and as a proof precondition (§9.6) |
 | 17 | Device-held page age | Within the U2 bounds (P32) | Max age 300 s, a client constant plus a cross-client invariant (`scope-eng-200ms.md:21`) | **Aligned** (300 s = the 5-minute bound) |
 | 18 | AC-9 page contract | AC-9b's differential test | `assert_page_is_top_n` / `assert_prefix_stable` (#382; `eng-evidence-contract.md:106-142`) | **Aligned.** AC-9b cites it |
 | 19 | Calibration decks and R3 | Not stated | `grading_refresh` decks emit no `trades_generated` (`…-events.md:32`) | **Aligned.** Consistent with AC-1b's "user-visible trade deck" |
@@ -1577,13 +1578,15 @@ product requirement main doesn't yet meet, with the owner. Main's docs were not 
 
 ## Handoffs
 
-- **head-eng (launch): restore background replenishment,** bounded by ADR-025's C2 and #361's
-  self-renewal fix, before the 200 ms build ships and before the §9.6 proof. It was paused as a DB
-  stopgap on 2026-10-20. Confirm whether it still gates (§15 item 16).
-- **trades-eng + ux-lead:** resolve §15 item 7 (P30 copy and destination in `scope-eng-200ms.md`
-  §6.5) and item 12 (check-error state) against this PRD.
-- **head-eng → platforms-eng / trades-eng:** §15 item 10, Trades focus as a floor trigger, or
-  head-product accepts the P41 kick as covering it.
+- **head-eng: background replenishment, NOT gating** (head-product, 2026-10-25). It returns after ADR-025's
+  C2 and #361's self-renewal fix, on its own schedule (§15 item 16).
+- **trades-eng, via head-eng:** align `scope-eng-200ms.md` §6.5 to D14(a) and the P36 copy, and
+  confirm what #363 does (§15 item 7). Also confirm that every launch-binary deck request carries a
+  `search_id`; if it does, §15 item 15 closes with no analytics change.
+- **trades-eng + ux-lead:** the check-error state with no cards shows the honest gate-miss state,
+  never a bare "Updating" (§15 item 12).
+- **Trades-focus floor trigger: closed for launch** (head-product, 2026-10-25: main's triggers cover it). It
+  is a post-launch candidate, revisitable from R2b data (§15 item 10).
 - **analytics-lead + trades-eng (W3 finding):** 10 taps had no source, and 9 of them got no card
   (§6). Investigate it as an instrumentation or flow gap; this PRD doesn't diagnose it.
 - **head-eng (launch, through head-product):** the critical-path build plan for 200 ms against
@@ -1595,17 +1598,15 @@ product requirement main doesn't yet meet, with the owner. Main's docs were not 
   - Also F-2: the Home tile's target inconsistency (`HomeHub.tsx:397`). It is live today,
     independent of this PRD (ux-lead).
 - **platforms-eng (through head-eng):**
-  - **deliver the `maybe_refresh_async` hook (about 2026-11-01).** P41's non-blocking kick depends
-    on it;
+  - the `maybe_refresh_async` hook is **built** (#378). What remains is trades-eng's `/generate`
+    caller (§12);
   - implement I-2 per platforms-pm R1–R5 and R8;
   - confirm what each send path does today when its roster fetch fails (R3);
   - **land `NEXT.md` 0f (the Sleeper propose route's `isdigit()` G-030 trap) before or with I-2**
     (platforms-pm N1).
-- **analytics-lead:** the grants are recorded in §4.6. Run `baseline-request.md` (W3) and replace
-  §6's provisional table with the read. Receive the new `sleeper_send_failed.error_code` value
-  (platforms-pm R4).
-- **The build:** write the addendum `docs/business/analytics/<date>-time-to-suggestion-events.md`
-  before any emitter ships (analytics-lead).
+- **analytics-lead:** **done (#399/#401):** the events contract is landed and the W3 baseline is in
+  §6. Still owed: receive the new `sleeper_send_failed.error_code` value (platforms-pm R4).
+- **The build:** the events addendum is **done** (`docs/business/analytics/2026-10-20-time-to-suggestion-events.md`, #399/#401).
 - **design-lead:**
   - the visual spec for the withdrawn card and the status line, plus their `components.md` row;
   - the push motion (AC-2b);

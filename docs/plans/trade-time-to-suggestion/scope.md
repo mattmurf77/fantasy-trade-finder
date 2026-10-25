@@ -191,12 +191,11 @@ This is a plan; nothing is updated yet. Each row states what the build must do.
 
 ## 5. Ship gate declaration
 
-- **Precondition, background replenishment restored:** it must be restored, bounded by DEC-2 narrow
-  rows, before the 200 ms build ships. The operator paused it as a DB emergency stopgap on
-  2026-10-20 (relayed by head-product). U2's freshness floor and U3's prefetch depend on it.
-  head-eng owns it (prd Handoffs, §12).
-- **AC-L1 proof:** the scripted two-device session (prd §9.6), run after replenishment is restored.
-  Organic telemetry is monitoring only.
+- **Background replenishment: not a ship gate** (head-product, 2026-10-25; prd §15 item 16). The
+  200 ms build doesn't rely on it: U2's floor is S0 (#378), and U3's pages are P1/P2. It returns
+  after C2 and the self-renewal fix, per #361.
+- **AC-L1 proof:** the scripted two-device session (prd §9.6). Organic telemetry is monitoring
+  only.
 - **CI green:** `backend-tests` + `mobile-typecheck` (with the `check-*.js` suites) +
   `maestro-testid-lint`, all passing on the pushed sha.
 - **Evidence recorded:** a `living-memory/TEST_LEDGER.md` entry naming the guards and tests that ran,
@@ -214,7 +213,7 @@ detail is in prd §5.1 and §5.3 (I-2).
 
 | Platform | Reads / writes used | Behavior: parity / honest `platform_unsupported` / fallback copy / n/a |
 |---|---|---|
-| Sleeper | **Reads:** rosters from the background floor, off the tap path, on session-init, app foreground and Trades focus, plus a non-blocking kick when a tap finds the roster past its bound with the floor healthy (head-product P41). **Never on the search tap's critical path or the first-page serve** (head-product P40, 2026-10-24; AC-L3). **No scheduled or headless server-side roster reads beyond today's pattern until the operator rules on E2** (platforms-pm R7). At send, the live `_fetch_league_rosters` already runs (`server.py:19529`), so the I-2 player check needs no new call. **Writes:** propose, unchanged | **Parity.** Players are checked live at send, at roster level (co-owners pass, D-051); picks are already checked live. Refusal: `asset_not_owned` / `counterparty_asset_not_owned` with their copy; the block is reported through `sleeper_send_failed.error_code`. A failed read (Cloudflare 1010) blocks the send. Dependency: `NEXT.md` 0f, the `isdigit()` G-030 trap, lands before or with I-2 (N1) |
+| Sleeper | **Reads:** rosters from the background floor, off the tap path, on session start and app foreground (session-init, 60 s throttle), plus a non-blocking kick when a tap finds the roster past its bound with the floor healthy (head-product P41). Trades focus is a post-launch candidate (head-product, 2026-10-25). **Never on the search tap's critical path or the first-page serve** (head-product P40, 2026-10-24; AC-L3). **No scheduled or headless server-side roster reads beyond today's pattern until the operator rules on E2** (platforms-pm R7). At send, the live `_fetch_league_rosters` already runs (`server.py:19529`), so the I-2 player check needs no new call. **Writes:** propose, unchanged | **Parity.** Players are checked live at send, at roster level (co-owners pass, D-051); picks are already checked live. Refusal: `asset_not_owned` / `counterparty_asset_not_owned` with their copy; the block is reported through `sleeper_send_failed.error_code`. A failed read (Cloudflare 1010) blocks the send. Dependency: `NEXT.md` 0f, the `isdigit()` G-030 trap, lands before or with I-2 (N1) |
 | ESPN | **Reads:** DB import, refreshed only by the background floor on user action off the tap path (P40), with stored credentials. At send, the live `fetch_league` with `view=mRoster` already runs (`server.py:33133`; `espn_service.py:94`), so the check needs no new call. **Writes:** propose (players only), unchanged | **Parity for players.** Picks stay hard-blocked (`espn_pick_unsupported`). Same refusal contract. A failed read blocks the send (`docs/runbook.md` L747) |
 | MFL | **Reads:** **new**, one rosters export per send (`mfl_service.fetch_rosters`, `mfl_service.py:432`), including `futureDraftPicks`. Refetches are user-triggered, within 1 request per second. **Writes:** propose, unchanged | **Parity**, players and picks. Same refusal contract. A failed read (`wwwNN` hosts, `docs/runbook.md` L758) blocks the send. Dependency, not a blocker: MFL client registration (`NEXT.md`) |
 | Fleaflicker (dark) | none | **n/a:** `fleaflicker.link` is false and there is no write path |
