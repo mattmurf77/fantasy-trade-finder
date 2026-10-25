@@ -7701,6 +7701,17 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
         log.exception("value-core: deck build failed for job %s; falling back to the legacy engine: %s",
                       job_id, vc_err)
         return False
+    diag = result.core
+    # Set by models-eng's count-bounded core (a2006b28); a core without the key never hit it.
+    ceiling_hit = bool(getattr(diag, "safety_ceiling_hit", False))
+    if ceiling_hit:
+        # Ruling 15: a safety-ceiling run is a partial pool. It is never registered, logged
+        # or served, and the job fails with Calibration's code (blind_grading.run_value_core).
+        log.error("trade-job %s value_core: safety ceiling hit (partners=%d checked=%d core_ms=%d); "
+                  "refusing the partial pool", job_id, diag.partners, diag.pairs_checked,
+                  diag.elapsed_ms)
+        _finish_trade_job(job_id, error="value_core_failed")
+        return True
     for card in cards:
         trade_service._trade_cards[card.trade_id] = card
     served = _project_trade_dispositions(cards, g_user_id, league_id)
@@ -7729,7 +7740,6 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
         if imp_by_card.get(id(card)):
             row["impression_id"] = imp_by_card[id(card)]
         snapshot_rows.append(row)
-    diag = result.core
     total_ms = int((time.monotonic() - started) * 1000)
     with _trade_jobs_lock:
         j = _trade_jobs.get(job_id)
@@ -7740,7 +7750,8 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
             j["value_core"] = {"fair": diag.fair, "served": len(served),
                                "core_ms": diag.elapsed_ms, "total_ms": total_ms,
                                "truncated_partners": diag.truncated_partners,
-                               "budget_exhausted": diag.budget_exhausted}
+                               "budget_exhausted": diag.budget_exhausted,
+                               "safety_ceiling_hit": ceiling_hit}
     log.info("trade-job %s value_core: partners=%d packages=%d checked=%d fair=%d served=%d "
              "truncated=%d budget_exhausted=%s core_ms=%d total_ms=%d", job_id, diag.partners,
              diag.packages_viewer, diag.pairs_checked, diag.fair, len(served),
@@ -8872,6 +8883,17 @@ def _run_trade_job(
             if j is not None and significance_diag:
                 j["significance"] = significance_diag
 
+        def _replace_significance(old, **updates):
+            # E1 F9: once attached, job["significance"] is copy-on-write. Job snapshots
+            # deep-copy it, the /generate reuse path outside _trade_jobs_lock, so the
+            # attached dict is never mutated: build the next state, swap it in, return it.
+            new = {**old, **updates}
+            with _trade_jobs_lock:
+                j = _trade_jobs.get(job_id)
+                if j is not None and j.get("significance") is old:
+                    j["significance"] = new
+            return new
+
         # One bounded post-policy permutation, before the FIRST evaluated
         # publication. Every later boundary retains this order or removes
         # authoritative dispositions; none re-sorts an old snapshot.
@@ -9031,7 +9053,8 @@ def _run_trade_job(
                     presentation["records"] = _records_in_order(
                         before_quality, presentation["records"], final_cards)
                 if significance_diag is not None:
-                    significance_diag["quality_filters"] = quality_counts
+                    significance_diag = _replace_significance(
+                        significance_diag, quality_filters=quality_counts)
                 log.info("trade-job %s: deck quality filters %s served=%d", job_id,
                          quality_counts, len(final_cards))
             except Exception as quality_err:
@@ -9053,14 +9076,15 @@ def _run_trade_job(
                 served_final, ghost_cards = final_cards, []
 
         if significance_diag:
-            significance_diag["final_served"] = len(served_final)
+            served_diag = {"final_served": len(served_final)}
             if bakeoff_run is not None:
                 served_counts = {}
                 for card in served_final:
                     credit = bakeoff_run.attribution_for(card)
                     arm = credit[0] if credit else "injected"
                     served_counts[arm] = served_counts.get(arm, 0) + 1
-                significance_diag["final_served_per_arm"] = served_counts
+                served_diag["final_served_per_arm"] = served_counts
+            significance_diag = _replace_significance(significance_diag, **served_diag)
 
         # Publish the filtered final list even with F1 disabled. Later F1
         # annotation adds impression IDs without altering package membership.
@@ -9296,16 +9320,15 @@ def _run_trade_job(
         # superseded run measures just as well. Never allowed to fail the job.
         if significance_diag and (owner_impression_error or _job_superseded(job_id)):
             retained = owner_published_cards if not _job_superseded(job_id) else []
-            significance_diag["final_served"] = len(retained)
-            significance_diag["final_served_per_arm"] = {}
+            counts = {}
             if bakeoff_run is not None:
                 for card in retained:
                     credit = bakeoff_run.attribution_for(card)
                     arm = credit[0] if credit else "injected"
-                    counts = significance_diag["final_served_per_arm"]
                     counts[arm] = counts.get(arm, 0) + 1
-            significance_diag["withheld"] = ("impression_unavailable" if owner_impression_error
-                                               else "superseded")
+            significance_diag = _replace_significance(
+                significance_diag, final_served=len(retained), final_served_per_arm=counts,
+                withheld=("impression_unavailable" if owner_impression_error else "superseded"))
         if bakeoff_run is not None:
             try:
                 run_row = bakeoff_run.run_row(
