@@ -364,6 +364,29 @@ def test_me_entitlements_pro_tracks_verification(eng, client):
     assert get(DEMO_TOKEN)["pro"] is True
 
 
+def test_me_entitlements_unverified_gets_empty_view(eng, client):
+    """A paying user_id on an unverified session: every entitlement field is
+    blank/false (founder too, once S1 adds it); `enforcing` stays the server
+    fact. The verified session of the same user gets the real values."""
+    _make_user("active_paid")
+    get = lambda t: client.get("/api/me/entitlements", headers={"X-Session-Token": t}).get_json()
+
+    real = get(TOKEN)
+    assert real["pro"] is True and real["ad_free"] is True
+    assert real["sources"] == ["apple_iap"] and real["expires_at"] is not None
+
+    blank = get(UNVERIFIED_TOKEN)
+    assert set(blank) == set(real)
+    assert blank["enforcing"] == real["enforcing"]
+    user_fields = {k: v for k, v in blank.items() if k != "enforcing"}
+    assert user_fields == {**entl.empty_entitlements()}
+    assert all(not v for v in user_fields.values()), user_fields
+    assert blank["pro"] is False and blank["ad_free"] is False
+    assert blank["sources"] == [] and blank["expires_at"] is None
+    if "founder" in blank:
+        assert blank["founder"] is False
+
+
 # ── (4) never a 402 ────────────────────────────────────────────────────────
 
 def test_unauthenticated_and_bad_token_never_402(eng, client, stubbed):

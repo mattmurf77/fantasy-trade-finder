@@ -31189,12 +31189,14 @@ def me_entitlements():
     bool rides in POST /api/extension/auth's payload (pro-subscription LLD;
     username-only auth can't carry a session token).
 
-    `pro` is false on an unverified session, as in the paywall gate: an
-    unverified username-only session shares the subscriber's user_id."""
+    An unverified session gets the empty entitlement view (every field
+    blank/false), as the paywall gate treats it: an unverified username-only
+    session shares the subscriber's user_id. `enforcing` is server state."""
     sess = _require_session()
-    out = entl.get_entitlements(sess["user_id"])
-    if not (sess.get("verified") or _synthetic_demo_session(sess)):
-        out["pro"] = False
+    if sess.get("verified") or _synthetic_demo_session(sess):
+        out = entl.get_entitlements(sess["user_id"])
+    else:
+        out = entl.empty_entitlements()
     out["enforcing"] = entl.is_enforcing()
     return jsonify(out)
 

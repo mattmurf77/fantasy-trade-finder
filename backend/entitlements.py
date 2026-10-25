@@ -232,7 +232,17 @@ def get_entitlements(user_id: str) -> dict:
     """
     with db.engine.begin() as conn:
         rows = _active_rows(conn, user_id)
+    return _view(rows)
 
+
+def empty_entitlements() -> dict:
+    """The view of a user with no rows: every field blank/false. Served to an
+    unverified session, which may carry a subscriber's user_id. Built by the
+    same shaping as get_entitlements, so a new field is blank here too."""
+    return _view([])
+
+
+def _view(rows) -> dict:
     pro_rows = [r for r in rows if r.entitlement == "pro"]
     ad_free_rows = [r for r in rows if r.entitlement == "ad_free"]
     pro = bool(pro_rows)
