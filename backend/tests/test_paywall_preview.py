@@ -252,6 +252,140 @@ def test_concurrent_second_deck_serve_answers_402(gate):
     assert r.status_code == 402 and r.get_json() == PREVIEW_USED
 
 
+# ── Legal R28.9: unverified sessions never reveal subscriber status ───────
+#
+# Every deck route also wears the account-auth verified gate
+# (@_gate_unverified_read/_write → 403 verification_required), which answers
+# an unverified session before any card is served. To exercise the paywall
+# gate's own rule, `unverified_deck` swaps /status for its undecorated view
+# (functools.wraps' __wrapped__); the real decorated route is pinned below.
+
+PAYING, FREE, TRIAL, LAPSED, GRANTED, NEW = (
+    "r289_paying", "r289_free", "r289_trial", "r289_lapsed", "r289_granted", "r289_new")
+VERIFY_REQUIRED = {"error": "pro_required", "gate": "verify_required"}
+VOLATILE_HEADERS = {"Date"}   # the Flask test client sets none; excluded anyway
+
+
+def _rc_user(uid, events):
+    for i, (etype, period, days) in enumerate(events):
+        ev = {"id": f"{uid}-{i}", "type": etype, "app_user_id": uid,
+              "product_id": "ftf_pro_monthly", "environment": "PRODUCTION",
+              "period_type": period, "expiration_at_ms": (time.time() + days * 86400) * 1000}
+        entl.ingest_billing_event("revenuecat", ev["id"], etype, ev, user_id=uid,
+                                  product_id="ftf_pro_monthly")
+
+
+@pytest.fixture
+def unverified_deck(gate, monkeypatch):
+    client, *_ = gate
+    _rc_user(PAYING, [("INITIAL_PURCHASE", "NORMAL", 30)])
+    _rc_user(TRIAL, [("INITIAL_PURCHASE", "TRIAL", -1), ("EXPIRATION", "TRIAL", -1)])
+    _rc_user(LAPSED, [("INITIAL_PURCHASE", "NORMAL", -1), ("EXPIRATION", "NORMAL", -1)])
+    entl.grant(GRANTED, "pro", source="manual_grant")
+    view = server.app.view_functions["trade_job_status"]
+    monkeypatch.setitem(server.app.view_functions, "trade_job_status", view.__wrapped__)
+    users = (PAYING, FREE, TRIAL, LAPSED, GRANTED, NEW)
+    with server._sessions_lock:
+        base = server._sessions[TOKEN]
+        for uid in users:
+            server._sessions[f"tok-{uid}"] = {**base, "user_id": uid, "verified": False}
+            server._trade_jobs[f"job-{uid}"] = {**server._trade_jobs[JOB_ID], "job_id": f"job-{uid}",
+                                                "key": (uid, LEAGUE, "1qb_ppr")}
+    try:
+        yield client
+    finally:
+        with server._sessions_lock:
+            for uid in users:
+                server._sessions.pop(f"tok-{uid}", None)
+
+
+def _as(uid):
+    return {"X-Session-Token": f"tok-{uid}", "X-Device": "iphone"}
+
+
+def _st(client, uid, cursor):
+    return status(client, cursor, job_id=f"job-{uid}", headers=_as(uid))
+
+
+def _shape(r):
+    """Status, body bytes and every header but the volatile ones."""
+    return (r.status_code, r.get_data(),
+            sorted((k, v) for k, v in r.headers.items() if k not in VOLATILE_HEADERS))
+
+
+def test_r289_unverified_paying_free_trial_identical(unverified_deck):
+    """(i) Each gets the preview page, then byte-identical 402s."""
+    client = unverified_deck
+    nexts, sends = [], []
+    for uid in (PAYING, FREE, TRIAL):
+        page = _st(client, uid, 0)
+        assert page.status_code == 200 and len(ids(page)) == PAGE
+        nexts.append(_st(client, uid, PAGE))
+        sends.append(client.post("/api/trades/propose", headers=_as(uid), json={}))
+    for r in nexts + sends:
+        assert r.status_code == 402 and r.get_json() == VERIFY_REQUIRED
+    assert _shape(nexts[0]) == _shape(nexts[1]) == _shape(nexts[2])
+    assert _shape(sends[0]) == _shape(sends[1]) == _shape(sends[2])
+
+
+def test_r289_granted_account_answers_like_a_brand_new_one(unverified_deck):
+    """(ii) Same page-1 allowance, same preview end, same 402."""
+    client = unverified_deck
+    seen = {}
+    for uid in (GRANTED, NEW):
+        rows = []
+        for cursor in range(PAGE + 2):
+            r = _st(client, uid, cursor)
+            body = {k: v for k, v in (r.get_json() or {}).items() if k != "job_id"}
+            rows.append((r.status_code, body))
+        seen[uid] = rows
+    assert seen[GRANTED] == seen[NEW]
+    statuses = [s for s, _ in seen[NEW]]
+    assert statuses == [200] * PAGE + [402, 402]          # the preview ends at cursor PAGE
+    assert seen[NEW][PAGE][1] == VERIFY_REQUIRED
+    assert len(seen[NEW][0][1]["cards"]) == PAGE
+
+
+def test_r289_after_verifying_resolves_normally(unverified_deck):
+    """(iii) Verified, the same call takes the usual path."""
+    client = unverified_deck
+    for uid in (PAYING, FREE, TRIAL, LAPSED, GRANTED, NEW):
+        _st(client, uid, 0)                                 # spend the unverified preview
+        with server._sessions_lock:
+            server._sessions[f"tok-{uid}"]["verified"] = True
+    gate = lambda uid: _st(client, uid, PAGE)
+    assert gate(PAYING).status_code == 200
+    assert gate(GRANTED).status_code == 200
+    assert gate(FREE).get_json() == PREVIEW_USED
+    assert gate(NEW).get_json() == PREVIEW_USED
+    assert gate(TRIAL).get_json() == {"error": "pro_required", "gate": "trial_expired"}
+    assert gate(LAPSED).get_json() == {"error": "pro_required", "gate": "lapsed"}
+    r = client.post("/api/trades/propose", headers=_as(FREE), json={})
+    assert r.get_json() == {"error": "pro_required", "gate": "never_trialed"}
+
+
+def test_r289_real_deck_route_answers_unverified_identically(gate):
+    """Today's decorated /status answers any unverified session 403
+    verification_required before the deck: identical for every user_id."""
+    client, *_ = gate
+    shapes = []
+    with server._sessions_lock:
+        base = server._sessions[TOKEN]
+        for uid in (PAYING, FREE):
+            server._sessions[f"tok-{uid}"] = {**base, "user_id": uid, "verified": False}
+    _rc_user(PAYING, [("INITIAL_PURCHASE", "NORMAL", 30)])
+    try:
+        for uid in (PAYING, FREE):
+            r = status(client, 0, job_id=JOB_ID, headers=_as(uid))
+            assert r.status_code == 403
+            shapes.append(_shape(r))
+    finally:
+        with server._sessions_lock:
+            for uid in (PAYING, FREE):
+                server._sessions.pop(f"tok-{uid}", None)
+    assert shapes[0] == shapes[1]
+
+
 def test_deleted_and_exported_with_the_account(gate):
     """Alias handling is test_account_deletion_coverage's parametrized case."""
     pg.record_preview(ME, JOB_ID, 1)
