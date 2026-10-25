@@ -13,6 +13,7 @@ Everything here is offline: in-memory SQLite, an injected fake ranking service,
 and a real Flask test client with a seeded `server._sessions` entry.
 """
 import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -67,6 +68,7 @@ class _FakeService:
     because T-15's "unlocked with ZERO trio interactions" assertion rests on it.
     """
 
+    _lock = threading.RLock()
     POSITION_THRESHOLDS = {"QB": 10, "RB": 10, "WR": 10, "TE": 10}
 
     def __init__(self, players):
