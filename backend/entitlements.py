@@ -260,18 +260,26 @@ def _enforce_knob_on() -> bool:
         return False
 
 
+def is_enforcing() -> bool:
+    """The one enforce rule, shared by check_pro and /api/me/entitlements'
+    `enforcing`: monetize.entitlements ∧ monetize.paywall ∧ model_config
+    paywall_enforce_enabled == 1. `monetize.pro` is retired and deliberately
+    not read (2026-10-24)."""
+    return (is_enabled("monetize.entitlements")
+            and is_enabled("monetize.paywall")
+            and _enforce_knob_on())
+
+
 def check_pro(user_id: str, route: str, logger=None) -> bool:
     """Flag-aware gate. Returns True when the request may proceed.
 
-    OFF → True. Enforce = monetize.entitlements ∧ monetize.paywall ∧
-    model_config paywall_enforce_enabled == 1 → resolution result.
+    OFF → True. Enforce (is_enforcing()) → resolution result.
     Entitlements on but enforce false (either reason) → observe: log + True.
-    `monetize.pro` is retired and deliberately not read (2026-10-24).
     """
     if not is_enabled("monetize.entitlements"):
         return True
     has_pro = get_entitlements(user_id)["pro"]
-    if not (is_enabled("monetize.paywall") and _enforce_knob_on()):
+    if not is_enforcing():
         if logger is not None:
             logger.info("ENTITLE-OBSERVE user=%s route=%s would_block=%s",
                         user_id, route, not has_pro)

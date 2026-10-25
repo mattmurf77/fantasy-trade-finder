@@ -31165,7 +31165,7 @@ def me_entitlements():
     username-only auth can't carry a session token)."""
     sess = _require_session()
     out = entl.get_entitlements(sess["user_id"])
-    out["enforcing"] = is_enabled("monetize.entitlements")
+    out["enforcing"] = entl.is_enforcing()
     return jsonify(out)
 
 

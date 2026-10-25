@@ -20,9 +20,11 @@ Covers:
   (4) kill knob — model_config `paywall_enforce_enabled` seeded 0, read live
       per call (flip the stored row, the answer changes, no reload); a
       missing row or failed read is 0, not enforcing (G-064)
+  (5) GET /api/me/entitlements `enforcing` uses the same is_enforcing() rule
+      as check_pro: true only when all three legs are on
 
-In-memory SQLite via the same patched-engine harness as test_entitlements.py.
-No network, no backend.server import.
+In-memory SQLite via the same patched-engine harness as test_entitlements.py;
+Flask test client + injected session for the route. No network.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -33,6 +35,7 @@ from sqlalchemy import create_engine, insert, select
 
 import backend.database as db_module
 import backend.entitlements as entl
+import backend.server as server
 from backend.database import (
     metadata, model_config_table, subscription_events_table, users_table,
 )
@@ -350,3 +353,41 @@ def test_monetize_pro_is_not_read(eng):
     with patch.object(entl, "is_enabled", spy):
         assert entl.check_pro(USER, "/api/x") is True
     assert "monetize.pro" not in seen
+
+
+# ── (5) /api/me/entitlements `enforcing` = the check_pro rule ──────────────
+
+TOKEN = "safety-test-token"
+
+
+@pytest.fixture()
+def client(eng):
+    server.app.config["TESTING"] = True
+    c = server.app.test_client()
+    with server._sessions_lock:
+        server._sessions[TOKEN] = {"user_id": USER, "last_active": 0.0}
+    try:
+        yield c
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(TOKEN, None)
+
+
+@pytest.mark.parametrize("ent", [False, True])
+@pytest.mark.parametrize("paywall", [False, True])
+@pytest.mark.parametrize("knob", [0.0, 1.0])
+def test_me_entitlements_enforcing_matches_check_pro(eng, client, ent, paywall, knob):
+    """All 8 combinations, which include every single-leg flip off all-on
+    and every single leg on alone: enforcing is true only when all three
+    are on, and always agrees with check_pro's verdict for a non-pro user."""
+    _set_knob(eng, knob)
+    on = [k for k, v in (("monetize.entitlements", ent),
+                         ("monetize.paywall", paywall)) if v]
+    with patch.object(entl, "is_enabled", _flags(*on)):
+        r = client.get("/api/me/entitlements",
+                       headers={"X-Session-Token": TOKEN})
+        blocked = entl.check_pro(USER, "/api/x") is False
+    assert r.status_code == 200
+    enforcing = r.get_json()["enforcing"]
+    assert enforcing is (ent and paywall and knob == 1.0)
+    assert enforcing is blocked
