@@ -14,6 +14,9 @@ Covers:
       with process_error `perpetual_grant_refused…` and writes no row (nor
       turns an existing row perpetual); founder lifetime still grants
       perpetually; tips still grant nothing
+  (3) enforce = monetize.entitlements ∧ monetize.paywall ∧ knob == 1 — all
+      8 combinations; only all three on blocks, every other entitlements-on
+      combination observes (logs ENTITLE-OBSERVE, returns True)
   (4) kill knob — model_config `paywall_enforce_enabled` seeded 0, read live
       per call (flip the stored row, the answer changes, no reload); a
       missing row or failed read is 0, not enforcing (G-064)
@@ -272,3 +275,78 @@ def test_knob_read_live_between_calls(eng):
     assert entl._enforce_knob_on() is True
     _set_knob(eng, 2.0)                                 # exactly 1, not truthy
     assert entl._enforce_knob_on() is False
+
+
+# ── (3) enforce truth table: entitlements × paywall × knob ─────────────────
+
+class _Cap:
+    def __init__(self):
+        self.lines = []
+
+    def info(self, msg, *a):
+        self.lines.append(msg % a)
+
+
+def _flags(*on):
+    return lambda k: k in on
+
+
+@pytest.mark.parametrize("ent", [False, True])
+@pytest.mark.parametrize("paywall", [False, True])
+@pytest.mark.parametrize("knob", [0.0, 1.0])
+def test_enforce_truth_table(eng, ent, paywall, knob):
+    _set_knob(eng, knob)
+    on = [k for k, v in (("monetize.entitlements", ent),
+                         ("monetize.paywall", paywall)) if v]
+    cap = _Cap()
+    with patch.object(entl, "is_enabled", _flags(*on)):
+        allowed = entl.check_pro(USER, "/api/x", logger=cap)   # USER has no pro
+    enforce = ent and paywall and knob == 1.0
+    assert allowed is (not enforce)
+    observed = any("ENTITLE-OBSERVE" in l and "would_block=True" in l
+                   for l in cap.lines)
+    assert observed is (ent and not enforce)
+
+
+def test_enforce_still_lets_pro_through(eng):
+    _set_knob(eng, 1.0)
+    both = _flags("monetize.entitlements", "monetize.paywall")
+    with patch.object(entl, "is_enabled", both):
+        assert entl.check_pro(USER, "/api/x") is False
+        entl.grant(USER, "pro", source="manual_grant")
+        assert entl.check_pro(USER, "/api/x") is True
+
+
+def test_check_pro_reads_knob_live(eng):
+    _other_config_row(eng)
+    both = _flags("monetize.entitlements", "monetize.paywall")
+    with patch.object(entl, "is_enabled", both):
+        _set_knob(eng, 1.0)
+        assert entl.check_pro(USER, "/api/x") is False      # enforcing
+        _set_knob(eng, 0.0)
+        assert entl.check_pro(USER, "/api/x") is True       # killed, no deploy
+
+
+def test_check_pro_missing_knob_row_does_not_enforce(eng):
+    """G-064: an absent row must read as 0 (observe), not as enforcing."""
+    _other_config_row(eng)
+    cap = _Cap()
+    both = _flags("monetize.entitlements", "monetize.paywall")
+    with patch.object(entl, "is_enabled", both):
+        assert entl.check_pro(USER, "/api/x", logger=cap) is True
+    assert any("ENTITLE-OBSERVE" in l for l in cap.lines)
+
+
+def test_monetize_pro_is_not_read(eng):
+    """monetize.pro is retired: flipping it alone (or with entitlements)
+    never changes the gate."""
+    _set_knob(eng, 1.0)
+    seen = []
+
+    def spy(k):
+        seen.append(k)
+        return k in ("monetize.entitlements", "monetize.pro")
+
+    with patch.object(entl, "is_enabled", spy):
+        assert entl.check_pro(USER, "/api/x") is True
+    assert "monetize.pro" not in seen

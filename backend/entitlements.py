@@ -10,9 +10,10 @@ Implements docs/plans/monetization/00-platform-foundation.md §2–§4:
     the billing projector (manual-grant admin routes wrap these).
   * check_pro() — flag-aware gate used by server.py's @require_pro wrapper.
     monetize.entitlements OFF → allow (all users implicitly pro).
-    ON without monetize.paywall → OBSERVE mode: log `ENTITLE-OBSERVE …
+    ON without enforce → OBSERVE mode: log `ENTITLE-OBSERVE …
     would_block=…`, never block (foundation §2.4, mirrors the AUTH-GRACE
-    rollout). Both ON → enforce (caller returns 402).
+    rollout). Enforce = both flags ON and model_config
+    paywall_enforce_enabled == 1 (caller returns 402).
   * ingest_billing_event() — append-only subscription_events ledger with
     event_id idempotency, plus a minimal projector for the RevenueCat /
     Stripe event types the launch SKUs emit. Client receipts are never
@@ -262,13 +263,15 @@ def _enforce_knob_on() -> bool:
 def check_pro(user_id: str, route: str, logger=None) -> bool:
     """Flag-aware gate. Returns True when the request may proceed.
 
-    OFF → True. Observe (entitlements on, paywall off) → log + True.
-    Enforce (both on) → resolution result.
+    OFF → True. Enforce = monetize.entitlements ∧ monetize.paywall ∧
+    model_config paywall_enforce_enabled == 1 → resolution result.
+    Entitlements on but enforce false (either reason) → observe: log + True.
+    `monetize.pro` is retired and deliberately not read (2026-10-24).
     """
     if not is_enabled("monetize.entitlements"):
         return True
     has_pro = get_entitlements(user_id)["pro"]
-    if not is_enabled("monetize.paywall"):
+    if not (is_enabled("monetize.paywall") and _enforce_knob_on()):
         if logger is not None:
             logger.info("ENTITLE-OBSERVE user=%s route=%s would_block=%s",
                         user_id, route, not has_pro)
