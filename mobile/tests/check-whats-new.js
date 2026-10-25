@@ -13,7 +13,7 @@
 //      red here.
 //   2. Its route is 'SettingsAbout', a registered RootNav screen (Settings ›
 //      Help & about, where the Privacy Policy and Terms rows live).
-//   3. Its headline is legal-lead's R26.1 text exactly, with no trailing period.
+//   3. Its headline is legal-lead's Part 5.2 text exactly, with no trailing period.
 //   4. No other entry remains (D13-R4: the stale 1.9.1 placeholder is gone).
 //   5. The hook is gated by ux.whats_new and keyed by Constants.expoConfig.version.
 //      The flag's VALUE is not pinned: release-lead holds it off until the new
@@ -51,8 +51,10 @@ const F = {
   appJson: 'app.json',
 };
 
-// legal-lead R26.1 (leads/legal-lead.md, 2026-10-23), verbatim. 67 characters.
-const D13_HEADLINE = "We've updated our Privacy Policy and Terms of Use. Tap to read them";
+// legal-lead, leads/legal-lead-drafts.md Part 5.2 (2026-10-24), verbatim.
+// 97 characters. It supersedes R26.1's 67-character text now that the
+// policies carry the subscription terms (R28).
+const D13_HEADLINE = "We've updated our Privacy Policy and Terms of Use, including subscription terms. Tap to read them";
 const D13_ROUTE = 'SettingsAbout';
 
 for (const rel of Object.values(F)) {
@@ -149,7 +151,7 @@ check(`2. the entry's route is '${D13_ROUTE}', a registered RootNav screen`, () 
 });
 
 // ── 3. legal's words ────────────────────────────────────────────────────────
-check("3. the headline is legal-lead's R26.1 text exactly, no trailing period", () => {
+check("3. the headline is legal-lead's Part 5.2 text exactly, no trailing period", () => {
   const entry = whatsNewMap()[appVersion] || {};
   expect(entry.headline === D13_HEADLINE,
     `headline is ${JSON.stringify(entry.headline)}\n      expected ${JSON.stringify(D13_HEADLINE)}`);
