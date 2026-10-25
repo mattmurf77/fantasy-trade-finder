@@ -29,6 +29,8 @@
 //      `testing.timing_readout`, false otherwise. The hub's Testing row and
 //      the Testing page body are each gated by it directly, and the page's
 //      other branch is the honest unavailable line, never an empty page.
+//      5e: #363's TimingReadoutRow sits right after TestingSection, imported
+//      from components/, default testID, under no gate but that predicate.
 //   6. D-6 — FeedbackSheet renders no Screen field (its only TextInput is the
 //      note) but still submits `screen`, falling back to 'Unknown'.
 //
@@ -515,6 +517,49 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
              : !isPredicate(page, g.test) ? `gated on \`${g.test.getText(page)}\`, not the shared predicate`
              : !importsPredicate(page) ? "the page doesn't import useTesterSurface from './useTesterSurface'"
              : 'the false branch is not the settings.testing-unavailable line');
+    }
+  }
+
+  // 5e. #363's TimingReadoutRow (head-eng ruling 11) is mounted directly
+  //     AFTER <TestingSection> on the Testing page (under its "Testing"
+  //     banner), imported from the components path, with its default testID
+  //     (no props) and no gate of its own: the component self-gates on
+  //     `testing.timing_readout`, so the only conditional around it is the
+  //     page's shared D-7 predicate, the same one TestingSection sits under.
+  {
+    const page = parseFile(path.join(SETTINGS_DIR, 'SettingsTestingScreen.tsx'));
+    const imported = page.statements.some((s) => ts.isImportDeclaration(s) && isStr(s.moduleSpecifier)
+      && s.moduleSpecifier.text === '../../components/TimingReadoutRow' && s.importClause
+      && s.importClause.namedBindings && ts.isNamedImports(s.importClause.namedBindings)
+      && s.importClause.namedBindings.elements.some((e) => e.name.text === 'TimingReadoutRow' && !e.propertyName));
+    const mounts = byTag(page, 'TimingReadoutRow');
+    const m = mounts.length === 1 ? mounts[0] : null;
+    const g = m ? innermostGuard(m) : null;
+    const sections = byTag(page, 'TestingSection');
+    const sg = sections.length === 1 ? innermostGuard(sections[0]) : null;
+    const asNode = (el) => (el && ts.isJsxOpeningElement(el) ? el.parent : el);
+    const node = asNode(m);
+    const sectionNode = sections.length === 1 ? asNode(sections[0]) : null;
+    const holder = node && ts.isJsxElement(node.parent) ? node.parent : null;
+    const kids = holder ? holder.children.filter((c) => !(ts.isJsxText(c) && !c.text.trim())) : [];
+    const at = kids.indexOf(node);
+    const prev = at > 0 ? kids[at - 1] : null;
+    const problems = [
+      [imported, "no `import { TimingReadoutRow } from '../../components/TimingReadoutRow'`"],
+      [mounts.length === 1, `found ${mounts.length} <TimingReadoutRow> mounts, want 1`],
+      [!m || m.attributes.properties.length === 0,
+        m ? `passes props (${m.attributes.getText(page)}); the default testID settings.testing.timing-readout must stand` : ''],
+      [!m || (g && sg && g.inTrue && g.test === sg.test && isPredicate(page, g.test)),
+        !g ? 'renders outside the useTesterSurface() branch'
+          : `gated on \`${g.test.getText(page)}\`, not only the page's shared predicate — the row gates itself`],
+      [!m || (!!sectionNode && prev === sectionNode),
+        `not the child immediately after <TestingSection> (it follows ${prev ? prev.getText(page).slice(0, 40) : 'nothing'})`],
+    ].filter(([okay]) => !okay).map(([, why]) => why);
+    if (problems.length === 0) {
+      ok(`5e. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection> (${line(page, m)}), ungated, default testID`);
+    } else {
+      fail('5e. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection>, ungated, with its default testID',
+           problems.join('; '));
     }
   }
 

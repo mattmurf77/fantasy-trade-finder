@@ -1,10 +1,14 @@
 // Settings › Testing — second-level page (dev / allowlisted-tester builds).
 //
-// Implements plan §3 (`SettingsTesting` row of the page table). Composes one
-// Phase-0 section module:
+// Implements plan §3 (`SettingsTesting` row of the page table). Renders, in
+// order:
 //
-//   • TestingSection — "Test feedback" and "Test stages" (the latter keeping
-//     its own `testing.stage_users` gate).
+//   • TestingSection — "Test stages", keeping its own `testing.stage_users`
+//     gate. ("Test feedback" moved to Help & about with #354 BL-10.)
+//   • TimingReadoutRow (components/, trades-eng's #363, head-eng ruling 11) —
+//     directly after TestingSection, so it sits under the "Testing" banner. It
+//     carries its own `testing.timing_readout` gate (renders null when off),
+//     so this page adds no gate around it.
 //
 // BANNER: owned by TestingSection itself (<TickLabel>Testing</TickLabel>), so
 // this page adds none.
@@ -25,6 +29,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import FeedbackFAB from '../../components/FeedbackFAB';
 import Toast from '../../components/Toast';
+import { TimingReadoutRow } from '../../components/TimingReadoutRow';
 import { Text } from '../../components/chalkline';
 import { space } from '../../theme/chalkline';
 import { styles } from './styles';
@@ -52,6 +57,7 @@ export default function SettingsTestingScreen({ navigation }: any) {
             navigate={navigate}
             navigateWithoutDismiss={(route, params) => navigation.navigate(route, params)}
           />
+          <TimingReadoutRow />
         </ScrollView>
       ) : (
         <View style={local.unavailable}>
