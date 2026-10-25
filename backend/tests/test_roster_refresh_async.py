@@ -352,3 +352,19 @@ def test_reads_per_kick_meta_cached_vs_miss(env):
     _wait_idle()
     assert (calls["rosters"], calls["users"], calls["meta"]) == (2, 2, 1)   # one meta read on a miss
     assert LID in server._FA_LEAGUE_META_CACHE                              # and the cache is warm again
+
+
+def test_stale_meta_cache_entry_is_refetched_once_fresh_one_is_not(env):
+    """QA P3 (#378): the kick honours the same 15-min TTL as every other
+    _FA_LEAGUE_META_CACHE reader — a stale entry is re-read once."""
+    calls, _b, _e = env
+    ttl = server._FA_LEAGUE_META_TTL
+    server._FA_LEAGUE_META_CACHE[LID] = (time.time() - ttl - 1, dict(META))   # stale
+    assert rr.maybe_refresh_async(LID, 0) is True
+    _wait_idle()
+    assert calls["meta"] == 1
+    assert time.time() - server._FA_LEAGUE_META_CACHE[LID][0] < ttl         # re-warmed
+    server._FA_LEAGUE_META_CACHE[LID] = (time.time() - ttl + 60, dict(META))  # fresh
+    assert rr.maybe_refresh_async(LID, 0) is True
+    _wait_idle()
+    assert calls["meta"] == 1                                                # no new read

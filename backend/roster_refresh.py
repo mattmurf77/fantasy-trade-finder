@@ -182,7 +182,8 @@ def _refresh_league(league_id: str, started: str) -> str | None:
 
     Reads rosters and users (circuit-guarded `_sleeper_get`), replace-syncs
     `league_members` in session init's row shape, syncs owned picks (meta from
-    the 15-min cache, else one read), then records the outcome. PR-B extends
+    the 15-min cache when younger than its TTL, else one read that re-warms
+    it), then records the outcome. PR-B extends
     this function with the fingerprint stamp and `on_roster_change`.
     """
     from . import server                  # lazy: server imports this module's siblings
@@ -221,8 +222,12 @@ def _refresh_league(league_id: str, started: str) -> str | None:
     picks_ok = True
     if is_enabled("picks.owned_sync"):            # the same gate session init uses
         try:
+            # The same freshness rule every _FA_LEAGUE_META_CACHE reader uses
+            # (_sleeper_lineup_slots, _fa_league_meta): younger than the 15-min TTL.
             hit = server._FA_LEAGUE_META_CACHE.get(league_id)
-            meta = hit[1] if hit and hit[1] else None
+            fresh = (hit is not None and hit[1]
+                     and (time.time() - hit[0]) < server._FA_LEAGUE_META_TTL)
+            meta = hit[1] if fresh else None
             if meta is None:
                 meta = server._fetch_sleeper_league_meta(league_id)
                 if meta:
