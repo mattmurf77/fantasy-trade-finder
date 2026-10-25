@@ -21,8 +21,8 @@
 //   set EXACTLY (2026-10-23, docs/plans/org-bringup/leads/legal-lead.md §R3/R5):
 //   the same types, each linked and not tracking, with the same purposes. The
 //   labels in App Store Connect and this manifest must agree, so any R3 change
-//   updates COLLECTED below in the same commit. Purchases is deliberately
-//   absent while the RevenueCat key is unset (R3 Q7).
+//   updates COLLECTED below in the same commit. Purchase History was added by
+//   legal-lead's R28.2 when the paywall entered the launch binary (2026-10-25).
 //
 // Run: node tests/check-privacy-manifest.js
 
@@ -56,6 +56,9 @@ const COLLECTED = {
   CrashData: ['AppFunctionality', 'Analytics'],
   PerformanceData: ['AppFunctionality', 'Analytics'],
   OtherDiagnosticData: ['AppFunctionality', 'Analytics'],
+  // R28.2 (2026-10-25): the paywall ships (operator approved R1), so purchases
+  // are collected. Analytics too, because subscription events feed K0–K3.
+  PurchaseHistory: ['AppFunctionality', 'Analytics'],
   OtherDataTypes: ['AppFunctionality'],
 };
 
@@ -151,4 +154,4 @@ if (failures) {
   console.error(`\n${failures} privacy-manifest pin(s) broken.`);
   process.exit(1);
 }
-console.log(`ok    privacy manifest: in Resources, ${Object.keys(REQUIRED).length} required-reason categories, ${Object.keys(COLLECTED).length} collected types = R3-FINAL, tracking off`);
+console.log(`ok    privacy manifest: in Resources, ${Object.keys(REQUIRED).length} required-reason categories, ${Object.keys(COLLECTED).length} collected types = the App Privacy labels, tracking off`);

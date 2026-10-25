@@ -68,6 +68,12 @@ ProductInteraction, CrashData, PerformanceData, OtherDiagnosticData, OtherDataTy
 - `check-privacy-manifest.js` now pins the set exactly. Five more sabotages each fail it: the old empty array, a
   type dropped, tracking true, an extra purpose, an undeclared PurchaseHistory.
 - The R5 trigger applies: any R3 change updates the manifest, and the check's table, in the same commit.
+- **2026-10-25, R28.2:** the paywall entered the launch binary (operator approved R1), so legal-lead's R28.2 adds
+  **PurchaseHistory**: linked, not tracking, purposes App Functionality + Analytics (subscription events feed the
+  K0–K3 metrics). The manifest and COLLECTED now hold 13 types. Two sabotages each fail it: the row dropped, the
+  Analytics purpose dropped. RevenueCat's own SDK manifest stays alongside it. The app calls no RevenueCat
+  device-identifier or attribution API (no `collectDeviceIdentifiers` / `enableAdServicesAttributionTokenCollection`
+  in `mobile/src`).
 - The code-vs-label diff found no mismatch:
   - Name: `api/auth.ts:99-102` forwards Apple's first-sign-in name; `users.display_name` holds Sleeper names.
   - Coarse Location: the time zone (`server.py:2905`, `notif.tz_sync`); also `user_events.country` from a CDN header
