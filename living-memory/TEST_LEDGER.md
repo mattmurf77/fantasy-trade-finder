@@ -1,3 +1,21 @@
+## 2026-10-25 — 200 ms path, mobile pieces (#363): pass A, M, C — evidence
+
+Full gates, not express (PRD #339; eng scope v1.3). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Ship gate:** CI 4/4 green on `e362c8ee` (backend-tests, mobile-typecheck with every `check-*.js`, testid-lint, web-structure). CLEAN against `main` @ `3d752296`; main was merged in at `04d50ade`.
+- **Code-walk:** [code-walk-mobile.md](../docs/plans/trade-time-to-suggestion/code-walk-mobile.md), keyed by symbol, with each claim's guard.
+- **New mobile guards:** `check-trade-pages`, `check-trade-buffer`, `check-trade-inplace-reveal`, `check-no-finding-more`, `check-withdraw-in-place`, `check-trade-first-card-events`, `check-timing-readout`, `check-device-first-page`.
+- **Sabotage runs (each red, then green on restore):**
+  - first-card events: 7 named sabotages, plus the `team_review` scoped-only rule;
+  - device page: no max age (1c), a request before the push (3a), an append merge (1h), the demo-start clear (4b), the Retry spoken label (4c);
+  - no-finding-more: 3 sabotages, plus the P36 tally at zero (4d);
+  - `check-usage-trends` 2h: a pin write before the league switch.
+  - Four guards were re-pinned to new code shapes, rule unchanged, each sabotaged once: inplace-reveal 2b, trade-pages 5b, withdraw-in-place 4c/4e, win-now-recovery.
+- **Local runs:** `tsc --noEmit` clean, and testid-lint OK.
+- **Backend:** `test_time_to_suggestion_events.py` (exact R1/R2/R2b/`deck_buffer_empty` prop rows; R1 INTENT; the other three NON_INTENT; join ids survive the digit-run scrub only when id-shaped; sabotaged). Analytics ingest suite: 145 passed. `test_analytics_taxonomy_384` pins follow the R1 widening.
+- **Review:** onboarding-eng approved C's session side (A1 folded in at `92a59dc5`).
+- **Not run yet:** the TestFlight checklist (code-walk §4: C's 9 steps plus the readout check), and app-manager's AC-L1 two-device session (OA-6, 11-07 to 11-09).
+
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
 - #326: CI 4/4 green on `fd805933`. Value-core, grading and fit suites 230 passed; the redundancy test gains the superflex third-QB and QB-for-QB cases.
