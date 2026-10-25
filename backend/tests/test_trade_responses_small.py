@@ -417,6 +417,18 @@ def test_paged_kill_switch_serves_the_legacy_body(e2, monkeypatch, off):
     assert not spawned
 
 
+
+def test_paged_kill_switch_on_a_fresh_job_returns_the_legacy_shape(e2, monkeypatch):
+    """The fresh-job return (no cached job, a new one is started) also drops the
+    paging fields at knob 0, not only the cache-hit return."""
+    client, _engine, spawned = e2
+    monkeypatch.setitem(ts._cfg, "trade_paged_responses", 0.0)
+    response = generate(client, page=1, search_id="kill-switch-fresh")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body.get("job_id") and len(spawned) == 1
+    assert not {"cursor", "total_ready", "replace", "search_id"} & set(body)
+
 def test_paged_kill_switch_still_validates(e2, monkeypatch):
     client, *_ = e2
     seed_job([card(i) for i in range(3)], status="complete")
