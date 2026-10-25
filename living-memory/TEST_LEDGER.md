@@ -16,6 +16,22 @@ Full gates, not express (PRD #339; eng scope v1.3). D-056: no simulator; `FTF_SK
 - **Review:** onboarding-eng approved C's session side (A1 folded in at `92a59dc5`).
 - **Not run yet:** the TestFlight checklist (code-walk §4: C's 9 steps plus the readout check), and app-manager's AC-L1 two-device session (OA-6, 11-07 to 11-09).
 
+## 2026-10-25 — S0 background roster refresh, Sleeper 429 circuit, R10 pick fix (#378)
+
+Full gates ([scope](../docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md)). Server only; D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** CI 4/4 green on `52bcb7fa`. Local full suite 7777 passed, 1 skipped, after R10 (`2a05ca80`). After merging main (`3d752296`): the targeted S0 suites pass, 115/115. They are `test_roster_refresh_async.py` (18), `test_roster_refresh_state.py`, `test_sleeper_backoff.py` (34), `test_traded_picks_unavailable.py` (11), `test_session_init_sleeper_calls.py` and `test_co_owner_rosters.py`.
+- **Pins:** per Sleeper session init, rosters 1, meta 1, total ≤ 8 (was ≤ 10, D-178). A numeric MFL id makes no Sleeper roster or meta call.
+- **Sabotage, each red then restored:**
+  - `maybe_refresh_async` single-flight removed → the barrier test fails `8 == 1`;
+  - the R10 guards removed → 6 of 11 `test_traded_picks_unavailable` fail.
+
+  The 60 s retry cooldown has direct tests (10 s → none, 61 s → one, unparseable → not blocked) but no recorded sabotage run.
+- **Code-walk:** scope evidence section. Covers fresh / stale on failure / no state row, the open circuit, and the `maybe_refresh_async` thread path.
+- **Reviews:** onboarding-eng approved the session-init diff (advisories A1/A2 recorded as R9/R11). The fingerprint contract with trades-eng is at v0.3.
+- **CI note:** one red run on `a860eaa3` was `test_ranking_service_threads`. That's a cross-branch wall-clock flake in #357 (`setswitchinterval(1e-6)` plus a 60 s join), routed to rankings-eng; it doesn't touch S0 code.
+- **Prod check after deploy:** for one app open, the Render log should show at most 8 `→ Sleeper GET` lines after `=== /api/session/init`. A `league_roster_state` row should then exist for that league (`status='fresh'`).
+
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
 - #326: CI 4/4 green on `fd805933`. Value-core, grading and fit suites 230 passed; the redundancy test gains the superflex third-QB and QB-for-QB cases.
