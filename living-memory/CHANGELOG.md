@@ -11,6 +11,12 @@
 
 ---
 
+## 2026-10-21 — Usage Trends week 6 loaded by hand (daily tick still dead)
+
+- `scripts/refresh_usage_trends.py --remote` stored 2026 week 6: 28 teams and 554 players. The byes CIN/DET/MIA/MIN match nflverse. Week 5's correction re-check found no change, and the server log reads `planned [5, 6], stored [6]`. The stored week dropped the route's caches, so the app serves weeks 3–6 by default at once.
+- Week 6's top snap jumps are Jaleel McLaughlin (CLE, 9% → 63%) and Jordan Watkins (SF, 34% → 76%). Top target jumps are Jalen Coker (CAR, 10% → 37%) and Christian McCaffrey (SF, 16% → 35%).
+- `POST /api/cron/daily-tick` still hit `WORKER TIMEOUT` → 500 on 2026-10-15, 10-18 and 10-21. The fix task is unshipped ([NEXT](NEXT.md) 2026-10-15). Week 7 needs the same manual load once Sleeper rolls to week 8.
+
 ## 2026-10-15 — Live-deck filters (#328, D-207), value core v4 (#326, D-206), Calibration Yes/No (#327, D-208)
 
 - Per-grader analysis of 378 Calibration answers. The operator grades in binary (95% 1s or 5s), gdubs10 uses the whole scale, and jonbonjourvi is harsh (73% 1–2). Normalized per grader, each grader prefers a different engine. Signature failures: today's engine junk filler; value core overpay + window; fit A window (mostly QBs). The structural signal is consistent: breakup −0.59 z, 2-for-1 +0.27 z, and receiving picks +0.26 z.

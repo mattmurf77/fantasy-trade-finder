@@ -24,7 +24,7 @@ import {
   type LinkSleeperResponse,
 } from '../api/auth';
 import { track } from '../api/events';
-import { ApiError } from '../api/client';
+import { ApiError, getSessionToken } from '../api/client';
 import EspnLinkSheet from '../components/EspnLinkSheet';
 import RankChipBadge from '../components/RankChipBadge';
 import PlatformLinkSheet from '../components/PlatformLinkSheet';
@@ -108,6 +108,9 @@ export default function LeaguePickerScreen({
   // on for an account-only session to exist at all, so the Sleeper button is
   // gated symmetrically with the three platform buttons.
   const sleeperLinkEnabled = useFlag('auth.accounts');
+  // Incident 2026-10-17 — the same gate as the session-expired reroute in
+  // useSession: flag off keeps the legacy no-reroute behavior.
+  const persistentSessions = useFlag('auth.persistent_sessions');
   const [espnOpen, setEspnOpen] = useState(false);
   // Which zero-auth platform sheet is open (MFL / Fleaflicker), if any.
   const [platformOpen, setPlatformOpen] = useState<LinkPlatform | null>(null);
@@ -124,6 +127,31 @@ export default function LeaguePickerScreen({
   // "the existing flags are the per-platform rollback lever" honest.
   const canLink = sleeperLinkEnabled || espnEnabled || mflEnabled || fleaflickerEnabled;
   const accountOnlyEmpty = !!user?.account_only && cached.length === 0 && canLink;
+
+  // Incident 2026-10-17 — a real Sleeper identity: not account-only, not a
+  // demo. canVerifySleeper's identity test plus the store's demo flag, read
+  // from the store at decision time.
+  function sleeperKeyed(): boolean {
+    const { user: u, isDemo } = useSession.getState();
+    return !!u && !u.account_only && !u.user_id.startsWith('demo_user_') && !isDemo;
+  }
+
+  // Incident 2026-10-17 — no token for a Sleeper-keyed user means signed out:
+  // RootNav lands a token-less cold start here, and every league tap would
+  // abort before reaching the network. Confirm against the stored token, not
+  // `hasToken`: right after a username sign-in `hasToken` is still false while
+  // a token IS stored, and trusting it would loop SignIn → picker → SignIn.
+  useEffect(() => {
+    if (useSession.getState().hasToken || !persistentSessions || !sleeperKeyed()) return;
+    let alive = true;
+    void getSessionToken().then((token) => {
+      if (alive && !token) navigation.replace('SignIn');
+    });
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // #130 — Settings' ESPN CTA lands here with `espnLink: true`; open the
   // sheet once the flag confirms. Effect (not initial state) because the
@@ -445,7 +473,16 @@ export default function LeaguePickerScreen({
       context.assertCurrent();
       onLeaguePicked();
     } catch (e: any) {
-      if (e?.name === 'AbortError') return;
+      if (e?.name === 'AbortError') {
+        // Incident 2026-10-17 — with the session intact an abort is a
+        // superseded or obsolete intent: reset only. With NO token no tap can
+        // succeed, so route to sign-in or say why instead of going quiet.
+        if (!(await getSessionToken())) {
+          if (sleeperKeyed() && persistentSessions) navigation.replace('SignIn');
+          else setError('Your session expired. Sign out, then sign in again to choose a league.');
+        }
+        return;
+      }
       try { guard(e); } catch { return; }
       const code = e instanceof ApiError ? (e.body as any)?.error : null;
       if (code === 'verification_required') {
@@ -460,6 +497,11 @@ export default function LeaguePickerScreen({
       setError(code === 'verification_required'
         ? 'Verify your Sleeper account, then choose your league again.'
         : e?.message || 'Failed to import this league');
+    } finally {
+      // Every exit releases the list: success, every catch branch, the abort
+      // and guard returns. A swallowed abort that skipped this froze every row
+      // (incident 2026-10-17). Plain null is enough: a second pick can't start
+      // while one is busy (the early return above; every trigger is disabled).
       setSelectingId(null);
     }
   }
@@ -479,8 +521,14 @@ export default function LeaguePickerScreen({
       {canVerifySleeper && (
         <Button testID="leagues.verify-sleeper" label="Verify Sleeper account"
           variant="secondary" disabled={!!selectingId}
-          onPress={() => {
+          onPress={async () => {
             setError(null);
+            // Incident 2026-10-17 — SleeperConnect's link call 401s without a
+            // session, so a token-less user signs in first.
+            if (!(await getSessionToken())) {
+              navigation.replace('SignIn');
+              return;
+            }
             navigation.navigate('SleeperConnect');
           }} />
       )}

@@ -5,7 +5,9 @@ identity) on the trailing window vs the production baseline, appends run
 records to data/eval_runs/runs.jsonl, and returns a summary + markdown
 report. Idempotent per (UTC run_date, scorer, window_days): a re-invoked
 daily tick finds the existing records and skips — same convention as the
-F10 replenish log.
+F10 replenish log. Lean by design (it runs last in the daily tick): when
+no scorer is due it returns before loading anything, and when one is it
+loads only eval's columns with features projected to the scorer contract.
 
 The server.py cron hook is a HANDOFF this wave (F7 owns server.py); the
 designed snippet lives in feedback-workspace/tiktok-discovery/build/W4-F8.md
@@ -53,9 +55,19 @@ def run_all(
         (r.get("run_date"), r.get("scorer"), r.get("window_days"))
         for r in load_runs()
     }
+    # Decide what is due BEFORE loading anything: the daily tick re-invokes
+    # this, and a re-run with nothing due must not pull the window into memory.
+    candidates = [name for name in registered_names()
+                  if name not in _SKIP and name != baseline_name]
+    due = [name for name in candidates if (today, name, window_days) not in done]
+    stats = {"ran": 0, "skipped": len(candidates) - len(due), "errors": 0,
+             "report": "", "summary": ""}
+    if not due:
+        stats["summary"] = f"nothing due for {today} (trailing {window_days}d)"
+        return stats
 
-    decks = load_decks(engine=engine, db_url=db_url, since=since)
-    stats = {"ran": 0, "skipped": 0, "errors": 0, "report": "", "summary": ""}
+    decks = load_decks(engine=engine, db_url=db_url, since=since,
+                       project_features=True)
     if not decks:
         stats["summary"] = f"no impressions in trailing {window_days}d — nothing to grade"
         return stats
@@ -63,12 +75,7 @@ def run_all(
     baseline = evaluate(get_scorer(baseline_name), decks,
                         ess_min=ess_min, bootstrap=bootstrap, seed=seed)
     runs = [baseline]
-    for name in registered_names():
-        if name in _SKIP or name == baseline_name:
-            continue
-        if (today, name, window_days) in done:
-            stats["skipped"] += 1
-            continue
+    for name in due:
         try:
             run = evaluate(get_scorer(name, seed=seed), decks,
                            ess_min=ess_min, bootstrap=bootstrap, seed=seed)

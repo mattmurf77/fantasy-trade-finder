@@ -50,6 +50,9 @@ class _FakeResponse(io.BytesIO):
 
 
 def _mock_fetch(monkeypatch):
+    # conftest pins FTF_DP_VALUES_FILE for the whole suite; these tests feed
+    # the network parse path a synthetic CSV, so they need the seam unset.
+    monkeypatch.delenv("FTF_DP_VALUES_FILE", raising=False)
     monkeypatch.setattr(
         data_loader.urllib.request, "urlopen",
         lambda req, timeout=10: _FakeResponse(_SYNTHETIC_CSV.encode("utf-8")),

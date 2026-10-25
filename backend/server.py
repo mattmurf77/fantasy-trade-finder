@@ -243,6 +243,7 @@ from .database import (
 from . import sleeper_write as _sleeper_write
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
+from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
 from . import trade_service as _trade_service_mod
 from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
@@ -2139,6 +2140,39 @@ def _refresh_players_cache_async(force: bool = False) -> bool:
         return False
 
 
+def _daily_tick_players_guard(now: datetime):
+    """daily-tick step 5 — the M0 player-cache fallback guard, run INLINE on
+    the daily-tick runner thread (never a request thread). The tick's own
+    gate (deployed env, cache past TTL), then the guards and in-flight
+    protocol of `_refresh_players_cache_async(force=False)` copied as they
+    are, then the same `_players_refresh_worker` body, called inline instead
+    of on a daemon. The worker never raises and clears the in-flight flag in
+    its `finally`.
+
+    Deployed environments only (`_IS_PROD_ENV`): a local/SQLite run has a
+    long-stale dev cache by construction, and an implicit refresh there would
+    rewrite the shared dev cache from a test run. The dedicated route (with
+    `?force=1`) is how you exercise a refresh locally."""
+    global _players_refresh_active
+    _age = _players_cache_age_seconds()
+    if not (_IS_PROD_ENV and (_age is None or _age > _PLAYERS_CACHE_TTL_SECONDS)):
+        return "skipped", f"prod_env={_IS_PROD_ENV} cache_age_s={_age}"
+    if not _PLAYERS_REFRESH_ENABLED:
+        log.info("players-refresh: skipped — FTF_PLAYERS_REFRESH=0")
+        return "skipped", "FTF_PLAYERS_REFRESH=0"
+    age = _players_cache_age_seconds()
+    if age is not None and age < _PLAYERS_CACHE_TTL_SECONDS:
+        return "skipped", f"cache_age_s={age}"
+    with _players_refresh_lock:
+        if _players_refresh_active:
+            log.info("players-refresh: skipped — already in flight")
+            return "skipped", "in_flight"
+        _players_refresh_active = True
+    _players_refresh_worker()
+    status = _last_refresh_status
+    return ("ok" if status.get("ok") else "error"), status
+
+
 # ── THE rookie predicate ───────────────────────────────────────────────────
 # `database.load_rookie_player_ids(season)` is the single source of truth
 # (SQL mirror of `draft_status.is_rookie_row`) — recorded in
@@ -2164,8 +2198,8 @@ def _rookie_player_ids(season: int) -> set[str]:
     if hit is not None:
         return hit
     ids = load_rookie_player_ids(int(season))
-    for stale in [k for k in _rookie_ids_memo if k[1] != gen]:
-        del _rookie_ids_memo[stale]   # prior generations only — seasons coexist
+    for stale in [k for k in list(_rookie_ids_memo) if k[1] != gen]:
+        _rookie_ids_memo.pop(stale, None)   # prior generations only — seasons coexist
     _rookie_ids_memo[key] = ids
     return ids
 
@@ -2247,6 +2281,55 @@ app = Flask(__name__, static_folder=str(_PROJECT_ROOT / "web"), static_url_path=
 
 _sessions: dict[str, dict] = {}  # token → per-session dict
 _sessions_lock = threading.RLock()  # request views may write while callers hold it
+# E1 F5 — per-token single-flight for POST /api/session/init (see the decorator).
+_session_init_inflight: dict[str, dict] = {}  # token → {sig, done, result}
+_session_init_inflight_lock = threading.Lock()
+_SESSION_INIT_WAIT_S = 60  # follower wait bound; past it the follower runs its own init
+
+
+def _single_flight_session_init(fn):
+    """Per-token single-flight around the session_init view (E1 F5).
+
+    Concurrent inits for one X-Session-Token never run side by side. An
+    identical request (same user_id, league_id, active_format) replays the
+    in-flight leader's response; a different one waits for the leader, then
+    runs its own init. No token or a non-object body skips single-flight.
+    """
+    @functools.wraps(fn)
+    def single_flight_view():
+        incoming_token = request.headers.get("X-Session-Token", "")
+        body = request.get_json(silent=True)
+        if not incoming_token or not isinstance(body, dict):
+            return fn()
+        sig = (body.get("user_id"), body.get("league_id"), body.get("active_format"))
+        stale = None  # a leader whose wait timed out; never wait on it again
+        while True:
+            with _session_init_inflight_lock:
+                entry = _session_init_inflight.get(incoming_token)
+                if entry is None or entry is stale:
+                    mine = {"sig": sig, "done": threading.Event(), "result": None}
+                    _session_init_inflight[incoming_token] = mine
+                    break
+            finished = entry["done"].wait(_SESSION_INIT_WAIT_S)
+            if finished and entry["sig"] == sig and entry["result"] is not None:
+                log.info("session/init: coalesced onto in-flight init (token %s…)",
+                         incoming_token[:6])
+                data, status, ctype = entry["result"]
+                return app.response_class(data, status=status, content_type=ctype)
+            if not finished:
+                stale = entry
+        try:
+            resp = app.make_response(fn())
+            mine["result"] = (resp.get_data(), resp.status_code,
+                              resp.headers.get("Content-Type"))
+            return resp
+        finally:
+            with _session_init_inflight_lock:
+                if _session_init_inflight.get(incoming_token) is mine:
+                    del _session_init_inflight[incoming_token]
+            mine["done"].set()
+
+    return single_flight_view
 
 if _TEST_MODE:
     # UI-test harness blueprint (/__test__/*) — see backend/test_support.py.
@@ -2814,7 +2897,8 @@ def _cleanup_loop() -> None:
             log.warning("prepared inventory maintenance unavailable", exc_info=True)
 
 
-threading.Thread(target=_cleanup_loop, daemon=True).start()
+if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":  # tests set it (conftest); prod never does
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
 
 
 # ---------------------------------------------------------------------------
@@ -3272,6 +3356,47 @@ def _trade_job_public_view(job: dict) -> dict:
     return out
 
 
+def _trade_page_size() -> int:
+    """E2: max cards per paged response (`trade_page_size`, default 30), held to 1-200."""
+    try:
+        return max(1, min(200, int(_deck_cfg("trade_page_size", 30.0))))
+    except (ValueError, OverflowError):  # NaN / inf
+        return 30
+
+
+def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
+    """E2 opt-in paging: `page=1` on /generate (cursor 0), `cursor` on /status.
+
+    `job` is a SHALLOW snapshot taken under the job lock; call outside it. The
+    cursor is a raw index into the job's pre-filter card list. Slice first,
+    then run the unchanged public view over the slice only, so a disposition
+    or guard filter never shifts a later card's index.
+
+    A raw index stays valid only while every publish extends the previous
+    list. Owner-serve batches (`_publish_owner_batch`; every card stamped
+    `preserve_server_order`), the value-core single publish and prepared
+    adoption do. Every other worker path re-sorts or filters (the progress
+    callback, the post-layer snapshots, the final publish), so for those, and
+    for a cursor past the end, the full current list returns with replace.
+    An errored job never pages its partial cards.
+    """
+    raw = job.get("cards") or []
+    append_only = bool(job.get("value_core") or job.get("prepared_inventory_id")
+                       or (raw and all(c.get("preserve_server_order") for c in raw)))
+    replace = cursor > len(raw) or (cursor > 0 and not append_only)
+    start = 0 if replace else cursor
+    end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
+    served = [] if job.get("status") == "error" else raw[start:end]
+    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)})
+    if out["status"] == "error":
+        out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
+    else:
+        out.update(cursor=end, total_ready=len(raw), replace=replace)
+    if search_id is not None:
+        out["search_id"] = search_id
+    return out
+
+
 def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared=False):
     """Read-only exact pass/source-interest cut, with no arm or floor bypass.
 
@@ -3422,9 +3547,7 @@ def _significance_card_key(card):
 
 
 def _significance_exemptions_for(trade_service):
-    exemptions = getattr(trade_service, "_significance_exemptions", None)
-    if exemptions is None:
-        exemptions = trade_service._significance_exemptions = {}
+    exemptions = trade_service.__dict__.setdefault("_significance_exemptions", {})
     if exemptions:
         live = {_significance_card_key(card)
                 for card in list(trade_service._trade_cards.values())}
@@ -9817,19 +9940,20 @@ def get_trio():
                 log.warning("qc_compliments trio generation failed: %s", _qc_err)
                 qc_trio_obj = None
 
-        if qc_trio_obj is not None:
-            trio = qc_trio_obj
-        else:
-            trio = service.get_next_trio(position=position,
-                                         skipped_player_ids=skipped_ids,
-                                         scoped=(scope == "rookie"))
-        resp = {
-            "player_a":  player_to_dict(trio.player_a),
-            "player_b":  player_to_dict(trio.player_b),
-            "player_c":  player_to_dict(trio.player_c),
-            "reasoning": trio.reasoning,
-            "tier_info": service._tier_info(position),
-        }
+        with service._lock:
+            if qc_trio_obj is not None:
+                trio = qc_trio_obj
+            else:
+                trio = service.get_next_trio(position=position,
+                                             skipped_player_ids=skipped_ids,
+                                             scoped=(scope == "rookie"))
+            resp = {
+                "player_a":  player_to_dict(trio.player_a),
+                "player_b":  player_to_dict(trio.player_b),
+                "player_c":  player_to_dict(trio.player_c),
+                "reasoning": trio.reasoning,
+                "tier_info": service._tier_info(position),
+            }
         # #207 — same year-explicit relabel the rankings payload gets, so a
         # rung reads identically whether you meet it in a matchup or on a board.
         _apply_pick_rung_year_labels(
@@ -9939,7 +10063,7 @@ def _invalidate_league_members_cache(league_id: str) -> None:
     """
     if not league_id:
         return
-    stale = [k for k in _LEAGUE_MEMBERS_CACHE if k[0] == league_id]
+    stale = [k for k in list(_LEAGUE_MEMBERS_CACHE) if k[0] == league_id]
     for k in stale:
         _LEAGUE_MEMBERS_CACHE.pop(k, None)
 
@@ -10091,40 +10215,41 @@ def post_rank3():
         }), 409
 
     try:
-        rank_set = service.record_ranking(ordered_ids=ranked_valid)
-        fmt = _active_format(sess)
+        with service._lock:
+            rank_set = service.record_ranking(ordered_ids=ranked_valid)
+            fmt = _active_format(sess)
 
-        # Persist swipe history — lets rankings survive server restarts
-        try:
-            save_ranking_swipes(
-                user_id        = g_user_id,
-                ordered_ids    = ranked_valid,
-                scoring_format = fmt,
-            )
-        except Exception as db_err:
-            log.warning("DB write failed for ranking swipe (continuing): %s", db_err)
-
-        # Auto-publish current ELO snapshot to member_rankings so leaguemates
-        # can use the real valuations in their trade generation.
-        # We submit ALL positions each time — cheap and always-consistent.
-        try:
-            if g_league and g_league.league_id not in ("league_demo",):
-                all_rankings = service.get_rankings(position=None)
-                ranking_payload = [
-                    {"player_id": rp.player.id, "elo": rp.elo}
-                    for rp in all_rankings.rankings
-                ]
-                _conf = _ranking_confidence(service)
-                ranking_payload = _confidence_payload(ranking_payload, _conf)
-                _publish_member_rankings_for_trade_refresh(
+            # Persist swipe history — lets rankings survive server restarts
+            try:
+                save_ranking_swipes(
                     user_id        = g_user_id,
-                    league_id      = g_league.league_id,
-                    rankings       = ranking_payload,
+                    ordered_ids    = ranked_valid,
                     scoring_format = fmt,
-                    **_conf,
                 )
-        except Exception as db_err:
-            log.warning("member_rankings auto-publish failed (continuing): %s", db_err)
+            except Exception as db_err:
+                log.warning("DB write failed for ranking swipe (continuing): %s", db_err)
+
+            # Auto-publish current ELO snapshot to member_rankings so leaguemates
+            # can use the real valuations in their trade generation.
+            # We submit ALL positions each time — cheap and always-consistent.
+            try:
+                if g_league and g_league.league_id not in ("league_demo",):
+                    all_rankings = service.get_rankings(position=None)
+                    ranking_payload = [
+                        {"player_id": rp.player.id, "elo": rp.elo}
+                        for rp in all_rankings.rankings
+                    ]
+                    _conf = _ranking_confidence(service)
+                    ranking_payload = _confidence_payload(ranking_payload, _conf)
+                    _publish_member_rankings_for_trade_refresh(
+                        user_id        = g_user_id,
+                        league_id      = g_league.league_id,
+                        rankings       = ranking_payload,
+                        scoring_format = fmt,
+                        **_conf,
+                    )
+            except Exception as db_err:
+                log.warning("member_rankings auto-publish failed (continuing): %s", db_err)
 
         # F5 (deck.taste_vectors) — board saves refresh the board-derived
         # taste prior (flag-gated + never-throwing inside the helper).
@@ -10925,56 +11050,57 @@ def copy_tiers_from_format_route():
     # calls below rewrite each position's slice fresh, on the target
     # format's consensus value curve. Any pre-existing target override for
     # a pid not in the source is dropped — that's what "copy" means here.
-    to_svc._elo_overrides = {}
-    to_svc._elo_override_at = {}          # F2: stamps travel with the overrides
+    with to_svc._lock:
+        to_svc._elo_overrides = {}
+        to_svc._elo_override_at = {}          # F2: stamps travel with the overrides
 
-    position_counts: dict[str, int] = {}
-    for position, ordered_pids in by_position.items():
-        # Value-aware mapping (#124): keep the user's rank order, deal out
-        # the group's own TARGET-format seed Elos to those ranks. Tier
-        # labels land wherever the target consensus puts them — QBs shift
-        # most between SF and 1QB, which is the point.
-        position_counts[position] = to_svc.apply_value_map(position, ordered_pids)
+        position_counts: dict[str, int] = {}
+        for position, ordered_pids in by_position.items():
+            # Value-aware mapping (#124): keep the user's rank order, deal out
+            # the group's own TARGET-format seed Elos to those ranks. Tier
+            # labels land wherever the target consensus puts them — QBs shift
+            # most between SF and 1QB, which is the point.
+            position_counts[position] = to_svc.apply_value_map(position, ordered_pids)
 
-    # Persist override dict.
-    try:
-        save_tier_overrides(g_user_id, to_svc._elo_overrides,
-                            scoring_format=to_format,
-                            stamps=to_svc._elo_override_at)
-    except Exception as db_err:
-        log.warning("copy-from-format: save_tier_overrides failed: %s", db_err)
-        return jsonify({"error": f"DB write failed: {db_err}"}), 500
-
-    # Mark each touched position as saved for the target format.
-    for position in by_position:
+        # Persist override dict.
         try:
-            save_tiers_position(g_user_id, position, scoring_format=to_format)
+            save_tier_overrides(g_user_id, to_svc._elo_overrides,
+                                scoring_format=to_format,
+                                stamps=to_svc._elo_override_at)
         except Exception as db_err:
-            log.warning("copy-from-format: save_tiers_position(%s) failed: %s", position, db_err)
+            log.warning("copy-from-format: save_tier_overrides failed: %s", db_err)
+            return jsonify({"error": f"DB write failed: {db_err}"}), 500
 
-    # Republish to member_rankings so leaguemates see the new format's rank
-    # set when generating trades.
-    if g_league and g_league.league_id not in ("league_demo",):
-        try:
-            all_rankings = to_svc.get_rankings(position=None)
-            ranking_payload = [
-                {"player_id": rp.player.id, "elo": rp.elo}
-                for rp in all_rankings.rankings
-            ]
-            # The WHOLE board here is derived from the other format's
-            # ordering, so no player on it has direct evidence in THIS
-            # format — `cross_format`, not per-player provenance.
-            _conf = _ranking_confidence(to_svc, source="cross_format")
-            ranking_payload = _confidence_payload(ranking_payload, _conf)
-            _publish_member_rankings_for_trade_refresh(
-                user_id        = g_user_id,
-                league_id      = g_league.league_id,
-                rankings       = ranking_payload,
-                scoring_format = to_format,
-                **_conf,
-            )
-        except Exception as db_err:
-            log.warning("copy-from-format: member_rankings publish failed: %s", db_err)
+        # Mark each touched position as saved for the target format.
+        for position in by_position:
+            try:
+                save_tiers_position(g_user_id, position, scoring_format=to_format)
+            except Exception as db_err:
+                log.warning("copy-from-format: save_tiers_position(%s) failed: %s", position, db_err)
+
+        # Republish to member_rankings so leaguemates see the new format's rank
+        # set when generating trades.
+        if g_league and g_league.league_id not in ("league_demo",):
+            try:
+                all_rankings = to_svc.get_rankings(position=None)
+                ranking_payload = [
+                    {"player_id": rp.player.id, "elo": rp.elo}
+                    for rp in all_rankings.rankings
+                ]
+                # The WHOLE board here is derived from the other format's
+                # ordering, so no player on it has direct evidence in THIS
+                # format — `cross_format`, not per-player provenance.
+                _conf = _ranking_confidence(to_svc, source="cross_format")
+                ranking_payload = _confidence_payload(ranking_payload, _conf)
+                _publish_member_rankings_for_trade_refresh(
+                    user_id        = g_user_id,
+                    league_id      = g_league.league_id,
+                    rankings       = ranking_payload,
+                    scoring_format = to_format,
+                    **_conf,
+                )
+            except Exception as db_err:
+                log.warning("copy-from-format: member_rankings publish failed: %s", db_err)
 
     # F5 (deck.taste_vectors) — board saves refresh the board-derived
     # taste prior (flag-gated + never-throwing inside the helper).
@@ -11685,69 +11811,70 @@ def save_tiers_route():
     scope = body.get("scope") if is_enabled("ranks.rookie_subset") else None
 
     try:
-        if scope == "rookie":
-            # `tier_overrides` is a wholesale-overwritten blob with no
-            # history, and this is the first feature that writes a PARTIAL
-            # board. Snapshot BEFORE any mutation — idempotent, so this costs
-            # one indexed read per scoped save after the first.
-            try:
-                take_tier_override_snapshot(g_user_id)
-            except Exception as snap_err:
-                log.warning("pre-scope snapshot failed: %s", snap_err)
-            # The merged-band rule: merge the scoped pids into the band's
-            # current full order, spread over the FULL merged list, persist
-            # the scoped pids ONLY. See RankingService.apply_tiers_subset.
-            service.apply_tiers_subset(
-                position=position,
-                tiers=tiers,
-                scope_pids=_rookie_scope_ids(sess),
-                scoring_format=fmt,
-                cleared_pids=cleared_pids,
-            )
-        else:
-            # apply_tiers assigns ELOs inside each tier's band (see
-            # backend/tier_config.json) so on reload the frontend re-buckets
-            # players into the same tier they were placed. Bands are
-            # position+format-aware. cleared_pids lets the frontend tell us
-            # "this player is back in the pool — drop their override".
-            service.apply_tiers(
-                position=position,
-                tiers=tiers,
-                scoring_format=fmt,
-                cleared_pids=cleared_pids,
-            )
-
-        _invalidate_trade_jobs(user_id=g_user_id)
-
-        # Persist the full tier override dict for THIS format so it survives
-        # session rebuilds. The other format's overrides are untouched.
-        try:
-            save_tier_overrides(g_user_id, service._elo_overrides,
-                                scoring_format=fmt,
-                                stamps=service._elo_override_at)
-        except Exception as db_err:
-            log.warning("save_tier_overrides failed: %s", db_err)
-
-        # Persist updated ELO snapshot to member_rankings (per-format row) so
-        # leaguemates see this rank set when generating trades in this format.
-        try:
-            if g_league and g_league.league_id not in ("league_demo",):
-                all_rankings = service.get_rankings(position=None)
-                ranking_payload = [
-                    {"player_id": rp.player.id, "elo": rp.elo}
-                    for rp in all_rankings.rankings
-                ]
-                _conf = _ranking_confidence(service)
-                ranking_payload = _confidence_payload(ranking_payload, _conf)
-                _publish_member_rankings_for_trade_refresh(
-                    user_id        = g_user_id,
-                    league_id      = g_league.league_id,
-                    rankings       = ranking_payload,
-                    scoring_format = fmt,
-                    **_conf,
+        with service._lock:
+            if scope == "rookie":
+                # `tier_overrides` is a wholesale-overwritten blob with no
+                # history, and this is the first feature that writes a PARTIAL
+                # board. Snapshot BEFORE any mutation — idempotent, so this costs
+                # one indexed read per scoped save after the first.
+                try:
+                    take_tier_override_snapshot(g_user_id)
+                except Exception as snap_err:
+                    log.warning("pre-scope snapshot failed: %s", snap_err)
+                # The merged-band rule: merge the scoped pids into the band's
+                # current full order, spread over the FULL merged list, persist
+                # the scoped pids ONLY. See RankingService.apply_tiers_subset.
+                service.apply_tiers_subset(
+                    position=position,
+                    tiers=tiers,
+                    scope_pids=_rookie_scope_ids(sess),
+                    scoring_format=fmt,
+                    cleared_pids=cleared_pids,
                 )
-        except Exception as db_err:
-            log.warning("member_rankings publish after tiers save failed: %s", db_err)
+            else:
+                # apply_tiers assigns ELOs inside each tier's band (see
+                # backend/tier_config.json) so on reload the frontend re-buckets
+                # players into the same tier they were placed. Bands are
+                # position+format-aware. cleared_pids lets the frontend tell us
+                # "this player is back in the pool — drop their override".
+                service.apply_tiers(
+                    position=position,
+                    tiers=tiers,
+                    scoring_format=fmt,
+                    cleared_pids=cleared_pids,
+                )
+
+            _invalidate_trade_jobs(user_id=g_user_id)
+
+            # Persist the full tier override dict for THIS format so it survives
+            # session rebuilds. The other format's overrides are untouched.
+            try:
+                save_tier_overrides(g_user_id, service._elo_overrides,
+                                    scoring_format=fmt,
+                                    stamps=service._elo_override_at)
+            except Exception as db_err:
+                log.warning("save_tier_overrides failed: %s", db_err)
+
+            # Persist updated ELO snapshot to member_rankings (per-format row) so
+            # leaguemates see this rank set when generating trades in this format.
+            try:
+                if g_league and g_league.league_id not in ("league_demo",):
+                    all_rankings = service.get_rankings(position=None)
+                    ranking_payload = [
+                        {"player_id": rp.player.id, "elo": rp.elo}
+                        for rp in all_rankings.rankings
+                    ]
+                    _conf = _ranking_confidence(service)
+                    ranking_payload = _confidence_payload(ranking_payload, _conf)
+                    _publish_member_rankings_for_trade_refresh(
+                        user_id        = g_user_id,
+                        league_id      = g_league.league_id,
+                        rankings       = ranking_payload,
+                        scoring_format = fmt,
+                        **_conf,
+                    )
+            except Exception as db_err:
+                log.warning("member_rankings publish after tiers save failed: %s", db_err)
 
         # F5 (deck.taste_vectors) — board saves refresh the board-derived
         # taste prior (flag-gated + never-throwing inside the helper).
@@ -11901,40 +12028,41 @@ def save_anchor_route():
     target_elo = _anchor_target_elo(anchor, top_tier_firsts=top_tier_firsts)
 
     try:
-        player = service.apply_anchor(player_id, target_elo)
-        if player is None:
-            return jsonify({"error": f"Unknown player_id: {player_id}"}), 404
-        _invalidate_trade_jobs(user_id=g_user_id)
+        with service._lock:
+            player = service.apply_anchor(player_id, target_elo)
+            if player is None:
+                return jsonify({"error": f"Unknown player_id: {player_id}"}), 404
+            _invalidate_trade_jobs(user_id=g_user_id)
 
-        # Persist the override dict for THIS format (same path as tiers/save)
-        # so the anchor survives session rebuilds.
-        try:
-            save_tier_overrides(g_user_id, service._elo_overrides,
-                                scoring_format=fmt,
-                                stamps=service._elo_override_at)
-        except Exception as db_err:
-            log.warning("save_tier_overrides after anchor failed: %s", db_err)
+            # Persist the override dict for THIS format (same path as tiers/save)
+            # so the anchor survives session rebuilds.
+            try:
+                save_tier_overrides(g_user_id, service._elo_overrides,
+                                    scoring_format=fmt,
+                                    stamps=service._elo_override_at)
+            except Exception as db_err:
+                log.warning("save_tier_overrides after anchor failed: %s", db_err)
 
-        # Publish the updated Elo snapshot so leaguemates' trade generation
-        # sees the anchored value (mirrors tiers/save).
-        try:
-            if g_league and g_league.league_id not in ("league_demo",):
-                all_rankings = service.get_rankings(position=None)
-                ranking_payload = [
-                    {"player_id": rp.player.id, "elo": rp.elo}
-                    for rp in all_rankings.rankings
-                ]
-                _conf = _ranking_confidence(service)
-                ranking_payload = _confidence_payload(ranking_payload, _conf)
-                _publish_member_rankings_for_trade_refresh(
-                    user_id        = g_user_id,
-                    league_id      = g_league.league_id,
-                    rankings       = ranking_payload,
-                    scoring_format = fmt,
-                    **_conf,
-                )
-        except Exception as db_err:
-            log.warning("member_rankings publish after anchor failed: %s", db_err)
+            # Publish the updated Elo snapshot so leaguemates' trade generation
+            # sees the anchored value (mirrors tiers/save).
+            try:
+                if g_league and g_league.league_id not in ("league_demo",):
+                    all_rankings = service.get_rankings(position=None)
+                    ranking_payload = [
+                        {"player_id": rp.player.id, "elo": rp.elo}
+                        for rp in all_rankings.rankings
+                    ]
+                    _conf = _ranking_confidence(service)
+                    ranking_payload = _confidence_payload(ranking_payload, _conf)
+                    _publish_member_rankings_for_trade_refresh(
+                        user_id        = g_user_id,
+                        league_id      = g_league.league_id,
+                        rankings       = ranking_payload,
+                        scoring_format = fmt,
+                        **_conf,
+                    )
+            except Exception as db_err:
+                log.warning("member_rankings publish after anchor failed: %s", db_err)
 
         # F5 (deck.taste_vectors) — board saves refresh the board-derived
         # taste prior (flag-gated + never-throwing inside the helper).
@@ -12233,7 +12361,8 @@ def reset():
     service = sess["service"]
     body     = request.get_json(force=True) or {}
     position = body.get("position") or None
-    return jsonify(service.reset(position=position))
+    with service._lock:
+        return jsonify(service.reset(position=position))
 
 
 @app.route("/api/rankings/reorder", methods=["POST"])
@@ -12258,71 +12387,72 @@ def reorder_rankings():
         return jsonify({"error": "Need at least 2 player IDs"}), 400
 
     try:
-        service.apply_reorder(position=position, ordered_ids=ordered_ids)
-        _invalidate_trade_jobs(user_id=g_user_id)
-        # Tracking plan v2 §S3 — ranking_reorder into user_events. Sole
-        # writer since the analytics P0 cutover (the legacy wrapped_events
-        # hook that fired here is gone; LLD §6.4).
-        try:
-            record_event(
-                g_user_id, "ranking_reorder",
-                league_id=getattr(g_league, "league_id", None),
-                source="api", props={"moves_count": len(ordered_ids)},
-                # #152 — ranking_reorder is a rank-class streak event now,
-                # so tz rides along for local-day streak math (same as
-                # trio_swipe / tier_save).
-                tz=getattr(g, "user_tz", None),
-                **(getattr(g, "device_info", {}) or {}),
-            )
-        except Exception as ev_err:
-            log.warning("record_event(ranking_reorder) failed: %s", ev_err)
-
-        # FR-20 (analytics P0, LLD §6.4b): Quick Rank routes its per-tier
-        # saves through this endpoint; a `via: 'quickrank'` body flag marks
-        # the completion of one Quick Rank step. duration_ms/skipped are
-        # client-passed (absent from old binaries → null).
-        if body.get("via") == "quickrank":
+        with service._lock:
+            service.apply_reorder(position=position, ordered_ids=ordered_ids)
+            _invalidate_trade_jobs(user_id=g_user_id)
+            # Tracking plan v2 §S3 — ranking_reorder into user_events. Sole
+            # writer since the analytics P0 cutover (the legacy wrapped_events
+            # hook that fired here is gone; LLD §6.4).
             try:
                 record_event(
-                    g_user_id, "quickrank_completed",
+                    g_user_id, "ranking_reorder",
                     league_id=getattr(g_league, "league_id", None),
-                    source="api",
-                    props={"position": position,
-                           "players_ranked": len(ordered_ids),
-                           "duration_ms": body.get("duration_ms"),
-                           "skipped": bool(body.get("skipped"))},
+                    source="api", props={"moves_count": len(ordered_ids)},
+                    # #152 — ranking_reorder is a rank-class streak event now,
+                    # so tz rides along for local-day streak math (same as
+                    # trio_swipe / tier_save).
+                    tz=getattr(g, "user_tz", None),
                     **(getattr(g, "device_info", {}) or {}),
                 )
             except Exception as ev_err:
-                log.warning("record_event(quickrank_completed) failed: %s", ev_err)
+                log.warning("record_event(ranking_reorder) failed: %s", ev_err)
 
-        # Persist override dict for THIS format so it survives session rebuilds
-        try:
-            save_tier_overrides(g_user_id, service._elo_overrides,
-                                scoring_format=fmt,
-                                stamps=service._elo_override_at)
-        except Exception as db_err:
-            log.warning("save_tier_overrides after reorder failed: %s", db_err)
+            # FR-20 (analytics P0, LLD §6.4b): Quick Rank routes its per-tier
+            # saves through this endpoint; a `via: 'quickrank'` body flag marks
+            # the completion of one Quick Rank step. duration_ms/skipped are
+            # client-passed (absent from old binaries → null).
+            if body.get("via") == "quickrank":
+                try:
+                    record_event(
+                        g_user_id, "quickrank_completed",
+                        league_id=getattr(g_league, "league_id", None),
+                        source="api",
+                        props={"position": position,
+                               "players_ranked": len(ordered_ids),
+                               "duration_ms": body.get("duration_ms"),
+                               "skipped": bool(body.get("skipped"))},
+                        **(getattr(g, "device_info", {}) or {}),
+                    )
+                except Exception as ev_err:
+                    log.warning("record_event(quickrank_completed) failed: %s", ev_err)
 
-        # Persist updated ELO snapshot for this format
-        try:
-            if g_league and g_league.league_id not in ("league_demo",):
-                all_rankings = service.get_rankings(position=None)
-                ranking_payload = [
-                    {"player_id": rp.player.id, "elo": rp.elo}
-                    for rp in all_rankings.rankings
-                ]
-                _conf = _ranking_confidence(service)
-                ranking_payload = _confidence_payload(ranking_payload, _conf)
-                _publish_member_rankings_for_trade_refresh(
-                    user_id        = g_user_id,
-                    league_id      = g_league.league_id,
-                    rankings       = ranking_payload,
-                    scoring_format = fmt,
-                    **_conf,
-                )
-        except Exception as db_err:
-            log.warning("member_rankings publish after reorder failed: %s", db_err)
+            # Persist override dict for THIS format so it survives session rebuilds
+            try:
+                save_tier_overrides(g_user_id, service._elo_overrides,
+                                    scoring_format=fmt,
+                                    stamps=service._elo_override_at)
+            except Exception as db_err:
+                log.warning("save_tier_overrides after reorder failed: %s", db_err)
+
+            # Persist updated ELO snapshot for this format
+            try:
+                if g_league and g_league.league_id not in ("league_demo",):
+                    all_rankings = service.get_rankings(position=None)
+                    ranking_payload = [
+                        {"player_id": rp.player.id, "elo": rp.elo}
+                        for rp in all_rankings.rankings
+                    ]
+                    _conf = _ranking_confidence(service)
+                    ranking_payload = _confidence_payload(ranking_payload, _conf)
+                    _publish_member_rankings_for_trade_refresh(
+                        user_id        = g_user_id,
+                        league_id      = g_league.league_id,
+                        rankings       = ranking_payload,
+                        scoring_format = fmt,
+                        **_conf,
+                    )
+            except Exception as db_err:
+                log.warning("member_rankings publish after reorder failed: %s", db_err)
 
         # F5 (deck.taste_vectors) — board saves refresh the board-derived
         # taste prior (flag-gated + never-throwing inside the helper).
@@ -12478,48 +12608,49 @@ def rankings_import_apply():
         if not imported:
             return jsonify({"error": "no_matching_players"}), 400
         full_order = imported + [pid for pid in current_ids if pid not in seen]
-        if len(full_order) >= 2:
-            service.apply_reorder(position=None, ordered_ids=full_order)
-            _invalidate_trade_jobs(user_id=g_user_id)
+        with service._lock:
+            if len(full_order) >= 2:
+                service.apply_reorder(position=None, ordered_ids=full_order)
+                _invalidate_trade_jobs(user_id=g_user_id)
 
-        try:
-            record_event(
-                g_user_id, "rankings_import_applied",
-                league_id=getattr(g_league, "league_id", None),
-                source="api",
-                props={"imported_count": len(imported),
-                       "submitted_count": len(ordered)},
-                tz=getattr(g, "user_tz", None),
-                **(getattr(g, "device_info", {}) or {}),
-            )
-        except Exception as ev_err:
-            log.warning("record_event(rankings_import_applied) failed: %s", ev_err)
-
-        # Same persistence side effects as /api/rankings/reorder: overrides
-        # survive session rebuilds, leaguemates see the published board,
-        # taste prior + Trends refresh.
-        try:
-            save_tier_overrides(g_user_id, service._elo_overrides,
-                                scoring_format=fmt,
-                                stamps=service._elo_override_at)
-        except Exception as db_err:
-            log.warning("save_tier_overrides after import failed: %s", db_err)
-        try:
-            if g_league and g_league.league_id not in ("league_demo",):
-                all_rankings = service.get_rankings(position=None)
-                _conf = _ranking_confidence(service)
-                _import_payload = _confidence_payload(
-                    [{"player_id": rp.player.id, "elo": rp.elo}
-                     for rp in all_rankings.rankings], _conf)
-                _publish_member_rankings_for_trade_refresh(
-                    user_id        = g_user_id,
-                    league_id      = g_league.league_id,
-                    rankings       = _import_payload,
-                    scoring_format = fmt,
-                    **_conf,
+            try:
+                record_event(
+                    g_user_id, "rankings_import_applied",
+                    league_id=getattr(g_league, "league_id", None),
+                    source="api",
+                    props={"imported_count": len(imported),
+                           "submitted_count": len(ordered)},
+                    tz=getattr(g, "user_tz", None),
+                    **(getattr(g, "device_info", {}) or {}),
                 )
-        except Exception as db_err:
-            log.warning("member_rankings publish after import failed: %s", db_err)
+            except Exception as ev_err:
+                log.warning("record_event(rankings_import_applied) failed: %s", ev_err)
+
+            # Same persistence side effects as /api/rankings/reorder: overrides
+            # survive session rebuilds, leaguemates see the published board,
+            # taste prior + Trends refresh.
+            try:
+                save_tier_overrides(g_user_id, service._elo_overrides,
+                                    scoring_format=fmt,
+                                    stamps=service._elo_override_at)
+            except Exception as db_err:
+                log.warning("save_tier_overrides after import failed: %s", db_err)
+            try:
+                if g_league and g_league.league_id not in ("league_demo",):
+                    all_rankings = service.get_rankings(position=None)
+                    _conf = _ranking_confidence(service)
+                    _import_payload = _confidence_payload(
+                        [{"player_id": rp.player.id, "elo": rp.elo}
+                         for rp in all_rankings.rankings], _conf)
+                    _publish_member_rankings_for_trade_refresh(
+                        user_id        = g_user_id,
+                        league_id      = g_league.league_id,
+                        rankings       = _import_payload,
+                        scoring_format = fmt,
+                        **_conf,
+                    )
+            except Exception as db_err:
+                log.warning("member_rankings publish after import failed: %s", db_err)
         _refresh_taste_board_prior(g_user_id, service)
         try:
             _record_trends_snapshot(service, g_user_id, g_league, fmt, imported)
@@ -14633,6 +14764,11 @@ def generate_trades():
         error: str | null,
       }
 
+    E2 (opt-in): body `page: 1` (+ optional `search_id`) returns at most
+    `trade_page_size` cards plus `cursor`, `total_ready`, `replace` and the
+    echoed `search_id` (see _trade_job_page_view). Without `page` the
+    response is unchanged.
+
     Caching:
       - A complete job for the same (user, league, format) within 30 min
         is returned instantly with status='complete'.
@@ -14648,6 +14784,16 @@ def generate_trades():
         return jsonify({"error": "session missing user/league"}), 400
 
     body               = request.get_json(force=True) or {}
+    # E2 — opt-in paged response. Validated before any side effect. Without
+    # `page` the body is the legacy one and `search_id` is not read.
+    paged              = "page" in body
+    search_id          = body.get("search_id") if paged else None
+    if paged and (type(body["page"]) is not int or body["page"] != 1):
+        return jsonify({"error": "invalid_page", "message": "page must be 1"}), 400
+    if search_id is not None and not (isinstance(search_id, str)
+                                      and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", search_id)):
+        return jsonify({"error": "invalid_search_id",
+                        "message": "search_id must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
     league_id          = body.get("league_id") or g_league.league_id
     pinned_give        = body.get("pinned_give_players") or []
     # FB-47 — "I want to acquire X". Honored only when trade.finder_targeting
@@ -14785,6 +14931,8 @@ def generate_trades():
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
+        if paged:
+            return jsonify(_trade_job_page_view(reuse_snapshot, 0, search_id))
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
@@ -14812,6 +14960,8 @@ def generate_trades():
     )
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
+    if paged:
+        return jsonify(_trade_job_page_view(snapshot, 0, search_id))
     return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
 
@@ -15199,7 +15349,7 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
                      "legacy" if user_elo.get(pid) != seed_map.get(pid) else "consensus")
                for pid in user_elo}
     # Imported/copy overrides are explicit actions even without comparisons.
-    for pid in getattr(service, "_elo_overrides", {}) or {}:
+    for pid in list(getattr(service, "_elo_overrides", {}) or {}):
         if pid in placed:
             sources[pid] = "explicit"
     context = dict(
@@ -15790,10 +15940,16 @@ def undo_deck_suppression():
 def trade_job_status():
     """GET /api/trades/status?job_id=X
     Snapshot plus one batched disposition read. Used to poll an in-flight
-    /api/trades/generate job. 404 if the job has been evicted."""
+    /api/trades/generate job. 404 if the job has been evicted.
+    E2 (opt-in): `cursor=K` returns only the raw cards after index K, at most
+    `trade_page_size` (see _trade_job_page_view)."""
     sess = _require_session()
     sess["last_active"] = time.time()
     job_id = request.args.get("job_id") or ""
+    cursor = request.args.get("cursor")
+    if cursor is not None and not re.fullmatch(r"[0-9]{1,9}", cursor):
+        return jsonify({"error": "invalid_cursor",
+                        "message": "cursor must be a non-negative integer"}), 400
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if not job:
@@ -15802,8 +15958,12 @@ def trade_job_status():
         # user_id, but we double-check here in case of a stale id.
         if job["key"][0] != sess["user_id"]:
             return jsonify({"error": "job not found"}), 404
-        snapshot = copy.deepcopy(job)
-    return jsonify(_trade_job_public_view(snapshot))
+        # Published card lists are replaced, never mutated in place. Capture
+        # their reference under the lock and do the expensive copy outside it.
+        snapshot = dict(job)
+    if cursor is not None:
+        return jsonify(_trade_job_page_view(snapshot, int(cursor)))
+    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
 
 def _pending_owner_cards(cards, config, exemptions):
@@ -16017,26 +16177,27 @@ def swipe_trade():
         # the persisted swipe_decisions k_factor), so the live board and the
         # DB replay can never disagree. Flag off ⇒ returns fit_mult unchanged.
         fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
-        if decision == "like":
-            service.record_trade_signal(
-                winner_ids = card.receive_player_ids,
-                loser_ids  = card.give_player_ids,
-                decision   = "like",
-                fit_mult   = fit_mult,
-            )
-            from .ranking_service import _c as _rs_c
-            k_factor = _rs_c("trade_k_like") * fit_mult
-            win_ids, lose_ids = card.receive_player_ids, card.give_player_ids
-        else:  # "pass"
-            service.record_trade_signal(
-                winner_ids = card.give_player_ids,
-                loser_ids  = card.receive_player_ids,
-                decision   = "pass",
-                fit_mult   = fit_mult,
-            )
-            from .ranking_service import _c as _rs_c
-            k_factor = _rs_c("trade_k_pass") * fit_mult
-            win_ids, lose_ids = card.give_player_ids, card.receive_player_ids
+        with service._lock:
+            if decision == "like":
+                service.record_trade_signal(
+                    winner_ids = card.receive_player_ids,
+                    loser_ids  = card.give_player_ids,
+                    decision   = "like",
+                    fit_mult   = fit_mult,
+                )
+                from .ranking_service import _c as _rs_c
+                k_factor = _rs_c("trade_k_like") * fit_mult
+                win_ids, lose_ids = card.receive_player_ids, card.give_player_ids
+            else:  # "pass"
+                service.record_trade_signal(
+                    winner_ids = card.give_player_ids,
+                    loser_ids  = card.receive_player_ids,
+                    decision   = "pass",
+                    fit_mult   = fit_mult,
+                )
+                from .ranking_service import _c as _rs_c
+                k_factor = _rs_c("trade_k_pass") * fit_mult
+                win_ids, lose_ids = card.give_player_ids, card.receive_player_ids
 
         # F1 (deck.signal_v2) — outcome join. Optional additive body fields
         # (impression_id, dwell_ms, detail_expanded, calc_opened); absent →
@@ -16539,57 +16700,58 @@ def queue_trade_for_opponent():
         getattr(card, "lane_shift", None), "like")
     fit_mult = _bakeoff.elo_freeze_mult(fit_mult)
     from .ranking_service import _c as _rs_c
-    service.record_trade_signal(
-        winner_ids = card.receive_player_ids,
-        loser_ids  = card.give_player_ids,
-        decision   = "like",
-        fit_mult   = fit_mult,
-    )
+    with service._lock:
+        service.record_trade_signal(
+            winner_ids = card.receive_player_ids,
+            loser_ids  = card.give_player_ids,
+            decision   = "like",
+            fit_mult   = fit_mult,
+        )
 
-    try:
-        wrote_decision = save_trade_decision(
-            user_id            = g_user_id,
-            league_id          = league_id,
-            trade_id           = trade_id,
-            give_player_ids    = card.give_player_ids,
-            receive_player_ids = card.receive_player_ids,
-            decision           = "like",
-            queue_target_user_id = opponent.user_id,
-            **({"impression_id": queue_impression,
-                "trade_concept_id": _trade_policy.trade_concept_id(
-                    league_id=league_id, viewer_user_id=g_user_id,
-                    partner_user_id=opponent.user_id, viewer_gives=give_ids,
-                    viewer_receives=recv_ids)} if queue_impression is not None else {}),
-        )
-        if wrote_decision:
-            save_trade_swipes(
-                user_id        = g_user_id,
-                winner_ids     = card.receive_player_ids,
-                loser_ids      = card.give_player_ids,
-                k_factor       = _rs_c("trade_k_like") * fit_mult,
-                scoring_format = _active_format(sess),
+        try:
+            wrote_decision = save_trade_decision(
+                user_id            = g_user_id,
+                league_id          = league_id,
+                trade_id           = trade_id,
+                give_player_ids    = card.give_player_ids,
+                receive_player_ids = card.receive_player_ids,
+                decision           = "like",
+                queue_target_user_id = opponent.user_id,
+                **({"impression_id": queue_impression,
+                    "trade_concept_id": _trade_policy.trade_concept_id(
+                        league_id=league_id, viewer_user_id=g_user_id,
+                        partner_user_id=opponent.user_id, viewer_gives=give_ids,
+                        viewer_receives=recv_ids)} if queue_impression is not None else {}),
             )
-        record_event(
-            g_user_id,
-            "trade_proposed",
-            league_id = league_id,
-            source    = "calc_queue",
-            props     = {
-                "decision": "like",
-                "trade_id": trade_id,
-                "give":     card.give_player_ids,
-                "receive":  card.receive_player_ids,
-                "target":   opponent.user_id,
-                # Propose-label spine — server-stamped: the ✓ cell is the
-                # calculator, no client declaration needed. Keeps
-                # props.source one closed enum across both emitters.
-                "source":   "calculator",
-                **({"impression_id": queue_impression} if queue_impression is not None else {}),
-            },
-            **(getattr(g, "device_info", {}) or {}),
-        )
-    except Exception as db_err:
-        log.warning("DB write failed for queued trade (continuing): %s", db_err)
+            if wrote_decision:
+                save_trade_swipes(
+                    user_id        = g_user_id,
+                    winner_ids     = card.receive_player_ids,
+                    loser_ids      = card.give_player_ids,
+                    k_factor       = _rs_c("trade_k_like") * fit_mult,
+                    scoring_format = _active_format(sess),
+                )
+            record_event(
+                g_user_id,
+                "trade_proposed",
+                league_id = league_id,
+                source    = "calc_queue",
+                props     = {
+                    "decision": "like",
+                    "trade_id": trade_id,
+                    "give":     card.give_player_ids,
+                    "receive":  card.receive_player_ids,
+                    "target":   opponent.user_id,
+                    # Propose-label spine — server-stamped: the ✓ cell is the
+                    # calculator, no client declaration needed. Keeps
+                    # props.source one closed enum across both emitters.
+                    "source":   "calculator",
+                    **({"impression_id": queue_impression} if queue_impression is not None else {}),
+                },
+                **(getattr(g, "device_info", {}) or {}),
+            )
+        except Exception as db_err:
+            log.warning("DB write failed for queued trade (continuing): %s", db_err)
 
     log.info("trades/queue: %s queued %s for %s (league=%s)",
              g_user_id, trade_id, opponent.user_id, league_id)
@@ -16952,9 +17114,10 @@ def _apply_reasoned_pass_elo_only(sess, card, reason_key: str) -> bool:
             pass_reason_key = reason_key,
         )
         if wrote:
-            sess["service"].record_trade_signal(
-                winner_ids=card.give_player_ids, loser_ids=card.receive_player_ids,
-                decision="pass", fit_mult=fit_mult)
+            with sess["service"]._lock:
+                sess["service"].record_trade_signal(
+                    winner_ids=card.give_player_ids, loser_ids=card.receive_player_ids,
+                    decision="pass", fit_mult=fit_mult)
         return bool(wrote)
     except Exception as e:
         log.warning("deferred pass-reason Elo write failed (non-fatal): %s", e)
@@ -19706,9 +19869,10 @@ def account_reset_rankings():
     # session_init.
     for svc in (sess.get("services") or {}).values():
         try:
-            svc.reset(position=None)
-            svc._elo_overrides = {}
-            svc._elo_override_at = {}
+            with svc._lock:
+                svc.reset(position=None)
+                svc._elo_overrides = {}
+                svc._elo_override_at = {}
         except Exception:
             log.exception("account reset-rankings in-memory reset failed")
     log.info("AUTH-VERIFIED reset-rankings user_id=%s counts=%s", user_id, counts)
@@ -20615,11 +20779,12 @@ def disposition_trade_match(match_id):
                 if (sig["user_id"] == g_user_id
                         and service is not None
                         and not is_cross_league):
-                    service.record_disposition_signal(
-                        winner_ids = sig["winner_ids"],
-                        loser_ids  = sig["loser_ids"],
-                        k_factor   = sig["k_factor"],
-                    )
+                    with service._lock:
+                        service.record_disposition_signal(
+                            winner_ids = sig["winner_ids"],
+                            loser_ids  = sig["loser_ids"],
+                            k_factor   = sig["k_factor"],
+                        )
                 # 2. Persist swipes for both users (non-current user gets
                 #    them on next session_init via replay_from_db). This ALWAYS
                 #    runs — including cross-league — so the decision survives.
@@ -20844,28 +21009,29 @@ def submit_rankings():
     user_id   = g_user_id
     league_id = body.get("league_id") or g_league.league_id
 
-    all_rankings = service.get_rankings(position=None)
-    payload = [
-        {"player_id": rp.player.id, "elo": rp.elo}
-        for rp in all_rankings.rankings
-    ]
+    with service._lock:
+        all_rankings = service.get_rankings(position=None)
+        payload = [
+            {"player_id": rp.player.id, "elo": rp.elo}
+            for rp in all_rankings.rankings
+        ]
 
-    try:
-        _conf = _ranking_confidence(service)
-        payload = _confidence_payload(payload, _conf)
-        _publish_member_rankings_for_trade_refresh(
-            user_id        = user_id,
-            league_id      = league_id,
-            rankings       = payload,
-            scoring_format = _active_format(sess),
-            **_conf,
-        )
-        log.info("rankings/submit [%s] — user=%s league=%s players=%d",
-                 _active_format(sess), user_id, league_id, len(payload))
-        return jsonify({"ok": True, "submitted": len(payload)})
-    except Exception as e:
-        log.error("rankings/submit error: %s", e)
-        return jsonify({"error": "internal_error"}), 500
+        try:
+            _conf = _ranking_confidence(service)
+            payload = _confidence_payload(payload, _conf)
+            _publish_member_rankings_for_trade_refresh(
+                user_id        = user_id,
+                league_id      = league_id,
+                rankings       = payload,
+                scoring_format = _active_format(sess),
+                **_conf,
+            )
+            log.info("rankings/submit [%s] — user=%s league=%s players=%d",
+                     _active_format(sess), user_id, league_id, len(payload))
+            return jsonify({"ok": True, "submitted": len(payload)})
+        except Exception as e:
+            log.error("rankings/submit error: %s", e)
+            return jsonify({"error": "internal_error"}), 500
 
 
 # #360/#361 — the five DNA position chips. This is the ONLY validated set for
@@ -22151,6 +22317,7 @@ VALID_POSITIONS = {"QB", "RB", "WR", "TE"}
 
 
 @app.route("/api/session/init", methods=["POST"])
+@_single_flight_session_init
 def session_init():
     """Initialize/switch a league for the proven session identity.
 
@@ -23975,7 +24142,8 @@ def _run_weekly_replenishment(now: datetime) -> dict:
 #                  transactions commit). No scheduler dependency — the only
 #                  mechanism whose correctness is independent of whether
 #                  the declared crons actually fire.
-#   B. weekly    — _kickoff_roster_snapshot_sweep, called from daily-tick
+#   B. weekly    — _daily_tick_roster_snapshot (daily-tick step 1, on the
+#                  tick's runner daemon thread, backend/daily_tick.py),
 #                  behind a >= weekday gate (the _run_weekly_replenishment
 #                  house pattern: one missed cron run doesn't skip the
 #                  week; the existing 'weekly' row for the period caps the
@@ -24350,6 +24518,20 @@ def _kickoff_roster_snapshot_sweep(now: datetime | None = None) -> dict:
     return {"started": True, "period_key": _rh.iso_period_key(now)}
 
 
+def _daily_tick_roster_snapshot(now: datetime):
+    """daily-tick step 1 — Writer B, run INLINE on the daily-tick runner
+    thread. The same gates as `_kickoff_roster_snapshot_sweep` (flag, then
+    the >= weekday gate), then the same body, budget and active-league
+    window its daemon runs."""
+    if not is_enabled("market.roster_history"):
+        return "skipped", "flag off"
+    gate = _roster_snapshot_weekday_gate()
+    if now.weekday() < gate:
+        return "skipped", f"weekday_gate={gate}"
+    return "ok", _run_roster_snapshot_sweep(now, _ROSTER_SNAPSHOT_SWEEP_BUDGET,
+                                            ACTIVE_LEAGUE_WINDOW_DAYS)
+
+
 # ---------------------------------------------------------------------------
 # Cron-tick endpoints — called by Render Cron jobs over HTTP
 # ---------------------------------------------------------------------------
@@ -24677,15 +24859,65 @@ def cron_hourly_tick():
 
 @app.route("/api/cron/daily-tick", methods=["POST"])
 def cron_daily_tick():
-    """Once per day. Re-engagement pushes — winback variants, finish_ranking,
-    and season_start. Frequency caps in `_NOTIF_FREQ_CAPS` enforce per-window
-    limits (winback_matches: 1/7d, winback_dormant: 1/30d, finish_ranking:
-    1/30d, season_start: 1/365d). The cap check happens inside
-    _send_typed_push, so the loop here is the broad scan.
+    """Once per day (Render cron `notif-daily-tick`). Authenticates, starts
+    ONE single-flight runner thread (`backend/daily_tick.py`) and returns
+    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one sync
+    gunicorn worker (`--timeout 120`, render.yaml) serves every request, and
+    the inline tick was killed at 120 s every day (runbook § Cron schedule).
+    `started: false` means a run is already in flight (single-flight, not a
+    queue).
+
+    The runner runs `_daily_tick_steps()` serially, in table order. Each step
+    reads its own gate at run time, a raise in one never skips the rest, and
+    each logs one `daily-tick step=<key> ms=<int> outcome=<ok|skipped|error>
+    detail=<…>` line, which carries the counters this response used to.
+    `now` is taken here, on the request, and handed to every step.
     """
     _require_cron_auth()
-    _cron_work_started = _user_data_lifecycle.snapshot()
     now = datetime.now(timezone.utc)
+    started = _daily_tick.start(_daily_tick_steps(), now, log=log)
+    return jsonify({"ok": True, "started": started}), 202
+
+
+def _daily_tick_steps() -> list:
+    """The daily-tick step table, in run order (docs/plans/daily-tick-fix/
+    scope.md §0): permanent-loss writers first, the CPU-heavy steps last.
+    Built per call, so each entry is the module's CURRENT function and
+    `patch.object(server, …)` in tests still bites."""
+    S = _daily_tick.Step
+    return [
+        S("roster_snapshot",   _daily_tick_roster_snapshot),
+        S("usage_trends",      _daily_tick_usage_trends),
+        S("receipts_grade",    _daily_tick_receipts_grade),
+        S("rookie_monitor",    _daily_tick_rookie_monitor),
+        S("players_guard",     _daily_tick_players_guard),
+        S("reengagement",      _daily_tick_reengagement),
+        S("replenishment",     _daily_tick_replenishment),
+        S("eval_nightly",      _daily_tick_eval_nightly),
+        S("value_model_refit", _daily_tick_value_model_refit),
+    ]
+
+
+def _daily_tick_rookie_monitor(now: datetime):
+    """daily-tick step 4 — M0 rookie class-load monitor. The NEXT season's
+    class does not exist in Sleeper's dump until ~late April. Its arrival is
+    a one-shot, unobservable-in-advance event that the Draft Room's
+    pre-class-load state depends on, so log it loudly the first time a row
+    appears. One indexed query per tick; the log line IS the alert (there is
+    no pager)."""
+    return "ok", {"appeared": _check_rookie_class_load(_CURRENT_SEASON + 1)}
+
+
+def _daily_tick_reengagement(now: datetime):
+    """daily-tick step 6. Re-engagement pushes — winback variants,
+    finish_ranking, and season_start. Frequency caps in `_NOTIF_FREQ_CAPS`
+    enforce per-window limits (winback_matches: 1/7d, winback_dormant: 1/30d,
+    finish_ranking: 1/30d, season_start: 1/365d). The cap check happens
+    inside _send_typed_push, so the loop here is the broad scan. The
+    user-data lifecycle snapshot is taken at step start; the counters go to
+    the step's log line.
+    """
+    _cron_work_started = _user_data_lifecycle.snapshot()
     cutoff_7d  = (now - timedelta(days=7)).isoformat()
     cutoff_30d = (now - timedelta(days=30)).isoformat()
     cutoff_3d  = (now - timedelta(days=3)).isoformat()
@@ -24774,148 +25006,56 @@ def cron_daily_tick():
                         data  = {"unread_count": unread},
                     )
                     counters["winback_matches"] += 1
+    return "ok", counters
 
-    # ── F10 (flag deck.replenishment) — weekly deck pre-generation ──
-    # Flag off ⇒ this block is a no-op and the response stays byte-identical.
-    replenish_stats: dict | None = None
-    if _deck_replenishment_enabled():
-        try:
-            replenish_stats = _run_weekly_replenishment(now)
-        except Exception as e:
-            log.warning("daily-tick: replenishment pass failed: %s", e)
-            replenish_stats = {"error": str(e)}
 
-    # ── F8 — offline eval nightly (operator tooling, unflagged) ──
-    # Idempotent per (UTC day, scorer, window) via data/eval_runs/runs.jsonl,
-    # so daily-tick retries are free. Never fails the tick.
-    eval_summary: str | None = None
-    try:
-        from .eval.nightly import run_all as _eval_run_all
-        _eval_stats = _eval_run_all(window_days=30)
-        eval_summary = _eval_stats.get("summary")
-        if _eval_stats.get("ran"):
-            counters["eval_scorers_graded"] = _eval_stats["ran"]
-        if _eval_stats.get("errors"):
-            log.warning("daily-tick eval: %s scorer(s) errored (recorded in runs.jsonl)",
-                        _eval_stats["errors"])
-    except Exception as e:
-        log.warning("daily-tick: offline-eval pass failed (non-fatal): %s", e)
-    if eval_summary:
-        log.info("daily-tick eval: %s", eval_summary)
+def _daily_tick_replenishment(now: datetime):
+    """daily-tick step 7 — F10 weekly deck pre-generation, DEFERRED: an
+    unconditional hard skip (operator, 2026-10-23: ship S3 without it). It
+    reads no flag and never calls `_run_weekly_replenishment`, so no deck
+    builds, pushes, inbox rows or marker rows, whatever `deck.replenishment`
+    says.
 
-    # ── F6 (flag deck.value_model — SHIPS DARK) — nightly refit ──
-    # Runs AFTER the F8 eval block so the eval pass grades yesterday's
-    # model before today's supersedes it. Flag-gated (training AND serving
-    # are both dark until the F8 replay win), idempotent per UTC date via
-    # data/value_model/models.jsonl, never fails the tick, and never
-    # changes the flag-off response payload.
-    if _deck_value_model_enabled():
-        try:
-            vm_stats = _value_model.nightly_refit(now=now)
-            log.info("daily-tick value-model refit: %s", vm_stats)
-            if vm_stats.get("status") == "trained":
-                counters["value_model_trained"] = 1
-        except Exception as e:
-            log.warning("daily-tick: value-model refit failed (non-fatal): %s", e)
+    Why: trades-eng's C2 (no evidence for unserved builds) and the
+    replenishment self-renewal fix (db-capacity.md latent issue 1) must land
+    first; until then a working tick would run the full weekly sweep and
+    fill the DB.
 
-    # ── M0 — player-cache refresh fallback guard ──
-    # The dedicated POST /api/cron/players-refresh is the primary trigger, but
-    # a missed day means a whole rookie class stays invisible. Mirrors the
-    # hourly-tick value-snapshot fallback guard: fires only when the cache is
-    # already past its TTL, starts a DAEMON (never blocks the tick), and is
-    # wrapped so a failure here can never touch the push work above.
-    #
-    # Deployed environments only (`_IS_PROD_ENV`, the same signal
-    # `_require_cron_auth` keys off). A local/SQLite run has a long-stale dev
-    # cache by construction, and an implicit fallback there would make this
-    # response environment-dependent and rewrite the shared dev cache from a
-    # test run. The dedicated route (with `?force=1`) is how you exercise a
-    # refresh locally.
-    players_refresh_started: bool | None = None
-    try:
-        _age = _players_cache_age_seconds()
-        if _IS_PROD_ENV and (_age is None or _age > _PLAYERS_CACHE_TTL_SECONDS):
-            players_refresh_started = _refresh_players_cache_async()
-    except Exception as e:
-        log.warning("daily-tick: players-refresh guard failed (continuing): %s", e)
+    Re-enabling = restoring the flag-gated call:
+        if not _deck_replenishment_enabled():
+            return "skipped", "flag off"
+        stats = _run_weekly_replenishment(now)
+        return ("skipped" if stats.get("gated") else "ok"), stats
+    """
+    return "skipped", "deferred: C2"
 
-    # ── M0 — rookie class-load monitor ──
-    # The NEXT season's class does not exist in Sleeper's dump until ~late
-    # April. Its arrival is a one-shot, unobservable-in-advance event that the
-    # Draft Room's pre-class-load state depends on, so log it loudly the first
-    # time a row appears. One indexed query per tick; the log line IS the
-    # alert (there is no pager).
-    try:
-        _check_rookie_class_load(_CURRENT_SEASON + 1)
-    except Exception as e:
-        log.warning("daily-tick: class-load monitor failed (continuing): %s", e)
 
-    # ── ADR-011 Writer B — weekly roster-snapshot sweep kickoff ──
-    # Behind the >= weekday gate (FTF_ROSTER_SNAPSHOT_WEEKDAY, default 1),
-    # on a daemon so the tick never blocks on N league fetches. The
-    # response counter is operator telemetry; the real liveness read is
-    # `SELECT source, count(*) FROM league_roster_history GROUP BY 1`
-    # (runbook § roster-snapshot monitoring).
-    roster_snapshot_stats: dict | None = None
-    try:
-        roster_snapshot_stats = _kickoff_roster_snapshot_sweep(now)
-    except Exception as e:
-        log.warning("daily-tick: roster-snapshot kickoff failed (continuing): %s", e)
+def _daily_tick_eval_nightly(now: datetime):
+    """daily-tick step 8 — F8 offline eval nightly (operator tooling,
+    unflagged). Idempotent per (UTC day, scorer, window) via
+    data/eval_runs/runs.jsonl, so daily-tick retries are free."""
+    from .eval.nightly import run_all as _eval_run_all
+    _eval_stats = _eval_run_all(window_days=30)
+    if _eval_stats.get("errors"):
+        log.warning("daily-tick eval: %s scorer(s) errored (recorded in runs.jsonl)",
+                    _eval_stats["errors"])
+    if _eval_stats.get("summary"):
+        log.info("daily-tick eval: %s", _eval_stats["summary"])
+    return "ok", {k: _eval_stats.get(k) for k in ("ran", "skipped", "errors")}
 
-    # ── Usage Trends weekly store (docs/plans/usage-trends/weekly-update.md) ──
-    # Idempotent: fetches only completed weeks not yet stored, plus stat
-    # corrections for weeks loaded within the last 7 days. Daemon thread;
-    # reported only while usage_trends.enabled is on (flag-off payload
-    # stays byte-identical).
-    usage_refresh_stats: dict | None = None
-    try:
-        usage_refresh_stats = _kickoff_usage_refresh(now)
-    except Exception as e:
-        log.warning("daily-tick: usage-trends refresh kickoff failed (continuing): %s", e)
 
-    # ── Receipts grading guard (docs/plans/receipts/, HLD D-9) ──
-    # POST /api/cron/receipts-grade is the primary trigger, but no Render cron
-    # service is provisioned for it (operator ruling Q-4) — and the one
-    # value-snapshot "provisioned cron" this repo believed in turned out to be
-    # fictional (reverted in commit 1e50d3e). So grading rides the same
-    # three-trigger pattern roster_history uses (database.py:1320-1336): the
-    # dedicated endpoint, this guard, and the backfill script all call ONE
-    # idempotent writer. The guard is what actually fires day to day.
-    #
-    # Fire-and-forget on a daemon thread: a grading run must never lengthen
-    # the tick or be able to fail the push work above (and vice versa). Single-
-    # flight inside the service means an overlap with the dedicated endpoint
-    # no-ops rather than duplicating. No-op while `receipts.grading` is off.
-    #
-    # The counter is serialized ONLY when `receipts.grading` is on, so a
-    # flag-off tick payload stays byte-identical to today — the
-    # `_run_weekly_replenishment` convention, pinned by
-    # test_deck_replenishment.py::test_flag_off_no_replenish_work_no_push_no_payload_change.
-    receipts_grade_started: bool | None = None
-    try:
-        from .receipts_service import grading_enabled as _receipts_on
-        if _receipts_on():
-            receipts_grade_started = _kickoff_receipts_grading("daily_tick")
-    except Exception as e:
-        log.warning("daily-tick: receipts-grade guard failed (continuing): %s", e)
-
-    log.info("daily-tick: %s", counters)
-    extra: dict = {}
-    # Serialized only when the flag is on — flag-off tick payloads stay
-    # byte-identical (the _run_weekly_replenishment convention, and
-    # test_deck_replenishment pins the equivalent for its key).
-    if roster_snapshot_stats is not None and not roster_snapshot_stats.get("disabled"):
-        extra["roster_snapshot"] = roster_snapshot_stats
-    if players_refresh_started is not None:
-        extra["players_refresh_started"] = players_refresh_started
-    if receipts_grade_started is not None:
-        extra["receipts_grade_started"] = receipts_grade_started
-    if usage_refresh_stats is not None and not usage_refresh_stats.get("disabled"):
-        extra["usage_refresh"] = usage_refresh_stats
-    if replenish_stats is not None:
-        log.info("daily-tick replenish: %s", replenish_stats)
-        return jsonify({"ok": True, **counters, "replenish": replenish_stats, **extra})
-    return jsonify({"ok": True, **counters, **extra})
+def _daily_tick_value_model_refit(now: datetime):
+    """daily-tick step 9 — F6 (flag deck.value_model — SHIPS DARK) nightly
+    refit. Runs AFTER step 8 so the eval pass grades yesterday's model
+    before today's supersedes it. Flag read at run time (training AND
+    serving are both dark until the F8 replay win); idempotent per UTC date
+    via data/value_model/models.jsonl; `nightly_refit` never raises."""
+    if not _deck_value_model_enabled():
+        return "skipped", "flag off"
+    vm_stats = _value_model.nightly_refit(now=now)
+    status = vm_stats.get("status")
+    return ("error" if status == "error" else
+            "skipped" if status == "skipped" else "ok"), vm_stats
 
 
 @app.route("/api/cron/value-snapshot", methods=["POST"])
@@ -24955,6 +25095,22 @@ def _kickoff_receipts_grading(trigger: str, batch: int | None = None) -> bool:
         name=f"receipts-grade-{trigger}", daemon=True)
     t.start()
     return True
+
+
+def _daily_tick_receipts_grade(now: datetime):
+    """daily-tick step 3 — the Receipts grading guard (docs/plans/receipts/,
+    HLD D-9), run INLINE on the daily-tick runner thread. No Render cron is
+    provisioned for POST /api/cron/receipts-grade (operator ruling Q-4), so
+    this step is what actually grades day to day. The same guards as
+    `_kickoff_receipts_grading` (flag + env kill switch, single-flight), then
+    the same `run_grading` body with `trigger="daily_tick"`."""
+    from .receipts_service import grading_enabled, is_running, run_grading
+    if not grading_enabled():
+        return "skipped", "flag off"
+    if is_running():
+        return "skipped", "in_flight"
+    res = run_grading(trigger="daily_tick")
+    return ("skipped" if res.get("skipped") else "ok"), res
 
 
 @app.route("/api/cron/receipts-grade", methods=["POST"])
@@ -30738,23 +30894,30 @@ def _usage_week(season: int, week: int) -> tuple[dict, dict]:
 _usage_refresh_lock = threading.Lock()
 
 
+def _run_usage_refresh(source: str, **kwargs) -> dict:
+    """One usage_trends_refresh run; the caller holds `_usage_refresh_lock`.
+    A run that stored anything drops the cached computed windows so the
+    route serves the new numbers at once."""
+    from .usage_trends_refresh import refresh_usage_weeks
+    summary = refresh_usage_weeks(lambda url: _sleeper_get(url, 20), **kwargs)
+    if summary.get("stored"):
+        with _usage_lock:
+            for key in [k for k in _usage_cache if k and k[0] in ("players", "week")]:
+                _usage_cache.pop(key, None)
+    log.info("usage-refresh (%s): %s", source, summary)
+    return summary
+
+
 def _start_usage_refresh(source: str, **kwargs) -> bool:
-    """Run usage_trends_refresh on a daemon thread (one gunicorn worker: a
+    """Run `_run_usage_refresh` on a daemon thread (one gunicorn worker: a
     multi-week fetch must never block requests). Single-flight: returns False
-    when a run is already going. A run that stored anything drops the cached
-    computed windows so the route serves the new numbers at once."""
+    when a run is already going."""
     if not _usage_refresh_lock.acquire(blocking=False):
         return False
 
     def _body():
         try:
-            from .usage_trends_refresh import refresh_usage_weeks
-            summary = refresh_usage_weeks(lambda url: _sleeper_get(url, 20), **kwargs)
-            if summary.get("stored"):
-                with _usage_lock:
-                    for key in [k for k in _usage_cache if k and k[0] in ("players", "week")]:
-                        _usage_cache.pop(key, None)
-            log.info("usage-refresh (%s): %s", source, summary)
+            _run_usage_refresh(source, **kwargs)
         except Exception:
             log.exception("usage-refresh (%s) crashed", source)
         finally:
@@ -30762,6 +30925,22 @@ def _start_usage_refresh(source: str, **kwargs) -> bool:
 
     threading.Thread(target=_body, name="usage-trends-refresh", daemon=True).start()
     return True
+
+
+def _daily_tick_usage_trends(now: datetime):
+    """daily-tick step 2 — the steady-state weekly update, run INLINE on the
+    daily-tick runner thread. The same flag gate as `_kickoff_usage_refresh`
+    and the same single-flight lock as `_start_usage_refresh`, taken
+    non-blocking (a run already going ⇒ skipped), around the same body."""
+    if not is_enabled("usage_trends.enabled"):
+        return "skipped", "flag off"
+    if not _usage_refresh_lock.acquire(blocking=False):
+        return "skipped", "busy"
+    try:
+        summary = _run_usage_refresh("daily_tick", now=now)
+    finally:
+        _usage_refresh_lock.release()
+    return ("error" if summary.get("error") else "ok"), summary
 
 
 def _kickoff_usage_refresh(now: datetime | None = None) -> dict:
