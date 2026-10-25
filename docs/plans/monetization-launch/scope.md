@@ -18,10 +18,13 @@ surfaces and analytics events (CLAUDE.md "Bright line").
 monetization-pm): "Work with product and eng to build monetization from day 1. 30 day free trial to access the
 product." Product spec: [recommendation.md](recommendation.md). UX spec: ux-lead's "Monetization UX flows"
 (`docs/plans/org-bringup/reports/ux-lead.md:23-264`, cited **ux §n**).
-**Builder:** not yet allocated. head-eng allocates; proposed: engagement-eng in a 4th Eng slot from 10-28 (mobile and
-server), eng-web (web). Rows refer to [recommendation.md](recommendation.md) §Itemization.
-**Operator sign-off on waivers:** **pending.** W-MON-1 and W-MON-2 (§6).
-**Assumes the operator's decisions 1–4, 9 and 10 as recommended.** If B or C1 is chosen, this block is re-cut.
+**Builder:** engagement-eng in the **approved 4th Eng slot** from 10-28, weekends included (the client); head-eng's
+server PRs #394 and #395 (drafts, under way); eng-web (web). Rows refer to [recommendation.md](recommendation.md)
+§Itemization.
+**Operator sign-off on waivers:** **approved 2026-10-25** (W-MON-1, W-MON-2), under "rest of PR #393" (relayed verbatim
+via head-bizops → head-product): "Approve M2-M5 as recommended: trade features only locked (C2), $4.99/$24.99 Founder then $6.99/$34.99 from 2027-01-01, rest of PR #393 incl. decision 16. Name: Founding GMs. Listing line: legal's R28.8 version."
+**Built to the operator's decisions of 2026-10-25** (recommendation.md header and §Decisions): A-preview, C2, the
+Founding GMs prices, R1 (the route, M1: "Ok. Then we need to build it.").
 **Operator ruling, 2026-10-24** (head-bizops' session, relayed by head-product, verbatim): "No to any UX reflections of a
 trial countdown. So scrap the 3 days and the day 30 items". Applied throughout: trial terms (duration, end behavior,
 price) and the cut-off are stated once, at the start, on the offer (3.1.2); when access ends, a gated action opens the
@@ -39,7 +42,7 @@ the T-3 items are superseded.
 
   | Event | Properties | Fires when | Client | Class |
   |---|---|---|---|---|
-  | `paywall_gate_hit` (**new**, server-fired) | `gate`: `preview_used` \| `trial_expired` \| `lapsed` \| `never_trialed`. `route_family`: `deck` \| `send` \| `matches` \| `calculator` \| `shop` \| `overhaul` \| `win_now` \| `other` (closed enums, kept in the row's comment) | The global gate returns 402 `pro_required`. **Capped:** the first per (user, `gate`, `route_family`) per UTC day; read as distinct users, never as a row count | server | **NON_INTENT** (a system response to an intent the existing events already count) |
+  | `paywall_gate_hit` (**new**, server-fired) | `gate`: `preview_used` \| `never_trialed` \| `trial_expired` \| `lapsed` \| `verify_required`. `route_family` (props only; never in the 402 body): `deck` \| `send` \| `matches` \| `calculator` \| `shop` \| `overhaul` \| `win_now` \| `other` (closed enums, kept in the row's comment) | The global gate returns 402 `pro_required`. **Capped:** the first per (user, `gate`, `route_family`) per UTC day; read as distinct users, never as a row count | server | **NON_INTENT** (a system response to an intent the existing events already count) |
   | `entitlement_granted` (**register only**; the emitter ships at `entitlements.py:302`) | `entitlement`, `source`, `expires_at`, verbatim from the shipped call | `entitlements.grant()` inserts a row (purchase projection, manual or comp grant) | server | **INTENT**, no NON_INTENT row (#347 5h). analytics-lead confirms, given that manual grants fire it for the recipient |
   | `paywall_viewed` (**shipped; enum widening only**) | `source` gains `first_opinion` \| `left_deck` \| `gate` \| `settings` (it keeps `unknown`). No push or club values (the ruling). `platform` unchanged (the config variant) | The paywall mounts. `first_opinion` / `left_deck` are ux §1's two triggers; `gate` is the standard paywall opened from a gated surface | mobile | NON_INTENT (unchanged). The widening edits the row comment and the addendum, not the registry (registration.md §3) |
 
@@ -47,6 +50,8 @@ the T-3 items are superseded.
     `pro` only through an intro trial that ended unconverted. `lapsed` = held a paid period, now expired or refunded.
     `never_trialed` = never held `pro`, and the action is outside the preview (a send before any opinion), or the
     preview knob is 0. **`lapsed` is added to the lead's three:** a churned payer isn't `trial_expired`.
+    `verify_required` (head-eng's P47) = the user_id holds `pro`, but the session is unverified (not verified, not
+    demo). analytics-lead is granting the event now.
   - **Not added, on purpose:**
     - `paywall_shown` (it duplicates `paywall_viewed`; this overrides head-eng's and ux-lead's proposals);
     - client `trial_started`, `purchase_*` duplicates, `declined`, `trial_expired*`.
@@ -84,18 +89,22 @@ the T-3 items are superseded.
 - **Feature flags (existing; no new flag).** All default `false` in `config/features.json:141-145`. `FTF_FLAGS`
   overrides them in prod, so every flip goes through the effective mechanism (release-lead), on the operator's word.
 
-  | Flag | Role after 5a | Flip | Graduation |
+  | Flag | Role (head-eng's rule, #394) | Flip | Graduation |
   |---|---|---|---|
-  | `monetize.entitlements` | Resolution on; alone = observe mode (`ENTITLE-OBSERVE … would_block`) | ON at the server-gate deploy (~11-04) | Remove after 8 weeks of enforcement with K0–K3 clear [A] |
-  | `monetize.pro` | **The enforce flag** (5a wires it; today nothing reads it) | ON when enforcement starts (review, ~11-09, under R1) | Same |
-  | `monetize.paywall` | Purchase UI only (the paywall, Settings › Subscription) | ON with `monetize.pro` | Same |
+  | `monetize.entitlements` | Resolution on; without enforce = observe mode (`ENTITLE-OBSERVE … would_block`) | ON at the server-gate deploy (~11-04) | Remove after 8 weeks of enforcement with K0–K3 clear [A] |
+  | `monetize.paywall` | Purchase UI (the paywall, Settings › Subscription) **and** an enforce leg | ON when enforcement starts (review, ~11-09) | Same |
+  | `monetize.pro` | **Retired:** deliberately not read (#394) | Stays OFF | Remove with the others |
   | `monetize.founder`, `monetize.season_pass` | Unused: no Founder or Season Pass SKU | Stay OFF | — |
 
-  **Enforce = `monetize.entitlements` ∧ `monetize.pro` ∧ `paywall_enforce_enabled = 1`.** `docs/config-reference.md`
-  and `backend/feature_flags.py` `FLAG_KEYS` get the new semantics; the flag keys don't change.
+  **Enforce = `entitlements.is_enforcing()` = `monetize.entitlements` ∧ `monetize.paywall` ∧ model_config
+  `paywall_enforce_enabled` = 1** (the rule head-eng's #394, a draft, implements). `docs/config-reference.md` and
+  `backend/feature_flags.py` `FLAG_KEYS` get the new semantics; the flag keys don't change.
 - **New `model_config` keys** (deploy-free; `docs/config-reference.md`):
   - **`paywall_enforce_enabled`** (int 0/1, default **0**): **the ship-the-knob kill.** 0 means no request is ever
     blocked, whatever the flags say. A gate misfire locks every user out, so the rollback can't need a deploy.
+  - **`paywall_web_enforce_enabled`** (int 0/1, default **0**): web enforcement, on top of `is_enforcing()`. A request
+    without the native app's `X-Device` counts as web (#395). **head-product ruled the web stays ungated until 11-18;**
+    it flips on 11-18 once `IOS_INSTALL_URL` resolves, on the operator's word.
   - **`paywall_preview_pages`** (int, default **1** [A]): the free deck pages for a never-entitled user. 0 = no preview
     (the offer at the first trade action). It's the fallback if App Review objects.
   - **The club window is server config,** not a knob: `closes_at` in `/api/paywall/config` must equal App Store
@@ -105,7 +114,10 @@ the T-3 items are superseded.
   - `REVENUECAT_WEBHOOK_SECRET` (Render and `secrets.local.env`; the webhook 503s without it).
 - **API surface** (`docs/api-reference.md`). No new routes:
   1. **The global gate:** every route the classification table marks `gated` returns
-     `402 {"error": "pro_required", "gate": "<enum>"}`, for a non-entitled user, while enforcing.
+     `402 {"error": "pro_required", "gate": "<enum>"}`, for a non-entitled user, while enforcing (web only once
+     `paywall_web_enforce_enabled` is on). The enum is `preview_used | never_trialed | trial_expired | lapsed |
+     verify_required`. **P47:** Pro counts only on verified or demo sessions; an unverified session whose user_id holds
+     Pro gets `verify_required`, and the client shows "sign in to use your subscription".
      - One `before_request` hook reads a **per-route** table (`gated` | `free` | `never_gate`), not prefixes:
        `/api/league/*` and `/api/trades/*` mix families. The table follows recommendation §(c).
      - **Gated:** `/api/trades/generate`, `GET /api/trades` and `/status` beyond the preview page; `/swipe` and
@@ -115,12 +127,18 @@ the T-3 items are superseded.
      - **Never gated:** `/api/admin/*`, `/api/cron/*`, `/api/billing/*` (secret-guarded, provider or operator traffic).
      - **Everything else is `free`.** That includes `DELETE /api/account`, `/api/account/export`, `/api/me/entitlements`,
        `/api/paywall/config`, `/api/feature-flags`, `/api/events`, `/api/session/*`, `/api/auth/*`, `/api/sleeper/link`,
-       `/api/extension/*`, every rank write, `/api/trade/evaluate`, `GET /api/trades/matches[/all]`, `/api/invite/*` and
-       `/api/profile/*`.
+       `/api/extension/*`, every rank write, `/api/trade/evaluate`, `GET /api/trades/matches[/all]`, `/api/invite/*`,
+       `/api/profile/*`, and **P48** (Product-confirmed against ux-lead's classification; #395 keeps them free):
+       `POST /api/trades/validate`, `POST /api/trades/standing-offer/revoke`, `POST /api/trades/matches/<id>/dismiss`,
+       `GET /api/trades/liked`.
+     - **The client source for engagement-eng** is ux-lead's classification with its "Decide" column decided by Product
+       (`docs/plans/org-bringup/reports/ux-lead.md:289`): the calculator's value comparison FREE (its deck suggestions
+       and sends gated); viewing Matches FREE (dismiss free; swipe, accept, send gated); Draft Room FREE; Calibration FREE.
      - `load_member_rankings` (`database.py:9281-9380`) is **not** filtered by entitlement.
   2. **`GET /api/me/entitlements`:**
-     - `enforcing` becomes the enforce predicate above (5b; today it reads one flag, `server.py:31168`);
-     - it adds `founder` (bool) only, for the Settings status line, the Home mark and the kept-price line.
+     - `enforcing` becomes `is_enforcing()` (5b; today it reads one flag, `server.py:31168`);
+     - it adds `founder` (bool) only, for the Settings status line, the Home mark and the kept-price line;
+     - **for an unverified session it blanks every field** (P47).
   3. **`GET /api/paywall/config`** (`server.py:31209-31251`):
      - `club: {name, closes_at, open}`;
      - `products[].trial_period: "1 month"`, which replaces the client-built "`trial_days` days free" string
@@ -162,14 +180,16 @@ the T-3 items are superseded.
   - `backend/tests/test_paywall_gate.py` **(the gate matrix).** Cross every combination of:
     - the flags × the knob (0/1);
     - user state: never-entitled before and after the preview; in trial; paid; trial expired; lapsed; manual grant;
-      sandbox-capped;
-    - route class.
+      sandbox-capped; **Pro on an unverified session**; the ungranted demo (not exempt);
+    - client: native (`X-Device`) vs web, × `paywall_web_enforce_enabled` (0/1);
+    - route class, including the four P48 routes (always free).
 
     Expect 200 or 402, with the exact `gate` value. Also: cron-built decks never consume the preview; page 2 → 402
-    `preview_used`; a send in preview → `never_trialed`; knob 0 → never 402.
+    `preview_used`; a send in preview → `never_trialed`; unverified Pro → `verify_required`; knob 0 → never 402; web
+    knob 0 → no web 402; the 402 body carries no route family.
   - `backend/tests/test_paywall_gate_allowlist.py` **(completeness).** Iterate `app.url_map`, and fail on any rule
-    missing from the classification table. A pinned never-gate list must stay non-gated (`DELETE /api/account`,
-    export, entitlements, paywall config, feature flags, events, session, auth, billing, admin, cron).
+    missing from the classification table. A pinned list must stay non-gated (`DELETE /api/account`, export,
+    entitlements, paywall config, feature flags, events, session, auth, billing, admin, cron, and the four P48 routes).
     **Sabotage, each one red:**
     - delete a table row;
     - mark `DELETE /api/account` gated;
@@ -179,8 +199,8 @@ the T-3 items are superseded.
   - `backend/tests/test_entitlements_sandbox_cap.py`: 5f's 24 h cap and 5d's perpetual guard, with sabotage.
   - `backend/tests/test_paywall_config.py` (extend): the club block open and closed around `closes_at`, `trial_period`
     "1 month", the founder vs standard `display_price`, the truthful grid, `tips: []`, `dismissible: true`.
-  - `backend/tests/test_me_entitlements.py` (extend): `enforcing` across flags × knob (5b); `founder` from fixture ledger
-    payloads.
+  - `backend/tests/test_me_entitlements.py` (extend): `enforcing` = `is_enforcing()` across flags × knob (5b), with
+    `monetize.pro` ignored; `founder` from fixture ledger payloads; every field blank on an unverified session (P47).
   - The analytics registration: `entitlement_granted` ∈ `SERVER_FIRED_EVENTS` and ∉ `NON_INTENT_EVENTS`;
     `paywall_gate_hit` in both; the daily cap.
 - [ ] **Code-walk proof (written by the builder, file:line cited, linked here before merge).** Required traces:
@@ -220,17 +240,18 @@ the T-3 items are superseded.
       account gets a full deck on the next Find a trade. Back to 1 → gated actions open the standard paywall again.
   12. **T12 (gated re-entry)** From a second account, Like a package that mirrors the gated account's. **Expect:** the
       existing push's tap lands on Matches (viewable); accepting opens the standard paywall.
-  13. **T13 (unverified identity)** [Sleeper username-only session] Tap Start my free month. **Expect:** the verify step
-      first. No Apple sheet until verified.
-  14. **T14 (review demo, never-entitled)** Preview → offer → sandbox purchase. **Expect:** entitled within one refresh,
-      and the sandbox grant expires ≤ 24 h later (5f).
-  15. **T15 (review demo, entitled)** Manual grant. **Expect:** no offer, a full deck; Settings shows the plan.
+  13. **T13 (P47)** [an unverified Sleeper username session on an account that holds Pro] Find a trade. **Expect:** "sign
+      in to use your subscription" (402 `verify_required`), no subscription shown; after verifying, the full deck.
+  14. **T14 (review demo, ungranted)** The demo deck isn't exempt: preview → offer → sandbox purchase. **Expect:**
+      entitled within one refresh, and the sandbox grant expires ≤ 24 h later (5f).
+  15. **T15 (review demo, granted)** Manual grant. **Expect:** no offer, a full deck; Settings shows the plan.
   16. **T16 (terms once)** **Expect:** "1 month", never "30 days"; the trial terms (duration, end behavior, price) and the
       cut-off appear once, on the offer; the Terms and Privacy links open.
   17. **T17 (the ruling)** Walk Home, the deck, Matches, League, the welcome and Settings › Subscription, during the trial
       and after it. **Expect:** no countdown, days-left or ends-soon text on any surface, including Settings; Settings ›
       Subscription shows status, plan, Manage and Restore only.
-  18. **T18 (web)** [gated account on web] **Expect:** the first deck, then "continue on iPhone"; Rank, Settings, Delete
+  18. **T18 (web)** [gated account on web] Before the 11-18 flip: **Expect** no web 402. After
+      `paywall_web_enforce_enabled` = 1: **Expect** the first deck, then "continue on iPhone"; Rank, Settings, Delete
       and legal reachable; no purchase UI.
   19. **T19 (extension)** [gated account] Sign in to the extension. **Expect:** the rankings overlay loads, with no 402.
 - [ ] **WAIVED:** n/a. Every row above is answered. W-MON-2 (§6) covers the one behavior that can't be exercised
@@ -248,11 +269,11 @@ the T-3 items are superseded.
 | `living-memory/LLD.md` | **updated** | A convention shift: one `before_request` per-route classification gate replaces per-route `@require_pro`; a new route must be classified (CI-enforced). "The server never mints trials" stays true. The preview counter |
 | `docs/architecture.md` | **updated** | A cross-cutting gate in the request pipeline. The billing ledger → entitlements → gate data flow |
 | `living-memory/HLD.md` | **updated** | Monetization becomes live access control across iOS, web and the extension: a major flow |
-| `docs/cross-client-invariants.md` | **updated** | § "Monetization SKU ids…" (`:1204`): the 402 `gate` enum; the `paywall_viewed.source` enum; `ftf_pro_monthly` / `ftf_pro_annual` at founder $4.99 / $24.99 → standard $6.99 / $34.99; `trial_period` "1 month"; `club` field names; tips not served at launch |
-| `docs/glossary.md` | **updated** | Founding GMs / Founder's Club (the name is the operator's), the preview, the standard paywall on gated surfaces, the preserved price |
+| `docs/cross-client-invariants.md` | **updated** | § "Monetization SKU ids…" (`:1204`): the 402 `gate` enum (with `verify_required`); the `paywall_viewed.source` enum; `ftf_pro_monthly` / `ftf_pro_annual` at founder $4.99 / $24.99 → standard $6.99 / $34.99; `trial_period` "1 month"; `club` field names; tips not served at launch |
+| `docs/glossary.md` | **updated** | Founding GMs (the operator's name, decided 2026-10-25), the preview, the standard paywall on gated surfaces, the preserved price |
 | ADR or `DECISIONS.md` entry | **updated** | **A new ADR** (next free number; ADR-025 is the packing draft) **plus a D-entry** (D-209 on main today; grep first), written by head-eng. It overturns foundation §2.2 "never wrap the core loop" (`00-platform-foundation.md:131-134`) and the `_require_pro` docstring (`server.py:31144-31146`) on the operator's direction; the 2026-08-14 never-gated list; never-tolled for swipes (BL-001); the August trial ruling. It records price preservation as the Founder mechanism, and C2's rule |
 | `docs/data-dictionary.md` | **n/a** unless head-eng's storage needs a column (§2). Fix the entitlements-deletion drift while there |
-| `docs/config-reference.md` | **updated** | `paywall_enforce_enabled`, `paywall_preview_pages`; the `monetize.*` semantics (`:438-448`); the `FTF_FLAGS` note |
+| `docs/config-reference.md` | **updated** | `paywall_enforce_enabled`, `paywall_web_enforce_enabled`, `paywall_preview_pages`; the `monetize.*` semantics (`:438-448`), with `monetize.pro` marked retired; the `FTF_FLAGS` note |
 | `docs/integrations/revenuecat.md` | **new** | RevenueCat is an external service with no file today: the intro-eligibility check, the webhook, the sandbox cap, and the safe-to-log / must-redact split |
 | `docs/runbook.md` | **updated** | The kill: `paywall_enforce_enabled` → 0, on the operator's word, and how to verify it |
 
@@ -270,11 +291,12 @@ the T-3 items are superseded.
 - **Order:**
   - the server registration and gate deploy (enforcement off) **before** the 11-06 binary;
   - enforcement on (flags plus knob) for review, on the operator's word;
+  - `paywall_web_enforce_enabled` on 11-18, once `IOS_INSTALL_URL` resolves, on the operator's word;
   - the R1 checkpoint 11-03: if the client gate isn't CI-green, it comes out of the binary, and the route is R3.
 - **Express lane declared by the operator?** **No**, and not eligible: API contracts, flag surfaces and analytics events
   are touched (the CLAUDE.md bright line).
 
-## 6. Waivers (surfaced to the operator before build)
+## 6. Waivers (APPROVED by the operator, 2026-10-25, under "rest of PR #393")
 
 - **W-MON-1: celebration-moment analytics.**
   - **What's waived:** events beyond `paywall_viewed`, `screen_viewed` and the ledger for the update-1 moments (the Home
