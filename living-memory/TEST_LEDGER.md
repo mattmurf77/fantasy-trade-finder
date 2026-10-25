@@ -6,8 +6,9 @@ Full gates ([scope](../docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md
 - **Pins:** per Sleeper session init, rosters 1, meta 1, total ≤ 8 (was ≤ 10, D-178). A numeric MFL id makes no Sleeper roster or meta call.
 - **Sabotage, each red then restored:**
   - `maybe_refresh_async` single-flight removed → the barrier test fails `8 == 1`;
-  - the R10 guards removed → 6 of 11 `test_traded_picks_unavailable` fail;
-  - the 60 s retry cooldown removed → its tests fail.
+  - the R10 guards removed → 6 of 11 `test_traded_picks_unavailable` fail.
+
+  The 60 s retry cooldown has direct tests (10 s → none, 61 s → one, unparseable → not blocked) but no recorded sabotage run.
 - **Code-walk:** scope evidence section. Covers fresh / stale on failure / no state row, the open circuit, and the `maybe_refresh_async` thread path.
 - **Reviews:** onboarding-eng approved the session-init diff (advisories A1/A2 recorded as R9/R11). The fingerprint contract with trades-eng is at v0.3.
 - **CI note:** one red run on `a860eaa3` was `test_ranking_service_threads`. That's a cross-branch wall-clock flake in #357 (`setswitchinterval(1e-6)` plus a 60 s join), routed to rankings-eng; it doesn't touch S0 code.
