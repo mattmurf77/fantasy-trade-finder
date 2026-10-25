@@ -871,6 +871,7 @@ exhibits the behaviour it is supposed to record, so the proof cannot rot.
 | Key | Default | Meaning |
 |---|---|---|
 | `trade_page_size` | 30.0 | Max cards in one opt-in paged response: `POST /api/trades/generate` with `page: 1`, and `GET /api/trades/status` with `cursor` ([api-reference](api-reference.md#opt-in-paged-responses-e2-2026-10-20)). Read through `_deck_cfg` and clamped to 1–200 (NaN or infinity → 30). Unpaged (legacy) requests never read it. A change takes effect on the next request after `reload_config()`; like every `model_config` row it is part of the trade request signature, so changing it also misses the in-process deck cache once. |
+| `trade_paged_responses` | 1.0 | **Kill switch for opt-in paging (E2), and so for the #363 app's paged deck.** At `0`, `POST /api/trades/generate` ignores `page` (and `search_id`), and `GET /api/trades/status` ignores `cursor`: both serve the legacy cumulative body, byte for byte. The #363 app treats a response without `cursor` as its pre-paging deck path (legacy poller, no prefetch, no device page). Requests are still validated. NaN or unreadable keeps paging on. Deploy-free: write the row, then `reload_config()`. Doesn't revert #363's UI (the P30 end card, D13, the in-place reveal). On release-lead's kill-switch inventory. |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 

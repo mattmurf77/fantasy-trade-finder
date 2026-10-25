@@ -2946,6 +2946,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("force_supersedes_running", 1.0, "/api/trades/generate: 1 = `force: true` supersedes an already-RUNNING job for the same key (the superseded worker finishes quietly — no further snapshots, no impression rows, no trades_generated event); 0 restores the pre-2026-08-18 behaviour where a forced request silently returned the in-flight job and the regeneration never happened"),
     # ── Paged trade responses (E2, docs/plans/trade-time-to-suggestion) ──
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
+    ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
     # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
     # Read by ranking_service. pin_tier_bounded=0 with the other three at their
     # shipped values restores the pre-2026-08-18 freeze exactly (goldens:

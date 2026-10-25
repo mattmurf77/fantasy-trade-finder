@@ -449,6 +449,10 @@ response; no minimum-version gate is needed for this change (head-eng,
 2026-10-20). The byte-for-byte rule includes `search_id`, which is read only
 alongside `page`.
 
+**Kill switch:** with `model_config` `trade_paged_responses` = 0, `page` and
+`cursor` are validated and then ignored, so every request gets the cumulative
+body above ([config](config-reference.md)).
+
 **Requests:**
 - `POST /api/trades/generate` body `page: 1` (a JSON integer; only `1` is valid)
   and optional `search_id` (1–64 characters of `A-Z a-z 0-9 _ -`, e.g. a client
