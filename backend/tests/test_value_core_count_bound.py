@@ -1,12 +1,14 @@
 """The value core is count-bounded, never clock-bounded (G-065).
 
 Same inputs -> same trades, same order and same diagnostics (bar elapsed_ms) whatever the
-machine load. Load is simulated with a core clock that advances 1 s per read, which runs
-far past the old 8 s budget, and then applied for real with busy threads. The safety
-ceiling itself is tested in test_value_core_core.py (test_safety_ceiling_marks_pathology).
+machine load. The CI gate SIMULATES contention: the core's `time.perf_counter` is stubbed to
+advance quickly, never real parallel load (models-lead R3.2 condition 5). Real busy threads
+are a local stress check only (FTF_STRESS=1). The ceiling's own mechanics are tested in
+test_value_core_core.py (test_safety_ceiling_marks_pathology).
 Scope: docs/plans/trade-time-to-suggestion/scope-eng-count-bounded.md.
 """
 import dataclasses
+import os
 import threading
 from types import SimpleNamespace
 
@@ -34,6 +36,16 @@ def _without_elapsed(diag):
     return dataclasses.replace(diag, elapsed_ms=0)
 
 
+def _stub_clock(monkeypatch, step_s):
+    """Simulated contention: every read of the core's clock costs `step_s` seconds."""
+    now = [0.0]
+
+    def perf_counter():
+        now[0] += step_s
+        return now[0]
+    monkeypatch.setattr(core, "time", SimpleNamespace(perf_counter=perf_counter))
+
+
 def test_same_deck_when_the_clock_runs_past_the_old_budget(league, monkeypatch):
     snapshot, request = league
     baseline, base_diag = core.find_fair_trades(snapshot, request, CFG)
@@ -44,19 +56,39 @@ def test_same_deck_when_the_clock_runs_past_the_old_budget(league, monkeypatch):
     # so the old 8 s budget would have cut every partner from the 9th on.
     assert len(partners) > 8
 
-    now = [0.0]
-
-    def perf_counter():            # every read costs 1 simulated second
-        now[0] += 1.0
-        return now[0]
-    monkeypatch.setattr(core, "time", SimpleNamespace(perf_counter=perf_counter))
+    _stub_clock(monkeypatch, 1.0)
     loaded, loaded_diag = core.find_fair_trades(snapshot, request, CFG, safety_ceiling_s=1e9)
 
-    assert loaded == baseline              # same trades, same order
+    assert set(loaded) == set(baseline)    # same pool
+    assert loaded == baseline              # same order
     assert _without_elapsed(loaded_diag) == _without_elapsed(base_diag)
     assert loaded[-1].partner_team_id == partners[-1]
 
 
+# step 1.0: about 29 simulated s, past the old 8 s budget and under the 30 s ceiling.
+# step >= 2.0: the default ceiling fires partway through the partners.
+@pytest.mark.parametrize("step_s, ceiling_fires", [(0.0, False), (0.5, False), (1.0, False),
+                                                   (2.0, True), (5.0, True), (31.0, True)])
+def test_safety_ceiling_is_the_only_clock_driven_stop(league, monkeypatch, step_s, ceiling_fires):
+    """With the default ceiling and a stubbed fast clock, a run either is the full unpressured
+    deck or was stopped by the safety ceiling. budget_exhausted never appears without
+    safety_ceiling_hit: no other clock-driven partial stop exists."""
+    snapshot, request = league
+    baseline, base_diag = core.find_fair_trades(snapshot, request, CFG)
+    _stub_clock(monkeypatch, step_s)
+    trades, diag = core.find_fair_trades(snapshot, request, CFG)
+
+    assert diag.safety_ceiling_hit is ceiling_fires
+    assert diag.budget_exhausted is diag.safety_ceiling_hit   # budget_exhausted <=> the ceiling
+    if not ceiling_fires:
+        assert trades == baseline and _without_elapsed(diag) == _without_elapsed(base_diag)
+    else:
+        assert len(trades) < len(baseline)
+
+
+@pytest.mark.skipif(os.environ.get("FTF_STRESS") != "1",
+                    reason="local stress check, not a CI gate: real parallel load is flaky by "
+                           "construction (models-lead R3.2 condition 5). Set FTF_STRESS=1 to run.")
 def test_same_deck_under_real_cpu_contention(league):
     snapshot, request = league
     baseline, base_diag = core.find_fair_trades(snapshot, request, CFG)

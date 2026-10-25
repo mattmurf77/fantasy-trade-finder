@@ -369,8 +369,9 @@ def snap(teams, *, slots=SLOTS, max_players=None, other=None, windows=None):
 - **`test_package_count_bound`.** 17 candidates give ≤ 833 packages, checked through `diag.packages_viewer` with 3 pins.
 
 **Tests: `backend/tests/test_value_core_count_bound.py`** (count-bounded, never clock-bounded; G-065). Fixture: `value_core_bench.synthetic_league()` seat `team00` (11 partners, a board) with `CoreConfig(max_assets_per_side=8)`.
-- **`test_same_deck_when_the_clock_runs_past_the_old_budget`.** A normal run, then a run whose core clock advances 1 s per read with `safety_ceiling_s=1e9`: equal trades in equal order and equal diagnostics bar `elapsed_ms`. The old 8 s budget would have cut every partner from the 9th on; a sabotage run with an 8 s partner-loop `break` fails this test.
-- **`test_same_deck_under_real_cpu_contention`.** The same comparison while two busy threads spin. Equality only, never timing.
+- **`test_same_deck_when_the_clock_runs_past_the_old_budget`** (the CI gate; models-lead R3.2 condition 5). A normal run, then a run whose core clock is stubbed to advance 1 s per read, with `safety_ceiling_s=1e9`. The test asserts the same pool, the same order and equal diagnostics bar `elapsed_ms`. The old 8 s budget would have cut every partner from the 9th on; a sabotage run with an 8 s partner-loop `break` fails this test.
+- **`test_safety_ceiling_is_the_only_clock_driven_stop`.** Default ceiling, stubbed clock at 0 / 0.5 / 1 / 2 / 5 / 31 s per read. At 2 s or more, `safety_ceiling_hit` and `budget_exhausted` are both set. Below that the run equals the baseline. `budget_exhausted` is never set without `safety_ceiling_hit`.
+- **`test_same_deck_under_real_cpu_contention`.** The same comparison while two busy threads spin, asserting equality only. It is a local stress check, skipped unless `FTF_STRESS=1`, and never a CI gate (R3.2 condition 5).
 - **`test_pipeline_passes_the_ceiling_through`.** `pipeline.run` hands `core.SAFETY_CEILING_S` by default and an explicit `safety_ceiling_s` otherwise; `0.0` trips the ceiling.
 
 **Isolated verification.**
