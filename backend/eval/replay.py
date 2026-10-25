@@ -55,6 +55,17 @@ Exclusions (counted per reason and printed — never silently dropped):
                    partial run's delivered rows, head-eng ruling 21) — the
                    deck isn't a complete ranking, so it's out whole; decks
                    in EvalRun.partial_run_decks
+  in_flight        the deck has no pack yet and may still be live (served
+                   at/after data.PACK_REQUIRED_SINCE, within
+                   IN_FLIGHT_WINDOW of as_of) — whole deck out, not an
+                   error; decks in EvalRun.in_flight_decks
+  pack_integrity   the deck's pack fails its checksum, has an unknown
+                   pack_version, or holds another run's cards (C7 (iv)) —
+                   whole deck out; decks in EvalRun.pack_integrity_decks
+  incomplete_deck  the deck's non-ghost card indexes aren't exactly 0..N-1
+                   after the pack merge (N = the pack's card_count, or
+                   max+1 without a pack), or its required pack is lost —
+                   whole deck out; decks in EvalRun.incomplete_decks
   missing_scorer_inputs
                    any card in the deck has neither features_json nor a
                    compact block (C7 (iv)) — whole deck out, counted by
@@ -68,21 +79,41 @@ silently shifted the counterfactual ranks of the viewed cards above them;
 their deck is now excluded instead. That retired the per-card
 `bad_features` reason: a card without features either has a compact block
 (scored normally) or takes its whole deck out under missing_scorer_inputs.
+An in_flight, pack_integrity or incomplete_deck deck is also left out of
+the exposure curve: the cards present in it (first 30, viewed rows) are a
+selected subset, so their view rates would bias e(k). Under paging the
+curve's served set is the DELIVERED positions (R4.2 U1, LoggedCard.
+delivered): a generated card that was never sent to a client was not
+served at its position.
+
+EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
+verdict() and render_report() say so when runs graded under different rules
+are compared (R2.5 (2)). The model_config a scorer reads is pinned, passed
+to it explicitly (get_scorer(name, config=...)) and recorded on
+EvalRun.config (R5.2 (a)); the read's as_of and settle lag are chosen by
+settled_read (R5.2 (b)).
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import random
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
+from backend import value_model as _value_model
 from backend.eval.data import (
+    IN_FLIGHT,
+    INCOMPLETE_DECK,
+    PACK_INTEGRITY,
     PARTIAL_RUN_TIER,
     LoggedDeck,
     card_dict,
+    last_served_at,
     load_decks,
     split_decks,
 )
@@ -98,8 +129,25 @@ METRICS = ("like", "propose")
 
 EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
-    "partial_run", "missing_scorer_inputs", "scorer_error",
+    "partial_run", "in_flight", "pack_integrity", "incomplete_deck",
+    "missing_scorer_inputs", "scorer_error",
 )
+
+# The eval rules a run was graded under (models-lead R2.5 (2), R5.2 (d)):
+#   1  before 2026-10-20: a card without features sank to the bottom of the
+#      candidate order (per-card bad_features). Persisted records without an
+#      exclusion_rule_version field are version 1.
+#   2  whole-deck exclusion: missing_scorer_inputs, partial_run, in_flight,
+#      pack_integrity and incomplete_deck.
+#   3  2, plus e(k) counts delivered positions only (a deck from before
+#      paging delivered every served card) and the read filters outcomes by
+#      acted_at <= as_of and decks by served_at <= as_of. e(k) rises where
+#      undelivered tails used to pull it down.
+# Estimates graded under different versions are not comparable.
+EXCLUSION_RULE_VERSION = 3
+# R5.2 (b): a read whose labels must be complete settles them this long
+# after the window's last served deck (late views, proposes days later).
+DEFAULT_SETTLE_LAG_DAYS = 7.0
 
 
 @dataclass
@@ -125,10 +173,15 @@ class EvalRun:
     tilt_clipped: int = 0            # propensity tilts hit TILT_MIN/TILT_MAX
     missing_inputs_decks: int = 0    # decks excluded as missing_scorer_inputs
     partial_run_decks: int = 0       # decks excluded as partial_run
+    in_flight_decks: int = 0         # decks excluded as in_flight (not an error)
+    pack_integrity_decks: int = 0    # decks excluded as pack_integrity
+    incomplete_decks: int = 0        # decks excluded as incomplete_deck
     exposure_positions: int = 0      # positions with an estimated e(k)
     metrics: dict = field(default_factory=dict)    # metric -> MetricEstimate
     eval_start: str | None = None
     ess_min: float = DEFAULT_ESS_MIN
+    exclusion_rule_version: int = EXCLUSION_RULE_VERSION
+    config: dict | None = None       # the pinned model_config the run read (R5.2 (a))
 
     @property
     def unreliable(self) -> bool:
@@ -142,11 +195,18 @@ class EvalRun:
 def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
     """e(k) = P(viewed | served at position k), Laplace(+1/+2)-smoothed,
     floored at EXPOSURE_FLOOR. Positions never observed fall back to the
-    floor at lookup time (exposure_at)."""
+    floor at lookup time (exposure_at). Only delivered cards count as
+    served (R4.2 U1). Decks with a loader exclusion (in_flight,
+    pack_integrity, incomplete_deck) are skipped: their present cards are
+    a selected subset."""
     served: dict[int, int] = {}
     viewed: dict[int, int] = {}
     for deck in decks:
+        if deck.exclusion is not None:
+            continue
         for c in deck.cards:
+            if not c.delivered:
+                continue
             served[c.card_index] = served.get(c.card_index, 0) + 1
             if c.viewed:
                 viewed[c.card_index] = viewed.get(c.card_index, 0) + 1
@@ -216,7 +276,10 @@ def evaluate(
 ) -> EvalRun:
     """Replay `decks` under `scorer`. Enforces the time-ordered protocol:
     a fit-capable scorer requires eval_start, is fitted on pre-split decks
-    only, and is evaluated on post-split decks only."""
+    only, and is evaluated on post-split decks only. The scorer's pinned
+    model_config (`scorer.config`, set by get_scorer(name, config=...);
+    R5.2 (a)) is recorded on EvalRun.config, so building the scorer with
+    the recorded config replays the run."""
     fit_capable = hasattr(scorer, "fit")
     if fit_capable and not eval_start:
         raise ValueError(
@@ -243,6 +306,7 @@ def evaluate(
         exposure_positions=len(curve),
         eval_start=eval_start,
         ess_min=ess_min,
+        config=getattr(scorer, "config", None),
     )
 
     # weights/rewards per deck (bootstrap clusters)
@@ -251,6 +315,18 @@ def evaluate(
         if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
             run.excluded["partial_run"] += len(deck.cards)
             run.partial_run_decks += 1
+            continue
+        if deck.exclusion == IN_FLIGHT:
+            run.excluded["in_flight"] += len(deck.cards)
+            run.in_flight_decks += 1
+            continue
+        if deck.exclusion == PACK_INTEGRITY:
+            run.excluded["pack_integrity"] += len(deck.cards)
+            run.pack_integrity_decks += 1
+            continue
+        if deck.exclusion == INCOMPLETE_DECK:
+            run.excluded["incomplete_deck"] += len(deck.cards)
+            run.incomplete_decks += 1
             continue
         if any(c.features is None and c.features_compact is None
                for c in deck.cards):
@@ -355,10 +431,23 @@ def _percentile_ci(samples: list[float], alpha: float = 0.05):
 # Verdicts + self-check
 # ---------------------------------------------------------------------------
 
+def rule_version_note(versions) -> str | None:
+    """None when every exclusion-rule version given is the same; otherwise
+    the warning any comparison or report across them must carry."""
+    found = sorted(set(versions))
+    if len(found) <= 1:
+        return None
+    return ("WARNING: exclusion rules differ across these runs (versions "
+            f"{', '.join(map(str, found))}); their estimates are not comparable")
+
+
 def verdict(run: EvalRun, baseline: EvalRun, metric: str = "like") -> str:
-    """UNRELIABLE below the ESS gate (per PRD: labeled, never silently
-    capped); else WIN/LOSS when the candidate's 95% CI clears the baseline
-    point estimate, FLAT otherwise."""
+    """RULE-MISMATCH when the two runs were graded under different
+    exclusion rules; else UNRELIABLE below the ESS gate (per PRD: labeled,
+    never silently capped); else WIN/LOSS when the candidate's 95% CI
+    clears the baseline point estimate, FLAT otherwise."""
+    if run.exclusion_rule_version != baseline.exclusion_rule_version:
+        return "RULE-MISMATCH"
     m = run.metrics.get(metric)
     b = baseline.metrics.get(metric)
     if m is None or m.snips is None or m.ess < run.ess_min:
@@ -434,6 +523,9 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"excluded[{excl or 'none'}] "
             f"missing_inputs_decks={run.missing_inputs_decks} "
             f"partial_run_decks={run.partial_run_decks} "
+            f"in_flight_decks={run.in_flight_decks} "
+            f"pack_integrity_decks={run.pack_integrity_decks} "
+            f"incomplete_decks={run.incomplete_decks} "
             f"tilt_clipped={run.tilt_clipped} "
             f"(bounds [{TILT_MIN}, {TILT_MAX}])"
         )
@@ -446,7 +538,27 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
     lines.append(
         f"ESS gate: {baseline.ess_min:.0f} (verdicts below it are UNRELIABLE; "
         f"exposure curve floor {EXPOSURE_FLOOR}, Laplace +1/+2 smoothing).")
+    note = rule_version_note(r.exclusion_rule_version for r in [baseline, *runs])
+    lines.append(note or f"Exclusion rules: version {baseline.exclusion_rule_version}.")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Reads whose labels must be complete (R5.2 (b))
+# ---------------------------------------------------------------------------
+
+def settled_read(*, now: datetime, settle_lag_days: float = DEFAULT_SETTLE_LAG_DAYS,
+                 until: str | None = None, **scope) -> tuple[str, str | None]:
+    """(until, as_of) for a read whose labels must be complete: the window
+    ends at `until` (default: now minus the lag), and as_of = the window's
+    last served_at plus the lag, so every deck read has had the lag to
+    collect late outcomes. as_of is None when nothing was served in the
+    window. `scope` takes load_decks' engine, db_url, since, user_id and
+    league_id. The lag is the read's parameter, never the loader's."""
+    lag = timedelta(days=settle_lag_days)
+    until = until or (now - lag).isoformat()
+    last = last_served_at(until=until, **scope)
+    return until, (None if last is None else (datetime.fromisoformat(last) + lag).isoformat())
 
 
 # ---------------------------------------------------------------------------
@@ -471,6 +583,16 @@ def main(argv=None) -> int:
                                          "evaluate on decks at/after (time-ordered protocol)")
     ap.add_argument("--since", help="only load impressions served at/after this ISO timestamp")
     ap.add_argument("--until", help="only load impressions served before this ISO timestamp")
+    ap.add_argument("--as-of", help="ISO UTC clock of the read: decks served and outcomes "
+                                    "acted after it are not read, and the in_flight rule "
+                                    "measures from it (default: settled, see "
+                                    "--settle-lag-days)")
+    ap.add_argument("--settle-lag-days", type=float, default=DEFAULT_SETTLE_LAG_DAYS,
+                    help="without --as-of: read decks served before now minus this lag "
+                         "(or --until), with as_of = the window's last served_at plus "
+                         f"the lag, so late outcomes are in (default {DEFAULT_SETTLE_LAG_DAYS:g})")
+    ap.add_argument("--config", help="a recorded run's `config` (JSON) to replay it under; "
+                                     "default: pin the live model_config once for this run")
     ap.add_argument("--user", help="restrict to one user_id")
     ap.add_argument("--league", help="restrict to one league_id")
     ap.add_argument("--ess-min", type=float, default=DEFAULT_ESS_MIN,
@@ -487,8 +609,15 @@ def main(argv=None) -> int:
     if args.db:
         db_url = args.db if "://" in args.db else f"sqlite:///{args.db}"
 
-    decks = load_decks(db_url=db_url, since=args.since, until=args.until,
-                       user_id=args.user, league_id=args.league)
+    until, as_of = args.until, args.as_of
+    if as_of is None:
+        until, as_of = settled_read(
+            now=datetime.now(timezone.utc), settle_lag_days=args.settle_lag_days,
+            until=args.until, db_url=db_url, since=args.since,
+            user_id=args.user, league_id=args.league)
+    print(f"Reading decks served before {until or 'now'} as of {as_of}")
+    decks = load_decks(db_url=db_url, since=args.since, until=until,
+                       user_id=args.user, league_id=args.league, as_of=as_of)
     n_imps = sum(len(d.cards) for d in decks)
     print(f"Loaded {len(decks)} decks / {n_imps} impressions"
           + (f" from {args.db}" if args.db else " from default DB"))
@@ -508,14 +637,17 @@ def main(argv=None) -> int:
         return 0 if ok else 1
 
     scorer_names = args.scorer or ["base_score", "random"]
-    baseline = evaluate(get_scorer(args.baseline), decks,
+    # One pin for every scorer in the run: a recorded one to replay, else live now.
+    config = (json.loads(args.config) if args.config
+              else _value_model.pin_config(_value_model.SCORE_CONFIG))
+    baseline = evaluate(get_scorer(args.baseline, config=config), decks,
                         eval_start=args.eval_start, ess_min=args.ess_min,
                         bootstrap=args.bootstrap, seed=args.seed)
     runs = [baseline]
     for name in scorer_names:
         if name == args.baseline:
             continue
-        runs.append(evaluate(get_scorer(name, seed=args.seed), decks,
+        runs.append(evaluate(get_scorer(name, seed=args.seed, config=config), decks,
                              eval_start=args.eval_start, ess_min=args.ess_min,
                              bootstrap=args.bootstrap, seed=args.seed))
     report = render_report(runs, baseline)
@@ -526,7 +658,8 @@ def main(argv=None) -> int:
         path = None
         for run in runs:
             path = append_run(run_record(run, baseline, extra={
-                "db": args.db, "since": args.since, "until": args.until,
+                "db": args.db, "since": args.since, "until": until, "as_of": as_of,
+                "settle_lag_days": None if args.as_of else args.settle_lag_days,
                 "seed": args.seed, "bootstrap": args.bootstrap,
             }))
         print(f"Run records appended to {path} (runs.jsonl)")

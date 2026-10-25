@@ -16,9 +16,10 @@ row lacks. Covered here:
     scorer; the 14 COMPACT_KEYS alone do not, for value_model.
 
 How value_model is instrumented: a real model is fitted in-test with the
-module's own train_model() on synthetic LoggedDecks (in-memory SQLite
-patched into backend.database for the taste reads, VALUE_MODEL_DIR on a
-tmp dir), persisted with append_model(), and graded through the registered
+module's own train_model() on synthetic LoggedDecks (in-memory SQLite with
+taste rows patched into backend.database, so a live taste read would show;
+R4.1 forbids one in a fit or eval; VALUE_MODEL_DIR on a tmp dir),
+persisted with append_model(), and graded through the registered
 `value_model` scorer end to end. One seam: _inject's `g = dict(f)` copies
 the whole card, and a copy is a pass-through, not a read. The builtin
 `dict` inside backend.value_model is swapped for `_see_through_copy`,
@@ -29,6 +30,7 @@ which is the safe direction.
 """
 
 import random
+from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import create_engine, insert
@@ -124,6 +126,8 @@ def _full_features(rng=None, *, partner="opp1", quality=0.7) -> dict:
         "ranked_player_count": 40, "user_value_basis": "personal",
         "taste_attrs": [f"shape:{shape}", f"arch:{lane}", "recvpos:WR",
                         f"partner:{partner}"],
+        "taste_pref_long": rng.uniform(-1.0, 1.0),     # frozen at serve (R4.1)
+        "taste_pref_short": rng.uniform(-1.0, 1.0),
         # Wide-only keys: dropped by a narrow row, read by no scorer.
         "give_value_band": "1000-1500", "receive_value_band": "1000-1500",
         "last_board_update_at": "2026-10-01T00:00:00+00:00",
@@ -132,11 +136,11 @@ def _full_features(rng=None, *, partner="opp1", quality=0.7) -> dict:
 
 
 def _fallback_features() -> dict:
-    """No shape, lane or taste_attrs: drives extract_features onto its
-    shape_bucket/archetype fallbacks and _inject onto attrs_from_features'
-    derivation from frozen fields."""
+    """No shape, lane, taste_attrs or frozen taste matches: drives
+    extract_features onto its shape_bucket/archetype fallbacks and _inject
+    onto the 0.0 no-signal anchor (the taste layer didn't run)."""
     f = _full_features(partner="opp2")
-    for k in ("shape", "lane", "taste_attrs"):
+    for k in ("shape", "lane", "taste_attrs", "taste_pref_long", "taste_pref_short"):
         f.pop(k)
     return f
 
@@ -167,7 +171,8 @@ def _training_decks() -> list[LoggedDeck]:
             partner = f"opp{rng.randrange(4)}"
             f = _full_features(rng, partner=partner, quality=quality)
             if rng.random() < 0.3:
-                f.pop("taste_attrs")
+                for k in ("taste_attrs", "taste_pref_long", "taste_pref_short"):
+                    f.pop(k)
             liked = rng.random() < (0.1 + 0.4 * quality
                                     + (0.2 if partner == "opp1" else 0.0))
             cards.append(_card(f, pos=pos, job=f"jt{d}", served_at=served,
@@ -180,10 +185,9 @@ def _training_decks() -> list[LoggedDeck]:
 
 @pytest.fixture()
 def taste_db(monkeypatch):
-    """In-memory DB for value_model's taste reads, with a taste vector for
-    USER so prefMatch is non-zero. "prior:" rows are never time-decayed, so
-    two scorers built a moment apart score bit-identically (swipe-learned
-    rows decay with the wall clock and can differ in the last bit)."""
+    """In-memory DB with a taste vector for USER, so a live prefMatch read
+    would be non-zero: the contract tests would see it. Fits and evals
+    read the frozen taste_pref_* instead (R4.1)."""
     eng = create_engine("sqlite:///:memory:",
                         connect_args={"check_same_thread": False})
     metadata.create_all(eng)
@@ -208,7 +212,8 @@ def fitted_model(taste_db, tmp_path, monkeypatch):
     monkeypatch.setenv("VALUE_MODEL_DIR", str(tmp_path / "vm"))
     monkeypatch.setattr(vm, "_model_cache", None)
     if "model" not in _FITTED:
-        trained = vm.train_model(_training_decks())
+        trained = vm.train_model(_training_decks(),
+                                 as_of=datetime(2026, 10, 20, tzinfo=timezone.utc))
         assert trained is not None, "fixture decks too small to train"
         _FITTED["model"] = trained.to_dict()
     model = vm.ValueModel.from_dict(_FITTED["model"])
@@ -245,8 +250,8 @@ def test_value_model_contract_run_actually_reads_the_card(fitted_model, monkeypa
     monkeypatch.setattr(vm, "dict", _see_through_copy, raising=False)
     rec = KeyRecorder(card_dict(_card(_full_features())))
     scorers.get_scorer("value_model").score(rec)
-    assert {"user_id", "partner_user_id", "taste_attrs", "give_value",
-            "_pref_long", "_partner_rate"} <= rec.reads
+    assert {"user_id", "partner_user_id", "taste_pref_long", "taste_pref_short",
+            "give_value", "_pref_long", "_partner_rate"} <= rec.reads
 
 
 # ---------------------------------------------------------------------------
@@ -315,9 +320,9 @@ def test_compact_block_scores_like_full_features(name, fitted_model):
 
 
 def test_compact_keys_alone_do_not_replay_value_model(fitted_model):
-    """Why the frozen block is COMPACT_KEYS ∪ INJECTED_CARD_INPUTS: without
-    partner_user_id and taste_attrs, _inject falls back to the global like
-    rate and a partner-less taste derivation, and the score moves."""
+    """Why the frozen block holds INJECTED_CARD_INPUTS too: without
+    partner_user_id and the frozen taste matches, _inject falls back to the
+    global like rate and the 0.0 taste anchor, and the score moves."""
     features = _full_features()
     full = _card(features)
     narrow = _card(None, _frozen(features, C.COMPACT_KEYS))
