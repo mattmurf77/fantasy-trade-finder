@@ -8,8 +8,8 @@
 // What it does: EXECUTES components/TimingReadoutRow.tsx with React and the
 // flag hook stubbed (null with the flag off; the row, its testID and the
 // last ms_from_tap with it on), executes utils/tapTiming.ts, pins the flag's
-// registrations, and (when git can see origin/main) asserts this branch
-// touches no file under mobile/src/screens/settings/.
+// registrations. (A branch-only check that #363 touched no Settings file
+// was removed before merge: on main it would fail every later Settings PR.)
 // HONEST LABEL (G-035): rendering is a stubbed call, not a device render;
 // the mount itself is onboarding-eng's.
 //
@@ -18,7 +18,6 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
-const cp = require('child_process');
 let ts;
 try { ts = require('typescript'); } catch {
   console.error('typescript not resolvable — run `npm install` in mobile/ first.');
@@ -100,21 +99,6 @@ const text = (node) => (node == null || typeof node !== 'object' ? String(node ?
       && /"testing\.timing_readout",/.test(flags)
       && /\| `testing\.timing_readout` \| false \|/.test(cref)
       && fixtures.every((f) => f['testing.timing_readout'] === false));
-}
-
-{
-  // This branch must not edit any Settings file (onboarding-eng owns them).
-  // Needs git and origin/main; skipped honestly where CI cannot see them.
-  let changed = null;
-  try {
-    const base = cp.execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    changed = cp.execFileSync('git', ['diff', '--name-only', base, 'HEAD', '--', 'mobile/src/screens/settings', 'mobile/src/screens/SettingsScreen.tsx'],
-      { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch {
-    changed = null;
-  }
-  if (changed === null) console.log('  - 4a. skipped: git or origin/main is not available here');
-  else check('4a. this branch touches no Settings file (onboarding-eng mounts the row)', changed === '', changed);
 }
 
 console.log(failures ? `check-timing-readout: ${failures} FAILED` : 'check-timing-readout: all passed');
