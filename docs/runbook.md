@@ -110,6 +110,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Offline eval harness — replay/IPS on the F1 impression spine (F8, 2026-07-26)](#offline-eval-harness-replayips-on-the-f1-impression-spine-f8-2026-07-26)
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
+- [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
 - [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
 - [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
@@ -1060,6 +1061,33 @@ Operator re-report post-#200: "Picks still not present on the bar chart" (League
 
 - **Fix (2026-08-01):** the daemon step is extracted to `server._sync_sleeper_owned_picks`, which **skips the sync (keeps the prior snapshot)** whenever the rosters or league-meta read is unavailable, and `database.sync_draft_picks` no-ops on empty `roster_ids` (defense in depth for every caller). A skip logs `owned-pick sync skipped … (keeping prior snapshot)` and the next init retries. Tests: `backend/tests/test_owned_picks.py::test_sync_empty_roster_ids_keeps_prior_snapshot`, `::test_daemon_step_skips_when_sleeper_rosters_unavailable`, `::test_daemon_step_skips_when_league_meta_unavailable`.
 - **Operational rule:** any daemon whose write is replace-style must treat "fetch came back empty" as SKIP, never as "the league truly has nothing" — the #200/#220 clobber class is exactly that conflation.
+
+## Sleeper 429 / circuit open (S0, 2026-10-20)
+
+Since S0, every server-side Sleeper **read** goes through one per-process circuit (`backend/sleeper_http.py`; rule
+in `docs/integrations/sleeper.md` §4.1). A Sleeper `429` opens it for at least the `Retry-After` (else 2 s, doubling
+per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
+
+- **Symptom:** Render logs show `sleeper 429: circuit open <s> league=<id> status=429 strikes=<n>`, then
+  `sleeper circuit open: read skipped …` lines. While it's open:
+  - `/api/session/init` for Sleeper leagues returns `503 league_data_unavailable`. The app keeps its token and any
+    live server session, so taps keep working from stored state.
+  - Sleeper sends are blocked with "couldn't confirm rosters" (the live roster check can't run), and the daemon's
+    trade-block, pick and transaction syncs skip.
+  - `league_roster_state` rows go `stale` with `last_error_code = 'rate_limited'`. That's a read,
+    not a fix: no prod writes are needed.
+- **What clears it:** time. The window ends on its own, and the next successful read resets the strike count.
+  There's no manual reset in prod; a deploy or restart also clears it (it's in-process state). Don't restart to
+  "fix" a 429: a fresh process that resumes full fan-out against a throttled IP just trips it again, with a
+  shorter window.
+- **Data safety:** while it's open, the owned-pick sync keeps the prior `draft_picks` snapshot, and the draft-status
+  refresh keeps the cached verdict (both would otherwise act on reads that never happened; the #220 clobber
+  class). No repair is needed afterwards.
+- **If it recurs:** the per-init budget is ≤ 8 Sleeper calls (`test_session_init_sleeper_calls.py`). Check
+  `api_events` for `service = 'sleeper'` with `status = 429` by endpoint class to find the hot path (read-only,
+  through analytics-lead). A sustained ceiling (3,600 s windows) means Sleeper is throttling the IP, not one
+  request: escalate to platforms-eng. Cloudflare 1010 is a separate failure (`blocked`, a 403); it doesn't open
+  the circuit.
 
 ## Player-cache refresh (rookie-draft M0, 2026-08-06)
 
