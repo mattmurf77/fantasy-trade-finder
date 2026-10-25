@@ -22,6 +22,7 @@ the route wiring is what's under test, and a real `RankingService` where the
 merge arithmetic is.
 """
 import json
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
@@ -373,6 +374,8 @@ def test_m2_09c_unknown_tier_name_is_skipped(db):
 class _FakeService:
     """Serves a fixed board. The seam runs on the SERIALIZED dicts, so the
     ranking math is irrelevant to the route tests."""
+
+    _lock = threading.RLock()
 
     def __init__(self, players):
         self._players = players
