@@ -7,7 +7,7 @@ paywall_web_enforce_enabled == 1; preview = 0 pages; pro counts only on a
 verified session (`verify_required`).
 
 Covers:
-  (1) the matrix: route class (gated deck, gated send, free, never_gate) ×
+  (1) the matrix (deck preview off; it has its own file): route class (gated deck, gated send, free, never_gate) ×
       enforce state (dark, flags on + knob 0, knob on + one flag, enforcing)
       × client (mobile, web with the web knob 0, web with it 1) × user state
       (never entitled, trial expired, lapsed, active paid, active trial,
@@ -51,6 +51,9 @@ DEMO_USER = "demo_user_1a2b3c4d"
 DEMO_TOKEN = "gate-demo-token"
 ENFORCE_KNOB = "paywall_enforce_enabled"
 WEB_KNOB = "paywall_web_enforce_enabled"
+# The deck preview has its own file (test_paywall_preview.py). Here it is off,
+# so a never-entitled user's deck request is the knob-0 case: 402 preview_used.
+NO_PREVIEW = {"paywall_preview_pages": 0.0}
 BOTH_FLAGS = ("monetize.entitlements", "monetize.paywall")
 
 MOBILE = {"X-Device": "iphone", "X-OS-Version": "18.1", "X-App-Version": "1.13.2"}
@@ -206,7 +209,7 @@ def _expected(route_cls, enforce, client_name, user_state):
 def test_gate_matrix(eng, client, stubbed, route_cls, enforce, client_name, user_state):
     flags, knob = ENFORCE_STATES[enforce]
     headers, web_knob = CLIENTS[client_name]
-    _set_config(eng, **{ENFORCE_KNOB: knob, WEB_KNOB: web_knob})
+    _set_config(eng, **{ENFORCE_KNOB: knob, WEB_KNOB: web_knob, **NO_PREVIEW})
     _make_user(user_state)
     method, path, _ep = ROUTE_CLASSES[route_cls]
     with patch.object(entl, "is_enabled", _flags(*flags)):
@@ -225,7 +228,7 @@ def test_gate_matrix(eng, client, stubbed, route_cls, enforce, client_name, user
     ("POST", "/api/trades/matches/7/disposition"),
 ])
 def test_other_gated_routes_block_never_entitled(eng, client, stubbed, method, path):
-    _set_config(eng, **{ENFORCE_KNOB: 1.0})
+    _set_config(eng, **{ENFORCE_KNOB: 1.0, **NO_PREVIEW})
     with patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS)):
         r = client.open(path, method=method, headers={"X-Session-Token": TOKEN, **MOBILE})
     deck = ("GET", "/api/trades/status") == (method, path)
@@ -237,15 +240,11 @@ def test_other_gated_routes_block_never_entitled(eng, client, stubbed, method, p
 def test_knob_kill_is_live(eng, client, stubbed):
     """Knob 1 → 402; set it 0 → the next request passes, no reload."""
     with patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS)):
-        _set_config(eng, **{ENFORCE_KNOB: 1.0})
+        _set_config(eng, **{ENFORCE_KNOB: 1.0, **NO_PREVIEW})
         hdr = {"X-Session-Token": TOKEN, **MOBILE}
         assert client.post("/api/trades/generate", headers=hdr).status_code == 402
         _set_config(eng, **{ENFORCE_KNOB: 0.0})
         assert client.post("/api/trades/generate", headers=hdr).status_code == 200
-
-
-def test_preview_is_zero_pages():
-    assert pg.PREVIEW_PAGES == 0
 
 
 # ── (2) reason derivation ──────────────────────────────────────────────────
@@ -299,7 +298,7 @@ def test_sandbox_trial_expired_end_to_end(eng):
 
 
 def test_decide_pure_matches_hook(eng):
-    _set_config(eng, **{ENFORCE_KNOB: 1.0})
+    _set_config(eng, **{ENFORCE_KNOB: 1.0, **NO_PREVIEW})
     with patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS)):
         assert pg.decide("/api/trades/generate", "POST", USER, True, True) == (
             402, {"error": "pro_required", "gate": "preview_used"})
@@ -312,7 +311,7 @@ def test_decide_pure_matches_hook(eng):
 # ── (3) pro needs a verified session ───────────────────────────────────────
 
 def _enforcing(eng):
-    _set_config(eng, **{ENFORCE_KNOB: 1.0, WEB_KNOB: 1.0})
+    _set_config(eng, **{ENFORCE_KNOB: 1.0, WEB_KNOB: 1.0, **NO_PREVIEW})
     return patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS))
 
 
@@ -347,12 +346,14 @@ def test_demo_synthetic_session_passes(eng, client, stubbed):
     assert r.status_code == 200
 
 
-def test_demo_session_without_pro_is_gated(eng, client, stubbed):
-    """The exemption covers verification only: a demo_user_* id holds no
-    pro, so try-before-sync's deck 402s while enforcing (flagged in the PR)."""
+def test_demo_session_exempt_on_deck_routes_only(eng, client, stubbed):
+    """head-eng 2026-10-25: the server-made demo session (try-before-sync)
+    holds no pro but is exempt on deck routes; a send still gates."""
     with _enforcing(eng):
-        r = client.post("/api/trades/generate", headers={"X-Session-Token": DEMO_TOKEN, **MOBILE})
-    assert r.get_json() == {"error": "pro_required", "gate": "preview_used"}
+        hdr = {"X-Session-Token": DEMO_TOKEN, **MOBILE}
+        assert client.post("/api/trades/generate", headers=hdr).status_code == 200
+        r = client.post("/api/trades/propose", headers=hdr)
+    assert r.get_json() == {"error": "pro_required", "gate": "never_trialed"}
 
 
 def test_me_entitlements_pro_tracks_verification(eng, client):
@@ -413,7 +414,7 @@ def test_extension_endpoints_never_402(eng, client, stubbed, method, path, heade
 
 @pytest.mark.parametrize("headers", [WEB, {"X-Device": "web"}, {"X-Source": "extension"}])
 def test_web_with_web_knob_0_never_402_while_mobile_enforces(eng, client, stubbed, headers):
-    _set_config(eng, **{ENFORCE_KNOB: 1.0, WEB_KNOB: 0.0})
+    _set_config(eng, **{ENFORCE_KNOB: 1.0, WEB_KNOB: 0.0, **NO_PREVIEW})
     with patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS)):
         hdr = {"X-Session-Token": TOKEN}
         assert client.post("/api/trades/generate", headers={**hdr, **MOBILE}).status_code == 402

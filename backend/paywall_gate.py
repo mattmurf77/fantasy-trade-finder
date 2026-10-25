@@ -10,11 +10,19 @@ overridden by head-eng (2026-10-24):
   * Web requests are gated only when, in addition, model_config
     `paywall_web_enforce_enabled` == 1. Mobile = the native app's X-Device
     header (MOBILE_DEVICES); everything else is web.
-  * The preview allowance doesn't exist yet: the deck path treats the preview
-    as PREVIEW_PAGES = 0 pages.
+  * The deck preview (head-eng, 2026-10-25): a never-entitled user gets the
+    first `paywall_preview_pages` pages (default 1) of their FIRST deck free.
+    A deck is one trade job (job_id); a page is E2's window of
+    `trade_page_size` raw cards. The hook only allows or blocks; the
+    /generate and /status handlers cap the cards to the window and record the
+    preview in `paywall_previews` once a page is actually served, so warm-up
+    and cron-built jobs never consume it.
   * A blocked request gets exactly 402 {"error": "pro_required", "gate": <reason>}.
   * Pro counts only on a verified session (head-eng security ruling,
     2026-10-24); a pro user_id on an unverified session gets `verify_required`.
+    The preview is not pro: it applies to a never-entitled user whether or not
+    the session is verified (it reveals nothing about any subscriber).
+  * The server-made demo session (try-before-sync) is exempt on deck routes.
 
 One before_request hook in server.py reads ROUTES, a per-route table keyed by
 (method, Flask rule string), never by prefix: /api/trades/* mixes free and
@@ -25,18 +33,21 @@ it. Everything stateful is a plain function so it tests without Flask.
 from __future__ import annotations
 
 import json
+import math
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Callable
 
-from sqlalchemy import or_, select
+from sqlalchemy import insert, or_, select, update
+from sqlalchemy.exc import IntegrityError
 
 from . import database as db
 from . import entitlements
 
 GATED, FREE, NEVER_GATE = "gated", "free", "never_gate"
 
-# The paywall_preview_pages knob lands with the preview allowance.
-PREVIEW_PAGES = 0
-
 WEB_ENFORCE_KNOB = "paywall_web_enforce_enabled"
+PREVIEW_KNOB = "paywall_preview_pages"
 
 # X-Device values the native app sends (mobile/src/api/client.ts
 # _resolveDeviceLabel; the same set server.py's feedback route reads as iOS,
@@ -350,16 +361,50 @@ def applies(rule: str, method: str) -> bool:
     return classify(method, rule) == GATED and entitlements.is_enforcing()
 
 
+@dataclass(frozen=True)
+class DeckAsk:
+    """What the hook knows about a deck request, for the preview decision.
+    `page_trade_ids(job_id, limit)` returns the trade ids among a job's first
+    `limit` raw cards (server.py owns the job registry)."""
+    page_size: int
+    job_id: str | None = None
+    cursor: int | None = None
+    trade_id: str | None = None
+    page_trade_ids: Callable[[str, int], set] = lambda _job_id, _limit: set()
+
+
+@dataclass(frozen=True)
+class Preview:
+    """Allowed under the preview: serve at most `limit` raw cards (`pages`
+    pages of `page_size`) of the preview deck."""
+    pages: int
+    page_size: int
+
+    @property
+    def limit(self) -> int:
+        return self.pages * self.page_size
+
+    def pages_for(self, raw_end: int) -> int:
+        """Preview pages a response reaching raw index `raw_end` touched."""
+        return min(self.pages, max(1, math.ceil(raw_end / self.page_size)))
+
+
 def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
-            verified: bool) -> tuple[int, dict] | None:
-    """The decision for a request that applies(). No user → None: the
-    route's own auth answers (401), never a 402.
+            verified: bool, *, demo: bool = False,
+            ask: DeckAsk | None = None) -> tuple[int, dict] | Preview | None:
+    """The decision for a request that applies(): None (through), a Preview
+    (through, capped to the preview window), or (402, body). No user → None:
+    the route's own auth answers (401), never a 402.
 
     Pro counts only on a verified session (or the server-made demo session):
     entitlements resolve by user_id, and an unverified username-only session
     carries the same user_id as the subscriber it names. Such a session gets
-    `verify_required` when the user_id holds pro, the normal reason when not."""
+    `verify_required` when the user_id holds pro, the normal reason when not.
+    A never-entitled user on a deck route gets the preview, verified or not."""
     if not user_id:
+        return None
+    deck = (("GET" if method == "HEAD" else method), rule) in DECK_ROUTES
+    if deck and demo:
         return None
     if not is_mobile and not _web_knob_on():
         return None
@@ -367,27 +412,103 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
     if has_pro and verified:
         return None
     if has_pro:
-        reason = VERIFY_REQUIRED
-    else:
-        deck = (("GET" if method == "HEAD" else method), rule) in DECK_ROUTES
-        reason = gate_reason(user_id, deck=deck)
-    return 402, {"error": "pro_required", "gate": reason}
+        return 402, {"error": "pro_required", "gate": VERIFY_REQUIRED}
+    held = _held_pro(user_id)
+    if held is None and deck:
+        return _preview(rule, user_id, ask)
+    return 402, {"error": "pro_required", "gate": _reason(held, deck)}
 
 
 def decide(rule: str, method: str, user_id: str | None, is_mobile: bool,
-           verified: bool) -> tuple[int, dict] | None:
-    """None = let the request through; (402, body) = block it."""
+           verified: bool, *, demo: bool = False,
+           ask: DeckAsk | None = None) -> tuple[int, dict] | Preview | None:
+    """None or a Preview = let the request through; (402, body) = block it."""
     if not applies(rule, method):
         return None
-    return verdict(rule, method, user_id, is_mobile, verified)
+    return verdict(rule, method, user_id, is_mobile, verified, demo=demo, ask=ask)
 
 
 def gate_reason(user_id: str, *, deck: bool) -> str:
-    held = _held_pro(user_id)
+    """The 402 reason for a user without pro (a spent preview on a deck route)."""
+    return _reason(_held_pro(user_id), deck)
+
+
+def _reason(held: str | None, deck: bool) -> str:
     if held is None:
-        # PREVIEW_PAGES == 0, so a deck request always finds the preview spent.
         return PREVIEW_USED if deck else NEVER_TRIALED
     return TRIAL_EXPIRED if held == "trial" else LAPSED
+
+
+# ── the deck preview ───────────────────────────────────────────────────────
+
+def preview_pages() -> int:
+    """model_config `paywall_preview_pages`, read live. A missing row or a
+    failed read is 1 (G-064: the fallback matches the seed); below 0 is 0."""
+    try:
+        return max(0, int(float(db.get_config().get(PREVIEW_KNOB, 1.0))))
+    except Exception:
+        return 1
+
+
+def _preview(rule: str, user_id: str, ask: DeckAsk | None) -> tuple[int, dict] | Preview:
+    """A never-entitled user on a deck route. Before anything is served, a
+    /generate or /status is allowed (the handler records the deck it serves);
+    after, only that deck's /status inside the window, and swipes or pass
+    reasons on its window's cards. GET /api/trades (the pending-cards view)
+    is not the preview deck."""
+    blocked = 402, {"error": "pro_required", "gate": PREVIEW_USED}
+    pages = preview_pages()
+    if pages == 0 or ask is None:
+        return blocked
+    allowance = Preview(pages=pages, page_size=ask.page_size)
+    row = preview_row(user_id)
+    if rule == "/api/trades/generate":
+        ok = row is None
+    elif rule == "/api/trades/status":
+        ok = ((row is None or row["deck_key"] == ask.job_id)
+              and (ask.cursor is None or ask.cursor < allowance.limit))
+    elif rule in ("/api/trades/swipe", "/api/trades/pass-reason"):
+        ok = (row is not None and ask.trade_id is not None
+              and ask.trade_id in ask.page_trade_ids(row["deck_key"], allowance.limit))
+    else:
+        ok = False
+    return allowance if ok else blocked
+
+
+def preview_row(user_id: str) -> dict | None:
+    t = db.paywall_previews_table
+    with db.engine.begin() as conn:
+        row = conn.execute(select(t).where(t.c.user_id == user_id)).fetchone()
+    return dict(row._mapping) if row is not None else None
+
+
+def record_preview(user_id: str, deck_key: str, pages: int) -> bool:
+    """Record that `pages` preview pages of `deck_key` were served. Called by
+    the /generate and /status handlers only, after a page with cards is built.
+    False when the preview already belongs to another deck (a concurrent
+    serve of a second job), in which case the caller answers 402."""
+    t = db.paywall_previews_table
+    now = datetime.now(timezone.utc).isoformat()
+    row = preview_row(user_id)
+    if row is None:
+        try:
+            with db.engine.begin() as conn:
+                conn.execute(insert(t).values(
+                    user_id=user_id, deck_key=deck_key, pages_served=pages,
+                    first_served_at=now, updated_at=now))
+            return True
+        except IntegrityError:
+            row = preview_row(user_id)
+            if row is None:
+                return False
+    if row["deck_key"] != deck_key:
+        return False
+    if pages > row["pages_served"]:
+        with db.engine.begin() as conn:
+            conn.execute(update(t).where(t.c.user_id == user_id)
+                         .where(t.c.pages_served < pages)
+                         .values(pages_served=pages, updated_at=now))
+    return True
 
 
 def _held_pro(user_id: str) -> str | None:
