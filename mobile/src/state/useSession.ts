@@ -794,18 +794,26 @@ setOnVerificationRequired(() => {
 });
 
 // ── Session-expired signal (teardown 06-03, flag auth.persistent_sessions) ──
-// A 401 just cleared the stored token. Sleeper-keyed sessions silently
-// re-mint via revalidateSession, and demo sessions just end — but an
-// ACCOUNT-ONLY session (no sleeper_username) has no silent path: identity
-// tokens are one-shot, so recovery needs a fresh Apple tap. Interim
-// mitigation per the P3 PRD: route to SignIn pre-set for Apple re-auth
-// instead of leaving the user stranded on failing screens. Flag-gated so
-// flag-off behavior stays the legacy generic clear.
+// A 401 just cleared the stored token, and nothing re-mints it:
+// revalidateSession reuses the existing token and swallows failures, so a
+// dead session stays dead until the user signs in again. With the flag on,
+// what happens next depends on the identity:
+//   • ACCOUNT-ONLY (no sleeper_username): route to SignIn with the Apple
+//     re-auth notice. Identity tokens are one-shot, so recovery needs a fresh
+//     Apple tap (interim mitigation per the P3 PRD).
+//   • SLEEPER-KEYED (incident 2026-10-17): route to SignIn the same way, with
+//     the sign-in-again notice and the username prefilled. Unverified Sleeper
+//     sessions are memory-only server-side, so this is where a returning
+//     username-only user lands once theirs expires.
+//   • DEMO, or no user: nothing to re-authenticate; the session just ends.
+// Flag off keeps the legacy generic clear for everyone.
 
-// One-shot hint for SignInScreen: "you're here for an Apple re-auth".
+// One-shot hint for SignInScreen: "you're here for a re-auth".
 // Module-level (not store state) — it's routing context, not UI state.
 let _appleReauthPending = false;
-/** Read-and-clear the pending Apple re-auth hint (SignInScreen mount). */
+/** Read-and-clear the pending re-auth hint (SignInScreen mount). Despite the
+ *  name it covers Sleeper-keyed re-auth too: SignInScreen picks the Apple or
+ *  the sign-in-again copy from the store user. */
 export function consumeAppleReauthHint(): boolean {
   const v = _appleReauthPending;
   _appleReauthPending = false;
@@ -831,7 +839,9 @@ setOnSessionExpired(() => {
   useSession.setState({ hasToken: false });
 
   const s = useSession.getState();
-  if (s.isDemo || !s.user?.account_only) return;
+  // Demo and no-user end here. Account-only AND Sleeper-keyed users go on to
+  // the SignIn reroute below.
+  if (s.isDemo || !s.user || s.user.user_id.startsWith('demo_user_')) return;
   try {
     // Lazy require — the flag store imports api modules that import us.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
