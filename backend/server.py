@@ -3681,7 +3681,8 @@ DECK_PIPELINE_VERSION = 1
 # - DECK_PIPELINE_IGNORED: what the listed functions reference but doesn't
 #   shape a deck, each with its reason.
 # A logic or constant change fails test_deck_pipeline_digest until
-# DECK_PIPELINE_VERSION is bumped and DECK_PIPELINE_DIGEST re-pinned. A listed
+# DECK_PIPELINE_VERSION is bumped and its digest pinned in DECK_PIPELINE_PINS
+# (a new row; an existing row never changes). A listed
 # function that references an unclassified server.py function or literal
 # constant fails the closure test until it's classified. models-eng reviews.
 DECK_PIPELINE_FUNCTIONS = (
@@ -3781,7 +3782,13 @@ DECK_PIPELINE_IGNORED = {
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
 }
-DECK_PIPELINE_DIGEST = "38068a074677acaa"
+# DECK_PIPELINE_VERSION -> its digest. Append-only: a bump adds a row and no
+# row is ever re-pinned in place (a re-pinned version would leave the pages
+# stored under it stamped current). test_deck_pipeline_digest holds a frozen
+# copy of these rows.
+DECK_PIPELINE_PINS = {
+    1: "38068a074677acaa",
+}
 
 # The modules whose code decides what cards a deck holds or their order. Their
 # bytes are hashed into every page's engine_version (backend/-relative globs,
