@@ -58,6 +58,7 @@ export interface DeckJob extends PageEnvelope {
   serve_source?: string;
   freshness_state?: string;
   prefetch_remaining?: number;
+  wait_reason?: string;
 }
 
 /**
@@ -85,6 +86,7 @@ export function nextDeckJob<J extends DeckJob>(
       ...next,
       job_id: next.job_id || prev?.job_id,
       search_id: prev?.search_id ?? next.search_id,
+      wait_reason: next.wait_reason,
       cards,
     } as unknown as Record<string, unknown>;
     for (const field of PAGING_FIELDS) delete legacy[field];
@@ -98,6 +100,8 @@ export function nextDeckJob<J extends DeckJob>(
     search_id: prev?.search_id ?? next.search_id,
     freshness_state: next.freshness_state,
     pool_exhausted: next.pool_exhausted,
+    // A withhold ends when a response stops saying so (S0's wait_reason).
+    wait_reason: next.wait_reason,
     replace: undefined,
     rebased: undefined,
     cards,

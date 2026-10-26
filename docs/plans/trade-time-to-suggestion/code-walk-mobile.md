@@ -52,8 +52,18 @@
   **the P30 end card** (`showDeckEndCard = pagedWithCards && …`). A legacy deck ends as before, on F10's "Deck
   done" summary (`summaryVisible = !pagedWithCards && …`, flag `deck.replenishment`) or the classic exhausted
   state.
+- **Named gate misses** (#339 item 12, ux-lead F-5; S0 contract v0.4 §3b; `utils/gateMiss.ts`):
+  - S0's check error with no cards (`status: "error"`, `error: "roster_check_unavailable"`) maps to
+    `deckFailure.kind === 'roster_check'` and `GateErrorCard` ("Couldn't confirm current rosters", one line,
+    Retry as `deck_error_retry`), never the generic "server may still be waking up";
+  - S0's withhold (`wait_reason: "roster_check"` on a building response, parsed by `api/trades.ts`, cleared by
+    the next response that lacks it via `nextDeckJob` or the legacy poller) shows `GateWaitCard` in place of
+    "Looking for trades…" while the deck has no card; after `FIRST_CARD_TIMEOUT_MS` (R2b's 10 s) with still no
+    card it falls through to `GateErrorCard`. Cards arriving end it normally. Copy keys `trades.gate.*` are
+    placeholders for marketing-lead; none says "Searching…", "Finding more" or a time. Absent fields mean
+    today's behavior. Guard: `check-gate-miss`.
 - **Guards:** `check-trade-pages`, `check-trade-buffer`, `check-trade-inplace-reveal`, `check-no-finding-more`,
-  `check-withdraw-in-place`.
+  `check-withdraw-in-place`, `check-gate-miss`.
 
 ## 2. Time-to-suggestion events and the readout (M)
 
@@ -186,7 +196,15 @@ sees; "deck" is the pushed results deck (Acquire → Find a trade).
    card from league A ever shows in league B, and no card from the other format after the format switch,
    including the first card of the first tap (this is the release-lead P1-a check; with C on, repeat it within
    5 min of the first deck).
-10. **Known behavior to log (P2-b):** on the first ~10 s of a cold search, note any card that turns into "This
+10. **Named gate misses (#339 item 12; reachable once S0 deploys).** With S0's roster check unavailable for the
+    league (S0's own test hook, or a league whose platform check fails), tap Find a trade. **Expect:** "Couldn't
+    confirm current rosters" / "We couldn't check rosters with your league's platform. Try again." with
+    **Retry** in the card slot, never "Search failed … waking up"; Retry starts a new search; Back works. While
+    S0 is withholding cards for the check, **expect** "Checking current rosters with your league's platform…"
+    in place of "Looking for trades…" (no seconds, no "Searching…"); if no card arrives within about 10 s it
+    turns into the error above with Retry; if cards arrive, the deck shows them normally. Copy is placeholder
+    (`trades.gate.*`, head-bizops due ~10-28).
+11. **Known behavior to log (P2-b):** on the first ~10 s of a cold search, note any card that turns into "This
     trade is no longer available." right after appearing. E2's `replace` can withdraw a fronted card that a later
     server layer dropped; log how often, don't file it as a bug.
 

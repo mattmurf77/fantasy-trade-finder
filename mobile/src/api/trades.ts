@@ -19,6 +19,9 @@ export interface TradePageFields {
   freshness_state?: 'fresh' | 'updating';
   prefetch_remaining?: number; // fetch the next page at this many ready cards
   search_id?: string;       // E2: echoed client search id
+  // S0 (contract v0.4 §3b, #339 item 12): "roster_check" while S0 withholds
+  // cards for its roster check; absent otherwise (utils/gateMiss).
+  wait_reason?: string;
   // P1 page fingerprints, read only if a response carries them (the public
   // projection doesn't today). The device page (C) stores them as-is.
   built_at?: string;
@@ -340,6 +343,7 @@ function normalizeJobSnapshot(raw: any): PagedTradeJobSnapshot {
     ...(Number.isInteger(raw?.prefetch_remaining) && raw.prefetch_remaining >= 0
       ? { prefetch_remaining: raw.prefetch_remaining } : {}),
     ...(typeof raw?.search_id === 'string' && raw.search_id ? { search_id: raw.search_id } : {}),
+    ...(typeof raw?.wait_reason === 'string' && raw.wait_reason ? { wait_reason: raw.wait_reason } : {}),
     ...(typeof raw?.built_at === 'string' ? { built_at: raw.built_at } : {}),
     ...(typeof raw?.roster_fp === 'string' ? { roster_fp: raw.roster_fp } : {}),
     ...(typeof raw?.values_snapshot_id === 'string'

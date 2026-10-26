@@ -15,6 +15,10 @@
 //     and 5): the Banner construction (ink-2, hairline, body-sm chalk-dim),
 //     inline in the deck under the card, non-dismissable, Secondary Retry.
 //     Shown when a device-held page could not be revalidated (C).
+//   - GateWaitCard / GateErrorCard: #339 item 12 (ux-lead F-5; PRD §5.4
+//     "Gate-miss wait"): a no-card gate miss names its real reason, makes no
+//     timing promise, uses the static Loading treatment, and ends in the
+//     error with Retry; the header Back stays usable (utils/gateMiss).
 // VoiceOver per ux-lead U3: every announcement is polite and fires once,
 // when the state appears. Copy owner: marketing-lead (the P30 lines are
 // Product's verbatim); the other lines are placeholders from ux-lead's spec.
@@ -35,6 +39,16 @@ export const DECK_MORE_ERROR_LINE = "Couldn't load more trades.";
 export const DECK_REFRESH_FAILED_LINE = "Couldn't refresh. These trades may be out of date.";
 // marketing-lead-copy.md §6 addendum 4 (final): the line above, "Retry", and this spoken label.
 export const DECK_REFRESH_FAILED_RETRY_A11Y = 'Retry refreshing trades';
+// #339 item 12 — S0's named gate misses (utils/gateMiss). Never "Searching…",
+// never a "Finding more", never a time.
+// COPY: placeholder, marketing-lead (trades.gate.*)
+export const GATE_ROSTER_CHECK_FAILED_TITLE = "Couldn't confirm current rosters";
+// COPY: placeholder, marketing-lead (trades.gate.*)
+export const GATE_ROSTER_CHECK_FAILED_LINE = "We couldn't check rosters with your league's platform. Try again.";
+// COPY: placeholder, marketing-lead (trades.gate.*)
+export const GATE_ROSTER_CHECK_RETRY = 'Retry';
+// COPY: placeholder, marketing-lead (trades.gate.*)
+export const GATE_ROSTER_CHECK_WAIT = "Checking current rosters with your league's platform…";
 
 function announcePolitely(line: string) {
   // `queue: true` lets VoiceOver finish what it is reading (polite).
@@ -231,6 +245,46 @@ export function DeckRefreshFailedLine({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+/** #339 item 12 — the withhold wait, named (`trades.gate.roster_check_wait`).
+ *  It replaces "Looking for trades…" while S0 withholds; the screen ends it
+ *  after FIRST_CARD_TIMEOUT_MS in GateErrorCard. */
+export function GateWaitCard({ minHeight }: { minHeight?: number | null }) {
+  const reduceMotion = useReducedMotionSafe();
+  useAnnounceOnMount(GATE_ROSTER_CHECK_WAIT);
+  return (
+    <View testID="trades.gate-wait">
+      <Card style={minHeight ? { minHeight } : undefined}>
+        <View style={styles.gateRow} accessible accessibilityLabel={GATE_ROSTER_CHECK_WAIT}>
+          {reduceMotion ? null : <ActivityIndicator size="small" color={ice.base} style={styles.spinner} />}
+          <Text variant="bodySm" style={styles.flex}>{GATE_ROSTER_CHECK_WAIT}</Text>
+        </View>
+      </Card>
+    </View>
+  );
+}
+
+/** #339 item 12 — the named check error (`trades.gate.roster_check_failed`):
+ *  S0's `roster_check_unavailable`, or the withhold wait that outlasted
+ *  FIRST_CARD_TIMEOUT_MS. Title, one line, Retry (a new search). */
+export function GateErrorCard({ minHeight, onRetry }: { minHeight?: number | null; onRetry: () => void }) {
+  useAnnounceOnMount(`${GATE_ROSTER_CHECK_FAILED_TITLE}. ${GATE_ROSTER_CHECK_FAILED_LINE}`);
+  return (
+    <View testID="trades.gate-error">
+      <Card style={minHeight ? { minHeight } : undefined}>
+        <Text variant="title">{GATE_ROSTER_CHECK_FAILED_TITLE}</Text>
+        <Text variant="bodySm" style={styles.endBody}>{GATE_ROSTER_CHECK_FAILED_LINE}</Text>
+        <Button
+          testID="trades.gate-error.retry"
+          label={GATE_ROSTER_CHECK_RETRY}
+          variant="secondary"
+          onPress={onRetry}
+          style={styles.fullWidth}
+        />
+      </Card>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   updating: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   // The standard Spinner is 20px; RN's "small" indicator is that size.
@@ -242,6 +296,7 @@ const styles = StyleSheet.create({
   // Plex Mono numerals (the tally's data), in the line's chalk-dim.
   tallyNum: { fontFamily: fonts.data, fontVariant: ['tabular-nums'] },
   endActions: { marginTop: space.sm },
+  gateRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   refreshFailed: {
     flexDirection: 'row',
     alignItems: 'center',

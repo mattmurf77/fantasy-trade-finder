@@ -117,6 +117,7 @@ import {
 } from '../state/tradeSearchTrace';
 import {
   FIRST_CARD_MIN_VISIBLE,
+  FIRST_CARD_TIMEOUT_MS,
   searchTypeOf,
   visibleFraction,
   type FirstCardFailure,
@@ -198,8 +199,13 @@ import {
   DeckOfflineCard,
   DeckRefreshFailedLine,
   DeckUpdatingLabel,
+  GATE_ROSTER_CHECK_FAILED_LINE,
+  GateErrorCard,
+  GateWaitCard,
   WithdrawnTradeCard,
 } from '../components/TradeDeckStates';
+// #339 item 12 — S0's named gate misses (pure; tests/check-gate-miss.js).
+import { isRosterCheckError, isRosterCheckWait } from '../utils/gateMiss';
 // 200 ms path, C — the device-held first page: its pure rules
 // (tests/check-device-first-page.js runs them) and the store that holds it.
 import {
@@ -471,7 +477,8 @@ let adaptationMomentShownThisSession = false;
 // `message` is ALWAYS shipped user copy. job.error is never routed here
 // verbatim — see jobErrorCopy below.
 type DeckFailure = {
-  kind: 'generate' | 'job_error' | 'poll_abandoned';
+  // 'roster_check': S0's named check error (#339 item 12, utils/gateMiss).
+  kind: 'generate' | 'job_error' | 'poll_abandoned' | 'roster_check';
   message: string;
 } | null;
 
@@ -2460,7 +2467,8 @@ export default function TradesScreen({ navigation, route }: any) {
           next.status !== job.status ||
           (next.opponents_done ?? 0) !== (job.opponents_done ?? 0) ||
           (next.opponents_total ?? 0) !== (job.opponents_total ?? 0) ||
-          next.cards.length !== job.cards.length
+          next.cards.length !== job.cards.length ||
+          next.wait_reason !== job.wait_reason // #339 item 12: S0's withhold starts / ends
         );
         if (changed) setJob(next);
         noteSearchCards(next.job_id, next.cards);
@@ -2522,7 +2530,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // the retry tick (job still 'error', deckFailure just cleared).
   useEffect(() => {
     if (job?.status !== 'error') return;
-    setDeckFailure({ kind: 'job_error', message: jobErrorCopy(job.error) });
+    // #339 item 12 — S0's roster check couldn't run: the NAMED error state
+    // (GateErrorCard), never the generic "server may still be waking up".
+    setDeckFailure(isRosterCheckError(job.error)
+      ? { kind: 'roster_check', message: GATE_ROSTER_CHECK_FAILED_LINE }
+      : { kind: 'job_error', message: jobErrorCopy(job.error) });
   }, [job?.status, job?.error]);
 
   // #330 R-6 — scoped-empty derivation, at COMPLETION time. Both zero-card
@@ -4781,6 +4793,20 @@ export default function TradesScreen({ navigation, route }: any) {
   // C — the revalidation failed or timed out: the refresh-failed line, with
   // the cards still usable (PRD §5.4 "Refresh failed", §5.x row 5).
   const deviceRefreshFailed = devicePhase === 'failed';
+
+  // #339 item 12 — S0 withholds cards for its roster check (`wait_reason`):
+  // the NAMED wait replaces "Looking for trades…", with no timing promise.
+  // It ends: after FIRST_CARD_TIMEOUT_MS (R2b's timeout) with still no card
+  // it falls through to the named error and Retry. Cards arriving end it
+  // the normal way (the wait no longer applies), and so does a new search.
+  const rosterWait = isRosterCheckWait(job, deck.length);
+  const [rosterWaitExpired, setRosterWaitExpired] = useState(false);
+  useEffect(() => {
+    setRosterWaitExpired(false);
+    if (!rosterWait) return;
+    const t = setTimeout(() => setRosterWaitExpired(true), FIRST_CARD_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [rosterWait, job?.job_id]);
   const topCardWithdrawn = !!rawTopCard && withdrawnIds.has(rawTopCard.trade_id);
   function handleWithdrawnNext() {
     haptics.selection();
@@ -9773,6 +9799,14 @@ export default function TradesScreen({ navigation, route }: any) {
             // paused for the network (TanStack's onlineManager) and runs on
             // reconnect; its cards then replace this in place.
             <DeckOfflineCard minHeight={topCardH} onRetry={handleOfflineTapRetry} />
+          ) : rosterWait ? (
+            // #339 item 12 — S0's withhold, named; it ends in the named
+            // error with Retry. Outranks the skeleton and "Looking…".
+            rosterWaitExpired ? (
+              <GateErrorCard minHeight={topCardH} onRetry={() => handleFindTrades('deck_error_retry')} />
+            ) : (
+              <GateWaitCard minHeight={topCardH} />
+            )
           ) : firstRun &&
             !fairDeck &&
             deck.length === 0 &&
@@ -9986,6 +10020,9 @@ export default function TradesScreen({ navigation, route }: any) {
                 ) : null}
               </View>
             </Card>
+          ) : deckFailure?.kind === 'roster_check' ? (
+            // #339 item 12 — S0's check error, named (not "Search failed").
+            <GateErrorCard minHeight={topCardH} onRetry={() => handleFindTrades('deck_error_retry')} />
           ) : deckFailure ? (
             // P0-2 — the last search FAILED, and this is the only state that
             // says so. Sits below row 7 (deck.length > 0) so a job that errors
