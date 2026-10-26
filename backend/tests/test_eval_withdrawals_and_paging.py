@@ -667,14 +667,14 @@ def test_deliveries_after_as_of_are_not_read_and_a_re_read_is_stable():
     assert later.cards[7].viewed and not again.cards[7].viewed
 
 
-@pytest.mark.parametrize("where, inconsistent", [
-    ("packed", True),          # a packed card past the deliveries has an outcome
-    ("row", True),             # an upgraded row past them does
-    ("ghost", False),          # a ghost row's outcome is not a card's
-    ("withdrawn", False),      # a removed card is not in the deck
-    ("delivered", False),
+@pytest.mark.parametrize("where, expected", [
+    ("packed", INCOMPLETE_DECK),        # a packed card past the deliveries has an outcome
+    ("row", INCOMPLETE_DECK),           # an upgraded row past them does
+    ("ghost", None),                    # a ghost row's outcome is not a card's
+    ("withdrawn", WITHDRAWAL_CONFLICT),  # a never-delivered withdrawal can't have one
+    ("delivered", None),
 ], ids=lambda v: str(v))
-def test_an_outcome_past_the_last_delivery_means_under_recorded_deliveries(where, inconsistent):
+def test_an_outcome_past_the_last_delivery_means_under_recorded_deliveries(where, expected):
     db = make_db()
     cards = _deck_cards("j", 10)
     full = {*range(5), 7} if where == "row" else range(5)
@@ -691,7 +691,7 @@ def test_an_outcome_past_the_last_delivery_means_under_recorded_deliveries(where
     else:
         act(db, "j", {"packed": 7, "row": 7, "delivered": 5}[where], "viewed")
     (deck,) = load_decks(engine=db.eng)
-    assert deck.exclusion == (INCOMPLETE_DECK if inconsistent else None)
+    assert deck.exclusion == expected
 
 
 # ---------------------------------------------------------------------------
@@ -809,3 +809,85 @@ def test_the_value_model_position_feature_is_the_displayed_position():
                     cards=cards)])
     assert [r["position"] for r in like_rows] == [0.0, 0.1, 0.3, 1.0, 0.9]
     assert [r["position"] for r in propose_rows] == [0.0, 0.1, 0.3, 1.0, 0.9]
+
+
+# ---------------------------------------------------------------------------
+# release-lead's #417 QA P3s: inclusive as_of, as-of-safe paged rows, and
+# delivered withdrawals checked against the evidence
+# ---------------------------------------------------------------------------
+
+def _set_delivered_at(db: DB, job, index, at):
+    with db.eng.begin() as conn:
+        conn.execute(db.imp.update().where(db.imp.c.impression_id == card_impression_id(job, index))
+                     .values(delivered_at=at))
+
+
+def test_every_as_of_comparison_is_inclusive():
+    """A delivery, a retirement, a withdrawal and a row's delivered_at exactly
+    at as_of all count (P3-1: `<` in place of `<=` must fail here)."""
+    db = make_db()
+    cards = _first_delivery_deck(db)
+    put_pack(db, "j", cards, card_count=10, deliveries=[[4, SERVED], [9, _after(2)]],
+             retired=True, retired_at=_after(2))
+    withdraw(db, "j", 9, 1, at=_after(2))
+    (deck,) = load_decks(engine=db.eng, as_of=_after(2))
+    assert deck.exclusion is None
+    assert all(c.delivered for c in deck.cards)          # the boundary at as_of counts
+    rows = make_db(live=PAGING_COLUMNS)
+    put_deck(rows, "r", 4, tier="first30", delivered=range(4))
+    _set_delivered_at(rows, "r", 3, _after(2))
+    (paged,) = load_decks(engine=rows.eng, as_of=_after(2))
+    assert [c.delivered for c in paged.cards] == [True] * 4
+
+
+def test_a_paged_row_deck_reads_delivered_at_as_of_the_read():
+    """P3-2: a delivery written after as_of is not read, so a re-read at the
+    same as_of is the same; a later read sees it."""
+    db = make_db(live=PAGING_COLUMNS)
+    put_deck(db, "r", 6, tier="first30", delivered=range(6))
+    _set_delivered_at(db, "r", 4, _after(3))
+    _set_delivered_at(db, "r", 5, _after(3))
+    (probe,) = load_decks(engine=db.eng, as_of=_after(2))
+    (later,) = load_decks(engine=db.eng, as_of=_after(4))
+    assert probe.exclusion is None and later.exclusion is None
+    assert [c.delivered for c in probe.cards] == [i < 4 for i in range(6)]
+    assert all(c.delivered for c in later.cards)
+    assert exposure_curve([probe]) == exposure_curve([load_decks(engine=db.eng,
+                                                                 as_of=_after(2))[0]])
+
+
+@pytest.mark.parametrize("viewed, expected", [
+    ([0, 1], None),                     # views on delivered rows only
+    ([0, 4], INCOMPLETE_DECK),          # a view on a row not delivered (by as_of)
+], ids=["delivered_views", "undelivered_view"])
+def test_a_view_on_an_undelivered_paged_row_means_under_recorded_deliveries(viewed, expected):
+    """P3-2: a paged deck without a pack is held to the same outcome check as
+    a packed one; a deck with no delivery evidence at all stays
+    no_delivery_evidence (test_a_paged_deck_without_delivery_evidence_is_excluded)."""
+    db = make_db(live=PAGING_COLUMNS)
+    put_deck(db, "r", 6, tier="first30", delivered=range(3), viewed=viewed)
+    (deck,) = load_decks(engine=db.eng, as_of=_after(2))
+    assert deck.exclusion == expected
+
+
+@pytest.mark.parametrize("layout, index, expected", [
+    ("packed", 3, None),                      # inside the deliveries: consistent
+    ("packed", 7, WITHDRAWAL_CONFLICT),       # past them: the evidence says not delivered
+    ("paged", 1, None),                       # its row was delivered
+    ("paged", 4, WITHDRAWAL_CONFLICT),        # its row was not
+    ("legacy", 4, None),                      # no delivery evidence to check against
+], ids=lambda v: str(v))
+def test_a_delivered_withdrawal_must_agree_with_the_delivery_evidence(layout, index, expected):
+    """P3-3: served_before=1 says an earlier response delivered the card."""
+    if layout == "packed":
+        db = make_db()
+        cards = _first_delivery_deck(db)
+        put_pack(db, "j", cards, card_count=10, deliveries=[[4, SERVED]],
+                 retired=True, retired_at=SERVED)
+        withdraw(db, "j", index, 1)
+    else:
+        db = make_db(live=PAGING_COLUMNS)
+        put_deck(db, "j", 6, tier="first30" if layout == "paged" else None,
+                 delivered=range(3) if layout == "paged" else (), w1=[index])
+    (deck,) = load_decks(engine=db.eng, as_of=_after(1))
+    assert deck.exclusion == expected

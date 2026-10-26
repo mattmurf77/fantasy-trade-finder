@@ -13,7 +13,7 @@ metadata: an unmigrated DB lacks what the metadata may declare, and a DB
 column the metadata lacks is still read); without that column, every
 card's features_compact is None. The same holds for `evidence_tier`
 (replay and calibration exclude 'partial_run'; every other tier,
-ghost/first30/delivered/archive/full_interim, is a usable row) and for
+ghost/first30/delivered/viewed/archive/full_interim, is a usable row) and for
 `delivered_at` (ISO UTC, NULL while undelivered; the paging rule below).
 
 Packed cards (ADR-025 C1, C7 (i)): when the engine has a deck_evidence_packs
@@ -38,8 +38,10 @@ evidence_tier, or its pack's run metadata has PAGE_STORE_MARKER == 1. The
 legacy rule applies only to an unmarked deck, or to one served before
 PAGING_RELEASED_AT when that is set (None: marker-only, so a marked deck is
 never legacy). A marked deck without a pack takes delivered from its rows:
-a non-ghost row with a non-NULL delivered_at. A marked deck with a pack
-takes it from deliveries, as above.
+a non-ghost row whose delivered_at is at or before as_of (any non-NULL one
+without as_of). A marked deck with a pack takes it from deliveries, as
+above. In a marked or packed deck, an outcome on a card the evidence says
+was not delivered means the deliveries are under-recorded.
 
 In-flight packs (models-eng): the pack row is written at the deck's first
 delivery and its header updated on later ones, so its run metadata may
@@ -93,10 +95,14 @@ deck whole and never sinks it; calibration excludes its cards.
                    header, malformed deliveries), or it holds another run's
                    cards; its cards are not merged
   withdrawal_conflict
-                   a served_before=0 index has a non-ghost row with a
-                   non-NULL delivered_at (the evidence says the user got
-                   it), or a withdrawal's index is outside 0..N-1 (N as for
-                   incomplete_deck): the writer's contract is broken
+                   the withdrawal disagrees with the evidence: a
+                   served_before=0 index's card has a non-NULL
+                   delivered_at or an outcome (the user got it), or a
+                   served_before=1 index is past the pack's deliveries as
+                   of the read, or (a paged deck) its row was not
+                   delivered by then; or a withdrawal's index is outside
+                   0..N-1 (N as for incomplete_deck): the writer's
+                   contract is broken
   in_flight        the deck's pack is not final yet (in-flight packs, above);
                    or a deck served at/after PACK_REQUIRED_SINCE has no pack
                    yet and may still be live (served within IN_FLIGHT_WINDOW
@@ -105,8 +111,10 @@ deck whole and never sinks it; calibration excludes its cards.
   incomplete_deck  the non-ghost card indexes ∪ the served_before=0 indexes
                    are not exactly 0..N-1, where N is the pack's card_count,
                    or without a pack max(the card indexes ∪ every
-                   withdrawal index)+1; or a packed deck has
-                   an outcome past its last delivered index; or a deck
+                   withdrawal index)+1; or a packed or paged deck has an
+                   outcome on a card not delivered as of the read (past
+                   the pack's last delivered index, or a row with no
+                   delivered_at by then); or a deck
                    served at/after PACK_REQUIRED_SINCE has no pack and is
                    past IN_FLIGHT_WINDOW (a lost pack)
   no_delivery_evidence
@@ -507,8 +515,24 @@ def load_decks(
         # card is a gap, not out of range); only a negative index is outside.
         n = pack[0] if pack else max(idx + list(withdrawn), default=-1) + 1
         removed = set(w0)
-        if (any(not c.is_ghost and c.card_index in removed and c.delivered_at is not None
-                for c in deck.cards)
+        paged = deck.deck_job_id in marked and not (
+            PAGING_RELEASED_AT is not None and deck.served_at < PAGING_RELEASED_AT)
+        by_index = {c.card_index: c for c in deck.cards if not c.is_ghost}
+
+        def shown(i: int) -> bool | None:
+            """Whether the evidence says index i was delivered as of the read:
+            the pack's deliveries, else a paged deck's row delivered_at; None
+            when there is no such evidence (no card, or a legacy deck)."""
+            if pack:
+                return i <= pack[2]
+            card = by_index.get(i)
+            return None if card is None or not paged else _delivered_by(card.delivered_at, as_of)
+
+        if (any(i in by_index and (by_index[i].delivered_at is not None
+                                   or by_index[i].impression_id in outcomes)
+                for i in w0)                       # never delivered, yet delivered or acted on
+                or any(shown(i) is False for i, served_before in withdrawn.items()
+                       if served_before != 0)      # delivered before, yet no delivery
                 or any(not 0 <= i < n for i in withdrawn)):
             deck.exclusion = WITHDRAWAL_CONFLICT
             continue
@@ -519,8 +543,6 @@ def load_decks(
         for c in deck.cards:
             if not c.is_ghost:
                 c.position = c.card_index - bisect_left(w0, c.card_index)
-        paged = deck.deck_job_id in marked and not (
-            PAGING_RELEASED_AT is not None and deck.served_at < PAGING_RELEASED_AT)
         if pack:
             _n, final, last_delivered = pack
             if not final:
@@ -532,14 +554,16 @@ def load_decks(
             maybe_live = in_flight_from is not None and deck.served_at >= in_flight_from
             deck.exclusion = IN_FLIGHT if maybe_live else INCOMPLETE_DECK
             continue
-        elif paged:   # never the legacy rule: delivered only where a row says so
+        elif paged:   # never the legacy rule: delivered only where a row says so, by as_of
             for c in deck.cards:
-                c.delivered = not c.is_ghost and c.delivered_at is not None
-        if sorted(idx + w0) != list(range(n)) or (pack and any(
-                not c.is_ghost and c.card_index > last_delivered and c.impression_id in outcomes
-                for c in deck.cards)):   # an outcome past the deliveries: under-recorded
+                c.delivered = not c.is_ghost and _delivered_by(c.delivered_at, as_of)
+        no_evidence = paged and not pack and not any(c.delivered for c in deck.cards)
+        under_recorded = (pack or paged) and not no_evidence and any(
+            not c.is_ghost and not c.delivered and c.impression_id in outcomes
+            for c in deck.cards)          # an outcome on a card not delivered as of the read
+        if sorted(idx + w0) != list(range(n)) or under_recorded:
             deck.exclusion = INCOMPLETE_DECK
-        elif paged and not pack and not any(c.delivered for c in deck.cards):
+        elif no_evidence:
             deck.exclusion = NO_DELIVERY_EVIDENCE
     return result
 
@@ -562,6 +586,11 @@ def last_served_at(engine=None, db_url: str | None = None, since: str | None = N
         q = q.where(imp.c.league_id == league_id)
     with resolve_engine(engine, db_url).connect() as conn:
         return conn.execute(q).scalar()
+
+
+def _delivered_by(delivered_at: str | None, as_of: str | None) -> bool:
+    """A row's delivered_at says it was delivered as of the read (inclusive)."""
+    return delivered_at is not None and (as_of is None or delivered_at <= as_of)
 
 
 def _unpack(p) -> tuple[dict, int, list[dict]] | None:
