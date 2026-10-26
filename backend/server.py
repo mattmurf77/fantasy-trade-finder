@@ -2934,29 +2934,36 @@ def _cleanup_loop() -> None:
 
 
 # Long-lived background threads start in the process that SERVES requests,
-# once per pid. gunicorn 26.x imports the app in the master before forking,
-# and threads do not survive fork, so a start at import time ran the loop only
-# in the master and never in the worker (docs/runbook.md § "DB connections and
-# background threads across fork"). The master never serves a request.
+# once per pid. Render's default GUNICORN_CMD_ARGS includes --preload, so the
+# app is imported in the gunicorn master before the worker is forked, and
+# threads do not survive fork: a start at import time ran only in the master,
+# never in the worker (docs/runbook.md § "DB connections and background threads
+# across fork"). The master never serves a request.
 _bg_threads_lock = threading.Lock()
 _bg_threads_pid: int | None = None
 
 
 def _ensure_background_threads() -> None:
-    """Start `_cleanup_loop` once in this process. Idempotent per pid; a
-    forked child (new pid) starts its own. FTF_DISABLE_CLEANUP_LOOP=1 (tests,
-    via conftest) skips it; prod never sets it."""
+    """Per process, once: start `_cleanup_loop` (skipped when
+    FTF_DISABLE_CLEANUP_LOOP=1, i.e. tests via conftest; prod never sets it),
+    then resume queued Win Now work (`start_worker_on_startup` keeps its own
+    FTF_TEST_MODE / FTF_BUILD_MODE guard and runs either way). Idempotent per
+    pid; a forked child (new pid) starts its own."""
     global _bg_threads_pid
-    if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") == "1":
-        return
     pid = os.getpid()
     if _bg_threads_pid == pid:
         return
     with _bg_threads_lock:
         if _bg_threads_pid == pid:
             return
-        threading.Thread(target=_cleanup_loop, name="cleanup-loop", daemon=True).start()
+        if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":
+            threading.Thread(target=_cleanup_loop, name="cleanup-loop", daemon=True).start()
         _bg_threads_pid = pid
+        from . import win_now_service
+        try:
+            win_now_service.start_worker_on_startup(_sleeper_get)
+        except Exception:                 # never fail the request that got here first
+            log.exception("win-now worker resume failed")
 
 
 @app.before_request
@@ -37459,8 +37466,8 @@ _install_win_now(app, require_session=_require_initialized_session,
                  read_denial=_verified_read_denial, write_denial=_verified_write_denial,
                  active_format=_active_format, league_user_id=_league_user_id,
                  pool_provider=_get_universal_pool, fetch_json=_sleeper_get)
-from . import win_now_service as _win_now_service
-_win_now_service.start_worker_on_startup(_sleeper_get)
+# Queued Win Now work resumes per serving process from _ensure_background_threads,
+# never at import (under --preload that would run in the gunicorn master).
 
 # Team overhaul (docs/plans/team-overhaul/BUILD-CONTRACT.md §3) — same seam
 # as Win Now: routes live in overhaul_api, server-private helpers are injected.
