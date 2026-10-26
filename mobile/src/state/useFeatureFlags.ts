@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { loadFeatureFlags, flagProvenance, fetchedAppMinVersion } from '../api/flags';
+import {
+  loadFeatureFlags,
+  flagProvenance,
+  fetchedAppMinVersion,
+  fetchedAppStoreLive,
+} from '../api/flags';
 import { track } from '../api/events';
 import type { FlagMap } from '../shared/types';
 
@@ -20,6 +25,10 @@ interface FlagState {
    *  fails or times out never gates (fails open). A failed refetch leaves the
    *  last resolved value in place. App.tsx feeds it to shouldBlockForUpdate. */
   appMinVersion: number;
+  /** B8 Update target: served `app_store_live` (1 App Store, 0 TestFlight,
+   *  -1 unset → the gate's compiled UTC fallback). Same rule as
+   *  appMinVersion: set only by a resolved revalidate, never persisted. */
+  appStoreLive: number;
   /** Local-only AsyncStorage hydrate. Awaited by the boot gate so flag-
    *  gated UI settles to cached values before the first screen renders.
    *  Never touches the network — safe inside the splash-gating set. */
@@ -140,6 +149,7 @@ export const useFeatureFlags = create<FlagState>((set, get) => ({
   flags: { ...LAUNCHED_FLAG_DEFAULTS },
   loaded: false,
   appMinVersion: 0,
+  appStoreLive: -1,
   loadCachedFlags: async () => {
     // Optimistically hydrate from AsyncStorage before the network fetch
     // so users get cached flags during a cold-start wait. First-ever
@@ -169,7 +179,12 @@ export const useFeatureFlags = create<FlagState>((set, get) => ({
       // One set: the update gate (App.tsx) mounts with the fetched flags
       // already in place, so its `update_gate_shown` track() reads the
       // fetched `analytics.client_events`, not the baked defaults.
-      set({ flags, loaded: true, appMinVersion: fetchedAppMinVersion() });
+      set({
+        flags,
+        loaded: true,
+        appMinVersion: fetchedAppMinVersion(),
+        appStoreLive: fetchedAppStoreLive(),
+      });
       try {
         await AsyncStorage.setItem(FF_KEY, JSON.stringify(flags));
       } catch {

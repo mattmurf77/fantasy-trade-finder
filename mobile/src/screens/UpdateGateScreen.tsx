@@ -5,7 +5,8 @@ import Constants from 'expo-constants';
 import { Button, Text } from '../components/chalkline';
 import { ink, space } from '../theme/chalkline';
 import { track } from '../api/events';
-import { appStoreLive, versionInt } from '../utils/appVersion';
+import { useFeatureFlags } from '../state/useFeatureFlags';
+import { updateGoesToAppStore, versionInt } from '../utils/appVersion';
 
 // ── B8 minimum-version gate — the blocking "Update required" screen ──────
 // Head-eng ruling 35. App.tsx renders this IN PLACE OF RootNav (so nothing
@@ -29,13 +30,14 @@ export const APP_VERSION_INT = versionInt(Constants.expoConfig?.version);
 // The same binary serves TestFlight testers first and App Store users from
 // the public release. No installed dependency can tell a TestFlight install
 // from an App Store one (expo-constants' executionEnvironment is
-// 'bare'/'standalone' for both; expo-application is not a dependency), so
-// the button switches on the release date instead: before it, the TestFlight
-// app; from it, the App Store listing.
+// 'bare'/'standalone' for both; expo-application is not a dependency). So:
+// the served `app_store_live` decides when ops have set it (1 → App Store,
+// 0 → TestFlight); unset (-1) falls back to the compiled instant below.
 
-/** App Store public release, LOCAL midnight (utils/appVersion.appStoreLive).
- *  Move this if the release date moves. */
-export const APP_STORE_LIVE_FROM = '2026-11-18';
+/** Compiled fallback: App Store public release as a UTC instant, midnight
+ *  Pacific (PST, UTC-8) on 2026-11-18. Used only while the served
+ *  `app_store_live` is unset (utils/appVersion.updateGoesToAppStore). */
+export const APP_STORE_LIVE_FROM_UTC = '2026-11-18T08:00:00Z';
 
 /** Opens the TestFlight app, where a tester installs the newer build. The
  *  repo has no public TestFlight link. */
@@ -60,6 +62,10 @@ interface Props {
 }
 
 export default function UpdateGateScreen({ minVersion, appVersionInt }: Props) {
+  // Served Update target (1 / 0 / -1); from the same resolved fetch that
+  // raised the gate, so it is never older than the gate itself.
+  const servedTarget = useFeatureFlags((s) => s.appStoreLive);
+
   // Once per gate show: this screen mounts only after a resolved flag fetch
   // raised the gate, and stays mounted while later fetches keep it raised.
   useEffect(() => {
@@ -71,7 +77,9 @@ export default function UpdateGateScreen({ minVersion, appVersionInt }: Props) {
   // state, and both the sync throw and the async rejection are swallowed.
   const onUpdate = () => {
     track('update_gate_tapped', { min_version: minVersion, app_version_int: appVersionInt });
-    const url = appStoreLive(APP_STORE_LIVE_FROM, new Date()) ? APP_STORE_URL : TESTFLIGHT_URL;
+    const url = updateGoesToAppStore(servedTarget, new Date(), APP_STORE_LIVE_FROM_UTC)
+      ? APP_STORE_URL
+      : TESTFLIGHT_URL;
     try {
       Linking.openURL(url).catch(() => {});
     } catch {

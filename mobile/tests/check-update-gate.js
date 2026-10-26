@@ -11,15 +11,16 @@
 // this guard:
 //   1–2  EXECUTES utils/appVersion's versionInt + shouldBlockForUpdate over a
 //        case table (equal, older, newer, 0 = off, null / garbage → open),
-//        and appStoreLive over the release-date boundary;
+//        and updateGoesToAppStore / appStoreLiveOrUnset (served 1 / 0
+//        override the date both ways; unset or garbage → the UTC fallback);
 //   3    pins every fail-open path in the wiring (success-path-only writes,
 //        never persisted, never hydrated, one decision site);
 //   4    pins that each gate event fires from exactly one place, with exactly
 //        the two registered props, and that the backend registered them;
 //   5    pins the screen: testIDs, no FeedbackFAB, Chalkline only, the three
-//        final copy strings, and the Update target (TestFlight before
-//        APP_STORE_LIVE_FROM, the eas.json ascAppId listing from it; a failed
-//        open keeps the gate up);
+//        final copy strings, and the Update target (served app_store_live
+//        first, else TestFlight before APP_STORE_LIVE_FROM_UTC and the
+//        eas.json ascAppId listing from it; a failed open keeps the gate up);
 //   6    pins that the version the gate parses equals the version the binary
 //        ships (G-012: the bare workflow takes the marketing version from
 //        ios/, while Constants.expoConfig.version comes from app.json);
@@ -149,15 +150,38 @@ const MIN_CASES = [
   [12200, 12200], [1, 1], [0, 0], [-5, 0], [0.5, 0], [12200.5, 0], [NaN, 0],
   [Infinity, 0], [1e20, 0], [undefined, 0], [null, 0], ['12200', 0], [false, 0],
 ];
-// [liveFrom, now (LOCAL time, so the table holds in any TZ), App Store?, label]
-const LIVE_CASES = [
-  ['2026-11-18', new Date(2026, 9, 25), false, 'weeks before → TestFlight'],
-  ['2026-11-18', new Date(2026, 10, 17, 23, 59, 59, 999), false, 'last ms before local midnight → TestFlight'],
-  ['2026-11-18', new Date(2026, 10, 18, 0, 0, 0, 0), true, 'local midnight → App Store'],
-  ['2026-11-18', new Date(2026, 10, 18, 12), true, 'release day → App Store'],
-  ['2026-11-18', new Date(2027, 0, 1), true, 'after → App Store'],
-  ['garbage', new Date(2026, 9, 25), true, 'unparseable date → App Store (the permanent target)'],
-  ['2026-11-18T00:00', new Date(2026, 9, 25), true, 'not YYYY-MM-DD → App Store'],
+// The Update target. [served app_store_live, now, compiled fallback, App
+// Store?, label]. `now` is built with Date.UTC, so the table holds in any TZ.
+const FALLBACK = '2026-11-18T08:00:00Z';
+const BEFORE = new Date(Date.UTC(2026, 9, 25));
+const AFTER = new Date(Date.UTC(2027, 0, 1));
+const TARGET_CASES = [
+  // unset (-1) → the compiled UTC instant decides
+  [-1, BEFORE, FALLBACK, false, 'unset, weeks before → TestFlight'],
+  [-1, new Date(Date.UTC(2026, 10, 18, 7, 59, 59, 999)), FALLBACK, false, 'unset, last ms before 08:00Z → TestFlight'],
+  [-1, new Date(Date.UTC(2026, 10, 18, 8, 0, 0, 0)), FALLBACK, true, 'unset, 08:00Z (midnight Pacific) → App Store'],
+  [-1, new Date(Date.UTC(2026, 10, 18, 7, 0, 0, 0)), FALLBACK, false, 'unset, Nov 18 UTC but still Nov 17 Pacific → TestFlight'],
+  [-1, AFTER, FALLBACK, true, 'unset, after → App Store'],
+  // served 1 / 0 override the date BOTH ways
+  [1, BEFORE, FALLBACK, true, 'served 1 before the date → App Store'],
+  [0, AFTER, FALLBACK, false, 'served 0 after the date → TestFlight'],
+  [1, AFTER, FALLBACK, true, 'served 1 after → App Store'],
+  [0, BEFORE, FALLBACK, false, 'served 0 before → TestFlight'],
+  // anything else served → the fallback
+  ['1', BEFORE, FALLBACK, false, 'string "1" → fallback (TestFlight before)'],
+  [true, BEFORE, FALLBACK, false, 'boolean → fallback'],
+  [2, AFTER, FALLBACK, true, '2 → fallback (App Store after)'],
+  [null, BEFORE, FALLBACK, false, 'null → fallback'],
+  [undefined, AFTER, FALLBACK, true, 'missing → fallback'],
+  [NaN, BEFORE, FALLBACK, false, 'NaN → fallback'],
+  // an unparseable fallback reads as App Store, the permanent target
+  [-1, BEFORE, 'garbage', true, 'unparseable fallback → App Store'],
+  [-1, BEFORE, '2026-11-18', true, 'date-only fallback (no time, no Z) → App Store'],
+  [-1, BEFORE, '2026-11-18T08:00:00', true, 'fallback without Z → App Store'],
+];
+const STORE_CASES = [
+  [1, 1], [0, 0], [-1, -1], [2, -1], [0.5, -1], ['1', -1], [true, -1], [null, -1],
+  [undefined, -1], [NaN, -1],
 ];
 
 /** Every case-table miss for a loaded module; [] means all cases pass. */
@@ -184,19 +208,24 @@ const runCases = (mod) => {
     const got = mod.shouldBlockForUpdate(min, mod.versionInt(ver));
     if (got !== want) miss.push(`block(${min}, versionInt(${JSON.stringify(ver)})) = ${got}, want ${want}`);
   }
-  for (const [liveFrom, now, want, label] of LIVE_CASES) {
-    const got = mod.appStoreLive(liveFrom, now);
-    if (got !== want) miss.push(`appStoreLive(${liveFrom}, ${now.toString()}) = ${got}, want ${want} (${label})`);
+  for (const [served, now, fallback, want, label] of TARGET_CASES) {
+    const got = mod.updateGoesToAppStore(served, now, fallback);
+    if (got !== want) miss.push(`updateGoesToAppStore(${String(served)}, ${now.toISOString()}, ${fallback}) = ${got}, want ${want} (${label})`);
+  }
+  for (const [raw, want] of STORE_CASES) {
+    const got = mod.appStoreLiveOrUnset(raw);
+    if (got !== want) miss.push(`appStoreLiveOrUnset(${String(raw)}) = ${got}, want ${want}`);
   }
   return miss;
 };
-const CASE_COUNT = VERSION_CASES.length + BLOCK_CASES.length + MIN_CASES.length + 6 + LIVE_CASES.length;
+const CASE_COUNT = VERSION_CASES.length + BLOCK_CASES.length + MIN_CASES.length + 6
+  + TARGET_CASES.length + STORE_CASES.length;
 
 const util = load(utilSrc);
 {
   const miss = runCases(util);
   assert(miss.length === 0,
-    `1–2. versionInt / minVersionOrOff / shouldBlockForUpdate / appStoreLive pass all ${CASE_COUNT} executed cases`,
+    `1–2. versionInt / minVersionOrOff / shouldBlockForUpdate / updateGoesToAppStore / appStoreLiveOrUnset pass all ${CASE_COUNT} executed cases`,
     miss.join('\n      '));
 }
 
@@ -220,26 +249,37 @@ const util = load(utilSrc);
     '3c. …after the fetch resolves and before the success return — never in the catch',
     'a write in the catch (or before the await) would let a failed fetch set the gate');
 
-  // 3d–g: the store sets appMinVersion only from a resolved revalidate.
-  assert(count(store, 'appMinVersion: 0,') === 1,
-    '3d. useFeatureFlags: appMinVersion starts at 0');
-  const setSite = 'set({ flags, loaded: true, appMinVersion: fetchedAppMinVersion() });';
+  // 3b2–c2: the served Update target follows the same success-path rule.
+  const liveWrite = '_appStoreLive = appStoreLiveOrUnset(res?.app_store_live);';
+  const liveWriteAt = flags.indexOf(liveWrite);
+  assert(count(flags, 'let _appStoreLive = -1;') === 1 && count(flags, liveWrite) === 1
+      && (flags.match(/_appStoreLive\s*=[^=]/g) || []).length === 2
+      && liveWriteAt > awaitAt && liveWriteAt < returnAt,
+    '3b2. api/flags.ts: the served target starts -1 (unset) and is written once, normalized, on the success path only');
+
+  // 3d–g: the store sets appMinVersion (and the target) only from a resolved
+  // revalidate, in the same set() as the fetched flags.
+  assert(count(store, 'appMinVersion: 0,') === 1 && count(store, 'appStoreLive: -1,') === 1,
+    '3d. useFeatureFlags: appMinVersion starts at 0 and appStoreLive at -1');
+  const SET_RE = /set\(\{\s*flags,\s*loaded: true,\s*appMinVersion: fetchedAppMinVersion\(\),\s*appStoreLive: fetchedAppStoreLive\(\),\s*\}\);/g;
+  const setMatches = [...store.matchAll(SET_RE)];
   const revalAt = store.indexOf('revalidateFlags: async () => {');
   const loadAt = store.indexOf('await loadFeatureFlags({ throwOnError: true });', revalAt);
-  const setAt = store.indexOf(setSite);
+  const setAt = setMatches.length ? setMatches[0].index : -1;
   // The OUTER catch of revalidateFlags (the inner one guards the cache write).
   const revalBlock = store.slice(revalAt, store.indexOf('maybeRevalidateFlags: async', revalAt));
   const failSet = revalBlock.slice(revalBlock.lastIndexOf('} catch {'));
-  assert(count(store, setSite) === 1 && revalAt > 0 && loadAt > revalAt && setAt > loadAt,
-    '3e. …set once, in revalidateFlags, after the fetch resolves, in the SAME set() as the fetched flags');
-  assert(/set\(\{ loaded: true \}\);/.test(failSet) && !/appMinVersion/.test(failSet),
-    '3f. …and the failed-fetch branch never touches it (a timeout or dead zone cannot raise the gate)');
-  assert((store.match(/appMinVersion/g) || []).length === 3,
-    '3g. …no other read/write site in the store (interface, initializer, the one set)',
-    `found ${(store.match(/appMinVersion/g) || []).length} mentions`);
+  assert(setMatches.length === 1 && revalAt > 0 && loadAt > revalAt && setAt > loadAt,
+    '3e. …both set once, in revalidateFlags, after the fetch resolves, in the SAME set() as the fetched flags');
+  assert(/set\(\{ loaded: true \}\);/.test(failSet) && !/appMinVersion|appStoreLive/.test(failSet),
+    '3f. …and the failed-fetch branch never touches either (a timeout or dead zone cannot raise the gate)');
+  assert((store.match(/appMinVersion/g) || []).length === 3
+      && (store.match(/appStoreLive/g) || []).length === 3,
+    '3g. …no other read/write site in the store (interface, initializer, the one set — each)',
+    `found ${(store.match(/appMinVersion/g) || []).length} / ${(store.match(/appStoreLive/g) || []).length} mentions`);
   const cacheFn = store.slice(store.indexOf('loadCachedFlags: async () => {'), revalAt);
-  assert(cacheFn.length > 0 && !/appMinVersion|app_min_version/.test(cacheFn),
-    '3h. loadCachedFlags never hydrates a min (the gate is never persisted)');
+  assert(cacheFn.length > 0 && !/appMinVersion|app_min_version|appStoreLive|app_store_live/.test(cacheFn),
+    '3h. loadCachedFlags never hydrates a min or a target (neither is persisted)');
   assert(/AsyncStorage\.setItem\(FF_KEY, JSON\.stringify\(flags\)\)/.test(store)
       && (store.match(/AsyncStorage\.setItem\(/g) || []).length === 1,
     '3i. the only persisted payload is the flag map');
@@ -329,19 +369,21 @@ const util = load(utilSrc);
       && count(screen, 'label={UPDATE_GATE_BUTTON}') === 1,
     '5c2. no placeholder marker remains, and the screen renders exactly those three constants');
 
-  // 5d — where Update goes: TestFlight before the App Store release date,
-  // the App Store listing (eas.json ascAppId) from it. Failure keeps the gate.
+  // 5d — where Update goes: the served app_store_live when set (1 App Store,
+  // 0 TestFlight); unset → the compiled UTC instant. Failure keeps the gate.
   const eas = JSON.parse(read('eas.json'));
   const ascAppId = eas?.submit?.production?.ios?.ascAppId;
   assert(typeof ascAppId === 'string' && /^\d+$/.test(ascAppId)
       && count(screen, `export const APP_STORE_URL = 'https://apps.apple.com/app/id${ascAppId}';`) === 1,
     '5d. the App Store URL is the listing for eas.json\'s ascAppId');
-  assert(count(screen, "export const APP_STORE_LIVE_FROM = '2026-11-18';") === 1
-      && count(screen, "export const TESTFLIGHT_URL = 'itms-beta://';") === 1,
-    '5d2. APP_STORE_LIVE_FROM is 2026-11-18 and the pre-release target is the TestFlight app');
-  assert(count(tapBody, 'const url = appStoreLive(APP_STORE_LIVE_FROM, new Date()) ? APP_STORE_URL : TESTFLIGHT_URL;') === 1
+  assert(count(screen, "export const APP_STORE_LIVE_FROM_UTC = '2026-11-18T08:00:00Z';") === 1
+      && count(screen, "export const TESTFLIGHT_URL = 'itms-beta://';") === 1
+      && !/APP_STORE_LIVE_FROM\b/.test(screen),
+    '5d2. the compiled fallback is the UTC instant 2026-11-18T08:00:00Z (midnight Pacific), no local-midnight date; pre-release target is the TestFlight app');
+  assert(count(screen, 'const servedTarget = useFeatureFlags((s) => s.appStoreLive);') === 1
+      && /const url = updateGoesToAppStore\(servedTarget, new Date\(\), APP_STORE_LIVE_FROM_UTC\)\s*\?\s*APP_STORE_URL\s*:\s*TESTFLIGHT_URL;/.test(tapBody)
       && count(screen, 'Linking.openURL(') === 1,
-    '5d3. Update picks App Store from the live date, TestFlight before it, through utils/appVersion.appStoreLive');
+    '5d3. Update asks utils/appVersion.updateGoesToAppStore(served target, now, UTC fallback): true → App Store, false → TestFlight');
   assert(/try \{\s*Linking\.openURL\(url\)\.catch\(\(\) => \{\}\);\s*\} catch \{\s*\}/.test(tapBody)
       && !/\bset[A-Z]\w*\(|\bset\(|setState|getState/.test(tapBody),
     '5d4. a failed open (sync throw or rejection) is swallowed and changes no gate state, so the gate stays up');
@@ -415,8 +457,12 @@ const util = load(utilSrc);
     ['unparseable app version blocks',
       "if (typeof appVersionInt !== 'number' || !Number.isSafeInteger(appVersionInt)) return false;", ''],
     ['3-digit patch parses', '\\.(\\d{1,2})$/', '\\.(\\d{1,3})$/'],
-    ['release-day midnight still TestFlight',
-      'return now.getTime() >= liveFrom.getTime();', 'return now.getTime() > liveFrom.getTime();'],
+    ['release instant still TestFlight',
+      'return now.getTime() >= liveFrom;', 'return now.getTime() > liveFrom;'],
+    ['served 1 ignored', 'if (served === 1) return true;', ''],
+    ['served 0 ignored', 'if (served === 0) return false;', ''],
+    ['served garbage honoured', 'return raw === 1 || raw === 0 ? raw : -1;',
+      "return typeof raw === 'number' ? raw : -1;"],
   ];
   for (const [label, from, to] of MUTANTS) {
     const applies = count(utilSrc, from) === 1;

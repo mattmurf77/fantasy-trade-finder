@@ -3320,7 +3320,12 @@ _MODEL_CONFIG_DEFAULTS = [
     # row here, so a deploy never gates anyone and never resets a raised
     # value. release-lead's deploy-free kill switch:
     # PUT /api/admin/config/app_min_version (docs/config-reference.md).
-    ("app_min_version",           0,    "min-version gate: builds whose version int (major*10000+minor*100+patch) is below this get a blocking Update required screen; 0 = off. Served on GET /api/feature-flags; a missing, non-integral, NaN or negative value serves 0"),
+    ("app_min_version",           0,    "min-version gate: builds whose version int (major*10000+minor*100+patch) is below this get a blocking Update required screen; 0 = off. Served on GET /api/feature-flags; a missing, non-integral, NaN or negative value serves 0. Writes are checked by backend/app_version_policy.py"),
+    # Where the gate's Update button goes: 1 = App Store, 0 = TestFlight,
+    # -1 = unset (the client's compiled UTC instant decides). Served as the
+    # top-level int `app_store_live` on GET /api/feature-flags; anything but
+    # exactly 0 or 1 serves -1.
+    ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
 ]
 
 

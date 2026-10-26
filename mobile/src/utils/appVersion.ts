@@ -38,15 +38,29 @@ export function shouldBlockForUpdate(minVersion: unknown, appVersionInt: unknown
   return appVersionInt < min;
 }
 
-/** Where the gate's Update button goes. The same binary serves TestFlight
- *  testers before the App Store release and App Store users after it, and
- *  the app has no dependency that can tell the two installs apart. So the
- *  button switches on the date: true from LOCAL midnight of `liveFromYmd`
- *  ('YYYY-MM-DD') onward. An unparseable date reads as live, because the
- *  App Store is the permanent target. */
-export function appStoreLive(liveFromYmd: string, now: Date): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(liveFromYmd);
+/** A served `app_store_live`: exactly 1 (App Store) or 0 (TestFlight);
+ *  anything else, including a missing field, → -1 (unset). */
+export function appStoreLiveOrUnset(raw: unknown): number {
+  return raw === 1 || raw === 0 ? raw : -1;
+}
+
+/** Where the gate's Update button goes: true → App Store, false → TestFlight.
+ *  The same binary serves TestFlight testers before the App Store release and
+ *  App Store users after it, and the app has no dependency that can tell the
+ *  two installs apart. So:
+ *    - the served `app_store_live` decides when set (1 → App Store,
+ *      0 → TestFlight), so ops can move the switch without a build;
+ *    - unset (-1) or anything else → the compiled fallback: App Store from
+ *      the UTC instant `liveFromUtc` ('YYYY-MM-DDTHH:MM:SSZ') onward,
+ *      TestFlight before it. An unparseable instant reads as App Store, the
+ *      permanent target. */
+export function updateGoesToAppStore(served: unknown, now: Date, liveFromUtc: string): boolean {
+  if (served === 1) return true;
+  if (served === 0) return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/.exec(liveFromUtc);
   if (!m) return true;
-  const liveFrom = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return now.getTime() >= liveFrom.getTime();
+  const liveFrom = Date.UTC(
+    Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]),
+  );
+  return now.getTime() >= liveFrom;
 }
