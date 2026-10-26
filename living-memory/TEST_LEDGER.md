@@ -1,3 +1,58 @@
+## 2026-10-26 — I-2 (4/4): overhaul blocks on a failed roster read + readable refusals (stacked on #413)
+
+Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_overhaul.py` has 14 tests. The targeted set passes, 123 tests: `test_overhaul_api` (27), `test_overhaul_service` (23), and the I-2 Sleeper (24), MFL (15) and ESPN (20) files. `test_sleeper_write_route` (35), `test_mfl_propose_route` (25) and `test_espn_propose_route` (17) also pass after the copy moved to `backend/ownership_copy.py`.
+- **Sabotage, each red then restored:**
+  - the session-roster fallback restored at prepare → 4 red;
+  - the raw-id copy restored ("You no longer own {id}.") → 5 red;
+  - the /send 409 `detail` dropped → 1 red;
+  - the `offer_stale` ownership detail dropped → 1 red.
+- **Contract:**
+  - **R3:** on a send platform, prepare-send with a failed live roster read → 503 `rosters_unavailable` `kind:"network"` with "Couldn’t confirm rosters with {platform} …". No token is minted and the session fallback is not stored.
+  - **R4:** receipt ownership blockers use the shared I-2 copy, one per offer and side, named from the offer card (count fallback, never a raw id).
+  - **/send:** an ownership 409 carries `detail == message`. So does an `offer_stale` 409 when the offer went stale for ownership: a give-side move found by `/refresh` is the only way a liked offer goes stale. That 409 uses the offer's own ownership blocker, which now carries `assets`.
+  - **Per-offer refusals:** a core's 422 reaches `attempts[].error.message` on `/send` and on `GET /api/overhauls/{id}`.
+- **Client code-walk (no client change):**
+  - `OverhaulSummaryScreen`: a failed prepare goes to `setPrepareError(errorDetail(e))` (`:146`, card at `:274-277`); an ownership 409 at send goes to the toast (`:196`); receipt lines render `item.message` (`:295`, `:405-416`).
+  - `OverhaulPlanScreen` renders `a.error.message` for `send_failed` attempts (`:290-292`).
+- **Not covered:**
+  - An offer that was staled for ownership but whose assets have since come back keeps today's `offer_stale` 409 with no `detail`.
+  - `pool_violation`, `asset_reserved` and the overlap blocker messages still name raw ids (outside I-2).
+
+## 2026-10-26 — I-2 (3/4): ESPN send-time player ownership + validate routing + 0f guard (stacked on #412)
+
+Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_espn_ownership.py` has 20 tests, including a send through the overhaul batch with the real `_espn_propose_core`. The targeted set passes, 171 tests: `test_espn_propose_route` (17), `test_espn_write` (29), `test_trade_send_validate` (16), the I-2 Sleeper (24) and MFL (15) files, `test_overhaul_api` (27) and `test_overhaul_service` (23). `test_sleeper_write_route` (35) and `test_mfl_propose_route` (25) also pass with the 0f guard.
+- **Sabotage, each red then restored:**
+  - the ESPN player refusals removed → 4 red;
+  - the R3 handling removed (error mapping, transport catch, shape guards) → 6 red;
+  - the validate ESPN branch and linked-platform guard removed → 5 red;
+  - the 0f guard removed → 2 red.
+- **Contract:** players are checked against the live `mTeam+mRoster` read the ESPN core already makes (no extra call). A moved player → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's helper. A failed read → 502 `espn_unavailable` `kind:"network"` with "Couldn’t confirm rosters with ESPN …". That failure covers transport errors, which used to escape as a 500, and a team with no `roster` object.
+- **Validate:** an ESPN league checks the live mRoster (`asset_unmapped` / `player_moved` / `roster_not_found`). Any other linked-platform id returns `checked:false`. Neither path calls Sleeper.
+- **NEXT.md 0f:** `_sleeper_propose_core` returns 400 `bad_request` for a linked-platform id before any Sleeper call.
+- **Client code-walk (no client change):** `SendInEspnButton` has no branch for the two 422s or `espn_unavailable`, so all three reach its catch-all (`:216-220`), which shows `detail`. `espn_write_failed` (`:205-215`) would have read "ESPN rejected the request".
+
+## 2026-10-26 — I-2 (2/4): MFL send-time player + pick ownership + R3 (stacked on #411)
+
+Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_mfl_ownership.py` has 15 tests, including a send through the overhaul batch with the real `_mfl_propose_core`. The targeted set passes, 133 tests: `test_mfl_propose_route` (25; its fixture now serves both live exports), `test_mfl_trade_lifecycle` (22), `test_mfl_write` (21), `test_overhaul_api` (27), `test_overhaul_service` (23).
+- **Sabotage, each red then restored:**
+  - the player check removed → 4 red;
+  - the pick check removed → 5 red;
+  - the R3 read-failure returns removed → 4 red.
+- **Contract:** players are checked against MFL's live `rosters` export and FTF picks against its live `futureDraftPicks` export (live rather than the stored snapshot: the zero-auth fetcher already exists, so it is one read). A moved asset → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's shared helper (names or pick labels, a count when one is missing, never a raw id). A failed read → 502 `mfl_unavailable` `kind:"network"` with "Couldn’t confirm rosters with MFL …" (coordinator's call: the core's existing read-failure 502, not `mfl_write_failed`).
+- **Client code-walk (no client change):**
+  - `SendInMflButton` has no branch for `asset_not_owned`, `counterparty_asset_not_owned` or `mfl_unavailable`, so all three reach its catch-all (`:169-173`), which shows `detail`.
+  - With `mfl_write_failed`, the R3 copy would have been framed as "MFL rejected the request" (`:158-168`).
+- **Not covered:** pre-encoded `give_pick_assets` / `receive_pick_assets`; `git grep` finds no sender in mobile, web, the extension or overhaul.
+- **release-lead P2s (2026-10-26):** `test_i2_mfl_ownership.py` now has 27 tests.
+  - **P2-2:** a dead cookie (401/403) on either ownership read → 409 `mfl_auth_expired`, the credential is dropped, and no provider call is made. It is told apart from other failures by an opt-in `raise_auth` on the two fetchers; their default `{}` contract is pinned by a test. Sabotage → 2 red.
+  - **P2-1:** timeout, connection reset, `IncompleteRead` and `BadStatusLine` on either read → readable 502 `mfl_unavailable`, and through the overhaul send every attempt is `send_failed` with no reservation held. Sabotage → 9 red.
+
 ## 2026-10-26 — I-2 (1/4): Sleeper send-time player ownership + R3 (#411)
 
 Full gates. This is the launch condition for the 200 ms waiver W-AC-L5 (Product, 2026-10-26). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
