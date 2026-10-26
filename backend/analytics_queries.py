@@ -405,6 +405,10 @@ NON_INTENT_EVENTS = frozenset({
     "trade_first_card_failed",
     # deck_buffer_empty (ruling 30): an AC-L4 system outcome, never a choice.
     "deck_buffer_empty",
+    # deck_i1_check (S0's C-a readout, 2026-10-27, added in the SAME commit as
+    # its emitter): a server-fired outcome of each served page, on background
+    # polls too. The serve's request already reflects the user's intent.
+    "deck_i1_check",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

@@ -3307,10 +3307,13 @@ def _prepared_job_matches(job):
         and prepared_trade_read_guard.valid(sys.modules[__name__], guard))
 
 
-def _trade_job_public_view(job: dict) -> dict:
+def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
-    with a copied snapshot: one current history projection owns every card."""
+    with a copied snapshot: one current history projection owns every card.
+    `page_start`: the served slice's start index for a paged serve
+    (_trade_job_page_view), None for the legacy cumulative body; it keys the
+    `deck_i1_check` dedupe."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3368,6 +3371,7 @@ def _trade_job_public_view(job: dict) -> dict:
         out["board_refresh"] = board_refresh
     kick_floor = None
     withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
+    i1_report = {}                        # deck_i1_check props, when the check ran
     if out["cards"]:
         user_id, league_id, _format = job["key"]
         if job.get("prepared_inventory_id"):
@@ -3376,7 +3380,8 @@ def _trade_job_public_view(job: dict) -> dict:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
         checked = out["cards"]
         out["cards"], block, past_bound = _roster_serve_rules(
-            out["cards"], league_id, job.get("league_user_id") or user_id, job["job_id"])
+            out["cards"], league_id, job.get("league_user_id") or user_id, job["job_id"],
+            report=i1_report)
         if not block:
             kept = {id(c) for c in out["cards"]}
             withdrawn = [c for c in checked if id(c) not in kept]
@@ -3408,6 +3413,10 @@ def _trade_job_public_view(job: dict) -> dict:
                                  partial=job.get("status") == "error", withdrawn=withdrawn)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
+    # One event per page; a legacy cumulative body re-serves the whole deck on
+    # every poll, so it counts once, when the job is complete.
+    if i1_report and (page_start is not None or job.get("status") == "complete"):
+        _emit_deck_i1_check(user_id, league_id, job["job_id"], page_start, i1_report)
     return out
 
 
@@ -3420,6 +3429,68 @@ def _kick_roster_floor(league_id: str) -> None:
             league_id, max_age_s=_s0_seconds_knob("trade_roster_bound_s", 300.0))
     except Exception as err:          # it never raises; a kick must never fail a serve
         log.warning("roster floor kick failed league=%s: %s", league_id, err)
+
+
+# deck_i1_check: the C-a readout's data path (analytics-lead's pre-grant,
+# 2026-10-26). One server-fired NON_INTENT row per job serve page, recorded
+# off the request thread after the response is built.
+_I1_AGE_BUCKETS = ((300, "under_5m"), (3600, "5m_to_1h"), (86400, "1h_to_24h"))
+_I1_EVENT_DEDUPE_MAX = 20000
+_i1_events_seen: "collections.OrderedDict[tuple, None]" = collections.OrderedDict()
+_i1_events_lock = threading.Lock()
+
+
+def _i1_age_bucket(age_s) -> str:
+    """The snapshot's age as a bucket: `under_5m` (inside the 300 s roster
+    bound), `5m_to_1h`, `1h_to_24h` (inside the 24 h import bound),
+    `over_24h`, or `none` (no stamp to age from)."""
+    if age_s is None:
+        return "none"
+    return next((label for limit, label in _I1_AGE_BUCKETS if age_s < limit), "over_24h")
+
+
+def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, page, report: dict) -> None:
+    """Record `deck_i1_check` for one serve page, at most once per (job, page)
+    in this process; repeat polls of the same page are dropped. `page` is the
+    served slice's start index, or None for a legacy cumulative serve (which
+    the caller sends only once the job is complete). Never raises, never
+    blocks: the row is written on a daemon thread, non-touching
+    (`touch_user=False`), owned by the viewer, with the league in the row's
+    `league_id` column and only a hashed job key in the props. A serve is an
+    HTTP response: a view built outside a request records nothing."""
+    if not has_request_context():
+        return
+    try:
+        key = (job_id, page)
+        with _i1_events_lock:
+            if key in _i1_events_seen:
+                return
+            _i1_events_seen[key] = None
+            if len(_i1_events_seen) > _I1_EVENT_DEDUPE_MAX:
+                _i1_events_seen.popitem(last=False)
+        props = dict(report, job_key=hashlib.sha256(str(job_id).encode()).hexdigest()[:12])
+        device = dict(getattr(g, "device_info", {}) or {})
+        # Like the trade worker: a write after an account deletion must not land.
+        lease = _user_data_lifecycle.capture(user_id, started=g.get("_user_data_started"))
+        # The writer and engine in effect for this serve, so a late thread
+        # can't write through a different one.
+        from . import database as _database
+        write = functools.partial(record_event, user_id, "deck_i1_check", league_id=league_id,
+                                  source="api", props=props, touch_user=False,
+                                  bind=_database.engine, **device)
+        threading.Thread(target=_record_deck_i1_check, name="deck-i1-check", daemon=True,
+                         args=(lease, write)).start()
+    except Exception as err:          # analytics must never fail a serve
+        log.warning("deck_i1_check not recorded job=%s: %s", job_id, err)
+
+
+def _record_deck_i1_check(lease, write) -> None:
+    try:
+        with lease.active() as active:
+            if active:
+                write()
+    except Exception as err:
+        log.warning("deck_i1_check write failed: %s", err)
 
 
 # S0 admin test hook (the operator's TestFlight step A10): force one gate miss
@@ -3488,7 +3559,8 @@ def _trade_roster_snapshot(league_id: str):
             import_fresh_s=_s0_seconds_knob("trade_import_roster_fresh_s", 86400.0))
 
 
-def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap=None):
+def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap=None,
+                        report=None):
     """S0's serve rules (contract v0.4 §3, §3b) for one serve: the job views
     (/generate and /status, legacy and paged) and P1's page-store serve all go
     through here. I-1 never serves an asset either side no longer owns; a
@@ -3500,6 +3572,9 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
     applies the block's shape and, when `past_bound`, kicks the roster floor
     after the response is built. `ref` names the deck in log lines; `snap` is
     a roster_snapshot the caller already read (P1), else one is read here.
+    `report`: filled with the serve's `deck_i1_check` props when the check
+    ran (_roster_serve_check); left empty otherwise (mode 0, the admin hook,
+    a failed read), so those serves emit nothing.
     """
     mode = _trade_i1_mode()
     forced = _gate_miss_test(league_id) if cards else None
@@ -3512,7 +3587,7 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
         gates = mode == 2 and _trade_gate_miss_on()
         try:
             cards, block, past_bound = _roster_serve_check(
-                cards, league_id, viewer_id, mode, gates, ref, snap=snap)
+                cards, league_id, viewer_id, mode, gates, ref, snap=snap, report=report)
         except Exception as err:
             log.warning("trade-job %s: roster check unavailable (%s): %s", ref,
                         "no cards" if gates else f"{len(cards)} cards served unchecked", err)
@@ -3557,7 +3632,7 @@ def _roster_gate_now(league_id: str, ref: str, current) -> tuple[str | None, boo
 
 
 def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates: bool,
-                        job_id: str = "", *, snap=None):
+                        job_id: str = "", *, snap=None, report=None):
     """S0 at serve (contract v0.4 §3, §3b, §5b; C-a, C-d). Returns
     `(cards, block, past_bound)`:
       - `block`: None, "roster_check_unavailable" (no stored rosters: strict,
@@ -3580,7 +3655,8 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
     and `job=` the job (or, for a page-store serve, the page's deck job).
     Raises when the stored rows can't be read. `snap`: a roster_snapshot
     already read for this serve (P1 shares it with its fingerprint compare);
-    None reads one now.
+    None reads one now. `report`: a dict to fill with this serve's
+    `deck_i1_check` props (all but `job_key`), at the C-a log point.
     """
     if snap is None:
         snap = _trade_roster_snapshot(league_id)
@@ -3589,17 +3665,22 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
     counts = dict.fromkeys(("dropped_give", "dropped_receive",
                             "unchecked_generic", "unchecked_pick_owner"), 0)
 
+    split = dict.fromkeys(("dropped_cards", "dropped_give_player", "dropped_give_pick",
+                           "dropped_receive_player", "dropped_receive_pick"), 0)
+
     def check(assets, owner):
-        """(moved, generic, unknown-owner pick) asset counts for one side."""
-        moved = generic = unknown = 0
+        """(moved players, moved picks, generic, unknown-owner pick) counts for one side."""
+        players = picks = generic = unknown = 0
         for asset in map(str, assets):
             if parse_generic_pick_id(asset) is not None:
                 generic += 1
-            elif asset not in owners and _parse_owned_pick_id(asset, league_id) is not None:
+                continue
+            pick = _parse_owned_pick_id(asset, league_id) is not None
+            if asset not in owners and pick:
                 unknown += 1
             elif owner not in owners.get(asset, nobody):
-                moved += 1
-        return moved, generic, unknown
+                picks, players = (picks + 1, players) if pick else (picks, players + 1)
+        return players, picks, generic, unknown
 
     kept, unchecked = [], {}
     for card in (cards if snap.status != "missing" else ()):   # no rows: nothing to check
@@ -3610,10 +3691,18 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
         else:
             give, receive = card.give_player_ids, card.receive_player_ids
             target = card.target_user_id
-        (give_moved, *give_unchecked), (receive_moved, *receive_unchecked) = (
+        (give_players, give_picks, *give_unchecked), (
+            receive_players, receive_picks, *receive_unchecked) = (
             check(give, viewer_id), check(receive, str(target)))
+        give_moved, receive_moved = give_players + give_picks, receive_players + receive_picks
         counts["dropped_give"] += bool(give_moved)
         counts["dropped_receive"] += bool(receive_moved)
+        # deck_i1_check: the side x asset-type split, and distinct cards.
+        split["dropped_give_player"] += bool(give_players)
+        split["dropped_give_pick"] += bool(give_picks)
+        split["dropped_receive_player"] += bool(receive_players)
+        split["dropped_receive_pick"] += bool(receive_picks)
+        split["dropped_cards"] += bool(give_moved or receive_moved)
         unchecked[id(card)] = [a + b for a, b in zip(give_unchecked, receive_unchecked)]
         if not (give_moved or receive_moved):
             kept.append(card)
@@ -3644,6 +3733,12 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
             "none" if snap.age_s is None else int(snap.age_s), len(cards), len(served),
             counts["dropped_give"], counts["dropped_receive"],
             counts["unchecked_generic"], counts["unchecked_pick_owner"])
+    if report is not None:                    # the same serve, for deck_i1_check
+        report.update(mode="lenient" if mode == 1 else "strict", status=snap.status,
+                      outcome=outcome, age_bucket=_i1_age_bucket(snap.age_s),
+                      cards=len(cards), kept=len(served),
+                      unchecked_generic=counts["unchecked_generic"],
+                      unchecked_pick_owner=counts["unchecked_pick_owner"], **split)
     return served, (block if gates else None), past_bound
 
 
@@ -3695,7 +3790,7 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     start = 0 if replace else cursor
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
     served = [] if job.get("status") == "error" else raw[start:end]
-    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)})
+    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start)
     if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
@@ -4938,8 +5033,9 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     league_id = row["league_id"]
     end = min(len(pages["cards"]), cursor + _trade_page_size())
     checked = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
+    i1_report = {}
     cards, block, past_bound = _roster_serve_rules(checked, league_id, viewer_id,
-                                                   row["deck_job_id"], snap=snap)
+                                                   row["deck_job_id"], snap=snap, report=i1_report)
     kept = {id(c) for c in cards}
     withdrawn = [] if block else [c for c in checked if id(c) not in kept]
     cards = _with_trade_hash(cards)       # P2: the client's dedupe key
@@ -4956,6 +5052,8 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         out.update(status="running", wait_reason="roster_check", cursor=cursor, total_ready=0)
     if search_id is not None:
         out["search_id"] = search_id
+    if i1_report:                         # off-thread, once per (deck, page)
+        _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], cursor, i1_report)
     return out, past_bound
 
 

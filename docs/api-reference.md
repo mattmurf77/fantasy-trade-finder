@@ -539,6 +539,7 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
     with a moved give asset, `dropped_receive` cards with a moved receive asset,
     players and picks alike. A card with moved assets on both sides counts once
     per side, so `dropped_give + dropped_receive` can exceed `cards - kept`.
+  - **The same counts as data:** each served page also records the server event `deck_i1_check` (one per job page; no league or raw job id in its props; the drops split by side × player/pick). Spec: `docs/business/analytics/2026-10-20-time-to-suggestion-events.md`.
   - **`outcome`:** `served` (strict, filtered), `served_lenient`
     (`trade_i1_mode` 1: checked, nothing dropped), `unchecked_c_e` (C-e:
     nothing dropped), `roster_check_unavailable` / `roster_gate_miss` (gate
