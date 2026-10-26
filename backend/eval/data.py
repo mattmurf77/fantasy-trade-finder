@@ -13,7 +13,8 @@ metadata: an unmigrated DB lacks what the metadata may declare, and a DB
 column the metadata lacks is still read); without that column, every
 card's features_compact is None. The same holds for `evidence_tier`
 (replay and calibration exclude 'partial_run'; every other tier,
-ghost/first30/delivered/archive/full_interim, is a usable row).
+ghost/first30/delivered/archive/full_interim, is a usable row) and for
+`delivered_at` (ISO UTC, NULL while undelivered; the paging rule below).
 
 Packed cards (ADR-025 C1, C7 (i)): when the engine has a deck_evidence_packs
 table, each pack in the window is unpacked (backend/eval/evidence_pack.py)
@@ -30,11 +31,54 @@ not a ghost and its card_index is within the pack's run["deliveries"]; the
 exposure model counts delivered positions only. The legacy rule (models-lead
 R5.2 (d)): a deck without a pack, from before paging, delivered every served
 card, so delivered = served at every position, as e(k) always counted it.
+Paging defense in depth (models-lead R2.4 addendum §3): a deck is MARKED
+when a non-ghost row's features_json or compact block (before the
+projection trim) has PAGE_STORE_MARKER == 1, a non-ghost row has a non-NULL
+evidence_tier, or its pack's run metadata has PAGE_STORE_MARKER == 1. The
+legacy rule applies only to an unmarked deck, or to one served before
+PAGING_RELEASED_AT when that is set (None: marker-only, so a marked deck is
+never legacy). A marked deck without a pack takes delivered from its rows:
+a non-ghost row with a non-NULL delivered_at. A marked deck with a pack
+takes it from deliveries, as above.
 
-LoggedDeck.exclusion, per deck: replay excludes the deck whole and never
-sinks it; calibration excludes its cards.
+In-flight packs (models-eng): the pack row is written at the deck's first
+delivery and its header updated on later ones, so its run metadata may
+carry "retired" (bool) and "retired_at" (ISO UTC). A pack without the
+"retired" key was written at retirement and is final. One with it: with
+as_of, only deliveries entries with delivered_at <= as_of count (the last
+delivered index is recomputed from them, so a re-read at the same as_of is
+the same after the row is updated), and the pack is final iff it retired
+at or before as_of, or its served_at is older than as_of - IN_FLIGHT_WINDOW;
+without as_of, iff retired is true. A pack that is not final makes its
+deck in_flight. Outcome consistency, every packed deck: an outcome (as
+read) on a kept non-ghost card past the last delivered index means the
+deliveries are under-recorded (outcomes only come from delivered cards),
+and the deck is incomplete_deck.
+
+Serve-time withdrawals (models-lead R2.4 addendum §2): when the engine has a
+deck_card_withdrawals table, its rows for the loaded decks are read (with
+as_of, only those first withdrawn at or before it). The writer's contract:
+a served_before=1 card (delivered by an earlier response) keeps its row or
+packed card; the pack's card_count is the build N; every index is a build
+index. A served_before=0 card (W0: never delivered) may still be present,
+as a packed card (cards_blob holds every built card) or a first30 row with
+delivered_at NULL (the first 30 rows are written at first delivery). Ghost
+rows are ignored by every withdrawal rule (a ghost's card_index is a
+would-have-been rank). A W0 index is removed from the deck for eval: its
+card, when present, is dropped, so it is never scored, exposed or ranked,
+and the index explains the gap there (LoggedDeck.withdrawn_removed counts
+them). A served_before=1 index changes nothing: its card keeps its
+position and outcomes, and an absent one is an unexplained gap.
+LoggedCard.position is the displayed position, the card's dense rank among
+the deck's kept non-ghost cards (card_index minus the W0 indexes below it);
+with no withdrawals it is card_index. The reason column is informational
+and never read.
+
+LoggedDeck.exclusion, per deck, in this precedence: replay excludes the
+deck whole and never sinks it; calibration excludes its cards.
   calibration_refresh
-                   a card's features_json (or compact block) carries
+                   a card's features_json (or compact block), or its pack's
+                   run metadata, carries
                    deck_source CALIBRATION_REFRESH_SOURCE: Calibration's
                    targeted refresh built the deck (ADR-025 S4), and it is
                    never shown in Trades, so replay, e(k) and calibration
@@ -48,15 +92,27 @@ sinks it; calibration excludes its cards.
                    checksum mismatch, row fields disagreeing with its
                    header, malformed deliveries), or it holds another run's
                    cards; its cards are not merged
-  incomplete_deck  the non-ghost card indexes are not exactly 0..N-1, where
-                   N is the pack's card_count, or max+1 without a pack; or a
-                   deck served at/after PACK_REQUIRED_SINCE has no pack and
-                   is past IN_FLIGHT_WINDOW (a lost pack)
-  in_flight        a deck served at/after PACK_REQUIRED_SINCE has no pack yet
-                   and may still be live (served within IN_FLIGHT_WINDOW of
-                   as_of): the pack is written when the deck retires. Not an
-                   error; without as_of the reader can't tell, and such a
-                   deck is incomplete_deck.
+  withdrawal_conflict
+                   a served_before=0 index has a non-ghost row with a
+                   non-NULL delivered_at (the evidence says the user got
+                   it), or a withdrawal's index is outside 0..N-1 (N as for
+                   incomplete_deck): the writer's contract is broken
+  in_flight        the deck's pack is not final yet (in-flight packs, above);
+                   or a deck served at/after PACK_REQUIRED_SINCE has no pack
+                   yet and may still be live (served within IN_FLIGHT_WINDOW
+                   of as_of). Not an error; without as_of the reader can't
+                   tell a pack-less deck is live, and it is incomplete_deck.
+  incomplete_deck  the non-ghost card indexes ∪ the served_before=0 indexes
+                   are not exactly 0..N-1, where N is the pack's card_count,
+                   or without a pack max(the card indexes ∪ every
+                   withdrawal index)+1; or a packed deck has
+                   an outcome past its last delivered index; or a deck
+                   served at/after PACK_REQUIRED_SINCE has no pack and is
+                   past IN_FLIGHT_WINDOW (a lost pack)
+  no_delivery_evidence
+                   a marked deck without a pack (paging, above) whose live
+                   table lacks delivered_at, or none of whose non-ghost rows
+                   has one: nothing says which cards were delivered
 
 Lean load: only the columns eval reads are selected, and
 project_features=True (the nightly) also trims each parsed features dict
@@ -71,6 +127,7 @@ honored (same idiom as the product loaders).
 from __future__ import annotations
 
 import json
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -91,7 +148,7 @@ EVAL_COLUMNS = (
 )
 # Read only when the live table has them (inspected per read, not taken from
 # the code's table metadata; module docstring).
-OPTIONAL_COLUMNS = ("features_compact", "evidence_tier")
+OPTIONAL_COLUMNS = ("features_compact", "evidence_tier", "delivered_at")
 # evidence_tier written on a partial run's delivered rows (head-eng ruling 21):
 # replay excludes the deck, calibration the card.
 PARTIAL_RUN_TIER = "partial_run"
@@ -111,11 +168,30 @@ _PACKS = table(
 # features_json (ADR-025 S4: #370's server._pregenerate_grading_targets builds
 # it through _replenish_deck_for(..., source="grading_refresh")).
 CALIBRATION_REFRESH_SOURCE = "grading_refresh"
+# Serve-time withdrawals (models-lead R2.4 addendum §2; trades-eng writes one
+# row per card ownership rule I-1 withdrew, on the page-store path). Read only
+# when the engine has it, and only these columns: `reason` is informational
+# and eval never gates on it.
+WITHDRAWALS_TABLE = "deck_card_withdrawals"
+_WITHDRAWALS = table(
+    WITHDRAWALS_TABLE,
+    column("deck_job_id", String), column("card_index", Integer),
+    column("served_before", Integer), column("first_withdrawn_at", String),
+)
 # LoggedDeck.exclusion values (also replay's exclusion reasons).
 CALIBRATION_REFRESH = "calibration_refresh"
 PACK_INTEGRITY = "pack_integrity"
+WITHDRAWAL_CONFLICT = "withdrawal_conflict"
 INCOMPLETE_DECK = "incomplete_deck"
 IN_FLIGHT = "in_flight"
+NO_DELIVERY_EVIDENCE = "no_delivery_evidence"
+# The paging marker (module doc): a card's features_json / compact block, or a
+# pack's run metadata, with this key == 1 is from the page-store path.
+PAGE_STORE_MARKER = "page_store"
+# Decks served before this ISO UTC time keep the legacy rule even when marked.
+# None (marker-only: a marked deck is never legacy) until trade.first_page_store
+# goes live; then set it to that go-live time, like PACK_REQUIRED_SINCE.
+PAGING_RELEASED_AT: str | None = None
 # Lost-pack detection: decks served at or after this ISO UTC time must have a
 # pack row. None until trades-eng's packed writer ships; then set it to the
 # writer's go-live time.
@@ -150,6 +226,9 @@ class LoggedCard:
     evidence_tier: str | None = None       # e.g. 'partial_run' (column pending)
     is_ghost: bool = False                 # a withheld ghost row (C5): never packed
     delivered: bool = True                 # sent to a client (R4.2 U1; module doc)
+    delivered_at: str | None = None        # the row's first delivery (paging; module doc)
+    # The displayed position (module doc); None at construction means card_index.
+    position: int | None = None
     # Aggregated outcome flags (deck_outcomes reduce)
     viewed: bool = False
     liked: bool = False
@@ -159,6 +238,10 @@ class LoggedCard:
     undone: bool = False
     dwell_ms: int | None = None    # max dwell across outcome rows
 
+    def __post_init__(self):
+        if self.position is None:
+            self.position = self.card_index
+
 
 @dataclass
 class LoggedDeck:
@@ -167,9 +250,12 @@ class LoggedDeck:
     league_id: str
     served_at: str
     cards: list[LoggedCard] = field(default_factory=list)
-    # None, or CALIBRATION_REFRESH / PACK_INTEGRITY / INCOMPLETE_DECK /
-    # IN_FLIGHT (module doc).
+    # None, or CALIBRATION_REFRESH / PACK_INTEGRITY / WITHDRAWAL_CONFLICT /
+    # IN_FLIGHT / INCOMPLETE_DECK / NO_DELIVERY_EVIDENCE (module doc).
     exclusion: str | None = None
+    # served_before=0 withdrawals removed from the deck (module doc): not an
+    # exclusion, but counted (replay's EvalRun.withdrawn_removed_cards).
+    withdrawn_removed: int = 0
 
 
 def resolve_engine(engine=None, db_url: str | None = None):
@@ -239,10 +325,13 @@ def load_decks(
     a non-ghost card before a ghost row at the same index.
 
     `as_of` is the read's explicit clock (the loader reads no wall clock):
-    only decks served at or before it, and outcomes acted at or before it
-    (deck_outcomes.acted_at), are read, so a re-read at the same as_of is
-    the same however many outcomes arrive later (models-lead R5.2 (b)); and
-    the in_flight rule measures from it. Choosing as_of so labels are
+    only decks served at or before it, outcomes acted at or before it
+    (deck_outcomes.acted_at), withdrawals first withdrawn at or before it
+    (deck_card_withdrawals.first_withdrawn_at), and an in-flight-capable
+    pack's deliveries made at or before it, are read, so a re-read at the
+    same as_of is the same however many outcomes, withdrawals or deliveries
+    arrive later (models-lead R5.2 (b)); and the in_flight rules measure
+    from it. Choosing as_of so labels are
     complete (a settle lag) is the caller's job: replay.settled_read.
 
     project_features=True keeps only contract.PROJECTION_KEYS inside each
@@ -289,7 +378,7 @@ def load_decks(
         imp_ids = list(dict.fromkeys(
             [r.impression_id for r in rows]
             + [card_impression_id(run_id, u["card_index"])
-               for run_id, got in unpacked.items() if got for u in got[1]]))
+               for run_id, got in unpacked.items() if got for u in got[2]]))
         outcomes: dict[str, list] = {}
         if imp_ids:
             # Chunk the IN() to stay under SQLite's parameter cap.
@@ -302,18 +391,36 @@ def load_decks(
                     oq = oq.where(out.c.acted_at <= as_of)
                 for orow in conn.execute(oq).fetchall():
                     outcomes.setdefault(orow.impression_id, []).append(orow)
+        # deck_job_id -> {card_index: served_before}, for the loaded decks only.
+        withdrawals: dict[str, dict[int, int]] = {}
+        if inspect(conn).has_table(WITHDRAWALS_TABLE):
+            jobs = list(dict.fromkeys([r.deck_job_id for r in rows] + [p.run_id for p in packs]))
+            for i in range(0, len(jobs), 500):   # chunked like the outcomes IN()
+                wq = select(_WITHDRAWALS).where(_WITHDRAWALS.c.deck_job_id.in_(jobs[i:i + 500]))
+                if as_of:
+                    wq = wq.where(_WITHDRAWALS.c.first_withdrawn_at <= as_of)
+                for wrow in conn.execute(wq).fetchall():
+                    withdrawals.setdefault(wrow.deck_job_id, {})[int(wrow.card_index)] = (
+                        wrow.served_before)
 
     decks: dict[str, LoggedDeck] = {}
     order: list[str] = []
     refresh: set[str] = set()   # deck_job_ids of Calibration refresh decks
+    marked: set[str] = set()    # deck_job_ids carrying a paging marker (module doc)
     for r in rows:
         features = _json_dict(r.features_json)
         # getattr: None when the live table lacks the column (not selected).
         features_compact = _json_dict(getattr(r, "features_compact", None))
+        evidence_tier = getattr(r, "evidence_tier", None)
         # Before the projection trim: deck_source is not a PROJECTION_KEYS key.
         if any(d is not None and d.get("deck_source") == CALIBRATION_REFRESH_SOURCE
                for d in (features, features_compact)):
             refresh.add(r.deck_job_id)
+        # Before the trim too: neither is PAGE_STORE_MARKER.
+        if r.is_ghost != 1 and (evidence_tier is not None or any(
+                d is not None and d.get(PAGE_STORE_MARKER) == 1
+                for d in (features, features_compact))):
+            marked.add(r.deck_job_id)
         if project_features and features is not None:
             features = {k: v for k, v in features.items() if k in PROJECTION_KEYS}
         card = LoggedCard(
@@ -331,8 +438,9 @@ def load_decks(
             served_at=r.served_at,
             features=features,
             features_compact=features_compact,
-            evidence_tier=getattr(r, "evidence_tier", None),
+            evidence_tier=evidence_tier,
             is_ghost=(r.is_ghost == 1),
+            delivered_at=getattr(r, "delivered_at", None),
         )
         _reduce_outcomes(card, outcomes.get(r.impression_id, ()))
         deck = decks.get(r.deck_job_id)
@@ -347,7 +455,10 @@ def load_decks(
             order.append(r.deck_job_id)
         deck.cards.append(card)
 
-    packed: dict[str, tuple[int, int]] = {}   # run_id -> (card_count, last delivered)
+    in_flight_from = (None if as_of is None else
+                      (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat())
+    # run_id -> (card_count, final, last delivered card_index as of the read)
+    packed: dict[str, tuple[int, bool, int]] = {}
     pack_only = False
     for p in packs:
         deck = decks.get(p.run_id)
@@ -361,8 +472,16 @@ def load_decks(
         if got is None:
             deck.exclusion = PACK_INTEGRITY
             continue
-        last_delivered, cards = got
-        packed[p.run_id] = (p.card_count, last_delivered)
+        run, last_delivered, cards = got
+        if run.get(PAGE_STORE_MARKER) == 1:
+            marked.add(p.run_id)
+        # deck_source is not a pack key (CONTRACT_KEYS): refresh decks are kept
+        # at "live" evidence, full rows (#370). If S8 ever packs one, the writer
+        # must carry deck_source in the run metadata, where this reads it.
+        if run.get("deck_source") == CALIBRATION_REFRESH_SOURCE:
+            refresh.add(p.run_id)
+        packed[p.run_id] = (p.card_count,
+                            *_pack_state(run, last_delivered, p.served_at, as_of, in_flight_from))
         full = {c.card_index for c in deck.cards if not c.is_ghost}
         for u in cards:
             if u["card_index"] not in full:
@@ -370,8 +489,6 @@ def load_decks(
                 _reduce_outcomes(card, outcomes.get(card.impression_id, ()))
                 deck.cards.append(card)
 
-    in_flight_from = (None if as_of is None else
-                      (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat())
     result = [decks[j] for j in order]
     if pack_only:
         result.sort(key=lambda d: (d.served_at, d.deck_job_id))
@@ -382,19 +499,48 @@ def load_decks(
             continue
         if deck.exclusion is not None:
             continue
+        idx = [c.card_index for c in deck.cards if not c.is_ghost]   # sorted
+        withdrawn = withdrawals.get(deck.deck_job_id, {})
+        w0 = sorted(i for i, served_before in withdrawn.items() if served_before == 0)
+        pack = packed.get(deck.deck_job_id)
+        # Without a pack, every withdrawal index bounds N (a trailing W1 with no
+        # card is a gap, not out of range); only a negative index is outside.
+        n = pack[0] if pack else max(idx + list(withdrawn), default=-1) + 1
+        removed = set(w0)
+        if (any(not c.is_ghost and c.card_index in removed and c.delivered_at is not None
+                for c in deck.cards)
+                or any(not 0 <= i < n for i in withdrawn)):
+            deck.exclusion = WITHDRAWAL_CONFLICT
+            continue
+        # A present W0 card (packed, or an undelivered first30 row) is dropped.
+        deck.cards = [c for c in deck.cards if c.is_ghost or c.card_index not in removed]
         idx = [c.card_index for c in deck.cards if not c.is_ghost]
-        if deck.deck_job_id in packed:
-            n, last_delivered = packed[deck.deck_job_id]
+        deck.withdrawn_removed = len(w0)
+        for c in deck.cards:
+            if not c.is_ghost:
+                c.position = c.card_index - bisect_left(w0, c.card_index)
+        paged = deck.deck_job_id in marked and not (
+            PAGING_RELEASED_AT is not None and deck.served_at < PAGING_RELEASED_AT)
+        if pack:
+            _n, final, last_delivered = pack
+            if not final:
+                deck.exclusion = IN_FLIGHT
+                continue
             for c in deck.cards:
                 c.delivered = not c.is_ghost and c.card_index <= last_delivered
         elif PACK_REQUIRED_SINCE is not None and deck.served_at >= PACK_REQUIRED_SINCE:
-            live = in_flight_from is not None and deck.served_at >= in_flight_from
-            deck.exclusion = IN_FLIGHT if live else INCOMPLETE_DECK
+            maybe_live = in_flight_from is not None and deck.served_at >= in_flight_from
+            deck.exclusion = IN_FLIGHT if maybe_live else INCOMPLETE_DECK
             continue
-        else:
-            n = idx[-1] + 1 if idx else 0
-        if idx != list(range(n)):
+        elif paged:   # never the legacy rule: delivered only where a row says so
+            for c in deck.cards:
+                c.delivered = not c.is_ghost and c.delivered_at is not None
+        if sorted(idx + w0) != list(range(n)) or (pack and any(
+                not c.is_ghost and c.card_index > last_delivered and c.impression_id in outcomes
+                for c in deck.cards)):   # an outcome past the deliveries: under-recorded
             deck.exclusion = INCOMPLETE_DECK
+        elif paged and not pack and not any(c.delivered for c in deck.cards):
+            deck.exclusion = NO_DELIVERY_EVIDENCE
     return result
 
 
@@ -418,9 +564,9 @@ def last_served_at(engine=None, db_url: str | None = None, since: str | None = N
         return conn.execute(q).scalar()
 
 
-def _unpack(p) -> tuple[int, list[dict]] | None:
-    """(last delivered card_index, unpacked cards) for one pack row, or None
-    when it fails integrity."""
+def _unpack(p) -> tuple[dict, int, list[dict]] | None:
+    """(run metadata, last delivered card_index, unpacked cards) for one pack
+    row, or None when it fails integrity."""
     try:
         run, cards = evidence_pack.unpack_run(evidence_pack.PackedRun(
             pack_version=p.pack_version, header_json=p.header_json,
@@ -430,7 +576,24 @@ def _unpack(p) -> tuple[int, list[dict]] | None:
             raise evidence_pack.PackIntegrityError("the pack holds another run's cards")
     except evidence_pack.PackIntegrityError:
         return None
-    return last_delivered, cards
+    return run, last_delivered, cards
+
+
+def _pack_state(run: dict, last_delivered: int, served_at: str, as_of: str | None,
+                in_flight_from: str | None) -> tuple[bool, int]:
+    """(final, last delivered card_index) of a pack as of the read (module
+    doc, in-flight packs). `last_delivered` is check_deliveries' over the
+    whole, already-validated list; `in_flight_from` is as_of minus
+    IN_FLIGHT_WINDOW."""
+    if "retired" not in run:      # written at retirement: final, every delivery in
+        return True, last_delivered
+    if as_of is None:
+        return run["retired"] is True, last_delivered
+    seen = [d[0] for d in run["deliveries"] if d[1] <= as_of]
+    retired_at = run.get("retired_at")
+    final = ((run["retired"] is True and isinstance(retired_at, str) and retired_at <= as_of)
+             or served_at < in_flight_from)
+    return final, (seen[-1] if seen else -1)
 
 
 def _reduce_outcomes(card: LoggedCard, orows) -> None:
