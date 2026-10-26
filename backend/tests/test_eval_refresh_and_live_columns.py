@@ -5,7 +5,8 @@ P2-3: a deck Calibration's targeted refresh built (a card's deck_source is
 calibration_refresh, ahead of every other loader exclusion (a refresh deck is
 never packed, so past PACK_REQUIRED_SINCE it would otherwise read as a lost
 pack); replay excludes it whole and counts it, e(k) skips it, calibration
-excludes its cards; EXCLUSION_RULE_VERSION is 4.
+excludes its cards; EXCLUSION_RULE_VERSION became 4 (5 since the withdrawal
+and paging rules).
 
 P3: load_decks selects an optional column (features_compact, evidence_tier)
 iff the LIVE table has it, never because the code's metadata declares it: an
@@ -95,9 +96,10 @@ def test_refresh_takes_precedence_over_in_flight_and_a_lost_pack(monkeypatch, as
               "lost": "2026-10-21T12:00:00+00:00"}     # 50 h before
     for job, at in served.items():
         cards = _deck_cards(job, 30, served_at=at)
-        write_deck(eng, packs, cards, full=range(30), served_at=at)
+        # Tiered (deferred evidence): the decks a pack is required of.
+        write_deck(eng, packs, cards, full=range(30), served_at=at, tier="first30")
         write_deck(eng, packs, _sourced(_deck_cards(f"refresh-{job}", 30, served_at=at)),
-                   full=range(30), served_at=at)
+                   full=range(30), served_at=at, tier="first30")
     got = {d.deck_job_id: d.exclusion for d in load_decks(engine=eng, as_of=as_of)}
     assert got == {"live": IN_FLIGHT if as_of else INCOMPLETE_DECK,
                    "lost": INCOMPLETE_DECK,
@@ -139,12 +141,12 @@ def test_replay_excludes_a_refresh_deck_whole_and_counts_it():
 
     text = render_report([run], run)
     assert "calibration_refresh=20" in text and "calibration_refresh_decks=1" in text
-    assert "Exclusion rules: version 4." in text
+    assert "Exclusion rules: version 5." in text
     record = run_record(run, run)
     assert record["calibration_refresh_decks"] == 1
     assert record["excluded"]["calibration_refresh"] == 20
-    assert EXCLUSION_RULE_VERSION == 4
-    assert run.exclusion_rule_version == 4 and record["exclusion_rule_version"] == 4
+    assert EXCLUSION_RULE_VERSION == 5
+    assert run.exclusion_rule_version == 5 and record["exclusion_rule_version"] == 5
 
 
 def test_calibration_excludes_refresh_deck_cards():
@@ -188,8 +190,8 @@ def _db(extra=()):
 
 
 def test_an_optional_column_the_db_lacks_is_not_selected(monkeypatch):
-    """The code's metadata has both optional columns (as once #370 lands);
-    the DB, an unmigrated snapshot, has neither."""
+    """The code's metadata has every optional column (as once #370 lands);
+    the DB, an unmigrated snapshot, has none."""
     eng, imp = _db()
     code = deck_impressions_table.to_metadata(MetaData())
     for name in OPTIONAL_COLUMNS:
@@ -205,17 +207,18 @@ def test_an_optional_column_the_db_lacks_is_not_selected(monkeypatch):
 
 
 def test_optional_columns_the_metadata_lacks_are_read_from_the_db(monkeypatch):
-    """The DB has both optional columns; the code's metadata has neither. A
+    """The DB has every optional column; the code's metadata has none. A
     'partial_run' tier still takes replay's deck out, and a refresh marker
     in a narrow row's compact block still marks its deck."""
     eng, imp = _db(extra=OPTIONAL_COLUMNS)
     monkeypatch.setattr(data_mod, "deck_impressions_table", _bare_impressions(MetaData()))
     marked = {"shape": "2x1", "deck_source": CALIBRATION_REFRESH_SOURCE}
-    rows = [{**_row(c), "features_compact": None,
+    # delivered_at: a tiered (paged) deck is never legacy, so it needs delivery evidence.
+    rows = [{**_row(c), "features_compact": None, "delivered_at": c["served_at"],
              "evidence_tier": PARTIAL_RUN_TIER if c["card_index"] == 1 else "first30"}
             for c in _deck_cards("partial", 4)]
     rows += [{**_row(c), "features_json": None, "features_compact": json.dumps(marked),
-              "evidence_tier": "first30"}
+              "evidence_tier": "first30", "delivered_at": c["served_at"]}
              for c in _deck_cards("narrow", 3)]
     with eng.begin() as conn:
         conn.execute(insert(imp), rows)
