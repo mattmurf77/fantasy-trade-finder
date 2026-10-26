@@ -937,13 +937,38 @@ def test_p2_1_v5_reads_a_live_decks_delivered_positions_from_its_stamps(deferred
 
 # ── #417 cross-check P3-5: a serve's withdrawals land with its delivery ─────
 
-def fail_withdrawal_inserts(monkeypatch):
-    """The withdrawal insert raises inside its transaction."""
-    def boom(conn, rows_):
-        if rows_:
-            raise RuntimeError("injected: the transaction fails")
-        return 0
-    monkeypatch.setattr(db_module, "_insert_withdrawals", boom)
+class fail_after:
+    """Raise right after a statement starting with `prefix` runs, inside its
+    transaction and before its commit (an after_cursor_execute hook)."""
+
+    def __init__(self, engine, prefix):
+        self.engine, self.prefix = engine, prefix
+
+    def _hook(self, conn, cursor, statement, *_args):
+        if " ".join(statement.split()).upper().startswith(self.prefix):
+            raise RuntimeError(f"injected: the transaction fails after {self.prefix}")
+
+    def __enter__(self):
+        from sqlalchemy import event
+        event.listen(self.engine, "after_cursor_execute", self._hook)
+
+    def __exit__(self, *_exc):
+        from sqlalchemy import event
+        event.remove(self.engine, "after_cursor_execute", self._hook)
+
+
+# Each path's delivery-evidence statement. Failing the transaction right after
+# it, or right after the withdrawals' insert, must leave neither (#416 QA P3:
+# both directions, so a withdrawal written in its own transaction before or
+# after the delivery's goes red).
+DELIVERY_STATEMENT = {"header": "UPDATE DECK_EVIDENCE_PACKS", "pack": "INSERT INTO DECK_EVIDENCE_PACKS",
+                      "rows": "INSERT INTO DECK_IMPRESSIONS", "live": "UPDATE DECK_IMPRESSIONS"}
+SIDES = ["after_withdrawals", "after_delivery"]
+
+
+def failing(engine, path, side):
+    return fail_after(engine, "INSERT INTO DECK_CARD_WITHDRAWALS" if side == "after_withdrawals"
+                      else DELIVERY_STATEMENT[path])
 
 
 def boundaries(engine, job_id):
@@ -951,58 +976,54 @@ def boundaries(engine, job_id):
     return [d[0] for d in unpack(row)[0]["deliveries"]] if row is not None else None
 
 
-def test_p3_5_a_header_update_and_its_withdrawal_land_together(deferred, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_a_header_update_and_its_withdrawal_land_together(deferred, side):
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120)
     status(client, job_id, 0)
     own_all_but(engine, 40)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 30)                             # boundary 59 and card 40's drop
+    with failing(engine, "header", side):
+        status(client, job_id, 30)                         # boundary 59 and card 40's drop
     assert withdrawals(engine) == {} and boundaries(engine, job_id) == [29]
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 60)                             # the next delivery carries both
     assert withdrawals(engine)[40]["served_before"] == 0
     assert boundaries(engine, job_id) == [29, 59, 89]
 
 
-def test_p3_5_the_pack_insert_and_its_withdrawal_land_together(deferred, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_the_pack_insert_and_its_withdrawal_land_together(deferred, side):
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120)
     own_all_but(engine, 5)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 0)
+    with failing(engine, "pack", side):
+        status(client, job_id, 0)
     assert withdrawals(engine) == {} and pack_of(engine, job_id) is None
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 30)                             # the next delivery carries both
     assert withdrawals(engine)[5]["served_before"] == 0 and boundaries(engine, job_id) == [29, 59]
 
 
-def test_p3_5_stage_1_rows_and_their_withdrawal_land_together(deferred, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_stage_1_rows_and_their_withdrawal_land_together(deferred, side):
     client, engine, _ = deferred
     job_id, *_ = deferred_deck(120, store=False)
     own_all_but(engine, 5)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 0)
+    with failing(engine, "rows", side):
+        status(client, job_id, 0)
     assert withdrawals(engine) == {} and rows(engine) == []
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 30)                             # the next delivery carries both
     assert withdrawals(engine)[5]["served_before"] == 0
     assert sorted(i for (g, i), r in by_index(engine).items() if not g and r["delivered_at"]) == [
         i for i in range(60) if i != 5]
 
 
-def test_p3_5_a_live_stamp_and_its_withdrawal_land_together(deferred, prepared_ok, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_a_live_stamp_and_its_withdrawal_land_together(deferred, prepared_ok, side):
     client, engine, _ = deferred
     job_id, _ids = live_deck(120)
     own_all_but(engine, 7)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 0)
+    with failing(engine, "live", side):
+        status(client, job_id, 0)
     assert withdrawals(engine) == {} and stamped(engine, job_id) == {}
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 0)                              # the next serve records both
     assert set(withdrawals(engine)) == {7}
     assert sorted(stamped(engine, job_id)) == [i for i in range(30) if i != 7]
