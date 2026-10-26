@@ -89,7 +89,7 @@ def test_load_decks_adds_optional_columns_when_the_table_has_them(monkeypatch):
     import backend.eval.data as data_mod
     md = MetaData()
     imp = deck_impressions_table.to_metadata(md)
-    for name in ("features_compact", "evidence_tier"):   # add only what the schema lacks
+    for name in OPTIONAL_COLUMNS:   # add only what the schema lacks
         if name not in imp.c:
             imp.append_column(Column(name, Text))
     deck_outcomes_table.to_metadata(md)
@@ -97,7 +97,7 @@ def test_load_decks_adds_optional_columns_when_the_table_has_them(monkeypatch):
     md.create_all(eng)
     monkeypatch.setattr(data_mod, "deck_impressions_table", imp)
     cols = _selected_columns(eng, lambda: load_decks(engine=eng))
-    assert cols == set(EVAL_COLUMNS) | {"features_compact", "evidence_tier"}
+    assert cols == set(EVAL_COLUMNS) | set(OPTIONAL_COLUMNS)
 
 
 def test_projection_keeps_every_contract_key():
@@ -194,7 +194,8 @@ def test_nightly_counts_a_deck_still_in_flight_as_in_flight(tmp_path, monkeypatc
                              ("done", timedelta(days=4), range(30, 34))):
         at = (now - ago).isoformat()
         write_deck(eng, packs, _deck_cards(job, 34 if packed else 30, served_at=at),
-                   full=range(30), packed=packed, served_at=at, viewed=range(0, 30, 2))
+                   full=range(30), packed=packed, served_at=at, viewed=range(0, 30, 2),
+                   tier=None if packed else "first30")   # deferred decks are packed
 
     stats = nightly.run_all(window_days=30, engine=eng, ess_min=1, bootstrap=20, seed=1)
     assert stats["errors"] == 0
