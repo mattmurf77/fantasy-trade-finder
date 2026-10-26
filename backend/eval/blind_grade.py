@@ -9,10 +9,19 @@ CardSet JSON: {"variant": str, "source": "value_core_bench" | "served",
                "cards": [{"league": str, "seat": str, "partner": str,
                           "give": [{"id","name","position","market"}],
                           "receive": [{"id","name","position","market"}],
-                          "reasons": [str]}]}
+                          "reasons": [str]}],
+               "skipped_no_row": int,      # served sets only
+               "leagues_without_deck": [str],   # served: no gradeable Trades deck in the lookback
+               "leagues_with_no_cards": [str]}  # served: a deck found, 0 gradeable cards
 
 ``served_card_set`` is the only production touch: a read-only read of the
 incumbent's served decks, asserting ``transaction_read_only = on`` first.
+It reads them through eval's loader (backend.eval.data.load_decks), so it sees
+each deck as eval does (models-lead B5): Trades decks only (a deck the loader
+marks CALIBRATION_REFRESH, by CALIBRATION_REFRESH_SOURCE, is skipped, as is
+one whose evidence contradicts itself),
+never-delivered withdrawn cards removed, not-yet-paged first30 rows kept, and
+the top N taken by displayed position.
 Every file written is 0600 inside a fresh directory (or O_EXCL), never overwritten.
 """
 from __future__ import annotations
@@ -24,6 +33,7 @@ import json
 import random
 import re
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -33,6 +43,8 @@ SHEET_COLUMNS = ("card_id", "league", "you_give", "you_get", "give_value", "get_
                  "reasons", "grade", "tags", "note")
 TARGET_MEAN = 4.0   # PRD section 6
 _GRADE = re.compile(r"[1-5]")
+# How far back served_card_set looks for a league's latest Trades deck.
+SERVED_LOOKBACK = timedelta(days=30)
 
 
 def _side_text(assets: Sequence[Mapping]) -> str:
@@ -142,36 +154,81 @@ def import_grades(sheet: Path, key: Path) -> dict:
 
 def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                     top: int = 30, variant: str = "incumbent") -> dict:
-    """The incumbent's latest served deck per league as a CardSet (prod, read-only)."""
+    """The incumbent's latest served Trades deck per league as a CardSet (prod, read-only).
+
+    Per league (models-lead B5): eval's loader (backend.eval.data.load_decks)
+    reads the user's decks served within SERVED_LOOKBACK, and the latest by
+    served_at whose exclusion is not CALIBRATION_REFRESH, PACK_INTEGRITY or
+    WITHDRAWAL_CONFLICT is taken (Calibration's refresh decks are never shown
+    in Trades; the other two contradict their own evidence and keep their
+    withdrawn cards; any other exclusion, in_flight above all, still counts:
+    the latest Trades deck is usually live). The
+    loader has already removed its never-delivered withdrawn cards
+    (deck_card_withdrawals.served_before = 0: I-1 drops and disposition cuts)
+    and kept its first30 rows whether delivered yet or not. The `top` kept
+    non-ghost cards by displayed position (LoggedCard.position) are chosen,
+    then assets_json, valuation_json and features_json are read for exactly
+    those impression_ids. A chosen card without a full row (a packed-only
+    card, or a row without assets_json) is skipped and counted in
+    "skipped_no_row", never replaced by a later card. A league with no such
+    deck is named in "leagues_without_deck", and one whose deck yields no
+    gradeable card (every chosen card skipped, or none to choose) in
+    "leagues_with_no_cards": neither is a silent 0 cards.
+
+    Every read runs on the engine prod_analytics._connect_readonly returns,
+    whose connections all open with default_transaction_read_only=on; the
+    SHOW check below confirms it before the first read."""
     from sqlalchemy import bindparam, text
 
+    from backend.eval import data as eval_data
+    # Never graded: Calibration's refresh (not a Trades deck), and a deck whose
+    # evidence contradicts itself (pack_integrity, withdrawal_conflict). The
+    # loader stops before removing such a deck's never-delivered withdrawals,
+    # so its top N could hold cards nobody saw.
+    ungradeable = {eval_data.CALIBRATION_REFRESH, eval_data.PACK_INTEGRITY,
+                   eval_data.WITHDRAWAL_CONFLICT}
     from backend.tools import prod_analytics
 
+    # load_decks drops an empty user or league filter: never read beyond the seat.
+    if not str(user_id) or not all(str(league_id) for league_id in league_ids):
+        raise ValueError("a user id and non-empty league ids are required")
     prod_analytics.SECRETS = Path(secrets)
     engine = prod_analytics._connect_readonly(prod_analytics._load_prod_url(), 15000)
+    since = (datetime.now(timezone.utc) - SERVED_LOOKBACK).isoformat()
     cards: list[dict] = []
+    skipped = 0
+    without_deck: list[str] = []
+    no_cards: list[str] = []
     try:
         with engine.connect() as conn:
             if conn.execute(text("SHOW transaction_read_only")).scalar() != "on":
                 raise ValueError("read-only connection required: transaction_read_only is not on")
             for league_id in league_ids:
-                job = conn.execute(text(
-                    "SELECT deck_job_id FROM deck_impressions WHERE user_id = :uid "
-                    "AND league_id = :lid ORDER BY served_at DESC LIMIT 1"),
-                    {"uid": user_id, "lid": league_id}).scalar()
-                if job is None:
+                decks = [d for d in eval_data.load_decks(engine=engine, since=since,
+                                                         user_id=str(user_id),
+                                                         league_id=str(league_id))
+                         if d.exclusion not in ungradeable]
+                if not decks:     # named, never a silent 0 cards (runbook §Blind grade)
+                    without_deck.append(str(league_id))
                     continue
+                deck = max(decks, key=lambda d: (d.served_at, d.deck_job_id))
+                chosen = sorted((c for c in deck.cards if not c.is_ghost),
+                                key=lambda c: c.position)[:top]
+                impression_ids = [c.impression_id for c in chosen]
+                full = {}
+                for i in range(0, len(impression_ids), 500):   # chunked like the loader's IN()
+                    sql = text("SELECT impression_id, assets_json, features_json, valuation_json "
+                               "FROM deck_impressions WHERE impression_id IN :ids"
+                               ).bindparams(bindparam("ids", expanding=True))
+                    full.update((r["impression_id"], r) for r in
+                                conn.execute(sql, {"ids": impression_ids[i:i + 500]}).mappings())
                 name = conn.execute(text("SELECT name FROM leagues WHERE sleeper_league_id = :lid"),
                                     {"lid": league_id}).scalar() or str(league_id)
-                rows = conn.execute(text(
-                    "SELECT card_index, assets_json, features_json, valuation_json "
-                    "FROM deck_impressions WHERE deck_job_id = :job AND user_id = :uid "
-                    "AND league_id = :lid AND card_index < :top AND COALESCE(is_ghost, 0) = 0 "
-                    "ORDER BY card_index"),
-                    {"job": job, "uid": user_id, "lid": league_id, "top": top}).mappings().all()
                 parsed = []
-                for r in rows:
-                    if not r["assets_json"]:
+                for impression_id in impression_ids:
+                    r = full.get(impression_id)
+                    if r is None or not r["assets_json"]:
+                        skipped += 1
                         continue
                     assets = json.loads(r["assets_json"])
                     valuation = json.loads(r["valuation_json"]) if r["valuation_json"] else {}
@@ -181,6 +238,8 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                     parsed.append(([str(i) for i in assets.get("give") or []],
                                    [str(i) for i in assets.get("receive") or []],
                                    features.get("partner_user_id"), markets))
+                if not parsed:    # a deck, but nothing to grade: named too
+                    no_cards.append(str(league_id))
                 ids = sorted({a for give, receive, _, _ in parsed for a in give + receive})
                 players = {}
                 if ids:
@@ -200,7 +259,8 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                              for give, receive, partner, markets in parsed)
     finally:
         engine.dispose()
-    return {"variant": variant, "source": "served", "cards": cards}
+    return {"variant": variant, "source": "served", "cards": cards, "skipped_no_row": skipped,
+            "leagues_without_deck": without_deck, "leagues_with_no_cards": no_cards}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -238,7 +298,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         except Exception as exc:     # a driver error can echo query parameters: name the type only
             raise SystemExit(f"served failed: {type(exc).__name__}") from None
         write_private_json(args.output, card_set)
-        print(json.dumps({"cards": len(card_set["cards"]), "leagues": len(args.league)}))
+        print(json.dumps({"cards": len(card_set["cards"]), "leagues": len(args.league),
+                          "skipped_no_row": card_set["skipped_no_row"],
+                          "leagues_without_deck": card_set["leagues_without_deck"],
+                          "leagues_with_no_cards": card_set["leagues_with_no_cards"]}))
     elif args.command == "export":
         card_sets = [json.loads(path.read_text()) for path in args.cards]
         print(json.dumps(export(card_sets, per_variant=args.per_variant, seed=args.seed,

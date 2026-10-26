@@ -162,7 +162,7 @@ outcomes are silently wrong:
 - **without network**: it fail-softs to `{}`, every pick falls back to the
   ladder, and the suite **passes for the wrong reason**.
 
-So `conftest.py` does exactly one thing: `os.environ.setdefault` on
+So `conftest.py` sets `os.environ.setdefault` on
 `FTF_DP_PICK_VALUES_FILE`, pointing at `fixtures/dp_values_picks_2026-08-06.csv`.
 That is the seam `data_loader._fetch_pick_values_csv` already honours (it is
 *mandatory* under `FTF_TEST_MODE`, which the UI-test harness sets and pytest
@@ -170,11 +170,19 @@ does not). `setdefault`, not assignment, so exporting the variable still points
 the suite at a different snapshot, and per-test `monkeypatch.setenv` still
 overrides and restores normally.
 
-**It pins the PICK curve only.** The player curve (`FTF_DP_VALUES_FILE`) is
-deliberately left alone: no unconditional path reaches it, and pinning it would
-change what a large number of unrelated tests see. Do not add to this file
-without the same kind of justification — a global fixture is a global blast
-radius.
+**It pins the player curve too (2026-10-22).** This file used to say no
+unconditional path reaches `FTF_DP_VALUES_FILE`. One does: `import
+backend.server` calls `load_consensus_maps()` at module level for the Elo seed,
+so every pytest process that imported the server fetched DP's
+`values-players.csv` live, and on success scraped KTC as well. `conftest.py` now
+also points `FTF_DP_VALUES_FILE` at
+`fixtures/outlook-hypotheses/dp-values-players-2026-08-09.csv`.
+
+**KTC stays unpinned on purpose.** With the DP seam set and no
+`FTF_KTC_VALUES_FILE`, KTC is off. Pinning the KTC snapshot would turn the blend
+on, and its id matching calls `espn_service.get_crosswalk()`, a live GET of DP's
+`db_playerids.csv` that has no env seam. Do not add to this file without the
+same kind of justification: a global fixture is a global blast radius.
 | `ktc_rankings_snapshot_*.html`, `ktc_blend_pipeline_*.json` | Trimmed KTC page + matched DP+KTC pool | `test_ktc_blend` |
 | `espn_league_snapshot_*`, `espn_league_11896_standings_*`, `mfl_league_snapshot_*`, `fleaflicker_league_snapshot_*` | Per-platform league snapshots (ESPN has a second one for draft order) | the matching `*_service` / `*_link_route` / `test_espn_draft_order` tests |
 | `nflverse_games_2022_2026.csv` | NFL schedule (CC-BY) → derived bye weeks | `backend/outlook/bye_weeks.py`, `test_bye_weeks` |

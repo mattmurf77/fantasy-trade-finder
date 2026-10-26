@@ -400,7 +400,7 @@ def fetch_draft_results(league_id: str, year: int, host: str,
 
 def fetch_future_draft_picks(league_id: str, year: int, host: str,
                              cookie: str | None = None, timeout: int = 15,
-                             _opener=None) -> dict:
+                             _opener=None, raise_auth: bool = False) -> dict:
     """Fetch the `futureDraftPicks` export on its own (#207/#228 MFL parity).
 
     Same export `fetch_league_bundle` pulls at link time — this is the
@@ -418,12 +418,21 @@ def fetch_future_draft_picks(league_id: str, year: int, host: str,
     so callers can tell "unavailable" (no `futureDraftPicks` key) apart from
     "genuinely empty" (key present, no franchises) and never overwrite a good
     snapshot with a flake.
+
+    `raise_auth=True` (I-2, the send-time ownership read only) re-raises
+    `MflAuthError` (HTTP 401/403: a dead cookie on a private league) instead
+    of degrading it, so the propose core can route to sign-in. Every other
+    caller keeps the default and its contract.
     """
     if not str(league_id).strip().isdigit():
         return {}
     try:
         out = _fetch_one(host, year, "futureDraftPicks", league_id, cookie,
                          timeout, _opener)
+    except MflAuthError:
+        if raise_auth:
+            raise
+        return {}
     except MflError:
         return {}
     return out if isinstance(out, dict) else {}
@@ -431,7 +440,7 @@ def fetch_future_draft_picks(league_id: str, year: int, host: str,
 
 def fetch_rosters(league_id: str, year: int, host: str,
                   cookie: str | None = None, timeout: int = 15,
-                  _opener=None) -> dict:
+                  _opener=None, raise_auth: bool = False) -> dict:
     """Fetch the `rosters` export on its own — the "Send in MFL" pre-flight
     (#180 parity: /api/trades/validate re-checks that each traded asset is
     still on the expected franchise before the handoff).
@@ -439,12 +448,19 @@ def fetch_rosters(league_id: str, year: int, host: str,
     Best-effort like `fetch_draft_results`/`fetch_future_draft_picks`: any
     MflError degrades to `{}` — validation then reports `checked: false`
     rather than blocking a send on a flaky read. Same export
-    `fetch_league_bundle` pulls at link time (endpoint #5, integrations doc)."""
+    `fetch_league_bundle` pulls at link time (endpoint #5, integrations doc).
+
+    `raise_auth=True` (I-2, the send-time ownership read only) re-raises
+    `MflAuthError` instead of degrading it; see `fetch_future_draft_picks`."""
     if not str(league_id).strip().isdigit():
         return {}
     try:
         out = _fetch_one(host, year, "rosters", league_id, cookie,
                          timeout, _opener)
+    except MflAuthError:
+        if raise_auth:
+            raise
+        return {}
     except MflError:
         return {}
     return out if isinstance(out, dict) else {}
