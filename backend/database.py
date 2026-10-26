@@ -3040,10 +3040,14 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Paged trade responses (E2, docs/plans/trade-time-to-suggestion) ──
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
     ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
+    # ── S0 serve rules (roster fingerprint contract v0.4 §3, §3b) ────────
+    ("trade_i1_mode", 2.0, "S0 live-path switch, read per request: 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as strict. Deploy-free"),
+    ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
+    ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
+    ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
     ("trade_pages_stored", 3.0, "Pages of trade_page_size cards stored per trade_page_store row; clamped to 1-10 at read"),
     ("trade_prefetch_remaining", 50.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read. 50 per head-eng ruling 10's sizing: 44-card swipe bursts at 0.4 s/card plus the prefetch round trip"),
-    ("trade_prebuild_debounce_s", 20.0, "on_roster_change page rebuilds: a key whose last roster-change rebuild was kicked less than this many seconds ago is skipped (the next serve rebuilds it)"),
     ("trade_page_store_evict_days", 30.0, "trade_page_store eviction: delete rows not served (or, never served, not built) in this many days; clamped to 1-3650 at read"),
     ("trade_page_store_max_bytes", 262144000.0, "trade_page_store eviction: when SUM(stored_bytes) exceeds this, delete least recently served rows until under it"),
     # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
@@ -7053,15 +7057,6 @@ def mark_trade_pages_stale(*, marked_at: str, user_id: str | None = None,
             state="stale",
             built_at=case((t.c.built_at < marked_at, marked_at), else_=t.c.built_at),
         )).rowcount or 0
-
-
-def list_trade_pages_for_league(league_id: str) -> list[dict]:
-    """Every stored page key in a league (no blobs): the roster-change rebuild set."""
-    t = trade_page_store_table
-    with engine.connect() as conn:
-        rows = conn.execute(select(t.c.user_id, t.c.scoring_format, t.c.request_scope)
-                            .where(t.c.league_id == league_id)).mappings().all()
-    return [dict(r) for r in rows]
 
 
 def evict_trade_pages(*, evict_days: int, max_bytes: int,

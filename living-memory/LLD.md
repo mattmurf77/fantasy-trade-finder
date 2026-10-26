@@ -51,6 +51,7 @@
 - [Blind grading: one neutral formatter, hidden arms, per-caller flag resolution (2026-10-02, grading.blind)](#blind-grading-one-neutral-formatter-hidden-arms-per-caller-flag-resolution-2026-10-02-gradingblind)
 - [Cross-tab arrival intents and duplicated arithmetic under a parity guard (2026-10-10, nav.home_hub)](#cross-tab-arrival-intents-and-duplicated-arithmetic-under-a-parity-guard-2026-10-10-navhome_hub)
 - [Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)](#usage-trends-global-stats-cache-per-caller-roster-maps-server-order-2026-10-10-usage_trendsenabled)
+- [S0 serve rules: one roster read at serve, knobs per request (2026-10-26, trade-time-to-suggestion S0)](#s0-serve-rules-one-roster-read-at-serve-knobs-per-request-2026-10-26-trade-time-to-suggestion-s0)
 
 ---
 
@@ -891,3 +892,11 @@ The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two c
   - `compute_normalized` takes the same `{week: normalize_week(...)}` shape from either source, and its output is sorted by player id, so stored == live byte for byte (checked on the full 2026 Weeks 1–4 NFL). That equivalence is what makes mixing safe; keep the pinning test.
   - New usage fields go into `normalize_week` + the tables + `load_usage_weeks` together. [Spec](../docs/plans/usage-trends/weekly-update.md).
 
+## S0 serve rules: one roster read at serve, knobs per request (2026-10-26, trade-time-to-suggestion S0)
+
+Contract: the roster fingerprint contract v0.4 (`docs/plans/trade-time-to-suggestion/scope-eng-200ms.md` §6.1). Code: `backend/roster_snapshot.py` and the S0 hunks of `server.py`.
+- **Stored rows only, never the network, on the tap path.** `roster_snapshot()` reads `league_members`, the pick rows the engine prices (`load_draft_picks(league_id, source=_pick_read_source())`, contested/orphaned filter included), `leagues.draft_status` and `league_roster_state`. A Sleeper roster past `trade_roster_bound_s` kicks `roster_refresh.maybe_refresh_async` after the response is built.
+- **Fingerprints: read before the lock, compare under it.** `rfp1` + `vsn1` are stamped on each job at kickoff. Every freshness and join caller reads `_trade_current_fingerprints()` before taking `_trade_jobs_lock` and passes it in. A failed read (`None`) never makes a completed job fresh, and keeps a running one (A2).
+- **One choke point for cards.** `_trade_job_public_view` (legacy and paged, `/generate` and `/status`) runs I-1 and the §3b rules through `_roster_serve_check` and logs one `[i1] serve` line per serve. A new serve path must go through it.
+- **Three knobs, read per request, deploy-free:** `trade_i1_mode` (2 strict, 1 lenient, 0 the pre-S0 path), `trade_gate_miss_mode` (0 holds the no-card gate misses until 1.22.0; 1 serves `roster_check_unavailable` and `wait_reason`), `trade_roster_bound_s`, plus `trade_import_roster_fresh_s` for linked platforms. Unreadable values fall to the safe side (strict I-1, held gate misses).
+- **No per-session state.** The only process state: the `vsn1` seed memo and the "state table exists" marker (one module lock), and the admin gate-miss test hook's `{league_id: (kind, expiry)}`.
