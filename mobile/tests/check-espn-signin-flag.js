@@ -25,6 +25,12 @@
 //   6. The flag is NOT in useFeatureFlags' LAUNCHED_FLAG_DEFAULTS. That map
 //      fails open from first paint; this flag is the operator's off switch
 //      and a server `false` must never paint the chip, even on a first boot.
+//   7. The smart-start "That's an ESPN league URL — choose ESPN above" hint
+//      follows the chip: with the picker up but no ESPN chip it falls to the
+//      screen's existing no-chip copy, and no new copy is introduced.
+//   8. Web mirrors the rule (chip and selectEntryPlatform need espn.link AND
+//      espn.signin; MFL untouched) while `_entryPost` keeps its unconditional
+//      throw — the web never mints an ESPN/MFL entry session.
 //
 // Run: node tests/check-espn-signin-flag.js
 //   (or: npm run test:espn-signin-flag)
@@ -160,6 +166,103 @@ assert(
 assert(
   !!defaultsBlock && !/espn\.signin/.test(defaultsBlock[1]),
   "6. LAUNCHED_FLAG_DEFAULTS has no 'espn.signin' key (fail-safe, not fail-open)",
+);
+
+// ── 7. the smart-start "choose ESPN above" hint needs the chip ───────────
+// Pasting an ESPN league URL used to say "choose ESPN above" whenever the
+// picker was up. With espn.signin off the picker can still be up (Sleeper ·
+// MFL) with no ESPN chip, so the hint points at a control that is not there.
+// It must follow the chip: `platformChips` is the single source of truth for
+// which chips render. When the chip is missing the screen falls to its
+// EXISTING no-chip branch ("<P> leagues link after sign-in …", Settings path)
+// — and no copy is invented: the setError ternary holds exactly the three
+// strings that were already there.
+const hintBlock = signIn.match(
+  /setError\(\s*\n\s*pname && platformPickerShown[\s\S]{0,900}?\n          \);/,
+);
+assert(!!hintBlock, '7. the smart-start platform-hint setError is parseable');
+assert(
+  !!hintBlock &&
+    /pname && platformPickerShown && \(platformChips as string\[\]\)\.includes\(resolved\.platform \?\? ''\)\s*\n\s*\? `That's an \$\{pname\} league URL — choose \$\{pname\} above to link it\.`/.test(
+      hintBlock[0],
+    ),
+  "7. 'choose <P> above' is shown only when that platform's chip is in platformChips",
+);
+assert(
+  !!hintBlock &&
+    /\? `\$\{pname\} leagues link after sign-in — enter a Sleeper username here, or sign in with Apple and link your league from Settings\.`/.test(
+      hintBlock[0],
+    ) &&
+    /: "That league URL isn't from a supported platform — paste a Sleeper league URL or your username\."/.test(
+      hintBlock[0],
+    ),
+  '7. the existing no-chip and unsupported-platform strings are still the fallbacks',
+);
+// (copy only: the empty `''` fallback in the chip test is not a message)
+const hintStrings = (hintBlock ? hintBlock[0].match(/`[^`]*`|"[^"]*"|'[^']*'/g) || [] : [])
+  .filter((s) => s.length > 2);
+assert(
+  hintStrings.length === 3,
+  '7. no new copy: the hint ternary holds exactly its three existing strings',
+  String(hintStrings.length),
+);
+
+// ── 8. web: the ESPN chip follows espn.link AND espn.signin ──────────────
+// The web never mints an entry session (`_entryPost` throws, below); its
+// ESPN/MFL chips only point people to the mobile app. But with espn.signin
+// off the ESPN chip would still say "Sign in and verify your ESPN account in
+// the Fleeced mobile app". Mirror the mobile rule.
+const webApp = fs.readFileSync(
+  path.join(__dirname, '..', '..', 'web', 'js', 'app.js'),
+  'utf8',
+);
+const codeOnly = (s) =>
+  s.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+const applyFn = webApp.match(/function _applyPlatformOptionsFlag\(\) \{[\s\S]*?\n    \}\n/);
+const selectFnWeb = webApp.match(/function selectEntryPlatform\(p\) \{[\s\S]*?\n    \}\n/);
+assert(!!applyFn && !!selectFnWeb, '8. web chip-row and selectEntryPlatform are parseable');
+assert(
+  !!applyFn &&
+    /const espnOn = optionsOn && window\.FTF_FLAG\('espn\.link'\) && window\.FTF_FLAG\('espn\.signin'\);/.test(
+      applyFn[0],
+    ),
+  '8. the web ESPN chip is shown only when espn.link AND espn.signin are on',
+);
+assert(
+  !!applyFn &&
+    /const mflOn\s+= optionsOn && window\.FTF_FLAG\('mfl\.link'\);/.test(applyFn[0]),
+  '8. the web MFL chip depends on mfl.link alone',
+);
+assert(
+  !!applyFn &&
+    /\(_entryPlatformSel === 'espn' && !espnOn\)/.test(applyFn[0]),
+  '8. a selected web ESPN chip falls back to Sleeper through the same espnOn',
+);
+assert(
+  !!selectFnWeb &&
+    /if \(p === 'espn' && !window\.FTF_FLAG\('espn\.signin'\)\) return;\s*\n\s*_entryPlatformSel = p;/.test(
+      selectFnWeb[0],
+    ),
+  "8. selectEntryPlatform('espn') returns before selecting when espn.signin is off",
+);
+const webSigninUses = (codeOnly(webApp).match(/espn\.signin/g) || []).length;
+assert(
+  webSigninUses === 2,
+  '8. espn.signin is read in exactly two web code sites (chip row, selectEntryPlatform)',
+  String(webSigninUses),
+);
+assert(
+  /window\.FTF_FLAG\s*=\s*function \(key\) \{ return !!\(window\.FTF_FLAGS && window\.FTF_FLAGS\[key\]\); \};/.test(
+    webApp,
+  ),
+  '8. (documents) FTF_FLAG reads a missing key as false — an unsent espn.signin hides the chip',
+);
+const entryPostWeb = webApp.match(/async function _entryPost\(body\) \{([\s\S]*?)\n    \}\n/);
+assert(!!entryPostWeb, '8. web _entryPost is parseable');
+assert(
+  !!entryPostWeb &&
+    /^throw new Error\('[^']*'\);$/.test(codeOnly(entryPostWeb[1]).trim()),
+  '8. web _entryPost still throws unconditionally — no web ESPN/MFL sign-in (legal)',
 );
 
 if (failures) {

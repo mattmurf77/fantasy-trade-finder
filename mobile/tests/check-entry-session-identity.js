@@ -2,7 +2,7 @@
 // Entry-mint identity — structural guard (SignInScreen.handleEntrySession).
 //
 // The sessionless ESPN/MFL entry mint (POST /api/entry/platform) returns the
-// user it minted. For a bare platform identity that is an `entry:…` account
+// user it minted. For a bare platform identity that is an `acct_*` account
 // with no Sleeper username, and the host pins it `account_only: true` so
 // LeaguePicker skips the Sleeper league fetch. But an identity that is BOUND
 // to a Sleeper user comes back `account_only: false` with the Sleeper

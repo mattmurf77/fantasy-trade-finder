@@ -149,8 +149,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
 
   // Entry mint landed (the sheet stored the session token already) — pin the
   // entry user. account_only is accurate AND load-bearing: it tells
-  // LeaguePicker's refresh to skip the Sleeper league fetch (an entry:… id
-  // is not a Sleeper user id) and merge the platform leagues instead.
+  // LeaguePicker's refresh to skip the Sleeper league fetch (an acct_* key is
+  // not a Sleeper user id) and merge the platform leagues instead. A platform
+  // identity bound to a Sleeper user mints that Sleeper id with account_only
+  // false and the Sleeper username, so the mint's values win over the default.
   async function handleEntrySession(u: {
     user_id: string;
     display_name: string;
@@ -459,8 +461,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             'SignIn',
           );
           // ESPN/MFL are live platforms now — a league URL just can't START
-          // sign-in (the link routes need a session first). Point at the
-          // entry chips when they render; otherwise at the Settings path.
+          // sign-in (the link routes need a session first). Point at that
+          // platform's entry chip only when IT renders (`espn.signin` hides
+          // ESPN's alone, so the picker can be up without it); otherwise at
+          // the Settings path.
           const pname =
             resolved.platform === 'espn'
               ? 'ESPN'
@@ -468,7 +472,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               ? 'MFL'
               : null;
           setError(
-            pname && platformPickerShown
+            pname && platformPickerShown && (platformChips as string[]).includes(resolved.platform ?? '')
               ? `That's an ${pname} league URL — choose ${pname} above to link it.`
               : pname
               ? `${pname} leagues link after sign-in — enter a Sleeper username here, or sign in with Apple and link your league from Settings.`
