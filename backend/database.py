@@ -1164,6 +1164,13 @@ deck_candidate_sets_table = Table("deck_candidate_sets", metadata,
     Column("set_hash",         String,  nullable=False),
     Column("candidates_json",  Text,    nullable=False),
     Column("created_at",       String,  nullable=False),    # ISO UTC
+    # Candidate-set packing (eng-evidence-contract §9, head-eng ruling 25;
+    # flag trade.packed_evidence): evidence_pack.pack_candidates' bytes and
+    # version, stored verbatim. candidates_packed IS NOT NULL is authoritative:
+    # a packed row stores candidates_json = '' (it stays NOT NULL), and readers
+    # never parse that ''. NULL on legacy rows and on a set that didn't pack.
+    Column("candidates_packed", LargeBinary),
+    Column("cand_pack_version", Integer),
 )
 
 Index(
@@ -1293,6 +1300,34 @@ deck_card_withdrawals_table = Table("deck_card_withdrawals", metadata,
     UniqueConstraint("deck_job_id", "card_index", name="uq_deck_card_withdrawals_card"),
 )
 Index("ix_deck_card_withdrawals_user", deck_card_withdrawals_table.c.user_id)
+
+# ── ADR-025 stage 2: packed deck evidence (S8; flag trade.packed_evidence) ──
+# eng-evidence-contract §6, one row per served packed-evidence deck. The five
+# pack columns are evidence_pack.PackedRun's fields, stored verbatim.
+# cards_blob holds every built card but ghosts, fixed at the deck's first
+# delivery (never-delivered withdrawals included: eval removes them through
+# deck_card_withdrawals). header_json carries the run metadata: deliveries
+# (the page boundaries in card_index space), built_at, page_store, retired /
+# retired_at. A later delivery or the retirement rewrites ONLY header_json and
+# checksum (update_deck_evidence_pack_header), never cards_blob, so Postgres
+# keeps the TOASTed blob. user_id is the account deletion/export key
+# (accounts._ADDITIONAL_PRIVATE_TABLES; the export carries the unpacked run).
+# New and empty: create_all makes it, no boot DDL.
+deck_evidence_packs_table = Table("deck_evidence_packs", metadata,
+    Column("run_id",       String,  primary_key=True),       # the deck's deck_job_id
+    Column("user_id",      String,  nullable=False),
+    Column("league_id",    String,  nullable=False),
+    Column("served_at",    String,  nullable=False),         # ISO UTC: the first delivery
+    Column("pack_version", Integer, nullable=False),
+    Column("header_json",  Text,    nullable=False),
+    Column("cards_blob",   LargeBinary, nullable=False),
+    Column("checksum",     String(64), nullable=False),
+    Column("card_count",   Integer, nullable=False),
+    Column("created_at",   String,  nullable=False),
+)
+Index("ix_deck_evidence_packs_served", deck_evidence_packs_table.c.served_at)
+Index("ix_deck_evidence_packs_user_league",
+      deck_evidence_packs_table.c.user_id, deck_evidence_packs_table.c.league_id)
 
 # ── suggestion.telemetry — executed-trade tagging ───────────────────────────
 # One row per captured sleeper_trades transaction examined by the matcher
@@ -3714,6 +3749,10 @@ def _migrate_db() -> None:
         # build and on all existing rows; no backfill by design.
         ("deck_impressions",   "evidence_tier",             "VARCHAR"),
         ("deck_impressions",   "delivered_at",              "VARCHAR"),
+        # Candidate-set packing (S8): nullable, NULL on every existing row.
+        ("deck_candidate_sets", "candidates_packed",
+         "BYTEA" if DATABASE_URL.startswith("postgres") else "BLOB"),
+        ("deck_candidate_sets", "cand_pack_version",        "INTEGER"),
         ("trade_decisions",    "impression_id",             "VARCHAR"),
         ("trade_decisions",    "trade_concept_id",          "VARCHAR"),
         ("trade_matches",      "trade_concept_id",          "VARCHAR"),
@@ -7071,14 +7110,25 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
 # first30 > delivered > archive, full_interim beside archive). Never 'ghost' or
 # 'first30': a later delivery never downgrades a tier.
 _EVIDENCE_TIERS_BELOW_DELIVERED = ("full_interim", "archive")
+# Tiers a first view raises to 'viewed' (R4.2: the revised C3).
+_EVIDENCE_TIERS_BELOW_VIEWED = ("full_interim", "archive", "delivered")
 # Tiers whose rows a later delivery stamps with delivered_at (never a ghost's,
 # never a build-time row's: their tier is NULL).
-_EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive")
+_EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive", "viewed")
+# R4.2 U6: rows of cards never shown as such (a C8 archive deck's extras, stage
+# 1's full_interim remainder) are not recommendations: receipts and the matcher
+# skip them, so they read viewed cards, the first 30 and pre-change rows.
+_EVIDENCE_TIERS_NOT_SHOWN = ("archive", "full_interim")
+
+
+def _evidence_shown():
+    i = deck_impressions_table
+    return or_(i.c.evidence_tier.is_(None), i.c.evidence_tier.notin_(_EVIDENCE_TIERS_NOT_SHOWN))
 
 
 def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
                        diagnostics: list | tuple = (), delivered: dict | None = None,
-                       deck_job_id: str | None = None) -> None:
+                       deck_job_id: str | None = None, raise_to: str | None = "delivered") -> None:
     """Deferred evidence (ADR-025 stage 1): one delivery write, one transaction.
 
     `rows` are a deferred deck's build-time deck_impressions rows, each with its
@@ -7091,7 +7141,8 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
     deck_candidate_sets row, also at most once. `delivered` maps impression
     ids of `deck_job_id` written undelivered and since delivered to their
     delivery time: each gets that `delivered_at` (once) and, from a lower
-    tier, the tier 'delivered'.
+    tier, the tier `raise_to`: 'delivered' (stage 1), 'viewed' (a packed deck's
+    first view, R4.2), or None (a packed deck's delivery: the stamp only).
     """
     delivered = dict(delivered or {})
     if not rows and candidate_set is None and not diagnostics and not delivered:
@@ -7124,12 +7175,52 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
                     i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
                     i.c.delivered_at.is_(None), i.c.evidence_tier.in_(_EVIDENCE_TIERS_DELIVERABLE),
                 ).values(delivered_at=at))
-                conn.execute(update(i).where(
-                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
-                    i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_DELIVERED),
-                ).values(evidence_tier="delivered"))
+                if raise_to is not None:
+                    conn.execute(update(i).where(
+                        i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                        i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_VIEWED if raise_to == "viewed"
+                                              else _EVIDENCE_TIERS_BELOW_DELIVERED),
+                    ).values(evidence_tier=raise_to))
     log.info("deck evidence: deck=%s rows=%d candidate_set=%s delivered=%d",
              deck_job_id, len(rows), candidate_set is not None, len(delivered))
+
+
+def mark_deck_impression_viewed(impression_id: str) -> bool:
+    """R4.2: a first view raises an archive deck's row to 'viewed'."""
+    i = deck_impressions_table
+    with engine.begin() as conn:
+        return bool(conn.execute(update(i).where(
+            i.c.impression_id == impression_id, i.c.evidence_tier == "archive",
+        ).values(evidence_tier="viewed")).rowcount)
+
+
+def save_deck_evidence_pack(row: dict) -> bool:
+    """Insert a deck's pack row (insert-or-ignore on run_id: written once, at
+    the deck's first delivery). True when it was inserted."""
+    t = deck_evidence_packs_table
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        return bool(conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+            index_elements=[t.c.run_id])).rowcount)
+
+
+def update_deck_evidence_pack_header(run_id: str, header_json: str, checksum: str) -> bool:
+    """A later delivery or the retirement: rewrite header_json and checksum
+    only. Never cards_blob (fixed at build; Postgres keeps its TOAST)."""
+    t = deck_evidence_packs_table
+    with engine.begin() as conn:
+        return bool(conn.execute(update(t).where(t.c.run_id == run_id).values(
+            header_json=header_json, checksum=checksum)).rowcount)
+
+
+def load_deck_evidence_pack(run_id: str) -> dict | None:
+    t = deck_evidence_packs_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(t.c.run_id == run_id)).mappings().first()
+    return dict(row) if row is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -7870,6 +7961,7 @@ def load_impressions_for_matching(
                     deck_impressions_table.c.assets_json.isnot(None),
                     deck_impressions_table.c.served_at >= since_iso,
                     deck_impressions_table.c.served_at <= until_iso,
+                    _evidence_shown(),            # R4.2 U6
                 )
             )
         ).fetchall()
@@ -15572,6 +15664,7 @@ def _receipts_candidate_where(window_days: int, grader_version: str,
             deck_impressions_table.c.is_ghost == 0),
         _receipts_serve_date_expr().in_([str(d) for d in serve_dates]),
         ~already,
+        _evidence_shown(),                        # R4.2 U6: viewed cards and the first 30
         or_(deck_impressions_table.c.features_json.is_(None),
             and_(*(~deck_impressions_table.c.features_json.contains(marker, autoescape=True)
                    for marker in _CALIBRATION_REFRESH_MARKERS))),
