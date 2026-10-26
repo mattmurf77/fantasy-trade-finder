@@ -3878,13 +3878,14 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
 
 
 def _trade_i1_mode() -> int:
-    """S0's live-path knob, model_config `trade_i1_mode` (default 2), read per
+    """S0's live-path knob, model_config `trade_i1_mode` (default 1 until C-b,
+    models-lead option B), read per
     request. 2 = strict (S0). 1 = lenient: run the checks and log, but serve
     every card and never withhold. 0 = off, the pre-S0 path: no I-1, no
     fingerprint read or compare, no withhold, no floor kick. NaN, an
-    unreadable value or anything else reads as strict."""
-    value = _deck_cfg("trade_i1_mode", 2.0)
-    return int(value) if value in (0.0, 1.0) else 2
+    unreadable value or anything else reads as 1."""
+    value = _deck_cfg("trade_i1_mode", 1.0)
+    return int(value) if value in (0.0, 2.0) else 1
 
 
 def _trade_gate_miss_on() -> bool:
