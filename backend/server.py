@@ -3735,7 +3735,8 @@ DECK_PIPELINE_VERSION = 1
 # - DECK_PIPELINE_IGNORED: what the listed functions reference but doesn't
 #   shape a deck, each with its reason.
 # A logic or constant change fails test_deck_pipeline_digest until
-# DECK_PIPELINE_VERSION is bumped and DECK_PIPELINE_DIGEST re-pinned. A listed
+# DECK_PIPELINE_VERSION is bumped and its digest pinned in DECK_PIPELINE_PINS
+# (a new row; an existing row never changes). A listed
 # function that references an unclassified server.py function or literal
 # constant fails the closure test until it's classified. models-eng reviews.
 DECK_PIPELINE_FUNCTIONS = (
@@ -3805,7 +3806,8 @@ DECK_PIPELINE_IGNORED = {
     # freshness captures and matches (the job cache's, not the deck's)
     "_capture_trade_execution": "captures the session for the worker",
     "_capture_trade_presentation": "freshness capture; its result is in engine_version",
-    "_capture_trade_significance": "freshness capture; its result is in engine_version",
+    "_capture_trade_significance": ("freshness capture; its knobs are in config_signature "
+                                    "and trade_significance.VERSION in the engine code hash"),
     "_trade_owner_model_matches": "freshness match",
     "_trade_significance_matches": "freshness match",
     "_trade_safety_signature": "freshness capture; its result is in engine_version",
@@ -3835,7 +3837,13 @@ DECK_PIPELINE_IGNORED = {
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
 }
-DECK_PIPELINE_DIGEST = "38068a074677acaa"
+# DECK_PIPELINE_VERSION -> its digest. Append-only: a bump adds a row and no
+# row is ever re-pinned in place (a re-pinned version would leave the pages
+# stored under it stamped current). test_deck_pipeline_digest holds a frozen
+# copy of these rows.
+DECK_PIPELINE_PINS = {
+    1: "38068a074677acaa",
+}
 
 # The modules whose code decides what cards a deck holds or their order. Their
 # bytes are hashed into every page's engine_version (backend/-relative globs,
@@ -3845,6 +3853,7 @@ _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
     "power_rankings.py",          # value_core's lineup slots and optimal starters
+    "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
     "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
@@ -3858,6 +3867,14 @@ _ENGINE_CODE_MODULES = (
     # the card copy itself
     "trade_narrative.py",
 )
+# Excluded on purpose (models-eng, 2026-10-26):
+# - outlook/, except league_state.py: the Outlook feature. Value core's
+#   standings (_value_core_standings -> outlook.build_league_state, a thin
+#   wrapper in pipeline.py -> get_league_state_provider(platform).load) come
+#   from league_state.py alone; hashing the rest would cold every page and
+#   trigger MOD-M1 on edits that can't change a deck.
+# - trade_input_evidence.py: provenance with its own VERSION, never a model
+#   input; a row-format change bumps that VERSION.
 _engine_code_hash_value: str | None = None
 
 # The experiments whose variant changes a deck (experiments.py keys). A stored
@@ -4107,7 +4124,8 @@ def _job_page_eligible(job: dict) -> bool:
                 and not job.get("trade_intent") and not job.get("source")
                 and not job.get("presentation_exempt")
                 and job.get("roster_fp") is not None and job.get("values_snapshot_id") is not None
-                and job.get("request_signature") is not None and not ceiling)
+                and job.get("request_signature") is not None
+                and job.get("experiment_digest") is not None and not ceiling)
 
 
 def _trade_card_expiry(card) -> float | None:
@@ -4149,7 +4167,7 @@ def _store_trade_page(job_id: str) -> bool:
                 _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
                 job.get("presentation_capture")),
             "config_signature": job["request_signature"],
-            "experiment_digest": _trade_experiment_digest(user_id), "deck_job_id": job_id,
+            "experiment_digest": job["experiment_digest"], "deck_job_id": job_id,
             "built_at": _db.page_store_iso(built),
             "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
             "card_count": len(cards), "pages_blob": blob, "evidence_blob": None,
@@ -10976,6 +10994,20 @@ def _kickoff_trade_job(
                     if prepared_trade_runtime.try_adopt(sys.modules[__name__], job_id=job_id,
                             context=execution_context, fairness=fairness_threshold, prefs=prefs_preload):
                         return
+                # P1: the experiment assignment the deck is built under, read
+                # here at job start (the memo, on this worker thread) so the
+                # stored page never carries a variant that moved mid-build.
+                with _trade_jobs_lock:
+                    page_eligible = bool((_trade_jobs.get(job_id) or {}).get("page_scope"))
+                if page_eligible:
+                    try:
+                        digest = _trade_experiment_digest(user_id)
+                    except Exception:
+                        log.warning("trade-page %s: experiment digest failed", job_id, exc_info=True)
+                    else:
+                        with _trade_jobs_lock:
+                            if job_id in _trade_jobs:
+                                _trade_jobs[job_id]["experiment_digest"] = digest
                 _run_trade_job(*args, **kwargs)
                 # P1: a complete organic job stores its first pages (flag off ⇒ no-op).
                 _store_trade_page(job_id)
