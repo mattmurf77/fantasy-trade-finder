@@ -300,6 +300,14 @@ def test_the_default_mode_is_lenient(monkeypatch):
     assert server._trade_i1_mode() == 2
 
 
+def test_the_seeded_mode_is_lenient():
+    """W-AC-L5: mode 1 is final for launch. The seed only inserts when the row is
+    missing, so a strict seed would ship strict on the first deploy whatever the
+    fallback says."""
+    seeds = [row for row in db_module._MODEL_CONFIG_DEFAULTS if row[0] == "trade_i1_mode"]
+    assert len(seeds) == 1 and seeds[0][1] == 1.0
+
+
 @pytest.mark.parametrize("value", [float("nan"), 7.0, -1.0, "strict please"])
 def test_mode_reads_lenient_for_anything_unexpected(live, monkeypatch, value):
     _set_mode(monkeypatch, value)
