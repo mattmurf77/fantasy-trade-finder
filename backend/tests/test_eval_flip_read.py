@@ -276,7 +276,8 @@ def test_an_orphan_outcome_recommends_the_kill():
     _post(db, "nowhere:9")
     r = flip_read(db.eng, since=SINCE, as_of=LATE)
     assert r.g3["orphans"] == 1 and r.g3["status"] == FAIL
-    assert "recommends the kill" in render(r)
+    assert ("G1 failed or G3 has orphans: models-lead recommends the kill "
+            "(first_page_store_enabled 0) at once") in render(r)       # the exact condition
 
 
 def test_g3_reads_only_outcomes_in_the_window_and_by_as_of():
@@ -637,6 +638,9 @@ def test_the_cli_settles_as_of_behind_the_clock(tmp_path, capsys, monkeypatch):
     out, err = capsys.readouterr()
     assert json.loads(out)["as_of"] == _after(2) and err == ""
 
+    main(args + ["--as-of", clock.isoformat(), "--weekly"])     # #432 QA P3: the weekly
+    assert json.loads(capsys.readouterr().out)["weekly"]["as_of"] == settled   # window too
+
 
 def test_a_read_only_violation_inside_the_read_exits_2(tmp_path, capsys, monkeypatch):
     """The statement guard firing mid-read is exit 2, as a refused database
@@ -672,9 +676,29 @@ def test_an_unexpected_error_inside_the_read_exits_4(tmp_path, capsys, monkeypat
     assert "RuntimeError: boom" in err
 
 
+def test_a_crash_never_echoes_the_database_credentials(capsys, monkeypatch):
+    """#432 QA P3: a password with an unencoded '@' comes back from libpq as
+    part of a "host" (could not translate host name "RET123@…"). The exit-4
+    traceback redacts every credential and host piece of --db."""
+    db = "postgresql://ftf:SEC@RET123@127.0.0.1:5432/ftf"
+
+    def refused(url, **_kw):
+        raise RuntimeError('could not translate host name "RET123@127.0.0.1" to address')
+
+    monkeypatch.setattr(fr, "read_only_engine", refused)
+    assert main(["--db", db, "--allow-postgres-readonly", "--since", SINCE,
+                 "--as-of", EARLY]) == 4
+    out, err = capsys.readouterr()
+    assert out == "" and "Traceback (most recent call last)" in err
+    assert "***" in err
+    for secret in ("SEC", "RET123", "127.0.0.1"):
+        assert secret not in err
+
+
 @pytest.mark.parametrize("flag, value", [
     ("--since", "2026-10-23T25:00:00Z"), ("--until", "tomorrow"),
     ("--as-of", "2026-13-01"), ("--as-of", "0001-01-01T00:00:00+01:00"),   # out of range in UTC
+    ("--as-of", "0001-01-01T00:00:00Z"),        # in range, but the window can't reach back
 ])
 def test_a_malformed_time_is_a_usage_error(flag, value, capsys):
     """#431 QA P3: --since, --until and --as-of are parsed as ISO 8601 by

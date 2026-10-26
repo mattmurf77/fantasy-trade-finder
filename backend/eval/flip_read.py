@@ -109,6 +109,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import traceback
 from collections import Counter
@@ -550,9 +551,35 @@ def _iso(value: str) -> str:
         dt = datetime.fromisoformat(value)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc).isoformat()
+        dt = dt.astimezone(timezone.utc)
+        dt - _WINDOW_REACH            # the read reaches back this far: must not overflow
+        return dt.isoformat()
     except (ValueError, OverflowError):
         raise argparse.ArgumentTypeError(f"not an ISO 8601 time: {value!r}") from None
+
+
+# The furthest any window reaches back from as_of (the weekly 7 d plus the 25 h
+# in-flight window): a time too near datetime.min is a usage error, not a crash.
+_WINDOW_REACH = timedelta(days=9)
+
+
+def _secret_fragments(db: str) -> list[str]:
+    """The pieces of a database URL a driver's connect error may echo: the
+    whole credentials-and-host part and each piece of it split on ':', '@' and
+    '/' (a password with an unencoded '@' comes back as part of a "host").
+    Pieces shorter than 3 characters are left (they would redact noise)."""
+    if "://" not in db:
+        return []
+    rest = db.split("://", 1)[1].split("?", 1)[0]
+    netloc = rest.rsplit("/", 1)[0] if "/" in rest else rest
+    pieces = {netloc, *re.split(r"[:@/]", netloc)}
+    return sorted((p for p in pieces if len(p) >= 3), key=len, reverse=True)
+
+
+def _redact(text: str, db: str) -> str:
+    for piece in _secret_fragments(db):
+        text = text.replace(piece, "***")
+    return text
 
 
 def _now() -> datetime:
@@ -597,7 +624,8 @@ def main(argv=None) -> int:
     try:
         return _run(args)
     except Exception:             # a crash is never a verdict: 4, apart from FAIL's 1
-        traceback.print_exc()
+        # Redacted: a driver's connect error can echo the URL's credentials.
+        print(_redact(traceback.format_exc(), args.db), file=sys.stderr, end="")
         return 4
 
 
