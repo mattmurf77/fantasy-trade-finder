@@ -76,6 +76,8 @@ the operator reaches it by running the server locally.
 - [Tiers](#tiers)
 - [Trades](#trades)
   - [Opt-in paged responses (E2, 2026-10-20)](#opt-in-paged-responses-e2-2026-10-20)
+  - [S0 roster check at serve](#s0-roster-check-at-serve)
+  - [First-page store (P1, flag `trade.first_page_store`, 2026-10-20)](#first-page-store-p1-flag-tradefirst_page_store-2026-10-20)
   - [Trade card object](#trade-card-object)
     - [Value-core cards (flag `trade.value_core`)](#value-core-cards-flag-tradevalue_core)
 - [Open trade calculator (public — no auth)](#open-trade-calculator-public-no-auth)
@@ -542,6 +544,79 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
     nothing dropped), `roster_check_unavailable` / `roster_gate_miss` (gate
     misses served), and the same with `_held` (`trade_gate_miss_mode` 0). The
     `dropped_*` counts are what strict mode would drop, whatever the outcome.
+
+### First-page store (P1, flag `trade.first_page_store`, 2026-10-20)
+
+**Everything in this section applies only while the store is on: the flag
+`trade.first_page_store` (default off), the flag `trade.packed_evidence`
+(added by #370; it reads off until then) and the kill knob
+`first_page_store_enabled` (default 1).** With either off, paged and unpaged
+responses are exactly the E2 section above
+(`backend/tests/test_trade_page_flag_off.py` pins them byte for byte). The
+server keeps the first `trade_pages_stored` × `trade_page_size` cards (90 at
+the defaults) of each user's latest complete organic deck in
+[`trade_page_store`](data-dictionary.md#trade_page_store), so page 1 can come
+from one DB read, including after a restart.
+
+**The store serve follows the [S0 roster check](#s0-roster-check-at-serve)
+exactly**, with the same knobs: I-1, both gate misses and their shapes
+(`roster_check_unavailable`; the withhold with `wait_reason: "roster_check"`,
+`status: "running"`), only at `trade_gate_miss_mode` 1 and held at 0, the
+admin gate-miss test hook, and the background floor kick past the roster bound.
+At `trade_i1_mode` 0 the store isn't read.
+
+**The store is only read on a paged request**, so `trade_paged_responses` 0
+keeps it out too.
+
+**On every paged response** (`page: 1` on generate, `cursor` on status, from
+the store or from a job): `prefetch_remaining` (model_config
+`trade_prefetch_remaining`, seeded at 50). The client requests the next page when
+this many ready cards remain.
+
+**`POST /api/trades/generate` with `page: 1`.** Only an organic body reads the
+store: no `pinned_give_players`, `pinned_receive_players`, `opponent_user_id`,
+`trade_intent` or `force` (which `refresh_fatigue` implies while `deck.fatigue`
+is on), and not the demo league. Its scope is the `fairness_threshold`, to two
+decimals. Unpaged requests never read it.
+
+- **Served from the store:** the envelope plus `serve_source: "page"` and
+  `freshness_state`:
+
+  | Field | Value |
+  |---|---|
+  | `job_id` | The job that built the stored deck. Page by it on `/status` |
+  | `status` | `"complete"` (a gate miss: S0's status) |
+  | `opponents_done`, `opponents_total` | From the stored deck |
+  | `cards` | The stored cards from index 0, at most `trade_page_size`, after the pass/interest projection and the S0 roster check |
+  | `cursor`, `total_ready` | The raw index after the slice and the stored card count (a gate miss: `0` and `0`) |
+  | `replace` | `false` |
+  | `search_id` | Echoed when sent |
+  | `serve_source` | `"page"` |
+  | `freshness_state` | `"updating"` only while a rebuild of a stale page is actually running, and never for an ESPN/MFL/Fleaflicker league (ruling 29); else `"fresh"`. A page is stale when an input change marked it (rankings, preferences, dispositions) or the stored rosters or values moved since it was built. A stale page still serves its checked cards; the rebuild's deck replaces it for the next request |
+
+  `suppression_note`, `first_deck` and `board_refresh` are never sent on a
+  store response (they belong to the job that ran).
+- **Not served from the store** (today's E2 response, plus
+  `prefetch_remaining`): no stored page for the scope; the engine (including
+  the engine modules' code hash and `DECK_PIPELINE_VERSION`), the request
+  configuration or the user's deck-experiment variants changed since the build; the stored cards have expired; the
+  roster and values read failed (it can't prove the page fresh); or the page is
+  stale while a complete, fresh job for it is in this process.
+
+**`GET /api/trades/status?job_id=X&cursor=K` on a page-served deck** (`X` is the
+`job_id` a store response returned):
+
+- `K < total_ready`: the stored cards from `K`, at most `trade_page_size`,
+  sliced first and checked after (the E2 raw-index rule, then the S0 roster
+  check), with `serve_source: "page"`, `status: "complete"`, `replace: false`
+  and `freshness_state` (the rule above). A gate miss gets S0's shape, and
+  `cursor` echoes `K`.
+- `K ≥ total_ready`: the job's E2 cursor response if the job is still in this
+  server process. Otherwise `cards: []`, `cursor: K`, `total_ready` = the stored
+  count, `serve_source: "page"`, `freshness_state: "fresh"`. Paging past the
+  stored pages arrives with P2.
+- A rebuild replaces the stored row and its job id. A cursor on the older job id
+  then reads that job if it is still in this process, else 404, as before P1.
 
 ### Trade card object
 
