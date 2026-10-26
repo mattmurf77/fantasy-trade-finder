@@ -124,7 +124,8 @@ def test_give_blocker_names_every_moved_player_without_a_serial_comma():
     o = _offer("o_a", ["4046", "9509", "6794"], ["X1"], "o1", names)
     receipt = _receipt([o], mine=[], rosters={"o1": ["X1"]})
     blockers = [b for b in receipt["blockers"] if b["code"] == "asset_not_owned"]
-    assert blockers == [{"code": "asset_not_owned", "package_id": "po_a", "offer_id": "o_a", "message":
+    assert blockers == [{"code": "asset_not_owned", "package_id": "po_a", "offer_id": "o_a",
+                         "assets": ["4046", "9509", "6794"], "message":
                          "Josh Allen, Bijan Robinson and CeeDee Lamb are no longer on your roster" + TAIL}]
     _no_raw_ids(blockers[0]["message"], ["4046", "9509", "6794"])
 
@@ -189,6 +190,45 @@ def test_send_recheck_409_has_a_readable_detail(api, world):
     assert body["detail"] == body["message"] == "PX3 is no longer on O3’s roster" + TAIL
     assert body["receipt"]["ok"] is False
     assert world.propose_calls == []              # nothing reached a core
+
+
+def test_send_409_for_a_refresh_staled_offer_has_the_ownership_detail(api, world):
+    """A GIVE-side move after prepare: /refresh stales the offer, so /send's
+    first blocker is `offer_stale`. The 409 still carries the readable
+    ownership sentence for that offer (Product: a readable reason on every
+    path), named from the card, never a raw id."""
+    oid, rm, prep = ovh_t._tie_then_prepare(api, world)
+    world.rosters[ovh_t.USER].remove("A")         # moved after prepare...
+    overhaul_api._REFRESH_AT.clear()
+    assert api.post(f"/api/overhauls/{oid}/refresh", json={}, headers=ovh_t._h()).status_code == 200
+    stale = {o["offer_id"] for o in store.list_offers(oid) if o["availability"] == "stale"}
+    assert stale                                  # refresh staled the A offers
+    r = api.post(f"/api/overhauls/{oid}/send", headers=ovh_t._h(), json={   # ...so /send re-checks
+        "prepare_token": prep["prepare_token"], "summary_hash": prep["summary_hash"],
+        "version": rm["version"], "idempotency_key": "i2-stale"})
+    assert r.status_code == 409, r.get_json()
+    body = r.get_json()
+    assert body["error"] == "offer_stale"
+    # The harness card names A "PA".
+    assert body["detail"] == body["message"] == "PA is no longer on your roster" + TAIL
+    assert world.propose_calls == []
+
+
+def test_send_409_for_a_stale_offer_whose_assets_came_back_stays_as_before(api, world):
+    """Stale but owned again (no ownership blocker): not an ownership reason
+    any more, so the 409 keeps today's shape with no `detail`."""
+    oid, rm, prep = ovh_t._tie_then_prepare(api, world)
+    world.rosters[ovh_t.USER].remove("A")
+    overhaul_api._REFRESH_AT.clear()
+    api.post(f"/api/overhauls/{oid}/refresh", json={}, headers=ovh_t._h())
+    world.rosters[ovh_t.USER].append("A")         # back before the send
+    overhaul_api._REFRESH_AT.clear()
+    api.post(f"/api/overhauls/{oid}/refresh", json={}, headers=ovh_t._h())
+    r = api.post(f"/api/overhauls/{oid}/send", headers=ovh_t._h(), json={
+        "prepare_token": prep["prepare_token"], "summary_hash": prep["summary_hash"],
+        "version": rm["version"], "idempotency_key": "i2-stale-back"})
+    assert r.status_code == 409 and r.get_json()["error"] == "offer_stale"
+    assert "detail" not in r.get_json() and "message" not in r.get_json()
 
 
 # ---------------------------------------------------------------------------

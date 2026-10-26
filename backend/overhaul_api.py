@@ -987,13 +987,27 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=False, caps=caps)
         if receipt["blockers"]:
             first = receipt["blockers"][0]
+            readable = None
             if first["code"] in ("asset_not_owned", "counterparty_asset_not_owned"):
+                readable = first["message"]
+            elif first["code"] == "offer_stale":
+                # A liked offer goes stale only one way: /refresh found its
+                # give side off the caller's roster (`store.mark_stale`). The
+                # settings and model changes stale UNDECIDED offers only, and
+                # those are refused earlier as `offer_not_liked`. The receipt
+                # recomputes ownership from the same stored snapshot, so the
+                # offer's own ownership blocker names the moved assets. If
+                # there is none (the asset has since come back), the 409
+                # stays as before.
+                readable = next((b["message"] for b in receipt["blockers"]
+                                 if b.get("offer_id") == first.get("offer_id") and b.get("assets")
+                                 and b["code"] == "asset_not_owned"), None)
+            if readable:
                 # I-2: the shared readable copy as `detail` == `message`, which
                 # OverhaulSummaryScreen's errorDetail(e) shows. Other blocker
                 # messages can still name raw ids, so they keep the client's
                 # own fallback copy.
-                raise _Conflict(first["code"], first["message"], receipt=receipt,
-                                message=first["message"])
+                raise _Conflict(first["code"], readable, receipt=receipt, message=readable)
             raise _Conflict(first["code"], receipt=receipt)
         package_of = {oid: p["package_id"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}
         tier_of = {oid: t["tier"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}

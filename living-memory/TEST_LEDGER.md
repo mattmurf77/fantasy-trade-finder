@@ -2,22 +2,23 @@
 
 Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
 
-- **Backend:** the new `test_i2_overhaul.py` has 12 tests. The targeted set passes, 121 tests: `test_overhaul_api` (27), `test_overhaul_service` (23), and the I-2 Sleeper (24), MFL (15) and ESPN (20) files. `test_sleeper_write_route` (35), `test_mfl_propose_route` (25) and `test_espn_propose_route` (17) also pass after the copy moved to `backend/ownership_copy.py`.
+- **Backend:** the new `test_i2_overhaul.py` has 14 tests. The targeted set passes, 123 tests: `test_overhaul_api` (27), `test_overhaul_service` (23), and the I-2 Sleeper (24), MFL (15) and ESPN (20) files. `test_sleeper_write_route` (35), `test_mfl_propose_route` (25) and `test_espn_propose_route` (17) also pass after the copy moved to `backend/ownership_copy.py`.
 - **Sabotage, each red then restored:**
   - the session-roster fallback restored at prepare → 4 red;
   - the raw-id copy restored ("You no longer own {id}.") → 5 red;
-  - the /send 409 `detail` dropped → 1 red.
+  - the /send 409 `detail` dropped → 1 red;
+  - the `offer_stale` ownership detail dropped → 1 red.
 - **Contract:**
   - **R3:** on a send platform, prepare-send with a failed live roster read → 503 `rosters_unavailable` `kind:"network"` with "Couldn’t confirm rosters with {platform} …". No token is minted and the session fallback is not stored.
   - **R4:** receipt ownership blockers use the shared I-2 copy, one per offer and side, named from the offer card (count fallback, never a raw id).
-  - **/send:** an ownership 409 carries `detail == message`.
+  - **/send:** an ownership 409 carries `detail == message`. So does an `offer_stale` 409 when the offer went stale for ownership: a give-side move found by `/refresh` is the only way a liked offer goes stale. That 409 uses the offer's own ownership blocker, which now carries `assets`.
   - **Per-offer refusals:** a core's 422 reaches `attempts[].error.message` on `/send` and on `GET /api/overhauls/{id}`.
 - **Client code-walk (no client change):**
   - `OverhaulSummaryScreen`: a failed prepare goes to `setPrepareError(errorDetail(e))` (`:146`, card at `:274-277`); an ownership 409 at send goes to the toast (`:196`); receipt lines render `item.message` (`:295`, `:405-416`).
   - `OverhaulPlanScreen` renders `a.error.message` for `send_failed` attempts (`:290-292`).
 - **Not covered:**
-  - A give-side move found by a refresh surfaces at `/send` as `offer_stale` (refresh stales the offer), which has no `detail`.
-  - `pool_violation`, `asset_reserved` and the overlap blocker messages still name raw ids (outside R4).
+  - An offer that was staled for ownership but whose assets have since come back keeps today's `offer_stale` 409 with no `detail`.
+  - `pool_violation`, `asset_reserved` and the overlap blocker messages still name raw ids (outside I-2).
 
 ## 2026-10-26 — I-2 (3/4): ESPN send-time player ownership + validate routing + 0f guard (stacked on #412)
 

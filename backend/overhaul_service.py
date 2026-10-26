@@ -596,6 +596,16 @@ def _card_names(offer) -> dict:
     return out
 
 
+def _ownership_item(side, moved, names, team, package_id, offer_id):
+    """I-2 (R4): an ownership blocker in the shared send-time copy. `assets`
+    (the moved ids, as in the propose cores' 422 body) is what marks it as an
+    ownership blocker; "This package already completed." shares its code."""
+    code = "asset_not_owned" if side == "give" else "counterparty_asset_not_owned"
+    item = _item(code, ownership_copy.refusal_message(side, moved, names, team), package_id, offer_id)
+    item["assets"] = list(moved)
+    return item
+
+
 def _item(code, message, package_id=None, offer_id=None):
     item = {"code": code, "message": message}
     if package_id:
@@ -668,8 +678,7 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
             if a not in outgoing:
                 outgoing.append(a)
         if moved:
-            blockers.insert(slot, _item("asset_not_owned", ownership_copy.refusal_message(
-                "give", moved, names), pkg_id, offer["offer_id"]))
+            blockers.insert(slot, _ownership_item("give", moved, names, None, pkg_id, offer["offer_id"]))
         cp = str(offer.get("counterparty_user_id") or "")
         cp_roster = rosters.get(cp) if isinstance(rosters, dict) else None
         moved, slot = [], None
@@ -687,9 +696,9 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
             if a not in incoming:
                 incoming.append(a)
         if moved:
-            blockers.insert(slot, _item("counterparty_asset_not_owned", ownership_copy.refusal_message(
-                "receive", moved, names, offer.get("counterparty_username") or None),
-                pkg_id, offer["offer_id"]))
+            blockers.insert(slot, _ownership_item("receive", moved, names,
+                                                  offer.get("counterparty_username") or None,
+                                                  pkg_id, offer["offer_id"]))
     for pkg_id, offers in by_package.items():
         seen = set()
         for o in offers:
