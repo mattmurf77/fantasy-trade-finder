@@ -76,8 +76,9 @@
       <li>
         <strong>How you sign in.</strong> You can sign in with Apple, with your Sleeper username, or,
         where available, with your ESPN or MyFantasyLeague (MFL) login. Each method creates a Fleeced
-        account with an internal account ID. You can also connect ESPN and MFL leagues after you sign
-        in (see "Platform connections" below). Depending on the method, we store:
+        account with an internal account ID the first time you use it. You can also connect ESPN and
+        MFL leagues after you sign in (see "Platform connections" below). Depending on the method, we
+        store:
         <ul>
           <li><strong>Apple:</strong> the stable identifier Apple issues for our app, the name you choose to share (used as your display name), and a one-way (SHA-256) hash of the email address Apple shares with us. We don't keep the email address itself, and we never receive your Apple password.</li>
           <li><strong>Sleeper:</strong> your Sleeper user ID, username, display name and avatar, looked up from Sleeper's public API. A username alone shows public league information. Private boards and account features need a verified Sleeper session (see "Platform connections" below).</li>
@@ -85,7 +86,7 @@
           <li><strong>MFL:</strong> your MFL username, which identifies your account. Your MFL password is used once to sign in to MFL and is never stored (see "Platform connections" below).</li>
         </ul>
       </li>
-      <li><strong>League data.</strong> From the platforms you connect we read your leagues, rosters, draft picks and league settings. We also read your leaguemates' usernames, display names and rosters, and your league's trades and roster history. We use leaguemates' data only to run trade discovery and league features for members of that league.</li>
+      <li><strong>League data.</strong> From the platforms you connect we read your leagues, rosters, draft picks and league settings. We also read your leaguemates' usernames, display names and rosters, and your league's trades and roster history. We use leaguemates' data only to run trade discovery and league features for members of that league, and to confirm ESPN sign-ins (see "Platform connections" below).</li>
       <li>
         <strong>Your rankings and in-app activity.</strong> We store:
         <ul>
@@ -132,14 +133,21 @@
             </ul>
           </li>
           <li>
-            <strong>ESPN.</strong> To sign in with or connect ESPN, you log in on ESPN's own page inside the app; we never see your password. We keep two ESPN sign-in cookies:
+            <strong>ESPN.</strong> You log in on ESPN's own page inside the app; we never see your password.
             <ul>
-              <li>espn_s2, stored encrypted;</li>
-              <li>SWID, which is your ESPN member ID and is stored as is.</li>
+              <li><strong>Signing in with ESPN:</strong> we use ESPN's sign-in cookies to confirm that your login owns the team you pick, and we keep only your ESPN member ID (called SWID) to recognize you next time. To confirm ownership, we may also check your cookies against another league member's ESPN member ID, which members of that league can see. Nothing from that check is kept.</li>
+              <li><strong>Importing an ESPN league</strong> (after you sign in, or when you connect ESPN in Settings → Leagues): we keep two ESPN sign-in cookies, espn_s2 (stored encrypted) and SWID (your ESPN member ID, stored as is). We use them to import your ESPN leagues and to send trades you approve.</li>
+              <li>You can disconnect in Settings → Leagues, which deletes both cookies. If ESPN is how you sign in, your ESPN member ID stays as your sign-in until you delete your account.</li>
             </ul>
-            <p>We use them to confirm the login is yours, to import your ESPN leagues and to send trades you approve. You can disconnect in Settings → Leagues, which deletes both cookies.</p>
           </li>
-          <li><strong>MFL.</strong> If you sign in with or connect MFL using your MFL username and password, your password passes through our server to MFL's sign-in once, to start a session. We never store it. We keep your MFL username and, encrypted, the session MFL returns, and use them to confirm the login is yours, to read your leagues and to send trades you approve. You can disconnect in Settings → Leagues.</li>
+          <li>
+            <strong>MFL.</strong> If you sign in with or connect MFL using your MFL username and password, your password passes through our server to MFL's sign-in once, to start a session. We never store it.
+            <ul>
+              <li><strong>Signing in with MFL:</strong> we keep your MFL username to recognize you next time.</li>
+              <li><strong>Importing an MFL league</strong> (after you sign in, or when you connect MFL in Settings → Leagues): we also keep the session MFL returns, encrypted, and use it to read your leagues and to send trades you approve.</li>
+              <li>You can disconnect in Settings → Leagues, which deletes the stored session. If MFL is how you sign in, your MFL username stays as your sign-in until you delete your account.</li>
+            </ul>
+          </li>
         </ul>
       </li>
       <li><strong>Subscriptions and purchases.</strong> If you subscribe, Apple handles the payment; we never see your card or billing details. We and our subscription service provider, RevenueCat, receive your subscription status, plan, trial, purchase and renewal dates, and transaction identifiers from Apple, linked to your account, so we can give you access and keep billing records. RevenueCat also receives your account identifier when you sign in.</li>
