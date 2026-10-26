@@ -1506,6 +1506,10 @@ def test_u4_importing_the_server_leaves_the_deck_ledgers_empty(tmp_path):
     env = {k: v for k, v in os.environ.items()
            if k not in ("FTF_TEST_MODE", "FTF_SLEEPER_RECORD", "DATABASE_URL")}
     env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
+    # A players cache, as prod's build bakes one (#436 QA): without it the boot
+    # sync stops at "sync deferred" and its sync branch never runs here.
+    env["FTF_PLAYERS_CACHE_FILE"] = str(
+        REPO / "backend/tests/fixtures/draft/players-bulk/players/nfl.json")
     child = subprocess.run(
         [sys.executable, "-c", "import backend.server as s; "
          "s._fetch_sleeper_adp = lambda: {}; import run; "
