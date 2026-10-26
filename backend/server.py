@@ -229,6 +229,8 @@ from .database import (
     save_feedback,
     # #360 QA P2-1: an unverified session's notes follow it when it verifies
     attach_session_feedback,
+    # release-lead delta QA E: a re-pointed token's notes never attach
+    detach_session_feedback,
     # #360 QA P2-2: a throttled retry of a held note still answers `duplicate`
     find_feedback_by_client_id,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
@@ -25431,6 +25433,15 @@ def session_init():
             session_verified = False
     if existing_sess:
         _sync_persisted_session_after_init(token, existing_sess, user_changed)
+    if user_changed:
+        # Release-lead delta QA E: the notes this token sent while anonymous
+        # were sent as the OLD identity. Attach keys on the token's hash, so
+        # drop the key and they can't follow the token to the new user if it
+        # later verifies. The rows stay, anonymous. Never fails the init.
+        try:
+            detach_session_feedback(_feedback_session_key(token))
+        except Exception as e:
+            log.warning("feedback: detach on re-point failed: %s", e)
 
     # ── Defer DB upserts + push fanout + Sleeper meta to a daemon ────────
     # Everything below this point that isn't required for the response

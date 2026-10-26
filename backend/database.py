@@ -14935,6 +14935,24 @@ def attach_session_feedback(session_key: str, user_id: str,
         return res.rowcount or 0
 
 
+def detach_session_feedback(session_key: str) -> int:
+    """Drop the session_key from a token's still-anonymous notes, so they can
+    never attach (release-lead delta QA E). Called when /api/session/init
+    re-points that token at a DIFFERENT user: the notes were sent as the old
+    identity and must not follow the token to the new one. The rows stay,
+    anonymous. Returns how many rows changed."""
+    if not session_key:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(session_key=None)
+        )
+        return res.rowcount or 0
+
+
 def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
     """Return feedback rows with id > since_id, oldest first, capped at
     `limit`. Used by GET /api/feedback/admin so an operator can stream

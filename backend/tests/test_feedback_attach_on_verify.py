@@ -238,6 +238,58 @@ def test_11_mfl_auth_link_never_attaches_for_an_unverified_session(harness):
     assert row["user_id"] is None and row["session_key"] == _sha(TOK_A)
 
 
+OTHER_UID = "998877665544332211"
+
+
+def test_12_a_repointed_token_never_carries_its_notes_to_the_new_user(harness, monkeypatch):
+    """release-lead delta QA E: a note sent under token T, then T re-pointed
+    at user B by /api/session/init (the legacy user_changed branch), then B
+    verifies in place on T: the note must NOT attach to B. The init world is
+    the minimum test_verified_sessions uses; resolve_session_input is stubbed
+    to the re-point (today it refuses one, so this branch is defensive)."""
+    client, engine = harness
+    from backend import session_input
+    from backend.ranking_service import Player
+    assert _post(client, TOK_A, "fb-repoint").status_code == 201
+
+    pool = [Player("qb_1", "QB One", "QB", "AAA", 25, 3),
+            Player("rb_1", "RB One", "RB", "BBB", 24, 2)]
+    seed = {p.id: 1500.0 for p in pool}
+    pools = {"1qb_ppr": {"players": pool, "seed": seed}, "sf_tep": {"players": pool, "seed": seed}}
+    monkeypatch.setattr(server, "_load_sleeper_cache", lambda: {})
+    monkeypatch.setattr(server, "_ensure_universal_pools", lambda: None)
+    monkeypatch.setattr(server, "g_universal_by_format", pools)
+    monkeypatch.setattr(server, "g_universal_players", pool)
+    monkeypatch.setattr(server, "_kickoff_trade_job", MagicMock())
+    monkeypatch.setattr(server, "_fetch_sleeper_league_meta", lambda lid: None)
+    real_thread = server.threading.Thread
+
+    class _NoBgWrites(real_thread):
+        def start(self):
+            if self.name == "session-init-bg-writes":
+                return
+            super().start()
+    monkeypatch.setattr(server.threading, "Thread", _NoBgWrites)
+    monkeypatch.setattr(session_input, "resolve_session_input", lambda sess, body, get, raw=None: dict(
+        user_id=OTHER_UID, league_id="123456789", league_name="Test League",
+        league_user_id=OTHER_UID, league_display_name="B", user_player_ids=["qb_1"],
+        opponent_rosters=[{"user_id": "opp_1", "username": "Opp", "player_ids": ["rb_1"]}],
+        platform="sleeper", username="b", display_name="B", avatar=None))
+
+    r = client.post("/api/session/init", headers=_h(TOK_A),
+                    data=json.dumps({"user_id": OTHER_UID, "league_id": "123456789"}))
+    assert r.status_code == 200, r.get_json()
+    assert server._sessions[TOK_A]["user_id"] == OTHER_UID          # T now names B
+
+    b_jwt = _fake_jwt({"user_id": OTHER_UID, "exp": int(time.time()) + 3600})
+    r = client.post("/api/sleeper/link", headers=_h(TOK_A), data=json.dumps({"token": b_jwt}))
+    assert r.status_code == 200, r.get_json()
+    assert server._sessions[TOK_A].get("verified") is True          # B verified in place on T
+    row = _rows(engine)["fb-repoint"]
+    assert row["user_id"] is None and row["session_key"] is None     # never attached; key dropped
+    assert "fb-repoint" not in _mine(client, TOK_A)[1]
+
+
 def test_9_every_in_place_verify_site_attaches():
     """Static pin: each in-place `sess["verified"] = True` in server.py is
     followed (within its block) by _attach_presession_feedback(sess). A new

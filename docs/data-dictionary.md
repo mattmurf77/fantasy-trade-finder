@@ -1755,7 +1755,7 @@ In-app feedback notes captured via the mobile FeedbackSheet and POSTed to `/api/
 | `created_at` | str, not null | ISO timestamp from server (canonical) |
 | `status` | str, nullable | operator-set lifecycle status; NULL reads as `'new'`. Vocabulary `new/planned/in_progress/fixed/shipped/declined` — see cross-client-invariants.md |
 | `status_updated_at` | str, nullable | ISO timestamp of the last status change |
-| `session_key` | text, nullable | sha256 hex of the `X-Session-Token` of the **unverified** session that sent the note (never the raw token; #360 QA P2-1). Set only for an existing, unverified session; NULL for verified-at-post, no-token and unknown-token notes. When that same session verifies in place (Sleeper link, MFL login, provider re-auth), `attach_session_feedback` sets `user_id`/`username` on its still-anonymous notes and clears this column. Omitted from account export |
+| `session_key` | text, nullable | sha256 hex of the `X-Session-Token` of the **unverified** session that sent the note (never the raw token; #360 QA P2-1). Set only for an existing, unverified session; NULL for verified-at-post, no-token and unknown-token notes. When that same session verifies in place (today only the Sleeper link; the MFL login and provider re-auth hooks are defensive, see `api-reference.md`), `attach_session_feedback` sets `user_id`/`username` on its still-anonymous notes and clears this column. If `/api/session/init` re-points the token at a different user, `detach_session_feedback` clears it on those notes instead, so they never attach (release-lead delta QA E). Omitted from account export |
 
 Indexes: `idx_app_feedback_created_at`, `idx_app_feedback_user_id`.
 
