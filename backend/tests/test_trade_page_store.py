@@ -9,9 +9,15 @@ Pinned here:
     intent, replenish and prepared jobs never do; the kickoff stamps the scope;
   * the supersede guard, two concurrent writers, and a serve during a rebuild;
   * restart survival: an empty job registry still serves the page;
-  * every §6.2 branch on /generate `page: 1`, strict I-1, dispositions,
-    last_served_at, expiry, and /status cursors into a page-served deck;
-  * the roster-change rebuild trigger and its debounce; session-init (U5);
+  * every §6.2 branch on /generate `page: 1`, dispositions, last_served_at,
+    expiry, and /status cursors into a page-served deck;
+  * every page serve goes through S0's serve rules: strict I-1, the two gate
+    misses and their knobs (trade_i1_mode, trade_gate_miss_mode), the admin
+    gate-miss hook, the C-a log line and the floor kick after the response;
+  * ruling 29: "updating" only while a rebuild runs, never on ESPN/MFL;
+  * the kill knob first_page_store_enabled and the paging kill switch;
+  * a roster change rebuilds lazily (S0: no proactive rebuild from a live
+    session's old rosters); session-init (U5);
   * eviction by age and by the byte ceiling; account deletion and export;
   * the measured `stored_bytes` of a realistic deck's stored pages.
 
@@ -20,6 +26,7 @@ Harness: test_i1_serve_filter's `live` (real synchronous worker, stored
 """
 import copy
 import json
+import logging
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -74,6 +81,10 @@ def p1(live, monkeypatch):
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
+    # Production's knob values, whatever a local DB seeded.
+    for knob, value in (("first_page_store_enabled", 1.0), ("trade_paged_responses", 1.0),
+                        ("trade_i1_mode", 2.0), ("trade_gate_miss_mode", 0.0)):
+        monkeypatch.setitem(server._trade_service_mod._cfg, knob, value)
     yield client, engine, sess
 
 
@@ -421,26 +432,48 @@ def test_expired_stored_cards_are_never_served(p1, spawned):
     assert "serve_source" not in body        # today's path: the in-process fresh job
 
 
-def test_a_check_error_serves_no_cards_updating_and_rebuilds(p1, spawned):
+def test_a_failed_fingerprint_read_falls_through(p1, spawned):
+    """A failed read can't prove a page fresh (S0's A2): today's path."""
     client, _, _ = p1
     build_page()
-    with patch.object(roster_snapshot, "snapshot_ids", MagicMock(side_effect=RuntimeError("db"))):
-        body = generate(client, page=1, search_id="s-2").get_json()
-    assert body["cards"] == [] and body["freshness_state"] == "updating"
-    assert body["serve_source"] == "page" and body["search_id"] == "s-2"
-    assert len(spawned) == 1 and body["job_id"] == server._trade_jobs_by_key[KEY]
-    assert body["status"] == "running" and (body["cursor"], body["total_ready"]) == (0, 0)
+    with patch.object(roster_snapshot, "values_snapshot_id", MagicMock(side_effect=RuntimeError("db"))):
+        body = generate(client, page=1).get_json()
+    assert "serve_source" not in body
 
 
-def test_strict_i1_a_league_without_stored_rosters_serves_no_cards(p1, spawned):
-    """Today's path passes such cards with a warning (S0, lenient); P1 never does."""
+@pytest.mark.parametrize("gate_mode", [0.0, 1.0])
+def test_a_failed_s0_check_on_the_page_follows_trade_gate_miss_mode(p1, spawned, monkeypatch,
+                                                                    gate_mode):
+    """0 (until 1.22.0): held, the cards serve unchecked. 1: roster_check_unavailable.
+    (Knobs are part of the config signature, so set before the page is built.)"""
+    client, _, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_gate_miss_mode", gate_mode)
+    build_page()
+    with patch.object(server, "_roster_serve_check", MagicMock(side_effect=RuntimeError("db"))):
+        body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page"
+    if gate_mode:
+        assert (body["status"], body["error"], body["cards"]) == ("error", "roster_check_unavailable", [])
+        assert (body["cursor"], body["total_ready"]) == (0, 0)
+    else:
+        assert body["status"] == "complete" and len(body["cards"]) == 30
+
+
+@pytest.mark.parametrize("gate_mode", [0.0, 1.0])
+def test_a_league_without_stored_rosters_follows_trade_gate_miss_mode(p1, spawned, monkeypatch,
+                                                                     gate_mode):
+    """Strict `missing` (ruling 30) only at gate mode 1; held at 0, as S0's job views."""
     client, engine, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_gate_miss_mode", gate_mode)
     build_page()
     with engine.begin() as conn:
         conn.execute(delete(league_members_table))
     body = generate(client, page=1).get_json()
-    assert body["cards"] == [] and body["freshness_state"] == "updating"
-    assert len(spawned) == 1
+    if gate_mode:
+        assert (body["status"], body["error"], body["cards"]) == ("error", "roster_check_unavailable", [])
+        assert not spawned                   # a gate miss kicks no deck rebuild
+    else:
+        assert body["status"] == "complete" and len(body["cards"]) == 30
 
 
 def test_dispositions_apply_to_the_served_page(p1, spawned):
@@ -475,10 +508,11 @@ def test_other_requests_never_read_the_store(p1, spawned, statements, body):
 
 
 def test_the_serve_path_reads(p1, spawned, statements):
-    """The page serve's own statements: one page read, one snapshot (one
-    league_members and one draft_picks read, shared by the fingerprint compare
-    and I-1), the disposition read, one last_served_at write. Everything else
-    is /generate's existing preamble (session touch, preference/outlook reads).
+    """The page serve's own statements: one page read; one S0 roster snapshot
+    (league_members, draft_picks, leagues, league_roster_state) shared by the
+    fingerprint compare and S0's serve check, plus the vsn1 pick read; the
+    disposition read; one last_served_at write. Everything else is
+    /generate's existing preamble (session touch, preference/outlook reads).
     """
     client, _, _ = p1
     build_page()
@@ -487,9 +521,151 @@ def test_the_serve_path_reads(p1, spawned, statements):
     selects = [" ".join(s.split()) for s in statements if s.startswith("SELECT")]
     assert sum("FROM trade_page_store" in s for s in selects) == 1
     assert sum(s.startswith("UPDATE trade_page_store") for s in statements) == 1
-    assert sum("FROM league_members" in s for s in selects) == 1
-    assert sum(s.startswith("SELECT draft_picks.pick_id, draft_picks.season") for s in selects) == 1
+    assert sum("FROM league_members" in s for s in selects) == 1   # the check reuses it
+    assert sum("FROM league_roster_state" in s for s in selects) == 1
     assert sum("FROM trade_decisions" in s for s in selects) == 1
+
+
+# ── The page serve goes through S0's serve rules (pre-merge pass) ───────────
+
+OLD = "2026-01-01T00:00:00.000000+00:00"
+
+
+@pytest.fixture()
+def floor_kicks(monkeypatch):
+    """S0's P41 floor kick, recorded instead of run."""
+    calls = []
+    monkeypatch.setattr(server._roster_refresh, "maybe_refresh_async",
+                        lambda league_id, max_age_s: calls.append((league_id, max_age_s)) or False)
+    return calls
+
+
+def _sleeper_roster_failed_past_bound(engine):
+    """league_roster_state: the last refresh failed, long past trade_roster_bound_s."""
+    with engine.begin() as conn:
+        conn.execute(insert(db_module.league_roster_state_table).values(
+            league_id=LEAGUE, status="stale", refreshed_at=OLD, last_error_code="timeout",
+            updated_at=OLD))
+
+
+@pytest.mark.parametrize("gate_mode", [0.0, 1.0])
+def test_a_past_bound_failed_roster_withholds_the_page_like_s0(p1, spawned, monkeypatch,
+                                                               floor_kicks, gate_mode):
+    """§3b: at gate mode 1 the page gets S0's withhold shape (the client keeps
+    polling); at 0 it's held and the I-1-filtered cards serve. Either way the
+    floor kick runs once, after the response is built."""
+    client, engine, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_gate_miss_mode", gate_mode)
+    job_id = build_page()
+    _sleeper_roster_failed_past_bound(engine)
+    body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page" and body["job_id"] == job_id
+    if gate_mode:
+        assert (body["status"], body["wait_reason"], body["cards"]) == ("running", "roster_check", [])
+        assert (body["cursor"], body["total_ready"]) == (0, 0)
+        assert stored()["last_served_at"] is None
+    else:
+        assert body["status"] == "complete" and "wait_reason" not in body
+        assert len(body["cards"]) == 30
+    assert floor_kicks == [(LEAGUE, 300.0)]
+
+
+def test_the_admin_gate_miss_hook_applies_to_page_serves(p1, spawned, monkeypatch, caplog):
+    client, _, _ = p1
+    job_id = build_page()
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    monkeypatch.setitem(server._gate_miss_tests, LEAGUE, ("withhold", time.monotonic() + 60))
+    body = generate(client, page=1).get_json()
+    assert (body["status"], body["wait_reason"], body["cards"]) == ("running", "roster_check", [])
+    assert any(r.getMessage() == f"[i1] gate-miss test applied league={LEAGUE} kind=withhold "
+               f"job={job_id}" for r in caplog.records)
+
+
+def test_each_page_serve_logs_one_s0_line(p1, spawned, caplog):
+    """C-a: one `[i1] serve` line per serve, on the page path too."""
+    client, _, _ = p1
+    build_page()
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    generate(client, page=1)
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[i1] serve ")]
+    assert len(lines) == 1 and f"league={LEAGUE} mode=strict" in lines[0]
+    assert "outcome=served" in lines[0] and "cards=30 kept=30" in lines[0]
+
+
+def test_lenient_mode_serves_every_page_card(p1, spawned, monkeypatch):
+    client, engine, _ = p1
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_i1_mode", 1.0)
+    build_page()
+    with engine.begin() as conn:             # g2 leaves the viewer's roster
+        conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
+                     .values(roster_data=json.dumps([])))
+    body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page" and len(body["cards"]) == 30
+
+
+def test_mode_0_never_reads_the_store(p1, spawned, statements, monkeypatch):
+    """trade_i1_mode 0 is the pre-S0 path: without its reads the stamps can't be compared."""
+    client, _, _ = p1
+    build_page()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_i1_mode", 0.0)
+    statements.clear()
+    body = generate(client, page=1).get_json()
+    assert "serve_source" not in body
+    assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
+
+
+# ── Ruling 29: "updating" only while a rebuild runs, never on ESPN/MFL ───────
+
+def test_a_stale_page_with_no_rebuild_running_is_not_updating(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    build_page()
+    _vote(client)
+    monkeypatch.setattr(server, "_kickoff_trade_job", lambda **kw: "no-such-job")
+    body = generate(client, page=1).get_json()
+    assert (body["serve_source"], body["freshness_state"]) == ("page", "fresh")
+
+
+def test_a_linked_league_never_shows_updating(p1, spawned):
+    client, engine, _ = p1
+    with engine.begin() as conn:
+        conn.execute(insert(db_module.leagues_table).values(
+            sleeper_league_id=LEAGUE, user_id=UID, name="ESPN league", platform="espn"))
+    build_page()
+    _vote(client)
+    body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page" and len(spawned) == 1     # the rebuild runs
+    assert body["freshness_state"] == "fresh"
+
+
+# ── Kill switches ───────────────────────────────────────────────────────────
+
+def test_the_kill_knob_stops_every_store_read_write_and_serve(p1, spawned, statements, monkeypatch):
+    """first_page_store_enabled 0, with the flag on: no store read, write, serve or mark."""
+    client, _, _ = p1
+    job_id = build_page()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "first_page_store_enabled", 0.0)
+    assert not server._trade_page_store_enabled()
+    statements.clear()
+    body = generate(client, page=1).get_json()
+    assert not {"serve_source", "freshness_state", "prefetch_remaining"} & set(body)
+    assert status(client, job_id, 30).get_json().get("serve_source") is None
+    run_job(force_fresh=True)                          # a completion
+    server._invalidate_trade_jobs(user_id=UID)         # an input change
+    server._evict_trade_page_store()
+    assert page_queries(statements) == []
+
+
+def test_the_paging_kill_switch_keeps_the_store_out(p1, spawned, statements, monkeypatch):
+    """trade_paged_responses 0: `page` and `cursor` are ignored, so no store serve."""
+    client, _, _ = p1
+    job_id = build_page()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_paged_responses", 0.0)
+    statements.clear()
+    body = generate(client, page=1).get_json()
+    assert not {"serve_source", "cursor"} & set(body)
+    body = status(client, job_id, 30).get_json()
+    assert not {"serve_source", "cursor"} & set(body)
+    assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
 
 
 # ── /status cursors into a page-served deck ─────────────────────────────────
@@ -516,20 +692,26 @@ def test_status_cursors_walk_the_stored_pages(p1, spawned):
         "serve_source": "page", "freshness_state": "fresh", "prefetch_remaining": 50}
 
 
-def test_status_page_applies_strict_i1_after_a_roster_move(p1, spawned):
+def test_status_page_goes_through_s0_after_a_roster_move(p1, spawned, monkeypatch):
     client, engine, _ = p1
     job_id = build_page()
     server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
     with engine.begin() as conn:
         conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
                      .values(roster_data=json.dumps([])))
     body = status(client, job_id, 30).get_json()
     assert all(c["give"][0]["id"] != "g2" for c in body["cards"]) and body["cards"]
-    assert body["freshness_state"] == "updating"
+    assert body["freshness_state"] == "fresh"        # stale, but no rebuild runs (ruling 29)
+    rebuild = run_job(synchronous=False)             # now one runs
+    assert server._trade_jobs[rebuild]["status"] == "running"
+    assert status(client, job_id, 30).get_json()["freshness_state"] == "updating"
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_gate_miss_mode", 1.0)
     with engine.begin() as conn:
         conn.execute(delete(league_members_table))
     body = status(client, job_id, 30).get_json()
-    assert body["cards"] == [] and body["freshness_state"] == "updating"
+    assert (body["status"], body["error"], body["cards"]) == ("error", "roster_check_unavailable", [])
+    assert (body["cursor"], body["total_ready"]) == (30, 0)       # the cursor holds
 
 
 def test_status_for_another_users_job_is_not_served_from_the_store(p1, spawned):
@@ -545,25 +727,19 @@ def test_status_for_another_users_job_is_not_served_from_the_store(p1, spawned):
 
 # ── Triggers ────────────────────────────────────────────────────────────────
 
-def test_a_roster_change_rebuilds_stored_pages_debounced(p1, spawned, monkeypatch):
+def test_a_roster_change_rebuilds_lazily_at_the_next_serve(p1, spawned):
+    """S0's handler kicks nothing (a live session holds its last init's rosters);
+    the next serve sees the roster_fp move and kicks the rebuild."""
+    client, engine, _ = p1
     build_page()
+    with engine.begin() as conn:
+        conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
+                     .values(roster_data=json.dumps(["g2", "x9"])))
     roster_snapshot.on_roster_change(LEAGUE, "rfp1:old", "rfp1:new")
-    assert len(spawned) == 1
-    rebuild = server._trade_jobs[server._trade_jobs_by_key[KEY]]
-    assert rebuild["page_scope"] == SCOPE and rebuild["fairness_threshold"] == 0.5
-    assert "page_rebuild_kicked_at" in rebuild
-    roster_snapshot.on_roster_change(LEAGUE, "rfp1:new", "rfp1:newer")
-    assert len(spawned) == 1                 # inside trade_prebuild_debounce_s
-    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_prebuild_debounce_s", 0.0)
-    roster_snapshot.on_roster_change(LEAGUE, "rfp1:newer", "rfp1:newest")
-    assert len(spawned) == 2
-
-
-def test_a_roster_change_without_a_live_session_rebuilds_lazily(p1, spawned):
-    build_page()
-    with patch.object(server, "_find_live_session_token", lambda *a: None):
-        roster_snapshot.on_roster_change(LEAGUE, "rfp1:old", "rfp1:new")
     assert not spawned
+    body = generate(client, page=1).get_json()
+    assert (body["serve_source"], body["freshness_state"]) == ("page", "updating")
+    assert len(spawned) == 1
 
 
 def test_session_init_warm_up_is_page_eligible(init_harness, monkeypatch, spawned):
@@ -696,12 +872,12 @@ def test_stale_marks_never_run_under_the_job_lock(p1, spawned, monkeypatch):
 
 # ── Engine identity across deploys (lead review B) ──────────────────────────
 
-@pytest.mark.parametrize("change", ["deck_shape_version", "engine_code_hash"])
-def test_an_engine_code_or_deck_shape_change_blocks_the_page(p1, spawned, monkeypatch, change):
+@pytest.mark.parametrize("change", ["deck_pipeline_version", "engine_code_hash"])
+def test_an_engine_code_or_deck_pipeline_change_blocks_the_page(p1, spawned, monkeypatch, change):
     client, _, _ = p1
     build_page()
-    if change == "deck_shape_version":
-        monkeypatch.setattr(server, "TRADE_DECK_SHAPE_VERSION", server.TRADE_DECK_SHAPE_VERSION + 1)
+    if change == "deck_pipeline_version":
+        monkeypatch.setattr(server, "DECK_PIPELINE_VERSION", server.DECK_PIPELINE_VERSION + 1)
     else:
         monkeypatch.setattr(server, "_engine_code_hash_value", "0" * 12)
     server._trade_jobs.clear()

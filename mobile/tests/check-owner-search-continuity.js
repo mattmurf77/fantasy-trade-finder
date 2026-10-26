@@ -72,6 +72,8 @@ let storePins = { pinnedGive: [{ id: 'old-send' }], pinnedReceive: [{ id: 'old-t
 const env = {
   useFinderTargets: { getState: () => storePins },
   lastModelRequestRef: modelRef, canvasSelectionRef: canvasRef,
+  // C (P1-a): the request binds the device page key it answers.
+  lastModelKeyRef: { current: null }, deviceKey: 'ftf_trade_device_page_v1:u:league:1qb_ppr',
   effectiveFairness: 0.9, leagueId: 'league', targetingEnabled: true,
   scopedOpponent: 'partner-B', tradeIntent: 'tier_up', modelSelectionParams,
   generateTrades: (request) => request,

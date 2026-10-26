@@ -280,7 +280,7 @@ needs a grant, or onboarding-eng adds the row reading trades-eng's value.
 | `roster_fp` differs | The I-1-filtered cards, "Updating", and a rebuild |
 | `values_snapshot_id` differs | Serve-and-refresh |
 | `engine_version` or `config_signature` differs | Block (#339 §5.2 exception 2) |
-| The check errors | "Updating", no cards |
+| The check errors | No cards. The **named-reason gate-miss state** (ux-lead F-5: it names the roster check, makes no timing promise, ends in an error with Retry, and keeps Back usable). "Updating" shows only while cards are showing (#339 item 12) |
 
 ### 6.3 Identity and order (models-eng)
 
@@ -305,8 +305,10 @@ needs a grant, or onboarding-eng adds the row reading trades-eng's value.
 - The server sets `pool_exhausted: true` only when every generated candidate of the deck has been delivered. It is
   never set while a page is pending or the deck is still building.
 - **The client** renders one final card in the deck slot:
-  - copy: "You've seen every trade we have for now. New ideas show up as rosters and values change.";
-  - actions: "Adjust what I'm looking for" (the targeting builder) and "Back to Home";
+  - copy (final, marketing-lead `p30.*`): "You've seen every trade for now." / "New ideas show up as rosters and
+    values change.", plus the tally, suppressed at 0 · 0 · 0 (P36);
+  - actions: "Adjust your search" (Product's D14(a): it opens **the deck's own preferences**, fairness and filters,
+    and the changed search runs **in place**; it is not the targeting builder) and "Back to Home";
   - Like and Pass hidden;
   - visuals: ux-lead's spec and design-lead's styling.
 
