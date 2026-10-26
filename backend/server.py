@@ -3365,14 +3365,19 @@ def _trade_job_public_view(job: dict) -> dict:
     if board_refresh:
         out["board_refresh"] = board_refresh
     kick_floor = None
+    withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
     if out["cards"]:
         user_id, league_id, _format = job["key"]
         if job.get("prepared_inventory_id"):
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id, prepared=True)
         else:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
+        checked = out["cards"]
         out["cards"], block, past_bound = _roster_serve_rules(
             out["cards"], league_id, job.get("league_user_id") or user_id, job["job_id"])
+        if not block:
+            kept = {id(c) for c in out["cards"]}
+            withdrawn = [c for c in checked if id(c) not in kept]
         if block == "roster_check_unavailable":
             out.update(cards=[], status="error", error="roster_check_unavailable")
         elif block == "roster_gate_miss":
@@ -3396,9 +3401,9 @@ def _trade_job_public_view(job: dict) -> dict:
     # legacy responses alike), counted after S0's serve rules. Only flag-on
     # organic jobs carry `evidence`. An errored job's published batches (ruling
     # 9, legacy) are a partial run's.
-    if job.get("evidence") is not None and out["cards"]:
+    if job.get("evidence") is not None and (out["cards"] or withdrawn):
         _deck_evidence_delivered(job["evidence"], out["cards"],
-                                 partial=job.get("status") == "error")
+                                 partial=job.get("status") == "error", withdrawn=withdrawn)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
     return out
@@ -4041,6 +4046,10 @@ class _DeckEvidence:
         self.delivered: set = set()   # impression ids sent to a client
         self.delivered_hashes: set = set()
         self.delivered_at: dict = {}  # impression_id / trade_hash -> first delivery (G2)
+        # Ids S0's I-1 dropped at a serve and no serve has delivered: never
+        # written (C-b: write impressions after I-1, so a dropped card never
+        # reads as a served position).
+        self.withdrawn: set = set()
         self.pending: set = set()     # delivered ids awaited until their row is written (F4)
         self.served_at = None         # F2: the deck's first delivery, every row's served_at
         self.marked: set = set()      # delivered ids already written or marked 'delivered'
@@ -4162,6 +4171,8 @@ class _DeckEvidence:
               for iid in self.by_hash.get(h, ())}
         at.update((iid, self.delivered_at[iid]) for iid in self.delivered)
         delivered = at.keys()
+        for iid in self.withdrawn - delivered:   # C-b: a dropped card is never written
+            self.rows.pop(iid, None)
         if self.partial:
             first = [{**_unpack_row(packed), "evidence_tier": "partial_run", "delivered_at": at[iid]}
                      for iid, (_, packed) in self.rows.items() if iid in delivered]
@@ -4384,7 +4395,7 @@ def _deck_evidence_write(ev: _DeckEvidence) -> None:
 
 
 def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
-                                delivered_at: str | None = None) -> None:
+                                delivered_at: str | None = None, withdrawn: set = frozenset()) -> None:
     """Thread target: a stored deck's delivery once its job has left this
     process, from the row's evidence_blob read fresh under the write lock."""
     from . import database as _db
@@ -4402,6 +4413,7 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                 ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
                 delivered_at = delivered_at or datetime.now(timezone.utc).isoformat()
                 ev.delivered.update(ids)
+                ev.withdrawn = set(withdrawn) - ev.delivered
                 ev.delivered_at.update(dict.fromkeys(ids, delivered_at))
                 ev.served_at = ev.served_at or delivered_at
                 _deck_evidence_flush(ev)
@@ -4409,12 +4421,16 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
         _deck_evidence_settle(ids)
 
 
-def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = False) -> None:
-    """Record a delivery of `cards` (public dicts) from `ev`'s deck. Once its run
-    has ended, the write runs off the request thread. A card published before
-    its impression id existed counts by trade_hash. `partial`: the job has
-    errored (a timed-out job's published batches still serve on the legacy
-    path), so the run has ended partial."""
+def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = False,
+                             withdrawn: list = ()) -> None:
+    """Record a delivery of `cards` (public dicts: what the response sends,
+    after S0's serve rules) from `ev`'s deck. Once its run has ended, the write
+    runs off the request thread. A card published before its impression id
+    existed counts by trade_hash. `partial`: the job has errored (a timed-out
+    job's published batches still serve on the legacy path), so the run has
+    ended partial. `withdrawn`: the cards S0's I-1 dropped at this serve; until
+    a serve delivers one, it gets no row (C-b)."""
+    dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
     ids, hashes = set(), set()
     for card in cards:
         iid = card.get("impression_id")
@@ -4429,9 +4445,10 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
             return
         if partial:
             ev.partial = ev.complete = True
+        ev.withdrawn = (ev.withdrawn | (dropped - ev.delivered)) - ids
         new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
         now = datetime.now(timezone.utc).isoformat()
-        if ev.served_at is None:
+        if ev.served_at is None and (ids or hashes):
             ev.served_at = now
         for key in (*ids, *hashes):   # G2: each card's first delivery
             ev.delivered_at.setdefault(key, now)
@@ -4445,26 +4462,28 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         _start_deck_evidence_thread(target=_deck_evidence_write, args=(ev,))
 
 
-def _deck_evidence_delivered_stored(row: Mapping, cards: list) -> None:
-    """A delivery of a stored page's `cards`: through the deck's job while it is
-    in this process, else through the row's evidence_blob."""
+def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list = ()) -> None:
+    """A delivery of a stored page's `cards` (sent, after S0's serve rules; the
+    `withdrawn` ones I-1 dropped): through the deck's job while it is in this
+    process, else through the row's evidence_blob."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(row["deck_job_id"])
         in_process = job is not None and job["key"][0] == row["user_id"]
         ev = job.get("evidence") if in_process else None
         live = in_process and job.get("evidence_mode") != "deferred"
     if ev is not None:
-        _deck_evidence_delivered(ev, cards)
+        _deck_evidence_delivered(ev, cards, withdrawn=withdrawn)
         return
     ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
     if live or not ids:
         return   # a live-mode deck wrote its rows at build (an F5-dropped one uses its blob)
+    dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
     lease = _user_data_lifecycle.capture(
         row["user_id"], started=g.get("_user_data_started") if has_request_context() else None)
     _deck_evidence_pend(ids)
     _start_deck_evidence_thread(target=_deck_evidence_write_stored,
                                 args=(row["user_id"], row["deck_job_id"], ids, lease,
-                                      datetime.now(timezone.utc).isoformat()))
+                                      datetime.now(timezone.utc).isoformat(), dropped - ids))
 
 
 def _deck_evidence_job_done(job_id: str) -> None:
@@ -4634,12 +4653,14 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         raise ValueError("stored pages do not decode")
     league_id = row["league_id"]
     end = min(len(pages["cards"]), cursor + _trade_page_size())
-    cards = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
-    cards, block, past_bound = _roster_serve_rules(cards, league_id, viewer_id,
+    checked = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
+    cards, block, past_bound = _roster_serve_rules(checked, league_id, viewer_id,
                                                    row["deck_job_id"], snap=snap)
+    kept = {id(c) for c in cards}
+    withdrawn = [] if block else [c for c in checked if id(c) not in kept]
     cards = _with_trade_hash(cards)       # P2: the client's dedupe key
-    if cards:
-        _deck_evidence_delivered_stored(row, cards)   # ADR-025 stage 1: a delivery, after S0's rules
+    if cards or withdrawn:                # ADR-025 stage 1: a delivery, after S0's rules
+        _deck_evidence_delivered_stored(row, cards, withdrawn)
     opponents = pages.get("opponents_total") or 0
     out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
            "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,

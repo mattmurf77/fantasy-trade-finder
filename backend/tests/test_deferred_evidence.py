@@ -485,7 +485,11 @@ def test_f6_an_opened_replenished_deck_writes_at_its_delivery(deferred, generate
     body = generate(client).get_json()                     # the tap that opens it: a cache hit
     assert body["job_id"] == job["job_id"] and body["cards"]
     written = rows(engine)
-    assert {r["impression_id"] for r in written} == {c["impression_id"] for c in job["cards"]}
+    # The harness's stored rosters moved g1 and r1, so strict I-1 drops the
+    # deck's cards that carry them: they get no row (C-b); the rest are written.
+    sent = {c["impression_id"] for c in body["cards"]}
+    assert sent < {c["impression_id"] for c in job["cards"]}
+    assert {r["impression_id"] for r in written} == sent
     assert {json.loads(r["features_json"])["deck_source"] for r in written} == {"replenish"}
     assert [e["props"]["deck_source"] for e in generated_events] == ["replenish"]
     assert build_writes(engine)[0] == len(job["cards"])
@@ -513,6 +517,107 @@ def test_f6_calibrations_refresh_reuses_a_delivered_deferred_deck(deferred):
     assert server._replenish_deck_for(UID, LEAGUE, source="grading_refresh") is not None
     assert replenished("grading_refresh") == []
     assert db_module.load_grading_legacy_deck(UID, LEAGUE)[0] == organic
+
+
+# ── #370: evidence for what S0's serve rules let through ───────────────────
+
+def move_away(engine, card_index):
+    """The viewer no longer owns card `card_index`'s give asset (stored rows)."""
+    with engine.begin() as conn:
+        conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
+                     .values(roster_data=json.dumps(
+                         ["g2"] + [f"mine{i}" for i in range(400) if i != card_index])))
+
+
+def response(client, path, deck, cursor=0):
+    """One serve of `deck` on `path`; the response body."""
+    if path == "legacy":
+        return client.get(f"/api/trades/status?job_id={deck}", headers=HEADERS).get_json()
+    if path == "job_cursor":
+        return client.get(f"/api/trades/status?job_id={deck}&cursor={cursor}", headers=HEADERS).get_json()
+    if path == "page_one":
+        return generate(client, page=1).get_json()
+    return client.get(f"/api/trades/status?deck={deck}&cursor={cursor}", headers=HEADERS).get_json()
+
+
+SERVE_PATHS = {   # path -> (store the page?, restart?, the deck asked for, cursor)
+    "legacy": (False, False, None, 0),
+    "job_cursor": (False, False, None, 0),
+    "page_one": (True, False, None, 0),
+    "deck_stored": (True, False, None, 30),
+    "deck_live": (True, False, None, 90),
+    "rebased_row": (True, True, "gone", 0),
+    "rebased_job": (False, False, "gone", 0),
+}
+
+
+@pytest.mark.parametrize("path", sorted(SERVE_PATHS))
+def test_370_every_serve_path_writes_exactly_the_cards_it_sends(deferred, path):
+    client, engine, _ = deferred
+    store, restart_, asked, cursor = SERVE_PATHS[path]
+    job_id, *_ = deferred_deck(120, store=store)
+    if restart_:
+        server._trade_jobs.clear()
+        server._trade_jobs_by_key.clear()
+    body = response(client, path, asked or job_id, cursor)
+    sent = {c["impression_id"] for c in body["cards"]}
+    assert sent and len(sent) == len(body["cards"])
+    marked = {r["impression_id"] for r in rows(engine) if r["delivered_at"] is not None}
+    assert marked == sent
+
+
+@pytest.mark.parametrize("path", ["job_cursor", "deck_stored", "page_one", "rebased_row"])
+def test_370_a_card_i1_drops_gets_no_row_at_all(deferred, path):
+    """C-b, write after I-1: a dropped card was never served, so it is neither
+    marked delivered nor written as first30 / full_interim / partial_run."""
+    client, engine, _ = deferred
+    store, restart_, asked, _ = SERVE_PATHS[path]
+    job_id, served, *_ = deferred_deck(120, store=store)
+    dropped_id = server._trade_jobs[job_id]["cards"][3]["impression_id"]
+    move_away(engine, 3)
+    if restart_:
+        server._trade_jobs.clear()
+        server._trade_jobs_by_key.clear()
+    body = response(client, path, asked or job_id, 0)
+    sent = {c["impression_id"] for c in body["cards"]}
+    assert len(sent) == 29 and dropped_id not in sent
+    written = {r["impression_id"]: r for r in rows(engine)}
+    assert dropped_id not in written
+    assert {iid for iid, r in written.items() if r["delivered_at"]} == sent
+
+
+@pytest.mark.parametrize("path", ["job_cursor", "deck_stored", "page_one"])
+def test_370_a_gate_miss_withholds_and_writes_nothing(deferred, monkeypatch, path):
+    client, engine, _ = deferred
+    store, _, asked, cursor = SERVE_PATHS[path]
+    job_id, *_ = deferred_deck(120, store=store)
+    monkeypatch.setitem(server._gate_miss_tests, LEAGUE, ("withhold", server.time.monotonic() + 60))
+    body = response(client, path, asked or job_id, cursor)
+    assert body["cards"] == [] and body["wait_reason"] == "roster_check"
+    assert rows(engine) == [] and rows(engine, db_module.deck_candidate_sets_table) == []
+
+
+@pytest.mark.parametrize("path", ["legacy", "job_cursor", "deck_stored", "page_one"])
+def test_370_no_impression_is_written_twice_across_polls(deferred, path):
+    """The second poll of the same cards issues no deck_impressions write."""
+    from sqlalchemy import event
+    client, engine, _ = deferred
+    store, _, asked, cursor = SERVE_PATHS[path]
+    job_id, *_ = deferred_deck(120, store=store)
+    response(client, path, asked or job_id, cursor)
+    first = sorted(rows(engine), key=lambda r: r["impression_id"])
+    seen = []
+    listen = lambda conn, cursor_, statement, *a: seen.append(statement)
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
+        response(client, path, asked or job_id, cursor)
+        response(client, path, asked or job_id, cursor)
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    writes = [s for s in seen if s.lstrip().upper().startswith(("INSERT INTO DECK_IMPRESSIONS",
+                                                                "UPDATE DECK_IMPRESSIONS"))]
+    assert writes == []
+    assert sorted(rows(engine), key=lambda r: r["impression_id"]) == first
 
 
 # ── C4 and C3: first delivery, later pages ──────────────────────────────────
