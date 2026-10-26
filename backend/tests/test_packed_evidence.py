@@ -1417,8 +1417,9 @@ def test_u4_a_deck_this_process_builds_is_noted_held(deferred, monkeypatch):
 
 def test_u4_restart_splits_assume_one_worker_per_instance():
     """models-eng: "this process never held the deck" means a restart only
-    with one gunicorn worker per instance (no --preload, which would share a
-    master's import)."""
+    with one gunicorn worker per instance. --preload is fine (#428 QA: Render
+    preloads by default through GUNICORN_CMD_ARGS, which this file can't see):
+    the master's import leaves the ledgers empty, pinned below."""
     # Plain text, no PyYAML (not a CI dependency): the web service's block runs
     # from its "- type: web" line to the next "- type:" line.
     lines = (REPO / "render.yaml").read_text().splitlines()
@@ -1431,7 +1432,25 @@ def test_u4_restart_splits_assume_one_worker_per_instance():
                "cross_worker cause to _upgrade_miss_cause (models-eng's reader is cause-generic) "
                "before raising --workers")
     assert command[command.index("--workers") + 1] == "1", message
-    assert "--preload" not in command and not any(c.startswith("--preload") for c in command), message
+
+
+def test_u4_importing_the_server_leaves_the_deck_ledgers_empty(tmp_path):
+    """#428 QA: the preload hazard. Under --preload the gunicorn master imports
+    the app and forks its worker, which inherits the master's _deck_held and
+    _deck_evicted_at. A deck noted there would never read as a restart's.
+    Observable only in a fresh interpreter (this one imported the server)."""
+    import os
+    import subprocess
+    import sys
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("FTF_TEST_MODE", "FTF_SLEEPER_RECORD", "DATABASE_URL")}
+    env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
+    child = subprocess.run(
+        [sys.executable, "-c", "import backend.server as s; "
+         "print(len(s._deck_held), len(s._deck_evicted_at))"],
+        capture_output=True, text=True, cwd=REPO, env=env, timeout=180)
+    assert child.returncode == 0, child.stderr[-2000:]
+    assert child.stdout.strip().splitlines()[-1] == "0 0"
 
 
 def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(deferred, monkeypatch):
