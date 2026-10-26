@@ -16,7 +16,8 @@ CardSet JSON: {"variant": str, "source": "value_core_bench" | "served",
 incumbent's served decks, asserting ``transaction_read_only = on`` first.
 It reads them through eval's loader (backend.eval.data.load_decks), so it sees
 each deck as eval does (models-lead B5): Trades decks only (a deck the loader
-marks CALIBRATION_REFRESH, by CALIBRATION_REFRESH_SOURCE, is skipped),
+marks CALIBRATION_REFRESH, by CALIBRATION_REFRESH_SOURCE, is skipped, as is
+one whose evidence contradicts itself),
 never-delivered withdrawn cards removed, not-yet-paged first30 rows kept, and
 the top N taken by displayed position.
 Every file written is 0600 inside a fresh directory (or O_EXCL), never overwritten.
@@ -155,9 +156,11 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
 
     Per league (models-lead B5): eval's loader (backend.eval.data.load_decks)
     reads the user's decks served within SERVED_LOOKBACK, and the latest by
-    served_at whose exclusion is not CALIBRATION_REFRESH is taken (Calibration's
-    refresh decks are never shown in Trades; any other exclusion, in_flight
-    above all, still counts: the latest Trades deck is usually live). The
+    served_at whose exclusion is not CALIBRATION_REFRESH, PACK_INTEGRITY or
+    WITHDRAWAL_CONFLICT is taken (Calibration's refresh decks are never shown
+    in Trades; the other two contradict their own evidence and keep their
+    withdrawn cards; any other exclusion, in_flight above all, still counts:
+    the latest Trades deck is usually live). The
     loader has already removed its never-delivered withdrawn cards
     (deck_card_withdrawals.served_before = 0: I-1 drops and disposition cuts)
     and kept its first30 rows whether delivered yet or not. The `top` kept
@@ -173,6 +176,12 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     from sqlalchemy import bindparam, text
 
     from backend.eval import data as eval_data
+    # Never graded: Calibration's refresh (not a Trades deck), and a deck whose
+    # evidence contradicts itself (pack_integrity, withdrawal_conflict). The
+    # loader stops before removing such a deck's never-delivered withdrawals,
+    # so its top N could hold cards nobody saw.
+    ungradeable = {eval_data.CALIBRATION_REFRESH, eval_data.PACK_INTEGRITY,
+                   eval_data.WITHDRAWAL_CONFLICT}
     from backend.tools import prod_analytics
 
     # load_decks drops an empty user or league filter: never read beyond the seat.
@@ -191,7 +200,7 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                 decks = [d for d in eval_data.load_decks(engine=engine, since=since,
                                                          user_id=str(user_id),
                                                          league_id=str(league_id))
-                         if d.exclusion != eval_data.CALIBRATION_REFRESH]
+                         if d.exclusion not in ungradeable]
                 if not decks:
                     continue
                 deck = max(decks, key=lambda d: (d.served_at, d.deck_job_id))

@@ -198,3 +198,14 @@ def test_refresh_decks_are_detected_through_the_pinned_constant_only():
     source = Path(blind_grade.__file__).read_text()
     assert eval_data.CALIBRATION_REFRESH_SOURCE not in source
     assert "CALIBRATION_REFRESH" in source
+
+
+def test_a_deck_whose_evidence_contradicts_itself_is_not_graded(prod):
+    """A newer withdrawal_conflict deck (a never-delivered withdrawal whose row
+    says it was delivered) is skipped: the loader leaves its withdrawn cards
+    in, so its top N could hold cards nobody saw. The older clean deck is
+    graded instead."""
+    fake = prod()
+    put_deck(fake, "T", 4, served_at=_ago(3), delivered=range(4))
+    put_deck(fake, "C", 4, served_at=_ago(1), rows=range(4), delivered=range(4), w0=[1])
+    assert shown(served()) == ["T-g0", "T-g1", "T-g2", "T-g3"]
