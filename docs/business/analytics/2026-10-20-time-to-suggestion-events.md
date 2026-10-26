@@ -76,7 +76,7 @@ reach and the empty-deck rate (`:967-1029`). **Don't trend these across #370's m
 Calibration refresh decks counted as `replenish` (the refresh calls `_replenish_deck_for`, `server.py:27545`, which
 sets `source = "replenish"` at `:24142`), so they **can't be separated from real replenish decks in history.**
 
-- **Break date:** `#370 merge date: <to be filled at merge by release-lead's scribe>`
+- **Break date:** `#370 merge date: 2026-10-26 (merged 11:22 UTC; analytics_queries.SERIES_BREAKS @ origin/main records the break day "2026-10-26")`
 - **The binding rule still holds:** exactly one `trades_generated` per user-visible deck. A grading deck actually
   served in Trades still emits, per release-lead's P2-2 fix, which lands before the merge. Calibration-only decks
   aren't user-visible trade decks, so they correctly emit none (the R3 row above).

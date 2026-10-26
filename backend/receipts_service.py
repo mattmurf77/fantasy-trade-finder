@@ -1125,10 +1125,10 @@ LOW_SHARE_FLAG = 0.70
 
 # R-U6b (analytics-lead, 2026-10-26): at the packed-evidence flip, receipts
 # move to viewed-or-first-30 cards (R-U6a; database._evidence_shown), so volume
-# and win-share denominators change. The flip day (UTC, "YYYY-MM-DD") stays
-# None until the flip; the scribe fills it in at the flip. While None, no
-# caveat (the #418 SERIES_BREAKS pattern, analytics_queries.py).
-RECEIPTS_SERIES_BREAK_DAY: str | None = None
+# and win-share denominators change. The flip day is database's
+# PACKED_EVIDENCE_FLIP_DAY, the one value the scribe sets at the flip, shared
+# with the endorsement ratio's caveat. While None, no caveat (the #418
+# SERIES_BREAKS pattern, analytics_queries.py).
 RECEIPTS_SERIES_BREAK_DETAIL = ("U6/R-U6a: receipts move to viewed-or-first-30 cards at the "
                                 "packed-evidence flip")
 
@@ -1136,7 +1136,7 @@ RECEIPTS_SERIES_BREAK_DETAIL = ("U6/R-U6a: receipts move to viewed-or-first-30 c
 def _receipts_series_break_caveats(rows: list[dict]) -> list[dict]:
     """A `series_break` caveat when the break day is set and the serve dates
     the metrics read span it (inclusive: the break day itself is mixed)."""
-    day = RECEIPTS_SERIES_BREAK_DAY
+    day = db.PACKED_EVIDENCE_FLIP_DAY
     days = [str(r["served_at"])[:10] for r in rows if r.get("served_at")]
     if day is None or not days or not min(days) <= day <= max(days):
         return []

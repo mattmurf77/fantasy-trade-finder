@@ -109,7 +109,7 @@ from .database import (
     PASS_REASON_TEXT_MAX,
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
     # (matcher logic lives in suggestion_telemetry.py)
-    save_deck_candidate_set, suggestion_ratio_by_league,
+    save_deck_candidate_set, suggestion_ratio_by_league, suggestion_link_day_span,
     # trade.bakeoff — one bakeoff_runs row per bake-off job
     save_bakeoff_run,
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
@@ -14984,6 +14984,22 @@ def analytics_health_route():
     })
 
 
+_RATIO_SERIES_BREAK_DETAIL = ("U6/R-U6a: from the packed-evidence flip, `recommended` counts "
+                              "matches to viewed-or-first-30 suggestions")
+
+
+def _ratio_series_break_caveats(first_day: str | None, last_day: str | None) -> list[dict]:
+    """A `series_break` caveat when the packed-evidence flip day is set
+    (database.PACKED_EVIDENCE_FLIP_DAY, shared with receipts) and the links'
+    trade days span it (inclusive: the flip day itself is mixed)."""
+    from . import database as _db
+    day = _db.PACKED_EVIDENCE_FLIP_DAY
+    if day is None or first_day is None or last_day is None or not first_day <= day <= last_day:
+        return []
+    return [{"code": "series_break", "scope": "suggestion_ratio",
+             "detail": _RATIO_SERIES_BREAK_DETAIL, "day": day}]
+
+
 @app.route("/api/admin/suggestion-telemetry/ratio", methods=["GET"])
 def suggestion_telemetry_ratio_route():
     """GET /api/admin/suggestion-telemetry/ratio[?league_id=…] — the always-
@@ -14992,10 +15008,13 @@ def suggestion_telemetry_ratio_route():
 
     Operator-only (X-Cron-Secret, same as /api/cron/*). Per league:
     executed = captured Sleeper trades examined by the matcher,
-    recommended = those matching a RENDERED (non-ghost) logged suggestion,
+    recommended = those matching a shown (non-ghost) logged suggestion,
+    viewed or first 30 (R-U6a, database._evidence_shown),
     ratio = recommended / executed, ghost_matches = executed trades whose
     best ghost-suggestion match exists (the incrementality read: withheld
-    suggestions that happened anyway). 404 feature_disabled while dark.
+    suggestions that happened anyway). `caveats`: a `series_break` once the
+    packed-evidence flip day is set and the trades span it. 404
+    feature_disabled while dark.
     """
     _require_cron_auth()
     if not _suggestion_telemetry_enabled():
@@ -15012,6 +15031,7 @@ def suggestion_telemetry_ratio_route():
             "ratio":         round(recommended / executed, 4) if executed else None,
             "ghost_matches": sum(l["ghost_matches"] for l in leagues),
         },
+        "caveats": _ratio_series_break_caveats(*suggestion_link_day_span(league_id)),
     })
 
 

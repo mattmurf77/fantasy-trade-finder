@@ -116,7 +116,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
-from urllib.parse import unquote
+from urllib.parse import unquote, unquote_plus
 
 from sqlalchemy import Integer, String, Text, column, create_engine, event, func, inspect, select, table
 
@@ -559,22 +559,24 @@ def _iso(value: str) -> str:
         dt - _WINDOW_REACH            # the read reaches back this far: must not overflow
     except (ValueError, OverflowError):
         raise argparse.ArgumentTypeError(
-            f"too near the minimum date to read back from: {value!r}") from None
+            f"out of range for the read (it reaches back {_WINDOW_REACH.days} days): "
+            f"{value!r}") from None
     return dt.isoformat()
 
 
-# The furthest a read reaches back from as_of: the weekly window (7 d) and the
-# in-flight window (25 h) both start at as_of, so 9 days covers either with a
-# margin. A time too near datetime.min is a usage error, not a crash.
+# How far a read reaches back from as_of: the weekly window (7 d) and the
+# in-flight window (25 h) both reach back from as_of, so 9 days covers either
+# with a margin. A time out of range for that is a usage error, not a crash.
 _WINDOW_REACH = timedelta(days=9)
 
 
 def _secret_fragments(db: str) -> list[str]:
     """The pieces of a database URL a driver or URL parser may echo in an
     error: everything after the scheme, and each piece of it split on
-    ':', '@', '/', '?', '&', '=' and '#' (so an unencoded '@', '?' or '/' in a
-    password, or a query-string password, can't shift what counts as the
-    host), each also percent-decoded. Longest first, so a username inside a
+    ':', '@', '/', '?', '&', '=', '#' and ',' (so an unencoded '@', '?', '/'
+    or ',' in a password, a libpq host list, or a query-string password can't
+    shift what counts as the host), each also percent-decoded, both plain and
+    with '+' as a space. Longest first, so a username inside a
     password can't leave the password's tail behind. Pieces shorter than 3
     characters are left (they would redact noise), and harmless words in the
     URL (a username like postgres) are redacted too: a safe-side cost. A SQLite
@@ -582,8 +584,8 @@ def _secret_fragments(db: str) -> list[str]:
     if "://" not in db or db.split("://", 1)[0].lower().startswith("sqlite"):
         return []
     rest = db.split("://", 1)[1]
-    pieces = {rest, *re.split(r"[:@/?&=#]", rest)}
-    pieces |= {unquote(p) for p in pieces}
+    pieces = {rest, *re.split(r"[:@/?&=#,]", rest)}
+    pieces |= {unquote(p) for p in pieces} | {unquote_plus(p) for p in pieces}
     return sorted((p for p in pieces if len(p) >= 3), key=len, reverse=True)
 
 
@@ -598,8 +600,21 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse whose usage errors are redacted: a database URL passed by
+    mistake (a stray positional, a mistyped flag) is never printed in full."""
+
+    redact_argv: list[str] = []
+
+    def error(self, message):
+        for token in self.redact_argv:
+            if "://" in token:
+                message = _redact(message, token)
+        super().error(message)
+
+
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(
+    ap = _Parser(
         prog="python3 -m backend.eval.flip_read",
         description="The model-side 24 h read after the 200 ms flip (G1-G3, G7-G10), "
                     "read-only.",
@@ -631,6 +646,7 @@ def main(argv=None) -> int:
                     help="the trade_i1_mode the window ran under (default 1, the launch "
                          "value): at 0 or 1 any i1_dropped withdrawal fails G10; at 2 it is "
                          "only reported")
+    ap.redact_argv = list(sys.argv[1:] if argv is None else argv)
     args = ap.parse_args(argv)
     try:
         return _run(args)

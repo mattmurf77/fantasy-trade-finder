@@ -135,7 +135,8 @@ they include all graded rows and report `gradeable_share` / `flag_low_share` ins
 `receipts.screen`; requires `receipts.grading` on (404 `feature_disabled` while fully dark).
 
 **Series break at the packed-evidence flip (U6 R-U6b, 2026-10-26).** The response always
-carries `caveats` (usually `[]`). Once `receipts_service.RECEIPTS_SERIES_BREAK_DAY` is set,
+carries `caveats` (usually `[]`). Once `database.PACKED_EVIDENCE_FLIP_DAY` is set (one value,
+shared with the endorsement ratio's caveat at `/api/admin/suggestion-telemetry/ratio`),
 and the serve dates of the graded rows used span that day, it holds one entry:
 `{code: "series_break", scope: "receipts", detail: "U6/R-U6a: receipts move to viewed-or-first-30
 cards at the packed-evidence flip", day}`. This is the #418 `analytics_queries.SERIES_BREAKS`
