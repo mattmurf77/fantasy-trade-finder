@@ -56,8 +56,8 @@ const read = (rel) => fs.readFileSync(path.join(MOBILE, rel), 'utf8');
 
 // The eight registrations plan §3/§5 requires: the hub route plus seven
 // second-level pages. `SettingsTesting` is registered unconditionally on
-// purpose — `__DEV__ || testing.stage_users` gates the hub ROW, not the
-// route (the RootNav convention).
+// purpose — `__DEV__ || testing.stage_users || testing.timing_readout` gates
+// the hub ROW, not the route (the RootNav convention).
 const ROUTES = [
   'Settings',
   'SettingsLeagues',

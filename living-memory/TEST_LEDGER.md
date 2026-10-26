@@ -16,6 +16,34 @@ Full gates. This is the launch condition for the 200 ms waiver W-AC-L5 (Product,
   - `/api/trades/queue` makes no platform write.
 - **Not covered:** whether Sleeper itself would reject a non-owned player is unverified; the server check now makes that moot.
 
+## 2026-10-26 — Timing readout mounted on Settings › Testing; hub row opens for it (#363 ruling 11)
+
+Full gates, not express (scope: #363's trades-200ms scope, head-eng ruling 11; in the 200 ms set on head-eng's call, 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `SettingsTestingScreen` mounts `<TimingReadoutRow />` directly after `<TestingSection>` (default testID `settings.testing.timing-readout`, no gate of its own). The hub's Testing row now shows on `__DEV__ || testing.stage_users || testing.timing_readout`. The flat `SettingsScreen` is unchanged.
+- **New pins:**
+  - `check-settings-ia` T1 (AST): the components-path import, exactly one mount, no props, no conditional, the child right after `<TestingSection>`.
+  - `check-settings-ia` T2 (AST): the `settings.hub.testing` row's condition is an `||` chain that resolves to exactly `__DEV__`, `testing.stage_users` and `testing.timing_readout`, with the row in the branch taken when that is true.
+  - `check-settings-ia` T3 (AST, D-166): `LAUNCHED_FLAG_DEFAULTS` holds neither `testing.timing_readout` nor `testing.stage_users`, and has no spread or computed entry hiding a key.
+  - `check-settings-ia` T4 (AST): `<TimingReadoutRow />` is mounted nowhere in `mobile/src` except the Testing page.
+  - `check-settings-testids`: `settings.testing.timing-readout` in NEW_GATED, pinned to `TimingReadoutRow.tsx`.
+- **Sabotage (each red, then green on restore; files byte-identical after): 18/18.**
+  - T1, 10: import removed, wrong path, aliased, mount removed, mounted twice, testID overridden, own `&&` gate, moved before `TestingSection`, a row in between, moved outside the ScrollView.
+  - T2, 6: gate reverted to `__DEV__ || stage_users`, const bound to the wrong flag key, `||` → `&&`, `stage_users` dropped, `__DEV__` dropped, an extra flag ORed in.
+  - testids, 2: the default id renamed; the default literal removed.
+  - **release-lead QA follow-up (`#407` GO-with-notes), 8 more, all red:** T3 ×5 (`timing_readout` or `stage_users` added at the top or the end of `LAUNCHED_FLAG_DEFAULTS`, and a spread entry); T2 ×2 (the row moved to the false branch of the right condition, and the gate reverted to `__DEV__ || stage_users`); T4 ×1 (a second mount on the hub). Checks renamed from 5a/5b to T1–T4 so they don't collide with #360's numbering.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; all 117 `check-*.js` pass.
+- **Code-walk (App Store build, only `testing.timing_readout` on, hub on):**
+  1. `RootNav.tsx:272-274` mounts the hub.
+  2. `SettingsHubScreen.tsx:94` is true, so `:337` shows the Testing row (`:339`).
+  3. On `SettingsTestingScreen.tsx`, `:50` `TestingSection` renders its "Testing" banner (`TestingSection.tsx:51`) and the unconditional "Test feedback" row (`:53-65`); "Test stages" stays hidden (`:66`, `stage_users` off).
+  4. `:55` renders the readout (`TimingReadoutRow.tsx:30` passes).
+- **TestFlight checklist (operator, `testing.timing_readout` delivered to the device):**
+  1. Settings shows a Testing row; tap it. Under the "Testing" banner and "Test feedback", the last row is "Last tap to first card".
+  2. Before any Find trades tap this session it reads "No trade search yet this session". After a tap that shows a first card it reads "N ms · network · launch", plus " · <serve_source>" (e.g. " · device") when R2 carried one.
+  3. With the flag off (and `stage_users` off), the hub has no Testing row.
+- **Not run yet:** the TestFlight checklist.
+
 ## 2026-10-25 — 200 ms path, mobile pieces (#363): pass A, M, C — evidence
 
 Full gates, not express (PRD #339; eng scope v1.3). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
