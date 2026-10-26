@@ -1125,19 +1125,12 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
-# C8 retention (ADR-025): the archive extras by age, for the purge the packing
-# stage restores (models-lead R2.6 S2 removed it until then). Partial, so it
-# indexes the archive extras alone (both dialects) and costs nothing on other
-# rows; kept so packing needs no migration. _migrate_db adds it to existing
-# databases.
-_ARCHIVE_INDEX_WHERE = "evidence_tier = 'archive'"
-Index(
-    "ix_deck_impressions_archive",
-    deck_impressions_table.c.evidence_tier,
-    deck_impressions_table.c.served_at,
-    sqlite_where=text(_ARCHIVE_INDEX_WHERE),
-    postgresql_where=text(_ARCHIVE_INDEX_WHERE),
-)
+# C8 retention (ADR-025) has no index yet: the archive partial index arrives
+# with stage-2 packing, which restores the purge (models-lead R2.6 S2). Build it
+# then with CREATE INDEX CONCURRENTLY off the boot path (an operator one-off or
+# a migration script, with a lock_timeout), never in _migrate_db: a plain
+# CREATE INDEX on prod's deck_impressions blocks writes for a full scan and
+# can outlast gunicorn's 120 s boot timeout.
 
 # Private debug evidence, content-addressed within one user/job. Core card
 # evidence and labels remain on deck_impressions; only debug snapshots expire.
@@ -3918,17 +3911,6 @@ def _migrate_db() -> None:
                 ))
         except Exception:
             pass
-
-    # ADR-025 C8: the archive partial index (after the evidence_tier column
-    # migration above). Both dialects accept CREATE INDEX ... WHERE.
-    try:
-        with engine.begin() as conn:
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_deck_impressions_archive "
-                f"ON deck_impressions (evidence_tier, served_at) WHERE {_ARCHIVE_INDEX_WHERE}"
-            ))
-    except Exception:
-        pass
 
     # ── trade_matches.status: 'active' → 'pending' (review P0) ─────────────
     # Earlier code wrote status='active' on insert; every cron reader filters

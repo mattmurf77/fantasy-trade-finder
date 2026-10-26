@@ -1142,30 +1142,26 @@ def test_s2_no_evidence_row_is_purged_before_packing(deferred, monkeypatch):
     assert not hasattr(db_module, "purge_archive_deck_impressions")
 
 
-def test_g3_the_archive_partial_index_is_kept_for_packing(deferred):
-    """S2 left the index with no reader; it indexes archive rows alone."""
-    from sqlalchemy import text
-    _, engine, _ = deferred
-    with engine.connect() as conn:
-        ddl = conn.execute(text("SELECT sql FROM sqlite_master WHERE name = 'ix_deck_impressions_archive'")).scalar()
-    assert ddl.endswith("(evidence_tier, served_at) WHERE evidence_tier = 'archive'")
-
-
-def test_g3_the_migration_adds_the_partial_index_to_an_existing_database(tmp_path, monkeypatch):
-    from sqlalchemy import create_engine, text
+def test_p2_1_no_archive_index_until_packing_and_none_built_at_boot(tmp_path, monkeypatch):
+    """release-lead P2-1: the archive partial index arrives with stage-2
+    packing, built CONCURRENTLY off the boot path. Neither a fresh schema nor
+    _migrate_db (the boot) creates an index over evidence_tier."""
+    from sqlalchemy import create_engine, event, inspect
     engine = create_engine(f"sqlite:///{tmp_path / 'existing.db'}",
                            connect_args={"check_same_thread": False})
     db_module.metadata.create_all(engine)
-    with engine.begin() as conn:
-        conn.execute(text("DROP INDEX ix_deck_impressions_archive"))   # a database from before G3
     monkeypatch.setattr(db_module, "engine", engine)
     monkeypatch.setattr(db_module, "DATABASE_URL", "sqlite:///existing")
-    for _ in range(2):                                    # idempotent
+    seen = []
+    listen = lambda conn, cursor, statement, *a: seen.append(" ".join(statement.split()))
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
         db_module._migrate_db()
-        with engine.connect() as conn:
-            ddl = conn.execute(text("SELECT sql FROM sqlite_master "
-                                    "WHERE name = 'ix_deck_impressions_archive'")).scalar()
-        assert ddl and ddl.endswith("WHERE evidence_tier = 'archive'")
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    indexes = inspect(engine).get_indexes("deck_impressions")
+    assert not [i for i in indexes if "evidence_tier" in i["column_names"]]
+    assert not [s for s in seen if s.upper().startswith("CREATE INDEX") and "evidence_tier" in s]
 
 
 # ── The budget rule ─────────────────────────────────────────────────────────

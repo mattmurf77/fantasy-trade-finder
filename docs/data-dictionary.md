@@ -768,7 +768,7 @@ Flag `trade.first_page_store` (default **false**). Spec: `docs/plans/org-bringup
 
 **`served_at`** on a deferred row is the deck's **first delivery** time, one timestamp shared by every row the deck writes (ghosts and later-written rows included), as the logger's start was one per deck before. Features and valuation stay frozen at build (C6).
 
-Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`. `ix_deck_impressions_archive` on `(evidence_tier, served_at) WHERE evidence_tier = 'archive'` (partial, both dialects; `_migrate_db` adds it to existing databases): kept for the C8 purge the packing stage restores; nothing reads it until then (S2 removed the stage-1 purge), and it indexes archive rows alone.
+Indexes: `ix_deck_impressions_user_league` on `(user_id, league_id)`; `ix_deck_impressions_job` on `deck_job_id`. No archive index yet: the partial index for C8's purge (`(evidence_tier, served_at) WHERE evidence_tier = 'archive'`) arrives with stage-2 packing, which restores the purge (S2), and must be built `CONCURRENTLY` off the boot path (an operator one-off or a separate migration script, with a `lock_timeout`), never in `_migrate_db`: a plain `CREATE INDEX` on prod's `deck_impressions` blocks writes for a full scan and can outlast gunicorn's 120 s boot timeout.
 
 ---
 
