@@ -15,7 +15,8 @@ Pinned here:
     misses and their knobs (trade_i1_mode, trade_gate_miss_mode), the admin
     gate-miss hook, the C-a log line and the floor kick after the response;
   * ruling 29: "updating" only while a rebuild runs, never on ESPN/MFL;
-  * the kill knob first_page_store_enabled and the paging kill switch;
+  * the kill knob first_page_store_enabled (on at any finite value ≥ 1; the
+    +1 re-enable) and the paging kill switch; /status at trade_i1_mode 0;
   * a roster change rebuilds lazily (S0: no proactive rebuild from a live
     session's old rosters); session-init (U5);
   * eviction by age and by the byte ceiling; account deletion and export;
@@ -707,6 +708,48 @@ def test_the_paging_kill_switch_keeps_the_store_out(p1, spawned, statements, mon
     assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
 
 
+@pytest.mark.parametrize("value, on", [
+    (1.0, True), (2.0, True), (7.0, True), (0.0, False), (0.5, False), (-1.0, False),
+    (float("nan"), False), (float("inf"), False), ("not a number", False), (None, False),
+])
+def test_the_kill_knob_is_on_at_any_finite_value_of_at_least_1(p1, monkeypatch, value, on):
+    monkeypatch.setitem(server._trade_service_mod._cfg, "first_page_store_enabled", value)
+    assert server._trade_page_store_enabled() is on
+
+
+def test_the_kill_knob_missing_reads_as_on(p1, monkeypatch):
+    monkeypatch.delitem(server._trade_service_mod._cfg, "first_page_store_enabled")
+    assert server._trade_page_store_enabled() is True
+
+
+def test_re_enabling_with_the_knob_plus_one_makes_old_pages_fall_through(p1, spawned, monkeypatch):
+    """1 → 0 → 2: while off, input changes weren't marked; the bumped knob is in
+    every config_signature, so the page stored at 1 never serves again."""
+    client, _, _ = p1
+    build_page()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "first_page_store_enabled", 0.0)
+    _vote(client)                                       # missed: the store is off
+    assert stored()["state"] == "ready"
+    monkeypatch.setitem(server._trade_service_mod._cfg, "first_page_store_enabled", 2.0)
+    body = generate(client, page=1).get_json()
+    assert "serve_source" not in body                   # today's path: a new job
+    assert len(spawned) == 1
+
+
+def test_status_at_i1_mode_0_takes_the_job_path(p1, spawned, statements, monkeypatch):
+    """No stored-page serve at trade_i1_mode 0, on /status as on /generate."""
+    client, _, _ = p1
+    job_id = build_page()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_i1_mode", 0.0)
+    statements.clear()
+    body = status(client, job_id, 30).get_json()
+    assert "serve_source" not in body and body["job_id"] == job_id    # the in-process job
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    assert status(client, job_id, 30).status_code == 404               # no job, no page
+    assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
+
+
 # ── /status cursors into a page-served deck ─────────────────────────────────
 
 def test_status_cursors_walk_the_stored_pages(p1, spawned):
@@ -923,6 +966,20 @@ def test_an_engine_code_or_deck_pipeline_change_blocks_the_page(p1, spawned, mon
     server._trade_jobs_by_key.clear()
     body = generate(client, page=1).get_json()
     assert "serve_source" not in body and len(spawned) == 1   # today's path
+
+
+def test_every_backend_module_value_core_imports_is_hashed():
+    """value_core's own imports of app modules (trade_service, ranking_service,
+    power_rankings, trade_policy) all decide its decks, so all are hashed."""
+    import re
+    root = Path(server.__file__).resolve().parent
+    hashed = {path.relative_to(root).as_posix()
+              for pattern in server._ENGINE_CODE_MODULES for path in root.glob(pattern)}
+    imported = set()
+    for source in (root / "value_core").glob("*.py"):
+        for name in re.findall(r"from \.\.(\w+) import|from \.\. import (\w+)", source.read_text()):
+            imported.add((name[0] or name[1]) + ".py")
+    assert imported and imported <= hashed, imported - hashed
 
 
 def test_the_engine_code_hash_covers_the_module_set_once_per_process(tmp_path, monkeypatch):

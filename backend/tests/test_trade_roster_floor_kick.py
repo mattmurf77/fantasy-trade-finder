@@ -8,7 +8,7 @@ held, whenever the Sleeper roster is past the bound. Pinned here through
       request thread (AC-L3);
   (b) N concurrent past-bound taps start exactly one refresh (the hook's
       single-flight), while the refresh is held in flight.
-Harness: test_roster_refresh_async's StaticPool engine and Sleeper stubs.
+Harness: a file-backed SQLite engine (one connection per thread) and Sleeper stubs.
 """
 import json
 import threading
@@ -16,7 +16,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine, insert
-from sqlalchemy.pool import StaticPool
 
 import backend.database as db_module
 import backend.roster_refresh as rr
@@ -37,8 +36,11 @@ CARD = {"trade_id": "t-floor", "league_id": LID, "target_user_id": OPP,
 
 
 @pytest.fixture()
-def env(monkeypatch):
-    engine = create_engine("sqlite://", poolclass=StaticPool,
+def env(monkeypatch, tmp_path):
+    # A file-backed DB, so each thread gets its own connection. The barrier
+    # test runs 6 concurrent taps, and one shared StaticPool connection across
+    # threads raised sqlite3.InterfaceError on CI (prod runs on a pooled Postgres).
+    engine = create_engine(f"sqlite:///{tmp_path / 'floor-kick.db'}",
                            connect_args={"check_same_thread": False})
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)

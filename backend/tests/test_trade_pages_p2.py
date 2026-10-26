@@ -810,6 +810,23 @@ def test_the_paging_kill_switch_ignores_deck_and_cursor(p1, spawned, statements,
     assert not spawned
 
 
+
+def test_i1_mode_0_ignores_deck_and_never_reads_the_store(p1, spawned, statements, monkeypatch):
+    """trade_i1_mode 0 (the pre-S0 path): the store isn't read, so `deck` is
+    ignored and `/status?deck=D&cursor=K` serves exactly as the job_id +
+    cursor form does (#368 QA: /status at mode 0 takes the job path)."""
+    client, _, _ = p1
+    deck = build_deck()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_i1_mode", 0.0)
+    for cursor in (0, 30):
+        statements.clear()
+        with_deck = client.get(f"/api/trades/status?job_id={deck}&deck={deck}&cursor={cursor}",
+                               headers=HEADERS)
+        assert with_deck.status_code == 200
+        assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
+        job_form = client.get(f"/api/trades/status?job_id={deck}&cursor={cursor}", headers=HEADERS)
+        assert with_deck.get_data() == job_form.get_data()
+
 def test_the_job_id_form_is_unchanged(p1, spawned):
     client, _, _ = p1
     deck = build_deck()
