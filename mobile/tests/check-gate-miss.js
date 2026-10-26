@@ -132,17 +132,70 @@ process.on('exit', () => {
     const idle = run(false);
     eq([idle.calls, idle.timers.length], [[false], 0], 'no wait, no timer (and the error state resets)');
   });
+  await check('1f. EXECUTED: Retry while the SAME job still runs (a non-force repeat) restarts the wait — it never sticks on the error', () => {
+    // The screen's own effect WITH its deps array, re-run React-style only
+    // when a dep changes, plus the screen's own Retry handler.
+    const sf = ts.createSourceFile('T.tsx', trades, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    let body = null; let deps = null; let retry = null;
+    (function visit(n) {
+      if (ts.isCallExpression(n) && n.expression.getText(sf) === 'useEffect' && n.arguments[0]
+          && ts.isArrowFunction(n.arguments[0]) && n.arguments[0].body.getText(sf).includes('setRosterWaitExpired(false)')) {
+        body = n.arguments[0].body.getText(sf);
+        deps = n.arguments[1] && n.arguments[1].getText(sf);
+      }
+      if (ts.isFunctionDeclaration(n) && n.name && n.name.text === 'handleGateRetry') retry = n.getText(sf);
+      ts.forEachChild(n, visit);
+    })(sf);
+    ok(body && deps, 'the fall-through effect and its deps');
+    ok(retry, 'handleGateRetry');
+    const names = ['rosterWait', 'job', 'gateRetrySeq', 'setRosterWaitExpired', 'setTimeout', 'clearTimeout', 'FIRST_CARD_TIMEOUT_MS'];
+    const effect = compile(`module.exports = function (env) { const { ${names.join(', ')} } = env; ${body} };`);
+    const depsOf = compile(`module.exports = function (env) { const { ${names.join(', ')} } = env; return ${deps}; };`);
+    const handler = compile(`module.exports = function (env) {
+      const { setGateRetrySeq, handleFindTrades } = env; return ${retry}; };`);
+    // A tiny React: state, and an effect that re-runs when its deps change.
+    const st = { expired: false, seq: 0, timers: [], searches: [] };
+    let prevDeps = null; let cleanup = null;
+    const env = () => ({
+      rosterWait: true, job: { job_id: 'j1' }, gateRetrySeq: st.seq, FIRST_CARD_TIMEOUT_MS: F.FIRST_CARD_TIMEOUT_MS,
+      setRosterWaitExpired: (v) => { st.expired = v; },
+      setTimeout: (fn, ms) => { st.timers.push({ fn, ms, live: true }); return st.timers.length; },
+      clearTimeout: (id) => { if (st.timers[id - 1]) st.timers[id - 1].live = false; },
+    });
+    const render = () => {
+      const e = env(); const d = depsOf(e);
+      if (!prevDeps || d.some((v, i) => !Object.is(v, prevDeps[i]))) {
+        if (typeof cleanup === 'function') cleanup();
+        cleanup = effect(e);
+      }
+      prevDeps = d;
+    };
+    const fire = () => { for (const t of st.timers) if (t.live) { t.live = false; t.fn(); } };
+    render();
+    fire();
+    eq(st.expired, true, 'the wait expired into the error');
+    render(); // the same running job answers again: nothing changes by itself
+    eq(st.expired, true, 'control: with no retry the error stays (same job_id)');
+    handler({ setGateRetrySeq: (u) => { st.seq = typeof u === 'function' ? u(st.seq) : u; },
+      handleFindTrades: (src) => st.searches.push(src) })();
+    eq(st.searches, ['deck_error_retry'], 'Retry runs a new search as deck_error_retry');
+    render(); // the retry's answer: SAME job_id, still withholding
+    eq(st.expired, false, 'Retry restarts the named wait even on the same job');
+    eq(st.timers.filter((t) => t.live).map((t) => t.ms), [10_000], '…with a fresh 10 s, so it ends again');
+    fire();
+    eq(st.expired, true, 'and it ends again');
+  });
 
   // ── 2. The screen's wiring ──────────────────────────────────────────────
   await check('2a. a roster_check_unavailable job error maps to the NAMED error, not the generic copy', () => {
     ok(/setDeckFailure\(isRosterCheckError\(job\.error\)\s*\? \{ kind: 'roster_check', message: GATE_ROSTER_CHECK_FAILED_LINE \}\s*: \{ kind: 'job_error', message: jobErrorCopy\(job\.error\) \}\);/.test(code),
       'the job-error mirror');
-    ok(/\) : deckFailure\?\.kind === 'roster_check' \? \(\s*<GateErrorCard minHeight=\{topCardH\} onRetry=\{\(\) => handleFindTrades\('deck_error_retry'\)\} \/>\s*\) : deckFailure \? \(/.test(code),
+    ok(/\) : deckFailure\?\.kind === 'roster_check' \? \(\s*<GateErrorCard minHeight=\{topCardH\} onRetry=\{handleGateRetry\} \/>\s*\) : deckFailure \? \(/.test(code),
       'its card, ahead of the generic "Search failed" card; Retry re-runs as deck_error_retry');
   });
   await check('2b. the withhold renders the named wait in place of "Looking for trades…", then the error', () => {
     ok(/const rosterWait = isRosterCheckWait\(job, deck\.length\);/.test(code), 'derived from the job and the device\'s cards');
-    ok(/\) : rosterWait \? \(\s*rosterWaitExpired \? \(\s*<GateErrorCard minHeight=\{topCardH\} onRetry=\{\(\) => handleFindTrades\('deck_error_retry'\)\} \/>\s*\) : \(\s*<GateWaitCard minHeight=\{topCardH\} \/>\s*\)\s*\) : firstRun &&/.test(code),
+    ok(/\) : rosterWait \? \(\s*rosterWaitExpired \? \(\s*<GateErrorCard minHeight=\{topCardH\} onRetry=\{handleGateRetry\} \/>\s*\) : \(\s*<GateWaitCard minHeight=\{topCardH\} \/>\s*\)\s*\) : firstRun &&/.test(code),
       'wait, then error');
     const at = (s) => code.indexOf(s);
     ok(at(') : rosterWait ? (') > at('onRetry={handleOfflineTapRetry} />'), 'offline outranks it');
