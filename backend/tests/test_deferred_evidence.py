@@ -621,6 +621,29 @@ def test_370_no_impression_is_written_twice_across_polls(deferred, path):
     assert sorted(rows(engine), key=lambda r: r["impression_id"]) == first
 
 
+def test_370_at_i1_mode_0_no_store_serve_is_assumed(deferred, monkeypatch):
+    """At trade_i1_mode 0 a job carries no roster_fp, so no page is stored and
+    the store is never read (P2 3672c88d): the job path serves and writes
+    exactly what it sends, and a deck whose job left the process undelivered
+    is served by nothing and writes nothing."""
+    client, engine, _ = deferred
+    monkeypatch.setitem(ts._cfg, "trade_i1_mode", 0)
+    job_id, *_ = deferred_deck(120, store=False)
+    assert server._store_trade_page(job_id) is False and stored() is None
+    sent = {c["impression_id"] for c in response(client, "job_cursor", job_id, 30)["cards"]}
+    assert len(sent) == 30
+    assert {r["impression_id"] for r in rows(engine) if r["delivered_at"]} == sent
+    with engine.begin() as conn:                           # a second deck, never delivered
+        conn.execute(delete(db_module.deck_impressions_table))
+        conn.execute(delete(db_module.deck_candidate_sets_table))
+    other, *_ = deferred_deck(60, store=False, job_id="deck-b0001")
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    assert client.get(f"/api/trades/status?job_id={other}&cursor=0", headers=HEADERS).status_code == 404
+    assert client.get(f"/api/trades/status?deck={other}&cursor=0", headers=HEADERS).status_code != 200
+    assert rows(engine) == [] and rows(engine, db_module.deck_candidate_sets_table) == []
+
+
 # ── C4 and C3: first delivery, later pages ──────────────────────────────────
 
 def test_c4_the_first_delivery_of_a_10_card_page_writes_full_rows_for_the_first_30(deferred, monkeypatch):
