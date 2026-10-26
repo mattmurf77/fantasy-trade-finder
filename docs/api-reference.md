@@ -530,9 +530,10 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
 
 ### First-page store (P1, flag `trade.first_page_store`, 2026-10-20)
 
-**Everything in this section applies only while `trade.first_page_store` is on
-(default off).** With it off, paged and unpaged responses are exactly the E2
-section above
+**Everything in this section applies only while the store is on: the flag
+`trade.first_page_store` (default off) and the kill knob
+`first_page_store_enabled` (default 1).** With either off, paged and unpaged
+responses are exactly the E2 section above
 (`backend/tests/test_trade_page_flag_off.py` pins them byte for byte). The
 server keeps the first `trade_pages_stored` × `trade_page_size` cards (90 at
 the defaults) of each user's latest complete organic deck in
@@ -545,6 +546,9 @@ exactly**, with the same knobs: I-1, both gate misses and their shapes
 `status: "running"`), only at `trade_gate_miss_mode` 1 and held at 0, the
 admin gate-miss test hook, and the background floor kick past the roster bound.
 At `trade_i1_mode` 0 the store isn't read.
+
+**The store is only read on a paged request**, so `trade_paged_responses` 0
+keeps it out too.
 
 **On every paged response** (`page: 1` on generate, `cursor` on status, from
 the store or from a job): `prefetch_remaining` (model_config
@@ -576,7 +580,7 @@ decimals. Unpaged requests never read it.
   store response (they belong to the job that ran).
 - **Not served from the store** (today's E2 response, plus
   `prefetch_remaining`): no stored page for the scope; the engine (including
-  the engine modules' code hash and `TRADE_DECK_SHAPE_VERSION`) or the request
+  the engine modules' code hash and `DECK_PIPELINE_VERSION`) or the request
   configuration changed since the build; the stored cards have expired; the
   roster and values read failed (it can't prove the page fresh); or the page is
   stale while a complete, fresh job for it is in this process.

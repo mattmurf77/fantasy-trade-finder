@@ -3641,26 +3641,40 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
 
 # ── P1 first-page store (flag trade.first_page_store) ─────────────────────────
 # Scope: docs/plans/trade-time-to-suggestion/scope-eng-200ms.md §2, §6.2, §6.8.
-# Rows live in trade_page_store (database.py). Flag off ⇒ nothing here reads or
-# writes the table and no response gains a field. Every page serve goes through S0's serve rules
+# Rows live in trade_page_store (database.py). Off (the flag, or the kill knob
+# first_page_store_enabled) ⇒ nothing here reads or writes the table and no
+# response gains a field. Every page serve goes through S0's serve rules
 # (_roster_serve_rules): the same I-1, gate misses, knobs, log line and floor kick.
 
 _TRADE_PAGE_FORMAT = 1           # pages_blob = {"v", "opponents_total", "cards"}
 _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card without one
 
-# Bump whenever _run_trade_job's deck-shaping layers change (gates, ordering,
-# quality filters, ghosting, publication): stored pages carry it in their
-# engine_version, so a bump makes every older page fall through. server.py
-# itself is not hashed below; hashing it would cold every page on every deploy.
-TRADE_DECK_SHAPE_VERSION = 1
+# The deck pipeline version (MOD-M1's re-run trigger). Bump it whenever
+# _run_trade_job's deck-shaping layers in server.py change what cards a deck
+# holds or their order (gates, ordering, quality filters, ghosting,
+# publication). Stored pages carry it in their engine_version, so a bump makes
+# every older page fall through. server.py itself is not hashed below; hashing
+# it would cold every page on every deploy.
+DECK_PIPELINE_VERSION = 1
 
-# The engine modules whose bytes are hashed into every page's engine_version
-# (backend/-relative globs, sorted within each pattern).
+# The modules whose code decides what cards a deck holds or their order. Their
+# bytes are hashed into every page's engine_version (backend/-relative globs,
+# sorted within each pattern). The reasons per module are in the P1 report and
+# docs/data-dictionary.md (trade_page_store.engine_version).
 _ENGINE_CODE_MODULES = (
+    # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
-    "deck_quality.py", "trade_bilateral_presentment.py", "small_trade_presentment.py",
-    "trade_policy.py", "trade_significance.py",
-    "ranking_service.py", "pick_values.py", "trade_breaker.py", "trade_narrative.py",
+    "ranking_service.py", "pick_values.py", "pick_slots.py",
+    # gates and filters on the candidate set
+    "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
+    "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
+    "negmem.py", "trade_breaker.py", "deck_quality.py",
+    # composition and order of the served deck
+    "bakeoff_runner.py", "bakeoff_profiles.py", "taste_service.py", "value_model.py",
+    "suggestion_telemetry.py", "trade_bilateral_presentment.py",
+    "small_trade_presentment.py",
+    # the card copy itself
+    "trade_narrative.py",
 )
 _engine_code_hash_value: str | None = None
 
@@ -3687,7 +3701,11 @@ def _trade_engine_code_hash() -> str:
 
 
 def _trade_page_store_enabled() -> bool:
-    return is_enabled("trade.first_page_store")
+    """The flag `trade.first_page_store` AND the deploy-free kill knob
+    `first_page_store_enabled` (model_config, default 1; only exactly 1 keeps
+    the store on). Either off ⇒ no store read, write or serve."""
+    return (is_enabled("trade.first_page_store")
+            and _deck_cfg("first_page_store_enabled", 1.0) == 1.0)
 
 
 def _trade_page_knob(key: str, default: float, low: int, high: int) -> int:
@@ -3741,13 +3759,13 @@ def _trade_page_engine_version(engine_name: str, safety_policy, presentation_cap
     """`engine_version`: the engine; a hash of the serving policy that the job
     cache also requires to match (_trade_job_is_fresh's safety signature and
     presentation mode); the engine modules' code hash; and
-    TRADE_DECK_SHAPE_VERSION. A stored page never outlives a policy rollout or
-    an engine code change across a deploy."""
+    DECK_PIPELINE_VERSION. A stored page never outlives a policy rollout or an
+    engine code change across a deploy."""
     presentation = (presentation_capture[:2] if presentation_capture is not None
                     else _simple_presentment.OFF)
     policy = json.dumps([list(safety_policy or []), list(presentation)], default=str)
     return (f"{engine_name}+policy:{hashlib.sha256(policy.encode()).hexdigest()[:12]}"
-            f"+code:{_trade_engine_code_hash()}+shape:{TRADE_DECK_SHAPE_VERSION}")
+            f"+code:{_trade_engine_code_hash()}+pipeline:{DECK_PIPELINE_VERSION}")
 
 
 def _trade_page_viewer(sess: Mapping, league_id: str) -> str:
@@ -3836,7 +3854,7 @@ def _mark_trade_pages_stale(marked_at: float, *, user_id: str | None = None,
     """P1: an input change makes the stored pages it touches stale (one
     bounded UPDATE). Call with _trade_jobs_lock released. `marked_at` is
     taken before the in-process fence, so the supersede guard also refuses a
-    deck admitted before the change. Flag off ⇒ no-op. Never raises."""
+    deck admitted before the change. Store off ⇒ no-op. Never raises."""
     if not _trade_page_store_enabled():
         return
     from . import database as _db
@@ -4028,7 +4046,7 @@ def _trade_page_past_stored(row: dict, cursor: int) -> dict:
 
 
 def _evict_trade_page_store() -> None:
-    """P1 eviction (§7): one bounded pass per cleanup tick. Flag off ⇒ no-op."""
+    """P1 eviction (§7): one bounded pass per cleanup tick. Store off ⇒ no-op."""
     if not _trade_page_store_enabled():
         return
     from . import database as _db
@@ -16809,7 +16827,7 @@ def trade_job_status():
         return jsonify({"error": "invalid_cursor",
                         "message": "cursor must be a non-negative integer"}), 400
     page_row = None
-    if cursor is not None and _trade_page_store_enabled():
+    if cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled():
         from . import database as _db
         try:
             page_row = _db.load_trade_page_for_job(sess["user_id"], job_id)

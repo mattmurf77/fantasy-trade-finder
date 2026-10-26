@@ -15,6 +15,7 @@ Pinned here:
     misses and their knobs (trade_i1_mode, trade_gate_miss_mode), the admin
     gate-miss hook, the C-a log line and the floor kick after the response;
   * ruling 29: "updating" only while a rebuild runs, never on ESPN/MFL;
+  * the kill knob first_page_store_enabled and the paging kill switch;
   * a roster change rebuilds lazily (S0: no proactive rebuild from a live
     session's old rosters); session-init (U5);
   * eviction by age and by the byte ceiling; account deletion and export;
@@ -81,7 +82,7 @@ def p1(live, monkeypatch):
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
     # Production's knob values, whatever a local DB seeded.
-    for knob, value in (("trade_paged_responses", 1.0),
+    for knob, value in (("first_page_store_enabled", 1.0), ("trade_paged_responses", 1.0),
                         ("trade_i1_mode", 2.0), ("trade_gate_miss_mode", 0.0)):
         monkeypatch.setitem(server._trade_service_mod._cfg, knob, value)
     yield client, engine, sess
@@ -634,6 +635,37 @@ def test_a_linked_league_never_shows_updating(p1, spawned):
     assert body["freshness_state"] == "fresh"
 
 
+# ── Kill switches ───────────────────────────────────────────────────────────
+
+def test_the_kill_knob_stops_every_store_read_write_and_serve(p1, spawned, statements, monkeypatch):
+    """first_page_store_enabled 0, with the flag on: no store read, write, serve or mark."""
+    client, _, _ = p1
+    job_id = build_page()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "first_page_store_enabled", 0.0)
+    assert not server._trade_page_store_enabled()
+    statements.clear()
+    body = generate(client, page=1).get_json()
+    assert not {"serve_source", "freshness_state", "prefetch_remaining"} & set(body)
+    assert status(client, job_id, 30).get_json().get("serve_source") is None
+    run_job(force_fresh=True)                          # a completion
+    server._invalidate_trade_jobs(user_id=UID)         # an input change
+    server._evict_trade_page_store()
+    assert page_queries(statements) == []
+
+
+def test_the_paging_kill_switch_keeps_the_store_out(p1, spawned, statements, monkeypatch):
+    """trade_paged_responses 0: `page` and `cursor` are ignored, so no store serve."""
+    client, _, _ = p1
+    job_id = build_page()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_paged_responses", 0.0)
+    statements.clear()
+    body = generate(client, page=1).get_json()
+    assert not {"serve_source", "cursor"} & set(body)
+    body = status(client, job_id, 30).get_json()
+    assert not {"serve_source", "cursor"} & set(body)
+    assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
+
+
 # ── /status cursors into a page-served deck ─────────────────────────────────
 
 def test_status_cursors_walk_the_stored_pages(p1, spawned):
@@ -838,12 +870,12 @@ def test_stale_marks_never_run_under_the_job_lock(p1, spawned, monkeypatch):
 
 # ── Engine identity across deploys (lead review B) ──────────────────────────
 
-@pytest.mark.parametrize("change", ["deck_shape_version", "engine_code_hash"])
-def test_an_engine_code_or_deck_shape_change_blocks_the_page(p1, spawned, monkeypatch, change):
+@pytest.mark.parametrize("change", ["deck_pipeline_version", "engine_code_hash"])
+def test_an_engine_code_or_deck_pipeline_change_blocks_the_page(p1, spawned, monkeypatch, change):
     client, _, _ = p1
     build_page()
-    if change == "deck_shape_version":
-        monkeypatch.setattr(server, "TRADE_DECK_SHAPE_VERSION", server.TRADE_DECK_SHAPE_VERSION + 1)
+    if change == "deck_pipeline_version":
+        monkeypatch.setattr(server, "DECK_PIPELINE_VERSION", server.DECK_PIPELINE_VERSION + 1)
     else:
         monkeypatch.setattr(server, "_engine_code_hash_value", "0" * 12)
     server._trade_jobs.clear()
