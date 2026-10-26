@@ -21,6 +21,7 @@ The client keeps any rejected note unsynced and retries it later
 In-memory SQLite, injected sessions; conftest resets the throttle per test.
 """
 import hashlib
+import io
 import json
 import logging
 from unittest.mock import MagicMock, patch
@@ -89,12 +90,13 @@ def _fill(client, n, prefix, **kw):
 
 # ── size cap ────────────────────────────────────────────────────────────────
 
-def test_oversized_body_is_413_before_it_is_read(harness):
+@pytest.mark.parametrize("over", [1, 10_000], ids=["cap+1", "cap+10000"])
+def test_oversized_body_is_413_before_it_is_read(harness, over):
+    """The Content-Length pre-check answers before ANY read, even one byte
+    over the cap (get_data is what get_json and the chunked cap read with)."""
     client, engine = harness
-    big = json.dumps({"client_id": "fb-big", "screen": "Trades", "severity": "bug",
-                      "text": "x" * (server.FEEDBACK_MAX_BODY_BYTES + 10),
-                      "client_created_at": "2026-10-26T12:00:00Z"})
-    with patch.object(server.app.request_class, "get_json",
+    big = _body_of(server.FEEDBACK_MAX_BODY_BYTES + over, "fb-big")
+    with patch.object(server.app.request_class, "get_data",
                       side_effect=AssertionError("body read before the size check")):
         r = _post(client, "fb-big", raw=big)
     assert r.status_code == 413
@@ -106,6 +108,67 @@ def test_a_body_at_the_cap_is_still_read(harness):
     client, engine = harness
     r = _post(client, "fb-normal", text="y" * server.FEEDBACK_TEXT_MAX)
     assert r.status_code == 201
+    assert _count(engine) == 1
+
+
+# Release-lead delta QA C (P2-2): a chunked body has no Content-Length, so it
+# used to be read and stored whole. The read itself is capped now. The rule
+# is `>`: a body of exactly FEEDBACK_MAX_BODY_BYTES is accepted, one byte
+# more is 413, by Content-Length and chunked alike.
+
+def _body_of(n, client_id):
+    note = {"client_id": client_id, "screen": "Trades", "severity": "bug",
+            "text": "the trade card overlapped the tab bar",
+            "client_created_at": "2026-10-26T12:00:00Z", "pad": ""}
+    note["pad"] = "x" * (n - len(json.dumps(note)))      # ignored by the route
+    raw = json.dumps(note).encode("utf-8")
+    assert len(raw) == n
+    return raw
+
+
+class _CountingStream(io.BytesIO):
+    """Records how many body bytes the server actually read."""
+    def read(self, size=-1):
+        out = super().read(size)
+        self.taken = getattr(self, "taken", 0) + len(out)
+        return out
+
+    def readinto(self, buf):
+        n = super().readinto(buf)
+        self.taken = getattr(self, "taken", 0) + (n or 0)
+        return n
+
+
+def _post_chunked(client, raw, stream=None):
+    """No Content-Length: the WSGI server marks the input as terminated."""
+    return client.post("/api/feedback", input_stream=stream or io.BytesIO(raw),
+                       headers={"Content-Type": "application/json",
+                                "Transfer-Encoding": "chunked"},
+                       environ_overrides={"wsgi.input_terminated": True})
+
+
+def test_a_chunked_1mib_body_is_413_and_nothing_is_stored(harness):
+    client, engine = harness
+    stream = _CountingStream(_body_of(1 << 20, "fb-chunk-big"))
+    r = _post_chunked(client, None, stream=stream)
+    assert r.status_code == 413
+    assert r.get_json() == {"error": "too_large", "limit": server.FEEDBACK_MAX_BODY_BYTES}
+    assert _count(engine) == 0
+    # The cap bounds the read itself: never more than cap + 1 bytes.
+    assert stream.taken <= server.FEEDBACK_MAX_BODY_BYTES + 1
+
+
+@pytest.mark.parametrize("chunked", [False, True], ids=["content-length", "chunked"])
+def test_the_cap_boundary_exactly_64kib_is_accepted_one_more_is_413(harness, chunked):
+    client, engine = harness
+    assert server.FEEDBACK_MAX_BODY_BYTES == 65_536
+    send = (lambda raw: _post_chunked(client, raw)) if chunked else (
+        lambda raw: client.post("/api/feedback", data=raw,
+                                headers={"Content-Type": "application/json"}))
+    at_cap = send(_body_of(65_536, "fb-cap-at"))
+    assert at_cap.status_code == 201, at_cap.get_json()
+    over = send(_body_of(65_537, "fb-cap-over"))
+    assert over.status_code == 413 and over.get_json()["error"] == "too_large"
     assert _count(engine) == 1
 
 

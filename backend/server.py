@@ -13679,7 +13679,8 @@ def submit_feedback_route():
     Idempotent on client_id — retries return 200 with `duplicate: true`.
 
     Public-write limits (#360 QA P2-2): a body over FEEDBACK_MAX_BODY_BYTES
-    is 413 `too_large` before it is read; past FEEDBACK_RATE_LIMIT accepted
+    is 413 `too_large`, before it is read when it has a Content-Length, and
+    capped as it is read when chunked (exactly the cap is accepted); past FEEDBACK_RATE_LIMIT accepted
     notes in a rolling hour per key (verified user, else an unverified
     session's token hash, else X-Device-Id, else client IP) a NEW note is
     429 `rate_limited`. Anonymous notes (no verified user and no resolvable
@@ -13694,7 +13695,28 @@ def submit_feedback_route():
     """
     # Size cap, pre-read (#360 QA P2-2). Clients keep a rejected note and
     # retry it later (useFeedback._syncOne treats any error as unsynced).
+    # A body is too large when it is MORE than FEEDBACK_MAX_BODY_BYTES:
+    # exactly the cap is accepted, cap + 1 is 413.
     if (request.content_length or 0) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
+    # A chunked body has no Content-Length, so the pre-check can't see it
+    # (release-lead delta QA C, P2-2). Cap the read itself with a
+    # per-request max_content_length. Werkzeug's limited stream returns the
+    # first `limit` bytes and only raises RequestEntityTooLarge on a read
+    # PAST the limit, so with limit == cap an over-cap body would come back
+    # silently truncated (and a 400) and a body of exactly the cap couldn't
+    # be told from a bigger one. So the limit is cap + 1 and the length is
+    # checked: at most cap + 1 bytes are ever read. get_data surfaces the
+    # error get_json(silent=True) would swallow; get_json then parses the
+    # cached bytes.
+    from werkzeug.exceptions import RequestEntityTooLarge
+    request.max_content_length = FEEDBACK_MAX_BODY_BYTES + 1
+    try:
+        raw_body = request.get_data(cache=True)
+    except RequestEntityTooLarge:
+        raw_body = None
+    if raw_body is None or len(raw_body) > FEEDBACK_MAX_BODY_BYTES:
         return jsonify({"error": "too_large",
                         "limit": FEEDBACK_MAX_BODY_BYTES}), 413
     body = request.get_json(force=True, silent=True) or {}
