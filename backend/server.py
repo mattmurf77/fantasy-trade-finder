@@ -4737,7 +4737,10 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
     """Write the deck's pack row (insert-or-ignore) with this serve's
     withdrawals in the same transaction. A deck that can't pack exactly
     (pack_run refuses) logs and keeps no pack (eval reads it as a lost pack,
-    which it excludes); its withdrawals are written alone. True when the
+    which it excludes); its withdrawals are written alone. If another
+    instance wrote the pack first (a deploy overlap: the insert is ignored),
+    its cards stand and this delivery merges into its header through the CAS
+    (the union of deliveries), with the withdrawals. True when the
     withdrawals are written."""
     from . import database as _db
     from .eval import evidence_pack
@@ -4749,16 +4752,25 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
                   exc_info=True)
         _db.record_deck_withdrawals(list(withdrawals))
         return True
-    _db.save_deck_evidence_pack({
+    inserted = _db.save_deck_evidence_pack({
         "run_id": ev.job_id, "user_id": ev.user_id, "league_id": ev.league_id,
         "served_at": ev.served_at, "pack_version": packed.pack_version,
         "header_json": packed.header_json, "cards_blob": packed.cards_blob,
         "checksum": packed.checksum, "card_count": packed.card_count,
         "created_at": datetime.now(timezone.utc).isoformat()}, withdrawals)
-    state = _PackState(ev.user_id, json.loads(packed.header_json), unpacked, packed.checksum)
+    if inserted:
+        state = _PackState(ev.user_id, json.loads(packed.header_json), unpacked, packed.checksum)
+    else:                                 # the stored pack's cards and checksum, read fresh
+        state = _load_pack_state(ev.job_id, ev.user_id)
+        if state is None:
+            log.warning("deck-evidence %s: pack insert ignored and no pack readable; "
+                        "retried at the next delivery", ev.job_id)
+            return False
     with ev.lock:
         ev.pack, ev.pack_cards = state, None
-        ev.pack_dirty = state.run["deliveries"] != ev.deliveries
+        ev.pack_dirty = not inserted or state.run["deliveries"] != ev.deliveries
+    if not inserted:                      # our deliveries and withdrawals, merged in by the CAS
+        return _deck_pack_flush_header(ev, withdrawals=withdrawals)
     if ev.pack_dirty:                     # a delivery landed while the pack was built
         _deck_pack_flush_header(ev)
     return True
@@ -4860,24 +4872,32 @@ def _deck_pack_state(deck_job_id: str, user_id: str):
     """The pack state of a deck whose job has left the process: cached, else
     rebuilt once from its row (decode, then the checksum prefix). None when
     the deck has no pack."""
-    from . import database as _db
-    from .eval import evidence_pack
     with _deck_pack_states_lock:
         state = _deck_pack_states.get(deck_job_id)
     if state is not None:
         return state if state.user_id == user_id else None
+    state = _load_pack_state(deck_job_id, user_id)
+    if state is None:
+        return None
+    with _deck_pack_states_lock:
+        while len(_deck_pack_states) >= _DECK_PACK_CACHE_MAX:
+            _deck_pack_states.pop(next(iter(_deck_pack_states)))
+        _deck_pack_states[deck_job_id] = state
+    return state
+
+
+def _load_pack_state(deck_job_id: str, user_id: str):
+    """A deck's pack state read fresh from its row (decode, then the checksum
+    prefix), uncached. None when the deck has no pack (or it isn't the user's)."""
+    from . import database as _db
+    from .eval import evidence_pack
     row = _db.load_deck_evidence_pack(deck_job_id)
     if row is None or row["user_id"] != user_id:
         return None
     _run, cards = evidence_pack.unpack_run(evidence_pack.PackedRun(
         row["pack_version"], row["header_json"], bytes(row["cards_blob"]), row["checksum"],
         row["card_count"]))
-    state = _PackState(user_id, json.loads(row["header_json"]), cards, row["checksum"])
-    with _deck_pack_states_lock:
-        while len(_deck_pack_states) >= _DECK_PACK_CACHE_MAX:
-            _deck_pack_states.pop(next(iter(_deck_pack_states)))
-        _deck_pack_states[deck_job_id] = state
-    return state
+    return _PackState(user_id, json.loads(row["header_json"]), cards, row["checksum"])
 
 
 def _pack_candidate_set(row: dict) -> dict:

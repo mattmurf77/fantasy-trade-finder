@@ -1073,3 +1073,33 @@ def test_a_retirement_db_error_never_stops_the_cleanup_loop(deferred, monkeypatc
     run = unpack(pack_of(engine, job_id))[0]
     assert run["retired"] is True and run["retired_at"]
     assert any("retirement failed" in r.getMessage() for r in caplog.records)
+
+
+def test_two_instances_first_writes_keep_both_boundaries(deferred):
+    """P3 (deploy overlap at the first write): both instances insert the pack
+    (insert-or-ignore). The loser adopts the stored pack (its cards stand, the
+    checksum stays valid even though its own cards differ) and merges its
+    boundary and its withdrawal in through the header CAS."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(80, store=False)
+    ev = server._trade_jobs[job_id]["evidence"]
+    with ev.lock:
+        ev.served_at = "2026-10-27T00:00:00+00:00"
+    cards, run = server._deck_pack_input(ev)
+    a, b = server._DeckEvidence(job_id, UID), server._DeckEvidence(job_id, UID)
+    for x, at, delivered in ((a, "2026-10-27T00:00:00+00:00", [[29, "2026-10-27T00:00:00+00:00"]]),
+                             (b, "2026-10-27T00:00:05+00:00", [[59, "2026-10-27T00:00:05+00:00"]])):
+        x.served_at, x.league_id, x.deliveries, x.packed = at, LEAGUE, delivered, True
+    b_cards = [{**c, "served_at": b.served_at} for c in cards]   # its own first delivery
+    w = {"deck_job_id": job_id, "card_index": 70, "user_id": UID, "league_id": LEAGUE,
+         "reason": "i1_dropped", "first_withdrawn_at": b.served_at,
+         "impression_id": contract.card_impression_id(job_id, 70), "served_before": 0}
+    assert server._deck_pack_first_write(a, cards, {**run, "deliveries": a.deliveries})
+    assert server._deck_pack_first_write(b, b_cards, {**run, "deliveries": b.deliveries},
+                                         withdrawals=[w])
+    stored_run, stored_cards = unpack(pack_of(engine, job_id))          # the checksum holds
+    assert stored_run["deliveries"] == [[29, "2026-10-27T00:00:00+00:00"],
+                                        [59, "2026-10-27T00:00:05+00:00"]]
+    assert {c["served_at"] for c in stored_cards} == {a.served_at}      # the first writer's cards
+    assert set(withdrawals(engine)) == {70}
+    assert b.pack.checksum == pack_of(engine, job_id)["checksum"]       # later updates CAS on it
