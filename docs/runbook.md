@@ -320,22 +320,22 @@ Why this exists: on #416's deploy, the boot spent about 90 s in `init_db`.
 How it works now (`backend/database.py`, `_SchemaSnapshot` / `_add_column_guarded`):
 - **Precheck.** `_migrate_db` builds one SQLAlchemy inspector per call. It skips any column or index that already exists, so a normal boot issues **no** ADD COLUMN and **no** CREATE INDEX. Only the two `DROP INDEX IF EXISTS` no-ops remain; they take no lock when the index is absent.
 - **Lock guard for a missing column (Postgres).** Each such ALTER runs in its own transaction after `SET LOCAL lock_timeout = '3s'` and `SET LOCAL statement_timeout = '30s'`.
-  - On `55P03` (lock_not_available) or `57014` (query_canceled) it retries up to 3 attempts, about 1 s apart.
-  - It then logs at ERROR: `MIGRATION_DEFERRED <table>.<col>: lock busy, retried next boot`.
-  - The boot continues. Any other error is swallowed as before.
+  - On `55P03` (lock_not_available) or `57014` (query_canceled) it retries up to 10 attempts, about 1 s apart (about 40 s at most).
+  - If the table is still locked, it logs at ERROR `MIGRATION_LOCK_BUSY <table>.<col>: …` and **raises**, so `init_db` and the boot fail.
+  - Any other error is swallowed as before (the "already exists" race).
 - **SQLite:** same precheck. No SET LOCAL, no retry.
 
-**What `MIGRATION_DEFERRED` means:** the column was **not** added on this boot. The next boot tries again.
-- **To force it:** redeploy, or restart the web service from the Render dashboard, in a quiet window: low traffic, and no long-running cron or job holding the table.
-- **Check it landed:** look for no new `MIGRATION_DEFERRED` line, and confirm the column with `\d <table>` in psql against `DATABASE_URL_PROD`.
+**Why it fails instead of serving:** readers need every metadata column.
+- SQLAlchemy Core `select(<table>)`, and any insert that lists every metadata column, names every declared column. Postgres rejects one that is not there yet.
+- For example, a missing `deck_impressions.evidence_tier` would fail every deck evidence write.
+- A missing `deck_candidate_sets.candidates_packed` would fail the prepared-offer reads.
+- A missing `overhaul_attempts.provider_status` would fail every overhaul status read.
 
-**Readers caveat: a deferred column breaks its table until it lands.**
-- SQLAlchemy Core `select(<table>)`, and any insert that lists every metadata column, names every declared column. Postgres rejects a column that is not there yet.
-- For the newest columns:
-  - **`deck_candidate_sets.candidates_packed` / `cand_pack_version`:** `select(db.deck_candidate_sets_table)` in `prepared_trade_store.py` and `prepared_trade_store_v2.py` fails. So do the account export (`accounts.py` `select(tbl)`) and the scorecard evidence column list. The candidate-set upsert in `save_deck_impressions` fails only when the row carries those keys, which happens when packing is on.
-  - **`deck_impressions.evidence_tier` / `delivered_at`:** `save_deck_impressions` inserts every metadata column, so every deck evidence write fails. That includes its candidate set and withdrawals, which share the transaction. The delivered stamp and the evidence-tier reads fail too.
-  - **`overhaul_attempts.provider_status`:** every `select(T_ATTEMPTS)` in `overhaul_store.py` fails, so overhaul status and resume reads fail.
-- Treat a `MIGRATION_DEFERRED` line as an incident: force the next boot promptly.
+**Shipping a column:**
+- A deploy that adds a column goes out in a **quiet window**: low traffic, and no long-running cron or job holding the table.
+- **If the boot fails with `MIGRATION_LOCK_BUSY`:** Render's zero-downtime deploy keeps the old instance serving, so nothing is down. **Redeploy** in a quieter moment.
+- **Never hand-edit the prod schema.**
+- **Check it landed:** the boot completes, and `\d <table>` in psql against `DATABASE_URL_PROD` shows the column.
 - **Index builds are not under this guard.** A newly added index still runs `CREATE INDEX` without a lock_timeout on its first boot.
 
 ---
