@@ -15841,12 +15841,25 @@ def load_league_scoring_map(league_ids: list[str]) -> dict[str, str]:
 # and PROPAGATES exceptions: a swallowed read would masquerade as
 # needs_fresh_deck. Joins carry an explicit onclause (no FKs, house style).
 
+def _grading_not_partial_run(di):
+    """ADR-025 ruling 25: Calibration's current arm skips a deck job with any
+    'partial_run' row (a run that ended partial, or a truncated lost-job deck),
+    as replay does. Per job, through ix_deck_impressions_job; NULL tiers
+    (every row written at build) pass."""
+    partial = deck_impressions_table.alias("partial_run_rows")
+    return ~(select(literal(1))
+             .where(partial.c.deck_job_id == di.c.deck_job_id,
+                    partial.c.evidence_tier == "partial_run")
+             .exists())
+
+
 def load_grading_legacy_deck(user_id: str, league_id: str
                              ) -> tuple[str | None, str | None, list[dict]]:
     """(deck_job_id, served_at, rows) of the caller's newest deck job that has at least one
     QUALIFYING row; (None, None, []) when none. Qualifying (hld §3.1):
     COALESCE(is_ghost,0)=0, model_arm IS NOT NULL, model_arm <> 'value_core',
-    source_like_impression_id IS NULL, trade_intent IS NULL, assets_json IS NOT NULL.
+    source_like_impression_id IS NULL, trade_intent IS NULL, assets_json IS NOT NULL,
+    and the job has no 'partial_run' row (ADR-025 ruling 25).
     Job = argmax MAX(served_at) over qualifying rows grouped by deck_job_id.
     rows = that job's qualifying rows ORDER BY card_index, each
     {impression_id, card_index, model_arm, assets_json, features_json} (JSON left as stored)."""
@@ -15860,6 +15873,7 @@ def load_grading_legacy_deck(user_id: str, league_id: str
         di.c.source_like_impression_id.is_(None),
         di.c.trade_intent.is_(None),
         di.c.assets_json.isnot(None),
+        _grading_not_partial_run(di),
     )
     with engine.connect() as conn:
         job = conn.execute(
@@ -15893,7 +15907,7 @@ def list_grading_candidates(since_iso: str) -> list[dict]:
             .where(func.coalesce(di.c.is_ghost, 0) == 0, di.c.model_arm.isnot(None),
                    di.c.model_arm != "value_core", di.c.source_like_impression_id.is_(None),
                    di.c.trade_intent.is_(None), di.c.assets_json.isnot(None),
-                   di.c.served_at >= since_iso)
+                   _grading_not_partial_run(di), di.c.served_at >= since_iso)
         ).all()
         members = {(str(r.league_id), str(r.user_id)) for r in conn.execute(
             select(lm.c.league_id, lm.c.user_id)).all()}
