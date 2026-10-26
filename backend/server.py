@@ -21422,10 +21422,21 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # A client-supplied their_roster_id that this successful read doesn't
         # hold: the receive side can't be checked, so it is never sent.
         return {"error": "opponent_roster_not_found"}, 400
+    def _refused(refusal):
+        # The stored roster behind the card is stale. Kick one background
+        # refresh so the same stale card isn't served again. It never blocks
+        # or raises; single-flight, the 60 s failure cooldown and the 429
+        # circuit all live in maybe_refresh_async.
+        try:
+            _roster_refresh.maybe_refresh_async(league_id, 0)
+        except Exception as err:
+            log.warning("I-2 refusal refresh kick failed league=%s: %s", league_id, err)
+        return refusal
+
     held = {str(x) for x in (mine.get("players") or []) if x}
     moved = [p for p in give_players if p not in held]
     if moved:
-        return _ownership_refusal("give", moved, _player_names_by_id(moved))
+        return _refused(_ownership_refusal("give", moved, _player_names_by_id(moved)))
     held = {str(x) for x in (theirs.get("players") or []) if x}
     moved = [p for p in recv_players if p not in held]
     if moved:
@@ -21436,7 +21447,7 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
                          if str(m.get("user_id")) == str(theirs.get("owner_id"))), None)
         except Exception as e:
             log.warning("I-2 counterparty name lookup failed: %s", e)
-        return _ownership_refusal("receive", moved, _player_names_by_id(moved), team)
+        return _refused(_ownership_refusal("receive", moved, _player_names_by_id(moved), team))
 
     encoded: list = []
     if give_picks or recv_picks:
