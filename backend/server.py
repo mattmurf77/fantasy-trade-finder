@@ -13503,6 +13503,10 @@ FEEDBACK_TEXT_MAX = 8000
 # on deploy, like the analytics limiter. It is a brake on runaway or abusive
 # volume, not authentication: the device id and X-Forwarded-For are
 # client-supplied, so only a verified user_id is a key a caller can't pick.
+# An unverified session is keyed by its token's hash, so users behind one
+# carrier NAT don't share the IP's budget (the mobile POST and the web form
+# send no X-Device-Id); a token must resolve to a live session to count, so
+# an unknown one falls through to device / IP rather than minting budgets.
 FEEDBACK_MAX_BODY_BYTES = 64 * 1024
 FEEDBACK_RATE_LIMIT = 20             # accepted notes per rolling hour per key
 FEEDBACK_RATE_WINDOW_S = 3600
@@ -13518,10 +13522,14 @@ def _client_ip() -> str:
     return fwd or (request.remote_addr or "unknown")
 
 
-def _feedback_rate_key(user_id) -> str:
-    """Verified user, else X-Device-Id, else the client IP."""
+def _feedback_rate_key(user_id, session_key=None) -> str:
+    """Verified user, else an unverified session (by `session_key`, the
+    sha256 hex _feedback_session_key gives, never the raw token), else
+    X-Device-Id, else the client IP."""
     if user_id:
         return f"user:{user_id}"
+    if session_key:
+        return f"session:{session_key}"
     device = (request.headers.get("X-Device-Id") or "").strip()
     if device:
         return f"device:{device[:200]}"
@@ -13622,8 +13630,9 @@ def submit_feedback_route():
 
     Public-write limits (#360 QA P2-2): a body over FEEDBACK_MAX_BODY_BYTES
     is 413 `too_large` before it is read; past FEEDBACK_RATE_LIMIT accepted
-    notes in a rolling hour per key (verified user, else X-Device-Id, else
-    client IP) a NEW note is 429 `rate_limited`. Duplicates never count, and
+    notes in a rolling hour per key (verified user, else an unverified
+    session's token hash, else X-Device-Id, else client IP) a NEW note is
+    429 `rate_limited`. Duplicates never count, and
     a duplicate is still answered 200 when its key is throttled.
 
     Contract spec: docs/plans/feedback-backend-sync.md
@@ -13683,8 +13692,9 @@ def submit_feedback_route():
     app_version    = request.headers.get("X-App-Version")
 
     # Throttle (#360 QA P2-2): reserve an accepted-note slot; a duplicate or
-    # a failed save gives it back below, so only new notes count.
-    rate_key = _feedback_rate_key(user_id)
+    # a failed save gives it back below, so only new notes count. An
+    # unverified session is keyed by its token hash (session_key above).
+    rate_key = _feedback_rate_key(user_id, session_key)
     rate_at = time.time()
     if not _feedback_rate_reserve(rate_key, rate_at):
         held = find_feedback_by_client_id(client_id)

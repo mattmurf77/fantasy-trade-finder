@@ -5,15 +5,19 @@ throttle.
   Content-Length before the body is read.
 - `client_created_at` is cut to 40 characters.
 - 20 accepted notes per rolling hour per key; the 21st new note is 429
-  `rate_limited`. The key is the verified user_id, else X-Device-Id, else the
-  client IP (first X-Forwarded-For hop). Idempotent duplicates don't count,
-  and a throttled duplicate is still answered 200 `duplicate`.
+  `rate_limited`. The key is the verified user_id, else an unverified
+  session's token hash (so users behind one carrier NAT don't share the IP's
+  budget; the raw token is never in the key or a log), else X-Device-Id, else
+  the client IP (first X-Forwarded-For hop). Idempotent duplicates don't
+  count, and a throttled duplicate is still answered 200 `duplicate`.
 
 The client keeps any rejected note unsynced and retries it later
 (useFeedback._syncOne turns every error into `synced: false`).
 In-memory SQLite, injected sessions; conftest resets the throttle per test.
 """
+import hashlib
 import json
+import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,6 +30,7 @@ from backend.database import metadata, app_feedback_table
 ME = "user_fb_limits"
 VERIFIED = "tok-limits-verified"
 UNVERIFIED = "tok-limits-unverified"
+UNVERIFIED_2 = "tok-limits-unverified-two"   # another person, same carrier NAT
 
 
 @pytest.fixture()
@@ -41,12 +46,14 @@ def harness():
             server._sessions[VERIFIED] = {"verified": True, "user_id": ME,
                                           "display_name": "Me", "last_active": 0.0}
             server._sessions[UNVERIFIED] = {"user_id": ME, "last_active": 0.0}
+            server._sessions[UNVERIFIED_2] = {"user_id": "user_fb_other", "last_active": 0.0}
         try:
             yield client, engine
         finally:
             with server._sessions_lock:
                 server._sessions.pop(VERIFIED, None)
                 server._sessions.pop(UNVERIFIED, None)
+                server._sessions.pop(UNVERIFIED_2, None)
 
 
 def _post(client, client_id, *, token=None, device=None, xff=None, created="2026-10-26T12:00:00Z",
@@ -147,7 +154,7 @@ def test_a_verified_user_is_keyed_by_user_id_across_devices(harness):
     # Same verified user, another device: the same budget.
     assert _post(client, "fb-v-20", token=VERIFIED, device="tablet").status_code == 429
     # An UNVERIFIED session naming the same user_id is not that user: it is
-    # keyed by its own device, so it neither spends nor inherits the budget.
+    # keyed by its own token hash, so it neither spends nor inherits the budget.
     assert _post(client, "fb-u-0", token=UNVERIFIED, device="other").status_code == 201
 
 
@@ -156,6 +163,74 @@ def test_no_device_id_falls_back_to_the_first_forwarded_hop(harness):
     _fill(client, 20, "fb-ip", xff="203.0.113.7, 10.0.0.1")
     assert _post(client, "fb-ip-20", xff="203.0.113.7, 10.0.0.2").status_code == 429
     assert _post(client, "fb-ip2-0", xff="198.51.100.4, 10.0.0.1").status_code == 201
+
+
+# ── unverified sessions: keyed by token hash, not the shared IP ─────────────
+# The mobile POST and the web form send no X-Device-Id, so without a session
+# key every unverified note behind one carrier NAT shared the IP's budget.
+
+NAT = "100.64.0.9, 10.0.0.1"        # one carrier-grade NAT egress for everyone
+
+
+def _sha(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def test_unverified_sessions_behind_one_ip_have_independent_budgets(harness):
+    client, engine = harness
+    _fill(client, 20, "fb-s1", token=UNVERIFIED, xff=NAT)
+    assert _post(client, "fb-s1-20", token=UNVERIFIED, xff=NAT).status_code == 429
+    # Another unverified session on the same IP: its own 20.
+    _fill(client, 20, "fb-s2", token=UNVERIFIED_2, xff=NAT)
+    assert _post(client, "fb-s2-20", token=UNVERIFIED_2, xff=NAT).status_code == 429
+    # And a no-token post from that IP still has the IP's whole budget.
+    assert _post(client, "fb-anon-0", xff=NAT).status_code == 201
+    assert _count(engine) == 41
+
+
+def test_one_unverified_session_is_429_at_note_21_whatever_its_device_or_ip(harness):
+    client, engine = harness
+    for i in range(20):
+        r = _post(client, f"fb-one-{i}", token=UNVERIFIED, device=f"dev-{i}", xff=f"198.51.100.{i}")
+        assert r.status_code == 201, (i, r.get_json())
+    r = _post(client, "fb-one-20", token=UNVERIFIED, device="dev-new", xff="203.0.113.99")
+    assert r.status_code == 429 and r.get_json() == {"error": "rate_limited"}
+    assert _count(engine) == 20
+
+
+def test_the_session_key_is_the_token_hash_never_the_raw_token(harness):
+    client, engine = harness
+    assert _post(client, "fb-k-0", token=UNVERIFIED, device="dev-k", xff=NAT).status_code == 201
+    assert list(server._feedback_rate) == [f"session:{_sha(UNVERIFIED)}"]
+    assert not any(UNVERIFIED in k for k in server._feedback_rate)
+
+
+def test_no_token_falls_back_to_device_then_ip(harness):
+    client, engine = harness
+    # Device beats IP: the same device on another IP shares one budget.
+    _fill(client, 20, "fb-nd", device="dev-nat", xff=NAT)
+    assert _post(client, "fb-nd-20", device="dev-nat", xff="203.0.113.5").status_code == 429
+    # No device: the IP, whose budget the device's notes never spent.
+    _fill(client, 20, "fb-ni", xff=NAT)
+    assert _post(client, "fb-ni-20", xff=NAT).status_code == 429
+    # A token that resolves to no session counts as no token (it can't mint
+    # a fresh budget per made-up token): it falls back to the device.
+    _fill(client, 20, "fb-nu", token="tok-made-up-1", device="dev-u")
+    assert _post(client, "fb-nu-20", token="tok-made-up-2", device="dev-u").status_code == 429
+    assert set(server._feedback_rate) == {"device:dev-nat", "ip:100.64.0.9", "device:dev-u"}
+
+
+def test_no_log_record_carries_the_raw_token_or_its_hash(harness, caplog):
+    client, engine = harness
+    caplog.set_level(logging.DEBUG)
+    _fill(client, 20, "fb-log", token=UNVERIFIED, xff=NAT)
+    assert _post(client, "fb-log-20", token=UNVERIFIED, xff=NAT).status_code == 429
+    throttled = [r for r in caplog.records if "rate_limited" in r.getMessage()]
+    assert throttled and throttled[-1].getMessage() == "feedback: rate_limited key=session"
+    for rec in caplog.records:
+        msg = rec.getMessage()
+        assert UNVERIFIED not in msg, msg
+        assert _sha(UNVERIFIED) not in msg, msg
 
 
 def test_the_window_rolls(harness):
