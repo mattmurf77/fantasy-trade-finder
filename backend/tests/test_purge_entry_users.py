@@ -92,6 +92,8 @@ def engine(monkeypatch):
         conn.execute(insert(db.accounts_table).values(account_id=ACCT[len("acct_"):],
                                                       created_at=BEFORE))
         _import_rows(conn, ESPN, 1, "espn", "10101")
+        # release-lead's case: a verified Fleeced user also belongs to 10101.
+        seed(conn, db.league_members_table, "lm-shared", league_id="10101", user_id=SLEEPER)
         seed(conn, db.espn_credentials_table, "espn", user_id=ESPN, swid=SWID)
         _import_rows(conn, MFL, 2, "mfl", "61408")
         seed(conn, db.mfl_credentials_table, "mfl", user_id=MFL, mfl_username="someone")
@@ -164,6 +166,9 @@ def test_execute_removes_targets_everywhere_and_keeps_everyone_else(engine, caps
         picks = {r.pick_id: r for r in conn.execute(select(db.draft_picks_table))}
         matches = conn.execute(select(db.trade_matches_table)).all()
         members = {r.user_id for r in conn.execute(select(db.league_members_table))}
+        leagues = {r.sleeper_league_id: r.user_id for r in conn.execute(select(db.leagues_table))}
+    # 10101 is shared with a live member: kept, importer anonymized. 61408 is solo: gone.
+    assert leagues == {"10101": accounts.DELETED_USER_PLACEHOLDER}
     assert picks["61408_2027_1_0003"].owner_user_id == accounts.DELETED_USER_PLACEHOLDER
     assert picks["61408_2027_1_0004"].owner_user_id == "mfl:61408.f0004"
     # The shared match is anonymized on the entry side; the counterparty's
@@ -242,8 +247,10 @@ def test_guard_refuses_anything_but_an_entry_id(engine, capsys, monkeypatch):
 
 # delete_user_data filters on these columns, but they are not user ids: they
 # are reached through an id the purge already discovers (account, device,
-# impression, rank set, inventory).
+# impression, rank set, inventory, and the leagues a deleted user imported or
+# belongs to, for the shared-league check).
 NOT_USER_KEYS = {
+    ("leagues", "sleeper_league_id"), ("league_members", "league_id"),
     ("accounts", "account_id"), ("linked_identities", "account_id"),
     ("sessions", "account_id"), ("entitlements", "account_id"),
     ("subscription_events", "account_id"), ("identity_links", "account_id"),

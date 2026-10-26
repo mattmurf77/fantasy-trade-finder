@@ -336,3 +336,97 @@ def test_export_of_draft_picks_is_unchanged_by_the_pick_grid_anonymization(engin
         _pick(conn, "alias-assigned", "mfl", OTHER, OTHER, assigned_by=ALIAS)
     archive = accounts.export_user_data(UID)
     assert {r["pick_id"] for r in archive["tables"]["draft_picks"]} == {"assigned", "alias-assigned"}
+
+
+# #452 D1: a shared leagues row (one row per league, PK = the league id) must
+# survive one member's deletion; membership is league_members x users.
+LEAGUE_PLATFORMS = (None, "sleeper", "espn", "mfl")
+
+
+def _league(conn, league_id, platform, importer, members):
+    seed(conn, db.leagues_table, league_id, sleeper_league_id=league_id, user_id=importer,
+         platform=platform, name="League " + league_id, default_scoring="sf_tep",
+         roster_data='["p-importer"]', opponent_data=json.dumps([{"user_id": OTHER}]),
+         espn_my_team_id=3 if platform == "espn" else None,
+         platform_my_team="0003" if platform == "mfl" else None)
+    for uid in members:
+        seed(conn, db.league_members_table, league_id + uid, league_id=league_id, user_id=uid)
+
+
+def _leagues(engine):
+    return {r["sleeper_league_id"]: r for r in rows(engine, db.leagues_table)}
+
+
+@pytest.mark.parametrize("platform", LEAGUE_PLATFORMS)
+def test_solo_league_deleted_shared_league_kept_with_the_importer_anonymized(engine, platform):
+    stranger = f"{platform or 'sleeper'}:not-a-fleeced-user"    # a member with no users row
+    with engine.begin() as conn:
+        _league(conn, "solo", platform, UID, (UID, stranger))
+        _league(conn, "alias-solo", platform, ALIAS, (ALIAS,))
+        _league(conn, "shared", platform, UID, (UID, OTHER, stranger))
+        _league(conn, "theirs", platform, OTHER, (OTHER, UID))
+    counts = accounts.delete_user_data(UID)
+    leagues = _leagues(engine)
+    assert set(leagues) == {"shared", "theirs"}
+    kept = leagues["shared"]
+    assert kept["user_id"] == accounts.DELETED_USER_PLACEHOLDER
+    assert (kept["roster_data"], kept["opponent_data"]) == ("[]", "[]")
+    # League settings and the team binding stay for the remaining members.
+    assert (kept["name"], kept["default_scoring"], kept["platform"]) == (
+        "League shared", "sf_tep", platform)
+    assert (kept["espn_my_team_id"], kept["platform_my_team"]) == (
+        3 if platform == "espn" else None, "0003" if platform == "mfl" else None)
+    theirs = leagues["theirs"]
+    assert (theirs["user_id"], theirs["roster_data"]) == (OTHER, '["p-importer"]')
+    members = {(r["league_id"], r["user_id"]) for r in rows(engine, db.league_members_table)}
+    assert {uid for _, uid in members}.isdisjoint({UID, ALIAS})
+    assert {("shared", OTHER), ("shared", stranger), ("theirs", OTHER)} <= members
+    assert (counts["leagues_deleted"], counts["leagues_anonymized"]) == (2, 1)
+
+
+def test_a_kept_league_goes_with_its_last_live_member(engine):
+    third = "synthetic-third-member"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=third))
+        _league(conn, "shared", "mfl", UID, (UID, OTHER, third))
+    accounts.delete_user_data(UID)
+    assert _leagues(engine)["shared"]["user_id"] == accounts.DELETED_USER_PLACEHOLDER
+    counts = accounts.delete_user_data(OTHER)       # third is still live: kept, untouched
+    assert _leagues(engine)["shared"]["user_id"] == accounts.DELETED_USER_PLACEHOLDER
+    assert (counts["leagues_deleted"], counts["leagues_anonymized"]) == (0, 0)
+    counts = accounts.delete_user_data(third)       # the last live member
+    assert _leagues(engine) == {}
+    assert (counts["leagues_deleted"], counts["leagues_anonymized"]) == (1, 0)
+
+
+@pytest.mark.parametrize("platform", ("sleeper", "espn", "mfl"))
+def test_the_remaining_verified_member_still_gets_the_shared_league(engine, monkeypatch, platform):
+    from types import SimpleNamespace
+    from backend import server
+    with engine.begin() as conn:
+        _league(conn, "shared", platform, UID, (UID, OTHER))
+        conn.execute(db.users_table.update().where(
+            db.users_table.c.sleeper_user_id == OTHER).values(verified_via="sleeper"))
+    accounts.delete_user_data(UID)
+    monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
+    monkeypatch.setattr(server, "is_enabled", lambda key: key in ("espn.link", "mfl.link"))
+    token = "synthetic-member-token"
+    with server._sessions_lock:
+        server._sessions[token] = {
+            "user_id": OTHER, "verified": True, "active_format": "1qb_ppr", "last_active": 0.0,
+            "league": SimpleNamespace(league_id="shared"), "players": [],
+            "trade_svcs": {"1qb_ppr": object()}}
+    try:
+        client, headers = server.app.test_client(), {"X-Session-Token": token}
+        if platform == "sleeper":
+            response = client.get("/api/league/summary?league_id=shared", headers=headers)
+            assert response.status_code == 200, response.get_json()
+            body = response.get_json()
+            assert (body["league_name"], body["default_scoring"]) == ("League shared", "sf_tep")
+        else:
+            response = client.get(f"/api/{platform}/leagues", headers=headers)
+            assert response.status_code == 200, response.get_json()
+            assert [lg["league_id"] for lg in response.get_json()["leagues"]] == ["shared"]
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(token, None)
