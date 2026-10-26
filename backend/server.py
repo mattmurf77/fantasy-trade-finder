@@ -34184,6 +34184,13 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         except _mfl.MflAuthError as e:
             log.warning("mfl propose: ownership read auth-rejected: %s", e)
             return _auth_expired(str(e))
+        except Exception as e:  # P2-1: rosters transport
+            # `_fetch_one` wraps only HTTPError / URLError / bad JSON. A read
+            # timeout, connection reset, IncompleteRead or BadStatusLine would
+            # escape as a 500 (or overhaul `outcome_unknown` holding the
+            # reservation). It is a failed read: R3.
+            log.warning("mfl propose: rosters read failed: %s", type(e).__name__)
+            return _read_failed()
         if not isinstance(raw, dict) or "rosters" not in raw:
             return _read_failed()
         held = {}
@@ -34208,6 +34215,9 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         except _mfl.MflAuthError as e:
             log.warning("mfl propose: ownership read auth-rejected: %s", e)
             return _auth_expired(str(e))
+        except Exception as e:  # P2-1: futureDraftPicks transport
+            log.warning("mfl propose: futureDraftPicks read failed: %s", type(e).__name__)
+            return _read_failed()
         if not isinstance(raw, dict) or "futureDraftPicks" not in raw:
             return _read_failed()
         live = _mfl_pick_owner_index(_mfl.parse_future_picks(raw))
