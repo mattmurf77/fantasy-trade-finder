@@ -54,6 +54,7 @@
 - [Trade deck on the device: append-only merge, device page, one trace per tap (2026-10-24, 200 ms path)](#trade-deck-on-the-device-append-only-merge-device-page-one-trace-per-tap-2026-10-24-200-ms-path)
 - [S0 serve rules: one roster read at serve, knobs per request (2026-10-26, trade-time-to-suggestion S0)](#s0-serve-rules-one-roster-read-at-serve-knobs-per-request-2026-10-26-trade-time-to-suggestion-s0)
 - [Deferred evidence: write what the serve sends, after S0's rules (2026-10-26, ADR-025 stage 1, #370)](#deferred-evidence-write-what-the-serve-sends-after-s0s-rules-2026-10-26-adr-025-stage-1-370)
+- [P1 page store: stamps, S0's serve rules, the deck pipeline guard (2026-10-26, trade.first_page_store)](#p1-page-store-stamps-s0s-serve-rules-the-deck-pipeline-guard-2026-10-26-tradefirst_page_store)
 
 ---
 
@@ -921,7 +922,7 @@ Contract: the roster fingerprint contract v0.4 (`docs/plans/trade-time-to-sugges
 - **One choke point for cards.** `_trade_job_public_view` (legacy and paged, `/generate` and `/status`) runs I-1 and the §3b rules through `_roster_serve_check` and logs one `[i1] serve` line per serve. A new serve path must go through it.
 - **Two unknowns.** No state row reads `unknown` and I-1 still filters. A failed session write (C-e) also reads `unknown`, but carries `RosterSnapshot.lenient_reason = "c_e"`: every card is served, logged `unchecked_c_e`. Branch on the marker, never on `status`.
 - **The `[i1] serve` line is per serve, so per poll.** A drop rate must de-duplicate by its `job` field. Drops are split by give/receive side (players and picks alike), and a card with moved assets on both sides counts once per side. Format: [api-reference](../docs/api-reference.md#s0-roster-check-at-serve).
-- **Three knobs, read per request, deploy-free:** `trade_i1_mode` (2 strict, 1 lenient, 0 the pre-S0 path), `trade_gate_miss_mode` (0 holds the no-card gate misses until 1.22.0; 1 serves `roster_check_unavailable` and `wait_reason`), `trade_roster_bound_s`, plus `trade_import_roster_fresh_s` for linked platforms. Unreadable values fall to the safe side (strict I-1, held gate misses).
+- **Three knobs, read per request, deploy-free:** `trade_i1_mode` (2 strict, 1 lenient, 0 the pre-S0 path), `trade_gate_miss_mode` (0 holds the no-card gate misses until 1.22.0; 1 serves `roster_check_unavailable` and `wait_reason`), `trade_roster_bound_s`, plus `trade_import_roster_fresh_s` for linked platforms. S0 ships at `trade_i1_mode` 1 until C-b (option B); unreadable values read as 1, and gate misses stay held.
 - **No per-session state.** The only process state: the `vsn1` seed memo and the "state table exists" marker (one module lock), and the admin gate-miss test hook's `{league_id: (kind, expiry)}`.
 
 ## Deferred evidence: write what the serve sends, after S0's rules (2026-10-26, ADR-025 stage 1, #370)
@@ -934,3 +935,11 @@ Flag `trade.first_page_store` (off). Schema and tiers: [data dictionary](../docs
 - **`grading_refresh` is not a Trades deck.** It is never pinned under the user's Trades key (`_kickoff_trade_job`'s `shared` is false for it), so it never joins, reuses or supersedes the user's Trades job, and Trades never reuses it (#370 P2-2). On either engine it writes rows at build (Calibration reads them) but no `trade_impressions` (replenishment eligibility), no `trades_generated` (ruling 30), and receipts skip it (S4). Ungated, like the relabel. Anything that must find it after kickoff looks it up by `job_id`, never by key.
 - **Nothing is purged before packing (S2), and there's no archive index yet.** The partial index the purge needs arrives with stage-2 packing, built `CREATE INDEX CONCURRENTLY` off the boot path (an operator one-off or a migration script, with a `lock_timeout`). Never add a `deck_impressions` index in `_migrate_db`: it runs at boot inside a transaction, blocks writes for a full scan, and can outlast gunicorn's 120 s boot timeout.
 - **`built_at` rides in the frozen full row** (`features_json`, spliced as the last key, so the rest stays byte-equal to the live row); ghosts stay narrow.
+
+## P1 page store: stamps, S0's serve rules, the deck pipeline guard (2026-10-26, trade.first_page_store)
+
+Code: the P1 block of `server.py`; table `trade_page_store` ([data-dictionary](../docs/data-dictionary.md#trade_page_store)).
+- **On only with three switches:** `trade.first_page_store`, `trade.packed_evidence` (#370's) and the knob `first_page_store_enabled` (any finite value ≥ 1). Re-enable with the knob at its previous value + 1.
+- **A page serves only if every stamp still matches:** `roster_fp`, `values_snapshot_id`, `engine_version` (engine, policy, engine-module code hash including `tier_config.json`, `DECK_PIPELINE_VERSION`), `config_signature` and `experiment_digest`. A mismatch or a failed read falls through to the job path; it never serves an unchecked page.
+- **Every page serve goes through S0's `_roster_serve_rules`**, like the job views. A new serve path must too.
+- **The deck pipeline guard.** `server.py` isn't hashed into `engine_version`, so its deck-shaping functions (`DECK_PIPELINE_FUNCTIONS`) and the constants they read (`DECK_PIPELINE_CONSTANTS`, by value) carry a pinned digest (`DECK_PIPELINE_DIGEST`: the functions' AST, docstrings stripped, in a Python-version-stable form). A logic or constant change fails `test_deck_pipeline_digest` until `DECK_PIPELINE_VERSION` is bumped and the digest re-pinned; models-eng reviews (a MOD-M1 re-run trigger after 11-10). A closure test keeps the list complete: any `server.py` function or literal constant a listed function references must be listed or in `DECK_PIPELINE_IGNORED` with a reason, so a new helper fails CI until it's classified.

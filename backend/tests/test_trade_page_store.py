@@ -17,6 +17,8 @@ Pinned here:
   * ruling 29: "updating" only while a rebuild runs, never on ESPN/MFL;
   * the kill knob first_page_store_enabled (on at any finite value ≥ 1; the
     +1 re-enable) and the paging kill switch; /status at trade_i1_mode 0;
+  * the store needs trade.packed_evidence (#370) on; experiment_digest: a page
+    serves only under the experiment variants it was built under;
   * a roster change rebuilds lazily (S0: no proactive rebuild from a live
     session's old rosters); session-init (U5);
   * eviction by age and by the byte ceiling; account deletion and export;
@@ -25,7 +27,9 @@ Pinned here:
 Harness: test_i1_serve_filter's `live` (real synchronous worker, stored
 `league_members` and `draft_picks`, in-memory SQLite), with the flag on.
 """
+import collections
 import copy
+import itertools
 import json
 import logging
 import threading
@@ -48,6 +52,7 @@ from backend.tests.test_trade_fingerprint_reads_unlocked import (  # noqa: F401 
     PLATFORM_LEAGUE, PLATFORM_USER, INIT_TOKEN, init_harness)
 
 FLAG = "trade.first_page_store"
+EVIDENCE = "trade.packed_evidence"   # #370's flag; the store needs it on
 SCOPE = "organic:f=0.50"
 HEADERS = {"X-Session-Token": TOKEN}
 GOLDEN_CARD = json.loads((Path(__file__).parent / "fixtures" / "bakeoff"
@@ -75,10 +80,11 @@ def ids(cards):
 @pytest.fixture()
 def p1(live, monkeypatch):
     client, engine, sess = live
-    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True})
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True, EVIDENCE: True})
     monkeypatch.setattr(server, "_trade_jobs", {})
     monkeypatch.setattr(server, "_trade_jobs_by_key", {})
     monkeypatch.setattr(server, "_trade_input_epochs", {})
+    monkeypatch.setattr(server, "_experiment_digest_memo", collections.OrderedDict())
     monkeypatch.setattr(server, "_deck_withdrawn_cache", {})   # C-b sticky drops, per process
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
@@ -266,7 +272,8 @@ def _row(built_at, job_id, **extra):
     blob = db_module.CompressedJSON.encode({"v": 1, "opponents_total": 1, "cards": [job_id]})
     row = dict(user_id=UID, league_id=LEAGUE, scoring_format="1qb_ppr", request_scope=SCOPE,
                roster_fp="rfp1:x", values_snapshot_id="vsn1:x", engine_version="v3+x",
-               config_signature="c", deck_job_id=job_id, built_at=db_module.page_store_iso(built_at),
+               config_signature="c", experiment_digest="e", deck_job_id=job_id,
+               built_at=db_module.page_store_iso(built_at),
                expires_at=db_module.page_store_iso(built_at + 86400), card_count=1,
                pages_blob=blob, evidence_blob=None, stored_bytes=len(blob), state="ready")
     row.update(extra)
@@ -751,6 +758,142 @@ def test_status_at_i1_mode_0_takes_the_job_path(p1, spawned, statements, monkeyp
     assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
 
 
+# ── trade.packed_evidence gates the store (head-eng, flag order) ────────────
+
+@pytest.mark.parametrize("evidence", [None, False])
+def test_the_store_needs_packed_evidence_on(p1, spawned, statements, monkeypatch, evidence):
+    """Without #370's flag the store can't take effect, whatever
+    trade.first_page_store says: P1 never registers the key, so it reads False."""
+    flags = {**ff.flags_dict(), FLAG: True}
+    flags.pop(EVIDENCE, None)
+    if evidence is not None:
+        flags[EVIDENCE] = evidence
+    monkeypatch.setattr(ff, "_flags_cache", flags)
+    assert server._trade_page_store_enabled() is False
+    client, _, _ = p1
+    statements.clear()
+    run_job()                                          # a complete organic job
+    body = generate(client, page=1).get_json()
+    assert "serve_source" not in body
+    assert page_queries(statements) == []             # no store read or write at all
+    assert stored() is None
+
+
+# ── experiment_digest (head-eng, the experiment gap) ────────────────────────
+
+RUNNING_AGGRESSION = {"key": "trade.aggression", "layer": "trade", "version": 3,
+                      "variants": [{"name": "light"}, {"name": "generous"}]}
+
+
+_GENERATIONS = itertools.count(1)
+
+
+def _assign(monkeypatch, variant, overlay=None, version=3, generation=None):
+    """The user's trade.aggression assignment, as experiments reports it, under
+    a new experiments cache generation unless one is given. Returns a list
+    that records every variant_overlay call (a spy)."""
+    from backend import experiments
+    calls = []
+    generation = next(_GENERATIONS) if generation is None else generation
+
+    def variant_overlay(unit_id, key, header_attrs=None):
+        calls.append((unit_id, key))
+        return (variant, overlay or {}) if variant else (None, {})
+
+    monkeypatch.setattr(experiments, "variant_overlay", variant_overlay)
+    monkeypatch.setattr(experiments, "_load_cache",
+                        lambda: {"at": generation,
+                                 "running": [dict(RUNNING_AGGRESSION, version=version)]})
+    return calls
+
+
+@pytest.mark.parametrize("built, now, served", [
+    (("light", {"aggression_weight": 0.2}), ("light", {"aggression_weight": 0.2}), True),
+    ((None, None), (None, None), True),                     # a fallback user round-trips
+    (("light", None), ("generous", None), False),           # moved to another variant
+    (("light", {"aggression_weight": 0.2}), ("light", {"aggression_weight": 0.4}), False),
+    (("light", None), (None, None), False),                 # enrolled -> fallback
+    ((None, None), ("light", None), False),                 # fallback -> enrolled
+])
+def test_a_page_serves_only_under_the_variant_it_was_built_under(p1, spawned, monkeypatch, caplog,
+                                                                built, now, served):
+    client, _, _ = p1
+    _assign(monkeypatch, *built)
+    build_page()
+    _assign(monkeypatch, *now)
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    body = generate(client, page=1).get_json()
+    assert (body.get("serve_source") == "page") is served
+    blocked = [r for r in caplog.records if "blocked (experiment variant moved)" in r.getMessage()]
+    assert bool(blocked) is not served
+
+
+def test_a_new_experiment_version_mismatches(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    _assign(monkeypatch, "light", version=3)
+    build_page()
+    _assign(monkeypatch, "light", version=4)
+    assert "serve_source" not in generate(client, page=1).get_json()
+
+
+def test_the_digest_marks_a_fallback_user(p1, monkeypatch):
+    _assign(monkeypatch, None)
+    fallback = server._trade_experiment_digest(UID)
+    _assign(monkeypatch, "fair")
+    enrolled = server._trade_experiment_digest(UID)
+    assert fallback != enrolled and len(fallback) == 16
+    assert server._DECK_EXPERIMENT_LAYERS == ("trade.aggression",)
+
+
+# ── The digest memo: no DB work per serve inside a cache generation ─────────
+
+def test_two_serves_in_one_generation_evaluate_once(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    calls = _assign(monkeypatch, "light", generation=7)
+    build_page()
+    server._experiment_digest_memo.clear()       # e.g. another process built the page
+    calls.clear()
+    for _ in range(2):
+        assert generate(client, page=1).get_json()["serve_source"] == "page"
+    assert len(calls) == 1
+
+
+def test_a_generation_change_recomputes(p1, monkeypatch):
+    calls = _assign(monkeypatch, "light", generation=7)
+    first = server._trade_experiment_digest(UID)
+    assert server._trade_experiment_digest(UID) == first and len(calls) == 1
+    calls = _assign(monkeypatch, "light", generation=8)
+    assert server._trade_experiment_digest(UID) == first and len(calls) == 1
+
+
+def test_a_variant_change_after_a_refresh_still_falls_through(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    _assign(monkeypatch, "light", generation=7)
+    build_page()
+    assert generate(client, page=1).get_json()["serve_source"] == "page"
+    _assign(monkeypatch, "generous", generation=8)
+    assert "serve_source" not in generate(client, page=1).get_json()
+
+
+def test_the_memo_is_bounded(p1, monkeypatch):
+    calls = _assign(monkeypatch, "light", generation=7)
+    monkeypatch.setattr(server, "_EXPERIMENT_DIGEST_MEMO_MAX", 3)
+    for n in range(5):
+        server._trade_experiment_digest(f"user-{n}")
+    assert list(server._experiment_digest_memo) == ["user-2", "user-3", "user-4"]
+    server._trade_experiment_digest("user-0")    # evicted: evaluated again
+    assert len(calls) == 6 and len(server._experiment_digest_memo) == 3
+
+
+def test_with_the_engine_off_no_experiment_state_is_read(p1, monkeypatch):
+    from backend import experiments
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "experiments.engine": False})
+    monkeypatch.setattr(experiments, "_load_cache",
+                        lambda: pytest.fail("the experiments cache was read with the engine off"))
+    digest = server._trade_experiment_digest(UID)
+    assert digest == server._trade_experiment_digest(UID)
+
+
 # ── /status cursors into a page-served deck ─────────────────────────────────
 
 def test_status_cursors_walk_the_stored_pages(p1, spawned):
@@ -829,7 +972,7 @@ def test_session_init_warm_up_is_page_eligible(init_harness, monkeypatch, spawne
     """U5 (a)/(d): session/init (also the step after a platform league import)
     kicks the organic warm-up whose completion stores the page."""
     client, kickoff, key = init_harness
-    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True})
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True, EVIDENCE: True})
     resp = client.post("/api/session/init", content_type="application/json",
                        headers={"X-Session-Token": INIT_TOKEN},
                        data=json.dumps({"user_id": PLATFORM_USER, "league_id": PLATFORM_LEAGUE}))
@@ -999,6 +1142,11 @@ def test_the_engine_code_hash_covers_the_module_set_once_per_process(tmp_path, m
     narrative = tmp_path / "trade_narrative.py"
     narrative.write_bytes(narrative.read_bytes() + b"\n# engine change\n")
     assert server._engine_code_hash_of(tmp_path) != server._engine_code_hash_of(root)
+    narrative.write_bytes((root / "trade_narrative.py").read_bytes())
+    tiers = tmp_path / "tier_config.json"           # ruling 25: the tier bands are engine input
+    assert tiers.exists()
+    tiers.write_bytes(tiers.read_bytes().replace(b"1", b"2", 1))
+    assert server._engine_code_hash_of(tmp_path) != server._engine_code_hash_of(root)
     calls = []
     monkeypatch.setattr(server, "_engine_code_hash_value", None)
     monkeypatch.setattr(server, "_engine_code_hash_of", lambda path: calls.append(path) or "c0ffee000000")
@@ -1051,7 +1199,7 @@ def test_the_cleanup_pass_evicts_only_with_the_flag_on(file_db, monkeypatch):
     monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
     server._evict_trade_page_store()
     assert stored() is not None
-    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True})
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True, EVIDENCE: True})
     server._evict_trade_page_store()
     assert stored() is None
 
