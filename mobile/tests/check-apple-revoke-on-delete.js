@@ -30,6 +30,10 @@
 //   6. No console.* in freshAppleAuthorizationCode, performDeleteAccount or
 //      deleteAccount: Sentry keeps console calls as breadcrumbs, so the code
 //      would leave the device (release-lead QA on #446).
+//   7. DELETE /api/account gets the client's slow (30 s) timeout, so the
+//      server's Apple revoke (up to 2 x 5 s) can't make the app report
+//      "took too long" while the deletion still completes (timeoutForRequest,
+//      lifted and EXECUTED).
 //
 // HONEST LABEL (G-035). 1-3 run the real function text against stubs; 4-6
 // pin wiring. The runtime proof is the TestFlight checklist in the LEG-S6 PR
@@ -58,6 +62,7 @@ const ROOT = process.env.FTF_MOBILE_TEST_ROOT || path.resolve(__dirname, '..');
 const F = {
   section: 'src/screens/settings/sections/AccountDataSection.tsx',
   auth:    'src/api/auth.ts',
+  client:  'src/api/client.ts',
 };
 
 let failures = 0;
@@ -303,6 +308,20 @@ function srcFiles(dir) {
       if (uses.length) bad.push(`${label} references console (${uses.map((n) => n.parent.getText(sf).slice(0, 40)).join(', ')})`);
     }
     expect(!bad.length, bad.join('; '));
+  });
+
+  // ── 7. The delete waits long enough for the server's Apple revoke ───────
+  await check('7. DELETE /api/account uses the slow (30 s) timeout; other account calls keep the default', () => {
+    const client = parse(F.client);
+    const parts = ['DEFAULT_TIMEOUT_MS', 'SLOW_TIMEOUT_MS', 'SLOW_POST_PATHS']
+      .map((n) => varDecl(client, n)).map((d) => d && d.parent.getText(client));
+    const fn = fnDecl(client, 'timeoutForRequest');
+    expect(parts.every(Boolean) && fn, 'timeoutForRequest or its constants not found in api/client.ts');
+    const t = new Function(`${transpile(parts.join('\n') + '\n' + fn.getText(client))}; return timeoutForRequest;`)();
+    expect(t('/api/account', 'DELETE') === 30_000, `DELETE /api/account -> ${t('/api/account', 'DELETE')} ms, want 30000`);
+    expect(t('https://x.example/api/account?a=1', 'DELETE') === 30_000, 'a base-URL/query DELETE /api/account is not slow');
+    expect(t('/api/account', 'GET') === 15_000, `GET /api/account -> ${t('/api/account', 'GET')} ms, want the 15000 default`);
+    expect(t('/api/account/export', 'DELETE') === 15_000, 'a different DELETE path got the slow timeout');
   });
 
   console.log(failures === 0
