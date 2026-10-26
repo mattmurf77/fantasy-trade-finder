@@ -584,8 +584,10 @@ the client's dedupe key. It is added at serve: unpaged responses and the
 
 **`deck_id` (P2).** Every organic `page: 1` response carries `deck_id`, from
 the store or from a job, `force` included: the deck the client pages by on
-`/status?deck=`. It equals that response's `job_id`. Pinned, opponent-scoped,
-intent and demo-league searches don't carry it; page those by `job_id`.
+`/status?deck=`. It equals that response's `job_id`. Pinned, opponent-scoped
+(Specific Team), intent and demo-league searches don't carry it. The app
+still sends `deck=<job_id>` when it pages them, and `/status` never rebases
+them (see `deck=` below).
 
 **`POST /api/trades/generate` with `page: 1`.** Only an organic body reads the
 store: no `pinned_give_players`, `pinned_receive_players`, `opponent_user_id`,
@@ -647,29 +649,39 @@ decimals. Unpaged requests never read it.
   rebuilds, use `deck`.
 
 **`GET /api/trades/status?deck=D&cursor=K` (P2): one deck, across rebuilds.**
-`D` is the `deck_id` from page 1 (or from a `rebased` response). `deck` is read
-only alongside an honored `cursor`; `job_id` is then not read. `D` is 1–64
-characters of `A-Z a-z 0-9 _ -`, else 400 `{error: "invalid_deck"}` (after the
-`cursor` check). **With paging killed (`trade_paged_responses` 0) `deck` is
-not read at all**, like `cursor`: the response is the legacy cumulative body
-for `job_id` (which the app always sends with `deck`), byte for byte.
+`D` is the deck the app is paging: the `deck_id` from page 1 (or from a
+`rebased` response), else the search's `job_id` (the app sends `deck` on every
+paged poll). `deck` is read only alongside an honored `cursor`; `job_id` is
+then not read. `D` is 1–64 characters of `A-Z a-z 0-9 _ -`, else 400
+`{error: "invalid_deck"}` (after the `cursor` check). **`deck` is not read at
+all with paging killed (`trade_paged_responses` 0) or at `trade_i1_mode` 0**,
+like `cursor` and the store: the response is the `job_id` form's (the legacy
+cumulative body with paging killed), byte for byte.
 
 **Every serve below follows the [S0 roster check](#s0-roster-check-at-serve)
 exactly, as the `job_id` form does,** with one roster snapshot per serve:
 dispositions, I-1, both gate misses and their shapes only at
 `trade_gate_miss_mode` 1 (held at 0), the admin gate-miss test hook, the
-`[i1] serve` log line, and the floor kick after the response. A gate miss holds
-the cursor (`cursor` echoes `K`, `total_ready` `0`) and is never an end or a
-rebase: the client keeps polling.
+`[i1] serve` log line (`job=` the deck served), and the floor kick after the
+response. A gate miss holds the cursor (`cursor` echoes `K`, `total_ready`
+`0`) and is never an end or a rebase: the client keeps polling. One stored
+page row is read and decoded per poll.
 
-**The scope is the deck's own:** the organic scope (league, scoring format,
-`fairness_threshold`) `D` was built under, if `D` is still in this server
-process; else that of the requester's stored row built by `D` (one read of
-the user's rows for the session's league and format); else, only when
-neither exists, the session's league, format and last non-pinned
-`fairness_threshold` (0.5 if none). So an intent or other search that
-changes the session's fairness never moves an organic deck's pages. The
-server resolves, in order:
+**Only a deck that is provably organic is ever rebased**: `D`'s job is in this
+server process with an organic page scope, or a stored row `D` built exists.
+Its scope (league, scoring format, `fairness_threshold`) is then `D`'s own, so
+an intent or other search that changes the session's fairness never moves it.
+Anything else is never rebased onto the organic deck:
+- **A pinned, Specific Team (`opponent_user_id`), intent or other non-organic
+  search** (`D` in this process without an organic page scope): its own job's
+  page at `K`, exactly the `job_id` + `cursor` form (no `deck_id`, no
+  `rebased`), with its own error passed through (a timeout, `inputs_changed`,
+  a policy change). At its own end (complete, `K` at its last card), a gate
+  miss holds the cursor, else `pool_exhausted: true` with `cards: []`.
+- **A deck that is gone** (not in this process, no stored row built by it, or
+  another user's): the legacy `404 {"error": "job not found"}`.
+
+For an organic `D`, the server resolves, in order:
 
 1. **The stored pages.** The scope's stored row was built by `D` and
    `K < total_ready`: the stored cards from `K`, exactly the `job_id=` form's
@@ -682,17 +694,16 @@ server resolves, in order:
    none, see the end of deck below.
 3. **Rebased.** Otherwise the deck changed (a rebuild replaced it, an input
    change revoked it, it errored or timed out, its serving policy moved, or a
-   restart dropped it): the scope's current deck from its **first** card,
+   restart dropped its job): the scope's current deck from its **first** card,
    with `rebased: true`, `deck_id` = the new deck, and `cursor` = the raw cards
    included. The current deck is the stored row when it isn't `D`'s own and
    would serve on `page: 1` (the same engine/config, expiry and staleness
    rules and backing job; at a live `D`'s end, only if it is the scope's
    newest job's row, so two decks never alternate); else the scope's newest
    job in this process; else a backing job is started and its first page
-   returned, often `cards: []` while it runs. An unknown `D`, or another
-   user's, rebases onto the requester's own deck. A start that joins a job
-   outside the scope (another fairness, an intent search) is no deck to move
-   to: the response stays on `D` with no cards, and the client asks again.
+   returned, often `cards: []` while it runs. A start that joins a job outside
+   the scope (another fairness, an intent search) is no deck to move to: the
+   response stays on `D` with no cards, and the client asks again.
 
 **This GET can start a trade job.** Case 3's backing job is `/status`'s one
 side effect: after a restart a client paging by `deck` never calls
@@ -708,20 +719,28 @@ same way: deduped, appended, never reordered. If a page comes back short
 after that, it fetches the next page right away. The server never dedupes
 against the client and keeps no per-client state.
 
-**End of deck: `pool_exhausted: true`.** When a `complete` `D` is asked at or
-past its last card (not a `replace`) and no newer deck exists, one roster
-snapshot decides:
+**End of deck: `pool_exhausted: true`.** When a `complete` organic `D` is
+asked at or past its last card and no newer deck exists, one roster snapshot
+decides:
 - a gate miss (S0's knobs and test hook, as above) gets its shape and holds
   the cursor: never the end;
 - a failed roster read: `D`'s own response, no cards and no end;
-- `pool_exhausted: true`, with `cards: []`, only when `D`'s rosters and values
-  still match the stored rows, its stored row isn't stale, and no job for the
-  key is running (a rebuild or backing job may still add cards);
-- otherwise the rebuild is started and the client is rebased onto it.
+- `pool_exhausted: true` when `D`'s rosters and values still match the stored
+  rows, its stored row isn't stale, and no job for the key is running (a
+  rebuild or backing job may still add cards);
+- otherwise the rebuild is started and the client is rebased onto it; a
+  stale scope converges, since the rebuilt deck's own end follows once it lands
+  and is stored. When nothing can rebuild the scope here (the start returns
+  `D` itself, still fresh in this process while its row was marked stale
+  elsewhere, or the start fails), the end is sent rather than withheld forever.
 
-It is never sent while `D` runs, during a gate miss, while a rebuild or
-backing job runs, after a rebuild landed, or on a stale row; otherwise the
-field is absent. `rebased` is likewise absent unless `true`.
+The end carries `cards: []`, except for a deck whose publishing re-sorts (not
+append-only; production serves owner-only, which appends): E2 replaces on
+every cursor there, so at exactly its length the response is the end
+**with** its final list (`replace: true`), for the client to merge. It is
+never sent while `D` runs, during a gate miss, while a rebuild or backing job
+runs, or after a rebuild landed; otherwise the field is absent. `rebased` is
+likewise absent unless `true`.
 
 ### Trade card object
 
