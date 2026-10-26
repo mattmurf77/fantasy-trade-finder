@@ -3740,7 +3740,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 1
+DECK_PIPELINE_VERSION = 2
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -3812,6 +3812,7 @@ DECK_PIPELINE_IGNORED = {
     "_revoke_trade_job_locked": "job lifecycle: revocation",
     # logging and telemetry
     "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
+    "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
     "_log_owner_selected_run": "run logging",
     "_log_presentment_outcome": "a log line",
     "_log_roster_rejections": "shadow logging of rejected candidates",
@@ -3852,7 +3853,7 @@ DECK_PIPELINE_IGNORED = {
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
 }
-DECK_PIPELINE_DIGEST = "38068a074677acaa"
+DECK_PIPELINE_DIGEST = "9e79b6087f6e1a42"
 
 # The modules whose code decides what cards a deck holds or their order. Their
 # bytes are hashed into every page's engine_version (backend/-relative globs,
@@ -29826,9 +29827,11 @@ def _refresh_sleeper_members(league_id: str) -> int:
 def _pregenerate_grading_targets(pairs: list[tuple[str, str]], rebuild: bool = False,
                                  refresh_rosters: bool = False) -> None:
     """Daemon-thread half of targeted pre-generation (operator 2026-10-07). Per
-    (user_id, league_id), sequentially: refresh the Acquire deck with the weekly
-    replenishment path (_replenish_deck_for — headless session, the normal trade job,
-    impressions logged with source "replenish"), then start_session + build exactly
+    (user_id, league_id), sequentially: build a Calibration refresh deck through the
+    replenishment path (_replenish_deck_for with source "grading_refresh" — headless
+    session, the normal trade job, never pinned under the Trades key, so no
+    trade_impressions and no trades_generated; its deck_impressions rows carry
+    deck_source "grading_refresh"), then start_session + build exactly
     as the bulk path does. rebuild=True first retires the pair's unanswered building/open
     session (blind_grading.retire_unanswered), so it is rebuilt on the current engine.
     refresh_rosters=True first re-reads a Sleeper league's rosters from Sleeper (once per
