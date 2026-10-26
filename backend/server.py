@@ -3799,6 +3799,7 @@ _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
     "power_rankings.py",          # value_core's lineup slots and optimal starters
+    "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
     "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
@@ -3812,6 +3813,14 @@ _ENGINE_CODE_MODULES = (
     # the card copy itself
     "trade_narrative.py",
 )
+# Excluded on purpose (models-eng, 2026-10-26):
+# - outlook/, except league_state.py: the Outlook feature. Value core's
+#   standings (_value_core_standings -> outlook.build_league_state, a thin
+#   wrapper in pipeline.py -> get_league_state_provider(platform).load) come
+#   from league_state.py alone; hashing the rest would cold every page and
+#   trigger MOD-M1 on edits that can't change a deck.
+# - trade_input_evidence.py: provenance with its own VERSION, never a model
+#   input; a row-format change bumps that VERSION.
 _engine_code_hash_value: str | None = None
 
 # The experiments whose variant changes a deck (experiments.py keys). A stored

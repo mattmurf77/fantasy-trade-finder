@@ -1141,6 +1141,28 @@ def test_the_engine_code_hash_covers_the_module_set_once_per_process(tmp_path, m
     assert len(calls) == 1
 
 
+def test_value_cores_standings_module_is_hashed_and_the_rest_of_outlook_is_not(tmp_path):
+    """models-eng (e): outlook/league_state.py loads the W/L/T, points_for and
+    completed_weeks value core reads, so its bytes are in the hash. The rest
+    of outlook/ and trade_input_evidence.py are excluded on purpose."""
+    root = Path(server.__file__).resolve().parent
+    files = sorted({path for pattern in server._ENGINE_CODE_MODULES for path in root.glob(pattern)})
+    hashed = {path.relative_to(root).as_posix() for path in files}
+    assert {name for name in hashed if name.startswith("outlook/")} == {"outlook/league_state.py"}
+    assert "trade_input_evidence.py" not in hashed
+    for path in files:
+        copy_to = tmp_path / path.relative_to(root)
+        copy_to.parent.mkdir(parents=True, exist_ok=True)
+        copy_to.write_bytes(path.read_bytes())
+    assert server._engine_code_hash_of(tmp_path) == server._engine_code_hash_of(root)
+    (tmp_path / "outlook" / "simulator.py").write_text("# an Outlook-only edit\n")
+    (tmp_path / "trade_input_evidence.py").write_text("# a provenance edit\n")
+    assert server._engine_code_hash_of(tmp_path) == server._engine_code_hash_of(root)
+    standings = tmp_path / "outlook" / "league_state.py"
+    standings.write_bytes(standings.read_bytes() + b"\n# a standings change\n")
+    assert server._engine_code_hash_of(tmp_path) != server._engine_code_hash_of(root)
+
+
 # ── Eviction ────────────────────────────────────────────────────────────────
 
 def _days_ago(days):
