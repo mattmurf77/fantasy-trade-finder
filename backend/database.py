@@ -7208,13 +7208,26 @@ def save_deck_evidence_pack(row: dict) -> bool:
             index_elements=[t.c.run_id])).rowcount)
 
 
-def update_deck_evidence_pack_header(run_id: str, header_json: str, checksum: str) -> bool:
-    """A later delivery or the retirement: rewrite header_json and checksum
-    only. Never cards_blob (fixed at build; Postgres keeps its TOAST)."""
+def update_deck_evidence_pack_header(run_id: str, header_json: str, checksum: str,
+                                     old_checksum: str) -> bool:
+    """A later delivery, a counted miss or the retirement: rewrite header_json
+    and checksum only, never cards_blob (fixed at build; Postgres keeps its
+    TOAST), compare-and-swap on the checksum the writer last read, so a deploy
+    overlap can't lose an update. False when another writer got there first."""
     t = deck_evidence_packs_table
     with engine.begin() as conn:
-        return bool(conn.execute(update(t).where(t.c.run_id == run_id).values(
-            header_json=header_json, checksum=checksum)).rowcount)
+        return bool(conn.execute(update(t).where(
+            t.c.run_id == run_id, t.c.checksum == old_checksum,
+        ).values(header_json=header_json, checksum=checksum)).rowcount)
+
+
+def load_deck_evidence_pack_header(run_id: str) -> dict | None:
+    """A pack's user_id, header_json and checksum, without its cards."""
+    t = deck_evidence_packs_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t.c.user_id, t.c.header_json, t.c.checksum)
+                           .where(t.c.run_id == run_id)).mappings().first()
+    return dict(row) if row is not None else None
 
 
 def load_deck_evidence_pack(run_id: str) -> dict | None:

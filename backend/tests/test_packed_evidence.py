@@ -386,23 +386,25 @@ def test_r42_a_card_past_the_stored_ones_viewed_after_a_restart_is_a_counted_mis
     assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
 
 
-def test_s8_a_delivery_lost_to_a_crash_is_recorded_before_its_outcome(deferred, monkeypatch):
-    """models-eng's condition 4: page 2's header update never landed (the
-    process died); after the restart, the outcome on one of its cards writes
-    the delivery first."""
+def test_s8_an_upgrade_past_the_recorded_deliveries_writes_no_delivery(deferred, monkeypatch, caplog):
+    """models-eng's review of #416: page 2's header update was lost (the
+    process died). The outcome on its card 45, after the restart, upgrades
+    the card but never writes a delivery for it (that would hide the loss and
+    bias e(k)'s tail; eval excludes the deck as incomplete_deck); it logs."""
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120)
     status(client, job_id, 0)
     real = db_module.update_deck_evidence_pack_header
     monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", lambda *a: True)   # lost
     status(client, job_id, 30)
-    assert [d[0] for d in unpack(pack_of(engine, job_id))[0]["deliveries"]] == [29]
     restart()
     monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", real)
-    view(job_id, 45)
-    deliveries = unpack(pack_of(engine, job_id))[0]["deliveries"]
-    assert deliveries[-1][0] >= 45
+    with caplog.at_level("WARNING"):
+        view(job_id, 45)
+    assert [d[0] for d in unpack(pack_of(engine, job_id))[0]["deliveries"]] == [29]
     assert by_index(engine)[(0, 45)]["evidence_tier"] == "viewed" and outcomes(engine)
+    assert any(f"upgrade past last_delivered job={job_id} index=45 last=29" in r.getMessage()
+               for r in caplog.records)
 
 
 def test_s8_the_shutdown_drain_flushes_pending_pack_updates(deferred, threaded, monkeypatch):
@@ -618,3 +620,143 @@ def test_u8_full_rows_per_served_deck_with_packing(sized_exclusive, monkeypatch)
           f"candidate set {len(members)} members packed {len(cand['candidates_packed']) / 1024:.1f} KiB "
           f"vs JSON {len(json.dumps(members)) / 1024:.1f} KiB")
     assert len(written) == 30 and pack["card_count"] == count
+
+
+# ── #417 (eval v5) contract §6/§8 alignment ─────────────────────────────────
+
+def test_served_before_is_written_as_exactly_0_or_1(deferred):
+    """v5 reads any served_before other than 0 as 1."""
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(120, store=False)
+    status(client, job_id, 0)
+    own_all_but(engine, 3, 40)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    values = [r["served_before"] for r in rows(engine, db_module.deck_card_withdrawals_table)]
+    assert sorted(values) == [0, 1] and {type(v) for v in values} == {int}
+
+
+def test_a_stored_path_withdrawal_of_a_delivered_unseen_card_was_served_before(deferred):
+    """models-eng's blocking find on #416: card 45 was delivered (page 2) but
+    never viewed, so it has no row, only its place in the pack's deliveries.
+    Withdrawn after a restart (the stored path), it was served before."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    restart()
+    own_all_but(engine, 45)
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    assert (0, 45) not in by_index(engine)
+    assert withdrawals(engine)[45]["served_before"] == 1
+
+
+def test_interleaved_header_updates_from_two_instances_lose_nothing(deferred):
+    """models-eng's review: a deploy overlap, two instances updating one pack.
+    Each appends a different intermediate boundary, one also a duplicate index
+    with a later time; one counts a miss, the other retires the deck. After
+    the CAS retry the stored run holds the union (the earlier time for the
+    duplicate), the miss, and the retirement."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    first = unpack(pack_of(engine, job_id))[0]["deliveries"]
+    restart()
+    a = server._deck_pack_state(job_id, UID)               # instance A
+    server._deck_pack_states.clear()
+    b = server._deck_pack_state(job_id, UID)               # instance B, the same stored header
+    assert a is not b and a.checksum == b.checksum
+    a.run["deliveries"] = first + [[59, "2026-10-27T00:00:59+00:00"], [89, "2026-10-27T00:01:29+00:00"]]
+    a.run["upgrade_misses"] = 1
+    assert server._deck_pack_commit(job_id, a)
+    b.run["deliveries"] = first + [[59, "2026-10-27T00:09:59+00:00"], [74, "2026-10-27T00:01:14+00:00"]]
+    b.run.update(retired=True, retired_at="2026-10-27T01:00:00+00:00")
+    assert server._deck_pack_commit(job_id, b)             # a CAS miss, merged, retried
+    run, _cards = unpack(pack_of(engine, job_id))          # the checksum holds
+    assert run["deliveries"] == first + [[59, "2026-10-27T00:00:59+00:00"],
+                                         [74, "2026-10-27T00:01:14+00:00"],
+                                         [89, "2026-10-27T00:01:29+00:00"]]
+    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (
+        1, True, "2026-10-27T01:00:00+00:00")
+
+
+def test_a_replenished_decks_pack_carries_its_deck_source(deferred, monkeypatch):
+    """§6: eval reads deck_source off the run metadata."""
+    from backend.tests.test_trade_page_store import generate
+    client, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.packed_evidence": True})
+    assert server._replenish_deck_for(UID, LEAGUE) is not None
+    [job] = [j for j in server._trade_jobs.values() if j.get("source") == "replenish"]
+    assert job["evidence"].packed
+    generate(client)                                       # the tap that opens it
+    run, _cards = unpack(pack_of(engine, job["job_id"]))
+    assert run["deck_source"] == "replenish" and run["page_store"] == 0
+
+
+def test_v5_reads_the_packed_deck_like_its_full_rows_with_withdrawals_and_in_flight(deferred):
+    """Under eval v5 (#417): the packed form and the full-row form give the
+    same cards, delivered positions and displayed positions, with a W0
+    withdrawal (removed) and a served-before one (kept); a non-retired pack in
+    its window reads as in_flight, and as final once retired."""
+    from sqlalchemy import create_engine, insert
+    from backend.eval import data as eval_data
+    from backend.eval.data import card_dict, load_decks
+    if not hasattr(eval_data, "PAGE_STORE_MARKER"):
+        pytest.skip("eval v5 (#417) isn't merged here")
+    client, engine, _ = deferred
+    job_id, served, ghosts, ev, _ = packed_deck(120, ghost_every=9)
+    status(client, job_id, 0)
+    own_all_but(engine, 3, 40)
+    status(client, job_id, 0)                              # card 3: served before, withdrawn
+    status(client, job_id, 30)                             # card 40: never delivered (W0)
+    with ev.lock:
+        held = [server._unpack_row(packed) for _iid, (_i, packed) in ev.rows.items()]
+    full = create_engine("sqlite:///:memory:")
+    db_module.metadata.create_all(full)
+    served_at = pack_of(engine, job_id)["served_at"]
+    with full.begin() as conn:
+        conn.execute(insert(db_module.deck_impressions_table), rows(engine) + [
+            {**{c.name: r.get(c.name) for c in db_module.deck_impressions_table.columns},
+             "served_at": served_at, "evidence_tier": "archive"} for r in held])
+        conn.execute(insert(PACKS), [pack_of(engine, job_id)])
+        conn.execute(insert(db_module.deck_card_withdrawals_table),
+                     rows(engine, db_module.deck_card_withdrawals_table))
+    attribution = server._PACK_ATTRIBUTION_COLUMNS
+
+    def read(eng, as_of=None):
+        on_rows = {r["impression_id"]: r for r in rows(eng)}
+        [deck] = load_decks(engine=eng, as_of=as_of)
+        out = []
+        for c in deck.cards:
+            d = card_dict(c)
+            if c.impression_id in on_rows and not c.is_ghost:
+                d.update({k: on_rows[c.impression_id][k] for k in attribution})
+            out.append((c.card_index, c.is_ghost, c.delivered, c.position,
+                        {k: v for k, v in d.items() if k in evidence_pack.CONTRACT_KEYS
+                         or k == "impression_id"}))
+        return deck, out
+
+    with ev.lock:                                          # retire it, as the cleanup loop does
+        ev.pack.run.update(retired=True, retired_at=served_at)
+        ev.pack_dirty = True
+    server._deck_pack_flush_header(ev)
+    retired = pack_of(engine, job_id)
+    with full.begin() as conn:                             # the full-row form: the same header
+        conn.execute(PACKS.update().where(PACKS.c.run_id == job_id).values(
+            header_json=retired["header_json"], checksum=retired["checksum"]))
+    (pdeck, packed_read), (fdeck, full_read) = read(engine), read(full)
+    assert pdeck.exclusion is None and fdeck.exclusion is None
+    assert packed_read == full_read
+    kept = [i for i, ghost, *_ in packed_read if not ghost]
+    assert 40 not in kept and 3 in kept and pdeck.withdrawn_removed == fdeck.withdrawn_removed == 1
+    assert [i for i, ghost, delivered, *_ in packed_read if delivered and not ghost] == [
+        i for i in range(60) if i != 40]
+    # A non-retired pack inside its window is in_flight (as of now).
+    with ev.lock:
+        ev.pack.run["retired"] = False
+        ev.pack.run.pop("retired_at")
+        ev.pack_dirty = True
+    server._deck_pack_flush_header(ev)
+    now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+    deck, _ = read(engine, as_of=now)
+    assert deck.exclusion == "in_flight"

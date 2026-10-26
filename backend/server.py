@@ -4373,6 +4373,7 @@ class _DeckEvidence:
         self.pack = None              # its _PackState once the pack row is written
         self.pack_dirty = False       # a delivery the pack's header doesn't carry yet
         self.pack_cards = None        # the pack's cards, fixed at the first write attempt
+        self.deck_source = None       # the job's source (F10 "replenish"), for the run metadata
 
     def __copy__(self):
         return self
@@ -4566,7 +4567,7 @@ class _DeckEvidence:
             # S8: the packed-mode fields a delivery after the job left needs.
             "packed": self.packed, "page_store": self.page_store, "league_id": self.league_id,
             "built_at": self.built_at, "run_meta": self.run_meta,
-            "pack_written": self.pack is not None})
+            "pack_written": self.pack is not None, "deck_source": self.deck_source})
 
     @classmethod
     def from_row(cls, user_id: str, deck_job_id: str, row: Mapping | None, lease) -> "_DeckEvidence":
@@ -4595,6 +4596,7 @@ class _DeckEvidence:
             ev.league_id = blob.get("league_id") or (row or {}).get("league_id")
             ev.built_at = blob.get("built_at")
             ev.run_meta = dict(blob.get("run_meta") or {})
+            ev.deck_source = blob.get("deck_source")
             # A packed deck whose pack is written keeps its packed cards' rows
             # here on purpose (U4): it isn't truncated, it's packed.
             ev.partial = (bool(ev.rows) and blob.get("truncated", True)
@@ -4637,11 +4639,14 @@ class _PackState:
     """A written pack's header, and the v1 checksum's sha256 state through
     `"header":` (the cards are fixed at build), for header-only updates."""
 
-    def __init__(self, user_id: str, header: dict, cards: list[dict]):
+    def __init__(self, user_id: str, header: dict, cards: list[dict], checksum: str | None = None):
         self.user_id = user_id
         self.header = header
+        self.cards = cards
         self.prefix = hashlib.sha256(('{"cards":' + json.dumps(cards, sort_keys=True,
                                       separators=(",", ":")) + ',"header":').encode("utf-8"))
+        self.checksum = checksum                  # the stored row's: the CAS predicate
+        self.base_run = copy.deepcopy(header.get("run"))   # the run as last stored
 
     @property
     def run(self) -> dict:
@@ -4685,6 +4690,8 @@ def _deck_pack_input(ev: _DeckEvidence):
                          for _iid, (_index, packed) in sorted(ev.rows.items(), key=lambda kv: kv[1][0])]
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False, "upgrade_misses": 0}
+    if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
+        run["deck_source"] = ev.deck_source
     return ev.pack_cards, run
 
 
@@ -4707,8 +4714,7 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict) -> N
         "header_json": packed.header_json, "cards_blob": packed.cards_blob,
         "checksum": packed.checksum, "card_count": packed.card_count,
         "created_at": datetime.now(timezone.utc).isoformat()})
-    state = _PackState(ev.user_id, json.loads(packed.header_json), unpacked)
-    state.cards = unpacked
+    state = _PackState(ev.user_id, json.loads(packed.header_json), unpacked, packed.checksum)
     with ev.lock:
         ev.pack, ev.pack_cards = state, None
         ev.pack_dirty = state.run["deliveries"] != ev.deliveries
@@ -4717,16 +4723,70 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict) -> N
 
 
 def _deck_pack_flush_header(ev: _DeckEvidence) -> None:
-    """A packed deck's later deliveries: one header-only update."""
-    from . import database as _db
+    """A packed deck's later deliveries: one header-only update (a CAS commit;
+    the caller holds _deck_evidence_write_lock)."""
     with ev.lock:
         if ev.pack is None or not ev.pack_dirty:
             return
-        ev.pack.run["deliveries"] = [list(d) for d in ev.deliveries]
-        header_json, checksum = ev.pack.render()
+        state = ev.pack
+        state.run["deliveries"] = _merge_deliveries(state.run.get("deliveries"), ev.deliveries)
         ev.pack_dirty = False
-    if not _db.update_deck_evidence_pack_header(ev.job_id, header_json, checksum):
-        log.warning("deck-evidence %s: pack row missing; deliveries not recorded", ev.job_id)
+    _deck_pack_commit(ev.job_id, state)
+    with ev.lock:                          # another instance's boundaries, if the CAS merged any
+        ev.deliveries = _merge_deliveries(ev.deliveries, state.run.get("deliveries"))
+
+
+_PACK_CAS_RETRIES = 5
+
+
+def _merge_deliveries(a, b) -> list:
+    """models-eng: the union of two deliveries lists, sorted and deduplicated by
+    index, keeping each index's earliest delivered_at (eval filters each entry
+    by its own delivered_at <= as_of)."""
+    earliest: dict = {}
+    for index, at in [*(a or []), *(b or [])]:
+        if index not in earliest or at < earliest[index]:
+            earliest[index] = at
+    return [[index, earliest[index]] for index in sorted(earliest)]
+
+
+def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
+    """Another instance updated the header first: keep both. Deliveries are
+    the union (earliest time per index); retired stays true once true (the
+    earliest retired_at); upgrade_misses is the stored count plus ours since
+    our base."""
+    merged = {**ours, **stored}
+    merged["deliveries"] = _merge_deliveries(stored.get("deliveries"), ours.get("deliveries"))
+    if stored.get("retired") or ours.get("retired"):
+        merged["retired"] = True
+        stamps = [t for t in (stored.get("retired_at"), ours.get("retired_at")) if t]
+        if stamps:
+            merged["retired_at"] = min(stamps)
+    merged["upgrade_misses"] = stored.get("upgrade_misses", 0) + max(
+        0, ours.get("upgrade_misses", 0) - (base or {}).get("upgrade_misses", 0))
+    return merged
+
+
+def _deck_pack_commit(run_id: str, state) -> bool:
+    """Write state's header with compare-and-swap on the stored checksum, so a
+    deploy overlap (two instances) loses nothing: on a miss, re-read, merge
+    (_merge_pack_runs), re-render from the fixed prefix and retry, at most
+    _PACK_CAS_RETRIES times. True when written."""
+    from . import database as _db
+    for _attempt in range(_PACK_CAS_RETRIES):
+        header_json, checksum = state.render()
+        if _db.update_deck_evidence_pack_header(run_id, header_json, checksum, state.checksum):
+            state.checksum, state.base_run = checksum, copy.deepcopy(state.run)
+            return True
+        row = _db.load_deck_evidence_pack_header(run_id)
+        if row is None:
+            log.warning("deck-evidence %s: pack row missing; header not written", run_id)
+            return False
+        stored_run = json.loads(row["header_json"])["run"]
+        state.header["run"] = _merge_pack_runs(stored_run, state.run, state.base_run)
+        state.checksum, state.base_run = row["checksum"], stored_run
+    log.error("[evidence] pack header CAS gave up after %d tries job=%s", _PACK_CAS_RETRIES, run_id)
+    return False
 
 
 def _deck_evidence_cover(ev: _DeckEvidence, ids, at: str) -> None:
@@ -4754,8 +4814,7 @@ def _deck_pack_state(deck_job_id: str, user_id: str):
     _run, cards = evidence_pack.unpack_run(evidence_pack.PackedRun(
         row["pack_version"], row["header_json"], bytes(row["cards_blob"]), row["checksum"],
         row["card_count"]))
-    state = _PackState(user_id, json.loads(row["header_json"]), cards)
-    state.cards = cards
+    state = _PackState(user_id, json.loads(row["header_json"]), cards, row["checksum"])
     with _deck_pack_states_lock:
         while len(_deck_pack_states) >= _DECK_PACK_CACHE_MAX:
             _deck_pack_states.pop(next(iter(_deck_pack_states)))
@@ -4806,7 +4865,7 @@ def _deck_evidence_upgrade(impression_id: str, acting_user_id: str) -> bool:
             if impression_id in ev.sticky and impression_id not in ev.delivered:
                 return False                  # W0: never shown, never upgraded
             held = ev.rows.get(impression_id)
-            _deck_evidence_cover(ev, [impression_id], now)
+            last = ev.deliveries[-1][0] if ev.deliveries else -1
             row = diag = None
             if held is not None:
                 row = {**_unpack_row(held[1]), "evidence_tier": "viewed",
@@ -4814,7 +4873,9 @@ def _deck_evidence_upgrade(impression_id: str, acting_user_id: str) -> bool:
                        "delivered_at": (ev.delivered_at.get(impression_id)
                                         or ev.pack.delivered_at(index) or now)}
                 diag = ev.closure([row])
-        _deck_pack_flush_header(ev)           # condition 4: the delivery first
+        _deck_pack_flush_header(ev)           # condition 4: a pending delivery lands first
+        if index > last:
+            _log_upgrade_past_deliveries(deck_job_id, index, last)
         if row is None:
             return _deck_upgrade_from_pack(ev.pack, deck_job_id, impression_id, index, now,
                                            ev_for_header=ev)
@@ -4823,6 +4884,15 @@ def _deck_evidence_upgrade(impression_id: str, acting_user_id: str) -> bool:
         with ev.lock:
             ev.wrote([row], diagnostics=diag)
         return True
+
+
+def _log_upgrade_past_deliveries(deck_job_id: str, index: int, last: int) -> None:
+    """models-eng (#416 review): an outcome past the recorded deliveries means
+    their update was lost or hasn't landed. Never write a delivery for it
+    (that would hide it and bias e(k)'s tail): a pending update lands on its
+    own, and a lost one makes eval exclude the deck (incomplete_deck). Logged."""
+    log.warning("[evidence] upgrade past last_delivered job=%s index=%d last=%d",
+                deck_job_id, index, last)
 
 
 def _deck_upgrade_stored(deck_job_id: str, impression_id: str, index: int, user_id: str,
@@ -4842,10 +4912,8 @@ def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, ind
     if any(w["card_index"] == index and not w["served_before"]
            for w in _db.load_deck_withdrawals(deck_job_id)):
         return False                          # W0: never shown, never upgraded
-    if index > state.last_delivered():        # condition 4: the delivery first
-        state.run.setdefault("deliveries", []).append([index, now])
-        header_json, checksum = state.render()
-        _db.update_deck_evidence_pack_header(deck_job_id, header_json, checksum)
+    if index > state.last_delivered():
+        _log_upgrade_past_deliveries(deck_job_id, index, state.last_delivered())
     page = _db.load_trade_page_for_job(user_id, deck_job_id, evidence=True)
     stored = _DeckEvidence.from_row(user_id, deck_job_id, page, None) if page else None
     held = stored.rows.get(impression_id) if stored is not None else None
@@ -4886,8 +4954,7 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
         _deck_pack_flush_header(ev_for_header)
     else:
         state.run["upgrade_misses"] = state.run.get("upgrade_misses", 0) + 1
-        header_json, checksum = state.render()
-        _db.update_deck_evidence_pack_header(deck_job_id, header_json, checksum)
+        _deck_pack_commit(deck_job_id, state)
     log.warning("deck-evidence %s: upgrade miss for card %d (no snapshot); row from the pack",
                 deck_job_id, index)
     _db.save_deck_evidence([row], deck_job_id=deck_job_id)
@@ -5284,6 +5351,17 @@ def _deck_withdrawals_write(deck_job_id: str, user_id: str, league_id: str,
                 return
             unknown = [iid for iid, served in withdrawals.items() if served is None]
             delivered = _db.load_delivered_impression_ids(unknown) if unknown else set()
+            if unknown:
+                # models-eng (#416 review): a card delivered past the first 30
+                # and never viewed has no row; the pack's deliveries say it was
+                # served. Read fresh, in this lease.
+                header = _db.load_deck_evidence_pack_header(deck_job_id)
+                if header is not None and header["user_id"] == user_id:
+                    deliveries = json.loads(header["header_json"])["run"].get("deliveries") or []
+                    last = deliveries[-1][0] if deliveries else -1
+                    delivered |= {iid for iid in unknown
+                                  if (_deck_card_index(deck_job_id, iid) or 0) <= last
+                                  and _deck_card_index(deck_job_id, iid) is not None}
             rows = []
             for iid, served in sorted(withdrawals.items()):
                 index = _deck_card_index(deck_job_id, iid)
@@ -5294,7 +5372,9 @@ def _deck_withdrawals_write(deck_job_id: str, user_id: str, league_id: str,
                 rows.append({"deck_job_id": deck_job_id, "card_index": index, "user_id": user_id,
                              "league_id": league_id, "reason": "i1_dropped",
                              "first_withdrawn_at": at, "impression_id": iid,
-                             "served_before": int(served if served is not None else iid in delivered)})
+                             # exactly 0 or 1 (eval reads anything else as 1)
+                             "served_before": 1 if (served if served is not None
+                                                    else iid in delivered) else 0})
             if rows:
                 _db.record_deck_withdrawals(rows)
     except Exception:
@@ -12383,6 +12463,7 @@ def _kickoff_trade_job(
         job["evidence"].packed = is_enabled("trade.packed_evidence")
         job["evidence"].page_store = bool(job.get("page_scope"))
         job["evidence"].league_id = league_id
+        job["evidence"].deck_source = source
     elif _trade_page_store_enabled():
         # Pinned, opponent, intent, presentation-exempt, demo jobs and
         # Calibration's targeted refresh ("grading_refresh", whose session reads
