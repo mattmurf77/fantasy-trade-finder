@@ -1350,14 +1350,16 @@ def test_u4_the_classification_hook():
         mp.setattr(server, "_deck_held", {"held": None, "gone": None})
         mp.setattr(server, "_deck_evicted_at", {"gone": "2026-10-27T02:00:00+00:00"})
         cause = server._upgrade_miss_cause
-        assert cause("elsewhere", 95, 90) == "restart_split"           # another process built it
-        assert cause("elsewhere", 89, 90) == "other"                   # within the stored pages
-        assert cause("elsewhere", 60, 60) == "restart_split"           # the deck's own count
-        assert cause("held", 95, 90) == "other"                        # built here, still here
-        assert cause("gone", 95, 90) == "other"                        # evicted: off by default
+        assert cause("elsewhere", 95, 90, True) == "restart_split"     # another process built it
+        assert cause("elsewhere", 95, 90, False) == "other"            # no recorded delivery
+        assert cause("elsewhere", 89, 90, True) == "other"             # within the stored pages
+        assert cause("elsewhere", 60, 60, True) == "restart_split"     # the deck's own count
+        assert cause("held", 95, 90, True) == "other"                  # built here, still here
+        assert cause("gone", 95, 90, True) == "other"                  # evicted: off by default
         mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
-        assert cause("gone", 95, 90) == "evicted_split"
-        assert cause("gone", 89, 90) == "other"
+        assert cause("gone", 95, 90, True) == "evicted_split"
+        assert cause("gone", 95, 90, False) == "other"
+        assert cause("gone", 89, 90, True) == "other"
 
 
 def pages_stored(monkeypatch, pages):
@@ -1768,3 +1770,186 @@ def test_b4_a_page_whose_every_card_is_cut(deferred, prepared_ok, kind):
     assert {(r["reason"], r["served_before"]) for r in got.values()} == {("disposition_cut", 0)}
     nxt = client.get(f"/api/trades/status?deck={job_id}&cursor={body['cursor']}", headers=HEADERS)
     assert deck_ids(nxt.get_json()) == ids[60:90]
+
+
+# ── Fix-before-flip (#428 QA, release-lead) ─────────────────────────────────
+
+def test_flip_a_replenished_decks_miss_after_a_restart_is_a_restart_split(deferred):
+    """Item 4: a weekly-replenishment deck is packed but never page-stored
+    (no page_scope: page_store 0, no stored_count). None of its cards has a
+    stored snapshot, so a miss after a restart is restart_split at any index,
+    never other because the knobs (90) say card 40 should have been stored."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, store=False, source="replenish")
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    assert server._trade_jobs[job_id]["source"] == "replenish"
+    assert not server._trade_jobs[job_id].get("page_scope")
+    run = unpack(pack_of(engine, job_id))[0]
+    assert (run["page_store"], "stored_count" in run) == (0, False)
+    restart()
+    view(job_id, 40)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_flip_a_pack_written_before_its_page_store_gets_the_stored_count(deferred):
+    """Item 4's ordering: a page delivered while the job ran makes
+    _deck_evidence_job_done write the pack (server.py, the worker: job_done,
+    then _store_trade_page), before the store sets ev.stored_count. The store
+    then records stored_count in the pack's header."""
+    import time as _time
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, complete=False)
+    assert deck_ids(status(client, job_id, 0).get_json())       # delivered while it runs
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="complete", finished_at=_time.monotonic())
+    server._deck_evidence_job_done(job_id)                     # the first write
+    assert "stored_count" not in unpack(pack_of(engine, job_id))[0]
+    assert server._store_trade_page(job_id)                    # then the store
+    run = unpack(pack_of(engine, job_id))[0]
+    assert run["stored_count"] == 90 and [d[0] for d in run["deliveries"]] == [29]
+
+
+def view_swallowed(job_id, index, action="viewed"):
+    """An outcome whose upgrade fails: the route logs it and goes on."""
+    view(job_id, index, action)
+
+
+def rows_of(engine, job_id, index):
+    return [r for r in rows(engine) if r["deck_job_id"] == job_id and r["card_index"] == index]
+
+
+@pytest.mark.parametrize("path", ["stored", "live"])
+def test_flip_a_miss_whose_header_commit_raises_counts_once_after_the_retry(deferred, path):
+    """Item 1: the header UPDATE fails on card 95's first outcome. Its
+    increment is taken back, so the next outcome counts it once: one row and
+    a count of 1, after a restart (restart_split) and in process (a held
+    deck whose snapshot is gone: other)."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    if path == "stored":
+        restart()
+        cause = "restart_split"
+    else:
+        ev = server._trade_jobs[job_id]["evidence"]
+        with ev.lock:
+            ev.rows.pop(contract.card_impression_id(job_id, 95))
+        cause = "other"
+    with fail_after(engine, "UPDATE DECK_EVIDENCE_PACKS"):
+        view_swallowed(job_id, 95)
+    assert rows_of(engine, job_id, 95) == []
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == NO_MISSES
+    view(job_id, 95)                                           # the retry
+    assert len(rows_of(engine, job_id, 95)) == 1
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, cause: 1}
+
+
+def test_flip_a_miss_whose_row_save_raises_counts_once_after_the_retry(deferred):
+    """Item 1's sibling: the count commits, then the row's insert fails. The
+    retry writes the row and doesn't count again."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    restart()
+    with fail_after(engine, "INSERT INTO DECK_IMPRESSIONS"):
+        view_swallowed(job_id, 95)
+    assert rows_of(engine, job_id, 95) == []
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+    view(job_id, 95)
+    assert len(rows_of(engine, job_id, 95)) == 1
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
+    """Item 2: kickoffs add to _deck_held concurrently; at the cap the FIFO
+    trim raced (KeyError, or the dict changing size). Under the leaf lock no
+    add raises and the ledger never passes the cap."""
+    import sys
+    import threading
+    monkeypatch.setattr(server, "_DECK_LEDGER_MAX", 8)
+    ledger, errors = {}, []
+
+    def hammer(t):
+        try:
+            for i in range(20000):
+                server._ledger_add(ledger, f"{t}-{i}", None)
+        except Exception as exc:                           # noqa: BLE001 (the race's symptom)
+            errors.append(repr(exc))
+
+    switch = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=hammer, args=(t,)) for t in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(switch)
+    assert errors == [] and len(ledger) <= 8
+
+
+def test_flip_a_past_stored_card_with_no_recorded_delivery_is_other(deferred):
+    """Item 3: only page 1's delivery is recorded (a later update was lost).
+    Card 95, past the stored pages, viewed after a restart, has no recorded
+    delivery, so it is no named cause: other."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "other": 1}
+
+
+def test_flip_eviction_is_checked_before_holding():
+    """Item 5 (a): a deck this process built and then evicted is in both
+    ledgers: with evicted_split named it reads evicted_split, never other (a
+    held check first) nor restart_split (a not-held check first, as for a
+    deck the held ledger's cap trimmed)."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(server, "_deck_held", {"built_and_evicted": None})
+        mp.setattr(server, "_deck_evicted_at", {"built_and_evicted": "t", "trimmed": "t"})
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
+        assert server._upgrade_miss_cause("built_and_evicted", 95, 90, True) == "evicted_split"
+        assert server._upgrade_miss_cause("trimmed", 95, 90, True) == "evicted_split"
+
+
+def test_flip_the_stored_path_counts_against_the_page_rows_card_count(deferred):
+    """Item 5 (b): the page row says 90 cards were stored; the pack's run is
+    made to say 100. After a restart card 95 is past the row's 90: the stored
+    path passes the row's card_count, so restart_split (the run's 100 would
+    read other)."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    state = server._load_pack_state(job_id, UID)
+    state.run["stored_count"] = 100
+    assert server._deck_pack_commit(job_id, state)
+    restart()
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_flip_the_live_path_counts_against_the_jobs_stored_count(deferred):
+    """Item 5 (c): in process the job's ev.stored_count (90) is passed, not the
+    run's (made 100). The deck is taken off the held ledger so the count
+    decides: card 95 is past 90, restart_split (the run's 100 would read
+    other)."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    ev = server._trade_jobs[job_id]["evidence"]
+    assert ev.stored_count == 90
+    with server._deck_evidence_write_lock:
+        ev.pack.run["stored_count"] = 100
+        assert server._deck_pack_commit(job_id, ev.pack)
+    server._deck_held.clear()
+    with ev.lock:
+        ev.rows.pop(contract.card_impression_id(job_id, 95))
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}

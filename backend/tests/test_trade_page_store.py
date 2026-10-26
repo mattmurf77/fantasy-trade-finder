@@ -93,6 +93,9 @@ def p1(live, monkeypatch):
     monkeypatch.setattr(server, "_deck_evidence_pending", {})
     monkeypatch.setattr(server, "_deck_evicted_at", {})        # U4: evicted decks, per process
     monkeypatch.setattr(server, "_deck_held", {})              # U4: decks this process built
+    # Cached pack states, per test: the tests reuse deck ids (deck-0000), and a
+    # state left by an earlier test carries its CAS checksum and counted misses.
+    monkeypatch.setattr(server, "_deck_pack_states", {})
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
