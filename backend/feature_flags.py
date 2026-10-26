@@ -189,6 +189,14 @@ FLAG_KEYS: tuple[str, ...] = (
     # `feature_disabled` and the sheet's input step is byte-identical to
     # today (text field only).
     "espn.league_picker",
+    # ESPN sign-in kill switch (platform sign-in, head-eng 2026-10-27;
+    # docs/plans/platform-sign-in/scope.md). OFF ⇒ the WHOLE ESPN branch of
+    # the sessionless POST /api/entry/platform (my_leagues, preview, team
+    # claim) 404s `feature_disabled` before any ESPN call or rate-limit
+    # accounting. MFL sign-in and Settings ESPN linking (`espn.link`,
+    # /api/espn/*) are unaffected. Ships TRUE in config/features.json; the
+    # code default (False) fails closed if the config can't be read.
+    "espn.signin",
     # Multi-platform league linking Phase 1 — read-only import of MFL /
     # Fleaflicker leagues via their official public APIs
     # (docs/plans/multi-platform-linking-plan-2026-07-17.md). Each gates its

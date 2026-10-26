@@ -56,7 +56,7 @@ ESPN_S2_BY_SWID = {ESPN_TEAM_1_SWID: "s2-team-1", ESPN_TEAM_2_SWID: "s2-team-2"}
 MFL_CREDS = {"username": "matt", "password": "hunter2"}
 
 ENTRY_FLAGS = {"landing.platform_options", "espn.link", "mfl.link",
-               "espn.league_picker", "mfl.auth_link"}
+               "espn.league_picker", "mfl.auth_link", "espn.signin"}
 
 # v2.1 account-discovery actions — what the patched platform lookups return.
 FAN_LEAGUES = [

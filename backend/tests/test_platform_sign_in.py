@@ -87,7 +87,7 @@ SLEEPER_UID = "313560442465169408"
 
 FLAGS = {"landing.platform_options", "espn.link", "mfl.link",
          "espn.league_picker", "mfl.auth_link", "auth.persistent_sessions",
-         "account.data_export"}
+         "account.data_export", "espn.signin"}
 
 # MFL "server": login handle (case-insensitive) → (password, myleagues rows).
 MFL_USERS = {
@@ -730,7 +730,15 @@ def test_c2_formatting_cannot_dodge_the_d6_conflict(env, stored, claimed):
 
 # ── Rate limits (D7) + condition 4 ──────────────────────────────────────────
 
-def test_c7_too_many_attempts_ip_limit_counts_claims_and_actions(env):
+@pytest.fixture()
+def small_ip_ceiling(monkeypatch):
+    """Same limiter logic at a ceiling of 30 so the IP tests stay fast; the
+    shipped 300 is pinned by test_c4_ip_ceiling_is_300_failures_per_10_minutes."""
+    monkeypatch.setattr(server, "_SIGNIN_IP_MAX_FAILURES", 30)
+
+
+def test_c7_too_many_attempts_ip_limit_counts_claims_and_actions(
+        env, small_ip_ceiling):
     ip = "198.51.100.20"
     for i in range(15):   # failed auth_leagues logins
         r = _post(env, ip=ip, platform="mfl", action="auth_leagues",
@@ -748,7 +756,8 @@ def test_c7_too_many_attempts_ip_limit_counts_claims_and_actions(env):
     assert _mfl_claim(env, ip="198.51.100.99").status_code == 200
 
 
-def test_c4_spoofed_leading_xff_neither_resets_nor_splits_the_ip_count(env):
+def test_c4_spoofed_leading_xff_neither_resets_nor_splits_the_ip_count(
+        env, small_ip_ceiling):
     real = "198.51.100.40"     # the hop Render's proxy appends (rightmost)
     for i in range(server._SIGNIN_IP_MAX_FAILURES):
         # Half the failures carry no spoof, half a different forged first hop.
@@ -762,12 +771,83 @@ def test_c4_spoofed_leading_xff_neither_resets_nor_splits_the_ip_count(env):
     assert _mfl_claim(env, ip="10.66.0.1").status_code == 200
 
 
-def test_ip_limit_ignores_successes(env):
+def test_ip_limit_ignores_successes(env, small_ip_ceiling):
     ip = "198.51.100.30"
     for _ in range(server._SIGNIN_IP_MAX_FAILURES + 5):
         r = _post(env, ip=ip, platform="mfl", action="auth_leagues",
                   username="MattM", password="hunter2")
         assert r.status_code == 200
+
+
+def test_c4_ip_ceiling_is_300_failures_per_10_minutes(env):
+    """A wrong proxy-hop count must not 429 real users at launch, so the
+    per-IP ceiling is loose; the per-subject limit is the real guard."""
+    assert server._SIGNIN_IP_MAX_FAILURES == 300
+    assert server._SIGNIN_IP_WINDOW_S == 600
+    ip = "198.51.100.70"
+    with server.app.test_request_context(headers={"X-Forwarded-For": ip}):
+        for i in range(299):
+            server._signin_note_failure("mfl", f"ceiling{i}")
+        assert server._signin_retry_after("mfl", None) is None
+    assert _mfl_claim(env, ip=ip).status_code == 200      # 299: admitted
+    with server.app.test_request_context(headers={"X-Forwarded-For": ip}):
+        server._signin_note_failure("mfl", "ceiling-last")  # 300th failure
+    r = _mfl_claim(env, ip=ip)
+    assert r.status_code == 429
+    assert 0 < int(r.headers["Retry-After"]) <= 600
+
+
+@pytest.mark.parametrize("hops, expected", [
+    (1, "10.0.0.3"), (2, "10.0.0.2"), (3, "10.0.0.1"),
+    (4, "192.0.2.99"),            # fewer hops than trusted → remote_addr
+])
+def test_c4_trusted_proxy_hops_pick_the_hop_counted_from_the_right(
+        monkeypatch, hops, expected):
+    monkeypatch.setattr(server, "_SIGNIN_TRUSTED_PROXY_HOPS", hops)
+    with server.app.test_request_context(
+            "/api/entry/platform",
+            headers={"X-Forwarded-For": "10.0.0.1, 10.0.0.2 ,10.0.0.3"},
+            environ_base={"REMOTE_ADDR": "192.0.2.99"}):
+        assert server._client_ip() == expected
+    with server.app.test_request_context(
+            "/api/entry/platform", environ_base={"REMOTE_ADDR": "192.0.2.99"}):
+        assert server._client_ip() == "192.0.2.99"           # no header at all
+
+
+def test_c4_two_trusted_hops_key_the_ip_limit_on_the_client_hop(
+        env, monkeypatch):
+    monkeypatch.setattr(server, "_SIGNIN_TRUSTED_PROXY_HOPS", 2)
+    monkeypatch.setattr(server, "_SIGNIN_IP_MAX_FAILURES", 10)
+    client = "198.51.100.61"
+    for i in range(10):
+        # A forged leading hop AND a varying last proxy hop; the client is
+        # the second hop from the right.
+        xff = f"10.66.{i}.1, {client}, 10.200.0.{i}"
+        r = _mfl_claim(env, ip=xff, username=f"hop{i}", password="bad")
+        assert r.status_code == 403
+    assert _mfl_claim(env, ip=f"1.2.3.4, {client}, 10.200.0.99"
+                      ).status_code == 429
+    assert _mfl_claim(env, ip=f"1.2.3.4, 198.51.100.62, 10.200.0.1"
+                      ).status_code == 200                       # other client
+
+
+def test_c4_xff_diagnostic_logs_only_the_hop_count(env, caplog):
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="trade_finder")
+    xff = "203.0.113.77, 198.51.100.88"
+    with patch.object(es, "fetch_fan_leagues", lambda *a, **kw: []):
+        assert _mfl_claim(env, ip=xff).status_code == 200            # claim
+        _espn_claim(env, ip=xff, s2=None, swid=None)                  # claim
+        _post(env, ip=xff, platform="mfl", action="auth_leagues",     # action
+              username="MattM", password="hunter2")
+        _post(env, ip=xff, platform="espn", action="my_leagues",      # action
+              espn_s2=S2_A, swid=SWID_A)
+        _post(env, ip=xff, platform="mfl", mfl_league_id=MFL_LEAGUE)  # preview
+    lines = [r.getMessage() for r in caplog.records
+             if r.getMessage().startswith("PLATFORM-SIGNIN-XFF")]
+    assert lines == ["PLATFORM-SIGNIN-XFF hops=2"] * 4
+    for ip in ("203.0.113.77", "198.51.100.88", "127.0.0.1"):
+        assert ip not in caplog.text, ip
 
 
 def test_c7_too_many_attempts_subject_limit(env):
@@ -812,7 +892,7 @@ def test_audit_log_one_line_per_claim_and_no_secrets(env, caplog):
     _espn_claim(env, s2=None, swid=None)             # proof_required
     _post(env, platform="espn", espn_league_id=ESPN_LEAGUE)   # preview: no line
     lines = [r.getMessage() for r in caplog.records
-             if r.getMessage().startswith("PLATFORM-SIGNIN")]
+             if r.getMessage().startswith("PLATFORM-SIGNIN ")]
     assert len(lines) == 5
     assert (f"PLATFORM-SIGNIN provider=espn outcome=proven reason=ok "
             f"account_id={ok['account_id']} created=true") == lines[0]
@@ -1364,6 +1444,42 @@ def test_c10_mfl_export_has_the_identity_not_the_cookie_or_password(env):
     text = r.get_data(as_text=True)
     assert "hunter2" not in text and "MFL_USER_ID" not in text
     assert cred.cookie_encrypted not in text
+
+
+# ── espn.signin kill switch ─────────────────────────────────────────────────
+
+def test_espn_signin_off_404s_the_whole_espn_entry_branch_with_zero_espn_calls(
+        env):
+    fan_calls: list = []
+    with patch.object(server, "is_enabled",
+                      lambda k: k in FLAGS - {"espn.signin"}), \
+         patch.object(es, "fetch_fan_leagues", _recorder(fan_calls, "fan")):
+        for body in (
+                {"action": "my_leagues", "espn_s2": S2_A, "swid": SWID_A},
+                {"espn_league_id": ESPN_LEAGUE},                        # preview
+                {"espn_league_id": ESPN_LEAGUE, "espn_s2": S2_A,
+                 "swid": SWID_A},                                       # preview
+                {"espn_league_id": ESPN_LEAGUE, "team_id": 1,
+                 "espn_s2": S2_A, "swid": SWID_A},                      # claim
+                {"espn_league_id": ESPN_LEAGUE, "team_id": 1}):         # claim
+            r = _post(env, platform="espn", **body)
+            assert r.status_code == 404, body
+            assert r.get_json() == {"error": "feature_disabled"}
+        assert env.espn.calls == [] and fan_calls == []    # no ESPN call
+        assert server._signin_failures == {}                # no limiter state
+        _assert_nothing_created(env)
+
+        # MFL sign-in is unaffected ...
+        minted = _mfl_claim(env)
+        assert minted.status_code == 200
+        # ... and so is Settings ESPN linking (espn.link, /api/espn/link).
+        r = env.client.post(
+            "/api/espn/link",
+            json={"espn_league_id": ESPN_LEAGUE, "espn_s2": S2_A,
+                  "swid": SWID_A},
+            headers={"X-Session-Token": minted.get_json()["session_token"]})
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert r.get_json()["status"] == "choose_team"
 
 
 # ── The entry:* invariant + MFL handoff ─────────────────────────────────────

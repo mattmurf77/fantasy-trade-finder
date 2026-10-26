@@ -29575,9 +29575,16 @@ def extension_auth():
 # lock-guarded dict is exact; state resets on deploy, acceptable for v1).
 # Both windows count FAILED proofs only (failed team-claim proofs, failed
 # auth_leagues logins, failed my_leagues reads): successes never count,
-# because carrier NAT puts many honest users behind one IP.
-_SIGNIN_IP_MAX_FAILURES = 30
+# because carrier NAT puts many honest users behind one IP. The per-IP
+# ceiling is deliberately loose (head-eng, C4): a wrong proxy-hop count must
+# never 429 real users at launch; the per-subject limit is the real guard.
+_SIGNIN_IP_MAX_FAILURES = 300
 _SIGNIN_IP_WINDOW_S = 10 * 60
+# How many X-Forwarded-For hops, counted from the RIGHT, our own proxies
+# append: 1 = the rightmost hop is the client as Render's proxy saw it,
+# 2 = second from the right, and so on. Pending release-lead's confirmation
+# of Render's layout (see PLATFORM-SIGNIN-XFF below).
+_SIGNIN_TRUSTED_PROXY_HOPS = 1
 _SIGNIN_SUBJECT_MAX_FAILURES = 5
 _SIGNIN_SUBJECT_WINDOW_S = 15 * 60
 _SIGNIN_LIMITER_MAX_KEYS = 50_000
@@ -29618,16 +29625,32 @@ _SIGNIN_TOO_MANY_MSG = ("Too many sign-in attempts. Wait a few minutes, "
                         "then try again.")
 
 
-def _client_ip() -> str:
-    """The caller's IP for the D7 limiter: the RIGHTMOST X-Forwarded-For hop,
-    else remote_addr. Every hop left of the one Render's proxy appends is
-    client-supplied (a client can send any XFF it likes), so the leftmost
-    value is attacker-chosen and would let one client rotate through
-    unlimited buckets. Rightmost is the address Render's proxy saw."""
-    hops = [h.strip() for h in
+def _xff_hops() -> list[str]:
+    return [h.strip() for h in
             (request.headers.get("X-Forwarded-For") or "").split(",")
             if h.strip()]
-    return hops[-1] if hops else (request.remote_addr or "unknown")
+
+
+def _client_ip() -> str:
+    """The caller's IP for the D7 limiter: the X-Forwarded-For hop
+    _SIGNIN_TRUSTED_PROXY_HOPS from the right (1 = rightmost), else
+    remote_addr when the header has fewer hops than that. Every hop left of
+    the ones our proxies append is client-supplied (a client can send any
+    XFF it likes), so the leftmost value is attacker-chosen and would let one
+    client rotate through unlimited buckets."""
+    hops = _xff_hops()
+    n = _SIGNIN_TRUSTED_PROXY_HOPS
+    if n >= 1 and len(hops) >= n:
+        return hops[-n]
+    return request.remote_addr or "unknown"
+
+
+def _log_xff_hop_count() -> None:
+    """TEMPORARY first-deploy diagnostic — remove after release-lead
+    confirms Render's layout (and sets _SIGNIN_TRUSTED_PROXY_HOPS). Logs
+    ONLY the number of X-Forwarded-For hops on a sign-in request: never an
+    IP, never the header value."""
+    log.info("PLATFORM-SIGNIN-XFF hops=%d", len(_xff_hops()))
 
 
 def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
@@ -30025,7 +30048,9 @@ def entry_platform():
     sign-in refusals add proof_required / proof_unavailable (+ reason) /
     mfl_bad_credentials / platform_identity_in_use (409) /
     too_many_attempts (429). Every refusal carries a readable `message`.
-    404 while `landing.platform_options` or the platform's link flag is off.
+    404 while `landing.platform_options` or the platform's link flag is off,
+    and for the whole ESPN branch while `espn.signin` (the ESPN sign-in kill
+    switch) is off.
     """
     from werkzeug.exceptions import HTTPException
 
@@ -30047,6 +30072,8 @@ def entry_platform():
                         "message": _SIGNIN_GENERIC_ERROR_MSG}), 500
         return resp
     finally:
+        if audit.get("claim") or audit.get("action"):
+            _log_xff_hop_count()   # TEMPORARY — see _log_xff_hop_count
         if audit.get("claim"):
             _log_platform_signin(audit, resp)
 
@@ -30061,6 +30088,12 @@ def _entry_platform(audit: dict):
     if platform not in ("espn", "mfl"):
         return jsonify({"error": "bad_platform",
                         "message": "platform must be 'espn' or 'mfl'."}), 400
+    # `espn.signin` kill switch: the WHOLE ESPN entry branch (my_leagues,
+    # preview, team claim) 404s before any ESPN call or limiter accounting —
+    # e.g. if the R1 pair-binding check fails. MFL entry and Settings ESPN
+    # linking (espn.link, /api/espn/*) are unaffected.
+    if platform == "espn" and not is_enabled("espn.signin"):
+        return jsonify({"error": "feature_disabled"}), 404
 
     # ── Account-discovery actions (v2.1) ────────────────────────────────────
     # Sessionless "log in instead of typing a league id". Nothing here is
@@ -30075,6 +30108,7 @@ def _entry_platform(audit: dict):
                                 "message": "Unknown action for ESPN."}), 400
             if not is_enabled("espn.link") or not is_enabled("espn.league_picker"):
                 return jsonify({"error": "feature_disabled"}), 404
+            audit["action"] = action
             from . import espn_service as _espn
 
             espn_s2 = (body.get("espn_s2") or "").strip() or None
@@ -30103,6 +30137,7 @@ def _entry_platform(audit: dict):
                             "message": "Unknown action for MFL."}), 400
         if not is_enabled("mfl.link") or not is_enabled("mfl.auth_link"):
             return jsonify({"error": "feature_disabled"}), 404
+        audit["action"] = action
         from . import mfl_service as _mfl
 
         username = str(body.get("username") or "").strip()

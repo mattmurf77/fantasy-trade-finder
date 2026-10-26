@@ -99,6 +99,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [8-tier ladder + consensus seed recalibration (2026-07-12, feedback #117/#118)](#8-tier-ladder-consensus-seed-recalibration-2026-07-12-feedback-117118)
 - [ESPN league linking — API fragility monitoring (`espn.link`, 2026-07-12)](#espn-league-linking-api-fragility-monitoring-espnlink-2026-07-12)
 - [MFL + Fleaflicker league linking — monitoring (`mfl.link` / `fleaflicker.link`, 2026-07-18)](#mfl-fleaflicker-league-linking-monitoring-mfllink-fleaflickerlink-2026-07-18)
+- [ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user (platform sign-in, 2026-10-27)](#espnmfl-sign-in-temporarily-refused-429-too_many_attempts-for-one-user-platform-sign-in-2026-10-27)
 - [Bare workflow: `app.json` iOS config is silently ignored (feedback #131, 2026-07-12)](#bare-workflow-appjson-ios-config-is-silently-ignored-feedback-131-2026-07-12)
 - [Universal Links AASA is CDN-cached by Apple (feedback #239, 2026-08-02)](#universal-links-aasa-is-cdn-cached-by-apple-feedback-239-2026-08-02)
 - [Render cold starts — keep-warm cron (onboarding item 3, 2026-07-17)](#render-cold-starts-keep-warm-cron-onboarding-item-3-2026-07-17)
@@ -811,6 +812,16 @@ Both read **official/sanctioned** APIs (far lower churn risk than ESPN), zero-au
 - **Kill switch (either):** flip the flag to `false` → all `/api/{platform}/*` routes 404 and the mobile link option disappears. Imported leagues stay inert; no cleanup.
 - **Future picks (MFL):** `futureDraftPicks` are stored raw in `leagues.platform_future_picks` (JSON), normalized into `draft_picks` by `_sync_mfl_owned_picks` (#158) and, since the #207/#228 parity fix, **re-fetched on the draft-status refresh cadence** (`_refresh_mfl_future_picks`) — one extra zero-auth export per refreshed MFL league, bounded by the same `_DRAFT_STATUS_SWEEP_BUDGET`. Symptom of an export regression: the log line `MFL futureDraftPicks unavailable for <id> — keeping the stored snapshot`. That is a *degradation*, not a fault: the stored snapshot is kept (never wiped — #220's lesson) and the verdict-gated current-season exclusion still hides a drafted season's picks on its own.
 - **Franchise name color/formatting markup (#282, reopens #258):** MFL lets owners style their franchise name; the raw name string can carry inline markup like `<font color = Green>...</font color>` (sometimes malformed — a closing tag with no matching open, or `</font color>` carrying the attribute). This is entity-encoded on the wire (`&lt;font...`), which is why it only becomes literal `<font...>` after entity-decoding. `mfl_service._clean_text` strips a fixed tag allowlist (`b`, `i`, `u`, `strong`, `em`, `font`) after unescaping — if a future report shows leftover markup, it's most likely a tag outside that allowlist; extend `_MARKUP_TAG` rather than switching to a blanket `<[^>]*>` strip (that would mangle a team name with a literal `<`/`>`). `database._backfill_mfl_name_entities()` re-cleans stored rows on every boot using the same function, so a cleaner improvement alone (no separate migration) fixes both new imports and previously-stored names.
+
+## ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user (platform sign-in, 2026-10-27)
+
+Platform sign-in (`POST /api/entry/platform`, [scope](plans/platform-sign-in/scope.md)) rate-limits FAILED proofs per subject: 5 per 15 minutes per ESPN SWID or MFL username, plus a loose per-IP ceiling (300 per 10 minutes).
+
+- **Cause:** anyone who knows a person's SWID (visible to every leaguemate) or MFL username can spend that subject's 5 failed attempts and lock that person's ESPN/MFL sign-in for 15 minutes. head-eng accepted this residual (2026-10-27).
+- **Impact:** bounded, and it expires on its own (15 minutes after the 5th failure). Sign in with Apple still works, and so does an already-signed-in session.
+- **Support:** tell the user to wait 15 minutes, or sign in with Apple. There is **no manual reset**: the limiter state is in-process and also clears on every deploy.
+- **Logs:** the user's attempts show as `PLATFORM-SIGNIN provider=… outcome=limited reason=subject_limit` (no ids are logged). `reason=ip_limit` instead means the per-IP ceiling. If that fires for many users at once, suspect a wrong `_SIGNIN_TRUSTED_PROXY_HOPS`: compare it with the temporary `PLATFORM-SIGNIN-XFF hops=N` lines.
+- **ESPN sign-in kill switch:** set `espn.signin` to `false` in `config/features.json` (or `FTF_FLAGS`). The whole ESPN entry branch then 404s `feature_disabled`, while MFL sign-in and Settings ESPN linking (`espn.link`) keep working.
 
 ## Bare workflow: `app.json` iOS config is silently ignored (feedback #131, 2026-07-12)
 

@@ -61,6 +61,8 @@
   "espn.link": true,
   "espn.webview_capture": true,
   "espn.league_picker": true,
+  "_comment_espn_signin": "2026-10-27 head-eng (11-06 item; docs/plans/platform-sign-in/scope.md \u00a7 espn.signin kill switch): espn.signin gates the WHOLE ESPN branch of the sessionless POST /api/entry/platform \u2014 the my_leagues action, the league preview and the proof-based ESPN team-claim sign-in \u2014 which 404s feature_disabled before any ESPN call or rate-limit accounting while it is off. Why: the operator can turn ESPN sign-in off (e.g. if the R1 espn_s2/SWID pair-binding check fails) while MFL sign-in and Settings ESPN league linking (espn.link, /api/espn/*) keep working. Requires landing.platform_options + espn.link on to have any effect. Ships TRUE. The client half (hiding the ESPN chip) is a separate mobile PR.",
+  "espn.signin": true,
   "mfl.link": true,
   "mfl.auth_link": true,
   "fleaflicker.link": false,

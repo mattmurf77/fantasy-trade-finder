@@ -1,3 +1,21 @@
+## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
+
+Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. This builds on the 2026-10-26 entry below.
+
+- **C4 (XFF):** `_client_ip()` now takes the hop `_SIGNIN_TRUSTED_PROXY_HOPS` (= 1) from the right, falling back to `remote_addr` when there are fewer hops. The per-IP ceiling is raised 30 → **300** failures per 10 min; the per-subject 5 per 15 min is unchanged. The TEMPORARY `PLATFORM-SIGNIN-XFF hops=N` line (count only) is logged on claims and the two actions, to be removed after release-lead confirms Render's layout.
+  - New tests: `test_c4_trusted_proxy_hops_pick_the_hop_counted_from_the_right` (×4), `test_c4_two_trusted_hops_key_the_ip_limit_on_the_client_hop`, `test_c4_ip_ceiling_is_300_failures_per_10_minutes`, `test_c4_xff_diagnostic_logs_only_the_hop_count` (caplog holds the count and none of the test IPs, incl. `remote_addr`).
+  - `test_c4_spoofed_leading_xff_…` and the other IP tests still pass at a test-local 30 ceiling.
+  - Sabotage: hard-coded rightmost → 4 red (hops 2/3, the fewer-hops fallback, the hops=2 limit test). Restored.
+- **`espn.signin` kill switch:** registered in `FLAG_KEYS`, `config/features.json` (`true`), `release.json` and the four release-derived profiles. When off, the whole ESPN entry branch returns 404 `feature_disabled` before any ESPN call or limiter accounting.
+  - `test_espn_signin_off_404s_the_whole_espn_entry_branch_with_zero_espn_calls`: five ESPN entry requests all get 404, with zero ESPN league/fan calls and no limiter state; MFL sign-in still 200; `/api/espn/link` still 200.
+  - Sabotage: drop the check → red (`500 == 404`, the action reached the fail-if-called fan stub). Restored.
+- **Runbook:** a new entry, "ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user", for the accepted per-subject lockout residual.
+- **Runs:**
+  - `test_platform_sign_in.py` (86) + `test_entry_platform_route.py` (27): **113 passed**.
+  - With the cohort test, the MFL auth-link and ESPN link suites, and the flag-registry/mirror suites (`test_seed_ui_test_db`, `test_blind_grading_routes`, `test_events_api`, `test_avoid_positions`, `test_invite_links`, `test_draft_extensions_w1`, `test_outlook_route_cache`, `test_packed_evidence`): **513 passed, 0 failed** on the final code. One earlier run showed 1 failure, from the audit-log test's `PLATFORM-SIGNIN` prefix also matching the new `PLATFORM-SIGNIN-XFF` lines; that filter is fixed.
+  - `check-landing-platform-options.js` passes.
+  - Full suite left to CI.
+
 ## 2026-10-26 — Platform sign-in: proof-based ESPN/MFL team claim mints a verified `acct_*` session (dark; `feat/platform-sign-in`)
 
 Full gates. Server only (plus the R1 operator script); ships dark behind `landing.platform_options`. D-056: `FTF_SKIP_SIM_GATE=1` posture — no simulator; evidence is the tests below, a code-walk and the TestFlight checklist in [scope.md](../docs/plans/platform-sign-in/scope.md). Includes head-eng's security conditions 1–11 (review dated 2026-10-27) and analytics-lead's two grants.
