@@ -551,12 +551,14 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
 `trade.first_page_store` (default off), the flag `trade.packed_evidence`
 (added by #370; it reads off until then) and the kill knob
 `first_page_store_enabled` (default 1).** With either off, paged and unpaged
-responses are exactly the E2 section above
-(`backend/tests/test_trade_page_flag_off.py` pins them byte for byte). The
-server keeps the first `trade_pages_stored` × `trade_page_size` cards (90 at
-the defaults) of each user's latest complete organic deck in
+responses are exactly the E2 section above, and the `deck` param below is not
+read (`backend/tests/test_trade_page_flag_off.py` and
+`backend/tests/test_trade_pages_p2.py` pin them byte for byte). The server
+keeps the first `trade_pages_stored` × `trade_page_size` cards (90 at the
+defaults) of each user's latest complete organic deck in
 [`trade_page_store`](data-dictionary.md#trade_page_store), so page 1 can come
-from one DB read, including after a restart.
+from one DB read, including after a restart. P2 (below) pages one deck past
+those cards, across rebuilds and restarts, to an honest end.
 
 **The store serve follows the [S0 roster check](#s0-roster-check-at-serve)
 exactly**, with the same knobs: I-1, both gate misses and their shapes
@@ -565,6 +567,24 @@ exactly**, with the same knobs: I-1, both gate misses and their shapes
 admin gate-miss test hook, and the background floor kick past the roster bound.
 At `trade_i1_mode` 0 the store isn't read.
 
+**Evidence is written at delivery (ADR-025 stage 1; no response change).**
+While the store is on, an organic or replenished deck writes its
+`deck_impressions` rows, its `trade_impressions`, its `bakeoff_runs` row and
+its `trades_generated` event when a response first sends its cards, not at
+build: page 1 from the store or a job, `cursor` pages, `deck=` pages
+(stored, live, a non-organic deck's own, rebased onto a row, a job or a
+lineage scope row) and legacy polls. Only the cards the response actually
+sends **after the S0 rules** count: a card I-1 drops gets no row, and a gate
+miss (withhold or `roster_check_unavailable`) writes nothing. The write runs
+off the request thread, once per card; repeat polls write nothing again. A
+swipe or other outcome whose `impression_id` row is still being written
+waits for it (at most 2 s) instead of being dropped. A deck never delivered
+writes nothing. Calibration's targeted refresh writes its rows at build, as
+before, and no `trades_generated` or `trade_impressions` (with the store on
+or off); it is never registered under the user's Trades job key, so
+`/generate` and `/status` never serve it and it never replaces or revokes the
+user's own Trades job. Details: [data dictionary](data-dictionary.md#deferred-evidence-evidence_tier-adr-025-stage-1-2026-10-20).
+
 **The store is only read on a paged request**, so `trade_paged_responses` 0
 keeps it out too.
 
@@ -572,6 +592,21 @@ keeps it out too.
 the store or from a job): `prefetch_remaining` (model_config
 `trade_prefetch_remaining`, seeded at 50). The client requests the next page when
 this many ready cards remain.
+
+**`trade_hash` on every card (P2).** Every card in a paged response (any form
+above or below, from the store or from a job) carries `trade_hash`: the F1
+card identity (sha256 over its sorted give ids, sorted receive ids and
+partner id, 16 hex characters), the same value as that card's
+`deck_impressions.trade_hash`. It is
+the client's dedupe key. It is added at serve: unpaged responses and the
+[trade card object](#trade-card-object) itself don't carry it.
+
+**`deck_id` (P2).** Every organic `page: 1` response carries `deck_id`, from
+the store or from a job, `force` included: the deck the client pages by on
+`/status?deck=`. It equals that response's `job_id`. Pinned, opponent-scoped
+(Specific Team), intent and demo-league searches don't carry it. The app
+still sends `deck=<job_id>` when it pages them, and `/status` never rebases
+them (see `deck=` below).
 
 **`POST /api/trades/generate` with `page: 1`.** Only an organic body reads the
 store: no `pinned_give_players`, `pinned_receive_players`, `opponent_user_id`,
@@ -584,7 +619,7 @@ decimals. Unpaged requests never read it.
 
   | Field | Value |
   |---|---|
-  | `job_id` | The job that built the stored deck. Page by it on `/status` |
+  | `job_id`, `deck_id` | The job that built the stored deck. Page by `deck_id` on `/status` |
   | `status` | `"complete"` (a gate miss: S0's status) |
   | `opponents_done`, `opponents_total` | From the stored deck |
   | `cards` | The stored cards from index 0, at most `trade_page_size`, after the pass/interest projection and the S0 roster check |
@@ -596,6 +631,18 @@ decimals. Unpaged requests never read it.
 
   `suppression_note`, `first_deck` and `board_refresh` are never sent on a
   store response (they belong to the job that ran).
+- **A backing job behind every store serve (AC-L4).** When no fresh or
+  matching running job for the scope is in this server process (after a
+  restart, or after an input change revoked it) and the serve isn't a gate
+  miss, the serve starts one with `preserve_running`, so pages past the stored
+  ones come from a live deck. That kickoff is the one path that starts these
+  jobs (/generate's page serve and P2's `/status?deck=`), so a scope has one
+  live rebuild at a time: a policy-matching running job is joined, also while
+  the roster read fails (S0's A2), and one on moved rosters or values is
+  replaced. A roster change starts nothing itself (P1's lazy rule); the next
+  serve sees the roster move and starts the rebuild. Each start logs one
+  `[trade-page] backing-job start scope=… reason=… job=…` line (reason
+  `page_serve`, `stale`, `rebase` or `status_restart`).
 - **Not served from the store** (today's E2 response, plus
   `prefetch_remaining`): no stored page for the scope; the engine (including
   the engine modules' code hash and `DECK_PIPELINE_VERSION`), the request
@@ -613,10 +660,112 @@ decimals. Unpaged requests never read it.
   `cursor` echoes `K`.
 - `K ≥ total_ready`: the job's E2 cursor response if the job is still in this
   server process. Otherwise `cards: []`, `cursor: K`, `total_ready` = the stored
-  count, `serve_source: "page"`, `freshness_state: "fresh"`. Paging past the
-  stored pages arrives with P2.
+  count, `serve_source: "page"`, `freshness_state: "fresh"`.
 - A rebuild replaces the stored row and its job id. A cursor on the older job id
   then reads that job if it is still in this process, else 404, as before P1.
+- P2 leaves this form's resolution unchanged: no `deck_id`, `rebased` or
+  `pool_exhausted` (its cards do carry `trade_hash`). To page across
+  rebuilds, use `deck`.
+
+**`GET /api/trades/status?deck=D&cursor=K` (P2): one deck, across rebuilds.**
+`D` is the deck the app is paging: the `deck_id` from page 1 (or from a
+`rebased` response), else the search's `job_id` (the app sends `deck` on every
+paged poll). `deck` is read only alongside an honored `cursor`; `job_id` is
+then not read. `D` is 1–64 characters of `A-Z a-z 0-9 _ -`, else 400
+`{error: "invalid_deck"}` (after the `cursor` check). **`deck` is not read at
+all with paging killed (`trade_paged_responses` 0) or at `trade_i1_mode` 0**,
+like `cursor` and the store: the response is the `job_id` form's (the legacy
+cumulative body with paging killed), byte for byte.
+
+**Every serve below follows the [S0 roster check](#s0-roster-check-at-serve)
+exactly, as the `job_id` form does,** with one roster snapshot per serve:
+dispositions, I-1, both gate misses and their shapes only at
+`trade_gate_miss_mode` 1 (held at 0), the admin gate-miss test hook, the
+`[i1] serve` log line (`job=` the deck served), and the floor kick after the
+response. A gate miss holds the cursor (`cursor` echoes `K`, `total_ready`
+`0`) and is never an end or a rebase: the client keeps polling. One stored
+page row is read and decoded per poll.
+
+**Only a deck that is provably organic is ever rebased**: `D`'s job is in this
+server process with an organic page scope, or a stored row `D` built exists,
+or `D`'s [lineage](data-dictionary.md#trade_deck_lineage) row (written when
+`D`'s job starts, kept 24 h) names its scope. **A gone organic deck rebases
+across restarts, also one still running at the restart; a gone non-organic
+deck 404s.** Its scope (league, scoring
+format, `fairness_threshold`) is then `D`'s own, so an intent or other search
+that changes the session's fairness never moves it. Anything else is never
+rebased onto the organic deck:
+- **A pinned, Specific Team (`opponent_user_id`), intent or other non-organic
+  search** (`D` in this process without an organic page scope): its own job's
+  page at `K`, exactly the `job_id` + `cursor` form (no `deck_id`, no
+  `rebased`), with its own error passed through (a timeout, `inputs_changed`,
+  a policy change). At its own end (complete, `K` at its last card), a gate
+  miss holds the cursor, else `pool_exhausted: true` with `cards: []`.
+- **A deck that is gone and was never organic** (not in this process, with no
+  page or lineage row of the requester's: a non-organic search never writes
+  one, and another user's deck isn't the requester's) or whose lineage is
+  older than 24 h: the legacy `404 {"error": "job not found"}`.
+
+For an organic `D`, the server resolves, in order:
+
+1. **The stored pages.** The scope's stored row was built by `D` and
+   `K < total_ready`: the stored cards from `K`, exactly the `job_id=` form's
+   response above, plus `deck_id`.
+2. **The live deck.** `D` is the requester's job in this server process: E2's
+   cursor response at `K` (the append-only rules and E2's `replace` apply),
+   plus `deck_id`. This is how pages past the stored ones arrive. Once a
+   `complete` `D` is asked at or past its last card, a newer deck for the
+   scope (running or complete) rebases the client onto it, as in case 3; with
+   none, see the end of deck below.
+3. **Rebased.** Otherwise the deck changed (a rebuild replaced it, an input
+   change revoked it, it errored or timed out, its serving policy moved, or a
+   restart dropped its job): the scope's current deck from its **first** card,
+   with `rebased: true`, `deck_id` = the new deck, and `cursor` = the raw cards
+   included. The current deck is the stored row when it isn't `D`'s own and
+   would serve on `page: 1` (the same engine/config, expiry and staleness
+   rules and backing job; at a live `D`'s end, only if it is the scope's
+   newest job's row, so two decks never alternate); else the scope's newest
+   job in this process; else a backing job is started and its first page
+   returned, often `cards: []` while it runs. A start that joins a job outside
+   the scope (another fairness, an intent search) is no deck to move to: the
+   response stays on `D` with no cards, and the client asks again.
+
+**This GET can start a trade job.** Case 3's backing job is `/status`'s one
+side effect: after a restart a client paging by `deck` never calls
+`/generate` again, so without it no live deck would exist for pages past the
+stored ones (AC-L4). It is the store serve's own kickoff (see "A backing job
+behind every store serve"), so polling joins the running rebuild rather than
+starting more.
+
+**The client keeps what it holds.** On `rebased: true` it appends the cards
+behind its current card, dropping any whose `trade_hash` it already holds,
+and pages on with the new `deck_id`. A `replace: true` page is merged the
+same way: deduped, appended, never reordered. If a page comes back short
+after that, it fetches the next page right away. The server never dedupes
+against the client and keeps no per-client state.
+
+**End of deck: `pool_exhausted: true`.** When a `complete` organic `D` is
+asked at or past its last card and no newer deck exists, one roster snapshot
+decides:
+- a gate miss (S0's knobs and test hook, as above) gets its shape and holds
+  the cursor: never the end;
+- a failed roster read: `D`'s own response, no cards and no end;
+- `pool_exhausted: true` when `D`'s rosters and values still match the stored
+  rows, its stored row isn't stale, and no job for the key is running (a
+  rebuild or backing job may still add cards);
+- otherwise the rebuild is started and the client is rebased onto it; a
+  stale scope converges, since the rebuilt deck's own end follows once it lands
+  and is stored. When nothing can rebuild the scope here (the start returns
+  `D` itself, still fresh in this process while its row was marked stale
+  elsewhere, or the start fails), the end is sent rather than withheld forever.
+
+The end carries `cards: []`, except for a deck whose publishing re-sorts (not
+append-only; production serves owner-only, which appends): E2 replaces on
+every cursor there, so at exactly its length the response is the end
+**with** its final list (`replace: true`), for the client to merge. It is
+never sent while `D` runs, during a gate miss, while a rebuild or backing job
+runs, or after a rebuild landed; otherwise the field is absent. `rebased` is
+likewise absent unless `true`.
 
 ### Trade card object
 
@@ -793,7 +942,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | GET | `/api/sleeper/link` | Link status (never returns the token): `{connected, sleeper_user_id, expires_at, expired}` |
 | DELETE | `/api/sleeper/link` | Disconnect — deletes the stored token → `{connected: false}`. Standard write gate (grace applies) |
 | POST | `/api/trades/propose` | Send a trade. **Hard-verified: requires a verified session (403 `verification_required`), no grace** — highest blast radius (writes into the user's real Sleeper league). Body `{league_id, their_user_id (or their_roster_id), give_player_ids[], receive_player_ids[], impression_id?}` — `give_player_ids` / `receive_player_ids` are **MIXED** arrays (Sleeper player ids AND FTF pick ids: owned `{league}_{season}_{round}_{orig}`, generic `generic_pick_{round}_{tier}`), exactly as the four `SendInSleeperButton` mounts send them. Server resolves **both** roster_ids from one public-rosters fetch (caller's from the linked Sleeper account, counterparty's from `their_user_id` — FTF user_id == Sleeper user_id); the client never asserts its own roster_id. **Picks (#413, 2026-09-02):** the server splits pick ids out (`_is_ftf_pick_asset`) and encodes them itself (`_sleeper_encode_ftf_picks` → `sleeper_write.encode_draft_pick`, `"orig,season,round,from,to"`) against two ground truths — existence is the league's `draft_picks` grid (platform rows, by `pick_id`), the current holder is live `/v1/league/{id}/traded_picks` over "original roster holds by default"; give side must be held by the caller's roster, receive side by the counterparty's. **#428 (2026-09-08) — a third truth, Sleeper's tradable window:** a spent current-season pick keeps both its grid row (a flaked `/drafts` read re-populates it) and its `traded_picks` holder, so `draft_status.sleeper_pick_window` (live `/v1/league/{id}/drafts` + `/v1/league/{id}` for the season; the cached #207 verdict as the D-189 fallback when `/drafts` is empty) refuses it as 422 `sleeper_pick_untradable` before Sleeper answers "These draft picks cannot be traded." Any unresolvable pick refuses the **whole** send (422 below) before anything reaches Sleeper; all four reads happen only when the trade carries a pick. A non-empty `draft_picks` body key is rejected (400) — the client never encodes. → `{status: "proposed", transaction_id}`. **F1 (flag `deck.signal_v2`):** on success, an optional `impression_id` appends a `propose` `deck_outcomes` row (impression-ownership validation applies — see `/api/trades/swipe`). **Personal-market policy (flag `trade.valuation_telemetry`, 2026-09-04):** on success the route also writes one durable `trade_proposals` row — the **final** package, its origin/final trade hashes, `edited_from_source`, and a proposal-time valuation snapshot **recalculated from the final package** rather than copied from the impression (the user may have swapped, dropped or added a piece before sending). Idempotent on a `proposal_event_id` minted **before** the provider call, so a retry after a lost response cannot record the send twice; `provider_transaction_id` is the second key. No request or response field changes, and an optional body `source` (`deck` / `match` / `calculator`) is recorded when present. `policy_eligible` inside the snapshot is **telemetry, not a gate** — a manually constructed trade the finder would never generate is recorded with its reason, never blocked. **P0-7 (2026-08-11) — server-fired analytics, no contract change:** on success the route records the `sleeper_send_succeeded` `user_events` row (`_record_send_success`) with props `{give_n, receive_n, pick_n, from_deck, transaction_id}`, `source:"api"` — since #413 `give_n`/`receive_n` count **players only** and `pick_n` counts encoded picks (before, a pick was counted as a player and `pick_n` was structurally 0). **Server-fired, not client-fired**, because this route is the only place a send is KNOWN to have landed in Sleeper — a client-forgeable success would sit in WAT and funnel stage 8 next to server-authoritative `trade_ratified`. The counterparty's `their_user_id` deliberately does **not** ride in props. Never raises; it is **not** in `database._EVENT_TO_USER_COL`, so `last_trade_proposed_at` (and therefore notification gating) is unchanged. The attempt and the failure are client-fired (`sleeper_send_attempted` / `sleeper_send_failed`) — see [cross-client-invariants § Client analytics event contract](cross-client-invariants.md#client-analytics-event-contract-post-apievents-flag-analyticsclient_events). This route deliberately does **not** fire `trade_sent` — that is the non-Sleeper confirmed-send event (`/api/trades/propose-mfl`); firing both here would double-count funnel stage 8 |
-| POST | `/api/trades/validate` | **#180 pre-send validation** (gated on `trade.send_in_sleeper` OR `trade.send_in_mfl`; read-only, session-authed, no verification needed, never blocks). Body mirrors propose (mixed arrays — player ids AND FTF pick ids). **Platform-routed server-side:** an MFL-linked league id (flag `trade.send_in_mfl`) validates against a fresh MFL `rosters` export (codes: `asset_unmapped` — advisory mirror of the propose route's mapping hard block, players AND picks — plus `pick_moved` (snapshot owner ≠ expected side), `player_moved`, `roster_not_found`); every other league takes the Sleeper path: re-fetches live Sleeper league meta + rosters → `{ok, checked, warnings:[{code, severity: "blocking"\|"warning", message}]}`. Sleeper codes: `league_archived` (season `complete`), `player_moved`, `roster_limit` (post-trade count > lineup+IR+taxi slots), `roster_not_found`, and since #413 the blocking pick advisories `asset_unmapped` (a pick with no `draft_picks` grid row — generic rungs always), `pick_untradable` (#428 — the pick's class is outside Sleeper's tradable window, i.e. that season's draft has already run; one extra `/drafts` read, only on a pick-bearing validate) and `pick_moved` (live `traded_picks` holder is not the offering side) — the advisory mirror of the propose route's three 422s. `player_moved` / `roster_limit` are computed over **players only** (picks are not roster slots); the pick reads happen only when the trade carries a pick. `checked:false` = platform data unreachable — nothing validated, including a pick-bearing validate whose `traded_picks` read fails (S0/R10, #378). Everything else (locks, deadline, veto, FAAB, roster limits on MFL) is delegated to the platform. See [items/180](feedback/items/180-trade-send-validation/status.md) |
+| POST | `/api/trades/validate` | **#180 pre-send validation** (gated on `trade.send_in_sleeper` OR `trade.send_in_mfl`; read-only, session-authed, no verification needed, never blocks). Body mirrors propose (mixed arrays — player ids AND FTF pick ids). **Platform-routed server-side:** an MFL-linked league id (flag `trade.send_in_mfl`) validates against a fresh MFL `rosters` export (codes: `asset_unmapped` — advisory mirror of the propose route's mapping hard block, players AND picks — plus `pick_moved` (snapshot owner ≠ expected side), `player_moved`, `roster_not_found`); **I-2 (2026-10-26):** an ESPN-linked league (flag `espn.send`) takes an ESPN branch. It reads ESPN's live `mTeam+mRoster` (the read the ESPN propose route makes) and reports `asset_unmapped` (crosswalk miss), `player_moved` and `roster_not_found` as blocking advisories. Picks are left to the propose route's `espn_pick_unsupported`. ESPN unreachable → `checked:false`. Any other linked-platform id (Fleaflicker, or a platform whose branch is flagged off) returns `checked:false` **without calling Sleeper** (G-014 / G-030; it used to hit the Sleeper reads with a platform-native id). Every other league takes the Sleeper path: re-fetches live Sleeper league meta + rosters → `{ok, checked, warnings:[{code, severity: "blocking"\|"warning", message}]}`. Sleeper codes: `league_archived` (season `complete`), `player_moved`, `roster_limit` (post-trade count > lineup+IR+taxi slots), `roster_not_found`, and since #413 the blocking pick advisories `asset_unmapped` (a pick with no `draft_picks` grid row — generic rungs always), `pick_untradable` (#428 — the pick's class is outside Sleeper's tradable window, i.e. that season's draft has already run; one extra `/drafts` read, only on a pick-bearing validate) and `pick_moved` (live `traded_picks` holder is not the offering side) — the advisory mirror of the propose route's three 422s. `player_moved` / `roster_limit` are computed over **players only** (picks are not roster slots); the pick reads happen only when the trade carries a pick. `checked:false` = platform data unreachable — nothing validated, including a pick-bearing validate whose `traded_picks` read fails (S0/R10, #378). Everything else (locks, deadline, veto, FAAB, roster limits on MFL) is delegated to the platform. See [items/180](feedback/items/180-trade-send-validation/status.md) |
 
 `/api/trades/propose` error contract (client maps these to a reconnect prompt / deep-link fallback):
 
@@ -806,12 +955,12 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | 409 | `sleeper_rejected` | Sleeper's write API rejected the (valid-shape) token — 401/403 or auth GraphQL error; cleared server-side. Carries `detail`. Reconnecting re-captures the SAME token, so the client must NOT loop to login — surface the reason. |
 | 503 | `sleeper_unconfigured` | `SLEEPER_TOKEN_KEY` unset/invalid |
 | 502 | `sleeper_write_failed` | Sleeper accepted auth but the write failed (non-auth). Carries `kind` + `detail` + `message` (`== detail`; since #428 `detail` is Sleeper's own sentence — the first GraphQL error `message`, e.g. `These draft picks cannot be traded.` — not a JSON dump of the errors array). **S0/R10 (#378):** also returned, before any provider call, when a pick-bearing send's live `traded_picks` read fails (`kind: "network"`, nothing sent). **I-2 / R3 (2026-10-26):** also returned, before any provider call, when the live `rosters` read itself fails (HTTP error, timeout, the open 429 circuit, a non-list body): `kind: "network"`, `message` == `detail` == "Couldn’t confirm rosters with Sleeper right now, so nothing was sent. Try again in a moment." This used to be 400 `roster_not_found`, which the client showed as "Couldn't match one of the teams". |
-| 422 | `sleeper_pick_unmapped` | **#413.** ≥1 pick asset is not a concrete pick in this league's `draft_picks` grid (generic rung, a well-formed id for a pick outside the synced grid — out-of-horizon or completed-draft season — or a user-asserted ADR-010 row; note a foreign-league or malformed id is not pick-shaped for this league and is treated as a player id, failing downstream as 502 `sleeper_write_failed`). Carries `picks[]` (the offending FTF ids, give-then-receive), `message`, `detail` (`== message`, what fielded catch-alls render). Nothing sent. Reported before `not_owned`. |
+| 422 | `sleeper_pick_unmapped` | **#413.** ≥1 pick asset is not a concrete pick in this league's `draft_picks` grid (generic rung, a well-formed id for a pick outside the synced grid — out-of-horizon or completed-draft season — or a user-asserted ADR-010 row; note a foreign-league or malformed id is not pick-shaped for this league and is treated as a player id. Since I-2, no live roster lists such an id, so it is refused **before any provider call** as 422 `asset_not_owned` (give side) or `counterparty_asset_not_owned` (receive side). Players are checked before picks, so that refusal comes ahead of any pick refusal). Carries `picks[]` (the offending FTF ids, give-then-receive), `message`, `detail` (`== message`, what fielded catch-alls render). Nothing sent. Reported before `not_owned`. |
 | 422 | `sleeper_pick_untradable` | **#428 (2026-09-08).** ≥1 pick's draft class is outside Sleeper's tradable window — that season's draft has already run (`/drafts` reports `complete`; Sleeper keeps the season in `traded_picks`, so the grid row and the holder check both still pass). Carries `picks[]`, `season_window: [first, last]` (always present — the classes Sleeper is trading, e.g. `[2027, 2029]`; an unknown season abstains and never produces this refusal), `message`, `detail` (`== message`; count-aware, names the spent seasons and the window). Nothing sent. Reported after `unmapped`, before `not_owned`. A `/drafts` flake with no cached #207 verdict excludes nothing (D-089) — the send proceeds and Sleeper stays the final authority (502 with its sentence). |
 | 422 | `sleeper_pick_not_owned` | **#413.** ≥1 pick's current holder (live `traded_picks`, default original roster) is not the side offering it. Same `picks[]` / `message` / `detail` shape. Nothing sent. |
-| 422 | `asset_not_owned` | **I-2 (2026-10-26; PRD `trade-time-to-suggestion` §5.3, platforms-pm R4).** ≥1 give **player** is not in the caller's roster `players` on the live `rosters` read the route already makes (no extra Sleeper call). `players` lists starters, bench, IR (`reserve`) and `taxi`, so those count as owned; the check is at roster level, so co-owners pass. Body `{error, assets: [<offending ids as sent>], message, detail}` with `detail` == `message`: "{Player} is no longer on your roster, so nothing was sent. Find a new trade." (plural: "{A} and {B} are …", "{A}, {B} and {C} are …", no serial comma). Names come from `players_table`. **A raw player id is never shown:** if any offending player has no name, the whole message counts instead: "A player in this trade is no longer on your roster, …" / "{n} players in this trade are no longer on your roster, …". `assets` still carries the ids. Checked inside `_sleeper_propose_core`, so the team-overhaul send gets it too. Players are checked **before** picks (the pick reads are skipped), and the give side is reported before the receive side. Nothing sent. |
+| 422 | `asset_not_owned` | **I-2 (2026-10-26; PRD `trade-time-to-suggestion` §5.3, platforms-pm R4).** ≥1 give **player** is not in the caller's roster `players` on the live `rosters` read the route already makes (no extra Sleeper call). `players` lists starters, bench, IR (`reserve`) and `taxi`, so those count as owned; the check is at roster level, so co-owners pass. Body `{error, assets: [<offending ids as sent>], message, detail}` with `detail` == `message`: "{Player} is no longer on your roster, so nothing was sent. Find a new trade." (plural: "{A} and {B} are …", "{A}, {B} and {C} are …", no serial comma). Names come from `players_table`. **A raw player id is never shown:** if any offending player has no name, the whole message counts instead: "A player in this trade is no longer on your roster, …" / "{n} players in this trade are no longer on your roster, …". `assets` still carries the ids. Checked inside `_sleeper_propose_core`, so the team-overhaul send gets it too. Either refusal also kicks one background roster refresh (`roster_refresh.maybe_refresh_async(league_id, 0)`, which is non-blocking and single-flight, with the 60 s failure cooldown and the 429 circuit) so the stale card isn't served again. A successful send kicks nothing. Players are checked **before** picks (the pick reads are skipped), and the give side is reported before the receive side. Nothing sent. |
 | 422 | `counterparty_asset_not_owned` | **I-2.** ≥1 receive **player** is not in the counterparty's live roster `players`. Same `assets[]` / `message` / `detail` shape: "{Player} is no longer on {Team}’s roster, so nothing was sent. Find a new trade." `{Team}` is the counterparty's stored `league_members.display_name` (else `username`) and always takes ’s ("Chris’s"); when neither is known the copy is "{Player} is no longer on the other manager’s roster, …". Same plurals and the same count fallback ("A player in this trade is no longer on {Team}’s roster, …"). Nothing sent. |
-| 400 | `bad_request` / `roster_not_found` / `opponent_roster_not_found` | Malformed body / caller or counterparty not in that league. Since I-2, `roster_not_found` means a **successful** `rosters` read without the caller's roster (a failed read is the 502 above), and `opponent_roster_not_found` also covers a client-supplied `their_roster_id` that the live read doesn't hold, because its receive side can't be checked. Since #413 `bad_request` also covers a non-empty `draft_picks` body key (carries `message` + `detail`) — pick ids belong in the mixed arrays |
+| 400 | `bad_request` / `roster_not_found` / `opponent_roster_not_found` | Malformed body / caller or counterparty not in that league. Since I-2, `roster_not_found` means a **successful** `rosters` read without the caller's roster (a failed read is the 502 above), and `opponent_roster_not_found` also covers a client-supplied `their_roster_id` that the live read doesn't hold, because its receive side can't be checked. **NEXT.md 0f (I-2 PR 3):** `bad_request` is also returned, before any Sleeper call, for a league id that `is_linked_platform_league` reports as an ESPN / MFL / Fleaflicker league. That body carries `message` == `detail` == "This league isn't on Sleeper, so it can't be sent there.", which is defensive, because no client routes such an id here. Those ids are numeric, so `isdigit()` alone let them reach Sleeper (G-030). Since #413 `bad_request` also covers a non-empty `draft_picks` body key (carries `message` + `detail`) — pick ids belong in the mixed arrays |
 
 **Scope:** players + draft picks (encoded server-side, #413); FAAB remains unimplemented (Q-016). Field 1 of the pick string (original-owner roster id) is confirmed on public Sleeper evidence (#428 investigation §2: Sleeper's own completed-trade transactions carry `roster_id` = original owner for picks that had already changed hands) — Q-037 closed.
 
@@ -833,12 +982,15 @@ The MFL analogue of Send in Sleeper — but riding MFL's **documented, sanctione
 | 404 | `feature_disabled` | Flag off |
 | 403 | `verification_required` | Session not verified (P1 hard gate) |
 | 404 | `mfl_not_linked` | League isn't a linked MFL league, or is linked by a different FTF user (only the linker has a franchise binding) |
-| 409 | `mfl_franchise_unknown` | League row has no `platform_my_team` → re-link |
+| 409 | `mfl_franchise_unknown` | League row has no `platform_my_team` → re-link. Since I-2, also returned when a successful live `rosters` export doesn't list the caller's franchise |
 | 409 | `mfl_not_connected` | No stored/session MFL cookie → prompt MFL sign-in (#177 flow) |
 | 409 | `mfl_auth_expired` | MFL rejected the cookie (HTTP 401/403 or auth-flavored error body) — stored credential dropped → prompt re-sign-in. Carries `detail` |
-| 422 | `mfl_asset_unmapped` | ≥1 asset failed to map (player crosswalk miss, pick absent from the futureDraftPicks snapshot, or a generic pick rung) — hard block, carries `unmapped[]` |
+| 422 | `mfl_asset_unmapped` | ≥1 asset failed to map (player crosswalk miss, pick absent from the futureDraftPicks snapshot, or a generic pick rung) — hard block, carries `unmapped[]`. Reported before the I-2 ownership check below |
+| 422 | `asset_not_owned` | **I-2 (2026-10-26; PRD `trade-time-to-suggestion` §5.3, platforms-pm R1/R5).** Before any provider write, the core re-reads ownership **live**: players from MFL's `rosters` export (after the Sleeper→MFL crosswalk), FTF picks from its `futureDraftPicks` export (the stored snapshot stays the existence check above). Each read happens only when the trade carries that asset class. ≥1 give asset is not held by the caller's franchise (a pick MFL dropped from the export after its draft counts as moved) → `{error, assets: [<offending FTF ids>], message, detail}` with `detail` == `message`, the same copy as `/api/trades/propose`: "{Asset} is no longer on your roster, so nothing was sent. Find a new trade." Players are named from `players_table` and picks by their `draft_picks` label ("2027 1st (from …)"). A raw player or pick id is never shown: an unnamed asset switches the message to a count ("A player in this trade …" / "{n} players in this trade …"). Give side first, players and picks together. Pre-encoded `give_pick_assets` / `receive_pick_assets` (no client sends them) are not checked. The team-overhaul send gets the same check through the same core. Nothing sent |
+| 422 | `counterparty_asset_not_owned` | **I-2.** ≥1 receive asset is not held by the counterparty's franchise. Same shape: "… is no longer on {Team}’s roster, …", where `{Team}` is the counterparty's stored `league_members.display_name` (matched by franchise), else "the other manager’s roster". Nothing sent |
 | 502 | `mfl_write_failed` | MFL refused or the transport failed (non-auth) — carries `kind` (`error`\|`network`\|`input`) + `detail` (incl. HTTP 429 throttling as `network`) |
-| 400 | `bad_request` | Malformed body / unparseable counterparty / self-trade / malformed pick asset |
+| 502 | `mfl_unavailable` | MFL couldn't be read: the league's host couldn't be resolved (`{error, message}`, "Couldn't reach MFL — try again shortly."). **I-2 / R3 (2026-10-26):** also returned, before any provider call, when either live ownership read fails (any MflError, which both fetchers turn into `{}`, or a body without the export's top-level key). That body adds `kind: "network"` and `detail`, with `message` == `detail` == "Couldn’t confirm rosters with MFL right now, so nothing was sent. Try again in a moment." `mfl_unavailable` rather than `mfl_write_failed`, because `SendInMflButton` presents the latter as "MFL rejected the request"; this code reaches its catch-all, which shows `detail` |
+| 400 | `bad_request` | Malformed body / unparseable counterparty / self-trade / malformed pick asset. Since I-2, also returned when a successful live `rosters` export doesn't list the counterparty's franchise |
 
 **Scope:** players AND owned future picks are wired end-to-end — the mobile trade surfaces already carry picks in the mixed asset arrays, and the server encodes them (`FP_` only; `DP_` current-year slot picks have no FTF-side representation and remain pre-encoded-only). The `FP_` shape was verified against a live public `futureDraftPicks` export 2026-08-11 (`originalPickFor` 4-digit padded, round 1-based unpadded → `FP_0001_2027_1`); whether a live *import* accepts it is still on the operator checklist. The full lifecycle is routed: propose → pending-trades read → respond (accept/reject/revoke).
 
@@ -862,8 +1014,11 @@ The ESPN analogue of Send in Sleeper/MFL, riding ESPN's **undocumented** `lm-api
 | 409 | `espn_auth_expired` | ESPN rejected the cookies (401/403 on the pre-flight read OR the write) — stored credential dropped → reconnect. **TODO(live-verify):** until the auth probe clears, this can also mean cookies alone never authorize a server-side write |
 | 422 | `espn_pick_unsupported` | ≥1 pick asset in the arrays — hard block (ESPN pick encoding unverified), carries `picks[]` |
 | 422 | `espn_asset_unmapped` | ≥1 player failed the reverse crosswalk — hard block, carries `unmapped[]` |
+| 422 | `asset_not_owned` | **I-2 (2026-10-26; PRD `trade-time-to-suggestion` §5.3, platforms-pm R1).** ≥1 give player isn't on the caller's team in the live `mTeam+mRoster` pre-flight read the route already makes (no extra ESPN call). Ids are compared in ESPN space (the same reverse crosswalk the write uses); mRoster entries include IR. Body `{error, assets: [<FTF ids>], message, detail}` with `detail` == `message`, the same copy as `/api/trades/propose`: "{Player} is no longer on your roster, so nothing was sent. Find a new trade." Names come from `players_table`. A raw id is never shown: an unnamed player switches the message to a count ("A player in this trade …"). Checked after the pick and mapping hard blocks and the team resolution, before the write. The team-overhaul send gets it through the same core. Nothing sent |
+| 422 | `counterparty_asset_not_owned` | **I-2.** ≥1 receive player isn't on the counterparty's team in that read. Same shape: "… is no longer on {Team}’s roster, …", where `{Team}` is the live ESPN team name (what the import stores as the member's `display_name`), else "the other manager’s roster". Nothing sent |
 | 502 | `espn_write_failed` | ESPN refused or transport failed (non-auth) — carries `kind` + `detail` |
-| 502/404/… | `espn_unavailable` / `espn_league_not_found` / … | Pre-flight read failures via the shared ESPN error mapping |
+| 502 | `espn_unavailable` | The pre-flight read failed. **I-2 / R3:** every read failure now carries `kind: "network"` and `message` == `detail` == "Couldn’t confirm rosters with ESPN right now, so nothing was sent. Try again in a moment.", with nothing sent. The read failures are: an ESPN HTTP error or non-JSON body, a transport error `fetch_league` doesn't wrap (URLError / timeout, which used to escape as a 500), a body that isn't a league with a `teams` list, or either team lacking a `roster` object. `espn_unavailable` rather than `espn_write_failed`, because `SendInEspnButton` shows the latter as "ESPN rejected the request"; this code reaches its catch-all, which shows `detail` |
+| 404/… | `espn_league_not_found` / … | Other pre-flight read outcomes via the shared ESPN error mapping (unchanged) |
 | 400 | `bad_request` | Malformed body / unresolvable counterparty / self-trade |
 
 **`POST /api/calc/score`** — body `{give_player_ids: [...], receive_player_ids: [...], scoring_format?: "1qb_ppr"|"sf_tep"}`. At least one side must be non-empty (both empty → 400). Unknown format falls back to `1qb_ppr`. Response:
@@ -1378,8 +1533,8 @@ The durable multi-trade plan: outlook → eligible pool → like/pass review →
 | `POST /api/overhauls/{id}/assemble` (flag) | `{revision}` → `{roadmaps: RoadmapView[] (≤5, ranked), shortfall: {reason, detail} \| null}` | `roadmaps == []` with `shortfall.reason` when fewer than 4 compatible packages exist. 409 `active_sends_exist` while any attempt is live. Supersedes previous roadmaps and always clears `selected_roadmap_id` (status returns to `reviewing` only from `assembled`). |
 | `PUT /api/overhauls/{id}/roadmaps/{rid}/select` | `{version}` → `OverhaulView` | 409 `stale_version`. Sets `selected_roadmap_id`, status `assembled`. |
 | `PUT /api/overhauls/{id}/roadmaps/{rid}/priorities` | `{version, package_id, tiers: [{tier, offer_ids}]}` → `RoadmapView` (`version+1`) | 409 `stale_version`; 400 `bad_request` (ids outside the package, gaps, omissions, duplicates); 409 `tier_duplicate_counterparty` (D4). Roadmap rows are immutable — a new version row is written. |
-| `POST /api/overhauls/{id}/roadmaps/{rid}/prepare-send` | `{version, offer_ids?}` → `PrepareView` | Default selection = tier 1 of every open package. Re-captures the ownership snapshot first (R8.7), then builds the `ValidationReceipt`; `prepare_token` expires after 120 s (in-process). `handoff.mode` is `send` on every platform with a send flag (Sleeper, MFL, ESPN — `overhaul_service.SEND_FLAGS`) and `copy` (with `text`) elsewhere (Fleaflicker / unknown). On a `send` platform the receipt additionally carries blocker `reconnect_required` (one item, names the platform) when `capabilities.auth_state != linked`, and on ESPN blocker `pick_unsupported_on_platform` (per offer, `package_id` + `offer_id`) for every selected offer whose give **or** receive side holds a pick — the pick is refused, never dropped. No provider writes. |
-| `POST /api/overhauls/{id}/send` (flag) | `{prepare_token, summary_hash, version, idempotency_key}` → `{batch_id, attempts: AttemptView[]}` | Same key + same summary → the existing batch (200); same key + different summary → 409 `idempotency_conflict`. 409 `prepare_expired` / `stale_version` / `summary_mismatch`; 409 `capability_unavailable` (a `copy`-handoff platform, or `capabilities.can_propose` false — e.g. the platform's send flag off; detail `send_disabled`), 409 `reconnect_required` (detail `unlinked`/`expired`), 403 `verification_required`; re-validation blockers → 409 `<first blocker code>` + `receipt` (so an ESPN pick offer is 409 `pick_unsupported_on_platform` before anything is reserved). Reservations are claimed for every outgoing asset **transactionally** (409 `asset_reserved` `{assets}` — nothing sent). Attempts are persisted `queued` **before** any provider call, then sequentially `sending` → `proposed` / `send_failed` / `outcome_unknown` through the platform's extracted propose core, chosen from the overhaul's `platform`: `_sleeper_propose_core` (`/api/trades/propose`, flag `trade.send_in_sleeper`), `_mfl_propose_core` (`/api/trades/propose-mfl`, flag `trade.send_in_mfl`) or `_espn_propose_core` (`/api/trades/propose-espn`, flag `espn.send`) — so every send inherits that route's test-mode fail-close, flag and verified gate, and a core's structured error becomes `send_failed` with `error.code` = the core's code (e.g. `mfl_auth_expired`, `espn_asset_unmapped`). On success `provider_transaction_id` is what the core returned (MFL returns none) and `provider_status` the provider's own word (`mfl_status` / `espn_status`; `null` on Sleeper). Fires `overhaul_batch_reconciled`. |
+| `POST /api/overhauls/{id}/roadmaps/{rid}/prepare-send` | `{version, offer_ids?}` → `PrepareView` | Default selection = tier 1 of every open package. Re-captures the ownership snapshot first (R8.7), then builds the `ValidationReceipt`; `prepare_token` expires after 120 s (in-process). `handoff.mode` is `send` on every platform with a send flag (Sleeper, MFL, ESPN — `overhaul_service.SEND_FLAGS`) and `copy` (with `text`) elsewhere (Fleaflicker / unknown). On a `send` platform the receipt additionally carries blocker `reconnect_required` (one item, names the platform) when `capabilities.auth_state != linked`, and on ESPN blocker `pick_unsupported_on_platform` (per offer, `package_id` + `offer_id`) for every selected offer whose give **or** receive side holds a pick — the pick is refused, never dropped. No provider writes. **I-2 (2026-10-26), R3:** on a `send` platform (not the demo league), a failed live roster read is refused: **503 `rosters_unavailable`** `{error, kind: "network", detail, message}`, with `detail` == `message` == "Couldn’t confirm rosters with {Sleeper\|MFL\|ESPN} right now, so nothing was sent. Try again in a moment.". It used to fall back to the session roster (`roster_source: session`) and prepare anyway. No `prepare_token` is minted and the fallback snapshot is not stored. Copy-handoff platforms are unaffected. **I-2, R4:** the receipt's `asset_not_owned` / `counterparty_asset_not_owned` blockers are one per offer and side, in the shared send-time copy (`backend/ownership_copy.py`, the same strings as `/api/trades/propose*`): "{A} and {B} are no longer on your roster, so nothing was sent. Find a new trade." / "… on {Team}’s roster …". `{Team}` is the offer's `counterparty_username`, else "the other manager’s". Names come from the offer card, with no serial comma. A missing name (or the card's "Unknown") switches the message to a count, so a raw id is never shown. Each ownership blocker also carries `assets` (the moved ids, as in the propose 422s); the receipt item shape gains only this field. The old copy was "You no longer own 4046." / "<user_id> no longer owns …". |
+| `POST /api/overhauls/{id}/send` (flag) | `{prepare_token, summary_hash, version, idempotency_key}` → `{batch_id, attempts: AttemptView[]}` | Same key + same summary → the existing batch (200); same key + different summary → 409 `idempotency_conflict`. 409 `prepare_expired` / `stale_version` / `summary_mismatch`; 409 `capability_unavailable` (a `copy`-handoff platform, or `capabilities.can_propose` false — e.g. the platform's send flag off; detail `send_disabled`), 409 `reconnect_required` (detail `unlinked`/`expired`), 403 `verification_required`; re-validation blockers → 409 `<first blocker code>` + `receipt` (so an ESPN pick offer is 409 `pick_unsupported_on_platform` before anything is reserved). **I-2:** when that first blocker is `asset_not_owned` / `counterparty_asset_not_owned`, the 409 also carries `detail` == `message` == the blocker's readable I-2 sentence, which OverhaulSummaryScreen's `errorDetail` shows. The same applies when the first blocker is `offer_stale` and that offer has an ownership blocker (one with `assets`): the 409 carries that blocker's sentence. A liked offer goes stale only when `/refresh` finds its give side off the caller's roster. The settings-change and model-change staling touches undecided offers only, and those are refused first as `offer_not_liked`. A stale offer whose assets have since come back keeps today's 409 with no `detail`. Other blocker codes keep no `detail`, because their messages can still name raw ids. A core refusal inside the batch (I-2's per-platform 422s, R3's 502s) becomes `send_failed` with `error.message` = the core's `detail`, which `GET /api/overhauls/{id}` also returns. Reservations are claimed for every outgoing asset **transactionally** (409 `asset_reserved` `{assets}` — nothing sent). Attempts are persisted `queued` **before** any provider call, then sequentially `sending` → `proposed` / `send_failed` / `outcome_unknown` through the platform's extracted propose core, chosen from the overhaul's `platform`: `_sleeper_propose_core` (`/api/trades/propose`, flag `trade.send_in_sleeper`), `_mfl_propose_core` (`/api/trades/propose-mfl`, flag `trade.send_in_mfl`) or `_espn_propose_core` (`/api/trades/propose-espn`, flag `espn.send`) — so every send inherits that route's test-mode fail-close, flag and verified gate, and a core's structured error becomes `send_failed` with `error.code` = the core's code (e.g. `mfl_auth_expired`, `espn_asset_unmapped`). On success `provider_transaction_id` is what the core returned (MFL returns none) and `provider_status` the provider's own word (`mfl_status` / `espn_status`; `null` on Sleeper). Fires `overhaul_batch_reconciled`. |
 | `POST /api/overhauls/{id}/refresh` | `{}` → `OverhaulView` | Re-captures the snapshot (players live from the platform — Sleeper's public rosters, or for MFL/ESPN the same authenticated fetch + crosswalk the import uses (`_overhaul_platform_rosters`, stored credentials, nothing persisted) — `snapshot.roster_source: live`; when that read fails or the platform has no reader the session roster is used and stamped `session`, and **no** attempt is terminalized from it. On Sleeper, pick holders live from the public `traded_picks` list when that read succeeds — `snapshot.pick_ownership_source: live`, else `db`). First sweeps zombies: a `sending` attempt older than 5 min → `outcome_unknown`, a `queued` one → `stale` (both `state_source: server`, error `{code: worker_lost}`). Then a `proposed`/`outcome_unknown` attempt whose give assets all left **and** whose receive assets all arrived → `accepted` (`state_source: ownership_refresh`), which completes the package, invalidates its tie partners and releases its reservations; give gone without a **player** on the receive side arriving → `resolved_elsewhere`. An un-arrived receive side made only of picks is never terminalized on the DB pick table: it is `accepted` only when the live read confirms every pick is the user's, otherwise left unchanged. Every terminal transition releases the package's reservation when no live attempt remains. Offers whose assets are gone become `stale`. Never sends. One call per 15 s per overhaul (429 `rate_limited`). |
 | `POST /api/overhauls/{id}/attempts/{aid}/status` | `{state: declined\|withdrawn\|expired, note?}` → `AttemptView` (`state_source: user_reported`) | Only from `proposed`/`outcome_unknown` (400 `bad_request` otherwise, and for any other `state`). Releases the package's reservation when no live attempt remains. |
 

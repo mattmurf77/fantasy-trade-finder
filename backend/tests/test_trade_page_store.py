@@ -88,6 +88,9 @@ def p1(live, monkeypatch):
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
+    # Flag on, organic jobs defer their evidence to delivery (ADR-025 stage 1).
+    # Write it inline, never on a thread that could outlive this test's engine.
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda *, target, args: target(*args))
     # Production's knob values, whatever a local DB seeded.
     for knob, value in (("first_page_store_enabled", 1.0), ("trade_paged_responses", 1.0),
                         ("trade_i1_mode", 2.0), ("trade_gate_miss_mode", 0.0)):
@@ -134,7 +137,7 @@ def build_page():
 
 
 def stored():
-    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE)
+    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE, evidence=True)
 
 
 def set_row(engine, **values):
@@ -171,8 +174,13 @@ def test_a_complete_organic_job_stores_its_first_pages_with_its_stamps(p1):
     assert row["card_count"] == PAGES == 90
     assert row["pages_blob"] == {"v": 1, "opponents_total": job["opponents_total"],
                                  "cards": job["cards"][:PAGES]}
-    assert row["stored_bytes"] == len(db_module.CompressedJSON.encode(row["pages_blob"]))
-    assert row["evidence_blob"] is None and row["last_served_at"] is None
+    # ADR-025 stage 1: the deferred deck's unwritten evidence rides along (the
+    # replaced cards are not the deck's, so only its candidate set is left).
+    evidence = row["evidence_blob"]
+    assert evidence["deck_job_id"] == job_id and evidence["rows"] == []
+    assert row["stored_bytes"] == (len(db_module.CompressedJSON.encode(row["pages_blob"]))
+                                   + len(db_module.CompressedJSON.encode(evidence)))
+    assert row["last_served_at"] is None
     assert row["built_at"] <= db_module.page_store_iso(time.time())
     assert row["expires_at"] == min(db_module.page_store_iso(
         datetime.fromisoformat(c["expires_at"]).timestamp()) for c in job["cards"][:PAGES])
@@ -198,6 +206,7 @@ REFUSALS = {
     "roster_fp_none": lambda job: job.update(roster_fp=None),
     "values_snapshot_none": lambda job: job.update(values_snapshot_id=None),
     "signature_none": lambda job: job.update(request_signature=None),
+    "experiment_digest_none": lambda job: job.pop("experiment_digest"),   # its read failed
     "pinned": lambda job: job.update(is_pinned=True),
     "intent": lambda job: job.update(trade_intent="consolidate"),
     "replenish": lambda job: job.update(source="replenish"),
@@ -365,7 +374,9 @@ def test_all_equal_serves_page_one_inline(p1, spawned):
     response = generate(client, page=1, search_id="s-1")
     assert response.status_code == 200
     body = response.get_json()
-    assert body["cards"] == stored()["pages_blob"]["cards"][:30]
+    # P2 adds each card's trade_hash at serve (test_trade_pages_p2); the rest is the stored card.
+    assert [{k: v for k, v in c.items() if k != "trade_hash"}
+            for c in body["cards"]] == stored()["pages_blob"]["cards"][:30]
     assert ids(body["cards"]) == [f"p1-{i:03d}" for i in range(30)]
     assert {k: body[k] for k in ("job_id", "status", "error", "cursor", "total_ready", "replace",
                                  "serve_source", "freshness_state", "search_id",
@@ -513,14 +524,16 @@ def test_other_requests_never_read_the_store(p1, spawned, statements, body):
     assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
 
 
-def test_the_serve_path_reads(p1, spawned, statements):
+def test_the_serve_path_reads(p1, spawned, statements, monkeypatch):
     """The page serve's own statements: one page read; one S0 roster snapshot
     (league_members, draft_picks, leagues, league_roster_state) shared by the
     fingerprint compare and S0's serve check, plus the vsn1 pick read; the
     disposition read; one last_served_at write. Everything else is
     /generate's existing preamble (session touch, preference/outlook reads).
+    The delivery's evidence write runs on its own thread (not run here).
     """
     client, _, _ = p1
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda **kw: None)
     build_page()
     statements.clear()
     assert generate(client, page=1).get_json()["serve_source"] == "page"
@@ -821,6 +834,47 @@ def test_a_new_experiment_version_mismatches(p1, spawned, monkeypatch):
     build_page()
     _assign(monkeypatch, "light", version=4)
     assert "serve_source" not in generate(client, page=1).get_json()
+
+
+def test_the_page_carries_the_digest_read_at_job_start(p1, spawned, monkeypatch):
+    """Release-lead #368 QA P3 (c): the variant moves while the engine runs.
+    The page stores the start-time digest, so the serve after the move falls
+    through instead of serving a light-built deck as generous."""
+    client, _, _ = p1
+    _assign(monkeypatch, "light")
+    at_start = server._trade_experiment_digest(UID)
+    real_run = server._run_trade_job
+
+    def run_then_move(*args, **kwargs):
+        real_run(*args, **kwargs)
+        _assign(monkeypatch, "generous")              # after the engine, before the store
+
+    monkeypatch.setattr(server, "_run_trade_job", run_then_move)
+    job_id = run_job()
+    moved = server._trade_experiment_digest(UID)
+    assert moved != at_start
+    assert server._trade_jobs[job_id]["experiment_digest"] == at_start
+    assert stored()["deck_job_id"] == job_id and stored()["experiment_digest"] == at_start
+    assert "serve_source" not in generate(client, page=1).get_json()
+
+
+def test_the_digest_is_read_on_the_worker_not_the_request(p1, spawned, monkeypatch):
+    """Read once, at job start on the worker; never on the request thread, and
+    the store reuses the job's value instead of reading it again."""
+    client, _, _ = p1
+    _assign(monkeypatch, "light")
+    expected = server._trade_experiment_digest(UID)
+    reads = []
+    real = server._trade_experiment_digest
+    monkeypatch.setattr(server, "_trade_experiment_digest", lambda uid: reads.append(uid) or real(uid))
+    generate(client)
+    (start,) = spawned
+    job_id = start["args"][0]
+    assert reads == [] and "experiment_digest" not in server._trade_jobs[job_id]
+    start["target"](*start["args"], **start["kwargs"])          # the worker thread's body
+    assert reads == [UID]
+    assert server._trade_jobs[job_id]["experiment_digest"] == expected
+    assert stored()["deck_job_id"] == job_id and stored()["experiment_digest"] == expected
 
 
 def test_the_digest_marks_a_fallback_user(p1, monkeypatch):
@@ -1139,6 +1193,28 @@ def test_the_engine_code_hash_covers_the_module_set_once_per_process(tmp_path, m
     monkeypatch.setattr(server, "_engine_code_hash_of", lambda path: calls.append(path) or "c0ffee000000")
     assert server._trade_engine_code_hash() == server._trade_engine_code_hash() == "c0ffee000000"
     assert len(calls) == 1
+
+
+def test_value_cores_standings_module_is_hashed_and_the_rest_of_outlook_is_not(tmp_path):
+    """models-eng (e): outlook/league_state.py loads the W/L/T, points_for and
+    completed_weeks value core reads, so its bytes are in the hash. The rest
+    of outlook/ and trade_input_evidence.py are excluded on purpose."""
+    root = Path(server.__file__).resolve().parent
+    files = sorted({path for pattern in server._ENGINE_CODE_MODULES for path in root.glob(pattern)})
+    hashed = {path.relative_to(root).as_posix() for path in files}
+    assert {name for name in hashed if name.startswith("outlook/")} == {"outlook/league_state.py"}
+    assert "trade_input_evidence.py" not in hashed
+    for path in files:
+        copy_to = tmp_path / path.relative_to(root)
+        copy_to.parent.mkdir(parents=True, exist_ok=True)
+        copy_to.write_bytes(path.read_bytes())
+    assert server._engine_code_hash_of(tmp_path) == server._engine_code_hash_of(root)
+    (tmp_path / "outlook" / "simulator.py").write_text("# an Outlook-only edit\n")
+    (tmp_path / "trade_input_evidence.py").write_text("# a provenance edit\n")
+    assert server._engine_code_hash_of(tmp_path) == server._engine_code_hash_of(root)
+    standings = tmp_path / "outlook" / "league_state.py"
+    standings.write_bytes(standings.read_bytes() + b"\n# a standings change\n")
+    assert server._engine_code_hash_of(tmp_path) != server._engine_code_hash_of(root)
 
 
 # ── Eviction ────────────────────────────────────────────────────────────────

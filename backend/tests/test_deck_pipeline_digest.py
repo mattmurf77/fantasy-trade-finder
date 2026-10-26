@@ -4,17 +4,22 @@ server.py isn't in the engine code hash (that would cold every stored page on
 every deploy), so a change to its deck layers reaches stored pages only through
 the manual `DECK_PIPELINE_VERSION` bump (and, after 11-10, it's a MOD-M1 re-run
 trigger). Pinned here, per models-eng's classification (2026-10-26):
-  * `server.DECK_PIPELINE_DIGEST` = the digest of the functions in
-    `DECK_PIPELINE_FUNCTIONS` (their AST with docstrings stripped, so a
-    comment, docstring or formatting edit doesn't trip it and a logic edit
-    does) and of the constants in `DECK_PIPELINE_CONSTANTS` (by value);
+  * `server.DECK_PIPELINE_PINS[DECK_PIPELINE_VERSION]` = the digest of the
+    functions in `DECK_PIPELINE_FUNCTIONS` (their AST with docstrings
+    stripped, so a comment, docstring or formatting edit doesn't trip it and
+    a logic edit does) and of the constants in `DECK_PIPELINE_CONSTANTS` (by
+    value);
+  * the pins are append-only: FROZEN_PINS below is a copy of every row, so a
+    version re-pinned in place (its stored pages would stay stamped current)
+    fails;
   * the closure: every server.py function or literal module constant a listed
     function references is listed, a listed constant, or in
     `DECK_PIPELINE_IGNORED` with a reason, so a new helper can't slip past.
 
-On a digest failure: bump DECK_PIPELINE_VERSION, re-pin DECK_PIPELINE_DIGEST
-to `server._deck_pipeline_digest()`, and have models-eng review. On a closure
-failure: classify the names it lists.
+On a digest failure: bump DECK_PIPELINE_VERSION, add its row to
+DECK_PIPELINE_PINS with `server._deck_pipeline_digest()` and copy that row into
+FROZEN_PINS, and have models-eng review. On a closure failure: classify the
+names it lists.
 """
 import ast
 import inspect
@@ -28,10 +33,28 @@ MESSAGE = "bump DECK_PIPELINE_VERSION and re-pin (models-eng reviews)"
 CLASSIFY = "classify in DECK_PIPELINE_FUNCTIONS / _CONSTANTS / _IGNORED (models-eng reviews)"
 LITERAL_CALLS = {"frozenset", "set", "tuple", "dict", "float", "int", "str", "list"}
 
+# Every DECK_PIPELINE_PINS row ever pinned. Append-only: a bump copies its new
+# row here; an existing row never changes.
+FROZEN_PINS = {
+    1: "38068a074677acaa",
+    2: "9e79b6087f6e1a42",
+}
+PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
+
 
 def test_the_deck_pipeline_digest_is_pinned():
-    if server._deck_pipeline_digest() != server.DECK_PIPELINE_DIGEST:
+    if server._deck_pipeline_digest() != PINNED:
         pytest.fail(MESSAGE)
+
+
+def test_no_pinned_version_ever_changes_its_digest():
+    pins = server.DECK_PIPELINE_PINS
+    changed = {v: (digest, pins.get(v)) for v, digest in FROZEN_PINS.items() if pins.get(v) != digest}
+    assert not changed, (f"re-pinned or dropped in place (frozen, now): {changed}; "
+                         "bump DECK_PIPELINE_VERSION and add a row instead")
+    new = sorted(set(pins) - set(FROZEN_PINS))
+    assert not new, f"copy the new pins {new} into FROZEN_PINS"
+    assert server.DECK_PIPELINE_VERSION == max(pins), "DECK_PIPELINE_VERSION is the newest pin"
 
 
 # ── The closure ─────────────────────────────────────────────────────────────
@@ -176,22 +199,22 @@ def test_comment_docstring_and_formatting_edits_keep_the_digest():
         lines.insert(1, "    # a new comment")
         source = "\n".join(lines) + "\n"
         return source.replace('"""', '"""Reworded. ', 1).replace(", ", ",  ")
-    assert _digest_with("_order_deck", cosmetic) == server.DECK_PIPELINE_DIGEST
+    assert _digest_with("_order_deck", cosmetic) == PINNED
 
 
 def test_a_one_token_logic_edit_moves_the_digest():
     source = inspect.getsource(server._apply_deck_suppression)
     assert "max(declines)" in source
     assert _digest_with("_apply_deck_suppression",
-                        lambda s: s.replace("max(declines)", "min(declines)", 1)) != server.DECK_PIPELINE_DIGEST
+                        lambda s: s.replace("max(declines)", "min(declines)", 1)) != PINNED
 
 
 def test_a_constant_value_change_moves_the_digest():
     real = lambda name: getattr(server, name)
     moved = server._deck_pipeline_digest(
         value_of=lambda name: real(name) + 1 if name == "_DECK_MIN_CARDS" else real(name))
-    assert moved != server.DECK_PIPELINE_DIGEST
+    assert moved != PINNED
     reordered = server._deck_pipeline_digest(
         value_of=lambda name: frozenset(sorted(real(name), reverse=True))
         if name == "_AUDITION_ESTABLISHED" else real(name))
-    assert reordered == server.DECK_PIPELINE_DIGEST       # a set's order never matters
+    assert reordered == PINNED       # a set's order never matters
