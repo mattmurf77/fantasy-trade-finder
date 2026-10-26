@@ -703,6 +703,81 @@ def run() -> int:
             "; ".join(problems) if problems
             else 'Q5/Q6 open with "sign in with Apple or Sleeper, then … Link an ESPN/MFL league"')
 
+    # ── RELFLIP: the 11-18 web release flip (onboarding-eng) ─────────────
+    # Copy: marketing-lead-copy.md §1 m3.web.mobile_cta, §6 addenda 7-8
+    # m3.web.espn_mfl_cta (+ .link) and §2 faq.q3.release. The App Store URL
+    # is the `[APP STORE URL]` placeholder until release-lead fills it at the
+    # flip; the text pins take it or a real apps.apple.com URL, and
+    # RELFLIP-no-app-store-placeholder is the deliberate merge blocker (the
+    # old [OPERATOR NAME] idea): red until the real URL is in.
+    STORE_URL = r"(?:\[APP STORE URL\]|https://apps\.apple\.com/[^\s\"'<>()]+)"
+    STORE_LINK = (r'<a\b[^>]*\bhref="' + STORE_URL + r'"[^>]*>\s*Download on the App Store\s*'
+                  r'<span aria-hidden="true">→</span>\s*</a>')
+    index_body = strip_style_and_script(strip_comments(body_of(all_sources["index.html"])))
+
+    panel = re.search(r'<div\b[^>]*\bid="entry-mobile"[^>]*>(.*?)</div>', index_body, flags=re.S)
+    cta = re.findall(r'<a\b[^>]*class="lp-mobile-link"[^>]*>.*?</a>', panel.group(1), flags=re.S) if panel else []
+    testflight = re.findall(r"TestFlight", plain(index_body))
+    r.check("RELFLIP-app-store-cta[index.html]",
+            len(cta) == 1 and re.fullmatch(STORE_LINK, cta[0].strip(), flags=re.S) is not None and not testflight,
+            ("no #entry-mobile panel" if not panel else
+             f"{len(cta)} lp-mobile-link(s) in #entry-mobile, want 1" if len(cta) != 1 else
+             "the page still says TestFlight" if testflight else
+             f"not 'Download on the App Store <span aria-hidden=\"true\">→</span>' to the App Store URL: {cta[0][:120]}")
+            if not (len(cta) == 1 and re.fullmatch(STORE_LINK, cta[0].strip(), flags=re.S) and not testflight)
+            else "m3.web.mobile_cta: Download on the App Store → (arrow aria-hidden)")
+
+    ESPN_MFL_LINE = "League on ESPN or MFL? Connect it in the Fleeced iPhone app."
+    line_re = (r'<details class="lp-login-help">.*?</details>\s*'
+               r'<p class="cb-auth-help lp-espn-mfl-cta">\s*' + re.escape(ESPN_MFL_LINE)
+               + r"\s*" + STORE_LINK + r"\s*</p>")
+    placed = re.findall(line_re, index_body, flags=re.S)
+    copies = plain(index_body).count(ESPN_MFL_LINE)
+    styles = strip_css_comments(all_sources.get("css/styles.css", ""))
+    rule = lambda sel: re.search(re.escape(sel) + r"\s*\{([^}]*)\}", styles)  # noqa: E731
+    line_rule, link_rule = rule(".cb-auth-help.lp-espn-mfl-cta"), rule(".cb-auth-help.lp-espn-mfl-cta a")
+    chalk_line = bool(line_rule) and re.search(r"(?:^|;)\s*color\s*:\s*var\(--chalk\)", line_rule.group(1))
+    chalk_link = bool(link_rule) and re.search(r"(?:^|;)\s*color\s*:\s*var\(--chalk\)", link_rule.group(1)) \
+        and re.search(r"text-decoration\s*:\s*underline", link_rule.group(1))
+    ok_line = len(placed) == 1 and copies == 1 and chalk_line and chalk_link
+    r.check("RELFLIP-espn-mfl-line[index.html]", ok_line,
+            (f"the line appears {copies}x in the page, want once" if copies != 1 else
+             "not directly after the \"How Sleeper sign-in works\" details, with its App Store link "
+             "(arrow aria-hidden)" if len(placed) != 1 else
+             "the line isn't chalk (.cb-auth-help.lp-espn-mfl-cta { color: var(--chalk) })" if not chalk_line else
+             "its link isn't chalk + underline")
+            if not ok_line else "m3.web.espn_mfl_cta: under the Sleeper door, chalk, link chalk + underline")
+
+    # faq.q3.release, the version WITHOUT ESPN/MFL sign-in (OA-8 rows 1-2).
+    Q3_RELEASE = [
+        r"On iPhone: the Fleeced app on the App Store \(" + STORE_URL
+        + r"\)\. Sign in with Apple or Sleeper\. ESPN and MFL leagues connect after you sign in\.",
+        re.escape("On a computer: the web app on this site, in Chrome or Edge with the Fleeced "
+                  "browser extension installed. The extension is installed by hand from a release "
+                  "download; it isn't in the Chrome Web Store. The web app signs in with Sleeper "
+                  "only. ESPN and MFL leagues connect through the iPhone app."),
+        re.escape("There's no Android app. Phone browsers can't run the extension, so on a phone, "
+                  "use the iPhone app."),
+    ]
+    q3 = faq_items.get("Where can I use Fleeced?")
+    q3_paras = [inline_text(p) for p in re.findall(r"<p\b[^>]*>(.*?)</p>", q3 or "", flags=re.S)]
+    q3_bad = [i + 1 for i, (want, got) in enumerate(zip(Q3_RELEASE, q3_paras))
+              if not re.fullmatch(want, got)]
+    r.check("RELFLIP-faq-q3-release[faq.html]",
+            bool(q3) and len(q3_paras) == len(Q3_RELEASE) and not q3_bad,
+            ("Q3 \"Where can I use Fleeced?\" not found" if not q3 else
+             f"Q3 has {len(q3_paras)} paragraphs, want {len(Q3_RELEASE)}" if len(q3_paras) != len(Q3_RELEASE) else
+             f"Q3 paragraph(s) {q3_bad} not marketing's faq.q3.release")
+            if not (q3 and len(q3_paras) == len(Q3_RELEASE) and not q3_bad)
+            else "faq.q3.release verbatim (3 paragraphs)")
+
+    # The deliberate blocker: no served page may carry the placeholder.
+    holders = sorted(name for name, src in all_sources.items() if "[APP STORE URL]" in src)
+    r.check("RELFLIP-no-app-store-placeholder", not holders,
+            "[APP STORE URL] still in " + ", ".join(holders)
+            + " — release-lead fills the real apps.apple.com URL at the 11-18 flip"
+            if holders else "no [APP STORE URL] in any served page")
+
     return r.report(), r
 
 
