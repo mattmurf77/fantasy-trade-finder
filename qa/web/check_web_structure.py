@@ -664,20 +664,27 @@ def run() -> int:
     r.check("POL-faq-extension-link", bool(release) and set(faq_release) == {release[0]},
             f"FAQ extension link {faq_release} != index.html's {release[:1]}")
 
-    # Q5/Q6 first paragraphs: marketing's OA-8 text (marketing-lead-copy.md §2;
-    # §1g rows 3-4, FIXED), which legal R28.15 row 7 treats as the live
-    # pre-launch Q5/Q6: sign in with Apple or Sleeper, then link the league.
-    # Neither may say "choose ESPN" / "choose MFL" (the old sign-in chips). At
-    # the 11-18 flip, R28.15 row 7's release sentences replace these.
-    OA8 = (
-        ("Q5", "How do I connect an ESPN league?",
-         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
-         "ESPN league and sign in on ESPN's own page inside the app. Your ESPN password stays on "
-         "ESPN's sign-in page, and the app lists your leagues."),
-        ("Q6", "How do I connect an MFL league?",
-         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
-         "MFL league. Sign in with your MFL username and password, or enter a league ID or a "
-         "myfantasyleague.com league URL."),
+    # ESPN/MFL sign-in wording for the 11-18 release binary (legal R28.15 row
+    # 7, W3; marketing-lead-copy.md §6 addendum 8 §A: faq.q5.release.signin,
+    # faq.q6.release.signin). This replaces POL-faq-oa8's pre-release Q5/Q6
+    # pin, and lives in the droppable commit: drop it and POL-faq-oa8 is back.
+    # Every other sentence stays as legal notes ("Your ESPN password stays…";
+    # Q6's last paragraph is the fixed-now text). Neither first paragraph may
+    # say "choose ESPN" / "choose MFL".
+    SIGNIN = (
+        ("Q5 first paragraph", "How do I connect an ESPN league?", 0,
+         "In the iPhone app, sign in with ESPN on ESPN's own page inside the app, or sign in another "
+         "way and go to Settings → Leagues → Link an ESPN league. Your ESPN password stays on ESPN's "
+         "sign-in page, and the app lists your leagues."),
+        ("Q5 cookie paragraph", "How do I connect an ESPN league?", 1,
+         "The app keeps two ESPN sign-in cookies: espn_s2 (encrypted) and SWID (your ESPN member ID). "
+         "They're used to confirm the login is yours, import your leagues and send trades you "
+         "approve. Disconnect any time in Settings."),
+        ("Q6 first paragraph", "How do I connect an MFL league?", 0,
+         "In the iPhone app, sign in with your MFL username and password, or sign in another way and "
+         "go to Settings → Leagues → Link an MFL league, where you can also enter a league ID or a "
+         "myfantasyleague.com league URL. Sign in with your MFL username and password, or enter a "
+         "league ID or a myfantasyleague.com league URL."),
     )
 
     def inline_text(fragment: str) -> str:
@@ -688,20 +695,18 @@ def run() -> int:
         r'<summary>(.*?)</summary>\s*<div class="faq-body">(.*?)</div>',
         strip_comments(faq), flags=re.S)}
     problems = []
-    for label, question, want in OA8:
-        if question not in faq_items:
-            problems.append(f'{label} "{question}" not found')
-            continue
-        first = re.search(r"<p\b[^>]*>(.*?)</p>", faq_items[question], flags=re.S)
-        lead = inline_text(first.group(1)) if first else ""
-        if " ".join(want.split()) not in lead:
-            problems.append(f"{label} first paragraph is not marketing's OA-8 text")
-        chose = re.findall(r"\bchoose\s+(?:ESPN|MFL)\b", lead, flags=re.I)
-        if chose:
-            problems.append(f'{label} first paragraph says "{chose[0]}"')
-    r.check("POL-faq-oa8", not problems,
+    for label, question, index, want in SIGNIN:
+        paras = [inline_text(p) for p in re.findall(r"<p\b[^>]*>(.*?)</p>", faq_items.get(question, ""), flags=re.S)]
+        got = paras[index] if len(paras) > index else ""
+        if got != " ".join(want.split()):
+            problems.append(f"{label} is not legal's release sign-in text")
+        if index == 0:
+            chose = re.findall(r"\bchoose\s+(?:ESPN|MFL)\b", got, flags=re.I)
+            if chose:
+                problems.append(f'{label} says "{chose[0]}"')
+    r.check("RELFLIP-signin[faq.html]", not problems,
             "; ".join(problems) if problems
-            else 'Q5/Q6 open with "sign in with Apple or Sleeper, then … Link an ESPN/MFL league"')
+            else "faq.q5/q6.release.signin: legal's sign-in sentences verbatim")
 
     # ── RELFLIP: the 11-18 web release flip (onboarding-eng) ─────────────
     # Copy: marketing-lead-copy.md §1 m3.web.mobile_cta, §6 addenda 7-8
@@ -748,10 +753,12 @@ def run() -> int:
              "its link isn't chalk + underline")
             if not ok_line else "m3.web.espn_mfl_cta: under the Sleeper door, chalk, link chalk + underline")
 
-    # faq.q3.release, the version WITHOUT ESPN/MFL sign-in (OA-8 rows 1-2).
+    # faq.q3.release with paragraph 1 as faq.q3.release.signin (legal R28.15
+    # row 7, droppable commit); the web paragraph stays Sleeper-only.
     Q3_RELEASE = [
         r"On iPhone: the Fleeced app on the App Store \(" + STORE_URL
-        + r"\)\. Sign in with Apple or Sleeper\. ESPN and MFL leagues connect after you sign in\.",
+        + r"\)\. Sign in with Apple, Sleeper, ESPN or MFL\. You can also connect ESPN and MFL "
+        r"leagues after you sign in\.",
         re.escape("On a computer: the web app on this site, in Chrome or Edge with the Fleeced "
                   "browser extension installed. The extension is installed by hand from a release "
                   "download; it isn't in the Chrome Web Store. The web app signs in with Sleeper "
