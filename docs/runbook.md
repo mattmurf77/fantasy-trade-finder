@@ -123,6 +123,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
+- [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
 
 ---
 
@@ -1369,3 +1370,59 @@ code, reconstruct diagnostics from retained snapshot nodes (or the verified
 backup); pause expiry with FTF_DECK_DIAGNOSTIC_RETENTION_DAYS=0. Never wipe the
 snapshot table as a rollback. Expiry does not delete impressions, labels,
 valuations or receipts, and a paused policy cannot recover already-expired detail.
+
+## Purge orphaned ESPN/MFL entry users (one-time, 2026-11)
+
+**What:** the old unverified ESPN/MFL league-ID sign-in minted users keyed
+`entry:espn:<SWID>`, `entry:espn:<league>.t<team>` and
+`entry:mfl:<league>.f<franchise>`. Nobody can delete them (no account a person
+can prove), and an ESPN one may carry a third person's identifier. Legal
+(R28.12 row 2, R28.16) requires removing them through the full deletion path.
+`scripts/purge_entry_users.py` does that: `accounts.delete_user_data`, one id
+per call, which also anonymizes shared rows (trade matches, platform pick-grid
+owners) per privacy §6. It is never a bare row delete.
+
+**Why it must finish first:** ESPN/MFL sign-in is coming back as a proof-based
+sign-in. Its `platform_identity_in_use` check searches every user's
+`espn_credentials` / `mfl_credentials`. A credential left on an entry user
+would answer 409 to the real owner.
+
+**The prod run needs the operator's own word in the acting session.** Counts
+only, everywhere: never paste an id, SWID, team or league name into a PR, log,
+chat or this runbook. The script prints counts only.
+
+Point the script at prod with `DATABASE_URL` set in the acting shell from
+`secrets.local.env` (`DATABASE_URL_PROD`), never typed into chat.
+
+1. **When:** before `landing.platform_options` goes back on (operator ask 16),
+   and finished by 11-05.
+2. **Dry run.** `--cutoff` is when the entry chips' flag went off (UTC):
+   `python3 scripts/purge_entry_users.py --cutoff <ISO datetime>`. Note the
+   target count N. Targets are entry ids with a users row that is unverified
+   (`verified_via` NULL) and created before the cutoff, plus entry ids with no
+   users row at all. It also reports, and never touches:
+   - "skipped (verified or after cutoff)", e.g. an MFL entry that proved an
+     MFL login (`verified_via = 'mfl_login'`);
+   - "skipped (no usable created_at)".
+3. **Execute:** `… --cutoff <same> --execute --expect N`. It refuses if N no
+   longer matches, continues past a failing id and exits non-zero if any
+   failed. Keep the printed summed counts.
+4. **Restart the Render web service.** The script deletes the durable session
+   rows, but a live in-memory entry session survives in the running process
+   until it restarts.
+5. **Verify:** `… --cutoff <same> --verify`. It exits 0 only if (a) no target
+   id remains in any key column and (b) no `espn_credentials` /
+   `mfl_credentials` row sits on any `entry:` id, skipped ones included. If it
+   isn't clean, repeat steps 2–5. A credential on a SKIPPED entry user has its
+   own message: a human looks (escalate to head-eng); don't delete it by hand.
+   The info lines never fail the check: JSON mentions in
+   `standing_offers.team_user_ids` / `leagues.opponent_data`, and overhaul
+   references (the known general deletion gap, privacy §6 "not yet").
+6. **Record counts only**, and send the purge date to head-bizops. Support
+   uses it: "data from ESPN and MFL sign-ins made before <date> was deleted on
+   that date".
+
+Backups roll off within 7 days, so deleted rows can remain in a backup for up
+to 7 days (privacy §5). There is no schema change, so no data-dictionary
+update.
+
