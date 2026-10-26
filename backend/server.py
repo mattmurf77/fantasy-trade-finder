@@ -4904,7 +4904,7 @@ def _deck_pack_input(ev: _DeckEvidence):
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False,
            "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0), "upgrade_miss_cards": {},
-           "upgrade_miss_row_gone": {}}
+           "upgrade_miss_row_gone": {}, "upgrade_miss_row_gone_why": {}}
     if ev.stored_count is not None:       # U4: the deck's own stored count (#428 QA (c))
         run["stored_count"] = ev.stored_count
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
@@ -5021,7 +5021,8 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     earliest retired_at); upgrade_miss_cards is the union, a card both
     missed keeping the stored cause (it landed first), and upgrade_misses is
     that map's tally, so a card two instances missed counts once;
-    upgrade_miss_row_gone is the union the same way."""
+    upgrade_miss_row_gone and upgrade_miss_row_gone_why are unions the same
+    way, each kept to its parent's keys."""
     merged = {**ours, **stored}
     merged["deliveries"] = _merge_deliveries(stored.get("deliveries"), ours.get("deliveries"))
     if stored.get("retired") or ours.get("retired"):
@@ -5035,7 +5036,9 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     gone = {**_upgrade_miss_row_gone(ours), **_upgrade_miss_row_gone(stored)}
     # The union, the stored entry winning; a row-gone key is always a miss-map
     # key (flip_read joins them), so one without its card is dropped.
-    merged["upgrade_miss_row_gone"] = {k: v for k, v in gone.items() if k in cards}
+    merged["upgrade_miss_row_gone"] = gone = {k: v for k, v in gone.items() if k in cards}
+    why = {**_upgrade_miss_row_gone_why(ours), **_upgrade_miss_row_gone_why(stored)}
+    merged["upgrade_miss_row_gone_why"] = {k: v for k, v in why.items() if k in gone}
     return merged
 
 
@@ -5227,14 +5230,40 @@ def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, ind
         row_gone = (recorded if page is None and isinstance(recorded, int)
                     and not isinstance(recorded, bool) and recorded > index else None)
         known = page["card_count"] if page else (0 if _STORED_COUNT_FROM_ROW_NOW else None)
+        why = (_row_gone_why(state, deck_job_id, index)
+               if row_gone is not None and str(index) not in _upgrade_miss_cards(state.run)
+               else None)
         return _deck_upgrade_from_pack(state, deck_job_id, impression_id, index, now,
                                        stored_count=known, row_gone=row_gone,
-                                       stored_from="row" if page else "no_row")
+                                       stored_from="row" if page else "no_row", row_gone_why=why)
     card = _deck_pack_card(state, index)
     row = {**_unpack_row(held[1]), "evidence_tier": "viewed", "served_at": card["served_at"],
            "delivered_at": state.delivered_at(index) or now}
     _db.save_deck_evidence([row], diagnostics=stored.closure([row]), deck_job_id=deck_job_id)
     return True
+
+
+def _row_gone_why(state, deck_job_id: str, index: int) -> str | None:
+    """models-lead (d1): why a row-gone miss's page row is gone, from one indexed
+    read of the deck's page-store key (scoring_format and page_scope from its
+    run, the league from its packed card): "replaced" when the key's row now
+    holds another deck, "no_row" when the key has none (aged, over budget, or a
+    bug). None, unsplit, for a pack written before the key was recorded, or
+    when the read fails (it's a report field: the miss never waits on it)."""
+    from . import database as _db
+    scoring_format, scope = state.run.get("scoring_format"), state.run.get("page_scope")
+    if not (scoring_format and scope):
+        return None
+    try:
+        holder = _db.load_trade_page_deck_job_id(
+            state.user_id, _deck_pack_card(state, index)["league_id"], scoring_format, scope)
+    except Exception:
+        log.warning("[evidence] row-gone why job=%s index=%d: the page-store read failed",
+                    deck_job_id, index, exc_info=True)
+        return None
+    if holder is None:
+        return "no_row"
+    return "replaced" if holder != deck_job_id else None    # its own row is back: unsplit
 
 
 def _deck_pack_card(state, index: int) -> dict:
@@ -5351,6 +5380,14 @@ def _upgrade_miss_row_gone(run: Mapping) -> dict:
     return {str(k): v for k, v in gone.items()} if isinstance(gone, Mapping) else {}
 
 
+def _upgrade_miss_row_gone_why(run: Mapping) -> dict:
+    """A run's upgrade_miss_row_gone_why, {"<card_index>": "replaced" | "no_row"}
+    (models-lead (d1), _row_gone_why): a row-gone entry's split, when its pack
+    records the deck's page-store key. {} when absent."""
+    why = run.get("upgrade_miss_row_gone_why")
+    return {str(k): v for k, v in why.items()} if isinstance(why, Mapping) else {}
+
+
 def _upgrade_miss_tally(cards: Mapping) -> dict:
     """upgrade_misses as the per-card map's tally: every cause present, and
     any other cause the map carries counted under its own key. The writer
@@ -5404,7 +5441,8 @@ def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, deliver
 
 def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: int, now: str,
                             ev_for_header=None, stored_count: int | None = None,
-                            row_gone: int | None = None, stored_from: str = "job") -> bool:
+                            row_gone: int | None = None, stored_from: str = "job",
+                            row_gone_why: str | None = None) -> bool:
     """The upgrade miss (U4's fallback): the card's row built from its packed
     card (its columns, and every other packed key as its features; no assets,
     no valuation), so the outcome still joins it, and the miss counted by
@@ -5412,7 +5450,8 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     knows it (_deck_stored_count), and `stored_from` where it came from.
     `row_gone`: the pack's recorded stored count when the deck's page row is
     gone and that count was above the card (recorded in
-    run["upgrade_miss_row_gone"] with the miss)."""
+    run["upgrade_miss_row_gone"] with the miss), and `row_gone_why` its split
+    (run["upgrade_miss_row_gone_why"], only with a row-gone entry)."""
     from . import database as _db
     card = _deck_pack_card(state, index)
     stored, stored_from = _deck_stored_count_from(stored_count, state.run, stored_from)
@@ -5435,18 +5474,25 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
         and its row-gone entry when it has one."""
         cards = _upgrade_miss_cards(state.run)
         gone = _upgrade_miss_row_gone(state.run)
+        why = _upgrade_miss_row_gone_why(state.run)
+        base = state.base_run or {}
         if add:
             cards[key] = cause
             if row_gone is not None:
                 gone[key] = row_gone
+                if row_gone_why is not None:
+                    why[key] = row_gone_why
         else:                         # ours only: an entry another writer stored stays
-            if key not in _upgrade_miss_cards(state.base_run or {}):
+            if key not in _upgrade_miss_cards(base):
                 cards.pop(key, None)
-            if key not in cards or key not in _upgrade_miss_row_gone(state.base_run or {}):
+            if key not in cards or key not in _upgrade_miss_row_gone(base):
                 gone.pop(key, None)   # with its card: a row-gone key is always a map key
+            if key not in gone or key not in _upgrade_miss_row_gone_why(base):
+                why.pop(key, None)    # with its row-gone entry: a why key is always one
         state.run["upgrade_miss_cards"] = cards
         state.run["upgrade_misses"] = _upgrade_miss_tally(cards)
         state.run["upgrade_miss_row_gone"] = gone
+        state.run["upgrade_miss_row_gone_why"] = why
 
     # Once per card, by the persisted map (models-eng): a card already in it
     # is never counted again, by this process or one that reloaded the header
@@ -6132,6 +6178,11 @@ def _deck_evidence_job_done(job_id: str) -> None:
         ev.complete = True
         ev.run_meta = {"values_snapshot_id": job.get("values_snapshot_id"),
                        "config_ref": job.get("request_signature")}
+        if job.get("page_scope"):
+            # models-lead (d1): the deck's page-store key, so a row-gone miss
+            # can tell a replaced row from none (_row_gone_why). Omitted for a
+            # deck with no page scope (it never has a page row).
+            ev.run_meta.update(scoring_format=job["key"][2], page_scope=job["page_scope"])
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
 

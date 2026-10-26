@@ -52,8 +52,10 @@ def row_gone(run):
 
 
 def assert_joined(run):
-    """models-eng's join: every row-gone key is a miss-map key."""
+    """models-eng's join: every row-gone key is a miss-map key, and every why
+    key (test_row_gone_why) a row-gone key."""
     assert set(row_gone(run)) <= set(run["upgrade_miss_cards"])
+    assert set(run.get("upgrade_miss_row_gone_why", {})) <= set(row_gone(run))
 
 
 def row_of(engine, job_id, index):
