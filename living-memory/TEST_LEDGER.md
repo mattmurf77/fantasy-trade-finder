@@ -7,11 +7,11 @@ Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server o
   - the player check removed → 4 red;
   - the pick check removed → 5 red;
   - the R3 read-failure returns removed → 4 red.
-- **Contract:** players are checked against MFL's live `rosters` export and FTF picks against its live `futureDraftPicks` export (live rather than the stored snapshot: the zero-auth fetcher already exists, so it is one read). A moved asset → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's shared helper (names or pick labels, a count when one is missing, never a raw id). A failed read → 502 `mfl_write_failed` `kind:"network"` with "Couldn’t confirm rosters with MFL …".
+- **Contract:** players are checked against MFL's live `rosters` export and FTF picks against its live `futureDraftPicks` export (live rather than the stored snapshot: the zero-auth fetcher already exists, so it is one read). A moved asset → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's shared helper (names or pick labels, a count when one is missing, never a raw id). A failed read → 502 `mfl_unavailable` `kind:"network"` with "Couldn’t confirm rosters with MFL …" (coordinator's call: the core's existing read-failure 502, not `mfl_write_failed`).
 - **Client code-walk (no client change):**
-  - `SendInMflButton` sends the two 422s to its catch-all (`:169-173`), which shows `detail`.
-  - **The R3 502 is intercepted** by the `mfl_write_failed` branch (`:158-168`): the alert reads "MFL wouldn’t accept the send" / "MFL rejected the request: Couldn’t confirm rosters with MFL …", with an "Open MFL" button. The copy is readable but framed as an MFL rejection.
-- **Not covered:** pre-encoded `give_pick_assets` / `receive_pick_assets` (no client sends them).
+  - `SendInMflButton` has no branch for `asset_not_owned`, `counterparty_asset_not_owned` or `mfl_unavailable`, so all three reach its catch-all (`:169-173`), which shows `detail`.
+  - With `mfl_write_failed`, the R3 copy would have been framed as "MFL rejected the request" (`:158-168`).
+- **Not covered:** pre-encoded `give_pick_assets` / `receive_pick_assets`; `git grep` finds no sender in mobile, web, the extension or overhaul.
 
 ## 2026-10-26 — I-2 (1/4): Sleeper send-time player ownership + R3 (#411)
 

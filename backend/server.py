@@ -33377,10 +33377,13 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     # carries that asset class. Both fetchers turn any MflError into `{}`, so
     # a missing top-level key is a failed read (R3), never "nothing owned".
     # Pre-encoded `give_pick_assets` / `receive_pick_assets` (no client sends
-    # them) are not checked.
+    # them) are not checked. R3 uses `mfl_unavailable`, the 502 this core
+    # already returns for an MFL read failure (`_platform_error_payload`), not
+    # `mfl_write_failed`: SendInMflButton shows that one as "MFL rejected the
+    # request", while this one reaches its catch-all, which shows `detail`.
     def _read_failed():
         _msg = _roster_read_failed_copy("MFL")
-        return {"error": "mfl_write_failed", "kind": "network",
+        return {"error": "mfl_unavailable", "kind": "network",
                 "detail": _msg, "message": _msg}, 502
 
     norm = _mfl_write.normalize_franchise_id

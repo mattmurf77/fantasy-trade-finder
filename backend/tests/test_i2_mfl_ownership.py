@@ -15,9 +15,11 @@ send, which calls the same core. Before any provider write it now checks:
     (422 `mfl_asset_unmapped`, unchanged)
   * a moved asset → 422 `asset_not_owned` / `counterparty_asset_not_owned`,
     with the give side reported first, players and picks together
-  * a failed read (either export) → 502 `mfl_write_failed`, `kind: "network"`
+  * a failed read (either export) → 502 `mfl_unavailable`, `kind: "network"`
     (R3). Both fetchers turn any MflError into `{}`, so a missing top-level
-    key is the failure signal.
+    key is the failure signal. `mfl_unavailable` (the core's existing
+    read-failure 502) rather than `mfl_write_failed`, because SendInMflButton
+    shows the latter as "MFL rejected the request".
 
 No network: the two fetchers (or `_fetch_one` under the real fetchers) are
 stubbed and `mfl_write.propose_trade` is a mock.
@@ -253,7 +255,7 @@ def test_failed_live_read_blocks_with_readable_502(client, which, failure):
             rosters=REAL_FETCH_ROSTERS if which == "rosters" else ok_rosters,
             picks=REAL_FETCH_PICKS if which == "picks" else ok_picks)
     assert r.status_code == 502, r.get_data(as_text=True)
-    assert r.get_json() == {"error": "mfl_write_failed", "kind": "network",
+    assert r.get_json() == {"error": "mfl_unavailable", "kind": "network",
                             "message": R3_COPY, "detail": R3_COPY}
     one.assert_called_once()
     fake.assert_not_called()
