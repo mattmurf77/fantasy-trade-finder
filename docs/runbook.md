@@ -77,6 +77,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Screen library (capture freshness)](#screen-library-capture-freshness)
   - [Failure symptom / lever](#failure-symptom-lever)
 - [Database](#database)
+- [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
@@ -306,6 +307,36 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - **Prod:** Postgres via `DATABASE_URL`. Take a Render snapshot before destructive changes.
 - **Schema source of truth:** `backend/database.py`.
 - **Migrations:** No migration tool. `_migrate_db()` in `database.py` applies idempotent additive ALTERs and seeds `model_config` defaults via INSERT OR IGNORE on every startup. For destructive changes, write a one-off script and run it manually.
+
+---
+
+## Migration DDL never blocks boot
+
+Why this exists: on #416's deploy, the boot spent about 90 s in `init_db`.
+- `_migrate_db()` ran every listed `ALTER TABLE … ADD COLUMN` (112) and every `CREATE INDEX IF NOT EXISTS` (15) on every boot.
+- On Postgres the ALTER takes ACCESS EXCLUSIVE and the CREATE INDEX takes SHARE, both **before** checking whether the object already exists.
+- The new instance's DDL queued behind the still-serving old instance, and the old instance's queries then queued behind the DDL.
+
+How it works now (`backend/database.py`, `_SchemaSnapshot` / `_add_column_guarded`):
+- **Precheck.** `_migrate_db` builds one SQLAlchemy inspector per call. It skips any column or index that already exists, so a normal boot issues **no** ADD COLUMN and **no** CREATE INDEX. Only the two `DROP INDEX IF EXISTS` no-ops remain; they take no lock when the index is absent.
+- **Lock guard for a missing column (Postgres).** Each such ALTER runs in its own transaction after `SET LOCAL lock_timeout = '3s'` and `SET LOCAL statement_timeout = '30s'`.
+  - On `55P03` (lock_not_available) or `57014` (query_canceled) it retries up to 3 attempts, about 1 s apart.
+  - It then logs at ERROR: `MIGRATION_DEFERRED <table>.<col>: lock busy, retried next boot`.
+  - The boot continues. Any other error is swallowed as before.
+- **SQLite:** same precheck. No SET LOCAL, no retry.
+
+**What `MIGRATION_DEFERRED` means:** the column was **not** added on this boot. The next boot tries again.
+- **To force it:** redeploy, or restart the web service from the Render dashboard, in a quiet window: low traffic, and no long-running cron or job holding the table.
+- **Check it landed:** look for no new `MIGRATION_DEFERRED` line, and confirm the column with `\d <table>` in psql against `DATABASE_URL_PROD`.
+
+**Readers caveat: a deferred column breaks its table until it lands.**
+- SQLAlchemy Core `select(<table>)`, and any insert that lists every metadata column, names every declared column. Postgres rejects a column that is not there yet.
+- For the newest columns:
+  - **`deck_candidate_sets.candidates_packed` / `cand_pack_version`:** `select(db.deck_candidate_sets_table)` in `prepared_trade_store.py` and `prepared_trade_store_v2.py` fails. So do the account export (`accounts.py` `select(tbl)`) and the scorecard evidence column list. The candidate-set upsert in `save_deck_impressions` fails only when the row carries those keys, which happens when packing is on.
+  - **`deck_impressions.evidence_tier` / `delivered_at`:** `save_deck_impressions` inserts every metadata column, so every deck evidence write fails. That includes its candidate set and withdrawals, which share the transaction. The delivered stamp and the evidence-tier reads fail too.
+  - **`overhaul_attempts.provider_status`:** every `select(T_ATTEMPTS)` in `overhaul_store.py` fails, so overhaul status and resume reads fail.
+- Treat a `MIGRATION_DEFERRED` line as an incident: force the next boot promptly.
+- **Index builds are not under this guard.** A newly added index still runs `CREATE INDEX` without a lock_timeout on its first boot.
 
 ---
 
