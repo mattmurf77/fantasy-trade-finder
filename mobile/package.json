@@ -36,6 +36,7 @@
     "test:trade-disposition": "node tests/check-trade-disposition.js",
     "test:demo-calc-removed": "node tests/check-demo-calc-removed.js",
     "test:dna-side-order": "node tests/check-dna-side-order.js",
+    "test:entry-session-identity": "node tests/check-entry-session-identity.js",
     "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
     "test:espn-cookies": "node tests/check-espn-cookies.js",
     "test:espn-nav-policy": "node tests/check-espn-nav-policy.js",

@@ -151,13 +151,18 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // entry user. account_only is accurate AND load-bearing: it tells
   // LeaguePicker's refresh to skip the Sleeper league fetch (an entry:… id
   // is not a Sleeper user id) and merge the platform leagues instead.
-  async function handleEntrySession(u: { user_id: string; display_name: string }) {
+  async function handleEntrySession(u: {
+    user_id: string;
+    display_name: string;
+    account_only?: boolean;
+    username?: string;
+  }) {
     await setUser({
       user_id: u.user_id,
-      username: '',
+      username: u.username ?? '',
       display_name: u.display_name,
       avatar_id: null,
-      account_only: true,
+      account_only: u.account_only ?? true,
     });
   }
 

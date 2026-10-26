@@ -214,11 +214,11 @@ assert(
 // V2.2 — the host pins an account_only entry user, then routes to the
 // picker (whose platform-league merge + auto-skip finish the flow).
 const entrySessionFn = signIn.match(
-  /async function handleEntrySession[\s\S]{0,600}?\n  \}/,
+  /async function handleEntrySession[\s\S]{0,700}?\n  \}\n/,
 );
 assert(
-  !!entrySessionFn && /account_only: true/.test(entrySessionFn[0]),
-  'V2: handleEntrySession pins an account_only entry user',
+  !!entrySessionFn && /account_only: u\.account_only \?\? true/.test(entrySessionFn[0]),
+  'V2: handleEntrySession pins an account_only entry user (default; a Sleeper-bound mint overrides — see check-entry-session-identity.js)',
 );
 assert(
   /function handleEntryLinked\(\) \{\s*\n\s*setEntrySheet\(null\);\s*\n\s*\(onAccountSignedIn \?\? onSignedIn\)\(\);/.test(signIn),
