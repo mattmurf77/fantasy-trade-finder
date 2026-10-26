@@ -23031,8 +23031,10 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # circuit) or a non-list body; a successful read is always a list.
         # Ownership can't be checked, so nothing is sent. Uses R10's 502 shape
         # (below). A successful read without the caller's roster stays 400.
+        # `kind: "roster_read"`, not "network": it tells this refused-before-send
+        # read apart from a real Sleeper write failure in sleeper_send_failed.kind.
         _msg = _roster_read_failed_copy("Sleeper")
-        return {"error": "sleeper_write_failed", "kind": "network",
+        return {"error": "sleeper_write_failed", "kind": "roster_read",
                 "detail": _msg, "message": _msg}, 502
     my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
     if my_roster_id is None:
@@ -35550,7 +35552,8 @@ def trades_validate():
     ESPN's live mRoster read; any other linked-platform id returns
     `checked:false` without a Sleeper call (G-030); everything else takes the
     Sleeper path unchanged."""
-    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")):
+    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")
+            or is_enabled("espn.send")):
         return jsonify({"error": "feature_disabled"}), 404
     sess = _require_session()
     user_id = sess.get("user_id")
