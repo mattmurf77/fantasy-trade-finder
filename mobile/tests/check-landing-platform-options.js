@@ -412,8 +412,9 @@ assert(
     /setStep\('entry-pick'\)/.test(mflSignInFn[0]),
   'V2.1: entry sign-in clears the password from state and opens the entry list',
 );
+// 3200, not 2200: the three-step retry-safe body is ~2190 chars (2026-10-26).
 const mflEntryPick = platformSheet.match(
-  /async function mflEntryPickLeague\([\s\S]{0,2200}?\n  \}/,
+  /async function mflEntryPickLeague\([\s\S]{0,3200}?\n  \}/,
 );
 // 2026-10-26 (proof-based sign-in, private MFL leagues): the minted session
 // is verified, so the tap stores the MFL cookie (mflAuthLink) and imports

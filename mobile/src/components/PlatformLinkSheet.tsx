@@ -47,10 +47,12 @@ interface Props {
    *  SignInScreen hosts this sheet with NO session). Preview goes through
    *  the sessionless /api/entry/platform; picking a franchise MINTS the
    *  entry session first (delivered via onEntrySession), then runs the
-   *  canonical import under the fresh token. v2.1: the `mfl.auth_link`
-   *  username/password path is available here too, routed through the
-   *  sessionless `auth_leagues` action and SINGLE-select (the franchise is
-   *  already known, so a league tap mints directly).
+   *  canonical /api/mfl/link import under the fresh token — but that path
+   *  has no login, so the proof-based server refuses its mint with a
+   *  readable proof_required. v2.1: the `mfl.auth_link` username/password
+   *  path lists leagues through the sessionless `auth_leagues` action and is
+   *  SINGLE-select (the franchise is already known): a league tap mints with
+   *  the login as proof, then /api/mfl/auth-link → /api/mfl/auth-import.
    *  Default off — linked flow byte-identical. */
   entry?: boolean;
   /** Entry mode only: the minted session's user, delivered BEFORE the
@@ -98,9 +100,10 @@ export default function PlatformLinkSheet({
   // The password lives in component state just long enough to make the ONE
   // auth-link call (our backend uses it for MFL's login and never stores it);
   // it is cleared the moment the call returns and never logged or echoed.
-  // v2.1: entry mode gets the sign-in path too — routed through the
-  // SESSIONLESS /api/entry/platform `auth_leagues` action instead of
-  // /api/mfl/auth-link (which requires the session entry doesn't have yet).
+  // v2.1: entry mode gets the sign-in path too — the league list comes from
+  // the SESSIONLESS /api/entry/platform `auth_leagues` action (no session
+  // exists yet); /api/mfl/auth-link runs only after the league tap's mint
+  // (see mflEntryPickLeague and entryMflPassRef).
   const mflAuthEnabled = useFlag('mfl.auth_link') && platform === 'mfl';
   const [showMflAuth, setShowMflAuth] = useState(false);
   const [mflUser, setMflUser] = useState('');
@@ -266,9 +269,10 @@ export default function PlatformLinkSheet({
     setBusyTeamId(teamId);
     setError(null);
     try {
-      // Entry mode: the claim MINTS the session first (deterministic
-      // entry:mfl:… id; the api fn stores the token), hands the user to the
-      // host, then the canonical import below runs under the fresh token.
+      // Entry mode (league-ID path): the claim MINTS the session first (the
+      // api fn stores the token), hands the user to the host, then the
+      // canonical /api/mfl/link import below runs under it. No login rides
+      // this mint, so the proof-based server refuses it (proof_required).
       if (entry) {
         const minted = await entryPlatformMint({
           platform: 'mfl',
@@ -430,6 +434,9 @@ export default function PlatformLinkSheet({
         setAuthLeagues(null);
         setStep('input');
         setError('Your MFL sign-in expired — sign in again.');
+      } else if (e instanceof ApiError && e.isVerificationRequired) {
+        // Same copy as pickTeam: a message-less 403 never shows a raw code.
+        setError('Verify your account to link a league.');
       } else {
         setError(e?.message || 'Import failed — try again.');
       }

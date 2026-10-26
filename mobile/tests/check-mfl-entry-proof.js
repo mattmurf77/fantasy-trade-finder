@@ -17,8 +17,12 @@
 //   (b) PlatformLinkSheet.tsx: mflEntryPickLeague (sign-in path) passes
 //       `username` + `password` (from entryMflPassRef) to entryPlatformMint;
 //       pickTeam (league-ID path) passes neither.
-//   (c) platformEntry.ts: no track( or console. call references `password`
-//       or forwards `args` wholesale.
+//   (c) platformEntry.ts, PlatformLinkSheet.tsx, EspnLinkSheet.tsx: no
+//       track( / console.*( / AsyncStorage.*( / SecureStore.*( /
+//       captureException( / Sentry.*( call has an argument mentioning
+//       password, mflPass, pass, entryMflPassRef, espnS2, espn_s2, swid or
+//       body, or forwards the mint `args` wholesale (release-lead P2,
+//       2026-10-26).
 //   (d) EspnLinkSheet.tsx + PlatformLinkSheet.tsx: every onEntrySession(...)
 //       call forwards `account_only` and `username` from the mint response,
 //       and both prop types declare them as optional additions.
@@ -30,7 +34,10 @@
 //       right after mflAuthLink succeeds (or when an expired sign-in sends
 //       the flow back to input); each step is skipped on a retry once it has
 //       succeeded; clearEntryMflSignIn drops the password and both progress
-//       refs, and reset() calls it.
+//       refs, and reset() calls it. release-lead P3s: the catch maps
+//       isVerificationRequired to pickTeam's copy before the e.message
+//       fallback, and a 200 whose `imported` lacks the tapped league shows
+//       failed[].message and returns before setAuthResult / auth-done.
 //
 // Run: node tests/check-mfl-entry-proof.js
 
@@ -209,31 +216,53 @@ if (mint) {
   }
 }
 
-// ── (c) no analytics / console call sees the password ─────────────────────
+// ── (c) no analytics / log / storage / crash-report call sees a secret ────
+//
+// Sinks: track(, console.*(, AsyncStorage.*(, SecureStore.*(,
+// captureException(, Sentry.*(. A sink call is flagged when any argument's
+// text mentions a credential or a request body. No allow-list is needed
+// today: the only sink calls in these files are platformEntry's three
+// signin_* track() calls, which carry `method` / `error_code` only.
 
-const sinkCalls = findAll(
-  entry,
-  (n) =>
-    ts.isCallExpression(n) &&
-    (n.expression.getText() === 'track' ||
-      /^console\.\w+$/.test(n.expression.getText())),
-);
+const SINK_CALLEE = /^(track|captureException|(console|AsyncStorage|SecureStore|Sentry)\.\w+)$/;
+const LEAK_TERMS = [
+  /password/i,
+  /mflPass/,
+  /\bpass\b/,
+  /entryMflPassRef/,
+  /espnS2/i,
+  /espn_s2/i,
+  /swid/i,
+  /\bbody\b/,
+  /^args$/, // the whole mint args object (carries the password)
+  /\.\.\.\s*args\b/,
+];
+
+const sinkFiles = {
+  'src/api/platformEntry.ts': entry,
+  'src/components/PlatformLinkSheet.tsx': parse('src/components/PlatformLinkSheet.tsx'),
+  'src/components/EspnLinkSheet.tsx': parse('src/components/EspnLinkSheet.tsx'),
+};
+const entryTracks = callsTo(entry, 'track');
 assert(
-  sinkCalls.filter((c) => c.expression.getText() === 'track').length >= 3,
+  entryTracks.length >= 3,
   'platformEntry.ts still fires the signin_* track() calls',
-  String(sinkCalls.length),
+  String(entryTracks.length),
 );
-const leaky = sinkCalls.filter((c) =>
-  c.arguments.some((a) => {
-    const t = a.getText();
-    return /password/i.test(t) || /^args$/.test(t) || /\.\.\.\s*args\b/.test(t);
-  }),
-);
-assert(
-  leaky.length === 0,
-  'no track( / console. call in platformEntry.ts references password or forwards args',
-  leaky.map((c) => c.getText().slice(0, 80)).join(' | '),
-);
+for (const [rel, sf] of Object.entries(sinkFiles)) {
+  const sinks = findAll(
+    sf,
+    (n) => ts.isCallExpression(n) && SINK_CALLEE.test(n.expression.getText().replace(/\?\./g, '.')),
+  );
+  const leaky = sinks.filter((c) =>
+    c.arguments.some((a) => LEAK_TERMS.some((re) => re.test(a.getText()))),
+  );
+  assert(
+    leaky.length === 0,
+    `${path.basename(rel)}: no track/console/storage/crash-report call mentions a credential or a body`,
+    leaky.map((c) => c.getText().slice(0, 80)).join(' | '),
+  );
+}
 
 // ── (b) the sheet passes the login on the sign-in path only ───────────────
 
@@ -366,6 +395,59 @@ if (pick) {
       expired.elseStatement &&
       /setError\(e\?\.message/.test(expired.elseStatement.getText()),
     "catch: mfl_auth_expired → back to input with the sign-in-expired copy, else e.message",
+  );
+
+  // release-lead P3: a message-less verification_required 403 maps to the
+  // same friendly copy pickTeam uses, checked BEFORE the e.message fallback.
+  const verify = expired && expired.elseStatement;
+  const pickTeamFn = findFunction(sheet, 'pickTeam');
+  const pickTeamCopy =
+    pickTeamFn &&
+    (pickTeamFn.getText().match(/isVerificationRequired\)\s*\{\s*setError\(('[^']+')\)/) || [])[1];
+  assert(
+    !!verify &&
+      ts.isIfStatement(verify) &&
+      verify.expression.getText().replace(/\s+/g, ' ') ===
+        'e instanceof ApiError && e.isVerificationRequired' &&
+      !!pickTeamCopy &&
+      new RegExp(`setError\\(${pickTeamCopy.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\)`).test(
+        verify.thenStatement.getText(),
+      ) &&
+      !!verify.elseStatement &&
+      /setError\(e\?\.message/.test(verify.elseStatement.getText()),
+    "catch: isVerificationRequired → pickTeam's copy, before the e.message fallback",
+    pickTeamCopy || 'pickTeam copy not found',
+  );
+
+  // release-lead P3: a 200 whose `imported` lacks the tapped league is a
+  // FAILURE — show its failed[].message, stay on the list (return before
+  // any step change), and only otherwise reach setAuthResult / auth-done.
+  const guard = findAll(
+    pick,
+    (n) => ts.isIfStatement(n) && /res\.imported/.test(n.expression.getText()),
+  )[0];
+  const guardThen = guard && ts.isBlock(guard.thenStatement) ? guard.thenStatement : null;
+  const setAuth = callsTo(pick, 'setAuthResult');
+  const toDone = findAll(
+    pick,
+    (n) => ts.isCallExpression(n) && n.getText() === "setStep('auth-done')",
+  );
+  assert(
+    !!guard && !!guardThen && !!imp &&
+      /^!res\.imported\.some\(/.test(guard.expression.getText()) &&
+      /lg\.league_id/.test(guard.expression.getText()) &&
+      guard.pos > imp.pos &&
+      !guard.elseStatement &&
+      /res\.failed\.find\([\s\S]*lg\.league_id/.test(guardThen.getText()) &&
+      /setError\([^)]*\.message/.test(guardThen.getText()) &&
+      ts.isReturnStatement(guardThen.statements[guardThen.statements.length - 1]) &&
+      !/setStep|setAuthResult|clearEntryMflSignIn/.test(guardThen.getText()),
+    'a 200 without the tapped league in `imported` shows failed.message and stays on the list',
+  );
+  assert(
+    !!guard && setAuth.length === 1 && toDone.length === 1 &&
+      setAuth[0].getStart() > guard.end && toDone[0].getStart() > guard.end,
+    'setAuthResult / auth-done come only after the per-league failure guard',
   );
 
   // Retry safety.

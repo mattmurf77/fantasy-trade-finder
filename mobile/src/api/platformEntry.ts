@@ -12,8 +12,11 @@ import type { MflAuthLeague } from './platformLink';
 //   • mint (team_id): validates the claim and mints a session — an acct_*
 //     account once the proof-based server ships (ESPN cookies / MFL login
 //     prove ownership), a legacy entry:<platform>:… id before. The mint stores the token
-//     here (like auth.signIn does); the sheet then runs the CANONICAL
-//     /api/{espn,mfl}/link import under it — no import logic is duplicated.
+//     here (like auth.signIn does); the sheet then runs an existing import
+//     under it — no import logic is duplicated: ESPN → /api/espn/link; MFL
+//     sign-in path → /api/mfl/auth-link (stores the MFL cookie) →
+//     /api/mfl/auth-import (reads private leagues with it); the MFL league-ID
+//     path has no login, so the proof-based server refuses its mint.
 // Route 404s while `landing.platform_options` or the platform flag is off.
 
 export type EntryPlatform = 'espn' | 'mfl';
@@ -136,7 +139,7 @@ function entryErrorCode(err: any): string {
 }
 
 /** Claim a team: mint the entry session and store its token. The caller
- *  (sheet in entry mode) follows this with the canonical link import.
+ *  (sheet in entry mode) follows this with the import (see the header).
  *  MFL: `username` + `password` are the proof of ownership (the sheet's
  *  sign-in path). They are sent only as a pair, the server uses them for one
  *  MFL login and never stores them, and they never reach `track()`. */
