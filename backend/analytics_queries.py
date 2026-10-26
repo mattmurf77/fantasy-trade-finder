@@ -414,6 +414,10 @@ NON_INTENT_EVENTS = frozenset({
     #     the store's, and the user cannot do anything else on that screen.
     "update_gate_shown",
     "update_gate_tapped",
+    # deck_i1_check (S0's C-a readout, 2026-10-27, added in the SAME commit as
+    # its emitter): a server-fired outcome of each served page, on background
+    # polls too. The serve's request already reflects the user's intent.
+    "deck_i1_check",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
@@ -592,6 +596,25 @@ def _envelope(report, start_day, end_day, rows, caveats, params_echo):
 
 def _dark_caveat(scope, detail):
     return {"code": "dark", "scope": scope, "detail": detail}
+
+
+# Known breaks in a server-fired series: from `day` (UTC, the merge's deploy)
+# the event means something else, so a report whose window includes that day
+# can't trend it straight across. Every report that reads the event appends the
+# caveat (analytics-lead 2026-10-26; "Seam: #370" in
+# docs/business/analytics/2026-10-20-time-to-suggestion-events.md).
+SERIES_BREAKS = (
+    ("2026-10-26", "trades_generated",
+     "#370: Calibration refresh decks stop emitting trades_generated"),
+)
+
+
+def _series_break_caveats(start_day, end_day, events):
+    """A `series_break` caveat for each known break in `events` whose day is
+    inside the window (inclusive: the break day itself is mixed)."""
+    return [{"code": "series_break", "scope": f"event:{event}", "detail": detail, "day": day}
+            for day, event, detail in SERIES_BREAKS
+            if event in events and str(start_day) <= day <= str(end_day)]
 
 
 # ---------------------------------------------------------------------------
@@ -788,6 +811,7 @@ def report_overview(conn, start_day, end_day, include_demo, row_cap, **_):
     caveats.append(_dark_caveat("coverage:client_events",
                                 f"{len(client_dark)} client event types have no rows in window — "
                                 "metrics that need them render — rather than a fabricated 0"))
+    caveats += _series_break_caveats(start_day, end_day, ["trades_generated"])   # the deck count
     return ({"kpis": kpis, "frustration": frustration,
              "failing_routes": failing, "coverage": coverage}, caveats, None)
 
@@ -958,6 +982,7 @@ def report_waterfall(conn, start_day, end_day, include_demo, row_cap, segment=No
     if segment:
         caveats.append(_dark_caveat(f"segment:{segment}",
                                     "server-fired rows carry NULL platform/device/experiments; segmentation lights up with the client SDK"))
+    caveats += _series_break_caveats(start_day, end_day, ["trades_generated"])   # stage 6
     return rows, caveats, {"base_stage": live_stage_nos[0] if live_stage_nos else None,
                            "base_n": base_n}
 
@@ -1036,6 +1061,7 @@ def report_pfo(conn, start_day, end_day, include_demo, row_cap, **_):
     }
     caveats.append(_dark_caveat("metric:ttfv",
                                 "TTFV start endpoint signin_succeeded is a dark client event; TTFV renders — until the SDK ships (trades_generated end endpoint IS live)"))
+    caveats += _series_break_caveats(start_day, end_day, ["trades_generated"])   # TTFV reach, empty-deck rate
     return {"stages": stages, "guardrails": guardrails}, caveats, None
 
 
