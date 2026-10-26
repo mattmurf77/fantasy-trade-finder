@@ -80,4 +80,6 @@ def _reset_feedback_throttle():
     if srv is not None and hasattr(srv, "_feedback_rate"):
         with srv._feedback_rate_lock:
             srv._feedback_rate.clear()
+            # The shared anonymous ceiling (release-lead delta QA B).
+            getattr(srv, "_feedback_anon_global", []).clear()
     yield

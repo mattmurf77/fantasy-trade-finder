@@ -13511,8 +13511,16 @@ FEEDBACK_MAX_BODY_BYTES = 64 * 1024
 FEEDBACK_RATE_LIMIT = 20             # accepted notes per rolling hour per key
 FEEDBACK_RATE_WINDOW_S = 3600
 FEEDBACK_RATE_MAX_KEYS = 10_000      # memory bound: attacker-chosen keys
+# Release-lead delta QA B (P2-1): one shared ceiling across every ANONYMOUS
+# note (neither a verified user nor a resolvable session, i.e. the device and
+# IP tiers). Those keys are client-chosen (X-Device-Id) or may be a rotating
+# Render-internal peer, so per-key budgets alone can't stop deliberate abuse.
+# A separate deque, never in _feedback_rate: flooding new keys there evicts
+# old keys, and must not be able to evict this one. Bounded by the limit.
+FEEDBACK_ANON_GLOBAL_LIMIT = 300     # accepted anonymous notes per rolling hour, all callers
 _feedback_rate_lock = threading.Lock()
 _feedback_rate: dict[str, collections.deque] = {}
+_feedback_anon_global: collections.deque = collections.deque()
 
 
 # _SIGNIN_TRUSTED_PROXY_HOPS, _xff_hops and _client_ip below are copied byte
@@ -13589,6 +13597,28 @@ def _feedback_rate_release(key: str, now: float) -> None:
                 pass
 
 
+def _feedback_anon_global_reserve(now: float) -> bool:
+    """Reserve one slot under FEEDBACK_ANON_GLOBAL_LIMIT (anonymous notes
+    only). False when the shared rolling hour is full; given back with
+    _feedback_anon_global_release like a per-key slot."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        while _feedback_anon_global and _feedback_anon_global[0] <= cutoff:
+            _feedback_anon_global.popleft()
+        if len(_feedback_anon_global) >= FEEDBACK_ANON_GLOBAL_LIMIT:
+            return False
+        _feedback_anon_global.append(now)
+        return True
+
+
+def _feedback_anon_global_release(now: float) -> None:
+    with _feedback_rate_lock:
+        try:
+            _feedback_anon_global.remove(now)
+        except ValueError:
+            pass
+
+
 def _feedback_session_key(token: str) -> str:
     """sha256 hex of a session token: the proof that links an unverified
     session's notes to that same session later (#360 QA P2-1). The token is
@@ -13652,8 +13682,13 @@ def submit_feedback_route():
     is 413 `too_large` before it is read; past FEEDBACK_RATE_LIMIT accepted
     notes in a rolling hour per key (verified user, else an unverified
     session's token hash, else X-Device-Id, else client IP) a NEW note is
-    429 `rate_limited`. Duplicates never count, and
-    a duplicate is still answered 200 when its key is throttled.
+    429 `rate_limited`. Anonymous notes (no verified user and no resolvable
+    session: the device and IP tiers) also share one ceiling,
+    FEEDBACK_ANON_GLOBAL_LIMIT per rolling hour across ALL callers; past it a
+    new anonymous note is 429 `rate_limited` too, while verified users and
+    unverified sessions are neither counted nor blocked by it. Duplicates
+    never count, and a duplicate is still answered 200 when its key is
+    throttled.
 
     Contract spec: docs/plans/feedback-backend-sync.md
     """
@@ -13716,13 +13751,27 @@ def submit_feedback_route():
     # unverified session is keyed by its token hash (session_key above).
     rate_key = _feedback_rate_key(user_id, session_key)
     rate_at = time.time()
+    # Anonymous = neither a verified user nor a resolvable session (the
+    # device and IP tiers): those also spend FEEDBACK_ANON_GLOBAL_LIMIT.
+    anonymous = not user_id and not session_key
+    limited_by = None
     if not _feedback_rate_reserve(rate_key, rate_at):
+        limited_by = rate_key.split(":", 1)[0]
+    elif anonymous and not _feedback_anon_global_reserve(rate_at):
+        _feedback_rate_release(rate_key, rate_at)
+        limited_by = "anon_global"
+    if limited_by:
         held = find_feedback_by_client_id(client_id)
         if held:
             return jsonify({"ok": True, "server_id": held["server_id"],
                             "created_at": held["created_at"], "duplicate": True}), 200
-        log.warning("feedback: rate_limited key=%s", rate_key.split(":", 1)[0])
+        log.warning("feedback: rate_limited key=%s", limited_by)
         return jsonify({"error": "rate_limited"}), 429
+
+    def _release_reservations():
+        _feedback_rate_release(rate_key, rate_at)
+        if anonymous:
+            _feedback_anon_global_release(rate_at)
 
     try:
         result = save_feedback(
@@ -13740,11 +13789,11 @@ def submit_feedback_route():
             session_key=session_key,
         )
     except Exception as e:
-        _feedback_rate_release(rate_key, rate_at)
+        _release_reservations()
         log.exception("save_feedback failed: %s", e)
         return jsonify({"error": "internal"}), 500
     if result.get("duplicate"):
-        _feedback_rate_release(rate_key, rate_at)
+        _release_reservations()
 
     # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
     # anonymous submissions (no session) have no user to attribute to, and

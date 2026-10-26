@@ -11,6 +11,10 @@ throttle.
   the client IP (the rightmost X-Forwarded-For hop, which Render's proxy
   appends; hops to its left are client-set). Idempotent duplicates don't
   count, and a throttled duplicate is still answered 200 `duplicate`.
+- Anonymous notes (no verified user, no resolvable session: the device and IP
+  tiers) also share FEEDBACK_ANON_GLOBAL_LIMIT (300) per rolling hour across
+  every caller (release-lead delta QA B); verified users and unverified
+  sessions neither spend it nor are blocked by it.
 
 The client keeps any rejected note unsynced and retries it later
 (useFeedback._syncOne turns every error into `synced: false`).
@@ -281,8 +285,92 @@ def test_the_key_table_is_memory_bounded(harness):
         assert len(server._feedback_rate) <= 5
 
 
+# ── the shared anonymous ceiling (release-lead delta QA B, P2-1) ────────────
+# Device ids are client-chosen and, with no XFF, the IP tier may see a
+# rotating Render-internal peer, so per-key budgets can't stop deliberate
+# abuse. Every anonymous note (no verified user, no resolvable session)
+# also spends one shared FEEDBACK_ANON_GLOBAL_LIMIT per rolling hour.
+
+def test_the_301st_anonymous_note_in_an_hour_is_429_even_with_fresh_device_ids(harness):
+    client, engine = harness
+    assert server.FEEDBACK_ANON_GLOBAL_LIMIT == 300
+    for i in range(300):
+        r = _post(client, f"fb-g-{i}", device=f"fresh-dev-{i}")
+        assert r.status_code == 201, (i, r.get_json())
+    r = _post(client, "fb-g-300", device="fresh-dev-300")
+    assert r.status_code == 429 and r.get_json() == {"error": "rate_limited"}
+    # The IP tier is anonymous too.
+    assert _post(client, "fb-g-ip", xff="198.51.100.77").status_code == 429
+    assert _count(engine) == 300
+    assert len(server._feedback_anon_global) == 300          # memory-bounded by the limit
+
+
+def test_verified_users_and_unverified_sessions_pass_after_the_ceiling_trips(harness):
+    client, engine = harness
+    with patch.object(server, "FEEDBACK_ANON_GLOBAL_LIMIT", 3):
+        _fill(client, 3, "fb-gt", xff="198.51.100.1")
+        assert _post(client, "fb-gt-3", device="dev-x").status_code == 429
+        assert _post(client, "fb-gv-0", token=VERIFIED).status_code == 201
+        assert _post(client, "fb-gu-0", token=UNVERIFIED).status_code == 201
+        # They didn't spend the anonymous ceiling either.
+        assert len(server._feedback_anon_global) == 3
+    assert _count(engine) == 5
+
+
+def test_duplicates_do_not_spend_the_anonymous_ceiling(harness):
+    client, engine = harness
+    with patch.object(server, "FEEDBACK_ANON_GLOBAL_LIMIT", 3):
+        assert _post(client, "fb-gd-0", device="dev-d0").status_code == 201
+        for _ in range(5):                                    # idempotent retries
+            r = _post(client, "fb-gd-0", device="dev-d0")
+            assert r.status_code == 200 and r.get_json()["duplicate"] is True
+        assert _post(client, "fb-gd-1", device="dev-d1").status_code == 201
+        assert _post(client, "fb-gd-2", device="dev-d2").status_code == 201
+        assert _post(client, "fb-gd-3", device="dev-d3").status_code == 429
+        held = _post(client, "fb-gd-1", device="dev-d9")      # a duplicate while tripped
+        assert held.status_code == 200 and held.get_json()["duplicate"] is True
+    assert _count(engine) == 3
+
+
+def test_flooding_new_keys_cannot_evict_the_anonymous_ceiling(harness):
+    client, engine = harness
+    # The per-key table holds 2 keys, so fresh devices keep evicting old
+    # keys; the shared ceiling lives outside that table and still trips.
+    with patch.object(server, "FEEDBACK_ANON_GLOBAL_LIMIT", 4), \
+         patch.object(server, "FEEDBACK_RATE_MAX_KEYS", 2):
+        for i in range(4):
+            assert _post(client, f"fb-gf-{i}", device=f"flood-{i}").status_code == 201
+        for i in range(4, 7):
+            assert _post(client, f"fb-gf-{i}", device=f"flood-{i}").status_code == 429
+        assert len(server._feedback_rate) <= 2
+    assert _count(engine) == 4
+
+
+def test_a_ceiling_refusal_gives_back_the_per_key_slot(harness):
+    client, engine = harness
+    with patch.object(server, "FEEDBACK_ANON_GLOBAL_LIMIT", 2):
+        _fill(client, 2, "fb-gk", device="dev-gk")
+        for i in range(2, 6):
+            assert _post(client, f"fb-gk-{i}", device="dev-gk").status_code == 429
+        # Refused notes spent neither budget.
+        assert len(server._feedback_rate["device:dev-gk"]) == 2
+        assert len(server._feedback_anon_global) == 2
+
+
+def test_the_anonymous_ceiling_rolls_with_the_window(harness):
+    client, engine = harness
+    t0 = 1_800_000_000.0
+    with patch.object(server, "FEEDBACK_ANON_GLOBAL_LIMIT", 2):
+        with patch.object(server.time, "time", return_value=t0):
+            _fill(client, 2, "fb-gw", xff="198.51.100.2")
+            assert _post(client, "fb-gw-2", device="dev-gw").status_code == 429
+        with patch.object(server.time, "time", return_value=t0 + server.FEEDBACK_RATE_WINDOW_S + 1):
+            assert _post(client, "fb-gw-3", device="dev-gw").status_code == 201
+
+
 def test_zz_the_throttle_starts_empty_in_every_test():
     """conftest's autouse reset: every Flask test client posts from one IP,
     so without it the suite's feedback tests would share one 20-note budget.
     Runs last in this file, after tests that left keys behind."""
     assert server._feedback_rate == {}
+    assert len(server._feedback_anon_global) == 0
