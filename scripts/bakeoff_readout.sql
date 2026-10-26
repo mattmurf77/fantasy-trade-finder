@@ -152,7 +152,7 @@ SELECT SUBSTRING(created_at, 1, 10)                              AS d,
        AVG((arms_json::json->'fit'->'diagnostics'->>'ms')::numeric)              AS avg_ms
 FROM bakeoff_runs
 WHERE created_at >= :window_start
-  AND arms_json::json ? 'fit'
+  AND arms_json::jsonb ? 'fit'
 GROUP BY 1 ORDER BY 1;
 
 -- killed{} counters per run (K0..K7 + junk), inspected raw:
@@ -160,7 +160,7 @@ SELECT run_id, created_at,
        arms_json::json->'fit'->'diagnostics'->'killed' AS killed
 FROM bakeoff_runs
 WHERE created_at >= :window_start
-  AND arms_json::json ? 'fit'
+  AND arms_json::jsonb ? 'fit'
 ORDER BY created_at DESC
 LIMIT 20;
 
