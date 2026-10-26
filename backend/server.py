@@ -35550,7 +35550,8 @@ def trades_validate():
     ESPN's live mRoster read; any other linked-platform id returns
     `checked:false` without a Sleeper call (G-030); everything else takes the
     Sleeper path unchanged."""
-    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")):
+    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")
+            or is_enabled("espn.send")):
         return jsonify({"error": "feature_disabled"}), 404
     sess = _require_session()
     user_id = sess.get("user_id")

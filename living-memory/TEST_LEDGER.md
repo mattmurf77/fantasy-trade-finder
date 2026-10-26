@@ -1,3 +1,16 @@
+## 2026-10-26 — I-2 follow-up: `/api/trades/validate` gate includes `espn.send`
+
+Full gates (head-eng approved, platforms-eng lead). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest.
+
+- **Change:** the route's top gate was `trade.send_in_sleeper` OR `trade.send_in_mfl`, so an `espn.send`-only deploy 404'd `feature_disabled` before reaching the I-2 ESPN branch. Latent: all three flags are ON today. The gate now also opens on `espn.send`; nothing else in the route changed.
+- **Backend:** two new tests in `test_i2_espn_ownership.py` (now 26):
+  - `test_validate_espn_send_alone_still_reaches_the_espn_branch`: flags `("espn.send",)` → 200 `checked:true`, one live mRoster read, no Sleeper call;
+  - `test_validate_all_send_flags_off_is_feature_disabled`: flags `()` → 404 `feature_disabled`, no ESPN read.
+- **Targeted:** `test_i2_espn_ownership.py` + `test_trade_send_validate.py` → 42 passed.
+- **Sabotage, red then restored:** the old gate line → 1 red (`test_validate_espn_send_alone_still_reaches_the_espn_branch`: `assert 404 == 200`, body `{"error":"feature_disabled"}`); the all-off test stays green, as expected.
+- **Full suite:** `pytest backend/tests -q` → 8762 passed, 4 skipped, 0 failed (30m20s).
+- **Docs:** `docs/api-reference.md` validate row's gate text now lists `espn.send`.
+
 ## 2026-10-26 — I-2 (4/4): overhaul blocks on a failed roster read + readable refusals (stacked on #413)
 
 Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
