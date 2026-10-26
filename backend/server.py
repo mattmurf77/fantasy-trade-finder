@@ -4719,17 +4719,33 @@ def _pack_card(row: dict, served_at: str) -> dict:
 
 
 def _deck_pack_input(ev: _DeckEvidence):
-    """Under `ev.lock`, at the deck's first write: (cards, run). Every built
-    card but ghosts (all held: nothing is written yet), in card_index order,
-    fixed at the first attempt so a retry packs the same N cards."""
-    if ev.pack_cards is None:
-        ev.pack_cards = [_pack_card(_unpack_row(packed), ev.served_at)
-                         for _iid, (_index, packed) in sorted(ev.rows.items(), key=lambda kv: kv[1][0])]
+    """Under `ev.lock`, at the deck's first write: what its pack is built from.
+    Every built card but ghosts (all held: nothing is written yet, and this
+    runs before plan() drops a withdrawn card's row). Only a snapshot of the
+    rows is taken here; _deck_pack_cards builds the cards outside the lock
+    (#416 QA: building them under it held a next-page serve ~40 ms at 2,354
+    cards)."""
+    rows = None if ev.pack_cards is not None else list(ev.rows.values())
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False, "upgrade_misses": 0}
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
         run["deck_source"] = ev.deck_source
-    return ev.pack_cards, run
+    return ev.pack_cards, rows, ev.served_at, run
+
+
+def _deck_pack_cards(ev: _DeckEvidence, source) -> tuple[list, dict]:
+    """Outside `ev.lock`: (cards, run) from _deck_pack_input's snapshot, in
+    card_index order. The cards are kept on `ev` at the first attempt, so a
+    retry packs the same N cards."""
+    cards, rows, served_at, run = source
+    if cards is None:
+        built = [_pack_card(_unpack_row(packed), served_at)
+                 for _index, packed in sorted(rows, key=lambda row: row[0])]
+        with ev.lock:
+            if ev.pack_cards is None:
+                ev.pack_cards = built
+            cards = ev.pack_cards
+    return cards, run
 
 
 def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
@@ -5256,7 +5272,8 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             shrunk = bool(first) or candidate_set is not None
             withdrawals_written = withdrawals_written or not packed_path
         if pack_input is not None:            # the pack insert carries them (P3-5)
-            withdrawals_written = _deck_pack_first_write(ev, *pack_input, withdrawals=withdrawals)
+            withdrawals_written = _deck_pack_first_write(ev, *_deck_pack_cards(ev, pack_input),
+                                                         withdrawals=withdrawals)
         elif packed_path:                     # or this delivery's header CAS
             withdrawals_written = (_deck_pack_flush_header(ev, withdrawals=withdrawals)
                                    or withdrawals_written)

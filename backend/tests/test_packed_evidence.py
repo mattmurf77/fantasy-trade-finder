@@ -1106,7 +1106,8 @@ def test_two_instances_first_writes_keep_both_boundaries(deferred):
     ev = server._trade_jobs[job_id]["evidence"]
     with ev.lock:
         ev.served_at = "2026-10-27T00:00:00+00:00"
-    cards, run = server._deck_pack_input(ev)
+        source = server._deck_pack_input(ev)
+    cards, run = server._deck_pack_cards(ev, source)
     a, b = server._DeckEvidence(job_id, UID), server._DeckEvidence(job_id, UID)
     for x, at, delivered in ((a, "2026-10-27T00:00:00+00:00", [[29, "2026-10-27T00:00:00+00:00"]]),
                              (b, "2026-10-27T00:00:05+00:00", [[59, "2026-10-27T00:00:05+00:00"]])):
@@ -1186,3 +1187,21 @@ def test_stored_path_writes_landing_out_of_order_keep_both_boundaries(deferred, 
     for target, args in queued:
         target(*args)
     assert deliveries_of(engine, job_id) == delivered
+
+
+def test_the_first_write_builds_the_pack_cards_outside_the_deck_lock(deferred, monkeypatch):
+    """P3 (lock hold): building every card's pack dict under ev.lock held a
+    next-page serve ~40 ms at 2,354 cards. Only the rows' snapshot is taken
+    under it; a W0 card is still packed (its row is snapshotted before plan()
+    drops it)."""
+    client, engine, _ = deferred
+    job_id, _served, _ghosts, ev, _players = packed_deck(120)
+    own_all_but(engine, 7)
+    real = server._pack_card
+    held = []
+    monkeypatch.setattr(server, "_pack_card",
+                        lambda row, at: (held.append(ev.lock.locked()), real(row, at))[1])
+    status(client, job_id, 0)
+    assert len(held) == 120 and not any(held)
+    _run, cards = unpack(pack_of(engine, job_id))
+    assert [c["card_index"] for c in cards] == list(range(120)) and 7 in withdrawals(engine)
