@@ -7802,7 +7802,7 @@ class TradeService:
     def get_pending_trades(self, user_id: str, league_id: Optional[str] = None) -> list[TradeCard]:
         """Return undecided trade cards for a user, newest first."""
         cards = [
-            c for c in self._trade_cards.values()
+            c for c in list(self._trade_cards.values())
             if c.proposing_user_id == user_id
             and c.decision is None
             and (league_id is None or c.league_id == league_id)
@@ -7822,7 +7822,7 @@ class TradeService:
 
     def get_liked_trades(self, user_id: str) -> list[TradeCard]:
         return [
-            c for c in self._trade_cards.values()
+            c for c in list(self._trade_cards.values())
             if c.proposing_user_id == user_id and c.decision == "like"
         ]
 
