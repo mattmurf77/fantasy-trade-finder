@@ -3364,10 +3364,16 @@ def _trade_job_public_view(job: dict) -> dict:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
         # S0 serve rules (contract v0.4 §3, §3b): I-1 never serves an asset
         # either side no longer owns; a failed check serves no cards, distinct
-        # from an empty deck. `trade_i1_mode` 0 skips all of it.
+        # from an empty deck. `trade_i1_mode` 0 skips all of it; only the admin
+        # gate-miss test hook applies whatever the knobs say.
         mode = _trade_i1_mode()
+        forced = _gate_miss_test(league_id) if out["cards"] else None
         block = past_bound = None
-        if out["cards"] and league_id != "league_demo" and mode:
+        if forced:                            # admin test hook (TestFlight A10)
+            block = "roster_gate_miss" if forced == "withhold" else "roster_check_unavailable"
+            log.warning("[i1] gate-miss test applied league=%s kind=%s job=%s",
+                        league_id, forced, job["job_id"])
+        elif out["cards"] and league_id != "league_demo" and mode:
             gates = mode == 2 and _trade_gate_miss_on()
             try:
                 out["cards"], block, past_bound = _roster_serve_check(
@@ -3411,6 +3417,60 @@ def _kick_roster_floor(league_id: str) -> None:
     except Exception as err:          # it never raises; a kick must never fail a serve
         log.warning("roster floor kick failed league=%s: %s", league_id, err)
 
+
+# S0 admin test hook (the operator's TestFlight step A10): force one gate miss
+# on one test league while `trade_gate_miss_mode` stays 0 for everyone. Admin
+# test state, not per-session state: in-process, lost on restart.
+_GATE_MISS_TEST_KINDS = ("withhold", "check_error")
+_GATE_MISS_TEST_MAX_TTL_S = 900
+_gate_miss_tests: dict[str, tuple[str, float]] = {}   # league_id -> (kind, monotonic expiry)
+_gate_miss_tests_lock = threading.Lock()
+
+
+def _gate_miss_test(league_id: str) -> str | None:
+    """The gate miss forced on this league by the admin test hook, or None."""
+    with _gate_miss_tests_lock:
+        entry = _gate_miss_tests.get(league_id)
+        if entry is not None and entry[1] <= time.monotonic():
+            del _gate_miss_tests[league_id]
+            log.info("[i1] gate-miss test expired league=%s kind=%s", league_id, entry[0])
+            return None
+    return entry[0] if entry is not None else None
+
+
+@app.route("/api/admin/trades/gate-miss-test", methods=["POST", "DELETE"])
+def admin_trade_gate_miss_test():
+    """POST /api/admin/trades/gate-miss-test  {league_id, kind, ttl_s}
+    DELETE /api/admin/trades/gate-miss-test {league_id}
+
+    Operator-only test hook (X-Cron-Secret, like /api/cron/*). Until `ttl_s`
+    (at most 900) runs out, every serve of that league's cards forces one S0
+    gate miss, whatever the knobs say: `withhold` = the building shape plus
+    `wait_reason: "roster_check"`; `check_error` = status "error", error
+    "roster_check_unavailable". Other leagues are untouched. DELETE clears it.
+    """
+    _require_cron_auth()
+    body = request.get_json(silent=True) or {}
+    league_id = body.get("league_id")
+    if not isinstance(league_id, str) or not league_id:
+        return jsonify({"error": "invalid_league_id"}), 400
+    if request.method == "DELETE":
+        with _gate_miss_tests_lock:
+            cleared = _gate_miss_tests.pop(league_id, None) is not None
+        log.warning("[i1] gate-miss test cleared league=%s was_set=%s", league_id, cleared)
+        return jsonify({"league_id": league_id, "cleared": cleared})
+    kind, ttl_s = body.get("kind"), body.get("ttl_s")
+    if kind not in _GATE_MISS_TEST_KINDS:
+        return jsonify({"error": "invalid_kind",
+                        "message": "kind must be 'withhold' or 'check_error'"}), 400
+    if (isinstance(ttl_s, bool) or not isinstance(ttl_s, (int, float))
+            or not 0 < ttl_s <= _GATE_MISS_TEST_MAX_TTL_S):
+        return jsonify({"error": "invalid_ttl_s",
+                        "message": f"ttl_s must be a number in (0, {_GATE_MISS_TEST_MAX_TTL_S}]"}), 400
+    with _gate_miss_tests_lock:
+        _gate_miss_tests[league_id] = (kind, time.monotonic() + ttl_s)
+    log.warning("[i1] gate-miss test set league=%s kind=%s ttl_s=%s", league_id, kind, ttl_s)
+    return jsonify({"league_id": league_id, "kind": kind, "ttl_s": ttl_s})
 
 
 def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates: bool):

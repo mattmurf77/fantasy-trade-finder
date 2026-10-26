@@ -15,6 +15,7 @@ cursor; co-owners. Harness: test_force_supersedes_running_job's.
 """
 import json
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -492,3 +493,79 @@ def test_lenient_i1_never_serves_a_gate_miss_even_with_gates_on(live, gates_on, 
         conn.execute(delete(league_members_table))
     body = _via_status(client, job["job_id"])
     assert len(body["cards"]) == len(CARDS) and body["error"] is None
+
+
+# ── admin gate-miss test hook (TestFlight A10) ───────────────────────────────
+
+HOOK = "/api/admin/trades/gate-miss-test"
+
+
+@pytest.fixture()
+def hook(live, monkeypatch):
+    client, _, _ = live
+    monkeypatch.setattr(server, "_CRON_SECRET", "s0-test-secret")
+    with server._gate_miss_tests_lock:
+        server._gate_miss_tests.clear()
+    try:
+        yield client
+    finally:
+        with server._gate_miss_tests_lock:
+            server._gate_miss_tests.clear()
+
+
+def _admin(client, method, body, secret="s0-test-secret"):
+    headers = {"X-Cron-Secret": secret} if secret else {}
+    return client.open(HOOK, method=method, json=body, headers=headers)
+
+
+@pytest.mark.parametrize("kind, expected", [
+    ("withhold", {"status": "running", "error": None, "wait_reason": "roster_check"}),
+    ("check_error", {"status": "error", "error": "roster_check_unavailable"}),
+])
+def test_the_hook_forces_its_gate_miss_on_the_target_league_only(live, hook, kind, expected):
+    client = hook
+    job = _complete_job_with_cards()                  # trade_gate_miss_mode stays 0
+    assert _admin(client, "POST", {"league_id": LEAGUE, "kind": kind, "ttl_s": 60}).status_code == 200
+    body = _via_status(client, job["job_id"])
+    assert body["cards"] == [] and {k: body.get(k) for k in expected} == expected
+    other = dict(job, key=(UID, "league_other", "1qb_ppr"))
+    assert server._trade_job_public_view(other)["cards"], "another league is untouched"
+
+
+def test_the_hook_expires_and_clears(live, hook):
+    client = hook
+    job = _complete_job_with_cards()
+    assert _admin(client, "POST", {"league_id": LEAGUE, "kind": "withhold",
+                                   "ttl_s": 0.05}).status_code == 200
+    time.sleep(0.1)
+    assert {c["trade_id"] for c in _via_status(client, job["job_id"])["cards"]} == SERVABLE
+    assert LEAGUE not in server._gate_miss_tests
+    _admin(client, "POST", {"league_id": LEAGUE, "kind": "check_error", "ttl_s": 900})
+    resp = _admin(client, "DELETE", {"league_id": LEAGUE})
+    assert resp.status_code == 200 and resp.get_json()["cleared"] is True
+    assert {c["trade_id"] for c in _via_status(client, job["job_id"])["cards"]} == SERVABLE
+
+
+@pytest.mark.parametrize("method, body", [
+    ("POST", {"league_id": LEAGUE, "kind": "withhold", "ttl_s": 60}),
+    ("DELETE", {"league_id": LEAGUE}),
+])
+def test_the_hook_requires_the_admin_secret(live, hook, method, body):
+    client = hook
+    assert _admin(client, method, body, secret=None).status_code == 401
+    assert _admin(client, method, body, secret="wrong").status_code == 401
+    assert LEAGUE not in server._gate_miss_tests
+
+
+@pytest.mark.parametrize("body, error", [
+    ({"league_id": LEAGUE, "kind": "withhold", "ttl_s": 901}, "invalid_ttl_s"),
+    ({"league_id": LEAGUE, "kind": "withhold", "ttl_s": 0}, "invalid_ttl_s"),
+    ({"league_id": LEAGUE, "kind": "withhold", "ttl_s": True}, "invalid_ttl_s"),
+    ({"league_id": LEAGUE, "kind": "withhold"}, "invalid_ttl_s"),
+    ({"league_id": LEAGUE, "kind": "updating", "ttl_s": 60}, "invalid_kind"),
+    ({"kind": "withhold", "ttl_s": 60}, "invalid_league_id"),
+])
+def test_the_hook_refuses_bad_input(live, hook, body, error):
+    resp = _admin(hook, "POST", body)
+    assert resp.status_code == 400 and resp.get_json()["error"] == error
+    assert server._gate_miss_tests == {}
