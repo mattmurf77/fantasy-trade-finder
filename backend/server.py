@@ -3996,6 +3996,19 @@ def _unpack_row(packed: bytes) -> dict:
     return json.loads(zlib.decompress(packed))
 
 
+def _stamp_built_at(row: dict) -> None:
+    """A deferred full row's features_json gains `built_at`, the build time
+    (the logger's served_at), frozen with the snapshot: the written row's
+    served_at is the deck's first delivery (F2), so staleness (delivery minus
+    build) reads without a join. A ghost stays narrow (C5): its deck's full
+    rows carry the time. Spliced into the compacted JSON object as the
+    logger's json.dumps would place a last key, so nothing else moves."""
+    features, built = row.get("features_json"), row.get("served_at")
+    if isinstance(features, str) and features.endswith("}") and built is not None:
+        tail = json.dumps({"built_at": built})[1:]
+        row["features_json"] = features[:-1] + (", " + tail if features != "{}" else tail)
+
+
 def _slim_bakeoff_run(row: dict) -> dict:
     """S5 (models-lead R2.6; rulings 22, 24, 25, 31): the bakeoff_runs row a
     deck's evidence_blob carries, so a deck first delivered after its job left
@@ -4116,6 +4129,7 @@ class _DeckEvidence:
                     if frozen.get("is_ghost") == 1:
                         self.ghosts[iid] = _narrow_ghost_row(frozen)
                     else:
+                        _stamp_built_at(frozen)
                         self.rows[iid] = (frozen["card_index"], _pack_row(frozen))
                         self.by_hash.setdefault(frozen.get("trade_hash"), []).append(iid)
 

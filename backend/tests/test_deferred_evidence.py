@@ -1307,7 +1307,28 @@ def test_deferred_rows_are_the_rows_the_logger_writes_live(deferred):
             narrow = server._narrow_ghost_row(live_row)
             assert strip(deferred_rows[key]) == {**strip(narrow), "valuation_json": None}
         else:
-            assert strip(deferred_rows[key]) == strip(live_row)
+            # A full row's features gain built_at, the build time, last.
+            features = json.loads(deferred_rows[key]["features_json"])
+            assert list(features)[-1] == "built_at" and features.pop("built_at")
+            assert json.dumps(features) == live_row["features_json"]
+            assert ({**strip(deferred_rows[key]), "features_json": None}
+                    == {**strip(live_row), "features_json": None})
+
+
+def test_built_at_is_frozen_with_each_full_rows_snapshot(deferred):
+    """built_at is the logger's served_at (the build); the written served_at
+    is the first delivery (F2). Ghost rows stay narrow, without it."""
+    client, engine, _ = deferred
+    job_id, _, ghosts, ev, _ = deferred_deck(40, ghost_every=9)
+    built = {iid: json.loads(r["features_json"])["built_at"] for iid, r in held(ev).items()}
+    assert {r["served_at"] for r in held(ev).values()} == set(built.values())
+    status(client, job_id, 0)
+    for r in rows(engine):
+        features = json.loads(r["features_json"])
+        if r["is_ghost"]:
+            assert "built_at" not in features
+        else:
+            assert features["built_at"] == built[r["impression_id"]] <= r["served_at"]
 
 
 # ── The real owner path: structured features, batch publication ────────────
@@ -1395,6 +1416,7 @@ def test_owner_rows_written_at_delivery_equal_the_rows_written_live(sized_exclus
         features = expand_features(json.loads(row["features_json"]),
                                    {d["snapshot_id"]: d["payload_json"] for d in diag})
         features["owner_request"].pop("captured_at")
+        features.pop("built_at", None)          # the deferred row's build time (frozen)
         out["features_json"] = features
         return out
 
