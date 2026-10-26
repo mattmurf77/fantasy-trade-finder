@@ -45,7 +45,7 @@ from backend import roster_snapshot
 from backend.database import league_members_table
 from backend.tests.test_i1_serve_filter import LEAGUE, OPP, UID, live  # noqa: F401  (fixture)
 from backend.tests.test_trade_page_store import (  # noqa: F401  (fixtures)
-    HEADERS, KEY, SCOPE, _row, _vote, build_page, generate, ids, p1, page_card, page_queries,
+    HEADERS, KEY, SCOPE, _row, _vote, build_page, file_db, generate, ids, p1, page_card, page_queries,
     run_job, set_row, spawned, statements, status, stored)
 from backend.tests.test_trade_responses_small import (  # noqa: F401  (fixtures)
     HEADERS as E2_HEADERS, JOB_ID, card, e2, generate as e2_generate, harness, seed_job,
@@ -951,6 +951,109 @@ def test_a_deck_poll_decodes_at_most_one_stored_page(p1, spawned, monkeypatch, c
                       "unknown": ("no-such-deck", 0)}[case]
     deck_status(client, target, cursor)
     assert len(decoded) <= 1 and (case != "unknown" or not decoded)
+
+
+# ── Deck lineage: a gone organic deck rebases across restarts ───────────────
+# Render restarts the one worker on every deploy. An organic deck D whose job
+# died and whose scope row was since rebuilt (D') is still provably organic
+# through trade_deck_lineage, written with every page row: it rebases onto
+# D' instead of 404ing. A deck that never wrote a page row has no lineage.
+
+def lineage_rows():
+    with db_module.engine.connect() as conn:
+        return [dict(r) for r in
+                conn.execute(select(db_module.trade_deck_lineage_table)).mappings()]
+
+
+def restarted_deck_with_rebuilt_row():
+    """D built and stored; a rebuild D' replaces the scope row; a restart
+    drops both jobs. D now has no job and no page row, only its lineage."""
+    deck = build_deck()
+    rebuilt = _land_new_deck()
+    restart()
+    assert stored()["deck_job_id"] == rebuilt
+    assert db_module.load_trade_page_for_job(UID, deck) is None
+    return deck, rebuilt
+
+
+def test_a_gone_organic_deck_rebases_across_a_restart(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    deck, rebuilt = restarted_deck_with_rebuilt_row()
+    decoded = []
+    real = db_module.zlib.decompress
+    monkeypatch.setattr(db_module.zlib, "decompress", lambda data: decoded.append(1) or real(data))
+    response = deck_status(client, deck, 30)              # mid-deck, after the deploy
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["rebased"] is True and body["deck_id"] == body["job_id"] == rebuilt
+    assert ids(body["cards"]) == p1_ids(200, 230) and body["cursor"] == 30
+    assert body["serve_source"] == "page" and len(decoded) == 1
+    assert len(spawned) == 1                               # D' has no job here: its backing kick
+
+
+def test_a_gone_organic_deck_whose_scope_row_was_evicted_rebases_onto_a_backing_job(p1, spawned):
+    client, engine, _ = p1
+    deck, _ = restarted_deck_with_rebuilt_row()
+    with engine.begin() as conn:
+        conn.execute(delete(db_module.trade_page_store_table))
+    body = deck_status(client, deck, 30).get_json()
+    assert body["rebased"] is True and body["deck_id"] == server._trade_jobs_by_key[KEY]
+    assert server._trade_jobs[body["deck_id"]]["page_scope"] == SCOPE and len(spawned) == 1
+
+
+def test_another_users_gone_deck_is_the_legacy_404(p1, spawned):
+    client, _, sess = p1
+    deck, _ = restarted_deck_with_rebuilt_row()
+    sess["user_id"] = "someone_else"                       # lineage is read per requester
+    try:
+        response = deck_status(client, deck, 30)
+    finally:
+        sess["user_id"] = UID
+    assert response.status_code == 404 and not spawned
+
+
+def test_a_non_organic_deck_writes_no_lineage_and_404s_when_gone(p1, spawned):
+    client, _, _ = p1
+    build_deck()
+    job_id = non_organic_deck("pinned")
+    restart()
+    assert job_id not in {r["deck_job_id"] for r in lineage_rows()}
+    assert deck_status(client, job_id, 7).status_code == 404
+
+
+def test_every_page_write_records_lineage_once_even_when_the_guard_refuses(file_db):
+    db_module.save_trade_page(_row(200, "newer"))
+    assert db_module.save_trade_page(_row(100, "older")) is False        # the supersede guard
+    assert db_module.save_trade_page(_row(300, "newer")) is True         # rewritten: no duplicate
+    rows = {r["deck_job_id"]: r for r in lineage_rows()}
+    assert set(rows) == {"newer", "older"} and len(lineage_rows()) == 2
+    assert {(r["user_id"], r["league_id"], r["scoring_format"], r["request_scope"])
+            for r in rows.values()} == {(UID, LEAGUE, "1qb_ppr", SCOPE)}
+
+
+@pytest.mark.parametrize("dialect", ["postgresql", "sqlite"])
+def test_the_lineage_insert_is_an_insert_or_ignore_on_both_dialects(dialect):
+    from sqlalchemy.dialects import postgresql, sqlite
+    stmt = db_module.trade_deck_lineage_insert(dialect, _row(1, "d1"))
+    sql = str(stmt.compile(dialect={"postgresql": postgresql, "sqlite": sqlite}[dialect].dialect()))
+    assert sql.startswith("INSERT INTO trade_deck_lineage")
+    assert "ON CONFLICT (user_id, deck_job_id) DO NOTHING" in sql
+
+
+def test_lineage_older_than_a_day_is_purged_with_the_store_on(file_db, monkeypatch):
+    t = db_module.trade_deck_lineage_table
+    with file_db.begin() as conn:
+        for deck_id, age_s in (("old", 25 * 3600), ("recent", 3600)):
+            conn.execute(insert(t).values(
+                user_id=UID, deck_job_id=deck_id, league_id=LEAGUE, scoring_format="1qb_ppr",
+                request_scope=SCOPE, recorded_at=db_module.page_store_iso(server.time.time() - age_s)))
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
+    server._evict_trade_page_store()
+    assert len(lineage_rows()) == 2                        # store off: untouched
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True})
+    monkeypatch.setitem(server._trade_service_mod._cfg, "first_page_store_enabled", 1.0)
+    server._evict_trade_page_store()
+    assert [r["deck_job_id"] for r in lineage_rows()] == ["recent"]
 
 
 # ── Knobs ───────────────────────────────────────────────────────────────────

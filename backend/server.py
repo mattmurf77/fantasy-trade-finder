@@ -4915,9 +4915,11 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
 
     The app sends `deck` on every paged poll, organic or not, so P2 rebases
     only a deck it can prove organic: D in this process with an organic
-    `page_scope`, or a stored row D built (looked up by deck_job_id). Its scope
-    is then D's own, so an intent or pinned search that moves the session's
-    fairness never moves it. Every serve goes through S0's rules:
+    `page_scope`, or a stored row D built (looked up by deck_job_id), or, once
+    that row was rebuilt by a newer deck (a deploy restarts the one worker),
+    D's lineage row (trade_deck_lineage, 24 h). Its scope is then D's own, so
+    an intent or pinned search that moves the session's fairness never moves
+    it. Every serve goes through S0's rules:
       (a) the scope's stored row was built by D and K < its count: its stored
           pages (_trade_page_status_view: P1's slice, S0's rules, floor kick);
       (b) D is the requester's job in this process: E2's page view of its raw
@@ -4930,8 +4932,9 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
           changed: _trade_deck_rebase.
     A deck that isn't provably organic (pinned, Specific Team, intent,
     replenish, or admitted with the store off) gets its own page view and
-    its own end or error (_trade_deck_own), never a rebase; gone, the legacy
-    404. One page row read per poll, and only that row's pages decoded.
+    its own end or error (_trade_deck_own), never a rebase; gone (no page or
+    lineage row: it never wrote one), the legacy 404. One page row decoded
+    per poll: the scope's by key, else D's own, else (via lineage) its scope's.
     The server never dedupes against the client; the client does, by trade_hash.
     """
     from . import database as _db
@@ -4941,7 +4944,7 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
         deck = dict(job) if job is not None and job["key"][0] == user_id else None
     if deck is not None and not deck.get("page_scope"):
         return _trade_deck_own(deck, cursor)
-    row = None
+    row = lineage = None
     try:
         if deck is not None:
             _, league_id, fmt = deck["key"]
@@ -4949,12 +4952,19 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
             row = _db.load_trade_page(user_id, league_id, fmt, scope)
         else:
             row = _db.load_trade_page_for_job(user_id, deck_id)
+            if row is None:                   # D's row was rebuilt: its lineage still proves it
+                lineage = _db.load_trade_deck_lineage(user_id, deck_id)
+                if lineage is not None:
+                    row = _db.load_trade_page(user_id, lineage["league_id"],
+                                              lineage["scoring_format"], lineage["request_scope"])
     except Exception as err:
         log.warning("trade-page read failed for deck %s: %s", deck_id, err)
     if deck is None:
-        if row is None:
+        origin = lineage or row
+        if origin is None:
             return None                       # gone, and not provably organic: the legacy 404
-        league_id, fmt, scope = row["league_id"], row["scoring_format"], row["request_scope"]
+        league_id, fmt, scope = (origin["league_id"], origin["scoring_format"],
+                                 origin["request_scope"])
         fairness = float(scope.rpartition("=")[2])
     if row is not None and row["deck_job_id"] == deck_id and cursor < row["card_count"]:
         return {**_trade_page_status_view(row, cursor, sess), "deck_id": deck_id}
@@ -5126,8 +5136,12 @@ def _trade_deck_waiting(deck_id: str, cursor: int) -> dict:
             "prefetch_remaining": _trade_prefetch_remaining()}
 
 
+_TRADE_DECK_LINEAGE_TTL_S = 86400    # P2: how long a gone deck can still rebase
+
+
 def _evict_trade_page_store() -> None:
-    """P1 eviction (§7): one bounded pass per cleanup tick. Store off ⇒ no-op."""
+    """P1 eviction (§7): one bounded pass per cleanup tick, plus P2's deck
+    lineage older than 24 h. Store off ⇒ no-op."""
     if not _trade_page_store_enabled():
         return
     from . import database as _db
@@ -5139,6 +5153,12 @@ def _evict_trade_page_store() -> None:
             log.info("trade page store evicted: %d aged, %d over the byte ceiling", aged, over_budget)
     except Exception:
         log.exception("trade page store eviction failed")
+    try:
+        purged = _db.purge_trade_deck_lineage(max_age_s=_TRADE_DECK_LINEAGE_TTL_S)
+        if purged:
+            log.info("trade deck lineage purged: %d older than 24 h", purged)
+    except Exception:
+        log.exception("trade deck lineage purge failed")
 
 
 def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared=False):
