@@ -517,7 +517,7 @@ def render(r: FlipRead) -> str:
     # join no card (G3 orphans). An outcome on a ghost row is a serve bug (a
     # ghost reached a client), not lost data: it goes back to models-lead.
     if g1["status"] == FAIL or g3["orphans"]:
-        lines.append("G1 or G3 failed: models-lead recommends the kill "
+        lines.append("G1 failed or G3 has orphans: models-lead recommends the kill "
                      "(first_page_store_enabled 0) at once; the operator decides via "
                      "release-lead (B3 (f4)).")
     elif r.overall == FAIL:
