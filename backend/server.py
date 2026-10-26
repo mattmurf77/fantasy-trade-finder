@@ -2910,6 +2910,7 @@ def _cleanup_loop() -> None:
                     to_drop.append(jid)
             for jid in to_drop:
                 key = _trade_jobs[jid].get("key")
+                _note_deck_evicted(jid, _trade_jobs[jid])   # U4: an evicted_split's clock
                 _trade_jobs.pop(jid, None)
                 if key and _trade_jobs_by_key.get(key) == jid:
                     _trade_jobs_by_key.pop(key, None)
@@ -4822,7 +4823,8 @@ def _deck_pack_input(ev: _DeckEvidence):
     cards)."""
     rows = None if ev.pack_cards is not None else list(ev.rows.values())
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
-           "page_store": 1 if ev.page_store else 0, "retired": False, "upgrade_misses": 0}
+           "page_store": 1 if ev.page_store else 0, "retired": False,
+           "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)}
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
         run["deck_source"] = ev.deck_source
     return ev.pack_cards, rows, ev.served_at, run
@@ -4933,8 +4935,8 @@ def _merge_deliveries(a, b) -> list:
 def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     """Another instance updated the header first: keep both. Deliveries are
     the union (earliest time per index); retired stays true once true (the
-    earliest retired_at); upgrade_misses is the stored count plus ours since
-    our base."""
+    earliest retired_at); each upgrade_misses cause is the stored count plus
+    ours since our base."""
     merged = {**ours, **stored}
     merged["deliveries"] = _merge_deliveries(stored.get("deliveries"), ours.get("deliveries"))
     if stored.get("retired") or ours.get("retired"):
@@ -4942,8 +4944,10 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
         stamps = [t for t in (stored.get("retired_at"), ours.get("retired_at")) if t]
         if stamps:
             merged["retired_at"] = min(stamps)
-    merged["upgrade_misses"] = stored.get("upgrade_misses", 0) + max(
-        0, ours.get("upgrade_misses", 0) - (base or {}).get("upgrade_misses", 0))
+    merged["upgrade_misses"] = {
+        cause: _upgrade_misses(stored)[cause] + max(
+            0, _upgrade_misses(ours)[cause] - _upgrade_misses(base or {})[cause])
+        for cause in _UPGRADE_MISS_CAUSES}
     return merged
 
 
@@ -5051,10 +5055,10 @@ def _pack_candidate_set(row: dict) -> dict:
 def _deck_evidence_upgrade(impression_id: str, acting_user_id: str) -> bool:
     """R4.2 U3/U4: a packed card's first outcome writes its full row ('viewed')
     from its build-time snapshot: the deck's job while it's in this process,
-    else the page store's evidence_blob (its stored cards). Past them (a card
-    delivered past the stored ones before a restart, viewed after it), a row
+    else the page store's evidence_blob (its stored cards). Past them, a row
     built from the packed card itself, with no assets or valuation: the miss,
-    counted in the pack's run metadata (upgrade_misses). The card's delivery
+    counted by cause in the pack's run metadata (upgrade_misses, U4-R2: the
+    one named case, restart_split, or other, a defect). The card's delivery
     is in the pack's deliveries first (condition 4). A never-delivered
     withdrawal, a foreign deck or a deck without a pack upgrades nothing.
     True when a row was written."""
@@ -5143,30 +5147,98 @@ def _deck_pack_card(state, index: int) -> dict:
     return by_index[index]
 
 
+# U4 (models-lead addendum A, R1/R2): a display past snapshot retention is
+# impossible, with one named exception, restart_split: a card past the stored
+# first 90, delivered before a process restart and viewed after it. It is
+# counted per run in the pack's run metadata (upgrade_misses, an object with
+# every cause, always present); its outcome joins the packed card by
+# impression_id and it scores normally. Any other miss is a defect: "other",
+# logged at error level. The process start is recorded at import.
+# evicted_split (trades-eng 2026-10-26, models-lead's ruling pending): the same
+# card when its job left this process by eviction (4 h) rather than a restart.
+# Eval reads any key but "other" as a named cause. If models-lead declines it,
+# _EVICTED_SPLIT_NAMED = False sends those misses to "other".
+_UPGRADE_MISS_CAUSES = ("restart_split", "evicted_split", "other")
+_RESTART_SPLIT_FROM_INDEX = 90             # the stored first 90 (3 pages of 30)
+_PROCESS_STARTED_AT = datetime.now(timezone.utc).isoformat()
+_EVICTED_SPLIT_NAMED = True
+_DECK_EVICTED_MAX = 4096
+_deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+
+
+def _note_deck_evicted(job_id: str, job: Mapping) -> None:
+    """Under _trade_jobs_lock, as the cleanup loop evicts `job`: a delivered
+    packed deck's eviction time, which _upgrade_miss_cause reads."""
+    ev = job.get("evidence")
+    if ev is None or not ev.packed or ev.pack is None:
+        return
+    while len(_deck_evicted_at) >= _DECK_EVICTED_MAX:
+        _deck_evicted_at.pop(next(iter(_deck_evicted_at)))
+    _deck_evicted_at[job_id] = datetime.now(timezone.utc).isoformat()
+
+
+def _upgrade_misses(run: Mapping) -> dict:
+    """A run's upgrade_misses, every cause present (0 when absent)."""
+    misses = run.get("upgrade_misses")
+    misses = misses if isinstance(misses, Mapping) else {}
+    return {cause: int(misses.get(cause) or 0) for cause in _UPGRADE_MISS_CAUSES}
+
+
+def _upgrade_miss_cause(deck_job_id: str, index: int, delivered_at: str | None,
+                        outcome_at: str) -> str:
+    """U4-R2's classification, the one place a miss gets its cause:
+    restart_split iff card_index >= 90 and delivered_at < this process's start
+    <= the first outcome; evicted_split (while _EVICTED_SPLIT_NAMED) iff
+    card_index >= 90 and delivered_at < the job's eviction here <= the first
+    outcome; anything else is other."""
+    if index >= _RESTART_SPLIT_FROM_INDEX and delivered_at is not None:
+        if delivered_at < _PROCESS_STARTED_AT <= outcome_at:
+            return "restart_split"
+        evicted = _deck_evicted_at.get(deck_job_id)
+        if _EVICTED_SPLIT_NAMED and evicted is not None and delivered_at < evicted <= outcome_at:
+            return "evicted_split"
+    return "other"
+
+
 def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: int, now: str,
                             ev_for_header=None) -> bool:
     """The upgrade miss (U4's fallback): the card's row built from its packed
     card (the frozen scorer inputs and logged columns; no assets, no
-    valuation), so the outcome still joins it, and the miss counted."""
+    valuation), so the outcome still joins it, and the miss counted by cause
+    (`now`: the first outcome's time)."""
     from . import database as _db
     card = _deck_pack_card(state, index)
-    features = {k: card[k] for k in card if k in _evidence_contract.FROZEN_INPUT_KEYS}
+    cause = _upgrade_miss_cause(deck_job_id, index, state.delivered_at(index), now)
+    # Every key the packed card carries outside the logged columns, the
+    # attribution ones included, so eval reads this row exactly as it reads the
+    # packed card (R5.2 (c); U4-R5's identity on the restart path).
+    features = {k: v for k, v in card.items() if k not in _PACK_LOGGED_COLUMNS and k != "served_at"}
     if state.run.get("page_store"):
         features["page_store"] = 1
     row = {k: card.get(k) for k in _PACK_LOGGED_COLUMNS + _PACK_ATTRIBUTION_COLUMNS}
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
+    def count():
+        misses = _upgrade_misses(state.run)
+        misses[cause] += 1
+        state.run["upgrade_misses"] = misses
+
     if ev_for_header is not None:
         with ev_for_header.lock:
-            state.run["upgrade_misses"] = state.run.get("upgrade_misses", 0) + 1
+            count()
             ev_for_header.pack_dirty = True
         _deck_pack_flush_header(ev_for_header)
     else:
-        state.run["upgrade_misses"] = state.run.get("upgrade_misses", 0) + 1
+        count()
         _deck_pack_commit(deck_job_id, state)
-    log.warning("deck-evidence %s: upgrade miss for card %d (no snapshot); row from the pack",
-                deck_job_id, index)
+    line = ("[evidence] upgrade miss cause=%s job=%s index=%d delivered_at=%s process_start=%s "
+            "outcome_at=%s: row from the pack")
+    args = (cause, deck_job_id, index, state.delivered_at(index), _PROCESS_STARTED_AT, now)
+    if cause == "other":                  # U4-R2: must be zero; it goes back to models-lead
+        log.error(line, *args)
+    else:
+        log.warning(line, *args)
     _db.save_deck_evidence([row], deck_job_id=deck_job_id)
     return True
 

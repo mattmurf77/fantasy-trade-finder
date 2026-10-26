@@ -91,6 +91,7 @@ def p1(live, monkeypatch):
     # leaves its delivery's ids pending forever (#419 QA: the F4 test failed
     # after the page suites).
     monkeypatch.setattr(server, "_deck_evidence_pending", {})
+    monkeypatch.setattr(server, "_deck_evicted_at", {})        # U4: evicted decks, per process
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)

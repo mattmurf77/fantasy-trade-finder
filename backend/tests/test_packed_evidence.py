@@ -289,7 +289,7 @@ def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_ev
     assert row["card_count"] == len(served) == 120 and [c["card_index"] for c in cards] == list(range(120))
     assert row["served_at"] == written[0]["served_at"]     # the first delivery (F2)
     assert run["deliveries"] == [[29, row["served_at"]]] and run["page_store"] == 1
-    assert run["retired"] is False and run["upgrade_misses"] == 0
+    assert run["retired"] is False and run["upgrade_misses"] == {"restart_split": 0, "evicted_split": 0, "other": 0}
     job = server._trade_jobs[job_id]
     assert (run["values_snapshot_id"], run["config_ref"]) == (job["values_snapshot_id"],
                                                               job["request_signature"])
@@ -365,26 +365,8 @@ def test_r42_after_a_restart_a_stored_card_upgrades_from_the_blob(deferred):
     got = by_index(engine)[(0, 50)]
     assert got["evidence_tier"] == "viewed" and got["assets_json"]
     assert "give_value_band" in json.loads(got["features_json"])
-    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == 0
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {"restart_split": 0, "evicted_split": 0, "other": 0}
     assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 50)]
-
-
-def test_r42_a_card_past_the_stored_ones_viewed_after_a_restart_is_a_counted_miss(deferred):
-    """models-lead (b): delivered past the stored 90 before a deploy, viewed
-    from the device after it. Its row comes from the packed card itself."""
-    client, engine, _ = deferred
-    job_id, *_ = packed_deck(120)
-    status(client, job_id, 0)
-    status(client, job_id, 90)                             # the live job's page past the stored 90
-    restart()
-    view(job_id, 95)
-    got = by_index(engine)[(0, 95)]
-    assert got["evidence_tier"] == "viewed" and got["assets_json"] is None
-    assert set(json.loads(got["features_json"])) <= contract.FROZEN_INPUT_KEYS | {"page_store"}
-    run, cards = unpack(pack_of(engine, job_id))
-    assert run["upgrade_misses"] == 1
-    assert json.loads(got["features_json"])["give_value"] == cards[95]["give_value"]
-    assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
 
 
 def test_s8_an_upgrade_past_the_recorded_deliveries_writes_no_delivery(deferred, monkeypatch, caplog):
@@ -672,17 +654,18 @@ def test_interleaved_header_updates_from_two_instances_lose_nothing(deferred):
     b = server._deck_pack_state(job_id, UID)               # instance B, the same stored header
     assert a is not b and a.checksum == b.checksum
     a.run["deliveries"] = first + [[59, "2026-10-27T00:00:59+00:00"], [89, "2026-10-27T00:01:29+00:00"]]
-    a.run["upgrade_misses"] = 1
+    a.run["upgrade_misses"] = {"restart_split": 1, "evicted_split": 0, "other": 0}
     assert server._deck_pack_commit(job_id, a)
     b.run["deliveries"] = first + [[59, "2026-10-27T00:09:59+00:00"], [74, "2026-10-27T00:01:14+00:00"]]
-    b.run.update(retired=True, retired_at="2026-10-27T01:00:00+00:00")
+    b.run.update(retired=True, retired_at="2026-10-27T01:00:00+00:00",
+                 upgrade_misses={"restart_split": 0, "evicted_split": 2, "other": 0})
     assert server._deck_pack_commit(job_id, b)             # a CAS miss, merged, retried
     run, _cards = unpack(pack_of(engine, job_id))          # the checksum holds
     assert run["deliveries"] == first + [[59, "2026-10-27T00:00:59+00:00"],
                                          [74, "2026-10-27T00:01:14+00:00"],
                                          [89, "2026-10-27T00:01:29+00:00"]]
-    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (
-        1, True, "2026-10-27T01:00:00+00:00")
+    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (    # summed per key
+        {"restart_split": 1, "evicted_split": 2, "other": 0}, True, "2026-10-27T01:00:00+00:00")
 
 
 def test_a_replenished_decks_pack_carries_its_deck_source(deferred, monkeypatch):
@@ -1205,3 +1188,171 @@ def test_the_first_write_builds_the_pack_cards_outside_the_deck_lock(deferred, m
     assert len(held) == 120 and not any(held)
     _run, cards = unpack(pack_of(engine, job_id))
     assert [c["card_index"] for c in cards] == list(range(120)) and 7 in withdrawals(engine)
+
+
+# ── models-lead addendum A, U4: the counted residual (R2, R5) ───────────────
+
+NO_MISSES = {"restart_split": 0, "evicted_split": 0, "other": 0}
+
+
+def copy_db(engine, drop_impressions=()):
+    """A second in-memory database holding `engine`'s rows, less the
+    deck_impressions rows named."""
+    from sqlalchemy import create_engine, insert
+    other = create_engine("sqlite:///:memory:")
+    db_module.metadata.create_all(other)
+    with other.begin() as conn:
+        for table in db_module.metadata.sorted_tables:
+            got = [r for r in rows(engine, table)
+                   if not (table is db_module.deck_impressions_table
+                           and r["impression_id"] in drop_impressions)]
+            if got:
+                conn.execute(insert(table), got)
+    return other
+
+
+def a_new_process(monkeypatch):
+    """The deploy: this process started after the deliveries so far."""
+    from datetime import datetime, timezone
+    monkeypatch.setattr(server, "_PROCESS_STARTED_AT", datetime.now(timezone.utc).isoformat())
+
+
+def cleanup_ticks(monkeypatch, n):
+    """Run the real _cleanup_loop for n ticks (its sleep returns at once)."""
+    import time as real_time
+    ticks = []
+
+    class FakeTime:
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+        def sleep(self, _seconds):
+            ticks.append(1)
+            if len(ticks) > n:
+                raise _StopLoop
+
+    monkeypatch.setattr(server, "time", FakeTime())
+    with pytest.raises(_StopLoop):
+        server._cleanup_loop()
+    monkeypatch.setattr(server, "time", real_time)
+
+
+def evict(monkeypatch, job_id):
+    """The cleanup loop evicts the deck's job (finished past _JOB_RETENTION),
+    in this process: no restart."""
+    import time as real_time
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id]["finished_at"] = real_time.monotonic() - server._JOB_RETENTION - 60
+    cleanup_ticks(monkeypatch, 1)
+    assert job_id not in server._trade_jobs
+
+
+@pytest.mark.parametrize("how, cause", [("restart", "restart_split"), ("eviction", "evicted_split"),
+                                        ("eviction_unnamed", "other")])
+def test_u4_a_card_past_the_stored_90_viewed_after_its_job_left_is_a_cause_coded_miss(
+        deferred, monkeypatch, caplog, how, cause):
+    """U4-R2/R5: the job is lost after a delivery past 90, then the card is
+    viewed. Its row comes from the packed card (the U2 id joins the outcome)
+    and the miss is counted by cause: after a restart (this process started
+    after the delivery) restart_split; after the job's eviction here
+    evicted_split (models-lead's ruling pending); with that cause turned off
+    (_EVICTED_SPLIT_NAMED False) the eviction is other, logged at error."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)                             # the live job's page past the stored 90
+    if how == "restart":
+        restart()
+        a_new_process(monkeypatch)
+    else:
+        if how == "eviction_unnamed":
+            monkeypatch.setattr(server, "_EVICTED_SPLIT_NAMED", False)
+        evict(monkeypatch, job_id)
+    with caplog.at_level("WARNING"):
+        view(job_id, 95)
+    got = by_index(engine)[(0, 95)]
+    assert got["evidence_tier"] == "viewed" and got["assets_json"] is None
+    run, cards = unpack(pack_of(engine, job_id))
+    features = json.loads(got["features_json"])                       # the packed card's keys,
+    assert contract.FROZEN_INPUT_KEYS & set(cards[95]) <= set(features)   # never the wide extras
+    assert set(features) <= evidence_pack.CONTRACT_KEYS | {"page_store"}
+    assert run["upgrade_misses"] == {**NO_MISSES, cause: 1}
+    assert features["give_value"] == cards[95]["give_value"]
+    assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
+    [line] = [r for r in caplog.records if "upgrade miss cause=" in r.getMessage()]
+    assert f"cause={cause} job={job_id} index=95" in line.getMessage()
+    assert line.levelname == ("ERROR" if cause == "other" else "WARNING")
+
+
+def test_u4_the_classification_hook():
+    start, evicted = "2026-10-27T00:00:00+00:00", "2026-10-27T02:00:00+00:00"
+    before, after = "2026-10-26T23:00:00+00:00", "2026-10-27T03:00:00+00:00"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(server, "_PROCESS_STARTED_AT", start)
+        mp.setattr(server, "_deck_evicted_at", {"gone": evicted})
+        cause = server._upgrade_miss_cause
+        assert cause("d", 95, before, after) == "restart_split"
+        assert cause("d", 89, before, after) == "other"                 # a stored card's index
+        assert cause("d", 95, None, after) == "other"                   # never delivered
+        assert cause("d", 95, after, after) == "other"                  # this process sent it
+        assert cause("d", 95, before, "2026-10-26T23:30:00+00:00") == "other"   # outcome before start
+        assert cause("gone", 95, "2026-10-27T01:00:00+00:00", after) == "evicted_split"
+        assert cause("gone", 95, "2026-10-27T02:30:00+00:00", after) == "other"  # sent after eviction
+        assert cause("gone", 89, "2026-10-27T01:00:00+00:00", after) == "other"
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", False)
+        assert cause("gone", 95, "2026-10-27T01:00:00+00:00", after) == "other"
+
+
+def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(deferred, monkeypatch):
+    """U4-R5: the upgraded-vs-packed identity, on the restart path itself.
+    Cards past the stored 90 are viewed after a restart (restart_split rows
+    from the pack), with a stored card upgraded from the blob beside them.
+    Eval reads the deck the same with those rows as with them left packed:
+    every card dict, outcome and position, the exposure curve, and every
+    registered scorer's replay (estimates and IPS weights)."""
+    import backend.eval.replay as replay_mod
+    import backend.value_model as vm
+    from backend.eval.data import card_dict, load_decks
+    from backend.eval.replay import evaluate, exposure_curve
+    from backend.eval.scorers import get_scorer, registered_names
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    for cursor in (0, 30, 60, 90):
+        status(client, job_id, cursor)
+    restart()
+    a_new_process(monkeypatch)
+    for index, action in ((50, "like"), (91, "like"), (95, "pass"), (99, "viewed"), (104, "like")):
+        view(job_id, index, action)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 4}
+    misses = [contract.card_impression_id(job_id, i) for i in (91, 95, 99, 104)]
+    assert {r["impression_id"] for r in rows(engine) if r["card_index"] >= 90} == set(misses)
+    upgraded, left_packed = engine, copy_db(engine, drop_impressions=misses)
+
+    def read(eng):
+        [deck] = load_decks(engine=eng)
+        return deck, [(c.card_index, c.is_ghost, c.delivered, getattr(c, "position", None),
+                       c.viewed, c.liked, c.passed,
+                       {k: v for k, v in card_dict(c).items() if k in evidence_pack.CONTRACT_KEYS})
+                      for c in deck.cards]
+
+    (deck_u, cards_u), (deck_p, cards_p) = read(upgraded), read(left_packed)
+    assert deck_u.exclusion is None and deck_p.exclusion is None
+    assert cards_u == cards_p
+    assert [c[0] for c in cards_u if any(c[4:7])] == [50, 91, 95, 99, 104]
+    assert exposure_curve([deck_u]) == exposure_curve([deck_p])
+    model = vm.ValueModel(
+        like_head=vm.LogisticHead(weights={"bias": -0.4, "value_delta": 0.8, "pref_long": 1.1,
+                                           "pref_short": -0.6, "partner_rate": 0.9}),
+        propose_head=None, propose_constant=0.2, partner_rates={}, global_like_rate=0.3,
+        position_mean=0.4, trained_at="t", train_date="t")
+    monkeypatch.setattr(vm, "load_latest_model", lambda: model)
+    real = replay_mod._estimate
+    for name in registered_names():
+        out = []
+        for deck in (deck_u, deck_p):
+            weights = []
+            monkeypatch.setattr(replay_mod, "_estimate",
+                                lambda *a, w=weights: w.append(list(a[1])) or real(*a))
+            run = evaluate(get_scorer(name, seed=3), [deck], ess_min=1, bootstrap=50, seed=2)
+            out.append((repr(run), weights))
+        assert out[0] == out[1], name
