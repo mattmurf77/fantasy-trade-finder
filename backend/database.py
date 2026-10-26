@@ -7433,6 +7433,18 @@ def load_trade_page(user_id: str, league_id: str, scoring_format: str,
     return dict(row) if row is not None else None
 
 
+def load_trade_page_deck_job_id(user_id: str, league_id: str, scoring_format: str,
+                                request_scope: str) -> str | None:
+    """The deck_job_id whose page row holds one key now (the unique-index read,
+    one column, no blobs), or None when the key has no row."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        return conn.execute(select(t.c.deck_job_id).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format,
+            t.c.request_scope == request_scope)).scalar()
+
+
 def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
                             evidence: bool = False) -> dict | None:
     """The viewer's page row built by `deck_job_id`, or None. `evidence`:
