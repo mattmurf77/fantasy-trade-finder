@@ -13,7 +13,7 @@ CardSet JSON: {"variant": str, "source": "value_core_bench" | "served",
                "skipped_no_row": int,      # served sets only
                "leagues_without_deck": [str],   # served: no gradeable Trades deck in the lookback
                "leagues_with_no_cards": [str],  # served: a deck found, 0 gradeable cards
-               "skipped_decks_by_reason": {str: int}}  # served: ungradeable decks seen
+               "skipped_decks_by_reason": {str: int}}  # served: every ungradeable deck in the lookback
 
 ``served_card_set`` is the only production touch: a read-only read of the
 incumbent's served decks, asserting ``transaction_read_only = on`` first.
@@ -189,7 +189,10 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     "skipped_no_row", never replaced by a later card. A league with no such
     deck is named in "leagues_without_deck", and one whose deck yields no
     gradeable card (every chosen card skipped, or none to choose) in
-    "leagues_with_no_cards": neither is a silent 0 cards.
+    "leagues_with_no_cards": neither is a silent 0 cards. Every deck skipped
+    for one of those three exclusions, in every league and older than the
+    chosen deck too, is counted by exclusion in "skipped_decks_by_reason"
+    (models-lead C5).
 
     Every read runs on the engine prod_analytics._connect_readonly returns,
     whose connections all open with default_transaction_read_only=on; the
@@ -324,7 +327,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                           "skipped_no_row": card_set["skipped_no_row"],
                           "leagues_without_deck": card_set["leagues_without_deck"],
                           "leagues_with_no_cards": card_set["leagues_with_no_cards"],
-                          "skipped_decks_by_reason": card_set["skipped_decks_by_reason"]}))
+                          "skipped_decks_in_lookback_by_reason":
+                              card_set["skipped_decks_by_reason"]}))
     elif args.command == "export":
         card_sets = [json.loads(path.read_text()) for path in args.cards]
         print(json.dumps(export(card_sets, per_variant=args.per_variant, seed=args.seed,

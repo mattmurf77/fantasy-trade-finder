@@ -9,6 +9,7 @@ An in-memory SQLite stands in for prod; it answers SHOW transaction_read_only
 like a read-only Postgres session (or, for the guard test, a writable one).
 """
 import json
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -77,17 +78,17 @@ def prod(monkeypatch):
 
 
 def put_deck(prod: Prod, job: str, n: int, *, served_at: str, rows=None, tier="first30",
-             delivered=(), no_assets=(), w0=(), w1=(), source=None, snapshot=()):
+             delivered=(), no_assets=(), w0=(), w1=(), source=None, snapshot=(), league="lg"):
     """A deck of n built cards: full rows (assets and valuation) for `rows`
     (default every index not in w0), `tier` and delivered_at on the indexes
     in `delivered`, no assets_json on `no_assets`, deck_source `source`,
     valuation_json in the personal-market snapshot's shape on `snapshot` (the
-    value core's elsewhere), and withdrawals: w0 served_before=0, w1
-    served_before=1."""
+    value core's elsewhere), in `league`, and withdrawals: w0 served_before=0,
+    w1 served_before=1."""
     rows = [i for i in range(n) if i not in w0] if rows is None else rows
     out = []
     for i in rows:
-        card = _card(job, i, served_at=served_at)
+        card = {**_card(job, i, served_at=served_at), "league_id": league}
         if source is not None:
             card["deck_source"] = source
         out.append({**_row(card), "evidence_tier": tier,
@@ -106,7 +107,7 @@ def put_deck(prod: Prod, job: str, n: int, *, served_at: str, rows=None, tier="f
         for served_before, indexes in ((0, w0), (1, w1)):
             for i in indexes:
                 conn.execute(insert(prod.wd).values(
-                    deck_job_id=job, card_index=i, user_id="u1", league_id="lg",
+                    deck_job_id=job, card_index=i, user_id="u1", league_id=league,
                     reason="disposition_cut", first_withdrawn_at=served_at,
                     served_before=served_before))
 
@@ -195,7 +196,7 @@ def test_a_chosen_card_without_a_full_row_is_skipped_and_counted(prod, tmp_path,
     assert json.loads(capsys.readouterr().out) == {"cards": 2, "leagues": 1,
                                                    "skipped_no_row": 3, "leagues_without_deck": [],
                                                    "leagues_with_no_cards": [],
-                                                   "skipped_decks_by_reason": {
+                                                   "skipped_decks_in_lookback_by_reason": {
                                                        "calibration_refresh": 0,
                                                        "pack_integrity": 0,
                                                        "withdrawal_conflict": 0}}
@@ -240,6 +241,37 @@ def test_a_deck_whose_evidence_contradicts_itself_is_not_graded(prod):
                                                    "withdrawal_conflict": 1}
 
 
+def test_skipped_decks_are_counted_in_every_league_older_ones_too(prod, tmp_path, capsys):
+    """#449 QA: every ungradeable deck in the lookback is counted, in each
+    league and older than the graded deck too, pack_integrity included, and
+    the CLI summary's label says it is the lookback's count."""
+    fake = prod()
+    with fake.eng.begin() as conn:
+        conn.execute(insert(db.leagues_table).values(
+            sleeper_league_id="lg2", user_id="u1", name="Second League"))
+    refresh = {"tier": None, "source": eval_data.CALIBRATION_REFRESH_SOURCE}
+    put_deck(fake, "T", 3, served_at=_ago(5), delivered=range(3))
+    put_deck(fake, "R1", 3, served_at=_ago(6), **refresh)          # older than T
+    put_deck(fake, "R2", 3, served_at=_ago(1), **refresh)
+    put_deck(fake, "P", 3, served_at=_ago(2), delivered=range(3))
+    run = ep.pack_run({"values_snapshot_id": "vsn1:t", "built_at": _ago(2),
+                       "deliveries": [[2, _ago(2)]]},
+                      [_card("P", i, served_at=_ago(2)) for i in range(3)], card_count=3)
+    with fake.eng.begin() as conn:                                  # fails its checksum
+        insert_pack(conn, fake.packs, run_id="P", user_id="u1", league_id="lg",
+                    served_at=_ago(2), packed=replace(run, checksum="0" * 64))
+    put_deck(fake, "U", 3, served_at=_ago(3), delivered=range(3), league="lg2")
+    put_deck(fake, "R3", 3, served_at=_ago(1), league="lg2", **refresh)
+    out = tmp_path / "served.json"
+    assert blind_grade.main(["served", "--secrets", str(tmp_path / "s.env"), "--user", "u1",
+                             "--league", "lg", "--league", "lg2", "--output", str(out)]) == 0
+    card_set = json.loads(out.read_text())
+    assert shown(card_set) == ["T-g0", "T-g1", "T-g2", "U-g0", "U-g1", "U-g2"]
+    counts = {"calibration_refresh": 3, "pack_integrity": 1, "withdrawal_conflict": 0}
+    assert card_set["skipped_decks_by_reason"] == counts
+    assert json.loads(capsys.readouterr().out)["skipped_decks_in_lookback_by_reason"] == counts
+
+
 def test_a_league_without_a_gradeable_deck_is_named_not_silent(prod):
     """#423 QA P3: a league with no Trades deck in SERVED_LOOKBACK yields no
     cards, and the CardSet names it rather than leaving a silent zero."""
@@ -270,7 +302,7 @@ def test_a_league_whose_deck_yields_no_gradeable_card_is_named(prod, tmp_path, c
     assert json.loads(capsys.readouterr().out) == {
         "cards": 0, "leagues": 2, "skipped_no_row": 3, "leagues_without_deck": ["empty-league"],
         "leagues_with_no_cards": ["lg"],
-        "skipped_decks_by_reason": {"calibration_refresh": 0, "pack_integrity": 0,
+        "skipped_decks_in_lookback_by_reason": {"calibration_refresh": 0, "pack_integrity": 0,
                                     "withdrawal_conflict": 0}}
 
 
