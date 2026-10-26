@@ -127,6 +127,7 @@ in its featured-offer ordering. See [release evidence](plans/owner-v2-bilateral/
   - [Paged trade responses (E2) — `backend/server.py`, DB-seeded](#paged-trade-responses-e2-backendserverpy-db-seeded)
   - [S0 serve rules (roster check) — `backend/server.py`, DB-seeded](#s0-serve-rules-roster-check--backendserverpy-db-seeded)
   - [First-page store (P1, flag `trade.first_page_store`) — `backend/server.py`, DB-seeded](#first-page-store-p1-flag-tradefirst_page_store--backendserverpy-db-seeded)
+  - [Paywall enforcement kill knob — `backend/entitlements.py`, DB-seeded](#paywall-enforcement-kill-knob-backendentitlementspy-db-seeded)
   - [Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded](#consensus-seed-blend-145148-backenddata_loaderpy-db-seeded)
   - [Trade engine v2 (Tier 1) — `trade_service._DEFAULT_CFG`](#trade-engine-v2-tier-1-trade_service_default_cfg)
   - [Tier 2 — marginal valuation + outlook blend](#tier-2-marginal-valuation-outlook-blend)
@@ -446,13 +447,13 @@ Both are **zero-auth** public-read imports; no credentials table, no encryption 
 
 ## Flags — Monetization platform (ships dark; [foundation](plans/monetization/00-platform-foundation.md), [plan index](plans/monetization/README.md))
 
-One flag per monetization strategy — each independently flippable, ALL default false. **Rollout order** (foundation §1): `monetize.entitlements` first in observe mode (logs `ENTITLE-OBSERVE`, never blocks — enforcement needs `monetize.paywall` too), then `monetize.founder` + `monetize.paywall` for the TestFlight window, `monetize.pro`/`monetize.season_pass` at launch, `growth.*` after, ads last. The manual-grant admin routes (`/api/admin/entitlements/*`) and billing webhooks are deliberately **unflagged** — operator surface + provider traffic; grants written while dark sit dormant.
+One flag per monetization strategy — each independently flippable, ALL default false. **Rollout order** (foundation §1): `monetize.entitlements` first in observe mode (logs `ENTITLE-OBSERVE`, never blocks — enforcement needs `monetize.paywall` **and** model_config [`paywall_enforce_enabled`](#paywall-enforcement-kill-knob-backendentitlementspy-db-seeded) = 1 too), then `monetize.founder` + `monetize.paywall` for the TestFlight window, `monetize.season_pass` at launch (`monetize.pro` is retired, see its row), `growth.*` after, ads last. The manual-grant admin routes (`/api/admin/entitlements/*`) and billing webhooks are deliberately **unflagged** — operator surface + provider traffic; grants written while dark sit dormant.
 
 | Flag | Default | Gates |
 |---|---|---|
-| `monetize.entitlements` | false | Master: entitlement checks become active (`entitlements.check_pro`). Off = every user implicitly pro. On without `monetize.paywall` = observe mode. |
-| `monetize.paywall` | false | Purchase UI surfaces (mobile + web) AND the enforce half of `check_pro` (both flags on → 402 on gated routes). |
-| `monetize.pro` | false | Pro subscription SKUs purchasable + Pro gate list ([plan](plans/monetization/pro-subscription/prd.md)). |
+| `monetize.entitlements` | false | Master: entitlement checks become active (`entitlements.check_pro`). Off = every user implicitly pro. On without the full enforce condition (see `monetize.paywall`) = observe mode. |
+| `monetize.paywall` | false | Purchase UI surfaces (mobile + web) AND one of the three legs of `check_pro`'s enforce condition: **enforce = `monetize.entitlements` ∧ `monetize.paywall` ∧ model_config `paywall_enforce_enabled` == 1** → 402 on gated routes. Entitlements on with either other leg off = observe (log, allow). |
+| `monetize.pro` | false | **Deprecated — not read; retired 2026-10-24; enforcement = entitlements ∧ paywall ∧ `paywall_enforce_enabled`.** The key stays registered (and false) so `config/features.json` still loads; flipping it changes nothing. Was: Pro subscription SKUs purchasable + Pro gate list ([plan](plans/monetization/pro-subscription/prd.md)). |
 | `monetize.season_pass` | false | Year-labeled season SKUs ([plan](plans/monetization/season-pass/prd.md)). |
 | `monetize.founder` | false | Founder Lifetime window — the flag flip IS the window open/close ([plan](plans/monetization/founder-lifetime/prd.md)). |
 | `monetize.affiliate` | false | Affiliate placements + partner registry ([plan](plans/monetization/affiliate/prd.md)); per-partner enables live in the (future) `config/affiliates.json`. |
@@ -469,6 +470,11 @@ One flag per monetization strategy — each independently flippable, ALL default
 | `marketplace.publisher_sets` | false | Publisher IAP + subscriber account-linking (phase 3). |
 | `marketplace.contributor_sales` | false | Contributor credit-priced sales (phase 4). |
 | `marketplace.cash_payouts` | false | Stripe Connect cash-out rung (phase 5). |
+
+**Billing projector safety (`entitlements._project`, 2026-10-24; source: head-eng's monetization-day1 feasibility §2 + its 2026-10-24 addendum, Product spec #393).** Unflagged, like the webhooks:
+- **Sandbox cap.** RevenueCat events with `environment: SANDBOX` (App Review, TestFlight) still project, so a reviewer's purchase unlocks, but `expires_at = min(payload expiry, now + 24 h)`; a missing expiry becomes now + 24 h, so no sandbox grant is ever perpetual. The RENEWAL upsert and the BILLING_ISSUE grace extension stay inside the cap. Sandbox writes carry `granted_by = "sandbox:<event_id>"`. Production events are uncapped.
+- **Sandbox and production are separate lanes.** A row whose `granted_by` starts with `sandbox:` is a sandbox row; every other billing row (a production or Stripe event id, or NULL) is a production row. Every projector path (activating upsert, EXPIRATION/REFUND, BILLING_ISSUE grace, TRANSFER, alias re-key) only reads and writes rows in its own event's lane. So a sandbox event **never** modifies, extends, shortens, deactivates, re-keys or transfers a production row: a user holding a real founder lifetime or annual who buys in sandbox gets a second, sandbox row for the same product, and the production row is untouched. Production events likewise leave sandbox rows alone (they lapse within 24 h). Resolution reads both lanes, so an unexpired sandbox row still grants pro (App Review and TestFlight unlock), and a production row is never weakened. No schema or `source` change: the lane is the `granted_by` tag.
+- **Perpetual-grant guard.** An activating event with no expiry is refused unless the product maps to `founder_iap`: no row is written (and an existing row is never made perpetual), and the ledger row's `process_error` reads `perpetual_grant_refused: …`. This closes the non-renewing Season Pass hole. A production founder lifetime purchase still grants perpetually; tips still grant nothing. Stripe events are exempt: that projector reads no expiry by design and ends access on `customer.subscription.deleted`.
 
 ## Flags — App-teardown remediation (2026-07, branch `teardown-remediation` — all dark)
 
@@ -907,6 +913,12 @@ Read through `_deck_cfg` only while the store is on (`trade_prefetch_remaining` 
 | `trade_prefetch_remaining` | 50.0 | Served as `prefetch_remaining` on paged `/api/trades/generate` and `/api/trades/status` responses: the client requests the next page when this many ready cards remain (at least one full page ahead, U3). Seeded at 50 (was 30) per head-eng ruling 10's sizing: a 44-card swipe burst at 0.4 s/card plus the prefetch round trip must not reach the end of the buffer. Clamped to 1–200; with no `model_config` row the code default is also 50. |
 | `trade_page_store_evict_days` | 30.0 | The cleanup loop deletes rows whose `last_served_at` (or `built_at`, never served) is older than this. Clamped to 1–3650. |
 | `trade_page_store_max_bytes` | 262144000.0 | Then, while `SUM(stored_bytes)` exceeds this (250 MB, scope §7), it deletes least recently used rows. Both passes are bounded to 500 rows per tick. |
+
+### Paywall enforcement kill knob — `backend/entitlements.py`, DB-seeded
+
+| Key | Default | Meaning |
+|---|---|---|
+| `paywall_enforce_enabled` | 0.0 (**OFF**) | The deploy-free third leg of Pro enforcement: `entitlements.check_pro` blocks (the gated route returns 402) only when `monetize.entitlements` ∧ `monetize.paywall` ∧ this knob == **exactly 1**. Read **live on every gated request** through `database.get_config()` (no cache, no `reload_config()` needed, every worker sees it), so **set 0 to kill enforcement without a deploy**: gated routes drop back to observe (`ENTITLE-OBSERVE` log, allow). A missing row or a failed read is **0**, not enforcing: the inline fallback matches the seed ([G-064](../living-memory/GOTCHAS.md)). |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 

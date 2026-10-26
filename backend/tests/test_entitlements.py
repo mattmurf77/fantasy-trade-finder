@@ -184,6 +184,10 @@ def test_check_pro_observe_logs_never_blocks(eng):
 
 
 def test_check_pro_enforces_with_both_flags(eng):
+    # Enforce needs the paywall_enforce_enabled knob at 1 too (2026-10-24).
+    with eng.begin() as conn:
+        conn.execute(insert(db_module.model_config_table).values(
+            key="paywall_enforce_enabled", value=1.0))
     both = _flags("monetize.entitlements", "monetize.paywall")
     with patch.object(entl, "is_enabled", both):
         assert entl.check_pro(USER, "/api/x") is False
