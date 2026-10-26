@@ -39,6 +39,7 @@
     "test:espn-connect-clear": "node tests/check-espn-connect-clear.js",
     "test:espn-cookies": "node tests/check-espn-cookies.js",
     "test:espn-nav-policy": "node tests/check-espn-nav-policy.js",
+    "test:espn-signin-flag": "node tests/check-espn-signin-flag.js",
     "test:espn-wrong-account": "node tests/check-espn-wrong-account.js",
     "test:fairness-default": "node tests/check-fairness-default.js",
     "test:feedback-badge": "node tests/check-feedback-badge.js",

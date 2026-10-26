@@ -113,12 +113,18 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // and platform-agnostic.
   const platformOptionsFlag = useFlag('landing.platform_options');
   const espnLinkOn = useFlag('espn.link');
+  // `espn.signin` hides ONLY this ESPN entry chip (Settings → link ESPN league
+  // and MFL sign-in stay on). useFlag is `!!flags[key]`, so a server that
+  // doesn't send the key yet reads false here: the chip stays hidden until
+  // the server flag ships — the fail-safe direction, intended. Deliberately
+  // absent from LAUNCHED_FLAG_DEFAULTS: a server `false` must never paint it.
+  const espnSignInOn = useFlag('espn.signin');
   const mflLinkOn = useFlag('mfl.link');
   const [entryPlatform, setEntryPlatform] =
     useState<'sleeper' | EntryPlatformIntent>('sleeper');
   const platformChips: Array<'sleeper' | EntryPlatformIntent> = [
     'sleeper',
-    ...(espnLinkOn ? (['espn'] as const) : []),
+    ...(espnLinkOn && espnSignInOn ? (['espn'] as const) : []),
     ...(mflLinkOn ? (['mfl'] as const) : []),
   ];
   // A single chip is no choice — hide the row unless ≥2 platforms are live.
@@ -130,12 +136,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // renders.
   useEffect(() => {
     if (
-      (entryPlatform === 'espn' && !espnLinkOn) ||
+      (entryPlatform === 'espn' && !(espnLinkOn && espnSignInOn)) ||
       (entryPlatform === 'mfl' && !mflLinkOn)
     ) {
       setEntryPlatform('sleeper');
     }
-  }, [entryPlatform, espnLinkOn, mflLinkOn]);
+  }, [entryPlatform, espnLinkOn, espnSignInOn, mflLinkOn]);
 
   // V2 (D-164): which entry-mode link sheet is open. One at a time — iOS
   // won't stack sibling RN Modals (#266 class).

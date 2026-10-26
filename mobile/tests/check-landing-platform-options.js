@@ -10,7 +10,8 @@
 //      `landing.platform_options` — losing either gate either strands the
 //      row on the P2.6 layout it was never designed for, or removes the
 //      deploy-free revert lever.
-//   2. The ESPN/MFL chips are individually gated on `espn.link` / `mfl.link`,
+//   2. The ESPN/MFL chips are individually gated on `espn.link` / `mfl.link`
+//      (ESPN additionally on `espn.signin` — see check-espn-signin-flag.js),
 //      and a de-flagged selection falls back to Sleeper — otherwise flipping
 //      a platform flag off strands the user on a chip that renders nothing.
 //   3. The Apple success branches forward `platformIntent` to BOTH
@@ -79,12 +80,12 @@ assert(
   'ESPN/MFL chips read espn.link / mfl.link',
 );
 assert(
-  /\.\.\.\(espnLinkOn \? \(\['espn'\] as const\) : \[\]\)/.test(signIn) &&
+  /\.\.\.\(espnLinkOn && espnSignInOn \? \(\['espn'\] as const\) : \[\]\)/.test(signIn) &&
     /\.\.\.\(mflLinkOn \? \(\['mfl'\] as const\) : \[\]\)/.test(signIn),
   'chip list conditions each platform on its flag',
 );
 assert(
-  /\(entryPlatform === 'espn' && !espnLinkOn\)[\s\S]{0,120}\(entryPlatform === 'mfl' && !mflLinkOn\)[\s\S]{0,80}setEntryPlatform\('sleeper'\)/.test(signIn),
+  /\(entryPlatform === 'espn' && !\(espnLinkOn && espnSignInOn\)\)[\s\S]{0,120}\(entryPlatform === 'mfl' && !mflLinkOn\)[\s\S]{0,80}setEntryPlatform\('sleeper'\)/.test(signIn),
   'de-flagged selection falls back to Sleeper',
 );
 

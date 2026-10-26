@@ -1,3 +1,31 @@
+## 2026-10-27 — `espn.signin` (client half): the flag hides only the ESPN chip on the sign-in platform picker
+
+Client half only, for the 11-06 binary; the server half (flag registered in `config/features.json` default `true`, 404 on the ESPN entry route) is a separate PR and nothing under `backend/` or `config/` is touched here. D-056: `FTF_SKIP_SIM_GATE=1` posture; no simulator, no Maestro. The evidence is the structural pin, the code-walk and the TestFlight checklist below. Branch `feat/espn-signin-flag-client`.
+
+- **Change (`SignInScreen.tsx`):** `const espnSignInOn = useFlag('espn.signin')` next to `espnLinkOn`. The ESPN chip is in `platformChips` only when `espnLinkOn && espnSignInOn`, and the de-flag fallback (selected ESPN chip falls back to Sleeper) now also fires when `espn.signin` goes off. The MFL chip is untouched.
+- **Missing flag reads false:** `useFlag` is `!!flags[key]` (`useFeatureFlags.ts:210`). `espn.signin` is deliberately NOT in `LAUNCHED_FLAG_DEFAULTS` (`:45`), so until the server sends `true` the ESPN chip is hidden. That is the fail-safe direction, per platforms-eng: a server `false` must never paint the chip, not even for a frame on a first boot. `landing.platform_options` is not in that map either, so the whole chip row is hidden on a first boot anyway. A cached flag map from the previous binary also lacks the key until the cold-start fetch lands, so the chip appears once it does.
+- **Pin:** new `mobile/tests/check-espn-signin-flag.js` (15 checks, `npm run test:espn-signin-flag`), covering:
+  1. the ESPN chip is behind both `espn.link` and `espn.signin`;
+  2. the MFL chip depends on `mfl.link` alone;
+  3. the fallback fires on either ESPN flag, leaves MFL alone, and `espnSignInOn` is an effect dep;
+  4. `espnSignInOn` has no other use in SignIn, and `espn.signin` appears nowhere else in `mobile/src`;
+  5. `<EspnLinkSheet entry>` is mounted only by SignIn;
+  6. `LAUNCHED_FLAG_DEFAULTS` has no `espn.signin` key.
+  - The two `check-landing-platform-options.js` assertions that encoded the old chip line and old fallback were updated to the new text; they went red on the edit and green after.
+- **Sabotage, each red then restored** (six runs): drop `espnSignInOn` from the chip gate → claim 1 red; `mflLinkOn && espnSignInOn` on the MFL chip → claims 2 and 4 red; fallback back to `!espnLinkOn` → claim 3 red; Settings reads `espn.signin` → claim 4 red; `entry` added to LeaguePicker's `EspnLinkSheet` → claim 5 red; `'espn.signin': true` added to `LAUNCHED_FLAG_DEFAULTS` → claims 4 and 6 red.
+- **Checks:** `npx tsc --noEmit` → exit 0. `scripts/testid-lint.sh` → OK. All 118 `mobile/tests/check-*.js` suites → 0 failed (117 existing + the new one).
+- **Code-walk:**
+  - Chip row: `SignInScreen.tsx:127` includes `'espn'` only for `espnLinkOn && espnSignInOn`; `platformPickerShown` (`:131`) needs ≥2 chips, so with ESPN off the row is Sleeper · MFL.
+  - Stale selection: a selected ESPN chip that is withdrawn mid-session returns to Sleeper (`:139`, deps `:144`), so the user is never left on the ESPN panel with no chip.
+  - Only entry mount: the one sessionless `<EspnLinkSheet entry>` is `SignInScreen.tsx:888`, opened only from the panel button (`:699`), which renders only under `nonSleeperEntry` (`:133`, a selected non-Sleeper chip). Gating the chip therefore gates the sheet. `RootNav`'s `platformIntentParams` produces `espnLink` only from a selected chip, and that param opens the signed-in (non-entry) sheet on LeaguePicker (`:175`).
+  - Unaffected (no `espn.signin` reference): Settings → link ESPN league (`SettingsScreen.tsx:223`, `:811`, still `espn.link`); LeaguePicker's `EspnLinkSheet` (`:728`); MFL sign-in (`PlatformLinkSheet`, `mfl.link`).
+- **Manual TestFlight checklist (the only runtime evidence this gets; needs the server flag and a build with this change):**
+  1. With `espn.signin` on (and `espn.link`, `mfl.link`, `landing.platform_options` on), signed out: the sign-in screen shows the Sleeper, ESPN and MFL chips; tapping ESPN shows the ESPN panel and its button opens the sign-in sheet.
+  2. Flip `espn.signin` off, force-quit and relaunch signed out: once the cold-start flag fetch lands, only Sleeper and MFL chips show (a map cached while it was on can paint the ESPN chip until then, which is the same for every flag). On a fresh install, with no cached map, the ESPN chip never appears.
+  3. With it still off, signed in: Settings → link ESPN league still opens LeaguePicker with the ESPN sheet and the link flow completes.
+  4. With it still off, signed out: MFL chip → MFL sign-in completes through to the league picker.
+- **Not covered:** the flag's presence in `config/features.json` and the route 404 (server PR); `docs/config-reference.md` rides with that PR.
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.
