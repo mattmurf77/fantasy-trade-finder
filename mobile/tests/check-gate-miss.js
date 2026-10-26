@@ -203,25 +203,28 @@ process.on('exit', () => {
       'it outranks "Looking for trades…" (and the first-run skeleton)');
     ok(/next\.wait_reason !== job\.wait_reason/.test(code), 'the legacy poller applies a wait_reason change on its own');
   });
-  await check('2c. the copy: the placeholder keys, each marked; no "Searching…", no "Finding more", no time', () => {
+  await check('2c. the copy: marketing-lead\'s final trades.gate.* (§6 addendum 5), no placeholder marks; no "Searching…", no "Finding more", no time', () => {
     const want = {
       GATE_ROSTER_CHECK_FAILED_TITLE: "Couldn't confirm current rosters",
-      GATE_ROSTER_CHECK_FAILED_LINE: "We couldn't check rosters with your league's platform. Try again.",
+      GATE_ROSTER_CHECK_FAILED_LINE: "The roster check didn't go through.",
       GATE_ROSTER_CHECK_RETRY: 'Retry',
-      GATE_ROSTER_CHECK_WAIT: "Checking current rosters with your league's platform…",
+      GATE_ROSTER_CHECK_RETRY_A11Y: 'Retry the roster check',
+      GATE_ROSTER_CHECK_WAIT: "Checking your league's current rosters…",
     };
+    ok(!/COPY: placeholder, marketing-lead \(trades\.gate\.\*\)/.test(states), 'no trades.gate.* placeholder marks remain');
     for (const [name, text] of Object.entries(want)) {
-      const m = new RegExp(`(// COPY: placeholder, marketing-lead \\(trades\\.gate\\.\\*\\)\\n)?export const ${name} = (["'])(.*?)\\2;`).exec(states);
+      const m = new RegExp(`export const ${name} = (["'])(.*?)\\1;`).exec(states);
       ok(m, `${name} not found`);
-      const actual = m[3];
-      // The rules run on the shipped string (whatever it says), then the placeholder.
+      const actual = m[2];
+      // The rules run on the shipped string (whatever it says), then the final copy.
       ok(!/search(ing)?…|searching|finding more|find more/i.test(actual), `${name}: no Searching / Finding more (${actual})`);
       ok(!/\d|second|minute|moment|soon|few/i.test(actual), `${name}: no timing promise (${actual})`);
-      ok(m[1], `${name}: marked as a placeholder for marketing-lead`);
-      eq(actual, text, `${name}: the placeholder`);
+      ok(!/\bwe\b|sleeper|espn|mfl|fleaflicker|platform|trade/i.test(actual), `${name}: no "we", no platform, no promise of trades (${actual})`);
+      eq(actual, text, `${name}: marketing-lead's final copy`);
     }
     ok(/testID="trades\.gate-wait"/.test(states) && /testID="trades\.gate-error"/.test(states)
-      && /testID="trades\.gate-error\.retry"\s*label=\{GATE_ROSTER_CHECK_RETRY\}/.test(states), 'testIDs');
+      && /testID="trades\.gate-error\.retry"\s*label=\{GATE_ROSTER_CHECK_RETRY\}\s*accessibilityLabel=\{GATE_ROSTER_CHECK_RETRY_A11Y\}/.test(states),
+      'testIDs, and Retry speaks its own label');
   });
   await check('2d. the gate cards take no navigation or deck props: Back stays the header\'s', () => {
     ok(/export function GateWaitCard\(\{ minHeight \}: \{ minHeight\?: number \| null \}\)/.test(states), 'wait: minHeight only');
