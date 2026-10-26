@@ -273,6 +273,8 @@ def restart():
     server._deck_withdrawn_cache.clear()
     server._deck_pack_states.clear()
     server._deck_live_stamped.clear()
+    server._deck_held.clear()                              # U4: a new process held none of them
+    server._deck_evicted_at.clear()
 
 
 def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_every_card(deferred):
@@ -1255,12 +1257,6 @@ def copy_db(engine, drop_impressions=()):
     return other
 
 
-def a_new_process(monkeypatch):
-    """The deploy: this process started after the deliveries so far."""
-    from datetime import datetime, timezone
-    monkeypatch.setattr(server, "_PROCESS_STARTED_AT", datetime.now(timezone.utc).isoformat())
-
-
 def cleanup_ticks(monkeypatch, n):
     """Run the real _cleanup_loop for n ticks (its sleep returns at once)."""
     import time as real_time
@@ -1291,27 +1287,47 @@ def evict(monkeypatch, job_id):
     assert job_id not in server._trade_jobs
 
 
-@pytest.mark.parametrize("how, cause", [("restart", "restart_split"), ("eviction", "evicted_split"),
-                                        ("eviction_unnamed", "other")])
-def test_u4_a_card_past_the_stored_90_viewed_after_its_job_left_is_a_cause_coded_miss(
+def an_old_instance_delivers(job_id, last, at):
+    """A deploy overlap: the old instance, still serving, records a page
+    boundary on the deck's pack after this (new) process started."""
+    state = server._load_pack_state(job_id, UID)
+    state.run["deliveries"] = server._merge_deliveries(state.run["deliveries"], [[last, at]])
+    assert server._deck_pack_commit(job_id, state)
+    server._deck_pack_states.clear()
+
+
+@pytest.mark.parametrize("how, cause", [
+    ("restart", "restart_split"), ("deploy_overlap", "restart_split"), ("re_fork", "restart_split"),
+    ("eviction", "other"), ("eviction_named", "evicted_split"), ("held_here", "other")])
+def test_u4_a_card_past_the_stored_pages_missing_its_snapshot_is_a_cause_coded_miss(
         deferred, monkeypatch, caplog, how, cause):
-    """U4-R2/R5: the job is lost after a delivery past 90, then the card is
-    viewed. Its row comes from the packed card (the U2 id joins the outcome)
-    and the miss is counted by cause: after a restart (this process started
-    after the delivery) restart_split; after the job's eviction here
-    evicted_split (models-lead's ruling pending); with that cause turned off
-    (_EVICTED_SPLIT_NAMED False) the eviction is other, logged at error."""
+    """U4-R2/R5, causes by provenance (#428 QA (d)). A card past the stored
+    90 is viewed with no snapshot left; its row comes from the packed card
+    (the U2 id joins the outcome) and the miss is counted by cause:
+    - restart, a deploy overlap (the old instance delivered page 4 after this
+      process started) and a re-fork (a fresh worker): this process never
+      held the deck, so restart_split;
+    - an eviction here: other while _EVICTED_SPLIT_NAMED is off (its default
+      until models-lead rules), evicted_split with it on;
+    - a deck this process built and still holds: other (a defect), at error."""
+    from datetime import datetime, timezone
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120)
     status(client, job_id, 0)
-    status(client, job_id, 90)                             # the live job's page past the stored 90
-    if how == "restart":
+    if how != "deploy_overlap":
+        status(client, job_id, 90)                         # the live job's page past the stored 90
+    if how in ("restart", "re_fork"):
+        restart()                                          # a new process (or worker): no jobs, no ledgers
+    elif how == "deploy_overlap":
         restart()
-        a_new_process(monkeypatch)
-    else:
-        if how == "eviction_unnamed":
-            monkeypatch.setattr(server, "_EVICTED_SPLIT_NAMED", False)
+        an_old_instance_delivers(job_id, 119, datetime.now(timezone.utc).isoformat())
+    elif how.startswith("eviction"):
+        monkeypatch.setattr(server, "_EVICTED_SPLIT_NAMED", how == "eviction_named")
         evict(monkeypatch, job_id)
+    else:                                                  # held here: its snapshot is lost in process
+        ev = server._trade_jobs[job_id]["evidence"]
+        with ev.lock:
+            ev.rows.pop(contract.card_impression_id(job_id, 95))
     with caplog.at_level("WARNING"):
         view(job_id, 95)
     got = by_index(engine)[(0, 95)]
@@ -1322,30 +1338,65 @@ def test_u4_a_card_past_the_stored_90_viewed_after_its_job_left_is_a_cause_coded
         server._PACK_ATTRIBUTION_COLUMNS) - {"served_at"} | {"page_store"}
     assert contract.FROZEN_INPUT_KEYS & set(cards[95]) <= set(features)
     assert run["upgrade_misses"] == {**NO_MISSES, cause: 1}
-    assert json.loads(got["features_json"])["give_value"] == cards[95]["give_value"]
+    assert features["give_value"] == cards[95]["give_value"]
     assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
     [line] = [r for r in caplog.records if "upgrade miss cause=" in r.getMessage()]
-    assert f"cause={cause} job={job_id} index=95" in line.getMessage()
+    assert f"cause={cause} job={job_id} index=95 stored=90" in line.getMessage()
     assert line.levelname == ("ERROR" if cause == "other" else "WARNING")
 
 
 def test_u4_the_classification_hook():
-    start, evicted = "2026-10-27T00:00:00+00:00", "2026-10-27T02:00:00+00:00"
-    before, after = "2026-10-26T23:00:00+00:00", "2026-10-27T03:00:00+00:00"
     with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(server, "_PROCESS_STARTED_AT", start)
-        mp.setattr(server, "_deck_evicted_at", {"gone": evicted})
+        mp.setattr(server, "_deck_held", {"held": None, "gone": None})
+        mp.setattr(server, "_deck_evicted_at", {"gone": "2026-10-27T02:00:00+00:00"})
         cause = server._upgrade_miss_cause
-        assert cause("d", 95, before, after) == "restart_split"
-        assert cause("d", 89, before, after) == "other"                 # a stored card's index
-        assert cause("d", 95, None, after) == "other"                   # never delivered
-        assert cause("d", 95, after, after) == "other"                  # this process sent it
-        assert cause("d", 95, before, "2026-10-26T23:30:00+00:00") == "other"   # outcome before start
-        assert cause("gone", 95, "2026-10-27T01:00:00+00:00", after) == "evicted_split"
-        assert cause("gone", 95, "2026-10-27T02:30:00+00:00", after) == "other"  # sent after eviction
-        assert cause("gone", 89, "2026-10-27T01:00:00+00:00", after) == "other"
-        mp.setattr(server, "_EVICTED_SPLIT_NAMED", False)
-        assert cause("gone", 95, "2026-10-27T01:00:00+00:00", after) == "other"
+        assert cause("elsewhere", 95, 90) == "restart_split"           # another process built it
+        assert cause("elsewhere", 89, 90) == "other"                   # within the stored pages
+        assert cause("elsewhere", 60, 60) == "restart_split"           # the deck's own count
+        assert cause("held", 95, 90) == "other"                        # built here, still here
+        assert cause("gone", 95, 90) == "other"                        # evicted: off by default
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
+        assert cause("gone", 95, 90) == "evicted_split"
+        assert cause("gone", 89, 90) == "other"
+
+
+def test_u4_the_stored_count_is_the_decks_own_never_a_constant(deferred, monkeypatch):
+    """#428 QA (c): the deck stored 90 cards. Lowering trade_pages_stored
+    afterwards (to 2 pages, 60 cards) never turns its restart split into
+    other, with its page row or, rebuilt away, from its pack's stored_count."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    assert unpack(pack_of(engine, job_id))[0]["stored_count"] == 90
+    restart()
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_pages_stored", 2.0)
+    assert server._trade_pages_stored() * server._trade_page_size() == 60
+    view(job_id, 95)                                       # its page row: card_count 90
+    from sqlalchemy import delete
+    with engine.begin() as conn:                           # a rebuild replaced its page row
+        conn.execute(delete(db_module.trade_page_store_table))
+    server._deck_pack_states.clear()
+    view(job_id, 100)                                      # the pack's stored_count, 90
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 2}
+    assert server._deck_stored_count(None, {}) == 60       # nothing known: the knobs now
+    assert server._deck_stored_count(None, {"stored_count": 90}) == 90
+    assert server._deck_stored_count(75, {"stored_count": 90}) == 75
+
+
+def test_u4_restart_splits_assume_one_worker_per_instance():
+    """models-eng: "this process never held the deck" means a restart only
+    with one gunicorn worker per instance (no --preload, which would share a
+    master's import)."""
+    import yaml
+    config = yaml.safe_load((REPO / "render.yaml").read_text())
+    [web] = [svc for svc in config["services"] if svc.get("type") == "web"]
+    command = web["startCommand"].split()
+    message = ("restart_split's provenance rule assumes one worker per instance: add a "
+               "cross_worker cause to _upgrade_miss_cause (models-eng's reader is cause-generic) "
+               "before raising --workers")
+    assert command[command.index("--workers") + 1] == "1", message
+    assert "--preload" not in command and not any(c.startswith("--preload") for c in command), message
 
 
 def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(deferred, monkeypatch):
@@ -1363,8 +1414,7 @@ def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(defe
     job_id, *_ = packed_deck(120)
     for cursor in (0, 30, 60, 90):
         status(client, job_id, cursor)
-    restart()
-    a_new_process(monkeypatch)
+    restart()                                              # a new process: never held the deck
     for index, action in ((50, "like"), (91, "like"), (95, "pass"), (99, "viewed"), (104, "like")):
         view(job_id, index, action)
     assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 4}

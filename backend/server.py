@@ -4835,6 +4835,8 @@ def _deck_pack_input(ev: _DeckEvidence):
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False,
            "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)}
+    if ev.stored_count is not None:       # U4: the deck's own stored count (#428 QA (c))
+        run["stored_count"] = ev.stored_count
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
         run["deck_source"] = ev.deck_source
     return ev.pack_cards, rows, ev.served_at, run
@@ -5103,7 +5105,7 @@ def _deck_evidence_upgrade(impression_id: str, acting_user_id: str) -> bool:
             _log_upgrade_past_deliveries(deck_job_id, index, last)
         if row is None:
             return _deck_upgrade_from_pack(ev.pack, deck_job_id, impression_id, index, now,
-                                           ev_for_header=ev)
+                                           ev_for_header=ev, stored_count=ev.stored_count)
         from . import database as _db
         _db.save_deck_evidence([row], diagnostics=diag, deck_job_id=deck_job_id)
         with ev.lock:
@@ -5143,7 +5145,8 @@ def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, ind
     stored = _DeckEvidence.from_row(user_id, deck_job_id, page, None) if page else None
     held = stored.rows.get(impression_id) if stored is not None else None
     if held is None:
-        return _deck_upgrade_from_pack(state, deck_job_id, impression_id, index, now)
+        return _deck_upgrade_from_pack(state, deck_job_id, impression_id, index, now,
+                                       stored_count=page["card_count"] if page else None)
     card = _deck_pack_card(state, index)
     row = {**_unpack_row(held[1]), "evidence_tier": "viewed", "served_at": card["served_at"],
            "delivered_at": state.delivered_at(index) or now}
@@ -5159,33 +5162,44 @@ def _deck_pack_card(state, index: int) -> dict:
 
 
 # U4 (models-lead addendum A, R1/R2): a display past snapshot retention is
-# impossible, with one named exception, restart_split: a card past the stored
-# first 90, delivered before a process restart and viewed after it. It is
+# impossible, with one named exception, restart_split: a card past the deck's
+# stored pages, delivered before a process restart and viewed after it. It is
 # counted per run in the pack's run metadata (upgrade_misses, an object with
 # every cause, always present); its outcome joins the packed card by
 # impression_id and it scores normally. Any other miss is a defect: "other",
-# logged at error level. The process start is recorded at import.
-# evicted_split (trades-eng 2026-10-26, models-lead's ruling pending): the same
-# card when its job left this process by eviction (4 h) rather than a restart.
-# Eval reads any key but "other" as a named cause. If models-lead declines it,
-# _EVICTED_SPLIT_NAMED = False sends those misses to "other".
+# logged at error level. The cause comes from provenance, never a clock
+# (#428 QA (d): an import-time stamp called a deploy overlap's or a re-fork's
+# misses "other"): which decks this process built (_deck_held) and which it
+# evicted (_deck_evicted_at).
+# evicted_split (trades-eng 2026-10-26): the same card when its job left this
+# process by the cleanup loop's eviction (4 h). Off until models-lead rules:
+# while _EVICTED_SPLIT_NAMED is False those misses are "other". Eval reads any
+# key but "other" as a named cause.
 _UPGRADE_MISS_CAUSES = ("restart_split", "evicted_split", "other")
-_RESTART_SPLIT_FROM_INDEX = 90             # the stored first 90 (3 pages of 30)
-_PROCESS_STARTED_AT = datetime.now(timezone.utc).isoformat()
-_EVICTED_SPLIT_NAMED = True
-_DECK_EVICTED_MAX = 4096
+_EVICTED_SPLIT_NAMED = False
+_DECK_LEDGER_MAX = 16384
+_deck_held: dict = {}                      # deck_job_id -> None: decks this process built
 _deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+
+
+def _ledger_add(ledger: dict, key: str, value) -> None:
+    while len(ledger) >= _DECK_LEDGER_MAX:
+        ledger.pop(next(iter(ledger)))
+    ledger[key] = value
+
+
+def _note_deck_held(job_id: str) -> None:
+    """A flag-on deck this process built (its job's evidence admitted here)."""
+    _ledger_add(_deck_held, job_id, None)
 
 
 def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     """Under _trade_jobs_lock, as the cleanup loop evicts `job`: a delivered
-    packed deck's eviction time, which _upgrade_miss_cause reads."""
+    packed deck's eviction, which _upgrade_miss_cause reads."""
     ev = job.get("evidence")
     if ev is None or not ev.packed or ev.pack is None:
         return
-    while len(_deck_evicted_at) >= _DECK_EVICTED_MAX:
-        _deck_evicted_at.pop(next(iter(_deck_evicted_at)))
-    _deck_evicted_at[job_id] = datetime.now(timezone.utc).isoformat()
+    _ledger_add(_deck_evicted_at, job_id, datetime.now(timezone.utc).isoformat())
 
 
 def _upgrade_misses(run: Mapping) -> dict:
@@ -5195,31 +5209,46 @@ def _upgrade_misses(run: Mapping) -> dict:
     return {cause: int(misses.get(cause) or 0) for cause in _UPGRADE_MISS_CAUSES}
 
 
-def _upgrade_miss_cause(deck_job_id: str, index: int, delivered_at: str | None,
-                        outcome_at: str) -> str:
-    """U4-R2's classification, the one place a miss gets its cause:
-    restart_split iff card_index >= 90 and delivered_at < this process's start
-    <= the first outcome; evicted_split (while _EVICTED_SPLIT_NAMED) iff
-    card_index >= 90 and delivered_at < the job's eviction here <= the first
-    outcome; anything else is other."""
-    if index >= _RESTART_SPLIT_FROM_INDEX and delivered_at is not None:
-        if delivered_at < _PROCESS_STARTED_AT <= outcome_at:
-            return "restart_split"
-        evicted = _deck_evicted_at.get(deck_job_id)
-        if _EVICTED_SPLIT_NAMED and evicted is not None and delivered_at < evicted <= outcome_at:
-            return "evicted_split"
+def _deck_stored_count(known, run: Mapping) -> int:
+    """#428 QA (c): the deck's own stored-page count, never a constant: the
+    page store's (its job's stored_count, else its page row's card_count),
+    else the one its pack recorded at the first write, else the knobs now.
+    Lowering a knob later never turns a restart split into other."""
+    for value in (known, run.get("stored_count")):
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return _trade_pages_stored() * _trade_page_size()
+
+
+def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int) -> str:
+    """U4-R2's classification, the one place a miss gets its cause. A card
+    within the deck's stored pages has a stored snapshot: its miss is other.
+    Past them: evicted_split iff this process evicted the deck (other while
+    _EVICTED_SPLIT_NAMED is off); restart_split iff this process never held
+    the deck's job (another process built it: a restart, a deploy overlap, a
+    re-fork); else other."""
+    # One worker per instance (render.yaml --workers 1, pinned by a test): with
+    # more, add a cross_worker cause here before raising --workers.
+    if index < stored_count:
+        return "other"
+    if deck_job_id in _deck_evicted_at:
+        return "evicted_split" if _EVICTED_SPLIT_NAMED else "other"
+    if deck_job_id not in _deck_held:
+        return "restart_split"
     return "other"
 
 
 def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: int, now: str,
-                            ev_for_header=None) -> bool:
+                            ev_for_header=None, stored_count: int | None = None) -> bool:
     """The upgrade miss (U4's fallback): the card's row built from its packed
     card (its columns, and every other packed key as its features; no assets,
     no valuation), so the outcome still joins it, and the miss counted by
-    cause (`now`: the first outcome's time)."""
+    cause. `stored_count`: the deck's stored-page count, when the caller
+    knows it (_deck_stored_count)."""
     from . import database as _db
     card = _deck_pack_card(state, index)
-    cause = _upgrade_miss_cause(deck_job_id, index, state.delivered_at(index), now)
+    stored = _deck_stored_count(stored_count, state.run)
+    cause = _upgrade_miss_cause(deck_job_id, index, stored)
     # The packed card is the row's features plus its columns (_pack_card): the
     # inverse keeps every packed key the columns don't hold, so eval reads this
     # row as it reads the packed card (U4-R5's identity on the restart path).
@@ -5244,9 +5273,10 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     else:
         count()
         _deck_pack_commit(deck_job_id, state)
-    line = ("[evidence] upgrade miss cause=%s job=%s index=%d delivered_at=%s process_start=%s "
-            "outcome_at=%s: row from the pack")
-    args = (cause, deck_job_id, index, state.delivered_at(index), _PROCESS_STARTED_AT, now)
+    line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
+            "evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
+    args = (cause, deck_job_id, index, stored, deck_job_id in _deck_held,
+            _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
     if cause == "other":                  # U4-R2: must be zero; it goes back to models-lead
         log.error(line, *args)
     else:
@@ -12922,6 +12952,7 @@ def _kickoff_trade_job(
         # weekly replenishment, F6).
         job["evidence_mode"] = "deferred"
         job["evidence"] = _DeckEvidence(job_id, user_id, _job_write_lease)
+        _note_deck_held(job_id)           # U4: a miss on it here is never a restart's
         # S8: read once, at admission, so a mid-deck flip never mixes modes.
         job["evidence"].packed = is_enabled("trade.packed_evidence")
         job["evidence"].page_store = bool(job.get("page_scope"))
