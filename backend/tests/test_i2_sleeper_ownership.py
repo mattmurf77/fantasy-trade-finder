@@ -162,9 +162,11 @@ def test_team_name_ending_in_s_still_takes_apostrophe_s(client):
     _name("299", "Puka Nacua")
     _name("298", "Nico Collins")
     _member("Chris")
-    r, _, _ = _send(client, ["100"], ["299", "298"])
+    r, fake, _ = _send(client, ["100"], ["299", "298"])
+    assert r.status_code == 422, r.get_data(as_text=True)
     assert r.get_json()["message"] == (
         "Puka Nacua and Nico Collins are no longer on Chris’s roster" + TAIL)
+    fake.assert_not_called()                       # no GraphQL propose
 
 
 def test_unnamed_team_falls_back_to_the_other_manager(client):
@@ -201,11 +203,13 @@ def test_one_missing_name_switches_the_whole_message_to_a_count(client):
 
 def test_unnamed_receive_players_are_counted_with_the_team_name(client):
     _member("Gridiron Gang")
-    r, _, _ = _send(client, ["100"], ["299"])
+    r, fake, _ = _send(client, ["100"], ["299"])
     body = r.get_json()
+    assert r.status_code == 422, r.get_data(as_text=True)
     assert body["message"] == (
         "A player in this trade is no longer on Gridiron Gang’s roster" + TAIL)
     _no_raw_ids(body)
+    fake.assert_not_called()                       # no GraphQL propose
 
 
 def test_unnamed_receive_players_and_unnamed_team(client):
