@@ -59,6 +59,28 @@ shipped (G-031); the emitters ship in #363.
 and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3330-3336`). After the seam,
 `league_offer` means the Offer hand-off alone. Its counts aren't comparable across the seam.
 
+## Seam: #370 (Calibration refresh decks stop emitting)
+
+**What changes at #370's merge** (PR #370, "Trades packed-evidence stage 1"; this change is ungated, with no knob).
+Source: release-lead #370 QA, 2026-10-26; the `server.py` lines below are #370's, from that note.
+- `_pregenerate_grading_targets` (`server.py:27525` on `origin/main`) passes `source="grading_refresh"` (`:29600`).
+- Those jobs **emit no `trades_generated`** (`:11273`, `:9615`) and **write no `trade_impressions`** (`:10995`,
+  `:9575`). Receipts skip them.
+- Their `deck_source` reads `grading_refresh` instead of `replenish`.
+
+**The series break:** the daily `trades_generated` count drops by about one per Calibration target pair on
+pregenerate days. Affected readers: funnel stage 6 (`analytics_queries.py:422`), the deck count (`:699`), and TTFV
+reach and the empty-deck rate (`:967-1029`). **Don't trend these across #370's merge date.** Before the merge,
+Calibration refresh decks counted as `replenish` (the refresh calls `_replenish_deck_for`, `server.py:27545`, which
+sets `source = "replenish"` at `:24142`), so they **can't be separated from real replenish decks in history.**
+
+- **Break date:** `#370 merge date: <to be filled at merge by release-lead's scribe>`
+- **The binding rule still holds:** exactly one `trades_generated` per user-visible deck. A grading deck actually
+  served in Trades still emits, per release-lead's P2-2 fix, which lands before the merge. Calibration-only decks
+  aren't user-visible trade decks, so they correctly emit none (the R3 row above).
+- **No reader filter change is needed** going forward: after the merge no grading-only deck emits, so the readers are
+  correct as written. Pre-merge history can't be corrected; the relabel isn't retroactive.
+
 ## Classes and funnel
 
 - **R1 stays INTENT:** a hand-off tap is a user action.
