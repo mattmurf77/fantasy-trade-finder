@@ -13636,6 +13636,17 @@ def _attach_presession_feedback(sess) -> None:
     is the bearer token, never the username). It never raises: a failure
     here must not fail the verification itself. No analytics event (the
     BL-10 waiver allows no new events).
+
+    What attaches TODAY (release-lead delta QA D): only an in-place verify
+    that actually runs for an unverified session, i.e. POST
+    /api/sleeper/link with a proven token. The other two hooks are
+    defensive and reach no unverified session today:
+      - POST /api/mfl/auth-link sits behind @_gate_unverified_write, which
+        403s every unverified session before the verify;
+      - provider re-auth (/api/auth/<provider>) from an unverified session
+        drops that session and mints a new one with a new token.
+    So pre-verify notes from ESPN/MFL-entry and Apple/Google sessions stay
+    anonymous. The hooks stay, harmless, in case either path changes.
     """
     try:
         token = request.headers.get("X-Session-Token", "")

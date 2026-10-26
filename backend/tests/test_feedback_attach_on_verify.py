@@ -221,6 +221,23 @@ def test_10_attach_never_moves_a_note_that_already_has_an_owner(harness):
     assert row["user_id"] == "someone_else" and row["username"] == "Them"
 
 
+def test_11_mfl_auth_link_never_attaches_for_an_unverified_session(harness):
+    """release-lead delta QA D: the MFL hook is defensive. The route sits
+    behind @_gate_unverified_write, so an unverified session is 403'd before
+    its verify, even with the flag on and MFL accepting the login."""
+    client, engine = harness
+    assert _post(client, TOK_A, "fb-mfl-pre").status_code == 201
+    from backend import mfl_service
+    with patch.object(server, "is_enabled", lambda k: k in ("trade.send_in_sleeper", "mfl.auth_link")), \
+         patch.object(mfl_service, "login", MagicMock(return_value={"cookie": "c"})), \
+         patch.object(mfl_service, "fetch_my_leagues", MagicMock(return_value=[])):
+        r = client.post("/api/mfl/auth-link", headers=_h(TOK_A),
+                        data=json.dumps({"username": "u", "password": "p"}))
+    assert r.status_code == 403 and r.get_json()["error"] == "verification_required"
+    row = _rows(engine)["fb-mfl-pre"]
+    assert row["user_id"] is None and row["session_key"] == _sha(TOK_A)
+
+
 def test_9_every_in_place_verify_site_attaches():
     """Static pin: each in-place `sess["verified"] = True` in server.py is
     followed (within its block) by _attach_presession_feedback(sess). A new
