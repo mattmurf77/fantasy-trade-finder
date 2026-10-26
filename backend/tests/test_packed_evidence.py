@@ -1404,6 +1404,17 @@ def test_u4_the_stored_count_order():
     assert server._deck_stored_count(None, {}) == server._trade_pages_stored() * server._trade_page_size()
 
 
+def test_u4_a_deck_this_process_builds_is_noted_held(deferred, monkeypatch):
+    """The provenance ledger's source: the kickoff notes each flag-on deck it
+    admits, so a miss on it in this process is never a restart_split. A
+    flag-off job carries no evidence and isn't noted."""
+    job_id = run_job()
+    assert server._trade_jobs[job_id]["evidence_mode"] == "deferred" and job_id in server._deck_held
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
+    off = run_job(force_fresh=True)
+    assert off != job_id and off not in server._deck_held
+
+
 def test_u4_restart_splits_assume_one_worker_per_instance():
     """models-eng: "this process never held the deck" means a restart only
     with one gunicorn worker per instance (no --preload, which would share a
