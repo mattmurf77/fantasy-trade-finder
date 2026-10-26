@@ -3671,6 +3671,30 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # older page fall through.
 DECK_PIPELINE_VERSION = 1
 
+# The CI guard for that manual bump: the server.py functions that shape a deck
+# (what cards it holds, their order and their stored content), and the digest
+# of their normalized source (_deck_pipeline_digest: the AST, docstrings
+# stripped, so comment and formatting edits don't move it). A logic edit to any
+# of them fails test_deck_pipeline_digest until DECK_PIPELINE_VERSION is bumped
+# and the digest re-pinned (models-eng reviews).
+DECK_PIPELINE_FUNCTIONS = (
+    "_run_trade_job", "_run_value_core_job",
+    # the candidate pool and injected cards
+    "_inject_owned_picks", "_inject_likes_you_cards",
+    # gates on the candidate set
+    "_evaluate_trade_significance", "_evaluate_deck_rosters", "_evaluate_deck_policy",
+    "_load_presentment_exclusions", "_presentment_need_gate_bypass",
+    "_owner_cards_valid", "_owner_selected_assignment",
+    # order and composition of the served deck (the F-layers, quality, ghosts)
+    "_apply_deck_suppression", "_deck_fatigue_multipliers", "_order_deck",
+    "_deck_value_scores", "_split_exploration_pool", "_apply_exploration_slot",
+    "_apply_first_session_shaping", "_records_in_order",
+    "_ghost_holdout_active", "_is_ghost_card", "_served_cards",
+    # the stored card's content
+    "_stamp_own_standing_offers", "trade_card_to_dict",
+)
+DECK_PIPELINE_DIGEST = "6a8f5746074f70fe"
+
 # The modules whose code decides what cards a deck holds or their order. Their
 # bytes are hashed into every page's engine_version (backend/-relative globs,
 # sorted within each pattern). The reasons per module are in the P1 report and
@@ -3680,6 +3704,7 @@ _ENGINE_CODE_MODULES = (
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "ranking_service.py", "pick_values.py", "pick_slots.py",
+    "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
     "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
@@ -3692,6 +3717,11 @@ _ENGINE_CODE_MODULES = (
     "trade_narrative.py",
 )
 _engine_code_hash_value: str | None = None
+
+# The experiments whose variant changes a deck (experiments.py keys). A stored
+# page carries their digest (_trade_experiment_digest); a page built under one
+# variant never serves after the user's assignment changes.
+_DECK_EXPERIMENT_LAYERS = ("trade.aggression",)
 
 
 def _engine_code_hash_of(root: pathlib.Path) -> str:
@@ -3715,17 +3745,87 @@ def _trade_engine_code_hash() -> str:
     return _engine_code_hash_value
 
 
-def _trade_page_store_enabled() -> bool:
-    """The flag `trade.first_page_store` AND the deploy-free kill knob
-    `first_page_store_enabled` (model_config, default 1). The knob is on at any
-    finite value ≥ 1; 0, a negative, NaN or an unreadable value is off. Either
-    off ⇒ no store read, write, serve or stale mark.
+def _ast_shape(node):
+    """A Python-version-stable form of an AST: node type plus its non-empty
+    fields (3.13's ast.dump hides empty fields that 3.12 shows; CI runs 3.12).
+    Docstrings are already gone; positions are never included."""
+    import ast
+    if isinstance(node, ast.AST):
+        fields = []
+        for name, value in ast.iter_fields(node):
+            shaped = _ast_shape(value)
+            if shaped not in (None, [], ()):
+                fields.append((name, shaped))
+        return [type(node).__name__, fields]
+    if isinstance(node, list):
+        return [_ast_shape(item) for item in node]
+    if isinstance(node, (bytes, complex)) or node is Ellipsis:
+        return repr(node)
+    return node
 
-    Re-enabling (the knob or the flag): set the knob to its previous value + 1.
+
+def _strip_docstrings(tree):
+    import ast
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module))
+                and body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
+            node.body = body[1:] or [ast.Pass()]
+    return tree
+
+
+def _deck_pipeline_digest(names=DECK_PIPELINE_FUNCTIONS, *, source_of=None) -> str:
+    """sha256[:16] over each listed function's normalized source: its AST with
+    docstrings stripped, so comment and formatting edits don't move it."""
+    import ast
+    import inspect
+    import textwrap
+    source_of = source_of or (lambda name: inspect.getsource(globals()[name]))
+    digest = hashlib.sha256()
+    for name in names:
+        tree = _strip_docstrings(ast.parse(textwrap.dedent(source_of(name))))
+        digest.update(name.encode() + b"\0")
+        digest.update(json.dumps(_ast_shape(tree), separators=(",", ":"), default=str).encode()
+                      + b"\0")
+    return digest.hexdigest()[:16]
+
+
+def _trade_experiment_digest(user_id: str) -> str:
+    """sha256[:16] over, for each deck-affecting experiment, the user's
+    assignment: the experiment's layer and version, the variant and its
+    model_overlay. A user who isn't enrolled (the engine off, not running, not
+    targeted, or out of bucket: trade_service's deterministic MD5 bucket) hashes
+    as "fallback", so moving between enrolled and fallback still mismatches.
+    Uses the same evaluation the trade job uses (experiments.variant_overlay)."""
+    from . import experiments as _experiments
+    parts = []
+    for key in _DECK_EXPERIMENT_LAYERS:
+        variant, overlay = _experiments.variant_overlay(user_id, key)
+        if variant is None:
+            parts.append([key, "fallback"])
+            continue
+        running = next((exp for exp in _experiments._load_cache()["running"]
+                        if exp["key"] == key), {})
+        parts.append([key, running.get("layer"), running.get("version"), variant, overlay])
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def _trade_page_store_enabled() -> bool:
+    """On only when all three hold, in order: the flag `trade.first_page_store`;
+    the flag `trade.packed_evidence` (#370's deferred evidence; without it,
+    backing jobs and rebuilds would write build-time evidence that reads as
+    fully exposed under eval rule v3. P1 doesn't register the key, so it reads
+    False until #370 does); and the deploy-free kill knob
+    `first_page_store_enabled` (model_config, default 1), on at any finite
+    value ≥ 1 (0, a negative, NaN or an unreadable value is off). Off ⇒ no
+    store read, write, serve or stale mark.
+
+    Re-enabling (the knob or a flag): set the knob to its previous value + 1.
     It's hashed into every page's config_signature, so each page stored before
     the off period, which missed that period's stale marks, falls through and
     rebuilds."""
-    if not is_enabled("trade.first_page_store"):
+    if not (is_enabled("trade.first_page_store") and is_enabled("trade.packed_evidence")):
         return False
     try:
         value = float(_trade_service_mod._cfg.get("first_page_store_enabled", 1.0))
@@ -3861,7 +3961,8 @@ def _store_trade_page(job_id: str) -> bool:
             "engine_version": _trade_page_engine_version(
                 _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
                 job.get("presentation_capture")),
-            "config_signature": job["request_signature"], "deck_job_id": job_id,
+            "config_signature": job["request_signature"],
+            "experiment_digest": _trade_experiment_digest(user_id), "deck_job_id": job_id,
             "built_at": _db.page_store_iso(built),
             "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
             "card_count": len(cards), "pages_blob": blob, "evidence_blob": None,
@@ -3982,10 +4083,10 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
                       request_signature, presentation_capture, search_id, backing,
                       kick) -> dict | None:
     """§6.2 for /generate `page: 1`. The response body, or None to fall through
-    to today's path: the engine or config moved; the stored cards expired; the
-    current read failed (a failed read can't prove a page fresh, A2); the
-    stored pages don't decode; or the page is stale while a complete, fresh
-    job is in this process (that job is newer).
+    to today's path: the engine, config or the user's deck experiment variants
+    moved; the stored cards expired; the current read failed (a failed read
+    can't prove a page fresh, A2); the stored pages don't decode; or the page
+    is stale while a complete, fresh job is in this process (that job is newer).
 
     `current` is the caller's _trade_current_snapshot(). `backing` is the
     status of the fresh or matching running job for this key in this process,
@@ -4006,6 +4107,9 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
     if (request_signature is None or row["config_signature"] != request_signature
             or row["engine_version"] != engine_now):
         log.info("trade-page %s: blocked (engine or config moved)", row["deck_job_id"])
+        return None
+    if row["experiment_digest"] != _trade_experiment_digest(user_id):
+        log.info("trade-page %s: blocked (experiment variant moved)", row["deck_job_id"])
         return None
     if row["expires_at"] <= _db.page_store_iso(time.time()) or current is None:
         return None

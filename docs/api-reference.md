@@ -548,7 +548,8 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
 ### First-page store (P1, flag `trade.first_page_store`, 2026-10-20)
 
 **Everything in this section applies only while the store is on: the flag
-`trade.first_page_store` (default off) and the kill knob
+`trade.first_page_store` (default off), the flag `trade.packed_evidence`
+(added by #370; it reads off until then) and the kill knob
 `first_page_store_enabled` (default 1).** With either off, paged and unpaged
 responses are exactly the E2 section above
 (`backend/tests/test_trade_page_flag_off.py` pins them byte for byte). The
@@ -597,8 +598,8 @@ decimals. Unpaged requests never read it.
   store response (they belong to the job that ran).
 - **Not served from the store** (today's E2 response, plus
   `prefetch_remaining`): no stored page for the scope; the engine (including
-  the engine modules' code hash and `DECK_PIPELINE_VERSION`) or the request
-  configuration changed since the build; the stored cards have expired; the
+  the engine modules' code hash and `DECK_PIPELINE_VERSION`), the request
+  configuration or the user's deck-experiment variants changed since the build; the stored cards have expired; the
   roster and values read failed (it can't prove the page fresh); or the page is
   stale while a complete, fresh job for it is in this process.
 

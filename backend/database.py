@@ -1177,7 +1177,7 @@ class CompressedJSON(TypeDecorator):
 # per (user, league, format, request_scope): the first trade_pages_stored ×
 # trade_page_size cards of the latest complete organic job, in final served
 # order, plus the stamps the serve compares (roster_fp, values_snapshot_id,
-# engine_version, config_signature). Read and written only by server.py while
+# engine_version, config_signature, experiment_digest). Read and written only by server.py while
 # the store is on (the flag and the first_page_store_enabled knob). user_id is
 # the account deletion/export key
 # (accounts._ADDITIONAL_PRIVATE_TABLES). Upserted by save_trade_page with a
@@ -1197,6 +1197,7 @@ trade_page_store_table = Table("trade_page_store", metadata,
     Column("values_snapshot_id", String,  nullable=False),   # vsn1 at the job's kickoff
     Column("engine_version",     String,  nullable=False),
     Column("config_signature",   String,  nullable=False),   # the job's request signature
+    Column("experiment_digest",  String,  nullable=False),   # the user's deck-affecting experiment variants
     Column("deck_job_id",        String,  nullable=False),
     Column("built_at",           String,  nullable=False),   # ISO UTC, the job's admission
     Column("expires_at",         String,  nullable=False),   # ISO UTC, earliest stored card expiry
@@ -6989,7 +6990,8 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
 _PAGE_STORE_KEY = ("user_id", "league_id", "scoring_format", "request_scope")
 # Replaced on a rebuild. last_served_at survives it: eviction is by use.
 _PAGE_STORE_REPLACED = (
-    "roster_fp", "values_snapshot_id", "engine_version", "config_signature", "deck_job_id",
+    "roster_fp", "values_snapshot_id", "engine_version", "config_signature",
+    "experiment_digest", "deck_job_id",
     "built_at", "expires_at", "card_count", "pages_blob", "evidence_blob", "stored_bytes", "state",
 )
 
