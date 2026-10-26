@@ -1656,3 +1656,61 @@ def test_b4_v5_removes_a_never_delivered_cut_like_an_i1_withdrawal(deferred, pre
     assert 40 not in [c.card_index for c in kept]
     assert [c.position for c in kept] == list(range(len(kept)))
     assert [c.card_index for c in kept if c.delivered] == [i for i in range(60) if i != 40]
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_b4_a_live_decks_cut_lands_with_its_stamp(deferred, prepared_ok, side):
+    """#428 QA (a): on the live path the cut rides the delivered_at stamp's
+    transaction, both directions; the next serve records both."""
+    client, engine, _ = deferred
+    job_id, ids = live_deck(120)
+    pass_elsewhere(engine, 7)
+    with failing(engine, "live", side):
+        status(client, job_id, 0)
+    assert withdrawals(engine) == {} and stamped(engine, job_id) == {}
+    status(client, job_id, 0)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {7: ("disposition_cut", 0)}
+    assert sorted(stamped(engine, job_id)) == [i for i in range(30) if i != 7]
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_b4_a_stored_path_cut_after_a_restart_lands_with_its_delivery(deferred, side):
+    """#428 QA (a): after a restart (the stored path) the cut rides the
+    page's header CAS, both directions; the next serve records both."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    pass_elsewhere(engine, 40)
+    with failing(engine, "header", side):
+        client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    assert withdrawals(engine) == {} and boundaries(engine, job_id) == [29]
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {40: ("disposition_cut", 0)}
+    assert boundaries(engine, job_id) == [29, 59]
+
+
+@pytest.mark.parametrize("kind", ["stored_pages", "job_view", "live_job_view"])
+def test_b4_a_page_whose_every_card_is_cut(deferred, prepared_ok, kind):
+    """#428 QA (b), the three `or cut` hooks (the stored page, the job view,
+    the live job view): every card on page 2 was acted on elsewhere. The page
+    returns no cards, records all 30 cuts (never delivered: W0), and is not
+    the deck's end: page 3 follows."""
+    client, engine, _ = deferred
+    if kind == "live_job_view":
+        job_id, ids = live_deck(120, kind="prepared")
+    else:
+        job_id, *_ = packed_deck(120, store=kind == "stored_pages")
+        ids = [contract.card_impression_id(job_id, i) for i in range(120)]
+    status(client, job_id, 0)
+    pass_elsewhere(engine, *range(30, 60))
+    body = client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS).get_json()
+    assert body["cards"] == [] and body["status"] == "complete" and body["cursor"] >= 60
+    assert not {"pool_exhausted", "rebased"} & set(body)
+    got = withdrawals(engine)
+    assert sorted(got) == list(range(30, 60))
+    assert {(r["reason"], r["served_before"]) for r in got.values()} == {("disposition_cut", 0)}
+    nxt = client.get(f"/api/trades/status?deck={job_id}&cursor={body['cursor']}", headers=HEADERS)
+    assert deck_ids(nxt.get_json()) == ids[60:90]

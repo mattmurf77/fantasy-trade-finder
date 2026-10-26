@@ -5620,8 +5620,15 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                 _deck_evidence_flush(ev)
                 with ev.lock:                    # not written with their delivery: retried
                     unwritten = set(ev.pending_withdrawals)
+                    header_lost = ev.packed and ev.pack_dirty
                 if unwritten:
                     _deck_withdrawn_unnote(deck_job_id, unwritten)
+                if header_lost:
+                    # The cached pack state now holds a boundary that didn't
+                    # land: reread the stored header next time (#428 QA (a)),
+                    # or a later withdrawal would read that page as served.
+                    with _deck_pack_states_lock:
+                        _deck_pack_states.pop(deck_job_id, None)
     finally:
         _deck_evidence_settle(ids)
 
