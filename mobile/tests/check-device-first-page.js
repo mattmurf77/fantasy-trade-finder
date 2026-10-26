@@ -547,8 +547,8 @@ process.on('exit', () => {
       'the fronted card onward, never a withdrawn or acted-on one (a deferred advance still fronts it)');
     ok(/saveDevicePage\(deviceKey, devicePageFrom\(job, \{ scope, validatedAt, cards: unacted \}\), validatedAt\);/.test(eff),
       'kept or discarded by the same rule (a discard answers the deck\'s own validation time)');
-    ok(/deckScopeRef\.current = lastModelRequestRef\.current\s*\? devicePageScope\(lastModelRequestRef\.current\)\s*: null;\s*deckKeyRef\.current = lastModelKeyRef\.current;\s*validatedAtRef\.current = Date\.now\(\);/.test(code),
-      'a model answer stamps its scope, its key and its validation time');
+    ok(/deckScopeRef\.current = lastModelRequestRef\.current\s*\? devicePageScope\(lastModelRequestRef\.current\)\s*: null;\s*deckKeyRef\.current = ctx\?\.deviceKey \?\? null;\s*validatedAtRef\.current = Date\.now\(\);/.test(code),
+      'a model answer stamps its scope, its (dispatch-time) key and its validation time');
   });
 
   await check('3h. EXECUTED: the deck writes only under the key it was validated for — a league switch, then a format switch, write nothing under the new key', async () => {
@@ -616,14 +616,74 @@ process.on('exit', () => {
       readDevicePage: st.readDevicePage, saveDevicePage: st.saveDevicePage });
     eq(st.readDevicePage(K1), null, 'a legacy (un-paged) deck discards its key\'s page: C never renders with paging off');
   });
-  await check('3i. the key is bound where the deck is validated: adoption (from the landing\'s key) and a model answer (from its request\'s render)', () => {
+  await check('3i. the key is bound where the deck is validated: adoption (from the landing\'s key) and a model answer (from ITS dispatch\'s onMutate context)', () => {
     ok(/const deckKeyRef = useRef<string \| null>\(adopted\?\.deviceKey \?\? null\);/.test(code), 'adoption');
-    ok(/lastModelRequestRef\.current = request;\s*lastModelKeyRef\.current = deviceKey;/.test(code), 'bound with the request it answers');
+    ok(/onMutate: \(\) => \(\{ epoch: deckEpochRef\.current, deviceKey \}\),/.test(code), 'the dispatch stamps its key');
+    ok(!/lastModelKeyRef/.test(code), 'no shared key ref a later dispatch could overwrite');
     ok(/\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}/.test(code), 'the network first page carries the landing\'s key');
     const eff = between(code, 'const scope = deckScopeRef.current;', 'job?.error, deck, rawTopCard?.trade_id, withdrawnIds]);');
     ok(/if \(!deviceKey \|\| deviceKey !== deckKeyRef\.current\) return;/.test(eff), 'the save effect\'s key check');
     ok(code.indexOf('deckFormatRef.current === activeFormat') < code.indexOf('const scope = deckScopeRef.current;'),
       'the format change runs before the save in the same commit');
+  });
+
+  await check('3j. EXECUTED: format X dispatch, switch to Y, Y dispatch, X answers FIRST — the deck binds X, and nothing is written under Y', async () => {
+    // The screen's own generate-mutation onMutate and onSuccess (the one that
+    // binds deckKeyRef), run in that order with stubs; then its own save effect.
+    const sf = ts.createSourceFile('T.tsx', trades, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    let onMutate = null; let onSuccess = null;
+    (function visit(n) {
+      if (ts.isObjectLiteralExpression(n)) {
+        const prop = (name) => n.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(sf) === name);
+        const succ = prop('onSuccess');
+        if (succ && succ.initializer.getText(sf).includes('deckKeyRef.current')) {
+          onSuccess = succ.initializer.getText(sf);
+          onMutate = prop('onMutate') && prop('onMutate').initializer.getText(sf);
+        }
+      }
+      ts.forEachChild(n, visit);
+    })(sf);
+    ok(onMutate && onSuccess, 'the generate mutation\'s onMutate and onSuccess');
+    const mutateNames = ['deckEpochRef', 'deviceKey'];
+    const succNames = ['applyJobResult', 'deckEpochRef', 'setJob', 'setDeckFailure', 'deckScopeRef', 'lastModelRequestRef',
+      'devicePageScope', 'deckKeyRef', 'validatedAtRef', 'deckSearchRef', 'noteFirstResponse', 'noteSearchCards',
+      'failFirstCard', 'useFinderTargets', 'scopedOpponent', 'canvasResultsLive', 'setToast', 'modelZeroCopy',
+      'deviceKey'];
+    const mkMutate = compile(`module.exports = function (env) { const { ${mutateNames.join(', ')} } = env; return ${onMutate}; };`);
+    const mkSuccess = compile(`module.exports = function (env) { const { ${succNames.join(', ')} } = env; return ${onSuccess}; };`);
+    const KX = D.devicePageKey('u1', 'L1', '1qb_ppr');
+    const KY = D.devicePageKey('u1', 'L1', 'sf_tep');
+    const deckEpochRef = { current: 7 }; // a format switch bumps no epoch
+    const refs = { deckScopeRef: { current: null }, deckKeyRef: { current: null }, validatedAtRef: { current: null } };
+    let job = null;
+    const succEnv = { ...refs, deckEpochRef, applyJobResult: (r, a, b) => (a === b ? r : null),
+      setJob: (j) => { job = j; }, setDeckFailure: () => {}, lastModelRequestRef: { current: { league_id: 'L1', fairness_threshold: 0.5 } },
+      devicePageScope: D.devicePageScope, deckSearchRef: { current: null }, noteFirstResponse: () => {}, noteSearchCards: () => {},
+      failFirstCard: () => {}, useFinderTargets: { getState: () => ({ pinnedGive: [], pinnedReceive: [] }) }, scopedOpponent: null,
+      canvasResultsLive: false, setToast: () => {}, modelZeroCopy: () => '',
+      deviceKey: KY }; // the screen's key when the answers land (after the switch)
+    const ctxX = mkMutate({ deckEpochRef, deviceKey: KX })();   // dispatch under format X
+    const ctxY = mkMutate({ deckEpochRef, deviceKey: KY })();   // the switch, then a dispatch under Y
+    const xCards = [card('x1', 'hx1'), card('x2', 'hx2')];
+    mkSuccess(succEnv)(page1({ cards: xCards }), {}, ctxX);     // X's answer lands first
+    eq(refs.deckKeyRef.current, KX, 'X\'s cards are bound to X\'s key, not the newer dispatch\'s');
+    const env = makeEnv();
+    const st = loadStore(env);
+    const save = screenEffect('saveDevicePage(deviceKey', ['deckScopeRef', 'validatedAtRef', 'deckKeyRef', 'deviceKey',
+      'job', 'isPagedEnvelope', 'deckMayWrite', 'readDevicePage', 'rawTopCard', 'deck', 'actedDeviceKeysRef',
+      'withdrawnIds', 'deckCardKey', 'saveDevicePage', 'devicePageFrom']);
+    const runSave = (deviceKey) => save({ ...refs, deviceKey, job, deck: job.cards, rawTopCard: job.cards[0],
+      actedDeviceKeysRef: { current: new Set() }, withdrawnIds: new Set(), isPagedEnvelope: P.isPagedEnvelope,
+      deckCardKey: P.deckCardKey, deckMayWrite: D.deckMayWrite, devicePageFrom: D.devicePageFrom,
+      readDevicePage: st.readDevicePage, saveDevicePage: st.saveDevicePage });
+    runSave(KY); // the screen is on format Y now
+    eq(st.readDevicePage(KY), null, 'nothing under Y\'s key');
+    // Control: Y's own answer binds Y and is written under Y.
+    const yCards = [card('y1', 'hy1')];
+    mkSuccess(succEnv)(page1({ cards: yCards }), {}, ctxY);
+    eq(refs.deckKeyRef.current, KY, 'Y\'s answer binds Y');
+    runSave(KY);
+    eq(ids(st.readDevicePage(KY).cards), ['y1'], 'and only Y\'s cards land under Y');
   });
 
   // ── 4. Discards outside the screen ─────────────────────────────────────

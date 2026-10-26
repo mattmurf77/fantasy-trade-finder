@@ -4,13 +4,13 @@
 Seeds one realistic league in a throwaway SQLite file: 12 teams x 25 players,
 a full pick grid (4 seasons x 4 rounds x 12 teams = 192 picks), and a fresh
 `league_roster_state` row (within the roster bound, so no floor kick). Then
-times `_trade_job_public_view` on a 30-card page with `trade_i1_mode` 2 against
-0, alternating per serve, after a warm-up. Prints p50/p95 for each mode and
+times `_trade_job_public_view` on a 30-card page with `trade_i1_mode` --mode (1,
+the shipped default under option B, or 2) against 0, alternating per serve, after a warm-up. Prints p50/p95 for each mode and
 for the added time per serve, plus the SQL statements per serve.
 
 SQLite only: on Postgres each added statement is also a network round trip.
 
-Usage (repo root):  python3 scripts/bench_s0_serve.py [--serves 300]
+Usage (repo root):  python3 scripts/bench_s0_serve.py [--serves 300] [--mode 1|2]
 No network and no real DB: DATABASE_URL points at a temp file before import.
 """
 from __future__ import annotations
@@ -114,30 +114,32 @@ def pct(values, q):
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--serves", type=int, default=300)
+    parser.add_argument("--mode", type=float, choices=(1.0, 2.0), default=1.0)
     args = parser.parse_args()
     server.log.setLevel("WARNING")           # the [i1] serve line is INFO
     seed()
     job = page()
     for _ in range(30):                      # warm-up: imports, memos, the table marker
-        serve(job, 2.0)
+        serve(job, args.mode)
         serve(job, 0.0)
     off, on = [], []
     for _ in range(args.serves):
         off.append(serve(job, 0.0))
-        on.append(serve(job, 2.0))
+        on.append(serve(job, args.mode))
     added = [b - a for a, b in zip(off, on)]
-    reads_off, reads_on = statements(job, 0.0), statements(job, 2.0)
+    reads_off, reads_on = statements(job, 0.0), statements(job, args.mode)
     print(f"serves={args.serves} cards=30 teams={TEAMS}x{PER_TEAM} picks="
           f"{len(SEASONS) * ROUNDS * TEAMS} (SQLite file)")
-    for name, values in (("mode 0", off), ("mode 2", on), ("added", added)):
+    label = f"mode {args.mode:.0f}"
+    for name, values in (("mode 0", off), (label, on), ("added", added)):
         print(f"{name:7} p50={pct(values, 50):6.2f} ms  p95={pct(values, 95):6.2f} ms")
-    print(f"SQL statements per serve: mode 0={reads_off} mode 2={reads_on} "
+    print(f"SQL statements per serve: mode 0={reads_off} {label}={reads_on} "
           f"added={reads_on - reads_off}")
 
     # /generate's cache-hit path also reads the fingerprints before the job
     # lock (the pool here is unbuilt, so vsn1's seed part is empty; in prod
     # it's memoized per pool generation).
-    ts._cfg["trade_i1_mode"] = 2.0
+    ts._cfg["trade_i1_mode"] = args.mode
     fp_times, fp_reads = [], [0]
     for _ in range(args.serves):
         start = time.perf_counter()
