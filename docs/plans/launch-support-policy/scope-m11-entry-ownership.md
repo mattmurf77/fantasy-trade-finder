@@ -6,6 +6,11 @@
 **Operator sign-off on waivers:** signed 2026-10-23 (operator, relayed by the coordinator; quoted verbatim: "Decision 1: Agree to the waivers."). Covers W-M11-1 and W-M11-2.
 **Gate 1 (head-product acceptance of this block):** accepted 2026-10-23 (P38). Option (e) fixes deletion under 5.1.1(v) and the broken ESPN/MFL import together.
 
+> **Backlog, 2026-10-26 (head-eng; Product accepts): #372, the M11 claim-only delete, is parked out of the launch binary.**
+> It can't be reached at launch: the ESPN/MFL entry chips are off (`landing.platform_options`, fallback (b), OA-8); the `entry:*` purge removes every entry user by ~11-05 (legal R28.12); and privacy §6 drops the M11 item.
+> **What returns together, when ESPN/MFL entry returns:** full M11 (the proof-based verified mint and the identity-routed step-up, M11-R1 to R6), #372's claim-only delete, the G4 strings (dropped from launch), and the verify sheet's non-Sleeper path.
+> This supersedes OA-8's "claim-only delete at launch". At launch, ESPN and MFL users sign in with Apple and connect their league from Settings, so they delete through the normal Apple-account path (verified at mint).
+
 The facts, the decision and the requirements:
 [prd.md §6.9](prd.md#69-m11-espnmfl-entry-ownership-proof-in-app-deletion-data-export-and-league-import).
 **Decision: option (e)** (`onboarding-pm`, 2026-10-23). In short, at `origin/main` `712dcbed`

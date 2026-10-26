@@ -522,6 +522,11 @@ TestFlight is waived while the tour is dark (W-Q6-3). The detail is in the scope
 
 ### 6.9 M11: ESPN/MFL entry ownership proof: in-app deletion, data export and league import
 
+> **Backlog, 2026-10-26 (head-eng; Product accepts): #372, the M11 claim-only delete, is parked out of the launch binary.**
+> It can't be reached at launch: the ESPN/MFL entry chips are off (`landing.platform_options`, fallback (b), OA-8); the `entry:*` purge removes every entry user by ~11-05 (legal R28.12); and privacy §6 drops the M11 item.
+> **What returns together, when ESPN/MFL entry returns:** full M11 (the proof-based verified mint and the identity-routed step-up, M11-R1 to R6), #372's claim-only delete, the G4 strings (dropped from launch), and the verify sheet's non-Sleeper path.
+> This supersedes OA-8's "claim-only delete at launch". At launch, ESPN and MFL users sign in with Apple and connect their league from Settings, so they delete through the normal Apple-account path (verified at mint).
+
 **Status:** spec; gate 1 accepted (P38) and W-M11-1, W-M11-2 signed, 2026-10-23. **Decision: option
 (e)** (`onboarding-pm`, 2026-10-23). Source: `head-product`'s
 new launch MUST M11 (2026-10-23); `legal-lead` tracks it as LEG-M5. Apple guideline 5.1.1(v) requires
@@ -1414,6 +1419,7 @@ For `head-product`, with a recommendation each.
 - **Operator waiver sign-off (M11), 2026-10-23,** relayed by the coordinator, verbatim: "Decision 1: Agree to the waivers." It covers W-M11-1 and W-M11-2.
 - **P38,** `head-product`, 2026-10-23: **gate 1 accepted** for [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md). Option (e) fixes deletion under 5.1.1(v) and the broken ESPN/MFL import together.
 - **M11 fallback: option (b)** (`head-product`, P39, 2026-10-24; Launch Desk OA-8; still a fallback, not taken). Product adopts (b) over its earlier (c); "(b)" and "(c)" are OA-8's labels, not §6.9.7's rejected options. If M11 misses 11-06, turn `landing.platform_options` off for launch. Users can sign in with Apple, then connect ESPN/MFL from Settings, and the listing and FAQ keep ESPN/MFL with accurate wording (§6.9.10). `head-product` has asked `app-manager` to add the TestFlight step Apple → Settings → connect ESPN/MFL → import. The decision point is 11-06.
+- M11 parked from launch (2026-10-26, head-eng; Product accepts): #372 claim-only delete parked; full M11 + #372 + G4 strings + verify sheet non-Sleeper path return together with ESPN/MFL entry; supersedes OA-8's claim-only delete at launch.
 - **ux-lead's and design-lead's #354 reviews accepted by Product** (2026-10-23) and folded in as build instructions (§6.10).
 - **onboarding-pm on ux-lead item 8** (the "See your notes" link): optional and outside the launch ACs; included only if it fits the 11-03 slot without risk, otherwise after launch.
 - **The credits row** joins BL-10's About-section work (BL10-R12, BL10-AC10), with `legal-lead`'s exact Part 3 text.
