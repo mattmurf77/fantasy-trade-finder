@@ -4838,10 +4838,6 @@ class _PackState:
                                       separators=(",", ":")) + ',"header":').encode("utf-8"))
         self.checksum = checksum                  # the stored row's: the CAS predicate
         self.base_run = copy.deepcopy(header.get("run"))   # the run as last stored
-        # Indexes whose upgrade miss a header commit counted (U4): a retried
-        # outcome never counts the same card twice. _deck_upgrade_from_pack's
-        # callers all hold _deck_evidence_write_lock, so it needs no lock of its own.
-        self.miss_counted: set = set()
 
     @property
     def run(self) -> dict:
@@ -4891,7 +4887,7 @@ def _deck_pack_input(ev: _DeckEvidence):
     rows = None if ev.pack_cards is not None else ev.pack_rows
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False,
-           "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)}
+           "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0), "upgrade_miss_cards": {}}
     if ev.stored_count is not None:       # U4: the deck's own stored count (#428 QA (c))
         run["stored_count"] = ev.stored_count
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
@@ -5005,8 +5001,9 @@ def _merge_deliveries(a, b) -> list:
 def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     """Another instance updated the header first: keep both. Deliveries are
     the union (earliest time per index); retired stays true once true (the
-    earliest retired_at); each upgrade_misses cause is the stored count plus
-    ours since our base."""
+    earliest retired_at); upgrade_miss_cards is the union, a card both
+    missed keeping the stored cause (it landed first), and upgrade_misses is
+    that map's tally, so a card two instances missed counts once."""
     merged = {**ours, **stored}
     merged["deliveries"] = _merge_deliveries(stored.get("deliveries"), ours.get("deliveries"))
     if stored.get("retired") or ours.get("retired"):
@@ -5014,10 +5011,9 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
         stamps = [t for t in (stored.get("retired_at"), ours.get("retired_at")) if t]
         if stamps:
             merged["retired_at"] = min(stamps)
-    merged["upgrade_misses"] = {
-        cause: _upgrade_misses(stored)[cause] + max(
-            0, _upgrade_misses(ours)[cause] - _upgrade_misses(base or {})[cause])
-        for cause in _UPGRADE_MISS_CAUSES}
+    cards = {**_upgrade_miss_cards(ours), **_upgrade_miss_cards(stored)}
+    merged["upgrade_miss_cards"] = cards
+    merged["upgrade_misses"] = _upgrade_miss_tally(cards)
     return merged
 
 
@@ -5264,11 +5260,21 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     _ledger_add(_deck_evicted_at, job_id, datetime.now(timezone.utc).isoformat())
 
 
-def _upgrade_misses(run: Mapping) -> dict:
-    """A run's upgrade_misses, every cause present (0 when absent)."""
-    misses = run.get("upgrade_misses")
-    misses = misses if isinstance(misses, Mapping) else {}
-    return {cause: int(misses.get(cause) or 0) for cause in _UPGRADE_MISS_CAUSES}
+def _upgrade_miss_cards(run: Mapping) -> dict:
+    """A run's upgrade_miss_cards, {"<card_index>": cause} (models-eng's per-card
+    miss map): which cards missed, each once, with its cause. {} when absent."""
+    cards = run.get("upgrade_miss_cards")
+    return {str(k): v for k, v in cards.items()} if isinstance(cards, Mapping) else {}
+
+
+def _upgrade_miss_tally(cards: Mapping) -> dict:
+    """upgrade_misses as the per-card map's tally: every cause present, and
+    any other cause the map carries counted under its own key. The writer
+    keeps this invariant: upgrade_misses always equals its map's tally."""
+    tally = dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)
+    for cause in cards.values():
+        tally[cause] = tally.get(cause, 0) + 1
+    return tally
 
 
 def _deck_stored_count(known, run: Mapping) -> int:
@@ -5327,34 +5333,42 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
-    def count(delta: int) -> None:
-        misses = _upgrade_misses(state.run)
-        misses[cause] += delta
-        state.run["upgrade_misses"] = misses
+    key = str(index)
 
-    # Once per card (#428 QA item 1): a commit that raises takes its increment
-    # back (the outcome's retry counts again); a commit that returns, even False
-    # (the CAS gave up: the count stays in state.run for a later flush), marks
-    # the index counted, so a retry after the row save below raised doesn't.
-    if index not in state.miss_counted:
+    def record(add: bool) -> None:
+        """The card in (or out of) the run's miss map, upgrade_misses its tally."""
+        cards = _upgrade_miss_cards(state.run)
+        if add:
+            cards[key] = cause
+        elif key not in _upgrade_miss_cards(state.base_run or {}):
+            cards.pop(key, None)      # ours only: an entry another writer stored stays
+        state.run["upgrade_miss_cards"] = cards
+        state.run["upgrade_misses"] = _upgrade_miss_tally(cards)
+
+    # Once per card, by the persisted map (models-eng): a card already in it
+    # is never counted again, by this process or one that reloaded the header
+    # after a deploy or an eviction (#434 QA P3-1). A commit that raises takes
+    # the entry back and re-raises (the outcome's retry counts it then); a
+    # commit that returns, even False (the CAS gave up: the entry waits in
+    # state.run for a later flush), keeps it.
+    if key not in _upgrade_miss_cards(state.run):
         if ev_for_header is not None:
             with ev_for_header.lock:
-                count(1)
+                record(True)
                 ev_for_header.pack_dirty = True
             try:
                 _deck_pack_flush_header(ev_for_header)
             except Exception:
                 with ev_for_header.lock:
-                    count(-1)
+                    record(False)
                 raise
         else:
-            count(1)
+            record(True)
             try:
                 _deck_pack_commit(deck_job_id, state)
             except Exception:
-                count(-1)
+                record(False)
                 raise
-        state.miss_counted.add(index)
         line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
                 "evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
         args = (cause, deck_job_id, index, stored, deck_job_id in _deck_held,

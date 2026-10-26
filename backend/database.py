@@ -7172,21 +7172,21 @@ def _evidence_shown():
 
 # R3: a card the user acted on whose row isn't a full row (no assets): neither
 # reader can grade or match it, so each reports it instead of dropping it
-# silently. Its cause is 'restart_split' when it sits past the page store's
-# stored cards (card_index >= 90 at the defaults) and its row was built from
-# the pack ('viewed', no assets: the snapshot-less upgrade, which happens only
-# once the deck's job has left the process, as a deploy's restart does);
-# otherwise 'other'.
-_RESTART_SPLIT_INDEX = 90
+# silently, by cause. The cause is the writer's own classification, read from
+# the card's run: its pack's run metadata `upgrade_miss_cards`
+# ({"<card_index>": cause}, U4-R2). No pack, or no entry for the card: other.
+VIEWED_WITHOUT_FULL_ROW_CAUSES = ("restart_split", "evicted_split", "other")
 
 
 def load_viewed_without_full_row(*, league_id: str | None = None, since_iso: str | None = None,
                                  until_iso: str | None = None) -> dict[str, dict[str, int]]:
     """Per run (deck_job_id), R3's acted-on cards with no full row, by cause:
-    {run_id: {"restart_split": n, "other": m}}. Non-ghost rows of a deferred
-    or packed deck (tier set: a pre-telemetry row has no assets either and
-    isn't counted), optionally in one league and a served_at window."""
-    i = deck_impressions_table
+    {run_id: {"restart_split": n, "evicted_split": n, "other": n}}. Non-ghost
+    rows of a deferred or packed deck (tier set: a pre-telemetry row has no
+    assets either and isn't counted), optionally in one league and a
+    served_at window. The runs' pack headers are read in one query per 500
+    runs; a cause outside the three reads as other."""
+    i, p = deck_impressions_table, deck_evidence_packs_table
     where = [or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0), i.c.evidence_tier.isnot(None),
              i.c.assets_json.is_(None), _deck_card_acted()]
     if league_id is not None:
@@ -7195,14 +7195,23 @@ def load_viewed_without_full_row(*, league_id: str | None = None, since_iso: str
         where.append(i.c.served_at >= since_iso)
     if until_iso is not None:
         where.append(i.c.served_at <= until_iso)
-    runs: dict[str, dict[str, int]] = {}
     with engine.connect() as conn:
-        for r in conn.execute(select(i.c.deck_job_id, i.c.card_index, i.c.evidence_tier)
-                              .where(and_(*where))):
-            cause = ("restart_split" if r.evidence_tier == "viewed"
-                     and (r.card_index or 0) >= _RESTART_SPLIT_INDEX else "other")
-            counts = runs.setdefault(r.deck_job_id, {"restart_split": 0, "other": 0})
-            counts[cause] += 1
+        rows = conn.execute(select(i.c.deck_job_id, i.c.card_index).where(and_(*where))).all()
+        run_ids = sorted({r.deck_job_id for r in rows})
+        miss_cards: dict[str, dict] = {}
+        for start in range(0, len(run_ids), 500):
+            for h in conn.execute(select(p.c.run_id, p.c.header_json).where(
+                    p.c.run_id.in_(run_ids[start:start + 500]))):
+                try:
+                    cards = json.loads(h.header_json)["run"].get("upgrade_miss_cards")
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    cards = None
+                miss_cards[h.run_id] = cards if isinstance(cards, dict) else {}
+    runs: dict[str, dict[str, int]] = {}
+    for r in rows:
+        cause = miss_cards.get(r.deck_job_id, {}).get(str(r.card_index), "other")
+        counts = runs.setdefault(r.deck_job_id, dict.fromkeys(VIEWED_WITHOUT_FULL_ROW_CAUSES, 0))
+        counts[cause if cause in counts else "other"] += 1
     return runs
 
 
