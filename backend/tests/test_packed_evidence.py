@@ -1195,6 +1195,25 @@ def test_the_first_write_builds_the_pack_cards_outside_the_deck_lock(deferred, m
 NO_MISSES = {"restart_split": 0, "evicted_split": 0, "other": 0}
 
 
+def eval_cards(eng, as_of=None):
+    """Eval v5's view of the one deck in `eng`, as the goldens compare it:
+    per card its index, ghost flag, delivery, displayed position, outcome
+    flags and contract-key dict, a full row's attribution columns merged in
+    (eval reads them off the row's columns; a packed card carries them in the
+    pack). Impression ids are left out: they differ by storage form."""
+    from backend.eval.data import card_dict, load_decks
+    on_rows = {r["impression_id"]: r for r in rows(eng)}
+    [deck] = load_decks(engine=eng, as_of=as_of)
+    out = []
+    for c in deck.cards:
+        d = card_dict(c)
+        if c.impression_id in on_rows and not c.is_ghost:
+            d.update({k: on_rows[c.impression_id][k] for k in server._PACK_ATTRIBUTION_COLUMNS})
+        out.append((c.card_index, c.is_ghost, c.delivered, c.position, c.viewed, c.liked, c.passed,
+                    {k: v for k, v in d.items() if k in evidence_pack.CONTRACT_KEYS}))
+    return deck, out
+
+
 def copy_db(engine, drop_impressions=()):
     """A second in-memory database holding `engine`'s rows, less the
     deck_impressions rows named."""
@@ -1273,11 +1292,12 @@ def test_u4_a_card_past_the_stored_90_viewed_after_its_job_left_is_a_cause_coded
     got = by_index(engine)[(0, 95)]
     assert got["evidence_tier"] == "viewed" and got["assets_json"] is None
     run, cards = unpack(pack_of(engine, job_id))
-    features = json.loads(got["features_json"])                       # the packed card's keys,
-    assert contract.FROZEN_INPUT_KEYS & set(cards[95]) <= set(features)   # never the wide extras
-    assert set(features) <= evidence_pack.CONTRACT_KEYS | {"page_store"}
+    features = json.loads(got["features_json"])       # the packed card less the row's columns
+    assert set(features) == set(cards[95]) - set(server._PACK_LOGGED_COLUMNS) - set(
+        server._PACK_ATTRIBUTION_COLUMNS) - {"served_at"} | {"page_store"}
+    assert contract.FROZEN_INPUT_KEYS & set(cards[95]) <= set(features)
     assert run["upgrade_misses"] == {**NO_MISSES, cause: 1}
-    assert features["give_value"] == cards[95]["give_value"]
+    assert json.loads(got["features_json"])["give_value"] == cards[95]["give_value"]
     assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
     [line] = [r for r in caplog.records if "upgrade miss cause=" in r.getMessage()]
     assert f"cause={cause} job={job_id} index=95" in line.getMessage()
@@ -1312,7 +1332,6 @@ def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(defe
     registered scorer's replay (estimates and IPS weights)."""
     import backend.eval.replay as replay_mod
     import backend.value_model as vm
-    from backend.eval.data import card_dict, load_decks
     from backend.eval.replay import evaluate, exposure_curve
     from backend.eval.scorers import get_scorer, registered_names
     client, engine, _ = deferred
@@ -1327,15 +1346,11 @@ def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(defe
     misses = [contract.card_impression_id(job_id, i) for i in (91, 95, 99, 104)]
     assert {r["impression_id"] for r in rows(engine) if r["card_index"] >= 90} == set(misses)
     upgraded, left_packed = engine, copy_db(engine, drop_impressions=misses)
+    from datetime import datetime, timedelta
+    as_of = (datetime.fromisoformat(pack_of(engine, job_id)["served_at"])
+             + timedelta(hours=26)).isoformat()                 # past v5's 25 h in-flight window
 
-    def read(eng):
-        [deck] = load_decks(engine=eng)
-        return deck, [(c.card_index, c.is_ghost, c.delivered, getattr(c, "position", None),
-                       c.viewed, c.liked, c.passed,
-                       {k: v for k, v in card_dict(c).items() if k in evidence_pack.CONTRACT_KEYS})
-                      for c in deck.cards]
-
-    (deck_u, cards_u), (deck_p, cards_p) = read(upgraded), read(left_packed)
+    (deck_u, cards_u), (deck_p, cards_p) = eval_cards(upgraded, as_of), eval_cards(left_packed, as_of)
     assert deck_u.exclusion is None and deck_p.exclusion is None
     assert cards_u == cards_p
     assert [c[0] for c in cards_u if any(c[4:7])] == [50, 91, 95, 99, 104]
@@ -1355,4 +1370,89 @@ def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(defe
                                 lambda *a, w=weights: w.append(list(a[1])) or real(*a))
             run = evaluate(get_scorer(name, seed=3), [deck], ess_min=1, bootstrap=50, seed=2)
             out.append((repr(run), weights))
+        assert out[0] == out[1], name
+
+
+def test_p2_1_a4_a_live_deck_replays_like_the_same_deck_stored_as_a_pack(deferred, prepared_ok,
+                                                                        monkeypatch):
+    """models-lead B2 (a4), the storage-form identity: a value-core
+    page-scoped deck's stamped live rows replay under eval v5 exactly as the
+    same deck stored as a pack with the same deliveries: card dicts,
+    delivered and dense displayed positions (a W0 withdrawal removed), the
+    exposure curve, and every registered scorer's replay. Only the impression
+    ids differ (uuid rows vs the contract id), so the comparison maps them."""
+    from sqlalchemy import create_engine, insert
+    from backend.eval import data as eval_data
+    if not hasattr(eval_data, "PAGE_STORE_MARKER"):
+        pytest.skip("eval v5 (#417) isn't merged here")
+    import backend.eval.replay as replay_mod
+    import backend.value_model as vm
+    from backend.eval.replay import evaluate, exposure_curve
+    from backend.eval.scorers import get_scorer, registered_names
+    client, engine, _ = deferred
+    job_id, ids = live_deck(120)
+    own_all_but(engine, 40)                                # W0 on page 2
+    status(client, job_id, 0)
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    for index, action in ((0, "like"), (3, "pass"), (10, "viewed"), (31, "like"), (45, "pass")):
+        server._save_deck_outcome_safe(ids[index], action, acting_user_id=UID)
+    live_rows = sorted((r for r in rows(engine) if r["deck_job_id"] == job_id),
+                       key=lambda r: r["card_index"])
+    assert sorted(r["card_index"] for r in live_rows if r["delivered_at"]) == [
+        i for i in range(60) if i != 40]
+    to_contract = {r["impression_id"]: contract.card_impression_id(job_id, r["card_index"])
+                   for r in live_rows}
+    served_at = live_rows[0]["served_at"]
+    deliveries = [[29, live_rows[0]["delivered_at"]], [59, live_rows[30]["delivered_at"]]]
+
+    # The same deck, stored as S8 stores a pack: full first-30 rows, every card packed.
+    cards = [server._pack_card(r, served_at) for r in live_rows]
+    run = {"values_snapshot_id": "vsn", "config_ref": "cfg", "built_at": served_at,
+           "deliveries": deliveries, "page_store": 1, "retired": True,
+           "retired_at": deliveries[-1][1],
+           "upgrade_misses": {"restart_split": 0, "other": 0}}
+    packed = evidence_pack.pack_run(run, cards, card_count=len(cards))
+    stored = create_engine("sqlite:///:memory:")
+    db_module.metadata.create_all(stored)
+    with stored.begin() as conn:
+        conn.execute(insert(db_module.deck_impressions_table), [
+            {**r, "impression_id": to_contract[r["impression_id"]], "evidence_tier": "first30"}
+            for r in live_rows if r["card_index"] < 30])
+        conn.execute(insert(PACKS), [{
+            "run_id": job_id, "user_id": UID, "league_id": LEAGUE, "served_at": served_at,
+            "pack_version": packed.pack_version, "header_json": packed.header_json,
+            "cards_blob": packed.cards_blob, "checksum": packed.checksum,
+            "card_count": packed.card_count, "created_at": served_at}])
+        conn.execute(insert(db_module.deck_card_withdrawals_table), [
+            {**{k: v for k, v in w.items() if k != "id"},
+             "impression_id": to_contract[w["impression_id"]]}
+            for w in rows(engine, db_module.deck_card_withdrawals_table)])
+        conn.execute(insert(db_module.deck_outcomes_table), [
+            {**{k: v for k, v in o.items() if k != "id"},
+             "impression_id": to_contract[o["impression_id"]]}
+            for o in outcomes(engine)])
+
+    (deck_live, live_read), (deck_pack, pack_read) = eval_cards(engine), eval_cards(stored)
+    assert deck_live.exclusion is None and deck_pack.exclusion is None
+    assert live_read == pack_read
+    kept = [c for c in live_read if not c[1]]
+    assert 40 not in [c[0] for c in kept] and deck_live.withdrawn_removed == 1
+    assert [c[0] for c in kept if c[2]] == [i for i in range(60) if i != 40]
+    assert [c[3] for c in kept] == list(range(len(kept)))      # dense displayed positions
+    assert exposure_curve([deck_live]) == exposure_curve([deck_pack])
+    model = vm.ValueModel(
+        like_head=vm.LogisticHead(weights={"bias": -0.4, "value_delta": 0.8, "pref_long": 1.1,
+                                           "pref_short": -0.6, "partner_rate": 0.9}),
+        propose_head=None, propose_constant=0.2, partner_rates={}, global_like_rate=0.3,
+        position_mean=0.4, trained_at="t", train_date="t")
+    monkeypatch.setattr(vm, "load_latest_model", lambda: model)
+    real = replay_mod._estimate
+    for name in registered_names():
+        out = []
+        for deck in (deck_live, deck_pack):
+            weights = []
+            monkeypatch.setattr(replay_mod, "_estimate",
+                                lambda *a, w=weights: w.append(list(a[1])) or real(*a))
+            evaluated = evaluate(get_scorer(name, seed=3), [deck], ess_min=1, bootstrap=50, seed=2)
+            out.append((repr(evaluated), weights))
         assert out[0] == out[1], name

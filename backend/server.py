@@ -5203,16 +5203,17 @@ def _upgrade_miss_cause(deck_job_id: str, index: int, delivered_at: str | None,
 def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: int, now: str,
                             ev_for_header=None) -> bool:
     """The upgrade miss (U4's fallback): the card's row built from its packed
-    card (the frozen scorer inputs and logged columns; no assets, no
-    valuation), so the outcome still joins it, and the miss counted by cause
-    (`now`: the first outcome's time)."""
+    card (its columns, and every other packed key as its features; no assets,
+    no valuation), so the outcome still joins it, and the miss counted by
+    cause (`now`: the first outcome's time)."""
     from . import database as _db
     card = _deck_pack_card(state, index)
     cause = _upgrade_miss_cause(deck_job_id, index, state.delivered_at(index), now)
-    # Every key the packed card carries outside the logged columns, the
-    # attribution ones included, so eval reads this row exactly as it reads the
-    # packed card (R5.2 (c); U4-R5's identity on the restart path).
-    features = {k: v for k, v in card.items() if k not in _PACK_LOGGED_COLUMNS and k != "served_at"}
+    # The packed card is the row's features plus its columns (_pack_card): the
+    # inverse keeps every packed key the columns don't hold, so eval reads this
+    # row as it reads the packed card (U4-R5's identity on the restart path).
+    features = {k: v for k, v in card.items()
+                if k not in _PACK_LOGGED_COLUMNS + _PACK_ATTRIBUTION_COLUMNS and k != "served_at"}
     if state.run.get("page_store"):
         features["page_store"] = 1
     row = {k: card.get(k) for k in _PACK_LOGGED_COLUMNS + _PACK_ATTRIBUTION_COLUMNS}
