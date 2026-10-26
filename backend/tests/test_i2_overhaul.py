@@ -30,6 +30,14 @@ from backend.tests import test_overhaul_service as svc_t
 TAIL = ", so nothing was sent. Find a new trade."
 
 
+@pytest.fixture(autouse=True)
+def _no_refresh_kick(monkeypatch):
+    """The real Sleeper core kicks a background roster refresh on a refusal
+    (#413). Stub it, so no refresh thread reaches Sleeper from a test."""
+    from backend import server
+    monkeypatch.setattr(server._roster_refresh, "maybe_refresh_async", lambda *a, **kw: False)
+
+
 @pytest.fixture()
 def world():
     return ovh_t.World()
