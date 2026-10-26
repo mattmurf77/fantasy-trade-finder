@@ -534,8 +534,8 @@ TestFlight is waived while the tour is dark (W-Q6-3). The detail is in the scope
 > ~~This supersedes OA-8's "claim-only delete at launch". At launch, ESPN and MFL users sign in with Apple and connect their league from Settings, so they delete through the normal Apple-account path (verified at mint).~~
 > **SUPERSEDED same day by the operator** (the decision above).
 
-**Status:** spec, **re-scoped into launch on 2026-10-26**. Gate 1 needs `head-product`'s
-re-acceptance of the re-scope, and W-M11-1 and W-M11-2 need the operator's re-confirmation (§9). For
+**Status:** spec, **re-scoped into launch on 2026-10-26**. Gate 1 was accepted for the
+re-scope on 2026-10-26 (P62, at `791c4f50`), and the operator re-confirmed W-M11-1 and W-M11-2 the same day (§9). For
 the earlier scope, gate 1 was accepted (P38) and both waivers were signed on 2026-10-23. **Decision:
 option (e)** (`onboarding-pm`, 2026-10-23), kept by the re-scope. Source: `head-product`'s
 new launch MUST M11 (2026-10-23); `legal-lead` tracks it as LEG-M5. Apple guideline 5.1.1(v) requires
@@ -677,7 +677,9 @@ and password) → a verified Fleeced account → import → the first deck.
     11-05 (legal R28.12), and they re-enter through the login. `legal-lead` confirms.
   - **For `head-eng` and `eng-security`:** a public ESPN league reads with no cookies, so M11-R1's
     authenticated read can't be a read of that league. Name the read that proves the pair for a
-    public-league user (an open question, §9).
+    public-league user (an open question, §9). **Decided at P62 (2026-10-26):** no weak proof for account
+    creation; public-league-only ESPN users go Apple → connect ESPN in Settings. The proof for private
+    leagues stays with `head-eng` (§9 Q5).
 - **M11-R6. Copy names the right identity:** the step-up copy, the error copy for E1 to E4, and E5's
   prevention line (copy: marketing-lead). Today's "Your account is verified, but this session isn't.
   Verify with your Sleeper login" (`mobile/src/screens/settings/sections/AccountDataSection.tsx:87-100`) is wrong for every entry account.
@@ -1468,7 +1470,7 @@ at `712dcbed`.
 | **M7** | Checklist work now | `legal-lead` wording; `analytics-lead` inventory (7.3, 7.4); D-11, D-12, D-13 | **App Privacy label submission** (M6(b)) and App Store submission |
 | **Q6 tour line** (§6.8) | Yes: approved, strings fixed | Nothing (operator-approved); gate-1 acceptance and waiver sign-off for its scope block | The 11-06 binary |
 | **FAQ** (§7b) | `FAQ-*` assertions; the post-launch text | Operator §6 (I); `legal-lead` on Q16/Q17; Q9's `model_config` confirmation; marketing's pre-launch Q3 variant (via `head-bizops`, in progress); pricing-line placement; `head-eng`'s flip mechanism | Live by 11-09 with M7, before the 11-10 App Store submission (P37); Q3 flips 11-18 |
-| **M11** (§6.9), **re-scoped into launch 2026-10-26** | Server design of the inline-login mechanism, and the `eng-security` review of the proofs | `head-eng`'s sizing, the 11-06-binary vs server-only split and the file allocation; `head-product`'s gate-1 re-acceptance; the operator's re-confirmation of W-M11-1 and W-M11-2; `platforms-pm` on M11-R5; the `legal-lead` and `marketing-lead` items (6.9.6) | Live before the 11-10 submission (Product's ask; `head-eng` says whether it fits). Client parts: the 11-06 binary. Then `landing.platform_options` ON for launch (M11-R7) |
+| **M11** (§6.9), **re-scoped into launch 2026-10-26** | Server design of the inline-login mechanism, and the `eng-security` review of the proofs | `head-eng`'s sizing, the 11-06-binary vs server-only split and the file allocation; `platforms-pm` on M11-R5 (gate 1 re-accepted at P62 and W-M11-1/2 re-confirmed, both 2026-10-26); the `legal-lead` and `marketing-lead` items (6.9.6) | Live before the 11-10 submission (Product's ask; `head-eng` says whether it fits). Client parts: the 11-06 binary. Then `landing.platform_options` ON for launch (M11-R7) |
 | **D-13 policy notice** (§7.8) | Yes: one map entry and its guard (legal's text is final, D13-R2) | The release version number (the entry's key). Gate 1, W-D13-1 to W-D13-3 and the flag sequencing are done (P39) | The 11-06 binary; the `ux.whats_new` flips bracket the TestFlight window (below) |
 
 All three are App Store launch MUST or support items. P28 and BL-10 should share one review pass for
@@ -1523,7 +1525,7 @@ For `head-product`, with a recommendation each.
 | D-13 | **Announcing the policy change in the app** (privacy §9 promises it, `:273-274`). | In-app notice, what's-new, or none (if `legal-lead` deems changes non-material). | `legal-lead` rules; any in-app surface is a separate spec. | legal-lead, head-product |
 | D-14 | **App Store Connect:** Support URL = `contact.html`; whether the listing also shows the address. | — | Support URL = contact page; address per `app-manager`. | app-manager |
 
-**Decisions recorded (as of 2026-10-24)**
+**Decisions recorded (as of 2026-10-26)**
 
 - **Gate 1:** `head-product` accepted this PRD and all three scope blocks at `f9762d77` on 2026-10-20 (P35).
 - **Operator waiver sign-off, 2026-10-22,** given in `head-product`'s session, verbatim: "I sign off on #354's waivers." It covers W-P28-1, W-P28-2, W-BL10-1, W-BL10-2, W-M7-1, W-M7-2 and W-ALL-1.
@@ -1535,7 +1537,7 @@ For `head-product`, with a recommendation each.
   - **Q3 uses marketing's pre-launch variant** until the 11-18 flip. `head-bizops` is obtaining it (copy: marketing-lead, in progress).
   - `head-product` has asked `head-eng` to move the legal-pages milestone to 11-09.
 - **M11, option (e),** decided by `onboarding-pm`, 2026-10-23 (§6.9, M11-R1 to M11-R6). Options (a), (b) and (d) are rejected; (c) is folded into (e).
-- **Operator waiver sign-off (M11), 2026-10-23,** relayed by the coordinator, verbatim: "Decision 1: Agree to the waivers." It covers W-M11-1 and W-M11-2 **for the earlier scope**; re-confirmation is requested for the 2026-10-26 re-scope (Open questions, below).
+- **Operator waiver sign-off (M11), 2026-10-23,** relayed by the coordinator, verbatim: "Decision 1: Agree to the waivers." It covers W-M11-1 and W-M11-2 **for the earlier scope**; re-confirmed for the 2026-10-26 launch scope (below).
 - **P38,** `head-product`, 2026-10-23: **gate 1 accepted** for [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md). Option (e) fixes deletion under 5.1.1(v) and the broken ESPN/MFL import together.
 - **M11 fallback: option (b)** (`head-product`, P39, 2026-10-24; Launch Desk OA-8; still a fallback, not taken). Product adopts (b) over its earlier (c); "(b)" and "(c)" are OA-8's labels, not §6.9.7's rejected options. If M11 misses 11-06, turn `landing.platform_options` off for launch. Users can sign in with Apple, then connect ESPN/MFL from Settings, and the listing and FAQ keep ESPN/MFL with accurate wording (§6.9.10). `head-product` has asked `app-manager` to add the TestFlight step Apple → Settings → connect ESPN/MFL → import. The decision point is 11-06.
 - ~~M11 parked from launch (2026-10-26, head-eng; Product accepts): #372 claim-only delete parked; full M11 + #372 + G4 strings + verify sheet non-Sleeper path return together with ESPN/MFL entry; supersedes OA-8's claim-only delete at launch.~~ **SUPERSEDED same day by the operator** (next item).
@@ -1545,6 +1547,8 @@ For `head-product`, with a recommendation each.
   - **Edge cases M11-E1 to M11-E6** are Product's intended behavior; `head-eng` confirms feasibility.
   - **#372 (the claim-only delete) is superseded;** this spec recommends closing it, with `head-eng`'s agreement. The `entry:*` purge (legal R28.12, by ~11-05) still proceeds.
   - **`landing.platform_options` flips ON for launch once M11 ships,** on the operator's word in `release-lead`'s session, and fallback (b) retires once M11 is live (M11-R7).
+- **P62,** `head-product`, 2026-10-26: **gate 1 accepted** for [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md) at `791c4f50` (the re-scope), including `onboarding-pm`'s edge-case decisions (M11-E1 to E6) and the public-ESPN rule: **no weak proof for account creation**. Public-league-only ESPN users go Apple → connect ESPN in Settings. The technical proof for private leagues stays with `head-eng` (Open question 5).
+- **Operator waiver re-confirmation (M11), 2026-10-26,** given in `head-product`'s session, verbatim: "I re-confirm W-M11-1 and W-M11-2 for the ESPN/MFL sign-in launch scope." It covers W-M11-1 and W-M11-2 for the launch scope.
 - **ux-lead's and design-lead's #354 reviews accepted by Product** (2026-10-23) and folded in as build instructions (§6.10).
 - **onboarding-pm on ux-lead item 8** (the "See your notes" link): optional and outside the launch ACs; included only if it fits the 11-03 slot without risk, otherwise after launch.
 - **The credits row** joins BL-10's About-section work (BL10-R12, BL10-AC10), with `legal-lead`'s exact Part 3 text.
@@ -1583,7 +1587,7 @@ For `head-product`, with a recommendation each.
   - **Q18** ("Replies come within 2 business days.") is the operator's own commitment. It matches D-10.
 - **Copy rows pending operator §6 (A–I), as labelled** in the §5.4 and §6.7 adopted tables and in [faq-copy.md](faq-copy.md) (block I). `name`, `typo`, `voice` and `keep` rows are adopted without approval.
 - **Launch dates:** per `head-product` (`launch-plan-1118.md`), recorded in §8.
-- **Scope-block gates.** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md): gate 1 accepted (P37) and waivers signed (2026-10-23). [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md): gate 1 accepted (P38) and waivers signed (2026-10-23) for the earlier scope; **after the 2026-10-26 re-scope, gate 1 needs `head-product`'s re-acceptance and the operator re-confirms W-M11-1 and W-M11-2.** [scope-d13-policy-notice.md](scope-d13-policy-notice.md): gate 1 accepted (P39) and waivers signed (2026-10-24).
+- **Scope-block gates.** [scope-q6-tour-line.md](scope-q6-tour-line.md) and [scope-faq-sup-m4.md](scope-faq-sup-m4.md): gate 1 accepted (P37) and waivers signed (2026-10-23). [scope-m11-entry-ownership.md](scope-m11-entry-ownership.md): gate 1 accepted (P38) and waivers signed (2026-10-23) for the earlier scope; **after the 2026-10-26 re-scope, gate 1 re-accepted (P62, at `791c4f50`) and W-M11-1 and W-M11-2 re-confirmed by the operator (2026-10-26).** [scope-d13-policy-notice.md](scope-d13-policy-notice.md): gate 1 accepted (P39) and waivers signed (2026-10-24).
 - **Flags for `head-product` from marketing's R22 revision** (source as of 2026-10-23 18:17, R22 applied, its §0 item 11):
   - **C2–C5 and C8, legal review.** P36 said they "still need legal-lead's review". Marketing's R22 column now marks c2 and c5 "approved (R22.1)" and c3, c4 and c8 "edited per R22" (legal's exact text), and its §0.11 says "No row is pending". Confirm that legal-lead's review is done.
   - **D-8.** c2 now reads `Delete my data` "(D-8(a); R22.1)", and c8 no longer branches on D-8. That reads as legal-lead choosing D-8(a). Confirm, and D-8 leaves "Still open".
@@ -1602,17 +1606,17 @@ For `head-product`, with a recommendation each.
   - D-8, D-9, D-11 and D-12 with `legal-lead` via `head-bizops`; D-14 with `app-manager`.
   - **M11:** an `analytics-lead` count of affected `entry:*` users (`head-product` has requested it), plus the Open questions below.
 - **Open questions (M11 re-scope, 2026-10-26):**
-  1. **Feasibility before 11-10** (`head-eng`): can the re-scoped M11 be live before the App Store submission?
-  2. **Binary vs server split** (`head-eng`): which parts need the 11-06 binary (likely the E1 to E5 error copy and the verify-sheet routing) and which are server-only.
-  3. **E6, the MFL account key** (`head-eng`): key on the MFL username, or bind the login's later franchises to the first account. Today MFL keys per franchise (`server.py:29710` at `21266ddf`).
-  4. **E2, the identity lookup** (`head-eng`: feasibility; `legal-lead`: acceptability): `espn_credentials` and `mfl_credentials` are keyed by `user_id` alone, with no index or uniqueness on the SWID or MFL username (`database.py:2626-2634`, `:2652-2659`), so "the first controller" needs a rule.
-  5. **The public-league ESPN proof and ownerless teams** (`head-eng`, `eng-security`): a public league reads without cookies, so which authenticated read proves the pair for a public-league user (M11-R1, M11-R5); and ownerless ESPN teams, which the mint accepts today (`server.py:29660-29662`), must be refused or get a rule.
-  6. **Error-code registration** (`analytics-lead`): `signin_*` already fires with method `espn`/`mfl` (`mobile/src/api/platformEntry.ts:137`, `:159`, `:162-166`). Do the new `signin_failed.error_code` values (`wrong_account`, `already_claimed`, `espn_expired`, `mfl_unavailable`) need registering? The taxonomy lists `error_code` as a `signin_failed` property with no closed value list (`backend/analytics_taxonomy.py:964`), unlike `sleeper_send_failed`'s closed enum (`:1186`). If they do need it, W-M11-1 doesn't cover them, and `analytics-lead` grants.
-  7. **Re-confirm W-M11-1 and W-M11-2** (the operator, via `head-product`): signed 2026-10-23 for the earlier scope; the scope changed materially on 2026-10-26.
-  8. **The verify sheet** (`head-product` coordinates with `ux-lead`'s §3): an entry session's step-up uses its own platform login (M11-R2), which un-parks `mon.verify.espn` / `mon.verify.mfl`.
-  9. **Closing #372** (`head-eng` agrees): the claim-only delete is superseded.
-  10. **The `entry:*` purge** (`legal-lead` confirms): it still proceeds by ~11-05 (R28.12), and those users re-enter through the login.
-  11. **The `legal-lead` and `marketing-lead` items** (§6.9.6), routed by `head-product` through `head-bizops`.
+  1. **Feasibility before 11-10** (`head-eng`): can the re-scoped M11 be live before the App Store submission? → routed to `head-eng`, for `platforms-eng`'s design, due EOD 2026-10-28.
+  2. **Binary vs server split** (`head-eng`): which parts need the 11-06 binary (likely the E1 to E5 error copy and the verify-sheet routing) and which are server-only. → routed to `head-eng`, for `platforms-eng`'s design, due EOD 2026-10-28.
+  3. **E6, the MFL account key** (`head-eng`): key on the MFL username, or bind the login's later franchises to the first account. Today MFL keys per franchise (`server.py:29710` at `21266ddf`). → routed to `head-eng`, for `platforms-eng`'s design, due EOD 2026-10-28.
+  4. **E2, the identity lookup** (`head-eng`: feasibility; `legal-lead`: acceptability): `espn_credentials` and `mfl_credentials` are keyed by `user_id` alone, with no index or uniqueness on the SWID or MFL username (`database.py:2626-2634`, `:2652-2659`), so "the first controller" needs a rule. → routed to `head-eng` (feasibility; `platforms-eng`'s design, due EOD 2026-10-28) and to `legal-lead` and `marketing-lead` via `head-bizops` (acceptability).
+  5. **[Resolved at P62 for the public-league case]** **The public-league ESPN proof and ownerless teams** (`head-eng`, `eng-security`): a public league reads without cookies, so which authenticated read proves the pair for a public-league user (M11-R1, M11-R5); and ownerless ESPN teams, which the mint accepts today (`server.py:29660-29662`), must be refused or get a rule. **Resolved at P62 (2026-10-26) for the public-league case:** no weak proof for account creation; public-league-only ESPN users go Apple → connect ESPN in Settings. The technical proof question for private leagues, and ownerless teams, stays with `head-eng`, for `platforms-eng`'s design, due EOD 2026-10-28.
+  6. **Error-code registration** (`analytics-lead`): `signin_*` already fires with method `espn`/`mfl` (`mobile/src/api/platformEntry.ts:137`, `:159`, `:162-166`). Do the new `signin_failed.error_code` values (`wrong_account`, `already_claimed`, `espn_expired`, `mfl_unavailable`) need registering? The taxonomy lists `error_code` as a `signin_failed` property with no closed value list (`backend/analytics_taxonomy.py:964`), unlike `sleeper_send_failed`'s closed enum (`:1186`). If they do need it, W-M11-1 doesn't cover them, and `analytics-lead` grants. → routed to `analytics-lead`, with `head-product`'s next message.
+  7. **Re-confirm W-M11-1 and W-M11-2** (the operator, via `head-product`): signed 2026-10-23 for the earlier scope; the scope changed materially on 2026-10-26. **Resolved 2026-10-26:** the operator re-confirmed both for the ESPN/MFL sign-in launch scope (verbatim, in Decisions recorded).
+  8. **The verify sheet** (`head-product` coordinates with `ux-lead`'s §3): an entry session's step-up uses its own platform login (M11-R2), which un-parks `mon.verify.espn` / `mon.verify.mfl`. → routed to `ux-lead`'s §3 amendment 5, provisional until 2026-10-29.
+  9. **Closing #372** (`head-eng` agrees): the claim-only delete is superseded. → routed to `head-eng`, for `platforms-eng`'s design, due EOD 2026-10-28. Product agrees #372 closes; `head-eng` decides.
+  10. **The `entry:*` purge** (`legal-lead` confirms): it still proceeds by ~11-05 (R28.12), and those users re-enter through the login. → routed to `legal-lead` and `marketing-lead` via `head-bizops`.
+  11. **The `legal-lead` and `marketing-lead` items** (§6.9.6), routed by `head-product` through `head-bizops`. → routed to `legal-lead` and `marketing-lead` via `head-bizops`.
   - **§6.10 open items** (6.10.3): file ownership of `SettingsHubScreen.tsx` / `SettingsTestingScreen.tsx` (`head-eng`), the inbox close-control glyph (`design-lead`), the credits string's final period (`legal-lead`), and the marketing strings.
 
 **Waivers** (surfaced here per the feature-scope rule; each is restated with its reason in its
@@ -1634,23 +1638,23 @@ scope block):
 | W-FAQ-1 | FAQ §1 analytics | A static page: `web/faq.html` loads no script, so there is no events SDK and no new user action to measure. **Signed 2026-10-23.** |
 | W-FAQ-2 | FAQ §2 flags | None added. Lapses if `head-eng`'s 11-18 flip uses a flag; the scope block's §2 then names it. **Signed 2026-10-23.** |
 | W-FAQ-3 | FAQ §3 mobile guard, pytest, TestFlight checklist | Web-only text. The app's Help & FAQ row only opens the web URL, which the manual read-through covers. **Signed 2026-10-23.** |
-| W-M11-1 | M11 §1 analytics | No new events. `signin_*` already fires with method `espn`/`mfl` at entry (`platformEntry.ts:137`, `:159`, `:162-166`), and the step-up re-auths reuse those proof paths (verified at build). New `signin_failed.error_code` values may need `analytics-lead`'s registration (Open question 6); if so, this waiver doesn't cover them. **Signed 2026-10-23 for the earlier scope; re-confirmation requested from the operator (scope changed 2026-10-26).** |
-| W-M11-2 | M11 §2 flags | No new flag. `mfl.auth_link` and `espn.webview_capture` remain kill switches: with one off, that entry is unavailable (there is no claim-only path). `landing.platform_options` flips ON at launch (M11-R7). A recommendation; `head-eng` decides. **Signed 2026-10-23 for the earlier scope; re-confirmation requested from the operator (scope changed 2026-10-26).** |
+| W-M11-1 | M11 §1 analytics | No new events. `signin_*` already fires with method `espn`/`mfl` at entry (`platformEntry.ts:137`, `:159`, `:162-166`), and the step-up re-auths reuse those proof paths (verified at build). New `signin_failed.error_code` values may need `analytics-lead`'s registration (Open question 6); if so, this waiver doesn't cover them. **Signed 2026-10-23 for the earlier scope; re-confirmed 2026-10-26.** |
+| W-M11-2 | M11 §2 flags | No new flag. `mfl.auth_link` and `espn.webview_capture` remain kill switches: with one off, that entry is unavailable (there is no claim-only path). `landing.platform_options` flips ON at launch (M11-R7). A recommendation; `head-eng` decides. **Signed 2026-10-23 for the earlier scope; re-confirmed 2026-10-26.** |
 | W-D13-1 | D-13 §1 analytics | No new events. A tap already fires `league_home_action_tapped` (`whats_new`); `whats_new_shown` / `whats_new_tapped` are optional per bizops §10, and need `analytics-lead`'s grant if added later. **Signed 2026-10-24.** |
 | W-D13-2 | D-13 §2 flags | None new; `ux.whats_new` is already on (`config/features.json:175`). Product's P39 sequencing only holds the existing flag off until the pages deploy (§7.8.4). **Signed 2026-10-24.** |
 | W-D13-3 | D-13 §3 pytest | No backend code. **Signed 2026-10-24.** |
 
 W-Q6-* and W-FAQ-* are covered by the 2026-10-23 sign-off, not the 2026-10-22 one. W-M11-* were
 covered by the M11 sign-off of 2026-10-23 ("Decision 1: Agree to the waivers.") for the earlier scope;
-the operator is asked to re-confirm them for the 2026-10-26 re-scope. W-D13-* are
+the operator re-confirmed them for the 2026-10-26 re-scope ("I re-confirm W-M11-1 and W-M11-2 for the ESPN/MFL sign-in launch scope.", 2026-10-26). W-D13-* are
 covered by the 2026-10-24 sign-off ("I sign off on #354's D-13 waivers (W-D13-1 to W-D13-3).").
 
 ## 10. Handoffs
 
 | To | What |
 |---|---|
-| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. (Gate 1 is accepted for the Q6, FAQ and D-13 scope blocks: P37, P39. **M11's needs re-acceptance after the 2026-10-26 re-scope.**) Route M11's Open questions (§9). The R22 flags in §9: the C2–C5/C8 legal review, D-8 and a home for `r22.settings.rows` (the FAQ ship order is resolved by P37). The 2026-10-23 flags in §9: P28's date; M11 (i) to (iii); the credits-row waivers. D-13 is closed: P39 and legal's R26.2. |
-| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; the `ux.whats_new` flips (§7.8.4; W-D13-* were signed on 2026-10-24, W-Q6-*, W-FAQ-* and W-M11-* on 2026-10-23); **re-confirm W-M11-1 and W-M11-2** for the re-scoped M11 (scope changed 2026-10-26); the `landing.platform_options` ON flip at launch once M11 ships (M11-R7); the M11 fallback only until M11 is live (§6.9.10). |
+| `head-product` | Accept or amend this PRD, the three scope blocks, D-1 to D-14 and the waivers. (Gate 1 is accepted for the Q6, FAQ and D-13 scope blocks: P37, P39. **Gate 1 for M11 was re-accepted for the 2026-10-26 re-scope: P62.**) Route M11's Open questions (§9). The R22 flags in §9: the C2–C5/C8 legal review, D-8 and a home for `r22.settings.rows` (the FAQ ship order is resolved by P37). The 2026-10-23 flags in §9: P28's date; M11 (i) to (iii); the credits-row waivers. D-13 is closed: P39 and legal's R26.2. |
+| operator (via `head-product`) | Marketing §6 approval for every row labelled "pending operator §6"; the `ux.whats_new` flips (§7.8.4; W-D13-* were signed on 2026-10-24, W-Q6-*, W-FAQ-* and W-M11-* on 2026-10-23); W-M11-1 and W-M11-2 **re-confirmed 2026-10-26** for the re-scoped M11; the `landing.platform_options` ON flip at launch once M11 ships (M11-R7); the M11 fallback only until M11 is live (§6.9.10). |
 | `marketing-lead` (via head-product → head-bizops) | Copy inventories §5.4 (C1-C8) and §6.7 (F1-F18): delivered 2026-10-23 and recorded in the adopted tables. Still owed for the FAQ (§7b): the **pre-launch variant** of Q3's App Store line (in progress via `head-bizops`; needed for the 11-09 go-live, P37), and where the **pricing line** goes. M11 (§6.9.6): the listing line (ESPN/MFL sign-in), the G4 strings, and the step-up, error (E1 to E4) and prevention (E5) copy (M11-R6). §6.10: the D-7 unavailable line (the row and inbox titles are already f17.title and f8/f9; the About preview is f18). If the M11 fallback is taken: the Apple-then-connect wording for the listing and FAQ (§6.9.10). **Copy: marketing-lead (not inventoried):** type the three "§3 note" rows (contact `:68` and `:82`, inbox `:110`; new text given in its §3, no type or §6 entry) and say whether they need operator §6. |
 | `legal-lead` (via head-bizops) | §7.2 requirements, the wording inventory §7.5, terms topics §7.6, D-8, D-9, D-11, D-12; review of P28 C3-C5; App Privacy labels M6(b) reconciled with the final policy. P36: review of C2–C5 and C8 as adopted (§5.4; marketing's R22 column marks them reviewed, `head-product` to confirm); FAQ Q16 and Q17 (§7b). M11 (re-scoped, §6.9.6): the privacy text for credential storage at sign-up (encrypted `espn_s2`, the SWID, the MFL username and cookie; the password is never stored); re-add the M11 item R28.12 dropped from privacy §6; confirm the `entry:*` purge; App Review notes; E2's acceptability (first controller wins). §6.10.3: the credits text's exact final string. D-13 is done (R26.1 text and R26.2 ruling, recorded in §7.8); only an adjustment to the TestFlight line's "League tab" wording is open, with `app-manager` (D13-R8). |
 | `analytics-lead` / `models-lead` (via head-bizops) | Read prod `model_config` and confirm or correct the FAQ's Q9 K-factors (32 / 8 / 4) before 11-09 (FAQ-R6). |

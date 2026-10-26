@@ -3,8 +3,8 @@
 **Date:** 2026-10-23 (re-scoped into launch 2026-10-26)
 **Entry point:** direct ask: `head-product`'s new launch MUST M11 (2026-10-23); `legal-lead` LEG-M5; Apple guideline 5.1.1(v); operator decision 2026-10-26 (in the launch scope)
 **Builder:** `onboarding-eng` (build, under `head-eng`; `head-eng` allocates the server files and is sizing the re-scope). Spec by `launch-onboarding-pm-4` for `onboarding-pm`.
-**Operator sign-off on waivers:** signed 2026-10-23 for the earlier scope (operator, relayed by the coordinator; quoted verbatim: "Decision 1: Agree to the waivers."), covering W-M11-1 and W-M11-2. **Re-confirmation requested from the operator (scope changed 2026-10-26).**
-**Gate 1 (head-product acceptance of this block):** accepted 2026-10-23 (P38) for the earlier scope. **Needs `head-product`'s re-acceptance of the 2026-10-26 re-scope.**
+**Operator sign-off on waivers:** re-confirmed 2026-10-26 for the launch scope (operator, in head-product's session; quoted verbatim: "I re-confirm W-M11-1 and W-M11-2 for the ESPN/MFL sign-in launch scope."). First signed 2026-10-23 for the earlier scope ("Decision 1: Agree to the waivers.").
+**Gate 1 (head-product acceptance of this block):** accepted 2026-10-26 (P62) at 791c4f50, including the edge-case decisions M11-E1 to E6 and the public-ESPN rule (no weak proof for account creation; public-league-only ESPN users go Apple → connect ESPN). First accepted 2026-10-23 (P38) for the earlier scope.
 
 > **Decision, 2026-10-26: M11 is in the launch scope.** The operator, in `head-product`'s session,
 > verbatim: "It should be in the launch scope." That means **account creation from the ESPN or MFL
@@ -59,7 +59,9 @@ as `POST /api/sleeper/link` does. This realizes M11-R1.
 - **M11-R4. The protection stays:** an unverified session without a login is refused;
   `backend/tests/test_private_session_ownership.py` stays green.
 - **M11-R5. Every ESPN/MFL entry requires the platform login, at launch, including public ESPN
-  leagues.** No claim-only entry remains (`onboarding-pm`'s decision; `platforms-pm` reviews, P10).
+  leagues.** No claim-only entry remains (`onboarding-pm`'s decision; `platforms-pm` reviews, P10). The public-ESPN question was decided at P62
+  (2026-10-26): no weak proof for account creation; public-league-only ESPN users go Apple → connect
+  ESPN in Settings.
   #372, the claim-only delete, is superseded: **recommend closing it**, with `head-eng`'s agreement.
   The `entry:*` purge (legal R28.12, by ~11-05) still proceeds; those users re-enter through the
   login (`legal-lead` confirms).
@@ -105,7 +107,7 @@ re-scope keeps option (e).
   `:162-166` at `21266ddf`), so the login-creates-account funnel is measured. The step-up re-auths
   reuse those proof paths; verify at build that each fires them.
 - [x] **(c) WAIVED — no new events because:** see (b). (Waiver **W-M11-1**: signed 2026-10-23 for
-  the earlier scope; **re-confirmation requested from the operator, scope changed 2026-10-26**.)
+  the earlier scope; **re-confirmed 2026-10-26**.)
   - **Open question:** the new `signin_failed.error_code` values (`wrong_account`,
     `already_claimed`, `espn_expired`, `mfl_unavailable`) may need `analytics-lead`'s registration.
     The taxonomy lists `error_code` as a `signin_failed` property with no closed value list
@@ -125,7 +127,7 @@ re-scope keeps option (e).
 
   Any of these updates `docs/data-dictionary.md` (§4).
 - New/changed feature flags: **none.** (Waiver **W-M11-2**: signed 2026-10-23 for the earlier scope;
-  **re-confirmation requested from the operator, scope changed 2026-10-26**.)
+  **re-confirmed 2026-10-26**.)
   - `mfl.auth_link` (`config/features.json:120`) and `espn.webview_capture` (`:114`) remain kill
     switches. With one off, that entry is unavailable; there is no claim-only path.
   - `landing.platform_options` (`:30`) flips **ON** for launch once M11 ships (M11-R7).
@@ -217,10 +219,11 @@ D-056: no simulator, no Maestro, no screen captures. Full evidence; nothing belo
 - **Launch switch:** `landing.platform_options` ON once M11 ships (M11-R7). **Fallback (b) retires
   once M11 is live.** Until then it stays the fallback at the 11-06 decision point
   ([prd.md §6.9.10](prd.md#6910-the-fallback-operator-decision-not-taken)).
-- **Gates still owed:** gate 1 needs `head-product`'s re-acceptance of the re-scope, and the operator
-  re-confirms W-M11-1 and W-M11-2.
+- **Gates still owed:** none on this block. Gate 1 was accepted 2026-10-26 (P62) at 791c4f50, and the
+  operator re-confirmed W-M11-1 and W-M11-2 the same day.
 - **Open questions** (prd.md §9): feasibility before 11-10; the binary vs server split; E6's MFL key;
-  E2's lookup (feasibility and legal acceptability); the public-league ESPN proof and ownerless teams;
-  the error-code registration; re-confirming W-M11-1/2; the ux-lead §3 verify sheet; closing #372; the
+  E2's lookup (feasibility and legal acceptability); the public-league ESPN proof and ownerless teams
+  (the public-ESPN rule was decided at P62; the private-league proof stays with `head-eng`);
+  the error-code registration; re-confirming W-M11-1/2 (done 2026-10-26); the ux-lead §3 verify sheet; closing #372; the
   purge confirmation; the `legal-lead` and `marketing-lead` items.
 - Express lane declared by the operator? **No.** Full gates (API contracts; see §2).
