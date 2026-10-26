@@ -265,7 +265,8 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
           "status": FAIL if incomplete else PASS}
 
     misses = _sum_counts(d.upgrade_misses for d in decks)
-    g7 = {"upgrade_misses": misses,
+    row_gone, row_gone_named = _row_gone(packs)
+    g7 = {"upgrade_misses": misses, "row_gone": row_gone, "row_gone_named": row_gone_named,
           "status": FAIL if misses.get(UPGRADE_MISS_OTHER, 0) > 0 else PASS}
 
     conflicts = [d.deck_job_id for d in decks if d.exclusion == WITHDRAWAL_CONFLICT]
@@ -297,6 +298,31 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
             c.evidence_tier == PARTIAL_RUN_TIER for c in d.cards)),
         withdrawn_removed_by_reason=_sum_counts(d.withdrawn_removed_by_reason for d in decks),
         g1=g1, g2=g2, g3=g3, g7=g7, g8=g8, g9=g9, g10=g10, overall=overall)
+
+
+def _row_gone(packs) -> tuple[int, int]:
+    """U4 option A's guard, reported under G7 and never barred: the misses on
+    the stored path whose pack recorded a stored count above the card while its
+    page row was gone (run["upgrade_miss_row_gone"], card_index -> the pack's
+    stored count), and how many of those carry a named cause in
+    run["upgrade_miss_cards"] (absent means other). With A on, the named ones
+    are named only because the row was gone; with A off, the entries are the
+    `other` misses A would name. A page-store bug can't hide behind A.
+    Absent keys count 0; an unreadable pack is G1's."""
+    total = named = 0
+    for _served_at, header_json in packs.values():
+        try:
+            run = json.loads(header_json)["run"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        gone, causes = run.get("upgrade_miss_row_gone"), run.get("upgrade_miss_cards")
+        if not isinstance(gone, dict):
+            continue
+        causes = causes if isinstance(causes, dict) else {}
+        for index in gone:
+            total += 1
+            named += causes.get(index, UPGRADE_MISS_OTHER) != UPGRADE_MISS_OTHER
+    return total, named
 
 
 def _final(deck, pack, as_of: str, in_flight_from: str) -> bool:
@@ -510,6 +536,9 @@ def render(r: FlipRead) -> str:
         lines.append(f"G8 withdrawal_conflict decks: {', '.join(g8['ids'])}")
     if g9["ids"]:
         lines.append(f"G9 no_delivery_evidence decks with an outcome: {', '.join(g9['ids'])}")
+    lines.append(f"G7 (not barred) row gone: {g7['row_gone']} misses whose pack recorded a "
+                 f"stored count above the card while its page row was gone; "
+                 f"{g7['row_gone_named']} of them with a named cause (U4 option A's guard).")
     lines.append(f"G10 note: {g10['note']}.")
     lines.append(f"v5 exclusions (decks): {_pairs(r.exclusions)}; partial_run decks "
                  f"(replay): {r.partial_run_decks}; withdrawn_removed_by_reason "

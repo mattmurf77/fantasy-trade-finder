@@ -313,6 +313,24 @@ def test_g7_bars_other_and_prints_every_cause(misses, total, status):
     assert f"| G7 | upgrade misses by cause | {causes} | other 0 | {status} |" in render(r)
 
 
+def test_g7_reports_misses_whose_page_row_was_gone_without_barring_them():
+    """U4 option A's guard (head-eng's condition 1): misses whose pack recorded
+    a stored count above the card while the page row was gone, and how many of
+    them carry a named cause. Reported, never barred: G7 stays bar-on-other."""
+    db = make_db()
+    _packed(db, "p", upgrade_misses={"restart_split": 1, "other": 0},
+            upgrade_miss_cards={"12": "restart_split", "40": "evicted_split", "41": "other"},
+            upgrade_miss_row_gone={"12": 90, "40": 90, "41": 90})
+    _packed(db, "q", upgrade_misses={"restart_split": 1},
+            upgrade_miss_row_gone={"7": 90})                     # no cause map: other
+    _packed(db, "r", upgrade_misses={"restart_split": 1})        # no row-gone key: 0
+    r = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert (r.g7["row_gone"], r.g7["row_gone_named"]) == (4, 2)
+    assert r.g7["status"] == PASS                                # never barred
+    assert ("G7 (not barred) row gone: 4 misses whose pack recorded a stored count above "
+            "the card while its page row was gone; 2 of them with a named cause") in render(r)
+
+
 # ---------------------------------------------------------------------------
 # G8, G9, G10
 # ---------------------------------------------------------------------------
