@@ -239,6 +239,19 @@ def test_g3_fails_on_an_outcome_on_a_ghost_row():
             "outside the window 2) | 0 / 0 | FAIL |") in text
     assert ("G3 outcomes on a ghost row (ghosts are never shown: a ghost reached a "
             f"client): {GHOST_ID}") in text
+    # A serve bug, not lost data: back to models-lead, never the kill (B3 (f4)).
+    assert "recommends the kill" not in text
+    assert "Back to models-lead" in text
+
+
+def test_an_orphan_outcome_recommends_the_kill():
+    """B3 (f4): an outcome that joins no card is lost data, so the read
+    recommends the kill at once."""
+    db = _joins_db()
+    _post(db, "nowhere:9")
+    r = flip_read(db.eng, since=SINCE, as_of=LATE)
+    assert r.g3["orphans"] == 1 and r.g3["status"] == FAIL
+    assert "recommends the kill" in render(r)
 
 
 def test_g3_reads_only_outcomes_in_the_window_and_by_as_of():

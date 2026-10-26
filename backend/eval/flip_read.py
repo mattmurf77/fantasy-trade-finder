@@ -492,11 +492,17 @@ def render(r: FlipRead) -> str:
                  f"(replay): {r.partial_run_decks}; withdrawn_removed_by_reason "
                  f"(every loaded deck): {_pairs(r.withdrawn_removed_by_reason)}")
     lines.append(f"OVERALL: {r.overall}")
-    if g1["status"] == FAIL or g3["status"] == FAIL:
+    # B3 (f4): the kill is for lost data, unreadable packs (G1) or outcomes that
+    # join no card (G3 orphans). An outcome on a ghost row is a serve bug (a
+    # ghost reached a client), not lost data: it goes back to models-lead.
+    if g1["status"] == FAIL or g3["orphans"]:
         lines.append("G1 or G3 failed: models-lead recommends the kill "
                      "(first_page_store_enabled 0) at once; the operator decides via "
                      "release-lead (B3 (f4)).")
     elif r.overall == FAIL:
+        if g3["on_ghost"]:
+            lines.append("G3: an outcome on a ghost row (a ghost reached a client): "
+                         "a serve bug, not lost data.")
         lines.append("Back to models-lead, who rules within the turn (B3 (f4)).")
     if r.weekly:
         w = r.weekly
