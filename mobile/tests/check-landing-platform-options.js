@@ -266,7 +266,7 @@ assert(
 
 // V2.6 — backend route exists, sessionless, dual-gated, deterministic ids.
 const entryRoute = serverPy.match(
-  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,20000}?\n@app\.route/,
+  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,30000}?\n@app\.route/,
 );
 assert(!!entryRoute, 'V2: POST /api/entry/platform route exists');
 assert(
@@ -289,7 +289,7 @@ assert(
 assert(
   !!entryRoute &&
     /_espn_signin_proof\(/.test(entryRoute[0]) &&
-    /_mfl\.fetch_my_leagues\(auth\["cookie"\], year\)[\s\S]*_platform_sign_in\(audit, "mfl"/.test(entryRoute[0]) &&
+    /_mfl\.login\(username, password, year\)[\s\S]*_mfl\.fetch_league_bundle\(league_id, year, host, cookie=cookie\)[\s\S]*_mfl\.fetch_my_leagues\(cookie, year\)[\s\S]*_platform_sign_in\(audit, "mfl"/.test(entryRoute[0]) &&
     /_platform_sign_in\(audit, "espn"/.test(entryRoute[0]),
   'Platform sign-in: both claims prove ownership, then mint via _platform_sign_in',
 );

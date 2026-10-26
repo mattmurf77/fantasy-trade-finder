@@ -107,11 +107,14 @@ or password.
 **Sign in with MFL — the password at the mint is transient too (2026-10-26).**
 The team-claim step of the sessionless `POST /api/entry/platform` now proves
 ownership with an MFL login (platform sign-in, design D5): the body carries
-`username` + `password`; the route pops the password out of the parsed body,
-calls `mfl_service.login` once (the password is `del`-ed in a `finally`
-whether the login succeeds or not), then `fetch_my_leagues` with the returned
-cookie, and the claimed (`league_id`, `franchise_id`) must be one of that
-login's franchises. **The mint stores nothing** — not the password, not the
+`username` + `password` (missing → `proof_required` before any MFL call);
+the route pops the password out of the parsed body, calls `mfl_service.login`
+once **before reading the league** (the password is `del`-ed in a `finally`
+whether the login succeeds or not), reads the league bundle **with the
+returned cookie** — so a private league can be claimed; a good login that
+still can't read the league is refused as `wrong_account` — then calls
+`fetch_my_leagues` with the same cookie, and the claimed (`league_id`,
+`franchise_id`) must be one of that login's franchises. **The mint stores nothing** — not the password, not the
 `MFL_USER_ID` cookie (the client's follow-on `POST /api/mfl/auth-link` stores
 the cookie as above). The identity kept is the username, trimmed and
 lower-cased, as a `linked_identities` row (provider `mfl`); first controller

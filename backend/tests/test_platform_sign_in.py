@@ -473,14 +473,79 @@ def test_c8_mfl_wrong_account_generic_when_login_owns_nothing_here(env):
                             "message": server._SIGNIN_MFL_WRONG_ACCOUNT_MSG}
 
 
-def test_c7_refusal_mfl_proof_required(env):
-    for kw in ({"username": None, "password": None},
-               {"password": None}, {"username": None}):
-        r = _mfl_claim(env, **kw)
-        assert r.status_code == 403
-        assert r.get_json()["error"] == "proof_required"
-        assert r.get_json()["message"]
+def _recorder(calls, name):
+    def call(*a, **kw):
+        calls.append(name)
+        raise AssertionError(f"unexpected MFL call: {name}")
+    return call
+
+
+def test_c7_refusal_mfl_proof_required_makes_zero_mfl_calls(env):
+    calls: list = []
+    with patch.object(mfl, "resolve_host", _recorder(calls, "resolve_host")), \
+         patch.object(mfl, "fetch_league_bundle", _recorder(calls, "bundle")), \
+         patch.object(mfl, "login", _recorder(calls, "login")), \
+         patch.object(mfl, "fetch_my_leagues", _recorder(calls, "myleagues")), \
+         patch.object(urllib.request, "urlopen", _recorder(calls, "urlopen")):
+        for kw in ({"username": None, "password": None},
+                   {"password": None}, {"username": None}):
+            r = _mfl_claim(env, **kw)
+            assert r.status_code == 403
+            assert r.get_json()["error"] == "proof_required"
+            assert r.get_json()["message"]
+    assert calls == []
     _assert_nothing_created(env)
+
+
+def _private_mfl_bundle(seen):
+    """A PRIVATE MFL league: the bundle exports need MattM's login cookie."""
+    with open(MFL_FIXTURE) as f:
+        bundle = json.load(f)
+
+    def fetch(league_id, year, host, cookie=None, **kw):
+        seen.append(cookie)
+        if cookie != "MFL_USER_ID=c-mattm":
+            raise mfl.MflAuthError()
+        return copy.deepcopy(bundle)
+    return fetch
+
+
+def test_mfl_private_league_bundle_is_read_with_the_login_cookie(env):
+    seen: list = []
+    with patch.object(mfl, "fetch_league_bundle", _private_mfl_bundle(seen)):
+        # Preview (no login) of a private league: unchanged, auth required.
+        r = _post(env, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026)
+        assert r.status_code == 403
+        assert r.get_json()["error"] == "mfl_auth_required"
+        r = _mfl_claim(env)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["verified_via"] == "mfl_login" and body["team_id"] == "0001"
+    assert body["display_name"] == "Clobberin Time 2"
+    assert seen == [None, "MFL_USER_ID=c-mattm"]    # login came first
+    assert "MFL_USER_ID" not in r.get_data(as_text=True)
+    assert _rows(env, db_module.mfl_credentials_table) == []    # stores nothing
+
+
+def test_mfl_private_league_unreadable_by_this_login_is_wrong_account(env):
+    seen: list = []
+    with patch.object(mfl, "fetch_league_bundle", _private_mfl_bundle(seen)):
+        r = _mfl_claim(env, username="loner", password="pw-loner")
+    assert r.status_code == 403
+    assert r.get_json() == {"error": "mfl_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": server._SIGNIN_MFL_WRONG_ACCOUNT_MSG}
+    assert seen == ["MFL_USER_ID=c-loner"]
+    _assert_nothing_created(env)
+
+
+def test_mfl_bad_login_is_refused_before_any_bundle_fetch(env):
+    seen: list = []
+    with patch.object(mfl, "fetch_league_bundle", _private_mfl_bundle(seen)):
+        r = _mfl_claim(env, password="wrong")
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "mfl_bad_credentials"
+    assert seen == []
 
 
 # ── Account + session (D3 / D6) ─────────────────────────────────────────────

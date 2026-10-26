@@ -102,6 +102,14 @@ def _fake_account_builder(user_id, display_name, token=None):
     return tok, payload
 
 
+def _no_live_mfl(name):
+    """Deny-by-default: a test that reaches MFL's login/myleagues without
+    patching them in (see _mfl_login_ok) fails instead of calling MFL."""
+    def call(*a, **kw):
+        raise AssertionError(f"live MFL call: {name}")
+    return call
+
+
 def _private_espn(payload):
     """A private ESPN league whose reads are pair-bound: anonymous reads and
     any (espn_s2, SWID) pair ESPN didn't issue together need auth."""
@@ -158,6 +166,8 @@ def client(monkeypatch):
                       lambda *a, **kw: "www48.myfantasyleague.com"), \
          patch.object(mfl, "fetch_league_bundle",
                       lambda *a, **kw: copy.deepcopy(mfl_bundle)), \
+         patch.object(mfl, "login", _no_live_mfl("login")), \
+         patch.object(mfl, "fetch_my_leagues", _no_live_mfl("fetch_my_leagues")), \
          patch.object(server, "_extension_build_session",
                       _fake_extension_builder), \
          patch.object(server, "_account_build_session",
@@ -229,11 +239,11 @@ def test_mfl_preview_mints_nothing_persists_nothing(client):
         assert conn.execute(select(db_module.leagues_table)).fetchall() == []
 
 
-def _mfl_mint(c, **extra):
+def _mfl_mint(c, franchise_id="0001", **extra):
     login, my = _mfl_login_ok()
     with login, my:
         return _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
-                      franchise_id="0001", **MFL_CREDS, **extra)
+                      franchise_id=franchise_id, **MFL_CREDS, **extra)
 
 
 def test_mfl_mint_signs_into_a_proven_account_session(client):
@@ -279,8 +289,7 @@ def test_mfl_claim_without_login_is_refused_not_minted(client):
 
 def test_mfl_bad_franchise_400(client):
     c, _ = client
-    r = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
-               franchise_id="0099", **MFL_CREDS)
+    r = _mfl_mint(c, franchise_id="0099")
     assert r.status_code == 400
     assert r.get_json()["error"] == "mfl_bad_team_id"
 

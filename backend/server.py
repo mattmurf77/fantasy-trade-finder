@@ -29876,8 +29876,11 @@ def entry_platform():
           proof_unavailable / espn_unavailable (fail closed). Identity =
           the canonical SWID (accounts.platform_subject: braced,
           upper-cased) — the one normaliser for every SWID comparison.
-          MFL (D5): body username+password (else 403 proof_required);
-          mfl_service.login + fetch_my_leagues must list the claimed
+          MFL (D5): body username+password (else 403 proof_required, before
+          any MFL call); mfl_service.login FIRST, then the league bundle is
+          read with that login's cookie (private leagues work; a login that
+          can't read the league → wrong_account); fetch_my_leagues with the
+          same cookie must list the claimed
           (league_id, franchise_id) (bad login → 403 mfl_bad_credentials,
           one body; not theirs → reason wrong_account, naming the
           franchise this login owns in the league when there is one).
@@ -30133,10 +30136,11 @@ def _entry_platform(audit: dict):
         from . import mfl_service as _mfl
 
         subject = None
-        if (body.get("franchise_id") or body.get("team_id")) is not None:
-            # Team claim = sign-in attempt (D5): MFL login required. The
-            # password leaves the parsed body here and lives only until the
-            # one login call below.
+        claim = (body.get("franchise_id") or body.get("team_id")) is not None
+        if claim:
+            # Team claim = sign-in attempt (D5): MFL login required, checked
+            # before ANY MFL call. The password leaves the parsed body here
+            # and lives only until the one login call below.
             audit.update(claim=True, provider="mfl")
             username = str(body.get("username") or "").strip()
             password = body.pop("password", None) or ""
@@ -30148,9 +30152,43 @@ def _entry_platform(audit: dict):
             if limited is not None:
                 return limited
 
+        def _refuse_login(reason=None, message=_SIGNIN_MFL_BAD_LOGIN_MSG):
+            return _signin_refusal(audit, 403, "mfl_bad_credentials", message,
+                                   reason, provider="mfl", subject=subject,
+                                   failed_proof=True)
+
         try:
+            # Parse + (public) host resolution first: a malformed league id
+            # is refused before any password is sent.
             league_id, year, host = _mfl_resolve(body)
-            raw = _mfl.fetch_league_bundle(league_id, year, host)
+        except _mfl.MflError as e:
+            return _platform_error_response(e, "mfl")
+
+        cookie = None
+        if claim:
+            # D5, log in FIRST: the bundle is then read with the user's own
+            # cookie, so a PRIVATE league can be claimed. The cookie is used
+            # for this request only — never stored, logged or returned (the
+            # client's follow-on /api/mfl/auth-link stores the session).
+            try:
+                try:
+                    cookie = _mfl.login(username, password, year)["cookie"]
+                finally:
+                    del password  # transient use only — never stored or logged
+            except _mfl.MflAuthError:
+                return _refuse_login()
+            except _mfl.MflError as e:
+                return _platform_error_response(e, "mfl")
+
+        try:
+            raw = _mfl.fetch_league_bundle(league_id, year, host, cookie=cookie)
+        except _mfl.MflAuthError as e:
+            if claim:
+                # A good login that still can't read this league holds no
+                # franchise in it.
+                return _refuse_login("wrong_account",
+                                     _SIGNIN_MFL_WRONG_ACCOUNT_MSG)
+            return _platform_error_response(e, "mfl")
         except _mfl.MflError as e:
             return _platform_error_response(e, "mfl")
 
@@ -30180,18 +30218,10 @@ def _entry_platform(audit: dict):
             return jsonify({"error": "mfl_bad_team_id",
                             "message": "That franchise isn't in this league."}), 400
 
-        # D5: log in, then the claimed (league, franchise) must be one MFL
-        # lists for that login. Nothing is stored — not even the cookie.
-        def _refuse_login(reason=None, message=_SIGNIN_MFL_BAD_LOGIN_MSG):
-            return _signin_refusal(audit, 403, "mfl_bad_credentials", message,
-                                   reason, provider="mfl", subject=subject,
-                                   failed_proof=True)
+        # D5: the claimed (league, franchise) must be one MFL lists for this
+        # login. Nothing is stored — not even the cookie.
         try:
-            try:
-                auth = _mfl.login(username, password, year)
-            finally:
-                del password  # transient use only — never stored or logged
-            mine = _mfl.fetch_my_leagues(auth["cookie"], year)
+            mine = _mfl.fetch_my_leagues(cookie, year)
         except _mfl.MflAuthError:
             return _refuse_login()
         except _mfl.MflError as e:
