@@ -4070,7 +4070,8 @@ def _job_page_eligible(job: dict) -> bool:
                 and not job.get("trade_intent") and not job.get("source")
                 and not job.get("presentation_exempt")
                 and job.get("roster_fp") is not None and job.get("values_snapshot_id") is not None
-                and job.get("request_signature") is not None and not ceiling)
+                and job.get("request_signature") is not None
+                and job.get("experiment_digest") is not None and not ceiling)
 
 
 def _trade_card_expiry(card) -> float | None:
@@ -4112,7 +4113,7 @@ def _store_trade_page(job_id: str) -> bool:
                 _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
                 job.get("presentation_capture")),
             "config_signature": job["request_signature"],
-            "experiment_digest": _trade_experiment_digest(user_id), "deck_job_id": job_id,
+            "experiment_digest": job["experiment_digest"], "deck_job_id": job_id,
             "built_at": _db.page_store_iso(built),
             "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
             "card_count": len(cards), "pages_blob": blob, "evidence_blob": None,
@@ -10570,6 +10571,20 @@ def _kickoff_trade_job(
                     if prepared_trade_runtime.try_adopt(sys.modules[__name__], job_id=job_id,
                             context=execution_context, fairness=fairness_threshold, prefs=prefs_preload):
                         return
+                # P1: the experiment assignment the deck is built under, read
+                # here at job start (the memo, on this worker thread) so the
+                # stored page never carries a variant that moved mid-build.
+                with _trade_jobs_lock:
+                    page_eligible = bool((_trade_jobs.get(job_id) or {}).get("page_scope"))
+                if page_eligible:
+                    try:
+                        digest = _trade_experiment_digest(user_id)
+                    except Exception:
+                        log.warning("trade-page %s: experiment digest failed", job_id, exc_info=True)
+                    else:
+                        with _trade_jobs_lock:
+                            if job_id in _trade_jobs:
+                                _trade_jobs[job_id]["experiment_digest"] = digest
                 _run_trade_job(*args, **kwargs)
                 # P1: a complete organic job stores its first pages (flag off ⇒ no-op).
                 _store_trade_page(job_id)

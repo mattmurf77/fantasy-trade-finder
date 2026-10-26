@@ -198,6 +198,7 @@ REFUSALS = {
     "roster_fp_none": lambda job: job.update(roster_fp=None),
     "values_snapshot_none": lambda job: job.update(values_snapshot_id=None),
     "signature_none": lambda job: job.update(request_signature=None),
+    "experiment_digest_none": lambda job: job.pop("experiment_digest"),   # its read failed
     "pinned": lambda job: job.update(is_pinned=True),
     "intent": lambda job: job.update(trade_intent="consolidate"),
     "replenish": lambda job: job.update(source="replenish"),
@@ -821,6 +822,47 @@ def test_a_new_experiment_version_mismatches(p1, spawned, monkeypatch):
     build_page()
     _assign(monkeypatch, "light", version=4)
     assert "serve_source" not in generate(client, page=1).get_json()
+
+
+def test_the_page_carries_the_digest_read_at_job_start(p1, spawned, monkeypatch):
+    """Release-lead #368 QA P3 (c): the variant moves while the engine runs.
+    The page stores the start-time digest, so the serve after the move falls
+    through instead of serving a light-built deck as generous."""
+    client, _, _ = p1
+    _assign(monkeypatch, "light")
+    at_start = server._trade_experiment_digest(UID)
+    real_run = server._run_trade_job
+
+    def run_then_move(*args, **kwargs):
+        real_run(*args, **kwargs)
+        _assign(monkeypatch, "generous")              # after the engine, before the store
+
+    monkeypatch.setattr(server, "_run_trade_job", run_then_move)
+    job_id = run_job()
+    moved = server._trade_experiment_digest(UID)
+    assert moved != at_start
+    assert server._trade_jobs[job_id]["experiment_digest"] == at_start
+    assert stored()["deck_job_id"] == job_id and stored()["experiment_digest"] == at_start
+    assert "serve_source" not in generate(client, page=1).get_json()
+
+
+def test_the_digest_is_read_on_the_worker_not_the_request(p1, spawned, monkeypatch):
+    """Read once, at job start on the worker; never on the request thread, and
+    the store reuses the job's value instead of reading it again."""
+    client, _, _ = p1
+    _assign(monkeypatch, "light")
+    expected = server._trade_experiment_digest(UID)
+    reads = []
+    real = server._trade_experiment_digest
+    monkeypatch.setattr(server, "_trade_experiment_digest", lambda uid: reads.append(uid) or real(uid))
+    generate(client)
+    (start,) = spawned
+    job_id = start["args"][0]
+    assert reads == [] and "experiment_digest" not in server._trade_jobs[job_id]
+    start["target"](*start["args"], **start["kwargs"])          # the worker thread's body
+    assert reads == [UID]
+    assert server._trade_jobs[job_id]["experiment_digest"] == expected
+    assert stored()["deck_job_id"] == job_id and stored()["experiment_digest"] == expected
 
 
 def test_the_digest_marks_a_fallback_user(p1, monkeypatch):
