@@ -1214,6 +1214,29 @@ trade_page_store_table = Table("trade_page_store", metadata,
 Index("ix_trade_page_store_last_served", trade_page_store_table.c.last_served_at)
 Index("ix_trade_page_store_league", trade_page_store_table.c.league_id)
 
+# ── P2 deck lineage (flag trade.first_page_store) ───────────────────────────
+# One row per organic deck: (user_id, deck_job_id) and the scope it is built
+# under. Inserted (insert-or-ignore, record_trade_deck_lineage) by the deck's
+# job worker when it starts, before the engine runs (best-effort, its own
+# transaction), so a deck still running at a restart has one too.
+# /api/trades/status?deck=D reads the requester's row when D's job is gone
+# from this process and no page row is D's own (a deploy restarts the one
+# worker): the row proves D organic and names its scope, so D is rebased
+# instead of 404. Purged after 24 h by the page-store eviction pass. user_id
+# is the account deletion/export key (accounts._ADDITIONAL_PRIVATE_TABLES).
+trade_deck_lineage_table = Table("trade_deck_lineage", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("user_id",        String,  nullable=False),
+    Column("deck_job_id",    String,  nullable=False),
+    Column("league_id",      String,  nullable=False),
+    Column("scoring_format", String,  nullable=False),
+    Column("request_scope",  String,  nullable=False),   # "organic:f=0.50"
+    Column("recorded_at",    String,  nullable=False),   # ISO UTC (page_store_iso): the first page write
+    UniqueConstraint("user_id", "deck_job_id", name="uq_trade_deck_lineage_deck"),
+)
+
+Index("ix_trade_deck_lineage_recorded", trade_deck_lineage_table.c.recorded_at)
+
 # ── suggestion.telemetry — executed-trade tagging ───────────────────────────
 # One row per captured sleeper_trades transaction examined by the matcher
 # (suggestion_telemetry.match_league_trades, hooked after every
@@ -7001,6 +7024,21 @@ def page_store_iso(epoch_seconds: float) -> str:
     return datetime.fromtimestamp(epoch_seconds, timezone.utc).isoformat(timespec="microseconds")
 
 
+def trade_deck_lineage_insert(dialect_name: str, row: dict):
+    """The insert-or-ignore of a page row's deck lineage (P2):
+    ON CONFLICT (user_id, deck_job_id) DO NOTHING on both dialects."""
+    if dialect_name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    t = trade_deck_lineage_table
+    return dialect_insert(t).values(
+        user_id=row["user_id"], deck_job_id=row["deck_job_id"], league_id=row["league_id"],
+        scoring_format=row["scoring_format"], request_scope=row["request_scope"],
+        recorded_at=page_store_iso(time.time()),
+    ).on_conflict_do_nothing(index_elements=[t.c.user_id, t.c.deck_job_id])
+
+
 def save_trade_page(row: dict) -> bool:
     """Upsert one page row. An existing row is replaced only when the new
     `built_at` is at or after its own (the supersede guard), in one statement,
@@ -7018,6 +7056,13 @@ def save_trade_page(row: dict) -> bool:
             set_={name: stmt.excluded[name] for name in _PAGE_STORE_REPLACED},
             where=t.c.built_at <= stmt.excluded.built_at)
         return bool(conn.execute(stmt).rowcount)
+
+
+def record_trade_deck_lineage(row: dict) -> None:
+    """Insert-or-ignore one organic deck's lineage row (P2), in its own
+    transaction: written when the deck's job starts, apart from any page write."""
+    with engine.begin() as conn:
+        conn.execute(trade_deck_lineage_insert(conn.dialect.name, row))
 
 
 def load_trade_page(user_id: str, league_id: str, scoring_format: str,
@@ -7039,6 +7084,26 @@ def load_trade_page_for_job(user_id: str, deck_job_id: str) -> dict | None:
         row = conn.execute(select(t).where(
             t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
     return dict(row) if row is not None else None
+
+
+def load_trade_deck_lineage(user_id: str, deck_job_id: str) -> dict | None:
+    """The requester's lineage row for one deck (a unique-index read), or None."""
+    t = trade_deck_lineage_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def purge_trade_deck_lineage(*, max_age_s: float = 86400.0, batch_size: int = 500) -> int:
+    """Delete up to `batch_size` lineage rows recorded more than `max_age_s`
+    ago (oldest first); a larger backlog finishes over later passes."""
+    t = trade_deck_lineage_table
+    cutoff = page_store_iso(time.time() - max_age_s)
+    with engine.begin() as conn:
+        old = (select(t.c.id).where(t.c.recorded_at < cutoff)
+               .order_by(t.c.recorded_at, t.c.id).limit(max(1, min(batch_size, 1000))))
+        return conn.execute(delete(t).where(t.c.id.in_(old))).rowcount or 0
 
 
 def touch_trade_page(page_id: int, served_at: str) -> None:
