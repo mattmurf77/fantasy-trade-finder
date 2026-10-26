@@ -27,6 +27,9 @@ Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server o
   - `SendInMflButton` has no branch for `asset_not_owned`, `counterparty_asset_not_owned` or `mfl_unavailable`, so all three reach its catch-all (`:169-173`), which shows `detail`.
   - With `mfl_write_failed`, the R3 copy would have been framed as "MFL rejected the request" (`:158-168`).
 - **Not covered:** pre-encoded `give_pick_assets` / `receive_pick_assets`; `git grep` finds no sender in mobile, web, the extension or overhaul.
+- **release-lead P2s (2026-10-26):** `test_i2_mfl_ownership.py` now has 27 tests.
+  - **P2-2:** a dead cookie (401/403) on either ownership read → 409 `mfl_auth_expired`, the credential is dropped, and no provider call is made. It is told apart from other failures by an opt-in `raise_auth` on the two fetchers; their default `{}` contract is pinned by a test. Sabotage → 2 red.
+  - **P2-1:** timeout, connection reset, `IncompleteRead` and `BadStatusLine` on either read → readable 502 `mfl_unavailable`, and through the overhaul send every attempt is `send_failed` with no reservation held. Sabotage → 9 red.
 
 ## 2026-10-26 — I-2 (1/4): Sleeper send-time player ownership + R3 (#411)
 

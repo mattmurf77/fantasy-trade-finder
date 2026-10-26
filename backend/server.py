@@ -3500,6 +3500,42 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
     return ([] if block else cards), block, past_bound
 
 
+def _roster_block(snap) -> tuple[str | None, bool]:
+    """S0 §3/§3b for one roster snapshot, before the knobs: `(block,
+    past_bound)`. No stored rosters is "roster_check_unavailable"; a Sleeper
+    roster whose last refresh failed and is past `trade_roster_bound_s` is the
+    "roster_gate_miss" withhold. `past_bound`: a Sleeper roster past the bound
+    (the age falls back to the newest league_members.updated_at)."""
+    bound = _s0_seconds_knob("trade_roster_bound_s", 300.0)
+    past_bound = not snap.linked and (snap.age_s is None or snap.age_s > bound)
+    if snap.status == "missing":
+        return "roster_check_unavailable", past_bound
+    if snap.status == "stale" and past_bound:
+        return "roster_gate_miss", past_bound
+    return None, past_bound
+
+
+def _roster_gate_now(league_id: str, ref: str, current) -> tuple[str | None, bool]:
+    """S0's serve rules for a response with no cards to check (P2's end of a
+    deck), on that serve's one snapshot read (`current`:
+    _trade_current_snapshot(), None at `trade_i1_mode` 0 or on a failed read):
+    `(block, past_bound)` as _roster_serve_rules would return them for a card
+    serve of this league now. The same admin hook, knobs and floor rule; no
+    I-1 to run, so no C-a line."""
+    forced = _gate_miss_test(league_id)
+    if forced:                            # admin test hook (TestFlight A10)
+        log.warning("[i1] gate-miss test applied league=%s kind=%s job=%s", league_id, forced, ref)
+        return ("roster_gate_miss" if forced == "withhold" else "roster_check_unavailable"), False
+    mode = _trade_i1_mode()
+    if league_id == "league_demo" or not mode:
+        return None, False
+    gates = mode == 2 and _trade_gate_miss_on()
+    if current is None:                   # the read failed
+        return ("roster_check_unavailable" if gates else None), False
+    block, past_bound = _roster_block(current[0])
+    return (block if gates else None), past_bound
+
+
 def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates: bool,
                         job_id: str = "", *, snap=None):
     """S0 at serve (contract v0.4 §3, §3b, §5b; C-a, C-d). Returns
@@ -3526,16 +3562,9 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
     already read for this serve (P1 shares it with its fingerprint compare);
     None reads one now.
     """
-    bound = _s0_seconds_knob("trade_roster_bound_s", 300.0)
     if snap is None:
         snap = _trade_roster_snapshot(league_id)
-    past_bound = not snap.linked and (snap.age_s is None or snap.age_s > bound)
-    if snap.status == "missing":
-        block = "roster_check_unavailable"
-    elif snap.status == "stale" and past_bound:
-        block = "roster_gate_miss"
-    else:
-        block = None
+    block, past_bound = _roster_block(snap)
     owners, nobody = snap.asset_owner, frozenset()
     counts = dict.fromkeys(("dropped_give", "dropped_receive",
                             "unchecked_generic", "unchecked_pick_owner"), 0)
@@ -3631,10 +3660,17 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     callback, the post-layer snapshots, the final publish), so for those, and
     for a cursor past the end, the full current list returns with replace.
     An errored job never pages its partial cards.
+
+    P2: while trade.first_page_store is on, the kickoff's `append_only`
+    stamp, when the job has one, decides instead of the card markers; jobs
+    admitted without it keep the card check. Every served card then carries
+    its `trade_hash` (_with_trade_hash).
     """
     raw = job.get("cards") or []
+    marker = job.get("append_only") if _trade_page_store_enabled() else None
     append_only = bool(job.get("value_core") or job.get("prepared_inventory_id")
-                       or (raw and all(c.get("preserve_server_order") for c in raw)))
+                       or (marker if marker is not None
+                           else raw and all(c.get("preserve_server_order") for c in raw)))
     replace = cursor > len(raw) or (cursor > 0 and not append_only)
     start = 0 if replace else cursor
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
@@ -3648,7 +3684,24 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
         out["search_id"] = search_id
     if _trade_page_store_enabled():
         out["prefetch_remaining"] = _trade_prefetch_remaining()
+        out["cards"] = _with_trade_hash(out["cards"])
+        if out["replace"]:
+            # head-eng ruling 16: does the replace fallback ever fire on owner-serve?
+            log.info("[trade-page] replace job=%s cursor=%d raw=%d append_only=%s",
+                     job.get("job_id"), cursor, len(raw), marker)
     return out
+
+
+def _with_trade_hash(cards: list) -> list:
+    """P2 (flag trade.first_page_store, paged responses only): each card plus
+    its `trade_hash`, the F1 card identity the impression writer stores in
+    deck_impressions.trade_hash (_deck_trade_hash over the same give,
+    receive and partner ids). The client dedupes rebased pages by it.
+    Copies; never mutates the published or stored card."""
+    return [{**c, "trade_hash": _deck_trade_hash([p["id"] for p in c.get("give", [])],
+                                                [p["id"] for p in c.get("receive", [])],
+                                                c.get("target_user_id"))}
+            for c in cards]
 
 
 # ── P1 first-page store (flag trade.first_page_store) ─────────────────────────
@@ -4184,6 +4237,7 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     cards = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
     cards, block, past_bound = _roster_serve_rules(cards, league_id, viewer_id,
                                                    row["deck_job_id"], snap=snap)
+    cards = _with_trade_hash(cards)       # P2: the client's dedupe key
     opponents = pages.get("opponents_total") or 0
     out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
            "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,
@@ -4223,10 +4277,11 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
 
     `current` is the caller's _trade_current_snapshot(). `backing` is the
     status of the fresh or matching running job for this key in this process,
-    or None. `kick()` starts (or joins, preserve_running) the organic rebuild.
-    It runs whenever no job backs the page (after a restart, or after an input
-    change revoked it) and the serve isn't a gate miss. The page serves now;
-    the rebuild replaces it, `ready`, for the next request. A stale page is
+    or None. `kick(stale)` starts (or joins, preserve_running) the organic
+    rebuild; `stale` names the start's logged reason (P2, ruling 20). It runs
+    whenever no job backs the page (after a restart, or after an input change
+    revoked it) and the serve isn't a gate miss. The page serves now; the
+    rebuild replaces it, `ready`, for the next request. A stale page is
     "updating" only while that rebuild runs (ruling 29). Past the roster bound,
     S0's floor kick runs after the response is built.
     """
@@ -4258,7 +4313,7 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
         return None
     blocked = out["status"] != "complete"
     if backing is None and not blocked:
-        kick()
+        kick(stale)
     out["freshness_state"] = _trade_page_freshness(stale, snap, (user_id, league_id, row["scoring_format"]))
     if not blocked:
         try:
@@ -4308,8 +4363,367 @@ def _trade_page_past_stored(row: dict, cursor: int) -> dict:
             "freshness_state": "fresh", "prefetch_remaining": _trade_prefetch_remaining()}
 
 
+# ── P2 next pages across rebuilds, end of deck (flag trade.first_page_store) ──
+# Design: the trades-eng P2 draft §2-§4; scope §6.3-§6.5. The client pages one
+# deck by `deck_id` + `cursor`. When that deck can no longer continue, the
+# server moves the client to the scope's current deck (`rebased`) and the
+# client drops cards it already holds by trade_hash. No per-client state.
+# Every P2 serve goes through P1's paths and so S0's serve rules
+# (_roster_serve_rules, one snapshot per serve): stored pages through
+# _trade_page_view, a live or rebased job through _trade_job_page_view.
+
+def _log_backing_job_start(job_id: str, since: float, *, scope: str, reason: str) -> None:
+    """head-eng ruling 20: one line per backing job the page or deck path
+    actually started (admitted at or after `since`, monotonic). A kickoff
+    that joined a fresh or running job logs nothing."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        started = job is not None and job.get("started_at", float("-inf")) >= since
+    if started:
+        log.info("[trade-page] backing-job start scope=%s reason=%s job=%s", scope, reason, job_id)
+
+
+def _record_trade_deck_lineage(job_id: str) -> None:
+    """P2: record an organic deck's lineage when its worker starts, before
+    the engine runs: off the request path, and in place even if the deck is
+    still running when a deploy restarts the worker (it never stored a page
+    row), so /status?deck= can still prove it organic and rebase it. Only
+    with the store on and an organic `page_scope` (none with the flag off).
+    Best-effort: its own transaction, logged, never fails the job."""
+    if not _trade_page_store_enabled():
+        return
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id) or {}
+        scope, key = job.get("page_scope"), job.get("key")
+    if not scope:
+        return
+    from . import database as _db
+    try:
+        user_id, league_id, scoring_format = key
+        _db.record_trade_deck_lineage({
+            "user_id": user_id, "deck_job_id": job_id, "league_id": league_id,
+            "scoring_format": scoring_format, "request_scope": scope})
+    except Exception:
+        log.warning("trade-deck %s: lineage not recorded", job_id, exc_info=True)
+
+
+def _trade_page_kick(sess: Mapping, *, sess_token: str, league_id: str, scoring_format: str,
+                     fairness_threshold, prefs_preload, opponents_total: int,
+                     presentation_capture, input_epochs, scope: str, reason: str) -> str:
+    """P1's backing-job kick, the one path for /generate's page serve and
+    /status's deck path (AC-L4): an organic preserve_running kickoff, so the
+    scope keeps one live rebuild at a time. A policy-matching running job is
+    joined (S0's A2: also while the fingerprint read fails); one on moved
+    rosters or values is replaced and finishes quietly. A start logs `reason`:
+    page_serve, stale, rebase or status_restart (ruling 20)."""
+    since = time.monotonic()
+    job_id = _kickoff_trade_job(
+        sess_token=sess_token, user_id=sess["user_id"], league_id=league_id,
+        scoring_format=scoring_format, fairness_threshold=fairness_threshold,
+        opponents_total=opponents_total, prefs_preload=prefs_preload, session_context=sess,
+        presentation_capture=presentation_capture, input_epochs=input_epochs,
+        preserve_running=True)
+    _log_backing_job_start(job_id, since, scope=scope, reason=reason)
+    return job_id
+
+
+def _serve_trade_page_for(sess: Mapping, row: dict, current, *, sess_token: str, league_id: str,
+                          scoring_format: str, fairness_threshold, prefs_preload, outlook_value,
+                          request_signature, input_epochs, presentation_capture,
+                          opponents_total: int, search_id=None,
+                          rebase: bool = False) -> dict | None:
+    """P1's /generate `page: 1` serve of `row`, also P2's rebase onto a row
+    (`rebase`): _serve_trade_page, given the fresh or matching running job for
+    the key in this process (`backing`), and _trade_page_kick."""
+    user_id = sess["user_id"]
+    key = _trade_job_key(user_id, league_id, scoring_format)
+    fingerprints = (current[0].fp, current[1]) if current else None
+    with _trade_jobs_lock:
+        current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
+        backing = None
+        if current_job is not None and not any(token.revoked for token in input_epochs):
+            if _trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
+                                   presentation_capture, request_signature, fingerprints):
+                backing = "complete"
+            elif _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
+                                        presentation_capture, request_signature, fingerprints):
+                backing = "running"
+    return _serve_trade_page(
+        row, current, user_id=user_id, league_id=league_id,
+        viewer_id=_trade_page_viewer(sess, league_id), request_signature=request_signature,
+        presentation_capture=presentation_capture, search_id=search_id, backing=backing,
+        kick=lambda stale: _trade_page_kick(
+            sess, sess_token=sess_token, league_id=league_id, scoring_format=scoring_format,
+            fairness_threshold=fairness_threshold, prefs_preload=prefs_preload,
+            opponents_total=opponents_total, presentation_capture=presentation_capture,
+            input_epochs=input_epochs, scope=row["request_scope"],
+            reason="rebase" if rebase else "stale" if stale else "page_serve"))
+
+
+def _trade_page_request_inputs(sess: Mapping, league_id: str) -> dict:
+    """/generate's preamble for an organic page serve, read again for a
+    /status rebase: input epochs (before the reads), the preference preload,
+    outlook and request signature, the presentation capture, the opponent count."""
+    user_id = sess["user_id"]
+    input_epochs = _capture_trade_input_epochs(user_id, league_id)
+    prefs_preload = outlook_value = None
+    try:
+        prefs_preload = _trade_job_preferences(user_id, league_id, sess, sess["league"])
+        outlook_value = ((prefs_preload["prefs"] or {}).get("team_outlook")
+                         or prefs_preload["seeded_outlook"])
+    except Exception:
+        pass
+    try:
+        opponents_total = sum(1 for m in sess["league"].members
+                              if m.user_id != user_id and m.elo_ratings)
+    except Exception:
+        opponents_total = 0
+    return {"input_epochs": input_epochs, "prefs_preload": prefs_preload,
+            "outlook_value": outlook_value,
+            "request_signature": (_trade_request_signature(prefs_preload)
+                                  if prefs_preload is not None else None),
+            "presentation_capture": _capture_trade_presentation(),
+            "opponents_total": opponents_total}
+
+
+def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int) -> dict | None:
+    """P2: GET /api/trades/status?deck=D&cursor=K. The body, or None (404).
+
+    The app sends `deck` on every paged poll, organic or not, so P2 rebases
+    only a deck it can prove organic: D in this process with an organic
+    `page_scope`, or a stored row D built (looked up by deck_job_id), or, once
+    that row was rebuilt by a newer deck (a deploy restarts the one worker),
+    D's lineage row (trade_deck_lineage, 24 h). Its scope is then D's own, so
+    an intent or pinned search that moves the session's fairness never moves
+    it. Every serve goes through S0's rules:
+      (a) the scope's stored row was built by D and K < its count: its stored
+          pages (_trade_page_status_view: P1's slice, S0's rules, floor kick);
+      (b) D is the requester's job in this process: E2's page view of its raw
+          list at K (_trade_job_page_view: append-only rules, E2's `replace`,
+          S0's rules). A gate miss (status "error" roster_check_unavailable,
+          or the §3b withhold's wait_reason) holds the cursor: never an end or
+          a rebase. A complete D asked past its last card is the deck's end:
+          _trade_deck_rebase decides between a newer deck and the end;
+      (c) otherwise (D gone, revoked, errored, or its policy moved) the deck
+          changed: _trade_deck_rebase.
+    A deck that isn't provably organic (pinned, Specific Team, intent,
+    replenish, or admitted with the store off) gets its own page view and
+    its own end or error (_trade_deck_own), never a rebase; gone (no page or
+    lineage row: it never wrote one), the legacy 404. One page row decoded
+    per poll: the scope's by key, else D's own, else (via lineage) its scope's.
+    The server never dedupes against the client; the client does, by trade_hash.
+    """
+    from . import database as _db
+    user_id = sess["user_id"]
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(deck_id)
+        deck = dict(job) if job is not None and job["key"][0] == user_id else None
+    if deck is not None and not deck.get("page_scope"):
+        return _trade_deck_own(deck, cursor)
+    row = lineage = None
+    try:
+        if deck is not None:
+            _, league_id, fmt = deck["key"]
+            scope, fairness = deck["page_scope"], deck["fairness_threshold"]
+            row = _db.load_trade_page(user_id, league_id, fmt, scope)
+        else:
+            row = _db.load_trade_page_for_job(user_id, deck_id)
+            if row is None:                   # D's row was rebuilt: its lineage still proves it
+                lineage = _db.load_trade_deck_lineage(user_id, deck_id)
+                if lineage is not None:
+                    row = _db.load_trade_page(user_id, lineage["league_id"],
+                                              lineage["scoring_format"], lineage["request_scope"])
+    except Exception as err:
+        log.warning("trade-page read failed for deck %s: %s", deck_id, err)
+    if deck is None:
+        origin = lineage or row
+        if origin is None:
+            return None                       # gone, and not provably organic: the legacy 404
+        league_id, fmt, scope = (origin["league_id"], origin["scoring_format"],
+                                 origin["request_scope"])
+        fairness = float(scope.rpartition("=")[2])
+    if row is not None and row["deck_job_id"] == deck_id and cursor < row["card_count"]:
+        return {**_trade_page_status_view(row, cursor, sess), "deck_id": deck_id}
+    finished = None
+    if deck is not None:
+        out, at_end = _trade_deck_job_view(deck, cursor)
+        if not at_end and (out["status"] != "error" or _trade_deck_held(out)):
+            return {**out, "deck_id": deck_id}
+        if at_end:
+            finished = out
+    return _trade_deck_rebase(sess, sess_token, deck_id, cursor, row, finished, deck,
+                              league_id=league_id, scoring_format=fmt,
+                              fairness_threshold=fairness, scope=scope)
+
+
+def _trade_deck_held(out: dict) -> bool:
+    """An S0 gate miss on this response: it holds the cursor."""
+    return out.get("error") == "roster_check_unavailable" or "wait_reason" in out
+
+
+def _trade_deck_job_view(deck: dict, cursor: int) -> tuple[dict, bool]:
+    """E2's page view of a deck's job at K, and whether that is the deck's end:
+    the job is complete, the page is neither an error nor a gate miss, and K
+    is at or past its last card without a `replace`, or exactly at its length
+    with one. A complete deck's list is final, so a re-sorting deck (E2
+    re-sends its final list on every cursor) ends at its length too, with
+    that list in the response for the client to merge; otherwise its end
+    would never come."""
+    out = _trade_job_page_view(deck, cursor)
+    raw = len(deck.get("cards") or [])
+    at_end = (out["status"] != "error" and not _trade_deck_held(out)
+              and deck["status"] == "complete" and cursor >= raw
+              and (not out["replace"] or cursor == raw))
+    return out, at_end
+
+
+def _trade_deck_own(deck: dict, cursor: int) -> dict:
+    """A deck in this process that isn't provably organic (pinned, Specific
+    Team, intent, replenish, or admitted with the store off): its own page
+    view, exactly the job_id + cursor form's (no deck_id), never a rebase. Its
+    error passes through; at its own end (_trade_deck_end, `organic` False) a
+    gate miss holds the cursor, else `pool_exhausted: true`."""
+    out, at_end = _trade_deck_job_view(deck, cursor)
+    if not at_end:
+        return out
+    _, league_id, fmt = deck["key"]
+    return _trade_deck_end(out, deck, None, None, league_id, fmt, organic=False)
+
+
+def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int,
+                       row: dict | None, finished: dict | None, deck: dict | None, *,
+                       league_id: str, scoring_format: str, fairness_threshold,
+                       scope: str) -> dict:
+    """Where deck D cannot continue. `finished` is D's own E2 response when D
+    is alive here, complete and asked past its last card (`deck` its job);
+    None when D is gone (unknown, evicted, revoked or errored). The scope's
+    current deck, from its first page, with `rebased: true`, its `deck_id`,
+    and `cursor` = the raw cards it includes:
+      1. the stored row, when it is not D's own and serves under §6.2
+         (_serve_trade_page: engine/config block, expiry, S0's rules, ruling
+         29, P1's kick). While D is alive only a newer deck counts, so the
+         row must be the key's newest job's;
+      2. else the key's newest job for the scope other than D, neither errored
+         nor revoked, running or complete: its first page (S0's rules);
+      3. else, at a live D's end (_trade_deck_end): a gate miss holds the
+         cursor; the end (`pool_exhausted`) only when nothing can add cards;
+         D's own response when the check can't run;
+      4. else P1's kick (reason "stale" at D's end, "status_restart" when D
+         is gone) and its first page. A kick that starts no deck to move to:
+         failed, its error (status "error", the cursor held, never the
+         end); at D's end with the kick returning D itself (still fresh
+         here), the end; else D's own response to ask again (it joined a job
+         outside the scope, another fairness or an intent search, or raced a
+         revocation), with D gone no cards on D.
+    A stale scope converges: its rebuild starts, the client is rebased onto
+    it, and that deck's own end follows once it lands and is stored.
+    """
+    key = _trade_job_key(sess["user_id"], league_id, scoring_format)
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(_trade_jobs_by_key.get(key))
+        newest = (dict(job) if job is not None and job["job_id"] != deck_id
+                  and job.get("page_scope") == scope and not _trade_job_revoked(job)
+                  and job.get("status") != "error" else None)
+    inputs = None
+    if (row is not None and row["deck_job_id"] != deck_id
+            and (finished is None or (newest is not None and row["deck_job_id"] == newest["job_id"]))):
+        inputs = _trade_page_request_inputs(sess, league_id)
+        served = _serve_trade_page_for(
+            sess, row, _trade_current_snapshot(league_id, scoring_format), sess_token=sess_token,
+            league_id=league_id, scoring_format=scoring_format,
+            fairness_threshold=fairness_threshold, rebase=True, **inputs)
+        if served is not None:
+            return {**served, "deck_id": served["job_id"], "rebased": True}
+    if newest is None:
+        if finished is not None:
+            end = _trade_deck_end(finished, deck, row, key, league_id, scoring_format)
+            if end is not None:
+                return {**end, "deck_id": deck_id}
+        inputs = inputs or _trade_page_request_inputs(sess, league_id)
+        job_id = _trade_page_kick(
+            sess, sess_token=sess_token, league_id=league_id, scoring_format=scoring_format,
+            fairness_threshold=fairness_threshold, prefs_preload=inputs["prefs_preload"],
+            opponents_total=inputs["opponents_total"],
+            presentation_capture=inputs["presentation_capture"],
+            input_epochs=inputs["input_epochs"], scope=scope,
+            reason="stale" if finished is not None else "status_restart")
+        with _trade_jobs_lock:
+            kicked = dict(_trade_jobs.get(job_id) or {})
+            revoked = _trade_job_revoked(kicked)
+        failed = kicked.get("status") == "error" and not revoked
+        if job_id == deck_id or failed or revoked or kicked.get("page_scope") != scope:
+            base = finished or _trade_deck_waiting(deck_id, cursor)
+            if failed:
+                # The kick failed (a capture error, worker_start_failed): its
+                # error with the cursor held, never the end. The app shows its
+                # job-error state, whose Try again re-runs the search; "ask
+                # again" would re-poll forever, kicking a failing job each time.
+                return {**base, "deck_id": deck_id, "status": "error", "error": kicked.get("error"),
+                        "cards": [], "total_ready": 0, "replace": False}
+            if finished is not None and job_id == deck_id:
+                # D is still fresh here (its row was marked stale elsewhere):
+                # nothing can rebuild the scope now. The end.
+                return {**finished, "deck_id": deck_id, "pool_exhausted": True}
+            return {**base, "deck_id": deck_id}   # joined a job outside the scope: ask again
+        newest = kicked
+    return {**_trade_job_page_view(newest, 0), "deck_id": newest["job_id"], "rebased": True}
+
+
+def _trade_deck_end(finished: dict, deck: dict, row: dict | None, key, league_id: str,
+                    scoring_format: str, *, organic: bool = True) -> dict | None:
+    """A live, complete deck D asked past its last card (`finished`, D's E2
+    response), with no newer deck for the scope. One snapshot read
+    (_trade_current_snapshot) decides:
+      - a gate miss under S0's rules (_roster_gate_now: the knobs, the admin
+        hook) gets the job views' shape and holds the cursor, never the end;
+      - the read failed: D's own response, no end (it can't be proven);
+      - a deck that isn't organic (`organic` False: pinned, Specific Team,
+        intent...) has nothing to rebuild: `pool_exhausted: true`, its own end;
+      - an organic deck: `pool_exhausted: true` only when D's rosters and
+        values still match the stored rows, its row isn't stale and no job
+        for the key is running (a rebuild or backing job may still add cards);
+        otherwise None, and the caller kicks the rebuild.
+    At `trade_i1_mode` 0 there is no snapshot read, so no gate miss and no
+    stamp compare: the end needs only a row that isn't stale and no running
+    job, as before S0. (/status ignores `deck` at mode 0, so only a mode flip
+    mid-request reaches this.)
+    Past the roster bound, S0's floor kick runs after the response is built."""
+    current = _trade_current_snapshot(league_id, scoring_format)
+    block, past_bound = _roster_gate_now(league_id, deck["job_id"], current)
+    if block == "roster_check_unavailable":
+        out = {**finished, "status": "error", "error": block}
+    elif block == "roster_gate_miss":
+        out = {**finished, "status": "running", "wait_reason": "roster_check"}
+    elif current is None and _trade_i1_mode():
+        out = finished
+    elif not organic:
+        out = {**finished, "pool_exhausted": True}
+    elif ((current is None
+           or (current[0].fp, current[1]) == (deck.get("roster_fp"), deck.get("values_snapshot_id")))
+          and (row is None or row["state"] != "stale") and not _trade_rebuild_running(key)):
+        out = {**finished, "pool_exhausted": True}
+    else:
+        out = None
+    if block:
+        out.update(cards=[], total_ready=0, replace=False)   # the cursor holds (E2's rule)
+    if past_bound:
+        _kick_roster_floor(league_id)        # after the response is built, no lock held
+    return out
+
+
+def _trade_deck_waiting(deck_id: str, cursor: int) -> dict:
+    """No cards for a deck with nothing to move to yet: keep polling."""
+    return {"job_id": deck_id, "status": "running", "opponents_done": 0, "opponents_total": 0,
+            "cards": [], "error": None, "cursor": cursor, "total_ready": 0, "replace": False,
+            "prefetch_remaining": _trade_prefetch_remaining()}
+
+
+_TRADE_DECK_LINEAGE_TTL_S = 86400    # P2: how long a gone deck can still rebase
+
+
 def _evict_trade_page_store() -> None:
-    """P1 eviction (§7): one bounded pass per cleanup tick. Store off ⇒ no-op."""
+    """P1 eviction (§7): one bounded pass per cleanup tick, plus P2's deck
+    lineage older than 24 h. Store off ⇒ no-op."""
     if not _trade_page_store_enabled():
         return
     from . import database as _db
@@ -4321,6 +4735,12 @@ def _evict_trade_page_store() -> None:
             log.info("trade page store evicted: %d aged, %d over the byte ceiling", aged, over_budget)
     except Exception:
         log.exception("trade page store eviction failed")
+    try:
+        purged = _db.purge_trade_deck_lineage(max_age_s=_TRADE_DECK_LINEAGE_TTL_S)
+        if purged:
+            log.info("trade deck lineage purged: %d older than 24 h", purged)
+    except Exception:
+        log.exception("trade deck lineage purge failed")
 
 
 def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared=False):
@@ -10547,6 +10967,8 @@ def _kickoff_trade_job(
                 with _trade_jobs_lock:
                     if not _job_live(_trade_jobs.get(job_id)):
                         return
+                # P2: an organic deck's lineage, before the engine runs (store on only).
+                _record_trade_deck_lineage(job_id)
                 if (source != "replenish" and not is_pinned and not trade_intent and not force_fresh
                         and not presentation_exempt and execution_context is not None):
                     from . import prepared_trade_runtime
@@ -10637,6 +11059,14 @@ def _kickoff_trade_job(
             and not presentation_exempt and not source and league_id != "league_demo"):
         job["page_scope"] = _trade_page_scope(fairness_threshold)
         job["page_built_at"] = time.time()   # wall-clock admission: the row's built_at
+    if _trade_page_store_enabled():
+        # P2: will every publish only extend the list? Owner-serve does, by
+        # the same reads the worker makes. The value core and prepared
+        # adoption are marked when they publish (job["value_core"],
+        # job["prepared_inventory_id"]): stamping them here would be wrong
+        # when the core falls back to a re-sorting legacy run or no
+        # prepared inventory is adopted.
+        job["append_only"] = bool(_owner_enabled(league_id) and _bakeoff.serve_owner())
     admission_owner_config = dict(_trade_service_mod._cfg)
     selected_owner = _bakeoff.owner_arm(admission_owner_config)
     if selected_owner == _bakeoff.ARM_OWNER_BILATERAL:
@@ -15995,6 +16425,9 @@ def generate_trades():
     # store. Its one snapshot read also feeds the job-cache checks below.
     page_scope = (_trade_page_request_scope(body, league_id, fairness_threshold, force_fresh)
                   if paged else None)
+    # P2: an organic paged response names its deck (`force` too: the newest deck).
+    deck_named = paged and _trade_page_request_scope(body, league_id, fairness_threshold,
+                                                     False) is not None
     if page_scope is not None:
         page_row, page_current = _trade_page_read(g_user_id, league_id, fmt, page_scope)
         fingerprints = (page_current[0].fp, page_current[1]) if page_current else None
@@ -16002,30 +16435,15 @@ def generate_trades():
         # S0: read before the lock; the checks under it only compare.
         fingerprints = None if _any_pinned else _trade_current_fingerprints(league_id, fmt)
     if page_scope is not None and page_row is not None:
-        # The fresh, or matching running, job behind this key in this process.
-        with _trade_jobs_lock:
-            current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
-            backing = None
-            if current_job is not None and not any(token.revoked for token in input_epochs):
-                if _trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
-                                       presentation_capture, request_signature, fingerprints):
-                    backing = "complete"
-                elif _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
-                                            presentation_capture, request_signature, fingerprints):
-                    backing = "running"
-        served = _serve_trade_page(
-            page_row, page_current, user_id=g_user_id, league_id=league_id,
-            viewer_id=_trade_page_viewer(sess, league_id), request_signature=request_signature,
-            presentation_capture=presentation_capture, search_id=search_id,
-            backing=backing,
-            kick=lambda: _kickoff_trade_job(
-                sess_token=sess_token, user_id=g_user_id, league_id=league_id,
-                scoring_format=fmt, fairness_threshold=fairness_threshold,
-                opponents_total=opponents_total, prefs_preload=prefs_preload,
-                session_context=sess, presentation_capture=presentation_capture,
-                input_epochs=input_epochs, preserve_running=True))
+        served = _serve_trade_page_for(
+            sess, page_row, page_current, sess_token=sess_token, league_id=league_id,
+            scoring_format=fmt, fairness_threshold=fairness_threshold,
+            prefs_preload=prefs_preload, outlook_value=outlook_value,
+            request_signature=request_signature, input_epochs=input_epochs,
+            presentation_capture=presentation_capture, opponents_total=opponents_total,
+            search_id=search_id)
         if served is not None:
-            return jsonify(served)
+            return jsonify({**served, "deck_id": served["job_id"]})
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -16068,7 +16486,8 @@ def generate_trades():
 
     if reuse_snapshot is not None:
         if paged:
-            return jsonify(_trade_job_page_view(reuse_snapshot, 0, search_id))
+            out = _trade_job_page_view(reuse_snapshot, 0, search_id)
+            return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
@@ -16097,7 +16516,8 @@ def generate_trades():
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
     if paged:
-        return jsonify(_trade_job_page_view(snapshot, 0, search_id))
+        out = _trade_job_page_view(snapshot, 0, search_id)
+        return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
     return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
 
 
@@ -17081,8 +17501,12 @@ def trade_job_status():
     `trade_page_size` (see _trade_job_page_view).
     P1 (flag trade.first_page_store): a cursor into a page-served deck (the
     job id of a stored page) inside its stored pages is served from them;
-    past them, from the live job if one exists, else no cards (P2 completes
-    this)."""
+    past them, from the live job if one exists, else no cards.
+    P2 (same flag): `deck=D` alongside `cursor` pages deck D across rebuilds
+    and restarts (_trade_deck_status); `job_id` is then not read. `deck` is
+    read only with an honored `cursor`: without one, with the store off, or
+    with paging killed (`trade_paged_responses` 0, when `cursor` is ignored
+    too and the legacy body serves by `job_id`) it is not read."""
     sess = _require_session()
     sess["last_active"] = time.time()
     job_id = request.args.get("job_id") or ""
@@ -17090,6 +17514,18 @@ def trade_job_status():
     if cursor is not None and not re.fullmatch(r"[0-9]{1,9}", cursor):
         return jsonify({"error": "invalid_cursor",
                         "message": "cursor must be a non-negative integer"}), 400
+    # At trade_i1_mode 0 (the pre-S0 path) the store isn't read, so `deck` is
+    # ignored and the job path serves, as with paging off.
+    deck = (request.args.get("deck")
+            if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
+                and _trade_i1_mode())
+            else None)
+    if deck is not None:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", deck):
+            return jsonify({"error": "invalid_deck",
+                            "message": "deck must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
+        body = _trade_deck_status(sess, request.headers.get("X-Session-Token", ""), deck, int(cursor))
+        return jsonify(body) if body is not None else (jsonify({"error": "job not found"}), 404)
     page_row = None
     if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
             and _trade_i1_mode()):      # at trade_i1_mode 0 the store isn't read: the job path
@@ -34259,12 +34695,39 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         return {"error": "mfl_unavailable", "kind": "network",
                 "detail": _msg, "message": _msg}, 502
 
+    def _auth_expired(detail):
+        # Dead/rejected cookie — drop the stored credential so the client
+        # re-prompts MFL sign-in (same treatment as mfl_auth_import). Shared
+        # by the I-2 ownership reads (a 401/403 export) and the write itself.
+        try:
+            delete_mfl_credential(user_id)
+        except Exception:
+            log.exception("mfl propose: credential delete failed")
+        sess.pop("mfl_cookie", None)
+        return {
+            "error": "mfl_auth_expired",
+            "message": "Your MFL sign-in expired — sign in again.",
+            "detail": (str(detail or ""))[:200],
+        }, 409
+
     norm = _mfl_write.normalize_franchise_id
     my_n, their_n = norm(my_fid), norm(their_fid)
     moved_give: list = []
     moved_recv: list = []
     if give_players or recv_players:
-        raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie)
+        try:
+            # raise_auth: a 401/403 is the sign-in expiring, not R3's flake.
+            raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
+        except _mfl.MflAuthError as e:
+            log.warning("mfl propose: ownership read auth-rejected: %s", e)
+            return _auth_expired(str(e))
+        except Exception as e:  # P2-1: rosters transport
+            # `_fetch_one` wraps only HTTPError / URLError / bad JSON. A read
+            # timeout, connection reset, IncompleteRead or BadStatusLine would
+            # escape as a 500 (or overhaul `outcome_unknown` holding the
+            # reservation). It is a failed read: R3.
+            log.warning("mfl propose: rosters read failed: %s", type(e).__name__)
+            return _read_failed()
         if not isinstance(raw, dict) or "rosters" not in raw:
             return _read_failed()
         held = {}
@@ -34283,7 +34746,15 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         moved_give += [p for p in give_players if inverse[p] not in held[my_n]]
         moved_recv += [p for p in recv_players if inverse[p] not in held[their_n]]
     if give_ftf_picks or recv_ftf_picks:
-        raw = _mfl.fetch_future_draft_picks(league_id, year, host, cookie=cookie)
+        try:
+            raw = _mfl.fetch_future_draft_picks(league_id, year, host, cookie=cookie,
+                                                raise_auth=True)
+        except _mfl.MflAuthError as e:
+            log.warning("mfl propose: ownership read auth-rejected: %s", e)
+            return _auth_expired(str(e))
+        except Exception as e:  # P2-1: futureDraftPicks transport
+            log.warning("mfl propose: futureDraftPicks read failed: %s", type(e).__name__)
+            return _read_failed()
         if not isinstance(raw, dict) or "futureDraftPicks" not in raw:
             return _read_failed()
         live = _mfl_pick_owner_index(_mfl.parse_future_picks(raw))
@@ -34327,19 +34798,8 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
-        # Dead/rejected cookie — drop the stored credential so the client
-        # re-prompts MFL sign-in (same treatment as mfl_auth_import).
         log.warning("mfl propose auth-rejected: %s", getattr(e, "detail", None))
-        try:
-            delete_mfl_credential(user_id)
-        except Exception:
-            log.exception("mfl propose: credential delete failed")
-        sess.pop("mfl_cookie", None)
-        return {
-            "error": "mfl_auth_expired",
-            "message": "Your MFL sign-in expired — sign in again.",
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 409
+        return _auth_expired(getattr(e, "detail", ""))
     except _mfl_write.MflWriteError as e:
         log.warning("mfl propose write-failed [%s]: %s", e.kind,
                     getattr(e, "detail", None))

@@ -24,7 +24,9 @@ send, which calls the same core. Before any provider write it now checks:
 No network: the two fetchers (or `_fetch_one` under the real fetchers) are
 stubbed and `mfl_write.propose_trade` is a mock.
 """
+import http.client
 import json
+import socket
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -36,6 +38,7 @@ import backend.mfl_service as mfl_service
 import backend.mfl_write as mfl_write
 import backend.server as server
 from backend import overhaul_api
+from backend import overhaul_store as store
 from backend.tests import test_mfl_propose_route as mfl_t
 from backend.tests import test_overhaul_api as ovh_t
 
@@ -261,6 +264,63 @@ def test_failed_live_read_blocks_with_readable_502(client, which, failure):
     fake.assert_not_called()
 
 
+@pytest.mark.parametrize("which", ["rosters", "picks"])
+def test_dead_cookie_on_the_ownership_read_routes_to_sign_in(client, which):
+    """P2-2: a private league's export 401/403s on a dead cookie. That is the
+    sign-in expiring, not R3's flake: the same 409 `mfl_auth_expired` the write
+    path returns (credential dropped, so the client re-prompts sign-in), never
+    the "Try again in a moment" 502. Runs the REAL fetchers over `_fetch_one`."""
+    assert db_module.get_mfl_credential(mfl_t.USER) is not None
+    one = MagicMock(side_effect=mfl_service.MflAuthError())
+    ok_rosters, ok_picks = MagicMock(return_value=_rosters()), MagicMock(return_value=_picks())
+    with patch.object(mfl_service, "_fetch_one", one):
+        r, fake, _, _ = _send(
+            client, [GIVE, MY_PICK], [RECV],
+            rosters=REAL_FETCH_ROSTERS if which == "rosters" else ok_rosters,
+            picks=REAL_FETCH_PICKS if which == "picks" else ok_picks)
+    assert r.status_code == 409, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "mfl_auth_expired"
+    assert body["message"] == "Your MFL sign-in expired — sign in again."
+    fake.assert_not_called()
+    assert db_module.get_mfl_credential(mfl_t.USER) is None     # dropped, as on the write path
+
+
+TRANSPORT_ERRORS = [
+    lambda: socket.timeout("timed out"),
+    lambda: ConnectionResetError(104, "Connection reset by peer"),
+    lambda: http.client.IncompleteRead(b"{\"rosters\""),
+    lambda: http.client.BadStatusLine("garbage"),
+]
+
+
+@pytest.mark.parametrize("which", ["rosters", "picks"])
+@pytest.mark.parametrize("exc", TRANSPORT_ERRORS,
+                         ids=["timeout", "conn_reset", "incomplete_read", "bad_status_line"])
+def test_transport_error_on_the_ownership_read_is_a_readable_502(client, which, exc):
+    """P2-1: `_fetch_one` wraps only HTTPError / URLError / bad JSON, so these
+    escape the REAL fetchers. The core turns them into R3's 502, never a 500."""
+    one = MagicMock(side_effect=exc())
+    ok_rosters, ok_picks = MagicMock(return_value=_rosters()), MagicMock(return_value=_picks())
+    with patch.object(mfl_service, "_fetch_one", one):
+        r, fake, _, _ = _send(
+            client, [GIVE, MY_PICK], [RECV],
+            rosters=REAL_FETCH_ROSTERS if which == "rosters" else ok_rosters,
+            picks=REAL_FETCH_PICKS if which == "picks" else ok_picks)
+    assert r.status_code == 502, r.get_data(as_text=True)
+    assert r.get_json() == {"error": "mfl_unavailable", "kind": "network",
+                            "message": R3_COPY, "detail": R3_COPY}
+    fake.assert_not_called()
+
+
+def test_other_callers_still_degrade_a_dead_cookie_to_empty():
+    """The fetchers' default contract is unchanged: without `raise_auth` an
+    MflAuthError is still `{}` (validate, the owned-pick refresher)."""
+    with patch.object(mfl_service, "_fetch_one", MagicMock(side_effect=mfl_service.MflAuthError())):
+        assert REAL_FETCH_ROSTERS(LEAGUE, 2026, "h") == {}
+        assert REAL_FETCH_PICKS(LEAGUE, 2026, "h") == {}
+
+
 def test_successful_rosters_read_without_my_franchise_keeps_its_code(client):
     r, fake, _, _ = _send(client, [GIVE], [RECV], rosters=_rosters(drop=MY_FID))
     assert r.status_code == 409 and r.get_json()["error"] == "mfl_franchise_unknown"
@@ -347,3 +407,27 @@ def test_overhaul_send_inherits_the_mfl_refusal(overhaul):
     assert [a["state"] for a in by_give["C"] + by_give["D"]] == ["proposed", "proposed"]
     sent = sorted(call[0][3].will_give_up[0] for call in fake.call_args_list)
     assert sent == sorted([mfl_id["C"], mfl_id["D"]])          # only the owned offers
+
+
+def test_overhaul_transport_error_fails_each_offer_readably_and_frees_reservations(overhaul, monkeypatch):
+    """P2-1 through the overhaul send: a reset on the live rosters read used to
+    escape the core, so each attempt went `outcome_unknown` with its
+    reservation held. Now each is `send_failed` with the R3 copy and the
+    packages are released."""
+    c, world, live, fake, mfl_id = overhaul
+    oid, rm, prep = ovh_t._tie_then_prepare(c, world)
+
+    def reset(*a, **kw):
+        raise ConnectionResetError(104, "Connection reset by peer")
+
+    monkeypatch.setattr(mfl_service, "fetch_rosters", reset)
+    r = c.post(f"/api/overhauls/{oid}/send", headers=ovh_t._h(), json={
+        "prepare_token": prep["prepare_token"], "summary_hash": prep["summary_hash"],
+        "version": rm["version"], "idempotency_key": "i2-mfl-reset"})
+    assert r.status_code == 200, r.get_json()
+    attempts = r.get_json()["attempts"]
+    assert [a["state"] for a in attempts] == ["send_failed"] * 5      # never outcome_unknown
+    assert {a["error"]["code"] for a in attempts} == {"mfl_unavailable"}
+    assert {a["error"]["message"] for a in attempts} == {R3_COPY}
+    assert store.active_reservations(LEAGUE, ovh_t.USER) == []        # nothing held
+    fake.assert_not_called()
