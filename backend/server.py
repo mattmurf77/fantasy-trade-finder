@@ -5300,13 +5300,21 @@ _STORED_COUNT_FROM_ROW_NOW = True
 # models-lead addendum C (c2): a ledger entry lives at least the 24 h display
 # cap, so a late view of an evicted (or held) deck keeps its cause. Entries are
 # trimmed by age; the count cap is a memory guard only, far above a day's adds
-# (131,072 entries ≈ 17 MiB per ledger at ~135 B each), and a guard trim of an
-# entry younger than 24 h logs a warning.
+# (131,072 entries ≈ 23 MiB per ledger as OrderedDicts, ~180 B an entry with its
+# id; it normally holds one day of adds), and a guard trim of an entry younger
+# than 24 h logs a warning.
 _DECK_LEDGER_RETAIN_S = 24 * 3600          # _DECK_DISPLAY_CAP_S
 _DECK_LEDGER_GUARD = 131072
-_deck_held: dict = {}                      # deck_job_id -> when this process built it (epoch s)
-_deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+# OrderedDicts (#451 QA P2-1): peeking at and popping the oldest entry are O(1).
+# A plain dict's next(iter()) rescans the deleted slots at its front, so a mass
+# age trim (a ledger idle for 24 h, then one add) was O(n²): 11.9 s at the guard,
+# under the leaf lock and, for evictions, under _trade_jobs_lock.
+_deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> built here (epoch s)
+_deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
 _ledger_now = time.time                    # the ledgers' clock (tests replace it)
+_DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
+_ledger_guard_young = 0                    # young entries the guard trimmed since its last warning
+_ledger_guard_warned_at = float("-inf")
 # A leaf lock for the ledgers' writes (#428 QA item 2: kickoffs add concurrently,
 # and the trim raced). Never take another lock while holding it (the guard's
 # warning is logged after it's released). Readers stay lock-free: membership
@@ -5314,27 +5322,27 @@ _ledger_now = time.time                    # the ledgers' clock (tests replace i
 _deck_ledger_lock = threading.Lock()
 
 
-def _ledger_add(ledger: dict, key: str) -> None:
+def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None:
     """Note `key` now. Entries stay in time order (a re-add moves to the end),
-    so the trims take the oldest first: every entry older than the retention,
-    then, at the guard, the oldest young ones (warned)."""
+    so the trims take the oldest first, each in O(1): every entry older than
+    the retention, then, at the guard, the oldest young ones (warned at most
+    once a minute, with the count since the last warning)."""
+    global _ledger_guard_young, _ledger_guard_warned_at
     now = _ledger_now()
-    young_trimmed = 0
+    warn = 0
     with _deck_ledger_lock:
         ledger.pop(key, None)
-        while ledger:
-            oldest = next(iter(ledger))
-            if now - ledger[oldest] < _DECK_LEDGER_RETAIN_S:
-                break
-            del ledger[oldest]
+        while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
+            ledger.popitem(last=False)
         while len(ledger) >= _DECK_LEDGER_GUARD:
-            young_trimmed += now - ledger.pop(next(iter(ledger))) < _DECK_LEDGER_RETAIN_S
+            _ledger_guard_young += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
         ledger[key] = now
-    if young_trimmed:
+        if _ledger_guard_young and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S:
+            warn, _ledger_guard_young, _ledger_guard_warned_at = _ledger_guard_young, 0, now
+    if warn:
         log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
-                    "24 h: a late view of %s reads restart_split", _DECK_LEDGER_GUARD,
-                    young_trimmed, "y" if young_trimmed == 1 else "ies",
-                    "an evicted deck" if ledger is _deck_evicted_at else "a held deck")
+                    "24 h since its last warning: a late view of such a deck reads "
+                    "restart_split", _DECK_LEDGER_GUARD, warn, "y" if warn == 1 else "ies")
 
 
 def _note_deck_held(job_id: str) -> None:
@@ -5349,6 +5357,11 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     if ev is None or not ev.packed or ev.pack is None:
         return
     _ledger_add(_deck_evicted_at, job_id)
+    # #451 QA P3-1: the two ledgers trim independently, so an evicted deck
+    # leaves the held one. Once its eviction record ages out, a late view reads
+    # restart_split (C (c2)'s assumption), never other.
+    with _deck_ledger_lock:
+        _deck_held.pop(job_id, None)
 
 
 def _upgrade_miss_cards(run: Mapping) -> dict:
@@ -15145,7 +15158,7 @@ def _ratio_series_break_caveats(first_day: str | None, last_day: str | None) -> 
     day = _db.PACKED_EVIDENCE_FLIP_DAY
     if day is None or first_day is None or last_day is None or not first_day <= day <= last_day:
         return []
-    return [{"code": "series_break", "scope": "suggestion_ratio",
+    return [{"code": _db.SERIES_BREAK_CAVEAT, "scope": "suggestion_ratio",
              "detail": _RATIO_SERIES_BREAK_DETAIL, "day": day}]
 
 

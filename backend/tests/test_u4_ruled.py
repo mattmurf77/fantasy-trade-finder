@@ -13,6 +13,7 @@ option A, with their conditions.
 Harness: test_packed_evidence's (the `deferred` fixture, real routes and
 evidence writes inline) and the ledgers with a replaced clock.
 """
+import collections
 import pytest
 
 import backend.server as server
@@ -48,6 +49,8 @@ class Clock:
 def clock(monkeypatch):
     c = Clock()
     monkeypatch.setattr(server, "_ledger_now", c)
+    monkeypatch.setattr(server, "_ledger_guard_young", 0)          # the warning's rate limit
+    monkeypatch.setattr(server, "_ledger_guard_warned_at", float("-inf"))
     return c
 
 
@@ -84,10 +87,62 @@ def test_c1_a_named_cause_needs_the_card_at_or_past_the_effective_count(
 
 # ── (c2) the ledgers keep 24 h ──────────────────────────────────────────────
 
+def test_c2_a_mass_age_trim_is_linear(clock):
+    """#451 QA P2-1: a ledger idle for 24 h, then one add, trims every entry at
+    once. The ledgers are OrderedDicts, so each trim is O(1): a full guard of
+    aged entries goes in well under a second (a plain dict rescans its deleted
+    front slots: O(n²), ~12 s at the guard, under the locks)."""
+    import time as _time
+    assert isinstance(server._deck_held, collections.OrderedDict)
+    assert isinstance(server._deck_evicted_at, collections.OrderedDict)
+    ledger = type(server._deck_evicted_at)()
+    for i in range(server._DECK_LEDGER_GUARD - 1):
+        ledger[f"old-{i}"] = clock.t
+    clock.t += DAY
+    started = _time.perf_counter()
+    server._ledger_add(ledger, "new")
+    assert _time.perf_counter() - started < 2.0
+    assert list(ledger) == ["new"]
+
+
+def test_c2_an_evicted_deck_leaves_the_held_ledger(clock, monkeypatch):
+    """#451 QA P3-1: eviction drops the deck's held entry, so once its eviction
+    record ages out a late view reads restart_split (C (c2)), never other."""
+    from types import SimpleNamespace
+    monkeypatch.setattr(server, "_deck_held", collections.OrderedDict())
+    monkeypatch.setattr(server, "_deck_evicted_at", collections.OrderedDict())
+    job = {"evidence": SimpleNamespace(packed=True, pack=object())}
+    server._note_deck_held("deck-a")
+    server._note_deck_evicted("deck-a", job)
+    assert "deck-a" not in server._deck_held and "deck-a" in server._deck_evicted_at
+    assert server._upgrade_miss_cause("deck-a", 95, 90, True) == "evicted_split"
+    clock.t += DAY + 1
+    server._note_deck_evicted("deck-b", job)               # ages deck-a's record out
+    assert "deck-a" not in server._deck_evicted_at
+    assert server._upgrade_miss_cause("deck-a", 95, 90, True) == "restart_split"
+
+
+def test_c2_the_guard_warning_is_rate_limited(clock, monkeypatch, caplog):
+    """#451 QA P3-2: at the guard every add trims a young entry; the warning
+    fires at most once a minute, with the count since the last one."""
+    monkeypatch.setattr(server, "_DECK_LEDGER_GUARD", 2)
+    ledger = collections.OrderedDict()
+    with caplog.at_level("WARNING"):
+        for i in range(50):                                # 48 young trims over 5 s
+            server._ledger_add(ledger, f"d{i}")
+            clock.t += 0.1
+    assert caplog.text.count("ledger guard") == 1
+    caplog.clear()
+    clock.t += 60
+    with caplog.at_level("WARNING"):
+        server._ledger_add(ledger, "late")
+    assert caplog.text.count("ledger guard") == 1 and "trimmed 48 entries younger" in caplog.text
+
+
 def test_c2_an_entry_younger_than_24h_survives_adds_past_the_old_cap(clock):
     """20,000 adds over 5.5 h, past the old FIFO's 16,384: the first entry
     stays (it is younger than 24 h), and nothing is trimmed."""
-    ledger = {}
+    ledger = collections.OrderedDict()
     server._ledger_add(ledger, "evicted-first")
     for i in range(20000):
         clock.t += 1
@@ -96,7 +151,7 @@ def test_c2_an_entry_younger_than_24h_survives_adds_past_the_old_cap(clock):
 
 
 def test_c2_an_entry_24h_old_is_trimmed_and_a_younger_one_kept(clock):
-    ledger = {}
+    ledger = collections.OrderedDict()
     server._ledger_add(ledger, "old")
     clock.t += DAY - 1
     server._ledger_add(ledger, "young")
@@ -107,7 +162,7 @@ def test_c2_an_entry_24h_old_is_trimmed_and_a_younger_one_kept(clock):
 
 
 def test_c2_a_re_add_moves_the_entry_to_now(clock):
-    ledger = {}
+    ledger = collections.OrderedDict()
     server._ledger_add(ledger, "a")
     clock.t += DAY - 10
     server._ledger_add(ledger, "b")
@@ -120,7 +175,7 @@ def test_c2_a_re_add_moves_the_entry_to_now(clock):
 def test_c2_the_memory_guard_trims_the_oldest_and_warns_for_a_young_entry(
         clock, monkeypatch, caplog):
     monkeypatch.setattr(server, "_DECK_LEDGER_GUARD", 4)
-    ledger = {}
+    ledger = collections.OrderedDict()
     for i in range(4):
         server._ledger_add(ledger, f"d{i}")
         clock.t += 1
@@ -139,7 +194,7 @@ def test_c2_the_held_ledger_keeps_24h_too(clock, monkeypatch):
     """_deck_held has the same policy: a deck built here 20 h ago, with
     20,000 builds since, is still held (a live miss on it stays other, never a
     restart_split)."""
-    monkeypatch.setattr(server, "_deck_held", {})
+    monkeypatch.setattr(server, "_deck_held", collections.OrderedDict())
     server._note_deck_held("built-early")
     for i in range(20000):
         clock.t += 3.6                                     # 20 h in all

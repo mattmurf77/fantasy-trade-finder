@@ -538,6 +538,8 @@ def _link(txid, *, traded_at, league=LEAGUE, computed_at="2026-11-20T00:00:00+00
 
 
 def test_the_link_day_span(mem_engine):
+    """A trade's day is the matcher's: traded_at, else its sleeper_trades
+    row's synced_at (#444 QA P3), else the link's computed_at."""
     assert db_module.suggestion_link_day_span() == (None, None)
     _link("tx_a", traded_at="2026-11-01T10:00:00+00:00")
     _link("tx_b", traded_at="2026-11-09T23:00:00+00:00")
@@ -545,6 +547,12 @@ def test_the_link_day_span(mem_engine):
     _link("tx_d", traded_at="2026-10-01T00:00:00+00:00", league="other-league")
     assert db_module.suggestion_link_day_span(LEAGUE) == ("2026-11-01", "2026-11-12")
     assert db_module.suggestion_link_day_span() == ("2026-10-01", "2026-11-12")
+    with mem_engine.begin() as conn:                     # tx_c's trade, captured on 11-10
+        conn.execute(db_module.sleeper_trades_table.insert().values(
+            transaction_id="tx_c", league_id=LEAGUE, week=1, traded_at=None,
+            synced_at="2026-11-10T04:00:00+00:00", roster_ids="[1, 2]", adds="{}", drops="{}",
+            draft_picks="[]", waiver_budget="[]", raw="{}"))
+    assert db_module.suggestion_link_day_span(LEAGUE) == ("2026-11-01", "2026-11-10")
 
 
 @pytest.mark.parametrize("flip_day, flagged", [
@@ -582,3 +590,31 @@ def test_receipts_and_the_ratio_read_one_flip_day(monkeypatch):
     [receipts] = rs._receipts_series_break_caveats([{"served_at": "2026-11-01T00:00:00+00:00"},
                                                     {"served_at": "2026-11-09T00:00:00+00:00"}])
     assert ratio["day"] == receipts["day"] == "2026-11-05"
+
+
+def test_the_ratio_break_reads_utc_days_whatever_the_local_zone(mem_engine, monkeypatch):
+    """#444 QA P3: trades near midnight UTC keep their UTC day under a non-UTC
+    local zone (CI runs at TZ=UTC, where a local-time bug can't show)."""
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    try:
+        _link("tx_a", traded_at="2026-11-01T00:30:00+00:00")
+        _link("tx_b", traded_at="2026-11-04T23:30:00+00:00")      # 11-05 in Tokyo
+        assert db_module.suggestion_link_day_span(LEAGUE) == ("2026-11-01", "2026-11-04")
+        monkeypatch.setattr(db_module, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-05")
+        assert server._ratio_series_break_caveats(*db_module.suggestion_link_day_span(LEAGUE)) == []
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+
+
+def test_every_series_break_carries_one_code(monkeypatch):
+    """#444 QA P3: the analytics, receipts and ratio caveats share one code."""
+    import backend.analytics_queries as aq
+    import backend.receipts_service as rs
+    monkeypatch.setattr(db_module, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-05")
+    codes = {c["code"] for c in (
+        server._ratio_series_break_caveats("2026-11-01", "2026-11-09")
+        + rs._receipts_series_break_caveats([{"served_at": "2026-11-05T00:00:00+00:00"}])
+        + aq._series_break_caveats("2026-10-20", "2026-11-01", ["trades_generated"]))}
+    assert codes == {db_module.SERIES_BREAK_CAVEAT} == {"series_break"}

@@ -6,6 +6,7 @@ models-lead R2.4 addendum §2-§3 and R4.2 (U1-U8).
 Harness: test_deferred_evidence's `deferred` (p1's real worker and routes,
 flag on, evidence writes inline).
 """
+import collections
 import json
 
 import pytest
@@ -1938,7 +1939,7 @@ def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
     import threading
     monkeypatch.setattr(server, "_DECK_LEDGER_GUARD", 8)
     monkeypatch.setattr(server.log, "warning", lambda *a, **k: None)
-    ledger, errors = {}, []
+    ledger, errors = collections.OrderedDict(), []
 
     def hammer(t):
         try:

@@ -603,7 +603,7 @@ SERIES_BREAKS = (
 def _series_break_caveats(start_day, end_day, events):
     """A `series_break` caveat for each known break in `events` whose day is
     inside the window (inclusive: the break day itself is mixed)."""
-    return [{"code": "series_break", "scope": f"event:{event}", "detail": detail, "day": day}
+    return [{"code": db.SERIES_BREAK_CAVEAT, "scope": f"event:{event}", "detail": detail, "day": day}
             for day, event, detail in SERIES_BREAKS
             if event in events and str(start_day) <= day <= str(end_day)]
 
