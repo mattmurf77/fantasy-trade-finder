@@ -4049,15 +4049,19 @@ def _diagnostic_refs(value) -> set:
     return set()
 
 
+_NARROW_GHOST_KEYS = _evidence_contract.FROZEN_INPUT_KEYS | {"page_store"}
+
+
 def _narrow_ghost_row(row: dict) -> dict:
     """C5: a ghost's row without the wide features_json or valuation_json:
     every other column as built (impression_id, assets_json, the scalars) and a
     features_json holding only the frozen scorer inputs, the eval contract's
-    FROZEN_INPUT_KEYS (S3: one definition), in the built row's key order."""
+    FROZEN_INPUT_KEYS (S3: one definition), plus the deck's `page_store`
+    marker when it has one, in the built row's key order."""
     features = json.loads(row["features_json"])
     narrow = {k: v for k, v in row.items() if k != "valuation_json"}
     narrow["features_json"] = json.dumps({k: v for k, v in features.items()
-                                          if k in _evidence_contract.FROZEN_INPUT_KEYS})
+                                          if k in _NARROW_GHOST_KEYS})
     return narrow
 
 
@@ -7185,6 +7189,11 @@ def _log_deck_signal_impressions(
         ranked_count, last_board_update = 0, None
 
     served_at = datetime.now(timezone.utc).isoformat()
+    # The page-store marker (R2.4 addendum §3's eval-side defense): every row
+    # of a deck admitted with a page_scope, so a paged deck is never read as a
+    # legacy one, even with a flag mis-set.
+    with _trade_jobs_lock:
+        page_store = bool((_trade_jobs.get(job_id) or {}).get("page_scope"))
     imp_by_card: dict[int, str] = {}
     rows: list[dict] = []
     batch_cards = []
@@ -7303,6 +7312,10 @@ def _log_deck_signal_impressions(
         # decks' features_json stays byte-identical to pre-F10.
         if source:
             features["deck_source"] = source
+        # The page-store marker, frozen with the row (above). Key only when
+        # set, so a deck admitted without a page_scope is byte-identical.
+        if page_store:
+            features["page_store"] = 1
         # F9 (deck.first_session) — frozen first-deck marker. The caller
         # only passes True while the flag is on AND this is the user's
         # first deck for the league, so flag-off (and every non-first)

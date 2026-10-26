@@ -49,7 +49,7 @@ from backend.tests.test_owner_only_routes import exclusive  # noqa: F401  (fixtu
 from backend.tests.test_owner_batch_publication import sized_exclusive  # noqa: F401  (fixture)
 
 TIERS = ("first30", "delivered", "ghost", "archive", "full_interim")
-COMPACT = contract.FROZEN_INPUT_KEYS
+COMPACT = contract.FROZEN_INPUT_KEYS | {"page_store"}   # a narrow ghost: the frozen inputs + the marker
 VOLATILE = ("impression_id", "served_at", "candidate_set_id", "evidence_tier", "delivered_at")
 
 
