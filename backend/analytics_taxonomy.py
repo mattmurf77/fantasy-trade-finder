@@ -895,6 +895,24 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # allowlist's prop filter, and the import-time completeness check below
     # is scoped to ALLOWED_CLIENT_EVENTS.
     "receipts_grade_run",
+    # ── S0's I-1 serve check, 2026-10-27 (analytics-lead's pre-grant, the
+    # 2026-10-26 report §2 (a); models-lead R2.4 addendum (ii)) — registered
+    # in the SAME commit as its emitter (server._emit_deck_i1_check).
+    # The C-a readout's data path: one row per job serve page that ran the
+    # check (the `[i1] serve` log point), deduped per (job, page) in-process;
+    # trade_i1_mode 0 runs no check and emits nothing. Owner = the viewer,
+    # written non-touching (touch_user=False) off the request thread; the
+    # league rides the row's `league_id` column. NON_INTENT (classified in
+    # analytics_queries in this same commit): a system outcome of a serve.
+    # Props, exactly: job_key (sha256(job_id)[:12], to de-duplicate by job),
+    # mode (strict | lenient), status (fresh | stale | unknown | missing),
+    # outcome (the log's), age_bucket (under_5m | 5m_to_1h | 1h_to_24h |
+    # over_24h | none), cards, kept, dropped_cards (distinct cards with a
+    # moved asset), dropped_give_player, dropped_give_pick,
+    # dropped_receive_player, dropped_receive_pick (cards per side x asset
+    # type), unchecked_generic, unchecked_pick_owner. No league id, no raw job
+    # id, no player ids.
+    "deck_i1_check",
 })
 
 # ---------------------------------------------------------------------------

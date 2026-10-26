@@ -4633,9 +4633,17 @@ def record_event(
     source:      str | None = None,
     props:       dict | None = None,
     tz:          str | None = None,
+    touch_user:  bool = True,
+    bind=None,
 ) -> dict | None:
     """Append one row to user_events AND bump the matching users.last_*_at
     column (and device snapshot columns) in a single transaction.
+
+    `touch_user=False` appends the row only: no `users` update and no streak.
+    For server-fired system outcomes that fire on background polls (e.g.
+    `deck_i1_check`), which must not move `last_active_at` or `events_count`.
+    `bind`: the engine to write through, default this module's. A background
+    writer passes the one it captured on the request thread.
 
     Always inserts a new row — never overwrites prior events. The denorm
     columns on `users` are pointers to the most recent event of each type
@@ -4653,7 +4661,7 @@ def record_event(
     now = _now()
     streak_result: dict | None = None
     try:
-        with engine.begin() as conn:
+        with (bind if bind is not None else engine).begin() as conn:
             conn.execute(
                 insert(user_events_table).values(
                     user_id     = user_id,
@@ -4668,6 +4676,8 @@ def record_event(
                     props       = json.dumps(props) if props else None,
                 )
             )
+            if not touch_user:
+                return None
             # Build the denorm UPDATE: always bumps last_active_at + events_count,
             # plus the event-specific pointer column when one is mapped, plus the
             # device snapshot columns when those headers were sent.
