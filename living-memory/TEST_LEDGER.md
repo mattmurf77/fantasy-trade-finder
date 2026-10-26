@@ -1,3 +1,18 @@
+## 2026-10-26 — I-2 (3/4): ESPN send-time player ownership + validate routing + 0f guard (stacked on #412)
+
+Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_espn_ownership.py` has 20 tests, including a send through the overhaul batch with the real `_espn_propose_core`. The targeted set passes, 171 tests: `test_espn_propose_route` (17), `test_espn_write` (29), `test_trade_send_validate` (16), the I-2 Sleeper (24) and MFL (15) files, `test_overhaul_api` (27) and `test_overhaul_service` (23). `test_sleeper_write_route` (35) and `test_mfl_propose_route` (25) also pass with the 0f guard.
+- **Sabotage, each red then restored:**
+  - the ESPN player refusals removed → 4 red;
+  - the R3 handling removed (error mapping, transport catch, shape guards) → 6 red;
+  - the validate ESPN branch and linked-platform guard removed → 5 red;
+  - the 0f guard removed → 2 red.
+- **Contract:** players are checked against the live `mTeam+mRoster` read the ESPN core already makes (no extra call). A moved player → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's helper. A failed read → 502 `espn_unavailable` `kind:"network"` with "Couldn’t confirm rosters with ESPN …". That failure covers transport errors, which used to escape as a 500, and a team with no `roster` object.
+- **Validate:** an ESPN league checks the live mRoster (`asset_unmapped` / `player_moved` / `roster_not_found`). Any other linked-platform id returns `checked:false`. Neither path calls Sleeper.
+- **NEXT.md 0f:** `_sleeper_propose_core` returns 400 `bad_request` for a linked-platform id before any Sleeper call.
+- **Client code-walk (no client change):** `SendInEspnButton` has no branch for the two 422s or `espn_unavailable`, so all three reach its catch-all (`:216-220`), which shows `detail`. `espn_write_failed` (`:205-215`) would have read "ESPN rejected the request".
+
 ## 2026-10-26 — I-2 (2/4): MFL send-time player + pick ownership + R3 (stacked on #411)
 
 Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
