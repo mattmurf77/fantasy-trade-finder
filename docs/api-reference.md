@@ -643,7 +643,7 @@ A job served by the value core returns cards in the same shape, serialized by th
 | `lane`, `narrative`, `match_context`, `tier`, `rationale`, `model_arm` | absent. With no card carrying a `lane`, clients hide the lane chips |
 | `likes_you`, `standing_offer_*`, `wildcard`, `retest`, `relaxed`, `sweetener`, `gap_sweetener`, `breaker` | never set: the value-core deck is single-source and the legacy presentation layers do not run on it |
 
-The job snapshot still adds `real_opponent`, `outlook` and `impression_id` per card. The in-memory job also records a `value_core` diagnostics block (`fair`, `served`, `core_ms`, `total_ms`, `truncated_partners`, `budget_exhausted`) that `_trade_job_public_view` does not return. Each card's scores, weights, windows and per-asset values are stored privately in `deck_impressions.valuation_json`, never in a response: see the [data dictionary](data-dictionary.md#value-core-rows-flag-tradevalue_core).
+The job snapshot still adds `real_opponent`, `outlook` and `impression_id` per card. The in-memory job also records a `value_core` diagnostics block (`fair`, `served`, `core_ms`, `total_ms`, `truncated_partners`, `budget_exhausted`, `safety_ceiling_hit`) that `_trade_job_public_view` does not return. A run that hit the safety ceiling is refused (#366, ruling 15): the job finishes with `status: "error"`, `error: "value_core_failed"`, no cards, no impressions, no event and no legacy fallback. Each card's scores, weights, windows and per-asset values are stored privately in `deck_impressions.valuation_json`, never in a response: see the [data dictionary](data-dictionary.md#value-core-rows-flag-tradevalue_core).
 
 ## Open trade calculator (public — no auth)
 
