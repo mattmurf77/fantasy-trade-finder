@@ -1419,10 +1419,14 @@ def test_u4_restart_splits_assume_one_worker_per_instance():
     """models-eng: "this process never held the deck" means a restart only
     with one gunicorn worker per instance (no --preload, which would share a
     master's import)."""
-    import yaml
-    config = yaml.safe_load((REPO / "render.yaml").read_text())
-    [web] = [svc for svc in config["services"] if svc.get("type") == "web"]
-    command = web["startCommand"].split()
+    # Plain text, no PyYAML (not a CI dependency): the web service's block runs
+    # from its "- type: web" line to the next "- type:" line.
+    lines = (REPO / "render.yaml").read_text().splitlines()
+    starts = [i for i, line in enumerate(lines) if line.strip().startswith("- type:")]
+    [web_at] = [i for i in starts if lines[i].split(":", 1)[1].strip() == "web"]
+    block = lines[web_at:min([i for i in starts if i > web_at], default=len(lines))]
+    [command_line] = [line for line in block if line.strip().startswith("startCommand:")]
+    command = command_line.split(":", 1)[1].split()
     message = ("restart_split's provenance rule assumes one worker per instance: add a "
                "cross_worker cause to _upgrade_miss_cause (models-eng's reader is cause-generic) "
                "before raising --workers")
