@@ -419,16 +419,39 @@ class PreparedEvidenceCapture:
         return _copy(bundle)
 
 
-def _candidate(row, *, user_id, league_id, job_id):
+_CANDIDATE_PACK_KEYS = {"candidates_packed", "cand_pack_version"}
+
+
+def candidate_members(row, *, limit=None):
+    """A deck_candidate_sets row's members (eng-evidence-contract §9, R6.2).
+    candidates_packed IS NOT NULL is authoritative: decode it, with the packed
+    bytes and the unpacked JSON each bounded by `limit`; a pack that can't be
+    read is a corrupt row (candidate_pack_integrity), never an empty set, and
+    its '' is never parsed. candidates_json only when it is NULL (legacy)."""
+    packed = row.get("candidates_packed")
+    if packed is None:
+        return _json(row["candidates_json"])
+    from .eval import evidence_pack
+    _require(type(packed) is bytes and (limit is None or len(packed) <= limit), "candidate_pack_bytes")
+    try:
+        _run, members = evidence_pack.unpack_candidates(
+            evidence_pack.PackedCandidates(row.get("cand_pack_version"), packed))
+    except evidence_pack.PackIntegrityError:
+        raise ValueError("prepared_payload:candidate_pack_integrity") from None
+    _require(limit is None or len(json.dumps(members).encode()) <= limit, "json_bytes")
+    return members
+
+
+def _candidate(row, *, user_id, league_id, job_id, limit=None):
     if row is None:
         return None
     keys = {"candidate_set_id", "deck_job_id", "user_id", "league_id", "size", "set_hash",
             "candidates_json", "created_at"}
-    _keys(row, keys, keys)
+    _keys(row, keys | _CANDIDATE_PACK_KEYS, keys)
     _scope(row, user_id, league_id, job_id)
     _text(row["candidate_set_id"])
     _date(row["created_at"])
-    members = _json(row["candidates_json"])
+    members = candidate_members(row, limit=limit)
     _require(type(members) is list and type(row["size"]) is int and row["size"] == len(members), "candidate_count")
     for member in members:
         keys = {"trade_hash", "partner", "give", "receive", "base_score", "in_deck"}
