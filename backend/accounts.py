@@ -1134,6 +1134,12 @@ def export_user_data(sleeper_user_id: str,
 
 APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
 APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke"
+# Per Apple HTTP call. Deletion makes up to two (/auth/token, /auth/revoke)
+# before it deletes, and the app's DELETE /api/account gives up at 15 s
+# (mobile api/client DEFAULT_TIMEOUT_MS): 2 x 5 s leaves room for the
+# deletion itself, so a slow Apple can't make the user see "took too
+# long" while the server still deletes (release-lead QA on #446).
+APPLE_HTTP_TIMEOUT_S = 5
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -1198,7 +1204,7 @@ def _apple_form_post(url: str, fields: dict) -> tuple[int, dict]:
                            or "token")
     with _api_obs.observe_call("apple", _endpoint, method="POST") as _ob:
         with urllib.request.urlopen(
-            req, timeout=10, context=ssl.create_default_context()
+            req, timeout=APPLE_HTTP_TIMEOUT_S, context=ssl.create_default_context()
         ) as resp:
             raw = resp.read().decode("utf-8", "replace")
         _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))

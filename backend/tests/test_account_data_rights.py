@@ -212,6 +212,35 @@ def test_revoke_exchange_and_revoke_flow(client, monkeypatch):
     assert posts == []
 
 
+def test_each_apple_http_call_times_out_at_5s():
+    """release-lead QA on #446: deletion makes up to two Apple calls before it
+    deletes, and the app's DELETE gives up at 15 s, so each call is capped at
+    5 s (2 x 5 s < 15 s) and a slow Apple can't outlast the client."""
+    assert accounts.APPLE_HTTP_TIMEOUT_S == 5
+    seen = {}
+
+    class _Resp:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(req, timeout=None, context=None):
+        seen["timeout"] = timeout
+        return _Resp()
+
+    with patch.object(accounts.urllib.request, "urlopen", side_effect=fake_urlopen):
+        assert accounts._apple_form_post(accounts.APPLE_TOKEN_URL, {"code": "c"}) == (200, {})
+    assert seen["timeout"] == accounts.APPLE_HTTP_TIMEOUT_S
+    assert 2 * accounts.APPLE_HTTP_TIMEOUT_S < 15
+
+
 def test_delete_attempts_revocation_and_never_blocks(client):
     c, token, _ = client
     db_module.upsert_user(sleeper_user_id=UID)
