@@ -40,15 +40,14 @@ export const DECK_REFRESH_FAILED_LINE = "Couldn't refresh. These trades may be o
 // marketing-lead-copy.md §6 addendum 4 (final): the line above, "Retry", and this spoken label.
 export const DECK_REFRESH_FAILED_RETRY_A11Y = 'Retry refreshing trades';
 // #339 item 12 — S0's named gate misses (utils/gateMiss). Never "Searching…",
-// never a "Finding more", never a time.
-// COPY: placeholder, marketing-lead (trades.gate.*)
+// never a "Finding more", never a time. marketing-lead-copy.md §6 addendum 5
+// (final, trades.gate.*): no "we", no platform named, no promise of trades;
+// the wait line always sits beside the progress indicator, never a bare spinner.
 export const GATE_ROSTER_CHECK_FAILED_TITLE = "Couldn't confirm current rosters";
-// COPY: placeholder, marketing-lead (trades.gate.*)
-export const GATE_ROSTER_CHECK_FAILED_LINE = "We couldn't check rosters with your league's platform. Try again.";
-// COPY: placeholder, marketing-lead (trades.gate.*)
+export const GATE_ROSTER_CHECK_FAILED_LINE = "The roster check didn't go through.";
 export const GATE_ROSTER_CHECK_RETRY = 'Retry';
-// COPY: placeholder, marketing-lead (trades.gate.*)
-export const GATE_ROSTER_CHECK_WAIT = "Checking current rosters with your league's platform…";
+export const GATE_ROSTER_CHECK_RETRY_A11Y = 'Retry the roster check';
+export const GATE_ROSTER_CHECK_WAIT = "Checking your league's current rosters…";
 
 function announcePolitely(line: string) {
   // `queue: true` lets VoiceOver finish what it is reading (polite).
@@ -276,6 +275,7 @@ export function GateErrorCard({ minHeight, onRetry }: { minHeight?: number | nul
         <Button
           testID="trades.gate-error.retry"
           label={GATE_ROSTER_CHECK_RETRY}
+          accessibilityLabel={GATE_ROSTER_CHECK_RETRY_A11Y}
           variant="secondary"
           onPress={onRetry}
           style={styles.fullWidth}

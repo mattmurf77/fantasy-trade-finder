@@ -998,6 +998,7 @@ FLAG_KEYS: tuple[str, ...] = (
     # bakeoff_runs row, swipe K factors untouched — byte-identical serving.
     "trade.bakeoff",
     "trade.prepared_inventory",  # capability; default-dark audited numeric rollout
+    "trade.first_page_store",    # P1 200 ms path: server-held first pages (scope-eng-200ms §2); OFF = today
     # ── Trade-suggestion presentation v2 (docs/plans/trade-presentation-v2/) ──
     # CLIENT-ONLY. No route reads this key; it is registered here so the
     # features-json-keys-known guard accepts it and so /api/flags serves it
