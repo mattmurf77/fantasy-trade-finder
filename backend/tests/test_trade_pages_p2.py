@@ -7,13 +7,21 @@ Pinned here, with the flag on:
   * organic paged responses name their deck (`deck_id`); pinned ones do not;
   * `/status?deck=D&cursor=K` resolves (a) D's stored pages, (b) D's live job
     past them, (c) `rebased` onto the scope's current deck from its first page,
-    after a rebuild and after a restart, with dispositions and strict I-1;
+    after a rebuild and after a restart; every serve under S0's rules, one
+    roster snapshot and one decoded page row per poll;
+  * only a provably organic deck (its job's page_scope, or a row it built) is
+    ever rebased: pinned, Specific Team and intent decks get their own pages,
+    end and error, and a gone deck without a row is the legacy 404;
   * `pool_exhausted` only for a complete deck asked past its last card with no
-    newer or running deck for the scope and no stale row;
-  * every page-store serve has a backing job, and the debounce stops stacking;
+    gate miss, no newer or running deck for the scope, no stale row and
+    unmoved stamps; a stale scope converges to the rebuilt deck's end, and one
+    nothing can rebuild ends honestly;
+  * every page-store serve has a backing job through P1's one kick path, so a
+    scope has one live rebuild at a time;
   * the kickoff's `append_only` marker decides over the card markers;
   * every paged card carries `trade_hash`, equal to its deck_impressions row's;
-  * the legacy `job_id` + `cursor` form is unchanged; `deck` is validated.
+  * the legacy `job_id` + `cursor` form is unchanged; `deck` is validated, and
+    ignored with paging killed.
 With the flag off, `deck` is ignored and every body is byte-identical to P1's
 base: each (status, body) sha256 equals a golden captured by running
 `p2_flag_off_bodies` on 414357c6 (P1, before P2).
@@ -35,10 +43,10 @@ import backend.feature_flags as ff
 import backend.server as server
 from backend import roster_snapshot
 from backend.database import league_members_table
-from backend.tests.test_i1_serve_filter import LEAGUE, UID, live  # noqa: F401  (fixture)
+from backend.tests.test_i1_serve_filter import LEAGUE, OPP, UID, live  # noqa: F401  (fixture)
 from backend.tests.test_trade_page_store import (  # noqa: F401  (fixtures)
-    HEADERS, KEY, SCOPE, _vote, build_page, generate, ids, p1, page_card, page_queries, run_job,
-    set_row, spawned, statements, status, stored)
+    HEADERS, KEY, SCOPE, _row, _vote, build_page, generate, ids, p1, page_card, page_queries,
+    run_job, set_row, spawned, statements, status, stored)
 from backend.tests.test_trade_responses_small import (  # noqa: F401  (fixtures)
     HEADERS as E2_HEADERS, JOB_ID, card, e2, generate as e2_generate, harness, seed_job,
     status as e2_status)
@@ -161,22 +169,57 @@ def test_rebased_after_a_rebuild_moves_to_the_new_deck_from_its_first_card(p1, s
     assert ids(following["cards"]) == p1_ids(230, 260) and "rebased" not in following
 
 
-def test_rebased_after_a_restart_serves_the_fresh_row_and_kicks_its_backing_job(p1, spawned):
+def revoked_deck_row_rebuilt_elsewhere(engine):
+    """An organic deck D still in this process but revoked, whose scope's row
+    was since rebuilt by a job this process doesn't hold (another worker, or
+    before a restart). D's page_scope proves it organic, so it rebases onto
+    the row's first page, and nothing here backs that row: P1's kick runs."""
+    deck = build_deck()
+    set_row(engine, deck_job_id="rebuilt-elsewhere")
+    with server._trade_jobs_lock:
+        server._revoke_trade_job_locked(server._trade_jobs[deck])
+    return deck
+
+
+def revoked_deck_newer_job(engine, n=10):
+    """An organic deck D, revoked, with a newer complete job for its scope in
+    this process and no stored row: D rebases onto that job's first page."""
+    deck = build_deck()
+    with server._trade_jobs_lock:
+        server._revoke_trade_job_locked(server._trade_jobs[deck])
+    job_id = run_job()
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id]["cards"] = [page_card(i + 300) for i in range(n)]
+    with engine.begin() as conn:
+        conn.execute(delete(db_module.trade_page_store_table))
+    return deck, job_id
+
+
+def test_after_a_restart_the_decks_own_row_proves_it_organic(p1, spawned):
+    """D's job died with the process; the stored row D built still proves it
+    organic: its stored pages serve, and past them the client moves to the
+    backing job. An unknown deck is the legacy 404, never a rebase."""
     client, _, _ = p1
     deck = build_deck()
     restart()
-    body = deck_status(client, "deck-before-restart", 30).get_json()
-    assert body["rebased"] is True and body["deck_id"] == deck
-    assert ids(body["cards"]) == p1_ids(0, 30) and body["cursor"] == 30
-    assert (body["serve_source"], body["freshness_state"]) == ("page", "fresh")
-    assert len(spawned) == 1                               # nothing here backed the row
-    backing = server._trade_jobs_by_key[KEY]
-    # The row's own deck past its stored pages: its job died with the process,
-    # so the client moves to the backing job (joined, not kicked again).
+    body = deck_status(client, deck, 30).get_json()
+    assert ids(body["cards"]) == p1_ids(30, 60) and "rebased" not in body
     tail = deck_status(client, deck, 90).get_json()
+    backing = server._trade_jobs_by_key[KEY]
     assert tail["rebased"] is True and tail["deck_id"] == tail["job_id"] == backing != deck
     assert (tail["status"], tail["cards"], tail["cursor"]) == ("running", [], 0)
     assert len(spawned) == 1
+    assert deck_status(client, "deck-before-restart", 30).status_code == 404
+    assert len(spawned) == 1
+
+
+def test_a_revoked_deck_rebases_onto_its_rebuilt_row_and_kicks_the_backing_job(p1, spawned):
+    client, engine, _ = p1
+    deck = revoked_deck_row_rebuilt_elsewhere(engine)
+    body = deck_status(client, deck, 30).get_json()
+    assert body["rebased"] is True and body["deck_id"] == body["job_id"] == "rebuilt-elsewhere"
+    assert ids(body["cards"]) == p1_ids(0, 30) and body["cursor"] == 30
+    assert body["serve_source"] == "page" and len(spawned) == 1
 
 
 def test_a_deck_past_its_row_with_nothing_running_kicks_a_backing_job(p1, spawned):
@@ -191,14 +234,13 @@ def test_a_deck_past_its_row_with_nothing_running_kicks_a_backing_job(p1, spawne
 
 def test_rebased_pages_apply_dispositions(p1, spawned):
     client, engine, _ = p1
-    build_deck()
-    restart()
+    deck = revoked_deck_row_rebuilt_elsewhere(engine)
     with engine.begin() as conn:                           # an exact pass on g2 -> r2
         conn.execute(insert(db_module.trade_decisions_table).values(
             user_id=UID, league_id=LEAGUE, trade_id="elsewhere",
             give_player_ids=json.dumps(["g2"]), receive_player_ids=json.dumps(["r2"]),
             decision="pass", created_at=datetime.now(timezone.utc).isoformat()))
-    body = deck_status(client, "gone", 0).get_json()
+    body = deck_status(client, deck, 0).get_json()
     passed = {c["trade_id"] for c in (page_card(i) for i in range(30))
               if c["give"][0]["id"] == "g2" and c["receive"][0]["id"] == "r2"}
     assert body["rebased"] and passed and not passed & set(ids(body["cards"]))
@@ -240,20 +282,19 @@ def sleeper_roster_failed_past_bound(engine):
 def test_rebased_pages_from_a_row_go_through_s0(p1, spawned, monkeypatch, mode):
     client, engine, _ = p1
     gate_mode(monkeypatch, mode)
-    deck = build_deck()
-    restart()
+    deck = revoked_deck_row_rebuilt_elsewhere(engine)
     with engine.begin() as conn:                           # g2 leaves the viewer's roster
         conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
                      .values(roster_data=json.dumps([])))
-    body = deck_status(client, "gone", 0).get_json()      # I-1 strict at any gate mode
+    body = deck_status(client, deck, 0).get_json()        # I-1 strict at any gate mode
     assert body["rebased"] and body["cards"] and body["cursor"] == 30
     assert all(c["give"][0]["id"] != "g2" for c in body["cards"])
     assert body["freshness_state"] == "updating"           # its rebuild runs (ruling 29)
     assert len(spawned) == 1
     with engine.begin() as conn:                           # no stored rosters (ruling 30)
         conn.execute(delete(league_members_table))
-    body = deck_status(client, "gone", 0).get_json()
-    assert body["rebased"] is True and body["deck_id"] == deck
+    body = deck_status(client, deck, 0).get_json()
+    assert body["rebased"] is True and body["deck_id"] == "rebuilt-elsewhere"
     if mode:
         assert (body["status"], body["error"], body["cards"]) == ("error", "roster_check_unavailable", [])
         assert (body["cursor"], body["total_ready"]) == (0, 0)     # the cursor holds
@@ -265,14 +306,11 @@ def test_rebased_pages_from_a_row_go_through_s0(p1, spawned, monkeypatch, mode):
 def test_a_rebase_onto_a_job_goes_through_s0_like_the_job_id_form(p1, spawned, monkeypatch, mode):
     client, engine, _ = p1
     gate_mode(monkeypatch, mode)
-    job_id = run_job()
-    with server._trade_jobs_lock:
-        server._trade_jobs[job_id]["cards"] = [page_card(i) for i in range(10)]
+    deck, job_id = revoked_deck_newer_job(engine)
     with engine.begin() as conn:
-        conn.execute(delete(db_module.trade_page_store_table))
         conn.execute(delete(league_members_table))
     plain = status(client, job_id, 0).get_json()
-    body = deck_status(client, "gone", 0).get_json()
+    body = deck_status(client, deck, 0).get_json()
     assert body["rebased"] is True and body["deck_id"] == job_id
     assert {k: body[k] for k in ("status", "error", "cursor")} == {
         k: plain[k] for k in ("status", "error", "cursor")}
@@ -325,16 +363,13 @@ DECK_PATHS = {"stored": 30, "live": 90, "rebased_row": 0, "rebased_job": 0}
 
 def _deck_path(engine, path):
     """Set up one deck path; returns (deck to ask for, cursor)."""
-    deck = build_deck()
-    if path.startswith("rebased"):
-        restart()
-    if path == "rebased_job":
-        job_id = run_job()
-        with server._trade_jobs_lock:
-            server._trade_jobs[job_id]["cards"] = [page_card(i) for i in range(10)]
-        with engine.begin() as conn:
-            conn.execute(delete(db_module.trade_page_store_table))
-    return (deck if path in ("stored", "live") else "gone"), DECK_PATHS[path]
+    if path == "rebased_row":
+        deck = revoked_deck_row_rebuilt_elsewhere(engine)
+    elif path == "rebased_job":
+        deck, _ = revoked_deck_newer_job(engine)
+    else:
+        deck = build_deck()
+    return deck, DECK_PATHS[path]
 
 
 @pytest.mark.parametrize("path", sorted(DECK_PATHS))
@@ -439,9 +474,9 @@ def test_another_users_deck_is_never_served(p1, spawned):
                    cards=[page_card(i + 500) for i in range(40)])
     with server._trade_jobs_lock:
         server._trade_jobs["foreign-deck"] = foreign
-    body = deck_status(client, "foreign-deck", 0).get_json()
-    assert body["rebased"] is True and body["deck_id"] == mine
-    assert ids(body["cards"]) == p1_ids(0, 30)
+    response = deck_status(client, "foreign-deck", 0)          # the legacy 404, no rebase
+    assert response.status_code == 404 and response.get_json() == {"error": "job not found"}
+    assert not spawned
 
 
 # ── End of deck ─────────────────────────────────────────────────────────────
@@ -475,23 +510,56 @@ def test_pool_exhausted_is_absent_while_a_rebuild_runs(p1, spawned):
     assert body["rebased"] is True and body["deck_id"] == rebuild
 
 
-@pytest.mark.parametrize("how", ["vote", "marked_elsewhere"])
-def test_a_stale_row_never_yields_pool_exhausted(p1, spawned, how):
-    client, engine, _ = p1
+def test_a_stale_scope_converges_to_the_rebuilt_decks_end(p1, spawned):
+    """(P3) A vote marks the row stale and revokes D: D's end is no end. One
+    rebuild starts, the client is rebased onto it, and once it lands and is
+    stored, paging it to its last card brings the end."""
+    client, _, _ = p1
     deck = build_deck()
-    if how == "vote":
-        _vote(client)                                     # marks stale and revokes the deck
-    else:
-        set_row(engine, state="stale")                    # e.g. another process's mark
+    _vote(client)
     assert stored()["state"] == "stale"
     body = deck_status(client, deck, 95).get_json()
-    assert "pool_exhausted" not in body
-    if how == "vote":                                      # the rebuild is kicked and followed
-        assert body["rebased"] is True and len(spawned) == 1
-        assert body["deck_id"] == server._trade_jobs_by_key[KEY] != deck
-    else:   # the deck is still fresh here, so it stays the deck: no end, no rebase, no stacking
-        assert (body["deck_id"], body["cards"], body["cursor"]) == (deck, [], 95)
-        assert "rebased" not in body and not spawned
+    rebuild = body["deck_id"]
+    assert body["rebased"] is True and "pool_exhausted" not in body
+    assert rebuild == server._trade_jobs_by_key[KEY] != deck and len(spawned) == 1
+    assert deck_status(client, deck, 95).get_json()["deck_id"] == rebuild    # polls join it
+    worker = spawned[0]                                    # the rebuild lands
+    worker["target"](*worker["args"], **worker["kwargs"])
+    landed = server._trade_jobs[rebuild]
+    assert landed["status"] == "complete" and len(spawned) == 1
+    assert (stored()["deck_job_id"], stored()["state"]) == (rebuild, "ready")
+    end = deck_status(client, rebuild, len(landed["cards"])).get_json()
+    assert end["pool_exhausted"] is True and "rebased" not in end and end["deck_id"] == rebuild
+    # This harness's real job re-sorts (no owner-serve): E2 re-sends its final
+    # list, and at its length that response is the end, list included.
+    assert end["replace"] is True
+    assert len(spawned) == 1
+
+
+def test_a_stale_row_whose_deck_is_still_fresh_here_ends_honestly(p1, spawned):
+    """(P3) The row was marked stale elsewhere but D is still fresh in this
+    process: P1's kick returns D itself, nothing can rebuild the scope here,
+    so the end comes instead of never."""
+    client, engine, _ = p1
+    deck = build_deck()
+    set_row(engine, state="stale")
+    body = deck_status(client, deck, 95).get_json()
+    assert body["pool_exhausted"] is True and "rebased" not in body
+    assert (body["deck_id"], body["cards"], body["cursor"]) == (deck, [], 95) and not spawned
+
+
+def test_a_failed_rebuild_kick_ends_honestly(p1, spawned):
+    """(P3) D's values moved, so its end needs a rebuild, but the kickoff fails
+    (here its execution capture): the end, not a stall."""
+    client, engine, _ = p1
+    deck = build_deck()
+    with engine.begin() as conn:
+        conn.execute(update(db_module.draft_picks_table).values(pool_value=99.0))
+    with patch.object(server, "_capture_trade_execution", MagicMock(side_effect=RuntimeError("x"))):
+        body = deck_status(client, deck, 95).get_json()
+    failed = server._trade_jobs[server._trade_jobs_by_key[KEY]]
+    assert failed["job_id"] != deck and failed["status"] == "error"
+    assert body["pool_exhausted"] is True and "rebased" not in body and body["deck_id"] == deck
 
 
 def test_a_newer_deck_landing_after_the_end_is_followed(p1, spawned):
@@ -577,20 +645,20 @@ def test_an_all_equal_serve_with_no_job_in_process_kicks_the_backing_job(p1, spa
 
 
 def test_one_rebuild_per_scope_at_a_time(p1, spawned):
-    """(c) P1's kick is the one path: /generate's page serve, the deck path's
-    rebase and its restart kick all join the scope's running rebuild, also
-    while the fingerprint read fails (S0's A2 keeps a running job)."""
+    """(c) P1's kick is the one path: /generate's page serve and the deck
+    path's restart kick join the scope's running rebuild, also while the
+    fingerprint read fails (S0's A2 keeps a running job). (The rebase onto a
+    row joins it too: the `rebase` case below.)"""
     client, _, _ = p1
     deck = build_deck()
     restart()
     generate(client, page=1)                               # kicks the backing job
     rebuild = server._trade_jobs_by_key[KEY]
     generate(client, page=1)                               # the page serve joins it
-    assert deck_status(client, "gone", 0).get_json()["deck_id"] == deck     # rebase: the row
-    assert deck_status(client, deck, 90).get_json()["deck_id"] == rebuild   # restart: the job
+    assert deck_status(client, deck, 90).get_json()["deck_id"] == rebuild   # restart: joins
     with patch.object(roster_snapshot, "values_snapshot_id", MagicMock(side_effect=RuntimeError("db"))):
         generate(client, page=1)                           # today's path joins it (A2)
-        assert deck_status(client, "gone", 0).get_json()["deck_id"] == rebuild
+        assert deck_status(client, deck, 90).get_json()["deck_id"] == rebuild
     assert len(spawned) == 1 and server._job_live(server._trade_jobs[rebuild])
 
 
@@ -605,9 +673,16 @@ def test_an_input_change_gets_its_rebuild_at_once(p1, spawned):
     assert body["freshness_state"] == "updating" and len(spawned) == 2
 
 
-def _lazy_roster_change(client, engine, deck):
+def _restarted_deck():
+    deck = build_deck()
+    restart()
+    return deck
+
+
+def _lazy_roster_change(client, engine):
     """S0's handler starts nothing (P1: the roster change is lazy); the next
     serve sees the roster_fp move and kicks the rebuild of a stale page."""
+    _restarted_deck()
     with engine.begin() as conn:
         conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
                      .values(roster_data=json.dumps(["g2", "x9"])))
@@ -617,11 +692,14 @@ def _lazy_roster_change(client, engine, deck):
 
 
 BACKING_STARTS = {     # case: (action, the start's logged reason)
-    "page_serve": (lambda client, engine, deck: generate(client, page=1), "page_serve"),
-    "stale": (lambda client, engine, deck: (set_row(engine, state="stale"),
-                                            generate(client, page=1)), "stale"),
-    "rebase": (lambda client, engine, deck: deck_status(client, "gone", 0), "rebase"),
-    "status_restart": (lambda client, engine, deck: deck_status(client, deck, 90), "status_restart"),
+    "page_serve": (lambda client, engine: (_restarted_deck(), generate(client, page=1)),
+                   "page_serve"),
+    "stale": (lambda client, engine: (_restarted_deck(), set_row(engine, state="stale"),
+                                      generate(client, page=1)), "stale"),
+    "rebase": (lambda client, engine: deck_status(
+        client, revoked_deck_row_rebuilt_elsewhere(engine), 0), "rebase"),
+    "status_restart": (lambda client, engine: deck_status(client, _restarted_deck(), 90),
+                       "status_restart"),
     "roster_change": (_lazy_roster_change, "stale"),
 }
 
@@ -630,11 +708,9 @@ BACKING_STARTS = {     # case: (action, the start's logged reason)
 def test_each_backing_job_start_logs_one_line_with_its_reason(p1, spawned, caplog, case):
     """head-eng ruling 20; a serve that joins the started job logs nothing more."""
     client, engine, _ = p1
-    deck = build_deck()
-    restart()
     caplog.set_level("INFO", logger=server.log.name)
     action, reason = BACKING_STARTS[case]
-    action(client, engine, deck)
+    action(client, engine)
     started = server._trade_jobs_by_key[KEY]
     assert len(spawned) == 1
     assert _page_lines(caplog, "[trade-page] backing-job start") == [
@@ -726,14 +802,16 @@ def test_every_served_card_carries_its_trade_hash(p1, spawned):
               + status(client, deck, 60).get_json()["cards"]
               + deck_status(client, deck, 90).get_json()["cards"]
               + status(client, deck, 90).get_json()["cards"])
-    restart()
-    served += deck_status(client, "gone", 0).get_json()["cards"]           # rebased: the row
-    job_id = run_job()
+    set_row(engine, deck_job_id="rebuilt-elsewhere")       # D revoked, its row rebuilt elsewhere
+    with server._trade_jobs_lock:
+        server._revoke_trade_job_locked(server._trade_jobs[deck])
+    served += deck_status(client, deck, 0).get_json()["cards"]             # rebased: the row
+    job_id = run_job(force_fresh=True)
     with server._trade_jobs_lock:
         server._trade_jobs[job_id]["cards"] = [page_card(i + 300) for i in range(5)]
     with engine.begin() as conn:
         conn.execute(delete(db_module.trade_page_store_table))
-    rebased = deck_status(client, "gone", 0).get_json()                    # rebased: the job
+    rebased = deck_status(client, deck, 0).get_json()                      # rebased: the job
     assert rebased["deck_id"] == job_id and rebased["cards"]
     served += rebased["cards"]
     assert len(served) == 30 + 30 + 30 + 5 + 5 + 30 + 5
@@ -762,6 +840,115 @@ def test_trade_hash_equals_the_impression_rows(p1, spawned):
         assert body["cards"]
         for c in body["cards"]:
             assert c["trade_hash"] == rows[c["impression_id"]]
+
+
+# ── A deck that isn't provably organic is never rebased (#369 QA, P1) ───────
+# The app sends `deck=<job_id>` on every paged poll, organic or not. Only a
+# deck P2 can prove organic (its job's page_scope, or a row it built) is ever
+# rebased; any other gets its own page view, its own end and its own error,
+# exactly the job_id + cursor form plus `pool_exhausted` at its end.
+
+NON_ORGANIC = {
+    "pinned": {"pinned_give": ["g2"]},
+    "opponent": {"opponent_user_id": OPP},            # Specific Team
+    "intent": {"trade_intent": "tier_up"},
+}
+
+
+def non_organic_deck(kind, n=7):
+    """A complete non-organic search beside the organic deck and its row."""
+    job_id = run_job(synchronous=False, **NON_ORGANIC[kind])
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[job_id]
+        assert not job.get("page_scope")
+        job.update(status="complete", finished_at=server.time.monotonic(), append_only=True,
+                   cards=[page_card(i + 700) for i in range(n)])
+    return job_id
+
+
+@pytest.mark.parametrize("kind", sorted(NON_ORGANIC))
+def test_a_non_organic_deck_ends_on_its_own_and_is_never_rebased(p1, spawned, kind):
+    client, _, _ = p1
+    build_deck()                                           # the organic deck and its row exist
+    job_id = non_organic_deck(kind)
+    mid = deck_status(client, job_id, 0).get_json()
+    assert ids(mid["cards"]) == p1_ids(700, 707)
+    end = deck_status(client, job_id, 7).get_json()
+    assert end["pool_exhausted"] is True and end["cards"] == [] and end["job_id"] == job_id
+    for body in (mid, end):
+        assert not {"rebased", "deck_id"} & set(body)
+        assert not set(ids(body["cards"])) & set(p1_ids(0, 95))      # no organic card
+    plain = status(client, job_id, 7).get_json()           # the job_id form, plus its end
+    assert {k: v for k, v in end.items() if k != "pool_exhausted"} == plain
+    assert len(spawned) == 1                               # only the search's own kickoff
+
+
+@pytest.mark.parametrize("kind, error", [("intent", "timeout"), ("pinned", "inputs_changed"),
+                                         ("opponent", "inputs_changed")])
+def test_a_non_organic_decks_error_passes_through(p1, spawned, kind, error):
+    client, _, _ = p1
+    build_deck()
+    job_id = non_organic_deck(kind)
+    if error == "timeout":
+        with server._trade_jobs_lock:
+            server._trade_jobs[job_id].update(status="error", error="timeout")
+    else:
+        server._invalidate_trade_jobs(user_id=UID)         # an input change revokes it
+    for cursor in (0, 7):
+        body = deck_status(client, job_id, cursor).get_json()
+        assert (body["status"], body["error"], body["cards"]) == ("error", error, [])
+        assert not {"rebased", "deck_id", "pool_exhausted"} & set(body)
+        assert body["job_id"] == job_id
+    assert len(spawned) == 1
+
+
+def test_a_non_organic_decks_end_holds_for_a_gate_miss(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    build_deck()
+    job_id = non_organic_deck("pinned")
+    monkeypatch.setitem(server._gate_miss_tests, LEAGUE, ("check_error", server.time.monotonic() + 60))
+    body = deck_status(client, job_id, 7).get_json()
+    assert (body["status"], body["error"], body["cards"], body["cursor"]) == (
+        "error", "roster_check_unavailable", [], 7)
+    assert not {"rebased", "deck_id", "pool_exhausted"} & set(body)
+
+
+def test_a_gone_deck_without_a_row_it_built_is_the_legacy_404(p1, spawned):
+    client, _, _ = p1
+    build_deck()
+    job_id = non_organic_deck("pinned")
+    with server._trade_jobs_lock:
+        server._trade_jobs.pop(job_id)
+    response = deck_status(client, job_id, 7)
+    assert response.status_code == 404 and response.get_json() == {"error": "job not found"}
+    assert len(spawned) == 1
+
+
+# ── One page row read and decoded per deck poll (#369 QA, P3) ───────────────
+
+DECODE_CASES = ("stored", "live", "end", "restart", "rebased_row", "unknown")
+
+
+@pytest.mark.parametrize("case", DECODE_CASES)
+def test_a_deck_poll_decodes_at_most_one_stored_page(p1, spawned, monkeypatch, case):
+    """Other scopes' rows exist; only the row served (or proving the deck) is
+    decompressed, never every scope row."""
+    client, engine, _ = p1
+    deck = (revoked_deck_row_rebuilt_elsewhere(engine) if case == "rebased_row"
+            else build_deck())
+    for scope in ("organic:f=0.75", "organic:f=0.60"):
+        db_module.save_trade_page({**_row(server.time.time(), f"other-{scope}"),
+                                   "request_scope": scope})
+    if case == "restart":
+        restart()
+    decoded = []
+    real = db_module.zlib.decompress
+    monkeypatch.setattr(db_module.zlib, "decompress", lambda data: decoded.append(1) or real(data))
+    target, cursor = {"stored": (deck, 30), "live": (deck, 90), "end": (deck, 95),
+                      "restart": (deck, 30), "rebased_row": (deck, 0),
+                      "unknown": ("no-such-deck", 0)}[case]
+    deck_status(client, target, cursor)
+    assert len(decoded) <= 1 and (case != "unknown" or not decoded)
 
 
 # ── Knobs ───────────────────────────────────────────────────────────────────
