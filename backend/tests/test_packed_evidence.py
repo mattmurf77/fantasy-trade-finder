@@ -422,6 +422,31 @@ def test_s8_a_never_delivered_withdrawal_is_packed_never_a_row_never_upgraded(de
     assert (0, 40) not in by_index(engine) and outcomes(engine) == []
 
 
+def test_s8_a_failed_first_write_still_packs_a_card_withdrawn_at_that_serve(deferred, monkeypatch):
+    """#420 QA P2: the first attempt's rows are fixed on `ev`. plan() drops a
+    never-delivered withdrawn card's row at the first write; if that write's
+    rows transaction fails, the retry must pack the same N cards, or pack_run
+    refuses (card_count N-1) at every later delivery and the deck never packs."""
+    from sqlalchemy.exc import OperationalError
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    own_all_but(engine, 5)                                 # card 5 I-1-dropped at the first serve
+    real, calls = db_module.save_deck_evidence, []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OperationalError("INSERT INTO deck_impressions", {}, Exception("database is locked"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(db_module, "save_deck_evidence", flaky)
+    status(client, job_id, 0)                              # the first write fails
+    assert pack_of(engine, job_id) is None
+    status(client, job_id, 30)                             # the next delivery retries it
+    _run, cards = unpack(pack_of(engine, job_id))
+    assert len(cards) == 120 and 5 in {c["card_index"] for c in cards}
+
+
 def test_s8_an_archive_deck_writes_every_card_and_a_view_raises_it_to_viewed(deferred):
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120, job_id=archive_id(True))

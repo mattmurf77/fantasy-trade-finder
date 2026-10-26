@@ -4510,6 +4510,7 @@ class _DeckEvidence:
         self.pack = None              # its _PackState once the pack row is written
         self.pack_dirty = False       # a delivery the pack's header doesn't carry yet
         self.pack_cards = None        # the pack's cards, fixed at the first write attempt
+        self.pack_rows = None         # the first attempt's row snapshot (W0 included), until the cards are built
         self.deck_source = None       # the job's source (F10 "replenish"), for the run metadata
 
     def __copy__(self):
@@ -4825,7 +4826,12 @@ def _deck_pack_input(ev: _DeckEvidence):
     rows is taken here; _deck_pack_cards builds the cards outside the lock
     (#416 QA: building them under it held a next-page serve ~40 ms at 2,354
     cards)."""
-    rows = None if ev.pack_cards is not None else list(ev.rows.values())
+    if ev.pack_cards is None and ev.pack_rows is None:
+        # Fixed at the first attempt (#420 QA P2): plan() drops a never-delivered
+        # withdrawn card's row right after this, so a retry after a failed
+        # rows transaction must reuse this snapshot, or the pack loses that card.
+        ev.pack_rows = list(ev.rows.values())
+    rows = None if ev.pack_cards is not None else ev.pack_rows
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False,
            "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)}
@@ -4845,6 +4851,7 @@ def _deck_pack_cards(ev: _DeckEvidence, source) -> tuple[list, dict]:
         with ev.lock:
             if ev.pack_cards is None:
                 ev.pack_cards = built
+            ev.pack_rows = None
             cards = ev.pack_cards
     return cards, run
 
@@ -5275,8 +5282,11 @@ def _retire_deck_evidence(now: float | None = None) -> int:
         except (TypeError, ValueError):
             capped = False
         if gone or capped:
-            _deck_evidence_retire(ev)
-            retired += 1
+            try:                          # one deck's error never skips the rest (#420 QA P3)
+                _deck_evidence_retire(ev)
+                retired += 1
+            except Exception:
+                log.exception("deck-evidence %s: retirement failed; retried next tick", ev.job_id)
     return retired
 
 
@@ -23210,8 +23220,10 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # circuit) or a non-list body; a successful read is always a list.
         # Ownership can't be checked, so nothing is sent. Uses R10's 502 shape
         # (below). A successful read without the caller's roster stays 400.
+        # `kind: "roster_read"`, not "network": it tells this refused-before-send
+        # read apart from a real Sleeper write failure in sleeper_send_failed.kind.
         _msg = _roster_read_failed_copy("Sleeper")
-        return {"error": "sleeper_write_failed", "kind": "network",
+        return {"error": "sleeper_write_failed", "kind": "roster_read",
                 "detail": _msg, "message": _msg}, 502
     my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
     if my_roster_id is None:
@@ -35729,7 +35741,8 @@ def trades_validate():
     ESPN's live mRoster read; any other linked-platform id returns
     `checked:false` without a Sleeper call (G-030); everything else takes the
     Sleeper path unchanged."""
-    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")):
+    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")
+            or is_enabled("espn.send")):
         return jsonify({"error": "feature_disabled"}), 404
     sess = _require_session()
     user_id = sess.get("user_id")
