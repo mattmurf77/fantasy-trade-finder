@@ -29,6 +29,29 @@
   in flight. `DeckEndCard` carries the P30 copy and two actions, and its tally is suppressed at 0 · 0 · 0 (P36).
 - **"Updating"** (`DeckUpdatingLabel`) is information only. It never disables Like or Pass (U2).
 - **Screen** (`TradesScreen.tsx`): `applyPage`, `fetchNextPage`, `dispatchGenerate`.
+- **The kill switch** (`model_config` `trade_paged_responses = 0`, PR #400): the server then ignores `page`/`cursor`
+  and answers with the legacy cumulative body. Verified in code that a response with no `cursor` takes the
+  pre-paging path:
+  - `normalizeJobSnapshot` adds no paging field and no `from_page` stamp (`check-trade-pages` 1d);
+  - `isPagedEnvelope(job)` is false, so `wantsNextPage` never fetches (4b) and the legacy cumulative poller runs
+    (its `if (isPagedEnvelope(job)) return;` guard, 5d);
+  - `orderedDeck` keeps today's sort (no `from_page` card), and `adoptablePage` refuses the landing's page 1, so
+    the pushed deck runs its own search (it joins the same job server-side);
+  - the device page keeps nothing (`storableResponse` needs a `cursor` and a `deck_id`), so C never renders;
+  - **mid-deck** (release-lead's QA of #400): a legacy answer to a deck that was paging goes through
+    `applyPage` → `tradePages.nextDeckJob`, which drops every paging field (`PAGING_FIELDS`) instead of
+    carrying `prev`'s `cursor` forward. The deck is then un-paged: `fetchNextPage` stops retrying
+    (`isPagedEnvelope(next) && needsBackoff(…)`), `wantsNextPage` is false, the legacy poller (keyed on
+    `job?.cursor === undefined` too) takes over the same job, and the deck's device page is discarded. A legacy
+    answer to a device deck's revalidation replaces the held cards behind the front with the cumulative ones
+    (whole-deck merge), adopts the response's job and continues on the legacy path. `check-trade-pages` 6a–6d
+    execute `nextDeckJob` and the screen's own `applyPage` with a paged deck and a legacy answer.
+  What the lever does **not** revert: the route's `animation: 'none'` (U1), D13's removed buttons, and the
+  Offline card for a search paused at the tap (it keys on `generateMutation.isPending`, not on paging). The
+  paged-only states don't render on a legacy deck: withdraw in place, the 3a/3b cards past the last card, and
+  **the P30 end card** (`showDeckEndCard = pagedWithCards && …`). A legacy deck ends as before, on F10's "Deck
+  done" summary (`summaryVisible = !pagedWithCards && …`, flag `deck.replenishment`) or the classic exhausted
+  state.
 - **Guards:** `check-trade-pages`, `check-trade-buffer`, `check-trade-inplace-reveal`, `check-no-finding-more`,
   `check-withdraw-in-place`.
 
@@ -66,7 +89,9 @@
   - `analytics_ingest._HEX_ID_PROPS` lets `search_id`/`job_id`/`deck_id` skip the digit-run scrub, but only when
     they're id-shaped.
 - **Readout:** `components/TimingReadoutRow` (null unless `testing.timing_readout`). It reads `utils/tapTiming`
-  (memory only), and onboarding-eng mounts it in Settings › Testing.
+  (memory only): `ms_from_tap · network_type · launch_state · serve_source`, the last for display only (it shows
+  `device` for a device-held first card; no event changes). It is to be mounted by onboarding-eng (#360) in
+  Settings › Testing; until that lands, nothing shows it.
 - **Guards and tests:** `check-trade-first-card-events`, `check-timing-readout`,
   `backend/tests/test_time_to_suggestion_events.py`, `test_analytics_taxonomy_384.py`.
 
@@ -93,8 +118,21 @@
   - `deckUpdating` shows only while it runs;
   - on failure, `DeckRefreshFailedLine` shows with Retry (spoken: "Retry refreshing trades").
 - **Swipes:** `advance()` removes the acted-on card (`removeDeviceCard`), so it never returns on the next tap.
+- **Which key a deck writes** (release-lead P1-a): the deck's own write-back (the device page effect) runs only
+  while the screen's `deviceKey` equals `deckKeyRef`, the key the deck was validated under. It is bound at
+  adoption (the landing's key rides the handoff) and at a model answer (`lastModelKeyRef`, set with the request
+  in the same render). The league reset and a format change unbind it (`deckKeyRef`/`validatedAtRef`, and the
+  scope on a league switch), so a league or format switch never writes the old deck under the new key.
+  `check-device-first-page` 3h runs the screen's own effect bodies through a league switch and then a format
+  switch.
+- **Discard time** (release-lead P2-a): every discard stamps when (device clock: all pages, or the key), and
+  `saveDevicePage` refuses cards validated before it, so a deck that predates a re-rank can't write its cards
+  back on its next swipe (2j). A deck's own unkeepable answer stamps its own validation time, so it never bars
+  the same deck.
 - **Discard:**
-  - the `api/client.ts` write listener (`isRankingWritePath`) fires on the user's rankings/preference writes;
+  - the `api/client.ts` write listener (`discardsDevicePages`) fires on the user's rankings/preference writes and
+    on a scoring-format switch (`/api/scoring/switch`: a page refreshed during it could hold the other format's
+    cards);
   - `useSession` clears on `setUser` to another account, on `signOut` (which includes deletion), and on
     `startDemoSession` over another account.
 - **Gate:** C is inert unless the served `trade.first_page_store` flag is on.
@@ -103,25 +141,95 @@
 
 ## 4. TestFlight checklist
 
-**C (flag `trade.first_page_store` on):**
-1. **Warm tap within 5 min:** open the Trades landing, wait 3 s, then tap Find a trade.
-   - **Expect:** the first card instantly, with no skeleton; "Updating" briefly, then gone; Like and Pass work
-     throughout; R2 `serve_source: device`.
-2. **Tap after 6 min**, with no refocus. **Expect:** the normal network path, and no device "Updating".
-3. **Airplane mode with a page under 5 min old.** **Expect:** cards at once, plus the refresh-failed line with
-   Retry; airplane mode off clears it.
-4. **Airplane mode with no page.** **Expect:** the Offline card at once; reconnecting fills the cards in place.
-5. **Roster move from another device**, then tap on A within 5 min. **Expect:** the moved player's card turns into
-   "This trade is no longer available." / Next trade within about 1 s.
-6. **Sign out, then sign in as another account.** **Expect:** no card from the first account; the first tap takes
-   the network path.
-7. **Re-rank** (a trio or a tier save), then tap. **Expect:** no instant device card; the deck reflects the new
-   ranks.
-8. **Pass two cards, go back, re-tap.** **Expect:** the passed cards never reappear.
-9. **Flag off.** **Expect:** identical to pass A.
+Pass A and M ship live for everyone; C is gated. Run A on any build with this PR. Each step names what the operator
+sees; "deck" is the pushed results deck (Acquire → Find a trade).
 
-**M:** turn on `testing.timing_readout` for the test device (`timing_readout_rollout`), tap Find a trade, and check
-that Settings › Testing shows the last `ms_from_tap` with its network and launch state.
+**Seeing which path served a card.** The operator can't see R2. Two ways:
+- the Testing readout (`testing.timing_readout` on for the device, delivered per device through the experiment
+  overlay; config-reference) shows `<ms> ms · <network> · <launch> · <serve_source>` for the last tap. **It is
+  visible only once onboarding-eng mounts the row (#360)** in Settings › Testing;
+- without it, use airplane mode: only a device-held page shows cards with no network (C step 3).
+
+**A — paging and the deck (live for everyone):**
+1. **The U1 hold.** On the Acquire landing, tap Find a trade with an empty canvas. **Expect:** the tap control
+   stays pressed, then the deck appears in place (no slide-in push animation) with a complete first card, within
+   about 600 ms of the tap. If the server is slower, the deck appears at about 600 ms in its honest wait state,
+   never later.
+2. **E2 paging, a long deck.** Swipe 40+ cards at a normal pace. **Expect:** the deck never runs dry and never
+   shows "Finding more" or any "Looking for trades" card mid-deck; a card you've seen never moves, reappears or
+   reorders; no card repeats.
+3. **D13.** On a deck with cards, and on the P30 end card: **Expect:** no "Find a Trade" or "Find more trades"
+   button anywhere on the deck.
+4. **The P30 end card.** Swipe a deck to its true end (a small league, or a pinned search with few results).
+   **Expect:** "You've seen every trade for now." / "New ideas show up as rosters and values change.", one tally
+   line "N passed · N liked · N proposed", and two buttons: "Adjust your search" (primary) and "Back to Home"
+   (secondary; only with the Home tab). If you reach the end with no pass, like or proposal (every card
+   withdrawn and skipped with Next trade), **Expect:** no tally line at 0 · 0 · 0. Cards that arrive later never
+   replace the end card under your thumb.
+5. **Withdraw in place on an E2 `replace`.** Early in a deck from a large league (pages are still loading),
+   trade away on Sleeper a player in the fronted card's give side, then let FTF see it (open FTF on a second
+   device, or background and foreground this one) while the card stays fronted. **Expect:** at the next page
+   fetch, the card keeps its slot and shows "This trade is no longer available." with Next trade; Like/Pass are
+   gone on it; Next moves on. Nothing slides in by itself.
+6. **Offline mid-deck (3a).** Go to airplane mode and swipe past every card already on the phone. **Expect:**
+   "You're offline. More trades load when you're back online." with Retry, in the card slot; airplane off fills
+   the deck in place.
+7. **Error mid-deck (3b).** With the API host blocked but the phone online (a router or VPN rule, or a proxy
+   map to a dead host), swipe past the held cards. **Expect:** "Couldn't load more trades." with Try again, in the card slot; Back
+   still works.
+8. **R1 tap sites each land on a deck:** League Summary → a row's **Offer** and a row's **Target**; Usage Trends →
+   a player's **Trade**; Team Review → **Find my trades** with a scoped partner; the deep link
+   `dtf://app/trades/finder` (from Notes or Safari). **Expect:** each opens a deck that fills with cards; none
+   hangs on "Looking for trades".
+9. **League switch, then format switch.** Find a trade in league A and swipe a few. Switch to league B (League
+   picker), then Find a trade. Then switch the scoring format (1QB ↔ SF) and Find a trade again. **Expect:** no
+   card from league A ever shows in league B, and no card from the other format after the format switch,
+   including the first card of the first tap (this is the release-lead P1-a check; with C on, repeat it within
+   5 min of the first deck).
+10. **Known behavior to log (P2-b):** on the first ~10 s of a cold search, note any card that turns into "This
+    trade is no longer available." right after appearing. E2's `replace` can withdraw a fronted card that a later
+    server layer dropped; log how often, don't file it as a bug.
+
+**A, lever off** (`model_config` `trade_paged_responses = 0`, PR #400; release-lead writes it, then
+`reload_config`):
+1. **A cold search still shows cards.** **Expect:** the deck appears with no push animation, in its wait state
+   (the landing's page 1 is no longer adopted), then fills.
+2. **The deck keeps filling** by the legacy poll. **Expect:** no "Finding more"; cards stream in as before.
+3. **The end:** **Expect:** the pre-paging end — F10's "Deck done" summary (tally, "Fresh ideas land every
+   week.", See liked / Done) after at least one pass or like, else the classic exhausted state. **Not** the P30
+   card: P30 is paged-only in code (§1).
+4. **C** (if its gate is on): no device card ever renders; the readout never says `device`.
+5. **Flip back to 1** (`reload_config`): the next search pages again (steps A1–A2 behave as above).
+6. **Mid-deck flip.** With the knob at 1, open a deck and swipe until a few pages have loaded (20+ cards). Set the
+   knob to 0 (`reload_config`) and keep swiping to the end. **Expect:** no stuck "Updating", no "Couldn't load
+   more trades" or Offline card, no repeated cards; the deck keeps filling while the job builds and finishes on
+   the legacy end ("Deck done" or the classic exhausted state, step 3). Then flip back to 1.
+
+**C — the device-held first page.** **Gate:** #367–#369 deployed and `trade.first_page_store` on; until then C is
+inert and these steps don't apply.
+1. **Warm tap within 5 min:** open the Acquire landing, wait 3 s, leave and come back or wait, then tap Find a
+   trade within 5 min. **Expect:** the first card instantly (no wait card); "Updating" in the deck header
+   briefly, then gone; Like and Pass work throughout; the readout (if mounted) ends in `device`.
+2. **Tap after 6 min** on the landing with no refocus or foreground. **Expect:** the normal path (step A1); the
+   readout says `page`, `cached`, `joined` or `fresh`, never `device`.
+3. **Airplane mode with a page under 5 min old:** **Expect:** cards at once, plus "Couldn't refresh. These trades
+   may be out of date." with Retry under the card; airplane off clears it after a brief "Updating".
+4. **Airplane mode with no page** (just signed in, or older than 5 min): **Expect:** the Offline card at once in
+   the card slot; reconnecting fills the cards in place.
+5. **Roster move from another device**, then tap on A within 5 min: **Expect:** the moved player's card turns into
+   "This trade is no longer available." / Next trade within about 1 s.
+6. **Sign out, then sign in as another account:** **Expect:** no card from the first account; the first tap
+   takes the normal path.
+7. **Re-rank** (a trio or a tier save), then tap — also: open a deck, re-rank in another tab, come back, swipe one
+   card, return to the landing and tap. **Expect:** no instant device card either way; the deck reflects the new
+   ranks (release-lead P2-a).
+8. **Pass two cards, go back, re-tap within 5 min:** **Expect:** the passed cards never reappear.
+9. **League or format switch** (step A9 with C on, inside 5 min): **Expect:** never another league's or format's
+   card, not even for one frame.
+10. **Flag off:** **Expect:** identical to A.
+
+**M:** with the readout mounted and `testing.timing_readout` on, tap Find a trade and check that Settings ›
+Testing shows the last `ms_from_tap` with its network, launch state and serve source.
 
 **AC-L1 itself** (p95 ≤ 200 ms, the scripted two-device session) is app-manager's device checklist (OA-6, 11-07 to
 11-09; `docs/plans/org-bringup/leads/app-manager-200ms-checklist.md` in the org's working folder).
