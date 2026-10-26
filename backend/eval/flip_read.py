@@ -6,6 +6,7 @@ models-lead rules on it.
 
     python3 -m backend.eval.flip_read --db URL --since ISO [--until ISO]
         [--as-of ISO] [--allow-postgres-readonly] [--weekly] [--json]
+        [--i1-mode {0,1,2}]
 
 The window is decks served in [since, until) and at or before as_of
 (as_of defaults to now, until to none), read through
@@ -14,34 +15,45 @@ data.load_decks(as_of=...) plus a few direct read-only queries. The G-table
 
   G1   pack integrity: pack_integrity decks among the decks with a pack row,
        retired or not. Bar 0.
-  G2   no unexplained gaps: incomplete_deck decks among FINAL decks only
-       (A3). A deck with a pack is final when the pack retired by as_of or
-       was served more than 25 h (data.IN_FLIGHT_WINDOW) before it; a deck
-       without one when it was served more than 25 h before as_of.
-       calibration_refresh decks are not Trades decks and are not counted.
-       Bar 0. Each incomplete deck must coincide with a restart or the kill
-       (A3, B3), so their ids (at most 20) are listed for that cross-check.
-       Fewer than 10 final decks: INSUFFICIENT, extend the window to 48 h.
+  G2   no unexplained gaps: incomplete_deck decks among the FINAL packed
+       decks and EVERY pack-less deck (A3). A packed deck is final when its
+       pack retired by as_of or was served more than 25 h
+       (data.IN_FLIGHT_WINDOW) before it. A pack-less deck (live evidence:
+       the value core, prepared adoption; rows at build, delivered_at
+       stamps) has no in-flight state, so its incomplete_deck (a gap, or an
+       outcome on a row never stamped delivered) is final at once. A
+       deferred-evidence (tiered) deck with no pack yet is the loader's
+       in_flight inside 25 h, not incomplete_deck (past it, a lost pack, and
+       barred like any other). calibration_refresh decks are not
+       Trades decks and are not counted. Bar 0. Each incomplete deck must
+       coincide with a restart or the kill (A3, B3), so their ids (at most
+       20) are listed for that cross-check. The sufficiency count is the
+       final packed decks alone: fewer than 10 is INSUFFICIENT, extend the
+       window to 48 h.
   G3   outcomes join (U2): outcomes acted in the window (and by as_of) whose
        impression_id joins no loaded card, row or packed. An outcome whose
        deck was not loaded (served before the window) is checked against
        the evidence directly: a non-ghost deck_impressions row with that id,
        or a pack row of its run whose card_count covers its index; it is
-       counted apart, as joined outside the window. Ghost ids ('…:ghost')
-       are not card outcomes and are counted apart. Bar 0.
+       counted apart, as joined outside the window. An outcome joining a
+       loaded ghost row (LoggedCard.is_ghost) is counted apart too, as on a
+       ghost row: ghosts are never shown, so it means a ghost reached a
+       client. Bar 0 on each: orphans and outcomes on a ghost row.
   G7   upgrade misses (U4-R2), every cause summed over the loaded packs.
        Bar: other == 0.
   G8   withdrawal_conflict decks. Bar 0.
   G9   no_delivery_evidence decks with any outcome (a missed delivered_at
        stamp, B3). Bar 0. The no_delivery_evidence total is reported too.
   G10  withdrawals by reason, first withdrawn in the window, read straight
-       from deck_card_withdrawals. Reported, not barred: disposition_cut > 0
-       is expected; any i1_dropped at trade_i1_mode 1 is a bug.
+       from deck_card_withdrawals. disposition_cut > 0 is expected and only
+       reported. i1_dropped is barred at 0 unless --i1-mode is 2: trade_i1_mode
+       1 (the launch value, the default) and 0 never withdraw for I-1, so any
+       i1_dropped there is a bug (B3); at mode 2 it is reported.
 Then the v5 exclusion counts over every loaded deck (each LoggedDeck.exclusion
 value, the deck count, the partial_run decks replay leaves out) and
 withdrawn_removed_by_reason over every loaded deck, and the overall line:
 FAIL if a barred G fails, else INSUFFICIENT if G2 has fewer than 10 final
-decks, else PASS.
+packed decks, else PASS.
 
 --weekly adds the two rolling 7-day ceilings over [as_of - 7 d, as_of], for
 the weekly BL-001 monitor through head-bizops:
@@ -58,7 +70,16 @@ Each prints its ratio, numerator and denominator, and OK or OVER.
 
 --json prints the same as one JSON object. flip_read() returns a FlipRead
 and weekly_read() a dict, so tests read the numbers without parsing text.
-Exit status: 1 on a FAIL or an OVER, 2 on a refused database, else 0.
+
+Exit status:
+  0  PASS (and no weekly ceiling OVER);
+  1  FAIL, or a weekly ceiling OVER (either wins over INSUFFICIENT);
+  2  a refused database or a ReadOnlyViolation (nothing is printed to
+     stdout), or a usage error;
+  3  INSUFFICIENT: fewer than 10 final packed decks, nothing failed; not a
+     pass, extend the window to 48 h.
+Any other error is not caught: it prints a traceback and exits non-zero
+(Python's 1), never 0.
 
 Read-only, enforced, not promised:
   - a SQLite path or sqlite:/// URL opens with mode=ro;
@@ -91,7 +112,7 @@ from backend.eval.data import (
     WITHDRAWALS_TABLE, load_decks,
 )
 
-# A3: fewer final decks than this and G2 reads INSUFFICIENT (extend to 48 h).
+# A3: fewer final packed decks than this and G2 reads INSUFFICIENT (extend to 48 h).
 MIN_FINAL_DECKS = 10
 # U4-R4: the upgrade-miss causes the weekly ceiling counts (None: every named
 # cause, i.e. every key but `other`) and the ceiling over viewed cards.
@@ -100,9 +121,10 @@ U4_R4_CEILING = 0.01
 # B4: disposition_cut removals over delivered-range positions.
 B4_CEILING = 0.05
 DISPOSITION_CUT = "disposition_cut"
+# G10: I-1's withdrawal reason, barred unless trade_i1_mode is 2 (module doc).
+I1_DROPPED = "i1_dropped"
 WEEK = timedelta(days=7)
 LIST_CAP = 20                   # ids listed per G
-GHOST_SUFFIX = ":ghost"
 LOADER_EXCLUSIONS = (CALIBRATION_REFRESH, PACK_INTEGRITY, WITHDRAWAL_CONFLICT, IN_FLIGHT,
                      INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE)
 PASS, FAIL, INSUFFICIENT, REPORT = "PASS", "FAIL", "INSUFFICIENT", "REPORT"
@@ -194,9 +216,11 @@ class FlipRead:
     weekly: dict | None = None
 
 
-def flip_read(engine, *, since: str, as_of: str, until: str | None = None) -> FlipRead:
+def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
+              i1_mode: int = 1) -> FlipRead:
     """The G-table (module doc) for decks served in [since, until), at or
-    before as_of, and outcomes and withdrawals in the same window."""
+    before as_of, and outcomes and withdrawals in the same window, with
+    trade_i1_mode `i1_mode` in effect over it (G10)."""
     decks = load_decks(engine=engine, since=since, until=until, as_of=as_of)
     in_flight_from = (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat()
     with engine.connect() as conn:
@@ -209,12 +233,16 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None) -> Fl
           "ids": [d.deck_job_id for d in pack_integrity][:LIST_CAP],
           "status": FAIL if pack_integrity else PASS}
 
-    final = [d for d in decks if d.exclusion != CALIBRATION_REFRESH
-             and _final(d, packs.get(d.deck_job_id), as_of, in_flight_from)]
-    incomplete = [d for d in final if d.exclusion == INCOMPLETE_DECK]
-    g2 = {"final_decks": len(final), "incomplete": len(incomplete),
+    trades = [d for d in decks if d.exclusion != CALIBRATION_REFRESH]
+    final_packed = [d for d in trades if d.deck_job_id in packs
+                    and _final(d, packs[d.deck_job_id], as_of, in_flight_from)]
+    packless = [d for d in trades if d.deck_job_id not in packs]
+    read = {d.deck_job_id for d in final_packed + packless}
+    incomplete = [d for d in trades if d.deck_job_id in read and d.exclusion == INCOMPLETE_DECK]
+    g2 = {"final_packed_decks": len(final_packed), "packless_decks": len(packless),
+          "incomplete": len(incomplete),
           "ids": [[d.deck_job_id, d.served_at] for d in incomplete][:LIST_CAP],
-          "insufficient": len(final) < MIN_FINAL_DECKS,
+          "insufficient": len(final_packed) < MIN_FINAL_DECKS,
           "status": FAIL if incomplete else PASS}
 
     misses = _sum_counts(d.upgrade_misses for d in decks)
@@ -230,11 +258,17 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None) -> Fl
     g9 = {"no_delivery_evidence": len(nde), "with_outcomes": len(acted),
           "ids": acted[:LIST_CAP], "status": FAIL if acted else PASS}
 
-    g10 = {"by_reason": withdrawals, "status": REPORT,
-           "note": "disposition_cut > 0 expected; any i1_dropped at mode 1 is a bug"}
+    if i1_mode == 2:
+        g10 = {"by_reason": withdrawals, "i1_mode": i1_mode, "status": REPORT,
+               "note": "disposition_cut > 0 expected; i1_dropped reported at trade_i1_mode 2"}
+    else:
+        g10 = {"by_reason": withdrawals, "i1_mode": i1_mode,
+               "status": FAIL if withdrawals.get(I1_DROPPED, 0) else PASS,
+               "note": f"disposition_cut > 0 expected; any i1_dropped at trade_i1_mode "
+                       f"{i1_mode} is a bug (barred at 0)"}
 
     exclusions = Counter(d.exclusion or "none" for d in decks)
-    barred = (g1, g2, g3, g7, g8, g9)
+    barred = (g1, g2, g3, g7, g8, g9, g10)
     overall = (FAIL if any(g["status"] == FAIL for g in barred)
                else INSUFFICIENT if g2["insufficient"] else PASS)
     return FlipRead(
@@ -247,11 +281,9 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None) -> Fl
 
 
 def _final(deck, pack, as_of: str, in_flight_from: str) -> bool:
-    """G2's final (module doc). A readable pack's run metadata decides it
-    through the loader's own rule (data._pack_state); an unreadable one
-    (pack_integrity) only by age."""
-    if pack is None:
-        return deck.served_at < in_flight_from
+    """Whether a packed deck is final for G2 (module doc). A readable pack's
+    run metadata decides it through the loader's own rule
+    (data._pack_state); an unreadable one (pack_integrity) only by age."""
     served_at, header_json = pack
     if deck.exclusion == PACK_INTEGRITY:
         return served_at < in_flight_from
@@ -260,16 +292,18 @@ def _final(deck, pack, as_of: str, in_flight_from: str) -> bool:
 
 
 def _g3(conn, decks, outcome_ids: list[str]) -> dict:
-    loaded = {c.impression_id for d in decks for c in d.cards}
+    loaded = {c.impression_id for d in decks for c in d.cards if not c.is_ghost}
+    ghosts = {c.impression_id for d in decks for c in d.cards if c.is_ghost}
     jobs = {d.deck_job_id for d in decks}
-    ghost = joined = 0
+    joined = 0
+    on_ghost: list[str] = []           # never shown, so a ghost reached a client
     orphans: list[str] = []
     elsewhere: list[str] = []          # their deck was not loaded: check the evidence
     for iid in outcome_ids:
-        if iid.endswith(GHOST_SUFFIX):
-            ghost += 1
-        elif iid in loaded:
+        if iid in loaded:
             joined += 1
+        elif iid in ghosts:
+            on_ghost.append(iid)
         elif _run_of(iid)[0] in jobs:  # its deck is in the window, the card is not
             orphans.append(iid)
         else:
@@ -278,8 +312,9 @@ def _g3(conn, decks, outcome_ids: list[str]) -> dict:
     orphans += [iid for iid in elsewhere if iid not in found]
     return {"outcomes": len(outcome_ids), "joined": joined,
             "joined_outside_window": sum(1 for iid in elsewhere if iid in found),
-            "ghost": ghost, "orphans": len(orphans),
-            "ids": sorted(set(orphans))[:LIST_CAP], "status": FAIL if orphans else PASS}
+            "on_ghost": len(on_ghost), "ghost_ids": sorted(set(on_ghost))[:LIST_CAP],
+            "orphans": len(orphans), "ids": sorted(set(orphans))[:LIST_CAP],
+            "status": FAIL if orphans or on_ghost else PASS}
 
 
 def _run_of(impression_id: str) -> tuple[str | None, int | None]:
@@ -418,18 +453,21 @@ def render(r: FlipRead) -> str:
         "|---|---|---|---|---|",
         f"| G1 | pack_integrity decks / decks with a pack row | {g1['pack_integrity']} / "
         f"{g1['pack_decks']} | 0 | {g1['status']} |",
-        f"| G2 | incomplete_deck / final Trades decks | {g2['incomplete']} / "
-        f"{g2['final_decks']} | 0 | {g2['status']} |",
-        f"| G3 | outcomes joining no card | {g3['orphans']} of {g3['outcomes']} (joined "
-        f"{g3['joined']}, outside the window {g3['joined_outside_window']}, ghost "
-        f"{g3['ghost']}) | 0 | {g3['status']} |",
+        f"| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
+        f"| {g2['incomplete']} / {g2['final_packed_decks'] + g2['packless_decks']} "
+        f"({g2['final_packed_decks']} final packed + {g2['packless_decks']} pack-less) "
+        f"| 0; INSUFFICIENT below {MIN_FINAL_DECKS} final packed | {g2['status']} |",
+        f"| G3 | outcomes joining no card / on a ghost row | {g3['orphans']} / "
+        f"{g3['on_ghost']} of {g3['outcomes']} (joined {g3['joined']}, outside the window "
+        f"{g3['joined_outside_window']}) | 0 / 0 | {g3['status']} |",
         f"| G7 | upgrade misses by cause | {_pairs(g7['upgrade_misses'])} | other 0 "
         f"| {g7['status']} |",
         f"| G8 | withdrawal_conflict decks | {g8['withdrawal_conflict']} | 0 | {g8['status']} |",
         f"| G9 | no_delivery_evidence decks with an outcome | {g9['with_outcomes']} of "
         f"{g9['no_delivery_evidence']} | 0 | {g9['status']} |",
-        f"| G10 | withdrawals by reason (window) | {_pairs(g10['by_reason'])} | reported "
-        f"| {g10['status']} |",
+        f"| G10 | withdrawals by reason (window), trade_i1_mode {g10['i1_mode']} | "
+        f"{_pairs(g10['by_reason'])} | "
+        f"{'reported' if g10['i1_mode'] == 2 else 'i1_dropped 0'} | {g10['status']} |",
         "",
     ]
     if g1["ids"]:
@@ -438,10 +476,13 @@ def render(r: FlipRead) -> str:
         lines.append("G2 incomplete decks (each must coincide with a restart or the kill): "
                      + ", ".join(f"{job} (served {at})" for job, at in g2["ids"]))
     if g2["insufficient"]:
-        lines.append(f"G2 INSUFFICIENT (<{MIN_FINAL_DECKS} final decks): extend to 48 h "
-                     f"({g2['final_decks']} final)")
+        lines.append(f"G2 INSUFFICIENT (<{MIN_FINAL_DECKS} final packed decks): extend to "
+                     f"48 h ({g2['final_packed_decks']} final packed)")
     if g3["ids"]:
         lines.append(f"G3 outcomes joining no card: {', '.join(g3['ids'])}")
+    if g3["ghost_ids"]:
+        lines.append("G3 outcomes on a ghost row (ghosts are never shown: a ghost reached "
+                     f"a client): {', '.join(g3['ghost_ids'])}")
     if g8["ids"]:
         lines.append(f"G8 withdrawal_conflict decks: {', '.join(g8['ids'])}")
     if g9["ids"]:
@@ -509,6 +550,10 @@ def main(argv=None) -> int:
                          "loader-included decks with delivery evidence (a pack, or rows "
                          "with delivered_at)")
     ap.add_argument("--json", action="store_true", help="print one JSON object")
+    ap.add_argument("--i1-mode", type=int, choices=(0, 1, 2), default=1,
+                    help="the trade_i1_mode the window ran under (default 1, the launch "
+                         "value): at 0 or 1 any i1_dropped withdrawal fails G10; at 2 it is "
+                         "only reported")
     args = ap.parse_args(argv)
 
     try:
@@ -520,15 +565,21 @@ def main(argv=None) -> int:
              else datetime.now(timezone.utc).replace(microsecond=0).isoformat())
     try:
         result = flip_read(eng, since=_iso(args.since), as_of=as_of,
-                           until=_iso(args.until) if args.until else None)
+                           until=_iso(args.until) if args.until else None,
+                           i1_mode=args.i1_mode)
         if args.weekly:
             result.weekly = weekly_read(eng, as_of=as_of)
+    except ReadOnlyViolation as e:
+        print(f"flip_read: {e}", file=sys.stderr)
+        return 2
     finally:
         eng.dispose()
     print(json.dumps(asdict(result), indent=2, sort_keys=True) if args.json else render(result))
     over = result.weekly is not None and "OVER" in (
         result.weekly["u4_r4"]["status"], result.weekly["b4"]["status"])
-    return 1 if result.overall == FAIL or over else 0
+    if result.overall == FAIL or over:
+        return 1
+    return 3 if result.overall == INSUFFICIENT else 0
 
 
 if __name__ == "__main__":
