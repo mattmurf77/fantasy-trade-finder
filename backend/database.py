@@ -1335,7 +1335,8 @@ Index("ix_deck_evidence_packs_user_league",
 # One row per captured sleeper_trades transaction examined by the matcher
 # (suggestion_telemetry.match_league_trades, hooked after every
 # sync_league_trades pass). was_recommended = 1 iff the trade matched a
-# NON-ghost (actually rendered) logged suggestion under the D-scope-5
+# NON-ghost shown logged suggestion (viewed or first 30; R-U6a,
+# _evidence_shown) under the D-scope-5
 # similarity rule; the best GHOST match is linked separately — the
 # ghost_* columns are the incrementality read (did a withheld suggestion
 # execute anyway?). Multi-team / unresolvable trades get a row with
@@ -7161,6 +7162,9 @@ def _deck_card_acted():
 # both series' `series_break` caveats read it (receipts_service.admin_metrics,
 # server.suggestion_telemetry_ratio_route), so the two can't drift.
 PACKED_EVIDENCE_FLIP_DAY: str | None = None
+# The caveat code every series-break entry carries (analytics_queries,
+# receipts_service, the ratio route), so a reader can match on one value.
+SERIES_BREAK_CAVEAT = "series_break"
 
 
 def _evidence_shown():
@@ -8210,12 +8214,14 @@ def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
 
 
 def suggestion_link_day_span(league_id: str | None = None) -> tuple[str | None, str | None]:
-    """The first and last UTC day of the links' trades (traded_at, else
-    computed_at), optionally in one league: (None, None) with no links. The
-    ratio route's series-break caveat reads it."""
-    t = suggestion_trade_links_table
-    day = func.substr(func.coalesce(t.c.traded_at, t.c.computed_at), 1, 10)
-    q = select(func.min(day), func.max(day))
+    """The first and last UTC day of the links' trades, optionally in one
+    league: (None, None) with no links. A trade's day is the one the matcher
+    reads (traded_at, else its sleeper_trades row's synced_at), else the link's
+    computed_at. The ratio route's series-break caveat reads it."""
+    t, s = suggestion_trade_links_table, sleeper_trades_table
+    day = func.substr(func.coalesce(t.c.traded_at, s.c.synced_at, t.c.computed_at), 1, 10)
+    q = select(func.min(day), func.max(day)).select_from(
+        t.outerjoin(s, s.c.transaction_id == t.c.transaction_id))
     if league_id:
         q = q.where(t.c.league_id == league_id)
     with engine.connect() as conn:

@@ -15094,7 +15094,7 @@ def _ratio_series_break_caveats(first_day: str | None, last_day: str | None) -> 
     day = _db.PACKED_EVIDENCE_FLIP_DAY
     if day is None or first_day is None or last_day is None or not first_day <= day <= last_day:
         return []
-    return [{"code": "series_break", "scope": "suggestion_ratio",
+    return [{"code": _db.SERIES_BREAK_CAVEAT, "scope": "suggestion_ratio",
              "detail": _RATIO_SERIES_BREAK_DETAIL, "day": day}]
 
 
