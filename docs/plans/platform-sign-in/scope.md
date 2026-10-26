@@ -66,6 +66,7 @@ D-056: no Maestro flows and no simulator captures — that tooling is retired, s
   4. ESPN private league → claim a team that is **not** yours. Expect "This ESPN login owns {your team} in this league. Pick that team to continue." and no sign-in.
   5. Sign-in screen → MFL → sign in with your MFL username/password → pick your league (repeat with a **private** MFL league if you have one). Expect: signed in; the client's `auth-link` → `auth-import` completes the import; "Send in MFL" works later (auth-link stored the cookie).
   6. MFL → wrong password. Expect "MFL didn't accept that username and password." Repeat 5 more times quickly: expect "Too many sign-in attempts…".
+  6b. **MFL username case (QA P2-3; settles the decision rule below).** Sign in to MFL with your real username in a **different case** (e.g. `MattM` → `mattm`) and the right password. Record whether MFL **accepts** it.
   7. Settings → disconnect the ESPN league, sign out, sign in with ESPN again. Expect the same account and board.
   8. Settings → Delete account on an ESPN-signed-in account. Expect deletion succeeds; signing in with ESPN again starts a fresh, empty account.
 - [ ] **WAIVED** — n/a.
@@ -151,6 +152,41 @@ The mint's refusal `message`s are the **final 14-row set** from marketing-lead (
   - Row 6 on that same cookie read (step 2): a 5xx, parse error or timeout → 502 `espn_unavailable` (the code is unchanged; a timeout used to surface as 500 `internal_error`) with row 6's text. The preview keeps the link-route "Couldn't reach ESPN — try again shortly."
   - Row 11: MFL not answering during the proof (host resolution, login, bundle or myleagues) → today's 502 `mfl_unavailable` with row 11's text.
 - **Evidence:**
-  - `test_signin_refusal_copy_is_the_final_set_verbatim` pins every row's exact body on the real route: 21 cases, covering both platforms for rows 7, 8 and 12, the four MFL failure points for row 11, and both 5xx codes for row 14.
+  - `test_signin_refusal_copy_is_the_final_set_verbatim` pins every row's exact body on the real route: 24 cases (incl. row 6 on the step-2 cookie read: 5xx, parse, timeout), covering both platforms for rows 7, 8 and 12, the four MFL failure points for row 11, and both 5xx codes for row 14.
   - `test_link_routes_and_previews_keep_their_own_copy` pins the non-sign-in copy.
   - Sabotage: the row-13 constant reworded → `[row13-too-many]` red. Restored.
+
+---
+
+## Addendum (2026-10-27) — release-lead QA follow-ups (#430 GO-with-notes)
+
+**D7 narrowed (P3s).** These limiter changes come from the coordinator; head-eng is informed.
+- **Counted, toward both the subject and IP windows:**
+  - an MFL bad login (claim or `auth_leagues`);
+  - the ESPN sign-in cookie read refused for auth (claim, row 9, or `my_leagues`);
+  - `espn_unproven_pair`, including the no-second-owner case, which shares the reason.
+- **Never counted:**
+  - `espn_public_league` and `espn_ownerless_team` (facts about the league);
+  - `wrong_account` (it follows a proven login);
+  - upstream outages and input errors.
+- **A proven claim clears its subject's count.** The IP window is left alone.
+- **Admission counts in-flight attempts** under the limiter lock, so `failures + in_flight >= cap` refuses. The slot is released in `entry_platform`'s `finally`, so an exception never leaks one. QA had seen 8 admitted with a cap of 5 on 4 threads.
+- **Tests:**
+  - `test_d7_unproven_pair_counts`;
+  - `test_d7_uncounted_refusals_never_consume_the_budget`;
+  - `test_d7_a_proven_claim_clears_the_subject_count_not_the_ip`;
+  - `test_d7_concurrent_bad_attempts_never_exceed_the_cap`: 12 threads behind a barrier, with a 0.2 s patched login, admit exactly 5;
+  - `test_d7_in_flight_slot_is_released_on_an_exception`.
+- **Sabotage:**
+  - admission ignoring in-flight → the concurrency test red (`12 == 5`);
+  - no subject clear on success → the clear test red.
+
+**XFF diagnostic.** The temporary line is now `PLATFORM-SIGNIN-XFF hops=N cf=0|1 tci=0|1`. It records only whether `CF-Connecting-IP` / `True-Client-IP` are present, never their values. `test_c4_xff_diagnostic_logs_only_the_hop_count` asserts none of the six test IPs appears in caplog.
+
+**MFL username case (QA P2-3). Documented now; no code change yet.**
+- The MFL identity is the lower-cased login (`accounts.platform_subject("mfl", …)`).
+- **Risk:** if MFL usernames are case-sensitive, two different MFL users who differ only by case would share one Fleeced account. That would be a **P1**.
+- **Decision rule:** settled by TestFlight checklist step 6b.
+  - MFL **accepts** the same username in a different case → MFL is case-insensitive, and lower-casing is correct. No change.
+  - MFL **rejects** it → MFL is case-sensitive. **Before ask 16**, switch the `mfl` branch of `platform_subject` to trim-only (case-preserving), together with the D6 conflict comparison in `platform_identity_in_use`, which goes through the same normaliser.
+- The same rule is written as a code comment at `accounts.platform_subject`.

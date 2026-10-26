@@ -815,11 +815,11 @@ Both read **official/sanctioned** APIs (far lower churn risk than ESPN), zero-au
 
 ## ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user (platform sign-in, 2026-10-27)
 
-Platform sign-in (`POST /api/entry/platform`, [scope](plans/platform-sign-in/scope.md)) rate-limits FAILED proofs per subject: 5 per 15 minutes per ESPN SWID or MFL username, plus a loose per-IP ceiling (300 per 10 minutes).
+Platform sign-in (`POST /api/entry/platform`, [scope](plans/platform-sign-in/scope.md)) rate-limits CREDENTIAL failures per subject: 5 per 15 minutes per ESPN SWID or MFL username. The counted failures are an MFL bad login, the ESPN sign-in cookie read being refused, and `espn_unproven_pair`. There is also a loose per-IP ceiling (300 per 10 minutes). A proven sign-in clears that subject's count; the IP window is left alone.
 
-- **Cause:** anyone who knows a person's SWID (visible to every leaguemate) or MFL username can spend that subject's 5 failed attempts and lock that person's ESPN/MFL sign-in for 15 minutes. head-eng accepted this residual (2026-10-27).
-- **Impact:** bounded, and it expires on its own (15 minutes after the 5th failure). Sign in with Apple still works, and so does an already-signed-in session.
-- **Support:** tell the user to wait 15 minutes, or sign in with Apple. There is **no manual reset**: the limiter state is in-process and also clears on every deploy.
+- **Cause:** anyone who knows a person's SWID (visible to every leaguemate) or MFL username can spend that subject's 5 failed attempts and lock that person's ESPN/MFL sign-in for 15 minutes. **By retrying, they can renew the lock indefinitely**: each new failure restarts the window. head-eng accepted this residual (2026-10-27).
+- **Impact:** a locked user can't sign in with ESPN/MFL while the attacker keeps retrying. An already-signed-in session is unaffected. **Don't steer them to Sign in with Apple as the fix.** Apple signs them into a **different, empty** account unless they set one up before.
+- **Support:** escalate to eng. There is **no manual reset**: the limiter state is in-process, so the only reset is a **service restart** (any deploy also clears it), and eng restarts if needed. Once the user gets one proven sign-in through, their failure count clears.
 - **Logs:** the user's attempts show as `PLATFORM-SIGNIN provider=… outcome=limited reason=subject_limit` (no ids are logged). `reason=ip_limit` instead means the per-IP ceiling. If that fires for many users at once, suspect a wrong `_SIGNIN_TRUSTED_PROXY_HOPS`: compare it with the temporary `PLATFORM-SIGNIN-XFF hops=N` lines.
 - **ESPN sign-in kill switch:** set `espn.signin` to `false` in `config/features.json` (or `FTF_FLAGS`). The whole ESPN entry branch then 404s `feature_disabled`, while MFL sign-in and Settings ESPN linking (`espn.link`) keep working.
 

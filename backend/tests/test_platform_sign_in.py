@@ -16,8 +16,10 @@ docs/plans/platform-sign-in/scope.md):
     no row but the subject sits in another user's imported credential →
     409 platform_identity_in_use; else find_or_create_account. The
     uq_linked_identity race signs the loser into the winner's account.
-  * D7: failed proofs rate-limited per IP (30/10 min, rightmost XFF) and per
-    subject (5/15 min) → 429 too_many_attempts + Retry-After.
+  * D7: CREDENTIAL failures rate-limited per IP (300/10 min, the trusted
+    XFF hop) and per subject (5/15 min), in-flight attempts included at
+    admission; a proven claim clears its subject → 429 too_many_attempts +
+    Retry-After.
   * D9: one PLATFORM-SIGNIN audit line per claim, never a SWID / username /
     cookie / password.
 
@@ -42,6 +44,7 @@ import json
 import logging
 import os
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -844,10 +847,27 @@ def test_c4_xff_diagnostic_logs_only_the_hop_count(env, caplog):
         _post(env, ip=xff, platform="espn", action="my_leagues",      # action
               espn_s2=S2_A, swid=SWID_A)
         _post(env, ip=xff, platform="mfl", mfl_league_id=MFL_LEAGUE)  # preview
+        # Cloudflare-style headers: only their PRESENCE is logged.
+        env.client.post(
+            "/api/entry/platform",
+            json={"platform": "mfl", "mfl_league_id": MFL_LEAGUE,
+                  "year": 2026, "franchise_id": "0001",
+                  "username": "MattM", "password": "hunter2"},
+            headers={"X-Forwarded-For": xff,
+                     "CF-Connecting-IP": "203.0.113.90",
+                     "True-Client-IP": "203.0.113.91"})
+        env.client.post(
+            "/api/entry/platform",
+            json={"platform": "mfl", "action": "auth_leagues",
+                  "username": "MattM", "password": "hunter2"},
+            headers={"CF-Connecting-IP": "203.0.113.92"})
     lines = [r.getMessage() for r in caplog.records
              if r.getMessage().startswith("PLATFORM-SIGNIN-XFF")]
-    assert lines == ["PLATFORM-SIGNIN-XFF hops=2"] * 4
-    for ip in ("203.0.113.77", "198.51.100.88", "127.0.0.1"):
+    assert lines == (["PLATFORM-SIGNIN-XFF hops=2 cf=0 tci=0"] * 4
+                     + ["PLATFORM-SIGNIN-XFF hops=2 cf=1 tci=1",
+                        "PLATFORM-SIGNIN-XFF hops=0 cf=1 tci=0"])
+    for ip in ("203.0.113.77", "198.51.100.88", "127.0.0.1", "203.0.113.90",
+               "203.0.113.91", "203.0.113.92"):
         assert ip not in caplog.text, ip
 
 
@@ -870,13 +890,114 @@ def test_c7_too_many_attempts_subject_limit(env):
 
 
 def test_espn_subject_limit_covers_the_claimed_swid(env):
-    env.espn.public = True       # every claim is a failed proof
-    for i in range(5):
-        assert _espn_claim(env, ip=f"192.0.2.{i}").status_code == 403
-    env.espn.public = False
+    for i in range(5):   # the sign-in cookie read refused: counted (row 9)
+        r = _espn_claim(env, ip=f"192.0.2.{i}", s2="not-issued")
+        assert r.get_json()["error"] == "espn_auth_required"
     r = _espn_claim(env, ip="192.0.2.99", swid=SWID_A.lower())  # any format
     assert r.status_code == 429
     assert "Retry-After" in r.headers
+
+
+def test_d7_unproven_pair_counts(env):
+    env.espn.bound = False          # every leaguemate attack → unproven_pair
+    for i in range(5):
+        r = _espn_claim(env, ip=f"192.0.2.{i}", s2=S2_B, swid=SWID_A)
+        assert r.get_json()["reason"] == "espn_unproven_pair"
+    assert _espn_claim(env, ip="192.0.2.99", s2=S2_B,
+                       swid=SWID_A).status_code == 429
+
+
+def test_d7_uncounted_refusals_never_consume_the_budget(env):
+    """Facts about the league (public, ownerless), post-proof outcomes
+    (wrong_account) and outages don't count: 6 of each, then the owner's
+    real sign-in still goes through."""
+    env.espn.public = True
+    for _ in range(6):
+        assert _espn_claim(env).get_json()["reason"] == "espn_public_league"
+    env.espn.public = False
+    for _ in range(6):   # B's proven login, A's team → wrong_account
+        assert _espn_claim(env, s2=S2_B, swid=SWID_B).get_json()[
+            "reason"] == "wrong_account"
+    with _espn_anon_503(env):
+        for _ in range(6):
+            assert _espn_claim(env).get_json()["reason"] == "espn_unavailable"
+    for t in env.espn.payload["teams"]:
+        if t["id"] == 2:
+            t["primaryOwner"], t["owners"] = "", []
+    for _ in range(6):   # A claims ownerless team 2
+        assert _espn_claim(env, team_id=2).get_json()[
+            "reason"] == "espn_ownerless_team"
+    for _ in range(6):   # MFL: a proven login, someone else's franchise
+        assert _mfl_claim(env, username="Rival", password="pw-rival"
+                          ).get_json()["reason"] == "wrong_account"
+    assert _espn_claim(env).status_code == 200
+    assert _espn_claim(env, s2=S2_B, swid=SWID_B, team_id=1
+                       ).status_code == 403          # still wrong_account
+    assert _mfl_claim(env, username="Rival", password="pw-rival",
+                      franchise_id="0002").status_code == 200
+    assert server._signin_failures == {}
+
+
+def test_d7_a_proven_claim_clears_the_subject_count_not_the_ip(env):
+    ip = "198.51.100.150"
+    for _ in range(4):
+        assert _mfl_claim(env, ip=ip, password="bad").status_code == 403
+    assert _mfl_claim(env, ip=ip).status_code == 200          # proven
+    for _ in range(4):          # would be 429 at the 5th if not cleared
+        assert _mfl_claim(env, ip=ip, password="bad").status_code == 403
+    assert _mfl_claim(env, ip=ip).status_code == 200
+    ip_key = "ip:" + ip
+    assert len(server._signin_failures[ip_key]) == 8          # IP untouched
+
+
+def test_d7_concurrent_bad_attempts_never_exceed_the_cap(env):
+    """QA saw 8 admitted with a cap of 5 on 4 threads. In-flight attempts
+    now count at admission, so N concurrent bad logins for one subject admit
+    exactly the cap."""
+    n = 12
+    barrier = threading.Barrier(n)
+
+    def slow_bad_login(username, password, year, **kw):
+        time.sleep(0.2)
+        raise mfl.MflAuthError("MFL rejected the username/password")
+
+    statuses: list = []
+    lock = threading.Lock()
+
+    def attempt(i):
+        client = server.app.test_client()
+        barrier.wait()
+        r = client.post("/api/entry/platform",
+                        json={"platform": "mfl", "mfl_league_id": MFL_LEAGUE,
+                              "year": 2026, "franchise_id": "0001",
+                              "username": "MattM", "password": "bad"},
+                        headers={"X-Forwarded-For": f"192.0.2.{i}"})
+        with lock:
+            statuses.append(r.status_code)
+
+    threads = [threading.Thread(target=attempt, args=(i,)) for i in range(n)]
+    with patch.object(mfl, "login", slow_bad_login):
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+    assert len(statuses) == n
+    assert statuses.count(403) == server._SIGNIN_SUBJECT_MAX_FAILURES
+    assert statuses.count(429) == n - server._SIGNIN_SUBJECT_MAX_FAILURES
+    assert server._signin_inflight == {}                    # all released
+
+
+def test_d7_in_flight_slot_is_released_on_an_exception(env):
+    def boom(*a, **kw):
+        raise RuntimeError("boom")
+    with patch.object(mfl, "login", boom):
+        for _ in range(server._SIGNIN_SUBJECT_MAX_FAILURES + 2):
+            r = _mfl_claim(env)
+            assert r.status_code == 500
+            assert r.get_json()["error"] == "internal_error"
+    assert server._signin_inflight == {}
+    assert server._signin_failures == {}    # an exception isn't counted
+    assert _mfl_claim(env).status_code == 200
 
 
 # ── Audit log (D9) ──────────────────────────────────────────────────────────

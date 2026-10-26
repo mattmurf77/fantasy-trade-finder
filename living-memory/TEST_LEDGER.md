@@ -10,6 +10,17 @@ Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_S
   - `test_espn_signin_off_404s_the_whole_espn_entry_branch_with_zero_espn_calls`: five ESPN entry requests all get 404, with zero ESPN league/fan calls and no limiter state; MFL sign-in still 200; `/api/espn/link` still 200.
   - Sabotage: drop the check → red (`500 == 404`, the action reached the fail-if-called fan stub). Restored.
 - **Runbook:** a new entry, "ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user", for the accepted per-subject lockout residual.
+- **release-lead QA follow-ups (#430 GO-with-notes):**
+  - **D7 narrowed.** Only credential failures count: an MFL bad login, the ESPN sign-in cookie read refused for auth, and `espn_unproven_pair`. Public/ownerless/`wrong_account`/outages don't count.
+  - **A proven claim clears its subject's count** (not the IP window).
+  - **In-flight admission:** `failures + in_flight >= cap` refuses, and the slot is released in a `finally`.
+  - New tests: `test_d7_unproven_pair_counts`, `test_d7_uncounted_refusals_never_consume_the_budget`, `test_d7_a_proven_claim_clears_the_subject_count_not_the_ip`, `test_d7_concurrent_bad_attempts_never_exceed_the_cap` (12 threads, barrier, 0.2 s login; stable over 6 runs), `test_d7_in_flight_slot_is_released_on_an_exception`. `test_espn_subject_limit_covers_the_claimed_swid` now uses counted cookie-read refusals.
+  - **Sabotage:** admission ignoring in-flight → concurrency test red (`12 == 5`); no subject clear on success → clear test red. Both restored.
+  - **XFF line** gains `cf=0|1 tci=0|1` (presence only). Its test asserts six test IPs are absent from caplog.
+  - The runbook lockout entry is reworded: renewable lock, Apple gives a different empty account, restart is the only reset, escalate to eng.
+  - The MFL username-case decision rule (QA P2-3) is in `scope.md`, TestFlight step 6b and a code comment at `accounts.platform_subject`; no code change.
+  - Doc nits fixed (preview 500 comment, 300 per IP, case count 24).
+  - Run: `test_platform_sign_in.py` (116) + `test_entry_platform_route.py` (27) = **143 passed**.
 - **Refusal copy (follow-up commit):** marketing's final 14-row set (§6 addendum 8, C) is applied, with rows 7, 8 and 12 approved by legal R28.16, so the set is complete. Apostrophes are U+2019, except row 10, which stays byte-identical. Rows 8, 9 and 11 are sign-in-only constants; the link-route copy is unchanged.
   - New: `test_signin_refusal_copy_is_the_final_set_verbatim` (21 cases, literal expected bodies on the real route) and `test_link_routes_and_previews_keep_their_own_copy`.
   - Sabotage: row-13 constant reworded → `[row13-too-many]` red. Restored.

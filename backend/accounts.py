@@ -75,7 +75,16 @@ VERIFIED_VIA_MFL = "mfl_login"
 def platform_subject(provider: str, raw: str | None) -> str:
     """The ONE normaliser for a platform identity subject: espn → the braced,
     upper-cased SWID (espn_service.swid_identity); mfl → the login username
-    trimmed + lower-cased. '' when empty."""
+    trimmed + lower-cased. '' when empty.
+
+    OPEN (QA P2-3): lower-casing the MFL username is correct ONLY if MFL
+    logins are case-insensitive. If two MFL users can differ only by case,
+    they would share one Fleeced account (P1). Decision rule, settled by the
+    TestFlight step in docs/plans/platform-sign-in/scope.md: sign in to MFL
+    with the same username in a different case. MFL ACCEPTS it → keep
+    lower-casing. MFL REJECTS it → before ask 16, switch the `mfl` branch to
+    trim-only (case-preserving), and the D6 conflict comparison in
+    platform_identity_in_use with it."""
     if provider == "espn":
         from .espn_service import swid_identity
         return swid_identity(raw)

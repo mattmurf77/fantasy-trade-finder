@@ -128,7 +128,9 @@ succeeded). Disconnecting (`DELETE /api/mfl/auth-link`) removes the stored
 cookie but **keeps** the sign-in identity, so the next MFL sign-in lands in
 the same account; only `DELETE /api/account` releases it. Failed logins here and in the
 `auth_leagues` action count toward the sign-in failure limits (5 per username
-per 15 min, 30 per IP per 10 min → 429 `too_many_attempts`). The audit line
+per 15 min, 300 per IP per 10 min → 429 `too_many_attempts`); a
+`wrong_account` after a good login doesn't count, and a proven sign-in
+clears the username's count. The audit line
 (`PLATFORM-SIGNIN`) never carries the username or password. Known limit: if
 MFL accepts an email address as the login, one person can end up with two
 identities (username and email).

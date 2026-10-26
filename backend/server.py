@@ -29573,11 +29573,17 @@ def extension_auth():
 
 # D7 rate limits — in-process (Render runs 1 gunicorn worker x 4 threads, so a
 # lock-guarded dict is exact; state resets on deploy, acceptable for v1).
-# Both windows count FAILED proofs only (failed team-claim proofs, failed
-# auth_leagues logins, failed my_leagues reads): successes never count,
-# because carrier NAT puts many honest users behind one IP. The per-IP
-# ceiling is deliberately loose (head-eng, C4): a wrong proxy-hop count must
-# never 429 real users at launch; the per-subject limit is the real guard.
+# Both windows count CREDENTIAL failures only (QA narrowing of D7): an MFL
+# bad login (claim or auth_leagues), the ESPN sign-in cookie read refused
+# for auth (claim or my_leagues), and espn_unproven_pair. Facts about the
+# league or post-proof outcomes (espn_public_league, espn_ownerless_team,
+# wrong_account), upstream outages and input errors never count, and
+# successes never count, because carrier NAT puts many honest users behind
+# one IP. A PROVEN claim clears its subject's count (not the IP window).
+# Admission counts in-flight attempts too, so concurrent requests can't
+# overshoot a cap. The per-IP ceiling is deliberately loose (head-eng, C4): a
+# wrong proxy-hop count must never 429 real users at launch; the
+# per-subject limit is the real guard.
 _SIGNIN_IP_MAX_FAILURES = 300
 _SIGNIN_IP_WINDOW_S = 10 * 60
 # How many X-Forwarded-For hops, counted from the RIGHT, our own proxies
@@ -29588,7 +29594,11 @@ _SIGNIN_TRUSTED_PROXY_HOPS = 1
 _SIGNIN_SUBJECT_MAX_FAILURES = 5
 _SIGNIN_SUBJECT_WINDOW_S = 15 * 60
 _SIGNIN_LIMITER_MAX_KEYS = 50_000
+# Retry-After when a window is full only because of IN-FLIGHT attempts (their
+# outcome isn't known yet, so the failure-window expiry doesn't apply).
+_SIGNIN_INFLIGHT_RETRY_S = 5
 _signin_failures: dict[str, collections.deque] = {}
+_signin_inflight: dict[str, int] = {}
 _signin_failures_lock = threading.Lock()
 
 # Sign-in refusal copy: the FINAL 14-row set (marketing-lead-copy.md §6
@@ -29680,9 +29690,12 @@ def _client_ip() -> str:
 def _log_xff_hop_count() -> None:
     """TEMPORARY first-deploy diagnostic — remove after release-lead
     confirms Render's layout (and sets _SIGNIN_TRUSTED_PROXY_HOPS). Logs
-    ONLY the number of X-Forwarded-For hops on a sign-in request: never an
-    IP, never the header value."""
-    log.info("PLATFORM-SIGNIN-XFF hops=%d", len(_xff_hops()))
+    ONLY the number of X-Forwarded-For hops and whether CF-Connecting-IP /
+    True-Client-IP are PRESENT (1/0) on a sign-in request: never an IP,
+    never a header value."""
+    log.info("PLATFORM-SIGNIN-XFF hops=%d cf=%d tci=%d", len(_xff_hops()),
+             int(bool(request.headers.get("CF-Connecting-IP"))),
+             int(bool(request.headers.get("True-Client-IP"))))
 
 
 def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
@@ -29697,55 +29710,98 @@ def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
     return keys
 
 
-def _signin_retry_after(provider: str, subject: str | None):
-    """(retry_after_s, 'ip_limit'|'subject_limit') when either window is
-    full, else None. Sliding window over the newest `max` failure stamps."""
-    now = time.monotonic()
+def _signin_full_locked(keys, now):
+    """Caller holds _signin_failures_lock. (retry_after_s, 'ip_limit' |
+    'subject_limit') when any key's recorded failures PLUS in-flight
+    attempts reach its cap, else None. Sliding window over the newest `cap`
+    failure stamps."""
     worst = None
-    with _signin_failures_lock:
-        for key, cap, window in _signin_limit_keys(provider, subject):
-            q = _signin_failures.get(key)
-            if q is None:
-                continue
+    for key, cap, window in keys:
+        q = _signin_failures.get(key)
+        if q is not None:
             while q and q[0] <= now - window:
                 q.popleft()
             if not q:
                 _signin_failures.pop(key, None)
-                continue
-            if len(q) >= cap:
-                wait = max(1, math.ceil(q[0] + window - now))
-                scope = "ip_limit" if key.startswith("ip:") else "subject_limit"
-                if worst is None or wait > worst[0]:
-                    worst = (wait, scope)
+                q = None
+        failures = len(q) if q else 0
+        if failures + _signin_inflight.get(key, 0) >= cap:
+            wait = (max(1, math.ceil(q[0] + window - now)) if failures >= cap
+                    else _SIGNIN_INFLIGHT_RETRY_S)
+            scope = "ip_limit" if key.startswith("ip:") else "subject_limit"
+            if worst is None or wait > worst[0]:
+                worst = (wait, scope)
     return worst
 
 
+def _signin_record_failure_locked(keys, now) -> None:
+    for key, cap, _window in keys:
+        q = _signin_failures.pop(key, None) or collections.deque()
+        q.append(now)
+        while len(q) > cap:      # only the newest `cap` stamps matter
+            q.popleft()
+        _signin_failures[key] = q   # re-insert: dict order = recency
+    while len(_signin_failures) > _SIGNIN_LIMITER_MAX_KEYS:
+        _signin_failures.pop(next(iter(_signin_failures)))
+
+
+def _signin_retry_after(provider: str, subject: str | None):
+    """Read-only check (no admission): see _signin_full_locked."""
+    keys = _signin_limit_keys(provider, subject)
+    with _signin_failures_lock:
+        return _signin_full_locked(keys, time.monotonic())
+
+
 def _signin_note_failure(provider: str, subject: str | None) -> None:
-    """Record one failed proof against the caller's IP and the subject."""
+    """Record one counted failure directly (outside an admitted attempt)."""
+    keys = _signin_limit_keys(provider, subject)
+    with _signin_failures_lock:
+        _signin_record_failure_locked(keys, time.monotonic())
+
+
+def _signin_release(audit: dict) -> None:
+    """Finish an admitted attempt — always called from entry_platform's
+    `finally`, so an exception can never leak an in-flight slot. Frees the
+    slot, records a counted credential failure, or — on a PROVEN claim —
+    clears the subject's failure count (never the IP window)."""
+    keys = audit.pop("_limiter_keys", None)
+    if not keys:
+        return
     now = time.monotonic()
     with _signin_failures_lock:
-        for key, cap, _window in _signin_limit_keys(provider, subject):
-            q = _signin_failures.pop(key, None) or collections.deque()
-            q.append(now)
-            while len(q) > cap:      # only the newest `cap` stamps matter
-                q.popleft()
-            _signin_failures[key] = q   # re-insert: dict order = recency
-        while len(_signin_failures) > _SIGNIN_LIMITER_MAX_KEYS:
-            _signin_failures.pop(next(iter(_signin_failures)))
+        for key, _cap, _window in keys:
+            left = _signin_inflight.get(key, 0) - 1
+            if left > 0:
+                _signin_inflight[key] = left
+            else:
+                _signin_inflight.pop(key, None)
+        if audit.get("_counted_failure"):
+            _signin_record_failure_locked(keys, now)
+        elif audit.get("outcome") == "proven":
+            for key, _cap, _window in keys:
+                if key.startswith("sub:"):
+                    _signin_failures.pop(key, None)
 
 
 def _reset_signin_limiter() -> None:
     """Tests only: drop all limiter state."""
     with _signin_failures_lock:
         _signin_failures.clear()
+        _signin_inflight.clear()
 
 
 def _signin_limit_gate(audit: dict, provider: str, subject: str | None):
-    """429 too_many_attempts (+ Retry-After) when the caller's IP or the
-    subject is over its failure budget; else None."""
-    hit = _signin_retry_after(provider, subject)
-    if hit is None:
-        return None
+    """Admission: 429 too_many_attempts (+ Retry-After) when the caller's IP
+    or the subject is at its cap (failures + in-flight); else None, with an
+    in-flight slot held on every key until _signin_release."""
+    keys = _signin_limit_keys(provider, subject)
+    with _signin_failures_lock:
+        hit = _signin_full_locked(keys, time.monotonic())
+        if hit is None:
+            for key, _cap, _window in keys:
+                _signin_inflight[key] = _signin_inflight.get(key, 0) + 1
+            audit["_limiter_keys"] = keys
+            return None
     audit.update(outcome="limited", reason=hit[1])
     resp = jsonify({"error": "too_many_attempts",
                     "message": _SIGNIN_TOO_MANY_MSG})
@@ -29758,10 +29814,11 @@ def _signin_refusal(audit: dict, status: int, error: str, message: str,
                     reason: str | None = None, *,
                     provider: str | None = None, subject: str | None = None,
                     failed_proof: bool = False):
-    """A team-claim refusal {error, reason?, message}. `failed_proof` charges
-    the D7 failure budgets (IP + subject)."""
-    if failed_proof and provider:
-        _signin_note_failure(provider, subject)
+    """A team-claim refusal {error, reason?, message}. `failed_proof` marks
+    a COUNTED credential failure; _signin_release records it against the
+    D7 windows (IP + subject) when the attempt finishes."""
+    if failed_proof:
+        audit["_counted_failure"] = True
     audit.update(outcome="refused", reason=reason or error)
     body = {"error": error}
     if reason:
@@ -29820,7 +29877,11 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
     """D4 steps 3-5, run after the step-2 cookie read already succeeded.
     Every SWID comparison goes through accounts.platform_subject (the one
     normaliser). Returns None when proven, else the refusal response."""
-    def _refuse(error, message, reason, failed=True):
+    def _refuse(error, message, reason, failed=False):
+        # `failed` = a COUNTED credential failure (D7 narrowed): only
+        # espn_unproven_pair counts here. Public/ownerless leagues are facts
+        # about the league, wrong_account comes after a proven login, and an
+        # outage is ESPN's — none of those charge the budgets.
         return _signin_refusal(audit, 403, error, message, reason,
                                provider="espn", subject=subject,
                                failed_proof=failed)
@@ -29832,7 +29893,7 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
         # Not the caller's failure (an ESPN outage/limit), so it doesn't
         # charge the D7 budgets — but it is never treated as a pass.
         return _refuse("proof_unavailable", _SIGNIN_ESPN_UNAVAILABLE_MSG,
-                       "espn_unavailable", failed=False)
+                       "espn_unavailable")
 
     # 3. The league must be cookie-gated: an anonymous read must need auth.
     anon = _espn_signin_read(_espn, league_id, season, None, None)
@@ -29855,7 +29916,7 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
     if control_swid is None:
         return _refuse("proof_unavailable",
                        _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_unproven_pair"],
-                       "espn_unproven_pair")
+                       "espn_unproven_pair", failed=True)
     control = _espn_signin_read(_espn, league_id, season, espn_s2,
                                 control_swid)
     if control == "ok":
@@ -29863,7 +29924,7 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
                     "SWID succeeded; refusing ESPN sign-in")
         return _refuse("proof_unavailable",
                        _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_unproven_pair"],
-                       "espn_unproven_pair")
+                       "espn_unproven_pair", failed=True)
     if control != "auth":
         return _unavailable()
 
@@ -30112,6 +30173,9 @@ def entry_platform():
                         "message": _SIGNIN_GENERIC_ERROR_MSG}), 500
         return resp
     finally:
+        # Frees any admitted limiter slot whatever happened above (counted
+        # failure / proven success / exception) — never leaks in-flight.
+        _signin_release(audit)
         if audit.get("claim") or audit.get("action"):
             _log_xff_hop_count()   # TEMPORARY — see _log_xff_hop_count
         if audit.get("claim"):
@@ -30138,8 +30202,9 @@ def _entry_platform(audit: dict):
     # ── Account-discovery actions (v2.1) ────────────────────────────────────
     # Sessionless "log in instead of typing a league id". Nothing here is
     # persisted: no credential row, no users row, no session — these branches
-    # return before any _platform_sign_in / upsert reached below. Failed
-    # logins/reads here charge the D7 failure budgets like a failed claim.
+    # return before any _platform_sign_in / upsert reached below. Credential
+    # failures here (MFL bad login, ESPN pair refused) charge the D7 budgets
+    # like a failed claim.
     action = str(body.get("action") or "").strip().lower()
     if action:
         if platform == "espn":
@@ -30159,14 +30224,14 @@ def _entry_platform(audit: dict):
                     "message": "Private leagues need both espn_s2 and SWID.",
                 }), 400
             subject = _accounts.platform_subject("espn", swid)
-            limited = _signin_limit_gate({}, "espn", subject)
+            limited = _signin_limit_gate(audit, "espn", subject)
             if limited is not None:
                 return limited
             try:
                 leagues = _espn.fetch_fan_leagues(espn_s2, swid)
             except _espn.EspnError as e:
                 if getattr(e, "kind", None) == "auth":
-                    _signin_note_failure("espn", subject)
+                    audit["_counted_failure"] = True
                 return _espn_error_response(e)
             log.info("entry_platform: espn my_leagues (sessionless) -> %d",
                      len(leagues))
@@ -30191,7 +30256,7 @@ def _entry_platform(audit: dict):
             return jsonify({"error": "mfl_missing_credentials",
                             "message": "MFL username and password are required."}), 400
         limited = _signin_limit_gate(
-            {}, "mfl", _accounts.platform_subject("mfl", username))
+            audit, "mfl", _accounts.platform_subject("mfl", username))
         if limited is not None:
             return limited
         try:
@@ -30199,7 +30264,7 @@ def _entry_platform(audit: dict):
             del password  # transient use only — never persisted, never logged
             leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
         except _mfl.MflAuthError:
-            _signin_note_failure("mfl", _accounts.platform_subject("mfl", username))
+            audit["_counted_failure"] = True
             return jsonify({"error": "mfl_bad_credentials",
                             "message": "MFL didn't accept that username and password."}), 403
         except _mfl.MflError as e:
@@ -30263,8 +30328,8 @@ def _entry_platform(audit: dict):
             return _espn_error_response(e)
         except (OSError, http.client.HTTPException) as e:
             # A timeout / transport failure on the sign-in's cookie read is
-            # "ESPN not answering" too (row 6). The preview re-raises to the
-            # route's generic handler, unchanged.
+            # "ESPN not answering" too (row 6). The preview re-raises to
+            # entry_platform's generic 500 internal_error (row 14's copy).
             if not subject:
                 raise
             log.warning("entry_platform: espn sign-in cookie read failed "
@@ -30334,9 +30399,11 @@ def _entry_platform(audit: dict):
                 return limited
 
         def _refuse_login(reason=None, message=_SIGNIN_MFL_BAD_LOGIN_MSG):
+            # Only a bad login (no reason) is a COUNTED credential failure;
+            # wrong_account follows a proven login and doesn't count (D7).
             return _signin_refusal(audit, 403, "mfl_bad_credentials", message,
                                    reason, provider="mfl", subject=subject,
-                                   failed_proof=True)
+                                   failed_proof=reason is None)
 
         def _mfl_error(e):
             # Row 11: MFL not answering DURING THE SIGN-IN PROOF gets the
