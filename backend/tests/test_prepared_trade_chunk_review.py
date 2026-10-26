@@ -111,7 +111,8 @@ def test_real_telemetry_candidate_dependency_is_quiet_exact_and_retryable(headle
         assert handled and job["status"] == "complete", (job, commit_failures)
         assert len(job["cards"]) >= 64
         durable_candidates = [dict(row) for row in rows(engine, db.deck_candidate_sets_table)]
-        assert durable_candidates == [candidate]
+        # Prepared adoption writes the JSON row; S8's packed columns stay NULL.
+        assert durable_candidates == [{**candidate, "candidates_packed": None, "cand_pack_version": None}]
         durable = [dict(row) for row in rows(engine, db.deck_impressions_table)]
         assert len(durable) == len(originals)
         for row in durable:
