@@ -4334,6 +4334,22 @@ def _store_trade_page(job_id: str) -> bool:
                 "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
                 "stored_bytes": len(blob) + len(evidence or b""), "state": "ready",
             })
+            # U4 (#428 QA item 4): a delivery while the job ran writes the pack at
+            # _deck_evidence_job_done, before this store, so it lacks the deck's
+            # stored count. Record it in the header now (a later flush retries).
+            late = False
+            if written and ev is not None:
+                with ev.lock:
+                    late = ev.pack is not None and ev.pack.run.get("stored_count") is None
+                    if late:
+                        ev.pack.run["stored_count"] = len(cards)
+                        ev.pack_dirty = True
+            if late:
+                try:
+                    _deck_pack_flush_header(ev)
+                except Exception:
+                    log.warning("deck-evidence %s: stored_count not yet in the pack", job_id,
+                                exc_info=True)
         log.info("trade-page %s: stored=%s scope=%s cards=%d bytes=%d evidence_bytes=%d", job_id,
                  written, job["page_scope"], len(cards), len(blob), len(evidence or b""))
         return written
@@ -5221,24 +5237,29 @@ def _upgrade_misses(run: Mapping) -> dict:
 def _deck_stored_count(known, run: Mapping) -> int:
     """#428 QA (c): the deck's own stored-page count, never a constant: the
     page store's (its job's stored_count, else its page row's card_count),
-    else the one its pack recorded at the first write, else the knobs now.
-    Lowering a knob later never turns a restart split into other."""
+    else the one its pack recorded, else 0 for a deck never page-stored (run
+    page_store 0: a weekly-replenishment deck has no page_scope, so no card has
+    a stored snapshot), else the knobs now. Lowering a knob later never turns
+    a restart split into other."""
     for value in (known, run.get("stored_count")):
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             return value
+    if run.get("page_store") == 0:
+        return 0
     return _trade_pages_stored() * _trade_page_size()
 
 
-def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int) -> str:
+def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, delivered: bool) -> str:
     """U4-R2's classification, the one place a miss gets its cause. A card
-    within the deck's stored pages has a stored snapshot: its miss is other.
-    Past them: evicted_split iff this process evicted the deck (other while
-    _EVICTED_SPLIT_NAMED is off); restart_split iff this process never held
-    the deck's job (another process built it: a restart, a deploy overlap, a
-    re-fork); else other."""
+    within the deck's stored pages has a stored snapshot, and a card with no
+    recorded delivery (the pack's deliveries don't reach it: the update was
+    lost) is no named case either: both are other. Otherwise: evicted_split
+    iff this process evicted the deck (other while _EVICTED_SPLIT_NAMED is
+    off); restart_split iff this process never held the deck's job (another
+    process built it: a restart, a deploy overlap, a re-fork); else other."""
     # One worker per instance (render.yaml --workers 1, pinned by a test): with
     # more, add a cross_worker cause here before raising --workers.
-    if index < stored_count:
+    if index < stored_count or not delivered:
         return "other"
     if deck_job_id in _deck_evicted_at:
         return "evicted_split" if _EVICTED_SPLIT_NAMED else "other"
@@ -5257,7 +5278,7 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     from . import database as _db
     card = _deck_pack_card(state, index)
     stored = _deck_stored_count(stored_count, state.run)
-    cause = _upgrade_miss_cause(deck_job_id, index, stored)
+    cause = _upgrade_miss_cause(deck_job_id, index, stored, state.delivered_at(index) is not None)
     # The packed card is the row's features plus its columns (_pack_card): the
     # inverse keeps every packed key the columns don't hold, so eval reads this
     # row as it reads the packed card (U4-R5's identity on the restart path).

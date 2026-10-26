@@ -1350,14 +1350,16 @@ def test_u4_the_classification_hook():
         mp.setattr(server, "_deck_held", {"held": None, "gone": None})
         mp.setattr(server, "_deck_evicted_at", {"gone": "2026-10-27T02:00:00+00:00"})
         cause = server._upgrade_miss_cause
-        assert cause("elsewhere", 95, 90) == "restart_split"           # another process built it
-        assert cause("elsewhere", 89, 90) == "other"                   # within the stored pages
-        assert cause("elsewhere", 60, 60) == "restart_split"           # the deck's own count
-        assert cause("held", 95, 90) == "other"                        # built here, still here
-        assert cause("gone", 95, 90) == "other"                        # evicted: off by default
+        assert cause("elsewhere", 95, 90, True) == "restart_split"     # another process built it
+        assert cause("elsewhere", 95, 90, False) == "other"            # no recorded delivery
+        assert cause("elsewhere", 89, 90, True) == "other"             # within the stored pages
+        assert cause("elsewhere", 60, 60, True) == "restart_split"     # the deck's own count
+        assert cause("held", 95, 90, True) == "other"                  # built here, still here
+        assert cause("gone", 95, 90, True) == "other"                  # evicted: off by default
         mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
-        assert cause("gone", 95, 90) == "evicted_split"
-        assert cause("gone", 89, 90) == "other"
+        assert cause("gone", 95, 90, True) == "evicted_split"
+        assert cause("gone", 95, 90, False) == "other"
+        assert cause("gone", 89, 90, True) == "other"
 
 
 def pages_stored(monkeypatch, pages):
@@ -1753,6 +1755,42 @@ def test_b4_a_page_whose_every_card_is_cut(deferred, prepared_ok, kind):
 
 # ── Fix-before-flip (#428 QA, release-lead) ─────────────────────────────────
 
+def test_flip_a_replenished_decks_miss_after_a_restart_is_a_restart_split(deferred):
+    """Item 4: a weekly-replenishment deck is packed but never page-stored
+    (no page_scope: page_store 0, no stored_count). None of its cards has a
+    stored snapshot, so a miss after a restart is restart_split at any index,
+    never other because the knobs (90) say card 40 should have been stored."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, store=False, source="replenish")
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    assert server._trade_jobs[job_id]["source"] == "replenish"
+    assert not server._trade_jobs[job_id].get("page_scope")
+    run = unpack(pack_of(engine, job_id))[0]
+    assert (run["page_store"], "stored_count" in run) == (0, False)
+    restart()
+    view(job_id, 40)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_flip_a_pack_written_before_its_page_store_gets_the_stored_count(deferred):
+    """Item 4's ordering: a page delivered while the job ran makes
+    _deck_evidence_job_done write the pack (server.py, the worker: job_done,
+    then _store_trade_page), before the store sets ev.stored_count. The store
+    then records stored_count in the pack's header."""
+    import time as _time
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, complete=False)
+    assert deck_ids(status(client, job_id, 0).get_json())       # delivered while it runs
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="complete", finished_at=_time.monotonic())
+    server._deck_evidence_job_done(job_id)                     # the first write
+    assert "stored_count" not in unpack(pack_of(engine, job_id))[0]
+    assert server._store_trade_page(job_id)                    # then the store
+    run = unpack(pack_of(engine, job_id))[0]
+    assert run["stored_count"] == 90 and [d[0] for d in run["deliveries"]] == [29]
+
+
 def view_swallowed(job_id, index, action="viewed"):
     """An outcome whose upgrade fails: the route logs it and goes on."""
     view(job_id, index, action)
@@ -1833,3 +1871,15 @@ def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
     finally:
         sys.setswitchinterval(switch)
     assert errors == [] and len(ledger) <= 8
+
+
+def test_flip_a_past_stored_card_with_no_recorded_delivery_is_other(deferred):
+    """Item 3: only page 1's delivery is recorded (a later update was lost).
+    Card 95, past the stored pages, viewed after a restart, has no recorded
+    delivery, so it is no named cause: other."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "other": 1}
