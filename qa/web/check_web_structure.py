@@ -471,12 +471,13 @@ def run() -> int:
             'still says "We and our service providers process data in the United States" (R28.9)'
             if us_only else "none")
 
-    # Legal R28.12 row 1 and R28.15 (2026-10-26), pinned word for word. Each
-    # sentence must appear verbatim in the page's rendered text, whitespace-
-    # normalized: block tags become a space and inline tags (<strong>, <a>)
-    # vanish, so "email <a …>fleecedapp@gmail.com</a>." reads as it renders.
-    # The text is hard-coded from R28.15's table and legal-lead-drafts.md
-    # Parts 1-2; any edit to it comes back through legal-lead.
+    # Legal R28.12 row 1, R28.15 (2026-10-26) and R28.16 (2026-10-27), pinned
+    # word for word. Each sentence must appear verbatim in the page's rendered
+    # text, whitespace-normalized: block tags become a space and inline tags
+    # (<strong>, <a>) vanish, so "email <a …>fleecedapp@gmail.com</a>." reads
+    # as it renders. The text is hard-coded from the rulings' tables and
+    # legal-lead-drafts.md Parts 1-2; any edit to it comes back through
+    # legal-lead.
     def rendered(page: str) -> str:
         body = strip_style_and_script(strip_comments(body_of(all_sources[page])))
         text = re.sub(r"<[^>]+>", "", BLOCK_TAG.sub(" ", body))
@@ -484,11 +485,12 @@ def run() -> int:
 
     R28_15 = {
         "privacy.html": (
+            # R28.16 added "the first time you use it" to R28.15's sentence.
             ('§1 "How you sign in" lead',
              'You can sign in with Apple, with your Sleeper username, or, where available, with your '
              'ESPN or MyFantasyLeague (MFL) login. Each method creates a Fleeced account with an '
-             'internal account ID. You can also connect ESPN and MFL leagues after you sign in (see '
-             '"Platform connections" below). Depending on the method, we store:'),
+             'internal account ID the first time you use it. You can also connect ESPN and MFL leagues '
+             'after you sign in (see "Platform connections" below). Depending on the method, we store:'),
             ("§1 ESPN sub-item",
              "ESPN: your ESPN member ID (called SWID), which identifies your account. You log in on "
              "ESPN's own page inside the app, and we check the login with ESPN (see \"Platform "
@@ -531,6 +533,60 @@ def run() -> int:
         r.check(f"POL-r28-15[{page}]", not missing,
                 "not verbatim (legal R28.15): " + "; ".join(missing) if missing
                 else f"{len(sentences)} R28.15 sentence(s) verbatim")
+
+    # R28.16, from the approved ESPN/MFL sign-in design: ESPN sign-in keeps only
+    # the SWID; cookies (ESPN) and the session (MFL) are kept only on import;
+    # the cross-check against another member's SWID is disclosed; disconnecting
+    # deletes the import credential and the sign-in identity stays until account
+    # deletion. Terms §2 gains "first controller wins".
+    R28_16 = {
+        "privacy.html": (
+            ('§1 "League data" ESPN sign-ins',
+             "We use leaguemates' data only to run trade discovery and league features for members of "
+             'that league, and to confirm ESPN sign-ins (see "Platform connections" below).'),
+            ("§1 ESPN lead",
+             "ESPN. You log in on ESPN's own page inside the app; we never see your password."),
+            ("§1 ESPN sign-in",
+             "Signing in with ESPN: we use ESPN's sign-in cookies to confirm that your login owns the "
+             "team you pick, and we keep only your ESPN member ID (called SWID) to recognize you next "
+             "time. To confirm ownership, we may also check your cookies against another league "
+             "member's ESPN member ID, which members of that league can see. Nothing from that check "
+             "is kept."),
+            ("§1 ESPN import",
+             "Importing an ESPN league (after you sign in, or when you connect ESPN in Settings → "
+             "Leagues): we keep two ESPN sign-in cookies, espn_s2 (stored encrypted) and SWID (your "
+             "ESPN member ID, stored as is). We use them to import your ESPN leagues and to send "
+             "trades you approve."),
+            ("§1 ESPN disconnect",
+             "You can disconnect in Settings → Leagues, which deletes both cookies. If ESPN is how you "
+             "sign in, your ESPN member ID stays as your sign-in until you delete your account."),
+            ("§1 MFL lead",
+             "MFL. If you sign in with or connect MFL using your MFL username and password, your "
+             "password passes through our server to MFL's sign-in once, to start a session. We never "
+             "store it."),
+            ("§1 MFL sign-in",
+             "Signing in with MFL: we keep your MFL username to recognize you next time."),
+            ("§1 MFL import",
+             "Importing an MFL league (after you sign in, or when you connect MFL in Settings → "
+             "Leagues): we also keep the session MFL returns, encrypted, and use it to read your "
+             "leagues and to send trades you approve."),
+            ("§1 MFL disconnect",
+             "You can disconnect in Settings → Leagues, which deletes the stored session. If MFL is how "
+             "you sign in, your MFL username stays as your sign-in until you delete your account."),
+        ),
+        "terms.html": (
+            ("§2 first controller wins",
+             "An ESPN or MyFantasyLeague login opens one Fleeced account: the first one it was used to "
+             "sign in to. It stays with that account until the account is deleted. Anyone who signs in "
+             "with that login can use that account, so don't share it."),
+        ),
+    }
+    for page, sentences in R28_16.items():
+        text = rendered(page)
+        missing = [label for label, s in sentences if " ".join(s.split()) not in text]
+        r.check(f"POL-r28-16[{page}]", not missing,
+                "not verbatim (legal R28.16): " + "; ".join(missing) if missing
+                else f"{len(sentences)} R28.16 sentence(s) verbatim")
 
     # R28.12 row 1: "Fleeced" is the Service, so the operator is "the developer
     # of Fleeced", and "we"/"us" attach to the operator, not the definition.
