@@ -4304,8 +4304,9 @@ def _deck_store_missed(job_id: str) -> None:
     """U4 (#434 QA P2-1): the store wrote no page row for this deck (the store
     was off, the job revoked, the deck not page-eligible, the save raised, or
     the supersede guard refused it), so none of its cards has a stored
-    snapshot: its stored count is 0, on the deck and in its pack's header (a
-    later flush retries a failed header write). Never raises."""
+    snapshot: its stored count is 0, on the deck and in its pack's header when
+    the header has none (models-lead addendum C (d3): a recorded count is never
+    rewritten; a later flush retries a failed header write). Never raises."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         ev = job.get("evidence") if job is not None else None
@@ -4315,7 +4316,7 @@ def _deck_store_missed(job_id: str) -> None:
         with _deck_evidence_write_lock:
             with ev.lock:
                 ev.stored_count = 0           # a store that returned before its save, too
-                dirty = ev.pack is not None and ev.pack.run.get("stored_count") != 0
+                dirty = ev.pack is not None and ev.pack.run.get("stored_count") is None
                 if dirty:
                     ev.pack.run["stored_count"] = 0
                     ev.pack_dirty = True
@@ -5266,25 +5267,49 @@ _EVICTED_SPLIT_NAMED = False
 # pack recorded. Off: today's behaviour exactly. A one-line switch; either way
 # the writer records such misses in run["upgrade_miss_row_gone"].
 _STORED_COUNT_FROM_ROW_NOW = False
-_DECK_LEDGER_MAX = 16384
-_deck_held: dict = {}                      # deck_job_id -> None: decks this process built
+# models-lead addendum C (c2): a ledger entry lives at least the 24 h display
+# cap, so a late view of an evicted (or held) deck keeps its cause. Entries are
+# trimmed by age; the count cap is a memory guard only, far above a day's adds
+# (131,072 entries ≈ 17 MiB per ledger at ~135 B each), and a guard trim of an
+# entry younger than 24 h logs a warning.
+_DECK_LEDGER_RETAIN_S = 24 * 3600          # _DECK_DISPLAY_CAP_S
+_DECK_LEDGER_GUARD = 131072
+_deck_held: dict = {}                      # deck_job_id -> when this process built it (epoch s)
 _deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+_ledger_now = time.time                    # the ledgers' clock (tests replace it)
 # A leaf lock for the ledgers' writes (#428 QA item 2: kickoffs add concurrently,
-# and the FIFO trim at the cap raced). Never take another lock while holding it.
-# Readers stay lock-free: membership and .get are atomic.
+# and the trim raced). Never take another lock while holding it (the guard's
+# warning is logged after it's released). Readers stay lock-free: membership
+# and .get are atomic.
 _deck_ledger_lock = threading.Lock()
 
 
-def _ledger_add(ledger: dict, key: str, value) -> None:
+def _ledger_add(ledger: dict, key: str) -> None:
+    """Note `key` now. Entries stay in time order (a re-add moves to the end),
+    so the trims take the oldest first: every entry older than the retention,
+    then, at the guard, the oldest young ones (warned)."""
+    now = _ledger_now()
+    young_trimmed = 0
     with _deck_ledger_lock:
-        while len(ledger) >= _DECK_LEDGER_MAX:
-            ledger.pop(next(iter(ledger)))
-        ledger[key] = value
+        ledger.pop(key, None)
+        while ledger:
+            oldest = next(iter(ledger))
+            if now - ledger[oldest] < _DECK_LEDGER_RETAIN_S:
+                break
+            del ledger[oldest]
+        while len(ledger) >= _DECK_LEDGER_GUARD:
+            young_trimmed += now - ledger.pop(next(iter(ledger))) < _DECK_LEDGER_RETAIN_S
+        ledger[key] = now
+    if young_trimmed:
+        log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
+                    "24 h: a late view of %s reads restart_split", _DECK_LEDGER_GUARD,
+                    young_trimmed, "y" if young_trimmed == 1 else "ies",
+                    "an evicted deck" if ledger is _deck_evicted_at else "a held deck")
 
 
 def _note_deck_held(job_id: str) -> None:
     """A flag-on deck this process built (its job's evidence admitted here)."""
-    _ledger_add(_deck_held, job_id, None)
+    _ledger_add(_deck_held, job_id)
 
 
 def _note_deck_evicted(job_id: str, job: Mapping) -> None:
@@ -5293,7 +5318,7 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     ev = job.get("evidence")
     if ev is None or not ev.packed or ev.pack is None:
         return
-    _ledger_add(_deck_evicted_at, job_id, datetime.now(timezone.utc).isoformat())
+    _ledger_add(_deck_evicted_at, job_id)
 
 
 def _upgrade_miss_cards(run: Mapping) -> dict:
@@ -5435,8 +5460,11 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
                 raise
         line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d stored_from=%s "
                 "held_here=%s evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
+        evicted_at = _deck_evicted_at.get(deck_job_id)
         args = (cause, deck_job_id, index, stored, stored_from, deck_job_id in _deck_held,
-                _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
+                None if evicted_at is None
+                else datetime.fromtimestamp(evicted_at, timezone.utc).isoformat(),
+                state.delivered_at(index), now)
         if cause == "other":              # U4-R2: must be zero; it goes back to models-lead
             log.error(line, *args)
         else:

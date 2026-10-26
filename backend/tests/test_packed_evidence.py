@@ -1930,16 +1930,18 @@ def test_flip_a_miss_whose_row_save_raises_counts_once_after_the_retry(deferred)
 def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
     """Item 2: kickoffs add to _deck_held concurrently; at the cap the FIFO
     trim raced (KeyError, or the dict changing size). Under the leaf lock no
-    add raises and the ledger never passes the cap."""
+    add raises and the ledger never passes the cap (addendum C: the memory
+    guard; its warning is silenced here, every add trims a young entry)."""
     import sys
     import threading
-    monkeypatch.setattr(server, "_DECK_LEDGER_MAX", 8)
+    monkeypatch.setattr(server, "_DECK_LEDGER_GUARD", 8)
+    monkeypatch.setattr(server.log, "warning", lambda *a, **k: None)
     ledger, errors = {}, []
 
     def hammer(t):
         try:
             for i in range(20000):
-                server._ledger_add(ledger, f"{t}-{i}", None)
+                server._ledger_add(ledger, f"{t}-{i}")
         except Exception as exc:                           # noqa: BLE001 (the race's symptom)
             errors.append(repr(exc))
 
