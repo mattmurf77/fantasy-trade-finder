@@ -13,6 +13,24 @@ Full gates. It merges dark: every `monetize.*` flag is off and `paywall_enforce_
 - **The P2 fix (release-lead QA):** sandbox events touch only `granted_by = 'sandbox:*'` rows. Every event type is tested, and a production founder lifetime and a production annual stay byte-unchanged.
 - **release-lead QA:** GO-with-notes. A real-defaults run sent 512 gated requests and got 0 × 402 and 0 SQL. No DDL.
 
+## 2026-10-26 — I-2 (1/4): Sleeper send-time player ownership + R3 (#411)
+
+Full gates. This is the launch condition for the 200 ms waiver W-AC-L5 (Product, 2026-10-26). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_sleeper_ownership.py` has 24 tests, including a send through the overhaul batch with the real core. The targeted set passes, 211 tests: `test_sleeper_write_route` (35), plus the validate, pick-tradability, traded-picks, overhaul api/service, pick-assignment and verified-sessions files.
+- **Sabotage, each red then restored:**
+  - the ownership refusals removed → 12 red;
+  - R3 turned back into a 400 → 5 red;
+  - the raw-id fallback restored → 6 red.
+- **Contract:** a 422 `asset_not_owned` / `counterparty_asset_not_owned` (named players, or a count, never a raw id; `detail == message`), checked inside `_sleeper_propose_core` before any provider write, so overhaul inherits it.
+  - A failed live roster read → 502 `sleeper_write_failed` `kind:"network"`.
+  - The copy is final (marketing via head-bizops).
+- **Client code-walk (no client change, per Product):**
+  - `SendInSleeperButton` sends the new codes to its catch-all (`:335-339`), which shows `detail`.
+  - In overhaul, the message reaches `attempts[i].error.message`, which `OverhaulPlanScreen.tsx:290-292` shows.
+  - `/api/trades/queue` makes no platform write.
+- **Not covered:** whether Sleeper itself would reject a non-owned player is unverified; the server check now makes that moot.
+
 ## 2026-10-26 — Timing readout mounted on Settings › Testing; hub row opens for it (#363 ruling 11)
 
 Full gates, not express (scope: #363's trades-200ms scope, head-eng ruling 11; in the 200 ms set on head-eng's call, 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.

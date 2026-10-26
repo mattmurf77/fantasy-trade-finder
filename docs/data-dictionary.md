@@ -166,6 +166,7 @@ counterparty board disclosure or client analytics event is added.
 - [`trade_pass_reasons`](#trade_pass_reasons)
 - [`deck_candidate_sets`](#deck_candidate_sets)
 - [`trade_page_store`](#trade_page_store)
+- [`trade_deck_lineage`](#trade_deck_lineage)
 - [`suggestion_trade_links`](#suggestion_trade_links)
 - [`bakeoff_runs`](#bakeoff_runs)
 - [`deck_suppressions`](#deck_suppressions)
@@ -914,6 +915,24 @@ Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
 | `state` | str, not null | `ready` (written by a complete job) or `stale`: every `server._invalidate_trade_jobs` call (rankings, preferences, dispositions) marks the user's rows, or a league-scoped change's whole league, and a board publish (`_publish_member_rankings_for_trade_refresh`) marks the league; one bounded UPDATE (`database.mark_trade_pages_stale`), run with `_trade_jobs_lock` released. A roster move needs no mark: the serve compares `roster_fp`. A stale row serves its checked cards and kicks a rebuild (`freshness_state: "updating"` while that rebuild runs, never for ESPN/MFL/Fleaflicker); the rebuild writes `ready` |
 
 Constraints and indexes: unique `uq_trade_page_store_scope` on `(user_id, league_id, scoring_format, request_scope)`; `ix_trade_page_store_last_served` on `last_served_at`; `ix_trade_page_store_league` on `league_id` (league-scoped stale marks). Measured (2026-10-20, a 2,354-card deck, 90 cards stored): about 109–122 KB raw JSON, **2.9 KiB** compressed for the replicated golden card and **29.2 KiB** for fully random card contents, against the §7 budget of about 0.2 MB per pair.
+
+---
+
+## `trade_deck_lineage`
+
+**P2 deck lineage** (flag `trade.first_page_store`, written and read only while the store is on). One row per organic deck (a job with an organic page scope, the decks that may write a [`trade_page_store`](#trade_page_store) row): the deck's id and the scope it is built under. Inserted by the deck's job worker when it starts, before the engine runs (`server._record_trade_deck_lineage` → `database.record_trade_deck_lineage`): off the request path, best-effort in its own transaction (a failure is logged and never fails the job or touches a page write), insert-or-ignore (`ON CONFLICT (user_id, deck_job_id) DO NOTHING`, both dialects). So a deck still running when a deploy restarts the worker has one too. A lineage row proves a deck organic. Read by `server._trade_deck_status` for `GET /api/trades/status?deck=D` when D's job is gone from this process and no page row is D's own (a deploy restarts the one worker: D never stored a row, or the scope's row was since rebuilt by a newer deck). The row names D's scope, so D is rebased onto that scope's current deck instead of a 404. A deck with no lineage row (non-organic, or older than the purge) stays the legacy 404. The read is one unique-index lookup of the requester's own `(user_id, deck_job_id)`. Purged after 24 h by `server._evict_trade_page_store` (the cleanup loop, store on only), in bounded batches. Private user data: deleted and exported by `user_id` via `accounts._ADDITIONAL_PRIVATE_TABLES`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str, not null | the deck's owner (deletion/export key); a lookup reads only the requester's rows |
+| `deck_job_id` | str, not null | the deck (the job that built the page row) |
+| `league_id` | str, not null | |
+| `scoring_format` | str, not null | `1qb_ppr` \| `sf_tep` |
+| `request_scope` | str, not null | `organic:f=<fairness, 2 decimals>`, as `trade_page_store.request_scope` |
+| `recorded_at` | str, not null | ISO UTC, microseconds (`page_store_iso`): the deck's first page write. The 24 h purge compares it |
+
+Constraints and indexes: unique `uq_trade_deck_lineage_deck` on `(user_id, deck_job_id)`; `ix_trade_deck_lineage_recorded` on `recorded_at` (the purge).
 
 ---
 

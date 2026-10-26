@@ -551,12 +551,14 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
 `trade.first_page_store` (default off), the flag `trade.packed_evidence`
 (added by #370; it reads off until then) and the kill knob
 `first_page_store_enabled` (default 1).** With either off, paged and unpaged
-responses are exactly the E2 section above
-(`backend/tests/test_trade_page_flag_off.py` pins them byte for byte). The
-server keeps the first `trade_pages_stored` × `trade_page_size` cards (90 at
-the defaults) of each user's latest complete organic deck in
+responses are exactly the E2 section above, and the `deck` param below is not
+read (`backend/tests/test_trade_page_flag_off.py` and
+`backend/tests/test_trade_pages_p2.py` pin them byte for byte). The server
+keeps the first `trade_pages_stored` × `trade_page_size` cards (90 at the
+defaults) of each user's latest complete organic deck in
 [`trade_page_store`](data-dictionary.md#trade_page_store), so page 1 can come
-from one DB read, including after a restart.
+from one DB read, including after a restart. P2 (below) pages one deck past
+those cards, across rebuilds and restarts, to an honest end.
 
 **The store serve follows the [S0 roster check](#s0-roster-check-at-serve)
 exactly**, with the same knobs: I-1, both gate misses and their shapes
@@ -573,6 +575,21 @@ the store or from a job): `prefetch_remaining` (model_config
 `trade_prefetch_remaining`, seeded at 50). The client requests the next page when
 this many ready cards remain.
 
+**`trade_hash` on every card (P2).** Every card in a paged response (any form
+above or below, from the store or from a job) carries `trade_hash`: the F1
+card identity (sha256 over its sorted give ids, sorted receive ids and
+partner id, 16 hex characters), the same value as that card's
+`deck_impressions.trade_hash`. It is
+the client's dedupe key. It is added at serve: unpaged responses and the
+[trade card object](#trade-card-object) itself don't carry it.
+
+**`deck_id` (P2).** Every organic `page: 1` response carries `deck_id`, from
+the store or from a job, `force` included: the deck the client pages by on
+`/status?deck=`. It equals that response's `job_id`. Pinned, opponent-scoped
+(Specific Team), intent and demo-league searches don't carry it. The app
+still sends `deck=<job_id>` when it pages them, and `/status` never rebases
+them (see `deck=` below).
+
 **`POST /api/trades/generate` with `page: 1`.** Only an organic body reads the
 store: no `pinned_give_players`, `pinned_receive_players`, `opponent_user_id`,
 `trade_intent` or `force` (which `refresh_fatigue` implies while `deck.fatigue`
@@ -584,7 +601,7 @@ decimals. Unpaged requests never read it.
 
   | Field | Value |
   |---|---|
-  | `job_id` | The job that built the stored deck. Page by it on `/status` |
+  | `job_id`, `deck_id` | The job that built the stored deck. Page by `deck_id` on `/status` |
   | `status` | `"complete"` (a gate miss: S0's status) |
   | `opponents_done`, `opponents_total` | From the stored deck |
   | `cards` | The stored cards from index 0, at most `trade_page_size`, after the pass/interest projection and the S0 roster check |
@@ -596,6 +613,18 @@ decimals. Unpaged requests never read it.
 
   `suppression_note`, `first_deck` and `board_refresh` are never sent on a
   store response (they belong to the job that ran).
+- **A backing job behind every store serve (AC-L4).** When no fresh or
+  matching running job for the scope is in this server process (after a
+  restart, or after an input change revoked it) and the serve isn't a gate
+  miss, the serve starts one with `preserve_running`, so pages past the stored
+  ones come from a live deck. That kickoff is the one path that starts these
+  jobs (/generate's page serve and P2's `/status?deck=`), so a scope has one
+  live rebuild at a time: a policy-matching running job is joined, also while
+  the roster read fails (S0's A2), and one on moved rosters or values is
+  replaced. A roster change starts nothing itself (P1's lazy rule); the next
+  serve sees the roster move and starts the rebuild. Each start logs one
+  `[trade-page] backing-job start scope=… reason=… job=…` line (reason
+  `page_serve`, `stale`, `rebase` or `status_restart`).
 - **Not served from the store** (today's E2 response, plus
   `prefetch_remaining`): no stored page for the scope; the engine (including
   the engine modules' code hash and `DECK_PIPELINE_VERSION`), the request
@@ -613,10 +642,112 @@ decimals. Unpaged requests never read it.
   `cursor` echoes `K`.
 - `K ≥ total_ready`: the job's E2 cursor response if the job is still in this
   server process. Otherwise `cards: []`, `cursor: K`, `total_ready` = the stored
-  count, `serve_source: "page"`, `freshness_state: "fresh"`. Paging past the
-  stored pages arrives with P2.
+  count, `serve_source: "page"`, `freshness_state: "fresh"`.
 - A rebuild replaces the stored row and its job id. A cursor on the older job id
   then reads that job if it is still in this process, else 404, as before P1.
+- P2 leaves this form's resolution unchanged: no `deck_id`, `rebased` or
+  `pool_exhausted` (its cards do carry `trade_hash`). To page across
+  rebuilds, use `deck`.
+
+**`GET /api/trades/status?deck=D&cursor=K` (P2): one deck, across rebuilds.**
+`D` is the deck the app is paging: the `deck_id` from page 1 (or from a
+`rebased` response), else the search's `job_id` (the app sends `deck` on every
+paged poll). `deck` is read only alongside an honored `cursor`; `job_id` is
+then not read. `D` is 1–64 characters of `A-Z a-z 0-9 _ -`, else 400
+`{error: "invalid_deck"}` (after the `cursor` check). **`deck` is not read at
+all with paging killed (`trade_paged_responses` 0) or at `trade_i1_mode` 0**,
+like `cursor` and the store: the response is the `job_id` form's (the legacy
+cumulative body with paging killed), byte for byte.
+
+**Every serve below follows the [S0 roster check](#s0-roster-check-at-serve)
+exactly, as the `job_id` form does,** with one roster snapshot per serve:
+dispositions, I-1, both gate misses and their shapes only at
+`trade_gate_miss_mode` 1 (held at 0), the admin gate-miss test hook, the
+`[i1] serve` log line (`job=` the deck served), and the floor kick after the
+response. A gate miss holds the cursor (`cursor` echoes `K`, `total_ready`
+`0`) and is never an end or a rebase: the client keeps polling. One stored
+page row is read and decoded per poll.
+
+**Only a deck that is provably organic is ever rebased**: `D`'s job is in this
+server process with an organic page scope, or a stored row `D` built exists,
+or `D`'s [lineage](data-dictionary.md#trade_deck_lineage) row (written when
+`D`'s job starts, kept 24 h) names its scope. **A gone organic deck rebases
+across restarts, also one still running at the restart; a gone non-organic
+deck 404s.** Its scope (league, scoring
+format, `fairness_threshold`) is then `D`'s own, so an intent or other search
+that changes the session's fairness never moves it. Anything else is never
+rebased onto the organic deck:
+- **A pinned, Specific Team (`opponent_user_id`), intent or other non-organic
+  search** (`D` in this process without an organic page scope): its own job's
+  page at `K`, exactly the `job_id` + `cursor` form (no `deck_id`, no
+  `rebased`), with its own error passed through (a timeout, `inputs_changed`,
+  a policy change). At its own end (complete, `K` at its last card), a gate
+  miss holds the cursor, else `pool_exhausted: true` with `cards: []`.
+- **A deck that is gone and was never organic** (not in this process, with no
+  page or lineage row of the requester's: a non-organic search never writes
+  one, and another user's deck isn't the requester's) or whose lineage is
+  older than 24 h: the legacy `404 {"error": "job not found"}`.
+
+For an organic `D`, the server resolves, in order:
+
+1. **The stored pages.** The scope's stored row was built by `D` and
+   `K < total_ready`: the stored cards from `K`, exactly the `job_id=` form's
+   response above, plus `deck_id`.
+2. **The live deck.** `D` is the requester's job in this server process: E2's
+   cursor response at `K` (the append-only rules and E2's `replace` apply),
+   plus `deck_id`. This is how pages past the stored ones arrive. Once a
+   `complete` `D` is asked at or past its last card, a newer deck for the
+   scope (running or complete) rebases the client onto it, as in case 3; with
+   none, see the end of deck below.
+3. **Rebased.** Otherwise the deck changed (a rebuild replaced it, an input
+   change revoked it, it errored or timed out, its serving policy moved, or a
+   restart dropped its job): the scope's current deck from its **first** card,
+   with `rebased: true`, `deck_id` = the new deck, and `cursor` = the raw cards
+   included. The current deck is the stored row when it isn't `D`'s own and
+   would serve on `page: 1` (the same engine/config, expiry and staleness
+   rules and backing job; at a live `D`'s end, only if it is the scope's
+   newest job's row, so two decks never alternate); else the scope's newest
+   job in this process; else a backing job is started and its first page
+   returned, often `cards: []` while it runs. A start that joins a job outside
+   the scope (another fairness, an intent search) is no deck to move to: the
+   response stays on `D` with no cards, and the client asks again.
+
+**This GET can start a trade job.** Case 3's backing job is `/status`'s one
+side effect: after a restart a client paging by `deck` never calls
+`/generate` again, so without it no live deck would exist for pages past the
+stored ones (AC-L4). It is the store serve's own kickoff (see "A backing job
+behind every store serve"), so polling joins the running rebuild rather than
+starting more.
+
+**The client keeps what it holds.** On `rebased: true` it appends the cards
+behind its current card, dropping any whose `trade_hash` it already holds,
+and pages on with the new `deck_id`. A `replace: true` page is merged the
+same way: deduped, appended, never reordered. If a page comes back short
+after that, it fetches the next page right away. The server never dedupes
+against the client and keeps no per-client state.
+
+**End of deck: `pool_exhausted: true`.** When a `complete` organic `D` is
+asked at or past its last card and no newer deck exists, one roster snapshot
+decides:
+- a gate miss (S0's knobs and test hook, as above) gets its shape and holds
+  the cursor: never the end;
+- a failed roster read: `D`'s own response, no cards and no end;
+- `pool_exhausted: true` when `D`'s rosters and values still match the stored
+  rows, its stored row isn't stale, and no job for the key is running (a
+  rebuild or backing job may still add cards);
+- otherwise the rebuild is started and the client is rebased onto it; a
+  stale scope converges, since the rebuilt deck's own end follows once it lands
+  and is stored. When nothing can rebuild the scope here (the start returns
+  `D` itself, still fresh in this process while its row was marked stale
+  elsewhere, or the start fails), the end is sent rather than withheld forever.
+
+The end carries `cards: []`, except for a deck whose publishing re-sorts (not
+append-only; production serves owner-only, which appends): E2 replaces on
+every cursor there, so at exactly its length the response is the end
+**with** its final list (`replace: true`), for the client to merge. It is
+never sent while `D` runs, during a gate miss, while a rebuild or backing job
+runs, or after a rebuild landed; otherwise the field is absent. `rebased` is
+likewise absent unless `true`.
 
 ### Trade card object
 
@@ -805,11 +936,13 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | 409 | `sleeper_expired` | Token time-expired → cleared server-side → prompt reconnect (a fresh token fixes it) |
 | 409 | `sleeper_rejected` | Sleeper's write API rejected the (valid-shape) token — 401/403 or auth GraphQL error; cleared server-side. Carries `detail`. Reconnecting re-captures the SAME token, so the client must NOT loop to login — surface the reason. |
 | 503 | `sleeper_unconfigured` | `SLEEPER_TOKEN_KEY` unset/invalid |
-| 502 | `sleeper_write_failed` | Sleeper accepted auth but the write failed (non-auth). Carries `kind` + `detail` + `message` (`== detail`; since #428 `detail` is Sleeper's own sentence — the first GraphQL error `message`, e.g. `These draft picks cannot be traded.` — not a JSON dump of the errors array). **S0/R10 (#378):** also returned, before any provider call, when a pick-bearing send's live `traded_picks` read fails (`kind: "network"`, nothing sent). |
+| 502 | `sleeper_write_failed` | Sleeper accepted auth but the write failed (non-auth). Carries `kind` + `detail` + `message` (`== detail`; since #428 `detail` is Sleeper's own sentence — the first GraphQL error `message`, e.g. `These draft picks cannot be traded.` — not a JSON dump of the errors array). **S0/R10 (#378):** also returned, before any provider call, when a pick-bearing send's live `traded_picks` read fails (`kind: "network"`, nothing sent). **I-2 / R3 (2026-10-26):** also returned, before any provider call, when the live `rosters` read itself fails (HTTP error, timeout, the open 429 circuit, a non-list body): `kind: "network"`, `message` == `detail` == "Couldn’t confirm rosters with Sleeper right now, so nothing was sent. Try again in a moment." This used to be 400 `roster_not_found`, which the client showed as "Couldn't match one of the teams". |
 | 422 | `sleeper_pick_unmapped` | **#413.** ≥1 pick asset is not a concrete pick in this league's `draft_picks` grid (generic rung, a well-formed id for a pick outside the synced grid — out-of-horizon or completed-draft season — or a user-asserted ADR-010 row; note a foreign-league or malformed id is not pick-shaped for this league and is treated as a player id, failing downstream as 502 `sleeper_write_failed`). Carries `picks[]` (the offending FTF ids, give-then-receive), `message`, `detail` (`== message`, what fielded catch-alls render). Nothing sent. Reported before `not_owned`. |
 | 422 | `sleeper_pick_untradable` | **#428 (2026-09-08).** ≥1 pick's draft class is outside Sleeper's tradable window — that season's draft has already run (`/drafts` reports `complete`; Sleeper keeps the season in `traded_picks`, so the grid row and the holder check both still pass). Carries `picks[]`, `season_window: [first, last]` (always present — the classes Sleeper is trading, e.g. `[2027, 2029]`; an unknown season abstains and never produces this refusal), `message`, `detail` (`== message`; count-aware, names the spent seasons and the window). Nothing sent. Reported after `unmapped`, before `not_owned`. A `/drafts` flake with no cached #207 verdict excludes nothing (D-089) — the send proceeds and Sleeper stays the final authority (502 with its sentence). |
 | 422 | `sleeper_pick_not_owned` | **#413.** ≥1 pick's current holder (live `traded_picks`, default original roster) is not the side offering it. Same `picks[]` / `message` / `detail` shape. Nothing sent. |
-| 400 | `bad_request` / `roster_not_found` / `opponent_roster_not_found` | Malformed body / caller or counterparty not in that league. Since #413 `bad_request` also covers a non-empty `draft_picks` body key (carries `message` + `detail`) — pick ids belong in the mixed arrays |
+| 422 | `asset_not_owned` | **I-2 (2026-10-26; PRD `trade-time-to-suggestion` §5.3, platforms-pm R4).** ≥1 give **player** is not in the caller's roster `players` on the live `rosters` read the route already makes (no extra Sleeper call). `players` lists starters, bench, IR (`reserve`) and `taxi`, so those count as owned; the check is at roster level, so co-owners pass. Body `{error, assets: [<offending ids as sent>], message, detail}` with `detail` == `message`: "{Player} is no longer on your roster, so nothing was sent. Find a new trade." (plural: "{A} and {B} are …", "{A}, {B} and {C} are …", no serial comma). Names come from `players_table`. **A raw player id is never shown:** if any offending player has no name, the whole message counts instead: "A player in this trade is no longer on your roster, …" / "{n} players in this trade are no longer on your roster, …". `assets` still carries the ids. Checked inside `_sleeper_propose_core`, so the team-overhaul send gets it too. Players are checked **before** picks (the pick reads are skipped), and the give side is reported before the receive side. Nothing sent. |
+| 422 | `counterparty_asset_not_owned` | **I-2.** ≥1 receive **player** is not in the counterparty's live roster `players`. Same `assets[]` / `message` / `detail` shape: "{Player} is no longer on {Team}’s roster, so nothing was sent. Find a new trade." `{Team}` is the counterparty's stored `league_members.display_name` (else `username`) and always takes ’s ("Chris’s"); when neither is known the copy is "{Player} is no longer on the other manager’s roster, …". Same plurals and the same count fallback ("A player in this trade is no longer on {Team}’s roster, …"). Nothing sent. |
+| 400 | `bad_request` / `roster_not_found` / `opponent_roster_not_found` | Malformed body / caller or counterparty not in that league. Since I-2, `roster_not_found` means a **successful** `rosters` read without the caller's roster (a failed read is the 502 above), and `opponent_roster_not_found` also covers a client-supplied `their_roster_id` that the live read doesn't hold, because its receive side can't be checked. Since #413 `bad_request` also covers a non-empty `draft_picks` body key (carries `message` + `detail`) — pick ids belong in the mixed arrays |
 
 **Scope:** players + draft picks (encoded server-side, #413); FAAB remains unimplemented (Q-016). Field 1 of the pick string (original-owner roster id) is confirmed on public Sleeper evidence (#428 investigation §2: Sleeper's own completed-trade transactions carry `roster_id` = original owner for picks that had already changed hands) — Q-037 closed.
 
