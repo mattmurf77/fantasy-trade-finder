@@ -85,10 +85,13 @@ export default function SettingsHubScreen({ navigation }: any) {
   const rankingPref = useSession((s) => s.rankingMethodPref);
   const verification = useSession((s) => s.verification);
 
-  // Flag store — free. `testing.stage_users` gates the Testing row exactly
-  // as SettingsScreen.tsx:1546 does; `ux.help_surface` decides whether the
-  // About page actually has an FAQ link to advertise.
+  // Flag store — free. The Testing row shows for `testing.stage_users` (as
+  // SettingsScreen.tsx:1546 does) or `testing.timing_readout` (#363 ruling
+  // 11: the operator's phone gets only that flag, and the readout lives on
+  // the Testing page); `ux.help_surface` decides whether the About page
+  // actually has an FAQ link to advertise.
   const stageUsersEnabled = useFlag('testing.stage_users');
+  const timingReadoutEnabled = useFlag('testing.timing_readout');
   const helpSurfaceOn = useFlag('ux.help_surface');
   // Monetization (iap-enablement, flag `monetize.paywall`, dark). The flag
   // gates this ROW, not the Paywall route — same rule as Testing above.
@@ -327,10 +330,11 @@ export default function SettingsHubScreen({ navigation }: any) {
           onPress={go('SettingsAbout')}
         />
 
-        {/* Dev builds and allowlisted testers only — the same gate the
-            shipped flat list uses (SettingsScreen.tsx:1546). No banner: it
-            is not a group, it is a build-conditional escape hatch. */}
-        {__DEV__ || stageUsersEnabled ? (
+        {/* Dev builds and allowlisted testers only: the shipped flat list's
+            gate (SettingsScreen.tsx:1546) plus the timing-readout flag, so a
+            readout-only device can reach the readout. No banner: it is not a
+            group, it is a build-conditional escape hatch. */}
+        {__DEV__ || stageUsersEnabled || timingReadoutEnabled ? (
           <NavRow
             testID="settings.hub.testing"
             title="Testing"
