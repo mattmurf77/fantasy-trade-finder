@@ -1214,15 +1214,15 @@ Index("ix_trade_page_store_last_served", trade_page_store_table.c.last_served_at
 Index("ix_trade_page_store_league", trade_page_store_table.c.league_id)
 
 # ── P2 deck lineage (flag trade.first_page_store) ───────────────────────────
-# One row per organic deck that wrote a page row: (user_id, deck_job_id) and
-# the scope it was built under. Inserted (insert-or-ignore) in
-# save_trade_page's own transaction, whether or not the upsert won the
-# supersede guard. /api/trades/status?deck=D reads the requester's row when D's
-# job is gone from this process and its page row was since rebuilt by a newer
-# deck (a deploy restarts the one worker): the row proves D organic and names
-# its scope, so D is rebased instead of 404. Purged after 24 h by the
-# page-store eviction pass. user_id is the account deletion/export key
-# (accounts._ADDITIONAL_PRIVATE_TABLES).
+# One row per organic deck: (user_id, deck_job_id) and the scope it is built
+# under. Inserted (insert-or-ignore, record_trade_deck_lineage) by the deck's
+# job worker when it starts, before the engine runs (best-effort, its own
+# transaction), so a deck still running at a restart has one too.
+# /api/trades/status?deck=D reads the requester's row when D's job is gone
+# from this process and no page row is D's own (a deploy restarts the one
+# worker): the row proves D organic and names its scope, so D is rebased
+# instead of 404. Purged after 24 h by the page-store eviction pass. user_id
+# is the account deletion/export key (accounts._ADDITIONAL_PRIVATE_TABLES).
 trade_deck_lineage_table = Table("trade_deck_lineage", metadata,
     Column("id",             Integer, primary_key=True, autoincrement=True),
     Column("user_id",        String,  nullable=False),
@@ -7041,8 +7041,7 @@ def save_trade_page(row: dict) -> bool:
     """Upsert one page row. An existing row is replaced only when the new
     `built_at` is at or after its own (the supersede guard), in one statement,
     so concurrent writers for a key leave exactly one consistent row. True when
-    the row was written. In the same transaction, the deck's lineage row is
-    inserted (or kept) either way: the deck is organic whether or not it won."""
+    the row was written."""
     t = trade_page_store_table
     with engine.begin() as conn:
         if conn.dialect.name == "postgresql":
@@ -7054,9 +7053,14 @@ def save_trade_page(row: dict) -> bool:
             index_elements=[t.c[name] for name in _PAGE_STORE_KEY],
             set_={name: stmt.excluded[name] for name in _PAGE_STORE_REPLACED},
             where=t.c.built_at <= stmt.excluded.built_at)
-        written = bool(conn.execute(stmt).rowcount)
+        return bool(conn.execute(stmt).rowcount)
+
+
+def record_trade_deck_lineage(row: dict) -> None:
+    """Insert-or-ignore one organic deck's lineage row (P2), in its own
+    transaction: written when the deck's job starts, apart from any page write."""
+    with engine.begin() as conn:
         conn.execute(trade_deck_lineage_insert(conn.dialect.name, row))
-        return written
 
 
 def load_trade_page(user_id: str, league_id: str, scoring_format: str,

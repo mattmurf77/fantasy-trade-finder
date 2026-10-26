@@ -548,18 +548,23 @@ def test_a_stale_row_whose_deck_is_still_fresh_here_ends_honestly(p1, spawned):
     assert (body["deck_id"], body["cards"], body["cursor"]) == (deck, [], 95) and not spawned
 
 
-def test_a_failed_rebuild_kick_ends_honestly(p1, spawned):
-    """(P3) D's values moved, so its end needs a rebuild, but the kickoff fails
-    (here its execution capture): the end, not a stall."""
+def test_a_failed_rebuild_kick_is_its_error_not_the_end(p1, spawned):
+    """(#369 re-QA) D's values moved, so its end needs a rebuild, but the
+    kickoff fails (here its execution capture): the failed job's error with
+    the cursor held, never `pool_exhausted` (the app's job-error state retries
+    the search; the end card would be a false "that's every trade")."""
     client, engine, _ = p1
     deck = build_deck()
     with engine.begin() as conn:
         conn.execute(update(db_module.draft_picks_table).values(pool_value=99.0))
-    with patch.object(server, "_capture_trade_execution", MagicMock(side_effect=RuntimeError("x"))):
+    with patch.object(server, "_capture_trade_execution",
+                      MagicMock(side_effect=RuntimeError("capture failed"))):
         body = deck_status(client, deck, 95).get_json()
     failed = server._trade_jobs[server._trade_jobs_by_key[KEY]]
-    assert failed["job_id"] != deck and failed["status"] == "error"
-    assert body["pool_exhausted"] is True and "rebased" not in body and body["deck_id"] == deck
+    assert failed["job_id"] != deck and failed["error"] == "capture failed"
+    assert (body["status"], body["error"], body["cards"], body["cursor"]) == (
+        "error", "capture failed", [], 95)
+    assert body["deck_id"] == deck and not {"pool_exhausted", "rebased"} & set(body)
 
 
 def test_a_newer_deck_landing_after_the_end_is_followed(p1, spawned):
@@ -1011,20 +1016,61 @@ def test_another_users_gone_deck_is_the_legacy_404(p1, spawned):
 def test_a_non_organic_deck_writes_no_lineage_and_404s_when_gone(p1, spawned):
     client, _, _ = p1
     build_deck()
-    job_id = non_organic_deck("pinned")
+    job_id = run_job(pinned_give=["g2"])                  # its worker runs: no organic scope
     restart()
     assert job_id not in {r["deck_job_id"] for r in lineage_rows()}
     assert deck_status(client, job_id, 7).status_code == 404
 
 
-def test_every_page_write_records_lineage_once_even_when_the_guard_refuses(file_db):
-    db_module.save_trade_page(_row(200, "newer"))
-    assert db_module.save_trade_page(_row(100, "older")) is False        # the supersede guard
-    assert db_module.save_trade_page(_row(300, "newer")) is True         # rewritten: no duplicate
-    rows = {r["deck_job_id"]: r for r in lineage_rows()}
-    assert set(rows) == {"newer", "older"} and len(lineage_rows()) == 2
-    assert {(r["user_id"], r["league_id"], r["scoring_format"], r["request_scope"])
-            for r in rows.values()} == {(UID, LEAGUE, "1qb_ppr", SCOPE)}
+def test_an_organic_deck_records_its_lineage_when_its_worker_starts(p1, spawned):
+    """Once, before the engine runs: in place even if the job never finishes."""
+    with patch.object(server, "_run_trade_job", lambda *a, **k: None):
+        job_id = run_job()
+    assert server._trade_jobs[job_id]["status"] == "running"
+    assert db_module.load_trade_page_for_job(UID, job_id) is None        # no page row
+    assert [(r["deck_job_id"], r["user_id"], r["league_id"], r["scoring_format"], r["request_scope"])
+            for r in lineage_rows()] == [(job_id, UID, LEAGUE, "1qb_ppr", SCOPE)]
+    db_module.record_trade_deck_lineage({"user_id": UID, "deck_job_id": job_id,
+                                         "league_id": LEAGUE, "scoring_format": "1qb_ppr",
+                                         "request_scope": SCOPE})
+    assert len(lineage_rows()) == 1                        # insert-or-ignore
+
+
+def test_a_deck_still_running_at_a_restart_rebases(p1, spawned):
+    """(#369 re-QA) An organic deck running when the deploy restarts the
+    worker never stored a page row; its lineage still proves it organic."""
+    client, _, _ = p1
+    stored_deck = build_deck()
+    with patch.object(server, "_run_trade_job", lambda *a, **k: None):
+        running = run_job(force_fresh=True)                # started, never finishes
+    assert server._trade_jobs[running]["status"] == "running"
+    restart()
+    response = deck_status(client, running, 30)
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["rebased"] is True and body["deck_id"] == stored_deck
+    assert ids(body["cards"]) == p1_ids(0, 30)
+
+
+def test_a_lineage_insert_that_raises_never_touches_the_job_or_its_page(p1, spawned, caplog):
+    caplog.set_level("INFO", logger=server.log.name)
+    with patch.object(db_module, "record_trade_deck_lineage",
+                      MagicMock(side_effect=RuntimeError("lineage down"))):
+        job_id = run_job()
+    assert server._trade_jobs[job_id]["status"] == "complete"
+    assert stored()["deck_job_id"] == job_id               # the page write is intact
+    assert not lineage_rows()
+    assert any(r.getMessage() == f"trade-deck {job_id}: lineage not recorded" for r in caplog.records)
+
+
+def test_flag_off_issues_no_lineage_statement(p1, spawned, statements, monkeypatch):
+    run_job()                                              # the control: on, it records
+    assert any("trade_deck_lineage" in s for s in statements)
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
+    statements.clear()
+    run_job(force_fresh=True)
+    server._evict_trade_page_store()
+    assert not [s for s in statements if "trade_deck_lineage" in s]
 
 
 @pytest.mark.parametrize("dialect", ["postgresql", "sqlite"])
