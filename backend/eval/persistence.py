@@ -45,6 +45,14 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "n_total": run.n_total,
         "n_included": run.n_included,
         "excluded": dict(run.excluded),
+        "exclusion_rule_version": run.exclusion_rule_version,
+        "config": run.config,          # pinned model_config values + its SHA-256 (R5.2 (a))
+        "missing_inputs_decks": run.missing_inputs_decks,
+        "partial_run_decks": run.partial_run_decks,
+        "in_flight_decks": run.in_flight_decks,
+        "pack_integrity_decks": run.pack_integrity_decks,
+        "incomplete_decks": run.incomplete_decks,
+        "calibration_refresh_decks": run.calibration_refresh_decks,
         "tilt_clipped": run.tilt_clipped,
         "metrics": {
             name: {
@@ -58,6 +66,14 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         },
         **(extra or {}),
     }
+
+
+def record_rule_version(record: dict) -> int:
+    """The exclusion-rule version a persisted record was graded under
+    (replay.EXCLUSION_RULE_VERSION). Records written before the field
+    existed are version 1. Before comparing records, pass these through
+    replay.rule_version_note and carry its warning when it returns one."""
+    return record.get("exclusion_rule_version", 1)
 
 
 def append_run(record: dict) -> str:

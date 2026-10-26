@@ -1,3 +1,73 @@
+## 2026-10-26 — Timing readout mounted on Settings › Testing; hub row opens for it (#363 ruling 11)
+
+Full gates, not express (scope: #363's trades-200ms scope, head-eng ruling 11; in the 200 ms set on head-eng's call, 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `SettingsTestingScreen` mounts `<TimingReadoutRow />` directly after `<TestingSection>` (default testID `settings.testing.timing-readout`, no gate of its own). The hub's Testing row now shows on `__DEV__ || testing.stage_users || testing.timing_readout`. The flat `SettingsScreen` is unchanged.
+- **New pins:**
+  - `check-settings-ia` T1 (AST): the components-path import, exactly one mount, no props, no conditional, the child right after `<TestingSection>`.
+  - `check-settings-ia` T2 (AST): the `settings.hub.testing` row's condition is an `||` chain that resolves to exactly `__DEV__`, `testing.stage_users` and `testing.timing_readout`, with the row in the branch taken when that is true.
+  - `check-settings-ia` T3 (AST, D-166): `LAUNCHED_FLAG_DEFAULTS` holds neither `testing.timing_readout` nor `testing.stage_users`, and has no spread or computed entry hiding a key.
+  - `check-settings-ia` T4 (AST): `<TimingReadoutRow />` is mounted nowhere in `mobile/src` except the Testing page.
+  - `check-settings-testids`: `settings.testing.timing-readout` in NEW_GATED, pinned to `TimingReadoutRow.tsx`.
+- **Sabotage (each red, then green on restore; files byte-identical after): 18/18.**
+  - T1, 10: import removed, wrong path, aliased, mount removed, mounted twice, testID overridden, own `&&` gate, moved before `TestingSection`, a row in between, moved outside the ScrollView.
+  - T2, 6: gate reverted to `__DEV__ || stage_users`, const bound to the wrong flag key, `||` → `&&`, `stage_users` dropped, `__DEV__` dropped, an extra flag ORed in.
+  - testids, 2: the default id renamed; the default literal removed.
+  - **release-lead QA follow-up (`#407` GO-with-notes), 8 more, all red:** T3 ×5 (`timing_readout` or `stage_users` added at the top or the end of `LAUNCHED_FLAG_DEFAULTS`, and a spread entry); T2 ×2 (the row moved to the false branch of the right condition, and the gate reverted to `__DEV__ || stage_users`); T4 ×1 (a second mount on the hub). Checks renamed from 5a/5b to T1–T4 so they don't collide with #360's numbering.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; all 117 `check-*.js` pass.
+- **Code-walk (App Store build, only `testing.timing_readout` on, hub on):**
+  1. `RootNav.tsx:272-274` mounts the hub.
+  2. `SettingsHubScreen.tsx:94` is true, so `:337` shows the Testing row (`:339`).
+  3. On `SettingsTestingScreen.tsx`, `:50` `TestingSection` renders its "Testing" banner (`TestingSection.tsx:51`) and the unconditional "Test feedback" row (`:53-65`); "Test stages" stays hidden (`:66`, `stage_users` off).
+  4. `:55` renders the readout (`TimingReadoutRow.tsx:30` passes).
+- **TestFlight checklist (operator, `testing.timing_readout` delivered to the device):**
+  1. Settings shows a Testing row; tap it. Under the "Testing" banner and "Test feedback", the last row is "Last tap to first card".
+  2. Before any Find trades tap this session it reads "No trade search yet this session". After a tap that shows a first card it reads "N ms · network · launch", plus " · <serve_source>" (e.g. " · device") when R2 carried one.
+  3. With the flag off (and `stage_users` off), the hub has no Testing row.
+- **Not run yet:** the TestFlight checklist.
+
+## 2026-10-25 — 200 ms path, mobile pieces (#363): pass A, M, C — evidence
+
+Full gates, not express (PRD #339; eng scope v1.3). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Ship gate:** CI 4/4 green on `e362c8ee` (backend-tests, mobile-typecheck with every `check-*.js`, testid-lint, web-structure). CLEAN against `main` @ `3d752296`; main was merged in at `04d50ade`.
+- **Code-walk:** [code-walk-mobile.md](../docs/plans/trade-time-to-suggestion/code-walk-mobile.md), keyed by symbol, with each claim's guard.
+- **New mobile guards:** `check-trade-pages`, `check-trade-buffer`, `check-trade-inplace-reveal`, `check-no-finding-more`, `check-withdraw-in-place`, `check-trade-first-card-events`, `check-timing-readout`, `check-device-first-page`.
+- **Sabotage runs (each red, then green on restore):**
+  - first-card events: 7 named sabotages, plus the `team_review` scoped-only rule;
+  - device page: no max age (1c), a request before the push (3a), an append merge (1h), the demo-start clear (4b), the Retry spoken label (4c);
+  - no-finding-more: 3 sabotages, plus the P36 tally at zero (4d);
+  - `check-usage-trends` 2h: a pin write before the league switch.
+  - Four guards were re-pinned to new code shapes, rule unchanged, each sabotaged once: inplace-reveal 2b, trade-pages 5b, withdraw-in-place 4c/4e, win-now-recovery.
+- **Local runs:** `tsc --noEmit` clean, and testid-lint OK.
+- **Backend:** `test_time_to_suggestion_events.py` (exact R1/R2/R2b/`deck_buffer_empty` prop rows; R1 INTENT; the other three NON_INTENT; join ids survive the digit-run scrub only when id-shaped; sabotaged). Analytics ingest suite: 145 passed. `test_analytics_taxonomy_384` pins follow the R1 widening.
+- **Review:** onboarding-eng approved C's session side (A1 folded in at `92a59dc5`).
+- **release-lead QA round 1 (NO-GO, 10-25), fixed:**
+  - **P1-a** (C's cross-key write on a league/format switch): fixed and pinned by guard 3h, which runs the screen's own save effect, reset and format effect. Sabotages: dropping the key check fails 3h/3i; skipping the unbind fails 3h; skipping the format discard fails 1k/2f2.
+  - **P2-a** (a save that predates a discard): executed case 2j; dropping the time check fails it.
+  - **The #400 kill switch mid-deck** (`nextDeckJob` drops the paging fields; the legacy poller takes over): `check-trade-pages` 6a–6d. Sabotages: keeping the old spread fails 6a/6c; not rebinding fails 6c; the job not holding the merged list fails 5b/6d.
+  - **#339 item 12** (named gate misses: `roster_check_unavailable` and `wait_reason`, ending after 10 s): new guard `check-gate-miss`. Sabotages: generic fallback fails 2a; a wait that never ends fails 1e; a timing promise fails 2c.
+  - **Results:** all 117 `check-*.js` pass, testid-lint OK, `tsc --noEmit` clean.
+  - **Checklist:** code-walk §4 now tests pass A directly (it's live with no kill switch), adds a 6-step **lever-off** block (with paging off the deck ends on the legacy summary, not P30) and the gate-miss states, and gates C on #367–#369 plus `trade.first_page_store`.
+- **Readout:** `TimingReadoutRow` (now showing `serve_source` too) **isn't mounted yet**. onboarding-eng mounts it on #360 after #363.
+- **Not run yet:** the TestFlight checklist (code-walk §4), and app-manager's AC-L1 two-device session (OA-6, 11-07 to 11-09).
+
+## 2026-10-25 — S0 background roster refresh, Sleeper 429 circuit, R10 pick fix (#378)
+
+Full gates ([scope](../docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md)). Server only; D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** CI 4/4 green on `52bcb7fa`. Local full suite 7777 passed, 1 skipped, after R10 (`2a05ca80`). After merging main (`3d752296`): the targeted S0 suites pass, 115/115. They are `test_roster_refresh_async.py` (18), `test_roster_refresh_state.py`, `test_sleeper_backoff.py` (34), `test_traded_picks_unavailable.py` (11), `test_session_init_sleeper_calls.py` and `test_co_owner_rosters.py`.
+- **Pins:** per Sleeper session init, rosters 1, meta 1, total ≤ 8 (was ≤ 10, D-178). A numeric MFL id makes no Sleeper roster or meta call.
+- **Sabotage, each red then restored:**
+  - `maybe_refresh_async` single-flight removed → the barrier test fails `8 == 1`;
+  - the R10 guards removed → 6 of 11 `test_traded_picks_unavailable` fail.
+
+  The 60 s retry cooldown has direct tests (10 s → none, 61 s → one, unparseable → not blocked) but no recorded sabotage run.
+- **Code-walk:** scope evidence section. Covers fresh / stale on failure / no state row, the open circuit, and the `maybe_refresh_async` thread path.
+- **Reviews:** onboarding-eng approved the session-init diff (advisories A1/A2 recorded as R9/R11). The fingerprint contract with trades-eng is at v0.3.
+- **CI note:** one red run on `a860eaa3` was `test_ranking_service_threads`. That's a cross-branch wall-clock flake in #357 (`setswitchinterval(1e-6)` plus a 60 s join), routed to rankings-eng; it doesn't touch S0 code.
+- **Prod check after deploy:** for one app open, the Render log should show at most 8 `→ Sleeper GET` lines after `=== /api/session/init`. A `league_roster_state` row should then exist for that league (`status='fresh'`).
+
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
 - #326: CI 4/4 green on `fd805933`. Value-core, grading and fit suites 230 passed; the redundancy test gains the superflex third-QB and QB-for-QB cases.
