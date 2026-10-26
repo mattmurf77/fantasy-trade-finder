@@ -62,10 +62,11 @@ and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3
 ## Seam: #370 (Calibration refresh decks stop emitting)
 
 **What changes at #370's merge** (PR #370, "Trades packed-evidence stage 1"; this change is ungated, with no knob).
-Source: release-lead #370 QA, 2026-10-26; the `server.py` lines below are #370's, from that note.
-- `_pregenerate_grading_targets` (`server.py:27525` on `origin/main`) passes `source="grading_refresh"` (`:29600`).
-- Those jobs **emit no `trades_generated`** (`:11273`, `:9615`) and **write no `trade_impressions`** (`:10995`,
-  `:9575`). Receipts skip them.
+Source: release-lead #370 QA, 2026-10-26.
+- `_pregenerate_grading_targets` (`server.py:27525` on `origin/main`) passes `source="grading_refresh"`
+  (`server.py:29608` @ #370 `50360031`).
+- Those jobs **emit no `trades_generated`** (`server.py:11275`, `:9615` @ #370 `50360031`) and **write no
+  `trade_impressions`** (`server.py:10994`, `:9575` @ #370 `50360031`). Receipts skip them.
 - Their `deck_source` reads `grading_refresh` instead of `replenish`.
 
 **The series break:** the daily `trades_generated` count drops by about one per Calibration target pair on
@@ -87,8 +88,8 @@ sets `source = "replenish"` at `:24142`), so they **can't be separated from real
 - **R2 and R2b are NON_INTENT:** a system outcome echoing the R1 tap, which already counts the user. They are
   registered in `backend/analytics_taxonomy.py` and listed in `analytics_queries.NON_INTENT_EVENTS` **in the same
   commit** as their emitters.
-- **`trades_generated` is funnel-v2 stage 6** (`analytics_queries.py:414`). The exactly-one rule keeps stage 6 and
-  the PFO guardrail's `props.count` unchanged in meaning.
+- **`trades_generated` is funnel-v2 stage 6** (`analytics_queries.py:422` @ `origin/main` `25e1f838`). The exactly-one
+  rule keeps stage 6 and the PFO guardrail's `props.count` unchanged in meaning.
 
 ## Readout conditions (from analytics-lead; T1–T7)
 
