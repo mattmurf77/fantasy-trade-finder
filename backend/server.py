@@ -3791,14 +3791,35 @@ def _deck_pipeline_digest(names=DECK_PIPELINE_FUNCTIONS, *, source_of=None) -> s
     return digest.hexdigest()[:16]
 
 
+# _trade_experiment_digest's memo: user_id -> (experiments cache generation,
+# engine flag, digest), least recently used first, capped. The experiments
+# cache refreshes at most once a minute, so a user costs at most one
+# evaluation (a users read and experiments' audit insert) per refresh, and a
+# serve inside a generation costs no DB work.
+_experiment_digest_memo: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+_experiment_digest_lock = threading.Lock()
+_EXPERIMENT_DIGEST_MEMO_MAX = 10_000
+
+
 def _trade_experiment_digest(user_id: str) -> str:
     """sha256[:16] over, for each deck-affecting experiment, the user's
     assignment: the experiment's layer and version, the variant and its
     model_overlay. A user who isn't enrolled (the engine off, not running, not
     targeted, or out of bucket: trade_service's deterministic MD5 bucket) hashes
     as "fallback", so moving between enrolled and fallback still mismatches.
-    Uses the same evaluation the trade job uses (experiments.variant_overlay)."""
+    Uses the same evaluation the trade job uses (experiments.variant_overlay).
+
+    Memoized per user on the experiments cache generation (`_cache["at"]`,
+    refreshed at most every 60 s) and the `experiments.engine` flag: the
+    evaluation reruns only when either moves."""
     from . import experiments as _experiments
+    engine_on = is_enabled("experiments.engine")
+    generation = _experiments._load_cache().get("at") if engine_on else None
+    with _experiment_digest_lock:
+        hit = _experiment_digest_memo.get(user_id)
+        if hit is not None and hit[:2] == (generation, engine_on):
+            _experiment_digest_memo.move_to_end(user_id)
+            return hit[2]
     parts = []
     for key in _DECK_EXPERIMENT_LAYERS:
         variant, overlay = _experiments.variant_overlay(user_id, key)
@@ -3808,7 +3829,13 @@ def _trade_experiment_digest(user_id: str) -> str:
         running = next((exp for exp in _experiments._load_cache()["running"]
                         if exp["key"] == key), {})
         parts.append([key, running.get("layer"), running.get("version"), variant, overlay])
-    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    digest = hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    with _experiment_digest_lock:
+        _experiment_digest_memo[user_id] = (generation, engine_on, digest)
+        _experiment_digest_memo.move_to_end(user_id)
+        while len(_experiment_digest_memo) > _EXPERIMENT_DIGEST_MEMO_MAX:
+            _experiment_digest_memo.popitem(last=False)
+    return digest
 
 
 def _trade_page_store_enabled() -> bool:

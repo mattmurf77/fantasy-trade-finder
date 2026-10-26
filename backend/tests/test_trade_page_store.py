@@ -27,7 +27,9 @@ Pinned here:
 Harness: test_i1_serve_filter's `live` (real synchronous worker, stored
 `league_members` and `draft_picks`, in-memory SQLite), with the flag on.
 """
+import collections
 import copy
+import itertools
 import json
 import logging
 import threading
@@ -82,6 +84,7 @@ def p1(live, monkeypatch):
     monkeypatch.setattr(server, "_trade_jobs", {})
     monkeypatch.setattr(server, "_trade_jobs_by_key", {})
     monkeypatch.setattr(server, "_trade_input_epochs", {})
+    monkeypatch.setattr(server, "_experiment_digest_memo", collections.OrderedDict())
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
@@ -769,14 +772,26 @@ RUNNING_AGGRESSION = {"key": "trade.aggression", "layer": "trade", "version": 3,
                       "variants": [{"name": "light"}, {"name": "generous"}]}
 
 
-def _assign(monkeypatch, variant, overlay=None, version=3):
-    """The user's trade.aggression assignment, as experiments reports it."""
+_GENERATIONS = itertools.count(1)
+
+
+def _assign(monkeypatch, variant, overlay=None, version=3, generation=None):
+    """The user's trade.aggression assignment, as experiments reports it, under
+    a new experiments cache generation unless one is given. Returns a list
+    that records every variant_overlay call (a spy)."""
     from backend import experiments
-    monkeypatch.setattr(experiments, "variant_overlay",
-                        lambda unit_id, key, header_attrs=None:
-                        (variant, overlay or {}) if variant else (None, {}))
+    calls = []
+    generation = next(_GENERATIONS) if generation is None else generation
+
+    def variant_overlay(unit_id, key, header_attrs=None):
+        calls.append((unit_id, key))
+        return (variant, overlay or {}) if variant else (None, {})
+
+    monkeypatch.setattr(experiments, "variant_overlay", variant_overlay)
     monkeypatch.setattr(experiments, "_load_cache",
-                        lambda: {"running": [dict(RUNNING_AGGRESSION, version=version)]})
+                        lambda: {"at": generation,
+                                 "running": [dict(RUNNING_AGGRESSION, version=version)]})
+    return calls
 
 
 @pytest.mark.parametrize("built, now, served", [
@@ -808,15 +823,62 @@ def test_a_new_experiment_version_mismatches(p1, spawned, monkeypatch):
     assert "serve_source" not in generate(client, page=1).get_json()
 
 
-def test_the_digest_marks_a_fallback_user():
-    from backend import experiments
-    with patch.object(experiments, "variant_overlay", lambda *a, **k: (None, {})):
-        fallback = server._trade_experiment_digest(UID)
-    with patch.object(experiments, "variant_overlay", lambda *a, **k: ("fair", {})), \
-         patch.object(experiments, "_load_cache", lambda: {"running": [RUNNING_AGGRESSION]}):
-        enrolled = server._trade_experiment_digest(UID)
+def test_the_digest_marks_a_fallback_user(p1, monkeypatch):
+    _assign(monkeypatch, None)
+    fallback = server._trade_experiment_digest(UID)
+    _assign(monkeypatch, "fair")
+    enrolled = server._trade_experiment_digest(UID)
     assert fallback != enrolled and len(fallback) == 16
     assert server._DECK_EXPERIMENT_LAYERS == ("trade.aggression",)
+
+
+# ── The digest memo: no DB work per serve inside a cache generation ─────────
+
+def test_two_serves_in_one_generation_evaluate_once(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    calls = _assign(monkeypatch, "light", generation=7)
+    build_page()
+    server._experiment_digest_memo.clear()       # e.g. another process built the page
+    calls.clear()
+    for _ in range(2):
+        assert generate(client, page=1).get_json()["serve_source"] == "page"
+    assert len(calls) == 1
+
+
+def test_a_generation_change_recomputes(p1, monkeypatch):
+    calls = _assign(monkeypatch, "light", generation=7)
+    first = server._trade_experiment_digest(UID)
+    assert server._trade_experiment_digest(UID) == first and len(calls) == 1
+    calls = _assign(monkeypatch, "light", generation=8)
+    assert server._trade_experiment_digest(UID) == first and len(calls) == 1
+
+
+def test_a_variant_change_after_a_refresh_still_falls_through(p1, spawned, monkeypatch):
+    client, _, _ = p1
+    _assign(monkeypatch, "light", generation=7)
+    build_page()
+    assert generate(client, page=1).get_json()["serve_source"] == "page"
+    _assign(monkeypatch, "generous", generation=8)
+    assert "serve_source" not in generate(client, page=1).get_json()
+
+
+def test_the_memo_is_bounded(p1, monkeypatch):
+    calls = _assign(monkeypatch, "light", generation=7)
+    monkeypatch.setattr(server, "_EXPERIMENT_DIGEST_MEMO_MAX", 3)
+    for n in range(5):
+        server._trade_experiment_digest(f"user-{n}")
+    assert list(server._experiment_digest_memo) == ["user-2", "user-3", "user-4"]
+    server._trade_experiment_digest("user-0")    # evicted: evaluated again
+    assert len(calls) == 6 and len(server._experiment_digest_memo) == 3
+
+
+def test_with_the_engine_off_no_experiment_state_is_read(p1, monkeypatch):
+    from backend import experiments
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "experiments.engine": False})
+    monkeypatch.setattr(experiments, "_load_cache",
+                        lambda: pytest.fail("the experiments cache was read with the engine off"))
+    digest = server._trade_experiment_digest(UID)
+    assert digest == server._trade_experiment_digest(UID)
 
 
 # ── /status cursors into a page-served deck ─────────────────────────────────
