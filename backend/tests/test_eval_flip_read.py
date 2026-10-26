@@ -320,15 +320,30 @@ def test_g7_reports_misses_whose_page_row_was_gone_without_barring_them():
     db = make_db()
     _packed(db, "p", upgrade_misses={"restart_split": 1, "other": 0},
             upgrade_miss_cards={"12": "restart_split", "40": "evicted_split", "41": "other"},
-            upgrade_miss_row_gone={"12": 90, "40": 90, "41": 90})
+            upgrade_miss_row_gone={"12": 90, "40": 90, "41": 90},
+            upgrade_miss_row_gone_why={"12": "replaced", "40": "no_row"})   # 41: unsplit
     _packed(db, "q", upgrade_misses={"restart_split": 1},
             upgrade_miss_row_gone={"7": 90})                     # no cause map: other
     _packed(db, "r", upgrade_misses={"restart_split": 1})        # no row-gone key: 0
     r = flip_read(db.eng, since=SINCE, as_of=EARLY)
     assert (r.g7["row_gone"], r.g7["row_gone_named"]) == (4, 2)
+    assert r.g7["row_gone_split"] == {"replaced": 1, "no_row": 1, "unsplit": 2}   # C4 (d1)
     assert r.g7["status"] == PASS                                # never barred
     assert ("G7 (not barred) row gone: 4 misses whose pack recorded a stored count above "
-            "the card while its page row was gone; 2 of them with a named cause") in render(r)
+            "the card while its page row was gone; 2 of them with a named cause (U4 option "
+            "A's guard); replaced=1, no_row=1, unsplit=2.") in render(r)
+
+
+def test_g7_reports_the_u4_r4_sum_over_the_window_as_indicative_only():
+    """Addendum C4: over the 24 h window the U4-R4 sum (named causes / viewed
+    cards) is indicative; it never changes G7's status, which bars other only."""
+    db = _joins_db()                                   # 2 viewed cards in the window
+    _packed(db, "p", upgrade_misses={"restart_split": 1, "evicted_split": 1, "other": 0})
+    r = flip_read(db.eng, since=SINCE, as_of=LATE)
+    ind = r.g7["indicative"]
+    assert (ind["numerator"], ind["status"]) == (2, "OVER") and ind["denominator"] >= 2
+    assert r.g7["status"] == PASS
+    assert "indicative only, the 7-day ceiling is read with --weekly" in render(r)
 
 
 # ---------------------------------------------------------------------------
@@ -447,12 +462,16 @@ def test_weekly_u4_r4_named_misses_over_viewed_cards(named, status):
     put_deck(db, "liked", 10)
     for i in range(10):
         act(db, "liked", i, "like")
-    _packed(db, "p", upgrade_misses={**named, "other": 3})
+    _packed(db, "p", upgrade_misses={**named, "other": 3},
+            upgrade_miss_row_gone={"40": 90}, upgrade_miss_row_gone_why={"40": "replaced"})
     _packed(db, "old", served_at="2026-10-16T12:00:00+00:00",
-            upgrade_misses={"restart_split": 9})
+            upgrade_misses={"restart_split": 9}, upgrade_miss_row_gone={"50": 90})
     w = weekly_read(db.eng, as_of=LATE)
     u = w["u4_r4"]
     assert (u["numerator"], u["denominator"]) == (sum(named.values()), 100)
+    # C4 (d1): the weekly line reports row_gone too, the old deck's not read
+    assert u["row_gone"] == 1 and u["row_gone_split"] == {"replaced": 1, "no_row": 0,
+                                                           "unsplit": 0}
     assert u["causes"] == dict(sorted(named.items())) and u["status"] == status
     assert u["ceiling"] == fr.U4_R4_CEILING == 0.01 and fr.U4_R4_CAUSES is None
 
@@ -530,7 +549,7 @@ def test_the_cli_reads_a_sqlite_file_read_only_and_never_writes(tmp_path, capsys
             "| 0 / 3 (1 final packed + 2 pack-less) | 0; INSUFFICIENT below 10 final packed "
             "| PASS |") in out
     assert "| G3 | outcomes joining no card / on a ghost row | 0 / 0 of 7" in out
-    assert "OVERALL: INSUFFICIENT" in out and "U4-R4" not in out
+    assert "OVERALL: INSUFFICIENT" in out and "Weekly ceilings" not in out
 
     # 1 restart split over 7 viewed cards is over 1%: OVER exits 1, over INSUFFICIENT's 3.
     assert main(args + ["--weekly"]) == 1

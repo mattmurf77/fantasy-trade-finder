@@ -265,8 +265,12 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
           "status": FAIL if incomplete else PASS}
 
     misses = _sum_counts(d.upgrade_misses for d in decks)
-    row_gone, row_gone_named = _row_gone(packs)
-    g7 = {"upgrade_misses": misses, "row_gone": row_gone, "row_gone_named": row_gone_named,
+    gone = _row_gone(packs)
+    g7 = {"upgrade_misses": misses, "row_gone": gone["total"], "row_gone_named": gone["named"],
+          "row_gone_split": gone["split"],
+          # Addendum C4: the U4-R4 sum over this window is indicative only; the
+          # 7-day ceiling is read weekly. Never part of G7's status.
+          "indicative": _ceiling(_named_misses(misses), _viewed(decks), U4_R4_CEILING),
           "status": FAIL if misses.get(UPGRADE_MISS_OTHER, 0) > 0 else PASS}
 
     conflicts = [d.deck_job_id for d in decks if d.exclusion == WITHDRAWAL_CONFLICT]
@@ -300,7 +304,20 @@ def flip_read(engine, *, since: str, as_of: str, until: str | None = None,
         g1=g1, g2=g2, g3=g3, g7=g7, g8=g8, g9=g9, g10=g10, overall=overall)
 
 
-def _row_gone(packs) -> tuple[int, int]:
+def _named_misses(misses: dict) -> int:
+    """The U4-R4 numerator: the named causes (every cause but `other`, or
+    U4_R4_CAUSES when set), summed."""
+    return sum(n for cause, n in misses.items()
+               if (cause != UPGRADE_MISS_OTHER if U4_R4_CAUSES is None else cause in U4_R4_CAUSES))
+
+
+def _viewed(decks) -> int:
+    """The U4-R4 denominator: viewed non-ghost cards (a viewed outcome joined by
+    impression_id, never a row's existence)."""
+    return sum(1 for d in decks for c in d.cards if not c.is_ghost and c.viewed)
+
+
+def _row_gone(packs) -> dict:
     """U4 option A's guard, reported under G7 and never barred: the misses on
     the stored path whose pack recorded a stored count above the card while its
     page row was gone (run["upgrade_miss_row_gone"], card_index -> the pack's
@@ -308,21 +325,29 @@ def _row_gone(packs) -> tuple[int, int]:
     run["upgrade_miss_cards"] (absent means other). With A on, the named ones
     are named only because the row was gone; with A off, the entries are the
     `other` misses A would name. A page-store bug can't hide behind A.
-    Absent keys count 0; an unreadable pack is G1's."""
+    Addendum C4 (d1) splits it by run["upgrade_miss_row_gone_why"]
+    (card_index -> "replaced", the key's row now holds a newer deck, explained,
+    or "no_row": aged, over budget, or a bug); an entry with no why is
+    "unsplit". Absent keys count 0; an unreadable pack is G1's."""
     total = named = 0
+    split = {"replaced": 0, "no_row": 0, "unsplit": 0}
     for _served_at, header_json in packs.values():
         try:
             run = json.loads(header_json)["run"]
         except (ValueError, KeyError, TypeError):
             continue
         gone, causes = run.get("upgrade_miss_row_gone"), run.get("upgrade_miss_cards")
+        why = run.get("upgrade_miss_row_gone_why")
         if not isinstance(gone, dict):
             continue
         causes = causes if isinstance(causes, dict) else {}
+        why = why if isinstance(why, dict) else {}
         for index in gone:
             total += 1
             named += causes.get(index, UPGRADE_MISS_OTHER) != UPGRADE_MISS_OTHER
-    return total, named
+            reason = why.get(index)
+            split[reason if reason in ("replaced", "no_row") else "unsplit"] += 1
+    return {"total": total, "named": named, "split": split}
 
 
 def _final(deck, pack, as_of: str, in_flight_from: str) -> bool:
@@ -456,12 +481,14 @@ def weekly_read(engine, *, as_of: str) -> dict:
     since = (datetime.fromisoformat(as_of) - WEEK).isoformat()
     decks = load_decks(engine=engine, since=since, as_of=as_of)
     with engine.connect() as conn:
-        packed = set(_pack_rows(conn, since, None, as_of))
+        packs = _pack_rows(conn, since, None, as_of)
+    packed = set(packs)
 
     misses = _sum_counts(d.upgrade_misses for d in decks)
     causes = {cause: n for cause, n in misses.items()
               if (cause != UPGRADE_MISS_OTHER if U4_R4_CAUSES is None else cause in U4_R4_CAUSES)}
-    viewed = sum(1 for d in decks for c in d.cards if not c.is_ghost and c.viewed)
+    viewed = _viewed(decks)
+    gone = _row_gone(packs)
 
     evidenced = [d for d in decks if d.exclusion is None and (
         d.deck_job_id in packed or any(not c.is_ghost and data._delivered_by(c.delivered_at, as_of)
@@ -470,7 +497,9 @@ def weekly_read(engine, *, as_of: str) -> dict:
     delivered = sum(1 for d in evidenced for c in d.cards if not c.is_ghost and c.delivered)
     return {
         "since": since, "as_of": as_of,
-        "u4_r4": {**_ceiling(sum(causes.values()), viewed, U4_R4_CEILING), "causes": causes},
+        "u4_r4": {**_ceiling(sum(causes.values()), viewed, U4_R4_CEILING), "causes": causes,
+                  "row_gone": gone["total"], "row_gone_named": gone["named"],
+                  "row_gone_split": gone["split"]},
         "b4": {**_ceiling(cuts, delivered + cuts, B4_CEILING), "evidenced_decks": len(evidenced)},
     }
 
@@ -538,7 +567,11 @@ def render(r: FlipRead) -> str:
         lines.append(f"G9 no_delivery_evidence decks with an outcome: {', '.join(g9['ids'])}")
     lines.append(f"G7 (not barred) row gone: {g7['row_gone']} misses whose pack recorded a "
                  f"stored count above the card while its page row was gone; "
-                 f"{g7['row_gone_named']} of them with a named cause (U4 option A's guard).")
+                 f"{g7['row_gone_named']} of them with a named cause (U4 option A's guard); "
+                 f"{_pairs(g7['row_gone_split'])}.")
+    lines.append(_ceiling_line("G7 (not barred) indicative U4-R4 over this window, named misses "
+                               "/ viewed cards", g7["indicative"])
+                 + "; indicative only, the 7-day ceiling is read with --weekly.")
     lines.append(f"G10 note: {g10['note']}.")
     lines.append(f"v5 exclusions (decks): {_pairs(r.exclusions)}; partial_run decks "
                  f"(replay): {r.partial_run_decks}; withdrawn_removed_by_reason "
@@ -561,7 +594,9 @@ def render(r: FlipRead) -> str:
         lines += ["", f"Weekly ceilings, decks served {w['since']} to {w['as_of']} "
                       "(BL-001 monitor, via head-bizops):",
                   _ceiling_line("U4-R4 named upgrade misses / viewed cards", w["u4_r4"])
-                  + f" [{_pairs(w['u4_r4']['causes'])}]",
+                  + f" [{_pairs(w['u4_r4']['causes'])}]; row gone "
+                  f"{w['u4_r4']['row_gone']} ({w['u4_r4']['row_gone_named']} named; "
+                  f"{_pairs(w['u4_r4']['row_gone_split'])}), not barred",
                   _ceiling_line("B4 disposition_cut removals / delivered-range positions",
                                 w["b4"])]
     return "\n".join(lines)
