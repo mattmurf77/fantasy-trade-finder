@@ -7,6 +7,8 @@ Harness: test_deferred_evidence's `deferred` (p1's real worker and routes,
 flag on, evidence writes inline).
 """
 import json
+
+import pytest
 from pathlib import Path
 
 import backend.database as db_module
@@ -570,3 +572,49 @@ def test_a_corrupt_candidate_pack_is_refused_never_read_as_empty():
     big = {**packed, "candidates_packed": b"\0" * (v2.MAX_CANDIDATE_BYTES + 1)}
     with pytest.raises(ValueError, match="candidate_pack_bytes"):
         v2._candidate(big, "u", "l", "job")
+
+
+# ── R4.2 U8: full rows per served deck, re-measured on the real owner path ──
+
+from backend.tests.test_deferred_evidence import owner_deck  # noqa: E402
+from backend.tests.test_owner_batch_publication import sized_exclusive  # noqa: E402,F401  (fixture)
+from backend.tests.test_owner_generator_routes import harness, owner_harness, worker  # noqa: E402,F401
+from backend.tests.test_owner_only_routes import exclusive  # noqa: E402,F401  (fixture)
+
+
+@pytest.mark.parametrize("sized_exclusive", [2354], indirect=True)   # B15's measured production deck
+def test_u8_full_rows_per_served_deck_with_packing(sized_exclusive, monkeypatch):
+    """Stage 1 wrote a full row for every card at the first delivery; packed,
+    the first 30 (and the viewed ones later), the rest in one pack row."""
+    fixture, count = sized_exclusive
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda *, target, args: target(*args))
+    real_init = server._DeckEvidence.__init__
+
+    def packed_init(self, *a, **k):
+        real_init(self, *a, **k)
+        self.packed = True
+
+    monkeypatch.setattr(server._DeckEvidence, "__init__", packed_init)
+    original = server._ghost_holdout_active
+
+    def telemetry_on(*args):                               # the worker helper turns it off
+        monkeypatch.setattr(server, "_suggestion_telemetry_enabled", lambda: True)
+        return original(*args)
+
+    monkeypatch.setattr(server, "_ghost_holdout_active", telemetry_on)
+    job, ev, engine = owner_deck(fixture, monkeypatch, deferred_mode=True)
+    with ev.lock:
+        stage1_bytes = sum(len(json.dumps(server._unpack_row(p))) for _, p in ev.rows.values())
+    server._deck_evidence_delivered(ev, job["cards"][:30])
+    written = [r for r in rows(engine) if not r["is_ghost"]]
+    row_bytes = sum(len(json.dumps({k: v for k, v in r.items()})) for r in written)
+    pack = pack_of(engine, job["job_id"])
+    [cand] = rows(engine, db_module.deck_candidate_sets_table)
+    _r, members = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
+        cand["cand_pack_version"], bytes(cand["candidates_packed"])))
+    print(f"\n[U8] owner deck cards={count}: full rows written {len(written)} "
+          f"({row_bytes / 1024:.0f} KiB), against stage 1's {count} ({stage1_bytes / 2**20:.1f} MiB raw); "
+          f"pack cards_blob {len(pack['cards_blob']) / 1024:.1f} KiB + header {len(pack['header_json'])} B; "
+          f"candidate set {len(members)} members packed {len(cand['candidates_packed']) / 1024:.1f} KiB "
+          f"vs JSON {len(json.dumps(members)) / 1024:.1f} KiB")
+    assert len(written) == 30 and pack["card_count"] == count
