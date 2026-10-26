@@ -54,8 +54,14 @@ interface Props {
    *  Default off — linked flow byte-identical. */
   entry?: boolean;
   /** Entry mode only: the minted session's user, delivered BEFORE the
-   *  import runs so the host can pin it into useSession. */
-  onEntrySession?: (user: { user_id: string; display_name: string }) => void;
+   *  import runs so the host can pin it into useSession. `account_only` /
+   *  `username` are forwarded from the mint (absent from older servers). */
+  onEntrySession?: (user: {
+    user_id: string;
+    display_name: string;
+    account_only?: boolean;
+    username?: string;
+  }) => void;
 }
 
 const LABEL: Record<LinkPlatform, string> = { mfl: 'MFL', fleaflicker: 'Fleaflicker' };
@@ -103,10 +109,11 @@ export default function PlatformLinkSheet({
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [authResult, setAuthResult] = useState<MflAuthImportResult | null>(null);
   // Entry mode only: the password, held OUTSIDE React state (never rendered,
-  // never in `dirty`, never logged) for exactly one more use — the
-  // best-effort re-store of the MFL credential under the freshly minted
-  // session, so "Send in MFL" works later. Dropped the moment that call is
-  // made, on reset, and whenever the flow leaves the sign-in path.
+  // never in `dirty`, never logged) for the league tap that follows: the
+  // mint (the login is the proof of team ownership), then the best-effort
+  // re-store of the MFL credential under the freshly minted session, so
+  // "Send in MFL" works later. Dropped the moment that re-store is made, on
+  // reset, and whenever the flow leaves the sign-in path.
   const entryMflPassRef = useRef<string>('');
 
   // Teardown PRD 01-01 audit hit (same hazard as EspnLinkSheet), flag
@@ -261,6 +268,8 @@ export default function PlatformLinkSheet({
         onEntrySession?.({
           user_id: minted.user_id,
           display_name: minted.display_name,
+          account_only: minted.account_only,
+          username: minted.username,
         });
       }
       const res = await linkPlatformLeague({
@@ -367,15 +376,21 @@ export default function PlatformLinkSheet({
     setBusyTeamId(lg.league_id);
     setError(null);
     try {
+      // The sign-in path's login rides the mint as the proof of ownership.
+      // Read, not cleared: the re-store below still needs it.
       const minted = await entryPlatformMint({
         platform: 'mfl',
         leagueInput: lg.league_id,
         year: yr,
         teamId: franchiseId,
+        username: mflUser.trim(),
+        password: entryMflPassRef.current,
       });
       onEntrySession?.({
         user_id: minted.user_id,
         display_name: minted.display_name,
+        account_only: minted.account_only,
+        username: minted.username,
       });
       const res = await linkPlatformLeague({
         platform,

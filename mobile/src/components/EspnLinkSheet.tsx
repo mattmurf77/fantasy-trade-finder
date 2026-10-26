@@ -48,8 +48,14 @@ interface Props {
    *  entry user doesn't have yet. Default off — linked flow byte-identical. */
   entry?: boolean;
   /** Entry mode only: the minted session's user, delivered BEFORE the import
-   *  runs so the host can pin it into useSession. */
-  onEntrySession?: (user: { user_id: string; display_name: string }) => void;
+   *  runs so the host can pin it into useSession. `account_only` /
+   *  `username` are forwarded from the mint (absent from older servers). */
+  onEntrySession?: (user: {
+    user_id: string;
+    display_name: string;
+    account_only?: boolean;
+    username?: string;
+  }) => void;
 }
 
 // Copy for the backend's `espn_auth_required` 403. Two honest variants
@@ -373,6 +379,8 @@ export default function EspnLinkSheet({
         onEntrySession?.({
           user_id: minted.user_id,
           display_name: minted.display_name,
+          account_only: minted.account_only,
+          username: minted.username,
         });
       }
       const res = await linkEspnLeague({

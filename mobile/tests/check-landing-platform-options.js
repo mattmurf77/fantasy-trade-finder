@@ -230,7 +230,9 @@ assert(
 );
 
 // V2.3 — sheets: mint BEFORE the canonical import, inside pickTeam.
-const espnPick = espnSheet.match(/async function pickTeam[\s\S]{0,900}?await linkEspnLeague/);
+// 1200, not 900: the mint's onEntrySession call forwards account_only /
+// username since 2026-10-26 (check-mfl-entry-proof.js), which lengthens the span.
+const espnPick = espnSheet.match(/async function pickTeam[\s\S]{0,1200}?await linkEspnLeague/);
 assert(
   !!espnPick && /if \(entry\) \{[\s\S]{0,400}entryPlatformMint\(/.test(espnPick[0]),
   'V2: ESPN pickTeam mints the entry session before the canonical import',
