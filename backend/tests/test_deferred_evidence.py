@@ -123,6 +123,7 @@ def deferred_deck(n, *, ghost_every=0, job_id=None, store=True, complete=True, p
         job_id = job_id or archive_id(False)               # deterministic, not a C8 deck
         job.update(job_id=job_id, append_only=True)
         server._trade_jobs[job_id] = job
+        server._note_deck_held(job_id)                     # as the kickoff notes the real id
         server._trade_jobs_by_key[job["key"]] = job_id
     cards, players = synthetic_cards(n + (n // ghost_every if ghost_every else 0))
     final = cards

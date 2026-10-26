@@ -273,6 +273,8 @@ def restart():
     server._deck_withdrawn_cache.clear()
     server._deck_pack_states.clear()
     server._deck_live_stamped.clear()
+    server._deck_held.clear()                              # U4: a new process held none of them
+    server._deck_evicted_at.clear()
 
 
 def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_every_card(deferred):
@@ -289,7 +291,7 @@ def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_ev
     assert row["card_count"] == len(served) == 120 and [c["card_index"] for c in cards] == list(range(120))
     assert row["served_at"] == written[0]["served_at"]     # the first delivery (F2)
     assert run["deliveries"] == [[29, row["served_at"]]] and run["page_store"] == 1
-    assert run["retired"] is False and run["upgrade_misses"] == 0
+    assert run["retired"] is False and run["upgrade_misses"] == {"restart_split": 0, "evicted_split": 0, "other": 0}
     job = server._trade_jobs[job_id]
     assert (run["values_snapshot_id"], run["config_ref"]) == (job["values_snapshot_id"],
                                                               job["request_signature"])
@@ -365,26 +367,8 @@ def test_r42_after_a_restart_a_stored_card_upgrades_from_the_blob(deferred):
     got = by_index(engine)[(0, 50)]
     assert got["evidence_tier"] == "viewed" and got["assets_json"]
     assert "give_value_band" in json.loads(got["features_json"])
-    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == 0
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {"restart_split": 0, "evicted_split": 0, "other": 0}
     assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 50)]
-
-
-def test_r42_a_card_past_the_stored_ones_viewed_after_a_restart_is_a_counted_miss(deferred):
-    """models-lead (b): delivered past the stored 90 before a deploy, viewed
-    from the device after it. Its row comes from the packed card itself."""
-    client, engine, _ = deferred
-    job_id, *_ = packed_deck(120)
-    status(client, job_id, 0)
-    status(client, job_id, 90)                             # the live job's page past the stored 90
-    restart()
-    view(job_id, 95)
-    got = by_index(engine)[(0, 95)]
-    assert got["evidence_tier"] == "viewed" and got["assets_json"] is None
-    assert set(json.loads(got["features_json"])) <= contract.FROZEN_INPUT_KEYS | {"page_store"}
-    run, cards = unpack(pack_of(engine, job_id))
-    assert run["upgrade_misses"] == 1
-    assert json.loads(got["features_json"])["give_value"] == cards[95]["give_value"]
-    assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
 
 
 def test_s8_an_upgrade_past_the_recorded_deliveries_writes_no_delivery(deferred, monkeypatch, caplog):
@@ -697,17 +681,18 @@ def test_interleaved_header_updates_from_two_instances_lose_nothing(deferred):
     b = server._deck_pack_state(job_id, UID)               # instance B, the same stored header
     assert a is not b and a.checksum == b.checksum
     a.run["deliveries"] = first + [[59, "2026-10-27T00:00:59+00:00"], [89, "2026-10-27T00:01:29+00:00"]]
-    a.run["upgrade_misses"] = 1
+    a.run["upgrade_misses"] = {"restart_split": 1, "evicted_split": 0, "other": 0}
     assert server._deck_pack_commit(job_id, a)
     b.run["deliveries"] = first + [[59, "2026-10-27T00:09:59+00:00"], [74, "2026-10-27T00:01:14+00:00"]]
-    b.run.update(retired=True, retired_at="2026-10-27T01:00:00+00:00")
+    b.run.update(retired=True, retired_at="2026-10-27T01:00:00+00:00",
+                 upgrade_misses={"restart_split": 0, "evicted_split": 2, "other": 0})
     assert server._deck_pack_commit(job_id, b)             # a CAS miss, merged, retried
     run, _cards = unpack(pack_of(engine, job_id))          # the checksum holds
     assert run["deliveries"] == first + [[59, "2026-10-27T00:00:59+00:00"],
                                          [74, "2026-10-27T00:01:14+00:00"],
                                          [89, "2026-10-27T00:01:29+00:00"]]
-    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (
-        1, True, "2026-10-27T01:00:00+00:00")
+    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (    # summed per key
+        {"restart_split": 1, "evicted_split": 2, "other": 0}, True, "2026-10-27T01:00:00+00:00")
 
 
 def test_a_replenished_decks_pack_carries_its_deck_source(deferred, monkeypatch):
@@ -1230,3 +1215,537 @@ def test_the_first_write_builds_the_pack_cards_outside_the_deck_lock(deferred, m
     assert len(held) == 120 and not any(held)
     _run, cards = unpack(pack_of(engine, job_id))
     assert [c["card_index"] for c in cards] == list(range(120)) and 7 in withdrawals(engine)
+
+
+# ── models-lead addendum A, U4: the counted residual (R2, R5) ───────────────
+
+NO_MISSES = {"restart_split": 0, "evicted_split": 0, "other": 0}
+
+
+def eval_cards(eng, as_of=None):
+    """Eval v5's view of the one deck in `eng`, as the goldens compare it:
+    per card its index, ghost flag, delivery, displayed position, outcome
+    flags and contract-key dict, a full row's attribution columns merged in
+    (eval reads them off the row's columns; a packed card carries them in the
+    pack). Impression ids are left out: they differ by storage form."""
+    from backend.eval.data import card_dict, load_decks
+    on_rows = {r["impression_id"]: r for r in rows(eng)}
+    [deck] = load_decks(engine=eng, as_of=as_of)
+    out = []
+    for c in deck.cards:
+        d = card_dict(c)
+        if c.impression_id in on_rows and not c.is_ghost:
+            d.update({k: on_rows[c.impression_id][k] for k in server._PACK_ATTRIBUTION_COLUMNS})
+        out.append((c.card_index, c.is_ghost, c.delivered, c.position, c.viewed, c.liked, c.passed,
+                    {k: v for k, v in d.items() if k in evidence_pack.CONTRACT_KEYS}))
+    return deck, out
+
+
+def copy_db(engine, drop_impressions=()):
+    """A second in-memory database holding `engine`'s rows, less the
+    deck_impressions rows named."""
+    from sqlalchemy import create_engine, insert
+    other = create_engine("sqlite:///:memory:")
+    db_module.metadata.create_all(other)
+    with other.begin() as conn:
+        for table in db_module.metadata.sorted_tables:
+            got = [r for r in rows(engine, table)
+                   if not (table is db_module.deck_impressions_table
+                           and r["impression_id"] in drop_impressions)]
+            if got:
+                conn.execute(insert(table), got)
+    return other
+
+
+def cleanup_ticks(monkeypatch, n):
+    """Run the real _cleanup_loop for n ticks (its sleep returns at once)."""
+    import time as real_time
+    ticks = []
+
+    class FakeTime:
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+        def sleep(self, _seconds):
+            ticks.append(1)
+            if len(ticks) > n:
+                raise _StopLoop
+
+    monkeypatch.setattr(server, "time", FakeTime())
+    with pytest.raises(_StopLoop):
+        server._cleanup_loop()
+    monkeypatch.setattr(server, "time", real_time)
+
+
+def evict(monkeypatch, job_id):
+    """The cleanup loop evicts the deck's job (finished past _JOB_RETENTION),
+    in this process: no restart."""
+    import time as real_time
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id]["finished_at"] = real_time.monotonic() - server._JOB_RETENTION - 60
+    cleanup_ticks(monkeypatch, 1)
+    assert job_id not in server._trade_jobs
+
+
+def an_old_instance_delivers(job_id, last, at):
+    """A deploy overlap: the old instance, still serving, records a page
+    boundary on the deck's pack after this (new) process started."""
+    state = server._load_pack_state(job_id, UID)
+    state.run["deliveries"] = server._merge_deliveries(state.run["deliveries"], [[last, at]])
+    assert server._deck_pack_commit(job_id, state)
+    server._deck_pack_states.clear()
+
+
+@pytest.mark.parametrize("how, cause", [
+    ("restart", "restart_split"), ("deploy_overlap", "restart_split"), ("re_fork", "restart_split"),
+    ("eviction", "other"), ("eviction_named", "evicted_split"), ("held_here", "other")])
+def test_u4_a_card_past_the_stored_pages_missing_its_snapshot_is_a_cause_coded_miss(
+        deferred, monkeypatch, caplog, how, cause):
+    """U4-R2/R5, causes by provenance (#428 QA (d)). A card past the stored
+    90 is viewed with no snapshot left; its row comes from the packed card
+    (the U2 id joins the outcome) and the miss is counted by cause:
+    - restart, a deploy overlap (the old instance delivered page 4 after this
+      process started) and a re-fork (a fresh worker): this process never
+      held the deck, so restart_split;
+    - an eviction here: other while _EVICTED_SPLIT_NAMED is off (its default
+      until models-lead rules), evicted_split with it on;
+    - a deck this process built and still holds: other (a defect), at error."""
+    from datetime import datetime, timezone
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    if how != "deploy_overlap":
+        status(client, job_id, 90)                         # the live job's page past the stored 90
+    if how in ("restart", "re_fork"):
+        restart()                                          # a new process (or worker): no jobs, no ledgers
+    elif how == "deploy_overlap":
+        restart()
+        an_old_instance_delivers(job_id, 119, datetime.now(timezone.utc).isoformat())
+    elif how.startswith("eviction"):
+        monkeypatch.setattr(server, "_EVICTED_SPLIT_NAMED", how == "eviction_named")
+        evict(monkeypatch, job_id)
+    else:                                                  # held here: its snapshot is lost in process
+        ev = server._trade_jobs[job_id]["evidence"]
+        with ev.lock:
+            ev.rows.pop(contract.card_impression_id(job_id, 95))
+    with caplog.at_level("WARNING"):
+        view(job_id, 95)
+    got = by_index(engine)[(0, 95)]
+    assert got["evidence_tier"] == "viewed" and got["assets_json"] is None
+    run, cards = unpack(pack_of(engine, job_id))
+    features = json.loads(got["features_json"])       # the packed card less the row's columns
+    assert set(features) == set(cards[95]) - set(server._PACK_LOGGED_COLUMNS) - set(
+        server._PACK_ATTRIBUTION_COLUMNS) - {"served_at"} | {"page_store"}
+    assert contract.FROZEN_INPUT_KEYS & set(cards[95]) <= set(features)
+    assert run["upgrade_misses"] == {**NO_MISSES, cause: 1}
+    assert features["give_value"] == cards[95]["give_value"]
+    assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
+    [line] = [r for r in caplog.records if "upgrade miss cause=" in r.getMessage()]
+    assert f"cause={cause} job={job_id} index=95 stored=90" in line.getMessage()
+    assert line.levelname == ("ERROR" if cause == "other" else "WARNING")
+
+
+def test_u4_the_classification_hook():
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(server, "_deck_held", {"held": None, "gone": None})
+        mp.setattr(server, "_deck_evicted_at", {"gone": "2026-10-27T02:00:00+00:00"})
+        cause = server._upgrade_miss_cause
+        assert cause("elsewhere", 95, 90) == "restart_split"           # another process built it
+        assert cause("elsewhere", 89, 90) == "other"                   # within the stored pages
+        assert cause("elsewhere", 60, 60) == "restart_split"           # the deck's own count
+        assert cause("held", 95, 90) == "other"                        # built here, still here
+        assert cause("gone", 95, 90) == "other"                        # evicted: off by default
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
+        assert cause("gone", 95, 90) == "evicted_split"
+        assert cause("gone", 89, 90) == "other"
+
+
+def pages_stored(monkeypatch, pages):
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_pages_stored", float(pages))
+    assert server._trade_pages_stored() * server._trade_page_size() == 30 * pages
+
+
+def test_u4_a_deck_that_stored_fewer_cards_splits_at_its_own_count(deferred, monkeypatch):
+    """#428 QA (c): the knob was 2 pages when the deck was built, so it stored
+    60 cards. Card 70, delivered past them and viewed after a restart, is a
+    restart_split (a constant 90 would have called it other)."""
+    client, engine, _ = deferred
+    pages_stored(monkeypatch, 2)
+    job_id, *_ = packed_deck(120)
+    for cursor in (0, 30, 60):
+        status(client, job_id, cursor)
+    assert unpack(pack_of(engine, job_id))[0]["stored_count"] == 60
+    restart()
+    view(job_id, 70)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_u4_raising_the_knob_after_store_never_turns_a_split_into_other(deferred, monkeypatch):
+    """#428 QA (c): the deck stored 90. The knob is raised to 4 pages after,
+    and a rebuild replaced its page row: its pack's stored_count (90) still
+    classifies card 95, never the knobs now (120)."""
+    from sqlalchemy import delete
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    restart()
+    pages_stored(monkeypatch, 4)
+    with engine.begin() as conn:                           # a rebuild replaced its page row
+        conn.execute(delete(db_module.trade_page_store_table))
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_u4_the_stored_count_order():
+    """The deck's job (or page row) first, then its pack, then the knobs now."""
+    assert server._deck_stored_count(75, {"stored_count": 90}) == 75
+    assert server._deck_stored_count(None, {"stored_count": 90}) == 90
+    assert server._deck_stored_count(None, {}) == server._trade_pages_stored() * server._trade_page_size()
+
+
+def test_u4_a_deck_this_process_builds_is_noted_held(deferred, monkeypatch):
+    """The provenance ledger's source: the kickoff notes each flag-on deck it
+    admits, so a miss on it in this process is never a restart_split. A
+    flag-off job carries no evidence and isn't noted."""
+    job_id = run_job()
+    assert server._trade_jobs[job_id]["evidence_mode"] == "deferred" and job_id in server._deck_held
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
+    off = run_job(force_fresh=True)
+    assert off != job_id and off not in server._deck_held
+
+
+def test_u4_restart_splits_assume_one_worker_per_instance():
+    """models-eng: "this process never held the deck" means a restart only
+    with one gunicorn worker per instance (no --preload, which would share a
+    master's import)."""
+    # Plain text, no PyYAML (not a CI dependency): the web service's block runs
+    # from its "- type: web" line to the next "- type:" line.
+    lines = (REPO / "render.yaml").read_text().splitlines()
+    starts = [i for i, line in enumerate(lines) if line.strip().startswith("- type:")]
+    [web_at] = [i for i in starts if lines[i].split(":", 1)[1].strip() == "web"]
+    block = lines[web_at:min([i for i in starts if i > web_at], default=len(lines))]
+    [command_line] = [line for line in block if line.strip().startswith("startCommand:")]
+    command = command_line.split(":", 1)[1].split()
+    message = ("restart_split's provenance rule assumes one worker per instance: add a "
+               "cross_worker cause to _upgrade_miss_cause (models-eng's reader is cause-generic) "
+               "before raising --workers")
+    assert command[command.index("--workers") + 1] == "1", message
+    assert "--preload" not in command and not any(c.startswith("--preload") for c in command), message
+
+
+def test_u4_the_restart_split_path_replays_the_same_upgraded_or_left_packed(deferred, monkeypatch):
+    """U4-R5: the upgraded-vs-packed identity, on the restart path itself.
+    Cards past the stored 90 are viewed after a restart (restart_split rows
+    from the pack), with a stored card upgraded from the blob beside them.
+    Eval reads the deck the same with those rows as with them left packed:
+    every card dict, outcome and position, the exposure curve, and every
+    registered scorer's replay (estimates and IPS weights)."""
+    import backend.eval.replay as replay_mod
+    import backend.value_model as vm
+    from backend.eval.replay import evaluate, exposure_curve
+    from backend.eval.scorers import get_scorer, registered_names
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    for cursor in (0, 30, 60, 90):
+        status(client, job_id, cursor)
+    restart()                                              # a new process: never held the deck
+    for index, action in ((50, "like"), (91, "like"), (95, "pass"), (99, "viewed"), (104, "like")):
+        view(job_id, index, action)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 4}
+    misses = [contract.card_impression_id(job_id, i) for i in (91, 95, 99, 104)]
+    assert {r["impression_id"] for r in rows(engine) if r["card_index"] >= 90} == set(misses)
+    upgraded, left_packed = engine, copy_db(engine, drop_impressions=misses)
+    from datetime import datetime, timedelta
+    as_of = (datetime.fromisoformat(pack_of(engine, job_id)["served_at"])
+             + timedelta(hours=26)).isoformat()                 # past v5's 25 h in-flight window
+
+    (deck_u, cards_u), (deck_p, cards_p) = eval_cards(upgraded, as_of), eval_cards(left_packed, as_of)
+    assert deck_u.exclusion is None and deck_p.exclusion is None
+    assert cards_u == cards_p
+    assert [c[0] for c in cards_u if any(c[4:7])] == [50, 91, 95, 99, 104]
+    assert exposure_curve([deck_u]) == exposure_curve([deck_p])
+    model = vm.ValueModel(
+        like_head=vm.LogisticHead(weights={"bias": -0.4, "value_delta": 0.8, "pref_long": 1.1,
+                                           "pref_short": -0.6, "partner_rate": 0.9}),
+        propose_head=None, propose_constant=0.2, partner_rates={}, global_like_rate=0.3,
+        position_mean=0.4, trained_at="t", train_date="t")
+    monkeypatch.setattr(vm, "load_latest_model", lambda: model)
+    real = replay_mod._estimate
+    for name in registered_names():
+        out = []
+        for deck in (deck_u, deck_p):
+            weights = []
+            monkeypatch.setattr(replay_mod, "_estimate",
+                                lambda *a, w=weights: w.append(list(a[1])) or real(*a))
+            run = evaluate(get_scorer(name, seed=3), [deck], ess_min=1, bootstrap=50, seed=2)
+            out.append((repr(run), weights))
+        assert out[0] == out[1], name
+
+
+def test_p2_1_a4_a_live_deck_replays_like_the_same_deck_stored_as_a_pack(deferred, prepared_ok,
+                                                                        monkeypatch):
+    """models-lead B2 (a4), the storage-form identity: a value-core
+    page-scoped deck's stamped live rows replay under eval v5 exactly as the
+    same deck stored as a pack with the same deliveries: card dicts,
+    delivered and dense displayed positions (a W0 withdrawal removed), the
+    exposure curve, and every registered scorer's replay. Only the impression
+    ids differ (uuid rows vs the contract id), so the comparison maps them."""
+    from sqlalchemy import create_engine, insert
+    from backend.eval import data as eval_data
+    if not hasattr(eval_data, "PAGE_STORE_MARKER"):
+        pytest.skip("eval v5 (#417) isn't merged here")
+    import backend.eval.replay as replay_mod
+    import backend.value_model as vm
+    from backend.eval.replay import evaluate, exposure_curve
+    from backend.eval.scorers import get_scorer, registered_names
+    client, engine, _ = deferred
+    job_id, ids = live_deck(120)
+    own_all_but(engine, 40)                                # W0 on page 2
+    status(client, job_id, 0)
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    for index, action in ((0, "like"), (3, "pass"), (10, "viewed"), (31, "like"), (45, "pass")):
+        server._save_deck_outcome_safe(ids[index], action, acting_user_id=UID)
+    live_rows = sorted((r for r in rows(engine) if r["deck_job_id"] == job_id),
+                       key=lambda r: r["card_index"])
+    assert sorted(r["card_index"] for r in live_rows if r["delivered_at"]) == [
+        i for i in range(60) if i != 40]
+    to_contract = {r["impression_id"]: contract.card_impression_id(job_id, r["card_index"])
+                   for r in live_rows}
+    served_at = live_rows[0]["served_at"]
+    deliveries = [[29, live_rows[0]["delivered_at"]], [59, live_rows[30]["delivered_at"]]]
+
+    # The same deck, stored as S8 stores a pack: full first-30 rows, every card packed.
+    cards = [server._pack_card(r, served_at) for r in live_rows]
+    run = {"values_snapshot_id": "vsn", "config_ref": "cfg", "built_at": served_at,
+           "deliveries": deliveries, "page_store": 1, "retired": True,
+           "retired_at": deliveries[-1][1],
+           "upgrade_misses": {"restart_split": 0, "other": 0}}
+    packed = evidence_pack.pack_run(run, cards, card_count=len(cards))
+    stored = create_engine("sqlite:///:memory:")
+    db_module.metadata.create_all(stored)
+    with stored.begin() as conn:
+        conn.execute(insert(db_module.deck_impressions_table), [
+            {**r, "impression_id": to_contract[r["impression_id"]], "evidence_tier": "first30"}
+            for r in live_rows if r["card_index"] < 30])
+        conn.execute(insert(PACKS), [{
+            "run_id": job_id, "user_id": UID, "league_id": LEAGUE, "served_at": served_at,
+            "pack_version": packed.pack_version, "header_json": packed.header_json,
+            "cards_blob": packed.cards_blob, "checksum": packed.checksum,
+            "card_count": packed.card_count, "created_at": served_at}])
+        conn.execute(insert(db_module.deck_card_withdrawals_table), [
+            {**{k: v for k, v in w.items() if k != "id"},
+             "impression_id": to_contract[w["impression_id"]]}
+            for w in rows(engine, db_module.deck_card_withdrawals_table)])
+        conn.execute(insert(db_module.deck_outcomes_table), [
+            {**{k: v for k, v in o.items() if k != "id"},
+             "impression_id": to_contract[o["impression_id"]]}
+            for o in outcomes(engine)])
+
+    (deck_live, live_read), (deck_pack, pack_read) = eval_cards(engine), eval_cards(stored)
+    assert deck_live.exclusion is None and deck_pack.exclusion is None
+    assert live_read == pack_read
+    kept = [c for c in live_read if not c[1]]
+    assert 40 not in [c[0] for c in kept] and deck_live.withdrawn_removed == 1
+    assert [c[0] for c in kept if c[2]] == [i for i in range(60) if i != 40]
+    assert [c[3] for c in kept] == list(range(len(kept)))      # dense displayed positions
+    assert exposure_curve([deck_live]) == exposure_curve([deck_pack])
+    model = vm.ValueModel(
+        like_head=vm.LogisticHead(weights={"bias": -0.4, "value_delta": 0.8, "pref_long": 1.1,
+                                           "pref_short": -0.6, "partner_rate": 0.9}),
+        propose_head=None, propose_constant=0.2, partner_rates={}, global_like_rate=0.3,
+        position_mean=0.4, trained_at="t", train_date="t")
+    monkeypatch.setattr(vm, "load_latest_model", lambda: model)
+    real = replay_mod._estimate
+    import dataclasses
+    for name in registered_names():
+        out, misses = [], []
+        for deck in (deck_live, deck_pack):
+            weights = []
+            monkeypatch.setattr(replay_mod, "_estimate",
+                                lambda *a, w=weights: w.append(list(a[1])) or real(*a))
+            evaluated = evaluate(get_scorer(name, seed=3), [deck], ess_min=1, bootstrap=50, seed=2)
+            misses.append(evaluated.upgrade_misses)
+            # Upgrade misses are a pack's own count (#425): compared apart, below.
+            out.append((repr(dataclasses.replace(evaluated, upgrade_misses={})), weights))
+        assert out[0] == out[1], name
+        assert misses[0] == {} and misses[1] and set(misses[1].values()) == {0}, (name, misses)
+
+
+# ── models-lead B4 (C): disposition cuts are withdrawals too ────────────────
+
+def pass_elsewhere(engine, *card_indexes, give=None, receive=None):
+    """The user passed on these cards' exact packages on another surface
+    (a trade_decisions pass): the serve's disposition projection cuts them."""
+    from datetime import datetime, timezone
+    from sqlalchemy import insert
+    with engine.begin() as conn:
+        for i in card_indexes:
+            conn.execute(insert(db_module.trade_decisions_table).values(
+                user_id=UID, league_id=LEAGUE, trade_id=f"elsewhere-{i}",
+                give_player_ids=json.dumps(give or [f"mine{i}"]),
+                receive_player_ids=json.dumps(receive or [f"theirs{i}"]),
+                decision="pass", created_at=datetime.now(timezone.utc).isoformat()))
+
+
+def undo_passes(engine):
+    from sqlalchemy import delete
+    with engine.begin() as conn:
+        conn.execute(delete(db_module.trade_decisions_table))
+
+
+@pytest.mark.parametrize("kind", ["packed", "packed_job_view", "live", "live_prepared"])
+def test_b4_a_cut_never_delivered_is_recorded_w0_and_stays_out(deferred, prepared_ok, kind):
+    """Through both serve hooks: the stored pages (packed, live value core)
+    and the job view (an unstored packed deck, prepared adoption)."""
+    client, engine, _ = deferred
+    if kind.startswith("packed"):
+        job_id, *_ = packed_deck(120, store=kind == "packed")
+        cut_id = contract.card_impression_id(job_id, 40)
+    else:
+        job_id, ids = live_deck(120, kind="prepared" if kind == "live_prepared" else "value_core")
+        cut_id = ids[40]
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 40)
+    page = deck_ids(status(client, job_id, 30).get_json())
+    assert cut_id not in page and len(page) == 29
+    got = withdrawals(engine)
+    assert set(got) == {40}
+    assert (got[40]["reason"], got[40]["served_before"], got[40]["impression_id"]) == (
+        "disposition_cut", 0, cut_id)
+    undo_passes(engine)                                    # sticky, whatever the pass does now
+    assert cut_id not in deck_ids(status(client, job_id, 30).get_json())
+    if kind == "live":
+        assert 40 not in stamped(engine, job_id)
+
+
+def test_b4_a_cut_after_delivery_was_served_before_and_is_distinct_from_i1(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 5)                              # card 5 was delivered on page 1
+    own_all_but(engine, 7)
+    status(client, job_id, 0)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {
+        5: ("disposition_cut", 1), 7: ("i1_dropped", 1)}
+
+
+def test_b4_a_stored_page_cut_after_a_restart_is_recorded(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    pass_elsewhere(engine, 3, 40)                          # 3 delivered before, 40 never
+    client.get(f"/api/trades/status?deck={job_id}&cursor=0", headers=HEADERS)
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {
+        3: ("disposition_cut", 1), 40: ("disposition_cut", 0)}
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_b4_a_cut_lands_with_its_delivery(deferred, side):
+    """The cut rides the delivery's transaction, as I-1's withdrawals do."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 40)
+    with failing(engine, "header", side):
+        status(client, job_id, 30)
+    assert withdrawals(engine) == {} and boundaries(engine, job_id) == [29]
+    status(client, job_id, 60)
+    assert withdrawals(engine)[40]["reason"] == "disposition_cut"
+    assert boundaries(engine, job_id) == [29, 59, 89]
+
+
+def test_b4_the_flag_off_path_records_no_cut(deferred, monkeypatch):
+    client, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
+    job_id = run_job()
+    cards = server._trade_jobs[job_id]["cards"]
+    first = cards[0]
+    pass_elsewhere(engine, 0, give=[p["id"] for p in first["give"]],
+                   receive=[p["id"] for p in first["receive"]])
+    body = client.get(f"/api/trades/status?job_id={job_id}", headers=HEADERS).get_json()
+    assert first["trade_id"] not in {c["trade_id"] for c in body["cards"]}   # cut, as today
+    assert rows(engine, db_module.deck_card_withdrawals_table) == []
+
+
+@pytest.mark.parametrize("kind", ["packed", "live"])
+def test_b4_v5_removes_a_never_delivered_cut_like_an_i1_withdrawal(deferred, prepared_ok, kind):
+    """models-lead B4: eval v5 removes a cut never delivered (served_before 0)
+    exactly as it removes I-1's: gone from the deck, the displayed positions
+    dense, counted in withdrawn_removed."""
+    from datetime import datetime, timedelta, timezone
+    from backend.eval.data import load_decks
+    client, engine, _ = deferred
+    job_id = packed_deck(120)[0] if kind == "packed" else live_deck(120)[0]
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 40)
+    status(client, job_id, 30)
+    as_of = (datetime.now(timezone.utc) + timedelta(hours=26)).isoformat()   # packs settled
+    [deck] = load_decks(engine=engine, as_of=as_of)
+    assert deck.exclusion is None and deck.withdrawn_removed == 1
+    kept = [c for c in deck.cards if not c.is_ghost]
+    assert 40 not in [c.card_index for c in kept]
+    assert [c.position for c in kept] == list(range(len(kept)))
+    assert [c.card_index for c in kept if c.delivered] == [i for i in range(60) if i != 40]
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_b4_a_live_decks_cut_lands_with_its_stamp(deferred, prepared_ok, side):
+    """#428 QA (a): on the live path the cut rides the delivered_at stamp's
+    transaction, both directions; the next serve records both."""
+    client, engine, _ = deferred
+    job_id, ids = live_deck(120)
+    pass_elsewhere(engine, 7)
+    with failing(engine, "live", side):
+        status(client, job_id, 0)
+    assert withdrawals(engine) == {} and stamped(engine, job_id) == {}
+    status(client, job_id, 0)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {7: ("disposition_cut", 0)}
+    assert sorted(stamped(engine, job_id)) == [i for i in range(30) if i != 7]
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_b4_a_stored_path_cut_after_a_restart_lands_with_its_delivery(deferred, side):
+    """#428 QA (a): after a restart (the stored path) the cut rides the
+    page's header CAS, both directions; the next serve records both."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    pass_elsewhere(engine, 40)
+    with failing(engine, "header", side):
+        client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    assert withdrawals(engine) == {} and boundaries(engine, job_id) == [29]
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {40: ("disposition_cut", 0)}
+    assert boundaries(engine, job_id) == [29, 59]
+
+
+@pytest.mark.parametrize("kind", ["stored_pages", "job_view", "live_job_view"])
+def test_b4_a_page_whose_every_card_is_cut(deferred, prepared_ok, kind):
+    """#428 QA (b), the three `or cut` hooks (the stored page, the job view,
+    the live job view): every card on page 2 was acted on elsewhere. The page
+    returns no cards, records all 30 cuts (never delivered: W0), and is not
+    the deck's end: page 3 follows."""
+    client, engine, _ = deferred
+    if kind == "live_job_view":
+        job_id, ids = live_deck(120, kind="prepared")
+    else:
+        job_id, *_ = packed_deck(120, store=kind == "stored_pages")
+        ids = [contract.card_impression_id(job_id, i) for i in range(120)]
+    status(client, job_id, 0)
+    pass_elsewhere(engine, *range(30, 60))
+    body = client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS).get_json()
+    assert body["cards"] == [] and body["status"] == "complete" and body["cursor"] >= 60
+    assert not {"pool_exhausted", "rebased"} & set(body)
+    got = withdrawals(engine)
+    assert sorted(got) == list(range(30, 60))
+    assert {(r["reason"], r["served_before"]) for r in got.values()} == {("disposition_cut", 0)}
+    nxt = client.get(f"/api/trades/status?deck={job_id}&cursor={body['cursor']}", headers=HEADERS)
+    assert deck_ids(nxt.get_json()) == ids[60:90]

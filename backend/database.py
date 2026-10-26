@@ -1295,7 +1295,7 @@ deck_card_withdrawals_table = Table("deck_card_withdrawals", metadata,
     Column("card_index",         Integer, nullable=False),   # the build index
     Column("user_id",            String,  nullable=False),
     Column("league_id",          String,  nullable=False),
-    Column("reason",             String,  nullable=False),   # 'i1_dropped'
+    Column("reason",             String,  nullable=False),   # 'i1_dropped' | 'disposition_cut'
     Column("first_withdrawn_at", String,  nullable=False),   # ISO UTC
     Column("served_before",      Integer, nullable=False),   # 0/1
     Column("impression_id",      String),                    # contract.card_impression_id
@@ -7452,7 +7452,7 @@ def record_deck_withdrawals(rows: list[dict]) -> int:
 
 
 def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
-                          at: str, withdrawn_ids=()) -> None:
+                          at: str, withdrawn=None) -> None:
     """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
     (the value core, prepared adoption), one transaction. Its rows were
     written at build (tier NULL, the page_store marker), so the delivery
@@ -7460,10 +7460,12 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
     (by impression_id): _stamp_delivered with build_rows, so once each (the
     first delivery wins) and never a ghost's. The serve's withdrawals land in
     the same transaction, each card_index from its row and served_before from
-    its delivered_at before this stamp: both are recorded or neither."""
+    its delivered_at before this stamp: both are recorded or neither.
+    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut")."""
     i = deck_impressions_table
+    withdrawn = dict(withdrawn or {})
     delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
-    withdrawn_ids = [x for x in withdrawn_ids if isinstance(x, str)]
+    withdrawn_ids = sorted(x for x in withdrawn if isinstance(x, str))
     with engine.begin() as conn:
         found = {}
         if withdrawn_ids:
@@ -7475,7 +7477,7 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
                          build_rows=True)
         _insert_withdrawals(conn, [
             {"deck_job_id": deck_job_id, "card_index": found[iid].card_index, "user_id": user_id,
-             "league_id": league_id, "reason": "i1_dropped", "first_withdrawn_at": at,
+             "league_id": league_id, "reason": withdrawn[iid], "first_withdrawn_at": at,
              "impression_id": iid,
              "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
             for iid in withdrawn_ids if iid in found])
