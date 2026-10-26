@@ -76,6 +76,7 @@ the operator reaches it by running the server locally.
 - [Tiers](#tiers)
 - [Trades](#trades)
   - [Opt-in paged responses (E2, 2026-10-20)](#opt-in-paged-responses-e2-2026-10-20)
+  - [S0 roster check at serve](#s0-roster-check-at-serve)
   - [First-page store (P1, flag `trade.first_page_store`, 2026-10-20)](#first-page-store-p1-flag-tradefirst_page_store-2026-10-20)
   - [Trade card object](#trade-card-object)
     - [Value-core cards (flag `trade.value_core`)](#value-core-cards-flag-tradevalue_core)
@@ -358,8 +359,8 @@ When roster collection is enabled, stored `features_json.roster_evaluation` incl
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Optional `pinned_give_mode: "all"\|"any"` (#174, default `"any"`): `"all"` requires EVERY pinned give player in each card's give side ("trade this package away"); ignored without `pinned_give_players`; the legacy (pre-v2) engine ignores it like `pinned_receive_players`. Optional `opponent_user_id` (FB #156 Specific Team) scopes the sweep to one league-mate; like pinned jobs it bypasses the shared cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active, and `need_fit` (0–1 automatic positional-need fit, FB-96) when `trade.need_fit` is on. Optional `force: true` skips the complete-fresh job cache **and, since 2026-08-18, supersedes an already-RUNNING job for the same key** (knob `force_supersedes_running`; `0` restores the old behavior) — used by the onboarding post-Quick-Set regeneration (item 7). Previously the in-flight branch ignored `force` and returned the running job verbatim, so the forced regeneration never happened and a board change could not reach the deck. There is no cancellation mechanism, so the superseded worker runs to completion but finishes quietly: no further snapshot publishes, no `deck_impressions` rows and no `trades_generated` event (a deck nobody is served must not enter the signal corpus). It still reaches `status: "complete"`, so a client still polling the OLD `job_id` terminates normally — it simply stops receiving new cards; the forced caller gets a NEW `job_id` in the response and should poll that. **#172 (flag `trades.intent_modes`):** optional `trade_intent: "consolidate"\|"tier_up"\|"tier_down"` — a post-generation shape filter over the completed deck, applied in `trade_service.generate_trades` via `RankingService.tier_for_elo`/`ORDERED_TIERS` on each side's best (highest-tier) asset. `consolidate` = user sends more pieces than they receive AND the best incoming asset is a strictly better tier than the best outgoing asset; `tier_up` = best incoming strictly better tier than best outgoing, piece counts irrelevant; `tier_down` = inverse of consolidate (receives more pieces than sends AND the best outgoing asset is strictly better tier). Unlike pinned/opponent-scoped jobs, an intent-bearing request does NOT bypass the shared per-key job cache — `trade_intent` is instead part of the cache-freshness check (alongside `fairness_threshold`/`outlook_value`), so a repeat request with the SAME intent still hits the cache and only a CHANGED intent forces a fresh job. Omitted or an unrecognized value ⇒ no filter (today's behavior); flag off ⇒ the field is never read and responses are byte-identical. **F1 (flag `deck.signal_v2`):** on a completed job each card additionally carries `impression_id` (its `deck_impressions` row); flag off ⇒ field absent, payload byte-identical. **F3 (flag `deck.fatigue`):** optional `refresh_fatigue: true` clears the caller's SOFT fatigue state (pass-derived multipliers + session demotions — NOT decline suppressions / not-interested / untouchables) via `deck_fatigue_resets` and forces a fresh job ("Refresh my deck"); ignored when the flag is off. Completed snapshots additionally carry `suppression_note: {count, latest_declined_at}` when ≥1 candidate was hidden by a decline-window suppression (absent otherwise — flag-off payloads byte-identical), and the ONE post-window retest card carries `retest: true`. **F7 (flag `deck.exploration`):** completed decks of ≥8 cards carry ONE `wildcard: true` card at the fixed mid-deck slot (positions 4–6) — an off-taste, gate-passing exploration draw; skipped for pinned/opponent-scoped jobs; flag off ⇒ field absent, decks byte-identical. **F9 (flag `deck.first_session`):** a user's FIRST deck for a league (no prior `deck_impressions`/legacy `trade_impressions`) is clamped to 8–10 cards with confidence-passing cards floated into the top 5 unlocked slots, and the snapshot carries `first_deck: true`; EVERY deck built from a board updated since the user's previous deck additionally carries `board_refresh: {updated_since_last_deck: true, ranked_player_count, basis}` (2026-07-26 amendment — omitted when `deck.signal_v2` is off, since the previous-deck timestamp is the F1 spine). Flag off ⇒ both fields absent, payload byte-identical. **#227 pick-swap gate (2026-08-01):** a 1-for-1 card whose BOTH sides are draft picks is never emitted (picks carry zero divergence by construction, so the shape is equal-value churn; it leaked via the #189 relaxed pass's zero surplus floor). Shared gate `trade_service.pick_swap_ok` — enforced in the v2 pair path, the v3 optimizer (before near-miss collection) and the consensus fallback. Deliberately narrow: pick-for-player 1-for-1s, pick+player packages and pure pick-for-pick 2-for-1 consolidations all still pass; `POST /api/trades/asset-ideas` is deliberately NOT gated (a pinned PICK's Lateral ideas are 1-for-1 pick swaps by design — user-requested exploration, not unsolicited suggestions). **G6 presentment rules (flag `trade.presentment_rules`, 2026-08-16 — #304 #336 #339 #340 #341): NO contract change** — no new request params (the R5 bypass derives server-side from existing job fields), no new/renamed card field or enum; the only observable delta is deck composition/size (candidates killed at construction refill from the enumeration; existing empty/no-fair-trades states cover the shrink case). ON ⇒ served decks never contain: a package whose raw-consensus gap is ≥500 AND ≥25% of the larger side (either direction, regardless of the fairness slider); a package moving a position's body count by more than ±1 net (picks uncounted); a heavier side whose excess is explained by a pick inside the [0.8·gap, gap/0.8] band; on UNTARGETED contender/championship decks, a primary received player who neither fills a post-give starting hole nor upgrades the worst starter (targeted jobs — pinned give/receive, `opponent_user_id`, saved `acquire_positions` — bypass this rule only); or a trade equal to an un-retracted awaiting like / `pending`/`accepted` match in the league (windowless — also enforced on likes-you injection; `declined` and retracted may regenerate). Knobs + bands: [config-reference](config-reference.md#trade-presentment-rules-flag-tradepresentment_rules-trade_service_default_cfg-db-seeded). **Engine selection (flag `trade.value_core`, default off):** no request change. When on, the server serves organic, pinned and `opponent_user_id` jobs from the value core ([value-core cards](#value-core-cards-flag-tradevalue_core)) for allowlisted testers (`vc_testers_only` = 1, the default) or for everyone (`vc_testers_only` = 0). Jobs with a `trade_intent`, the demo league and users outside the rollout stay on the legacy engine. A value-core failure ends the job in `status: "error"`; one job never falls back to the legacy engine. Flag and knobs: [config-reference](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off). **E2 opt-in paging (2026-10-20):** body `page: 1` (plus optional `search_id`, echoed) returns at most `trade_page_size` cards with `cursor`, `total_ready` and `replace`; 400 `invalid_page` / `invalid_search_id`. Without `page`, the response is unchanged. See [Opt-in paged responses](#opt-in-paged-responses-e2-2026-10-20) |
-| GET | `/api/trades/status` | Generation job status (completed snapshots carry per-card `impression_id` under `deck.signal_v2`, the F3 `suppression_note`/`retest` fields under `deck.fatigue`, the F7 `wildcard` card under `deck.exploration`, and the F9 `first_deck`/`board_refresh` fields under `deck.first_session`, same as generate). **E2 opt-in:** `cursor=K` returns only the raw cards after index K (at most `trade_page_size`), with `cursor`, `total_ready` and `replace`; 400 `invalid_cursor`. Without `cursor`, the response is unchanged. See [Opt-in paged responses](#opt-in-paged-responses-e2-2026-10-20) |
+| POST | `/api/trades/generate` | Generate trade cards. Optional `pinned_give_players` ("what can I get for X") and, behind `trade.finder_targeting`, `pinned_receive_players` ("what does X cost") — pinned jobs bypass the cache. Optional `pinned_give_mode: "all"\|"any"` (#174, default `"any"`): `"all"` requires EVERY pinned give player in each card's give side ("trade this package away"); ignored without `pinned_give_players`; the legacy (pre-v2) engine ignores it like `pinned_receive_players`. Optional `opponent_user_id` (FB #156 Specific Team) scopes the sweep to one league-mate; like pinned jobs it bypasses the shared cache. Cards may carry `partner_fit` (0–1 counterparty positional fit) when targeting is active, and `need_fit` (0–1 automatic positional-need fit, FB-96) when `trade.need_fit` is on. Optional `force: true` skips the complete-fresh job cache **and, since 2026-08-18, supersedes an already-RUNNING job for the same key** (knob `force_supersedes_running`; `0` restores the old behavior) — used by the onboarding post-Quick-Set regeneration (item 7). Previously the in-flight branch ignored `force` and returned the running job verbatim, so the forced regeneration never happened and a board change could not reach the deck. There is no cancellation mechanism, so the superseded worker runs to completion but finishes quietly: no further snapshot publishes, no `deck_impressions` rows and no `trades_generated` event (a deck nobody is served must not enter the signal corpus). It still reaches `status: "complete"`, so a client still polling the OLD `job_id` terminates normally — it simply stops receiving new cards; the forced caller gets a NEW `job_id` in the response and should poll that. **#172 (flag `trades.intent_modes`):** optional `trade_intent: "consolidate"\|"tier_up"\|"tier_down"` — a post-generation shape filter over the completed deck, applied in `trade_service.generate_trades` via `RankingService.tier_for_elo`/`ORDERED_TIERS` on each side's best (highest-tier) asset. `consolidate` = user sends more pieces than they receive AND the best incoming asset is a strictly better tier than the best outgoing asset; `tier_up` = best incoming strictly better tier than best outgoing, piece counts irrelevant; `tier_down` = inverse of consolidate (receives more pieces than sends AND the best outgoing asset is strictly better tier). Unlike pinned/opponent-scoped jobs, an intent-bearing request does NOT bypass the shared per-key job cache — `trade_intent` is instead part of the cache-freshness check (alongside `fairness_threshold`/`outlook_value`), so a repeat request with the SAME intent still hits the cache and only a CHANGED intent forces a fresh job. Omitted or an unrecognized value ⇒ no filter (today's behavior); flag off ⇒ the field is never read and responses are byte-identical. **F1 (flag `deck.signal_v2`):** on a completed job each card additionally carries `impression_id` (its `deck_impressions` row); flag off ⇒ field absent, payload byte-identical. **F3 (flag `deck.fatigue`):** optional `refresh_fatigue: true` clears the caller's SOFT fatigue state (pass-derived multipliers + session demotions — NOT decline suppressions / not-interested / untouchables) via `deck_fatigue_resets` and forces a fresh job ("Refresh my deck"); ignored when the flag is off. Completed snapshots additionally carry `suppression_note: {count, latest_declined_at}` when ≥1 candidate was hidden by a decline-window suppression (absent otherwise — flag-off payloads byte-identical), and the ONE post-window retest card carries `retest: true`. **F7 (flag `deck.exploration`):** completed decks of ≥8 cards carry ONE `wildcard: true` card at the fixed mid-deck slot (positions 4–6) — an off-taste, gate-passing exploration draw; skipped for pinned/opponent-scoped jobs; flag off ⇒ field absent, decks byte-identical. **F9 (flag `deck.first_session`):** a user's FIRST deck for a league (no prior `deck_impressions`/legacy `trade_impressions`) is clamped to 8–10 cards with confidence-passing cards floated into the top 5 unlocked slots, and the snapshot carries `first_deck: true`; EVERY deck built from a board updated since the user's previous deck additionally carries `board_refresh: {updated_since_last_deck: true, ranked_player_count, basis}` (2026-07-26 amendment — omitted when `deck.signal_v2` is off, since the previous-deck timestamp is the F1 spine). Flag off ⇒ both fields absent, payload byte-identical. **#227 pick-swap gate (2026-08-01):** a 1-for-1 card whose BOTH sides are draft picks is never emitted (picks carry zero divergence by construction, so the shape is equal-value churn; it leaked via the #189 relaxed pass's zero surplus floor). Shared gate `trade_service.pick_swap_ok` — enforced in the v2 pair path, the v3 optimizer (before near-miss collection) and the consensus fallback. Deliberately narrow: pick-for-player 1-for-1s, pick+player packages and pure pick-for-pick 2-for-1 consolidations all still pass; `POST /api/trades/asset-ideas` is deliberately NOT gated (a pinned PICK's Lateral ideas are 1-for-1 pick swaps by design — user-requested exploration, not unsolicited suggestions). **G6 presentment rules (flag `trade.presentment_rules`, 2026-08-16 — #304 #336 #339 #340 #341): NO contract change** — no new request params (the R5 bypass derives server-side from existing job fields), no new/renamed card field or enum; the only observable delta is deck composition/size (candidates killed at construction refill from the enumeration; existing empty/no-fair-trades states cover the shrink case). ON ⇒ served decks never contain: a package whose raw-consensus gap is ≥500 AND ≥25% of the larger side (either direction, regardless of the fairness slider); a package moving a position's body count by more than ±1 net (picks uncounted); a heavier side whose excess is explained by a pick inside the [0.8·gap, gap/0.8] band; on UNTARGETED contender/championship decks, a primary received player who neither fills a post-give starting hole nor upgrades the worst starter (targeted jobs — pinned give/receive, `opponent_user_id`, saved `acquire_positions` — bypass this rule only); or a trade equal to an un-retracted awaiting like / `pending`/`accepted` match in the league (windowless — also enforced on likes-you injection; `declined` and retracted may regenerate). Knobs + bands: [config-reference](config-reference.md#trade-presentment-rules-flag-tradepresentment_rules-trade_service_default_cfg-db-seeded). **Engine selection (flag `trade.value_core`, default off):** no request change. When on, the server serves organic, pinned and `opponent_user_id` jobs from the value core ([value-core cards](#value-core-cards-flag-tradevalue_core)) for allowlisted testers (`vc_testers_only` = 1, the default) or for everyone (`vc_testers_only` = 0). Jobs with a `trade_intent`, the demo league and users outside the rollout stay on the legacy engine. A value-core failure ends the job in `status: "error"`; one job never falls back to the legacy engine. Flag and knobs: [config-reference](config-reference.md#flags--value-core-trade-engine-2026-09-30-ships-off). **E2 opt-in paging (2026-10-20):** body `page: 1` (plus optional `search_id`, echoed) returns at most `trade_page_size` cards with `cursor`, `total_ready` and `replace`; 400 `invalid_page` / `invalid_search_id`. Without `page`, the response is unchanged. See [Opt-in paged responses](#opt-in-paged-responses-e2-2026-10-20). **S0 roster check (2026-10-26):** cards are re-checked against the stored rosters at serve; `error: "roster_check_unavailable"` and the additive `wait_reason: "roster_check"` appear only at `trade_gate_miss_mode` 1 (or through the admin test hook). See [S0 roster check at serve](#s0-roster-check-at-serve) |
+| GET | `/api/trades/status` | Generation job status (completed snapshots carry per-card `impression_id` under `deck.signal_v2`, the F3 `suppression_note`/`retest` fields under `deck.fatigue`, the F7 `wildcard` card under `deck.exploration`, and the F9 `first_deck`/`board_refresh` fields under `deck.first_session`, same as generate). **E2 opt-in:** `cursor=K` returns only the raw cards after index K (at most `trade_page_size`), with `cursor`, `total_ready` and `replace`; 400 `invalid_cursor`. Without `cursor`, the response is unchanged. See [Opt-in paged responses](#opt-in-paged-responses-e2-2026-10-20). **S0 roster check (2026-10-26):** cards are re-checked against the stored rosters at serve; `error: "roster_check_unavailable"` and the additive `wait_reason: "roster_check"` appear only at `trade_gate_miss_mode` 1 (or through the admin test hook). See [S0 roster check at serve](#s0-roster-check-at-serve) |
 | POST | `/api/trades/asset-ideas` | **#172/#189 follow-up (flag `trade.asset_ideas`; 404 when off).** Grouped **Upgrade / Lateral / Downgrade** ideas for ONE pinned asset (player or injected owned pick) — synchronous consensus-basis sweep, no job machinery. Body `{asset_id, direction: "give"\|"receive" (default "give"), league_id?, fairness_threshold? (default 0.50), opponent_user_id?, swap_positions?, lateral_scope?}`. **#403 W2, widened by #402 rev-3 §2, forked by rev-3 QA-B F1 (2026-08-28; the shop window's position chip row applies to every mode — but only on the rev-3 request shape):** optional `swap_positions: [str]` — when present it REPLACES the #198 same-position predicate, with a reach CONDITIONAL on the request shape. **`lateral_scope` present in the body (any valid value — the rev-3 shop client always sends it):** the set constrains **EVERY group's incoming headline piece** (supersedes W2's lateral-only rule / PRD R-11): the upgrade counterpart, the lateral swap, and the downgrade package's headliner (top-value piece; fillers behind it stay any-position) must play a position in the set — the pin's OWN position is included only if selected. **`lateral_scope` absent (every pre-rev-3 caller — including the fielded v1.16.9 inline strip, whose picker UI promised Same-value-only):** the set filters the **lateral group only**; upgrade/downgrade keep #198, byte-identical to the v1.16.9 deploy, so this backend cannot silently change Tier up/down for an old client holding a selection. The receive direction mirrors the same rule on the caller's variable GIVE piece (the incoming pin is fixed). Absent/`null`/`[]` ⇒ all three groups byte-identical to today under either shape. Domain exactly `{QB, RB, WR, TE}` (`" rb "` normalizes to `RB`; first-seen-order dedupe); any other token — including `"PICK"`, rejected deliberately since a PICK pin already runs pure value bands and generic pick rungs carry a fake `position` (#360) — is 400 `{error: "invalid_position", value}`; a non-array body value is 400 `{error: "swap_positions must be an array"}`. No server-side flag gate (HLD D-4): the parameter is inert unless a client sends it. An avoided position (#360) beats a selected one at pool-build — honest empty, never an override. **#402 rev-3 §3 (2026-08-28):** optional `lateral_scope: "band"\|"tier"` (lowercase; absent = `"band"` semantics = today for every existing caller, the single-pin panel included — but the field's PRESENCE doubles as the rev-3 request signature that widens `swap_positions` to all groups (QA-B F1, above); `null` = omitted; any other value is 400 `{error: "invalid_lateral_scope", value}`). `"tier"` — the shop client always sends it — makes the **`lateral` group only** the pin's TIER-mates: every counterpart on the pin's rung of the 8-tier pick-valuation ladder (`ranking_service.tier_for_elo` against `tier_config.json`, each asset bucketed by its own position's bands in the league's scoring format; rung-name equality on `ORDERED_TIERS`, sound cross-position because the bands are pick-value-anchored and identical across all (format, position) blocks by design). **User-facing semantics change for that group:** the ±`asset_ideas_lateral_band` membership, the #108 user-gain gates AND the fairness floor are removed — same-value under tier scope shows tier-mates, not band-mates, so a result may sit visibly above or below the pin's value; the card's two-board verdict (`favors` + `gap`) still prices each idea honestly, and tier laterals are never labeled `relaxed` (membership is the rule, not fairness). A tier-mate above the band legitimately appears in BOTH `upgrade` (band math unchanged under either scope) and `lateral` — idea dedupe is group-scoped. `upgrade`/`downgrade`, caps, ordering, untouchables/not-interested/#360 avoids, and the position predicate above are unchanged under either scope; an unranked pin (below the waivers floor) has zero tier-mates, and a SEED-MISSING asset has no tier at all (QA-B F3: the 1500-Elo pricing default is a placeholder, not a ranking — it never tier-matches in either role, while staying band-eligible exactly as before). Both fields compose (`swap_positions` filters the tier pool). **#250 (2026-08-05):** optional `opponent_user_id` (Specific Team mode) scopes the sweep to that one league-mate — every idea's counterparty is that member; a `"receive"` pin owned by anyone else returns empty groups. `"give"` = pin leaves the caller's roster (all league-mates swept; ideas enumerate the RETURN — **#198 position-centric**: a better SAME-POSITION player back with own-roster sweeteners when needed, a same-position band 1-for-1, or 2-3 lesser pieces of any position with same-position headliners first; PICK pins keep pure value bands); `"receive"` = pin is acquired from its owner (ideas enumerate what the caller GIVES — mirrored groups; the tier-up headliner and lateral swap must play the pin's position). → `{asset, asset_value, direction, basis: "consensus", groups: {upgrade: [idea], lateral: [idea], downgrade: [idea]}}` where idea = `{counterparty_user_id, counterparty_username, give: [player], receive: [player], give_player_ids, receive_player_ids, give_value, receive_value, difference (receive − give; + = caller ahead), fairness, relaxed?, relaxed_reason?, favors, gap}`. **#216 (2026-08-02):** every idea also carries the pick-denominated value verdict — `favors: "give"\|"receive"\|"even"` + `gap: {value, add_to, firsts, pick_equivalent}` — via the same `_value_verdict_payload` single source as `/api/trade/evaluate` and deck cards (`even` ⇔ the idea's `fairness` ≥ 0.95), so the mobile featured-trade window renders `TradeValueBar` from it directly. Gates mirror consensus-basis generation (`package_value_v2` values, fairness ratio, #108 user-gain, #141 filler, consolidation raw-loss, untouchables + not-interested); a group that would be empty refills from the widened #189 band with `relaxed: true, relaxed_reason: "fairness_band"`. **#402 rev-3 QA-B F2 (2026-08-28) — the D-067 dismiss cooldown binds this route:** ideas whose (give-set, receive-set) key matches a live dismiss (`decision: "pass"` via `/api/trades/swipe`, `pass_cooldown_days` window — the same key derivation the deck path excludes on) for the calling user are excluded from every group, both directions, both lateral scopes; a LIKE never excludes here (it is a queued proposal). Deliberate consequence: the single-pin panel stops re-serving shop-dismissed packages too — D-067 compliance, not a regression. Groups capped at `asset_ideas_group_cap` (6), ordered by \|difference\|; deterministic per league snapshot. Classification band: ±`asset_ideas_lateral_band` (10%) around the pin's consensus value (band scope; under `lateral_scope: "tier"` the lateral group classifies by tier instead — upgrade/downgrade keep the band) |
 | POST | `/api/trades/fair-packages` | **#384 W6-B / [D-153] — fairness-only packages for a HAND-BUILT give side (flag `calc.merged_layout`; 404 `feature_disabled` when off, checked before any session work).** The merged calculator's Find a Trade **when the canvas has assets on it**. Operator ruling, verbatim: *"this type of request shouldn't go through our models. It should be a much simpler set of cards solving for fairness only. Similar to how we determine the consolidate and downgrade suggestions already."* So this is one **synchronous** sweep — no job, no polling, no divergence, no lanes, no position semantics. An EMPTY canvas is unchanged and still runs the model deck through `POST /api/trades/generate`. Body `{league_id, give_player_ids[] (required, non-empty), receive_player_ids?, opponent_user_id?, fairness_threshold? (default 0.50)}`. **`give_player_ids` is an ANCHOR, not a seed:** every idea's give side is exactly that set, in that order — the search is over the RETURN (1–3 assets from the named partner's roster, or from every league-mate's when no partner is named; owned picks injected through the same `_inject_owned_picks` helper the generate job and asset-ideas use). **`receive_player_ids` is a PREFERENCE, not a constraint:** ideas containing ALL of them sort first, then by \|difference\| ascending, but an idea that cannot include them is still returned. That is deliberate and it is what retires the `pinned_receive_mode:'all'` half of **Q-029** — a hard receive constraint hands the user an empty deck whenever the canvas names an asset the partner does not own, including the `picks_pool_cap` case, and an empty deck is a worse answer than a ranked one. For the same reason the anchor is priced from the seed board and is **never re-checked against `user_roster`**. → 200 `{basis: "consensus", anchor: {give_player_ids, receive_player_ids, opponent_user_id|null}, ideas: [idea], relaxed: bool, reason?}`. `idea` is the `/api/trades/asset-ideas` idea shape — `{counterparty_user_id, counterparty_username, give: [player], receive: [player], give_player_ids, receive_player_ids, give_value, receive_value, difference, fairness, relaxed?, relaxed_reason?, favors, gap}` — **plus `trade_id` and `basis: "consensus"`**. `trade_id` is deterministic, `fairpk_<sha1(user|league|opponent|sorted give|sorted receive)[:16]>`, same construction and same reasoning as `/api/trades/queue`'s `calcq_`: these cards are never registered by a generator, so a swipe / queue / flag on one arrives with an id the in-memory deck has never seen and is rebuilt from the echoed card context by `_reconstruct_swipe_card` (FB-46) — a stable id is what makes a re-swipe ONE row. **Gates are `trade_service.eval_consensus_package`, literally the function `_generate_asset_ideas_impl` calls** (`package_value_v2` pricing, the #108 user-gain gates, #141 `filler_ok`, the consolidation raw-loss cap, the fairness band), so a fair package and an asset idea can never price the same trade differently. Untouchables and not-interested are read for the CALLER: a not-interested asset is excluded from every return, while an untouchable on the GIVE side is the caller's own rule contradicting their own canvas and returns `{ideas: [], reason: "give_untouchable"}`. `relaxed: true` means the whole list came from the widened #189 band because the strict one was empty; each such idea also carries `relaxed: true, relaxed_reason: "fairness_band"`. Flat list capped at `fair_packages_cap` (20) — one swipeable deck, so one cap rather than asset-ideas' per-group cap. Deterministic per league snapshot. `reason` accompanies an EMPTY list only and is diagnostic, **not** a cross-client enum — no client branches on it today (`give_untouchable` | `unknown_asset` | `no_partner` | `unknown_league`); a client that starts switching on it must add it to `cross-client-invariants.md` first. Errors: 400 `{error: "missing_field", field: "give_player_ids"}`, 400 `league_mismatch` (another league's members, rosters and seed board are not on this session), 400 `session missing required state`. Client events: the sweep fires `find_trades_tapped {source: "calculator", mode}` like any other search, and the tap that started it fires `calc_find_a_trade_tapped {path: "fair", …}` |
 | POST | `/api/trades/suppressions/undo` | **F3 (flag `deck.fatigue`; 404 when off).** Lift the caller's NEWEST decline suppression for a league (the deck note's "Undo" — newest-only by design: the note describes the latest decline, and each older window needs its own undo). Body `{league_id?}` (defaults to the session league). Invalidates the cached deck so the client's follow-up regenerate reflects the lift. → `{ok, lifted: 0|1}` |
@@ -498,18 +499,75 @@ unpaged response is unchanged.)
 
 The cursor is stateless: the server keeps no per-client paging state.
 
+### S0 roster check at serve
+
+Every response that carries a job's cards (`POST /api/trades/generate`, `GET
+/api/trades/status`, legacy and paged) re-checks them against the league's
+stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
+§3b). Knobs: [config-reference](config-reference.md#s0-serve-rules-roster-check--backendserverpy-db-seeded).
+
+- **I-1:** a card whose give asset the viewer, or receive asset the opponent,
+  no longer owns is not served. Generic ladder picks (`generic_pick_*`) and a
+  pick with no stored owner row pass unchecked. Dropped cards just aren't in
+  `cards`; the response shape doesn't change. Not dropped: when the league's
+  last session write failed (C-e: Sleeper `stale` with `write_failed`), the
+  stored rows may be outdated, so every card is served unchecked.
+- **Two no-card gate misses, only at `trade_gate_miss_mode` = 1** (default 0
+  until 1.22.0 is distributed; older binaries show either one as "Search
+  failed"). At 0, both are held and the cards are served, as described in
+  config-reference.
+  - **`error: "roster_check_unavailable"`** with `status: "error"` and
+    `cards: []`: the check couldn't run (the league has no stored
+    `league_members` rows, or the read failed). Distinct from an empty deck.
+  - **`wait_reason: "roster_check"`** (additive, present only when the cards
+    are withheld): a Sleeper roster whose last refresh failed and is past
+    `trade_roster_bound_s`. The body is the building shape (`status:
+    "running"`, `cards: []`), so the client keeps polling; every poll re-runs
+    the check, and the cards are served once the background refresh succeeds.
+    Paged: `cursor` echoes the request's and `total_ready` is `0`.
+- **No platform call on the request.** A Sleeper roster past the bound kicks one
+  background refresh after the response is built.
+- **Test hook:** `POST /api/admin/trades/gate-miss-test` forces either gate
+  miss on one league, whatever the knobs say (see the admin routes).
+- **The `[i1] serve` log line (C-a), for the readout.** One line per serve:
+  `league job mode status outcome age_s cards kept dropped_give
+  dropped_receive unchecked_generic unchecked_pick_owner`.
+  - **It's per serve, so per poll.** A legacy client polls `/status` and re-serves
+    the same cards, so a drop rate must **de-duplicate by `job`** (e.g. the last
+    line per job), and only `mode=strict` lines drop cards.
+  - **Drops are split by side, not by asset type.** `dropped_give` counts cards
+    with a moved give asset, `dropped_receive` cards with a moved receive asset,
+    players and picks alike. A card with moved assets on both sides counts once
+    per side, so `dropped_give + dropped_receive` can exceed `cards - kept`.
+  - **`outcome`:** `served` (strict, filtered), `served_lenient`
+    (`trade_i1_mode` 1: checked, nothing dropped), `unchecked_c_e` (C-e:
+    nothing dropped), `roster_check_unavailable` / `roster_gate_miss` (gate
+    misses served), and the same with `_held` (`trade_gate_miss_mode` 0). The
+    `dropped_*` counts are what strict mode would drop, whatever the outcome.
+
 ### First-page store (P1, flag `trade.first_page_store`, 2026-10-20)
 
-**Everything in this section applies only while `trade.first_page_store` is on
-(default off).** With it off, paged and unpaged responses are exactly the E2
-section above, and the `deck` param below is not read
-(`backend/tests/test_trade_page_flag_off.py` and
-`backend/tests/test_trade_pages_p2.py` pin them byte for byte). The server keeps
-the first `trade_pages_stored` × `trade_page_size` cards (90 at the defaults) of
-each user's latest complete organic deck in
+**Everything in this section applies only while the store is on: the flag
+`trade.first_page_store` (default off) and the kill knob
+`first_page_store_enabled` (default 1).** With either off, paged and unpaged
+responses are exactly the E2 section above, and the `deck` param below is not
+read (`backend/tests/test_trade_page_flag_off.py` and
+`backend/tests/test_trade_pages_p2.py` pin them byte for byte). The server
+keeps the first `trade_pages_stored` × `trade_page_size` cards (90 at the
+defaults) of each user's latest complete organic deck in
 [`trade_page_store`](data-dictionary.md#trade_page_store), so page 1 can come
 from one DB read, including after a restart. P2 (below) pages one deck past
 those cards, across rebuilds and restarts, to an honest end.
+
+**The store serve follows the [S0 roster check](#s0-roster-check-at-serve)
+exactly**, with the same knobs: I-1, both gate misses and their shapes
+(`roster_check_unavailable`; the withhold with `wait_reason: "roster_check"`,
+`status: "running"`), only at `trade_gate_miss_mode` 1 and held at 0, the
+admin gate-miss test hook, and the background floor kick past the roster bound.
+At `trade_i1_mode` 0 the store isn't read.
+
+**The store is only read on a paged request**, so `trade_paged_responses` 0
+keeps it out too.
 
 **On every paged response** (`page: 1` on generate, `cursor` on status, from
 the store or from a job): `prefetch_remaining` (model_config
@@ -532,8 +590,8 @@ intent and demo-league searches don't carry it; page those by `job_id`.
 **`POST /api/trades/generate` with `page: 1`.** Only an organic body reads the
 store: no `pinned_give_players`, `pinned_receive_players`, `opponent_user_id`,
 `trade_intent` or `force` (which `refresh_fatigue` implies while `deck.fatigue`
-is on), and not the demo league. Its scope
-is the `fairness_threshold`, to two decimals. Unpaged requests never read it.
+is on), and not the demo league. Its scope is the `fairness_threshold`, to two
+decimals. Unpaged requests never read it.
 
 - **Served from the store:** the envelope plus `serve_source: "page"` and
   `freshness_state`:
@@ -541,41 +599,43 @@ is the `fairness_threshold`, to two decimals. Unpaged requests never read it.
   | Field | Value |
   |---|---|
   | `job_id`, `deck_id` | The job that built the stored deck. Page by `deck_id` on `/status` |
-  | `status` | `"complete"` |
+  | `status` | `"complete"` (a gate miss: S0's status) |
   | `opponents_done`, `opponents_total` | From the stored deck |
-  | `cards` | The stored cards from index 0, at most `trade_page_size`, after the pass/interest projection and the **strict** I-1 ownership filter (a league with no stored rosters is a check failure here) |
-  | `cursor`, `total_ready` | The raw index after the slice; the stored card count |
+  | `cards` | The stored cards from index 0, at most `trade_page_size`, after the pass/interest projection and the S0 roster check |
+  | `cursor`, `total_ready` | The raw index after the slice and the stored card count (a gate miss: `0` and `0`) |
   | `replace` | `false` |
   | `search_id` | Echoed when sent |
   | `serve_source` | `"page"` |
-  | `freshness_state` | `"fresh"`, or `"updating"` when an input change marked the page stale (rankings, preferences, dispositions, roster moves) or the rosters or values moved since it was built. An `"updating"` page still serves its filtered cards; a rebuild runs and the next request gets the rebuilt page |
+  | `freshness_state` | `"updating"` only while a rebuild of a stale page is actually running, and never for an ESPN/MFL/Fleaflicker league (ruling 29); else `"fresh"`. A page is stale when an input change marked it (rankings, preferences, dispositions) or the stored rosters or values moved since it was built. A stale page still serves its checked cards; the rebuild's deck replaces it for the next request |
 
   `suppression_note`, `first_deck` and `board_refresh` are never sent on a
   store response (they belong to the job that ran).
-- **Check failure:** `cards: []`, `freshness_state: "updating"`,
-  `serve_source: "page"`, `cursor: 0`, `total_ready: 0`, and **`job_id` (and
-  `deck_id`) is the rebuild job's id**, with that job's own `status` (normally
-  `"running"`) and `error`. Poll it on `/status` like any job.
-- **A backing job behind every store serve.** When no fresh or matching
-  running job for the scope is in this server process (after a restart, an
-  input change, or on a stale page), the serve starts one (`preserve_running`),
-  so pages past the stored ones come from a live deck. A leading-edge
-  debounce (`trade_prebuild_debounce_s`, default 20 s, from the job's start)
-  joins the scope's running job instead of starting another, so repeated taps
-  never stack jobs. A revoked job never holds the window.
+- **A backing job behind every store serve (AC-L4).** When no fresh or
+  matching running job for the scope is in this server process (after a
+  restart, or after an input change revoked it) and the serve isn't a gate
+  miss, the serve starts one with `preserve_running`, so pages past the stored
+  ones come from a live deck. That kickoff is the one path that starts these
+  jobs (/generate's page serve and P2's `/status?deck=`), so a scope has one
+  live rebuild at a time: a policy-matching running job is joined, also while
+  the roster read fails (S0's A2), and one on moved rosters or values is
+  replaced. A roster change starts nothing itself (P1's lazy rule); the next
+  serve sees the roster move and starts the rebuild. Each start logs one
+  `[trade-page] backing-job start scope=… reason=… job=…` line (reason
+  `page_serve`, `stale`, `rebase` or `status_restart`).
 - **Not served from the store** (today's E2 response, plus
   `prefetch_remaining`): no stored page for the scope; the engine (including
-  the engine modules' code hash and deck-shape version) or the request
-  configuration changed since the build; or the stored cards have expired.
+  the engine modules' code hash and `DECK_PIPELINE_VERSION`) or the request
+  configuration changed since the build; the stored cards have expired; the
+  roster and values read failed (it can't prove the page fresh); or the page is
+  stale while a complete, fresh job for it is in this process.
 
 **`GET /api/trades/status?job_id=X&cursor=K` on a page-served deck** (`X` is the
 `job_id` a store response returned):
 
 - `K < total_ready`: the stored cards from `K`, at most `trade_page_size`,
-  sliced first and filtered after (the E2 raw-index rule), with
-  `serve_source: "page"`, `status: "complete"`, `replace: false` and
-  `freshness_state` (`"updating"` when the page is stale or the rosters moved).
-  A failed check returns `cards: []`, `freshness_state: "updating"`, and
+  sliced first and checked after (the E2 raw-index rule, then the S0 roster
+  check), with `serve_source: "page"`, `status: "complete"`, `replace: false`
+  and `freshness_state` (the rule above). A gate miss gets S0's shape, and
   `cursor` echoes `K`.
 - `K ≥ total_ready`: the job's E2 cursor response if the job is still in this
   server process. Otherwise `cards: []`, `cursor: K`, `total_ready` = the stored
@@ -583,15 +643,24 @@ is the `fairness_threshold`, to two decimals. Unpaged requests never read it.
 - A rebuild replaces the stored row and its job id. A cursor on the older job id
   then reads that job if it is still in this process, else 404, as before P1.
 - P2 leaves this form's resolution unchanged: no `deck_id`, `rebased` or
-  `pool_exhausted`, and past the stored pages a live job's cards still pass
-  E2's lenient I-1 (its cards do carry `trade_hash`). To page across
+  `pool_exhausted` (its cards do carry `trade_hash`). To page across
   rebuilds, use `deck`.
 
 **`GET /api/trades/status?deck=D&cursor=K` (P2): one deck, across rebuilds.**
 `D` is the `deck_id` from page 1 (or from a `rebased` response). `deck` is read
-only alongside `cursor`; `job_id` is then not read. `D` is 1–64 characters of
-`A-Z a-z 0-9 _ -`, else 400 `{error: "invalid_deck"}` (after the `cursor`
-check).
+only alongside an honored `cursor`; `job_id` is then not read. `D` is 1–64
+characters of `A-Z a-z 0-9 _ -`, else 400 `{error: "invalid_deck"}` (after the
+`cursor` check). **With paging killed (`trade_paged_responses` 0) `deck` is
+not read at all**, like `cursor`: the response is the legacy cumulative body
+for `job_id` (which the app always sends with `deck`), byte for byte.
+
+**Every serve below follows the [S0 roster check](#s0-roster-check-at-serve)
+exactly, as the `job_id` form does,** with one roster snapshot per serve:
+dispositions, I-1, both gate misses and their shapes only at
+`trade_gate_miss_mode` 1 (held at 0), the admin gate-miss test hook, the
+`[i1] serve` log line, and the floor kick after the response. A gate miss holds
+the cursor (`cursor` echoes `K`, `total_ready` `0`) and is never an end or a
+rebase: the client keeps polling.
 
 **The scope is the deck's own:** the organic scope (league, scoring format,
 `fairness_threshold`) `D` was built under, if `D` is still in this server
@@ -605,37 +674,32 @@ server resolves, in order:
 1. **The stored pages.** The scope's stored row was built by `D` and
    `K < total_ready`: the stored cards from `K`, exactly the `job_id=` form's
    response above, plus `deck_id`.
-2. **The live deck.** `D` is the requester's job in this server process and
-   has neither errored nor been revoked: E2's cursor response at `K` (the
-   append-only rules and E2's `replace` apply), plus `deck_id`. This is how
-   pages past the stored ones arrive. The **strict** I-1 rule applies here
-   too, as in cases 1 and 3: if the league has no stored rosters or the
-   roster read fails, `cards: []`, `freshness_state: "updating"` and `cursor`
-   echoes `K` (never an end or a rebase; ask again). Once a `complete` `D` is
-   asked at or past its last card, a newer deck for the scope (running or
-   complete) rebases the client onto it, as in case 3; with none, the deck
-   is over (`pool_exhausted`, below).
+2. **The live deck.** `D` is the requester's job in this server process: E2's
+   cursor response at `K` (the append-only rules and E2's `replace` apply),
+   plus `deck_id`. This is how pages past the stored ones arrive. Once a
+   `complete` `D` is asked at or past its last card, a newer deck for the
+   scope (running or complete) rebases the client onto it, as in case 3; with
+   none, see the end of deck below.
 3. **Rebased.** Otherwise the deck changed (a rebuild replaced it, an input
-   change revoked it, it errored or timed out, or a restart dropped it): the
-   scope's current deck from its **first** card, with `rebased: true`,
-   `deck_id` = the new deck, and `cursor` = the raw cards included. The
-   current deck is the stored row when it isn't `D`'s own and would serve on
-   `page: 1` (the same engine/config, expiry and staleness rules, the strict
-   I-1 filter, dispositions and backing job; at a live `D`'s end, only if it
-   is the scope's newest job's row, so two decks never alternate); else the
-   scope's newest job in this process (its first page, also under strict I-1:
-   a league with no stored rosters, or a failed check, serves `cards: []` and
-   `freshness_state: "updating"`); else a backing job is started and its
-   first page returned, often `cards: []` while it runs.
-   An unknown `D`, or another user's, rebases onto the requester's own deck.
+   change revoked it, it errored or timed out, its serving policy moved, or a
+   restart dropped it): the scope's current deck from its **first** card,
+   with `rebased: true`, `deck_id` = the new deck, and `cursor` = the raw cards
+   included. The current deck is the stored row when it isn't `D`'s own and
+   would serve on `page: 1` (the same engine/config, expiry and staleness
+   rules and backing job; at a live `D`'s end, only if it is the scope's
+   newest job's row, so two decks never alternate); else the scope's newest
+   job in this process; else a backing job is started and its first page
+   returned, often `cards: []` while it runs. An unknown `D`, or another
+   user's, rebases onto the requester's own deck. A start that joins a job
+   outside the scope (another fairness, an intent search) is no deck to move
+   to: the response stays on `D` with no cards, and the client asks again.
 
-**This GET can start a trade job.** Case 3's backing job is the one side
-effect of `/status`: after a restart a client paging by `deck` never calls
+**This GET can start a trade job.** Case 3's backing job is `/status`'s one
+side effect: after a restart a client paging by `deck` never calls
 `/generate` again, so without it no live deck would exist for pages past the
-stored ones (AC-L4). It's an organic `preserve_running` kickoff for the
-deck's scope, behind the same debounce as the store serve, so polling joins
-the running job rather than starting more. The rebase onto a stored row
-starts one under the store serve's own rule.
+stored ones (AC-L4). It is the store serve's own kickoff (see "A backing job
+behind every store serve"), so polling joins the running rebuild rather than
+starting more.
 
 **The client keeps what it holds.** On `rebased: true` it appends the cards
 behind its current card, dropping any whose `trade_hash` it already holds,
@@ -644,13 +708,20 @@ same way: deduped, appended, never reordered. If a page comes back short
 after that, it fetches the next page right away. The server never dedupes
 against the client and keeps no per-client state.
 
-**End of deck: `pool_exhausted: true`.** Sent only on case 2, when `D` is
-`complete`, `K` is at or past its last card (and not a `replace`), the
-scope has no other job running or newer, and the scope's stored row is not
-stale. The response carries `cards: []`. It is never sent while `D` runs,
-while a rebuild runs, after a rebuild landed (that rebases instead), or on a
-stale row; otherwise the field is absent. `rebased` is likewise absent
-unless `true`.
+**End of deck: `pool_exhausted: true`.** When a `complete` `D` is asked at or
+past its last card (not a `replace`) and no newer deck exists, one roster
+snapshot decides:
+- a gate miss (S0's knobs and test hook, as above) gets its shape and holds
+  the cursor: never the end;
+- a failed roster read: `D`'s own response, no cards and no end;
+- `pool_exhausted: true`, with `cards: []`, only when `D`'s rosters and values
+  still match the stored rows, its stored row isn't stale, and no job for the
+  key is running (a rebuild or backing job may still add cards);
+- otherwise the rebuild is started and the client is rebased onto it.
+
+It is never sent while `D` runs, during a gate miss, while a rebuild or
+backing job runs, after a rebuild landed, or on a stale row; otherwise the
+field is absent. `rebased` is likewise absent unless `true`.
 
 ### Trade card object
 
@@ -798,7 +869,7 @@ A job served by the value core returns cards in the same shape, serialized by th
 | `lane`, `narrative`, `match_context`, `tier`, `rationale`, `model_arm` | absent. With no card carrying a `lane`, clients hide the lane chips |
 | `likes_you`, `standing_offer_*`, `wildcard`, `retest`, `relaxed`, `sweetener`, `gap_sweetener`, `breaker` | never set: the value-core deck is single-source and the legacy presentation layers do not run on it |
 
-The job snapshot still adds `real_opponent`, `outlook` and `impression_id` per card. The in-memory job also records a `value_core` diagnostics block (`fair`, `served`, `core_ms`, `total_ms`, `truncated_partners`, `budget_exhausted`) that `_trade_job_public_view` does not return. Each card's scores, weights, windows and per-asset values are stored privately in `deck_impressions.valuation_json`, never in a response: see the [data dictionary](data-dictionary.md#value-core-rows-flag-tradevalue_core).
+The job snapshot still adds `real_opponent`, `outlook` and `impression_id` per card. The in-memory job also records a `value_core` diagnostics block (`fair`, `served`, `core_ms`, `total_ms`, `truncated_partners`, `budget_exhausted`, `safety_ceiling_hit`) that `_trade_job_public_view` does not return. A run that hit the safety ceiling is refused (#366, ruling 15): the job finishes with `status: "error"`, `error: "value_core_failed"`, no cards, no impressions, no event and no legacy fallback. Each card's scores, weights, windows and per-asset values are stored privately in `deck_impressions.valuation_json`, never in a response: see the [data dictionary](data-dictionary.md#value-core-rows-flag-tradevalue_core).
 
 ## Open trade calculator (public — no auth)
 
@@ -827,7 +898,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | GET | `/api/sleeper/link` | Link status (never returns the token): `{connected, sleeper_user_id, expires_at, expired}` |
 | DELETE | `/api/sleeper/link` | Disconnect — deletes the stored token → `{connected: false}`. Standard write gate (grace applies) |
 | POST | `/api/trades/propose` | Send a trade. **Hard-verified: requires a verified session (403 `verification_required`), no grace** — highest blast radius (writes into the user's real Sleeper league). Body `{league_id, their_user_id (or their_roster_id), give_player_ids[], receive_player_ids[], impression_id?}` — `give_player_ids` / `receive_player_ids` are **MIXED** arrays (Sleeper player ids AND FTF pick ids: owned `{league}_{season}_{round}_{orig}`, generic `generic_pick_{round}_{tier}`), exactly as the four `SendInSleeperButton` mounts send them. Server resolves **both** roster_ids from one public-rosters fetch (caller's from the linked Sleeper account, counterparty's from `their_user_id` — FTF user_id == Sleeper user_id); the client never asserts its own roster_id. **Picks (#413, 2026-09-02):** the server splits pick ids out (`_is_ftf_pick_asset`) and encodes them itself (`_sleeper_encode_ftf_picks` → `sleeper_write.encode_draft_pick`, `"orig,season,round,from,to"`) against two ground truths — existence is the league's `draft_picks` grid (platform rows, by `pick_id`), the current holder is live `/v1/league/{id}/traded_picks` over "original roster holds by default"; give side must be held by the caller's roster, receive side by the counterparty's. **#428 (2026-09-08) — a third truth, Sleeper's tradable window:** a spent current-season pick keeps both its grid row (a flaked `/drafts` read re-populates it) and its `traded_picks` holder, so `draft_status.sleeper_pick_window` (live `/v1/league/{id}/drafts` + `/v1/league/{id}` for the season; the cached #207 verdict as the D-189 fallback when `/drafts` is empty) refuses it as 422 `sleeper_pick_untradable` before Sleeper answers "These draft picks cannot be traded." Any unresolvable pick refuses the **whole** send (422 below) before anything reaches Sleeper; all four reads happen only when the trade carries a pick. A non-empty `draft_picks` body key is rejected (400) — the client never encodes. → `{status: "proposed", transaction_id}`. **F1 (flag `deck.signal_v2`):** on success, an optional `impression_id` appends a `propose` `deck_outcomes` row (impression-ownership validation applies — see `/api/trades/swipe`). **Personal-market policy (flag `trade.valuation_telemetry`, 2026-09-04):** on success the route also writes one durable `trade_proposals` row — the **final** package, its origin/final trade hashes, `edited_from_source`, and a proposal-time valuation snapshot **recalculated from the final package** rather than copied from the impression (the user may have swapped, dropped or added a piece before sending). Idempotent on a `proposal_event_id` minted **before** the provider call, so a retry after a lost response cannot record the send twice; `provider_transaction_id` is the second key. No request or response field changes, and an optional body `source` (`deck` / `match` / `calculator`) is recorded when present. `policy_eligible` inside the snapshot is **telemetry, not a gate** — a manually constructed trade the finder would never generate is recorded with its reason, never blocked. **P0-7 (2026-08-11) — server-fired analytics, no contract change:** on success the route records the `sleeper_send_succeeded` `user_events` row (`_record_send_success`) with props `{give_n, receive_n, pick_n, from_deck, transaction_id}`, `source:"api"` — since #413 `give_n`/`receive_n` count **players only** and `pick_n` counts encoded picks (before, a pick was counted as a player and `pick_n` was structurally 0). **Server-fired, not client-fired**, because this route is the only place a send is KNOWN to have landed in Sleeper — a client-forgeable success would sit in WAT and funnel stage 8 next to server-authoritative `trade_ratified`. The counterparty's `their_user_id` deliberately does **not** ride in props. Never raises; it is **not** in `database._EVENT_TO_USER_COL`, so `last_trade_proposed_at` (and therefore notification gating) is unchanged. The attempt and the failure are client-fired (`sleeper_send_attempted` / `sleeper_send_failed`) — see [cross-client-invariants § Client analytics event contract](cross-client-invariants.md#client-analytics-event-contract-post-apievents-flag-analyticsclient_events). This route deliberately does **not** fire `trade_sent` — that is the non-Sleeper confirmed-send event (`/api/trades/propose-mfl`); firing both here would double-count funnel stage 8 |
-| POST | `/api/trades/validate` | **#180 pre-send validation** (gated on `trade.send_in_sleeper` OR `trade.send_in_mfl`; read-only, session-authed, no verification needed, never blocks). Body mirrors propose (mixed arrays — player ids AND FTF pick ids). **Platform-routed server-side:** an MFL-linked league id (flag `trade.send_in_mfl`) validates against a fresh MFL `rosters` export (codes: `asset_unmapped` — advisory mirror of the propose route's mapping hard block, players AND picks — plus `pick_moved` (snapshot owner ≠ expected side), `player_moved`, `roster_not_found`); every other league takes the Sleeper path: re-fetches live Sleeper league meta + rosters → `{ok, checked, warnings:[{code, severity: "blocking"\|"warning", message}]}`. Sleeper codes: `league_archived` (season `complete`), `player_moved`, `roster_limit` (post-trade count > lineup+IR+taxi slots), `roster_not_found`, and since #413 the blocking pick advisories `asset_unmapped` (a pick with no `draft_picks` grid row — generic rungs always), `pick_untradable` (#428 — the pick's class is outside Sleeper's tradable window, i.e. that season's draft has already run; one extra `/drafts` read, only on a pick-bearing validate) and `pick_moved` (live `traded_picks` holder is not the offering side) — the advisory mirror of the propose route's three 422s. `player_moved` / `roster_limit` are computed over **players only** (picks are not roster slots); the pick reads happen only when the trade carries a pick. `checked:false` = platform data unreachable — nothing validated. Everything else (locks, deadline, veto, FAAB, roster limits on MFL) is delegated to the platform. See [items/180](feedback/items/180-trade-send-validation/status.md) |
+| POST | `/api/trades/validate` | **#180 pre-send validation** (gated on `trade.send_in_sleeper` OR `trade.send_in_mfl`; read-only, session-authed, no verification needed, never blocks). Body mirrors propose (mixed arrays — player ids AND FTF pick ids). **Platform-routed server-side:** an MFL-linked league id (flag `trade.send_in_mfl`) validates against a fresh MFL `rosters` export (codes: `asset_unmapped` — advisory mirror of the propose route's mapping hard block, players AND picks — plus `pick_moved` (snapshot owner ≠ expected side), `player_moved`, `roster_not_found`); every other league takes the Sleeper path: re-fetches live Sleeper league meta + rosters → `{ok, checked, warnings:[{code, severity: "blocking"\|"warning", message}]}`. Sleeper codes: `league_archived` (season `complete`), `player_moved`, `roster_limit` (post-trade count > lineup+IR+taxi slots), `roster_not_found`, and since #413 the blocking pick advisories `asset_unmapped` (a pick with no `draft_picks` grid row — generic rungs always), `pick_untradable` (#428 — the pick's class is outside Sleeper's tradable window, i.e. that season's draft has already run; one extra `/drafts` read, only on a pick-bearing validate) and `pick_moved` (live `traded_picks` holder is not the offering side) — the advisory mirror of the propose route's three 422s. `player_moved` / `roster_limit` are computed over **players only** (picks are not roster slots); the pick reads happen only when the trade carries a pick. `checked:false` = platform data unreachable — nothing validated, including a pick-bearing validate whose `traded_picks` read fails (S0/R10, #378). Everything else (locks, deadline, veto, FAAB, roster limits on MFL) is delegated to the platform. See [items/180](feedback/items/180-trade-send-validation/status.md) |
 
 `/api/trades/propose` error contract (client maps these to a reconnect prompt / deep-link fallback):
 
@@ -839,7 +910,7 @@ The mobile Trade Calculator's server side ([docs/plans/manual-trade-calculator-p
 | 409 | `sleeper_expired` | Token time-expired → cleared server-side → prompt reconnect (a fresh token fixes it) |
 | 409 | `sleeper_rejected` | Sleeper's write API rejected the (valid-shape) token — 401/403 or auth GraphQL error; cleared server-side. Carries `detail`. Reconnecting re-captures the SAME token, so the client must NOT loop to login — surface the reason. |
 | 503 | `sleeper_unconfigured` | `SLEEPER_TOKEN_KEY` unset/invalid |
-| 502 | `sleeper_write_failed` | Sleeper accepted auth but the write failed (non-auth). Carries `kind` + `detail` + `message` (`== detail`; since #428 `detail` is Sleeper's own sentence — the first GraphQL error `message`, e.g. `These draft picks cannot be traded.` — not a JSON dump of the errors array). |
+| 502 | `sleeper_write_failed` | Sleeper accepted auth but the write failed (non-auth). Carries `kind` + `detail` + `message` (`== detail`; since #428 `detail` is Sleeper's own sentence — the first GraphQL error `message`, e.g. `These draft picks cannot be traded.` — not a JSON dump of the errors array). **S0/R10 (#378):** also returned, before any provider call, when a pick-bearing send's live `traded_picks` read fails (`kind: "network"`, nothing sent). |
 | 422 | `sleeper_pick_unmapped` | **#413.** ≥1 pick asset is not a concrete pick in this league's `draft_picks` grid (generic rung, a well-formed id for a pick outside the synced grid — out-of-horizon or completed-draft season — or a user-asserted ADR-010 row; note a foreign-league or malformed id is not pick-shaped for this league and is treated as a player id, failing downstream as 502 `sleeper_write_failed`). Carries `picks[]` (the offending FTF ids, give-then-receive), `message`, `detail` (`== message`, what fielded catch-alls render). Nothing sent. Reported before `not_owned`. |
 | 422 | `sleeper_pick_untradable` | **#428 (2026-09-08).** ≥1 pick's draft class is outside Sleeper's tradable window — that season's draft has already run (`/drafts` reports `complete`; Sleeper keeps the season in `traded_picks`, so the grid row and the holder check both still pass). Carries `picks[]`, `season_window: [first, last]` (always present — the classes Sleeper is trading, e.g. `[2027, 2029]`; an unknown season abstains and never produces this refusal), `message`, `detail` (`== message`; count-aware, names the spent seasons and the window). Nothing sent. Reported after `unmapped`, before `not_owned`. A `/drafts` flake with no cached #207 verdict excludes nothing (D-089) — the send proceeds and Sleeper stays the final authority (502 with its sentence). |
 | 422 | `sleeper_pick_not_owned` | **#413.** ≥1 pick's current holder (live `traded_picks`, default original roster) is not the side offering it. Same `picks[]` / `message` / `detail` shape. Nothing sent. |
@@ -1167,6 +1238,7 @@ All routes in this section require the `X-Cron-Secret` header (see `CRON_SECRET`
 |---|---|---|
 | GET | `/api/admin/config` | Read all `model_config` entries. **Auth: X-Cron-Secret** |
 | PUT | `/api/admin/config/<key>` | Update one `model_config` value (hot-reloads ranking + trade math). **M-rail (fit-challenger PR-M, additive):** optional body `source` (string, truncated to 64 chars, default `"admin-api"`) attributes the write; the route funnels through `database.set_config`, which stamps `model_config.updated_at` and appends a `model_config_changes` row in the same transaction; the response gains `old_value`. `scripts/set_knob.py` is the blessed operator CLI (`source='operator'`) — it goes through this route because only the route triggers the live `reload_config()` pair. **Auth: X-Cron-Secret** |
+| POST, DELETE | `/api/admin/trades/gate-miss-test` | **S0 test hook (TestFlight step A10).** POST `{league_id, kind: "withhold" | "check_error", ttl_s}` (`ttl_s` in (0, 900]; else 400 `invalid_ttl_s`; 400 `invalid_kind` / `invalid_league_id`) forces one gate miss on that league until the TTL ends, whatever `trade_i1_mode` and `trade_gate_miss_mode` say: `withhold` serves the building shape plus `wait_reason: "roster_check"`, `check_error` serves `status: "error"`, `error: "roster_check_unavailable"`. Applies to serves that carry cards; other leagues are untouched. DELETE `{league_id}` clears it (`{cleared}`). In-process admin test state, lost on restart; set, apply, expiry and clear are logged (`[i1] gate-miss test`). See [S0 roster check at serve](#s0-roster-check-at-serve). **Auth: X-Cron-Secret** |
 | GET | `/api/admin/engine-metrics` | Trade-engine telemetry: like/pass rates by basis, likes-you, deck position, shape, league; match conversion (`?days=30&league_id=`). **Auth: X-Cron-Secret** |
 | PUT | `/api/feedback/admin/<id>/status` | Operator update for a feedback note: `status` (`new\|planned\|in_progress\|fixed\|shipped\|declined`) and/or `severity` (`bug\|polish\|idea`). **Auth: X-Cron-Secret** |
 | GET | `/api/trades/flags/admin` | Operator readback of bad-trade flags (`?since_id=N&limit=M`, max 500) → `{items, count, next_since_id}` — same paging contract as `/api/feedback/admin`. **Auth: X-Cron-Secret** |

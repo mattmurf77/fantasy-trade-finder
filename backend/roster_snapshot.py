@@ -1,30 +1,32 @@
 """Roster fingerprint (``rfp1``) and values snapshot id (``vsn1``): the S0 serve side.
 
-Contract: ``docs/plans/trade-time-to-suggestion/scope-eng-200ms.md`` §6.1
-(trades-eng with platforms-eng; ``vsn1`` as finalized by models-eng). Every
-function here reads stored rows only: no network, and no in-process cache of
-roster data. The one memo is the ``vsn1`` seed part, keyed on
-``(fmt, pool_generation)`` and guarded by the seed map's identity.
+Contract: the roster fingerprint contract v0.4 (FINAL), copied into
+``docs/plans/trade-time-to-suggestion/scope-eng-200ms.md`` §6.1 (trades-eng with
+platforms-eng; ``vsn1`` is models-eng's). Every function here reads stored rows
+only: no network, and no in-process cache of roster data. The process state is
+the ``vsn1`` seed memo (keyed on ``(fmt, pool_generation)`` and the seed map's
+identity) and a "the state table exists" marker per engine, both under one
+module lock.
 
-- ``roster_snapshot(conn, league_id)``: one snapshot of the league's stored
-  ``league_members`` rosters and ``draft_picks`` ownership. ``fp`` keys the
-  trade job's freshness and join checks; ``asset_owner`` drives the I-1 serve
-  filter. Names, timestamps, SQL ids and values are excluded, so a display-name
-  change never moves ``fp``.
-- ``values_snapshot_id(conn, fmt, league_id, pool)``: the format's seed Elo and
-  age per player, plus this league's pick ``pool_value``s.
-- ``snapshot_ids(...)``: both from one read of each table (two indexed reads
-  plus the hashes), for the serve path.
-- ``on_roster_change(league_id, old_fp, new_fp)``: platforms-eng's refresh calls
-  it after committing rows; trades-eng registers its handler from server.py.
+- ``roster_snapshot(conn, league_id, *, pick_source)``: one snapshot of the
+  league's stored rosters, the pick rows the engine prices, and the draft state.
+  ``fp`` keys the trade job's freshness and join checks; ``asset_owner`` drives
+  the I-1 serve filter; ``status``, ``refreshed_at`` and ``age_s`` drive the
+  serve rules (contract §3, §3b). Names, timestamps, SQL ids and values are not
+  fingerprint inputs, so a display-name change never moves ``fp``.
+- ``values_snapshot_id(conn, fmt, league_id, pool, *, pick_source)``: the
+  format's seed Elo and age per player, plus the league's pick ``pool_value``s.
+- ``snapshot_ids(...)``: ``(rfp1, vsn1)`` from one read of each input, for the
+  freshness and join checks.
+- ``on_roster_change(league_id, old_fp, new_fp)``: platforms-eng's refresh
+  calls it after committing rows; trades-eng registers its handler from
+  server.py.
 
-Not settled yet, so marked in code:
-- EXTENSION POINT ``draft``: the ``leagues`` draft-state columns platforms-eng is
-  still naming. Until then the canonical form carries an empty dict.
-- ``refreshed_at`` / ``status``: platforms-eng's ``league_roster_state`` table is
-  not granted yet. It is read only if it exists (checked once per engine);
-  otherwise ``refreshed_at=None`` and ``status="unknown"``. A league with no
-  stored ``league_members`` rows has ``status="missing"``.
+Picks are exactly the rows the engine prices: ``database.load_draft_picks(
+league_id, source=pick_source)``, which applies the contested/orphaned row
+filter itself (``database._excluded_pick_ids``). The caller passes
+``server._pick_read_source()``, because this module never imports server.
+That read uses its own connection, so the inputs aren't one transaction.
 
 Any change to the inputs or the canonical form bumps the prefix (``rfp2``,
 ``vsn2``): old jobs and pages then miss and rebuild, which is safe.
@@ -34,26 +36,38 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import weakref
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable, Mapping
 
-from sqlalchemy import inspect, select, text
+from sqlalchemy import inspect, select
 
-from .database import draft_picks_table, league_members_table
+from . import database as _db
 
 log = logging.getLogger(__name__)
 
 RFP_PREFIX = "rfp1:"
 VSN_PREFIX = "vsn1:"
 
+# Player ids a roster can carry by accident (G-004): never an asset.
+_NOT_PLAYER_IDS = frozenset(("", "None"))
+
 
 @dataclass(frozen=True)
 class RosterSnapshot:
     fp: str                               # "rfp1:" + 32 hex
     asset_owner: Mapping[str, frozenset]  # player_id or pick_id -> owner user_ids
-    refreshed_at: str | None              # platforms-eng's refresh record, when it exists
-    status: str                           # "missing" | the refresh record's status | "unknown"
+    refreshed_at: str | None              # contract §3: the state row's, or a linked league's newest row
+    status: str                           # "missing" | "fresh" | "stale" | "unknown" (contract §3)
+    # Additive to contract §3, for the §3b serve rules:
+    linked: bool = False                  # ESPN/MFL/Fleaflicker (database.is_linked_platform_league)
+    age_s: float | None = None            # seconds since the roster bound's stamp; None = no stamp
+    # Why I-1 must not drop cards on this serve, or None. "c_e": the last
+    # session write failed (C-e), so the stored rows may be outdated and would
+    # cause false drops. A plain `unknown` (no state row) still filters.
+    lenient_reason: str | None = None
 
 
 def _canonical(obj) -> str:
@@ -68,19 +82,6 @@ def _id(value):
     return None if value is None else str(value)
 
 
-def _read_members(conn, league_id):
-    t = league_members_table
-    return conn.execute(select(t.c.user_id, t.c.roster_data)
-                        .where(t.c.league_id == league_id)).all()
-
-
-def _read_picks(conn, league_id):
-    t = draft_picks_table
-    return conn.execute(select(t.c.pick_id, t.c.season, t.c.round, t.c.original_roster_id,
-                               t.c.owner_user_id, t.c.pool_value)
-                        .where(t.c.league_id == league_id)).all()
-
-
 def _player_ids(roster_data) -> list[str]:
     # Malformed JSON reads as an empty roster, as load_league_members does.
     try:
@@ -89,65 +90,136 @@ def _player_ids(roster_data) -> list[str]:
         return []
     if not isinstance(ids, list):
         return []
-    return sorted({str(pid) for pid in ids if pid is not None})
+    return sorted({str(pid) for pid in ids if pid is not None and str(pid) not in _NOT_PLAYER_IDS})
 
 
-# league_roster_state existence, per engine, checked once.
-_roster_state_exists: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+def _parse_stamp(stamp) -> datetime | None:
+    if not stamp:
+        return None
+    try:
+        when = datetime.fromisoformat(str(stamp))
+    except ValueError:
+        return None
+    return when if when.tzinfo is not None else when.replace(tzinfo=timezone.utc)
 
 
-def _refresh_state(conn, league_id):
-    engine = conn.engine
-    exists = _roster_state_exists.get(engine)
-    if exists is None:
-        exists = _roster_state_exists[engine] = inspect(conn).has_table("league_roster_state")
-    if not exists:
-        return None, "unknown"
-    # Column names per contract §4 (league_id, refreshed_at, status). The table
-    # is platforms-eng's and not granted yet; revisit when it lands.
-    row = conn.execute(text("SELECT refreshed_at, status FROM league_roster_state "
-                            "WHERE league_id = :league_id"), {"league_id": league_id}).first()
-    if row is None:
-        return None, "unknown"
-    return _id(row[0]), row[1] or "unknown"
+def _read_members(conn, league_id):
+    t = _db.league_members_table
+    return conn.execute(select(t.c.user_id, t.c.roster_data, t.c.updated_at)
+                        .where(t.c.league_id == league_id)).all()
 
 
-def _roster_snapshot_from_rows(conn, league_id, members, picks) -> RosterSnapshot:
+def _read_picks(conn, league_id, pick_source):
+    # The engine's row set and filter. `conn` is unused: load_draft_picks
+    # opens its own connection.
+    return _db.load_draft_picks(league_id, source=pick_source)
+
+
+def _read_drafted(conn, league_id) -> bool:
+    t = _db.leagues_table
+    status = conn.execute(select(t.c.draft_status)
+                          .where(t.c.sleeper_league_id == league_id)).scalar()
+    # NULL, 'unknown' and 'not_drafted' mean the same for tradability.
+    return status == "drafted"
+
+
+def _roster_fp(members, picks, drafted: bool) -> tuple[str, dict]:
     owners: dict[str, set] = {}
     canon_members = []
-    for user_id, roster_data in members:
+    for user_id, roster_data, _updated_at in members:
         uid = str(user_id)
         ids = _player_ids(roster_data)
         canon_members.append([uid, ids])
         for pid in ids:
-            # A shared roster (co-owners on two rows) gives the asset two owners.
+            # A shared roster (two rows) gives the asset two owners.
             owners.setdefault(pid, set()).add(uid)
     canon_picks = []
-    for pick_id, season, rnd, original_roster_id, owner_user_id, _pool_value in picks:
-        canon_picks.append([str(pick_id), season, rnd, _id(original_roster_id), _id(owner_user_id)])
-        if owner_user_id is not None:
-            owners.setdefault(str(pick_id), set()).add(str(owner_user_id))
+    for pick in picks:
+        owner = _id(pick.get("owner_user_id"))
+        canon_picks.append([str(pick["pick_id"]), pick.get("season"), pick.get("round"),
+                            _id(pick.get("original_roster_id")), owner,
+                            pick.get("source") or _db.PICK_SOURCE_PLATFORM])
+        if owner is not None:
+            owners.setdefault(str(pick["pick_id"]), set()).add(owner)
     canonical = _canonical({
         "v": 1,
         "members": sorted(canon_members, key=lambda row: row[0]),
         "picks": sorted(canon_picks, key=lambda row: row[0]),
-        # EXTENSION POINT: platforms-eng names the `leagues` draft-state columns
-        # that decide pick tradability (contract §2, open item FP). Until then
-        # this stays empty; adding them is an rfp2 bump.
-        "draft": {},
+        "draft": {"drafted": drafted},
     })
-    refreshed_at, status = _refresh_state(conn, league_id)
+    return RFP_PREFIX + _hash32(canonical), {k: frozenset(v) for k, v in owners.items()}
+
+
+# Engines known to have `league_roster_state`. Positives only: a missing table
+# is re-checked on the next read (release-lead's #367 note).
+_lock = threading.Lock()
+_state_table_seen: "weakref.WeakSet" = weakref.WeakSet()
+
+
+def _has_state_table(conn) -> bool:
+    engine = conn.engine
+    with _lock:
+        if engine in _state_table_seen:
+            return True
+    if not inspect(conn).has_table("league_roster_state"):
+        return False
+    with _lock:
+        _state_table_seen.add(engine)
+    return True
+
+
+def _read_state(conn, league_id):
+    if not _has_state_table(conn):
+        return None
+    t = _db.league_roster_state_table
+    return conn.execute(select(t.c.refreshed_at, t.c.status, t.c.last_error_code)
+                        .where(t.c.league_id == league_id)).first()
+
+
+def roster_snapshot(conn, league_id: str, *, pick_source: str,
+                    import_fresh_s: float = 86400.0, now: datetime | None = None) -> RosterSnapshot:
+    """The league's stored rosters, priced pick rows and serve status, read now.
+
+    ``status`` follows contract §3:
+      - no ``league_members`` rows: ``missing``;
+      - a linked platform: ``fresh`` while its newest row is within
+        ``import_fresh_s`` (model_config ``trade_import_roster_fresh_s``), else
+        ``stale``, with ``refreshed_at`` = that newest row's ``updated_at``;
+      - Sleeper with a ``league_roster_state`` row: that row's status, except a
+        failed session write (``write_failed``) reads ``unknown`` with
+        ``lenient_reason="c_e"`` (C-e: serve without I-1 drops);
+      - Sleeper without a row, or without the table: ``unknown`` (I-1 still
+        filters against the stored rows).
+    ``age_s`` measures the roster bound (§3b): from ``refreshed_at``, else from
+    the newest ``league_members.updated_at``.
+    """
+    lid = str(league_id)
+    members = _read_members(conn, lid)
+    fp, owners = _roster_fp(members, _read_picks(conn, lid, pick_source), _read_drafted(conn, lid))
     if not members:
-        status = "missing"
-    return RosterSnapshot(fp=RFP_PREFIX + _hash32(canonical),
-                          asset_owner={k: frozenset(v) for k, v in owners.items()},
-                          refreshed_at=refreshed_at, status=status)
+        return RosterSnapshot(fp, owners, None, "missing")
+    now = now or datetime.now(timezone.utc)
+    stamps = [(when, raw) for when, raw in ((_parse_stamp(m[2]), m[2]) for m in members) if when]
+    newest = max(stamps)[1] if stamps else None
 
+    def age(stamp):
+        when = _parse_stamp(stamp)
+        return None if when is None else max(0.0, (now - when).total_seconds())
 
-def roster_snapshot(conn, league_id: str) -> RosterSnapshot:
-    """The league's stored rosters and pick ownership, read now."""
-    return _roster_snapshot_from_rows(conn, league_id, _read_members(conn, league_id),
-                                      _read_picks(conn, league_id))
+    if _db.is_linked_platform_league(lid):
+        newest_age = age(newest)
+        status = ("fresh" if newest_age is not None and newest_age <= float(import_fresh_s)
+                  else "stale")
+        return RosterSnapshot(fp, owners, _id(newest), status, linked=True, age_s=newest_age)
+    row = _read_state(conn, lid)
+    if row is None:
+        return RosterSnapshot(fp, owners, None, "unknown", age_s=age(newest))
+    refreshed_at, status, error_code = row
+    lenient_reason = None
+    if status == _db.ROSTER_STATE_STALE and error_code == "write_failed":
+        status, lenient_reason = "unknown", "c_e"
+    return RosterSnapshot(fp, owners, _id(refreshed_at), status or "unknown",
+                          age_s=age(refreshed_at or newest), lenient_reason=lenient_reason)
 
 
 # fmt -> (pool generation, the seed map it was computed from, canonical seed JSON)
@@ -156,7 +228,8 @@ _seed_memo: dict = {}
 
 def _seed_json(fmt: str, pool: Mapping, generation) -> str:
     seed = pool.get("seed") or {}
-    hit = _seed_memo.get(fmt)
+    with _lock:
+        hit = _seed_memo.get(fmt)
     if generation is not None and hit is not None and hit[0] == generation and hit[1] is seed:
         return hit[2]
     ages = {str(p.id): getattr(p, "age", None) for p in pool.get("players") or ()}
@@ -164,12 +237,14 @@ def _seed_json(fmt: str, pool: Mapping, generation) -> str:
                   key=lambda row: row[0])
     out = _canonical(rows)
     if generation is not None and seed:
-        _seed_memo[fmt] = (generation, seed, out)
+        with _lock:
+            _seed_memo[fmt] = (generation, seed, out)
     return out
 
 
-def _values_snapshot_id_from_rows(fmt: str, pool: Mapping, picks, generation) -> str:
-    pick_rows = sorted(([str(row[0]), row[5]] for row in picks), key=lambda row: row[0])
+def _values_snapshot_id(fmt: str, pool: Mapping, picks, generation) -> str:
+    pick_rows = sorted(([str(p["pick_id"]), p.get("pool_value")] for p in picks),
+                       key=lambda row: row[0])
     # Byte-identical to _canonical({"v": 1, "fmt": fmt, "seed": [...], "picks": [...]})
     # (sort_keys order: fmt, picks, seed, v), so the memoized seed JSON is reused
     # as-is. test_roster_snapshot pins the equality.
@@ -179,22 +254,23 @@ def _values_snapshot_id_from_rows(fmt: str, pool: Mapping, picks, generation) ->
 
 
 def values_snapshot_id(conn, fmt: str, league_id: str, pool: Mapping, *,
-                       generation=None) -> str:
+                       pick_source: str, generation=None) -> str:
     """``vsn1`` for (fmt, league): the pool's seed Elo and age per player, plus
-    this league's ``draft_picks`` pool values.
+    the ``pool_value`` of the pick rows the engine prices.
 
     ``pool`` is ``g_universal_by_format[fmt]`` as server.py holds it, read only.
     ``generation`` is ``pool_generation()``; with it, the seed part is memoized.
     """
-    return _values_snapshot_id_from_rows(fmt, pool, _read_picks(conn, league_id), generation)
+    return _values_snapshot_id(fmt, pool, _read_picks(conn, str(league_id), pick_source), generation)
 
 
 def snapshot_ids(conn, fmt: str, league_id: str, pool: Mapping, *,
-                 generation=None) -> tuple[RosterSnapshot, str]:
-    """``(roster_snapshot, values_snapshot_id)`` from one read of each table."""
-    picks = _read_picks(conn, league_id)
-    snap = _roster_snapshot_from_rows(conn, league_id, _read_members(conn, league_id), picks)
-    return snap, _values_snapshot_id_from_rows(fmt, pool, picks, generation)
+                 pick_source: str, generation=None) -> tuple[str, str]:
+    """``(rfp1, vsn1)`` from one read of each input: members, picks, draft state."""
+    lid = str(league_id)
+    picks = _read_picks(conn, lid, pick_source)
+    fp, _owners = _roster_fp(_read_members(conn, lid), picks, _read_drafted(conn, lid))
+    return fp, _values_snapshot_id(fmt, pool, picks, generation)
 
 
 # ── on_roster_change: platforms-eng notifies, trades-eng reacts ───────────────
@@ -202,19 +278,29 @@ _roster_change_handlers: list[Callable[[str, str | None, str], None]] = []
 
 
 def register_roster_change_handler(handler: Callable[[str, str | None, str], None]) -> None:
-    if handler not in _roster_change_handlers:
-        _roster_change_handlers.append(handler)
+    with _lock:
+        if handler not in _roster_change_handlers:
+            _roster_change_handlers.append(handler)
 
 
 def on_roster_change(league_id: str, old_fp: str | None, new_fp: str) -> None:
-    """Call after committing refreshed rows, with the fp before and after.
+    """Tell trades-eng a league's stored rosters moved (contract §4.3).
 
-    Handlers run in registration order. A failing handler is logged and never
-    blocks the others or the caller's refresh.
+    Call contract (A3):
+      - Call it after the refreshed rows are committed, and after the
+        compare-and-set on ``league_roster_state.roster_fp`` succeeds.
+      - Call it from the session-init daemon thread, never the request thread.
+      - The caller holds no app locks and no open DB transaction.
+      - ``old_fp`` is None on a league's first stamp. Equal fps are a no-op.
+      - A double call (two concurrent inits) is safe: handlers debounce.
+    Handlers must never raise; each is also caught and logged here, so one
+    failure never blocks the others or the caller's refresh.
     """
     if old_fp == new_fp:
         return
-    for handler in list(_roster_change_handlers):
+    with _lock:
+        handlers = list(_roster_change_handlers)
+    for handler in handlers:
         try:
             handler(league_id, old_fp, new_fp)
         except Exception:

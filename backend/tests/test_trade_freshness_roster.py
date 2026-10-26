@@ -224,7 +224,69 @@ def test_running_job_is_still_joined_after_a_display_name_change(live):
     assert _generate(client) == (running["job_id"], False)
 
 
+def test_a_failed_read_keeps_the_running_job(live):
+    """A2 (contract §4.4): a failed fingerprint read can't prove a running job
+    stale, so it is kept (joined, never superseded); a failed read still never
+    makes a completed job fresh."""
+    client, _ = live
+    job = _complete_job()
+    running = _register_running_copy(job)
+    with patch.object(roster_snapshot, "snapshot_ids", MagicMock(side_effect=RuntimeError("db"))):
+        assert server._trade_current_fingerprints(LEAGUE, "1qb_ppr") is None
+        assert server._trade_running_matches(
+            running, running["fairness_threshold"], running["outlook_value"],
+            request_signature=running["request_signature"], fingerprints=None)
+        assert _generate(client) == (running["job_id"], False)
+    assert "superseded" not in running
+    assert not server._trade_job_is_fresh(job, job["fairness_threshold"], job["outlook_value"],
+                                          request_signature=job["request_signature"],
+                                          fingerprints=None)
+
+
 # ── on_roster_change → the trades handler ────────────────────────────────────
+
+def test_the_handler_is_debounced_by_fingerprint():
+    """A3: only jobs not built on `new_fp` are revoked, so a double call, or a
+    call landing after a rebuild, changes nothing for the rebuilt job."""
+    def park(job_id, roster_fp):
+        job = {"job_id": job_id, "key": (job_id, "league-d", "1qb_ppr"), "status": "complete",
+               "cards": [], "error": None, "roster_fp": roster_fp, "values_snapshot_id": "vsn1:x"}
+        with server._trade_jobs_lock:
+            server._trade_jobs[job_id] = job
+            server._trade_jobs_by_key[job["key"]] = job_id
+        return job
+
+    old, rebuilt = park("j-old", "rfp1:old"), park("j-new", "rfp1:new")
+    try:
+        roster_snapshot.on_roster_change("league-d", "rfp1:old", "rfp1:new")
+        roster_snapshot.on_roster_change("league-d", "rfp1:old", "rfp1:new")   # the double call
+        assert old.get("superseded") is True
+        assert "superseded" not in rebuilt
+        with server._trade_jobs_lock:
+            assert server._trade_jobs_by_key.get(rebuilt["key"]) == "j-new"
+    finally:
+        with server._trade_jobs_lock:
+            for job in (old, rebuilt):
+                server._trade_jobs.pop(job["job_id"], None)
+                server._trade_jobs_by_key.pop(job["key"], None)
+
+
+def test_the_handler_never_raises_and_is_off_in_mode_0(monkeypatch):
+    job = {"job_id": "j-m0", "key": ("u-m0", "league-m", "1qb_ppr"), "status": "complete",
+           "cards": [], "error": None, "roster_fp": "rfp1:old"}
+    with server._trade_jobs_lock:
+        server._trade_jobs[job["job_id"]] = job
+    try:
+        monkeypatch.setattr(server, "_trade_i1_mode", lambda: 0)
+        server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
+        assert "superseded" not in job
+        monkeypatch.setattr(server, "_trade_i1_mode", lambda: 2)
+        monkeypatch.setattr(server, "_revoke_trade_job_locked",
+                            MagicMock(side_effect=RuntimeError("boom")))
+        server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
+    finally:
+        with server._trade_jobs_lock:
+            server._trade_jobs.pop(job["job_id"], None)
 
 def test_on_roster_change_revokes_every_job_in_the_league_only():
     def park(job_id, user_id, league_id):

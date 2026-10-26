@@ -280,9 +280,10 @@ inputs beyond the one throw-in check noted below:
    piece the viewer receives and on the partner's published board
    (`snapshot.partner_boards`) for a piece the partner receives. Apart from that
    check the core sees market values, rosters, roster rules, untouchables and
-   pins only: no personal board and no windows. It is bounded by an 8 s time
-   budget, 40,000 checks per partner and `vc_max_per_partner` kept trades per
-   partner.
+   pins only: no personal board and no windows. It is bounded by its check and
+   keep caps only (40,000 checks per partner and `vc_max_per_partner` kept
+   trades per partner), never by the clock, so machine load cannot change a
+   deck. A 30 s safety ceiling (`core.SAFETY_CEILING_S`) marks pathology only.
 2. **Ranking (`windows.py`, `ranking.py`, `deck.py`), order plus variety.** Each fair
    trade gets three scores in [0, 1]. **Value** is the size of the return and
    whether a real piece comes back. **Outlook** is the fit with both teams'
@@ -415,7 +416,9 @@ the same seat, built from the same DB reads the bench uses —
 app's own engine; the one place server-path code imports from `backend/eval/`)
 → `league_record` → `snapshot_for_seat` — with standings, lineup slots and
 roster limit overridden from `ServerInputs`. Fewer than 10 ⇒ `failed` with
-`value_core_too_few`; an exception ⇒ logged, `failed` with `value_core_failed`.
+`value_core_too_few`; an exception ⇒ logged, `failed` with `value_core_failed`;
+a run that hit the core's safety ceiling (a partial pool) ⇒ ERROR log, `failed`
+with `value_core_failed`, no cards.
 
 **Blinding, by construction.** Cards from both arms are merged by
 (partner, give set, receive set) — a trade both engines produced is one card
@@ -800,8 +803,10 @@ available to pending/swipe routes and suppression sees live decisions. Ranking
 services retain execution-time reads; player objects, other request service
 mutations, DB preferences and feature/config reads are not immutable snapshots.
 This is a limited in-process prerequisite, **not** stateless request handling,
-durable jobs, full thread safety, or a separate worker. One Gunicorn worker and
-all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
+durable jobs, or a separate worker. Thread safety for the single worker's four
+`gthread` threads comes from E1's locks (`RankingService`, single-flight session
+init, the shared dicts and job safety; [E1](plans/e1-concurrency/scope.md)). One
+Gunicorn worker and all generation/timing policies remain unchanged. See the [implementation record](plans/budget-scalability/implementation.md).
 
 Trade-job revocation epochs are captured before input reads and retained through
 admission, worker publication and copied public responses. Kickoff adds the

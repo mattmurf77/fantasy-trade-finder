@@ -51,6 +51,8 @@
 - [Blind grading: one neutral formatter, hidden arms, per-caller flag resolution (2026-10-02, grading.blind)](#blind-grading-one-neutral-formatter-hidden-arms-per-caller-flag-resolution-2026-10-02-gradingblind)
 - [Cross-tab arrival intents and duplicated arithmetic under a parity guard (2026-10-10, nav.home_hub)](#cross-tab-arrival-intents-and-duplicated-arithmetic-under-a-parity-guard-2026-10-10-navhome_hub)
 - [Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)](#usage-trends-global-stats-cache-per-caller-roster-maps-server-order-2026-10-10-usage_trendsenabled)
+- [Trade deck on the device: append-only merge, device page, one trace per tap (2026-10-24, 200 ms path)](#trade-deck-on-the-device-append-only-merge-device-page-one-trace-per-tap-2026-10-24-200-ms-path)
+- [S0 serve rules: one roster read at serve, knobs per request (2026-10-26, trade-time-to-suggestion S0)](#s0-serve-rules-one-roster-read-at-serve-knobs-per-request-2026-10-26-trade-time-to-suggestion-s0)
 
 ---
 
@@ -891,3 +893,32 @@ The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two c
   - `compute_normalized` takes the same `{week: normalize_week(...)}` shape from either source, and its output is sorted by player id, so stored == live byte for byte (checked on the full 2026 Weeks 1–4 NFL). That equivalence is what makes mixing safe; keep the pinning test.
   - New usage fields go into `normalize_week` + the tables + `load_usage_weeks` together. [Spec](../docs/plans/usage-trends/weekly-update.md).
 
+## Trade deck on the device: append-only merge, device page, one trace per tap (2026-10-24, 200 ms path)
+
+**Merge rule (`mobile/src/utils/tradePages.ts` `mergeDeckPage`):** the fronted card and everything before it never move, change or disappear. An append page goes behind everything held, deduped by `trade_hash`. Only a **whole-deck** response (`replace: true`, or a rebased page spanning a finished deck) may replace what's behind the front, and a fronted card it lacks is **withdrawn in place** (it keeps its slot, says why, and loses Like/Pass). Pinned by `check-trade-pages.js` and `check-withdraw-in-place.js`.
+
+**Device page (piece C, `utils/devicePage.ts` + `state/devicePageStore.ts`):**
+- Keyed per account, league and format. It holds the next unseen cards and is updated as the user swipes.
+- Refreshed only in the background (Trades focus and foreground, ≤ 1 per 60 s per key, no `search_id`, never offline).
+- At the tap it renders with **no network wait** if it's within `DEVICE_PAGE_MAX_AGE_S = 300` (the §5.1 viewer-roster bound; a cross-client invariant).
+- The tap's own request then revalidates it, and that answer is merged as a whole deck.
+- It's discarded by a client write listener on the rankings/preferences routes that invalidate trade jobs, and on sign-out, an account switch or a demo start (`useSession`).
+- It's inert unless the served `trade.first_page_store` flag is on. Pinned by `check-device-first-page.js`.
+
+**One trace per tap (`state/tradeSearchTrace.ts`):**
+- `beginTradeSearch` is the only R1 emitter. It mints `search_id` at the tap; the dispatch claims it.
+- R2 fires at T1 (a real card ≥ 50% visible with Like/Pass enabled). R2b covers empty, error, abandoned (blur, unmount, or leaving `active`) and the 10 s timeout. They share a `settled` flag, so exactly one fires per `search_id`.
+- Timing uses `performance.now()` only, never Date.
+- On the server, `search_id`/`job_id`/`deck_id` skip the digit-run PII scrub **only when id-shaped** (`analytics_ingest._HEX_ID_PROPS`).
+- Pinned by `check-trade-first-card-events.js` and `backend/tests/test_time_to_suggestion_events.py`.
+
+## S0 serve rules: one roster read at serve, knobs per request (2026-10-26, trade-time-to-suggestion S0)
+
+Contract: the roster fingerprint contract v0.4 (`docs/plans/trade-time-to-suggestion/scope-eng-200ms.md` §6.1). Code: `backend/roster_snapshot.py` and the S0 hunks of `server.py`.
+- **Stored rows only, never the network, on the tap path.** `roster_snapshot()` reads `league_members`, the pick rows the engine prices (`load_draft_picks(league_id, source=_pick_read_source())`, contested/orphaned filter included), `leagues.draft_status` and `league_roster_state`. A Sleeper roster past `trade_roster_bound_s` kicks `roster_refresh.maybe_refresh_async` after the response is built.
+- **Fingerprints: read before the lock, compare under it.** `rfp1` + `vsn1` are stamped on each job at kickoff. Every freshness and join caller reads `_trade_current_fingerprints()` before taking `_trade_jobs_lock` and passes it in. A failed read (`None`) never makes a completed job fresh, and keeps a running one (A2).
+- **One choke point for cards.** `_trade_job_public_view` (legacy and paged, `/generate` and `/status`) runs I-1 and the §3b rules through `_roster_serve_check` and logs one `[i1] serve` line per serve. A new serve path must go through it.
+- **Two unknowns.** No state row reads `unknown` and I-1 still filters. A failed session write (C-e) also reads `unknown`, but carries `RosterSnapshot.lenient_reason = "c_e"`: every card is served, logged `unchecked_c_e`. Branch on the marker, never on `status`.
+- **The `[i1] serve` line is per serve, so per poll.** A drop rate must de-duplicate by its `job` field. Drops are split by give/receive side (players and picks alike), and a card with moved assets on both sides counts once per side. Format: [api-reference](../docs/api-reference.md#s0-roster-check-at-serve).
+- **Three knobs, read per request, deploy-free:** `trade_i1_mode` (2 strict, 1 lenient, 0 the pre-S0 path), `trade_gate_miss_mode` (0 holds the no-card gate misses until 1.22.0; 1 serves `roster_check_unavailable` and `wait_reason`), `trade_roster_bound_s`, plus `trade_import_roster_fresh_s` for linked platforms. Unreadable values fall to the safe side (strict I-1, held gate misses).
+- **No per-session state.** The only process state: the `vsn1` seed memo and the "state table exists" marker (one module lock), and the admin gate-miss test hook's `{league_id: (kind, expiry)}`.

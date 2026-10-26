@@ -28,6 +28,7 @@ OPP = "user_lock_opp"
 LEAGUE = "league_lock"
 TOKEN = "sess-lock-tok"
 KEY = (UID, LEAGUE, "1qb_ppr")
+REAL_KICKOFF = server._kickoff_trade_job      # before any fixture stubs it
 
 
 @pytest.fixture()
@@ -37,9 +38,9 @@ def reads(monkeypatch):
     for name in ("_read_members", "_read_picks"):
         real = getattr(roster_snapshot, name)
 
-        def audited(conn, league_id, _real=real, _name=name):
+        def audited(*args, _real=real, _name=name):
             seen.append((_name, server._trade_jobs_lock.locked()))
-            return _real(conn, league_id)
+            return _real(*args)
 
         monkeypatch.setattr(roster_snapshot, name, audited)
     return seen
@@ -268,3 +269,31 @@ def test_session_init_warm_up(init_harness, reads):
     assert resp.status_code == 200, resp.get_json()
     _assert_unlocked(reads)
     kickoff.assert_called_once()      # stale fingerprints: the warm-up replaces it
+
+
+def test_a_persistent_read_failure_keeps_one_warm_up_job(init_harness, monkeypatch):
+    """A2 (contract §4.4): two session inits while every fingerprint read fails
+    leave ONE warm-up job, neither revoked nor superseded."""
+    client, _, key = init_harness
+    monkeypatch.setattr(server, "_kickoff_trade_job", REAL_KICKOFF)
+    monkeypatch.setattr(server, "_start_trade_job_thread", MagicMock())
+    monkeypatch.setattr(roster_snapshot, "snapshot_ids",
+                        MagicMock(side_effect=RuntimeError("db unavailable")))
+
+    def init():
+        resp = client.post("/api/session/init", content_type="application/json",
+                           headers={"X-Session-Token": INIT_TOKEN},
+                           data=json.dumps({"user_id": PLATFORM_USER,
+                                            "league_id": PLATFORM_LEAGUE}))
+        assert resp.status_code == 200, resp.get_json()
+
+    init()
+    init()
+    with server._trade_jobs_lock:
+        jobs = [dict(job) for job in server._trade_jobs.values() if job.get("key") == key]
+        indexed = server._trade_jobs_by_key.get(key)
+        for job in jobs:
+            server._trade_jobs.pop(job["job_id"], None)
+    assert len(jobs) == 1 and indexed == jobs[0]["job_id"]
+    assert jobs[0]["status"] == "running" and not jobs[0].get("superseded")
+    assert jobs[0]["roster_fp"] is None          # stamped during the failure
