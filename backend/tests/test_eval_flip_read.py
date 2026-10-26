@@ -1,8 +1,10 @@
 """backend.eval.flip_read, the model-side 24 h read after the one-step 200 ms
 flip (models-lead-launch.md §Gate-11-03 §3, addenda A3 and B3 (f3)): each
-barred G passing and failing, G10's report, the two weekly ceilings (U4-R4,
-B4) at, under and over, the read-only guard, and that the module never
-imports backend.server.
+barred G passing and failing (a failing G fails the read), G2 over final
+packed decks and every pack-less deck, G3's ghost-row bucket, G10 at
+trade_i1_mode 1 and 2, the two weekly ceilings (U4-R4, B4) at, under and
+over, each exit status, the read-only guard and engine options, and that
+the module never imports backend.server.
 
 The DBs are in-memory SQLite built with the v5 tests' helpers (the pack and
 withdrawals tables are test-local there); the CLI tests write the same tables
@@ -28,7 +30,7 @@ from backend.eval.flip_read import (
     FAIL, INSUFFICIENT, PASS, REPORT, ReadOnlyViolation, flip_read, main, read_only_engine,
     render, weekly_read,
 )
-from backend.tests.test_eval_pack_reader import SERVED, _deck_cards, pack_table, write_deck
+from backend.tests.test_eval_pack_reader import SERVED, _deck_cards, _row, pack_table, write_deck
 from backend.tests.test_eval_refresh_and_live_columns import _bare_impressions
 from backend.tests.test_eval_withdrawals_and_paging import (
     DB, PAGING_COLUMNS, _after, act, make_db, put_deck, put_pack, withdraw, withdrawals_table,
@@ -81,13 +83,15 @@ def test_g1_counts_unreadable_packs_among_every_pack(tamper):
 
 
 # ---------------------------------------------------------------------------
-# G2: incomplete decks among final decks only, and the 10-deck minimum
+# G2: incomplete decks among final packed decks and every pack-less deck, and
+# the 10-final-packed-deck minimum
 # ---------------------------------------------------------------------------
 
-def test_g2_reads_only_final_decks():
+def test_g2_reads_final_packed_decks_and_every_pack_less_deck():
     """2 h after serving, only the retired packs are final: an unretired pack
-    is in flight, and a pack-less deck with a gap (incomplete_deck to the
-    loader) is not final yet. 30 h after, every deck is."""
+    is in flight. A pack-less deck has no in-flight state, so its gap
+    (incomplete_deck to the loader) is barred at once. 30 h after, every
+    pack is final."""
     db = make_db()
     _packed(db, "retired_gap", cards=9, retired=True, retired_at=_after(1))   # lost card 9
     _packed(db, "retired_ok", retired=True, retired_at=_after(1))
@@ -97,57 +101,113 @@ def test_g2_reads_only_final_decks():
 
     early = flip_read(db.eng, since=SINCE, as_of=EARLY)
     assert early.exclusions[IN_FLIGHT] == 1 and early.exclusions[INCOMPLETE_DECK] == 2
-    assert early.g2["final_decks"] == 2 and early.g2["incomplete"] == 1
-    assert early.g2["ids"] == [["retired_gap", SERVED]] and early.g2["status"] == FAIL
+    assert (early.g2["final_packed_decks"], early.g2["packless_decks"]) == (2, 1)
+    assert early.g2["incomplete"] == 2 and early.g2["status"] == FAIL
+    assert early.g2["ids"] == [["retired_gap", SERVED], ["rows_gap", SERVED]]
     assert early.g2["insufficient"] and early.overall == FAIL
     text = render(early)
-    assert "G2 INSUFFICIENT (<10 final decks): extend to 48 h" in text
-    assert f"retired_gap (served {SERVED})" in text
+    assert ("| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
+            "| 2 / 3 (2 final packed + 1 pack-less) | 0; INSUFFICIENT below 10 final packed "
+            "| FAIL |") in text
+    assert "G2 INSUFFICIENT (<10 final packed decks): extend to 48 h (2 final packed)" in text
+    assert f"retired_gap (served {SERVED}), rows_gap (served {SERVED})" in text
 
     late = flip_read(db.eng, since=SINCE, as_of=LATE)
     assert late.exclusions[CALIBRATION_REFRESH] == 1
-    assert late.g2["final_decks"] == 4 and late.g2["incomplete"] == 2
+    assert (late.g2["final_packed_decks"], late.g2["packless_decks"]) == (3, 1)
+    assert late.g2["incomplete"] == 2
     assert late.g2["ids"] == [["retired_gap", SERVED], ["rows_gap", SERVED]]
 
 
+def test_g2_fails_on_pack_less_live_decks_with_a_gap_or_a_missed_stamp_inside_25_h():
+    """release-lead's #425 QA probe: 10 retired packs (sufficient), and two
+    live-mode value-core decks (marked rows at build, delivered_at stamps,
+    no pack) 2 h after serving, one with a gap and one with an outcome on a
+    row never stamped delivered. Both are incomplete_deck to the loader;
+    final-only G2 read 0 / 10 PASS and OVERALL PASS."""
+    db = make_db(live=PAGING_COLUMNS)
+    for k in range(10):
+        _packed(db, f"r{k}", retired=True, retired_at=_after(1))
+    put_deck(db, "vc_gap", 10, rows=[i for i in range(10) if i != 4],
+             delivered=[i for i in range(10) if i != 4], extra={"page_store": 1})
+    put_deck(db, "vc_stamp", 10, delivered=range(5), extra={"page_store": 1})
+    act(db, "vc_stamp", 7, "viewed")                  # viewed, never stamped delivered
+    put_deck(db, "vc_ok", 10, delivered=range(10), viewed=[3], extra={"page_store": 1})
+
+    r = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert r.exclusions[INCOMPLETE_DECK] == 2
+    assert (r.g2["final_packed_decks"], r.g2["packless_decks"]) == (10, 3)
+    assert r.g2["incomplete"] == 2 and not r.g2["insufficient"]
+    assert r.g2["ids"] == [["vc_gap", SERVED], ["vc_stamp", SERVED]]
+    assert r.g2["status"] == FAIL and r.overall == FAIL
+    text = render(r)
+    assert ("| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
+            "| 2 / 13 (10 final packed + 3 pack-less) | 0; INSUFFICIENT below 10 final "
+            "packed | FAIL |") in text
+    assert "OVERALL: FAIL" in text and "INSUFFICIENT (<10" not in text
+
+
+def test_g2_does_not_count_a_deferred_deck_waiting_on_its_pack(monkeypatch):
+    """A tiered (deferred-evidence) deck served at/after PACK_REQUIRED_SINCE
+    with no pack yet is the loader's in_flight inside 25 h, not
+    incomplete_deck, so it never fails G2; past 25 h it is a lost pack."""
+    import backend.eval.data as data_mod
+    monkeypatch.setattr(data_mod, "PACK_REQUIRED_SINCE", SINCE)
+    db = make_db(live=PAGING_COLUMNS)
+    put_deck(db, "tiered", 10, rows=range(5), tier="first30", delivered=range(5))
+    early = flip_read(db.eng, since=SINCE, as_of=EARLY)
+    assert early.exclusions[IN_FLIGHT] == 1 and early.g2["packless_decks"] == 1
+    assert early.g2["incomplete"] == 0 and early.g2["status"] == PASS
+    late = flip_read(db.eng, since=SINCE, as_of=LATE)
+    assert late.g2["ids"] == [["tiered", SERVED]] and late.g2["status"] == FAIL
+
+
 @pytest.mark.parametrize("n", [9, 10])
-def test_g2_says_insufficient_below_ten_final_decks(n):
-    """A retired pack is final at once; a pack-less deck 25 h after serving."""
+def test_g2_says_insufficient_below_ten_final_packed_decks(n):
+    """A retired pack is final at once; pack-less decks never count toward
+    the minimum, however old."""
     db = make_db()
     for k in range(n):
         _packed(db, f"r{k}", retired=True, retired_at=_after(1))
         put_deck(db, f"d{k}", 4)
     early = flip_read(db.eng, since=SINCE, as_of=EARLY)
-    assert early.g2["final_decks"] == n and early.g2["insufficient"] == (n < 10)
+    assert early.g2["final_packed_decks"] == n and early.g2["packless_decks"] == n
+    assert early.g2["insufficient"] == (n < 10)
     assert early.g2["status"] == PASS and early.overall == (INSUFFICIENT if n < 10 else PASS)
-    assert ("INSUFFICIENT (<10 final decks): extend to 48 h" in render(early)) == (n < 10)
+    assert ("INSUFFICIENT (<10 final packed decks): extend to 48 h" in render(early)) == (n < 10)
     late = flip_read(db.eng, since=SINCE, as_of=LATE)
-    assert late.g2["final_decks"] == 2 * n and not late.g2["insufficient"]
+    assert late.g2["final_packed_decks"] == n and late.g2["insufficient"] == (n < 10)
 
 
 # ---------------------------------------------------------------------------
 # G3: every outcome in the window joins a card, row or packed
 # ---------------------------------------------------------------------------
 
+GHOST_ID = "5f0c2a9e-3b7d-4e61-9a24-c1d8e7f60b13"   # ghosts keep uuid4 ids
+
+
 def _joins_db() -> DB:
     """j: rows 0-4 and a pack of 5-9, viewed at 2 (a row) and 7 (left
-    packed); old: served before the window, viewed in it at 1 (a row) and 8
-    (packed); a ghost row's outcome."""
+    packed), and a ghost row copying card 3 under a uuid4 id, as the
+    writer gives ghosts; old: served before the window, viewed in it at 1
+    (a row) and 8 (packed)."""
     db = make_db()
-    write_deck(db.eng, db.packs, _deck_cards("j", 10), full=range(5), packed=range(5, 10),
-               viewed=[2, 7])
+    cards = _deck_cards("j", 10)
+    write_deck(db.eng, db.packs, cards, full=range(5), packed=range(5, 10), viewed=[2, 7])
+    with db.eng.begin() as conn:
+        conn.execute(insert(db.imp).values({**_row(cards[3], ghost=True),
+                                            "impression_id": GHOST_ID}))
     write_deck(db.eng, db.packs, _deck_cards("old", 10, served_at=BEFORE), full=range(5),
                packed=range(5, 10), served_at=BEFORE)
     act(db, "old", 1, "viewed")
     act(db, "old", 8, "viewed")
-    _post(db, "j:3:ghost")
     return db
 
 
 def test_g3_passes_when_every_outcome_joins():
     r = flip_read(_joins_db().eng, since=SINCE, as_of=LATE)
-    assert r.g3 == {"outcomes": 5, "joined": 2, "joined_outside_window": 2, "ghost": 1,
-                    "orphans": 0, "ids": [], "status": PASS}
+    assert r.g3 == {"outcomes": 4, "joined": 2, "joined_outside_window": 2, "on_ghost": 0,
+                    "ghost_ids": [], "orphans": 0, "ids": [], "status": PASS}
 
 
 @pytest.mark.parametrize("impression_id", [
@@ -155,22 +215,52 @@ def test_g3_passes_when_every_outcome_joins():
     "old:15",               # past the older deck's card_count
     "nowhere:0",            # no row, no pack
     "legacy-uuid-1",        # not a contract id, and no row
+    "j:3:ghost",            # the old ghost suffix, joining no ghost row
 ])
 def test_g3_fails_on_an_outcome_joining_no_card(impression_id):
     db = _joins_db()
     _post(db, impression_id, action="like")
     r = flip_read(db.eng, since=SINCE, as_of=LATE)
-    assert r.g3["orphans"] == 1 and r.g3["ids"] == [impression_id]
+    assert r.g3["orphans"] == 1 and r.g3["ids"] == [impression_id] and r.g3["on_ghost"] == 0
     assert r.g3["status"] == FAIL and r.overall == FAIL
     assert f"G3 outcomes joining no card: {impression_id}" in render(r)
+
+
+def test_g3_fails_on_an_outcome_on_a_ghost_row():
+    """Ghosts are never shown: an outcome joining a loaded ghost row means a
+    ghost reached a client. Counted apart from the orphans, barred at 0."""
+    db = _joins_db()
+    _post(db, GHOST_ID)
+    r = flip_read(db.eng, since=SINCE, as_of=LATE)
+    assert (r.g3["on_ghost"], r.g3["ghost_ids"], r.g3["orphans"]) == (1, [GHOST_ID], 0)
+    assert r.g3["joined"] == 2 and r.g3["status"] == FAIL and r.overall == FAIL
+    text = render(r)
+    assert ("| G3 | outcomes joining no card / on a ghost row | 0 / 1 of 5 (joined 2, "
+            "outside the window 2) | 0 / 0 | FAIL |") in text
+    assert ("G3 outcomes on a ghost row (ghosts are never shown: a ghost reached a "
+            f"client): {GHOST_ID}") in text
+    # A serve bug, not lost data: back to models-lead, never the kill (B3 (f4)).
+    assert "recommends the kill" not in text
+    assert "Back to models-lead" in text
+
+
+def test_an_orphan_outcome_recommends_the_kill():
+    """B3 (f4): an outcome that joins no card is lost data, so the read
+    recommends the kill at once."""
+    db = _joins_db()
+    _post(db, "nowhere:9")
+    r = flip_read(db.eng, since=SINCE, as_of=LATE)
+    assert r.g3["orphans"] == 1 and r.g3["status"] == FAIL
+    assert "recommends the kill" in render(r)
 
 
 def test_g3_reads_only_outcomes_in_the_window_and_by_as_of():
     db = _joins_db()
     _post(db, "nowhere:0", at=BEFORE)          # before the window
     _post(db, "nowhere:1", at=_after(31))      # after as_of
+    _post(db, GHOST_ID, at=_after(31))         # after as_of
     r = flip_read(db.eng, since=SINCE, as_of=LATE)
-    assert r.g3["outcomes"] == 5 and r.g3["status"] == PASS
+    assert r.g3["outcomes"] == 4 and r.g3["status"] == PASS
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +282,7 @@ def test_g7_bars_other_and_prints_every_cause(misses, total, status):
     r = flip_read(db.eng, since=SINCE, as_of=EARLY)
     assert r.g7["upgrade_misses"] == total and list(r.g7["upgrade_misses"]) == sorted(total)
     assert r.g7["status"] == status
+    assert r.overall == (FAIL if status == FAIL else INSUFFICIENT)    # 1 final packed deck
     causes = ", ".join(f"{k}={v}" for k, v in sorted(total.items()))
     assert f"| G7 | upgrade misses by cause | {causes} | other 0 | {status} |" in render(r)
 
@@ -209,6 +300,7 @@ def test_g8_bars_withdrawal_conflicts(conflict):
     assert r.g8["withdrawal_conflict"] == int(conflict)
     assert r.g8["status"] == (FAIL if conflict else PASS)
     assert r.g8["ids"] == (["c"] if conflict else [])
+    assert r.overall == (FAIL if conflict else INSUFFICIENT)
 
 
 @pytest.mark.parametrize("actions", [(), ("viewed",), ("pass",)], ids=["none", "viewed", "pass"])
@@ -225,24 +317,50 @@ def test_g9_a_deck_without_delivery_evidence_must_have_no_outcome(actions):
     assert r.g9["with_outcomes"] == (1 if actions else 0)
     assert r.g9["status"] == (FAIL if actions else PASS)
     assert r.g9["ids"] == (["acted"] if actions else [])
+    assert r.overall == (FAIL if actions else INSUFFICIENT)            # G9 is barred
 
 
-def test_g10_reports_withdrawals_by_reason_in_the_window():
+def _withdrawals_db(i1_dropped: bool) -> DB:
     db = make_db()
     withdraw(db, "a", 1, 0, reason="disposition_cut")
     withdraw(db, "a", 2, 1, reason="disposition_cut")
-    withdraw(db, "b", 0, 0, reason="i1_dropped")
+    if i1_dropped:
+        withdraw(db, "b", 0, 0, reason="i1_dropped")
     withdraw(db, "c", 0, 0, reason="disposition_cut", at=BEFORE)        # before the window
     withdraw(db, "d", 0, 0, reason="i1_dropped", at=_after(31))         # after as_of
+    return db
+
+
+@pytest.mark.parametrize("i1_dropped", [False, True], ids=["cuts_only", "i1_dropped"])
+def test_g10_at_mode_1_bars_i1_dropped_and_reports_cuts(i1_dropped):
+    """trade_i1_mode 1 (the default, the launch value) withdraws nothing for
+    I-1: any i1_dropped in the window fails G10 and the read. Cuts are
+    expected and only reported."""
+    db = _withdrawals_db(i1_dropped)
     r = flip_read(db.eng, since=SINCE, as_of=LATE)
-    assert r.g10["by_reason"] == {"disposition_cut": 2, "i1_dropped": 1}
-    assert r.g10["status"] == REPORT
-    assert r.overall == INSUFFICIENT                 # G10 is never barred; no final decks here
+    assert r.g10["by_reason"] == ({"disposition_cut": 2, "i1_dropped": 1} if i1_dropped
+                                  else {"disposition_cut": 2})
+    assert r.g10["i1_mode"] == 1 and r.g10["status"] == (FAIL if i1_dropped else PASS)
+    assert r.overall == (FAIL if i1_dropped else INSUFFICIENT)       # no final decks here
     text = render(r)
-    assert ("| G10 | withdrawals by reason (window) | disposition_cut=2, i1_dropped=1 "
-            "| reported | REPORT |") in text
-    assert "disposition_cut > 0 expected; any i1_dropped at mode 1 is a bug" in text
+    assert ("| G10 | withdrawals by reason (window), trade_i1_mode 1 | disposition_cut=2"
+            + (", i1_dropped=1" if i1_dropped else "")
+            + f" | i1_dropped 0 | {FAIL if i1_dropped else PASS} |") in text
+    assert ("G10 note: disposition_cut > 0 expected; any i1_dropped at trade_i1_mode 1 is "
+            "a bug (barred at 0).") in text
     assert flip_read(db.eng, since=SINCE, as_of=LATE, until=SERVED).g10["by_reason"] == {}
+
+
+def test_g10_at_mode_2_only_reports_i1_dropped():
+    db = _withdrawals_db(i1_dropped=True)
+    r = flip_read(db.eng, since=SINCE, as_of=LATE, i1_mode=2)
+    assert r.g10["by_reason"] == {"disposition_cut": 2, "i1_dropped": 1}
+    assert r.g10["i1_mode"] == 2 and r.g10["status"] == REPORT
+    assert r.overall == INSUFFICIENT                 # not barred at mode 2; no final decks
+    text = render(r)
+    assert ("| G10 | withdrawals by reason (window), trade_i1_mode 2 | disposition_cut=2, "
+            "i1_dropped=1 | reported | REPORT |") in text
+    assert "disposition_cut > 0 expected; i1_dropped reported at trade_i1_mode 2" in text
 
 
 def test_the_v5_exclusion_counts_cover_every_reason_and_the_removals_by_reason():
@@ -361,14 +479,16 @@ def test_the_cli_reads_a_sqlite_file_read_only_and_never_writes(tmp_path, capsys
     before = path.read_bytes()
 
     args = ["--db", str(path), "--since", "2026-10-23T00:00:00Z", "--as-of", _after(20)]
-    assert main(args) == 0                                         # INSUFFICIENT is not a FAIL
+    assert main(args) == 3                                         # INSUFFICIENT: not a pass
     out = capsys.readouterr().out
     assert "| G1 | pack_integrity decks / decks with a pack row | 0 / 2 | 0 | PASS |" in out
-    assert "| G2 | incomplete_deck / final Trades decks | 0 / 1 | 0 | PASS |" in out
-    assert "| G3 | outcomes joining no card | 0 of 7" in out
+    assert ("| G2 | incomplete_deck / Trades decks read (final packed + every pack-less) "
+            "| 0 / 3 (1 final packed + 2 pack-less) | 0; INSUFFICIENT below 10 final packed "
+            "| PASS |") in out
+    assert "| G3 | outcomes joining no card / on a ghost row | 0 / 0 of 7" in out
     assert "OVERALL: INSUFFICIENT" in out and "U4-R4" not in out
 
-    # 1 restart split over 7 viewed cards is over 1%: OVER exits 1.
+    # 1 restart split over 7 viewed cards is over 1%: OVER exits 1, over INSUFFICIENT's 3.
     assert main(args + ["--weekly"]) == 1
     out = capsys.readouterr().out
     assert ("U4-R4 named upgrade misses / viewed cards: 14.29% (1 / 7), ceiling 1%: OVER "
@@ -411,6 +531,80 @@ def test_a_fail_exits_1(tmp_path, capsys):
     assert "OVERALL: FAIL" in out and "recommends the kill (first_page_store_enabled 0)" in out
 
 
+def test_a_pass_exits_0(tmp_path, capsys):
+    path = tmp_path / "flip.db"
+    db = _file_db(path)
+    for k in range(10):
+        _packed(db, f"r{k}", retired=True, retired_at=_after(1))
+    db.eng.dispose()
+    assert main(["--db", str(path), "--since", SINCE, "--as-of", EARLY]) == 0
+    assert "OVERALL: PASS" in capsys.readouterr().out
+
+
+def test_the_cli_i1_mode_defaults_to_1(tmp_path, capsys):
+    """An i1_dropped withdrawal fails the read at the default (1); with
+    --i1-mode 2 it is reported and the read is INSUFFICIENT (exit 3)."""
+    path = tmp_path / "flip.db"
+    db = _file_db(path)
+    _example(db)
+    withdraw(db, "packed", 29, 0, reason="i1_dropped")
+    db.eng.dispose()
+    args = ["--db", str(path), "--since", SINCE, "--as-of", _after(20)]
+    assert main(args) == 1
+    assert "trade_i1_mode 1 | disposition_cut=1, i1_dropped=1 | i1_dropped 0 | FAIL |" in (
+        capsys.readouterr().out)
+    assert main(args + ["--i1-mode", "2"]) == 3
+    out = capsys.readouterr().out
+    assert "trade_i1_mode 2 | disposition_cut=1, i1_dropped=1 | reported | REPORT |" in out
+    assert "OVERALL: INSUFFICIENT" in out
+    with pytest.raises(SystemExit) as usage:
+        main(args + ["--i1-mode", "3"])
+    assert usage.value.code == 2
+
+
+def test_a_read_only_violation_inside_the_read_exits_2(tmp_path, capsys, monkeypatch):
+    """The statement guard firing mid-read is exit 2, as a refused database
+    is, and nothing goes to stdout."""
+    path = tmp_path / "flip.db"
+    _file_db(path).eng.dispose()
+    before = path.read_bytes()
+
+    def writes(engine, **_kw):
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM deck_outcomes"))
+
+    monkeypatch.setattr(fr, "load_decks", writes)
+    assert main(["--db", str(path), "--since", SINCE, "--as-of", EARLY]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and "blocked a non-read statement" in err
+    assert path.read_bytes() == before
+
+
+def test_an_unexpected_error_inside_the_read_is_never_exit_0(tmp_path, monkeypatch):
+    """main() catches only the refusals it maps to 2: anything else
+    propagates (a traceback, Python's exit 1), never a quiet 0."""
+    path = tmp_path / "flip.db"
+    _file_db(path).eng.dispose()
+
+    def boom(engine, **_kw):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(fr, "load_decks", boom)
+    with pytest.raises(RuntimeError, match="boom"):
+        main(["--db", str(path), "--since", SINCE, "--as-of", EARLY])
+
+
+def test_help_documents_the_exit_codes(capsys):
+    with pytest.raises(SystemExit) as done:
+        main(["--help"])
+    assert done.value.code == 0
+    out = capsys.readouterr().out
+    assert "--i1-mode" in out and "Exit status:" in out
+    for line in ("0  PASS", "1  FAIL, or a weekly ceiling OVER", "2  a refused database or a "
+                 "ReadOnlyViolation", "3  INSUFFICIENT"):
+        assert line in out
+
+
 def test_a_non_sqlite_database_is_refused_without_the_flag(capsys):
     url = "postgresql://reader:hunter2@db.invalid/ftf"
     assert main(["--db", url, "--since", SINCE]) == 2
@@ -447,6 +641,24 @@ class _FakePG:
 
     def rollback(self):
         pass
+
+
+def test_the_postgres_engine_opens_every_connection_read_only_with_a_timeout(monkeypatch):
+    """#425 QA P3: pins the startup options every pooled connection opens
+    with. Nothing at runtime notices a dropped statement_timeout, and the
+    session SET masks a dropped read-only default."""
+    seen = {}
+    real = fr.create_engine
+
+    def spy(url, **kw):
+        seen.update(kw)
+        return real(url, **kw)
+
+    monkeypatch.setattr(fr, "create_engine", spy)
+    read_only_engine("postgres://reader:pw@db.invalid/ftf", allow_postgres_readonly=True).dispose()
+    options = seen["connect_args"]["options"]
+    assert "-c statement_timeout=120s" in options
+    assert "-c default_transaction_read_only=on" in options
 
 
 def test_with_the_flag_every_postgres_session_must_prove_it_is_read_only():
