@@ -1,3 +1,28 @@
+## 2026-10-26 — Timing readout mounted on Settings › Testing; hub row opens for it (#363 ruling 11)
+
+Full gates, not express (scope: #363's trades-200ms scope, head-eng ruling 11; in the 200 ms set on head-eng's call, 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `SettingsTestingScreen` mounts `<TimingReadoutRow />` directly after `<TestingSection>` (default testID `settings.testing.timing-readout`, no gate of its own). The hub's Testing row now shows on `__DEV__ || testing.stage_users || testing.timing_readout`. The flat `SettingsScreen` is unchanged.
+- **New pins:**
+  - `check-settings-ia` 5a (AST): the components-path import, exactly one mount, no props, no conditional, the child right after `<TestingSection>`.
+  - `check-settings-ia` 5b (AST): the `settings.hub.testing` row's condition is an `||` chain that resolves to exactly `__DEV__`, `testing.stage_users` and `testing.timing_readout`.
+  - `check-settings-testids`: `settings.testing.timing-readout` in NEW_GATED, pinned to `TimingReadoutRow.tsx`.
+- **Sabotage (each red, then green on restore; files byte-identical after): 18/18.**
+  - 5a, 10: import removed, wrong path, aliased, mount removed, mounted twice, testID overridden, own `&&` gate, moved before `TestingSection`, a row in between, moved outside the ScrollView.
+  - 5b, 6: gate reverted to `__DEV__ || stage_users`, const bound to the wrong flag key, `||` → `&&`, `stage_users` dropped, `__DEV__` dropped, an extra flag ORed in.
+  - testids, 2: the default id renamed; the default literal removed.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; all 117 `check-*.js` pass.
+- **Code-walk (App Store build, only `testing.timing_readout` on, hub on):**
+  1. `RootNav.tsx:272-274` mounts the hub.
+  2. `SettingsHubScreen.tsx:94` is true, so `:337` shows the Testing row (`:339`).
+  3. On `SettingsTestingScreen.tsx`, `:50` `TestingSection` renders its "Testing" banner (`TestingSection.tsx:51`) and the unconditional "Test feedback" row (`:53-65`); "Test stages" stays hidden (`:66`, `stage_users` off).
+  4. `:55` renders the readout (`TimingReadoutRow.tsx:30` passes).
+- **TestFlight checklist (operator, `testing.timing_readout` delivered to the device):**
+  1. Settings shows a Testing row; tap it. Under the "Testing" banner and "Test feedback", the last row is "Last tap to first card".
+  2. Before any Find trades tap this session it reads "No trade search yet this session". After a tap that shows a first card it reads "N ms · network · launch", plus " · <serve_source>" (e.g. " · device") when R2 carried one.
+  3. With the flag off (and `stage_users` off), the hub has no Testing row.
+- **Not run yet:** the TestFlight checklist.
+
 ## 2026-10-25 — 200 ms path, mobile pieces (#363): pass A, M, C — evidence
 
 Full gates, not express (PRD #339; eng scope v1.3). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
