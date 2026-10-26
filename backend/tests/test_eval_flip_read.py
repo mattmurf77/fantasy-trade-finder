@@ -680,10 +680,10 @@ def test_a_crash_never_echoes_the_database_credentials(capsys, monkeypatch):
     """#432 QA P3: a password with an unencoded '@' comes back from libpq as
     part of a "host" (could not translate host name "RET123@…"). The exit-4
     traceback redacts every credential and host piece of --db."""
-    db = "postgresql://ftf:SEC@RET123@127.0.0.1:5432/ftf"
+    db = "postgresql://ftf:SEC@RET123@192.0.2.1:5432/ftf"
 
     def refused(url, **_kw):
-        raise RuntimeError('could not translate host name "RET123@127.0.0.1" to address')
+        raise RuntimeError('could not translate host name "RET123@192.0.2.1" to address')
 
     monkeypatch.setattr(fr, "read_only_engine", refused)
     assert main(["--db", db, "--allow-postgres-readonly", "--since", SINCE,
@@ -691,7 +691,7 @@ def test_a_crash_never_echoes_the_database_credentials(capsys, monkeypatch):
     out, err = capsys.readouterr()
     assert out == "" and "Traceback (most recent call last)" in err
     assert "***" in err
-    for secret in ("SEC", "RET123", "127.0.0.1"):
+    for secret in ("SEC", "RET123", "192.0.2.1"):
         assert secret not in err
 
 
@@ -711,27 +711,37 @@ def _crash_err(monkeypatch, capsys, db, message, *, exc=RuntimeError):
 
 @pytest.mark.parametrize("db, message, exc, status, secrets", [
     # exit 2: SQLAlchemy reads an unencoded password's tail as the port
-    ("postgresql://u:Tr0ub4dor@x:9k2LmQ@dpg-host.oregon/ftf",
-     "invalid literal for int() with base 10: '9k2LmQ@dpg-host.oregon'", ValueError, 2,
-     ("Tr0ub4dor", "9k2LmQ", "dpg-host.oregon")),
+    ("postgresql://u:Tr0ub4dor@x:9k2LmQ@dpg-host.invalid/ftf",
+     "invalid literal for int() with base 10: '9k2LmQ@dpg-host.invalid'", ValueError, 2,
+     ("Tr0ub4dor", "9k2LmQ", "dpg-host.invalid")),
     # a query-string password with an unencoded '&'
-    ("postgresql://u@dpg-host/ftf?password=S3cr&et=x",
-     'invalid connection option "et" (S3cr)', RuntimeError, 4, ("S3cr", "dpg-host")),
+    ("postgresql://u@dpg-host.invalid/ftf?password=S3cr&et=x",
+     'invalid connection option "et" (S3cr)', RuntimeError, 4, ("S3cr", "dpg-host.invalid")),
     # a '?' in an unencoded password must not cut the host off the redaction
-    ("postgresql://u:ab?cdefg@host.example/ftf",
-     'could not translate host name "host.example" (cdefg)', RuntimeError, 4,
-     ("host.example", "cdefg")),
+    ("postgresql://u:ab?cdefg@host.invalid/ftf",
+     'could not translate host name "host.invalid" (cdefg)', RuntimeError, 4,
+     ("host.invalid", "cdefg")),
     # a percent-encoded username comes back decoded
-    ("postgresql://ops%40team:pw12345@h.example/main",
+    ("postgresql://ops%40team:pw12345@h.invalid/main",
      'FATAL: password authentication failed for user "ops@team"', RuntimeError, 4,
      ("ops@team", "pw12345")),
     # a 3-character piece is redacted (the minimum)
-    ("postgresql://u:abc@h.example/ftf", "auth failed: abc", RuntimeError, 4, ("abc",)),
+    ("postgresql://u:abc@h.invalid/ftf", "auth failed: abc", RuntimeError, 4, ("abc",)),
     # longest first: a username inside the password leaves no tail behind
-    ("postgresql://sec:secret99@h.example/ftf", "bad password secret99", RuntimeError, 4,
+    ("postgresql://sec:secret99@h.invalid/ftf", "bad password secret99", RuntimeError, 4,
      ("secret99", "ret99")),
+    # libpq splits a host list on ',': each host is redacted
+    ("postgresql://u:x9k@hostA.invalid,hostB.invalid/main",
+     'could not translate host name "hostB.invalid" to address', RuntimeError, 4,
+     ("hostB.invalid", "hostA.invalid")),
+    # a '#' in an unencoded password
+    ("postgresql://u:pa#ss123@h.invalid/main",
+     'could not translate host name "ss123@h.invalid"', RuntimeError, 4, ("ss123",)),
+    # a '+' in a query value comes back as a space
+    ("postgresql://u@h.invalid/main?password=a+b+c1234",
+     "authentication failed: a b c1234", RuntimeError, 4, ("a b c1234", "c1234")),
 ], ids=["exit2_port", "query", "question_mark", "decoded_user", "three_chars",
-        "longest_first"])
+        "longest_first", "host_list", "hash", "plus"])
 def test_no_exit_path_echoes_database_credentials(monkeypatch, capsys, db, message, exc,
                                                    status, secrets):
     """#435 QA P3: every exit path (2 and 4) redacts every 3+ character piece of
@@ -740,6 +750,42 @@ def test_no_exit_path_echoes_database_credentials(monkeypatch, capsys, db, messa
     assert got == status and "***" in err
     for secret in secrets:
         assert secret not in err
+
+
+def test_two_character_pieces_are_left(monkeypatch, capsys):
+    """The lower bound: pieces under 3 characters are not redacted (they would
+    redact noise), and everything longer is."""
+    got, err = _crash_err(monkeypatch, capsys, "postgresql://ab:pw9k3@h.invalid/main",
+                          "auth for ab failed: pw9k3")
+    assert got == 4 and "auth for ab failed: ***" in err
+
+
+def test_a_read_only_violation_message_is_redacted(monkeypatch, capsys):
+    """Exit 2 from a ReadOnlyViolation mid-read is redacted like a crash."""
+    class _Engine:
+        def dispose(self):
+            pass
+
+    def blocked(engine, **_kw):
+        raise fr.ReadOnlyViolation("blocked a non-read statement: 'SET pw = PWsecret9'")
+
+    monkeypatch.setattr(fr, "read_only_engine", lambda url, **_kw: _Engine())
+    monkeypatch.setattr(fr, "flip_read", blocked)
+    assert main(["--db", "postgresql://u:PWsecret9@h.invalid/main",
+                 "--allow-postgres-readonly", "--since", SINCE, "--as-of", EARLY]) == 2
+    out, err = capsys.readouterr()
+    assert out == "" and "PWsecret9" not in err and "***" in err
+
+
+def test_a_usage_error_never_prints_a_database_url(capsys):
+    """argparse's usage errors are exit 2 too: a URL passed by mistake (here a
+    stray positional) is redacted."""
+    with pytest.raises(SystemExit) as usage:
+        main(["--db", "unused.db", "--since", SINCE,
+              "postgresql://u:PW12345@h.invalid/main"])
+    assert usage.value.code == 2
+    err = capsys.readouterr().err
+    assert "unrecognized arguments" in err and "PW12345" not in err and "***" in err
 
 
 def test_a_sqlite_url_is_not_redacted(monkeypatch, capsys):
@@ -754,9 +800,9 @@ def test_a_sqlite_url_is_not_redacted(monkeypatch, capsys):
     ("--until", "tomorrow", "not an ISO 8601 time"),
     ("--as-of", "2026-13-01", "not an ISO 8601 time"),
     ("--as-of", "0001-01-01T00:00:00+01:00",        # valid, but out of range in UTC
-     "too near the minimum date to read back from"),
+     "out of range for the read (it reaches back 9 days)"),
     ("--as-of", "0001-01-01T00:00:00Z",             # in range, but the window can't reach back
-     "too near the minimum date to read back from"),
+     "out of range for the read (it reaches back 9 days)"),
 ])
 def test_a_malformed_time_is_a_usage_error(flag, value, why, capsys):
     """#431 QA P3: --since, --until and --as-of are parsed as ISO 8601 by
