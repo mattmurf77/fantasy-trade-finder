@@ -4785,6 +4785,10 @@ class _PackState:
                                       separators=(",", ":")) + ',"header":').encode("utf-8"))
         self.checksum = checksum                  # the stored row's: the CAS predicate
         self.base_run = copy.deepcopy(header.get("run"))   # the run as last stored
+        # Indexes whose upgrade miss a header commit counted (U4): a retried
+        # outcome never counts the same card twice. _deck_upgrade_from_pack's
+        # callers all hold _deck_evidence_write_lock, so it needs no lock of its own.
+        self.miss_counted: set = set()
 
     @property
     def run(self) -> dict:
@@ -5265,27 +5269,42 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
-    def count():
+    def count(delta: int) -> None:
         misses = _upgrade_misses(state.run)
-        misses[cause] += 1
+        misses[cause] += delta
         state.run["upgrade_misses"] = misses
 
-    if ev_for_header is not None:
-        with ev_for_header.lock:
-            count()
-            ev_for_header.pack_dirty = True
-        _deck_pack_flush_header(ev_for_header)
-    else:
-        count()
-        _deck_pack_commit(deck_job_id, state)
-    line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
-            "evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
-    args = (cause, deck_job_id, index, stored, deck_job_id in _deck_held,
-            _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
-    if cause == "other":                  # U4-R2: must be zero; it goes back to models-lead
-        log.error(line, *args)
-    else:
-        log.warning(line, *args)
+    # Once per card (#428 QA item 1): a commit that raises takes its increment
+    # back (the outcome's retry counts again); a commit that returns, even False
+    # (the CAS gave up: the count stays in state.run for a later flush), marks
+    # the index counted, so a retry after the row save below raised doesn't.
+    if index not in state.miss_counted:
+        if ev_for_header is not None:
+            with ev_for_header.lock:
+                count(1)
+                ev_for_header.pack_dirty = True
+            try:
+                _deck_pack_flush_header(ev_for_header)
+            except Exception:
+                with ev_for_header.lock:
+                    count(-1)
+                raise
+        else:
+            count(1)
+            try:
+                _deck_pack_commit(deck_job_id, state)
+            except Exception:
+                count(-1)
+                raise
+        state.miss_counted.add(index)
+        line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
+                "evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
+        args = (cause, deck_job_id, index, stored, deck_job_id in _deck_held,
+                _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
+        if cause == "other":              # U4-R2: must be zero; it goes back to models-lead
+            log.error(line, *args)
+        else:
+            log.warning(line, *args)
     _db.save_deck_evidence([row], deck_job_id=deck_job_id)
     return True
 

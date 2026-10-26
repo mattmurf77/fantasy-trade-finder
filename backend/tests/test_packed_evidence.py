@@ -1753,6 +1753,59 @@ def test_b4_a_page_whose_every_card_is_cut(deferred, prepared_ok, kind):
 
 # ── Fix-before-flip (#428 QA, release-lead) ─────────────────────────────────
 
+def view_swallowed(job_id, index, action="viewed"):
+    """An outcome whose upgrade fails: the route logs it and goes on."""
+    view(job_id, index, action)
+
+
+def rows_of(engine, job_id, index):
+    return [r for r in rows(engine) if r["deck_job_id"] == job_id and r["card_index"] == index]
+
+
+@pytest.mark.parametrize("path", ["stored", "live"])
+def test_flip_a_miss_whose_header_commit_raises_counts_once_after_the_retry(deferred, path):
+    """Item 1: the header UPDATE fails on card 95's first outcome. Its
+    increment is taken back, so the next outcome counts it once: one row and
+    a count of 1, after a restart (restart_split) and in process (a held
+    deck whose snapshot is gone: other)."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    if path == "stored":
+        restart()
+        cause = "restart_split"
+    else:
+        ev = server._trade_jobs[job_id]["evidence"]
+        with ev.lock:
+            ev.rows.pop(contract.card_impression_id(job_id, 95))
+        cause = "other"
+    with fail_after(engine, "UPDATE DECK_EVIDENCE_PACKS"):
+        view_swallowed(job_id, 95)
+    assert rows_of(engine, job_id, 95) == []
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == NO_MISSES
+    view(job_id, 95)                                           # the retry
+    assert len(rows_of(engine, job_id, 95)) == 1
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, cause: 1}
+
+
+def test_flip_a_miss_whose_row_save_raises_counts_once_after_the_retry(deferred):
+    """Item 1's sibling: the count commits, then the row's insert fails. The
+    retry writes the row and doesn't count again."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    restart()
+    with fail_after(engine, "INSERT INTO DECK_IMPRESSIONS"):
+        view_swallowed(job_id, 95)
+    assert rows_of(engine, job_id, 95) == []
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+    view(job_id, 95)
+    assert len(rows_of(engine, job_id, 95)) == 1
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
 def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
     """Item 2: kickoffs add to _deck_held concurrently; at the cap the FIFO
     trim raced (KeyError, or the dict changing size). Under the leaf lock no
