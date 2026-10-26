@@ -26,8 +26,11 @@
 //      called once, from performDeleteAccount, which runs only from the
 //      "Delete everything" confirm; nothing else in mobile/src sends an Apple
 //      code to deleteAccount or writes `apple_authorization_code`.
+//   6. No console.* in freshAppleAuthorizationCode, performDeleteAccount or
+//      deleteAccount: Sentry keeps console calls as breadcrumbs, so the code
+//      would leave the device (release-lead QA on #446).
 //
-// HONEST LABEL (G-035). 1-3 run the real function text against stubs; 4 and 5
+// HONEST LABEL (G-035). 1-3 run the real function text against stubs; 4-6
 // pin wiring. The runtime proof is the TestFlight checklist in the LEG-S6 PR
 // (an Apple account deletes, the Apple prompt appears, Fleeced leaves iOS
 // Settings › Apple ID › Sign in with Apple; cancelling still deletes). Every
@@ -263,6 +266,24 @@ function srcFiles(dir) {
       for (const c of calls(sf, 'deleteAccount')) {
         if (c.arguments.length && /appleAuthorizationCode/.test(c.arguments[0].getText(sf))) bad.push(`${rel} sends an Apple code to deleteAccount`);
       }
+    }
+    expect(!bad.length, bad.join('; '));
+  });
+
+  // ── 6. The Apple code never reaches the console ─────────────────────────
+  // Sentry records console calls as breadcrumbs, so a console.* anywhere the
+  // fresh authorizationCode passes would ship it off the device (release-lead
+  // QA on #446, b). Any reference to `console` inside the three functions.
+  await check('6. no console.* in freshAppleAuthorizationCode, performDeleteAccount or deleteAccount', () => {
+    const bad = [];
+    for (const [label, sf, node] of [
+      ['freshAppleAuthorizationCode', section, apple],
+      ['performDeleteAccount', section, perform],
+      ['deleteAccount', auth, fnDecl(auth, 'deleteAccount')],
+    ]) {
+      if (!node) { bad.push(`no ${label}`); continue; }
+      const uses = findAll(node, (n) => ts.isIdentifier(n) && n.text === 'console');
+      if (uses.length) bad.push(`${label} references console (${uses.map((n) => n.parent.getText(sf).slice(0, 40)).join(', ')})`);
     }
     expect(!bad.length, bad.join('; '));
   });
