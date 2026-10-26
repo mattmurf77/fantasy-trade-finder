@@ -21,7 +21,10 @@
 //      `aboutSection` that is the `account.settings_hub` rollback), never in
 //      the Testing section, and never behind `__DEV__` / `stageUsersEnabled`.
 //      2g (#360 QA P3): the flat `testingSection`'s "Testing" banner shares
-//      its rows' gate, so the legacy layout never shows an empty banner.
+//      its rows' gate, so the legacy layout never shows an empty banner, and
+//      that gate is the tester flag (testing.stage_users / stageUsersEnabled,
+//      or useTesterSurface()), not merely any shared condition (release-lead
+//      delta QA F).
 //   3. ONE SUPPORT ADDRESS (BL10-R7). Across mobile/src exactly one string
 //      literal, template literal or JSX text contains fleecedapp@gmail.com,
 //      and it is the whole literal of an exported const; no U+FF20 look-alike
@@ -418,14 +421,30 @@ function textNodes(root) {
     const bannerKey = banners.length === 1 ? guardKey(banners[0]) : null;
     const rowKeys = rows.map((r) => ({ at: at(flat, r), key: guardKey(r) }));
     const mismatched = rowKeys.filter((r) => r.key !== bannerKey);
-    if (banners.length === 1 && bannerKey && rows.length > 0 && mismatched.length === 0) {
-      ok(`2g. testingSection's "Testing" banner renders only with its rows (both under \`${bannerKey}\`)`);
+    // ...and that shared gate must BE the tester gate (release-lead delta QA
+    // F, P3-5), not merely "the same as its rows": one positive guard has to
+    // resolve to `testing.stage_users` (directly, or a const initialized from
+    // it, i.e. stageUsersEnabled) or to the shared tester predicate
+    // useTesterSurface(). `true ? (` or another flag fails.
+    const TESTER = [/^useFlag\(\s*['"]testing\.stage_users['"]\s*\)$/, /^useTesterSurface\(\s*\)$/];
+    const isTesterGate = (text) => {
+      const t = text.trim();
+      if (TESTER.some((re) => re.test(t))) return true;
+      if (!/^[A-Za-z_$][\w$]*$/.test(t)) return false;
+      const decls = varDecl(flat, t);
+      return decls.length === 1 && !!decls[0].initializer
+        && TESTER.some((re) => re.test(decls[0].initializer.getText(flat).trim()));
+    };
+    const testerGated = banners.length === 1 && polarGuards(banners[0]).some(isTesterGate);
+    if (banners.length === 1 && bannerKey && rows.length > 0 && mismatched.length === 0 && testerGated) {
+      ok(`2g. testingSection's "Testing" banner renders only with its rows, under the tester gate (\`${bannerKey}\`)`);
     } else {
-      fail('2g. testingSection\'s "Testing" banner shares its rows\' gate (no empty banner)',
+      fail('2g. testingSection\'s "Testing" banner shares its rows\' gate (no empty banner), and that gate is the tester flag',
            banners.length !== 1 ? `found ${banners.length} "Testing" TickLabels in testingSection`
              : rows.length === 0 ? 'no testID row found in testingSection — the parse is vacuous'
              : !bannerKey ? 'the banner is unconditional — with its row off it renders alone'
-             : mismatched.map((r) => `${r.at} under \`${r.key || 'nothing'}\`, banner under \`${bannerKey}\``).join('; '));
+             : mismatched.length ? mismatched.map((r) => `${r.at} under \`${r.key || 'nothing'}\`, banner under \`${bannerKey}\``).join('; ')
+             : `the gate \`${bannerKey}\` isn't the tester flag (testing.stage_users / stageUsersEnabled, or useTesterSurface())`);
     }
   }
 }
