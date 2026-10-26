@@ -704,6 +704,35 @@ def test_370_no_impression_is_written_twice_across_polls(deferred, path):
     assert sorted(rows(engine), key=lambda r: r["impression_id"]) == first
 
 
+def test_370_a_failed_rebuild_kick_sends_nothing_and_writes_nothing(deferred, monkeypatch):
+    """P2 e3f33cf1: a deck asked past its end whose rebuild kick fails gets the
+    kick's error with no cards, and that poll writes no evidence."""
+    from sqlalchemy import event
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(120, store=False)
+    response(client, "deck_stored", job_id, 0)            # page 1 delivered: rows written
+    first = sorted(rows(engine), key=lambda r: r["impression_id"])
+    assert first
+    with engine.begin() as conn:                           # values moved: its end needs a rebuild
+        conn.execute(update(db_module.draft_picks_table).values(pool_value=99.0))
+
+    def capture_fails(*a, **k):
+        raise RuntimeError("capture failed")
+
+    monkeypatch.setattr(server, "_capture_trade_execution", capture_fails)
+    seen = []
+    listen = lambda conn, cursor_, statement, *a: seen.append(statement)
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
+        body = response(client, "deck_stored", job_id, 120)
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    assert (body["status"], body["error"], body["cards"]) == ("error", "capture failed", [])
+    assert not [s for s in seen if s.lstrip().upper().startswith(
+        ("INSERT INTO DECK_", "UPDATE DECK_IMPRESSIONS"))]
+    assert sorted(rows(engine), key=lambda r: r["impression_id"]) == first
+
+
 def test_370_at_i1_mode_0_no_store_serve_is_assumed(deferred, monkeypatch):
     """At trade_i1_mode 0 a job carries no roster_fp, so no page is stored and
     the store is never read (P2 3672c88d): the job path serves and writes
