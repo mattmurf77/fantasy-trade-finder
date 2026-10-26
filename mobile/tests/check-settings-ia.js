@@ -21,6 +21,11 @@
 //   3. the four moves §4 actually makes, asserted individually, plus the
 //      ordering the operator fixed on 2026-08-18.
 //
+// Plus #363's timing readout (head-eng ruling 11), on the TypeScript AST so
+// comments can't satisfy it: 5a the Testing page mounts TimingReadoutRow
+// right after TestingSection, ungated, default testID; 5b the hub's Testing
+// row shows on exactly __DEV__ || testing.stage_users || testing.timing_readout.
+//
 // If §4 changes, change the tables below in the same commit. A row added to
 // the app and not added here fails as "not in the §4 migration map" — that
 // is the check working, not the check being stale.
@@ -328,6 +333,128 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       fail('hub: no sign-out control',
            `SettingsHubScreen.tsx ${mechanisms.join(' and ')} — the operator moved sign-out `
              + 'to the Account page on 2026-08-18; the hub is navigation only');
+    }
+  }
+}
+
+// ── 5. #363's timing readout (head-eng ruling 11), on the TypeScript AST ──
+// The readout self-gates on `testing.timing_readout`; the operator's phone
+// gets ONLY that flag, so it must also open the hub's Testing row.
+{
+  let ts;
+  try { ts = require('typescript'); } catch {
+    console.error('typescript not resolvable — run `npm install` in mobile/ first.');
+    process.exit(2);
+  }
+  const parseFile = (abs) => ts.createSourceFile(abs, fs.readFileSync(abs, 'utf8'), ts.ScriptTarget.Latest, true,
+    abs.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const findAll = (root, pred) => {
+    const out = [];
+    const visit = (n) => { if (pred(n)) out.push(n); ts.forEachChild(n, visit); };
+    visit(root);
+    return out;
+  };
+  const isStr = (n) => !!n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n));
+  const jsxOpen = (n) => ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n);
+  const byTag = (sf, tag) => findAll(sf, (n) => jsxOpen(n) && n.tagName.getText(sf) === tag);
+  const asNode = (el) => (el && ts.isJsxOpeningElement(el) ? el.parent : el);
+  const attrStr = (el, name) => {
+    const a = el.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText() === name);
+    if (!a || !a.initializer) return null;
+    if (isStr(a.initializer)) return a.initializer.text;
+    if (ts.isJsxExpression(a.initializer) && isStr(a.initializer.expression)) return a.initializer.expression.text;
+    return null;
+  };
+  const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n);
+  // The innermost ternary / && that renders `el`, inside its component.
+  const innermostGuard = (el) => {
+    let child = asNode(el);
+    for (let p = child.parent; p; child = p, p = p.parent) {
+      if (isFnLike(p)) return null;
+      if (ts.isConditionalExpression(p) && child !== p.condition) return p.condition;
+      if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+          && child === p.right) return p.left;
+    }
+    return null;
+  };
+
+  // 5a. The Testing page mounts the readout from components/, once, with no
+  //     props (its default testID), under no conditional, as the child
+  //     immediately after <TestingSection> (under the "Testing" banner).
+  {
+    const page = parseFile(path.join(SETTINGS_DIR, 'SettingsTestingScreen.tsx'));
+    const imported = page.statements.some((s) => ts.isImportDeclaration(s) && isStr(s.moduleSpecifier)
+      && s.moduleSpecifier.text === '../../components/TimingReadoutRow' && s.importClause
+      && s.importClause.namedBindings && ts.isNamedImports(s.importClause.namedBindings)
+      && s.importClause.namedBindings.elements.some((e) => e.name.text === 'TimingReadoutRow' && !e.propertyName));
+    const mounts = byTag(page, 'TimingReadoutRow');
+    const m = mounts.length === 1 ? mounts[0] : null;
+    const sections = byTag(page, 'TestingSection');
+    const node = asNode(m);
+    const holder = node && ts.isJsxElement(node.parent) ? node.parent : null;
+    const kids = holder ? holder.children.filter((c) => !(ts.isJsxText(c) && !c.text.trim())) : [];
+    const prev = kids.indexOf(node) > 0 ? kids[kids.indexOf(node) - 1] : null;
+    const guard = m ? innermostGuard(m) : null;
+    const problems = [
+      [imported, "no `import { TimingReadoutRow } from '../../components/TimingReadoutRow'`"],
+      [mounts.length === 1, `found ${mounts.length} <TimingReadoutRow> mounts, want 1`],
+      [!m || m.attributes.properties.length === 0,
+        m ? `passes props (${m.attributes.getText(page)}); the default testID settings.testing.timing-readout must stand` : ''],
+      [!m || !guard, guard ? `gated on \`${guard.getText(page)}\` — the row gates itself` : ''],
+      [!m || (sections.length === 1 && prev === asNode(sections[0])),
+        `not the child immediately after <TestingSection> (it follows ${prev ? prev.getText(page).slice(0, 40) : 'nothing'})`],
+    ].filter(([okay]) => !okay).map(([, why]) => why);
+    if (problems.length === 0) {
+      const at = page.getLineAndCharacterOfPosition(m.getStart(page)).line + 1;
+      ok(`5a. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection> (:${at}), ungated, default testID`);
+    } else {
+      fail('5a. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection>, ungated, with its default testID',
+           problems.join('; '));
+    }
+  }
+
+  // 5b. The hub's Testing row shows on exactly `__DEV__ || testing.stage_users
+  //     || testing.timing_readout`: an || chain of __DEV__ and flag reads (an
+  //     inline useFlag('…') / useTimingReadoutEnabled() call, or a const bound
+  //     to one), so a readout-only device reaches the readout.
+  {
+    const hub = parseFile(path.join(SETTINGS_DIR, 'SettingsHubScreen.tsx'));
+    const rows = findAll(hub, (n) => jsxOpen(n) && attrStr(n, 'testID') === 'settings.hub.testing');
+    const cond = rows.length === 1 ? innermostGuard(rows[0]) : null;
+    const flagOf = (e) => {
+      while (e && ts.isParenthesizedExpression(e)) e = e.expression;
+      if (!e) return null;
+      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression)) {
+        if (e.expression.text === 'useFlag' && isStr(e.arguments[0])) return e.arguments[0].text;
+        if (e.expression.text === 'useTimingReadoutEnabled' && e.arguments.length === 0) return 'testing.timing_readout';
+        return null;
+      }
+      if (ts.isIdentifier(e)) {
+        if (e.text === '__DEV__') return '__DEV__';
+        const decls = findAll(hub, (n) => ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === e.text);
+        return decls.length === 1 && decls[0].initializer ? flagOf(decls[0].initializer) : null;
+      }
+      return null;
+    };
+    const operands = [];
+    const flatten = (e) => {
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        flatten(e.left); flatten(e.right);
+      } else operands.push(e);
+    };
+    if (cond) flatten(cond);
+    const read = operands.map(flagOf);
+    const want = ['__DEV__', 'testing.stage_users', 'testing.timing_readout'];
+    const exact = read.every(Boolean) && read.length === want.length && want.every((k) => read.includes(k));
+    if (rows.length === 1 && cond && exact) {
+      ok(`5b. the hub's Testing row shows on \`${cond.getText(hub)}\` = __DEV__ || testing.stage_users || testing.timing_readout`);
+    } else {
+      fail("5b. the hub's Testing row shows on __DEV__ || testing.stage_users || testing.timing_readout",
+           rows.length !== 1 ? `found ${rows.length} settings.hub.testing rows`
+             : !cond ? 'the row is unconditional — every user would see Testing'
+             : `gated on \`${cond.getText(hub)}\`, which reads [${read.map((k) => k || '?').join(', ')}]`
+               + (read.includes('testing.timing_readout') ? '' : ' — a readout-only device cannot reach the readout'));
     }
   }
 }

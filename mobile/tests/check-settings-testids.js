@@ -83,10 +83,16 @@ const NEW = [
 ];
 
 // The Testing hub row is the seventh group row but is gated
-// (`__DEV__ || testing.stage_users`), so it is listed apart from the six
-// that every release build renders.
+// (`__DEV__ || testing.stage_users || testing.timing_readout`), so it is
+// listed apart from the six that every release build renders. The timing
+// readout (#363, ruling 11) is gated by its own `testing.timing_readout`
+// flag; its id is the component's default testID, so it lives in
+// TimingReadoutRow.tsx, and check-settings-ia.js 5a pins that the Testing
+// page mounts it unchanged.
 const NEW_GATED = [
   { id: 'settings.hub.testing', file: 'SettingsHubScreen.tsx', why: 'hub group row, dev/tester builds only' },
+  { id: 'settings.testing.timing-readout', file: 'TimingReadoutRow.tsx',
+    why: '#363 timing readout, after TestingSection on Settings › Testing (testing.timing_readout)' },
 ];
 
 // Dies with the modal presentation (plan §5, §8).
@@ -222,7 +228,7 @@ const inNewTree = (id) => [...(idsToFiles.get(id) || [])].some((f) => f.startsWi
   };
 
   check(NEW, 'new testIDs (version row + identity block + the six release hub rows)');
-  check(NEW_GATED, 'new gated testID (Testing hub row)');
+  check(NEW_GATED, 'new gated testIDs (Testing hub row, timing readout)');
 }
 
 // ── 3. settings.close-btn is gone, everywhere ─────────────────────────────
