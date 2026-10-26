@@ -138,7 +138,8 @@ def test_dry_run_counts_and_changes_nothing(engine, capsys):
     assert "skipped (no usable created_at): 1" in out
     assert "espn_credentials.user_id: 1" in out and "mfl_credentials.user_id: 1" in out
     assert "draft_picks.owner_user_id: 1" in out
-    assert "next: --execute --expect 3" in out
+    assert ("  python3 scripts/purge_entry_users.py --cutoff 2026-10-26T00:00:00Z "
+            "--execute --expect 3") in out
     assert snapshot(engine) == before
 
 

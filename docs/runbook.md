@@ -1391,6 +1391,11 @@ would answer 409 to the real owner.
 only, everywhere: never paste an id, SWID, team or league name into a PR, log,
 chat or this runbook. The script prints counts only.
 
+**Who runs what** (release-lead, 2026-10-26). A deletion has no rollback, so
+**the operator runs step 4, `--execute`, themself.** release-lead may run the
+read-only steps (the dry run, `--verify`) and the flag flip / Render restart
+around it on the operator's word. Nobody else runs `--execute`.
+
 Point the script at prod with `DATABASE_URL` set in the acting shell from
 `secrets.local.env` (`DATABASE_URL_PROD`), never typed into chat.
 
@@ -1404,21 +1409,31 @@ Point the script at prod with `DATABASE_URL` set in the acting shell from
    - "skipped (verified or after cutoff)", e.g. an MFL entry that proved an
      MFL login (`verified_via = 'mfl_login'`);
    - "skipped (no usable created_at)".
-3. **Execute:** `… --cutoff <same> --execute --expect N`. It refuses if N no
-   longer matches, continues past a failing id and exits non-zero if any
-   failed. Keep the printed summed counts.
-4. **Restart the Render web service.** The script deletes the durable session
+3. **Snapshot the prod database first** (no rollback without it). Take a
+   Render Postgres backup / snapshot of the prod DB and note its timestamp.
+   Don't run step 4 until the snapshot shows as complete. **Delete this manual
+   snapshot once step 6 passes, and in any case within 7 days**: privacy §5
+   promises deleted data leaves backups within 7 days, and a manual snapshot
+   would otherwise outlive that.
+4. **Execute: the operator runs this, nobody else.** Copy the exact command
+   the dry run printed under "next (the operator runs this exact command,
+   after a DB snapshot)": it is pre-filled with the dry run's cutoff (UTC) and
+   `--expect N`, e.g.
+   `python3 scripts/purge_entry_users.py --cutoff 2026-10-26T14:00:00Z --execute --expect N`.
+   It refuses if N no longer matches (re-run the dry run), continues past a
+   failing id and exits non-zero if any failed. Keep the printed summed counts.
+5. **Restart the Render web service.** The script deletes the durable session
    rows, but a live in-memory entry session survives in the running process
    until it restarts.
-5. **Verify:** `… --cutoff <same> --verify`. It exits 0 only if (a) no target
+6. **Verify:** `… --cutoff <same> --verify`. It exits 0 only if (a) no target
    id remains in any key column and (b) no `espn_credentials` /
    `mfl_credentials` row sits on any `entry:` id, skipped ones included. If it
-   isn't clean, repeat steps 2–5. A credential on a SKIPPED entry user has its
+   isn't clean, repeat steps 2–6. A credential on a SKIPPED entry user has its
    own message: a human looks (escalate to head-eng); don't delete it by hand.
    The info lines never fail the check: JSON mentions in
    `standing_offers.team_user_ids` / `leagues.opponent_data`, and overhaul
    references (the known general deletion gap, privacy §6 "not yet").
-6. **Record counts only**, and send the purge date to head-bizops. Support
+7. **Record counts only**, and send the purge date to head-bizops. Support
    uses it: "data from ESPN and MFL sign-ins made before <date> was deleted on
    that date".
 

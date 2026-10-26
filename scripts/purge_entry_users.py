@@ -218,7 +218,13 @@ def dry_run(cutoff) -> int:
     lines.append(f"  total: {sum(counts.values())}")
     lines += _info(found)
     if found["targets"]:
-        lines.append(f"next: --execute --expect {len(found['targets'])} with the same --cutoff")
+        # The exact execute command, pre-filled, for the OPERATOR to run after
+        # a DB snapshot (runbook). The cutoff is printed in UTC so the copied
+        # command selects exactly the targets this dry run counted.
+        stamp = cutoff.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        lines.append("next (the operator runs this exact command, after a DB snapshot):")
+        lines.append(f"  python3 scripts/purge_entry_users.py --cutoff {stamp} "
+                     f"--execute --expect {len(found['targets'])}")
     print("\n".join(lines))
     return 0
 
