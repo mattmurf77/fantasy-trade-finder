@@ -50,6 +50,17 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Trades
     "find_trades_tapped", "trade_card_viewed", "trade_flagged",
     "match_opened",
+    # Time to trade suggestion (addendum docs/business/analytics/
+    # 2026-10-20-time-to-suggestion-events.md v2): R2/R2b, the AC-L1 outcome
+    # of an R1 tap — exactly one of the two per `search_id`. NON_INTENT
+    # (analytics_queries.NON_INTENT_EVENTS): a system outcome echoing the tap,
+    # which already counts the user. Registered in the SAME commit as the
+    # emitters (mobile/src/state/tradeSearchTrace.ts).
+    "trade_first_card_shown", "trade_first_card_failed",
+    # deck_buffer_empty (granted, analytics-lead ruling 30): the user reached
+    # the last ready card while the deck was still building and no next page
+    # was local — an AC-L4 failure. NON_INTENT. Same commit as its emitter.
+    "deck_buffer_empty",
     # TikTok-discovery deck engine (docs/plans/tiktok-discovery/). The F1
     # /api/events derives verified, owned viewed/undo outcomes only after
     # taxonomy filtering and successful ingestion. These analytics rows
@@ -953,7 +964,50 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # pinned surface could not fire this event AT ALL (the CTA was gated
     # out), so a non-zero find_trades_tapped{mode:single_pin} count IS the
     # regression fix's telemetry.
-    "find_trades_tapped":   frozenset({"source", "mode"}),
+    #
+    # Time to trade suggestion (R1; addendum docs/business/analytics/
+    # 2026-10-20-time-to-suggestion-events.md v2, analytics-lead ruling 30):
+    # WIDENED with `search_id`, a client UUID minted AT THE TAP that the same
+    # search sends as /api/trades/generate's `search_id`, so the tap, its job
+    # and R2/R2b join on one key. Fires at the tap on every #339 table-A
+    # control (no longer at dispatch on the push path). Exact `source` values:
+    # absent (the deck's own Find a Trade), deck_error_retry,
+    # prefs_changed_strip, deck_summary_unpin, deck_search_all, calculator
+    # (the canvas Find a Trade), league_offer (League Summary Offer ONLY after
+    # the seam), and new: league_target (League Summary Target), usage_trends
+    # (Usage Trends Trade), deep_link (app/trades/finder), end_card_adjust
+    # (the P30 card's apply tap), and team_review (Team Review's "Find my
+    # trades" hand-off, only when a partner is scoped; granted by
+    # analytics-lead, Q-A — per Product it is OUT of the AC-L1 cells for
+    # launch and reported separately). Still INTENT.
+    "find_trades_tapped":   frozenset({"source", "mode", "search_id"}),
+    # R2 — at T1, the first frame where a real card is >= 50% visible with
+    # Like and Pass enabled; once per search_id. `ms_from_tap` is a MONOTONIC
+    # client delta (performance.now()), int. `entry_point` = the tap's R1
+    # `source`; `search_type` organic | pinned | fair_sweep; `launch_state`
+    # cold_launch | first_tap | repeat_tap; `network_type` wifi | cellular |
+    # offline | unknown (the tap's); `serve_source` device | page | cached |
+    # joined | fresh; `freshness_state` fresh | updating; `job_id`;
+    # `card_index`. No player ids, names or league-identifying values.
+    "trade_first_card_shown":  frozenset({"search_id", "ms_from_tap", "entry_point",
+                                          "search_type", "launch_state",
+                                          "network_type", "serve_source",
+                                          "freshness_state", "job_id",
+                                          "card_index"}),
+    # R2b — instead of R2. `reason` empty | error | abandoned (unmount, blur,
+    # or the app leaving `active` before a card, T4) | timeout (10,000 ms
+    # from the tap). Every R2b counts as > 200 ms in the p95 (T2).
+    "trade_first_card_failed": frozenset({"search_id", "ms_from_tap", "reason",
+                                          "entry_point", "search_type",
+                                          "launch_state", "network_type",
+                                          "serve_source"}),
+    # At most once per search_id. `deck_id` = the deck being paged (P2's, else
+    # the job's id); `cards_seen` = cards fronted so far, the empty one
+    # included; `ms_since_first_card` = monotonic ms since R2 (absent when R2
+    # had not fired yet); `network_type` at the moment.
+    "deck_buffer_empty":       frozenset({"search_id", "deck_id", "cards_seen",
+                                          "ms_since_first_card",
+                                          "network_type"}),
     # Receipts. `status` is ledger | ready — which of the two designed screen
     # states the user actually saw, so "did anyone see a number?" is
     # answerable without joining grades. `headline_bucket` is neg | flat | pos,
@@ -1601,9 +1655,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # selected. NO player ids, NO names, NO league id (that rides the envelope
     # column), and NO device platform — that is a user_events COLUMN
     # derived server-side (the NULL-`platform` incident).
+    # R1 widening (time to suggestion, addendum v2): + `search_id`, the same
+    # client UUID as the tap's find_trades_tapped {source: calculator}.
     "calc_find_a_trade_tapped":    frozenset({"path",
                                               "give_count", "receive_count",
-                                              "has_partner"}),
+                                              "has_partner", "search_id"}),
     # The ✓ cell's outcome (#384 W6-A / D-152). `queued` is a BOOLEAN — did
     # the server record the package as a like. `reason` is present ONLY on
     # `queued: false` and is a LOW-CARDINALITY enum: the six server refusal

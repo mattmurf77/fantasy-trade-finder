@@ -51,6 +51,7 @@
 - [Blind grading: one neutral formatter, hidden arms, per-caller flag resolution (2026-10-02, grading.blind)](#blind-grading-one-neutral-formatter-hidden-arms-per-caller-flag-resolution-2026-10-02-gradingblind)
 - [Cross-tab arrival intents and duplicated arithmetic under a parity guard (2026-10-10, nav.home_hub)](#cross-tab-arrival-intents-and-duplicated-arithmetic-under-a-parity-guard-2026-10-10-navhome_hub)
 - [Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)](#usage-trends-global-stats-cache-per-caller-roster-maps-server-order-2026-10-10-usage_trendsenabled)
+- [Trade deck on the device: append-only merge, device page, one trace per tap (2026-10-24, 200 ms path)](#trade-deck-on-the-device-append-only-merge-device-page-one-trace-per-tap-2026-10-24-200-ms-path)
 
 ---
 
@@ -891,3 +892,21 @@ The Home hub (D-202, [scope](../docs/plans/home-engagement/scope.md)) sets two c
   - `compute_normalized` takes the same `{week: normalize_week(...)}` shape from either source, and its output is sorted by player id, so stored == live byte for byte (checked on the full 2026 Weeks 1–4 NFL). That equivalence is what makes mixing safe; keep the pinning test.
   - New usage fields go into `normalize_week` + the tables + `load_usage_weeks` together. [Spec](../docs/plans/usage-trends/weekly-update.md).
 
+## Trade deck on the device: append-only merge, device page, one trace per tap (2026-10-24, 200 ms path)
+
+**Merge rule (`mobile/src/utils/tradePages.ts` `mergeDeckPage`):** the fronted card and everything before it never move, change or disappear. An append page goes behind everything held, deduped by `trade_hash`. Only a **whole-deck** response (`replace: true`, or a rebased page spanning a finished deck) may replace what's behind the front, and a fronted card it lacks is **withdrawn in place** (it keeps its slot, says why, and loses Like/Pass). Pinned by `check-trade-pages.js` and `check-withdraw-in-place.js`.
+
+**Device page (piece C, `utils/devicePage.ts` + `state/devicePageStore.ts`):**
+- Keyed per account, league and format. It holds the next unseen cards and is updated as the user swipes.
+- Refreshed only in the background (Trades focus and foreground, ≤ 1 per 60 s per key, no `search_id`, never offline).
+- At the tap it renders with **no network wait** if it's within `DEVICE_PAGE_MAX_AGE_S = 300` (the §5.1 viewer-roster bound; a cross-client invariant).
+- The tap's own request then revalidates it, and that answer is merged as a whole deck.
+- It's discarded by a client write listener on the rankings/preferences routes that invalidate trade jobs, and on sign-out, an account switch or a demo start (`useSession`).
+- It's inert unless the served `trade.first_page_store` flag is on. Pinned by `check-device-first-page.js`.
+
+**One trace per tap (`state/tradeSearchTrace.ts`):**
+- `beginTradeSearch` is the only R1 emitter. It mints `search_id` at the tap; the dispatch claims it.
+- R2 fires at T1 (a real card ≥ 50% visible with Like/Pass enabled). R2b covers empty, error, abandoned (blur, unmount, or leaving `active`) and the 10 s timeout. They share a `settled` flag, so exactly one fires per `search_id`.
+- Timing uses `performance.now()` only, never Date.
+- On the server, `search_id`/`job_id`/`deck_id` skip the digit-run PII scrub **only when id-shaped** (`analytics_ingest._HEX_ID_PROPS`).
+- Pinned by `check-trade-first-card-events.js` and `backend/tests/test_time_to_suggestion_events.py`.

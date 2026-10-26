@@ -22,6 +22,10 @@ exceptions. See [configuration](config-reference.md#shared-recommendation-signif
 
 **Biggest jumps / Weekly share** (Usage Trends orders) — The Simple view's two orders. **Biggest jumps** (default) is the server's order in three sections: the newest week's jumps (biggest jump first, each card reading "Jumped from X% to Y%"), then returns and new roles that aren't jumps, then everyone else. **Weekly share** orders by the newest selected week's share (or count), highest first, and each card states that week's number. Raw stats has neither; its columns sort.
 
+**Device page** (device-held first page, the 200 ms path's piece C) — The next unseen cards of the last validated trade deck, held on the phone per account, league and scoring format (AsyncStorage `ftf_trade_device_page_v1:…`, `mobile/src/utils/devicePage.ts`). At a search tap it renders at once if it was validated within 300 s, then the server's first page revalidates it in the background; a card the server no longer serves is withdrawn in place. It's cleared on the user's own ranking/preference writes, sign-out, an account switch and a demo start, and it's inert unless `trade.first_page_store` is on. R2's `serve_source: device`. See [cross-client invariants](cross-client-invariants.md).
+
+**search_id** — A client UUID minted at the tap on a search-starting control (`state/tradeSearchTrace.ts`). It rides `/api/trades/generate` and every time-to-suggestion event of that search (R1 `find_trades_tapped`, R2/R2b, `deck_buffer_empty`), so a tap, its job and its first card join on one key. Exactly one of R2/R2b fires per `search_id`. See the [events addendum](business/analytics/2026-10-20-time-to-suggestion-events.md).
+
 ---
 
 **Elo** — Rating system from chess. Each player has a numeric rating; comparing two players updates both based on actual vs. expected outcome. Used to rank fantasy players within a single user's preferences.
