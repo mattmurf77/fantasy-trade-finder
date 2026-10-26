@@ -13516,10 +13516,16 @@ _feedback_rate: dict[str, collections.deque] = {}
 
 
 def _client_ip() -> str:
-    """The caller's IP: the first X-Forwarded-For hop (Render's proxy sets
-    it), else the socket peer. No other helper in this file reads it."""
-    fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-    return fwd or (request.remote_addr or "unknown")
+    """The caller's IP: the RIGHTMOST X-Forwarded-For hop, else the socket
+    peer. Render's proxy appends the address it saw; every hop to the left of
+    it is client-supplied, so the leftmost is attacker-chosen and would let
+    one client rotate through budgets. Same rule as the ESPN/MFL sign-in
+    limiter (feat/platform-sign-in); whichever of the two merges second
+    reuses the other's helper instead of keeping a second definition."""
+    hops = [h.strip() for h in
+            (request.headers.get("X-Forwarded-For") or "").split(",")
+            if h.strip()]
+    return hops[-1] if hops else (request.remote_addr or "unknown")
 
 
 def _feedback_rate_key(user_id, session_key=None) -> str:

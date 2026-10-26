@@ -8,7 +8,8 @@ throttle.
   `rate_limited`. The key is the verified user_id, else an unverified
   session's token hash (so users behind one carrier NAT don't share the IP's
   budget; the raw token is never in the key or a log), else X-Device-Id, else
-  the client IP (first X-Forwarded-For hop). Idempotent duplicates don't
+  the client IP (the rightmost X-Forwarded-For hop, which Render's proxy
+  appends; hops to its left are client-set). Idempotent duplicates don't
   count, and a throttled duplicate is still answered 200 `duplicate`.
 
 The client keeps any rejected note unsynced and retries it later
@@ -158,18 +159,24 @@ def test_a_verified_user_is_keyed_by_user_id_across_devices(harness):
     assert _post(client, "fb-u-0", token=UNVERIFIED, device="other").status_code == 201
 
 
-def test_no_device_id_falls_back_to_the_first_forwarded_hop(harness):
+def test_no_device_id_falls_back_to_the_rightmost_forwarded_hop(harness):
     client, engine = harness
-    _fill(client, 20, "fb-ip", xff="203.0.113.7, 10.0.0.1")
-    assert _post(client, "fb-ip-20", xff="203.0.113.7, 10.0.0.2").status_code == 429
-    assert _post(client, "fb-ip2-0", xff="198.51.100.4, 10.0.0.1").status_code == 201
+    _fill(client, 20, "fb-ip", xff="1.2.3.4, 9.9.9.9")
+    # A spoofed leading hop neither resets nor splits the count: the rightmost
+    # hop (the address Render's proxy saw) is the key.
+    assert _post(client, "fb-ip-20", xff="5.6.7.8, 9.9.9.9").status_code == 429
+    assert _post(client, "fb-ip-21", xff="9.9.9.9").status_code == 429
+    assert "ip:9.9.9.9" in server._feedback_rate
+    assert not any(k in server._feedback_rate for k in ("ip:1.2.3.4", "ip:5.6.7.8"))
+    # A different real hop is a different caller.
+    assert _post(client, "fb-ip2-0", xff="1.2.3.4, 9.9.9.8").status_code == 201
 
 
 # ── unverified sessions: keyed by token hash, not the shared IP ─────────────
 # The mobile POST and the web form send no X-Device-Id, so without a session
 # key every unverified note behind one carrier NAT shared the IP's budget.
 
-NAT = "100.64.0.9, 10.0.0.1"        # one carrier-grade NAT egress for everyone
+NAT = "10.0.0.1, 100.64.0.9"        # one carrier-grade NAT egress (rightmost, as Render sees it)
 
 
 def _sha(token):
