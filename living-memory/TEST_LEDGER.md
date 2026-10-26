@@ -1,3 +1,30 @@
+## 2026-10-26 — Platform sign-in: proof-based ESPN/MFL team claim mints a verified `acct_*` session (dark; `feat/platform-sign-in`)
+
+Full gates. Server only (plus the R1 operator script); ships dark behind `landing.platform_options`. D-056: `FTF_SKIP_SIM_GATE=1` posture — no simulator; evidence is the tests below, a code-walk and the TestFlight checklist in [scope.md](../docs/plans/platform-sign-in/scope.md). Includes head-eng's security conditions 1–11 (review dated 2026-10-27) and analytics-lead's two grants.
+
+- **Backend:** the new `test_platform_sign_in.py` has 75 tests; `test_entry_platform_route.py` (27) was rewritten where it asserted claim-only `entry:*` mints; `test_prepared_trade_cohort.py` gains 1 pin. The condition-1 and condition-3 tests run the **real** `espn_service.fetch_league` / `mfl_service.login` / `fetch_my_leagues` over a fake urllib opener, so the real `obs.api_events` capture and error mapping are exercised. Related suites green (421 tests: accounts, account-first, Apple harness, deletion, data rights, ESPN/MFL link + auth-link, persistent sessions, verified reads/sessions, signout). `mobile/tests/check-landing-platform-options.js` updated and passing.
+- **Sabotage, each red then restored** (final code):
+  - skip the anonymous read → 12 red, incl. `test_c7_refusal_espn_public_league` (`'espn_unproven_pair' == 'espn_public_league'`);
+  - skip the pair-binding control read → 13 red, incl. `test_c7_refusal_espn_unproven_pair_leaguemate_attack` (the attacker signs in: `200 == 403`);
+  - skip the D6 `platform_identity_in_use` check → 5 red (both 409 tests, both condition-2 D6 cases, the condition-1 sweep);
+  - limiter disabled → 6 red (IP, spoofed-XFF, subject, ESPN subject, audit `limited`, condition-1 sweep);
+  - skip the MFL franchise match → 3 red (both MFL `wrong_account` tests, condition-1 sweep);
+  - **C1** unexpected exceptions fall through to the global handler → `test_c1_markers_never_leak_through_any_outcome` red (`('logs', 'S2MARKER')`);
+  - **C2** ESPN subject = raw `.strip()` instead of the normaliser → 6 red (all four condition-2 tests, the bare-lower 409 test, the ESPN subject-limit test);
+  - **C3** non-auth answers on steps 3/4 treated as auth → 19 red (all 18 `test_c3_…` cases + condition-1 sweep);
+  - **C4** leftmost XFF hop → `test_c4_spoofed_leading_xff_neither_resets_nor_splits_the_ip_count` red;
+  - **C5** script prints the Cookie header → both `test_c5_r1_script_env_only_…` red; script reads `secrets.local.env` → both red (`file access`);
+  - **C6** `delete_espn_credential` also drops identities → `test_c6_espn_disconnect_…` red; same on `delete_mfl_credential` → `test_c6_mfl_disconnect_…` red;
+  - **C7** an `entry` exemption added to `_verified_write_denial` → `test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes` red (hash pinned to `origin/main` @ `732a6b7f`);
+  - **C8** ESPN `wrong_account` always generic → `test_c7_c8_refusal_espn_wrong_account_names_the_team_this_login_owns` red;
+  - **C9** `account_created` always true → 6 red (second sign-in, bound restore, race, condition-2 identity, both condition-6 tests);
+  - **C10** `linked_identities` dropped from the export → both `test_c10_…` red; credential secrets no longer omitted → both red;
+  - **C11** deletion skips `accounts` + `linked_identities` → `test_c7_c11_mint_import_delete_…` and `test_c11_mfl_deletion_releases_the_identity` red;
+  - **E1** cohort literal `espn` → `espn_login` → `test_platform_sign_in_verified_via_values_are_cohort_eligible` red.
+- **Suite:** `python -m pytest backend/tests -q` before head-eng's conditions: **8867 passed, 2 skipped** (25 min). After (final code): **8912 passed, 2 skipped, 0 failed** (12 min; +45 = the 44 new sign-in tests + the cohort pin). The known `test_ranking_service_threads` flake did not fire.
+- **Analytics:** no new events. Grant 1 → value-only addendum `docs/business/analytics/2026-10-27-signin-failed-error-codes.md` (closed `signin_failed.error_code` domain for espn/mfl). Grant 2 → `espn` in `prepared_trade_cohort.VERIFIED`, the value defined once as `accounts.VERIFIED_VIA_ESPN` and pinned (E1); `prepared_trade_inventory_enabled` untouched (E2).
+- **Not covered:** live ESPN/MFL behaviour. Open risk R1 (does ESPN bind `espn_s2` to the SWID?) is unobserved until head-eng reviews `scripts/espn_pair_check.py` and the operator runs it; the design fails closed either way. TestFlight checklist owed on the 11-06 binary.
+
 ## 2026-10-26 — I-2 (4/4): overhaul blocks on a failed roster read + readable refusals (stacked on #413)
 
 Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.

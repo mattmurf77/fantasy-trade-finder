@@ -71,6 +71,7 @@ etc.) is ever requested — see §1.2.
 | CLI spike `_main` | `backend/espn_service.py:626-657` | `python3 -m backend.espn_service <league_id> [season]` — manual debug tool, not reachable from any client |
 | `_espn_propose_core` (`POST /api/trades/propose-espn` + the team-overhaul send) | `backend/server.py`, the pre-flight read | One mTeam+mRoster read per send. It resolves the counterparty team and the lineup slots, and since I-2 (2026-10-26) it is also the **ownership check**: give/receive players must be on the expected team's live roster, or the send is refused with 422 `asset_not_owned` / `counterparty_asset_not_owned`. A failed read (HTTP error, non-JSON or non-UTF-8 body, transport error, `http.client.HTTPException`, no `teams` list, a team without `roster`) → 502 `espn_unavailable` `kind:"network"`, nothing sent. No extra read |
 | `_validate_espn_trade` (`POST /api/trades/validate`, flag `espn.send`) | `backend/server.py` | I-2: one live mTeam+mRoster read per pre-send validate on an ESPN league. It reports advisory `asset_unmapped` / `player_moved` / `roster_not_found`; a failed read → `checked:false`. Never calls Sleeper |
+| `_espn_signin_read` (`POST /api/entry/platform` team claim, platform sign-in 2026-10-26) | `backend/server.py` | Two extra reads per ESPN sign-in after the cookie read: one **anonymous** and one **pair-binding control** (`espn_s2` + another member's SWID). Each must fail with auth-required; see §2.5. Nothing is stored |
 
 ### 1.4 A second, non-ESPN URL lives in the same module
 
@@ -354,6 +355,73 @@ Related league-binding columns on the `leagues` table (`backend/database.py:254-
    `espn_s2`/`SWID` clears as belt-and-braces. Scoped to those domains
    only — never `clearAll` (the native store is app-wide). Pinned by
    `mobile/tests/check-espn-connect-clear.js`.
+
+### 2.5 Sign in with ESPN — the proof at `POST /api/entry/platform` (2026-10-26)
+
+A team claim at the sessionless entry route signs into an account anchored
+on the ESPN identity (canonical SWID, upper-cased — `linked_identities`
+provider `espn`), so the claim must prove that the cookie pair belongs to the
+claimed team's owner. The mint stores **nothing** ESPN-side (the later
+`/api/espn/link` import stores the pair exactly as §2.3 describes). The proof
+makes **three** reads of the same §1.1 URL (`_espn_import_payload` +
+`_espn_signin_read` in `backend/server.py`):
+
+1. **Cookie read** (`espn_s2` + the caller's SWID) — must succeed. This is
+   the existing mint read; a 401/403 here is `espn_auth_required`.
+2. **Anonymous read** (no cookies) — must fail with auth-required
+   (`EspnError.kind == "auth"`, i.e. HTTP 401/403). A 200 means the league is
+   public, so step 1 proved nothing → 403 `proof_unavailable`,
+   `reason: "espn_public_league"`.
+3. **Pair-binding control** — the same `espn_s2` with **another member's**
+   SWID (another team's `owner_swid` from the step-1 payload) must fail with
+   auth-required. This closes the **leaguemate attack**: SWIDs are visible to
+   every leaguemate, so a member's own valid `espn_s2` plus a victim's SWID
+   would pass steps 1-2 and the owner check unless ESPN binds the cookie to
+   the SWID. A 200 → 403 `proof_unavailable`, `reason: "espn_unproven_pair"`
+   and a WARN `ESPN-PAIR-UNBOUND` log line (no ids); a league with no second
+   owner SWID gets the same refusal without the log line.
+
+Then the claimed team's `owner_swid` must equal the pair's SWID (else
+`espn_bad_credentials` / `wrong_account` — the message names the team this
+login owns in the league when it owns one, which is safe only because all
+three reads already succeeded; otherwise the #321 copy. An ownerless team →
+`proof_unavailable` / `espn_ownerless_team`). On reads 2 and 3, only a clean
+401/403 counts as auth-required: a 5xx, ESPN's own 429, any other status, a
+timeout or transport error, or a non-JSON 200 fails **closed** → 403
+`proof_unavailable`, `reason: "espn_unavailable"` — never a pass. The
+control's SWID is taken from this league's owners and is never echoed or
+logged. `probe_fan_profile` is never used.
+
+**One SWID form.** Every identity comparison goes through
+`espn_service.swid_identity` (braced, upper-cased, trimmed; exposed as
+`accounts.platform_subject("espn", …)`): the claimed SWID, each team's
+`owner_swid`, `linked_identities.provider_subject`, and the D6 check against
+`espn_credentials.swid` — which `/api/espn/link` stores **as captured**
+(braced or bare, any case), so that comparison normalises both sides.
+`canonical_swid` stays the Cookie-header wire form.
+
+**Disconnect vs. delete.** `DELETE /api/espn/link` removes the imported
+league credential (`espn_credentials`) but **keeps** the sign-in identity
+(`linked_identities`), so the next ESPN sign-in lands in the same account.
+Only `DELETE /api/account` removes the identity; a later sign-in then creates
+a new account.
+
+`espn_service` has no lighter view, so the two extra reads use the same
+`mTeam+mRoster+mSettings` URL as step 1 — which is also exactly what the R1
+operator check script exercises. **Open risk R1** (does ESPN bind `espn_s2`
+to the SWID at all?) is unobserved; the design fails closed (if ESPN doesn't
+bind, every ESPN sign-in is refused and users sign in with Apple). The
+read-only check is `scripts/espn_pair_check.py` (standard library only,
+environment variables only, writes no files, GETs to ESPN's league-read host
+only; head-eng reviews it before the operator runs it): four reads (both
+cookies, anonymous, `espn_s2` + another member's SWID, `espn_s2` + a random
+SWID), HTTP statuses only, verdict `PAIR_BOUND` / `PAIR_NOT_BOUND` /
+`INCONCLUSIVE`. Its URL, headers and cookie forms are pinned equal to
+`espn_service`'s by `test_c5_r1_script_is_stdlib_only_and_matches_espn_service`.
+
+Known limit: `owner_swid` is `primaryOwner or owners[0]` (§3.2), so a
+co-owner who is not the primary owner gets `wrong_account` and signs in with
+Apple instead.
 
 ---
 

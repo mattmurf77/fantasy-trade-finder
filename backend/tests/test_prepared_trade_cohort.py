@@ -435,3 +435,15 @@ def test_legacy_normalized_source_missing_availability_remains_explicit_unknown(
     normalized = discover()["targets"][0]["source"]["teams"][0]
     assert normalized["reserve"] == normalized["taxi"] == []
     assert normalized["availability_source"] == "unknown"
+
+
+def test_platform_sign_in_verified_via_values_are_cohort_eligible():
+    """analytics-lead grant E1 (2026-10-26): the verified_via the ESPN and MFL
+    sign-ins write (one definition each, in backend/accounts.py) must be in
+    VERIFIED exactly, or verified ESPN/MFL accounts silently drop out of
+    prepared-trade discovery. Import-only: no DB is touched."""
+    from backend import accounts
+    assert accounts.VERIFIED_VIA_ESPN == "espn"
+    assert accounts.VERIFIED_VIA_MFL == "mfl_login"
+    assert accounts.VERIFIED_VIA_ESPN in cohort.VERIFIED
+    assert accounts.VERIFIED_VIA_MFL in cohort.VERIFIED

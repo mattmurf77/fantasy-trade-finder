@@ -136,6 +136,17 @@ def canonical_swid(value: str) -> str:
     return "{" + v.strip("{}") + "}"
 
 
+def swid_identity(value: str | None) -> str:
+    """The ONE canonical SWID *identity* form: braced, upper-case, trimmed
+    ('' for empty). Platform sign-in compares SWIDs only through this — the
+    claimed SWID, each team's owner_swid, linked_identities.provider_subject
+    and the stored espn_credentials.swid (stored as captured: braced or bare,
+    any case) — so formatting can never dodge an identity match. Not a wire
+    form: canonical_swid above stays the Cookie-header shape."""
+    bare = (value or "").strip().strip("{}").strip().upper()
+    return "{" + bare + "}" if bare else ""
+
+
 def fetch_league(
     league_id: str,
     season: int,

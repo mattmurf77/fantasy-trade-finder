@@ -29474,6 +29474,378 @@ def extension_auth():
     })
 
 
+# ---------------------------------------------------------------------------
+# Platform sign-in (proof-based ESPN/MFL team claim, 2026-10-26)
+# ---------------------------------------------------------------------------
+# The team-claim step of POST /api/entry/platform proves ownership, then signs
+# into an account anchored on the proven ESPN/MFL identity (accounts.
+# PLATFORM_PROVIDERS) — the same verified acct_* session Sign in with Apple
+# mints. Design: platforms-eng ESPN/MFL sign-in design D1-D10; scope block in
+# docs/plans/platform-sign-in/scope.md. Never log a SWID, MFL username,
+# espn_s2, password or cookie anywhere on this path: the PLATFORM-SIGNIN
+# audit line carries provider / outcome / reason / account_id / created only,
+# and no exception message from this route reaches a log or a body (the
+# entry_platform wrapper logs the exception type and code frames only).
+
+# D7 rate limits — in-process (Render runs 1 gunicorn worker x 4 threads, so a
+# lock-guarded dict is exact; state resets on deploy, acceptable for v1).
+# Both windows count FAILED proofs only (failed team-claim proofs, failed
+# auth_leagues logins, failed my_leagues reads): successes never count,
+# because carrier NAT puts many honest users behind one IP.
+_SIGNIN_IP_MAX_FAILURES = 30
+_SIGNIN_IP_WINDOW_S = 10 * 60
+_SIGNIN_SUBJECT_MAX_FAILURES = 5
+_SIGNIN_SUBJECT_WINDOW_S = 15 * 60
+_SIGNIN_LIMITER_MAX_KEYS = 50_000
+_signin_failures: dict[str, collections.deque] = {}
+_signin_failures_lock = threading.Lock()
+
+# Placeholder refusal copy (marketing copy comes later, routed via head-eng).
+_SIGNIN_PROOF_REQUIRED_MSG = {
+    "espn": "Sign in to ESPN to claim your team.",
+    "mfl": "Sign in to MFL to claim your team.",
+}
+_SIGNIN_PROOF_UNAVAILABLE_MSG = (
+    "We can’t confirm this team is yours through ESPN. Sign in with "
+    "Apple, then link your league.")
+_SIGNIN_ESPN_UNAVAILABLE_MSG = (
+    "We couldn’t confirm this team with ESPN just now. Try again in a few "
+    "minutes, or sign in with Apple and link your league.")
+# wrong_account, naming the team this login DOES own in the same league —
+# only ever built after the proof read (ESPN cookie read / MFL login)
+# succeeded, so it names nothing the caller couldn't already see as a member.
+_SIGNIN_OWNS_OTHER_TEAM_MSG = ("This {platform} login owns {team} in this "
+                               "league, not the team you picked.")
+_SIGNIN_GENERIC_ERROR_MSG = ("Something went wrong signing you in. Try "
+                             "again shortly.")
+_SIGNIN_IDENTITY_IN_USE_MSG = {
+    "espn": "This ESPN account is already connected to a Fleeced account. "
+            "Sign in the way you did before.",
+    "mfl": "This MFL account is already connected to a Fleeced account. "
+           "Sign in the way you did before.",
+}
+# Byte-identical to the auth_leagues / auth-link bad-login body (D8: MFL
+# keeps ONE body for every failed login).
+_SIGNIN_MFL_BAD_LOGIN_MSG = "MFL didn't accept that username and password."
+_SIGNIN_MFL_WRONG_ACCOUNT_MSG = (
+    "That MFL account doesn’t own this team. Sign in with the MFL "
+    "account that owns it.")
+_SIGNIN_TOO_MANY_MSG = ("Too many sign-in attempts. Wait a few minutes, "
+                        "then try again.")
+
+
+def _client_ip() -> str:
+    """The caller's IP for the D7 limiter: the RIGHTMOST X-Forwarded-For hop,
+    else remote_addr. Every hop left of the one Render's proxy appends is
+    client-supplied (a client can send any XFF it likes), so the leftmost
+    value is attacker-chosen and would let one client rotate through
+    unlimited buckets. Rightmost is the address Render's proxy saw."""
+    hops = [h.strip() for h in
+            (request.headers.get("X-Forwarded-For") or "").split(",")
+            if h.strip()]
+    return hops[-1] if hops else (request.remote_addr or "unknown")
+
+
+def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
+    """[(key, max_failures, window_s)] for this request. The subject key is
+    a hash, so no SWID/username sits in limiter memory either."""
+    keys = [("ip:" + _client_ip(), _SIGNIN_IP_MAX_FAILURES,
+             _SIGNIN_IP_WINDOW_S)]
+    if subject:
+        digest = hashlib.sha256(f"{provider}\0{subject}".encode()).hexdigest()
+        keys.append(("sub:" + digest, _SIGNIN_SUBJECT_MAX_FAILURES,
+                     _SIGNIN_SUBJECT_WINDOW_S))
+    return keys
+
+
+def _signin_retry_after(provider: str, subject: str | None):
+    """(retry_after_s, 'ip_limit'|'subject_limit') when either window is
+    full, else None. Sliding window over the newest `max` failure stamps."""
+    now = time.monotonic()
+    worst = None
+    with _signin_failures_lock:
+        for key, cap, window in _signin_limit_keys(provider, subject):
+            q = _signin_failures.get(key)
+            if q is None:
+                continue
+            while q and q[0] <= now - window:
+                q.popleft()
+            if not q:
+                _signin_failures.pop(key, None)
+                continue
+            if len(q) >= cap:
+                wait = max(1, math.ceil(q[0] + window - now))
+                scope = "ip_limit" if key.startswith("ip:") else "subject_limit"
+                if worst is None or wait > worst[0]:
+                    worst = (wait, scope)
+    return worst
+
+
+def _signin_note_failure(provider: str, subject: str | None) -> None:
+    """Record one failed proof against the caller's IP and the subject."""
+    now = time.monotonic()
+    with _signin_failures_lock:
+        for key, cap, _window in _signin_limit_keys(provider, subject):
+            q = _signin_failures.pop(key, None) or collections.deque()
+            q.append(now)
+            while len(q) > cap:      # only the newest `cap` stamps matter
+                q.popleft()
+            _signin_failures[key] = q   # re-insert: dict order = recency
+        while len(_signin_failures) > _SIGNIN_LIMITER_MAX_KEYS:
+            _signin_failures.pop(next(iter(_signin_failures)))
+
+
+def _reset_signin_limiter() -> None:
+    """Tests only: drop all limiter state."""
+    with _signin_failures_lock:
+        _signin_failures.clear()
+
+
+def _signin_limit_gate(audit: dict, provider: str, subject: str | None):
+    """429 too_many_attempts (+ Retry-After) when the caller's IP or the
+    subject is over its failure budget; else None."""
+    hit = _signin_retry_after(provider, subject)
+    if hit is None:
+        return None
+    audit.update(outcome="limited", reason=hit[1])
+    resp = jsonify({"error": "too_many_attempts",
+                    "message": _SIGNIN_TOO_MANY_MSG})
+    resp.status_code = 429
+    resp.headers["Retry-After"] = str(hit[0])
+    return resp
+
+
+def _signin_refusal(audit: dict, status: int, error: str, message: str,
+                    reason: str | None = None, *,
+                    provider: str | None = None, subject: str | None = None,
+                    failed_proof: bool = False):
+    """A team-claim refusal {error, reason?, message}. `failed_proof` charges
+    the D7 failure budgets (IP + subject)."""
+    if failed_proof and provider:
+        _signin_note_failure(provider, subject)
+    audit.update(outcome="refused", reason=reason or error)
+    body = {"error": error}
+    if reason:
+        body["reason"] = reason
+    body["message"] = message
+    return jsonify(body), status
+
+
+def _log_platform_signin(audit: dict, resp) -> None:
+    """D9: one PLATFORM-SIGNIN line per team-claim attempt. Provider,
+    outcome, reason, and account_id + created on success — never a SWID,
+    username, cookie or password."""
+    outcome = audit.get("outcome") or "refused"
+    reason = audit.get("reason")
+    if not reason:
+        try:
+            r = resp[0] if isinstance(resp, tuple) else resp
+            body = r.get_json(silent=True) or {}
+            reason = body.get("reason") or body.get("error")
+        except Exception:
+            reason = None
+        reason = reason or "error"
+    if outcome == "proven":
+        log.info("PLATFORM-SIGNIN provider=%s outcome=proven reason=%s "
+                 "account_id=%s created=%s", audit.get("provider"), reason,
+                 audit.get("account_id"),
+                 str(bool(audit.get("created"))).lower())
+    else:
+        log.info("PLATFORM-SIGNIN provider=%s outcome=%s reason=%s",
+                 audit.get("provider"), outcome, reason)
+
+
+def _espn_signin_read(_espn, league_id: str, season: int,
+                      espn_s2: str | None, swid: str | None) -> str:
+    """One of the two extra D4 reads: 'auth' ONLY for a clean auth-required
+    answer (EspnError kind 'auth' = HTTP 401/403); 'ok' when ESPN served the
+    league; 'unavailable' for anything else — 5xx, ESPN rate-limit (429),
+    any other status, a timeout or transport error, a non-JSON body. The
+    caller refuses on 'unavailable' (fail closed, never a pass). Nothing
+    about the request or the exception message is logged. Same fetch_league
+    URL/views as the cookie read: espn_service has no lighter view, and the
+    R1 check script exercises exactly this request shape."""
+    try:
+        _espn.fetch_league(league_id, season, espn_s2=espn_s2, swid=swid)
+    except _espn.EspnError as e:
+        return "auth" if getattr(e, "kind", None) == "auth" else "unavailable"
+    except Exception as e:
+        log.warning("entry_platform: espn sign-in read failed (%s)",
+                    type(e).__name__)
+        return "unavailable"
+    return "ok"
+
+
+def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
+                       espn_s2: str, subject: str, league: dict, team):
+    """D4 steps 3-5, run after the step-2 cookie read already succeeded.
+    Every SWID comparison goes through accounts.platform_subject (the one
+    normaliser). Returns None when proven, else the refusal response."""
+    def _refuse(error, message, reason, failed=True):
+        return _signin_refusal(audit, 403, error, message, reason,
+                               provider="espn", subject=subject,
+                               failed_proof=failed)
+
+    def _ident(swid):
+        return _accounts.platform_subject("espn", swid)
+
+    def _unavailable():
+        # Not the caller's failure (an ESPN outage/limit), so it doesn't
+        # charge the D7 budgets — but it is never treated as a pass.
+        return _refuse("proof_unavailable", _SIGNIN_ESPN_UNAVAILABLE_MSG,
+                       "espn_unavailable", failed=False)
+
+    # 3. The league must be cookie-gated: an anonymous read must need auth.
+    anon = _espn_signin_read(_espn, league_id, season, None, None)
+    if anon == "ok":
+        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+                       "espn_public_league")
+    if anon != "auth":
+        return _unavailable()
+
+    # 4. Pair-binding control: the same espn_s2 with ANOTHER member's SWID
+    #    (from this league's own owners; never echoed or logged) must fail
+    #    auth, or ESPN isn't binding espn_s2 to the SWID and a leaguemate's
+    #    own espn_s2 + a victim's (league-visible) SWID would pass steps 2,
+    #    3 and 5. No second owner SWID → no control → refuse.
+    control_swid = next(
+        (t.owner_swid for t in league["teams"]
+         if _ident(t.owner_swid) and _ident(t.owner_swid) != subject),
+        None)
+    if control_swid is None:
+        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+                       "espn_unproven_pair")
+    control = _espn_signin_read(_espn, league_id, season, espn_s2,
+                                control_swid)
+    if control == "ok":
+        log.warning("ESPN-PAIR-UNBOUND control read with another member's "
+                    "SWID succeeded; refusing ESPN sign-in")
+        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+                       "espn_unproven_pair")
+    if control != "auth":
+        return _unavailable()
+
+    # 5. The claimed team must be owned by the proven SWID (#321).
+    if not _ident(team.owner_swid):
+        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+                       "espn_ownerless_team")
+    if _ident(team.owner_swid) != subject:
+        # Proof reads all succeeded, so naming the team this login owns in
+        # this league tells the caller nothing a member can't already see.
+        owned = next((t for t in league["teams"]
+                      if _ident(t.owner_swid) == subject), None)
+        message = (_SIGNIN_OWNS_OTHER_TEAM_MSG.format(
+                       platform="ESPN", team=owned.name)
+                   if owned is not None and owned.name
+                   else _ESPN_WRONG_ACCOUNT_MSG)
+        return _refuse("espn_bad_credentials", message, "wrong_account")
+    return None
+
+
+def _platform_sign_in(audit: dict, provider: str, subject: str,
+                      team_name: str, league_id: str, team_id):
+    """D3/D6: after a successful proof, sign into the account anchored on
+    (provider, subject) — creating it on first sight — and mint its verified
+    session. Same primitives as Apple's _provider_auth_response, which is
+    deliberately left untouched:
+      * identity row exists, account bound to a Sleeper user → restore that
+        user's verified session (the device-loss branch);
+      * identity row exists, unbound → the account-only acct_* session;
+      * no identity row, but the subject sits in another user's imported
+        credential → 409 platform_identity_in_use (never sign in/merge/bind);
+      * no identity row → find_or_create_account, then the acct_* session.
+    Concurrent first proofs race on uq_linked_identity: the loser re-reads
+    and signs into the winner's account."""
+    from sqlalchemy.exc import IntegrityError
+
+    verified_via = {"espn": _accounts.VERIFIED_VIA_ESPN,
+                    "mfl": _accounts.VERIFIED_VIA_MFL}[provider]
+    _hold_request_user_data(_accounts.identity_work_key(provider, subject))
+    acct = _accounts.get_account_by_identity(provider, subject)
+    if acct is None:
+        if _accounts.platform_identity_in_use(provider, subject):
+            return _signin_refusal(audit, 409, "platform_identity_in_use",
+                                   _SIGNIN_IDENTITY_IN_USE_MSG[provider])
+        try:
+            acct = _accounts.find_or_create_account(provider, subject)
+        except IntegrityError:
+            acct = _accounts.get_account_by_identity(provider, subject)
+            if acct is None:
+                raise
+    account_id = acct["account_id"]
+    acct_uid = _accounts.account_user_id(account_id)
+    _hold_request_user_data(acct_uid)
+    bound_uid = acct.get("sleeper_user_id")
+
+    try:
+        if bound_uid:
+            # Device-loss branch twin: restore the bound Sleeper user.
+            _hold_request_user_data(bound_uid)
+            profile = _accounts.get_user_profile(bound_uid) or {}
+            user_id = bound_uid
+            username = profile.get("username") or ""
+            display_name = (profile.get("display_name") or username
+                            or team_name)
+            avatar = profile.get("avatar")
+            token, payload = _extension_build_session(
+                user_id=bound_uid, username=username,
+                display_name=display_name, avatar=avatar)
+        else:
+            # A returning identity keeps its stored display name; the newly
+            # claimed team's name is only the first-sight default.
+            user_id = acct_uid
+            username = ""
+            stored = None
+            if not acct.get("created"):
+                stored = (_accounts.get_user_profile(acct_uid)
+                          or {}).get("display_name")
+            display_name = stored or team_name
+            avatar = None
+            token, payload = _account_build_session(acct_uid, display_name)
+    except Exception as e:
+        # Type only: an exception message may carry SQL parameters.
+        log.error("entry_platform: %s sign-in session build failed (%s)",
+                  provider, type(e).__name__)
+        return jsonify({"error": "session_build_failed",
+                        "message": _SIGNIN_GENERIC_ERROR_MSG}), 500
+
+    payload["verified"] = True
+    payload["verified_via"] = verified_via
+    payload["account_id"] = account_id
+    try:
+        _accounts.mark_user_verified(user_id, verified_via)
+    except Exception as e:
+        log.warning("entry_platform: mark_user_verified failed (%s)",
+                    type(e).__name__)
+    _persist_session_if_eligible(token, payload)
+    _link_device_identity(sleeper_user_id=user_id, account_id=account_id)
+    audit.update(outcome="proven", reason="ok", account_id=account_id,
+                 created=bool(acct.get("created")))
+    # A persisted (verified) session lives on the 90-day rolling idle window;
+    # only with persistence off does the 4h memory sweep bound it.
+    idle_s = (_PERSISTED_SESSION_IDLE_DAYS * 86400
+              if payload.get("_persisted_at") else 4 * 3600)
+    return jsonify({
+        "stage":         "connected",
+        "session_token": token,
+        "expires_at":    int(payload.get("last_active") or time.time()) + idle_s,
+        "user_id":       user_id,
+        "username":      username,
+        "display_name":  display_name,
+        "avatar":        avatar,
+        "platform":      provider,
+        "league_id":     league_id,
+        "team_id":       team_id,
+        "verified":      True,
+        "verified_via":  verified_via,
+        "account_id":    account_id,
+        "account_only":  not bound_uid,
+        # True = this proof created the account; False = signed into an
+        # existing one (incl. the loser of a first-proof race).
+        "account_created": bool(acct.get("created")),
+    })
+
+
 @app.route("/api/entry/platform", methods=["POST"])
 def entry_platform():
     """Sessionless ESPN/MFL entry (landing platform options v2, D-164).
@@ -29487,12 +29859,43 @@ def entry_platform():
         existing link sheets parse it unchanged. Nothing is persisted and no
         session exists yet. ESPN cookies come from the body only — there is
         no user to hold a stored credential.
-      • team_id → MINT: validate the claim and mint a session for a
-        DETERMINISTIC user id derived from the claimed team, via the same
-        _extension_build_session that backs /api/extension/auth (which also
-        creates the users row). Deterministic ids make identity durable:
-        re-claiming the same team recovers the same boards, exactly like
-        re-typing the same Sleeper username.
+      • team_id → SIGN IN (platform sign-in, 2026-10-26): PROVE the claim,
+        then sign into the account anchored on the proven identity. There
+        is no claim-only path: every claim is proven or refused.
+          ESPN (D4): the espn_s2+SWID pair is required (else 403
+          proof_required); the cookie read must succeed; an ANONYMOUS read
+          of the league must fail auth (else proof_unavailable /
+          espn_public_league); the same espn_s2 with ANOTHER member's SWID
+          must fail auth (else proof_unavailable / espn_unproven_pair +
+          WARN ESPN-PAIR-UNBOUND; no other owner SWID → the same refusal);
+          the claimed team's owner_swid must be the pair's SWID (else 403
+          espn_bad_credentials / wrong_account, naming the team this login
+          owns in the league when there is one; ownerless →
+          proof_unavailable / espn_ownerless_team). Any answer to the
+          anonymous or control read other than a clean 401/403 → 403
+          proof_unavailable / espn_unavailable (fail closed). Identity =
+          the canonical SWID (accounts.platform_subject: braced,
+          upper-cased) — the one normaliser for every SWID comparison.
+          MFL (D5): body username+password (else 403 proof_required);
+          mfl_service.login + fetch_my_leagues must list the claimed
+          (league_id, franchise_id) (bad login → 403 mfl_bad_credentials,
+          one body; not theirs → reason wrong_account, naming the
+          franchise this login owns in the league when there is one).
+          Identity = the
+          username trimmed + lower-cased; the password is used once and
+          dropped, never logged or stored.
+        Then _platform_sign_in (D3/D6): an existing linked_identities row
+        signs into its account (restoring a bound Sleeper user's session,
+        else the acct_* session); a new identity that already sits in
+        another user's imported ESPN/MFL credential → 409
+        platform_identity_in_use; otherwise find_or_create_account. The
+        session is verified (verified_via espn / mfl_login) and persisted;
+        the response adds account_created (true = new account). Failed
+        proofs are rate-limited (D7, 429 too_many_attempts + Retry-After)
+        and every claim attempt writes one PLATFORM-SIGNIN audit line (D9).
+        An unexpected exception anywhere in this route is logged by type
+        and code frames only and answered 500 internal_error with a fixed
+        message — never its text, which could carry request secrets.
 
     Plus two ACCOUNT-DISCOVERY actions (landing platform options v2.1) that
     run BEFORE either branch and are mutually exclusive with team_id /
@@ -29513,26 +29916,57 @@ def entry_platform():
     Both actions STORE NOTHING — no credential row, no users row, no
     session. They are read-only lookups against the platform, and the
     password is used for the single MFL login call and never logged or
-    echoed back.
+    echoed back. Their failed logins/reads count toward the same D7
+    failure budgets as team claims.
 
-    Id namespace — deliberately distinct from the `espn:`/`mfl:` member
-    placeholders, which are documented as never-routable (see
-    replace_espn_league_members):
-      entry:espn:<canonical SWID>       (claimed team has an owner SWID)
-      entry:espn:<league_id>.t<team_id> (ownerless team)
-      entry:mfl:<league_id>.f<franchise_id>
+    Ids: a proven claim's session is the account's `acct_<account_id>`
+    working key, or the bound Sleeper user id. The mint never creates an
+    `entry:*` id (D2) — the old deterministic entry:espn:/entry:mfl: ids and
+    the ESPN public/no-cookie claim are gone.
 
     The route does NOT import the league. The client follows the mint with
-    the canonical POST /api/{espn,mfl}/link import under the fresh token
-    (admitted by the unverified-write grace path), which binds the claimed
-    team to the entry user and persists league/members/credentials through
-    the one existing implementation.
+    the canonical POST /api/{espn,mfl}/link import under the fresh token.
+    That token is already VERIFIED, so the #279 @_gate_unverified_write gate
+    admits it unchanged — there is no exemption and no grace path for
+    unverified sessions. The import binds the claimed team to the account's
+    user and persists league/members/credentials through the one existing
+    implementation.
 
     Errors reuse the link routes' vocabulary (espn_auth_required /
     espn_bad_credentials + wrong_account / *_bad_league_id / *_bad_team_id /
-    *_unavailable) so the sheets' error handling applies verbatim.
+    *_unavailable) so the sheets' error handling applies verbatim; the
+    sign-in refusals add proof_required / proof_unavailable (+ reason) /
+    mfl_bad_credentials / platform_identity_in_use (409) /
+    too_many_attempts (429). Every refusal carries a readable `message`.
     404 while `landing.platform_options` or the platform's link flag is off.
     """
+    from werkzeug.exceptions import HTTPException
+
+    audit: dict = {}
+    resp = None
+    try:
+        resp = _entry_platform(audit)
+        return resp
+    except (HTTPException, _SessionExpired):
+        raise
+    except Exception as e:
+        # This route carries espn_s2 / SWID / MFL passwords. An exception
+        # message (or a DB error's SQL parameters) can embed them, so the
+        # global handler's log.exception must never see one: log the type
+        # and the code frames only, and answer with a fixed body.
+        log.error("entry_platform: unexpected %s\n%s", type(e).__name__,
+                  "".join(traceback.format_tb(e.__traceback__, limit=-4)))
+        resp = jsonify({"error": "internal_error",
+                        "message": _SIGNIN_GENERIC_ERROR_MSG}), 500
+        return resp
+    finally:
+        if audit.get("claim"):
+            _log_platform_signin(audit, resp)
+
+
+def _entry_platform(audit: dict):
+    """entry_platform's body. Sets audit['claim'] on a team-claim attempt
+    (the route then writes its one PLATFORM-SIGNIN line)."""
     if not is_enabled("landing.platform_options"):
         return jsonify({"error": "feature_disabled"}), 404
     body = request.get_json(force=True) or {}
@@ -29544,7 +29978,8 @@ def entry_platform():
     # ── Account-discovery actions (v2.1) ────────────────────────────────────
     # Sessionless "log in instead of typing a league id". Nothing here is
     # persisted: no credential row, no users row, no session — these branches
-    # return before any _extension_build_session / upsert reached below.
+    # return before any _platform_sign_in / upsert reached below. Failed
+    # logins/reads here charge the D7 failure budgets like a failed claim.
     action = str(body.get("action") or "").strip().lower()
     if action:
         if platform == "espn":
@@ -29562,9 +29997,15 @@ def entry_platform():
                     "error": "espn_cookies_incomplete",
                     "message": "Private leagues need both espn_s2 and SWID.",
                 }), 400
+            subject = _accounts.platform_subject("espn", swid)
+            limited = _signin_limit_gate({}, "espn", subject)
+            if limited is not None:
+                return limited
             try:
                 leagues = _espn.fetch_fan_leagues(espn_s2, swid)
             except _espn.EspnError as e:
+                if getattr(e, "kind", None) == "auth":
+                    _signin_note_failure("espn", subject)
                 return _espn_error_response(e)
             log.info("entry_platform: espn my_leagues (sessionless) -> %d",
                      len(leagues))
@@ -29587,11 +30028,16 @@ def entry_platform():
         if not username or not password:
             return jsonify({"error": "mfl_missing_credentials",
                             "message": "MFL username and password are required."}), 400
+        limited = _signin_limit_gate(
+            {}, "mfl", _accounts.platform_subject("mfl", username))
+        if limited is not None:
+            return limited
         try:
             auth = _mfl.login(username, password, year)
             del password  # transient use only — never persisted, never logged
             leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
         except _mfl.MflAuthError:
+            _signin_note_failure("mfl", _accounts.platform_subject("mfl", username))
             return jsonify({"error": "mfl_bad_credentials",
                             "message": "MFL didn't accept that username and password."}), 403
         except _mfl.MflError as e:
@@ -29621,10 +30067,25 @@ def entry_platform():
                 "message": "Private leagues need both espn_s2 and SWID.",
             }), 400
 
+        subject = None
+        if body.get("team_id") is not None:
+            # Team claim = sign-in attempt (D4 step 1: the pair is required).
+            audit.update(claim=True, provider="espn")
+            if not (espn_s2 and swid):
+                return _signin_refusal(audit, 403, "proof_required",
+                                       _SIGNIN_PROOF_REQUIRED_MSG["espn"])
+            subject = _accounts.platform_subject("espn", swid)
+            limited = _signin_limit_gate(audit, "espn", subject)
+            if limited is not None:
+                return limited
+
         try:
             league, mapped = _espn_import_payload(league_id, season,
                                                   espn_s2, swid)
         except _espn.EspnError as e:
+            if subject and getattr(e, "kind", None) == "auth":
+                # D4 step 2 failed: ESPN rejected the pair for this league.
+                _signin_note_failure("espn", subject)
             return _espn_error_response(e)
 
         team_id = body.get("team_id")
@@ -29657,24 +30118,35 @@ def entry_platform():
         if team is None:
             return jsonify({"error": "espn_bad_team_id",
                             "message": "That team isn't in this league."}), 400
-        # #321 parity: when the claim arrives with a live cookie pair, the
-        # pair's SWID must own the claimed team (an ownerless team is
-        # inconclusive-accept, same as the link route).
-        if espn_s2 and swid and team.owner_swid:
-            if (_espn.canonical_swid(team.owner_swid).upper()
-                    != _espn.canonical_swid(swid).upper()):
-                return jsonify({"error": "espn_bad_credentials",
-                                "reason": "wrong_account",
-                                "message": _ESPN_WRONG_ACCOUNT_MSG}), 403
-        if team.owner_swid:
-            entry_uid = f"entry:espn:{_espn.canonical_swid(team.owner_swid)}"
-        else:
-            entry_uid = f"entry:espn:{league_id}.t{team_id}"
-        display_name = team.name or f"Team {team_id}"
+        # D4 steps 3-5: cookie-gated league, pair-binding control, and #321
+        # ownership (an ownerless team is no longer inconclusive-accept).
+        refusal = _espn_signin_proof(audit, _espn, league_id, season,
+                                     espn_s2, subject, league, team)
+        if refusal is not None:
+            return refusal
+        return _platform_sign_in(audit, "espn", subject,
+                                 team.name or f"Team {team_id}",
+                                 league_id, team_id)
     else:
         if not is_enabled("mfl.link"):
             return jsonify({"error": "feature_disabled"}), 404
         from . import mfl_service as _mfl
+
+        subject = None
+        if (body.get("franchise_id") or body.get("team_id")) is not None:
+            # Team claim = sign-in attempt (D5): MFL login required. The
+            # password leaves the parsed body here and lives only until the
+            # one login call below.
+            audit.update(claim=True, provider="mfl")
+            username = str(body.get("username") or "").strip()
+            password = body.pop("password", None) or ""
+            if not username or not password:
+                return _signin_refusal(audit, 403, "proof_required",
+                                       _SIGNIN_PROOF_REQUIRED_MSG["mfl"])
+            subject = _accounts.platform_subject("mfl", username)
+            limited = _signin_limit_gate(audit, "mfl", subject)
+            if limited is not None:
+                return limited
 
         try:
             league_id, year, host = _mfl_resolve(body)
@@ -29707,35 +30179,42 @@ def entry_platform():
         if franchise is None:
             return jsonify({"error": "mfl_bad_team_id",
                             "message": "That franchise isn't in this league."}), 400
-        entry_uid = f"entry:{_mfl_member_id(league_id, franchise_id)}"
-        display_name = franchise["name"] or f"Franchise {franchise_id}"
 
-    try:
-        token, payload = _extension_build_session(
-            user_id=entry_uid,
-            username="",
-            display_name=display_name,
-            avatar=None,
-        )
-    except Exception as e:
-        log.error("entry_platform: session build failed: %s", e)
-        return jsonify({"error": "session_build_failed",
-                        "message": str(e)}), 500
-    _link_device_identity(sleeper_user_id=entry_uid)
-    log.info("entry_platform: minted %s session for %s (%s)",
-             platform, entry_uid, display_name)
-    return jsonify({
-        "stage":         "connected",
-        "session_token": token,
-        "expires_at":    int(payload["last_active"]) + 4 * 3600,
-        "user_id":       entry_uid,
-        "username":      "",
-        "display_name":  display_name,
-        "avatar":        None,
-        "platform":      platform,
-        "league_id":     league_id,
-        "team_id":       team_id if platform == "espn" else franchise_id,
-    })
+        # D5: log in, then the claimed (league, franchise) must be one MFL
+        # lists for that login. Nothing is stored — not even the cookie.
+        def _refuse_login(reason=None, message=_SIGNIN_MFL_BAD_LOGIN_MSG):
+            return _signin_refusal(audit, 403, "mfl_bad_credentials", message,
+                                   reason, provider="mfl", subject=subject,
+                                   failed_proof=True)
+        try:
+            try:
+                auth = _mfl.login(username, password, year)
+            finally:
+                del password  # transient use only — never stored or logged
+            mine = _mfl.fetch_my_leagues(auth["cookie"], year)
+        except _mfl.MflAuthError:
+            return _refuse_login()
+        except _mfl.MflError as e:
+            return _platform_error_response(e, "mfl")
+        in_league = [lg for lg in mine
+                     if str(lg.get("league_id") or "") == str(league_id)]
+        if not any(str(lg.get("franchise_id") or "") == franchise_id
+                   for lg in in_league):
+            # The login succeeded, so naming the franchise it owns in THIS
+            # league tells the caller nothing a member can't already see.
+            names = {fr["franchise_id"]: fr["name"]
+                     for fr in parsed["franchises"]}
+            owned = next((lg.get("franchise_name")
+                          or names.get(str(lg.get("franchise_id") or ""))
+                          for lg in in_league if lg.get("franchise_id")),
+                         None)
+            return _refuse_login(
+                "wrong_account",
+                _SIGNIN_OWNS_OTHER_TEAM_MSG.format(platform="MFL", team=owned)
+                if owned else _SIGNIN_MFL_WRONG_ACCOUNT_MSG)
+        return _platform_sign_in(audit, "mfl", subject,
+                                 franchise["name"] or f"Franchise {franchise_id}",
+                                 league_id, franchise_id)
 
 
 @app.route("/api/extension/rankings")

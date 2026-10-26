@@ -1,11 +1,15 @@
 """Tests for POST /api/entry/platform — sessionless ESPN/MFL entry
 (landing platform options v2, D-164; docs/plans/landing-platform-options/).
 
-The route is the platform twin of /api/extension/auth's claim-a-username
-door: preview a league with no session, then mint a session for a
-DETERMINISTIC user id derived from the claimed team. The league import
+Preview a league with no session, then claim a team. Since platform
+sign-in (2026-10-26) the claim is PROVEN (ESPN cookie pair + anonymous and
+pair-binding control reads; MFL login + myleagues) and signs into a verified
+acct_* account session — never a claim-only entry:* id. The proof matrix,
+limiter, audit log and account rules live in test_platform_sign_in.py; this
+file keeps the route's preview/action/handoff contracts. The league import
 itself stays on the canonical /api/{espn,mfl}/link routes, driven by the
-freshly minted token — the mint→import test proves that handoff end-to-end.
+freshly minted (already verified) token — the mint→import tests prove that
+handoff end-to-end.
 
 v2.1 adds two ACCOUNT-DISCOVERY actions on the same route — ESPN
 `my_leagues` (fan-profile list for a supplied cookie pair) and MFL
@@ -46,6 +50,10 @@ MFL_LEAGUE = "10005"
 # From the fixtures: ESPN team 1 = "Chalk Dusters", owner SWID {A111…};
 # MFL franchise 0001 = "Clobberin Time 2".
 ESPN_TEAM_1_SWID = "{A1111111-1111-1111-1111-111111111111}"
+ESPN_TEAM_2_SWID = "{B2222222-2222-2222-2222-222222222222}"
+# The espn_s2 ESPN issued with each member's SWID (private-league model).
+ESPN_S2_BY_SWID = {ESPN_TEAM_1_SWID: "s2-team-1", ESPN_TEAM_2_SWID: "s2-team-2"}
+MFL_CREDS = {"username": "matt", "password": "hunter2"}
 
 ENTRY_FLAGS = {"landing.platform_options", "espn.link", "mfl.link",
                "espn.league_picker", "mfl.auth_link"}
@@ -68,7 +76,7 @@ MFL_MY_LEAGUES = [
 
 def _fake_extension_builder(user_id, username, display_name, avatar,
                             token=None):
-    tok = token or f"entry-sess-{user_id}"
+    tok = token or f"entry-sess-{user_id}-{time.time_ns()}"
     payload = {"user_id": user_id, "username": username,
                "display_name": display_name,
                "active_format": "1qb_ppr", "last_active": time.time()}
@@ -85,6 +93,39 @@ def _fake_extension_builder(user_id, username, display_name, avatar,
     with server._sessions_lock:
         server._sessions[tok] = payload
     return tok, payload
+
+
+def _fake_account_builder(user_id, display_name, token=None):
+    tok, payload = _fake_extension_builder(user_id, "", display_name, None,
+                                           token)
+    payload["account_only"] = True
+    return tok, payload
+
+
+def _private_espn(payload):
+    """A private ESPN league whose reads are pair-bound: anonymous reads and
+    any (espn_s2, SWID) pair ESPN didn't issue together need auth."""
+    def fetch(league_id, season, espn_s2=None, swid=None, **kw):
+        if not (espn_s2 and swid) or ESPN_S2_BY_SWID.get(
+                es.canonical_swid(swid).upper()) != espn_s2:
+            raise es.EspnAuthError()
+        return copy.deepcopy(payload)
+    return patch.object(es, "fetch_league", fetch)
+
+
+def _mfl_login_ok(owned=("0001",)):
+    def login(username, password, year, **kw):
+        if (username, password) != (MFL_CREDS["username"],
+                                    MFL_CREDS["password"]):
+            raise mfl.MflAuthError()
+        return {"cookie": "MFL_USER_ID=abc", "mfl_user_id": "abc"}
+
+    def my(cookie, year, **kw):
+        return [{"league_id": MFL_LEAGUE, "name": "Clobberin League",
+                 "host": "www48.myfantasyleague.com", "franchise_id": fid,
+                 "franchise_name": None} for fid in owned]
+    return patch.object(mfl, "login", login), patch.object(
+        mfl, "fetch_my_leagues", my)
 
 
 @pytest.fixture()
@@ -119,11 +160,15 @@ def client(monkeypatch):
                       lambda *a, **kw: copy.deepcopy(mfl_bundle)), \
          patch.object(server, "_extension_build_session",
                       _fake_extension_builder), \
+         patch.object(server, "_account_build_session",
+                      _fake_account_builder), \
          patch.object(server, "_link_device_identity",
                       lambda **kw: None):
+        server._reset_signin_limiter()
         try:
             yield c, engine
         finally:
+            server._reset_signin_limiter()
             with server._sessions_lock:
                 for t in set(server._sessions) - before:
                     server._sessions.pop(t, None)
@@ -184,21 +229,29 @@ def test_mfl_preview_mints_nothing_persists_nothing(client):
         assert conn.execute(select(db_module.leagues_table)).fetchall() == []
 
 
-def test_mfl_mint_returns_deterministic_entry_session(client):
+def _mfl_mint(c, **extra):
+    login, my = _mfl_login_ok()
+    with login, my:
+        return _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
+                      franchise_id="0001", **MFL_CREDS, **extra)
+
+
+def test_mfl_mint_signs_into_a_proven_account_session(client):
     c, engine = client
-    r = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
-               franchise_id="0001")
-    assert r.status_code == 200
+    r = _mfl_mint(c)
+    assert r.status_code == 200, r.get_data(as_text=True)
     body = r.get_json()
-    expected_uid = f"entry:mfl:{MFL_LEAGUE}.f0001"
+    expected_uid = f"acct_{body['account_id']}"
     assert body["stage"] == "connected"
     assert body["user_id"] == expected_uid
+    assert body["verified"] is True and body["verified_via"] == "mfl_login"
     assert body["platform"] == "mfl"
     assert body["team_id"] == "0001"
     assert body["display_name"] == "Clobberin Time 2"
     token = body["session_token"]
     with server._sessions_lock:
         assert server._sessions[token]["user_id"] == expected_uid
+        assert server._sessions[token]["verified"] is True
     with engine.connect() as conn:
         row = conn.execute(
             select(db_module.users_table.c.display_name).where(
@@ -206,17 +259,28 @@ def test_mfl_mint_returns_deterministic_entry_session(client):
         ).fetchone()
     assert row is not None and row[0] == "Clobberin Time 2"
 
-    # Re-claiming the same franchise = same identity, fresh token.
-    r2 = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
-                franchise_id="0001")
+    # Re-proving the same login = same account, fresh token.
+    r2 = _mfl_mint(c)
     assert r2.status_code == 200
     assert r2.get_json()["user_id"] == expected_uid
+    assert r2.get_json()["session_token"] != token
+
+
+def test_mfl_claim_without_login_is_refused_not_minted(client):
+    """D2: no claim-only path — the old league-id-only claim is refused."""
+    c, engine = client
+    r = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
+               franchise_id="0001")
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "proof_required"
+    with engine.connect() as conn:
+        assert conn.execute(select(db_module.users_table)).fetchall() == []
 
 
 def test_mfl_bad_franchise_400(client):
     c, _ = client
     r = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
-               franchise_id="0099")
+               franchise_id="0099", **MFL_CREDS)
     assert r.status_code == 400
     assert r.get_json()["error"] == "mfl_bad_team_id"
 
@@ -225,15 +289,9 @@ def test_mfl_minted_token_drives_the_canonical_import(client):
     """The money test: mint → the real /api/mfl/link import under the fresh
     token binds the claimed franchise to the entry user in league_members."""
     c, engine = client
-    entry_uid = f"entry:mfl:{MFL_LEAGUE}.f0001"
-    token = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
-                   franchise_id="0001").get_json()["session_token"]
-    # Username/team entry is only a claim; the import needs account proof.
-    denied = c.post("/api/mfl/link", headers={"X-Session-Token": token},
-                    json={"mfl_league_id": MFL_LEAGUE, "franchise_id": "0001"})
-    assert denied.status_code == 403
-    assert denied.get_json()["error"] == "verification_required"
-    server._sessions[token]["verified"] = True
+    minted = _mfl_mint(c).get_json()
+    entry_uid, token = minted["user_id"], minted["session_token"]
+    # The proven session passes the unchanged #279 write gate as-is.
     r = c.post("/api/mfl/link",
                headers={"X-Session-Token": token,
                         "Content-Type": "application/json"},
@@ -252,6 +310,7 @@ def test_mfl_minted_token_drives_the_canonical_import(client):
         ).fetchone()
     member_ids = {m[0] for m in members}
     assert entry_uid in member_ids
+    assert entry_uid.startswith("acct_")
     assert all(uid == entry_uid or uid.startswith("mfl:")
                for uid in member_ids)
     assert league is not None and league[0] == entry_uid
@@ -279,24 +338,42 @@ def test_espn_bad_league_id_and_cookie_xor(client):
     assert r.get_json()["error"] == "espn_cookies_incomplete"
 
 
-def test_espn_mint_swid_keyed_identity(client):
+def _espn_mint(c, swid=ESPN_TEAM_1_SWID, team_id=1):
+    with open(ESPN_FIXTURE) as f:
+        payload = json.load(f)
+    with _private_espn(payload):
+        return _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE,
+                      team_id=team_id, espn_s2=ESPN_S2_BY_SWID[swid],
+                      swid=swid)
+
+
+def test_espn_mint_signs_into_a_proven_account_session(client):
     c, engine = client
-    r = _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE, team_id=1)
-    assert r.status_code == 200
+    r = _espn_mint(c)
+    assert r.status_code == 200, r.get_data(as_text=True)
     body = r.get_json()
-    assert body["user_id"] == f"entry:espn:{ESPN_TEAM_1_SWID}"
+    assert body["user_id"] == f"acct_{body['account_id']}"
+    assert body["verified"] is True and body["verified_via"] == "espn"
     assert body["display_name"] == "Chalk Dusters"
     with server._sessions_lock:
         assert server._sessions[body["session_token"]]["user_id"] == body["user_id"]
+
+
+def test_espn_public_no_cookie_claim_is_refused_not_minted(client):
+    """D2: the old ESPN public/no-cookie claim no longer mints anything."""
+    c, engine = client
+    r = _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE, team_id=1)
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "proof_required"
+    with engine.connect() as conn:
+        assert conn.execute(select(db_module.users_table)).fetchall() == []
 
 
 def test_espn_mint_wrong_account_403(client):
     """#321 parity: a cookie pair whose SWID doesn't own the claimed team is
     refused with the same wrong_account shape the link route uses."""
     c, _ = client
-    r = _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE, team_id=1,
-               espn_s2="live-cookie",
-               swid="{B2222222-2222-2222-2222-222222222222}")
+    r = _espn_mint(c, swid=ESPN_TEAM_2_SWID, team_id=1)
     assert r.status_code == 403
     body = r.get_json()
     assert body["error"] == "espn_bad_credentials"
@@ -305,7 +382,7 @@ def test_espn_mint_wrong_account_403(client):
 
 def test_espn_bad_team_400(client):
     c, _ = client
-    r = _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE, team_id=99)
+    r = _espn_mint(c, team_id=99)
     assert r.status_code == 400
     assert r.get_json()["error"] == "espn_bad_team_id"
 
@@ -481,9 +558,8 @@ def test_mfl_unknown_action_400(client):
 # resolves) with a non-empty roster in Sleeper id space.
 
 def _import_then_leagues(c, token, platform, body):
-    # Snapshot assertions model an owner who completed account verification.
-    assert not server._sessions[token].get("verified")
-    server._sessions[token]["verified"] = True
+    # The mint already proved ownership: the session arrives verified.
+    assert server._sessions[token].get("verified") is True
     r = c.post(f"/api/{platform}/link",
                headers={"X-Session-Token": token,
                         "Content-Type": "application/json"},
@@ -496,8 +572,7 @@ def _import_then_leagues(c, token, platform, body):
 
 def test_mfl_entry_leagues_snapshot_carries_the_claimed_franchise(client):
     c, _ = client
-    minted = _entry(c, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026,
-                    franchise_id="0001").get_json()
+    minted = _mfl_mint(c).get_json()
     leagues = _import_then_leagues(
         c, minted["session_token"], "mfl",
         {"mfl_league_id": MFL_LEAGUE, "year": 2026, "franchise_id": "0001"})
@@ -512,11 +587,15 @@ def test_mfl_entry_leagues_snapshot_carries_the_claimed_franchise(client):
 
 def test_espn_entry_leagues_snapshot_carries_the_claimed_team(client):
     c, _ = client
-    minted = _entry(c, platform="espn", espn_league_id=ESPN_LEAGUE,
-                    team_id=1).get_json()
-    leagues = _import_then_leagues(
-        c, minted["session_token"], "espn",
-        {"espn_league_id": ESPN_LEAGUE, "team_id": 1})
+    minted = _espn_mint(c).get_json()
+    with open(ESPN_FIXTURE) as f:
+        payload = json.load(f)
+    with _private_espn(payload):
+        leagues = _import_then_leagues(
+            c, minted["session_token"], "espn",
+            {"espn_league_id": ESPN_LEAGUE, "team_id": 1,
+             "espn_s2": ESPN_S2_BY_SWID[ESPN_TEAM_1_SWID],
+             "swid": ESPN_TEAM_1_SWID})
     assert [lg["league_id"] for lg in leagues] == [ESPN_LEAGUE]
     lg = leagues[0]
     assert lg["platform"] == "espn" and lg["total_rosters"]

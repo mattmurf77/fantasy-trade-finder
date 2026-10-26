@@ -1,0 +1,98 @@
+# Feature Scope — Platform sign-in (proof-based ESPN/MFL team claim)
+
+**Date:** 2026-10-26 (head-eng conditions and analytics grants folded in 2026-10-27)
+**Entry point:** direct ask — platforms-eng's ESPN/MFL sign-in design (D1–D10, §2–§4); onboarding-eng's four review amendments (2026-10-26); head-eng's security review, "APPROVED to build, with conditions" (2026-10-27); analytics-lead's ESPN/MFL sign-in grants (2026-10-26)
+**Builder:** platforms-eng backend worker, branch `feat/platform-sign-in` (pushed for head-eng's read; no PR; merge waits for onboarding-eng's mint review and head-eng's diff check)
+**Operator sign-off on waivers:** pending — the deferrals below are surfaced in the build report to platforms-eng → head-eng
+
+**What changes:** the team-claim step of the sessionless `POST /api/entry/platform` stops minting a claim-only `entry:*` session. It now proves ownership (ESPN: cookie read, anonymous read refused, pair-binding control refused, owner SWID matches; MFL: login + myleagues lists the claimed franchise) and signs into an account anchored on the proven identity — a verified, persisted `acct_*` session (or the bound Sleeper user's). Unprovable claims are refused with a readable `message`. Failed proofs are rate-limited; every claim writes one `PLATFORM-SIGNIN` audit line. Contract: [api-reference § `/api/entry/platform`](../../api-reference.md); ESPN reads: [integrations/espn.md §2.5](../../integrations/espn.md); MFL password handling: [integrations/mfl.md §2](../../integrations/mfl.md).
+
+**Ships dark (D10):** no new flag. The route already sits behind `landing.platform_options` (operator ask 12 turns it off now) plus `espn.link` / `mfl.link`. This build flips nothing.
+
+**Disconnect semantics (head-eng condition 6, for legal R28.15 W2 via head-bizops):** disconnecting an ESPN or MFL league in Settings (`DELETE /api/espn/link`, `DELETE /api/mfl/auth-link`) removes the import credential but **keeps** the sign-in identity (`linked_identities`) until account deletion. Those routes are unchanged; this is today's behaviour, now pinned by tests.
+
+---
+
+## 1. Analytics scope
+
+- [ ] **(a) New events specced:** none.
+- [x] **(b) Existing events cover it** — the client already fires `signin_attempted` / `signin_succeeded` / `signin_failed` with `method` = `espn` / `mfl` around the mint (`mobile/src/api/platformEntry.ts`, `entryPlatformMint`). They answer "how many platform sign-ins start, succeed and fail, and why": `signin_failed.error_code` carries the response's `error`. Server side, `obs.api_events` now records `user` = `acct_*` for these sessions instead of an `entry:espn:<SWID>` id (the D2 log-leak fix). The `PLATFORM-SIGNIN` line is an operational audit log, not an analytics event.
+
+  **analytics-lead grants (2026-10-26), both exercised in this build:**
+  1. **`signin_failed.error_code` gains `proof_required`, `proof_unavailable`, `platform_identity_in_use`, `too_many_attempts`** — value-only, no registry change, no client change (the client passes the server's `error` through). Condition met: the dated value-only addendum [`docs/business/analytics/2026-10-27-signin-failed-error-codes.md`](../../business/analytics/2026-10-27-signin-failed-error-codes.md) lists the closed domain for `method` espn/mfl — every refusal code the route can return, plus the client's `timeout` / `http_<status>` / `unknown` and the sign-in screen's `owner_resolve_failed` / `platform_unsupported` / `smart_start_invalid`. Codes only, never an identity value. The 2026-08-26 entry-method addendum points to it.
+  2. **`espn` joins `prepared_trade_cohort.VERIFIED`.** **E1:** the value is defined once, `accounts.VERIFIED_VIA_ESPN = "espn"` (next to `VERIFIED_VIA_MFL = "mfl_login"`), and the mint uses both constants; `test_prepared_trade_cohort.py::test_platform_sign_in_verified_via_values_are_cohort_eligible` pins both in `VERIFIED` (sabotage: cohort literal → `espn_login` → red). **E2:** the prepared-inventory flag is untouched (`prepared_trade_inventory_enabled` stays 0; DEC-9's byte budget is unaffected).
+- [ ] **(c) WAIVED** — n/a.
+
+## 2. Schema & flag scope
+
+- New/changed tables or columns: **none (no DDL).** `linked_identities.provider` gains `espn` / `mfl` (subject = canonical SWID braced + upper-cased / MFL username trimmed + lower-cased, both via `accounts.platform_subject`) and `verified_via` (users, sessions) gains `espn` (`mfl_login` already existed). Neither column has a CHECK constraint (design D3). → `docs/data-dictionary.md` updated.
+- New/changed feature flags: **none.** Gated by the existing `landing.platform_options` + `espn.link` / `mfl.link` (actions also by `espn.league_picker` / `mfl.auth_link`). Rollback lever: `landing.platform_options` → false (deploy-free, hot-reloadable).
+- New env vars / `model_config` keys: **none.** The D7 limits are module constants in `backend/server.py` (`_SIGNIN_IP_MAX_FAILURES` = 30 / `_SIGNIN_IP_WINDOW_S` = 600, `_SIGNIN_SUBJECT_MAX_FAILURES` = 5 / `_SIGNIN_SUBJECT_WINDOW_S` = 900); state is in-process and resets on deploy (one gunicorn worker × 4 threads, lock-guarded).
+- Code-level vocabulary: `accounts.PLATFORM_PROVIDERS = ("espn", "mfl")`, allowed by `find_or_create_account`; `accounts.PROVIDERS` stays `("apple", "google")` and keeps meaning the `/api/auth/*` issuers. `accounts.VERIFIED_VIA_ESPN` / `VERIFIED_VIA_MFL`. `espn_service.swid_identity` (the one SWID identity form). `prepared_trade_cohort.VERIFIED` gains `"espn"`.
+
+## 3. Evidence scope
+
+D-056: no Maestro flows and no simulator captures — that tooling is retired, so those rows do not exist here.
+
+- [x] **Structural guard:** `mobile/tests/check-landing-platform-options.js` updated — V2.6 now pins "the mint never creates an `entry:*` id" and "both claims prove ownership, then mint via `_platform_sign_in`"; the V2.1 action-before-mint and store-nothing assertions key on `_platform_sign_in(`. (Still `npm run`-only; the check suites gate nothing in CI yet.)
+- [x] **Unit tests:** `backend/tests/test_platform_sign_in.py` (new, 75 tests), `backend/tests/test_entry_platform_route.py` (claim-only `entry:*` assertions rewritten for proven mints; 27 tests), `backend/tests/test_prepared_trade_cohort.py` (+1 pin). The condition-1 and condition-3 tests run the **real** `espn_service.fetch_league`, `mfl_service.login` and `fetch_my_leagues` over a fake urllib opener, so the real `obs.api_events` capture and error mapping are exercised.
+
+### head-eng's conditions → tests (each has a recorded sabotage in the `living-memory/TEST_LEDGER.md` 2026-10-26 "Platform sign-in" entry)
+
+| # | Condition | How it's met | Tests |
+|---|---|---|---|
+| 1 | No secret reaches a log, an event or an error body | `entry_platform` catches any unexpected exception, logs its **type and code frames only**, and answers 500 `internal_error` with a fixed message; the proof reads log exception types only; refusal bodies are fixed strings; the audit line carries no ids; session-build failures answer a fixed message. Exception messages never embed request values | `test_c1_markers_never_leak_through_any_outcome` — marker `espn_s2` / SWIDs / MFL username / password through proven, every refusal, both 429s, the two actions, a forced DB error (SQL params carry the SWID), forced exceptions inside the ESPN control read, the ESPN cookie read and the MFL login, and the #279 AUTH-DENY handler; asserts no marker in caplog (all loggers), any response body or header, stdout/stderr, or `obs.api_events` rows; and in the DB a SWID / username only in `linked_identities.provider_subject`, `espn_credentials.swid`, `mfl_credentials.mfl_username`, never an s2 / password / cookie |
+| 2 | One canonical SWID form | `espn_service.swid_identity` (braced, upper, trimmed) via `accounts.platform_subject`, used for the claimed SWID, every `owner_swid`, the control choice, `linked_identities.provider_subject` (also normalised inside `find_or_create_account` / `get_account_by_identity`), and the D6 check, which normalises the stored `espn_credentials.swid` (stored as captured today) in Python on both sides | `test_c2_swid_normaliser_folds_braces_case_and_whitespace`, `test_c2_formatting_cannot_dodge_identity_exists`, `test_c2_formatting_cannot_dodge_the_d6_conflict` (×2) |
+| 3 | Steps 3 and 4 fail closed | `_espn_signin_read` returns `auth` only for `EspnError.kind == "auth"` (HTTP 401/403); anything else → 403 `proof_unavailable`, `reason: "espn_unavailable"`. The control SWID comes from the league's own owners and is never echoed or logged | `test_c3_any_non_auth_answer_on_steps_3_and_4_refuses` × {anon, control} × {500, 503, ESPN 429, 404, 418, non-JSON 200, timeout, URLError, connection reset} (18 cases) |
+| 4 | Rate-limit key = the real client IP | `_client_ip()` = the rightmost `X-Forwarded-For` hop (Render's appended hop), else `remote_addr` | `test_c4_spoofed_leading_xff_neither_resets_nor_splits_the_ip_count` |
+| 5 | The R1 script is env-only, GET-only, ESPN-only, prints statuses + a verdict, writes nothing | `scripts/espn_pair_check.py` rewritten: standard library only (no `backend` import), environment only, four GETs, status lines + verdict | `test_c5_r1_script_is_stdlib_only_and_matches_espn_service`, `test_c5_r1_script_verdicts` (×9), `test_c5_r1_script_env_only_get_only_espn_only_prints_statuses` (×2; `open` patched to fail, all requests GET to `lm-api-reads.fantasy.espn.com`, 5 output lines, no marker) |
+| 6 | Disconnect keeps the identity | Routes unchanged (confirmed); pinned | `test_c6_espn_disconnect_keeps_the_identity_then_same_account`, `test_c6_mfl_disconnect_keeps_the_identity_then_same_account` |
+| 7 | Refusal per code; mint → import → delete; race; #279 gate pinned | — | `test_c7_refusal_espn_proof_required`, `test_c7_refusal_mfl_proof_required`, `test_c7_refusal_espn_public_league`, `test_c7_refusal_espn_ownerless_team`, `test_c7_refusal_espn_unproven_pair_leaguemate_attack`, condition-3 cases (`espn_unavailable`), `test_c7_c8_refusal_espn_wrong_account_…`, `test_c7_c8_refusal_mfl_wrong_account_…`, `test_c7_refusal_espn_platform_identity_in_use`, `test_c7_refusal_mfl_platform_identity_in_use_case_insensitive`, `test_c7_too_many_attempts_ip_limit_counts_claims_and_actions`, `test_c7_too_many_attempts_subject_limit`, `test_c7_c11_mint_import_delete_then_a_fresh_sign_in_is_a_new_account`, `test_c7_c9_uq_linked_identity_race_signs_into_the_winner`, `test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes` (sha256 of the four gate functions pinned to `origin/main` @ `732a6b7f`, `_MUTATING_METHODS`, and the gate wrapper on all four link routes), `test_c7_unverified_session_still_403s_on_espn_link_but_minted_passes` |
+| 8 | `wrong_account` names the login's own team, only after proof | ESPN: after all three reads succeeded, a team in this league whose `owner_swid` is the pair's → "This ESPN login owns {Team} in this league, not the team you picked."; MFL: after login, a franchise of this login in this league (myleagues `franchise_name`, else the bundle's) → same wording with "MFL"; otherwise the generic copy | `test_c7_c8_refusal_espn_wrong_account_names_the_team_this_login_owns`, `test_c8_espn_wrong_account_generic_when_login_owns_no_team_here`, `test_c7_c8_refusal_mfl_wrong_account_names_the_franchise_this_login_owns`, `test_c8_mfl_wrong_account_generic_when_login_owns_nothing_here`, `test_c8_nothing_is_named_before_the_proof_read` |
+| 9 | Response gains `account_created` | `true` = the proof created the account; `false` = existing account (incl. the race loser and the bound-Sleeper restore) | `test_c9_second_sign_in_same_identity_returns_the_same_account`, `test_c7_c9_uq_linked_identity_race_signs_into_the_winner`, plus assertions in the first-sign-in, bound-Sleeper, condition-2 and condition-6 tests |
+| 10 | Export has the identity, never the secrets | Already true: `accounts.export_user_data` exports `linked_identities` (provider + subject) and omits `espn_credentials.espn_s2_encrypted` / `mfl_credentials.cookie_encrypted`; no code change | `test_c10_espn_export_has_the_identity_not_the_cookie`, `test_c10_mfl_export_has_the_identity_not_the_cookie_or_password` |
+| 11 | Deletion releases the identity | Already true: `DELETE /api/account` removes `accounts` + `linked_identities`; the next proof creates a new account | `test_c7_c11_mint_import_delete_then_a_fresh_sign_in_is_a_new_account`, `test_c11_mfl_deletion_releases_the_identity` |
+
+- [x] **Code-walk proof** (`backend/server.py`, functions named because line numbers move):
+  1. `entry_platform` wraps `_entry_platform(audit)`: an unexpected exception → type + code frames logged, 500 `internal_error`; in a `finally`, one `PLATFORM-SIGNIN` line whenever `audit["claim"]` was set (`_log_platform_signin`).
+  2. ESPN claim (`team_id` present): `espn_cookies_incomplete` (unchanged) → `proof_required` if no pair → subject = `accounts.platform_subject("espn", swid)` → `_signin_limit_gate` → the existing cookie read `_espn_import_payload` (an auth failure charges the failure budgets) → team lookup → `_espn_signin_proof`: anonymous `_espn_signin_read` must return `"auth"`; control read with the first other owner SWID must return `"auth"`; anything else → `espn_unavailable`; owner check (named `wrong_account`) → `_platform_sign_in`.
+  3. MFL claim (`franchise_id`/`team_id` present): password popped from the parsed body → `proof_required` if missing → limiter → existing resolve + bundle + franchise lookup → `mfl_service.login` (password `del`-ed in `finally`) → `fetch_my_leagues` → (`league_id`, `franchise_id`) membership (named `wrong_account`) → `_platform_sign_in`.
+  4. `_platform_sign_in`: `identity_work_key` lease → `accounts.get_account_by_identity` → if none, `accounts.platform_identity_in_use` (409) else `find_or_create_account` (IntegrityError → re-read winner) → bound Sleeper user ⇒ `_extension_build_session` restore, else `_account_build_session(acct_*)` → `verified` / `verified_via` (`accounts.VERIFIED_VIA_*`) / `account_id` on the session → `mark_user_verified` → `_persist_session_if_eligible` → `_link_device_identity` → response with `expires_at` from the persisted 90-day window and `account_created`.
+  5. The #279 gates (`_gate_unverified_write`, `_verified_*_denial`) and `/api/espn/link`, `/api/espn/import`, `/api/mfl/link`, `/api/mfl/auth-link` are untouched (pinned by condition 7's hash test); `_provider_auth_response` (Apple/Google) is untouched.
+- [x] **Manual TestFlight checklist** (operator, on the 11-06 binary that carries the client MFL change; flag `landing.platform_options` on in a test window only). Prerequisite: head-eng has reviewed `scripts/espn_pair_check.py`, and the operator's run printed `PAIR_BOUND`. If it printed `PAIR_NOT_BOUND`, steps 1–2 are expected to refuse and only the refusal copy is checked.
+  1. Sign-in screen → ESPN → sign in to ESPN in the WebView → pick a **private** league → claim your own team. Expect: you land signed in; Settings → Account shows an account (no Sleeper); the league import completes (no "verification required" error).
+  2. Sign out, repeat step 1 with the same ESPN account. Expect: the same board (rankings you made in step 1 are there) and the display name you had.
+  3. ESPN → a **public** league you're in → claim a team. Expect "We can’t confirm this team is yours through ESPN. Sign in with Apple, then link your league." and no sign-in.
+  4. ESPN private league → claim a team that is **not** yours. Expect "This ESPN login owns {your team} in this league, not the team you picked." and no sign-in.
+  5. Sign-in screen → MFL → sign in with your MFL username/password → pick your league. Expect: signed in, import completes, "Send in MFL" works later (auth-link stored the cookie).
+  6. MFL → wrong password. Expect "MFL didn't accept that username and password." Repeat 5 more times quickly: expect "Too many sign-in attempts…".
+  7. Settings → disconnect the ESPN league, sign out, sign in with ESPN again. Expect the same account and board.
+  8. Settings → Delete account on an ESPN-signed-in account. Expect deletion succeeds; signing in with ESPN again starts a fresh, empty account.
+- [ ] **WAIVED** — n/a.
+- `testID`s added/renamed: none (server-only change).
+
+## 4. Docs scope
+
+| Doc | Updated? | Section / reason n/a |
+|---|---|---|
+| `docs/api-reference.md` | updated | `/api/entry/platform` row: the proof, every refusal and its closed `reason` set (incl. `espn_unavailable`), named `wrong_account`, response fields incl. `account_created`, the 429, the fixed 500, the audit line, the verified handoff; the stale "unverified-write grace" text in that row and under the write-gate table fixed |
+| `living-memory/LLD.md` | n/a | no route/schema *convention* shifted: the provider and `verified_via` vocabularies live in `docs/data-dictionary.md` and `docs/cross-client-invariants.md`, both updated |
+| `docs/architecture.md` | n/a | no module wiring change — the proof runs inside the existing route with existing primitives |
+| `living-memory/HLD.md` | n/a | no new module, client or major flow; the entry flow's shape (preview → claim → canonical import) is unchanged |
+| `docs/cross-client-invariants.md` | updated | "Verified-via strings": `mfl_login`, `espn`; `linked_identities.provider` `espn` / `mfl`; `PLATFORM_PROVIDERS` |
+| `docs/glossary.md` | updated | "Platform sign-in" (new); "Linked identity" note |
+| ADR or `DECISIONS.md` entry | deferred | the design doc (platforms-eng, D1–D10) plus head-eng's review are the decision record; the D- entry is written at merge by the decision owner. Build-level choices are recorded here |
+| `docs/data-dictionary.md` | updated | `users.verified_via`, `linked_identities`, `sessions.verified_via`, `espn_credentials.swid` / `mfl_credentials.mfl_username` (stored as captured; compared normalised) |
+| `docs/integrations/espn.md` | updated | §1.3 call-site row; §2.5 (the extra reads, fail-closed, the one SWID form, disconnect vs. delete, R1 script) |
+| `docs/integrations/mfl.md` | updated | §2 — the password at the mint is transient; named `wrong_account`; disconnect keeps the identity |
+| `docs/business/analytics/2026-10-27-signin-failed-error-codes.md` | new | analytics-lead grant 1 addendum (closed `error_code` domain) |
+| `scripts/README.md` | updated | `espn_pair_check.py` (operator R1 check, env-only) |
+
+## 5. Ship gate declaration
+
+- **CI green:** `pytest backend/tests`, `tsc --noEmit`, testid-lint — to be confirmed on the PR's sha (the branch is pushed for review; no PR yet)
+- **Evidence recorded:** `living-memory/TEST_LEDGER.md` 2026-10-26 "Platform sign-in" entry (targeted tests, sabotage per condition, full-suite counts; `FTF_SKIP_SIM_GATE=1` per D-056)
+- **TestFlight verification:** §3 checklist, run by the operator on the 11-06 binary; outcome logged in TEST_LEDGER
+- **R1:** head-eng reviews `scripts/espn_pair_check.py`; then the operator runs it once (read-only, prints statuses only) before 11-06
+- **Merge gate:** onboarding-eng mint review → head-eng diff check against conditions 1–7 → merge dark by 11-03
+- Express lane declared by the operator? **no** — full gates

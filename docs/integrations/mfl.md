@@ -104,6 +104,30 @@ variable immediately after (`del password` at `server.py:20096`). It is never
 persisted and never logged — no log line in the auth routes carries username
 or password.
 
+**Sign in with MFL — the password at the mint is transient too (2026-10-26).**
+The team-claim step of the sessionless `POST /api/entry/platform` now proves
+ownership with an MFL login (platform sign-in, design D5): the body carries
+`username` + `password`; the route pops the password out of the parsed body,
+calls `mfl_service.login` once (the password is `del`-ed in a `finally`
+whether the login succeeds or not), then `fetch_my_leagues` with the returned
+cookie, and the claimed (`league_id`, `franchise_id`) must be one of that
+login's franchises. **The mint stores nothing** — not the password, not the
+`MFL_USER_ID` cookie (the client's follow-on `POST /api/mfl/auth-link` stores
+the cookie as above). The identity kept is the username, trimmed and
+lower-cased, as a `linked_identities` row (provider `mfl`); first controller
+wins and the row never moves. Every failed login gets the one
+`mfl_bad_credentials` body; a login that doesn't own the franchise gets the
+same code plus `reason: "wrong_account"` (the message names the franchise
+that login owns in the same league, if any — only after the login
+succeeded). Disconnecting (`DELETE /api/mfl/auth-link`) removes the stored
+cookie but **keeps** the sign-in identity, so the next MFL sign-in lands in
+the same account; only `DELETE /api/account` releases it. Failed logins here and in the
+`auth_leagues` action count toward the sign-in failure limits (5 per username
+per 15 min, 30 per IP per 10 min → 429 `too_many_attempts`). The audit line
+(`PLATFORM-SIGNIN`) never carries the username or password. Known limit: if
+MFL accepts an email address as the login, one person can end up with two
+identities (username and email).
+
 **What IS persisted:** the `MFL_USER_ID` cookie only, in `mfl_credentials`
 (`backend/database.py:1339`) — Fernet-encrypted at rest using the same
 `SLEEPER_TOKEN_KEY` as Sleeper/ESPN credentials
