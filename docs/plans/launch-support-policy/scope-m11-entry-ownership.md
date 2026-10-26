@@ -3,7 +3,7 @@
 **Date:** 2026-10-23 (re-scoped into launch 2026-10-26)
 **Entry point:** direct ask: `head-product`'s new launch MUST M11 (2026-10-23); `legal-lead` LEG-M5; Apple guideline 5.1.1(v); operator decision 2026-10-26 (in the launch scope)
 **Builder:** `onboarding-eng` (build, under `head-eng`; `head-eng` allocates the server files and is sizing the re-scope). Spec by `launch-onboarding-pm-4` for `onboarding-pm`.
-**Operator sign-off on waivers:** re-confirmed 2026-10-26 for the launch scope (operator, in head-product's session; quoted verbatim: "I re-confirm W-M11-1 and W-M11-2 for the ESPN/MFL sign-in launch scope."). First signed 2026-10-23 for the earlier scope ("Decision 1: Agree to the waivers.").
+**Operator sign-off on waivers:** re-confirmed 2026-10-26 for the launch scope (operator, in head-product's session; quoted verbatim: "I re-confirm W-M11-1 and W-M11-2 for the ESPN/MFL sign-in launch scope."). First signed 2026-10-23 for the earlier scope ("Decision 1: Agree to the waivers."). **W-M11-2 narrowed to MFL on 2026-10-26** when the ESPN sign-in flag was added (§2); no operator re-sign is needed.
 **Gate 1 (head-product acceptance of this block):** accepted 2026-10-26 (P62) at 791c4f50, including the edge-case decisions M11-E1 to E6 and the public-ESPN rule (no weak proof for account creation; public-league-only ESPN users go Apple → connect ESPN). First accepted 2026-10-23 (P38) for the earlier scope.
 
 > **Decision, 2026-10-26: M11 is in the launch scope.** The operator, in `head-product`'s session,
@@ -126,12 +126,29 @@ re-scope keeps option (e).
   - a new MFL account key for E6.
 
   Any of these updates `docs/data-dictionary.md` (§4).
-- New/changed feature flags: **none.** (Waiver **W-M11-2**: signed 2026-10-23 for the earlier scope;
-  **re-confirmed 2026-10-26**.)
+- New/changed feature flags: **one new flag, an ESPN-only sign-in flag** (`head-eng`, 2026-10-26;
+  built by `platforms-eng` in the 11-06 binary). Waiver **W-M11-2** narrows to MFL (below).
+  - **`‹ESPN sign-in flag: name from platforms-eng›`.** The key isn't chosen yet, so
+    this placeholder stands in for it everywhere; the name is swapped in when `platforms-eng`'s PR
+    lands.
+    - **Default:** ON.
+    - **What it hides:** when OFF, the sign-in screen shows only Sleeper and MFL, with no ESPN chip.
+      ESPN users sign in with Apple and connect ESPN in Settings. ESPN league linking in Settings is
+      unaffected.
+    - **Why a new flag:** today the ESPN chip shows whenever `espn.link` is on
+      (`mobile/src/screens/SignInScreen.tsx:115`, and the chip list at `:119-123`, ESPN's entry at
+      `:121`, at `origin/main` `34dc1ced`). Turning `espn.link` off would also break ESPN league
+      linking in Settings.
+    - **Purpose:** the **ask-15 fallback**. If ESPN fails the operator's check (does ESPN bind
+      `espn_s2` to the SWID?), launch needs MFL-only sign-in.
+    - **Who flips it:** `release-lead`, on the operator's word.
   - `mfl.auth_link` (`config/features.json:120`) and `espn.webview_capture` (`:114`) remain kill
     switches. With one off, that entry is unavailable; there is no claim-only path.
   - `landing.platform_options` (`:30`) flips **ON** for launch once M11 ships (M11-R7).
-  - If `head-eng` adds a flag instead, this section is amended before build, and W-M11-2 lapses.
+  - **Waiver W-M11-2, narrowed 2026-10-26 to "no new flag for MFL".** `mfl.auth_link` stays MFL's kill
+    switch. It was signed 2026-10-23 for the earlier scope and re-confirmed 2026-10-26, before the
+    ESPN flag was added. **No operator re-sign is needed:** adding a flag meets a requirement rather
+    than waiving one, so the narrowing leaves nothing new to waive.
 - New env vars / `model_config` keys: **none.**
 - **Not express-lane.** This changes API contracts (the entry and link routes, the step-up) and may
   change schema, so full gates apply (root `CLAUDE.md`, "Bright line").
@@ -183,6 +200,11 @@ D-056: no simulator, no Maestro, no screen captures. Full evidence; nothing belo
      franchises the login does own offered (E1).
   4. An existing Apple user who has linked their ESPN SWID in Settings, then uses the ESPN chip with
      the same ESPN login. Expected: they land in their existing account (E2).
+  5. **ESPN sign-in flag ON (the default; `‹ESPN sign-in flag: name from platforms-eng›`).**
+     Expected: the sign-in screen shows the ESPN chip alongside Sleeper and MFL.
+  6. **ESPN sign-in flag OFF** (set by `release-lead` in a test window, then restored to the launch
+     value). Expected: the sign-in screen shows **Sleeper and MFL only**, with no ESPN chip. An ESPN
+     user signs in with Apple, then Settings → connect ESPN → import works.
 - `testID`s added/renamed: any new error or step-up control gets a `testID`, named at build; it must
   pass `mobile/scripts/testid-lint.sh`. Existing ones stay.
 
@@ -198,6 +220,8 @@ D-056: no simulator, no Maestro, no screen captures. Full evidence; nothing belo
 | `docs/integrations/espn.md` | **update at build** | The ESPN login as account-creation proof: which authenticated read counts, and why `fan_profile` doesn't. |
 | `docs/integrations/mfl.md` | **update at build** | The MFL login as account-creation proof, and the account key (E6). |
 | `docs/cross-client-invariants.md` (shared constants/enums/colors) | **update at build, if shared** | The error-code enum (`wrong_account`, `already_claimed`, `espn_expired`, `mfl_unavailable`), if mobile and web share it. |
+| `docs/config-reference.md` (env vars / feature flags) | **update at build** | `platforms-eng`'s PR adds the row for `‹ESPN sign-in flag: name from platforms-eng›`: default ON, what it hides (the ESPN sign-in chip), who flips it (`release-lead`, on the operator's word), and that it is the ask-15 fallback. |
+| `config/features.json` (feature flags) | **update at build** | `platforms-eng`'s PR adds the key for `‹ESPN sign-in flag: name from platforms-eng›`, default `true`. |
 | `docs/glossary.md` (new domain term) | **only if** | Only if the build names a new term (e.g. "platform login account") in code or UI. |
 | ADR or `DECISIONS.md` entry (non-obvious choice made) | **update at build** | The platform login creates the account; first controller wins (E2); one account per person (E6); no claim-only entry; option (d) rejected. Next ID = max `D-` + 1 at build time. |
 | `docs/runbook.md` | n/a | No new operation. The `entry:*` purge is `legal-lead`'s and `head-eng`'s, tracked outside this block. |
@@ -219,8 +243,12 @@ D-056: no simulator, no Maestro, no screen captures. Full evidence; nothing belo
 - **Launch switch:** `landing.platform_options` ON once M11 ships (M11-R7). **Fallback (b) retires
   once M11 is live.** Until then it stays the fallback at the 11-06 decision point
   ([prd.md §6.9.10](prd.md#6910-the-fallback-operator-decision-not-taken)).
+- **ESPN-only fallback (ask 15):** if ESPN fails the operator's check, `release-lead` turns the ESPN
+  sign-in flag `‹ESPN sign-in flag: name from platforms-eng›` OFF on the operator's word, and
+  launch signs in with Sleeper and MFL only (§2).
 - **Gates still owed:** none on this block. Gate 1 was accepted 2026-10-26 (P62) at 791c4f50, and the
-  operator re-confirmed W-M11-1 and W-M11-2 the same day.
+  operator re-confirmed W-M11-1 and W-M11-2 the same day. W-M11-2 then narrowed to MFL when the ESPN
+  sign-in flag was added (§2); no re-sign is needed.
 - **Open questions** (prd.md §9): feasibility before 11-10; the binary vs server split; E6's MFL key;
   E2's lookup (feasibility and legal acceptability); the public-league ESPN proof and ownerless teams
   (the public-ESPN rule was decided at P62; the private-league proof stays with `head-eng`);
