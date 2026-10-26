@@ -5369,7 +5369,7 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
             except Exception:
                 record(False)
                 raise
-        line =("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
+        line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
                 "evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
         args = (cause, deck_job_id, index, stored, deck_job_id in _deck_held,
                 _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
