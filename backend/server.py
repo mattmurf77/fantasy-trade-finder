@@ -5244,29 +5244,30 @@ def _deck_pack_card(state, index: int) -> dict:
     return by_index[index]
 
 
-# U4 (models-lead addendum A, R1/R2): a display past snapshot retention is
-# impossible, with one named exception, restart_split: a card past the deck's
-# stored pages, delivered before a process restart and viewed after it. It is
-# counted per run in the pack's run metadata (upgrade_misses, an object with
-# every cause, always present); its outcome joins the packed card by
-# impression_id and it scores normally. Any other miss is a defect: "other",
-# logged at error level. The cause comes from provenance, never a clock
-# (#428 QA (d): an import-time stamp called a deploy overlap's or a re-fork's
-# misses "other"): which decks this process built (_deck_held) and which it
-# evicted (_deck_evicted_at).
-# evicted_split (trades-eng 2026-10-26): the same card when its job left this
-# process by the cleanup loop's eviction (4 h). Off until models-lead rules:
-# while _EVICTED_SPLIT_NAMED is False those misses are "other". Eval reads any
-# key but "other" as a named cause.
+# U4 (models-lead addendum C (c4), R1; R2): a display past snapshot retention
+# is impossible, with two named exceptions, both for a card at or past the
+# deck's effective stored count (its current page-row count, else 0):
+# restart_split, when this process never held the deck's job, and
+# evicted_split, when this process evicted it. Each is counted per run in the
+# pack's run metadata (upgrade_misses, an object with every cause, always
+# present); its outcome joins the packed card by impression_id and it scores
+# normally. Any other miss is a defect: "other", logged at error level. The
+# cause comes from provenance, never a clock (#428 QA (d): an import-time stamp
+# called a deploy overlap's or a re-fork's misses "other"): which decks this
+# process built (_deck_held) and which it evicted (_deck_evicted_at). Eval
+# reads any key but "other" as a named cause.
 _UPGRADE_MISS_CAUSES = ("restart_split", "evicted_split", "other")
-_EVICTED_SPLIT_NAMED = False
-# Option A (head-eng's recommendation; models-lead rules on it): a deck's stored
-# pages are what the page store holds now. On the stored path the count is the
+# evicted_split named: models-lead ruled, addendum C, 2026-10-26 (C1). Off,
+# those misses would count as "other".
+_EVICTED_SPLIT_NAMED = True
+# Option A: models-lead ruled, addendum C, 2026-10-26 (C4). A deck's stored
+# pages are what the page store holds now: on the stored path the count is the
 # deck's current page row's card_count, and 0 when it has none (a newer deck's
 # row replaced it, or evict_trade_pages deleted it), instead of the count its
-# pack recorded. Off: today's behaviour exactly. A one-line switch; either way
-# the writer records such misses in run["upgrade_miss_row_gone"].
-_STORED_COUNT_FROM_ROW_NOW = False
+# pack recorded (which is never rewritten, (d3)). Off, the pack's count. A
+# one-line switch; either way the writer records such misses in
+# run["upgrade_miss_row_gone"].
+_STORED_COUNT_FROM_ROW_NOW = True
 # models-lead addendum C (c2): a ledger entry lives at least the 24 h display
 # cap, so a late view of an evicted (or held) deck keeps its cause. Entries are
 # trimmed by age; the count cap is a memory guard only, far above a day's adds

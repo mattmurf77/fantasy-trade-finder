@@ -1311,8 +1311,8 @@ def test_u4_a_card_past_the_stored_pages_missing_its_snapshot_is_a_cause_coded_m
     - restart, a deploy overlap (the old instance delivered page 4 after this
       process started) and a re-fork (a fresh worker): this process never
       held the deck, so restart_split;
-    - an eviction here: other while _EVICTED_SPLIT_NAMED is off (its default
-      until models-lead rules), evicted_split with it on;
+    - an eviction here: evicted_split with _EVICTED_SPLIT_NAMED on (its
+      default since models-lead's addendum C), other with it off;
     - a deck this process built and still holds: other (a defect), at error."""
     from datetime import datetime, timezone
     client, engine, _ = deferred
@@ -1359,7 +1359,9 @@ def test_u4_the_classification_hook():
         assert cause("elsewhere", 89, 90, True) == "other"             # within the stored pages
         assert cause("elsewhere", 60, 60, True) == "restart_split"     # the deck's own count
         assert cause("held", 95, 90, True) == "other"                  # built here, still here
-        assert cause("gone", 95, 90, True) == "other"                  # evicted: off by default
+        assert cause("gone", 95, 90, True) == "evicted_split"          # evicted: named by default
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", False)
+        assert cause("gone", 95, 90, True) == "other"                  # off: other
         mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
         assert cause("gone", 95, 90, True) == "evicted_split"
         assert cause("gone", 95, 90, False) == "other"

@@ -51,6 +51,13 @@ def clock(monkeypatch):
     return c
 
 
+def test_both_rulings_are_on_by_default():
+    """Addendum C: evicted_split named (C1) and option A (C4), both on before
+    the flip. The off paths stay covered by tests that set them off."""
+    assert server._EVICTED_SPLIT_NAMED is True
+    assert server._STORED_COUNT_FROM_ROW_NOW is True
+
+
 # ── (c1) the index test comes first ─────────────────────────────────────────
 
 @pytest.mark.parametrize("cause", ["restart_split", "evicted_split"])
