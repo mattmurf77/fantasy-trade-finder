@@ -1269,6 +1269,31 @@ trade_deck_lineage_table = Table("trade_deck_lineage", metadata,
 
 Index("ix_trade_deck_lineage_recorded", trade_deck_lineage_table.c.recorded_at)
 
+# ── C-b withdrawals (models-lead R2.4 addendum §2; head-eng's schema grant) ──
+# One row per card S0's I-1 withdrew from a packed-evidence deck at a serve
+# (flag trade.first_page_store / trade.packed_evidence only), keyed by its
+# build index. Append-only: insert-or-ignore, the first withdrawal wins
+# (record_deck_withdrawals). `served_before` is 1 when an earlier response had
+# delivered the card. A withdrawn card is never served again in that deck (the
+# sticky drop): the serve reads this table once per deck after the deck's job
+# has left the process. Eval removes a never-delivered withdrawal (W0) from the
+# deck; one delivered before keeps its position. user_id is the account
+# deletion/export key (accounts._ADDITIONAL_PRIVATE_TABLES). New and empty:
+# create_all makes it, no boot DDL.
+deck_card_withdrawals_table = Table("deck_card_withdrawals", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("deck_job_id",        String,  nullable=False),
+    Column("card_index",         Integer, nullable=False),   # the build index
+    Column("user_id",            String,  nullable=False),
+    Column("league_id",          String,  nullable=False),
+    Column("reason",             String,  nullable=False),   # 'i1_dropped'
+    Column("first_withdrawn_at", String,  nullable=False),   # ISO UTC
+    Column("served_before",      Integer, nullable=False),   # 0/1
+    Column("impression_id",      String),                    # contract.card_impression_id
+    UniqueConstraint("deck_job_id", "card_index", name="uq_deck_card_withdrawals_card"),
+)
+Index("ix_deck_card_withdrawals_user", deck_card_withdrawals_table.c.user_id)
+
 # ── suggestion.telemetry — executed-trade tagging ───────────────────────────
 # One row per captured sleeper_trades transaction examined by the matcher
 # (suggestion_telemetry.match_league_trades, hooked after every
@@ -7195,6 +7220,44 @@ def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
         row = conn.execute(select(*_trade_page_columns(evidence)).where(
             t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
     return dict(row) if row is not None else None
+
+
+def record_deck_withdrawals(rows: list[dict]) -> int:
+    """Append C-b withdrawals, insert-or-ignore on (deck_job_id, card_index):
+    the first withdrawal of a card wins. The count of rows inserted."""
+    if not rows:
+        return 0
+    t = deck_card_withdrawals_table
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        inserted = 0
+        for row in rows:
+            inserted += conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+                index_elements=[t.c.deck_job_id, t.c.card_index])).rowcount or 0
+        return inserted
+
+
+def load_delivered_impression_ids(impression_ids) -> set:
+    """The ids among `impression_ids` whose deck_impressions row has a
+    delivered_at (a card an earlier response sent)."""
+    ids = [i for i in impression_ids if isinstance(i, str)]
+    if not ids:
+        return set()
+    i = deck_impressions_table
+    with engine.connect() as conn:
+        return {r[0] for r in conn.execute(select(i.c.impression_id).where(
+            i.c.impression_id.in_(ids), i.c.delivered_at.isnot(None)))}
+
+
+def load_deck_withdrawals(deck_job_id: str) -> list[dict]:
+    """Every withdrawal recorded for one deck (an indexed read)."""
+    t = deck_card_withdrawals_table
+    with engine.connect() as conn:
+        return [dict(r) for r in conn.execute(
+            select(t).where(t.c.deck_job_id == deck_job_id).order_by(t.c.card_index)).mappings()]
 
 
 def load_trade_deck_lineage(user_id: str, deck_job_id: str) -> dict | None:

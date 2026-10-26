@@ -167,6 +167,7 @@ counterparty board disclosure or client analytics event is added.
 - [`deck_candidate_sets`](#deck_candidate_sets)
 - [`trade_page_store`](#trade_page_store)
 - [`trade_deck_lineage`](#trade_deck_lineage)
+- [`deck_card_withdrawals`](#deck_card_withdrawals)
 - [`suggestion_trade_links`](#suggestion_trade_links)
 - [`bakeoff_runs`](#bakeoff_runs)
 - [`deck_suppressions`](#deck_suppressions)
@@ -945,6 +946,24 @@ Constraints and indexes: unique `uq_trade_page_store_scope` on `(user_id, league
 | `recorded_at` | str, not null | ISO UTC, microseconds (`page_store_iso`): the deck's first page write. The 24 h purge compares it |
 
 Constraints and indexes: unique `uq_trade_deck_lineage_deck` on `(user_id, deck_job_id)`; `ix_trade_deck_lineage_recorded` on `recorded_at` (the purge).
+
+## `deck_card_withdrawals`
+
+**C-b withdrawals** (models-lead R2.4 addendum §2, head-eng's schema grant; flag-on path only: a deferred deck of `trade.first_page_store`). One row per card S0's I-1 filter withdrew from a packed-evidence deck at a serve: the serve hooks (`server._trade_job_public_view`, `_trade_page_view`) see which cards the rules dropped, and `server._deck_withdrawals_write` records each, off the request thread inside the deck's user-data lease. **Append-only, the first withdrawal wins** (`database.record_deck_withdrawals`, `ON CONFLICT (deck_job_id, card_index) DO NOTHING`, both dialects). **The sticky drop:** a withdrawn card is never served again in that deck, whatever its roster says later. While the deck's job is in the process the serves read its `_DeckEvidence.sticky`; after it has left (a restart, the job eviction), the store serve reads this table once per deck per process (`database.load_deck_withdrawals`, cached; a failed read serves on S0's rules alone). **Eval** (eval v5): a never-delivered withdrawal (`served_before = 0`, "W0") is removed from the deck (not scored, not in exposure, not ranked; positions are the displayed ones); a card withdrawn after it was delivered keeps its position and outcomes. A W0 card never has a row with a `delivered_at` (the sticky drop makes that impossible); an undelivered `first30` row of a later-withdrawn card can exist, and the reader removes it too. Never written on the flag-off path or for a live-mode deck. New and empty: `create_all` makes it, with no boot DDL. Private user data: deleted and exported by `user_id` via `accounts._ADDITIONAL_PRIVATE_TABLES`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `deck_job_id` | str, not null | the deck |
+| `card_index` | int, not null | the card's **build** index (the index in its contract `impression_id`) |
+| `user_id` | str, not null | the deck's owner (deletion/export key) |
+| `league_id` | str, not null | |
+| `reason` | str, not null | `i1_dropped` (S0's I-1: a give asset the viewer no longer holds, or a receive asset its partner no longer holds) |
+| `first_withdrawn_at` | str, not null | ISO UTC of the withdrawing serve |
+| `served_before` | int, not null | 1 when an earlier response had delivered the card (in process: its id was in the deck's delivered set at the withdrawing serve; after a restart: its row has a `delivered_at`), else 0 |
+| `impression_id` | str, nullable | `contract.card_impression_id(deck_job_id, card_index)` |
+
+Constraints and indexes: unique `uq_deck_card_withdrawals_card` on `(deck_job_id, card_index)`; `ix_deck_card_withdrawals_user` on `user_id` (deletion).
 
 ---
 

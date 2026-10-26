@@ -574,7 +574,10 @@ build: page 1 from the store or a job, `cursor` pages, `deck=` pages
 (stored, live, a non-organic deck's own, rebased onto a row, a job or a
 lineage scope row) and legacy polls. Only the cards the response actually
 sends **after the S0 rules** count: a card I-1 drops gets no row, and a gate
-miss (withhold or `roster_check_unavailable`) writes nothing. The write runs
+miss (withhold or `roster_check_unavailable`) writes nothing. **A card I-1
+withdraws is never served again in that deck** (the C-b sticky drop, recorded
+in `deck_card_withdrawals`), even after its roster moves back: later pages of
+the deck, from its job or its stored pages, after a restart too, leave it out. The write runs
 off the request thread, once per card; repeat polls write nothing again. A
 swipe or other outcome whose `impression_id` row is still being written
 waits for it (at most 2 s) instead of being dropped. A deck never delivered

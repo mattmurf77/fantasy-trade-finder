@@ -79,6 +79,7 @@ def p1(live, monkeypatch):
     monkeypatch.setattr(server, "_trade_jobs", {})
     monkeypatch.setattr(server, "_trade_jobs_by_key", {})
     monkeypatch.setattr(server, "_trade_input_epochs", {})
+    monkeypatch.setattr(server, "_deck_withdrawn_cache", {})   # C-b sticky drops, per process
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)

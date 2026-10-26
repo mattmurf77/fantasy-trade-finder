@@ -3366,6 +3366,13 @@ def _trade_job_public_view(job: dict) -> dict:
         out["board_refresh"] = board_refresh
     kick_floor = None
     withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
+    if out["cards"] and job.get("evidence") is not None:
+        # C-b sticky drop: a card I-1 withdrew at an earlier serve of this deck
+        # is never served again, whatever its roster says now.
+        with job["evidence"].lock:
+            sticky = set(job["evidence"].sticky)
+        if sticky:
+            out["cards"] = [c for c in out["cards"] if c.get("impression_id") not in sticky]
     if out["cards"]:
         user_id, league_id, _format = job["key"]
         if job.get("prepared_inventory_id"):
@@ -3403,7 +3410,8 @@ def _trade_job_public_view(job: dict) -> dict:
     # 9, legacy) are a partial run's.
     if job.get("evidence") is not None and (out["cards"] or withdrawn):
         _deck_evidence_delivered(job["evidence"], out["cards"],
-                                 partial=job.get("status") == "error", withdrawn=withdrawn)
+                                 partial=job.get("status") == "error", withdrawn=withdrawn,
+                                 league_id=job["key"][1])
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
     return out
@@ -4092,6 +4100,9 @@ class _DeckEvidence:
         # written (C-b: write impressions after I-1, so a dropped card never
         # reads as a served position).
         self.withdrawn: set = set()
+        # Every id S0's I-1 withdrew at any serve of this deck: never served
+        # again (the C-b sticky drop), and recorded in deck_card_withdrawals.
+        self.sticky: set = set()
         self.pending: set = set()     # delivered ids awaited until their row is written (F4)
         self.served_at = None         # F2: the deck's first delivery, every row's served_at
         self.marked: set = set()      # delivered ids already written or marked 'delivered'
@@ -4477,14 +4488,15 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
 
 
 def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = False,
-                             withdrawn: list = ()) -> None:
+                             withdrawn: list = (), league_id: str | None = None) -> None:
     """Record a delivery of `cards` (public dicts: what the response sends,
     after S0's serve rules) from `ev`'s deck. Once its run has ended, the write
     runs off the request thread. A card published before its impression id
     existed counts by trade_hash. `partial`: the job has errored (a timed-out
     job's published batches still serve on the legacy path), so the run has
     ended partial. `withdrawn`: the cards S0's I-1 dropped at this serve: no row (C-b),
-    even if a serve after the deck's write sends one."""
+    and never served again in this deck (the sticky drop); each is recorded once
+    in deck_card_withdrawals (`league_id`: the deck's league)."""
     dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
     ids, hashes = set(), set()
     for card in cards:
@@ -4501,6 +4513,9 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         if partial:
             ev.partial = ev.complete = True
         ev.withdrawn = (ev.withdrawn | (dropped - ev.delivered)) - ids
+        # C-b: served_before is whether an earlier response delivered the card.
+        withdrawals = {iid: iid in ev.delivered for iid in dropped - ev.sticky}
+        ev.sticky |= dropped
         new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
         now = datetime.now(timezone.utc).isoformat()
         if ev.served_at is None and (ids or hashes):
@@ -4513,8 +4528,101 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
         go = new and ev.complete
+    if withdrawals and league_id:
+        _start_deck_evidence_thread(target=_deck_withdrawals_write, args=(
+            ev.job_id, ev.user_id, league_id, withdrawals, ev.lease,
+            datetime.now(timezone.utc).isoformat()))
     if go:
         _start_deck_evidence_thread(target=_deck_evidence_write, args=(ev,))
+
+
+# ── C-b withdrawals and the sticky drop (models-lead R2.4 addendum §2) ───────
+# A card S0's I-1 withdraws from a packed-evidence deck at a serve is recorded
+# once in deck_card_withdrawals (first wins) and never served again in that
+# deck: in process from its _DeckEvidence.sticky, after its job has left the
+# process from the table, read once per deck per process.
+_DECK_WITHDRAWN_CACHE_MAX = 4096
+_deck_withdrawn_cache: dict = {}          # deck_job_id -> set of withdrawn impression ids
+_deck_withdrawn_cache_lock = threading.Lock()
+
+
+def _deck_card_index(deck_job_id: str, impression_id) -> int | None:
+    """The build index in a contract impression id (R4.2 U2), else None."""
+    prefix = f"{deck_job_id}:"
+    if isinstance(impression_id, str) and impression_id.startswith(prefix):
+        tail = impression_id[len(prefix):]
+        if tail.isdigit():
+            return int(tail)
+    return None
+
+
+def _deck_withdrawn_note(deck_job_id: str, ids) -> None:
+    """Add ids to the process cache of a deck whose job has left the process."""
+    with _deck_withdrawn_cache_lock:
+        if deck_job_id in _deck_withdrawn_cache:
+            _deck_withdrawn_cache[deck_job_id] |= set(ids)
+        else:
+            while len(_deck_withdrawn_cache) >= _DECK_WITHDRAWN_CACHE_MAX:
+                _deck_withdrawn_cache.pop(next(iter(_deck_withdrawn_cache)))
+            _deck_withdrawn_cache[deck_job_id] = set(ids)
+
+
+def _deck_sticky(deck_job_id: str, user_id: str, *, loaded_only: bool = False) -> set:
+    """The ids I-1 withdrew in this deck, never served again: the deck's
+    _DeckEvidence while its job is in this process, else the process cache,
+    filled from deck_card_withdrawals on the deck's first serve here. A failed
+    read serves without it (S0's rules still run) and isn't cached."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(deck_job_id)
+        ev = job.get("evidence") if job is not None and job["key"][0] == user_id else None
+    if ev is not None:
+        with ev.lock:
+            return set(ev.sticky)
+    with _deck_withdrawn_cache_lock:
+        cached = _deck_withdrawn_cache.get(deck_job_id)
+        if cached is not None:
+            return set(cached)
+    if loaded_only:
+        return set()
+    from . import database as _db
+    try:
+        ids = {r["impression_id"] for r in _db.load_deck_withdrawals(deck_job_id)
+               if r["user_id"] == user_id and r["impression_id"]}
+    except Exception:
+        log.warning("deck-withdrawals %s: unreadable; serving on S0's rules alone",
+                    deck_job_id, exc_info=True)
+        return set()
+    _deck_withdrawn_note(deck_job_id, ids)
+    return ids
+
+
+def _deck_withdrawals_write(deck_job_id: str, user_id: str, league_id: str,
+                            withdrawals: dict, lease, at: str) -> None:
+    """Thread target: record withdrawals ({impression_id: served_before, None
+    when unknown here}) in deck_card_withdrawals, inside the deck's lease. An
+    unknown served_before is read from the deck's delivered rows."""
+    from . import database as _db
+    try:
+        with lease.active() as active:
+            if not active:
+                return
+            unknown = [iid for iid, served in withdrawals.items() if served is None]
+            delivered = _db.load_delivered_impression_ids(unknown) if unknown else set()
+            rows = []
+            for iid, served in sorted(withdrawals.items()):
+                index = _deck_card_index(deck_job_id, iid)
+                if index is None:
+                    log.warning("deck-withdrawals %s: %s is no contract id; not recorded",
+                                deck_job_id, iid)
+                    continue
+                rows.append({"deck_job_id": deck_job_id, "card_index": index, "user_id": user_id,
+                             "league_id": league_id, "reason": "i1_dropped",
+                             "first_withdrawn_at": at, "impression_id": iid,
+                             "served_before": int(served if served is not None else iid in delivered)})
+            if rows:
+                _db.record_deck_withdrawals(rows)
+    except Exception:
+        log.warning("deck-withdrawals %s: not recorded", deck_job_id, exc_info=True)
 
 
 def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list = ()) -> None:
@@ -4527,14 +4635,22 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list =
         ev = job.get("evidence") if in_process else None
         live = in_process and job.get("evidence_mode") != "deferred"
     if ev is not None:
-        _deck_evidence_delivered(ev, cards, withdrawn=withdrawn)
+        _deck_evidence_delivered(ev, cards, withdrawn=withdrawn, league_id=row["league_id"])
         return
-    ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
-    if live or not ids:
+    if live:
         return   # a live-mode deck wrote its rows at build (an F5-dropped one uses its blob)
+    ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
     dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
     lease = _user_data_lifecycle.capture(
         row["user_id"], started=g.get("_user_data_started") if has_request_context() else None)
+    new_drops = dropped - _deck_sticky(row["deck_job_id"], row["user_id"], loaded_only=True)
+    if new_drops:                        # C-b: recorded once; never served again here
+        _deck_withdrawn_note(row["deck_job_id"], new_drops)
+        _start_deck_evidence_thread(target=_deck_withdrawals_write, args=(
+            row["deck_job_id"], row["user_id"], row["league_id"], dict.fromkeys(new_drops),
+            lease, datetime.now(timezone.utc).isoformat()))
+    if not ids:
+        return
     _deck_evidence_pend(ids)
     _start_deck_evidence_thread(target=_deck_evidence_write_stored,
                                 args=(row["user_id"], row["deck_job_id"], ids, lease,
@@ -4685,7 +4801,11 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         raise ValueError("stored pages do not decode")
     league_id = row["league_id"]
     end = min(len(pages["cards"]), cursor + _trade_page_size())
-    checked = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
+    page = pages["cards"][cursor:end]
+    sticky = _deck_sticky(row["deck_job_id"], user_id)   # C-b: withdrawn cards never return
+    if sticky:
+        page = [c for c in page if c.get("impression_id") not in sticky]
+    checked = _project_trade_dispositions(page, user_id, league_id)
     cards, block, past_bound = _roster_serve_rules(checked, league_id, viewer_id,
                                                    row["deck_job_id"], snap=snap)
     kept = {id(c) for c in cards}

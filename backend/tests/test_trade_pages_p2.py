@@ -289,6 +289,7 @@ def test_rebased_pages_from_a_row_go_through_s0(p1, spawned, monkeypatch, mode):
     body = deck_status(client, deck, 0).get_json()        # I-1 strict at any gate mode
     assert body["rebased"] and body["cards"] and body["cursor"] == 30
     assert all(c["give"][0]["id"] != "g2" for c in body["cards"])
+    kept = [c["impression_id"] for c in body["cards"]]
     assert body["freshness_state"] == "updating"           # its rebuild runs (ruling 29)
     assert len(spawned) == 1
     with engine.begin() as conn:                           # no stored rosters (ruling 30)
@@ -298,8 +299,9 @@ def test_rebased_pages_from_a_row_go_through_s0(p1, spawned, monkeypatch, mode):
     if mode:
         assert (body["status"], body["error"], body["cards"]) == ("error", "roster_check_unavailable", [])
         assert (body["cursor"], body["total_ready"]) == (0, 0)     # the cursor holds
-    else:                                                  # held: served unchecked
-        assert body["status"] == "complete" and len(body["cards"]) == 30
+    else:                                                  # held: served unchecked, but
+        # the cards I-1 withdrew above never return to this deck (C-b sticky drop)
+        assert body["status"] == "complete" and [c["impression_id"] for c in body["cards"]] == kept
 
 
 @pytest.mark.parametrize("mode", [0.0, 1.0])
