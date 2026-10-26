@@ -877,6 +877,7 @@ def main(argv: Sequence[str] | None = None) -> int
 - its rows with `card_index < top` and `COALESCE(is_ghost, 0) = 0`, ordered by `card_index`;
 - `assets_json` for the give/receive ids, and per-asset `market` from `valuation_json.assets[*].market` where present (owner and bilateral rows), else null;
 - names and positions from `players`.
+- **Selection since models-lead B5 (2026-10-26), replacing the first two bullets:** the deck is the latest by `served_at` within 30 days, through `backend.eval.data.load_decks`, whose `exclusion` is not `CALIBRATION_REFRESH` (never-delivered withdrawn cards removed, unpaged `first30` rows kept); the cards are its first `top` non-ghost cards by displayed position (`LoggedCard.position`), and one without a full row is skipped and counted in the CardSet's `skipped_no_row`.
 
 This lets the operator grade the incumbent alongside the value-core variants.
 
