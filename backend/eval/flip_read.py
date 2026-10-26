@@ -600,6 +600,20 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _settled_as_of(as_of: str | None, prog: str) -> str:
+    """The CLI's as_of (module doc): the wall clock minus STAMP_SETTLE by
+    default, and a later --as-of clamped to that, with a note on stderr
+    giving both values. bdk_audit's CLI shares it."""
+    settled = (_now() - STAMP_SETTLE).replace(microsecond=0).isoformat()
+    as_of = as_of or settled
+    if datetime.fromisoformat(as_of) > datetime.fromisoformat(settled):
+        print(f"{prog}: note: --as-of {as_of} is later than now minus STAMP_SETTLE "
+              f"({STAMP_SETTLE.total_seconds() / 60:g} min); clamped to {settled}",
+              file=sys.stderr)
+        as_of = settled
+    return as_of
+
+
 class _Parser(argparse.ArgumentParser):
     """argparse whose usage errors are redacted: a database URL passed by
     mistake (a stray positional, a mistyped flag) is never printed in full."""
@@ -663,13 +677,7 @@ def _run(args) -> int:
     except ValueError as e:              # a URL parser's message can echo the URL
         print(f"flip_read: {_redact(str(e), args.db)}", file=sys.stderr)
         return 2
-    settled = (_now() - STAMP_SETTLE).replace(microsecond=0).isoformat()
-    as_of = args.as_of or settled
-    if datetime.fromisoformat(as_of) > datetime.fromisoformat(settled):
-        print(f"flip_read: note: --as-of {as_of} is later than now minus STAMP_SETTLE "
-              f"({STAMP_SETTLE.total_seconds() / 60:g} min); clamped to {settled}",
-              file=sys.stderr)
-        as_of = settled
+    as_of = _settled_as_of(args.as_of, "flip_read")
     try:
         result = flip_read(eng, since=args.since, as_of=as_of, until=args.until,
                            i1_mode=args.i1_mode)
