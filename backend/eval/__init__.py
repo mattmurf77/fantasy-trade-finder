@@ -17,6 +17,9 @@ Modules:
   nightly     — run_all(): re-run every registered scorer on the trailing
                 window (idempotent per day); server cron hook is a HANDOFF,
                 not wired here
+  flip_read   — the model-side 24 h read after the 200 ms flip (G1-G3,
+                G7-G10, the weekly U4-R4 / B4 ceilings), read-only
+                (python3 -m backend.eval.flip_read --help)
   synth       — synthetic logged-data generator for demos + the CLI
                 end-to-end check
 

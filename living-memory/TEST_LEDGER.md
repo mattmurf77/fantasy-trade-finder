@@ -26,6 +26,25 @@ Full gates. Server only (plus the R1 operator script); ships dark behind `landin
 - **Analytics:** no new events. Grant 1 → value-only addendum `docs/business/analytics/2026-10-27-signin-failed-error-codes.md` (closed `signin_failed.error_code` domain for espn/mfl). Grant 2 → `espn` in `prepared_trade_cohort.VERIFIED`, the value defined once as `accounts.VERIFIED_VIA_ESPN` and pinned (E1); `prepared_trade_inventory_enabled` untouched (E2).
 - **Not covered:** live ESPN/MFL behaviour. Open risk R1 (does ESPN bind `espn_s2` to the SWID?) is unobserved until head-eng reviews `scripts/espn_pair_check.py` and the operator runs it; the design fails closed either way. TestFlight checklist owed on the 11-06 binary.
 
+## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
+
+Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.
+
+- **Validate gate (commit 1):** `/api/trades/validate`'s top gate was `trade.send_in_sleeper` OR `trade.send_in_mfl`, so an `espn.send`-only deploy 404'd `feature_disabled` before reaching the I-2 ESPN branch. Latent: all three flags are ON today. The gate now also opens on `espn.send`; nothing else in the route changed.
+  - Two new tests in `test_i2_espn_ownership.py` (now 26): `test_validate_espn_send_alone_still_reaches_the_espn_branch` (flags `("espn.send",)` → 200 `checked:true`, one live mRoster read, no Sleeper call) and `test_validate_all_send_flags_off_is_feature_disabled` (flags `()` → 404 `feature_disabled`, no ESPN read).
+  - Targeted: `test_i2_espn_ownership.py` + `test_trade_send_validate.py` → 42 passed.
+  - Sabotage, red then restored: the old gate line → 1 red (the espn.send-alone test: `assert 404 == 200`, body `{"error":"feature_disabled"}`); the all-off test stays green, as expected.
+  - Full suite on commit 1: `pytest backend/tests -q` → 8762 passed, 4 skipped, 0 failed (30m20s).
+- **`sleeper_send_failed.error_code` 18 → 20 (commit 2, comments and docs only):** every `error` value that `POST /api/trades/propose` and `_sleeper_propose_core` return is 17 codes: the 15 already listed plus I-2 #411's `asset_not_owned` / `counterparty_asset_not_owned`. Updated `backend/analytics_taxonomy.py`, `SendInSleeperButton.tsx`, `docs/cross-client-invariants.md` and the P0-7 addendum. Not counted, as before: the app-wide handlers' `session_expired` (401) and `internal_error` (500) can also reach the client's `body.error`.
+- **R3 `kind: "roster_read"` (commit 2):** the Sleeper core's failed-rosters-read 502 `sleeper_write_failed` now carries `kind: "roster_read"` instead of `"network"`, so `sleeper_send_failed.kind` tells a refused-before-send read from a real Sleeper write failure. Unchanged, still `network`: the R10 `traded_picks` block, MFL/ESPN `*_unavailable`, overhaul `rosters_unavailable`.
+  - Tests updated: `test_i2_sleeper_ownership.py` (the R3 matrix ×3 and the open 429 circuit) and `test_sleeper_write_route.py::test_propose_roster_fetch_failure_degrades_gracefully`.
+  - Sabotage, red then restored: the value back to `"network"` → those 5 red.
+  - Client code-walk: no client branches on `kind`; `SendInSleeperButton` only forwards `body?.kind` to `track()` (`:261`). `SendInMflButton` / `SendInEspnButton` fire no analytics event at all.
+  - Targeted on commit 2: 215 passed: `test_i2_sleeper_ownership` (27), `test_sleeper_write_route` (35), `test_trade_send_validate` (16), `test_traded_picks_unavailable` (11), `test_i2_espn_ownership` (26), `test_i2_overhaul` (14), `test_analytics_p0` (24), `test_events_api` (45), `test_analytics_taxonomy_384` (11), `test_analytics_taxonomy_home_hub` (6).
+  - Not run on commit 2: the full suite (CI runs it); `tsc --noEmit` (no `mobile/node_modules` in this worktree; the mobile change is a comment).
+- **Docs:** `docs/api-reference.md`: the validate row's gate text (commit 1) and the propose 502 row's R3 sentence, now `kind: "roster_read"` (commit 2).
+- **Analytics seam:** R3 rows between the #411 deploy and this change carry `kind: network`; the P0-7 addendum says so.
+
 ## 2026-10-26 — I-2 (4/4): overhaul blocks on a failed roster read + readable refusals (stacked on #413)
 
 Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
