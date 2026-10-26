@@ -28,6 +28,7 @@ from sqlalchemy import MetaData, create_engine, insert, text
 import backend.deck_quality as dq
 import backend.eval.bdk_audit as ba
 import backend.eval.flip_read as fr
+from backend.eval import data as eval_data
 from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval.bdk_audit import (
     FAIL, INCOMPLETE, NOT_AUDITABLE, PASS, ReadOnlyViolation, audit, main, render,
@@ -180,6 +181,20 @@ def test_a_card_without_per_asset_markets_is_not_auditable_for_the_value_rules(m
         else:
             assert (t["violations"], t["status"]) == (None, NOT_AUDITABLE)
     assert r.overall == INCOMPLETE
+
+
+@pytest.mark.parametrize("sides", [{"give": 5, "receive": True}, {"give": {"id": "x"}}],
+                         ids=["scalar", "object"])
+def test_a_snapshot_side_that_is_not_a_list_reads_as_no_market(sides):
+    """#455 QA P3: a snapshot side that is not a list is read as empty, so
+    the card is unchecked for the value rules, never a crash. blind_grade
+    reads markets through the same parser (data.valuation_markets)."""
+    db = make_db()
+    deck(db, "d", 1, {0: {**row("d", 0, *shape("breakup", "d", 0)),
+                          "valuation_json": json.dumps({"assets": sides})}})
+    r = run(db)
+    assert r.rules["breakup"]["not_auditable"] == 1 and r.rules["breakup"]["audited"] == 0
+    assert ba.valuation_markets is eval_data.valuation_markets
 
 
 # ---------------------------------------------------------------------------

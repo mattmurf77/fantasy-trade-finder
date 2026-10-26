@@ -37,7 +37,8 @@ The rule inputs, and what the evidence records at serve time:
   give / receive   assets_json: served-time.
   market values    valuation_json's per-asset market: the personal-market
                    snapshot (assets.give / assets.receive rows, market_value)
-                   or the value core's evidence (assets rows, market).
+                   or the value core's evidence (assets rows, market), read
+                   by data.valuation_markets (blind_grade's parser too).
                    Served-time but approximate: the filter priced assets with
                    elo_to_value(seed Elo), None when unseeded; the snapshot's
                    market_value is that age-adjusted (age_pref_value), and an
@@ -120,7 +121,7 @@ from backend.deck_quality import (
 )
 from backend.eval.data import (
     CALIBRATION_REFRESH, PACK_INTEGRITY, PACK_TABLE, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
-    _json_dict, load_decks,
+    _json_dict, load_decks, valuation_markets,
 )
 from backend.eval.flip_read import (
     _PACK_ROWS, FAIL, LIST_CAP, PASS, ReadOnlyViolation, _chunks, _iso, _Parser, _redact,
@@ -274,22 +275,9 @@ def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
                                    **{a: features.get(k) for a, k in _RECORDED_FEATURES.items()})
             out[r.impression_id] = ([str(a) for a in assets.get("give") or []],
                                     [str(a) for a in assets.get("receive") or []],
-                                    _markets(_json_dict(r.valuation_json)), is_protected(card))
+                                    valuation_markets(_json_dict(r.valuation_json)) or None,
+                                    is_protected(card))
     return out
-
-
-def _markets(valuation: dict | None) -> dict | None:
-    """asset id -> market from a served valuation_json (module doc), or None
-    when it records no per-asset market."""
-    assets = (valuation or {}).get("assets")
-    if isinstance(assets, dict):          # the personal-market snapshot
-        rows, key = [*(assets.get("give") or []), *(assets.get("receive") or [])], "market_value"
-    elif isinstance(assets, list):        # the value core's evidence
-        rows, key = assets, "market"
-    else:
-        return None
-    markets = {str(r["id"]): r.get(key) for r in rows if isinstance(r, dict) and "id" in r}
-    return markets or None
 
 
 def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
@@ -322,7 +310,7 @@ def _repeat(trades, sets, rows) -> dict:
                 t["not_auditable"] += 1
                 continue
             t["audited"] += 1
-            give, receive, _markets, protected = row
+            give, receive, _, protected = row
             assets = (*give, *receive)
             for a in assets:
                 if seen[a] >= REPEAT_CAP:

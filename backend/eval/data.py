@@ -345,6 +345,25 @@ def _json_dict(raw) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def valuation_markets(valuation: dict | None) -> dict:
+    """asset id -> market from a served deck_impressions.valuation_json, in
+    either shape it is written in: the value core's and owner evidence's
+    (assets: [{id, market}]) or trade_policy's personal-market snapshot
+    (assets: {give: [...], receive: [...]}, each row {id, market_value}).
+    {} when it records no per-asset market; a side that is not a list is
+    read as empty. blind_grade and bdk_audit both read markets through it."""
+    assets = (valuation or {}).get("assets")
+    if isinstance(assets, dict):          # the personal-market snapshot
+        rows = [r for side in ("give", "receive") if isinstance(assets.get(side), list)
+                for r in assets[side]]
+        key = "market_value"
+    elif isinstance(assets, list):        # the value core's evidence
+        rows, key = assets, "market"
+    else:
+        return {}
+    return {str(r["id"]): r.get(key) for r in rows if isinstance(r, dict) and "id" in r}
+
+
 def load_decks(
     engine=None,
     db_url: str | None = None,
