@@ -10,7 +10,7 @@
 ---
 
 ## Table of Contents
-- [2026-10-27](#2026-10-27)
+- [2026-10-26](#2026-10-26)
 - [2026-10-05](#2026-10-05)
 - [2026-08-28](#2026-08-28)
 - [2026-08-15](#2026-08-15)
@@ -21,25 +21,30 @@
 
 ---
 
-## 2026-10-27
+## 2026-10-26
 
 ### Backend: `gunicorn` pinned to the version prod runs
 
 | Package | Version | Changed | Why |
 |---|---|---|---|
-| `gunicorn` | `==26.2.0` (was `>=22.0.0`) | branch `fix/fork-safe-db-and-worker-threads` | Prod runs 26.2.0, while local dev had 25.3.0 and CI installed whatever was latest. Under 26.x the app is imported in the **master** before the fork, even without `--preload`: every boot logs "Database initialised" before "Listening at" and "Booting worker". |
+| `gunicorn` | `==26.2.0` (was `>=22.0.0`) | branch `fix/fork-safe-db-and-worker-threads` | Prod (Render) installs 26.2.0. The pin matches prod and is harmless: CI already resolved to 26.2.0. **It is not the cause of the fork problems below**, and it does not make local runs import the app the way prod does: local `python run.py` does not preload. |
 
-- **Found in** release-lead's read-only deploy watch on 2026-10-27, while chasing "decryption failed or bad record mac" and "SSL SYSCALL EOF".
+- **Found in** release-lead's read-only deploy watch on 2026-10-26, while chasing "decryption failed or bad record mac" and "SSL SYSCALL EOF".
+- **The cause is Render's default `GUNICORN_CMD_ARGS`:** `"--preload --access-logfile - --bind=0.0.0.0:10000"` for Python services.
+  - It does not appear in the service's env list.
+  - With `--preload`, gunicorn imports the app in the **master** and then forks the worker. Every boot logs "Database initialised" before "Booting worker".
+  - So prod has always preloaded. gunicorn 26.2.0 still loads in the master only with `preload_app`.
 - **What it broke:**
-  - Threads started at import ran in the master and died in the worker at fork, so `_cleanup_loop` never ran where requests are served.
+  - Threads started at import ran in the master and died in the worker at fork. `_cleanup_loop` has probably never run where requests are served.
+  - The Win Now resume started `win-now-worker` in the master, so the worker inherited `_worker_running=True` with no thread.
   - The worker inherited the master's pooled SSL connections.
-- **The fix does not depend on the version:**
+- **The fix does not depend on the gunicorn version:**
   - an `os.register_at_fork` child hook disposes every engine's pool (`close=False`);
   - Postgres engines get `pool_recycle=280` and libpq keepalives;
-  - the cleanup loop starts per process from a `before_request` hook.
+  - the cleanup loop and the Win Now resume start per process from a `before_request` hook.
 
-  The pin exists so local, CI and prod import the app the same way. See `docs/runbook.md` § "DB connections and background threads across fork".
-- **Bumping it later:** re-check the boot-log order ("Booting worker" relative to "Database initialised") on the new version before relying on any import-time side effect.
+  See `docs/runbook.md` § "DB connections and background threads across fork".
+- **Bumping it later:** no special care is needed for the fork fix. Keep the pin in step with what Render installs.
 
 ## 2026-10-05
 

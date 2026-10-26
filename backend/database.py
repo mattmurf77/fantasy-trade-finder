@@ -418,8 +418,9 @@ else:
 
 
 def _reset_pools_after_fork() -> None:
-    """os.register_at_fork child hook. gunicorn 26.x imports the app in the
-    MASTER before forking, so a worker inherits pooled DB connections whose
+    """os.register_at_fork child hook. Under gunicorn --preload (Render's
+    default GUNICORN_CMD_ARGS) the app is imported in the MASTER before the
+    fork, so a worker inherits pooled DB connections whose
     sockets (and SSL state) the master still holds. Drop them from the child's
     pools WITHOUT closing (close=False): the parent keeps its sockets, and the
     child opens fresh ones on first use. Engines are read at call time."""
