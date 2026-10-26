@@ -74,14 +74,15 @@
     <h2>1. Information we collect</h2>
     <ul>
       <li>
-        <strong>How you sign in.</strong> You can sign in with Apple, with your Sleeper username, with
-        ESPN, or with MyFantasyLeague (MFL). Each method creates a Fleeced account with an internal
-        account ID. Depending on the method, we store:
+        <strong>How you sign in.</strong> You can sign in with Apple, with your Sleeper username, or,
+        where available, with your ESPN or MyFantasyLeague (MFL) login. Each method creates a Fleeced
+        account with an internal account ID. You can also connect ESPN and MFL leagues after you sign
+        in (see "Platform connections" below). Depending on the method, we store:
         <ul>
           <li><strong>Apple:</strong> the stable identifier Apple issues for our app, the name you choose to share (used as your display name), and a one-way (SHA-256) hash of the email address Apple shares with us. We don't keep the email address itself, and we never receive your Apple password.</li>
           <li><strong>Sleeper:</strong> your Sleeper user ID, username, display name and avatar, looked up from Sleeper's public API. A username alone shows public league information. Private boards and account features need a verified Sleeper session (see "Platform connections" below).</li>
-          <li><strong>ESPN:</strong> your ESPN member ID (called SWID), which ESPN includes in league data.</li>
-          <li><strong>MFL:</strong> your MFL username.</li>
+          <li><strong>ESPN:</strong> your ESPN member ID (called SWID), which identifies your account. You log in on ESPN's own page inside the app, and we check the login with ESPN (see "Platform connections" below).</li>
+          <li><strong>MFL:</strong> your MFL username, which identifies your account. Your MFL password is used once to sign in to MFL and is never stored (see "Platform connections" below).</li>
         </ul>
       </li>
       <li><strong>League data.</strong> From the platforms you connect we read your leagues, rosters, draft picks and league settings. We also read your leaguemates' usernames, display names and rosters, and your league's trades and roster history. We use leaguemates' data only to run trade discovery and league features for members of that league.</li>
@@ -131,14 +132,14 @@
             </ul>
           </li>
           <li>
-            <strong>ESPN.</strong> To connect ESPN, you log in on ESPN's own page inside the app; we never see your password. We keep two ESPN sign-in cookies:
+            <strong>ESPN.</strong> To sign in with or connect ESPN, you log in on ESPN's own page inside the app; we never see your password. We keep two ESPN sign-in cookies:
             <ul>
               <li>espn_s2, stored encrypted;</li>
               <li>SWID, which is your ESPN member ID and is stored as is.</li>
             </ul>
-            <p>We use them to import your ESPN leagues and to send trades you approve. You can disconnect in Settings → Leagues, which deletes both cookies.</p>
+            <p>We use them to confirm the login is yours, to import your ESPN leagues and to send trades you approve. You can disconnect in Settings → Leagues, which deletes both cookies.</p>
           </li>
-          <li><strong>MFL.</strong> When you sign in with MFL, your password passes through our server to MFL's sign-in once, to start a session. We never store it. We keep the session MFL returns, encrypted, and use it to read your leagues and to send trades you approve. You can disconnect in Settings → Leagues.</li>
+          <li><strong>MFL.</strong> If you sign in with or connect MFL using your MFL username and password, your password passes through our server to MFL's sign-in once, to start a session. We never store it. We keep your MFL username and, encrypted, the session MFL returns, and use them to confirm the login is yours, to read your leagues and to send trades you approve. You can disconnect in Settings → Leagues.</li>
         </ul>
       </li>
       <li><strong>Subscriptions and purchases.</strong> If you subscribe, Apple handles the payment; we never see your card or billing details. We and our subscription service provider, RevenueCat, receive your subscription status, plan, trial, purchase and renewal dates, and transaction identifiers from Apple, linked to your account, so we can give you access and keep billing records. RevenueCat also receives your account identifier when you sign in.</li>
@@ -233,7 +234,7 @@
       <li><strong>Emails</strong> to our support mailbox: kept as long as we need them to answer you and to keep a record of your request.</li>
       <li><strong>Push tokens:</strong> kept until your account is deleted. Turning notifications off in Settings or on your device stops alerts.</li>
       <li>
-        <strong>Platform connections (Sleeper, ESPN, MFL):</strong> kept encrypted until any of these happens:
+        <strong>Platform connections (Sleeper, ESPN, MFL):</strong> the sign-in tokens, cookies and sessions are kept encrypted (except ESPN's SWID cookie, your member ID, which is stored as is) until any of these happens:
         <ul>
           <li>you disconnect (they're deleted immediately);</li>
           <li>your account is deleted;</li>
@@ -302,7 +303,7 @@
       <li>
         <strong>Requests outside the app.</strong> For deletion, correction, or any privacy question when you can't use the app, email <a href="mailto:fleecedapp@gmail.com">fleecedapp@gmail.com</a> from the address you'd like us to reply to.
         <ul>
-          <li>Tell us how you sign in (Apple, Sleeper, ESPN or MFL) and your username, or the email on your Apple ID, so we can find your records.</li>
+          <li>Tell us how you sign in (Apple, Sleeper, ESPN or MFL) and how to find your account: your Sleeper or MFL username, your ESPN league ID and team name, or the email on your Apple ID.</li>
           <li><strong>We check that a request comes from the account's owner before we act.</strong> For example, we may ask you to write from the email on your Apple ID, or to sign in to the app once so the request can be confirmed there. We don't act on requests we can't verify.</li>
           <li><strong>We never send account data by email.</strong> A copy of your data is available only through the in-app export, which needs you to be signed in.</li>
           <li>We acknowledge requests within 2 business days and complete them within 30 days.</li>
