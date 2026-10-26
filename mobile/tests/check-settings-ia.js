@@ -42,7 +42,8 @@
 //      (#360's own readout-mount pin, 5e, folded into T1 at the #407 merge.)
 //      U1-U4 (marketing-lead copy addendum 6A): the non-tester state reads
 //      exactly "There's nothing on this page.", has a "Back to Settings"
-//      Button that calls navigate('Settings') and never goBack, overrides
+//      Button that calls popTo('Settings') (never navigate, which pushes in
+//      RN7, G-056, and never goBack), overrides
 //      the header title to "Settings" only while the predicate is false, and
 //      the old "This page isn't available." is gone from src.
 //   6. D-6 — FeedbackSheet renders no Screen field (its only TextInput is the
@@ -750,9 +751,11 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
 
   // U1-U4. The non-tester state (useTesterSurface() false), marketing-lead
   //     copy addendum 6A: the final body line, a "Back to Settings" button
-  //     that navigates to Settings (never goBack: a cold-start deep link has
-  //     nothing to pop), a header title that no longer says "Testing", and
-  //     the placeholder line gone from src.
+  //     that lands in Settings with nothing dead behind it (popTo: never
+  //     goBack, since a cold-start deep link has nothing to pop, and never
+  //     navigate, which in RN7 pushes a second Settings, G-056), a header
+  //     title that no longer says "Testing", and the placeholder line gone
+  //     from src.
   {
     const PAGE = path.join(SETTINGS_DIR, 'SettingsTestingScreen.tsx');
     const page = parseFile(PAGE);
@@ -788,8 +791,9 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
     }
 
     // U2. The Back to Settings button: the chalkline Button, exact label,
-    //     no separate a11y label, an inline handler that calls exactly
-    //     navigate('Settings'), and no goBack anywhere on the page.
+    //     no separate a11y label, an inline handler whose ONE call is
+    //     popTo('Settings') (no navigate, no goBack in it), and no goBack
+    //     anywhere on the page.
     const backs = byTestId(page, 'settings.testing-unavailable.back');
     const b = backs.length === 1 ? backs[0] : null;
     const onPress = b ? attr(b, 'onPress') : null;
@@ -797,9 +801,12 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       ? onPress.initializer.expression : null;
     const isFn = !!handler && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler));
     const calls = isFn ? findAll(handler.body, (n) => ts.isCallExpression(n)) : [];
-    const navs = calls.filter((c) => ts.isPropertyAccessExpression(c.expression) && c.expression.name.text === 'navigate');
-    const navOk = calls.length === 1 && navs.length === 1 && navs[0].arguments.length === 1
-      && isStr(navs[0].arguments[0]) && navs[0].arguments[0].text === 'Settings';
+    const named = (c, name) => ts.isPropertyAccessExpression(c.expression) && c.expression.name.text === name;
+    const pops = calls.filter((c) => named(c, 'popTo'));
+    const banned = isFn ? findAll(handler.body, (n) => ts.isIdentifier(n)
+      && (n.text === 'navigate' || n.text === 'goBack')).map((n) => n.text) : [];
+    const navOk = calls.length === 1 && pops.length === 1 && pops[0].arguments.length === 1
+      && isStr(pops[0].arguments[0]) && pops[0].arguments[0].text === 'Settings' && banned.length === 0;
     const goBacks = findAll(page, (n) => ts.isIdentifier(n) && n.text === 'goBack');
     const problems = [
       [!!b, `found ${backs.length} settings.testing-unavailable.back elements, want 1`],
@@ -808,14 +815,15 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       [!b || !attr(b, 'accessibilityLabel'), 'passes an accessibilityLabel; VoiceOver should read the visible label'],
       [!b || isFn, 'onPress is not an inline function'],
       [!b || !isFn || navOk,
-        `onPress makes ${calls.length} call(s): ${calls.map((c) => c.getText(page)).join(', ') || 'none'}; want exactly navigation.navigate('Settings')`],
+        `onPress makes ${calls.length} call(s): ${calls.map((c) => c.getText(page)).join(', ') || 'none'}; `
+          + "want exactly navigation.popTo('Settings') (RN7 navigate pushes a second Settings; goBack has nothing to pop on a cold deep link)"],
       [goBacks.length === 0, `goBack at ${goBacks.map((n) => line(page, n)).join(', ')}; a cold-start deep link has nothing to pop`],
       [!b || inNonTesterBranch(b), 'not in the non-tester branch beside the unavailable line'],
     ].filter(([okay]) => !okay).map(([, why]) => why);
     if (problems.length === 0) {
-      ok(`U2. "Back to Settings" (${line(page, b)}) calls navigate('Settings'), never goBack, in the non-tester branch`);
+      ok(`U2. "Back to Settings" (${line(page, b)}) calls popTo('Settings'), never navigate or goBack, in the non-tester branch`);
     } else {
-      fail('U2. settings.testing-unavailable.back is <Button label="Back to Settings"> calling navigate(\'Settings\'), never goBack',
+      fail('U2. settings.testing-unavailable.back is <Button label="Back to Settings"> calling popTo(\'Settings\'), never navigate or goBack',
            problems.join('; '));
     }
 

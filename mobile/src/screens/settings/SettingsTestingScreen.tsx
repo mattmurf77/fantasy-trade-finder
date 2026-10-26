@@ -28,9 +28,12 @@
 // NON-TESTER STATE (marketing-lead copy addendum 6A). The line reads "There's
 // nothing on this page." (no tester vocabulary, no promise it comes back),
 // with a "Back to Settings" button under it. The button calls
-// navigate('Settings'), never goBack(): on a cold-start deep link the header
-// Back has nothing to pop and goes to `Main` (RootNav settingsPageOptions), so
-// only this button is sure to land in Settings. And the header title reads
+// popTo('Settings'), never goBack() and never navigate(): on a cold-start deep
+// link the header Back has nothing to pop and goes to `Main` (RootNav
+// settingsPageOptions), and RN7's navigate('Settings') would PUSH a second
+// Settings with this dead page behind it (G-056). popTo pops back to an
+// existing Settings, or replaces this page when there is none, so the button
+// always lands in Settings with nothing dead behind. And the header title reads
 // "Settings", not "Testing": RootNav renders the title through a headerTitle
 // closure over 'Testing', so this page replaces both `title` and `headerTitle`
 // in a layout effect, only while the predicate is false. With it true,
@@ -92,7 +95,7 @@ export default function SettingsTestingScreen({ navigation }: any) {
           <Button
             testID="settings.testing-unavailable.back"
             label="Back to Settings"
-            onPress={() => navigation.navigate('Settings')}
+            onPress={() => navigation.popTo('Settings')}
           />
         </View>
       )}
