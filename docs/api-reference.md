@@ -529,6 +529,10 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
   background refresh after the response is built.
 - **Test hook:** `POST /api/admin/trades/gate-miss-test` forces either gate
   miss on one league, whatever the knobs say (see the admin routes).
+- **Withdrawals are sticky (flag-on only).** A card I-1 withdraws from a
+  packed-evidence deck is recorded in `deck_card_withdrawals` and never served
+  again in that deck. `trade_i1_mode` 0 adds no new withdrawals, but a deck's
+  earlier withdrawals stay out of it; at mode 1 nothing is withdrawn.
 - **The `[i1] serve` log line (C-a), for the readout.** One line per serve:
   `league job mode status outcome age_s cards kept dropped_give
   dropped_receive unchecked_generic unchecked_pick_owner`.

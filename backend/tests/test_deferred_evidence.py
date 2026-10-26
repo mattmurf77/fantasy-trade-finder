@@ -109,11 +109,13 @@ def public(card, iid):
             "impression_id": iid, "expires_at": card.expires_at}
 
 
-def deferred_deck(n, *, ghost_every=0, job_id=None, store=True, complete=True, **kickoff):
+def deferred_deck(n, *, ghost_every=0, job_id=None, store=True, complete=True, packed=False,
+                  **kickoff):
     """A complete deferred organic job whose deck is `n` cards (plus a ghost
     after every `ghost_every`), assembled by the real logger into the job's
     _DeckEvidence, published with its minted ids, then stored (P1).
-    complete=False: the job is still running (assembled, not finished)."""
+    complete=False: the job is still running (assembled, not finished).
+    packed=True: the deck is admitted under trade.packed_evidence (S8)."""
     real = run_job(**kickoff)
     with server._trade_jobs_lock:
         job = server._trade_jobs.pop(real)
@@ -128,6 +130,7 @@ def deferred_deck(n, *, ghost_every=0, job_id=None, store=True, complete=True, *
     ghost_ids = {id(c) for _, c in ghosts}
     served = [c for c in final if id(c) not in ghost_ids]
     ev = server._DeckEvidence(job_id, UID)
+    ev.packed, ev.page_store, ev.league_id = packed, bool(job.get("page_scope")), LEAGUE
     imp = server._log_deck_signal_impressions(
         user_id=UID, league_id=LEAGUE, job_id=job_id, cards=served, players_dict=players,
         capture=None, scoring_format="1qb_ppr", ghost_cards=ghosts, candidate_pool=[],

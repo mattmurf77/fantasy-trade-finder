@@ -16,7 +16,7 @@ from backend.feature_flags import DEFAULT_FLAGS, FLAG_KEYS
 from backend.tests.test_i1_serve_filter import live  # noqa: F401  (fixture)
 from backend.tests.test_trade_page_store import p1, run_job, status  # noqa: F401  (fixture)
 from backend.tests.test_deferred_evidence import (  # noqa: F401  (fixture)
-    HEADERS, LEAGUE, UID, by_index, deferred, deferred_deck, outcomes, rows)
+    HEADERS, LEAGUE, UID, by_index, deferred, deferred_deck, outcomes, rows, threaded)
 from backend.database import league_members_table
 from sqlalchemy import update
 from backend.tests.test_trade_page_store import generate  # noqa: E402
@@ -232,3 +232,341 @@ def test_withdrawals_are_covered_by_account_deletion_and_export():
     from backend import accounts
     assert "deck_card_withdrawals" in accounts._ADDITIONAL_PRIVATE_TABLES
     assert ("deck_card_withdrawals", "deck_card_withdrawals_table", "user_id", ()) in accounts._EXPORT_TABLES
+
+
+# ── Item 1 (S8): the packed deck-evidence writer; item 3 (R4.2): full row on view ──
+
+from backend.eval import evidence_pack  # noqa: E402
+from backend.tests.test_deferred_evidence import archive_id  # noqa: E402
+
+PACKS = db_module.deck_evidence_packs_table
+REAL_START = server._start_deck_evidence_thread            # before any fixture inlines it
+
+
+def pack_of(engine, job_id):
+    with engine.connect() as conn:
+        row = conn.execute(PACKS.select().where(PACKS.c.run_id == job_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def unpack(row):
+    return evidence_pack.unpack_run(evidence_pack.PackedRun(
+        row["pack_version"], row["header_json"], bytes(row["cards_blob"]), row["checksum"],
+        row["card_count"]))
+
+
+def packed_deck(n, **kw):
+    return deferred_deck(n, packed=True, **kw)
+
+
+def view(job_id, index, action="viewed"):
+    """An outcome posted with the card's contract id (the swipe/view routes' writer)."""
+    server._save_deck_outcome_safe(contract.card_impression_id(job_id, index), action,
+                                   acting_user_id=UID)
+
+
+def restart():
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    server._deck_withdrawn_cache.clear()
+    server._deck_pack_states.clear()
+
+
+def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_every_card(deferred):
+    client, engine, _ = deferred
+    job_id, served, ghosts, ev, _ = packed_deck(120, ghost_every=9)
+    status(client, job_id, 0)
+    written = rows(engine)
+    full = sorted(r["card_index"] for r in written if not r["is_ghost"])
+    assert full == list(range(30))                         # C4; the rest is packed (R4.2)
+    assert {r["evidence_tier"] for r in written if not r["is_ghost"]} == {"first30"}
+    assert {r["evidence_tier"] for r in written if r["is_ghost"]} == {"ghost"}
+    row = pack_of(engine, job_id)
+    run, cards = unpack(row)
+    assert row["card_count"] == len(served) == 120 and [c["card_index"] for c in cards] == list(range(120))
+    assert row["served_at"] == written[0]["served_at"]     # the first delivery (F2)
+    assert run["deliveries"] == [[29, row["served_at"]]] and run["page_store"] == 1
+    assert run["retired"] is False and run["upgrade_misses"] == 0
+    job = server._trade_jobs[job_id]
+    assert (run["values_snapshot_id"], run["config_ref"]) == (job["values_snapshot_id"],
+                                                              job["request_signature"])
+    assert run["built_at"] < row["served_at"]
+    [cand] = rows(engine, db_module.deck_candidate_sets_table)
+    assert cand["candidates_json"] == "" and cand["candidates_packed"] is not None
+    _r, members = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
+        cand["cand_pack_version"], bytes(cand["candidates_packed"])))
+    assert len(members) == cand["size"] and evidence_pack.candidate_set_hash(members) == cand["set_hash"]
+
+
+def test_s8_a_later_delivery_rewrites_only_header_and_checksum(deferred):
+    from sqlalchemy import event
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    before = pack_of(engine, job_id)
+    seen = []
+    listen = lambda conn, cursor_, statement, params, *a: seen.append((statement, params))
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
+        status(client, job_id, 30)
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    updates = [st for st, _p in seen if st.lstrip().upper().startswith("UPDATE DECK_EVIDENCE_PACKS")]
+    assert len(updates) == 1 and "cards_blob" not in updates[0]
+    assert "header_json" in updates[0] and "checksum" in updates[0]
+    after = pack_of(engine, job_id)
+    assert bytes(after["cards_blob"]) == bytes(before["cards_blob"])
+    run, _cards = unpack(after)                            # the checksum holds
+    assert [d[0] for d in run["deliveries"]] == [29, 59]
+    assert not [r for r in rows(engine) if not r["is_ghost"] and r["card_index"] >= 30]
+
+
+def test_s8_the_incremental_checksum_equals_pack_runs():
+    """models-eng's condition 1: the v1 checksum's prefix is fixed at build."""
+    cards = [{"card_index": i, "trade_hash": f"{i:016x}", "base_score": i / 7, "shape": "1x1",
+              "user_id": "u", "league_id": "l", "deck_job_id": "d", "served_at": "t"} for i in range(50)]
+    first = evidence_pack.pack_run({"deliveries": [[9, "a"]], "retired": False}, cards, card_count=50)
+    _run, unpacked = evidence_pack.unpack_run(first)
+    state = server._PackState("u", json.loads(first.header_json), unpacked)
+    assert state.render() == (first.header_json, first.checksum)
+    state.run["deliveries"].append([29, "b"])
+    state.run.update(retired=True, retired_at="c")
+    again = evidence_pack.pack_run(state.run, cards, card_count=50)
+    assert state.render() == (again.header_json, again.checksum)
+    assert again.cards_blob == first.cards_blob
+
+
+def test_r42_a_first_view_upgrades_a_packed_card_to_a_viewed_row(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    view(job_id, 45)
+    got = by_index(engine)[(0, 45)]
+    features = json.loads(got["features_json"])
+    assert got["evidence_tier"] == "viewed" and "give_value_band" in features   # the wide row
+    assert got["delivered_at"] == unpack(pack_of(engine, job_id))[0]["deliveries"][1][1]
+    assert got["assets_json"] and got["served_at"] == pack_of(engine, job_id)["served_at"]
+    view(job_id, 45, "like")
+    assert [o["action"] for o in outcomes(engine)] == ["viewed", "like"]
+    assert len([r for r in rows(engine) if r["card_index"] == 45]) == 1
+
+
+def test_r42_after_a_restart_a_stored_card_upgrades_from_the_blob(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    restart()
+    view(job_id, 50)
+    got = by_index(engine)[(0, 50)]
+    assert got["evidence_tier"] == "viewed" and got["assets_json"]
+    assert "give_value_band" in json.loads(got["features_json"])
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == 0
+    assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 50)]
+
+
+def test_r42_a_card_past_the_stored_ones_viewed_after_a_restart_is_a_counted_miss(deferred):
+    """models-lead (b): delivered past the stored 90 before a deploy, viewed
+    from the device after it. Its row comes from the packed card itself."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)                             # the live job's page past the stored 90
+    restart()
+    view(job_id, 95)
+    got = by_index(engine)[(0, 95)]
+    assert got["evidence_tier"] == "viewed" and got["assets_json"] is None
+    assert set(json.loads(got["features_json"])) <= contract.FROZEN_INPUT_KEYS | {"page_store"}
+    run, cards = unpack(pack_of(engine, job_id))
+    assert run["upgrade_misses"] == 1
+    assert json.loads(got["features_json"])["give_value"] == cards[95]["give_value"]
+    assert [o["impression_id"] for o in outcomes(engine)] == [contract.card_impression_id(job_id, 95)]
+
+
+def test_s8_a_delivery_lost_to_a_crash_is_recorded_before_its_outcome(deferred, monkeypatch):
+    """models-eng's condition 4: page 2's header update never landed (the
+    process died); after the restart, the outcome on one of its cards writes
+    the delivery first."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    real = db_module.update_deck_evidence_pack_header
+    monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", lambda *a: True)   # lost
+    status(client, job_id, 30)
+    assert [d[0] for d in unpack(pack_of(engine, job_id))[0]["deliveries"]] == [29]
+    restart()
+    monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", real)
+    view(job_id, 45)
+    deliveries = unpack(pack_of(engine, job_id))[0]["deliveries"]
+    assert deliveries[-1][0] >= 45
+    assert by_index(engine)[(0, 45)]["evidence_tier"] == "viewed" and outcomes(engine)
+
+
+def test_s8_the_shutdown_drain_flushes_pending_pack_updates(deferred, threaded, monkeypatch):
+    """models-eng's condition 4: Render's SIGTERM drain. An update still in
+    flight lands before the drain returns."""
+    import time as _time
+    client, engine = deferred[0], threaded
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", REAL_START)   # tracked threads
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    server._deck_evidence_drain(5)
+    real = server._deck_pack_flush_header
+    monkeypatch.setattr(server, "_deck_pack_flush_header",
+                        lambda ev: (_time.sleep(0.5), real(ev))[1])
+    status(client, job_id, 30)
+    assert [d[0] for d in unpack(pack_of(engine, job_id))[0]["deliveries"]] == [29]
+    assert server._deck_evidence_drain(5) == 0
+    assert [d[0] for d in unpack(pack_of(engine, job_id))[0]["deliveries"]] == [29, 59]
+
+
+def test_s8_a_never_delivered_withdrawal_is_packed_never_a_row_never_upgraded(deferred):
+    """models-eng's condition 2: cards_blob holds W0 cards; eval removes them."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    own_all_but(engine, 40)
+    status(client, job_id, 30)                             # card 40 withdrawn, never delivered
+    assert withdrawals(engine)[40]["served_before"] == 0
+    _run, cards = unpack(pack_of(engine, job_id))
+    assert 40 in {c["card_index"] for c in cards}
+    view(job_id, 40)
+    assert (0, 40) not in by_index(engine) and outcomes(engine) == []
+
+
+def test_s8_an_archive_deck_writes_every_card_and_a_view_raises_it_to_viewed(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, job_id=archive_id(True))
+    status(client, job_id, 0)
+    tiers_ = {r["card_index"]: r["evidence_tier"] for r in rows(engine) if not r["is_ghost"]}
+    assert set(tiers_) == set(range(120)) and pack_of(engine, job_id) is not None
+    assert {tiers_[i] for i in range(30)} == {"first30"} and {tiers_[i] for i in range(30, 120)} == {"archive"}
+    status(client, job_id, 60)
+    view(job_id, 70)
+    assert by_index(engine)[(0, 70)]["evidence_tier"] == "viewed"
+    assert by_index(engine)[(0, 70)]["delivered_at"] is not None
+
+
+def test_s8_a_superseded_or_capped_deck_is_retired_once(deferred, monkeypatch):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    assert server._retire_deck_evidence() == 0             # current, fresh: not yet
+    key = server._trade_jobs[job_id]["key"]
+    server._trade_jobs_by_key[key] = "a-newer-deck"        # superseded for its key
+    assert server._retire_deck_evidence() == 1
+    run, _ = unpack(pack_of(engine, job_id))
+    assert run["retired"] is True and run["retired_at"] >= pack_of(engine, job_id)["served_at"]
+    assert server._retire_deck_evidence() == 0             # once
+    other, *_ = packed_deck(60, job_id="deck-capped")
+    status(client, other, 0)
+    monkeypatch.setattr(server, "_DECK_DISPLAY_CAP_S", 0)  # the 24 h display cap
+    assert server._retire_deck_evidence() == 1
+    assert unpack(pack_of(engine, other))[0]["retired"] is True
+
+
+def test_s8_flag_off_and_stage_1_write_no_pack_and_json_candidates(deferred, monkeypatch):
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(60)                         # the store on, packed evidence off
+    status(client, job_id, 0)
+    assert rows(engine, PACKS) == []
+    assert {r["candidates_packed"] for r in rows(engine, db_module.deck_candidate_sets_table)} == {None}
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False,
+                                             "trade.packed_evidence": True})
+    run_job(force_fresh=True)                              # the store off: rows at build
+    assert rows(engine, PACKS) == []
+
+
+def test_s8_a_real_job_admitted_with_the_flag_on_is_packed(deferred, monkeypatch):
+    client, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.packed_evidence": True})
+    job_id = run_job()
+    assert server._trade_jobs[job_id]["evidence"].packed
+    status(client, job_id, 0)
+    row = pack_of(engine, job_id)
+    assert row is not None and row["card_count"] == len(server._trade_jobs[job_id]["cards"])
+
+
+def test_s8_the_pack_round_trips_through_the_eval_reader_to_the_full_rows(deferred):
+    """The golden: a packed deck (the first 30 as rows, the rest packed) and
+    the same deck with every card a full row read back through
+    eval.data.load_decks to the same cards on every contract key, the same
+    delivered positions (U1) and the same e(k) inputs."""
+    from sqlalchemy import create_engine, insert
+    from backend.eval.data import card_dict, load_decks
+    client, engine, _ = deferred
+    job_id, served, ghosts, ev, _ = packed_deck(120, ghost_every=9)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    with ev.lock:                                          # the build-time snapshots still held
+        held = [server._unpack_row(packed) for _iid, (_i, packed) in ev.rows.items()]
+    full = create_engine("sqlite:///:memory:")
+    db_module.metadata.create_all(full)
+    first = rows(engine)
+    served_at = pack_of(engine, job_id)["served_at"]
+    with full.begin() as conn:
+        conn.execute(insert(db_module.deck_impressions_table), first + [
+            {**{c.name: r.get(c.name) for c in db_module.deck_impressions_table.columns},
+             "served_at": served_at, "evidence_tier": "archive"} for r in held])
+        conn.execute(insert(PACKS), [pack_of(engine, job_id)])
+
+    attribution = server._PACK_ATTRIBUTION_COLUMNS
+
+    def read(eng):
+        """card_dict plus a full row's attribution columns (a packed card
+        carries them in the pack), restricted to the contract keys and the id."""
+        on_rows = {r["impression_id"]: r for r in rows(eng)}
+        [deck] = load_decks(engine=eng)
+        out = []
+        for c in deck.cards:
+            d = card_dict(c)
+            if c.impression_id in on_rows and not c.is_ghost:
+                d.update({k: on_rows[c.impression_id][k] for k in attribution})
+            out.append((c.card_index, c.is_ghost, c.delivered,
+                        {k: v for k, v in d.items() if k in evidence_pack.CONTRACT_KEYS
+                         or k == "impression_id"}))
+        return out
+
+    packed_read, full_read = read(engine), read(full)
+    assert len(packed_read) == len(full_read) == 120 + len(ghosts)
+    assert packed_read == full_read
+    assert [i for i, ghost, delivered, _ in packed_read if delivered and not ghost] == list(range(60))
+
+
+# ── R6.2's condition: the prepared payload readers key on candidates_packed ──
+
+def candidate_row(n=40):
+    from backend import prepared_trade_payload as v1
+    members = [{"trade_hash": v1._trade_hash([f"g{i}"], [f"r{i}"], "opp"), "partner": "opp",
+                "give": [f"g{i}"], "receive": [f"r{i}"], "base_score": i / 3, "in_deck": i % 2 == 0}
+               for i in range(n)]
+    row = {"candidate_set_id": "cs", "deck_job_id": "job", "user_id": "u", "league_id": "l",
+           "size": n, "set_hash": evidence_pack.candidate_set_hash(members),
+           "candidates_json": json.dumps(members), "created_at": "2026-10-26T00:00:00+00:00"}
+    return row, members
+
+
+def test_a_packed_candidate_row_reads_as_its_members_in_both_payload_versions():
+    from backend import prepared_trade_payload as v1, prepared_trade_payload_v2 as v2
+    row, members = candidate_row()
+    packed = server._pack_candidate_set(row)
+    assert packed["candidates_json"] == "" and packed["candidates_packed"]
+    scope = {"user_id": "u", "league_id": "l", "job_id": "job"}
+    assert v1._candidate(packed, **scope) == v1._candidate(row, **scope) == members
+    assert v2._candidate(packed, "u", "l", "job") == v2._candidate(row, "u", "l", "job")
+
+
+def test_a_corrupt_candidate_pack_is_refused_never_read_as_empty():
+    import pytest
+    from backend import prepared_trade_payload as v1, prepared_trade_payload_v2 as v2
+    row, _members = candidate_row()
+    packed = server._pack_candidate_set(row)
+    broken = {**packed, "candidates_packed": packed["candidates_packed"][:-3] + b"xyz"}
+    with pytest.raises(ValueError, match="candidate_pack_integrity"):
+        v1._candidate(broken, user_id="u", league_id="l", job_id="job")
+    with pytest.raises(ValueError, match="candidate_pack_integrity"):
+        v2._candidate(broken, "u", "l", "job")
+    big = {**packed, "candidates_packed": b"\0" * (v2.MAX_CANDIDATE_BYTES + 1)}
+    with pytest.raises(ValueError, match="candidate_pack_bytes"):
+        v2._candidate(big, "u", "l", "job")
