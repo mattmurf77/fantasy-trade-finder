@@ -52,6 +52,7 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "in_flight_decks": run.in_flight_decks,
         "pack_integrity_decks": run.pack_integrity_decks,
         "incomplete_decks": run.incomplete_decks,
+        "calibration_refresh_decks": run.calibration_refresh_decks,
         "tilt_clipped": run.tilt_clipped,
         "metrics": {
             name: {
