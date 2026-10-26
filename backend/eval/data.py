@@ -104,8 +104,9 @@ deck whole and never sinks it; calibration excludes its cards.
                    0..N-1 (N as for incomplete_deck): the writer's
                    contract is broken
   in_flight        the deck's pack is not final yet (in-flight packs, above);
-                   or a deck served at/after PACK_REQUIRED_SINCE has no pack
-                   yet and may still be live (served within IN_FLIGHT_WINDOW
+                   or a deferred-evidence deck (tiered rows) served
+                   at/after PACK_REQUIRED_SINCE has no pack yet and may
+                   still be live (served within IN_FLIGHT_WINDOW
                    of as_of). Not an error; without as_of the reader can't
                    tell a pack-less deck is live, and it is incomplete_deck.
   incomplete_deck  the non-ghost card indexes ∪ the served_before=0 indexes
@@ -114,9 +115,9 @@ deck whole and never sinks it; calibration excludes its cards.
                    withdrawal index)+1; or a packed or paged deck has an
                    outcome on a card not delivered as of the read (past
                    the pack's last delivered index, or a row with no
-                   delivered_at by then); or a deck
-                   served at/after PACK_REQUIRED_SINCE has no pack and is
-                   past IN_FLIGHT_WINDOW (a lost pack)
+                   delivered_at by then); or a deferred-evidence deck
+                   (tiered rows) served at/after PACK_REQUIRED_SINCE has no
+                   pack and is past IN_FLIGHT_WINDOW (a lost pack)
   no_delivery_evidence
                    a marked deck without a pack (paging, above) whose live
                    table lacks delivered_at, or none of whose non-ghost rows
@@ -197,13 +198,20 @@ NO_DELIVERY_EVIDENCE = "no_delivery_evidence"
 # pack's run metadata, with this key == 1 is from the page-store path.
 PAGE_STORE_MARKER = "page_store"
 # Decks served before this ISO UTC time keep the legacy rule even when marked.
-# None (marker-only: a marked deck is never legacy) until trade.first_page_store
-# goes live; then set it to that go-live time, like PACK_REQUIRED_SINCE.
+# None: marker-only, so a marked deck is never legacy. That is the strictest
+# setting and stays so through the flip (models-eng, 2026-10-26): marked decks
+# exist only after trade.first_page_store is on, so a release time would only
+# add a way for a mis-dated deck to be read as legacy.
 PAGING_RELEASED_AT: str | None = None
-# Lost-pack detection: decks served at or after this ISO UTC time must have a
-# pack row. None until trades-eng's packed writer ships; then set it to the
-# writer's go-live time.
-PACK_REQUIRED_SINCE: str | None = None
+# Lost-pack detection: a deferred-evidence deck (a non-ghost row with a
+# non-NULL evidence_tier) served at or after this ISO UTC time must have a pack
+# row (#416 packs every one). Decks without tiered rows (flag-off, live
+# evidence: the value core, prepared adoption, Calibration's refresh) are never
+# packed and never required to be. Tiered decks exist only once
+# trade.packed_evidence and trade.first_page_store are on together, so any
+# instant before that flip is safe (models-eng, 2026-10-26: set ahead of it, so
+# the flip has no eval-side constant to set).
+PACK_REQUIRED_SINCE: str | None = "2026-10-27T00:00:00+00:00"
 # A deck's pack is written when it retires (superseded, or the 24 h display
 # cap, PRD #339 §5.1); 1 h more for the write.
 IN_FLIGHT_WINDOW = timedelta(hours=25)
@@ -415,6 +423,7 @@ def load_decks(
     order: list[str] = []
     refresh: set[str] = set()   # deck_job_ids of Calibration refresh decks
     marked: set[str] = set()    # deck_job_ids carrying a paging marker (module doc)
+    deferred: set[str] = set()  # deck_job_ids with deferred-evidence (tiered) rows
     for r in rows:
         features = _json_dict(r.features_json)
         # getattr: None when the live table lacks the column (not selected).
@@ -429,6 +438,8 @@ def load_decks(
                 d is not None and d.get(PAGE_STORE_MARKER) == 1
                 for d in (features, features_compact))):
             marked.add(r.deck_job_id)
+        if r.is_ghost != 1 and evidence_tier is not None:
+            deferred.add(r.deck_job_id)
         if project_features and features is not None:
             features = {k: v for k, v in features.items() if k in PROJECTION_KEYS}
         card = LoggedCard(
@@ -550,7 +561,8 @@ def load_decks(
                 continue
             for c in deck.cards:
                 c.delivered = not c.is_ghost and c.card_index <= last_delivered
-        elif PACK_REQUIRED_SINCE is not None and deck.served_at >= PACK_REQUIRED_SINCE:
+        elif (PACK_REQUIRED_SINCE is not None and deck.served_at >= PACK_REQUIRED_SINCE
+              and deck.deck_job_id in deferred):   # only a deferred-evidence deck is packed
             maybe_live = in_flight_from is not None and deck.served_at >= in_flight_from
             deck.exclusion = IN_FLIGHT if maybe_live else INCOMPLETE_DECK
             continue

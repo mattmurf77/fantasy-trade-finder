@@ -96,9 +96,10 @@ def test_refresh_takes_precedence_over_in_flight_and_a_lost_pack(monkeypatch, as
               "lost": "2026-10-21T12:00:00+00:00"}     # 50 h before
     for job, at in served.items():
         cards = _deck_cards(job, 30, served_at=at)
-        write_deck(eng, packs, cards, full=range(30), served_at=at)
+        # Tiered (deferred evidence): the decks a pack is required of.
+        write_deck(eng, packs, cards, full=range(30), served_at=at, tier="first30")
         write_deck(eng, packs, _sourced(_deck_cards(f"refresh-{job}", 30, served_at=at)),
-                   full=range(30), served_at=at)
+                   full=range(30), served_at=at, tier="first30")
     got = {d.deck_job_id: d.exclusion for d in load_decks(engine=eng, as_of=as_of)}
     assert got == {"live": IN_FLIGHT if as_of else INCOMPLETE_DECK,
                    "lost": INCOMPLETE_DECK,

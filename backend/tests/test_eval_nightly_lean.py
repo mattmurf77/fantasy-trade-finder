@@ -194,7 +194,8 @@ def test_nightly_counts_a_deck_still_in_flight_as_in_flight(tmp_path, monkeypatc
                              ("done", timedelta(days=4), range(30, 34))):
         at = (now - ago).isoformat()
         write_deck(eng, packs, _deck_cards(job, 34 if packed else 30, served_at=at),
-                   full=range(30), packed=packed, served_at=at, viewed=range(0, 30, 2))
+                   full=range(30), packed=packed, served_at=at, viewed=range(0, 30, 2),
+                   tier=None if packed else "first30")   # deferred decks are packed
 
     stats = nightly.run_all(window_days=30, engine=eng, ess_min=1, bootstrap=20, seed=1)
     assert stats["errors"] == 0

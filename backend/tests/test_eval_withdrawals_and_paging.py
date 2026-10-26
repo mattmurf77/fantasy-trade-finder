@@ -891,3 +891,34 @@ def test_a_delivered_withdrawal_must_agree_with_the_delivery_evidence(layout, in
                  delivered=range(3) if layout == "paged" else (), w1=[index])
     (deck,) = load_decks(engine=db.eng, as_of=_after(1))
     assert deck.exclusion == expected
+
+
+# ---------------------------------------------------------------------------
+# Go-live constants (#416 QA P2): a pack is required only of deferred decks
+# ---------------------------------------------------------------------------
+
+def test_the_go_live_constants():
+    """A go-live decision (models-eng, 2026-10-26): changing either is an
+    eval-rule change, reviewed like one."""
+    assert data_mod.PACK_REQUIRED_SINCE == "2026-10-27T00:00:00+00:00"
+    assert data_mod.PAGING_RELEASED_AT is None
+
+
+def test_a_pack_is_required_only_of_a_deferred_evidence_deck(monkeypatch):
+    """After PACK_REQUIRED_SINCE: a tiered deck with only its first 30 rows and
+    no pack is a lost pack, never a complete 30-card deck (#416 QA P2); a
+    live-evidence page deck (the value core: page_store marker, NULL tier,
+    delivered_at stamped per page) and an unmarked deck are never packed and
+    read as before."""
+    monkeypatch.setattr(data_mod, "PACK_REQUIRED_SINCE", "2026-10-01T00:00:00+00:00")
+    db = make_db(live=PAGING_COLUMNS)
+    put_deck(db, "deferred", 30, tier="first30", delivered=range(10), viewed=[0])
+    put_deck(db, "live_page", 12, extra={"page_store": 1}, delivered=range(8), viewed=[0, 7])
+    put_deck(db, "unmarked", 12, viewed=[0])
+    got = {d.deck_job_id: d for d in load_decks(engine=db.eng, as_of=_after(30))}
+    assert got["deferred"].exclusion == INCOMPLETE_DECK
+    assert got["live_page"].exclusion is None and got["unmarked"].exclusion is None
+    assert [c.delivered for c in got["live_page"].cards] == [i < 8 for i in range(12)]
+    assert all(c.delivered for c in got["unmarked"].cards)
+    in_window = {d.deck_job_id: d.exclusion for d in load_decks(engine=db.eng, as_of=_after(2))}
+    assert in_window == {"deferred": IN_FLIGHT, "live_page": None, "unmarked": None}
