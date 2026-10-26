@@ -30245,7 +30245,8 @@ def _entry_platform(audit: dict):
             league, mapped = _espn_import_payload(league_id, season,
                                                   espn_s2, swid)
         except _espn.EspnError as e:
-            if subject and getattr(e, "kind", None) == "auth":
+            kind = getattr(e, "kind", None)
+            if subject and kind == "auth":
                 # D4 step 2 failed: ESPN rejected the pair for this league.
                 # Same error code, the sign-in's own copy (row 9); the
                 # preview and /api/espn/* keep the cookie-paste copy.
@@ -30253,7 +30254,23 @@ def _entry_platform(audit: dict):
                                        _SIGNIN_ESPN_AUTH_REQUIRED_MSG,
                                        provider="espn", subject=subject,
                                        failed_proof=True)
+            if subject and kind not in ("not_found", "input"):
+                # ESPN not answering during the proof (5xx / parse): the
+                # same 502 espn_unavailable, with row 6's sign-in copy.
+                log.warning("espn fetch failed [%s]: %s", kind, e)
+                return _signin_refusal(audit, 502, "espn_unavailable",
+                                       _SIGNIN_ESPN_UNAVAILABLE_MSG)
             return _espn_error_response(e)
+        except (OSError, http.client.HTTPException) as e:
+            # A timeout / transport failure on the sign-in's cookie read is
+            # "ESPN not answering" too (row 6). The preview re-raises to the
+            # route's generic handler, unchanged.
+            if not subject:
+                raise
+            log.warning("entry_platform: espn sign-in cookie read failed "
+                        "(%s)", type(e).__name__)
+            return _signin_refusal(audit, 502, "espn_unavailable",
+                                   _SIGNIN_ESPN_UNAVAILABLE_MSG)
 
         team_id = body.get("team_id")
         if team_id is None:

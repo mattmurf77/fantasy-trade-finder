@@ -1513,6 +1513,17 @@ def _espn_anon_503(env):
     return patch.object(es, "fetch_league", fetch)
 
 
+def _espn_cookie_read_fails(exc):
+    """The sign-in's own cookie read (D4 step 2) fails with `exc`."""
+    def setup(env):
+        def fetch(league_id, season, espn_s2=None, swid=None, **kw):
+            if espn_s2 and swid:
+                raise exc
+            return env.espn(league_id, season, espn_s2=espn_s2, swid=swid)
+        return patch.object(es, "fetch_league", fetch)
+    return setup
+
+
 def _mfl_down(env, target):
     def down(*a, **kw):
         raise mfl.MflError("MFL HTTP 503", kind="http")
@@ -1573,6 +1584,23 @@ _COPY_CASES = [
      "as yours. Sign in with Apple, then link your league."),
     ("row6-espn-unavailable", _espn_anon_503, lambda e: _espn_claim(e), 403,
      "proof_unavailable", "espn_unavailable",
+     "Couldn’t confirm this team with ESPN right now. Try again in a "
+     "few minutes, or sign in with Apple, then link your league."),
+    # Row 6 on the sign-in's own cookie read (step 2): the same 502
+    # espn_unavailable code as before, now with the sign-in copy.
+    ("row6-step2-5xx",
+     _espn_cookie_read_fails(es.EspnError("ESPN HTTP 503", kind="http")),
+     lambda e: _espn_claim(e), 502, "espn_unavailable", None,
+     "Couldn’t confirm this team with ESPN right now. Try again in a "
+     "few minutes, or sign in with Apple, then link your league."),
+    ("row6-step2-parse",
+     _espn_cookie_read_fails(es.EspnError("non-JSON", kind="parse")),
+     lambda e: _espn_claim(e), 502, "espn_unavailable", None,
+     "Couldn’t confirm this team with ESPN right now. Try again in a "
+     "few minutes, or sign in with Apple, then link your league."),
+    ("row6-step2-timeout",
+     _espn_cookie_read_fails(TimeoutError("timed out")),
+     lambda e: _espn_claim(e), 502, "espn_unavailable", None,
      "Couldn’t confirm this team with ESPN right now. Try again in a "
      "few minutes, or sign in with Apple, then link your league."),
     ("row7-espn", None, lambda e: _espn_claim(e, s2=S2_B, swid=SWID_B), 403,
@@ -1676,6 +1704,13 @@ def test_link_routes_and_previews_keep_their_own_copy(env):
     assert r.status_code == 403
     assert r.get_json() == {"error": "espn_auth_required",
                             "message": espn_auth}
+    # A preview whose (cookie) read gets a 5xx keeps the link-route copy.
+    with _espn_cookie_read_fails(es.EspnError("ESPN HTTP 503", kind="http"))(env):
+        r = _post(env, platform="espn", espn_league_id=ESPN_LEAGUE,
+                  espn_s2=S2_A, swid=SWID_A)
+    assert (r.status_code, r.get_json()) == (
+        502, {"error": "espn_unavailable",
+              "message": "Couldn't reach ESPN — try again shortly."})
     token = _mfl_claim(env).get_json()["session_token"]
     r = env.client.post("/api/espn/link",
                         json={"espn_league_id": ESPN_LEAGUE},

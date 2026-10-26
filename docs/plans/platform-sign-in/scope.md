@@ -148,6 +148,7 @@ The mint's refusal `message`s are the **final 14-row set** from marketing-lead (
   - `_platform_error_payload`'s "Couldn't reach MFL — try again shortly." still serves the preview, the actions and `/api/mfl/*`.
 - **Mint-only behaviour for rows 9 and 11:**
   - Row 9: the sign-in's cookie read refused → 403 `espn_auth_required` with row 9's text.
+  - Row 6 on that same cookie read (step 2): a 5xx, parse error or timeout → 502 `espn_unavailable` (the code is unchanged; a timeout used to surface as 500 `internal_error`) with row 6's text. The preview keeps the link-route "Couldn't reach ESPN — try again shortly."
   - Row 11: MFL not answering during the proof (host resolution, login, bundle or myleagues) → today's 502 `mfl_unavailable` with row 11's text.
 - **Evidence:**
   - `test_signin_refusal_copy_is_the_final_set_verbatim` pins every row's exact body on the real route: 21 cases, covering both platforms for rows 7, 8 and 12, the four MFL failure points for row 11, and both 5xx codes for row 14.

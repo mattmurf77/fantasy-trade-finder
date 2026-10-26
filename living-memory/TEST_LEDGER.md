@@ -14,6 +14,10 @@ Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_S
   - New: `test_signin_refusal_copy_is_the_final_set_verbatim` (21 cases, literal expected bodies on the real route) and `test_link_routes_and_previews_keep_their_own_copy`.
   - Sabotage: row-13 constant reworded → `[row13-too-many]` red. Restored.
   - `test_platform_sign_in.py` + `test_entry_platform_route.py`: **135 passed**.
+- **Row 6 at step 2 (follow-up commit):** the sign-in's own ESPN cookie read failing with a 5xx, parse error or timeout now returns 502 `espn_unavailable` with row 6's copy. A timeout there used to fall to 500 `internal_error`. The preview keeps the link-route copy.
+  - New cases: `[row6-step2-5xx]`, `[row6-step2-parse]` and `[row6-step2-timeout]`, plus a preview assertion in `test_link_routes_and_previews_keep_their_own_copy`.
+  - Sabotage: the step-2 branch disabled → `[row6-step2-5xx]` and `[row6-step2-parse]` red. Restored.
+  - Run: **138 passed**.
 - **Runs:**
   - `test_platform_sign_in.py` (86) + `test_entry_platform_route.py` (27): **113 passed**.
   - With the cohort test, the MFL auth-link and ESPN link suites, and the flag-registry/mirror suites (`test_seed_ui_test_db`, `test_blind_grading_routes`, `test_events_api`, `test_avoid_positions`, `test_invite_links`, `test_draft_extensions_w1`, `test_outlook_route_cache`, `test_packed_evidence`): **513 passed, 0 failed** on the final code. One earlier run showed 1 failure, from the audit-log test's `PLATFORM-SIGNIN` prefix also matching the new `PLATFORM-SIGNIN-XFF` lines; that filter is fixed.
