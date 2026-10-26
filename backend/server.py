@@ -4288,8 +4288,45 @@ def _store_trade_page(job_id: str) -> bool:
     """P1 write: store a just-finished job's first pages, in final served order.
 
     Called on the worker thread once _run_trade_job returns, inside the job's
-    user-data lease. True when a row was written. Never raises.
+    user-data lease. True when a row was written. Never raises. A deck with
+    evidence whose row wasn't written records stored count 0 (_deck_store_missed).
     """
+    written = False
+    try:
+        written = _store_trade_page_row(job_id)
+    finally:
+        if not written:
+            _deck_store_missed(job_id)
+    return written
+
+
+def _deck_store_missed(job_id: str) -> None:
+    """U4 (#434 QA P2-1): the store wrote no page row for this deck (the store
+    was off, the job revoked, the deck not page-eligible, the save raised, or
+    the supersede guard refused it), so none of its cards has a stored
+    snapshot: its stored count is 0, on the deck and in its pack's header (a
+    later flush retries a failed header write). Never raises."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        ev = job.get("evidence") if job is not None else None
+    if ev is None:
+        return
+    try:
+        with _deck_evidence_write_lock:
+            with ev.lock:
+                ev.stored_count = 0           # overwrites a refused store's len(cards)
+                dirty = ev.pack is not None and ev.pack.run.get("stored_count") != 0
+                if dirty:
+                    ev.pack.run["stored_count"] = 0
+                    ev.pack_dirty = True
+            if dirty:
+                _deck_pack_flush_header(ev)
+    except Exception:
+        log.warning("deck-evidence %s: stored count 0 not yet in the pack", job_id, exc_info=True)
+
+
+def _store_trade_page_row(job_id: str) -> bool:
+    """_store_trade_page's write: True when a row was written."""
     if not _trade_page_store_enabled():
         return False
     with _trade_jobs_lock:

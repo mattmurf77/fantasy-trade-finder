@@ -1953,3 +1953,69 @@ def test_flip_the_live_path_counts_against_the_jobs_stored_count(deferred):
         ev.rows.pop(contract.card_impression_id(job_id, 95))
     view(job_id, 95)
     assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+# ── #434 QA: a store that doesn't write records stored count 0 ──────────────
+
+def delivered_before_completion(client, job_id):
+    """Pages 1 and 2 delivered while the job ran; then the worker's job_done
+    writes the pack (no stored_count yet), as before its store."""
+    import time as _time
+    for cursor in (0, 30):
+        assert deck_ids(status(client, job_id, cursor).get_json())
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id].update(status="complete", finished_at=_time.monotonic())
+    server._deck_evidence_job_done(job_id)
+    assert "stored_count" not in unpack(pack_of(engine_of(), job_id))[0]
+
+
+def engine_of():
+    return db_module.engine
+
+
+def store_fails(job_id, how):
+    """The store writes no page row: (a) the save raises, (b) the supersede
+    guard refuses it (a newer deck's row holds the key), (c) the deck isn't
+    page-eligible (a failed experiment-digest read) or its job was revoked."""
+    import time as _time
+    from backend.tests.test_trade_page_store import _row
+    with pytest.MonkeyPatch.context() as mp:
+        if how == "raises":
+            def boom(row):
+                raise RuntimeError("injected: the page store's write fails")
+            mp.setattr(db_module, "save_trade_page", boom)
+        elif how == "refused":
+            assert db_module.save_trade_page(_row(_time.time() + 3600, "a-newer-deck"))
+        elif how == "ineligible":
+            with server._trade_jobs_lock:
+                server._trade_jobs[job_id]["experiment_digest"] = None
+        else:
+            with server._trade_jobs_lock:
+                server._revoke_trade_job_locked(server._trade_jobs[job_id], "inputs_changed")
+        assert server._store_trade_page(job_id) is False
+
+
+@pytest.mark.parametrize("how, pack_first", [
+    ("raises", True), ("raises", False), ("refused", True), ("refused", False),
+    ("ineligible", True), ("ineligible", False), ("revoked", True)])
+def test_store_count_zero_when_the_store_writes_no_row(deferred, how, pack_first):
+    """#434 QA P2-1 (a)-(c): the deck is page-scoped (page_store 1) but its
+    store wrote no row, so no card has a stored snapshot. Its stored count is
+    recorded as 0, in the pack's header whether the pack came before the
+    store (pages delivered while the job ran) or after (the first delivery),
+    and card 40 (delivered on page 2, under 90, packed: past the first 30's
+    full rows) missed after a restart is a restart_split, not other."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, complete=not pack_first, store=False)
+    if pack_first:
+        delivered_before_completion(client, job_id)
+    store_fails(job_id, how)
+    if not pack_first:
+        for cursor in (0, 30):                             # the first delivery writes the pack
+            status(client, job_id, cursor)
+    run = unpack(pack_of(engine, job_id))[0]
+    assert (run["page_store"], run["stored_count"]) == (1, 0)
+    assert db_module.load_trade_page_for_job(UID, job_id) is None
+    restart()
+    view(job_id, 40)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
