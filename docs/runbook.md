@@ -110,6 +110,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Offline eval harness — replay/IPS on the F1 impression spine (F8, 2026-07-26)](#offline-eval-harness-replayips-on-the-f1-impression-spine-f8-2026-07-26)
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
+- [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
 - [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
 - [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
@@ -182,6 +183,18 @@ from historical decisions/inbound offers, which must retain original terms.
 - **DB:** Postgres via injected `DATABASE_URL`.
 - **Static:** `web/` served by Flask.
 - Set `ANTHROPIC_API_KEY` in Render dashboard if smart matchups should be enabled in prod.
+
+### The gthread switch (E1)
+
+The web service runs one gunicorn worker with **`--threads 4`** (E1). The live start command comes from the
+service settings, **not** `render.yaml` (G-018; confirmed 2026-10-24 by an API read, which showed the dashboard
+command while the blueprint said `plan: free` against a live `standard`). So merging this file changes nothing
+by itself. On the operator's word, set the start command on the service (Render API `PATCH /v1/services/<id>`
+or the dashboard), then deploy and read the live command back. **Rollback:** the same command without
+`--threads 4`, then deploy. Watch the first 13:30 UTC daily tick and the request p95 after the switch.
+
+As of 2026-10-24 the service reports **`autoDeploy: yes`**: every merge to `main` deploys at once. That
+supersedes the 2026-09-20 note above.
 
 ### First-action latency release (2026-09-21)
 
@@ -478,7 +491,7 @@ python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --ke
 1. **Stop it:** set `trade.value_core` to `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The safety signature changes, so the next `/api/trades/generate` runs the legacy engine and no cached value-core deck is reused.
 2. **Narrow it (deploy-free):** `vc_testers_only` → `1` with `scripts/set_knob.py` or `PUT /api/admin/config/vc_testers_only` (`X-Cron-Secret`). Serving returns to the tester allowlist only.
 
-**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. `budget_exhausted=True` means the 8 s core budget stopped enumeration and a partial pool was ranked and served. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
+**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. The only thing that sets `budget_exhausted` is the 30 s safety ceiling (pathology), always together with `CoreDiagnostics.safety_ceiling_hit`. The core is bounded by its check caps, never by the clock, so this is not load. A ceiling run never reaches this INFO line, because the job refuses the partial pool (head-eng ruling 15). Look instead for two ERROR lines: `value-core: safety ceiling … hit; stopped with N/M partners done, K pairs checked` and `trade-job <id> value_core: safety ceiling hit (…); refusing the partial pool`. The job ends with error `value_core_failed`. Check for a machine stall (a frozen or starved process, a paused instance) or a pathological input (an extreme roster or package count), not traffic. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
 
 ### Gate 2 — Calibration (in-app blind grading)
 
@@ -1039,11 +1052,11 @@ Adding `FTF_TESTER_ALLOWLIST` to `render.yaml` envVars and deploying did NOT set
 
 `backend/eval/` grades candidate deck rankers on logged data before any user sees them (docs/plans/tiktok-discovery/prds/F8-offline-eval.md). Read-only against product tables; only writes are JSON-lines run records under `data/eval_runs/` (gitignored).
 
-- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` / `bad_features` / `scorer_error` — the counts must sum to the loaded total; a printed WARNING means a harness bug, file it.
+- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` per card, then whole-deck reasons, each also counted in decks: `partial_run` (a card from a partial run, `evidence_tier='partial_run'`) / `in_flight` (a deck served at or after `backend/eval/data.PACK_REQUIRED_SINCE` with no pack yet, served within 25 h of the read's `as_of`; it may still be live, so this is **not** an error) / `pack_integrity` (its pack fails its checksum, has an unknown version, or holds another run's cards) / `incomplete_deck` (a gap in its card indexes after the pack merge, or a required pack missing past 25 h) / `missing_scorer_inputs` (a card with neither `features_json` nor a compact block, C7 (iv)) / `scorer_error`. The counts must sum to the loaded total; a printed WARNING means a harness bug, file it. Any `pack_integrity` or `incomplete_deck` count is evidence loss: investigate the pack writer. Every report and run record carries the eval-rule version (`replay.EXCLUSION_RULE_VERSION`, now 3: delivered-position exposure and the `as_of` read filter); comparing runs across versions prints `RULE-MISMATCH`. **The read is settled by default:** without `--as-of`, it grades decks served before now minus `--settle-lag-days` (default 7), as of the window's last `served_at` plus the lag. Outcomes acted after `as_of` aren't read, so late views and proposes have time to land. Each record also carries the pinned V-vector and the `model_config` SHA-256 it was graded under (`config`). The rules are in `docs/plans/trade-time-to-suggestion/eng-evidence-contract.md` §8.
 - **Sanity first, always:** `python3 -m backend.eval.replay --self-check` replays the logged policy against its own logs; the observed like/propose rate must fall inside the replayed CI (exit 1 otherwise). Run it before trusting any candidate readout — a self-check failure means the log or the estimator is broken, not the candidate.
 - **`UNRELIABLE` verdict** = ESS below the gate (`EVAL_ESS_MIN`, default 100). That is the harness refusing to bless the number, not a failure — collect more log or narrow the question. The `random` scorer is a permanent canary: it must grade worse than `production`; if it ever grades level on healthy volume, stop and debug the harness.
 - **Trainable scorers (F6):** the harness enforces the time-ordered protocol — `--eval-start` is mandatory for any scorer with `fit()`; fitting sees only pre-split decks, scoring only post-split. There is deliberately no shuffled-CV mode.
-- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d, idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
+- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d (the CLI grades the 30d ending `--settle-lag-days`, default 7, ago, as of its last served deck plus the lag; `run_all()` with no lag, as the daily tick calls it, grades up to now), idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
 - **The gate (process):** no ranking-affecting change (F5 η's, F6, tweaks) graduates without (a) a replay win with adequate ESS, then (b) an interleaving/experiment win. Cite run records, not vibes.
 
 ## MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)
@@ -1060,6 +1073,33 @@ Operator re-report post-#200: "Picks still not present on the bar chart" (League
 
 - **Fix (2026-08-01):** the daemon step is extracted to `server._sync_sleeper_owned_picks`, which **skips the sync (keeps the prior snapshot)** whenever the rosters or league-meta read is unavailable, and `database.sync_draft_picks` no-ops on empty `roster_ids` (defense in depth for every caller). A skip logs `owned-pick sync skipped … (keeping prior snapshot)` and the next init retries. Tests: `backend/tests/test_owned_picks.py::test_sync_empty_roster_ids_keeps_prior_snapshot`, `::test_daemon_step_skips_when_sleeper_rosters_unavailable`, `::test_daemon_step_skips_when_league_meta_unavailable`.
 - **Operational rule:** any daemon whose write is replace-style must treat "fetch came back empty" as SKIP, never as "the league truly has nothing" — the #200/#220 clobber class is exactly that conflation.
+
+## Sleeper 429 / circuit open (S0, 2026-10-20)
+
+Since S0, every server-side Sleeper **read** goes through one per-process circuit (`backend/sleeper_http.py`; rule
+in `docs/integrations/sleeper.md` §4.1). A Sleeper `429` opens it for at least the `Retry-After` (else 2 s, doubling
+per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
+
+- **Symptom:** Render logs show `sleeper 429: circuit open <s> league=<id> status=429 strikes=<n>`, then
+  `sleeper circuit open: read skipped …` lines. While it's open:
+  - `/api/session/init` for Sleeper leagues returns `503 league_data_unavailable`. The app keeps its token and any
+    live server session, so taps keep working from stored state.
+  - Sleeper sends are blocked with "couldn't confirm rosters" (the live roster check can't run), and the daemon's
+    trade-block, pick and transaction syncs skip.
+  - `league_roster_state` rows go `stale` with `last_error_code = 'rate_limited'`. That's a read,
+    not a fix: no prod writes are needed.
+- **What clears it:** time. The window ends on its own, and the next successful read resets the strike count.
+  There's no manual reset in prod; a deploy or restart also clears it (it's in-process state). Don't restart to
+  "fix" a 429: a fresh process that resumes full fan-out against a throttled IP just trips it again, with a
+  shorter window.
+- **Data safety:** while it's open, the owned-pick sync keeps the prior `draft_picks` snapshot, and the draft-status
+  refresh keeps the cached verdict (both would otherwise act on reads that never happened; the #220 clobber
+  class). No repair is needed afterwards.
+- **If it recurs:** the per-init budget is ≤ 8 Sleeper calls (`test_session_init_sleeper_calls.py`). Check
+  `api_events` for `service = 'sleeper'` with `status = 429` by endpoint class to find the hot path (read-only,
+  through analytics-lead). A sustained ceiling (3,600 s windows) means Sleeper is throttling the IP, not one
+  request: escalate to platforms-eng. Cloudflare 1010 is a separate failure (`blocked`, a 403); it doesn't open
+  the circuit.
 
 ## Player-cache refresh (rookie-draft M0, 2026-08-06)
 
