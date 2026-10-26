@@ -132,6 +132,7 @@ import {
   isWholeDeck,
   mergeDeckPage,
   needsBackoff,
+  nextDeckJob,
   nextRetryAttempt,
   pageRetryDelayMs,
   unseenCount,
@@ -523,12 +524,15 @@ function tradePackageKey(c: TradeCard): string {
 // deck then dispatches its own search exactly as before.
 // C: `device` marks a page read from the DEVICE (no request behind it yet;
 // the pushed deck revalidates it), `validatedAt` when the server last
-// validated the cards (device clock).
+// validated the cards (device clock), `deviceKey` the device page key the
+// landing validated them under (user, league, format): the pushed deck
+// writes its cards back under that key only.
 type FirstPageHandoff = {
   request: GenerateBody;
   snapshot: PagedTradeJobSnapshot;
   device?: true;
   validatedAt?: number;
+  deviceKey?: string | null;
 };
 function adoptablePage(s: PagedTradeJobSnapshot): boolean {
   return isPagedEnvelope(s) && s.status !== 'error'
@@ -730,6 +734,13 @@ export default function TradesScreen({ navigation, route }: any) {
   // the device page current from both (the device page effect below).
   const deckScopeRef = useRef<string | null>(adopted ? devicePageScope(adopted.request) : null);
   const validatedAtRef = useRef<number | null>(adopted?.validatedAt ?? null);
+  // …and the device page key the deck was validated under. The deck writes
+  // back only while the screen's key is still that one: a league or format
+  // switch (a new key) never receives the old deck's cards. Nulled by the
+  // league reset and the format change below; bound wherever the deck is
+  // validated (adoption, a model answer via lastModelKeyRef).
+  const deckKeyRef = useRef<string | null>(adopted?.deviceKey ?? null);
+  const lastModelKeyRef = useRef<string | null>(null);
   // Cards acted on in this deck (deckCardKey): never written back to the
   // device page, even while a deferred advance (decline reasons) still
   // fronts one.
@@ -2254,6 +2265,9 @@ export default function TradesScreen({ navigation, route }: any) {
             trade_intent: tradeIntent ?? undefined,
           };
       lastModelRequestRef.current = request;
+      // C — the device page key this request answers (same render as its
+      // league_id); onSuccess binds the deck to it.
+      lastModelKeyRef.current = deviceKey;
       // A handoff supplies one explicit canvas request. Subsequent new
       // targeting uses the pin store; Retry and regenerations use the saved
       // request.
@@ -2279,6 +2293,7 @@ export default function TradesScreen({ navigation, route }: any) {
       deckScopeRef.current = lastModelRequestRef.current
         ? devicePageScope(lastModelRequestRef.current)
         : null;
+      deckKeyRef.current = lastModelKeyRef.current;
       validatedAtRef.current = Date.now();
       // R2/R2b — the search's first response: what R2 reports, the job its
       // cards come from, and an honest `empty` when it finished with none.
@@ -2487,7 +2502,10 @@ export default function TradesScreen({ navigation, route }: any) {
       cancelled = true;
       clearTimeout(firstTimer);
     };
-  }, [job?.job_id, job?.status]);
+    // `cursor === undefined`: a deck the kill switch un-pages mid-deck keeps
+    // its job id and status, and must start polling here then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [job?.job_id, job?.status, job?.cursor === undefined]);
 
   // P0-2 — mirror a job-level failure into the one-funnel deckFailure state.
   //
@@ -2603,6 +2621,11 @@ export default function TradesScreen({ navigation, route }: any) {
     if (!keepAdoptedPage) {
       setDeck([]);
       setDeckIdx(0);
+      // C — the old league's deck is no longer validated for any key: the
+      // device page effect (same commit, later) must not write it.
+      deckKeyRef.current = null;
+      validatedAtRef.current = null;
+      deckScopeRef.current = null;
     }
     setLaneFilter(null);
     setTradeIntent(null); // #172 — a declared shape is league-specific
@@ -3752,6 +3775,7 @@ export default function TradesScreen({ navigation, route }: any) {
         snapshot: devicePageSnapshot(held, fork.searchId),
         device: true,
         validatedAt: held.validated_at,
+        deviceKey,
       });
       return;
     }
@@ -3776,7 +3800,7 @@ export default function TradesScreen({ navigation, route }: any) {
     const deadline = setTimeout(() => go(), FIRST_PAGE_PUSH_DEADLINE_MS);
     generateTrades(request, { searchId: fork.searchId })
       .then((snapshot) => go(adoptablePage(snapshot)
-        ? { request, snapshot, validatedAt: Date.now() }
+        ? { request, snapshot, validatedAt: Date.now(), deviceKey }
         : undefined))
       .catch(() => go());
   }
@@ -4615,6 +4639,11 @@ export default function TradesScreen({ navigation, route }: any) {
   // C — `revalidation`: the response that revalidates a device deck is
   // authoritative for every card it holds (utils/devicePage.mergeRevalidation,
   // whole-deck semantics), and paging continues from ITS deck_id/cursor.
+  //
+  // The paging kill switch (#400, `trade_paged_responses = 0`) answers with
+  // the LEGACY cumulative body, no cursor. utils/tradePages.nextDeckJob then
+  // drops every paging field, so the deck leaves the page loop for the legacy
+  // poller mid-deck (on the response's job: a device deck adopts it).
   function applyPage(next: PagedTradeJobSnapshot, opts?: { revalidation?: boolean }): number {
     const projection = deckProjectionRef.current;
     const front = projection.cards[projection.index];
@@ -4628,23 +4657,13 @@ export default function TradesScreen({ navigation, route }: any) {
     if (deckFullyDelivered(next) && next.status !== 'error' && deckSearchRef.current?.keys.size === 0) {
       failDeckSearch('empty');
     }
-    // A revalidation with no `deck_id` (no P2 behind it) can only page by
-    // the server's job id, so it adopts that one (rebindJobRef above).
-    const rebind = !!opts?.revalidation && !next.deck_id && !!next.job_id
-      && next.job_id !== jobRef.current?.job_id;
+    // A revalidation with no `deck_id` (no P2 behind it), or any legacy
+    // answer, can only be followed by the server's job id, so the deck
+    // adopts that one (rebindJobRef above keeps a withdrawn card).
+    const rebind = (!isPagedEnvelope(next) || (!!opts?.revalidation && !next.deck_id))
+      && !!next.job_id && next.job_id !== jobRef.current?.job_id;
     if (rebind) rebindJobRef.current = next.job_id;
-    setJob((prev) => ({
-      ...(prev ?? {}),
-      ...next,
-      job_id: rebind ? next.job_id : prev?.job_id || next.job_id,
-      deck_id: opts?.revalidation ? next.deck_id : next.deck_id ?? prev?.deck_id,
-      search_id: prev?.search_id ?? next.search_id,
-      freshness_state: next.freshness_state,
-      pool_exhausted: next.pool_exhausted,
-      replace: undefined,
-      rebased: undefined,
-      cards: merged.cards,
-    }));
+    setJob((prev) => nextDeckJob(prev, next, merged.cards, { revalidation: opts?.revalidation, rebind }));
     // U2 — the fronted card is gone from the server's whole current deck:
     // withdraw it in place (it keeps its slot; behind-cards the server
     // dropped were removed silently by the merge).
@@ -4671,7 +4690,8 @@ export default function TradesScreen({ navigation, route }: any) {
       if (jobRef.current?.job_id !== forJob) return;
       loop.failures = 0;
       const added = applyPage(next);
-      backoff = needsBackoff(next, requested);
+      // A legacy answer (the kill switch) ended paging: nothing to retry.
+      backoff = isPagedEnvelope(next) && needsBackoff(next, requested);
       loop.attempt = nextRetryAttempt(loop.attempt, backoff, added);
       setPagePhase(backoff ? 'retrying' : 'idle');
     } catch {
@@ -4813,15 +4833,30 @@ export default function TradesScreen({ navigation, route }: any) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online]);
 
+  // C — a format switch has no deck reset (the deck on screen stays), but
+  // its cards were validated for the OLD format: they stop being written
+  // anywhere, even if the user switches back.
+  const deckFormatRef = useRef(activeFormat);
+  useEffect(() => {
+    if (deckFormatRef.current === activeFormat) return;
+    deckFormatRef.current = activeFormat;
+    deckKeyRef.current = null;
+    validatedAtRef.current = null;
+  }, [activeFormat]);
+
   // C — the deck keeps the device page current: the next unseen cards (the
   // fronted one onward, never a withdrawn one) of an organic deck the server
   // validated, under its newest envelope. Every swipe moves the front, so an
   // acted-on card never comes back on the next tap. A server answer that may
   // not be kept (still building, "updating", errored) discards the page.
+  // Only under the key the deck was validated for (deckKeyRef).
   useEffect(() => {
     const scope = deckScopeRef.current;
     const validatedAt = validatedAtRef.current;
-    if (!deviceKey || !scope || validatedAt == null || !job || !isPagedEnvelope(job)) return;
+    if (!deviceKey || deviceKey !== deckKeyRef.current) return;
+    // (A legacy answer — the kill switch — can't be kept: devicePageFrom
+    // needs a cursor, so it discards the key's page.)
+    if (!scope || validatedAt == null || !job) return;
     // A page validated later (a background refresh) is never overwritten by
     // an older deck; its swipes still leave it (removeDeviceCard in advance).
     if (!deckMayWrite(readDevicePage(deviceKey), validatedAt)) return;
@@ -4829,7 +4864,7 @@ export default function TradesScreen({ navigation, route }: any) {
     const acted = actedDeviceKeysRef.current;
     const unacted = frontAt < 0 ? [] : deck.slice(frontAt)
       .filter((c) => !withdrawnIds.has(c.trade_id) && !acted.has(deckCardKey(c)));
-    saveDevicePage(deviceKey, devicePageFrom(job, { scope, validatedAt, cards: unacted }));
+    saveDevicePage(deviceKey, devicePageFrom(job, { scope, validatedAt, cards: unacted }), validatedAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deviceKey, job?.job_id, job?.status, job?.cursor, job?.deck_id, job?.freshness_state,
       job?.error, deck, rawTopCard?.trade_id, withdrawnIds]);

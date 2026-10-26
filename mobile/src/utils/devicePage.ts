@@ -236,7 +236,21 @@ export const RANKING_WRITE_PATHS: readonly string[] = [
   '/api/league/asset-prefs',
 ];
 
+function pathnameOf(path: string): string {
+  return path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
+}
+
 export function isRankingWritePath(path: string): boolean {
-  const pathname = path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
-  return RANKING_WRITE_PATHS.includes(pathname);
+  return RANKING_WRITE_PATHS.includes(pathnameOf(path));
+}
+
+/** The session's scoring-format switch. The organic request names no
+ *  format (the server answers in the session's), so a page refreshed while
+ *  the switch is in flight may hold the other format's cards under this
+ *  format's key: the switch discards too, which drops that refresh. */
+export const FORMAT_SWITCH_PATH = '/api/scoring/switch';
+
+/** Every client write that discards the device pages the user holds. */
+export function discardsDevicePages(path: string): boolean {
+  return isRankingWritePath(path) || pathnameOf(path) === FORMAT_SWITCH_PATH;
 }

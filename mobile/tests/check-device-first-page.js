@@ -14,7 +14,11 @@
 //     stored cursor instead of the response's;
 //   - "Updating" shows when nothing is revalidating, or never stops;
 //   - a swiped card comes back on the next tap, or a rankings write leaves
-//     the pre-write page in place, or another account reads it.
+//     the pre-write page in place (or a deck that predates it writes its
+//     cards back on the next swipe), or another account reads it;
+//   - a league or format switch lets the OLD deck's cards be written under
+//     the NEW key, so the next tap there renders another league's or
+//     format's trades (release-lead's P1-a).
 // What it does: transpiles and EXECUTES utils/devicePage.ts (with the real
 // utils/tradePages.ts) and state/devicePageStore.ts (stubbed AsyncStorage,
 // network and API); then pins the screen, client and session wiring by
@@ -79,6 +83,7 @@ const page1 = (over = {}) => ({
 // A fresh store module per scenario, over shared stubs.
 function loadStore(env) {
   return compile(read('state/devicePageStore.ts'), {
+    Date: { now: () => (env.clock ?? Date.now()) },
     setTimeout: (fn) => { Promise.resolve().then(fn); return 0; },
     clearTimeout: () => {},
     require: (name) => {
@@ -140,6 +145,44 @@ function fnBody(text, signature) {
   }
   throw new Error(`unbalanced: ${signature}`);
 }
+
+// The body of the screen's useEffect whose callback contains `marker`, as a
+// function of the names it reads: the guard runs the screen's OWN code.
+function screenEffect(marker, names) {
+  const sf = ts.createSourceFile('T.tsx', trades, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const found = [];
+  (function visit(n) {
+    if (ts.isCallExpression(n) && n.expression.getText(sf) === 'useEffect'
+        && n.arguments[0] && ts.isArrowFunction(n.arguments[0])
+        && n.arguments[0].body.getText(sf).includes(marker)) {
+      found.push(n.arguments[0].body.getText(sf));
+    }
+    ts.forEachChild(n, visit);
+  })(sf);
+  ok(found.length === 1, `exactly one useEffect containing ${marker} (found ${found.length})`);
+  return compile(`module.exports = function (env) { const { ${names.join(', ')} } = env; ${found[0]} };`);
+}
+// The balanced `{ … }` block that follows `marker` in the raw source.
+function blockAfter(text, marker) {
+  const a = text.indexOf(marker);
+  ok(a >= 0, `marker not found: ${marker}`);
+  const i = text.indexOf('{', a + marker.length - 1);
+  for (let j = i, depth = 0; j < text.length; j++) {
+    if (text[j] === '{') depth++;
+    else if (text[j] === '}' && --depth === 0) return text.slice(i, j + 1);
+  }
+  throw new Error(`unbalanced after ${marker}`);
+}
+
+// A check that awaits something that never settles would let the event loop
+// drain and node exit 0 mid-run: an unfinished run fails instead.
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-device-first-page did not finish (a check hung): FAILED');
+    process.exitCode = 1;
+  }
+});
 
 (async () => {
   console.log('check-device-first-page:');
@@ -250,6 +293,9 @@ function fnBody(text, signature) {
     eq(['/api/trades/generate', '/api/trades/swipe', '/api/trio/skip', '/api/rankings', '/api/rank3x']
       .map(D.isRankingWritePath), [false, false, false, false, false]);
     eq(D.RANKING_WRITE_PATHS.length, 8);
+    // A format switch discards too (an organic page refreshed during it may be the other format's).
+    eq([D.discardsDevicePages('/api/scoring/switch'), D.discardsDevicePages('/api/rank3?x=1'),
+      D.discardsDevicePages('/api/trades/swipe')], [true, true, false]);
   });
   await check('1l. every named write is a path the app really posts (drift guard)', () => {
     const api = ['api/rankings.ts', 'api/league.ts'].map(read).join('\n');
@@ -326,6 +372,15 @@ function fnBody(text, signature) {
     await flush(); await flush();
     ok(!env.storage.m.has(KEY) && !env.storage.m.has(KEY2), 'and from disk');
   });
+  await check('2f2. a refresh that was out when the format switched drops its answer (it may be the other format\'s)', async () => {
+    let release;
+    const env = makeEnv({ respond: () => new Promise((r) => { release = () => r(page1()); }) });
+    const st = loadStore(env);
+    const pending = st.refreshDevicePage(target, T0);
+    env.onWrite('/api/scoring/switch');
+    release(); await pending;
+    eq(st.readDevicePage(KEY), null, 'never kept under this format\'s key');
+  });
   await check('2f. a refresh that was out when a ranking write happened drops its answer', async () => {
     let release;
     const env = makeEnv({ respond: () => new Promise((r) => { release = () => r(page1()); }) });
@@ -366,11 +421,50 @@ function fnBody(text, signature) {
     eq(st.readDevicePage(KEY2), null);
   });
 
+  await check('2j. a save never keeps cards validated before the last discard (a swipe after a re-rank writes nothing)', async () => {
+    const env = makeEnv({ clock: T0 });
+    const st = loadStore(env);
+    const deckPage = (validatedAt, cards = [card('a', 'ha'), card('b', 'hb')]) =>
+      D.devicePageFrom(page1({ cards }), { scope: S, validatedAt });
+    st.saveDevicePage(KEY, deckPage(T0), T0);
+    ok(st.readDevicePage(KEY), 'control: a deck validated now is kept');
+    env.clock = T0 + 5_000;
+    env.onWrite('/api/rank3'); // the re-rank: every page goes
+    eq(st.readDevicePage(KEY), null, 'discarded by the write');
+    env.clock = T0 + 9_000;
+    st.saveDevicePage(KEY, deckPage(T0), T0); // the old deck's next swipe
+    eq(st.readDevicePage(KEY), null, 'cards validated before the re-rank are refused');
+    st.saveDevicePage(KEY2, deckPage(T0 + 4_999), T0 + 4_999);
+    eq(st.readDevicePage(KEY2), null, 'on every key (the write discarded them all)');
+    st.saveDevicePage(KEY, deckPage(T0 + 6_000), T0 + 6_000);
+    ok(st.readDevicePage(KEY), 'a deck revalidated after the write is kept');
+    // A key-level discard (a server answer that can't be kept) bars older cards for that key only.
+    st.saveDevicePage(KEY, null, T0 + 7_000);
+    st.saveDevicePage(KEY, deckPage(T0 + 6_500), T0 + 6_500);
+    eq(st.readDevicePage(KEY), null, 'older than the key discard: refused');
+    st.saveDevicePage(KEY2, deckPage(T0 + 6_500), T0 + 6_500);
+    ok(st.readDevicePage(KEY2), 'another key is not barred by it');
+    // A deck's own unkeepable answer (asOf = its validation) doesn't bar that same deck later.
+    st.saveDevicePage(KEY, null, T0 + 8_000);
+    st.saveDevicePage(KEY, deckPage(T0 + 8_000), T0 + 8_000);
+    ok(st.readDevicePage(KEY), 'same validation time: kept');
+    // Swipes emptying a page don't bar the deck that still holds more cards.
+    st.removeDeviceCard(KEY, 'ha'); st.removeDeviceCard(KEY, 'hb');
+    eq(st.readDevicePage(KEY), null, 'emptied by swipes');
+    st.saveDevicePage(KEY, deckPage(T0 + 8_000, [card('c', 'hc')]), T0 + 8_000);
+    ok(st.readDevicePage(KEY), 'the same deck writes its next cards');
+    // Sign-out bars everything validated before it too.
+    env.clock = T0 + 20_000;
+    await st.clearDevicePages();
+    st.saveDevicePage(KEY, deckPage(T0 + 19_000), T0 + 19_000);
+    eq(st.readDevicePage(KEY), null, 'validated before the sign-out: refused');
+  });
+
   // ── 3. The screen: no wait, background revalidation, "Updating" ─────────
   await check('3a. the tap renders a held page with NO network wait (no request, timer or await before the push)', () => {
     const push = fnBody(code, 'function pushWithFirstPage(');
     const branch = between(push, 'const held = readDevicePage(deviceKey);', 'let pushed = false;');
-    ok(/if \(devicePageUsable\(held, devicePageScope\(request\), Date\.now\(\)\)\) \{\s*pushDeck\(\{\s*request,\s*snapshot: devicePageSnapshot\(held, fork\.searchId\),\s*device: true,\s*validatedAt: held\.validated_at,\s*\}\);\s*return;\s*\}/.test(branch),
+    ok(/if \(devicePageUsable\(held, devicePageScope\(request\), Date\.now\(\)\)\) \{\s*pushDeck\(\{\s*request,\s*snapshot: devicePageSnapshot\(held, fork\.searchId\),\s*device: true,\s*validatedAt: held\.validated_at,\s*deviceKey,\s*\}\);\s*return;\s*\}/.test(branch),
       'a usable device page is pushed at once, then return');
     ok(!/generateTrades|await|setTimeout|\.then\(/.test(branch), 'nothing in the device / offline branches waits on anything');
     ok(push.indexOf('const held = readDevicePage(deviceKey);') < push.indexOf('generateTrades(request'),
@@ -417,7 +511,13 @@ function fnBody(text, signature) {
     ok(reval.includes('applyPage(next, { revalidation: true })'), 'the revalidation is applied as one');
     const apply = fnBody(code, 'function applyPage(');
     ok(/const merged = opts\?\.revalidation\s*\? mergeRevalidation\(deckRef\.current, next\.cards, frontKey\)/.test(apply), 'mergeRevalidation');
-    ok(/deck_id: opts\?\.revalidation \? next\.deck_id : next\.deck_id \?\? prev\?\.deck_id/.test(apply), "the response's deck_id, even a new one");
+    // (The job is built by tradePages.nextDeckJob since the kill-switch fix; executed here.)
+    ok(/nextDeckJob\(prev, next, merged\.cards, \{ revalidation: opts\?\.revalidation, rebind \}\)/.test(apply)
+      && P.nextDeckJob({ job_id: 'j', cursor: 3, deck_id: 'old', cards: [] },
+        { job_id: 'n', status: 'complete', cursor: 30, deck_id: 'new', cards: [] }, [], { revalidation: true }).deck_id === 'new'
+      && P.nextDeckJob({ job_id: 'j', cursor: 3, deck_id: 'old', cards: [] },
+        { job_id: 'n', status: 'complete', cursor: 30, cards: [] }, [], { revalidation: true }).deck_id === undefined,
+      "the response's deck_id, even a new one (or none: never the stored page's)");
     ok(/if \(merged\.withdrawFront && front\) \{\s*setWithdrawnIds/.test(apply), 'an absent fronted card is withdrawn in place');
     const trigger = between(code, 'if (!snap?.job_id || !online) return;', 'void fetchNextPage();');
     ok(/if \(devicePhase === 'running' \|\| devicePhase === 'failed'\) return;/.test(trigger), 'no paging from the stored cursor');
@@ -445,9 +545,85 @@ function fnBody(text, signature) {
     ok(/if \(!deckMayWrite\(readDevicePage\(deviceKey\), validatedAt\)\) return;/.test(eff), 'never over a later page');
     ok(/deck\.slice\(frontAt\)\s*\.filter\(\(c\) => !withdrawnIds\.has\(c\.trade_id\) && !acted\.has\(deckCardKey\(c\)\)\)/.test(eff),
       'the fronted card onward, never a withdrawn or acted-on one (a deferred advance still fronts it)');
-    ok(/saveDevicePage\(deviceKey, devicePageFrom\(job, \{ scope, validatedAt, cards: unacted \}\)\);/.test(eff), 'kept or discarded by the same rule');
-    ok(/deckScopeRef\.current = lastModelRequestRef\.current\s*\? devicePageScope\(lastModelRequestRef\.current\)\s*: null;\s*validatedAtRef\.current = Date\.now\(\);/.test(code),
-      'a model answer stamps its scope and validation time');
+    ok(/saveDevicePage\(deviceKey, devicePageFrom\(job, \{ scope, validatedAt, cards: unacted \}\), validatedAt\);/.test(eff),
+      'kept or discarded by the same rule (a discard answers the deck\'s own validation time)');
+    ok(/deckScopeRef\.current = lastModelRequestRef\.current\s*\? devicePageScope\(lastModelRequestRef\.current\)\s*: null;\s*deckKeyRef\.current = lastModelKeyRef\.current;\s*validatedAtRef\.current = Date\.now\(\);/.test(code),
+      'a model answer stamps its scope, its key and its validation time');
+  });
+
+  await check('3h. EXECUTED: the deck writes only under the key it was validated for — a league switch, then a format switch, write nothing under the new key', async () => {
+    const save = screenEffect('saveDevicePage(deviceKey', ['deckScopeRef', 'validatedAtRef', 'deckKeyRef', 'deviceKey',
+      'job', 'isPagedEnvelope', 'deckMayWrite', 'readDevicePage', 'rawTopCard', 'deck', 'actedDeviceKeysRef',
+      'withdrawnIds', 'deckCardKey', 'saveDevicePage', 'devicePageFrom']);
+    const formatChange = screenEffect('deckFormatRef.current === activeFormat',
+      ['deckFormatRef', 'activeFormat', 'deckKeyRef', 'validatedAtRef']);
+    const resetBlock = blockAfter(trades, 'if (!keepAdoptedPage) {');
+    ok(resetBlock.includes('setDeck([])'), 'the league reset\'s own block');
+    const leagueReset = compile(`module.exports = function (env) {
+      const { setDeck, setDeckIdx, deckKeyRef, validatedAtRef, deckScopeRef } = env; ${resetBlock} };`);
+
+    const K1 = D.devicePageKey('u1', 'L1', '1qb_ppr');
+    const K2 = D.devicePageKey('u1', 'L2', '1qb_ppr');
+    const K1sf = D.devicePageKey('u1', 'L1', 'sf_tep');
+    const cards = [card('a', 'ha'), card('b', 'hb'), card('c', 'hc')];
+    const env = makeEnv();
+    const st = loadStore(env);
+    const now = Date.now();
+    const refs = () => ({
+      deckScopeRef: { current: S }, validatedAtRef: { current: now }, deckKeyRef: { current: K1 },
+      actedDeviceKeysRef: { current: new Set() },
+    });
+    const run = (r, deviceKey) => save({ ...r, deviceKey, job: page1({ cards }), deck: cards, rawTopCard: cards[0],
+      withdrawnIds: new Set(), isPagedEnvelope: P.isPagedEnvelope, deckCardKey: P.deckCardKey,
+      deckMayWrite: D.deckMayWrite, devicePageFrom: D.devicePageFrom,
+      readDevicePage: st.readDevicePage, saveDevicePage: st.saveDevicePage });
+
+    // Control: the deck's own key is written (the harness can write).
+    const r = refs();
+    run(r, K1);
+    eq(ids(st.readDevicePage(K1).cards), ['a', 'b', 'c'], 'its own key');
+    // League switch, release-lead's order: the NEW key renders while the old
+    // deck's refs are still bound (the reset only schedules setDeck/setJob).
+    run(r, K2);
+    eq(st.readDevicePage(K2), null, 'league switch: nothing under the new league\'s key, even with stale refs');
+    // …and the reset itself nulls them, so nothing can follow.
+    leagueReset({ ...r, setDeck: () => {}, setDeckIdx: () => {} });
+    eq([r.deckKeyRef.current, r.validatedAtRef.current, r.deckScopeRef.current], [null, null, null], 'the league reset unbinds the deck');
+    run(r, K2);
+    eq(st.readDevicePage(K2), null, 'still nothing after the reset');
+
+    // Format switch (no deck reset at all): same league, new format.
+    const f = refs();
+    run(f, K1sf);
+    eq(st.readDevicePage(K1sf), null, 'format switch: nothing under the new format\'s key, before the format effect');
+    const deckFormatRef = { current: '1qb_ppr' };
+    formatChange({ ...f, deckFormatRef, activeFormat: 'sf_tep' });
+    eq([f.deckKeyRef.current, f.validatedAtRef.current], [null, null], 'the format change unbinds the deck');
+    run(f, K1sf);
+    eq(st.readDevicePage(K1sf), null, 'nothing after it either');
+    const before = JSON.stringify(st.readDevicePage(K1));
+    run(f, K1); // switched back: the old deck stays unbound
+    eq(JSON.stringify(st.readDevicePage(K1)), before, 'switching back does not revive the old deck\'s writes');
+    // The mount run changes nothing (same format).
+    const g = refs();
+    formatChange({ ...g, deckFormatRef: { current: '1qb_ppr' }, activeFormat: '1qb_ppr' });
+    eq(g.deckKeyRef.current, K1, 'no format change, no unbind');
+    // The kill switch (#400): a deck un-paged by a legacy answer keeps nothing for its key.
+    const legacyJob = { job_id: 'j1', status: 'complete', error: null, opponents_done: 9, opponents_total: 9, cards };
+    save({ ...refs(), deviceKey: K1, job: legacyJob, deck: cards, rawTopCard: cards[0],
+      withdrawnIds: new Set(), isPagedEnvelope: P.isPagedEnvelope, deckCardKey: P.deckCardKey,
+      deckMayWrite: D.deckMayWrite, devicePageFrom: D.devicePageFrom,
+      readDevicePage: st.readDevicePage, saveDevicePage: st.saveDevicePage });
+    eq(st.readDevicePage(K1), null, 'a legacy (un-paged) deck discards its key\'s page: C never renders with paging off');
+  });
+  await check('3i. the key is bound where the deck is validated: adoption (from the landing\'s key) and a model answer (from its request\'s render)', () => {
+    ok(/const deckKeyRef = useRef<string \| null>\(adopted\?\.deviceKey \?\? null\);/.test(code), 'adoption');
+    ok(/lastModelRequestRef\.current = request;\s*lastModelKeyRef\.current = deviceKey;/.test(code), 'bound with the request it answers');
+    ok(/\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}/.test(code), 'the network first page carries the landing\'s key');
+    const eff = between(code, 'const scope = deckScopeRef.current;', 'job?.error, deck, rawTopCard?.trade_id, withdrawnIds]);');
+    ok(/if \(!deviceKey \|\| deviceKey !== deckKeyRef\.current\) return;/.test(eff), 'the save effect\'s key check');
+    ok(code.indexOf('deckFormatRef.current === activeFormat') < code.indexOf('const scope = deckScopeRef.current;'),
+      'the format change runs before the save in the same commit');
   });
 
   // ── 4. Discards outside the screen ─────────────────────────────────────
@@ -478,6 +654,7 @@ function fnBody(text, signature) {
     ok(/accessibilityLabel=\{accessibilityLabel\}/.test(read('components/chalkline/Button.tsx')), 'Button passes it to the Pressable');
   });
 
+  finished = true;
   console.log(failures ? `\n${failures} failed` : '\nall passed');
   process.exit(failures ? 1 : 0);
 })();

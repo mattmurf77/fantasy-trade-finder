@@ -6,13 +6,17 @@
 // (hydrated once, on the first Trades focus). A discard bumps an epoch (all
 // pages, or the one key), and a background refresh that started before it
 // drops its response, so a page refreshed while a rankings write was in
-// flight is never kept.
+// flight is never kept. A discard also stamps WHEN (device clock, all pages
+// or the one key), and a save of cards validated before that is refused, so
+// a deck that predates a re-rank can't write its cards back on its next
+// swipe.
 //
-// Discards: a rankings or preference write (api/client's write listener,
-// isRankingWritePath: every page the user holds), sign-out / account switch
-// / deletion (clearDevicePages, from useSession.signOut), and any server
-// answer for the key that can't be kept (devicePageFrom → null). A league or
-// format switch reads a different key.
+// Discards: a rankings or preference write or a format switch (api/client's
+// write listener, discardsDevicePages: every page the user holds), sign-out
+// / account switch / deletion (clearDevicePages, from useSession), and any
+// server answer for the key that can't be kept (devicePageFrom → null). A
+// league or format switch reads a different key, and the deck on screen
+// writes only under the key it was validated for (TradesScreen deckKeyRef).
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { onlineManager } from '@tanstack/react-query';
 import { setOnWriteRequest } from '../api/client';
@@ -20,7 +24,7 @@ import { generateTrades, type GenerateBody, type PagedTradeJobSnapshot } from '.
 import {
   DEVICE_PAGE_KEY_PREFIX,
   devicePageFrom,
-  isRankingWritePath,
+  discardsDevicePages,
   parseDevicePage,
   refreshDue,
   withoutCard,
@@ -33,6 +37,10 @@ const inFlight = new Set<string>();
 const persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const keyEpochs = new Map<string, number>();
 let epoch = 0;
+// The validation time a kept page must not predate: the last discard of
+// every page (`discardedAt`) or of its key (`keyDiscardedAt`).
+const keyDiscardedAt = new Map<string, number>();
+let discardedAt = 0;
 let hydration: Promise<void> | null = null;
 // A swipe rewrites the page; the disk copy trails it by this much.
 const PERSIST_DEBOUNCE_MS = 300;
@@ -76,19 +84,26 @@ export function readDevicePage(key: string | null): DevicePage | null {
   return key ? pages.get(key) ?? null : null;
 }
 
-export function discardDevicePage(key: string) {
+/** Drop the key's page. `asOf` is the validation time the discard answers
+ *  (a server answer's, or a deck's): cards validated before it are never
+ *  kept for this key again. */
+export function discardDevicePage(key: string, asOf = Date.now()) {
   keyEpochs.set(key, (keyEpochs.get(key) ?? 0) + 1);
+  keyDiscardedAt.set(key, Math.max(keyDiscardedAt.get(key) ?? 0, asOf));
   if (!pages.delete(key)) return;
   persist(key);
 }
 
 /** Keep `page` for `key`, or discard the key's page when it is null (a
- *  server answer that can't be kept supersedes what the device holds). */
-export function saveDevicePage(key: string, page: DevicePage | null) {
+ *  server answer that can't be kept supersedes what the device holds; `asOf`
+ *  as in discardDevicePage). A page validated before the last discard of its
+ *  key, or of every key, is refused: it predates what superseded it. */
+export function saveDevicePage(key: string, page: DevicePage | null, asOf?: number) {
   if (!page) {
-    discardDevicePage(key);
+    discardDevicePage(key, asOf);
     return;
   }
+  if (page.validated_at < Math.max(discardedAt, keyDiscardedAt.get(key) ?? 0)) return;
   pages.set(key, page);
   persist(key);
 }
@@ -100,13 +115,15 @@ export function removeDeviceCard(key: string | null, cardKey: string) {
   if (!key || !page) return;
   const next = withoutCard(page, cardKey);
   if (next === page) return;
-  saveDevicePage(key, next.cards.length > 0 ? next : null);
+  // Emptied by swipes: nothing newer superseded it (asOf = its own time).
+  saveDevicePage(key, next.cards.length > 0 ? next : null, page.validated_at);
 }
 
 /** Sign-out, account switch, account deletion: every device page goes,
  *  from memory and from disk. */
 export async function clearDevicePages(): Promise<void> {
   epoch += 1;
+  discardedAt = Math.max(discardedAt, Date.now());
   pages.clear();
   lastAttemptAt.clear();
   for (const t of persistTimers.values()) clearTimeout(t);
@@ -120,15 +137,17 @@ export async function clearDevicePages(): Promise<void> {
 
 function discardAllDevicePages() {
   epoch += 1;
+  discardedAt = Math.max(discardedAt, Date.now());
   for (const key of [...pages.keys()]) {
     pages.delete(key);
     persist(key);
   }
 }
 
-// The client's own rankings / preference writes (sent, and again settled).
+// The client's own rankings / preference writes and format switches (sent,
+// and again settled).
 setOnWriteRequest((path) => {
-  if (isRankingWritePath(path)) discardAllDevicePages();
+  if (discardsDevicePages(path)) discardAllDevicePages();
 });
 
 export interface DevicePageTarget {
@@ -163,5 +182,6 @@ export async function refreshDevicePage(target: DevicePageTarget, now = Date.now
   }
   // A discard happened while it was out: what it answered is superseded.
   if (epoch !== startEpoch || (keyEpochs.get(target.key) ?? 0) !== startKeyEpoch) return;
-  saveDevicePage(target.key, devicePageFrom(res, { scope: target.scope, validatedAt: Date.now() }));
+  const answeredAt = Date.now();
+  saveDevicePage(target.key, devicePageFrom(res, { scope: target.scope, validatedAt: answeredAt }), answeredAt);
 }

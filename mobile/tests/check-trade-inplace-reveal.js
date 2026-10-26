@@ -67,7 +67,8 @@ console.log('check-trade-inplace-reveal:');
   const helper = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
   check('2b. pushWithFirstPage requests page 1 (paged, client search id) and pushes from its result',
     // (C stamps the page's validation time, for the device page it seeds.)
-    /generateTrades\(request, \{ searchId: fork\.searchId \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\)\s*\? \{ request, snapshot, validatedAt: Date\.now\(\) \}\s*: undefined\)\)/.test(helper));
+    // (and the device page key the landing validated it under, P1-a).
+    /generateTrades\(request, \{ searchId: fork\.searchId \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\)\s*\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}\s*: undefined\)\)/.test(helper));
   check('2c. …with a bounded wait: past the deadline (or on failure) it pushes without the page',
     /setTimeout\(\(\) => go\(\), FIRST_PAGE_PUSH_DEADLINE_MS\)/.test(helper) && /\.catch\(\(\) => go\(\)\)/.test(helper)
       && /if \(pushed\) return;/.test(helper));
@@ -120,7 +121,8 @@ console.log('check-trade-inplace-reveal:');
       && /\(\) => \(adopted && route\?\.params\?\.resultsPush\?\.origin === 'calculator' \? 'calculator' : null\)/.test(code));
   const league = code.slice(code.indexOf('const keepAdoptedPage = adoptedMountRef.current.league;'));
   check("4c. the league effect's MOUNT run keeps the adopted deck and job",
-    /if \(!keepAdoptedPage\) \{\s*setDeck\(\[\]\);\s*setDeckIdx\(0\);\s*\}/.test(league.slice(0, 2500))
+    // (C, P1-a: the same branch unbinds the old deck from its device page key.)
+    /if \(!keepAdoptedPage\) \{\s*setDeck\(\[\]\);\s*setDeckIdx\(0\);\s*deckKeyRef\.current = null;\s*validatedAtRef\.current = null;\s*deckScopeRef\.current = null;\s*\}/.test(league.slice(0, 2500))
       && /if \(!keepAdoptedPage\) setJob\(null\);/.test(league.slice(0, 2500)));
   const chokeAt = code.indexOf('const adoptedRun = adoptedMountRef.current.choke;');
   const choke = chokeAt > -1 ? code.slice(chokeAt, chokeAt + 6000) : '';

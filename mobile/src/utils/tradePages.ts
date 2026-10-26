@@ -45,6 +45,65 @@ export function isPagedEnvelope(s: { cursor?: number } | null | undefined): bool
   return typeof s?.cursor === 'number';
 }
 
+/** Every field only a paged response carries (E2 / P1 / P2). */
+export const PAGING_FIELDS = [
+  'cursor', 'total_ready', 'replace', 'deck_id', 'rebased', 'pool_exhausted',
+  'serve_source', 'freshness_state', 'prefetch_remaining',
+] as const;
+
+export interface DeckJob extends PageEnvelope {
+  job_id: string;
+  cards: readonly unknown[];
+  search_id?: string;
+  serve_source?: string;
+  freshness_state?: string;
+  prefetch_remaining?: number;
+}
+
+/**
+ * The job the deck holds once a response to it lands (TradesScreen
+ * `applyPage`), with `cards` the merged deck.
+ *
+ * - A PAGED response keeps the search's identity (`job_id`; `rebind` adopts
+ *   the response's instead) and takes the page identity (`deck_id`; on a
+ *   `revalidation`, the response's even when absent).
+ * - A LEGACY response (no `cursor`: the server's paging kill switch,
+ *   `model_config` `trade_paged_responses = 0`, flipped mid-deck) leaves
+ *   paging for good: no paging field survives from `prev`, so the deck is no
+ *   longer paged, the page loop stops (`wantsNextPage` is false) and the
+ *   legacy poller takes over the response's job.
+ */
+export function nextDeckJob<J extends DeckJob>(
+  prev: J | null,
+  next: J,
+  cards: J['cards'],
+  opts: { revalidation?: boolean; rebind?: boolean } = {},
+): J {
+  if (!isPagedEnvelope(next)) {
+    const legacy = {
+      ...(prev ?? {}),
+      ...next,
+      job_id: next.job_id || prev?.job_id,
+      search_id: prev?.search_id ?? next.search_id,
+      cards,
+    } as unknown as Record<string, unknown>;
+    for (const field of PAGING_FIELDS) delete legacy[field];
+    return legacy as unknown as J;
+  }
+  return {
+    ...(prev ?? {}),
+    ...next,
+    job_id: opts.rebind ? next.job_id : prev?.job_id || next.job_id,
+    deck_id: opts.revalidation ? next.deck_id : next.deck_id ?? prev?.deck_id,
+    search_id: prev?.search_id ?? next.search_id,
+    freshness_state: next.freshness_state,
+    pool_exhausted: next.pool_exhausted,
+    replace: undefined,
+    rebased: undefined,
+    cards,
+  } as J;
+}
+
 /** The response's cards are the server's WHOLE current deck: E2's
  *  `replace: true`, or a rebased first page that already spans the new,
  *  finished deck. Only then may a held card be judged "no longer served";

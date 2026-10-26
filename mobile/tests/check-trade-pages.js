@@ -224,7 +224,7 @@ const code = stripComments(trades);
     ok(/const frontKey = front \? deckCardKey\(front\) : null;/.test(fn)
       && /: mergeDeckPage\(deckRef\.current, next\.cards, frontKey, isWholeDeck\(next\)\);/.test(fn),
       'applyPage merges at the fronted card with the whole-deck rule');
-    ok(/setDeck\(merged\.cards\)/.test(fn) && /cards: merged\.cards/.test(fn), 'deck and job.cards stay one list');
+    ok(/setDeck\(merged\.cards\)/.test(fn) && /nextDeckJob\(prev, next, merged\.cards,/.test(fn), 'deck and job.cards stay one list');
     ok(/applyJobResult\(next, epoch, deckEpochRef\.current\) === null/.test(code), 'epoch guard on every page');
   });
   await check('5c. the prefetch threshold comes from the response, not a client literal', () => {
@@ -255,6 +255,88 @@ const code = stripComments(trades);
     ok(run(paged, false, null, false, null) === paged, 'paged deck returned as-is (no re-sort, no likes-you lift)');
     const legacy = [{ id: 'a', match_score: 1 }, { id: 'b', match_score: 2 }];
     eq(run(legacy, false, null, false, null).map((c) => c.id), ['b', 'a'], 'legacy fairness-off re-sort unchanged');
+  });
+
+  // ── 6. The kill switch mid-deck (#400 `trade_paged_responses = 0`) ──────
+  // A legacy answer (no cursor) to a paged deck must end paging: the job
+  // keeps no paging field, the page loop stops, the legacy poller takes over.
+  const pagedPrev = () => ({
+    job_id: 'j', status: 'running', error: null, opponents_done: 3, opponents_total: 9, search_id: 's',
+    cursor: 30, total_ready: 90, deck_id: 'd', pool_exhausted: false, prefetch_remaining: 50,
+    freshness_state: 'fresh', serve_source: 'page', cards: [card('a', 'ha'), card('b', 'hb')],
+  });
+  const legacyNext = (over = {}) => ({
+    job_id: 'j', status: 'running', error: null, opponents_done: 5, opponents_total: 9,
+    cards: [card('a', 'ha'), card('b', 'hb'), card('c', 'hc')], ...over,
+  });
+  const noPaging = (job) => P.PAGING_FIELDS.filter((f) => f in job);
+  await check('6a. EXECUTED nextDeckJob: a paged deck answered by a LEGACY body keeps no paging field, and wantsNextPage is false', () => {
+    const merged = [card('a', 'ha'), card('b', 'hb'), card('c', 'hc')];
+    const job = P.nextDeckJob(pagedPrev(), legacyNext(), merged);
+    eq(noPaging(job), [], 'no cursor / total_ready / deck_id / … carried over from the paged job');
+    ok(!P.isPagedEnvelope(job), 'no longer a paged deck (the legacy poller takes it)');
+    ok(!P.wantsNextPage({ ...job, unseen: 0, busy: false }), 'the page loop stops');
+    eq([job.job_id, job.search_id, job.status, job.opponents_done, ids(job.cards)], ['j', 's', 'running', 5, ['a', 'b', 'c']]);
+    const reval = P.nextDeckJob(pagedPrev(), legacyNext({ job_id: 'j2' }), merged, { revalidation: true, rebind: true });
+    eq([reval.job_id, noPaging(reval)], ['j2', []], 'a device deck\'s legacy revalidation follows the server\'s job');
+  });
+  await check('6b. EXECUTED nextDeckJob: a PAGED answer is unchanged (identity kept, page identity taken)', () => {
+    const next = { ...pagedPrev(), job_id: 'j9', deck_id: 'd2', cursor: 60, rebased: true, replace: true, freshness_state: 'updating' };
+    const job = P.nextDeckJob(pagedPrev(), next, next.cards);
+    eq([job.job_id, job.deck_id, job.cursor, job.search_id, job.freshness_state, job.replace, job.rebased],
+      ['j', 'd2', 60, 's', 'updating', undefined, undefined]);
+    const noDeck = P.nextDeckJob(pagedPrev(), { ...next, deck_id: undefined }, next.cards);
+    eq(noDeck.deck_id, 'd', 'a page without deck_id keeps the held one');
+    eq(P.nextDeckJob(pagedPrev(), { ...next, deck_id: undefined }, next.cards, { revalidation: true }).deck_id, undefined,
+      '…except a revalidation, which takes the response\'s');
+  });
+  await check('6c. EXECUTED: the screen\'s own applyPage, a paged deck then a legacy page — the job leaves paging; a legacy revalidation adopts its job', () => {
+    const sf = ts.createSourceFile('T.tsx', trades, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    let fn;
+    (function visit(n) {
+      if (ts.isFunctionDeclaration(n) && n.name && n.name.text === 'applyPage') fn = n.getText(sf);
+      ts.forEachChild(n, visit);
+    })(sf);
+    ok(fn, 'applyPage found');
+    const devicePage = compile(read('utils/devicePage.ts'), { require: (name) => {
+      if (name !== './tradePages') throw new Error(`unexpected ${name}`);
+      return P;
+    } });
+    const names = ['deckProjectionRef', 'deckRef', 'setDeck', 'noteSearchCards', 'deckFullyDelivered', 'deckSearchRef',
+      'failDeckSearch', 'isPagedEnvelope', 'jobRef', 'rebindJobRef', 'setJob', 'nextDeckJob', 'setWithdrawnIds',
+      'mergeRevalidation', 'mergeDeckPage', 'isWholeDeck', 'deckCardKey'];
+    const applyPage = compile(`module.exports = function (env) { const { ${names.join(', ')} } = env; return ${fn}; };`);
+    const run = (prev, next, opts) => {
+      const held = prev.cards.slice();
+      const state = { job: prev, deck: held, withdrawn: new Set() };
+      const env = {
+        deckProjectionRef: { current: { cards: held, index: 1 } }, deckRef: { current: held },
+        setDeck: (d) => { state.deck = d; }, noteSearchCards: () => {}, deckFullyDelivered: P.deckFullyDelivered,
+        deckSearchRef: { current: null }, failDeckSearch: () => {}, isPagedEnvelope: P.isPagedEnvelope,
+        jobRef: { current: prev }, rebindJobRef: { current: null },
+        setJob: (u) => { state.job = typeof u === 'function' ? u(state.job) : u; }, nextDeckJob: P.nextDeckJob,
+        setWithdrawnIds: (u) => { state.withdrawn = u(state.withdrawn); },
+        mergeRevalidation: devicePage.mergeRevalidation, mergeDeckPage: P.mergeDeckPage, isWholeDeck: P.isWholeDeck,
+        deckCardKey: P.deckCardKey,
+      };
+      applyPage(env)(next, opts);
+      return { ...state, rebind: env.rebindJobRef.current };
+    };
+    const mid = run(pagedPrev(), legacyNext());
+    eq(noPaging(mid.job), [], 'the deck\'s job keeps no paging field');
+    ok(!P.wantsNextPage({ ...mid.job, unseen: 0, busy: false }), 'the page loop stops');
+    eq([ids(mid.deck), mid.job.job_id, mid.rebind], [['a', 'b', 'c'], 'j', null], 'cards append behind; same job, no rebind');
+    const reval = run(pagedPrev(), legacyNext({ job_id: 'j2', cards: [card('a', 'ha'), card('x', 'hx')] }), { revalidation: true });
+    eq(noPaging(reval.job), [], 'a legacy revalidation leaves paging too');
+    eq([reval.job.job_id, reval.rebind], ['j2', 'j2'], 'and follows the server\'s job (the legacy poller polls it)');
+    eq(ids(reval.deck), ['a', 'b', 'x'], 'the held page is replaced behind the front by the cumulative cards');
+    ok(reval.withdrawn.has('b'), 'a fronted card the cumulative body lacks is withdrawn in place');
+  });
+  await check('6d. the fetch stops retrying on a legacy answer, and the legacy poller starts when a deck un-pages', () => {
+    ok(/backoff = isPagedEnvelope\(next\) && needsBackoff\(next, requested\);/.test(code), 'no backoff after a legacy answer');
+    ok(/\}, \[job\?\.job_id, job\?\.status, job\?\.cursor === undefined\]\);/.test(code), 'the poller re-evaluates when the cursor goes');
+    ok(/setJob\(\(prev\) => nextDeckJob\(prev, next, merged\.cards, \{ revalidation: opts\?\.revalidation, rebind \}\)\);/.test(code),
+      'applyPage builds the job through nextDeckJob');
   });
 
   console.log(failures ? `check-trade-pages: ${failures} FAILED` : 'check-trade-pages: all passed');
