@@ -204,8 +204,9 @@ PAGE_STORE_MARKER = "page_store"
 # add a way for a mis-dated deck to be read as legacy.
 PAGING_RELEASED_AT: str | None = None
 # Lost-pack detection: a deferred-evidence deck (a non-ghost row with a
-# non-NULL evidence_tier) served at or after this ISO UTC time must have a pack
-# row (#416 packs every one). Decks without tiered rows (flag-off, live
+# non-NULL evidence_tier other than 'partial_run') served at or after this ISO
+# UTC time must have a pack row (#416 packs every one). A partial run is never
+# packed and stays partial_run in replay. Decks without tiered rows (flag-off, live
 # evidence: the value core, prepared adoption, Calibration's refresh) are never
 # packed and never required to be. Tiered decks exist only once
 # trade.packed_evidence and trade.first_page_store are on together, so any
@@ -438,7 +439,10 @@ def load_decks(
                 d is not None and d.get(PAGE_STORE_MARKER) == 1
                 for d in (features, features_compact))):
             marked.add(r.deck_job_id)
-        if r.is_ghost != 1 and evidence_tier is not None:
+        # A partial run (every row 'partial_run', ruling 21) is never packed by
+        # design: replay and calibration exclude it as partial_run, and its
+        # delivered cards keep counting in e(k), as before v5.
+        if r.is_ghost != 1 and evidence_tier not in (None, PARTIAL_RUN_TIER):
             deferred.add(r.deck_job_id)
         if project_features and features is not None:
             features = {k: v for k, v in features.items() if k in PROJECTION_KEYS}

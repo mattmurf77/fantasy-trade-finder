@@ -922,3 +922,25 @@ def test_a_pack_is_required_only_of_a_deferred_evidence_deck(monkeypatch):
     assert all(c.delivered for c in got["unmarked"].cards)
     in_window = {d.deck_job_id: d.exclusion for d in load_decks(engine=db.eng, as_of=_after(2))}
     assert in_window == {"deferred": IN_FLIGHT, "live_page": None, "unmarked": None}
+
+
+def test_a_partial_run_is_never_required_to_have_a_pack(monkeypatch):
+    """ruling 21: a run that ended partial writes its delivered rows, all
+    'partial_run', and no pack by design. After PACK_REQUIRED_SINCE it is not
+    a lost pack: the loader leaves it unexcluded (as before v5), replay and
+    calibration exclude it as partial_run, and its delivered cards still
+    count in e(k)."""
+    monkeypatch.setattr(data_mod, "PACK_REQUIRED_SINCE", "2026-10-01T00:00:00+00:00")
+    db = make_db(live=PAGING_COLUMNS)
+    put_deck(db, "partial", 8, tier=PARTIAL_RUN_TIER, delivered=range(4), viewed=[0, 2])
+    put_deck(db, "deferred", 8, tier="first30", delivered=range(4), viewed=[0, 2])
+    got = {d.deck_job_id: d for d in load_decks(engine=db.eng, as_of=_after(30))}
+    assert got["partial"].exclusion is None
+    assert got["deferred"].exclusion == INCOMPLETE_DECK          # a lost pack
+    run = evaluate(_Spy(), list(got.values()), ess_min=1, bootstrap=0, seed=0)
+    assert run.partial_run_decks == 1 and run.excluded["partial_run"] == 8
+    assert run.incomplete_decks == 1
+    assert exposure_curve(list(got.values())) == exposure_curve([got["partial"]])
+    assert set(exposure_curve([got["partial"]])) == {0, 1, 2, 3}
+    _pairs, excluded = calibration_pairs(_Spy(), list(got.values()))
+    assert excluded["partial_run"] == 8
