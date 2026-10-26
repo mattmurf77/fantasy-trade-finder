@@ -144,12 +144,13 @@ no row carries a non-NULL `evidence_tier` and nothing breaks. A readout that str
 compares two populations: every built card before it, and viewed-or-first-30 cards after it
 (§4.1).
 
-**`viewed_without_full_row` (models-lead R3).** `{restart_split, other, runs}` counts the
+**`viewed_without_full_row` (models-lead R3).** `{restart_split, evicted_split, other, runs}` counts the
 cards a user acted on that have no full row (no `assets_json`), so they can be neither graded
-nor matched; they are counted here so they are never silently dropped. The cause is
-`restart_split` for a row the evidence path built from the pack past the 90 stored cards (the
-deck's job left the process: a restart, or the 4 h eviction, which look the same from the
-row), and `other` for everything else. The matcher logs the same counts once per run. If the
+nor matched; they are counted here so they are never silently dropped. Each card's cause is
+the one the evidence writer recorded when its upgrade missed: its run's pack header,
+`run["upgrade_miss_cards"]` (`restart_split`, `evicted_split` or `other`), read in one query
+for the runs involved; no pack or no entry for the card is `other`. The card's index no
+longer decides. The matcher logs the same counts once per run. If the
 count fails, the block is `{…: null, unavailable: true}` and the rest of the response is
 unaffected.
 
@@ -272,7 +273,7 @@ read. The outcome check is an EXISTS on `deck_outcomes.impression_id`, which nev
 probes `ix_deck_outcomes_impression` per row, and Postgres may plan it as a hashed SubPlan (one scan of `deck_outcomes`
 per query, about 28 ms at 200k rows). That index was created with the table, so no migration is
 needed. An acted-on card with no full row can't be graded; it is counted in §2.3
-`viewed_without_full_row` instead.
+`viewed_without_full_row` instead, by the cause its run's pack records.
 
 Date arithmetic is shown PG-flavored; the implementation computes cutoff dates in Python
 so the identical query runs on SQLite (tests) and Postgres (prod). Retry-pending
