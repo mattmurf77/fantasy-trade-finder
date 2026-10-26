@@ -2,7 +2,7 @@
 
 Full gates. It merges dark: `paywall_enforce_enabled` is 0, and `paywall_preview_pages` defaults to 1 (code fallback 1, G-064). D-056: `FTF_SKIP_SIM_GATE=1` posture.
 
-- **Backend:** 683 targeted tests pass.
+- **Backend:** 828 targeted tests pass after the #369 merge, including `test_trade_pages_p2` (103) (683 before it).
   - `test_paywall_preview` (24), `test_paywall_gate` (326), `test_paywall_gate_allowlist` (7);
   - the entitlements files (90), `test_account_deletion_coverage` (34);
   - E2's `test_trade_responses_small` (61) and `test_trade_status_lock` (3);
@@ -17,6 +17,9 @@ Full gates. It merges dark: `paywall_enforce_enabled` is 0, and `paywall_preview
   - (i) Payer, free and trial-expired accounts get identical status, headers and body.
   - (ii) A granted account behaves like a brand-new one, including the preview end.
   - (iii) After verifying, the result resolves normally.
+- **#369 deck-id paging (`b555d28a`):** `/status?deck=D&cursor=K` (`_trade_deck_status`) had bypassed the preview helpers. It now serves through `_serve_deck_status`: capped to the preview window of the serving deck, consumed against that deck, a rebase after the preview is spent → 402, and the R28.9 reason passed through.
+  - Tests: page 2 by deck id / another deck / a rebase → 402; entitled users are unaffected; an unverified session gets the preview, then `verify_required`. Bypassing the helper turns 3 red.
+  - Known gap: if D's stored row is rebuilt by a newer deck AND D's job is gone, swipes on D's page-1 cards return 402 (it needs a store plus lineage restart).
 - **Consumption** is recorded only when cards are served: in `_serve_trade_job`, and for #368's store in `_serve_stored_trade_page`. Warm-up and cron decks never consume it. The `paywall_previews` table is covered by account deletion and export.
 
 ## 2026-10-26 — Global server paywall gate (#395): one before_request, C2 trade-only, 402 pro_required (dark)
