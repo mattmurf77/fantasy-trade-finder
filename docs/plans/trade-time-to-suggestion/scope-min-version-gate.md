@@ -55,7 +55,7 @@ A server-controlled kill switch that forces an app update. While the `model_conf
   - Both seeded in `backend/database.py` `_MODEL_CONFIG_DEFAULTS`, insert-if-absent, so a deploy never resets a set value.
   - Documented in `docs/config-reference.md` § Minimum-version gate (B8).
   - **Ship-the-knob:** `app_min_version` *is* the deploy-free lever. Raise it with `scripts/set_knob.py app_min_version <N>` (e.g. 12201 after a bad 1.22.0, once 1.22.1 is live); the write guard refuses implausible values. **Rollback: set it to 0** (never refused). Every gated device lifts on its next foreground.
-  - `app_store_live`: leave -1 while the release is 2026-11-18. If it moves, set 0 until the listing is live, then 1.
+  - `app_store_live`: set 1 on release day once the listing is verified live. If the release slips past 2026-11-18, set 0 before 2026-11-18T08:00Z, then 1 once the listing is live.
   - Side effect: like every `model_config` row, both are part of `_trade_request_signature`, so the new rows and each later change miss the in-process deck cache once.
 
 ## 3. Evidence scope
@@ -119,7 +119,8 @@ A server-controlled kill switch that forces an app update. While the `model_conf
 - [x] **Manual TestFlight checklist** (the only runtime evidence; run on the first gate-aware build, called **B** below: 1.22.0 = 12200).
 
   > **Warning: this writes the PROD knob.** `app_min_version` at B+1 (12201) on prod blocks **every 1.22.0 device in the field**, testers included, for as long as it stays set.
-  > - Run items 2–9 **only before 2026-11-18**, while the only 1.22.0 devices are TestFlight testers.
+  > - Run items 2–9 **only from 1.22.0 landing on TestFlight until its App Review submission** (about 11-06 to 11-10), while the only 1.22.0 devices are TestFlight testers.
+  > - **Never open a window while a gate-aware build is in App Review.** The reviewer would be gated, and Update goes to `itms-beta://`.
   > - Keep each B+1 window to a few minutes, and set it back to **0** at the end of every window.
   > - **Always end the session at 0** and confirm `GET /api/feature-flags` → `app_min_version: 0`.
   > - Never touch `app_store_live` for this checklist.
@@ -144,13 +145,13 @@ A server-controlled kill switch that forces an app update. While the `model_conf
 
      Set 0, disable airplane mode, then foreground → the gate lifts. Window B closes.
   8. **Write guard (no window).** Run `scripts/set_knob.py app_min_version` with 122000, then 12201.5, then -1, then 12400. Each prints `refusing: app_min_version …` and writes nothing. `GET /api/feature-flags` still shows `app_min_version: 0`.
-  9. **App Store target, by device date only (window C: set 12201).** Leave `app_store_live` at -1. On the test device, turn off automatic date and time and set the date to **2026-11-19**. Cold launch → gated. Tap Update → the **App Store** opens on the Fleeced listing. Return → still gated. Restore automatic date and time, set 0, and window C closes.
+  9. **App Store target, by device date only (window C: set 12201).** Leave `app_store_live` at -1. On the test device, turn off automatic date and time and set the date to **2026-11-19**. Cold launch → gated. Tap Update → the **App Store** opens on the Fleeced listing. Before 2026-11-18 the listing may show "not available" because it isn't live yet; that passes, since the check is that the App Store opens on the listing's id. Return → still gated. Restore automatic date and time, set 0, and window C closes.
   10. **Analytics.** After items 2–3, `update_gate_shown` and `update_gate_tapped` rows exist for the test device with `props = {min_version: 12201, app_version_int: 12200}`. The not-signed-in install's rows land under `device:<id>`.
   11. **End.** Confirm `app_min_version` is **0** and `app_store_live` is **-1**.
 
   **Release-day step (ops, not a test).**
-  - If the App Store release is 2026-11-18, leave `app_store_live` at **-1**; the compiled fallback flips the button to the App Store at 08:00Z (midnight Pacific).
-  - If the date moves earlier or later, set `app_store_live` **0** before 2026-11-18T08:00Z, then **1** on the actual release day (`scripts/set_knob.py app_store_live 1`).
+  - **On release day, once the App Store listing is verified live, set `app_store_live` to 1** (`scripts/set_knob.py app_store_live 1`), whatever the date. Don't rely on the compiled -1 fallback and device clocks.
+  - If the release slips past 2026-11-18, set `app_store_live` **0** before 2026-11-18T08:00Z so the button keeps going to TestFlight, then **1** once the listing is live.
   - After launch, kill a bad build by setting `app_min_version` to the first good version above the oldest bad one (§0).
 - [ ] **WAIVED because:** n/a. Nothing in this section is waived; the row is unused.
 - `testID`s added: `update-gate.screen`, `update-gate.update` (static literals; `mobile/scripts/testid-lint.sh` passes).
