@@ -19481,18 +19481,24 @@ def _roster_id_for_owner(rosters, owner_id) -> int | None:
         return None
 
 
-# I-2 send-time refusal copy (Product ruling, 2026-10-26). These are drafts
-# out for marketing review, so a later swap is a change here and nowhere else.
-# `{assets}` is the named list ("A", "A and B", "A, B and C") and `{verb}`
-# agrees with it ("is" / "are").
+# I-2 send-time refusal copy (final: marketing via head-bizops, accepted by
+# Product, 2026-10-26). A later swap is a change here and nowhere else.
+# Curly ’ throughout, like the shipped refusals. `{assets}` is either the named
+# list ("A", "A and B", "A, B and C", with no serial comma) or, when ANY
+# offending player has no name, the count subject below: a raw player id is
+# never shown. `{verb}` agrees with it ("is" / "are"). `{team}’s` takes ’s
+# even after a final s ("Chris’s").
 _I2_COPY_ASSET_NOT_OWNED = (
     "{assets} {verb} no longer on your roster, so nothing was sent. Find a new trade.")
 _I2_COPY_COUNTERPARTY_NOT_OWNED = (
-    "{assets} {verb} no longer on {team}'s roster, so nothing was sent. Find a new trade.")
+    "{assets} {verb} no longer on {team}’s roster, so nothing was sent. Find a new trade.")
 _I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED = (
-    "{assets} {verb} no longer on their roster, so nothing was sent. Find a new trade.")
+    "{assets} {verb} no longer on the other manager’s roster, so nothing was sent. "
+    "Find a new trade.")
+_I2_COPY_ONE_UNNAMED_PLAYER = "A player in this trade"
+_I2_COPY_N_UNNAMED_PLAYERS = "{n} players in this trade"
 _I2_COPY_ROSTER_READ_FAILED = (
-    "Couldn't confirm rosters with {platform} right now, so nothing was sent. "
+    "Couldn’t confirm rosters with {platform} right now, so nothing was sent. "
     "Try again in a moment.")
 
 
@@ -19512,14 +19518,23 @@ def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tupl
     `side` "give"    → 422 `asset_not_owned` (team overhaul's code)
     `side` "receive" → 422 `counterparty_asset_not_owned`, naming the
                        counterparty when `counterparty_name` is known
-    `assets` are the offending ids as sent; `names` maps id → display name,
-    with the id itself as the fallback. `detail` == `message`, because fielded
-    builds render `detail` in their catch-all.
+    `assets` are the offending ids as sent, and stay in the body for the
+    client and analytics. `names` maps id → display name. The readable
+    `message` never shows a raw id: if any offending player has no name, it
+    counts them instead ("A player in this trade" / "2 players in this
+    trade"). `detail` == `message`, because fielded builds render `detail` in
+    their catch-all.
     """
     assets = [str(a) for a in assets]
-    labels = [str((names or {}).get(a) or a) for a in assets]
-    listed = labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
-    verb = "is" if len(labels) == 1 else "are"
+    labels = [(names or {}).get(a) for a in assets]
+    if all(labels):
+        labels = [str(n) for n in labels]
+        listed = labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+    elif len(assets) == 1:
+        listed = _I2_COPY_ONE_UNNAMED_PLAYER
+    else:
+        listed = _I2_COPY_N_UNNAMED_PLAYERS.format(n=len(assets))
+    verb = "is" if len(assets) == 1 else "are"
     if side == "give":
         code, msg = "asset_not_owned", _I2_COPY_ASSET_NOT_OWNED.format(assets=listed, verb=verb)
     elif counterparty_name:

@@ -42,8 +42,22 @@ THEIRS = {"owner_id": "opp", "roster_id": 2, "players": ["200", "201"]}
 ROSTERS = [MINE, THEIRS]
 
 TAIL = ", so nothing was sent. Find a new trade."
-R3_COPY = ("Couldn't confirm rosters with Sleeper right now, so nothing was sent. "
+R3_COPY = ("Couldn’t confirm rosters with Sleeper right now, so nothing was sent. "
            "Try again in a moment.")
+
+
+def _no_raw_ids(body):
+    """`assets` keeps the ids for the client and analytics; the readable copy
+    never shows one."""
+    assert body["assets"]
+    assert not any(pid in body["message"] for pid in body["assets"]), body["message"]
+    assert body["detail"] == body["message"]
+
+
+def _member(display_name):
+    db_module.upsert_league_members(LEAGUE, [{"user_id": "opp", "username": "oppy",
+                                              "display_name": display_name,
+                                              "player_ids": ["200"]}])
 
 
 @pytest.fixture(autouse=True)
@@ -118,29 +132,91 @@ def test_plural_give_refusal_names_every_moved_player(client):
     fake.assert_not_called()
 
 
+def test_three_names_take_no_serial_comma(client):
+    for pid, n in (("102", "Josh Allen"), ("103", "Bijan Robinson"), ("104", "CeeDee Lamb")):
+        _name(pid, n)
+    r, fake, _ = _send(client, ["102", "103", "104"], ["200"])
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["message"] == (
+        "Josh Allen, Bijan Robinson and CeeDee Lamb are no longer on your roster" + TAIL)
+    assert ", and" not in body["message"]
+    _no_raw_ids(body)
+    fake.assert_not_called()
+
+
 def test_receive_player_off_their_roster_names_the_team(client):
     _name("299", "Puka Nacua")
-    db_module.upsert_league_members(LEAGUE, [{"user_id": "opp", "username": "oppy",
-                                              "display_name": "Gridiron Gang",
-                                              "player_ids": ["200"]}])
+    _member("Gridiron Gang")
     r, fake, traded = _send(client, ["100"], ["200", "299"], their_roster_id=None)
     assert r.status_code == 422, r.get_data(as_text=True)
     body = r.get_json()
     assert body["error"] == "counterparty_asset_not_owned" and body["assets"] == ["299"]
-    assert body["message"] == "Puka Nacua is no longer on Gridiron Gang's roster" + TAIL
-    assert body["detail"] == body["message"]
+    assert body["message"] == "Puka Nacua is no longer on Gridiron Gang’s roster" + TAIL
+    _no_raw_ids(body)
     fake.assert_not_called()
     traded.assert_not_called()
 
 
-def test_receive_refusal_falls_back_to_their_roster_and_raw_ids(client):
-    # No league_members row and no players_table names: the copy still reads.
+def test_team_name_ending_in_s_still_takes_apostrophe_s(client):
+    _name("299", "Puka Nacua")
+    _name("298", "Nico Collins")
+    _member("Chris")
+    r, _, _ = _send(client, ["100"], ["299", "298"])
+    assert r.get_json()["message"] == (
+        "Puka Nacua and Nico Collins are no longer on Chris’s roster" + TAIL)
+
+
+def test_unnamed_team_falls_back_to_the_other_manager(client):
+    _name("299", "Puka Nacua")                     # no league_members row
+    r, fake, _ = _send(client, ["100"], ["299"])
+    assert r.status_code == 422, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["message"] == "Puka Nacua is no longer on the other manager’s roster" + TAIL
+    _no_raw_ids(body)
+    fake.assert_not_called()
+
+
+# A raw player id is never shown (head-eng): if ANY offending player has no
+# name, the whole message counts players instead of naming them.
+
+def test_unnamed_give_player_is_counted_never_shown_by_id(client):
+    r, fake, _ = _send(client, ["102"], ["200"])
+    body = r.get_json()
+    assert r.status_code == 422 and body["assets"] == ["102"]
+    assert body["message"] == "A player in this trade is no longer on your roster" + TAIL
+    _no_raw_ids(body)
+    fake.assert_not_called()
+
+
+def test_one_missing_name_switches_the_whole_message_to_a_count(client):
+    _name("102", "Josh Allen")                     # 103 has no name
+    r, fake, _ = _send(client, ["102", "103"], ["200"])
+    body = r.get_json()
+    assert r.status_code == 422 and body["assets"] == ["102", "103"]
+    assert body["message"] == "2 players in this trade are no longer on your roster" + TAIL
+    _no_raw_ids(body)
+    fake.assert_not_called()
+
+
+def test_unnamed_receive_players_are_counted_with_the_team_name(client):
+    _member("Gridiron Gang")
+    r, _, _ = _send(client, ["100"], ["299"])
+    body = r.get_json()
+    assert body["message"] == (
+        "A player in this trade is no longer on Gridiron Gang’s roster" + TAIL)
+    _no_raw_ids(body)
+
+
+def test_unnamed_receive_players_and_unnamed_team(client):
     r, fake, _ = _send(client, ["100"], ["299", "298", "297"])
     assert r.status_code == 422, r.get_data(as_text=True)
     body = r.get_json()
     assert body["error"] == "counterparty_asset_not_owned"
-    assert body["message"] == "299, 298 and 297 are no longer on their roster" + TAIL
-    assert body["detail"] == body["message"]
+    assert body["assets"] == ["299", "298", "297"]
+    assert body["message"] == (
+        "3 players in this trade are no longer on the other manager’s roster" + TAIL)
+    _no_raw_ids(body)
     fake.assert_not_called()
 
 
@@ -185,15 +261,21 @@ def test_co_owner_passes_at_roster_level(client):
 
 
 def test_refusal_helper_is_platform_neutral():
-    body, status = server._ownership_refusal("give", ["a", "b", "c"], {"a": "Al", "b": "Bo"})
+    body, status = server._ownership_refusal("give", ["a", "b", "c"],
+                                             {"a": "Al", "b": "Bo", "c": "Cy"})
     assert status == 422
     assert body == {"error": "asset_not_owned", "assets": ["a", "b", "c"],
-                    "message": "Al, Bo and c are no longer on your roster" + TAIL,
-                    "detail": "Al, Bo and c are no longer on your roster" + TAIL}
-    body, _ = server._ownership_refusal("receive", ["x"], {}, "Team Z")
-    assert body["message"] == "x is no longer on Team Z's roster" + TAIL
+                    "message": "Al, Bo and Cy are no longer on your roster" + TAIL,
+                    "detail": "Al, Bo and Cy are no longer on your roster" + TAIL}
+    body, _ = server._ownership_refusal("give", ["a", "z9"], {"a": "Al"})
+    assert body["message"] == "2 players in this trade are no longer on your roster" + TAIL
+    body, _ = server._ownership_refusal("receive", ["x"], {"x": "Xa"}, "Team Z")
+    assert body["message"] == "Xa is no longer on Team Z’s roster" + TAIL
+    body, _ = server._ownership_refusal("receive", ["x"], {})
+    assert body["message"] == (
+        "A player in this trade is no longer on the other manager’s roster" + TAIL)
     assert server._roster_read_failed_copy("MFL") == (
-        "Couldn't confirm rosters with MFL right now, so nothing was sent. Try again in a moment.")
+        "Couldn’t confirm rosters with MFL right now, so nothing was sent. Try again in a moment.")
 
 
 # ---------------------------------------------------------------------------
@@ -293,12 +375,15 @@ def test_overhaul_send_inherits_the_refusal(overhaul):
     by_give = {}
     for a in r.get_json()["attempts"]:
         by_give.setdefault(give_of[a["package_id"]], []).append(a)
+    # The harness's players have no players_table names and o3 has no member
+    # row, so the copy counts instead of naming (never a raw id).
     assert [a["state"] for a in by_give["A"]] == ["send_failed", "send_failed"]   # the tie
     for a in by_give["A"]:
         assert a["error"] == {"code": "asset_not_owned",
-                              "message": "A is no longer on your roster" + TAIL}
+                              "message": "A player in this trade is no longer on your roster" + TAIL}
     assert [a["error"] for a in by_give["B"]] == [
-        {"code": "counterparty_asset_not_owned", "message": "X3 is no longer on their roster" + TAIL}]
+        {"code": "counterparty_asset_not_owned",
+         "message": "A player in this trade is no longer on the other manager’s roster" + TAIL}]
     assert [a["state"] for a in by_give["C"] + by_give["D"]] == ["proposed", "proposed"]
     # Only the two still-owned offers reached the provider.
     assert sorted(call[0][1].give_player_ids[0] for call in fake.call_args_list) == ["C", "D"]
