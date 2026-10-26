@@ -1,0 +1,535 @@
+"""The model-side 24 h read after the one-step 200 ms flip
+(trade.packed_evidence and trade.first_page_store on together;
+models-lead-launch.md §Gate-11-03 §3, addenda A3 and B3 (f3)). Read-only:
+models-eng runs it and posts the output, release-lead collects it, and
+models-lead rules on it.
+
+    python3 -m backend.eval.flip_read --db URL --since ISO [--until ISO]
+        [--as-of ISO] [--allow-postgres-readonly] [--weekly] [--json]
+
+The window is decks served in [since, until) and at or before as_of
+(as_of defaults to now, until to none), read through
+data.load_decks(as_of=...) plus a few direct read-only queries. The G-table
+(a barred G prints PASS or FAIL):
+
+  G1   pack integrity: pack_integrity decks among the decks with a pack row,
+       retired or not. Bar 0.
+  G2   no unexplained gaps: incomplete_deck decks among FINAL decks only
+       (A3). A deck with a pack is final when the pack retired by as_of or
+       was served more than 25 h (data.IN_FLIGHT_WINDOW) before it; a deck
+       without one when it was served more than 25 h before as_of.
+       calibration_refresh decks are not Trades decks and are not counted.
+       Bar 0. Each incomplete deck must coincide with a restart or the kill
+       (A3, B3), so their ids (at most 20) are listed for that cross-check.
+       Fewer than 10 final decks: INSUFFICIENT, extend the window to 48 h.
+  G3   outcomes join (U2): outcomes acted in the window (and by as_of) whose
+       impression_id joins no loaded card, row or packed. An outcome whose
+       deck was not loaded (served before the window) is checked against
+       the evidence directly: a non-ghost deck_impressions row with that id,
+       or a pack row of its run whose card_count covers its index; it is
+       counted apart, as joined outside the window. Ghost ids ('…:ghost')
+       are not card outcomes and are counted apart. Bar 0.
+  G7   upgrade misses (U4-R2), every cause summed over the loaded packs.
+       Bar: other == 0.
+  G8   withdrawal_conflict decks. Bar 0.
+  G9   no_delivery_evidence decks with any outcome (a missed delivered_at
+       stamp, B3). Bar 0. The no_delivery_evidence total is reported too.
+  G10  withdrawals by reason, first withdrawn in the window, read straight
+       from deck_card_withdrawals. Reported, not barred: disposition_cut > 0
+       is expected; any i1_dropped at trade_i1_mode 1 is a bug.
+Then the v5 exclusion counts over every loaded deck (each LoggedDeck.exclusion
+value, the deck count, the partial_run decks replay leaves out) and
+withdrawn_removed_by_reason over every loaded deck, and the overall line:
+FAIL if a barred G fails, else INSUFFICIENT if G2 has fewer than 10 final
+decks, else PASS.
+
+--weekly adds the two rolling 7-day ceilings over [as_of - 7 d, as_of], for
+the weekly BL-001 monitor through head-bizops:
+  U4-R4  the named upgrade-miss causes (U4_R4_CAUSES; None = every cause but
+         other) over viewed cards, at most U4_R4_CEILING. Viewed cards are
+         the distinct loaded non-ghost cards with a `viewed` outcome.
+  B4     disposition_cut removals over delivered-range positions, at most
+         B4_CEILING. Delivered-range positions are the delivered non-ghost
+         cards plus the disposition_cut never-delivered (W0) removals, over
+         the decks the loader includes (no exclusion: an excluded deck's
+         deliveries are not read) that have delivery evidence: a pack, or a
+         row with delivered_at by as_of.
+Each prints its ratio, numerator and denominator, and OK or OVER.
+
+--json prints the same as one JSON object. flip_read() returns a FlipRead
+and weekly_read() a dict, so tests read the numbers without parsing text.
+Exit status: 1 on a FAIL or an OVER, 2 on a refused database, else 0.
+
+Read-only, enforced, not promised:
+  - a SQLite path or sqlite:/// URL opens with mode=ro;
+  - any other URL is refused unless --allow-postgres-readonly, and then only
+    Postgres: every new connection is opened with
+    default_transaction_read_only=on, runs SET SESSION CHARACTERISTICS AS
+    TRANSACTION READ ONLY, and must answer SHOW transaction_read_only = on
+    before anything reads (else ReadOnlyViolation);
+  - on both, a statement that is not a read raises ReadOnlyViolation;
+  - backend.server is never imported (a test pins it).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections import Counter
+from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
+from fractions import Fraction
+
+from sqlalchemy import Integer, String, Text, column, create_engine, event, func, inspect, select, table
+
+from backend.database import deck_impressions_table, deck_outcomes_table
+from backend.eval import data
+from backend.eval.data import (
+    CALIBRATION_REFRESH, IN_FLIGHT, IN_FLIGHT_WINDOW, INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE,
+    PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
+    WITHDRAWALS_TABLE, load_decks,
+)
+
+# A3: fewer final decks than this and G2 reads INSUFFICIENT (extend to 48 h).
+MIN_FINAL_DECKS = 10
+# U4-R4: the upgrade-miss causes the weekly ceiling counts (None: every named
+# cause, i.e. every key but `other`) and the ceiling over viewed cards.
+U4_R4_CAUSES: tuple[str, ...] | None = None
+U4_R4_CEILING = 0.01
+# B4: disposition_cut removals over delivered-range positions.
+B4_CEILING = 0.05
+DISPOSITION_CUT = "disposition_cut"
+WEEK = timedelta(days=7)
+LIST_CAP = 20                   # ids listed per G
+GHOST_SUFFIX = ":ghost"
+LOADER_EXCLUSIONS = (CALIBRATION_REFRESH, PACK_INTEGRITY, WITHDRAWAL_CONFLICT, IN_FLIGHT,
+                     INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE)
+PASS, FAIL, INSUFFICIENT, REPORT = "PASS", "FAIL", "INSUFFICIENT", "REPORT"
+
+# Only the columns the direct queries read.
+_PACK_ROWS = table(PACK_TABLE, column("run_id", String), column("served_at", String),
+                   column("header_json", Text), column("card_count", Integer))
+_WITHDRAWAL_ROWS = table(WITHDRAWALS_TABLE, column("reason", String),
+                         column("first_withdrawn_at", String))
+
+
+class ReadOnlyViolation(RuntimeError):
+    """The connection is not read-only, or a statement would write."""
+
+
+# ---------------------------------------------------------------------------
+# Read-only engine
+# ---------------------------------------------------------------------------
+
+_READ_PREFIXES = ("select", "with", "pragma", "show", "explain", "begin", "commit",
+                  "rollback", "savepoint", "release")
+
+
+def read_only_engine(db: str, *, allow_postgres_readonly: bool = False):
+    """An engine that can only read `db` (a SQLite path or URL, or with
+    allow_postgres_readonly a Postgres URL). Raises ValueError for anything
+    else; the message never repeats the URL (it may hold a password)."""
+    url = db if "://" in db else f"sqlite:///{db}"
+    if url.startswith("sqlite:///"):
+        eng = create_engine(f"sqlite:///file:{url[len('sqlite:///'):]}?mode=ro&uri=true",
+                            connect_args={"uri": True})
+    elif not allow_postgres_readonly:
+        raise ValueError("refusing a non-SQLite database without --allow-postgres-readonly")
+    elif url.startswith(("postgresql://", "postgresql+psycopg2://", "postgres://")):
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        eng = create_engine(url, connect_args={
+            "options": "-c default_transaction_read_only=on -c statement_timeout=120s"})
+        event.listen(eng, "connect", _read_only_session)
+    else:
+        raise ValueError("only a SQLite or a Postgres database can be read")
+    event.listen(eng, "before_cursor_execute", _reads_only)
+    return eng
+
+
+def _read_only_session(dbapi_conn, _record) -> None:
+    """Postgres, every new connection: make the session read-only and prove
+    it (SHOW transaction_read_only = on) before anything reads on it."""
+    cur = dbapi_conn.cursor()
+    try:
+        cur.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
+        dbapi_conn.commit()            # a SET rolled back would be undone
+        cur.execute("SHOW transaction_read_only")
+        state = cur.fetchone()[0]
+        dbapi_conn.rollback()
+    finally:
+        cur.close()
+    if state != "on":
+        raise ReadOnlyViolation("read-only session required: transaction_read_only is not on")
+
+
+def _reads_only(conn, cursor, statement, parameters, context, executemany) -> None:
+    head = statement.lstrip().lstrip("(").split(None, 1)
+    if not head or head[0].lower() not in _READ_PREFIXES:
+        raise ReadOnlyViolation(f"blocked a non-read statement: {statement.strip()[:80]!r}")
+
+
+# ---------------------------------------------------------------------------
+# The 24 h read
+# ---------------------------------------------------------------------------
+
+@dataclass
+class FlipRead:
+    since: str
+    until: str | None
+    as_of: str
+    decks: int
+    exclusions: dict           # every LoggedDeck.exclusion value ("none": included) -> decks
+    partial_run_decks: int     # unexcluded decks replay leaves out as partial_run
+    withdrawn_removed_by_reason: dict   # over every loaded deck
+    g1: dict
+    g2: dict
+    g3: dict
+    g7: dict
+    g8: dict
+    g9: dict
+    g10: dict
+    overall: str
+    weekly: dict | None = None
+
+
+def flip_read(engine, *, since: str, as_of: str, until: str | None = None) -> FlipRead:
+    """The G-table (module doc) for decks served in [since, until), at or
+    before as_of, and outcomes and withdrawals in the same window."""
+    decks = load_decks(engine=engine, since=since, until=until, as_of=as_of)
+    in_flight_from = (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat()
+    with engine.connect() as conn:
+        packs = _pack_rows(conn, since, until, as_of)
+        g3 = _g3(conn, decks, _outcome_ids(conn, since, until, as_of))
+        withdrawals = _withdrawals_by_reason(conn, since, until, as_of)
+
+    pack_integrity = [d for d in decks if d.exclusion == PACK_INTEGRITY]
+    g1 = {"pack_decks": len(packs), "pack_integrity": len(pack_integrity),
+          "ids": [d.deck_job_id for d in pack_integrity][:LIST_CAP],
+          "status": FAIL if pack_integrity else PASS}
+
+    final = [d for d in decks if d.exclusion != CALIBRATION_REFRESH
+             and _final(d, packs.get(d.deck_job_id), as_of, in_flight_from)]
+    incomplete = [d for d in final if d.exclusion == INCOMPLETE_DECK]
+    g2 = {"final_decks": len(final), "incomplete": len(incomplete),
+          "ids": [[d.deck_job_id, d.served_at] for d in incomplete][:LIST_CAP],
+          "insufficient": len(final) < MIN_FINAL_DECKS,
+          "status": FAIL if incomplete else PASS}
+
+    misses = _sum_counts(d.upgrade_misses for d in decks)
+    g7 = {"upgrade_misses": misses,
+          "status": FAIL if misses.get(UPGRADE_MISS_OTHER, 0) > 0 else PASS}
+
+    conflicts = [d.deck_job_id for d in decks if d.exclusion == WITHDRAWAL_CONFLICT]
+    g8 = {"withdrawal_conflict": len(conflicts), "ids": conflicts[:LIST_CAP],
+          "status": FAIL if conflicts else PASS}
+
+    nde = [d for d in decks if d.exclusion == NO_DELIVERY_EVIDENCE]
+    acted = [d.deck_job_id for d in nde if any(_acted(c) for c in d.cards)]
+    g9 = {"no_delivery_evidence": len(nde), "with_outcomes": len(acted),
+          "ids": acted[:LIST_CAP], "status": FAIL if acted else PASS}
+
+    g10 = {"by_reason": withdrawals, "status": REPORT,
+           "note": "disposition_cut > 0 expected; any i1_dropped at mode 1 is a bug"}
+
+    exclusions = Counter(d.exclusion or "none" for d in decks)
+    barred = (g1, g2, g3, g7, g8, g9)
+    overall = (FAIL if any(g["status"] == FAIL for g in barred)
+               else INSUFFICIENT if g2["insufficient"] else PASS)
+    return FlipRead(
+        since=since, until=until, as_of=as_of, decks=len(decks),
+        exclusions={k: exclusions.get(k, 0) for k in (*LOADER_EXCLUSIONS, "none")},
+        partial_run_decks=sum(1 for d in decks if d.exclusion is None and any(
+            c.evidence_tier == PARTIAL_RUN_TIER for c in d.cards)),
+        withdrawn_removed_by_reason=_sum_counts(d.withdrawn_removed_by_reason for d in decks),
+        g1=g1, g2=g2, g3=g3, g7=g7, g8=g8, g9=g9, g10=g10, overall=overall)
+
+
+def _final(deck, pack, as_of: str, in_flight_from: str) -> bool:
+    """G2's final (module doc). A readable pack's run metadata decides it
+    through the loader's own rule (data._pack_state); an unreadable one
+    (pack_integrity) only by age."""
+    if pack is None:
+        return deck.served_at < in_flight_from
+    served_at, header_json = pack
+    if deck.exclusion == PACK_INTEGRITY:
+        return served_at < in_flight_from
+    run = json.loads(header_json)["run"]
+    return data._pack_state(run, -1, served_at, as_of, in_flight_from)[0]
+
+
+def _g3(conn, decks, outcome_ids: list[str]) -> dict:
+    loaded = {c.impression_id for d in decks for c in d.cards}
+    jobs = {d.deck_job_id for d in decks}
+    ghost = joined = 0
+    orphans: list[str] = []
+    elsewhere: list[str] = []          # their deck was not loaded: check the evidence
+    for iid in outcome_ids:
+        if iid.endswith(GHOST_SUFFIX):
+            ghost += 1
+        elif iid in loaded:
+            joined += 1
+        elif _run_of(iid)[0] in jobs:  # its deck is in the window, the card is not
+            orphans.append(iid)
+        else:
+            elsewhere.append(iid)
+    found = _joins_elsewhere(conn, set(elsewhere))
+    orphans += [iid for iid in elsewhere if iid not in found]
+    return {"outcomes": len(outcome_ids), "joined": joined,
+            "joined_outside_window": sum(1 for iid in elsewhere if iid in found),
+            "ghost": ghost, "orphans": len(orphans),
+            "ids": sorted(set(orphans))[:LIST_CAP], "status": FAIL if orphans else PASS}
+
+
+def _run_of(impression_id: str) -> tuple[str | None, int | None]:
+    """(run_id, card_index) of a contract id (contract.card_impression_id),
+    else (None, None)."""
+    run, sep, index = impression_id.rpartition(":")
+    return (run, int(index)) if sep and index.isdigit() else (None, None)
+
+
+def _joins_elsewhere(conn, ids: set[str]) -> set[str]:
+    """The ids that join a card of a deck outside the window: a non-ghost
+    deck_impressions row, or a pack of their run covering their index."""
+    imp = deck_impressions_table
+    found: set[str] = set()
+    for chunk in _chunks(sorted(ids)):
+        found.update(conn.execute(select(imp.c.impression_id).where(
+            imp.c.impression_id.in_(chunk), func.coalesce(imp.c.is_ghost, 0) == 0)).scalars())
+    parsed = {iid: _run_of(iid) for iid in ids - found}
+    parsed = {iid: ri for iid, ri in parsed.items() if ri[0] is not None}
+    if parsed and inspect(conn).has_table(PACK_TABLE):
+        counts: dict[str, int] = {}
+        for chunk in _chunks(sorted({run for run, _i in parsed.values()})):
+            counts.update(conn.execute(select(_PACK_ROWS.c.run_id, _PACK_ROWS.c.card_count)
+                                       .where(_PACK_ROWS.c.run_id.in_(chunk))).all())
+        found.update(iid for iid, (run, index) in parsed.items()
+                     if run in counts and index < counts[run])
+    return found
+
+
+def _pack_rows(conn, since, until, as_of) -> dict[str, tuple[str, str]]:
+    """run_id -> (served_at, header_json) for the pack rows in the window
+    (load_decks' filters)."""
+    if not inspect(conn).has_table(PACK_TABLE):
+        return {}
+    p = _PACK_ROWS
+    q = select(p.c.run_id, p.c.served_at, p.c.header_json).where(p.c.served_at <= as_of)
+    if since:
+        q = q.where(p.c.served_at >= since)
+    if until:
+        q = q.where(p.c.served_at < until)
+    return {r.run_id: (r.served_at, r.header_json) for r in conn.execute(q)}
+
+
+def _outcome_ids(conn, since, until, as_of) -> list[str]:
+    """The impression_id of every outcome acted in the window, by as_of."""
+    out = deck_outcomes_table
+    q = select(out.c.impression_id).where(out.c.acted_at >= since, out.c.acted_at <= as_of)
+    if until:
+        q = q.where(out.c.acted_at < until)
+    return list(conn.execute(q).scalars())
+
+
+def _withdrawals_by_reason(conn, since, until, as_of) -> dict[str, int]:
+    """G10: deck_card_withdrawals rows first withdrawn in the window, by reason."""
+    if not inspect(conn).has_table(WITHDRAWALS_TABLE):
+        return {}
+    w = _WITHDRAWAL_ROWS
+    q = (select(w.c.reason, func.count()).where(w.c.first_withdrawn_at >= since,
+                                                 w.c.first_withdrawn_at <= as_of)
+         .group_by(w.c.reason))
+    if until:
+        q = q.where(w.c.first_withdrawn_at < until)
+    return dict(sorted(conn.execute(q).all()))
+
+
+def _acted(card) -> bool:
+    """Any outcome (the writer's whole action vocabulary reduces to these)."""
+    return (card.viewed or card.liked or card.passed or card.proposed
+            or card.not_interested or card.undone)
+
+
+def _sum_counts(dicts) -> dict[str, int]:
+    total: Counter = Counter()
+    for d in dicts:
+        total.update(d)
+    return dict(sorted(total.items()))
+
+
+def _chunks(items: list, size: int = 500):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
+# ---------------------------------------------------------------------------
+# The weekly ceilings (U4-R4, B4)
+# ---------------------------------------------------------------------------
+
+def weekly_read(engine, *, as_of: str) -> dict:
+    """U4-R4 and B4 over decks served in [as_of - 7 d, as_of] (module doc)."""
+    since = (datetime.fromisoformat(as_of) - WEEK).isoformat()
+    decks = load_decks(engine=engine, since=since, as_of=as_of)
+    with engine.connect() as conn:
+        packed = set(_pack_rows(conn, since, None, as_of))
+
+    misses = _sum_counts(d.upgrade_misses for d in decks)
+    causes = {cause: n for cause, n in misses.items()
+              if (cause != UPGRADE_MISS_OTHER if U4_R4_CAUSES is None else cause in U4_R4_CAUSES)}
+    viewed = sum(1 for d in decks for c in d.cards if not c.is_ghost and c.viewed)
+
+    evidenced = [d for d in decks if d.exclusion is None and (
+        d.deck_job_id in packed or any(not c.is_ghost and data._delivered_by(c.delivered_at, as_of)
+                                       for c in d.cards))]
+    cuts = sum(d.withdrawn_removed_by_reason.get(DISPOSITION_CUT, 0) for d in evidenced)
+    delivered = sum(1 for d in evidenced for c in d.cards if not c.is_ghost and c.delivered)
+    return {
+        "since": since, "as_of": as_of,
+        "u4_r4": {**_ceiling(sum(causes.values()), viewed, U4_R4_CEILING), "causes": causes},
+        "b4": {**_ceiling(cuts, delivered + cuts, B4_CEILING), "evidenced_decks": len(evidenced)},
+    }
+
+
+def _ceiling(numerator: int, denominator: int, ceiling: float) -> dict:
+    over = (Fraction(numerator, denominator) > Fraction(str(ceiling)) if denominator
+            else numerator > 0)
+    return {"numerator": numerator, "denominator": denominator,
+            "ratio": numerator / denominator if denominator else None,
+            "ceiling": ceiling, "status": "OVER" if over else "OK"}
+
+
+# ---------------------------------------------------------------------------
+# Output and CLI
+# ---------------------------------------------------------------------------
+
+def _pairs(counts: dict) -> str:
+    return ", ".join(f"{k}={v}" for k, v in counts.items()) or "none"
+
+
+def render(r: FlipRead) -> str:
+    g1, g2, g3, g7, g8, g9, g10 = r.g1, r.g2, r.g3, r.g7, r.g8, r.g9, r.g10
+    lines = [
+        f"Flip read (model side, models-lead §Gate-11-03 §3, A3, B3): decks served "
+        f"from {r.since}{f' until {r.until}' if r.until else ''}, as of {r.as_of}; "
+        f"{r.decks} decks loaded.",
+        "",
+        "| G | what | result | bar | status |",
+        "|---|---|---|---|---|",
+        f"| G1 | pack_integrity decks / decks with a pack row | {g1['pack_integrity']} / "
+        f"{g1['pack_decks']} | 0 | {g1['status']} |",
+        f"| G2 | incomplete_deck / final Trades decks | {g2['incomplete']} / "
+        f"{g2['final_decks']} | 0 | {g2['status']} |",
+        f"| G3 | outcomes joining no card | {g3['orphans']} of {g3['outcomes']} (joined "
+        f"{g3['joined']}, outside the window {g3['joined_outside_window']}, ghost "
+        f"{g3['ghost']}) | 0 | {g3['status']} |",
+        f"| G7 | upgrade misses by cause | {_pairs(g7['upgrade_misses'])} | other 0 "
+        f"| {g7['status']} |",
+        f"| G8 | withdrawal_conflict decks | {g8['withdrawal_conflict']} | 0 | {g8['status']} |",
+        f"| G9 | no_delivery_evidence decks with an outcome | {g9['with_outcomes']} of "
+        f"{g9['no_delivery_evidence']} | 0 | {g9['status']} |",
+        f"| G10 | withdrawals by reason (window) | {_pairs(g10['by_reason'])} | reported "
+        f"| {g10['status']} |",
+        "",
+    ]
+    if g1["ids"]:
+        lines.append(f"G1 pack_integrity decks: {', '.join(g1['ids'])}")
+    if g2["ids"]:
+        lines.append("G2 incomplete decks (each must coincide with a restart or the kill): "
+                     + ", ".join(f"{job} (served {at})" for job, at in g2["ids"]))
+    if g2["insufficient"]:
+        lines.append(f"G2 INSUFFICIENT (<{MIN_FINAL_DECKS} final decks): extend to 48 h "
+                     f"({g2['final_decks']} final)")
+    if g3["ids"]:
+        lines.append(f"G3 outcomes joining no card: {', '.join(g3['ids'])}")
+    if g8["ids"]:
+        lines.append(f"G8 withdrawal_conflict decks: {', '.join(g8['ids'])}")
+    if g9["ids"]:
+        lines.append(f"G9 no_delivery_evidence decks with an outcome: {', '.join(g9['ids'])}")
+    lines.append(f"G10 note: {g10['note']}.")
+    lines.append(f"v5 exclusions (decks): {_pairs(r.exclusions)}; partial_run decks "
+                 f"(replay): {r.partial_run_decks}; withdrawn_removed_by_reason "
+                 f"(every loaded deck): {_pairs(r.withdrawn_removed_by_reason)}")
+    lines.append(f"OVERALL: {r.overall}")
+    if g1["status"] == FAIL or g3["status"] == FAIL:
+        lines.append("G1 or G3 failed: models-lead recommends the kill "
+                     "(first_page_store_enabled 0) at once; the operator decides via "
+                     "release-lead (B3 (f4)).")
+    elif r.overall == FAIL:
+        lines.append("Back to models-lead, who rules within the turn (B3 (f4)).")
+    if r.weekly:
+        w = r.weekly
+        lines += ["", f"Weekly ceilings, decks served {w['since']} to {w['as_of']} "
+                      "(BL-001 monitor, via head-bizops):",
+                  _ceiling_line("U4-R4 named upgrade misses / viewed cards", w["u4_r4"])
+                  + f" [{_pairs(w['u4_r4']['causes'])}]",
+                  _ceiling_line("B4 disposition_cut removals / delivered-range positions",
+                                w["b4"])]
+    return "\n".join(lines)
+
+
+def _ceiling_line(label: str, c: dict) -> str:
+    ratio = "n/a" if c["ratio"] is None else f"{c['ratio'] * 100:.2f}%"
+    return (f"{label}: {ratio} ({c['numerator']} / {c['denominator']}), ceiling "
+            f"{c['ceiling'] * 100:g}%: {c['status']}")
+
+
+def _iso(value: str) -> str:
+    """An ISO time as UTC isoformat (naive means UTC), so it compares
+    lexically with the stored timestamps."""
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).isoformat()
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(
+        prog="python3 -m backend.eval.flip_read",
+        description="The model-side 24 h read after the 200 ms flip (G1-G3, G7-G10), "
+                    "read-only.",
+        formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    ap.add_argument("--db", required=True,
+                    help="SQLite path or sqlite:/// URL (opened mode=ro), or a Postgres URL "
+                         "with --allow-postgres-readonly")
+    ap.add_argument("--since", required=True,
+                    help="ISO start of the window: decks served, outcomes acted and "
+                         "withdrawals first withdrawn at or after it")
+    ap.add_argument("--until", help="ISO end of the window, exclusive (default: none)")
+    ap.add_argument("--as-of", help="ISO clock of the read (default: now)")
+    ap.add_argument("--allow-postgres-readonly", action="store_true",
+                    help="allow a Postgres URL; the session is set read-only and must "
+                         "report transaction_read_only = on before anything reads")
+    ap.add_argument("--weekly", action="store_true",
+                    help="also print the rolling 7-day ceilings over [as_of - 7 d, as_of]: "
+                         "U4-R4, named upgrade misses / viewed cards <= 1%%; B4, "
+                         "disposition_cut removals / delivered-range positions <= 5%%, "
+                         "where delivered-range positions are the delivered non-ghost cards "
+                         "plus the disposition_cut never-delivered removals, over the "
+                         "loader-included decks with delivery evidence (a pack, or rows "
+                         "with delivered_at)")
+    ap.add_argument("--json", action="store_true", help="print one JSON object")
+    args = ap.parse_args(argv)
+
+    try:
+        eng = read_only_engine(args.db, allow_postgres_readonly=args.allow_postgres_readonly)
+    except ValueError as e:
+        print(f"flip_read: {e}", file=sys.stderr)
+        return 2
+    as_of = (_iso(args.as_of) if args.as_of
+             else datetime.now(timezone.utc).replace(microsecond=0).isoformat())
+    try:
+        result = flip_read(eng, since=_iso(args.since), as_of=as_of,
+                           until=_iso(args.until) if args.until else None)
+        if args.weekly:
+            result.weekly = weekly_read(eng, as_of=as_of)
+    finally:
+        eng.dispose()
+    print(json.dumps(asdict(result), indent=2, sort_keys=True) if args.json else render(result))
+    over = result.weekly is not None and "OVER" in (
+        result.weekly["u4_r4"]["status"], result.weekly["b4"]["status"])
+    return 1 if result.overall == FAIL or over else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
