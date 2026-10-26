@@ -14509,6 +14509,19 @@ def save_feedback(
         return {"server_id": 0, "created_at": now_iso, "duplicate": True}
 
 
+def find_feedback_by_client_id(client_id: str) -> dict | None:
+    """{server_id, created_at} of the note with this client_id, or None.
+    POST /api/feedback uses it on the throttled path only, so an idempotent
+    retry of a note already held still gets its 200 `duplicate` (#360 QA
+    P2-2: duplicates never count against the throttle)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(app_feedback_table.c.id, app_feedback_table.c.created_at)
+            .where(app_feedback_table.c.client_id == client_id)
+        ).fetchone()
+    return {"server_id": int(row[0]), "created_at": row[1]} if row else None
+
+
 def attach_session_feedback(session_key: str, user_id: str,
                             username: str | None) -> int:
     """Hand an unverified session's notes to its user once it verifies in

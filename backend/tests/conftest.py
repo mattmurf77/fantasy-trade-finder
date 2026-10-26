@@ -63,3 +63,21 @@ os.environ.setdefault("FTF_DP_VALUES_FILE", str(_PLAYER_SNAPSHOT))
 # flakes on long runs. The server skips the thread when this is "1"; prod never
 # sets it.
 os.environ.setdefault("FTF_DISABLE_CLEANUP_LOOP", "1")
+
+
+import sys  # noqa: E402
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_feedback_throttle():
+    """POST /api/feedback's throttle (#360 QA P2-2) is in-process state, and
+    every Flask test client posts from the same IP, so without a reset the
+    suite's feedback tests would share one 20-per-hour budget. Touches
+    backend.server only if a test already imported it."""
+    srv = sys.modules.get("backend.server")
+    if srv is not None and hasattr(srv, "_feedback_rate"):
+        with srv._feedback_rate_lock:
+            srv._feedback_rate.clear()
+    yield

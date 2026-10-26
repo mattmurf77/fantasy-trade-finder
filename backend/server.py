@@ -227,6 +227,8 @@ from .database import (
     save_feedback,
     # #360 QA P2-1: an unverified session's notes follow it when it verifies
     attach_session_feedback,
+    # #360 QA P2-2: a throttled retry of a held note still answers `duplicate`
+    find_feedback_by_client_id,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
     list_feedback,
     # Bad-trade flags (FB #85) — POST /api/trades/flag + admin readback
@@ -11239,6 +11241,71 @@ def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> d
 FEEDBACK_TEXT_MAX = 8000
 
 
+# #360 QA P2-2: the public POST's body cap and throttle. The cap is checked
+# against Content-Length BEFORE the body is read (the analytics_ingest idiom;
+# never Flask's app-global MAX_CONTENT_LENGTH). The throttle is in-process:
+# a per-key deque of accepted-note times over a rolling hour, so it resets
+# on deploy, like the analytics limiter. It is a brake on runaway or abusive
+# volume, not authentication: the device id and X-Forwarded-For are
+# client-supplied, so only a verified user_id is a key a caller can't pick.
+FEEDBACK_MAX_BODY_BYTES = 64 * 1024
+FEEDBACK_RATE_LIMIT = 20             # accepted notes per rolling hour per key
+FEEDBACK_RATE_WINDOW_S = 3600
+FEEDBACK_RATE_MAX_KEYS = 10_000      # memory bound: attacker-chosen keys
+_feedback_rate_lock = threading.Lock()
+_feedback_rate: dict[str, collections.deque] = {}
+
+
+def _client_ip() -> str:
+    """The caller's IP: the first X-Forwarded-For hop (Render's proxy sets
+    it), else the socket peer. No other helper in this file reads it."""
+    fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return fwd or (request.remote_addr or "unknown")
+
+
+def _feedback_rate_key(user_id) -> str:
+    """Verified user, else X-Device-Id, else the client IP."""
+    if user_id:
+        return f"user:{user_id}"
+    device = (request.headers.get("X-Device-Id") or "").strip()
+    if device:
+        return f"device:{device[:200]}"
+    return f"ip:{_client_ip()}"
+
+
+def _feedback_rate_reserve(key: str, now: float) -> bool:
+    """Reserve one accepted-note slot for `key`. False when the rolling hour
+    is full. A reservation the save doesn't use (a duplicate, a failure) is
+    given back with _feedback_rate_release, so duplicates never count."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times is None:
+            if len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                # Prune keys with nothing in the window, then the oldest.
+                for k in [k for k, d in _feedback_rate.items() if not d or d[-1] <= cutoff]:
+                    del _feedback_rate[k]
+                while len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                    _feedback_rate.pop(next(iter(_feedback_rate)))
+            times = _feedback_rate[key] = collections.deque()
+        while times and times[0] <= cutoff:
+            times.popleft()
+        if len(times) >= FEEDBACK_RATE_LIMIT:
+            return False
+        times.append(now)
+        return True
+
+
+def _feedback_rate_release(key: str, now: float) -> None:
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times:
+            try:
+                times.remove(now)
+            except ValueError:
+                pass
+
+
 def _feedback_session_key(token: str) -> str:
     """sha256 hex of a session token: the proof that links an unverified
     session's notes to that same session later (#360 QA P2-1). The token is
@@ -11298,8 +11365,19 @@ def submit_feedback_route():
 
     Idempotent on client_id — retries return 200 with `duplicate: true`.
 
+    Public-write limits (#360 QA P2-2): a body over FEEDBACK_MAX_BODY_BYTES
+    is 413 `too_large` before it is read; past FEEDBACK_RATE_LIMIT accepted
+    notes in a rolling hour per key (verified user, else X-Device-Id, else
+    client IP) a NEW note is 429 `rate_limited`. Duplicates never count, and
+    a duplicate is still answered 200 when its key is throttled.
+
     Contract spec: docs/plans/feedback-backend-sync.md
     """
+    # Size cap, pre-read (#360 QA P2-2). Clients keep a rejected note and
+    # retry it later (useFeedback._syncOne treats any error as unsynced).
+    if (request.content_length or 0) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
     body = request.get_json(force=True, silent=True) or {}
 
     client_id_raw = body.get("client_id")
@@ -11349,6 +11427,18 @@ def submit_feedback_route():
     os_version     = request.headers.get("X-OS-Version")
     app_version    = request.headers.get("X-App-Version")
 
+    # Throttle (#360 QA P2-2): reserve an accepted-note slot; a duplicate or
+    # a failed save gives it back below, so only new notes count.
+    rate_key = _feedback_rate_key(user_id)
+    rate_at = time.time()
+    if not _feedback_rate_reserve(rate_key, rate_at):
+        held = find_feedback_by_client_id(client_id)
+        if held:
+            return jsonify({"ok": True, "server_id": held["server_id"],
+                            "created_at": held["created_at"], "duplicate": True}), 200
+        log.warning("feedback: rate_limited key=%s", rate_key.split(":", 1)[0])
+        return jsonify({"error": "rate_limited"}), 429
+
     try:
         result = save_feedback(
             client_id=client_id,
@@ -11361,12 +11451,15 @@ def submit_feedback_route():
             platform=platform_label,
             device_type=device_type,
             os_version=os_version,
-            client_created_at=client_created_at if isinstance(client_created_at, str) else None,
+            client_created_at=client_created_at[:40] if isinstance(client_created_at, str) else None,
             session_key=session_key,
         )
     except Exception as e:
+        _feedback_rate_release(rate_key, rate_at)
         log.exception("save_feedback failed: %s", e)
         return jsonify({"error": "internal"}), 500
+    if result.get("duplicate"):
+        _feedback_rate_release(rate_key, rate_at)
 
     # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
     # anonymous submissions (no session) have no user to attribute to, and
