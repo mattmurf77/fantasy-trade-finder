@@ -315,6 +315,7 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - Edit `config/features.json` and commit/deploy, OR
 - `POST /api/feature-flags/reload` to re-read without restart, OR
 - Set `FTF_FLAGS` env var for process-level overrides.
+- Don't roll back `account.settings_hub` after the 11-06 build: the flat Settings fallback deletes without the LEG-S6 Apple code (#446).
 
 ---
 

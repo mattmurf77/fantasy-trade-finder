@@ -13,7 +13,8 @@
 //      `apple_authorization_code` and nothing else; with no code it is
 //      exactly the old body-less DELETE.
 //   2. The Apple prompt is requested only for an Apple-linked account (the
-//      ['account'] query's identities) on iOS, when Apple says it's available
+//      ['account'] query's identities) on iOS, when Apple says it's available,
+//      and never on a session known to be unverified (its DELETE 403s anyway)
 //      (freshAppleAuthorizationCode, lifted and EXECUTED with a stub Apple
 //      module).
 //   3. Cancelling, failing or an unavailable Apple prompt returns null, and
@@ -140,19 +141,20 @@ function srcFiles(dir) {
   const harness = transpile(`function make(env) {
     let { appleLinked, Platform, AppleAuthentication, deleteAccount, signOut, onAccountDeleted,
           setDeleting, onNotice, ApiError, dataExportEnabled, promptVerifyStepUp,
-          setSessionToken, appleSignIn } = env;
+          setSessionToken, appleSignIn, verification } = env;
     let deleting = false;
     ${apple ? apple.getText(section) : ''}
     ${perform ? perform.getText(section) : ''}
     return { freshAppleAuthorizationCode, performDeleteAccount };
   }
   module.exports = make;`);
-  const run = async ({ linked = true, os = 'ios', available = true, signIn }) => {
+  const run = async ({ linked = true, os = 'ios', available = true, verification = { session_verified: true }, signIn }) => {
     const log = { deletes: [], available: 0, appleCalls: 0, scopes: [], signedOut: 0, landed: 0, notices: [], tokens: 0, appleSignIns: 0 };
     const mod = { exports: {} };
     vm.runInNewContext(harness, { module: mod });
     const fns = mod.exports({
       appleLinked: linked,
+      verification,
       Platform: { OS: os },
       AppleAuthentication: {
         isAvailableAsync: async () => { log.available += 1; if (available instanceof Error) throw available; return available; },
@@ -194,6 +196,21 @@ function srcFiles(dir) {
     }
     const off = await run({ available: false, signIn: code('never') });
     expect(off.available === 1 && off.appleCalls === 0, 'Apple unavailable: signInAsync was still called');
+    // A session KNOWN to be unverified isn't asked: its DELETE 403s anyway
+    // (release-lead QA on #446). Unknown (null, before the first init) and
+    // verified still ask.
+    const unverified = await run({ verification: { session_verified: false }, signIn: code('never') });
+    expect(unverified.available === 0 && unverified.appleCalls === 0,
+      `unverified session: the Apple prompt was requested (isAvailableAsync ${unverified.available}, signInAsync ${unverified.appleCalls})`);
+    expect(unverified.deletes.length === 1 && !unverified.deletes[0].appleAuthorizationCode,
+      'unverified session: the DELETE did not go out once, code-less');
+    for (const [label, v] of [['verification unknown (null)', null], ['verified', { session_verified: true }]]) {
+      const asked = await run({ verification: v, signIn: code('fresh-code') });
+      expect(asked.appleCalls === 1, `${label}: the Apple prompt was not requested`);
+    }
+    const reads = findAll(section, (n) => ts.isCallExpression(n) && n.expression.getText(section) === 'useSession'
+      && /\.verification\b/.test(n.getText(section)));
+    expect(reads.length === 1, "AccountDataSection does not read the session's verification from useSession");
   });
 
   // ── 3. Cancel / failure never blocks the DELETE (executed) ───────────────

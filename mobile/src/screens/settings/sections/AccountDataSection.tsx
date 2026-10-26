@@ -70,6 +70,9 @@ export default function AccountDataSection({
   const isDemo  = useSession((s) => s.isDemo);
   const user    = useSession((s) => s.user);
   const signOut = useSession((s) => s.signOut);
+  // session_init's verification state (the hub reads the same). null until
+  // the first init lands.
+  const verification = useSession((s) => s.verification);
 
   const [deleting, setDeleting]   = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -159,8 +162,11 @@ export default function AccountDataSection({
 
   // LEG-S6: a fresh Apple authorization code for the server's revocation.
   // Cancelling or failing the Apple prompt never blocks deletion: no code.
+  // A session known to be unverified isn't asked: its DELETE 403s anyway
+  // (release-lead QA on #446). Unknown (null, before the first init) still
+  // asks, so a verified user's revoke isn't lost.
   async function freshAppleAuthorizationCode(): Promise<string | null> {
-    if (!appleLinked || Platform.OS !== 'ios') return null;
+    if (!appleLinked || verification?.session_verified === false || Platform.OS !== 'ios') return null;
     try {
       if (!(await AppleAuthentication.isAvailableAsync())) return null;
       const cred = await AppleAuthentication.signInAsync({ requestedScopes: [] });
