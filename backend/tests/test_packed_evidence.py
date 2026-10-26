@@ -1360,28 +1360,48 @@ def test_u4_the_classification_hook():
         assert cause("gone", 89, 90) == "other"
 
 
-def test_u4_the_stored_count_is_the_decks_own_never_a_constant(deferred, monkeypatch):
-    """#428 QA (c): the deck stored 90 cards. Lowering trade_pages_stored
-    afterwards (to 2 pages, 60 cards) never turns its restart split into
-    other, with its page row or, rebuilt away, from its pack's stored_count."""
+def pages_stored(monkeypatch, pages):
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_pages_stored", float(pages))
+    assert server._trade_pages_stored() * server._trade_page_size() == 30 * pages
+
+
+def test_u4_a_deck_that_stored_fewer_cards_splits_at_its_own_count(deferred, monkeypatch):
+    """#428 QA (c): the knob was 2 pages when the deck was built, so it stored
+    60 cards. Card 70, delivered past them and viewed after a restart, is a
+    restart_split (a constant 90 would have called it other)."""
+    client, engine, _ = deferred
+    pages_stored(monkeypatch, 2)
+    job_id, *_ = packed_deck(120)
+    for cursor in (0, 30, 60):
+        status(client, job_id, cursor)
+    assert unpack(pack_of(engine, job_id))[0]["stored_count"] == 60
+    restart()
+    view(job_id, 70)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_u4_raising_the_knob_after_store_never_turns_a_split_into_other(deferred, monkeypatch):
+    """#428 QA (c): the deck stored 90. The knob is raised to 4 pages after,
+    and a rebuild replaced its page row: its pack's stored_count (90) still
+    classifies card 95, never the knobs now (120)."""
+    from sqlalchemy import delete
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120)
     status(client, job_id, 0)
     status(client, job_id, 90)
-    assert unpack(pack_of(engine, job_id))[0]["stored_count"] == 90
     restart()
-    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_pages_stored", 2.0)
-    assert server._trade_pages_stored() * server._trade_page_size() == 60
-    view(job_id, 95)                                       # its page row: card_count 90
-    from sqlalchemy import delete
+    pages_stored(monkeypatch, 4)
     with engine.begin() as conn:                           # a rebuild replaced its page row
         conn.execute(delete(db_module.trade_page_store_table))
-    server._deck_pack_states.clear()
-    view(job_id, 100)                                      # the pack's stored_count, 90
-    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 2}
-    assert server._deck_stored_count(None, {}) == 60       # nothing known: the knobs now
-    assert server._deck_stored_count(None, {"stored_count": 90}) == 90
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_u4_the_stored_count_order():
+    """The deck's job (or page row) first, then its pack, then the knobs now."""
     assert server._deck_stored_count(75, {"stored_count": 90}) == 75
+    assert server._deck_stored_count(None, {"stored_count": 90}) == 90
+    assert server._deck_stored_count(None, {}) == server._trade_pages_stored() * server._trade_page_size()
 
 
 def test_u4_restart_splits_assume_one_worker_per_instance():
