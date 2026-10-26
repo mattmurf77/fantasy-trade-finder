@@ -3752,7 +3752,8 @@ DECK_PIPELINE_IGNORED = {
     # freshness captures and matches (the job cache's, not the deck's)
     "_capture_trade_execution": "captures the session for the worker",
     "_capture_trade_presentation": "freshness capture; its result is in engine_version",
-    "_capture_trade_significance": "freshness capture; its result is in engine_version",
+    "_capture_trade_significance": ("freshness capture; its knobs are in config_signature "
+                                    "and trade_significance.VERSION in the engine code hash"),
     "_trade_owner_model_matches": "freshness match",
     "_trade_significance_matches": "freshness match",
     "_trade_safety_signature": "freshness capture; its result is in engine_version",
