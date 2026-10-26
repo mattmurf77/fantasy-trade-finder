@@ -197,7 +197,9 @@ export function reportFirstCardShown(searchId: string, o: { cardIndex: number })
   const ms = settle(t);
   t.firstCardAt = monotonicNow();
   // The Testing readout's last value (in memory only; ruling 11).
-  recordTapTiming({ msFromTap: ms, networkType: t.networkType, launchState: t.launchState });
+  recordTapTiming({
+    msFromTap: ms, networkType: t.networkType, launchState: t.launchState, serveSource: t.serveSource,
+  });
   track('trade_first_card_shown', {
     search_id: t.searchId,
     ms_from_tap: ms,

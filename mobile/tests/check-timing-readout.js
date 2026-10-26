@@ -75,6 +75,10 @@ const text = (node) => (node == null || typeof node !== 'object' ? String(node ?
   check('1c. flag on ⇒ the device\'s last ms_from_tap with its cell (network_type, launch_state); the testID can be overridden',
     !!shown && shown.props.testID === 'x.readout' && /187 ms · wifi · repeat_tap/.test(text(shown))
       && row.useTimingReadoutEnabled() === true);
+  // C: R2's serve_source rides along, display only (a device-held first card reads `device`).
+  tapTiming.recordTapTiming({ msFromTap: 42, networkType: 'cellular', launchState: 'first_tap', serveSource: 'device' });
+  check('1c2. …and its serve_source when the trace has one (display only: no event changes)',
+    /42 ms · cellular · first_tap · device/.test(text(row.TimingReadoutRow({}))));
   flagOn = false;
   check('1d. …and null again the moment the flag goes off', row.TimingReadoutRow({}) === null);
 }
@@ -84,8 +88,8 @@ const text = (node) => (node == null || typeof node !== 'object' ? String(node ?
   check('2a. the component reads ONLY the flag hook and the in-memory store (no request, no storage)',
     !/from '\.\.\/api\//.test(comp) && !/AsyncStorage|SecureStore|fetch\(/.test(comp));
   const trace = read('state/tradeSearchTrace.ts');
-  check('2b. the R2 emitter writes the store with ms_from_tap and its cell',
-    /recordTapTiming\(\{ msFromTap: ms, networkType: t\.networkType, launchState: t\.launchState \}\);/.test(trace));
+  check('2b. the R2 emitter writes the store with ms_from_tap, its cell and its serve_source',
+    /recordTapTiming\(\{\s*msFromTap: ms, networkType: t\.networkType, launchState: t\.launchState, serveSource: t\.serveSource,\s*\}\);/.test(trace));
 }
 
 {

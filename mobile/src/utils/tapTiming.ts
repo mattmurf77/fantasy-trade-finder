@@ -14,6 +14,9 @@ export interface TapTiming {
   /** The AC-L1 cell it belongs to. */
   networkType: string;
   launchState: string;
+  /** R2's serve_source (device / page / cached / joined / fresh): display
+   *  only, so a tester can see a device-held first card (C). */
+  serveSource?: string;
 }
 
 let last: TapTiming | null = null;

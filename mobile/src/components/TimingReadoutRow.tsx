@@ -7,7 +7,8 @@
 // and mounts it there; `useTimingReadoutEnabled` is the hub's entry gate.
 //
 // The value is R2's `ms_from_tap` (a monotonic performance.now() delta)
-// with its AC-L1 cell (network_type, launch_state), held in memory by
+// with its AC-L1 cell (network_type, launch_state) and R2's serve_source
+// (`device` = a device-held first page, C), held in memory by
 // utils/tapTiming — written by the R2 emitter, never sent anywhere.
 import React, { useSyncExternalStore } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -27,16 +28,18 @@ export function TimingReadoutRow({
   const enabled = useTimingReadoutEnabled();
   const timing = useSyncExternalStore(subscribeTapTiming, lastTapTiming);
   if (!enabled) return null;
-  const line = timing
-    ? `${timing.msFromTap} ms · ${timing.networkType} · ${timing.launchState}`
-    : 'No trade search yet this session';
+  const cell = timing
+    ? ` ms · ${timing.networkType} · ${timing.launchState}`
+      + (timing.serveSource ? ` · ${timing.serveSource}` : '')
+    : '';
+  const line = timing ? `${timing.msFromTap}${cell}` : 'No trade search yet this session';
   return (
     <View testID={testID} style={styles.row} accessible accessibilityLabel={`Last tap to first card: ${line}`}>
       <Text variant="body">Last tap to first card</Text>
       {timing ? (
         <Text variant="bodySm" style={styles.value}>
           <Text style={styles.ms}>{timing.msFromTap}</Text>
-          {` ms · ${timing.networkType} · ${timing.launchState}`}
+          {cell}
         </Text>
       ) : (
         <Text variant="bodySm" style={styles.value}>{line}</Text>
