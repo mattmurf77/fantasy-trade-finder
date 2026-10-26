@@ -73,6 +73,9 @@ def deferred(p1, monkeypatch):
     """p1 (flag on) with F1 and telemetry on, and rosters a 120-card deck can
     draw from: UID owns mine0.., OPP owns theirs0.."""
     client, engine, sess = p1
+    # A rebuild or backing job a serve kicks (P1/P2) is recorded, never run: a
+    # real worker thread outlives the test and writes to the default engine.
+    monkeypatch.setattr(server, "_start_trade_job_thread", lambda **kw: None)
     monkeypatch.setattr(server, "_deck_signal_v2_enabled", lambda: True)
     monkeypatch.setattr(server, "_suggestion_telemetry_enabled", lambda: True)
     with engine.begin() as conn:
