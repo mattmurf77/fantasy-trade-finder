@@ -440,6 +440,31 @@ def test_s8_a_never_delivered_withdrawal_is_packed_never_a_row_never_upgraded(de
     assert (0, 40) not in by_index(engine) and outcomes(engine) == []
 
 
+def test_s8_a_failed_first_write_still_packs_a_card_withdrawn_at_that_serve(deferred, monkeypatch):
+    """#420 QA P2: the first attempt's rows are fixed on `ev`. plan() drops a
+    never-delivered withdrawn card's row at the first write; if that write's
+    rows transaction fails, the retry must pack the same N cards, or pack_run
+    refuses (card_count N-1) at every later delivery and the deck never packs."""
+    from sqlalchemy.exc import OperationalError
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    own_all_but(engine, 5)                                 # card 5 I-1-dropped at the first serve
+    real, calls = db_module.save_deck_evidence, []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OperationalError("INSERT INTO deck_impressions", {}, Exception("database is locked"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(db_module, "save_deck_evidence", flaky)
+    status(client, job_id, 0)                              # the first write fails
+    assert pack_of(engine, job_id) is None
+    status(client, job_id, 30)                             # the next delivery retries it
+    _run, cards = unpack(pack_of(engine, job_id))
+    assert len(cards) == 120 and 5 in {c["card_index"] for c in cards}
+
+
 def test_s8_an_archive_deck_writes_every_card_and_a_view_raises_it_to_viewed(deferred):
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120, job_id=archive_id(True))
@@ -937,13 +962,38 @@ def test_p2_1_v5_reads_a_live_decks_delivered_positions_from_its_stamps(deferred
 
 # ── #417 cross-check P3-5: a serve's withdrawals land with its delivery ─────
 
-def fail_withdrawal_inserts(monkeypatch):
-    """The withdrawal insert raises inside its transaction."""
-    def boom(conn, rows_):
-        if rows_:
-            raise RuntimeError("injected: the transaction fails")
-        return 0
-    monkeypatch.setattr(db_module, "_insert_withdrawals", boom)
+class fail_after:
+    """Raise right after a statement starting with `prefix` runs, inside its
+    transaction and before its commit (an after_cursor_execute hook)."""
+
+    def __init__(self, engine, prefix):
+        self.engine, self.prefix = engine, prefix
+
+    def _hook(self, conn, cursor, statement, *_args):
+        if " ".join(statement.split()).upper().startswith(self.prefix):
+            raise RuntimeError(f"injected: the transaction fails after {self.prefix}")
+
+    def __enter__(self):
+        from sqlalchemy import event
+        event.listen(self.engine, "after_cursor_execute", self._hook)
+
+    def __exit__(self, *_exc):
+        from sqlalchemy import event
+        event.remove(self.engine, "after_cursor_execute", self._hook)
+
+
+# Each path's delivery-evidence statement. Failing the transaction right after
+# it, or right after the withdrawals' insert, must leave neither (#416 QA P3:
+# both directions, so a withdrawal written in its own transaction before or
+# after the delivery's goes red).
+DELIVERY_STATEMENT = {"header": "UPDATE DECK_EVIDENCE_PACKS", "pack": "INSERT INTO DECK_EVIDENCE_PACKS",
+                      "rows": "INSERT INTO DECK_IMPRESSIONS", "live": "UPDATE DECK_IMPRESSIONS"}
+SIDES = ["after_withdrawals", "after_delivery"]
+
+
+def failing(engine, path, side):
+    return fail_after(engine, "INSERT INTO DECK_CARD_WITHDRAWALS" if side == "after_withdrawals"
+                      else DELIVERY_STATEMENT[path])
 
 
 def boundaries(engine, job_id):
@@ -951,58 +1001,54 @@ def boundaries(engine, job_id):
     return [d[0] for d in unpack(row)[0]["deliveries"]] if row is not None else None
 
 
-def test_p3_5_a_header_update_and_its_withdrawal_land_together(deferred, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_a_header_update_and_its_withdrawal_land_together(deferred, side):
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120)
     status(client, job_id, 0)
     own_all_but(engine, 40)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 30)                             # boundary 59 and card 40's drop
+    with failing(engine, "header", side):
+        status(client, job_id, 30)                         # boundary 59 and card 40's drop
     assert withdrawals(engine) == {} and boundaries(engine, job_id) == [29]
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 60)                             # the next delivery carries both
     assert withdrawals(engine)[40]["served_before"] == 0
     assert boundaries(engine, job_id) == [29, 59, 89]
 
 
-def test_p3_5_the_pack_insert_and_its_withdrawal_land_together(deferred, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_the_pack_insert_and_its_withdrawal_land_together(deferred, side):
     client, engine, _ = deferred
     job_id, *_ = packed_deck(120)
     own_all_but(engine, 5)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 0)
+    with failing(engine, "pack", side):
+        status(client, job_id, 0)
     assert withdrawals(engine) == {} and pack_of(engine, job_id) is None
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 30)                             # the next delivery carries both
     assert withdrawals(engine)[5]["served_before"] == 0 and boundaries(engine, job_id) == [29, 59]
 
 
-def test_p3_5_stage_1_rows_and_their_withdrawal_land_together(deferred, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_stage_1_rows_and_their_withdrawal_land_together(deferred, side):
     client, engine, _ = deferred
     job_id, *_ = deferred_deck(120, store=False)
     own_all_but(engine, 5)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 0)
+    with failing(engine, "rows", side):
+        status(client, job_id, 0)
     assert withdrawals(engine) == {} and rows(engine) == []
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 30)                             # the next delivery carries both
     assert withdrawals(engine)[5]["served_before"] == 0
     assert sorted(i for (g, i), r in by_index(engine).items() if not g and r["delivered_at"]) == [
         i for i in range(60) if i != 5]
 
 
-def test_p3_5_a_live_stamp_and_its_withdrawal_land_together(deferred, prepared_ok, monkeypatch):
+@pytest.mark.parametrize("side", SIDES)
+def test_p3_5_a_live_stamp_and_its_withdrawal_land_together(deferred, prepared_ok, side):
     client, engine, _ = deferred
     job_id, _ids = live_deck(120)
     own_all_but(engine, 7)
-    real = db_module._insert_withdrawals
-    fail_withdrawal_inserts(monkeypatch)
-    status(client, job_id, 0)
+    with failing(engine, "live", side):
+        status(client, job_id, 0)
     assert withdrawals(engine) == {} and stamped(engine, job_id) == {}
-    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
     status(client, job_id, 0)                              # the next serve records both
     assert set(withdrawals(engine)) == {7}
     assert sorted(stamped(engine, job_id)) == [i for i in range(30) if i != 7]
@@ -1018,3 +1064,169 @@ def test_p3_5_withdrawals_before_any_delivery_are_written_alone(deferred):
     got = withdrawals(engine)
     assert sorted(got) == list(range(30)) and {r["served_before"] for r in got.values()} == {0}
     assert pack_of(engine, job_id) is None
+
+
+# ── #416 QA follow-ups (release-lead, 2026-10-26) ───────────────────────────
+
+class _StopLoop(BaseException):
+    """Ends _cleanup_loop from its sleep (not an Exception: the loop must not catch it)."""
+
+
+def test_a_retirement_db_error_never_stops_the_cleanup_loop(deferred, monkeypatch, caplog):
+    """P2: an OperationalError on the retirement CAS is logged; the loop keeps
+    running, evicts on that tick and the next, and retires the deck on the
+    next tick (the failed retirement is undone in memory, so it retries)."""
+    import time as real_time
+    from sqlalchemy.exc import OperationalError
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    with server._trade_jobs_lock:                          # superseded: due, and not evicted
+        server._trade_jobs_by_key[server._trade_jobs[job_id]["key"]] = "a-newer-job"
+    real_cas = db_module.update_deck_evidence_pack_header
+
+    def locked(*_a, **_k):
+        raise OperationalError("UPDATE deck_evidence_packs", {}, Exception("database is locked"))
+
+    def stale(jid):                                        # a finished job past retention
+        with server._trade_jobs_lock:
+            server._trade_jobs[jid] = {"job_id": jid, "key": ("u", jid, "f"), "status": "complete",
+                                       "finished_at": real_time.monotonic() - server._JOB_RETENTION - 60}
+
+    ticks = []
+
+    class FakeTime:
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+        def sleep(self, _seconds):
+            ticks.append(1)
+            if len(ticks) == 1:
+                monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", locked)
+                stale("stale-1")
+            elif len(ticks) == 2:
+                assert "stale-1" not in server._trade_jobs   # evicted on the failing tick
+                assert unpack(pack_of(engine, job_id))[0]["retired"] is False
+                monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", real_cas)
+                stale("stale-2")
+            else:
+                raise _StopLoop
+
+    monkeypatch.setattr(server, "time", FakeTime())
+    with pytest.raises(_StopLoop):
+        server._cleanup_loop()
+    assert len(ticks) == 3 and "stale-2" not in server._trade_jobs
+    run = unpack(pack_of(engine, job_id))[0]
+    assert run["retired"] is True and run["retired_at"]
+    assert any("retirement failed" in r.getMessage() for r in caplog.records)
+
+
+def test_two_instances_first_writes_keep_both_boundaries(deferred):
+    """P3 (deploy overlap at the first write): both instances insert the pack
+    (insert-or-ignore). The loser adopts the stored pack (its cards stand, the
+    checksum stays valid even though its own cards differ) and merges its
+    boundary and its withdrawal in through the header CAS."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(80, store=False)
+    ev = server._trade_jobs[job_id]["evidence"]
+    with ev.lock:
+        ev.served_at = "2026-10-27T00:00:00+00:00"
+        source = server._deck_pack_input(ev)
+    cards, run = server._deck_pack_cards(ev, source)
+    a, b = server._DeckEvidence(job_id, UID), server._DeckEvidence(job_id, UID)
+    for x, at, delivered in ((a, "2026-10-27T00:00:00+00:00", [[29, "2026-10-27T00:00:00+00:00"]]),
+                             (b, "2026-10-27T00:00:05+00:00", [[59, "2026-10-27T00:00:05+00:00"]])):
+        x.served_at, x.league_id, x.deliveries, x.packed = at, LEAGUE, delivered, True
+    b_cards = [{**c, "served_at": b.served_at} for c in cards]   # its own first delivery
+    w = {"deck_job_id": job_id, "card_index": 70, "user_id": UID, "league_id": LEAGUE,
+         "reason": "i1_dropped", "first_withdrawn_at": b.served_at,
+         "impression_id": contract.card_impression_id(job_id, 70), "served_before": 0}
+    assert server._deck_pack_first_write(a, cards, {**run, "deliveries": a.deliveries})
+    assert server._deck_pack_first_write(b, b_cards, {**run, "deliveries": b.deliveries},
+                                         withdrawals=[w])
+    stored_run, stored_cards = unpack(pack_of(engine, job_id))          # the checksum holds
+    assert stored_run["deliveries"] == [[29, "2026-10-27T00:00:00+00:00"],
+                                        [59, "2026-10-27T00:00:05+00:00"]]
+    assert {c["served_at"] for c in stored_cards} == {a.served_at}      # the first writer's cards
+    assert set(withdrawals(engine)) == {70}
+    assert b.pack.checksum == pack_of(engine, job_id)["checksum"]       # later updates CAS on it
+
+
+def deliveries_of(engine, job_id):
+    return unpack(pack_of(engine, job_id))[0]["deliveries"]
+
+
+def test_pages_delivered_out_of_order_each_keep_their_boundary(deferred):
+    """P3 (concurrent pages): page 3 finishes before page 2. Page 2's boundary
+    is added below the last one (the union), so its cards read its own time
+    instead of collapsing into page 3's."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 60)
+    status(client, job_id, 30)
+    delivered = deliveries_of(engine, job_id)
+    assert [d[0] for d in delivered] == [29, 59, 89]
+    assert delivered[1][1] >= delivered[2][1]              # page 2 went out after page 3
+    state =server._trade_jobs[job_id]["evidence"].pack
+    assert state.delivered_at(40) == delivered[1][1] and state.delivered_at(70) == delivered[2][1]
+
+
+def test_a_first_send_inside_a_delivered_stretch_adds_no_boundary(deferred):
+    """A card sent for the first time where its neighbours were delivered
+    earlier (as if a disposition had hidden it at that page's serve): no
+    boundary, so its neighbours keep their earlier time."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    before = deliveries_of(engine, job_id)
+    ev = server._trade_jobs[job_id]["evidence"]
+    card45 = server._trade_jobs[job_id]["cards"][45]
+    with ev.lock:
+        ev.delivered.discard(card45["impression_id"])
+    server._deck_evidence_delivered(ev, [card45], league_id=LEAGUE)
+    assert ev.deliveries == before and deliveries_of(engine, job_id) == before
+
+
+def test_stored_path_writes_landing_out_of_order_keep_both_boundaries(deferred, monkeypatch):
+    """After the job left: pages 2 and 3 are requested in order, their writes
+    land in reverse. Each keeps its request's time; a later re-serve of page 2
+    (its top card now dropped) adds nothing."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    queued = []
+    monkeypatch.setattr(server, "_start_deck_evidence_thread",
+                        lambda *, target, args: queued.append((target, args)))
+    for cursor in (30, 60):
+        client.get(f"/api/trades/status?deck={job_id}&cursor={cursor}", headers=HEADERS)
+    for target, args in reversed(queued):
+        target(*args)
+    delivered = deliveries_of(engine, job_id)
+    assert [d[0] for d in delivered] == [29, 59, 89] and delivered[1][1] < delivered[2][1]
+    queued.clear()
+    own_all_but(engine, 59)
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    for target, args in queued:
+        target(*args)
+    assert deliveries_of(engine, job_id) == delivered
+
+
+def test_the_first_write_builds_the_pack_cards_outside_the_deck_lock(deferred, monkeypatch):
+    """P3 (lock hold): building every card's pack dict under ev.lock held a
+    next-page serve ~40 ms at 2,354 cards. Only the rows' snapshot is taken
+    under it; a W0 card is still packed (its row is snapshotted before plan()
+    drops it)."""
+    client, engine, _ = deferred
+    job_id, _served, _ghosts, ev, _players = packed_deck(120)
+    own_all_but(engine, 7)
+    real = server._pack_card
+    held = []
+    monkeypatch.setattr(server, "_pack_card",
+                        lambda row, at: (held.append(ev.lock.locked()), real(row, at))[1])
+    status(client, job_id, 0)
+    assert len(held) == 120 and not any(held)
+    _run, cards = unpack(pack_of(engine, job_id))
+    assert [c["card_index"] for c in cards] == list(range(120)) and 7 in withdrawals(engine)
