@@ -261,6 +261,36 @@ def test_failed_live_read_blocks_with_readable_502(client, which, failure):
     fake.assert_not_called()
 
 
+@pytest.mark.parametrize("which", ["rosters", "picks"])
+def test_dead_cookie_on_the_ownership_read_routes_to_sign_in(client, which):
+    """P2-2: a private league's export 401/403s on a dead cookie. That is the
+    sign-in expiring, not R3's flake: the same 409 `mfl_auth_expired` the write
+    path returns (credential dropped, so the client re-prompts sign-in), never
+    the "Try again in a moment" 502. Runs the REAL fetchers over `_fetch_one`."""
+    assert db_module.get_mfl_credential(mfl_t.USER) is not None
+    one = MagicMock(side_effect=mfl_service.MflAuthError())
+    ok_rosters, ok_picks = MagicMock(return_value=_rosters()), MagicMock(return_value=_picks())
+    with patch.object(mfl_service, "_fetch_one", one):
+        r, fake, _, _ = _send(
+            client, [GIVE, MY_PICK], [RECV],
+            rosters=REAL_FETCH_ROSTERS if which == "rosters" else ok_rosters,
+            picks=REAL_FETCH_PICKS if which == "picks" else ok_picks)
+    assert r.status_code == 409, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["error"] == "mfl_auth_expired"
+    assert body["message"] == "Your MFL sign-in expired — sign in again."
+    fake.assert_not_called()
+    assert db_module.get_mfl_credential(mfl_t.USER) is None     # dropped, as on the write path
+
+
+def test_other_callers_still_degrade_a_dead_cookie_to_empty():
+    """The fetchers' default contract is unchanged: without `raise_auth` an
+    MflAuthError is still `{}` (validate, the owned-pick refresher)."""
+    with patch.object(mfl_service, "_fetch_one", MagicMock(side_effect=mfl_service.MflAuthError())):
+        assert REAL_FETCH_ROSTERS(LEAGUE, 2026, "h") == {}
+        assert REAL_FETCH_PICKS(LEAGUE, 2026, "h") == {}
+
+
 def test_successful_rosters_read_without_my_franchise_keeps_its_code(client):
     r, fake, _, _ = _send(client, [GIVE], [RECV], rosters=_rosters(drop=MY_FID))
     assert r.status_code == 409 and r.get_json()["error"] == "mfl_franchise_unknown"

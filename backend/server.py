@@ -34158,12 +34158,32 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         return {"error": "mfl_unavailable", "kind": "network",
                 "detail": _msg, "message": _msg}, 502
 
+    def _auth_expired(detail):
+        # Dead/rejected cookie — drop the stored credential so the client
+        # re-prompts MFL sign-in (same treatment as mfl_auth_import). Shared
+        # by the I-2 ownership reads (a 401/403 export) and the write itself.
+        try:
+            delete_mfl_credential(user_id)
+        except Exception:
+            log.exception("mfl propose: credential delete failed")
+        sess.pop("mfl_cookie", None)
+        return {
+            "error": "mfl_auth_expired",
+            "message": "Your MFL sign-in expired — sign in again.",
+            "detail": (str(detail or ""))[:200],
+        }, 409
+
     norm = _mfl_write.normalize_franchise_id
     my_n, their_n = norm(my_fid), norm(their_fid)
     moved_give: list = []
     moved_recv: list = []
     if give_players or recv_players:
-        raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie)
+        try:
+            # raise_auth: a 401/403 is the sign-in expiring, not R3's flake.
+            raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
+        except _mfl.MflAuthError as e:
+            log.warning("mfl propose: ownership read auth-rejected: %s", e)
+            return _auth_expired(str(e))
         if not isinstance(raw, dict) or "rosters" not in raw:
             return _read_failed()
         held = {}
@@ -34182,7 +34202,12 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         moved_give += [p for p in give_players if inverse[p] not in held[my_n]]
         moved_recv += [p for p in recv_players if inverse[p] not in held[their_n]]
     if give_ftf_picks or recv_ftf_picks:
-        raw = _mfl.fetch_future_draft_picks(league_id, year, host, cookie=cookie)
+        try:
+            raw = _mfl.fetch_future_draft_picks(league_id, year, host, cookie=cookie,
+                                                raise_auth=True)
+        except _mfl.MflAuthError as e:
+            log.warning("mfl propose: ownership read auth-rejected: %s", e)
+            return _auth_expired(str(e))
         if not isinstance(raw, dict) or "futureDraftPicks" not in raw:
             return _read_failed()
         live = _mfl_pick_owner_index(_mfl.parse_future_picks(raw))
@@ -34226,19 +34251,8 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
-        # Dead/rejected cookie — drop the stored credential so the client
-        # re-prompts MFL sign-in (same treatment as mfl_auth_import).
         log.warning("mfl propose auth-rejected: %s", getattr(e, "detail", None))
-        try:
-            delete_mfl_credential(user_id)
-        except Exception:
-            log.exception("mfl propose: credential delete failed")
-        sess.pop("mfl_cookie", None)
-        return {
-            "error": "mfl_auth_expired",
-            "message": "Your MFL sign-in expired — sign in again.",
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 409
+        return _auth_expired(getattr(e, "detail", ""))
     except _mfl_write.MflWriteError as e:
         log.warning("mfl propose write-failed [%s]: %s", e.kind,
                     getattr(e, "detail", None))
