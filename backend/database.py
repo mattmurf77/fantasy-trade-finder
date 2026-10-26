@@ -3569,15 +3569,113 @@ def _evict_prerelease_espn_verified_stamps() -> int:
         return res.rowcount or 0
 
 
+# ── Migration DDL lock safety (docs/runbook.md § "Migration DDL never blocks
+# boot"). On Postgres, `ALTER TABLE … ADD COLUMN` takes ACCESS EXCLUSIVE before
+# it checks whether the column exists, and CREATE INDEX IF NOT EXISTS takes
+# SHARE before its check. Running every listed DDL on every boot therefore
+# queued exclusive locks behind the still-serving old instance (#416: ~90 s in
+# init_db). `_migrate_db` now inspects the schema once and issues only the DDL
+# that is actually missing; a missing column's ALTER runs under a short
+# lock_timeout and is deferred to the next boot if the table stays busy.
+_DDL_LOCK_TIMEOUT = "3s"
+_DDL_STATEMENT_TIMEOUT = "30s"
+_DDL_ATTEMPTS = 3
+_DDL_RETRY_SLEEP_S = 1.0
+_PG_LOCK_BUSY_CODES = frozenset({"55P03", "57014"})   # lock_not_available, query_canceled
+
+
+class _SchemaSnapshot:
+    """One inspector per `_migrate_db` call, with per-table cached column and
+    index-name sets. A table that does not exist reads as None (any ALTER on
+    it would fail anyway); an inspection error reads as an empty set, so the
+    DDL simply runs as it did before."""
+
+    def __init__(self):
+        from sqlalchemy import inspect as sa_inspect
+        self._insp = sa_inspect(engine)
+        self._cols: dict = {}
+        self._idx: dict = {}
+
+    def _load(self, cache, table, read):
+        if table not in cache:
+            from sqlalchemy.exc import NoSuchTableError
+            try:
+                cache[table] = {item["name"] for item in read(table)}
+            except NoSuchTableError:
+                cache[table] = None
+            except Exception:
+                cache[table] = set()
+        return cache[table]
+
+    def columns(self, table):
+        return self._load(self._cols, table, self._insp.get_columns)
+
+    def has_index(self, table, name) -> bool:
+        return name in (self._load(self._idx, table, self._insp.get_indexes) or ())
+
+    def has_index_ddl(self, ddl: str) -> bool:
+        """True for a `CREATE [UNIQUE] INDEX IF NOT EXISTS <name> ON <table>`
+        whose index already exists. Anything else (a DROP) runs as before."""
+        import re
+        m = re.match(r"\s*CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+(\w+)\s+ON\s+(\w+)",
+                     ddl, re.I)
+        return bool(m) and self.has_index(m.group(2), m.group(1))
+
+
+def _ddl_is_postgres() -> bool:
+    return engine.dialect.name == "postgresql"
+
+
+def _execute_ddl(conn, sql: str) -> None:
+    conn.execute(text(sql))
+
+
+def _add_column_guarded(table: str, col: str, col_type: str) -> bool:
+    """ALTER TABLE … ADD COLUMN in its own transaction. Postgres: under
+    SET LOCAL lock_timeout / statement_timeout, retried on a lock or statement
+    timeout, then deferred to the next boot (MIGRATION_DEFERRED at ERROR).
+    Any other error is swallowed as before (e.g. the "already exists" race).
+    Returns True when the column was added."""
+    pg = _ddl_is_postgres()
+    for attempt in range(1, _DDL_ATTEMPTS + 1):
+        try:
+            with engine.begin() as conn:
+                if pg:
+                    _execute_ddl(conn, f"SET LOCAL lock_timeout = '{_DDL_LOCK_TIMEOUT}'")
+                    _execute_ddl(conn, f"SET LOCAL statement_timeout = '{_DDL_STATEMENT_TIMEOUT}'")
+                _execute_ddl(conn, f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+            return True
+        except Exception as exc:
+            busy = getattr(getattr(exc, "orig", None), "pgcode", None) in _PG_LOCK_BUSY_CODES
+            if not (pg and busy):
+                return False
+            if attempt < _DDL_ATTEMPTS:
+                time.sleep(_DDL_RETRY_SLEEP_S)
+    log.error("MIGRATION_DEFERRED %s.%s: lock busy, retried next boot", table, col)
+    return False
+
+
 def _migrate_db() -> None:
     """
     Add columns that may be missing from older DB schemas.
-    Each ALTER TABLE is wrapped in try/except so it's idempotent — safe to
-    call on a fresh DB or one that already has all columns.
+    The schema is inspected once per call; only a column (or index) that is
+    actually missing gets DDL, each in its own transaction, so a normal boot
+    issues no ADD COLUMN at all. See `_add_column_guarded` for the Postgres
+    lock guard.
 
     Also seeds model_config with default values (INSERT OR IGNORE so that
     any manually-tuned rows survive re-deploys).
     """
+    schema = _SchemaSnapshot()
+
+    def _add_missing_columns(cols) -> None:
+        for table, col, col_type in cols:
+            present = schema.columns(table)
+            if present is None or col in present:
+                continue
+            if _add_column_guarded(table, col, col_type):
+                present.add(col)
+
     migration_cols = [
         # Email capture (2026-07-17 spec) — dark behind auth.email_capture
         ("accounts",           "email",                 "VARCHAR"),
@@ -3768,15 +3866,10 @@ def _migrate_db() -> None:
         # report a status word without a transaction id.
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
     ]
-    # Each ALTER TABLE gets its own transaction so a "column already exists"
+    # Only missing columns get an ALTER, each in its own transaction so a
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
     # entire transaction as aborted on any error — even if Python catches it.
-    for table, col, col_type in migration_cols:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass   # column already exists — safe to ignore
+    _add_missing_columns(migration_cols)
 
     # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
     _backfill_dual_format()
@@ -3818,12 +3911,7 @@ def _migrate_db() -> None:
     _agent1_skip_migrations = [
         # (table, column, type) — currently none; placeholder for future work
     ]
-    for table, col, col_type in _agent1_skip_migrations:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass
+    _add_missing_columns(_agent1_skip_migrations)
 
     # ── app_feedback migrations ────────────────────────────────────────────
     # The table itself is created by metadata.create_all(); this block is
@@ -3832,12 +3920,7 @@ def _migrate_db() -> None:
     _app_feedback_migrations: list[tuple[str, str, str]] = [
         # (table, column, type) — currently none; placeholder for future work
     ]
-    for table, col, col_type in _app_feedback_migrations:
-        try:
-            with engine.begin() as conn:
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
-        except Exception:
-            pass
+    _add_missing_columns(_app_feedback_migrations)
 
     # ── user_events / identity_links analytics indexes ────────────────────
     # Tracking plan v2 §S1/S2 + analytics-platform LLD §3.1/§3.2. All
@@ -3859,6 +3942,8 @@ def _migrate_db() -> None:
         "DROP INDEX IF EXISTS ix_identity_links_device",
     ]
     for ddl in _user_events_env_indexes:
+        if schema.has_index_ddl(ddl):
+            continue   # present: skip the SHARE lock CREATE INDEX would take
         try:
             with engine.begin() as conn:
                 conn.execute(text(ddl))
@@ -3900,6 +3985,8 @@ def _migrate_db() -> None:
         ("idx_app_feedback_user_id",    "app_feedback", "user_id"),
     ]
     for idx_name, tbl, cols in _app_feedback_indexes:
+        if schema.has_index(tbl, idx_name):
+            continue
         try:
             with engine.begin() as conn:
                 conn.execute(text(
@@ -3928,6 +4015,8 @@ def _migrate_db() -> None:
         ("ix_draft_picks_league_source",  "draft_picks",   "league_id, source"),
     ]
     for idx_name, tbl, cols in _trade_match_indexes:
+        if schema.has_index(tbl, idx_name):
+            continue
         try:
             with engine.begin() as conn:
                 conn.execute(text(
@@ -3972,6 +4061,8 @@ def _migrate_db() -> None:
          "scoring_format, snapshot_date"),
     ]
     for idx_name, tbl, cols in _hot_path_indexes:
+        if schema.has_index(tbl, idx_name):
+            continue
         try:
             with engine.begin() as conn:
                 conn.execute(text(
