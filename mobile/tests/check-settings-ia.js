@@ -22,9 +22,11 @@
 //      ordering the operator fixed on 2026-08-18.
 //
 // Plus #363's timing readout (head-eng ruling 11), on the TypeScript AST so
-// comments can't satisfy it: 5a the Testing page mounts TimingReadoutRow
-// right after TestingSection, ungated, default testID; 5b the hub's Testing
-// row shows on exactly __DEV__ || testing.stage_users || testing.timing_readout.
+// comments can't satisfy it: T1 the Testing page mounts TimingReadoutRow
+// right after TestingSection, ungated, default testID; T2 the hub's Testing
+// row shows on exactly __DEV__ || testing.stage_users || testing.timing_readout
+// (in the branch taken when that is true); T3 neither tester flag is a
+// launched default (D-166); T4 the readout is mounted nowhere else.
 //
 // If §4 changes, change the tables below in the same commit. A row added to
 // the app and not added here fails as "not in the §4 migration map" — that
@@ -337,7 +339,7 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
   }
 }
 
-// ── 5. #363's timing readout (head-eng ruling 11), on the TypeScript AST ──
+// ── T. #363's timing readout (head-eng ruling 11), on the TypeScript AST ──
 // The readout self-gates on `testing.timing_readout`; the operator's phone
 // gets ONLY that flag, so it must also open the hub's Testing row.
 {
@@ -366,19 +368,23 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
     return null;
   };
   const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n);
-  // The innermost ternary / && that renders `el`, inside its component.
-  const innermostGuard = (el) => {
+  // The innermost ternary / && that renders `el`, inside its component, and
+  // whether `el` sits in the branch taken when that condition is TRUE.
+  const innermostGuardInfo = (el) => {
     let child = asNode(el);
     for (let p = child.parent; p; child = p, p = p.parent) {
       if (isFnLike(p)) return null;
-      if (ts.isConditionalExpression(p) && child !== p.condition) return p.condition;
+      if (ts.isConditionalExpression(p) && child !== p.condition) {
+        return { cond: p.condition, whenTrue: child === p.whenTrue };
+      }
       if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-          && child === p.right) return p.left;
+          && child === p.right) return { cond: p.left, whenTrue: true };
     }
     return null;
   };
+  const innermostGuard = (el) => (innermostGuardInfo(el) || {}).cond || null;
 
-  // 5a. The Testing page mounts the readout from components/, once, with no
+  // T1. The Testing page mounts the readout from components/, once, with no
   //     props (its default testID), under no conditional, as the child
   //     immediately after <TestingSection> (under the "Testing" banner).
   {
@@ -406,21 +412,23 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
     ].filter(([okay]) => !okay).map(([, why]) => why);
     if (problems.length === 0) {
       const at = page.getLineAndCharacterOfPosition(m.getStart(page)).line + 1;
-      ok(`5a. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection> (:${at}), ungated, default testID`);
+      ok(`T1. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection> (:${at}), ungated, default testID`);
     } else {
-      fail('5a. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection>, ungated, with its default testID',
+      fail('T1. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection>, ungated, with its default testID',
            problems.join('; '));
     }
   }
 
-  // 5b. The hub's Testing row shows on exactly `__DEV__ || testing.stage_users
+  // T2. The hub's Testing row shows on exactly `__DEV__ || testing.stage_users
   //     || testing.timing_readout`: an || chain of __DEV__ and flag reads (an
   //     inline useFlag('…') / useTimingReadoutEnabled() call, or a const bound
-  //     to one), so a readout-only device reaches the readout.
+  //     to one), so a readout-only device reaches the readout. The row must be
+  //     in the TRUE branch: `cond ? null : <Row>` would show it to everyone else.
   {
     const hub = parseFile(path.join(SETTINGS_DIR, 'SettingsHubScreen.tsx'));
     const rows = findAll(hub, (n) => jsxOpen(n) && attrStr(n, 'testID') === 'settings.hub.testing');
-    const cond = rows.length === 1 ? innermostGuard(rows[0]) : null;
+    const info = rows.length === 1 ? innermostGuardInfo(rows[0]) : null;
+    const cond = info ? info.cond : null;
     const flagOf = (e) => {
       while (e && ts.isParenthesizedExpression(e)) e = e.expression;
       if (!e) return null;
@@ -447,15 +455,58 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
     const read = operands.map(flagOf);
     const want = ['__DEV__', 'testing.stage_users', 'testing.timing_readout'];
     const exact = read.every(Boolean) && read.length === want.length && want.every((k) => read.includes(k));
-    if (rows.length === 1 && cond && exact) {
-      ok(`5b. the hub's Testing row shows on \`${cond.getText(hub)}\` = __DEV__ || testing.stage_users || testing.timing_readout`);
+    if (rows.length === 1 && cond && info.whenTrue && exact) {
+      ok(`T2. the hub's Testing row shows on \`${cond.getText(hub)}\` = __DEV__ || testing.stage_users || testing.timing_readout`);
     } else {
-      fail("5b. the hub's Testing row shows on __DEV__ || testing.stage_users || testing.timing_readout",
+      fail("T2. the hub's Testing row shows on __DEV__ || testing.stage_users || testing.timing_readout",
            rows.length !== 1 ? `found ${rows.length} settings.hub.testing rows`
              : !cond ? 'the row is unconditional — every user would see Testing'
+             : !info.whenTrue ? `the row is in the FALSE branch of \`${cond.getText(hub)}\` — every non-tester would see Testing`
              : `gated on \`${cond.getText(hub)}\`, which reads [${read.map((k) => k || '?').join(', ')}]`
                + (read.includes('testing.timing_readout') ? '' : ' — a readout-only device cannot reach the readout'));
     }
+  }
+
+  // T3 (D-166). Neither tester flag is a LAUNCHED default. Those baked defaults
+  //     apply from first paint, before the first flag fetch, so either key there
+  //     would show Testing (and the readout) to every fresh install.
+  {
+    const flagsFile = path.join(__dirname, '..', 'src', 'state', 'useFeatureFlags.ts');
+    const sf = parseFile(flagsFile);
+    const decls = findAll(sf, (n) => ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)
+      && n.name.text === 'LAUNCHED_FLAG_DEFAULTS');
+    const obj = decls.length === 1 && decls[0].initializer
+      && ts.isObjectLiteralExpression(decls[0].initializer) ? decls[0].initializer : null;
+    const keys = obj ? obj.properties.map((p) => (p.name && (isStr(p.name) || ts.isIdentifier(p.name)) ? p.name.text : null)) : [];
+    const banned = ['testing.timing_readout', 'testing.stage_users'].filter((k) => keys.includes(k));
+    const opaque = obj ? obj.properties.filter((p) => !p.name).length : 0;
+    if (obj && banned.length === 0 && opaque === 0) {
+      ok(`T3. LAUNCHED_FLAG_DEFAULTS (${keys.length} keys) holds neither testing.timing_readout nor testing.stage_users`);
+    } else {
+      fail('T3. LAUNCHED_FLAG_DEFAULTS holds neither testing.timing_readout nor testing.stage_users',
+           !obj ? 'LAUNCHED_FLAG_DEFAULTS object literal not found in state/useFeatureFlags.ts'
+             : opaque ? `${opaque} spread/computed entr${opaque === 1 ? 'y' : 'ies'}, so its keys can't be checked`
+             : `${banned.join(' and ')} would be on for every fresh install until its first flag fetch`);
+    }
+  }
+
+  // T4. The readout is mounted ONLY on the Testing page: any other mount (the
+  //     hub, a tab screen) would escape the Testing row's tester gate.
+  {
+    const SRC = path.join(__dirname, '..', 'src');
+    const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+      d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.tsx') ? [path.join(dir, d.name)] : []);
+    const where = [];
+    for (const abs of walk(SRC)) {
+      if (!fs.readFileSync(abs, 'utf8').includes('TimingReadoutRow')) continue;
+      const sf = parseFile(abs);
+      for (const el of byTag(sf, 'TimingReadoutRow')) {
+        where.push(`${path.relative(SRC, abs)}:${sf.getLineAndCharacterOfPosition(el.getStart(sf)).line + 1}`);
+      }
+    }
+    const only = where.length === 1 && where[0].startsWith(path.join('screens', 'settings', 'SettingsTestingScreen.tsx') + ':');
+    if (only) ok(`T4. <TimingReadoutRow /> is mounted only on the Testing page (${where[0]})`);
+    else fail('T4. <TimingReadoutRow /> is mounted only on the Testing page', `mounts: ${where.join(', ') || 'none'}`);
   }
 }
 
