@@ -644,7 +644,7 @@ TikTok-discovery **F1 signal spine** (flag `deck.signal_v2`, `docs/plans/tiktok-
 
 | Column | Type | Notes |
 |---|---|---|
-| `impression_id` | str PK | uuid4 hex, minted at serve time |
+| `impression_id` | str PK | Minted at build. **uuid4 hex** on every row written at build and on every ghost row. On a deferred (packed-evidence) deck's non-ghost card: **`<deck_job_id>:<card_index>`**, `backend/eval/contract.card_impression_id` (R4.2 U2), deterministic, ≤ 64 characters; the page payload carries it and the client posts outcomes with it, whether the card has a full row or is packed |
 | `user_id` | str | user the deck was served to |
 | `league_id` | str | |
 | `deck_job_id` | str | generation job id (`_trade_jobs`) |

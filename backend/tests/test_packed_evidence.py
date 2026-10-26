@@ -16,7 +16,9 @@ from backend.feature_flags import DEFAULT_FLAGS, FLAG_KEYS
 from backend.tests.test_i1_serve_filter import live  # noqa: F401  (fixture)
 from backend.tests.test_trade_page_store import p1, run_job, status  # noqa: F401  (fixture)
 from backend.tests.test_deferred_evidence import (  # noqa: F401  (fixture)
-    deferred, deferred_deck, rows)
+    UID, deferred, deferred_deck, outcomes, rows)
+from backend.tests.test_trade_page_store import generate  # noqa: E402
+from backend.eval import contract
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -63,3 +65,42 @@ def test_a_real_page_scoped_job_marks_its_rows_and_a_flag_off_job_does_not(defer
     assert "page_scope" not in server._trade_jobs[off]
     assert rows(engine)
     assert all("page_store" not in json.loads(r["features_json"]) for r in rows(engine))
+
+
+# ── Item 2 (R4.2 U2): the deterministic impression id ───────────────────────
+
+def is_uuid_hex(value):
+    return isinstance(value, str) and len(value) == 32 and all(c in "0123456789abcdef" for c in value)
+
+
+def test_every_non_ghost_row_has_the_contract_id_and_ghosts_keep_a_uuid(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(60, ghost_every=9)
+    status(client, job_id, 0)
+    written = rows(engine)
+    assert {r["impression_id"] for r in written if not r["is_ghost"]} == {
+        contract.card_impression_id(job_id, r["card_index"]) for r in written if not r["is_ghost"]}
+    assert all(is_uuid_hex(r["impression_id"]) for r in written if r["is_ghost"])
+
+
+def test_the_page_payload_carries_the_contract_id_and_an_outcome_with_it_lands(deferred):
+    """The client echoes the id untouched (mobile api/trades.ts); it passes the
+    outcome routes' 1-64-character check and their ownership read."""
+    client, engine, _ = deferred
+    job_id = run_job()
+    built = [c["impression_id"] for c in server._trade_jobs[job_id]["cards"]]
+    assert built == [contract.card_impression_id(job_id, i) for i in range(len(built))]
+    for body in (generate(client, page=1).get_json(), status(client, job_id, 0).get_json()):
+        sent = [c["impression_id"] for c in body["cards"]]   # S0's I-1 may drop some (gaps)
+        assert sent and set(sent) <= set(built) and sent == sorted(sent, key=built.index)
+    iid = body["cards"][0]["impression_id"]
+    assert 1 <= len(iid) <= 64
+    server._save_deck_outcome_safe(iid, "like", acting_user_id=UID)
+    assert [o["impression_id"] for o in outcomes(engine)] == [iid]
+
+
+def test_rows_written_at_build_keep_uuid_ids(deferred, monkeypatch):
+    client, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
+    run_job()
+    assert rows(engine) and all(is_uuid_hex(r["impression_id"]) for r in rows(engine))

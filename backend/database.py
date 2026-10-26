@@ -948,7 +948,9 @@ Index(
 # sort-key multiplier ACTUALLY applied to this card (1.0 when ordering was
 # off/deterministic) — the off-policy-evaluation prerequisite.
 deck_impressions_table = Table("deck_impressions", metadata,
-    Column("impression_id", String,  primary_key=True),  # uuid4 hex, minted at serve
+    # uuid4 hex, minted at build; a packed-evidence deck's non-ghost card has
+    # contract.card_impression_id = "<deck_job_id>:<card_index>" (R4.2 U2).
+    Column("impression_id", String,  primary_key=True),
     Column("user_id",       String,  nullable=False),    # user the deck was served to
     Column("league_id",     String,  nullable=False),
     Column("deck_job_id",   String,  nullable=False),    # _trade_jobs job_id

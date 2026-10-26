@@ -7404,7 +7404,13 @@ def _log_deck_signal_impressions(
             features["wildcard_provenance"] = getattr(
                 card, "wildcard_provenance", None)
         base = float(getattr(card, "composite_score", 0.0) or 0.0)
-        impression_id = uuid.uuid4().hex
+        # R4.2 U2: a deferred (packed-evidence) deck's non-ghost card has the
+        # deterministic contract id, the same whether its row is full or it is
+        # packed; the client posts outcomes with it. A ghost keeps a uuid4 (its
+        # would-have-been rank can equal a served card's index), as does every
+        # row written at build.
+        impression_id = (_evidence_contract.card_impression_id(job_id, pos)
+                         if evidence_sink is not None and not is_ghost else uuid.uuid4().hex)
         if not is_ghost:
             # Ghosts never enter imp_by_card — the caller stamps snapshot
             # cards from this map, so a ghost id can never reach a client.
