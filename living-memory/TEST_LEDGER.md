@@ -1,3 +1,24 @@
+## 2026-10-26 — Paywall one-page deck preview + uniform verify_required (legal R28.9) + first-page-store leak fix (#397) (dark)
+
+Full gates. It merges dark: `paywall_enforce_enabled` is 0, and `paywall_preview_pages` defaults to 1 (code fallback 1, G-064). D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** 683 targeted tests pass.
+  - `test_paywall_preview` (24), `test_paywall_gate` (326), `test_paywall_gate_allowlist` (7);
+  - the entitlements files (90), `test_account_deletion_coverage` (34);
+  - E2's `test_trade_responses_small` (61) and `test_trade_status_lock` (3);
+  - #368's `test_trade_page_store` (120) and `test_trade_page_flag_off` (3);
+  - `test_paywall_config` (15).
+- **Sabotage, each red then restored:**
+  - job kickoff consumes the preview;
+  - the knob fallback is set to 0;
+  - the unverified response depends on entitlement (5 red, R28.9 (i) and (ii) included);
+  - the first-page-store leak test was red before the fix (`557973da`).
+- **R28.9:** an unverified session is decided without reading entitlements (a spy proves it).
+  - (i) Payer, free and trial-expired accounts get identical status, headers and body.
+  - (ii) A granted account behaves like a brand-new one, including the preview end.
+  - (iii) After verifying, the result resolves normally.
+- **Consumption** is recorded only when cards are served: in `_serve_trade_job`, and for #368's store in `_serve_stored_trade_page`. Warm-up and cron decks never consume it. The `paywall_previews` table is covered by account deletion and export.
+
 ## 2026-10-26 — Global server paywall gate (#395): one before_request, C2 trade-only, 402 pro_required (dark)
 
 Full gates. It merges dark: both knobs are 0 and the flags are off. D-056: `FTF_SKIP_SIM_GATE=1` posture.
