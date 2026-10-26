@@ -113,12 +113,18 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // and platform-agnostic.
   const platformOptionsFlag = useFlag('landing.platform_options');
   const espnLinkOn = useFlag('espn.link');
+  // `espn.signin` hides ONLY this ESPN entry chip (Settings → link ESPN league
+  // and MFL sign-in stay on). useFlag is `!!flags[key]`, so a server that
+  // doesn't send the key yet reads false here: the chip stays hidden until
+  // the server flag ships — the fail-safe direction, intended. Deliberately
+  // absent from LAUNCHED_FLAG_DEFAULTS: a server `false` must never paint it.
+  const espnSignInOn = useFlag('espn.signin');
   const mflLinkOn = useFlag('mfl.link');
   const [entryPlatform, setEntryPlatform] =
     useState<'sleeper' | EntryPlatformIntent>('sleeper');
   const platformChips: Array<'sleeper' | EntryPlatformIntent> = [
     'sleeper',
-    ...(espnLinkOn ? (['espn'] as const) : []),
+    ...(espnLinkOn && espnSignInOn ? (['espn'] as const) : []),
     ...(mflLinkOn ? (['mfl'] as const) : []),
   ];
   // A single chip is no choice — hide the row unless ≥2 platforms are live.
@@ -130,12 +136,12 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   // renders.
   useEffect(() => {
     if (
-      (entryPlatform === 'espn' && !espnLinkOn) ||
+      (entryPlatform === 'espn' && !(espnLinkOn && espnSignInOn)) ||
       (entryPlatform === 'mfl' && !mflLinkOn)
     ) {
       setEntryPlatform('sleeper');
     }
-  }, [entryPlatform, espnLinkOn, mflLinkOn]);
+  }, [entryPlatform, espnLinkOn, espnSignInOn, mflLinkOn]);
 
   // V2 (D-164): which entry-mode link sheet is open. One at a time — iOS
   // won't stack sibling RN Modals (#266 class).
@@ -143,15 +149,22 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
 
   // Entry mint landed (the sheet stored the session token already) — pin the
   // entry user. account_only is accurate AND load-bearing: it tells
-  // LeaguePicker's refresh to skip the Sleeper league fetch (an entry:… id
-  // is not a Sleeper user id) and merge the platform leagues instead.
-  async function handleEntrySession(u: { user_id: string; display_name: string }) {
+  // LeaguePicker's refresh to skip the Sleeper league fetch (an acct_* key is
+  // not a Sleeper user id) and merge the platform leagues instead. A platform
+  // identity bound to a Sleeper user mints that Sleeper id with account_only
+  // false and the Sleeper username, so the mint's values win over the default.
+  async function handleEntrySession(u: {
+    user_id: string;
+    display_name: string;
+    account_only?: boolean;
+    username?: string;
+  }) {
     await setUser({
       user_id: u.user_id,
-      username: '',
+      username: u.username ?? '',
       display_name: u.display_name,
       avatar_id: null,
-      account_only: true,
+      account_only: u.account_only ?? true,
     });
   }
 
@@ -448,8 +461,10 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
             'SignIn',
           );
           // ESPN/MFL are live platforms now — a league URL just can't START
-          // sign-in (the link routes need a session first). Point at the
-          // entry chips when they render; otherwise at the Settings path.
+          // sign-in (the link routes need a session first). Point at that
+          // platform's entry chip only when IT renders (`espn.signin` hides
+          // ESPN's alone, so the picker can be up without it); otherwise at
+          // the Settings path.
           const pname =
             resolved.platform === 'espn'
               ? 'ESPN'
@@ -457,7 +472,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               ? 'MFL'
               : null;
           setError(
-            pname && platformPickerShown
+            pname && platformPickerShown && (platformChips as string[]).includes(resolved.platform ?? '')
               ? `That's an ${pname} league URL — choose ${pname} above to link it.`
               : pname
               ? `${pname} leagues link after sign-in — enter a Sleeper username here, or sign in with Apple and link your league from Settings.`
