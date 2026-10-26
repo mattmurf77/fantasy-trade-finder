@@ -12,7 +12,8 @@ CardSet JSON: {"variant": str, "source": "value_core_bench" | "served",
                           "reasons": [str]}],
                "skipped_no_row": int,      # served sets only
                "leagues_without_deck": [str],   # served: no gradeable Trades deck in the lookback
-               "leagues_with_no_cards": [str]}  # served: a deck found, 0 gradeable cards
+               "leagues_with_no_cards": [str],  # served: a deck found, 0 gradeable cards
+               "skipped_decks_by_reason": {str: int}}  # served: ungradeable decks seen
 
 ``served_card_set`` is the only production touch: a read-only read of the
 incumbent's served decks, asserting ``transaction_read_only = on`` first.
@@ -199,15 +200,21 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     skipped = 0
     without_deck: list[str] = []
     no_cards: list[str] = []
+    # models-lead C5: every ungradeable deck in the lookback is counted by reason,
+    # so a skip is never silent (pack_integrity / withdrawal_conflict are also
+    # G1 / G8 signals).
+    skipped_decks = dict.fromkeys(sorted(ungradeable), 0)
     try:
         with engine.connect() as conn:
             if conn.execute(text("SHOW transaction_read_only")).scalar() != "on":
                 raise ValueError("read-only connection required: transaction_read_only is not on")
             for league_id in league_ids:
-                decks = [d for d in eval_data.load_decks(engine=engine, since=since,
-                                                         user_id=str(user_id),
-                                                         league_id=str(league_id))
-                         if d.exclusion not in ungradeable]
+                loaded = eval_data.load_decks(engine=engine, since=since,
+                                              user_id=str(user_id), league_id=str(league_id))
+                for d in loaded:
+                    if d.exclusion in ungradeable:
+                        skipped_decks[d.exclusion] += 1
+                decks = [d for d in loaded if d.exclusion not in ungradeable]
                 if not decks:     # named, never a silent 0 cards (runbook §Blind grade)
                     without_deck.append(str(league_id))
                     continue
@@ -260,7 +267,8 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     finally:
         engine.dispose()
     return {"variant": variant, "source": "served", "cards": cards, "skipped_no_row": skipped,
-            "leagues_without_deck": without_deck, "leagues_with_no_cards": no_cards}
+            "leagues_without_deck": without_deck, "leagues_with_no_cards": no_cards,
+            "skipped_decks_by_reason": skipped_decks}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -301,7 +309,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps({"cards": len(card_set["cards"]), "leagues": len(args.league),
                           "skipped_no_row": card_set["skipped_no_row"],
                           "leagues_without_deck": card_set["leagues_without_deck"],
-                          "leagues_with_no_cards": card_set["leagues_with_no_cards"]}))
+                          "leagues_with_no_cards": card_set["leagues_with_no_cards"],
+                          "skipped_decks_by_reason": card_set["skipped_decks_by_reason"]}))
     elif args.command == "export":
         card_sets = [json.loads(path.read_text()) for path in args.cards]
         print(json.dumps(export(card_sets, per_variant=args.per_variant, seed=args.seed,
