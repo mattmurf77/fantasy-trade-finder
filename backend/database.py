@@ -1178,12 +1178,14 @@ class CompressedJSON(TypeDecorator):
 # trade_page_size cards of the latest complete organic job, in final served
 # order, plus the stamps the serve compares (roster_fp, values_snapshot_id,
 # engine_version, config_signature). Read and written only by server.py while
-# the flag is on. user_id is the account deletion/export key
+# the store is on (the flag and the first_page_store_enabled knob). user_id is
+# the account deletion/export key
 # (accounts._ADDITIONAL_PRIVATE_TABLES). Upserted by save_trade_page with a
 # supersede guard: a row is replaced only by one built at the same time or
-# later. An input change (rankings, preferences, dispositions, rosters) marks
-# rows state='stale' and advances built_at to the change (mark_trade_pages_stale),
-# so no deck admitted before it can overwrite the mark. evidence_blob is
+# later. An input change (rankings, preferences, dispositions) marks rows
+# state='stale' and advances built_at to the change (mark_trade_pages_stale),
+# so no deck admitted before it can overwrite the mark. A roster move needs no
+# mark: the serve compares roster_fp. evidence_blob is
 # reserved for the packed-evidence piece (NULL in P1).
 trade_page_store_table = Table("trade_page_store", metadata,
     Column("id",                 Integer, primary_key=True, autoincrement=True),
@@ -3046,7 +3048,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
-    ("first_page_store_enabled", 1.0, "P1 kill knob, ANDed with the flag trade.first_page_store: only exactly 1 keeps the first-page store on; any other value (0 to kill) stops every store read, write, serve and stale mark. Deploy-free via scripts/set_knob.py. Re-enabling after an off period: input changes weren't marked meanwhile, so mark every row stale first (UPDATE trade_page_store SET state = 'stale')"),
+    ("first_page_store_enabled", 1.0, "P1 kill knob, ANDed with the flag trade.first_page_store: any finite value >= 1 keeps the first-page store on; 0, a negative, NaN or an unreadable value stops every store read, write, serve and stale mark. Deploy-free via scripts/set_knob.py. Re-enabling after an off period (this knob or the flag): set it to its previous value + 1; it's hashed into every page's config_signature, so pages that missed the off period's stale marks fall through and rebuild. Alternative: UPDATE trade_page_store SET state = 'stale'"),
     ("trade_pages_stored", 3.0, "Pages of trade_page_size cards stored per trade_page_store row; clamped to 1-10 at read"),
     ("trade_prefetch_remaining", 50.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read. 50 per head-eng ruling 10's sizing: 44-card swipe bursts at 0.4 s/card plus the prefetch round trip"),
     ("trade_page_store_evict_days", 30.0, "trade_page_store eviction: delete rows not served (or, never served, not built) in this many days; clamped to 1-3650 at read"),
