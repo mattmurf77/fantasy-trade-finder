@@ -21,6 +21,16 @@
 //   3. the four moves §4 actually makes, asserted individually, plus the
 //      ordering the operator fixed on 2026-08-18.
 //
+// Plus #363's timing readout (head-eng ruling 11), on the TypeScript AST so
+// comments can't satisfy it: T1 the Testing page mounts TimingReadoutRow
+// right after TestingSection, default testID, under no conditional or only
+// the page's shared useTesterSurface() branch (#354 D-7), the same one that
+// wraps TestingSection; T2 the hub's Testing row shows on exactly __DEV__ ||
+// testing.stage_users || testing.timing_readout, read through
+// useTesterSurface()'s definition in its hook file (in the branch taken when
+// that is true); T3 neither tester flag is a launched default (D-166); T4 the
+// readout is mounted nowhere else.
+//
 // Plus two #354 review items (ux-lead, 2026-10-23), walked on the TypeScript
 // AST so comments can't satisfy them:
 //   5. D-7 — ONE tester-surface predicate. `useTesterSurface()` is defined once
@@ -29,8 +39,7 @@
 //      `testing.timing_readout`, false otherwise. The hub's Testing row and
 //      the Testing page body are each gated by it directly, and the page's
 //      other branch is the honest unavailable line, never an empty page.
-//      5e: #363's TimingReadoutRow sits right after TestingSection, imported
-//      from components/, default testID, under no gate but that predicate.
+//      (#360's own readout-mount pin, 5e, folded into T1 at the #407 merge.)
 //      U1-U4 (marketing-lead copy addendum 6A): the non-tester state reads
 //      exactly "There's nothing on this page.", has a "Back to Settings"
 //      Button that calls navigate('Settings') and never goBack, overrides
@@ -354,6 +363,220 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
   }
 }
 
+// ── T. #363's timing readout (head-eng ruling 11), on the TypeScript AST ──
+// The readout self-gates on `testing.timing_readout`; the operator's phone
+// gets ONLY that flag, so it must also open the hub's Testing row.
+{
+  let ts;
+  try { ts = require('typescript'); } catch {
+    console.error('typescript not resolvable — run `npm install` in mobile/ first.');
+    process.exit(2);
+  }
+  const parseFile = (abs) => ts.createSourceFile(abs, fs.readFileSync(abs, 'utf8'), ts.ScriptTarget.Latest, true,
+    abs.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
+  const findAll = (root, pred) => {
+    const out = [];
+    const visit = (n) => { if (pred(n)) out.push(n); ts.forEachChild(n, visit); };
+    visit(root);
+    return out;
+  };
+  const isStr = (n) => !!n && (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n));
+  const jsxOpen = (n) => ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n);
+  const byTag = (sf, tag) => findAll(sf, (n) => jsxOpen(n) && n.tagName.getText(sf) === tag);
+  const asNode = (el) => (el && ts.isJsxOpeningElement(el) ? el.parent : el);
+  const attrStr = (el, name) => {
+    const a = el.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText() === name);
+    if (!a || !a.initializer) return null;
+    if (isStr(a.initializer)) return a.initializer.text;
+    if (ts.isJsxExpression(a.initializer) && isStr(a.initializer.expression)) return a.initializer.expression.text;
+    return null;
+  };
+  const isFnLike = (n) => ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n);
+  // The innermost ternary / && that renders `el`, inside its component, and
+  // whether `el` sits in the branch taken when that condition is TRUE.
+  const innermostGuardInfo = (el) => {
+    let child = asNode(el);
+    for (let p = child.parent; p; child = p, p = p.parent) {
+      if (isFnLike(p)) return null;
+      if (ts.isConditionalExpression(p) && child !== p.condition) {
+        return { cond: p.condition, whenTrue: child === p.whenTrue };
+      }
+      if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+          && child === p.right) return { cond: p.left, whenTrue: true };
+    }
+    return null;
+  };
+  // #354 D-7: is `test` the shared tester-surface predicate itself, an inline
+  // `useTesterSurface()` call or a const in `sf` bound to one?
+  const isTesterSurfaceCall = (n) => !!n && ts.isCallExpression(n) && ts.isIdentifier(n.expression)
+    && n.expression.text === 'useTesterSurface' && n.arguments.length === 0;
+  const isPredicate = (sf, test) => {
+    let t = test;
+    while (t && ts.isParenthesizedExpression(t)) t = t.expression;
+    if (isTesterSurfaceCall(t)) return true;
+    if (!t || !ts.isIdentifier(t)) return false;
+    const decls = findAll(sf, (n) => ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === t.text);
+    return decls.length === 1 && isTesterSurfaceCall(decls[0].initializer);
+  };
+
+  // T1. The Testing page mounts the readout from components/, once, with no
+  //     props (its default testID), as the child immediately after
+  //     <TestingSection> (under the "Testing" banner). Its only allowed guard
+  //     is none, or the page's shared #354 D-7 branch: the SAME
+  //     `useTesterSurface()` conditional node that wraps <TestingSection>,
+  //     on its true side. Any other guard fails: the row gates itself.
+  //     (#360's 5e folded in here. With 5d holding TestingSection under the
+  //     predicate, "right after TestingSection" already forces the readout
+  //     into that branch, so allowing "none" loosens nothing.)
+  {
+    const page = parseFile(path.join(SETTINGS_DIR, 'SettingsTestingScreen.tsx'));
+    const imported = page.statements.some((s) => ts.isImportDeclaration(s) && isStr(s.moduleSpecifier)
+      && s.moduleSpecifier.text === '../../components/TimingReadoutRow' && s.importClause
+      && s.importClause.namedBindings && ts.isNamedImports(s.importClause.namedBindings)
+      && s.importClause.namedBindings.elements.some((e) => e.name.text === 'TimingReadoutRow' && !e.propertyName));
+    const mounts = byTag(page, 'TimingReadoutRow');
+    const m = mounts.length === 1 ? mounts[0] : null;
+    const sections = byTag(page, 'TestingSection');
+    const node = asNode(m);
+    const holder = node && ts.isJsxElement(node.parent) ? node.parent : null;
+    const kids = holder ? holder.children.filter((c) => !(ts.isJsxText(c) && !c.text.trim())) : [];
+    const prev = kids.indexOf(node) > 0 ? kids[kids.indexOf(node) - 1] : null;
+    const gi = m ? innermostGuardInfo(m) : null;
+    const guard = gi ? gi.cond : null;
+    // The D-7 branch TestingSection sits in: the only guard the readout may share.
+    const sg = sections.length === 1 ? innermostGuardInfo(sections[0]) : null;
+    const sharedBranch = !!(gi && sg && gi.cond === sg.cond && gi.whenTrue && sg.whenTrue
+      && isPredicate(page, gi.cond));
+    const problems = [
+      [imported, "no `import { TimingReadoutRow } from '../../components/TimingReadoutRow'`"],
+      [mounts.length === 1, `found ${mounts.length} <TimingReadoutRow> mounts, want 1`],
+      [!m || m.attributes.properties.length === 0,
+        m ? `passes props (${m.attributes.getText(page)}); the default testID settings.testing.timing-readout must stand` : ''],
+      [!m || !guard || sharedBranch,
+        guard ? `gated on \`${guard.getText(page)}\`${gi.whenTrue ? '' : ' (false branch)'} — the row gates itself; `
+          + "only the page's shared useTesterSurface() branch, the one around <TestingSection>, may wrap it" : ''],
+      [!m || (sections.length === 1 && prev === asNode(sections[0])),
+        `not the child immediately after <TestingSection> (it follows ${prev ? prev.getText(page).slice(0, 40) : 'nothing'})`],
+    ].filter(([okay]) => !okay).map(([, why]) => why);
+    if (problems.length === 0) {
+      const at = page.getLineAndCharacterOfPosition(m.getStart(page)).line + 1;
+      ok(`T1. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection> (:${at}), `
+         + `${guard ? `only under the page's shared \`${guard.getText(page)}\` (useTesterSurface) branch` : 'ungated'}, default testID`);
+    } else {
+      fail("T1. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection>, ungated or only under the page's useTesterSurface() branch, with its default testID",
+           problems.join('; '));
+    }
+  }
+
+  // T2. The hub's Testing row shows on exactly `__DEV__ || testing.stage_users
+  //     || testing.timing_readout`: an || chain of __DEV__ and flag reads (an
+  //     inline useFlag('…') / useTimingReadoutEnabled() call, or a const bound
+  //     to one), so a readout-only device reaches the readout. Since #354 D-7
+  //     the row reads the shared useTesterSurface() (inline, or a const bound
+  //     to it), so that call resolves through its ONE return expression in
+  //     settings/useTesterSurface.ts: the chain is read from the definition,
+  //     not trusted from the name. The row must be in the TRUE branch:
+  //     `cond ? null : <Row>` would show it to everyone else.
+  {
+    const hub = parseFile(path.join(SETTINGS_DIR, 'SettingsHubScreen.tsx'));
+    const rows = findAll(hub, (n) => jsxOpen(n) && attrStr(n, 'testID') === 'settings.hub.testing');
+    const info = rows.length === 1 ? innermostGuardInfo(rows[0]) : null;
+    const cond = info ? info.cond : null;
+    // useTesterSurface()'s ONE return expression, from its definition (a
+    // function declaration or a const arrow/function) in the hook file.
+    const HOOK = path.join(SETTINGS_DIR, 'useTesterSurface.ts');
+    const hookSf = fs.existsSync(HOOK) ? parseFile(HOOK) : null;
+    const hookReturn = (() => {
+      if (!hookSf) return null;
+      const defs = findAll(hookSf, (n) => (ts.isFunctionDeclaration(n) && n.name && n.name.text === 'useTesterSurface')
+        || (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'useTesterSurface'));
+      const fn = defs.length === 1 ? (ts.isVariableDeclaration(defs[0]) ? defs[0].initializer : defs[0]) : null;
+      if (!fn || !(ts.isFunctionDeclaration(fn) || ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) || !fn.body) return null;
+      if (!ts.isBlock(fn.body)) return fn.body;
+      const rets = findAll(fn.body, (n) => ts.isReturnStatement(n));
+      return rets.length === 1 && rets[0].expression ? rets[0].expression : null;
+    })();
+    // The flag reads `e` stands for in `sf`, flattening ||: null when any
+    // operand is something else (so it can't be counted as a flag).
+    const flagsOf = (e, sf, depth = 0) => {
+      while (e && ts.isParenthesizedExpression(e)) e = e.expression;
+      if (!e || depth > 8) return null;
+      if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        const l = flagsOf(e.left, sf, depth + 1);
+        const r = flagsOf(e.right, sf, depth + 1);
+        return l && r ? [...l, ...r] : null;
+      }
+      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression)) {
+        if (e.expression.text === 'useFlag' && isStr(e.arguments[0])) return [e.arguments[0].text];
+        if (e.expression.text === 'useTimingReadoutEnabled' && e.arguments.length === 0) return ['testing.timing_readout'];
+        if (isTesterSurfaceCall(e)) return hookReturn ? flagsOf(hookReturn, hookSf, depth + 1) : null;
+        return null;
+      }
+      if (ts.isIdentifier(e)) {
+        if (e.text === '__DEV__') return ['__DEV__'];
+        const decls = findAll(sf, (n) => ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === e.text);
+        return decls.length === 1 && decls[0].initializer ? flagsOf(decls[0].initializer, sf, depth + 1) : null;
+      }
+      return null;
+    };
+    const read = (cond && flagsOf(cond, hub)) || [null];
+    const want = ['__DEV__', 'testing.stage_users', 'testing.timing_readout'];
+    const exact = read.every(Boolean) && read.length === want.length && want.every((k) => read.includes(k));
+    if (rows.length === 1 && cond && info.whenTrue && exact) {
+      ok(`T2. the hub's Testing row shows on \`${cond.getText(hub)}\` = __DEV__ || testing.stage_users || testing.timing_readout`);
+    } else {
+      fail("T2. the hub's Testing row shows on __DEV__ || testing.stage_users || testing.timing_readout",
+           rows.length !== 1 ? `found ${rows.length} settings.hub.testing rows`
+             : !cond ? 'the row is unconditional — every user would see Testing'
+             : !info.whenTrue ? `the row is in the FALSE branch of \`${cond.getText(hub)}\` — every non-tester would see Testing`
+             : `gated on \`${cond.getText(hub)}\`, which reads [${read.map((k) => k || '?').join(', ')}]`
+               + (read.includes('testing.timing_readout') ? '' : ' — a readout-only device cannot reach the readout'));
+    }
+  }
+
+  // T3 (D-166). Neither tester flag is a LAUNCHED default. Those baked defaults
+  //     apply from first paint, before the first flag fetch, so either key there
+  //     would show Testing (and the readout) to every fresh install.
+  {
+    const flagsFile = path.join(__dirname, '..', 'src', 'state', 'useFeatureFlags.ts');
+    const sf = parseFile(flagsFile);
+    const decls = findAll(sf, (n) => ts.isVariableDeclaration(n) && ts.isIdentifier(n.name)
+      && n.name.text === 'LAUNCHED_FLAG_DEFAULTS');
+    const obj = decls.length === 1 && decls[0].initializer
+      && ts.isObjectLiteralExpression(decls[0].initializer) ? decls[0].initializer : null;
+    const keys = obj ? obj.properties.map((p) => (p.name && (isStr(p.name) || ts.isIdentifier(p.name)) ? p.name.text : null)) : [];
+    const banned = ['testing.timing_readout', 'testing.stage_users'].filter((k) => keys.includes(k));
+    const opaque = obj ? obj.properties.filter((p) => !p.name).length : 0;
+    if (obj && banned.length === 0 && opaque === 0) {
+      ok(`T3. LAUNCHED_FLAG_DEFAULTS (${keys.length} keys) holds neither testing.timing_readout nor testing.stage_users`);
+    } else {
+      fail('T3. LAUNCHED_FLAG_DEFAULTS holds neither testing.timing_readout nor testing.stage_users',
+           !obj ? 'LAUNCHED_FLAG_DEFAULTS object literal not found in state/useFeatureFlags.ts'
+             : opaque ? `${opaque} spread/computed entr${opaque === 1 ? 'y' : 'ies'}, so its keys can't be checked`
+             : `${banned.join(' and ')} would be on for every fresh install until its first flag fetch`);
+    }
+  }
+
+  // T4. The readout is mounted ONLY on the Testing page: any other mount (the
+  //     hub, a tab screen) would escape the Testing row's tester gate.
+  {
+    const SRC = path.join(__dirname, '..', 'src');
+    const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+      d.isDirectory() ? walk(path.join(dir, d.name)) : d.name.endsWith('.tsx') ? [path.join(dir, d.name)] : []);
+    const where = [];
+    for (const abs of walk(SRC)) {
+      if (!fs.readFileSync(abs, 'utf8').includes('TimingReadoutRow')) continue;
+      const sf = parseFile(abs);
+      for (const el of byTag(sf, 'TimingReadoutRow')) {
+        where.push(`${path.relative(SRC, abs)}:${sf.getLineAndCharacterOfPosition(el.getStart(sf)).line + 1}`);
+      }
+    }
+    const only = where.length === 1 && where[0].startsWith(path.join('screens', 'settings', 'SettingsTestingScreen.tsx') + ':');
+    if (only) ok(`T4. <TimingReadoutRow /> is mounted only on the Testing page (${where[0]})`);
+    else fail('T4. <TimingReadoutRow /> is mounted only on the Testing page', `mounts: ${where.join(', ') || 'none'}`);
+  }
+}
+
 // ── 5 + 6. #354 review items, on the TypeScript AST ──────────────────────
 {
   let ts;
@@ -522,49 +745,6 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
              : !isPredicate(page, g.test) ? `gated on \`${g.test.getText(page)}\`, not the shared predicate`
              : !importsPredicate(page) ? "the page doesn't import useTesterSurface from './useTesterSurface'"
              : 'the false branch is not the settings.testing-unavailable line');
-    }
-  }
-
-  // 5e. #363's TimingReadoutRow (head-eng ruling 11) is mounted directly
-  //     AFTER <TestingSection> on the Testing page (under its "Testing"
-  //     banner), imported from the components path, with its default testID
-  //     (no props) and no gate of its own: the component self-gates on
-  //     `testing.timing_readout`, so the only conditional around it is the
-  //     page's shared D-7 predicate, the same one TestingSection sits under.
-  {
-    const page = parseFile(path.join(SETTINGS_DIR, 'SettingsTestingScreen.tsx'));
-    const imported = page.statements.some((s) => ts.isImportDeclaration(s) && isStr(s.moduleSpecifier)
-      && s.moduleSpecifier.text === '../../components/TimingReadoutRow' && s.importClause
-      && s.importClause.namedBindings && ts.isNamedImports(s.importClause.namedBindings)
-      && s.importClause.namedBindings.elements.some((e) => e.name.text === 'TimingReadoutRow' && !e.propertyName));
-    const mounts = byTag(page, 'TimingReadoutRow');
-    const m = mounts.length === 1 ? mounts[0] : null;
-    const g = m ? innermostGuard(m) : null;
-    const sections = byTag(page, 'TestingSection');
-    const sg = sections.length === 1 ? innermostGuard(sections[0]) : null;
-    const asNode = (el) => (el && ts.isJsxOpeningElement(el) ? el.parent : el);
-    const node = asNode(m);
-    const sectionNode = sections.length === 1 ? asNode(sections[0]) : null;
-    const holder = node && ts.isJsxElement(node.parent) ? node.parent : null;
-    const kids = holder ? holder.children.filter((c) => !(ts.isJsxText(c) && !c.text.trim())) : [];
-    const at = kids.indexOf(node);
-    const prev = at > 0 ? kids[at - 1] : null;
-    const problems = [
-      [imported, "no `import { TimingReadoutRow } from '../../components/TimingReadoutRow'`"],
-      [mounts.length === 1, `found ${mounts.length} <TimingReadoutRow> mounts, want 1`],
-      [!m || m.attributes.properties.length === 0,
-        m ? `passes props (${m.attributes.getText(page)}); the default testID settings.testing.timing-readout must stand` : ''],
-      [!m || (g && sg && g.inTrue && g.test === sg.test && isPredicate(page, g.test)),
-        !g ? 'renders outside the useTesterSurface() branch'
-          : `gated on \`${g.test.getText(page)}\`, not only the page's shared predicate — the row gates itself`],
-      [!m || (!!sectionNode && prev === sectionNode),
-        `not the child immediately after <TestingSection> (it follows ${prev ? prev.getText(page).slice(0, 40) : 'nothing'})`],
-    ].filter(([okay]) => !okay).map(([, why]) => why);
-    if (problems.length === 0) {
-      ok(`5e. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection> (${line(page, m)}), ungated, default testID`);
-    } else {
-      fail('5e. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection>, ungated, with its default testID',
-           problems.join('; '));
     }
   }
 

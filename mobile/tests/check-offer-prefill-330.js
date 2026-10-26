@@ -341,7 +341,8 @@ assert(
   'sabotage detected: after a scoped zero-result, toggling fairness leaves the stale "No trade found" card until the next search (QA F-4)',
 );
 assert(
-  /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current \}\)/.test(tradesCode),
+  // (200 ms path C stamps the dispatch-time device page key beside it.)
+  /onMutate: \(\) => \(\{ epoch: deckEpochRef\.current(, deviceKey)? \}\)/.test(tradesCode),
   'S-5 every dispatch stamps the current epoch into the mutation context',
 );
 assert(

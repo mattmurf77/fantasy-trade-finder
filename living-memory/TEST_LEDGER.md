@@ -1,3 +1,104 @@
+## 2026-10-26 — I-2 (4/4): overhaul blocks on a failed roster read + readable refusals (stacked on #413)
+
+Full gates. Completes I-2, the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_overhaul.py` has 14 tests. The targeted set passes, 123 tests: `test_overhaul_api` (27), `test_overhaul_service` (23), and the I-2 Sleeper (24), MFL (15) and ESPN (20) files. `test_sleeper_write_route` (35), `test_mfl_propose_route` (25) and `test_espn_propose_route` (17) also pass after the copy moved to `backend/ownership_copy.py`.
+- **Sabotage, each red then restored:**
+  - the session-roster fallback restored at prepare → 4 red;
+  - the raw-id copy restored ("You no longer own {id}.") → 5 red;
+  - the /send 409 `detail` dropped → 1 red;
+  - the `offer_stale` ownership detail dropped → 1 red.
+- **Contract:**
+  - **R3:** on a send platform, prepare-send with a failed live roster read → 503 `rosters_unavailable` `kind:"network"` with "Couldn’t confirm rosters with {platform} …". No token is minted and the session fallback is not stored.
+  - **R4:** receipt ownership blockers use the shared I-2 copy, one per offer and side, named from the offer card (count fallback, never a raw id).
+  - **/send:** an ownership 409 carries `detail == message`. So does an `offer_stale` 409 when the offer went stale for ownership: a give-side move found by `/refresh` is the only way a liked offer goes stale. That 409 uses the offer's own ownership blocker, which now carries `assets`.
+  - **Per-offer refusals:** a core's 422 reaches `attempts[].error.message` on `/send` and on `GET /api/overhauls/{id}`.
+- **Client code-walk (no client change):**
+  - `OverhaulSummaryScreen`: a failed prepare goes to `setPrepareError(errorDetail(e))` (`:146`, card at `:274-277`); an ownership 409 at send goes to the toast (`:196`); receipt lines render `item.message` (`:295`, `:405-416`).
+  - `OverhaulPlanScreen` renders `a.error.message` for `send_failed` attempts (`:290-292`).
+- **Not covered:**
+  - An offer that was staled for ownership but whose assets have since come back keeps today's `offer_stale` 409 with no `detail`.
+  - `pool_violation`, `asset_reserved` and the overlap blocker messages still name raw ids (outside I-2).
+
+## 2026-10-26 — I-2 (3/4): ESPN send-time player ownership + validate routing + 0f guard (stacked on #412)
+
+Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_espn_ownership.py` has 20 tests, including a send through the overhaul batch with the real `_espn_propose_core`. The targeted set passes, 171 tests: `test_espn_propose_route` (17), `test_espn_write` (29), `test_trade_send_validate` (16), the I-2 Sleeper (24) and MFL (15) files, `test_overhaul_api` (27) and `test_overhaul_service` (23). `test_sleeper_write_route` (35) and `test_mfl_propose_route` (25) also pass with the 0f guard.
+- **Sabotage, each red then restored:**
+  - the ESPN player refusals removed → 4 red;
+  - the R3 handling removed (error mapping, transport catch, shape guards) → 6 red;
+  - the validate ESPN branch and linked-platform guard removed → 5 red;
+  - the 0f guard removed → 2 red.
+- **Contract:** players are checked against the live `mTeam+mRoster` read the ESPN core already makes (no extra call). A moved player → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's helper. A failed read → 502 `espn_unavailable` `kind:"network"` with "Couldn’t confirm rosters with ESPN …". That failure covers transport errors, which used to escape as a 500, and a team with no `roster` object.
+- **Validate:** an ESPN league checks the live mRoster (`asset_unmapped` / `player_moved` / `roster_not_found`). Any other linked-platform id returns `checked:false`. Neither path calls Sleeper.
+- **NEXT.md 0f:** `_sleeper_propose_core` returns 400 `bad_request` for a linked-platform id before any Sleeper call.
+- **Client code-walk (no client change):** `SendInEspnButton` has no branch for the two 422s or `espn_unavailable`, so all three reach its catch-all (`:216-220`), which shows `detail`. `espn_write_failed` (`:205-215`) would have read "ESPN rejected the request".
+
+## 2026-10-26 — I-2 (2/4): MFL send-time player + pick ownership + R3 (stacked on #411)
+
+Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_mfl_ownership.py` has 15 tests, including a send through the overhaul batch with the real `_mfl_propose_core`. The targeted set passes, 133 tests: `test_mfl_propose_route` (25; its fixture now serves both live exports), `test_mfl_trade_lifecycle` (22), `test_mfl_write` (21), `test_overhaul_api` (27), `test_overhaul_service` (23).
+- **Sabotage, each red then restored:**
+  - the player check removed → 4 red;
+  - the pick check removed → 5 red;
+  - the R3 read-failure returns removed → 4 red.
+- **Contract:** players are checked against MFL's live `rosters` export and FTF picks against its live `futureDraftPicks` export (live rather than the stored snapshot: the zero-auth fetcher already exists, so it is one read). A moved asset → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's shared helper (names or pick labels, a count when one is missing, never a raw id). A failed read → 502 `mfl_unavailable` `kind:"network"` with "Couldn’t confirm rosters with MFL …" (coordinator's call: the core's existing read-failure 502, not `mfl_write_failed`).
+- **Client code-walk (no client change):**
+  - `SendInMflButton` has no branch for `asset_not_owned`, `counterparty_asset_not_owned` or `mfl_unavailable`, so all three reach its catch-all (`:169-173`), which shows `detail`.
+  - With `mfl_write_failed`, the R3 copy would have been framed as "MFL rejected the request" (`:158-168`).
+- **Not covered:** pre-encoded `give_pick_assets` / `receive_pick_assets`; `git grep` finds no sender in mobile, web, the extension or overhaul.
+- **release-lead P2s (2026-10-26):** `test_i2_mfl_ownership.py` now has 27 tests.
+  - **P2-2:** a dead cookie (401/403) on either ownership read → 409 `mfl_auth_expired`, the credential is dropped, and no provider call is made. It is told apart from other failures by an opt-in `raise_auth` on the two fetchers; their default `{}` contract is pinned by a test. Sabotage → 2 red.
+  - **P2-1:** timeout, connection reset, `IncompleteRead` and `BadStatusLine` on either read → readable 502 `mfl_unavailable`, and through the overhaul send every attempt is `send_failed` with no reservation held. Sabotage → 9 red.
+
+## 2026-10-26 — I-2 (1/4): Sleeper send-time player ownership + R3 (#411)
+
+Full gates. This is the launch condition for the 200 ms waiver W-AC-L5 (Product, 2026-10-26). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_sleeper_ownership.py` has 24 tests, including a send through the overhaul batch with the real core. The targeted set passes, 211 tests: `test_sleeper_write_route` (35), plus the validate, pick-tradability, traded-picks, overhaul api/service, pick-assignment and verified-sessions files.
+- **Sabotage, each red then restored:**
+  - the ownership refusals removed → 12 red;
+  - R3 turned back into a 400 → 5 red;
+  - the raw-id fallback restored → 6 red.
+- **Contract:** a 422 `asset_not_owned` / `counterparty_asset_not_owned` (named players, or a count, never a raw id; `detail == message`), checked inside `_sleeper_propose_core` before any provider write, so overhaul inherits it.
+  - A failed live roster read → 502 `sleeper_write_failed` `kind:"network"`.
+  - The copy is final (marketing via head-bizops).
+- **Client code-walk (no client change, per Product):**
+  - `SendInSleeperButton` sends the new codes to its catch-all (`:335-339`), which shows `detail`.
+  - In overhaul, the message reaches `attempts[i].error.message`, which `OverhaulPlanScreen.tsx:290-292` shows.
+  - `/api/trades/queue` makes no platform write.
+- **Not covered:** whether Sleeper itself would reject a non-owned player is unverified; the server check now makes that moot.
+
+## 2026-10-26 — Timing readout mounted on Settings › Testing; hub row opens for it (#363 ruling 11)
+
+Full gates, not express (scope: #363's trades-200ms scope, head-eng ruling 11; in the 200 ms set on head-eng's call, 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `SettingsTestingScreen` mounts `<TimingReadoutRow />` directly after `<TestingSection>` (default testID `settings.testing.timing-readout`, no gate of its own). The hub's Testing row now shows on `__DEV__ || testing.stage_users || testing.timing_readout`. The flat `SettingsScreen` is unchanged.
+- **New pins:**
+  - `check-settings-ia` T1 (AST): the components-path import, exactly one mount, no props, no conditional, the child right after `<TestingSection>`.
+  - `check-settings-ia` T2 (AST): the `settings.hub.testing` row's condition is an `||` chain that resolves to exactly `__DEV__`, `testing.stage_users` and `testing.timing_readout`, with the row in the branch taken when that is true.
+  - `check-settings-ia` T3 (AST, D-166): `LAUNCHED_FLAG_DEFAULTS` holds neither `testing.timing_readout` nor `testing.stage_users`, and has no spread or computed entry hiding a key.
+  - `check-settings-ia` T4 (AST): `<TimingReadoutRow />` is mounted nowhere in `mobile/src` except the Testing page.
+  - `check-settings-testids`: `settings.testing.timing-readout` in NEW_GATED, pinned to `TimingReadoutRow.tsx`.
+- **Sabotage (each red, then green on restore; files byte-identical after): 18/18.**
+  - T1, 10: import removed, wrong path, aliased, mount removed, mounted twice, testID overridden, own `&&` gate, moved before `TestingSection`, a row in between, moved outside the ScrollView.
+  - T2, 6: gate reverted to `__DEV__ || stage_users`, const bound to the wrong flag key, `||` → `&&`, `stage_users` dropped, `__DEV__` dropped, an extra flag ORed in.
+  - testids, 2: the default id renamed; the default literal removed.
+  - **release-lead QA follow-up (`#407` GO-with-notes), 8 more, all red:** T3 ×5 (`timing_readout` or `stage_users` added at the top or the end of `LAUNCHED_FLAG_DEFAULTS`, and a spread entry); T2 ×2 (the row moved to the false branch of the right condition, and the gate reverted to `__DEV__ || stage_users`); T4 ×1 (a second mount on the hub). Checks renamed from 5a/5b to T1–T4 so they don't collide with #360's numbering.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; all 117 `check-*.js` pass.
+- **Code-walk (App Store build, only `testing.timing_readout` on, hub on):**
+  1. `RootNav.tsx:272-274` mounts the hub.
+  2. `SettingsHubScreen.tsx:94` is true, so `:337` shows the Testing row (`:339`).
+  3. On `SettingsTestingScreen.tsx`, `:50` `TestingSection` renders its "Testing" banner (`TestingSection.tsx:51`) and the unconditional "Test feedback" row (`:53-65`); "Test stages" stays hidden (`:66`, `stage_users` off).
+  4. `:55` renders the readout (`TimingReadoutRow.tsx:30` passes).
+- **TestFlight checklist (operator, `testing.timing_readout` delivered to the device):**
+  1. Settings shows a Testing row; tap it. Under the "Testing" banner and "Test feedback", the last row is "Last tap to first card".
+  2. Before any Find trades tap this session it reads "No trade search yet this session". After a tap that shows a first card it reads "N ms · network · launch", plus " · <serve_source>" (e.g. " · device") when R2 carried one.
+  3. With the flag off (and `stage_users` off), the hub has no Testing row.
+- **Not run yet:** the TestFlight checklist.
+
 ## 2026-10-25 — 200 ms path, mobile pieces (#363): pass A, M, C — evidence
 
 Full gates, not express (PRD #339; eng scope v1.3). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.

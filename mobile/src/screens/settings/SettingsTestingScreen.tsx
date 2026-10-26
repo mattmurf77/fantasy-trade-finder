@@ -13,13 +13,17 @@
 // BANNER: owned by TestingSection itself (<TickLabel>Testing</TickLabel>), so
 // this page adds none.
 //
-// GATING. Per plan §3 the route is registered unconditionally. The hub's entry
-// row and this page's body read the SAME predicate, useTesterSurface()
-// (`__DEV__ || testing.stage_users || testing.timing_readout`, #354 D-7). When
-// it is false — a non-tester following the `settings/testing` deep link — the
-// page shows an honest unavailable line instead of an empty "Testing" banner
-// (the RookieRanksScreen stale-link precedent); the header Back stays. When it
-// is true the section renders, and each row inside keeps its own flag gate.
+// GATING. Per plan §3 the route is registered unconditionally and the HUB ENTRY
+// ROW is gated, matching the RootNav convention; the flat list's shipped
+// `{__DEV__ || stageUsersEnabled ? testingSection : null}` in SettingsScreen.tsx
+// is unchanged. The hub's entry row and this page's body read the SAME
+// predicate, useTesterSurface() (`__DEV__ || testing.stage_users ||
+// testing.timing_readout`, #354 D-7; #407 gave the hub row the same three, so
+// the readout's flag alone opens the page). When it is false — a non-tester
+// following the `settings/testing` deep link — the page shows an honest
+// unavailable line instead of an empty "Testing" banner (the RookieRanksScreen
+// stale-link precedent); the header Back stays. When it is true the section
+// and the readout render, and each keeps its own flag gate.
 //
 // NON-TESTER STATE (marketing-lead copy addendum 6A). The line reads "There's
 // nothing on this page." (no tester vocabulary, no promise it comes back),

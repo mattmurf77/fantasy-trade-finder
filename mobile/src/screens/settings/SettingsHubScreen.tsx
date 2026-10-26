@@ -87,7 +87,9 @@ export default function SettingsHubScreen({ navigation }: any) {
   const verification = useSession((s) => s.verification);
 
   // Flag store — free. The Testing row shows exactly when its page has
-  // something to render (useTesterSurface, #354 D-7); `ux.help_surface`
+  // something to render (useTesterSurface, #354 D-7), which includes
+  // `testing.timing_readout` (#363 ruling 11: the operator's phone gets only
+  // that flag, and the readout lives on the Testing page); `ux.help_surface`
   // decides whether the About page actually has an FAQ link to advertise.
   const testerSurface = useTesterSurface();
   const helpSurfaceOn = useFlag('ux.help_surface');
@@ -329,8 +331,10 @@ export default function SettingsHubScreen({ navigation }: any) {
         />
 
         {/* Dev builds and devices with a tester flag only — the same
-            predicate the Testing page body uses (useTesterSurface, D-7). No
-            banner: it is not a group, it is a build-conditional escape hatch. */}
+            predicate the Testing page body uses (useTesterSurface, D-7: the
+            shipped flat list's `stage_users` gate plus the timing-readout
+            flag, so a readout-only device can reach the readout). No banner:
+            it is not a group, it is a build-conditional escape hatch. */}
         {testerSurface ? (
           <NavRow
             testID="settings.hub.testing"

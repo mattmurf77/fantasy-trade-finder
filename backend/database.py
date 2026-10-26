@@ -18,6 +18,7 @@ import math
 import os
 import threading
 import time
+import zlib
 from datetime import datetime, timezone
 
 try:
@@ -26,10 +27,11 @@ except ImportError:                # pragma: no cover
     ZoneInfo = None  # type: ignore
 
 from sqlalchemy import (
-    Column, Float, Index, Integer, MetaData, String, Table, Text, UniqueConstraint,
-    create_engine, delete, func, insert, literal, or_, select, update, and_, text,
+    Column, Float, Index, Integer, LargeBinary, MetaData, String, Table, Text, UniqueConstraint,
+    case, create_engine, delete, func, insert, literal, or_, select, update, and_, text,
 )
 from sqlalchemy import event as sa_event
+from sqlalchemy.types import TypeDecorator
 from datetime import timedelta
 
 # #158 — shared pick ladder + owned-pick pool_value reconciliation. Lives in a
@@ -1088,6 +1090,30 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("trade_concept_id",          String),
     Column("policy_variant",            String),
     Column("source_like_impression_id", String),
+    # ── deferred evidence (ADR-025 stage 1; flag trade.first_page_store) ──
+    # Which evidence rule wrote this row. Set only on rows written at delivery
+    # from a deferred job's build-time snapshot (server._DeckEvidence); NULL on
+    # every row written at build (flag off, or a live-mode job) and on
+    # pre-change rows. Ruling 17's precedence, highest first:
+    #   'ghost'        C5: never delivered; a narrow row, even inside the first 30
+    #   'first30'      C4: card_index < 30, full whether delivered or not
+    #   'delivered'    a card past the first 30 sent to a client
+    #   'archive'      C8: an undelivered card past the first 30 of a 2% deck
+    #                  (eval contract.is_archive_deck)
+    #   'full_interim' stage 1 only, at archive's rank: the same card on any
+    #                  other deck, written full until packing replaces it
+    # 'partial_run' overrides them all (ruling 21; replay excludes it): every
+    # row of a run that ended partial (error, timeout, supersede), and of a
+    # deck first delivered after its job left the process with cards past
+    # the stored ones (S1b). A card S0's I-1 dropped is never written (C-b).
+    # A later delivery raises only 'archive' and 'full_interim' to
+    # 'delivered'. No row is deleted: C8's archive retention waits for the
+    # packing stage (models-lead R2.6 S2).
+    Column("evidence_tier",             String),
+    # ISO UTC: when this card was first sent to a client (any tier, first30
+    # included). NULL for an undelivered card (first30, archive, full_interim),
+    # a ghost, and every row written at build (granted by head-eng, G2).
+    Column("delivered_at",              String),
 )
 
 Index(
@@ -1099,6 +1125,12 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+# C8 retention (ADR-025) has no index yet: the archive partial index arrives
+# with stage-2 packing, which restores the purge (models-lead R2.6 S2). Build it
+# then with CREATE INDEX CONCURRENTLY off the boot path (an operator one-off or
+# a migration script, with a lock_timeout), never in _migrate_db: a plain
+# CREATE INDEX on prod's deck_impressions blocks writes for a full scan and
+# can outlast gunicorn's 120 s boot timeout.
 
 # Private debug evidence, content-addressed within one user/job. Core card
 # evidence and labels remain on deck_impressions; only debug snapshots expire.
@@ -1137,6 +1169,104 @@ Index(
     deck_candidate_sets_table.c.user_id,
     deck_candidate_sets_table.c.league_id,
 )
+
+
+class CompressedJSON(TypeDecorator):
+    """JSON stored zlib-compressed in a binary column (BLOB / BYTEA).
+
+    Bind: bytes pass through, so a writer can compress once and count the
+    bytes; any other value is JSON-encoded and compressed here. Result: the
+    decoded JSON, or None when the bytes do not decode. A read (the page
+    serve, the account export) therefore never raises on a bad row, and the
+    export archive stays JSON.
+    """
+    impl = LargeBinary
+    cache_ok = True
+
+    @staticmethod
+    def encode(value) -> bytes:
+        return zlib.compress(json.dumps(value, separators=(",", ":")).encode("utf-8"))
+
+    def process_bind_param(self, value, dialect):
+        if value is None or isinstance(value, (bytes, bytearray, memoryview)):
+            return value
+        return self.encode(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        try:
+            return json.loads(zlib.decompress(bytes(value)))
+        except (zlib.error, ValueError, TypeError) as err:
+            log.warning("compressed JSON column does not decode: %s", err)
+            return None
+
+
+# ── P1 first-page store (flag trade.first_page_store) ───────────────────────
+# docs/plans/trade-time-to-suggestion/scope-eng-200ms.md §2, §6.2, §7. One row
+# per (user, league, format, request_scope): the first trade_pages_stored ×
+# trade_page_size cards of the latest complete organic job, in final served
+# order, plus the stamps the serve compares (roster_fp, values_snapshot_id,
+# engine_version, config_signature, experiment_digest). Read and written only by server.py while
+# the store is on (the flag and the first_page_store_enabled knob). user_id is
+# the account deletion/export key
+# (accounts._ADDITIONAL_PRIVATE_TABLES). Upserted by save_trade_page with a
+# supersede guard: a row is replaced only by one built at the same time or
+# later. An input change (rankings, preferences, dispositions) marks rows
+# state='stale' and advances built_at to the change (mark_trade_pages_stale),
+# so no deck admitted before it can overwrite the mark. A roster move needs no
+# mark: the serve compares roster_fp. evidence_blob holds a deferred deck's
+# build-time evidence for its stored cards (server._DeckEvidence, ADR-025
+# stage 1), shrunk as rows are written at delivery; NULL for a deck with none.
+trade_page_store_table = Table("trade_page_store", metadata,
+    Column("id",                 Integer, primary_key=True, autoincrement=True),
+    Column("user_id",            String,  nullable=False),
+    Column("league_id",          String,  nullable=False),
+    Column("scoring_format",     String,  nullable=False),
+    Column("request_scope",      String,  nullable=False),   # "organic:f=0.50"
+    Column("roster_fp",          String,  nullable=False),   # rfp1 at the job's kickoff
+    Column("values_snapshot_id", String,  nullable=False),   # vsn1 at the job's kickoff
+    Column("engine_version",     String,  nullable=False),
+    Column("config_signature",   String,  nullable=False),   # the job's request signature
+    Column("experiment_digest",  String,  nullable=False),   # the user's deck-affecting experiment variants
+    Column("deck_job_id",        String,  nullable=False),
+    Column("built_at",           String,  nullable=False),   # ISO UTC, the job's admission
+    Column("expires_at",         String,  nullable=False),   # ISO UTC, earliest stored card expiry
+    Column("last_served_at",     String,  nullable=True),    # ISO UTC
+    Column("card_count",         Integer, nullable=False),
+    Column("pages_blob",         CompressedJSON, nullable=False),  # {"v", "opponents_total", "cards"}
+    Column("evidence_blob",      CompressedJSON, nullable=True),   # same BLOB / BYTEA type
+    Column("stored_bytes",       Integer, nullable=False),   # len(pages_blob) + len(evidence_blob)
+    Column("state",              String,  nullable=False),   # "ready" | "stale"
+    UniqueConstraint("user_id", "league_id", "scoring_format", "request_scope",
+                     name="uq_trade_page_store_scope"),
+)
+
+Index("ix_trade_page_store_last_served", trade_page_store_table.c.last_served_at)
+Index("ix_trade_page_store_league", trade_page_store_table.c.league_id)
+
+# ── P2 deck lineage (flag trade.first_page_store) ───────────────────────────
+# One row per organic deck: (user_id, deck_job_id) and the scope it is built
+# under. Inserted (insert-or-ignore, record_trade_deck_lineage) by the deck's
+# job worker when it starts, before the engine runs (best-effort, its own
+# transaction), so a deck still running at a restart has one too.
+# /api/trades/status?deck=D reads the requester's row when D's job is gone
+# from this process and no page row is D's own (a deploy restarts the one
+# worker): the row proves D organic and names its scope, so D is rebased
+# instead of 404. Purged after 24 h by the page-store eviction pass. user_id
+# is the account deletion/export key (accounts._ADDITIONAL_PRIVATE_TABLES).
+trade_deck_lineage_table = Table("trade_deck_lineage", metadata,
+    Column("id",             Integer, primary_key=True, autoincrement=True),
+    Column("user_id",        String,  nullable=False),
+    Column("deck_job_id",    String,  nullable=False),
+    Column("league_id",      String,  nullable=False),
+    Column("scoring_format", String,  nullable=False),
+    Column("request_scope",  String,  nullable=False),   # "organic:f=0.50"
+    Column("recorded_at",    String,  nullable=False),   # ISO UTC (page_store_iso): the first page write
+    UniqueConstraint("user_id", "deck_job_id", name="uq_trade_deck_lineage_deck"),
+)
+
+Index("ix_trade_deck_lineage_recorded", trade_deck_lineage_table.c.recorded_at)
 
 # ── suggestion.telemetry — executed-trade tagging ───────────────────────────
 # One row per captured sleeper_trades transaction examined by the matcher
@@ -2973,6 +3103,17 @@ _MODEL_CONFIG_DEFAULTS = [
     # ── Paged trade responses (E2, docs/plans/trade-time-to-suggestion) ──
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
     ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
+    # ── S0 serve rules (roster fingerprint contract v0.4 §3, §3b) ────────
+    ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
+    ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
+    ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
+    ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
+    # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
+    ("first_page_store_enabled", 1.0, "P1 kill knob, ANDed with the flag trade.first_page_store: any finite value >= 1 keeps the first-page store on; 0, a negative, NaN or an unreadable value stops every store read, write, serve and stale mark. Deploy-free via scripts/set_knob.py. Re-enabling after an off period (this knob or the flag): set it to its previous value + 1; it's hashed into every page's config_signature, so pages that missed the off period's stale marks fall through and rebuild. Alternative: UPDATE trade_page_store SET state = 'stale'"),
+    ("trade_pages_stored", 3.0, "Pages of trade_page_size cards stored per trade_page_store row; clamped to 1-10 at read"),
+    ("trade_prefetch_remaining", 50.0, "Served as `prefetch_remaining` on paged responses: the client fetches the next page when this many ready cards remain; clamped to 1-200 at read. 50 per head-eng ruling 10's sizing: 44-card swipe bursts at 0.4 s/card plus the prefetch round trip"),
+    ("trade_page_store_evict_days", 30.0, "trade_page_store eviction: delete rows not served (or, never served, not built) in this many days; clamped to 1-3650 at read"),
+    ("trade_page_store_max_bytes", 262144000.0, "trade_page_store eviction: when SUM(stored_bytes) exceeds this, delete least recently served rows until under it"),
     # ── Board-override pins (docs/reviews/2026-08-18-valuation-age-audit.md) ──
     # Read by ranking_service. pin_tier_bounded=0 with the other three at their
     # shipped values restores the pre-2026-08-18 freeze exactly (goldens:
@@ -3549,6 +3690,10 @@ def _migrate_db() -> None:
         ("deck_impressions",   "trade_concept_id",          "VARCHAR"),
         ("deck_impressions",   "policy_variant",            "VARCHAR"),
         ("deck_impressions",   "source_like_impression_id", "VARCHAR"),
+        # Deferred evidence (ADR-025 stage 1): NULL on every row written at
+        # build and on all existing rows; no backfill by design.
+        ("deck_impressions",   "evidence_tier",             "VARCHAR"),
+        ("deck_impressions",   "delivered_at",              "VARCHAR"),
         ("trade_decisions",    "impression_id",             "VARCHAR"),
         ("trade_decisions",    "trade_concept_id",          "VARCHAR"),
         ("trade_matches",      "trade_concept_id",          "VARCHAR"),
@@ -6902,6 +7047,252 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
         ids = select(d.c.snapshot_id).where(d.c.created_at < cutoff).order_by(
             d.c.created_at, d.c.snapshot_id).limit(max(1, min(batch_size, 1000)))
         return conn.execute(delete(d).where(d.c.snapshot_id.in_(ids))).rowcount or 0
+
+
+# Tiers a later delivery raises to 'delivered' (ruling 17's precedence: ghost >
+# first30 > delivered > archive, full_interim beside archive). Never 'ghost' or
+# 'first30': a later delivery never downgrades a tier.
+_EVIDENCE_TIERS_BELOW_DELIVERED = ("full_interim", "archive")
+# Tiers whose rows a later delivery stamps with delivered_at (never a ghost's,
+# never a build-time row's: their tier is NULL).
+_EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive")
+
+
+def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
+                       diagnostics: list | tuple = (), delivered: dict | None = None,
+                       deck_job_id: str | None = None) -> None:
+    """Deferred evidence (ADR-025 stage 1): one delivery write, one transaction.
+
+    `rows` are a deferred deck's build-time deck_impressions rows, each with its
+    `evidence_tier`. Each is inserted at most once per impression_id (ON CONFLICT
+    DO NOTHING), so a retried delivery writes nothing twice, and compacted
+    exactly as save_deck_impressions compacts. Rows are normalized to every
+    column, so full and narrow rows share one VALUES statement. `diagnostics`
+    are the deck's deck_diagnostic_snapshots rows the compacted rows reference
+    (content-addressed, so also at most once). `candidate_set` is the deck's
+    deck_candidate_sets row, also at most once. `delivered` maps impression
+    ids of `deck_job_id` written undelivered and since delivered to their
+    delivery time: each gets that `delivered_at` (once) and, from a lower
+    tier, the tier 'delivered'.
+    """
+    delivered = dict(delivered or {})
+    if not rows and candidate_set is None and not diagnostics and not delivered:
+        return
+    from .deck_diagnostics import compact_rows
+    columns = [c.name for c in deck_impressions_table.columns]
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as upsert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as upsert
+        _save_deck_diagnostic_snapshots(conn, list(diagnostics))
+        for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
+            compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
+            _save_deck_diagnostic_snapshots(conn, snapshots)
+            conn.execute(upsert(deck_impressions_table).values(
+                [{name: row.get(name) for name in columns} for row in compacted]
+            ).on_conflict_do_nothing(index_elements=["impression_id"]))
+        if candidate_set is not None:
+            conn.execute(upsert(deck_candidate_sets_table).values(**candidate_set)
+                         .on_conflict_do_nothing(index_elements=["candidate_set_id"]))
+        i = deck_impressions_table
+        by_time: dict = {}
+        for iid, at in delivered.items():
+            by_time.setdefault(at, []).append(iid)
+        for at, ids in by_time.items():
+            for start in range(0, len(ids), 500):
+                chunk = ids[start:start + 500]
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.delivered_at.is_(None), i.c.evidence_tier.in_(_EVIDENCE_TIERS_DELIVERABLE),
+                ).values(delivered_at=at))
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_DELIVERED),
+                ).values(evidence_tier="delivered"))
+    log.info("deck evidence: deck=%s rows=%d candidate_set=%s delivered=%d",
+             deck_job_id, len(rows), candidate_set is not None, len(delivered))
+
+
+# ---------------------------------------------------------------------------
+# P1 first-page store (trade_page_store; flag trade.first_page_store)
+# ---------------------------------------------------------------------------
+
+_PAGE_STORE_KEY = ("user_id", "league_id", "scoring_format", "request_scope")
+# Replaced on a rebuild. last_served_at survives it: eviction is by use.
+_PAGE_STORE_REPLACED = (
+    "roster_fp", "values_snapshot_id", "engine_version", "config_signature",
+    "experiment_digest", "deck_job_id",
+    "built_at", "expires_at", "card_count", "pages_blob", "evidence_blob", "stored_bytes", "state",
+)
+
+
+def page_store_iso(epoch_seconds: float) -> str:
+    """The one timestamp format of trade_page_store, so ISO strings compare in order."""
+    return datetime.fromtimestamp(epoch_seconds, timezone.utc).isoformat(timespec="microseconds")
+
+
+def trade_deck_lineage_insert(dialect_name: str, row: dict):
+    """The insert-or-ignore of a page row's deck lineage (P2):
+    ON CONFLICT (user_id, deck_job_id) DO NOTHING on both dialects."""
+    if dialect_name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    t = trade_deck_lineage_table
+    return dialect_insert(t).values(
+        user_id=row["user_id"], deck_job_id=row["deck_job_id"], league_id=row["league_id"],
+        scoring_format=row["scoring_format"], request_scope=row["request_scope"],
+        recorded_at=page_store_iso(time.time()),
+    ).on_conflict_do_nothing(index_elements=[t.c.user_id, t.c.deck_job_id])
+
+
+def save_trade_page(row: dict) -> bool:
+    """Upsert one page row. An existing row is replaced only when the new
+    `built_at` is at or after its own (the supersede guard), in one statement,
+    so concurrent writers for a key leave exactly one consistent row. True when
+    the row was written."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as dialect_insert
+        else:
+            from sqlalchemy.dialects.sqlite import insert as dialect_insert
+        stmt = dialect_insert(t).values(**row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[t.c[name] for name in _PAGE_STORE_KEY],
+            set_={name: stmt.excluded[name] for name in _PAGE_STORE_REPLACED},
+            where=t.c.built_at <= stmt.excluded.built_at)
+        return bool(conn.execute(stmt).rowcount)
+
+
+def record_trade_deck_lineage(row: dict) -> None:
+    """Insert-or-ignore one organic deck's lineage row (P2), in its own
+    transaction: written when the deck's job starts, apart from any page write."""
+    with engine.begin() as conn:
+        conn.execute(trade_deck_lineage_insert(conn.dialect.name, row))
+
+
+def _trade_page_columns(evidence: bool):
+    """A page row's columns. The serve reads leave out evidence_blob, so a
+    poll decodes one blob, its pages (#369 QA); only the deferred-evidence
+    writer (server._deck_evidence_write_stored) reads it."""
+    t = trade_page_store_table
+    return [c for c in t.c if evidence or c.name != "evidence_blob"]
+
+
+def load_trade_page(user_id: str, league_id: str, scoring_format: str,
+                    request_scope: str, *, evidence: bool = False) -> dict | None:
+    """The page row for one key (a unique-index read), pages decoded, or None.
+    `evidence`: include evidence_blob (decoded)."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        row = conn.execute(select(*_trade_page_columns(evidence)).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format,
+            t.c.request_scope == request_scope)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
+                            evidence: bool = False) -> dict | None:
+    """The viewer's page row built by `deck_job_id`, or None. `evidence`:
+    include evidence_blob (decoded)."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        row = conn.execute(select(*_trade_page_columns(evidence)).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def load_trade_deck_lineage(user_id: str, deck_job_id: str) -> dict | None:
+    """The requester's lineage row for one deck (a unique-index read), or None."""
+    t = trade_deck_lineage_table
+    with engine.connect() as conn:
+        row = conn.execute(select(t).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
+    return dict(row) if row is not None else None
+
+
+def purge_trade_deck_lineage(*, max_age_s: float = 86400.0, batch_size: int = 500) -> int:
+    """Delete up to `batch_size` lineage rows recorded more than `max_age_s`
+    ago (oldest first); a larger backlog finishes over later passes."""
+    t = trade_deck_lineage_table
+    cutoff = page_store_iso(time.time() - max_age_s)
+    with engine.begin() as conn:
+        old = (select(t.c.id).where(t.c.recorded_at < cutoff)
+               .order_by(t.c.recorded_at, t.c.id).limit(max(1, min(batch_size, 1000))))
+        return conn.execute(delete(t).where(t.c.id.in_(old))).rowcount or 0
+
+
+def touch_trade_page(page_id: int, served_at: str) -> None:
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        conn.execute(update(t).where(t.c.id == page_id).values(last_served_at=served_at))
+
+
+def save_trade_page_evidence(user_id: str, deck_job_id: str, evidence_blob: bytes | None,
+                             pages_bytes: int) -> bool:
+    """Rewrite the evidence_blob of the viewer's row built by `deck_job_id` (and
+    its stored_bytes = pages_bytes + len(evidence_blob)), after a delivery wrote
+    some of its snapshots. A row since rebuilt by another deck is untouched.
+    True when the row was updated."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        return bool(conn.execute(update(t).where(
+            t.c.user_id == user_id, t.c.deck_job_id == deck_job_id,
+        ).values(evidence_blob=evidence_blob,
+                 stored_bytes=pages_bytes + len(evidence_blob or b""))).rowcount)
+
+
+def mark_trade_pages_stale(*, marked_at: str, user_id: str | None = None,
+                           league_id: str | None = None) -> int:
+    """One bounded UPDATE after an input change: every row of `user_id` (all
+    its leagues), or every row in `league_id`. Sets state='stale' and advances
+    built_at to `marked_at`, so the supersede guard refuses any deck admitted
+    before the change. Returns the rows marked."""
+    if (user_id is None) == (league_id is None):
+        raise ValueError("exactly one of user_id, league_id")
+    t = trade_page_store_table
+    scope = t.c.user_id == user_id if user_id is not None else t.c.league_id == league_id
+    with engine.begin() as conn:
+        return conn.execute(update(t).where(scope).values(
+            state="stale",
+            built_at=case((t.c.built_at < marked_at, marked_at), else_=t.c.built_at),
+        )).rowcount or 0
+
+
+def evict_trade_pages(*, evict_days: int, max_bytes: int,
+                      batch_size: int = 500) -> tuple[int, int]:
+    """One bounded pass of page-store eviction; returns (aged, over_budget).
+
+    1. Delete up to `batch_size` rows whose last serve (or, never served, whose
+       build) is older than `evict_days`.
+    2. If SUM(stored_bytes) is still above `max_bytes`, delete least recently
+       served rows, from up to `batch_size`, until it is not.
+    A larger backlog finishes over later passes.
+    """
+    t = trade_page_store_table
+    batch = max(1, min(batch_size, 1000))
+    last_use = func.coalesce(t.c.last_served_at, t.c.built_at)
+    cutoff = page_store_iso(time.time() - evict_days * 86400)
+    with engine.begin() as conn:
+        aged_ids = select(t.c.id).where(last_use < cutoff).order_by(last_use, t.c.id).limit(batch)
+        aged = conn.execute(delete(t).where(t.c.id.in_(aged_ids))).rowcount or 0
+    with engine.begin() as conn:
+        over = (conn.execute(select(func.coalesce(func.sum(t.c.stored_bytes), 0))).scalar() or 0) - max_bytes
+        doomed, freed = [], 0
+        if over > 0:
+            for page_id, size in conn.execute(select(t.c.id, t.c.stored_bytes)
+                                              .order_by(last_use, t.c.id).limit(batch)):
+                if freed >= over:
+                    break
+                doomed.append(page_id)
+                freed += size or 0
+        removed = 0
+        if doomed:
+            removed = conn.execute(delete(t).where(t.c.id.in_(doomed))).rowcount or 0
+    return aged, removed
 
 
 # ---------------------------------------------------------------------------
@@ -15124,6 +15515,12 @@ def _receipts_serve_date_expr():
     return func.substr(deck_impressions_table.c.served_at, 1, 10)
 
 
+# deck_source as server._log_deck_signal_impressions dumps it (default
+# separators), and the compact form, for the receipts exclusion (S4).
+_CALIBRATION_REFRESH_MARKERS = ('"deck_source": "grading_refresh"',
+                                '"deck_source":"grading_refresh"')
+
+
 def _receipts_candidate_where(window_days: int, grader_version: str,
                               serve_dates: list[str]):
     """Shared WHERE for the grading queue and its backlog COUNT (LLD §4.1).
@@ -15144,6 +15541,9 @@ def _receipts_candidate_where(window_days: int, grader_version: str,
         starve a run.
       * no grade row at this (window, grader_version) — the queue is defined
         by ABSENCE, which is what makes the job idempotent by construction.
+      * not a Calibration refresh deck (features_json `deck_source` =
+        'grading_refresh', ADR-025 S4): never shown in Trades, so never a
+        receipt. A NULL features_json stays eligible.
     """
     g = receipts_grades_table
     already = (
@@ -15159,6 +15559,9 @@ def _receipts_candidate_where(window_days: int, grader_version: str,
             deck_impressions_table.c.is_ghost == 0),
         _receipts_serve_date_expr().in_([str(d) for d in serve_dates]),
         ~already,
+        or_(deck_impressions_table.c.features_json.is_(None),
+            and_(*(~deck_impressions_table.c.features_json.contains(marker, autoescape=True)
+                   for marker in _CALIBRATION_REFRESH_MARKERS))),
     )
 
 
@@ -15476,12 +15879,25 @@ def load_league_scoring_map(league_ids: list[str]) -> dict[str, str]:
 # and PROPAGATES exceptions: a swallowed read would masquerade as
 # needs_fresh_deck. Joins carry an explicit onclause (no FKs, house style).
 
+def _grading_not_partial_run(di):
+    """ADR-025 ruling 25: Calibration's current arm skips a deck job with any
+    'partial_run' row (a run that ended partial, or a truncated lost-job deck),
+    as replay does. Per job, through ix_deck_impressions_job; NULL tiers
+    (every row written at build) pass."""
+    partial = deck_impressions_table.alias("partial_run_rows")
+    return ~(select(literal(1))
+             .where(partial.c.deck_job_id == di.c.deck_job_id,
+                    partial.c.evidence_tier == "partial_run")
+             .exists())
+
+
 def load_grading_legacy_deck(user_id: str, league_id: str
                              ) -> tuple[str | None, str | None, list[dict]]:
     """(deck_job_id, served_at, rows) of the caller's newest deck job that has at least one
     QUALIFYING row; (None, None, []) when none. Qualifying (hld §3.1):
     COALESCE(is_ghost,0)=0, model_arm IS NOT NULL, model_arm <> 'value_core',
-    source_like_impression_id IS NULL, trade_intent IS NULL, assets_json IS NOT NULL.
+    source_like_impression_id IS NULL, trade_intent IS NULL, assets_json IS NOT NULL,
+    and the job has no 'partial_run' row (ADR-025 ruling 25).
     Job = argmax MAX(served_at) over qualifying rows grouped by deck_job_id.
     rows = that job's qualifying rows ORDER BY card_index, each
     {impression_id, card_index, model_arm, assets_json, features_json} (JSON left as stored)."""
@@ -15495,6 +15911,7 @@ def load_grading_legacy_deck(user_id: str, league_id: str
         di.c.source_like_impression_id.is_(None),
         di.c.trade_intent.is_(None),
         di.c.assets_json.isnot(None),
+        _grading_not_partial_run(di),
     )
     with engine.connect() as conn:
         job = conn.execute(
@@ -15528,7 +15945,7 @@ def list_grading_candidates(since_iso: str) -> list[dict]:
             .where(func.coalesce(di.c.is_ghost, 0) == 0, di.c.model_arm.isnot(None),
                    di.c.model_arm != "value_core", di.c.source_like_impression_id.is_(None),
                    di.c.trade_intent.is_(None), di.c.assets_json.isnot(None),
-                   di.c.served_at >= since_iso)
+                   _grading_not_partial_run(di), di.c.served_at >= since_iso)
         ).all()
         members = {(str(r.league_id), str(r.user_id)) for r in conn.execute(
             select(lm.c.league_id, lm.c.user_id)).all()}
