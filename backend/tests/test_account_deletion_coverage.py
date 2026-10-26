@@ -3,7 +3,7 @@ import json
 
 import pytest
 from cryptography.fernet import Fernet
-from sqlalchemy import Float, Integer, create_engine, event, insert, select
+from sqlalchemy import Float, Integer, LargeBinary, create_engine, event, insert, select
 
 from backend import accounts, database as db
 
@@ -35,7 +35,8 @@ def seed(conn, table, marker, **values):
             continue
         if col.primary_key and isinstance(col.type, Integer):
             continue
-        row[col.name] = 1 if isinstance(col.type, (Integer, Float)) else marker
+        row[col.name] = (1 if isinstance(col.type, (Integer, Float))
+                         else marker.encode() if isinstance(col.type, LargeBinary) else marker)
     row.update(values)
     conn.execute(insert(table).values(**row))
 
