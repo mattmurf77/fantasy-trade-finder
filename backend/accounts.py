@@ -629,15 +629,18 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            importer's own picks carry their FLEECED id (entry:*, acct_*;
 #            server._sync_mfl_owned_picks), and nothing re-syncs the grid once
 #            they are gone. The row itself stays: other members rely on it.
+#            recorded_picks.picking_team_id → the placeholder where it is a
+#            deleted Fleeced-minted id (entry:*, acct_*; no platform column).
 #            leagues rows this user imported that another live Fleeced user
 #            (a users row outside this deletion) still belongs to, per
 #            league_members: user_id → the placeholder, roster_data /
 #            opponent_data → "[]"; league settings and the team binding stay.
 #            Such a row is deleted with its last live member.
 #   KEEP     player_value_history + model_config (not user-keyed),
-#            draft_picks on Sleeper grids (and legacy rows with no platform):
-#            public Sleeper ids other members rely on, re-synced from
-#            Sleeper, players.
+#            draft_picks on Sleeper grids (and legacy rows with no platform)
+#            and recorded_picks.picking_team_id holding a Sleeper id: public
+#            Sleeper ids other members rely on, re-synced from Sleeper,
+#            players.
 # ---------------------------------------------------------------------------
 
 def _user_data_scope(conn, user_id: str, account_id: str | None = None):
@@ -845,6 +848,16 @@ def _delete_user_data(sleeper_user_id: str,
             conn.execute(update(picks).where(platform_grid, picks.c[col].in_(user_ids))
                          .values({col: DELETED_USER_PLACEHOLDER}))
         counts["draft_picks_owner_anonymized"] = len(named)
+        # recorded_picks.picking_team_id (a league_members.user_id) has no
+        # platform column to apply the rule above with, so it is anonymized
+        # only where it holds a Fleeced-minted id (entry:*, acct_*), which
+        # exists nowhere but here and names the person. Public Sleeper ids
+        # stay, as on Sleeper grids (#452 D2).
+        minted = [u for u in user_ids if u.startswith("entry:") or is_account_user_id(u)]
+        recorded = db.recorded_picks_table
+        res = conn.execute(update(recorded).where(recorded.c.picking_team_id.in_(minted))
+                           .values(picking_team_id=DELETED_USER_PLACEHOLDER))
+        counts["recorded_picks_picking_team_id_anonymized"] = res.rowcount or 0
         # Weak roster keys embed the user ID; strong keys are public team slots.
         history = db.league_roster_history_table
         res = conn.execute(delete(history).where(history.c.owner_user_id.in_(user_ids),

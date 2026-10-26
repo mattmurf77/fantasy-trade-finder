@@ -94,6 +94,8 @@ def engine(monkeypatch):
         _import_rows(conn, ESPN, 1, "espn", "10101")
         # release-lead's case: a verified Fleeced user also belongs to 10101.
         seed(conn, db.league_members_table, "lm-shared", league_id="10101", user_id=SLEEPER)
+        seed(conn, db.recorded_picks_table, "rp", league_id="10101", season=2027, round=1, slot=1,
+             overall=1, picking_team_id=ESPN, recorded_by=SLEEPER)
         seed(conn, db.espn_credentials_table, "espn", user_id=ESPN, swid=SWID)
         _import_rows(conn, MFL, 2, "mfl", "61408")
         seed(conn, db.mfl_credentials_table, "mfl", user_id=MFL, mfl_username="someone")
@@ -140,6 +142,7 @@ def test_dry_run_counts_and_changes_nothing(engine, capsys):
     assert "skipped (no usable created_at): 1" in out
     assert "espn_credentials.user_id: 1" in out and "mfl_credentials.user_id: 1" in out
     assert "draft_picks.owner_user_id: 1" in out
+    assert "recorded_picks.picking_team_id: 1" in out
     assert ("  python3 scripts/purge_entry_users.py --cutoff 2026-10-26T00:00:00Z "
             "--execute --expect 3") in out
     assert snapshot(engine) == before
@@ -167,6 +170,8 @@ def test_execute_removes_targets_everywhere_and_keeps_everyone_else(engine, caps
         matches = conn.execute(select(db.trade_matches_table)).all()
         members = {r.user_id for r in conn.execute(select(db.league_members_table))}
         leagues = {r.sleeper_league_id: r.user_id for r in conn.execute(select(db.leagues_table))}
+        recorded = conn.execute(select(db.recorded_picks_table)).one()
+    assert (recorded.picking_team_id, recorded.recorded_by) == (accounts.DELETED_USER_PLACEHOLDER, SLEEPER)
     # 10101 is shared with a live member: kept, importer anonymized. 61408 is solo: gone.
     assert leagues == {"10101": accounts.DELETED_USER_PLACEHOLDER}
     assert picks["61408_2027_1_0003"].owner_user_id == accounts.DELETED_USER_PLACEHOLDER
@@ -211,9 +216,13 @@ def test_info_counts_never_fail_verify(engine, capsys):
         seed(conn, db.overhaul_offers_table, "ovh", offer_id="ovh_1", overhaul_id="ovh_x", revision=1,
              package_hash="h", counterparty_user_id=VERIFIED, give_ids_json="[]",
              receive_ids_json="[]", card_json="{}", created_at=BEFORE)
+        # Another user's event naming an entry id (pick_assignment_changed.new_owner).
+        seed(conn, db.user_events_table, "ev", user_id=SLEEPER, event_type="pick_assignment_changed",
+             props=f'{{"actor": "{SLEEPER}", "new_owner": "{LATE}"}}')
     code, out = run(capsys, "--verify")
     assert code == 0, out
     assert "standing_offers.team_user_ids 1" in out
+    assert "user_events.props 1" in out
     assert "known general deletion gap, privacy §6 'not yet'): " in out
     assert "overhaul_offers.counterparty_user_id 1" in out
 

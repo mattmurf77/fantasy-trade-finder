@@ -72,11 +72,15 @@ DELETION_ONLY_KEYS = (
     ("users_table", "invited_by"),
     ("draft_picks_table", "owner_user_id"),
     ("draft_picks_table", "original_user_id"),
+    ("recorded_picks_table", "picking_team_id"),
     ("prepared_trade_participants_table", "participant_user_id"),
 )
 # Reported as info counts, never a failure (onboarding-eng, 2026-10-26).
+# user_events.props: OTHER users' events can name an entry id (e.g.
+# pick_assignment_changed.new_owner); delete_user_data doesn't scrub them.
 JSON_MENTIONS = (("standing_offers_table", "team_user_ids"),
-                 ("leagues_table", "opponent_data"))
+                 ("leagues_table", "opponent_data"),
+                 ("user_events_table", "props"))
 OVERHAUL_REFS = (("overhauls_table", "account_user_id"),
                  ("overhauls_table", "league_user_id"),
                  ("overhaul_offers_table", "counterparty_user_id"),

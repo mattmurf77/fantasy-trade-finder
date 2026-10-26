@@ -338,6 +338,46 @@ def test_export_of_draft_picks_is_unchanged_by_the_pick_grid_anonymization(engin
     assert {r["pick_id"] for r in archive["tables"]["draft_picks"]} == {"assigned", "alias-assigned"}
 
 
+# #452 D2: recorded_picks has no platform column, so picking_team_id is
+# anonymized only where it is a Fleeced-minted id (entry:*, acct_*).
+def _recorded(conn, overall, picking_team_id):
+    seed(conn, db.recorded_picks_table, f"rp{overall}", league_id="espn-league", season=2027,
+         round=1, slot=overall, overall=overall, picking_team_id=picking_team_id,
+         player_id=f"p{overall}", recorded_by=OTHER, recorded_at="2026-10-26T00:00:00Z")
+
+
+def _recorded_teams(engine):
+    return {r["overall"]: r["picking_team_id"] for r in rows(engine, db.recorded_picks_table)}
+
+
+@pytest.mark.parametrize("deleted", [
+    "entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}", "entry:mfl:61408.f0003", "acct_espn-signin"])
+def test_recorded_pick_team_ids_anonymized_where_fleeced_minted(engine, deleted):
+    with engine.begin() as conn:
+        if deleted.startswith(accounts.ACCOUNT_USER_PREFIX):
+            conn.execute(insert(db.accounts_table).values(
+                account_id=deleted[len(accounts.ACCOUNT_USER_PREFIX):], created_at="2026-10-26"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _recorded(conn, 1, deleted)
+        _recorded(conn, 2, OTHER)
+        _recorded(conn, 3, "espn:{SOMEONE-ELSE}")
+        _recorded(conn, 4, None)
+    counts = accounts.delete_user_data(deleted)
+    assert _recorded_teams(engine) == {
+        1: accounts.DELETED_USER_PLACEHOLDER, 2: OTHER, 3: "espn:{SOMEONE-ELSE}", 4: None}
+    assert counts["recorded_picks_picking_team_id_anonymized"] == 1
+
+
+def test_recorded_pick_sleeper_team_ids_stay_and_the_bound_alias_goes(engine):
+    with engine.begin() as conn:
+        _recorded(conn, 1, UID)       # a public Sleeper id: kept, as on Sleeper grids
+        _recorded(conn, 2, ALIAS)     # the bound acct_ alias: Fleeced-minted
+        _recorded(conn, 3, OTHER)
+    counts = accounts.delete_user_data(UID)
+    assert _recorded_teams(engine) == {1: UID, 2: accounts.DELETED_USER_PLACEHOLDER, 3: OTHER}
+    assert counts["recorded_picks_picking_team_id_anonymized"] == 1
+
+
 # #452 D1: a shared leagues row (one row per league, PK = the league id) must
 # survive one member's deletion; membership is league_members x users.
 LEAGUE_PLATFORMS = (None, "sleeper", "espn", "mfl")
