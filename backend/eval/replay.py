@@ -51,6 +51,12 @@ Exclusions (counted per reason and printed — never silently dropped):
   never_viewed     no `viewed` outcome — served ≠ seen; the label would be
                    fabricated (the F2 cascade rule: unseen is not a negative)
   undo_reversed    an `undo` outcome exists — the disposition was retracted
+  calibration_refresh
+                   Calibration's targeted refresh built the deck (a card's
+                   deck_source is 'grading_refresh', ADR-025 S4): it was
+                   never shown in Trades — whole deck out, ahead of every
+                   other deck reason; decks in
+                   EvalRun.calibration_refresh_decks
   partial_run      any card in the deck has evidence_tier 'partial_run' (a
                    partial run's delivered rows, head-eng ruling 21) — the
                    deck isn't a complete ranking, so it's out whole; decks
@@ -81,10 +87,11 @@ their deck is now excluded instead. That retired the per-card
 (scored normally) or takes its whole deck out under missing_scorer_inputs.
 An in_flight, pack_integrity or incomplete_deck deck is also left out of
 the exposure curve: the cards present in it (first 30, viewed rows) are a
-selected subset, so their view rates would bias e(k). Under paging the
-curve's served set is the DELIVERED positions (R4.2 U1, LoggedCard.
-delivered): a generated card that was never sent to a client was not
-served at its position.
+selected subset, so their view rates would bias e(k). A calibration_refresh
+deck is left out of it too: its cards were never at a Trades position.
+Under paging the curve's served set is the DELIVERED positions (R4.2 U1,
+LoggedCard.delivered): a generated card that was never sent to a client
+was not served at its position.
 
 EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
 verdict() and render_report() say so when runs graded under different rules
@@ -107,6 +114,7 @@ from datetime import datetime, timedelta, timezone
 
 from backend import value_model as _value_model
 from backend.eval.data import (
+    CALIBRATION_REFRESH,
     IN_FLIGHT,
     INCOMPLETE_DECK,
     PACK_INTEGRITY,
@@ -129,7 +137,7 @@ METRICS = ("like", "propose")
 
 EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
-    "partial_run", "in_flight", "pack_integrity", "incomplete_deck",
+    "calibration_refresh", "partial_run", "in_flight", "pack_integrity", "incomplete_deck",
     "missing_scorer_inputs", "scorer_error",
 )
 
@@ -143,8 +151,12 @@ EXCLUSION_REASONS = (
 #      paging delivered every served card) and the read filters outcomes by
 #      acted_at <= as_of and decks by served_at <= as_of. e(k) rises where
 #      undelivered tails used to pull it down.
+#   4  3, plus decks built by Calibration's targeted refresh (features_json
+#      deck_source 'grading_refresh', ADR-025 S4) are excluded whole as
+#      calibration_refresh, from replay, e(k) and calibration. Refresh decks
+#      from before the relabel carry 'replenish' and stay in.
 # Estimates graded under different versions are not comparable.
-EXCLUSION_RULE_VERSION = 3
+EXCLUSION_RULE_VERSION = 4
 # R5.2 (b): a read whose labels must be complete settles them this long
 # after the window's last served deck (late views, proposes days later).
 DEFAULT_SETTLE_LAG_DAYS = 7.0
@@ -172,6 +184,7 @@ class EvalRun:
     excluded: dict = field(default_factory=dict)   # reason -> count
     tilt_clipped: int = 0            # propensity tilts hit TILT_MIN/TILT_MAX
     missing_inputs_decks: int = 0    # decks excluded as missing_scorer_inputs
+    calibration_refresh_decks: int = 0   # decks excluded as calibration_refresh
     partial_run_decks: int = 0       # decks excluded as partial_run
     in_flight_decks: int = 0         # decks excluded as in_flight (not an error)
     pack_integrity_decks: int = 0    # decks excluded as pack_integrity
@@ -196,9 +209,10 @@ def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
     """e(k) = P(viewed | served at position k), Laplace(+1/+2)-smoothed,
     floored at EXPOSURE_FLOOR. Positions never observed fall back to the
     floor at lookup time (exposure_at). Only delivered cards count as
-    served (R4.2 U1). Decks with a loader exclusion (in_flight,
-    pack_integrity, incomplete_deck) are skipped: their present cards are
-    a selected subset."""
+    served (R4.2 U1). Decks with a loader exclusion are skipped: a
+    calibration_refresh deck was never shown in Trades, and an in_flight,
+    pack_integrity or incomplete_deck deck's present cards are a selected
+    subset."""
     served: dict[int, int] = {}
     viewed: dict[int, int] = {}
     for deck in decks:
@@ -312,6 +326,10 @@ def evaluate(
     # weights/rewards per deck (bootstrap clusters)
     clusters: list[dict] = []   # {"w": [...], "r_like": [...], "r_propose": [...]}
     for deck in eval_decks:
+        if deck.exclusion == CALIBRATION_REFRESH:
+            run.excluded["calibration_refresh"] += len(deck.cards)
+            run.calibration_refresh_decks += 1
+            continue
         if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
             run.excluded["partial_run"] += len(deck.cards)
             run.partial_run_decks += 1
@@ -522,6 +540,7 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"- {run.scorer}: total={run.n_total} included={run.n_included} "
             f"excluded[{excl or 'none'}] "
             f"missing_inputs_decks={run.missing_inputs_decks} "
+            f"calibration_refresh_decks={run.calibration_refresh_decks} "
             f"partial_run_decks={run.partial_run_decks} "
             f"in_flight_decks={run.in_flight_decks} "
             f"pack_integrity_decks={run.pack_integrity_decks} "
