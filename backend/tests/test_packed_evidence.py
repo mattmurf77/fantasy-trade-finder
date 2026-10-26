@@ -1480,14 +1480,16 @@ def undo_passes(engine):
         conn.execute(delete(db_module.trade_decisions_table))
 
 
-@pytest.mark.parametrize("kind", ["packed", "live"])
+@pytest.mark.parametrize("kind", ["packed", "packed_job_view", "live", "live_prepared"])
 def test_b4_a_cut_never_delivered_is_recorded_w0_and_stays_out(deferred, prepared_ok, kind):
+    """Through both serve hooks: the stored pages (packed, live value core)
+    and the job view (an unstored packed deck, prepared adoption)."""
     client, engine, _ = deferred
-    if kind == "packed":
-        job_id, *_ = packed_deck(120)
+    if kind.startswith("packed"):
+        job_id, *_ = packed_deck(120, store=kind == "packed")
         cut_id = contract.card_impression_id(job_id, 40)
     else:
-        job_id, ids = live_deck(120)
+        job_id, ids = live_deck(120, kind="prepared" if kind == "live_prepared" else "value_core")
         cut_id = ids[40]
     status(client, job_id, 0)
     pass_elsewhere(engine, 40)
