@@ -21,7 +21,10 @@
 //   4. The hub's sign-in label (its own `verifiedVia` / `provider` /
 //      `signInLabel` declarations, lifted and EXECUTED) maps an espn/mfl
 //      identity and verified_via `espn` / `mfl_login` to "ESPN" / "MFL", with
-//      the Apple, Google, Sleeper and demo answers unchanged.
+//      the Apple, Google, Sleeper and demo answers unchanged. `mfl_login`
+//      means MFL only on an account-only session: /api/mfl/auth-link also
+//      writes it for a Sleeper user who connects MFL, who stays "Sleeper"
+//      (release-lead QA P2).
 //
 // HONEST LABEL (G-035). 1 and 4 run the real code; 2 and 3 pin wiring. The
 // runtime proof is the TestFlight checklist in the PR. Every pin was watched
@@ -205,6 +208,10 @@ check("4. the hub maps espn / mfl identities and verified_via 'espn' / 'mfl_logi
     ['demo', [via('espn'), acct('espn'), true, acctOnly], 'Demo session'],
     ['Sleeper session', [via('sleeper'), undefined, false, sleeper], 'Sleeper'],
     ['account-only, nothing reported', [null, undefined, false, acctOnly], null],
+    // release-lead QA P2: /api/mfl/auth-link also writes 'mfl_login' for a
+    // Sleeper user who connects MFL by password. That's not an MFL sign-in.
+    ["Sleeper user verified by MFL auth-link (verified_via 'mfl_login')", [via('mfl_login'), undefined, false, sleeper], 'Sleeper'],
+    ["Sleeper user verified by MFL auth-link, account loaded, no identities", [via('mfl_login'), acct(), false, sleeper], 'Sleeper'],
   ];
   const bad = [];
   for (const [name, args, want] of cases) {
