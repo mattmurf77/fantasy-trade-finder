@@ -106,7 +106,9 @@ const ROWS = [
   { row: 'Pause overnight toggle',        marker: 'Pause overnight',                    owner: 'NotificationsSection.tsx' },
   { row: 'Time zone + footnote',          marker: 'Detected from this device',          owner: 'NotificationsSection.tsx' },
   { row: 'Demo session row',              marker: '>Demo session<',                     owner: 'AccountIdentitySection.tsx' },
-  { row: 'Identity rows (Apple/Google)',  marker: 'Signed in with Apple',               owner: 'AccountIdentitySection.tsx' },
+  // The identity-row strings live in settings/identityLabels.ts (shared with
+  // the flat SettingsScreen), so the row's marker is the call that renders them.
+  { row: 'Identity rows (Apple/Google/ESPN/MFL)', marker: 'identityLabel(ident.provider)', owner: 'AccountIdentitySection.tsx' },
   { row: 'Link Apple card',               marker: 'settings.link-apple-btn',            owner: 'AccountIdentitySection.tsx' },
   { row: 'Sleeper @username row',         marker: '>Sleeper<',                          owner: 'AccountIdentitySection.tsx' },
   { row: 'LinkSleeperForm (account-only)', marker: '<LinkSleeperForm',                  owner: 'AccountIdentitySection.tsx' },

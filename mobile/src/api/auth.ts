@@ -168,7 +168,7 @@ export interface AccountInfo {
     account_id: string;
     sleeper_user_id: string | null;
     created_at: string;
-    identities: Array<{ provider: 'apple' | 'google'; linked_at: string }>;
+    identities: Array<{ provider: 'apple' | 'google' | 'espn' | 'mfl'; linked_at: string }>;
   } | null;
   /** P2.6 — session is keyed to an account with no linked Sleeper source. */
   account_only?: boolean;
