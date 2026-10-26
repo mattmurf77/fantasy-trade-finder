@@ -203,7 +203,8 @@ sees; "deck" is the pushed results deck (Acquire → Find a trade).
    (release-lead P1-a).
 10. **Named gate misses (#339 item 12; reachable once S0, #367, deploys).** Prod keeps
     `trade_gate_miss_mode` = 0 until 1.22.0 is distributed, so **force each state for your test league only**
-    with S0's admin hook (release-lead or the operator runs it; it needs `CRON_SECRET`):
+    with S0's admin hook (release-lead or the operator runs it; it needs `CRON_SECRET`). **The hook applies to every
+    member of that league, so use a league whose members are all operator test accounts:**
     `POST /api/admin/trades/gate-miss-test` `{"league_id": "<test league>", "kind": "check_error", "ttl_s": 600}`
     for the error, and `"kind": "withhold"` for the wait. `DELETE` with `{"league_id": …}` clears it, and it
     expires by itself after `ttl_s` (≤ 900). With `check_error` set, tap Find a trade. **Expect:** "Couldn't
