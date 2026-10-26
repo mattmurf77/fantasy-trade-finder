@@ -22,6 +22,12 @@ Covers:
       missing row or failed read is 0, not enforcing (G-064)
   (5) GET /api/me/entitlements `enforcing` uses the same is_enforcing() rule
       as check_pro: true only when all three legs are on
+  (6) lanes (release-lead P2) — a SANDBOX event never updates, extends,
+      shortens, deactivates, re-keys or transfers a PRODUCTION row: per
+      event type, against a production founder lifetime (NULL expiry) and a
+      production annual, the production row is byte-unchanged and the
+      sandbox effect lands only on a sandbox row; production events leave
+      sandbox rows alone
 
 In-memory SQLite via the same patched-engine harness as test_entitlements.py;
 Flask test client + injected session for the route. No network.
@@ -37,7 +43,8 @@ import backend.database as db_module
 import backend.entitlements as entl
 import backend.server as server
 from backend.database import (
-    metadata, model_config_table, subscription_events_table, users_table,
+    accounts_table, entitlements_table, metadata, model_config_table,
+    subscription_events_table, users_table,
 )
 
 USER = "safety_user_1"
@@ -391,3 +398,218 @@ def test_me_entitlements_enforcing_matches_check_pro(eng, client, ent, paywall, 
     enforcing = r.get_json()["enforcing"]
     assert enforcing is (ent and paywall and knob == 1.0)
     assert enforcing is blocked
+
+
+# ── (6) lanes: sandbox events never touch production rows ──────────────────
+# A user who holds a real (PRODUCTION) row and then buys in sandbox — a
+# TestFlight tester, or an App Review account that also has a real grant —
+# hits the same (user, product) key. The sandbox event must land on a
+# sandbox row of its own; the production row stays byte-identical
+# (updated_at included, so even a no-op rewrite would show).
+
+USER2 = "safety_user_2"
+ANON = "$RCAnonymousID:5b1d"
+ACCT = "acct_safety1"
+
+# kind → (product, production event type, production expiry)
+PROD = {
+    "founder": ("ftf_founder", "NON_RENEWING_PURCHASE", None),
+    "annual": ("ftf_pro_annual", "INITIAL_PURCHASE", timedelta(days=365)),
+    # an annual about to lapse: the one a stray sandbox grace would extend
+    "annual_ending": ("ftf_pro_annual", "INITIAL_PURCHASE", timedelta(hours=1)),
+}
+
+
+def _row(eng, row_id):
+    with eng.begin() as conn:
+        return dict(conn.execute(select(entitlements_table).where(
+            entitlements_table.c.id == row_id)).fetchone()._mapping)
+
+
+def _prod_row(eng, kind, user=USER):
+    product, etype, exp = PROD[kind]
+    ev = _rc(f"prod-{kind}", etype, expires=exp, product=product)
+    ev["app_user_id"] = user
+    r = _ingest(ev)
+    assert r["projected"] is True
+    (row,) = [x for x in entl.list_for_user(user) if x["product_id"] == product]
+    assert not (row["granted_by"] or "").startswith("sandbox:")
+    return product, _row(eng, row["id"])
+
+
+def _sandbox_rows(user=USER):
+    return [r for r in entl.list_for_user(user)
+            if (r["granted_by"] or "").startswith("sandbox:")]
+
+
+def _sb(eid, etype, product, **kw):
+    return _rc(eid, etype, env="SANDBOX", product=product, **kw)
+
+
+def _second_user(eng):
+    with eng.begin() as conn:
+        conn.execute(insert(users_table).values(
+            sleeper_user_id=USER2, username="safetyuser2", created_at=_iso(0)))
+
+
+def _sb_transfer(eid, product):
+    return {"id": eid, "type": "TRANSFER", "environment": "SANDBOX",
+            "app_user_id": USER, "product_id": product,
+            "transferred_from": [USER], "transferred_to": [USER2]}
+
+
+def _assert_untouched(eng, prod):
+    assert _row(eng, prod["id"]) == prod
+    # resolution: the production row is never weakened by sandbox activity
+    # (a lifetime stays perpetual; a dated row's expiry is a floor — an
+    # unexpired sandbox row may sit later, never earlier)
+    out = entl.get_entitlements(prod["user_id"])
+    assert out["pro"] is True
+    if prod["expires_at"] is None:
+        assert out["expires_at"] is None
+    else:
+        assert (datetime.fromisoformat(out["expires_at"])
+                >= datetime.fromisoformat(prod["expires_at"]))
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+@pytest.mark.parametrize("etype", ["INITIAL_PURCHASE", "RENEWAL",
+                                   "PRODUCT_CHANGE", "NON_RENEWING_PURCHASE",
+                                   "UNCANCELLATION"])
+def test_sandbox_activation_lands_on_own_row(eng, kind, etype):
+    product, prod = _prod_row(eng, kind)
+    with _Window() as w:
+        r = _ingest(_sb("sb1", etype, product, expires=timedelta(days=30)))
+    assert r["projected"] is True
+    _assert_untouched(eng, prod)
+    (sb,) = _sandbox_rows()
+    assert sb["id"] != prod["id"] and sb["product_id"] == product
+    assert sb["granted_by"] == "sandbox:sb1" and sb["status"] == "active"
+    assert w.holds(sb["expires_at"])
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+def test_sandbox_renewal_upserts_only_the_sandbox_row(eng, kind):
+    product, prod = _prod_row(eng, kind)
+    _ingest(_sb("sb1", "INITIAL_PURCHASE", product, expires=timedelta(minutes=5)))
+    _ingest(_sb("sb2", "RENEWAL", product, expires=timedelta(minutes=10)))
+    _assert_untouched(eng, prod)
+    (sb,) = _sandbox_rows()                       # one sandbox row, upserted
+    assert sb["granted_by"] == "sandbox:sb2"
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+@pytest.mark.parametrize("etype, status", [("EXPIRATION", "expired"),
+                                           ("REFUND", "refunded")])
+def test_sandbox_deactivation_hits_only_the_sandbox_row(eng, kind, etype, status):
+    product, prod = _prod_row(eng, kind)
+    _ingest(_sb("sb1", "INITIAL_PURCHASE", product))
+    r = _ingest(_sb("sb2", etype, product))
+    assert r["projected"] is True
+    _assert_untouched(eng, prod)
+    (sb,) = _sandbox_rows()
+    assert sb["status"] == status and sb["granted_by"] == "sandbox:sb2"
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+@pytest.mark.parametrize("etype", ["EXPIRATION", "REFUND"])
+def test_sandbox_deactivation_without_sandbox_row_is_inert(eng, kind, etype):
+    product, prod = _prod_row(eng, kind)
+    _ingest(_sb("sb1", etype, product))
+    _assert_untouched(eng, prod)
+    assert _sandbox_rows() == []
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+@pytest.mark.parametrize("etype", ["CANCELLATION", "SUBSCRIBER_ALIAS", "TEST"])
+def test_sandbox_noop_events_touch_nothing(eng, kind, etype):
+    product, prod = _prod_row(eng, kind)
+    r = _ingest(_sb("sb1", etype, product))
+    assert r["projected"] is False
+    _assert_untouched(eng, prod)
+    assert _sandbox_rows() == []
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual", "annual_ending"])
+def test_sandbox_billing_issue_never_extends_production(eng, kind):
+    product, prod = _prod_row(eng, kind)
+    ev = _sb("sb1", "BILLING_ISSUE", product)
+    ev["grace_period_expiration_at_ms"] = _ms(timedelta(days=16))
+    assert _ingest(ev)["projected"] is False
+    assert _process_error(eng, "sb1").startswith("ignored: BILLING_ISSUE")
+    _assert_untouched(eng, prod)
+    # with a sandbox row present, grace extends that row (inside the cap)
+    _ingest(_sb("sb2", "INITIAL_PURCHASE", product, expires=timedelta(minutes=5)))
+    ev = _sb("sb3", "BILLING_ISSUE", product)
+    ev["grace_period_expiration_at_ms"] = _ms(timedelta(days=16))
+    with _Window() as w:
+        assert _ingest(ev)["projected"] is True
+    _assert_untouched(eng, prod)
+    (sb,) = _sandbox_rows()
+    assert w.holds(sb["expires_at"]) and sb["granted_by"] == "sandbox:sb3"
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+def test_sandbox_transfer_moves_only_sandbox_rows(eng, kind):
+    _second_user(eng)
+    product, prod = _prod_row(eng, kind)
+    _ingest(_sb("sb1", "INITIAL_PURCHASE", product))
+    assert _ingest(_sb_transfer("sb2", product))["projected"] is True
+    _assert_untouched(eng, prod)                  # still USER's, unchanged
+    assert _sandbox_rows(USER) == []
+    (moved,) = entl.list_for_user(USER2)
+    assert moved["granted_by"] == "sandbox:sb2"
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+def test_sandbox_transfer_with_only_production_rows_is_inert(eng, kind):
+    _second_user(eng)
+    product, prod = _prod_row(eng, kind)
+    assert _ingest(_sb_transfer("sb1", product))["projected"] is False
+    _assert_untouched(eng, prod)
+    assert entl.list_for_user(USER2) == []
+
+
+@pytest.mark.parametrize("kind", ["founder", "annual"])
+def test_sandbox_alias_reconciliation_never_rekeys_production(eng, kind):
+    """A production row stranded under an anon id is not swept onto the
+    account by sandbox traffic; the next production event moves it."""
+    with eng.begin() as conn:
+        conn.execute(insert(accounts_table).values(
+            account_id=ACCT[len("acct_"):], sleeper_user_id=USER,
+            created_at=_iso(0)))
+    product, prod = _prod_row(eng, kind, user=ANON)
+    ev = _sb("sb1", "INITIAL_PURCHASE", product)
+    entl.ingest_billing_event("revenuecat", "sb1", ev["type"], ev,
+                              user_id=ACCT, product_id=product,
+                              aliases=[ACCT, ANON])
+    assert _row(eng, prod["id"]) == prod          # still under ANON, unchanged
+    (sb,) = _sandbox_rows(ACCT)
+    assert sb["user_id"] == ACCT
+
+
+def test_production_events_leave_sandbox_rows_alone(eng):
+    """The other direction: sandbox rows are their own lane."""
+    _ingest(_sb("sb1", "INITIAL_PURCHASE", "ftf_pro_annual"))
+    (sb,) = _sandbox_rows()
+    sb = _row(eng, sb["id"])
+    _ingest(_rc("p1", "INITIAL_PURCHASE", product="ftf_pro_annual",
+                expires=timedelta(days=365)))
+    assert _row(eng, sb["id"]) == sb              # a new production row instead
+    prod = [r for r in _rows() if r["id"] != sb["id"]]
+    assert len(prod) == 1 and prod[0]["granted_by"] == "p1"
+    _ingest(_rc("p2", "EXPIRATION", product="ftf_pro_annual"))
+    assert _row(eng, sb["id"]) == sb
+    assert _row(eng, prod[0]["id"])["status"] == "expired"
+    assert entl.get_entitlements(USER)["pro"] is True   # sandbox still unlocks
+
+
+def test_production_flow_unchanged(eng):
+    """Production purchase → renewal → expiration upserts one row, as before."""
+    _ingest(_rc("p1", "INITIAL_PURCHASE", expires=timedelta(days=30)))
+    _ingest(_rc("p2", "RENEWAL", expires=timedelta(days=60)))
+    (row,) = _rows()
+    assert row["granted_by"] == "p2" and row["status"] == "active"
+    _ingest(_rc("p3", "EXPIRATION"))
+    (row,) = _rows()
+    assert row["status"] == "expired"

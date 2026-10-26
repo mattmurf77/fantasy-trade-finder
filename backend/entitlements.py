@@ -167,20 +167,23 @@ def resolve_rc_identity(app_user_id: str | None, aliases=None) -> str:
 
 
 def _rekey_billing_rows(conn, canonical: str, from_ids, product_id: str | None,
-                        *, active_only: bool = False) -> int:
+                        *, active_only: bool = False,
+                        sandbox: bool = False) -> int:
     """Move billing-source entitlements rows from `from_ids` onto `canonical`.
 
     Surgical on purpose — the same rule the projector's upsert already
-    follows: only `_BILLING_SOURCES` rows, and only this product_id when one
-    is known. Manual grants and promo rewards written under an old id are
-    never moved by billing traffic. Returns the number of rows moved.
+    follows: only `_BILLING_SOURCES` rows in the event's lane (see _lane),
+    and only this product_id when one is known. Manual grants and promo
+    rewards written under an old id are never moved by billing traffic.
+    Returns the number of rows moved.
     """
     stale = [i for i in from_ids if i and i != canonical]
     if not stale:
         return 0
     stmt = (update(db.entitlements_table)
             .where(db.entitlements_table.c.user_id.in_(stale))
-            .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES)))
+            .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
+            .where(_lane(sandbox)))
     if product_id is not None:
         stmt = stmt.where(db.entitlements_table.c.product_id == product_id)
     if active_only:
@@ -413,7 +416,7 @@ def _ms_to_iso(ms) -> str | None:
 # prod webhook. They still project, so a reviewer's purchase unlocks, but
 # never for longer than this and never perpetually (monetization-day1
 # feasibility §2 + addendum). Sandbox writes are tagged through granted_by
-# (`sandbox:<event_id>`); no reader matches granted_by against a bare id.
+# (`sandbox:<event_id>`), and that tag is also the row's LANE (see _lane).
 _SANDBOX_MAX_GRANT = timedelta(hours=24)
 SANDBOX_GRANT_PREFIX = "sandbox:"
 
@@ -423,6 +426,25 @@ def _is_sandbox(source: str, payload: dict) -> bool:
     and the whole event object is the stored payload."""
     return (source == "revenuecat"
             and str((payload or {}).get("environment") or "").upper() == "SANDBOX")
+
+
+def _lane(sandbox: bool):
+    """WHERE clause confining a billing event to its own lane of rows.
+
+    A sandbox row is one whose granted_by starts with `sandbox:`; every
+    other billing row (granted_by a production/Stripe event id, or NULL) is
+    a production row. Sandbox events only ever create or update sandbox
+    rows, so they can never extend, shorten, deactivate, re-key or transfer
+    a production row. Production events likewise leave sandbox rows alone:
+    they are their own lane and lapse within 24 h. Each lane keeps its own
+    row per (user, product), so no schema or `source` change is needed, and
+    resolution (_active_rows) reads both lanes: an unexpired sandbox row
+    still grants pro.
+    """
+    granted_by = db.entitlements_table.c.granted_by
+    if sandbox:
+        return granted_by.startswith(SANDBOX_GRANT_PREFIX)
+    return or_(granted_by.is_(None), ~granted_by.startswith(SANDBOX_GRANT_PREFIX))
 
 
 def _sandbox_cap(expires_at: str | None) -> str:
@@ -481,7 +503,8 @@ def ingest_billing_event(source: str, event_id: str, event_type: str,
 
 
 def _project_transfer(event_id: str, payload: dict,
-                      product_id: str | None) -> tuple[bool, str | None]:
+                      product_id: str | None, *,
+                      sandbox: bool = False) -> tuple[bool, str | None]:
     """TRANSFER — the subscription MOVED to another subscriber.
 
     RevenueCat carries the two sides in `transferred_from` / `transferred_to`
@@ -505,13 +528,14 @@ def _project_transfer(event_id: str, payload: dict,
     canonical = resolve_rc_identity(to_ids[0], to_ids[1:])
     with db.engine.begin() as conn:
         moved = _rekey_billing_rows(conn, canonical, from_ids, product_id,
-                                    active_only=True)
+                                    active_only=True, sandbox=sandbox)
         if moved:
             conn.execute(
                 update(db.entitlements_table)
                 .where(db.entitlements_table.c.user_id == canonical)
                 .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
                 .where(db.entitlements_table.c.status == "active")
+                .where(_lane(sandbox))
                 .values(granted_by=event_id, updated_at=_now())
             )
     if not moved:
@@ -541,6 +565,7 @@ def _project_grace(event_id: str, payload: dict, user_id: str,
             .where(db.entitlements_table.c.product_id == product_id)
             .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
             .where(db.entitlements_table.c.status == "active")
+            .where(_lane(sandbox))
         ).fetchone()
         if row is None:
             return False, "ignored: BILLING_ISSUE matched no active row"
@@ -558,15 +583,17 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
              user_id: str | None, product_id: str | None,
              candidates=None) -> tuple[bool, str | None]:
     """Apply one billing event to entitlements. Upserts by
-    (user_id, product_id) among billing-source rows only — promo and manual
-    rows are never touched by billing traffic."""
+    (user_id, product_id) among billing-source rows in the event's lane
+    only (_lane: sandbox events never touch production rows, and vice
+    versa) — promo and manual rows are never touched by billing traffic."""
     sandbox = _is_sandbox(source, payload)
     marked_by = f"{SANDBOX_GRANT_PREFIX}{event_id}" if sandbox else event_id
 
     # TRANSFER carries its identities in payload arrays rather than
     # app_user_id, so it is handled ahead of the user_id guard below.
     if event_type == "TRANSFER":
-        return _project_transfer(marked_by, payload, product_id)
+        return _project_transfer(marked_by, payload, product_id,
+                                 sandbox=sandbox)
 
     if not user_id or not product_id:
         return False, "ignored: missing user_id/product_id"
@@ -582,7 +609,8 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
     # merge them onto the canonical key BEFORE the upsert looks for one.
     if candidates and len(candidates) > 1:
         with db.engine.begin() as conn:
-            _rekey_billing_rows(conn, user_id, candidates, product_id)
+            _rekey_billing_rows(conn, user_id, candidates, product_id,
+                                sandbox=sandbox)
 
     entitlement, mapped_source = _product_mapping(product_id)
     expires_at = _ms_to_iso(payload.get("expiration_at_ms"))
@@ -608,6 +636,7 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
                 .where(db.entitlements_table.c.user_id == user_id)
                 .where(db.entitlements_table.c.product_id == product_id)
                 .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
+                .where(_lane(sandbox))
             ).fetchone()
             if existing is not None:
                 conn.execute(
@@ -632,6 +661,7 @@ def _project(source: str, event_id: str, event_type: str, payload: dict, *,
                 .where(db.entitlements_table.c.user_id == user_id)
                 .where(db.entitlements_table.c.product_id == product_id)
                 .where(db.entitlements_table.c.source.in_(_BILLING_SOURCES))
+                .where(_lane(sandbox))
                 .values(status=deactivate_status, granted_by=marked_by,
                         updated_at=_now())
             )
