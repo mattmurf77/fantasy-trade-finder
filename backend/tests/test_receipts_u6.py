@@ -15,6 +15,9 @@ addendum), on ADR-025 C3 / R4.2 U6:
     dropped: per run, by cause (`restart_split` past the 90 stored cards for
     a row built from the pack, else `other`): a counter in the receipts
     metrics response and a log line from the matcher.
+  * R-U6b: a `series_break` caveat on /api/admin/receipts/metrics once the
+    flip day is set and the graded rows' serve dates span it; none while it
+    is None.
 
 Harness: isolated in-memory SQLite (backend/tests/CLAUDE.md pattern 1).
 """
@@ -228,3 +231,38 @@ def test_the_matcher_logs_the_viewed_cards_without_a_full_row(engine, caplog):
             if r.getMessage().startswith("[matcher] viewed without full row")] == [
         f"[matcher] viewed without full row league={LEAGUE} run=job-restart "
         f"restart_split=1 other=0"]
+
+
+# ── R-U6b: the receipts series break at the flip ───────────────────────────
+
+def test_no_caveat_while_the_flip_day_is_none(engine, flags_on, monkeypatch):
+    monkeypatch.setattr(rs, "RECEIPTS_SERIES_BREAK_DAY", None)
+    grade("g-old", 20)
+    grade("g-new", 2)
+    with patch.object(rs, "max_grader_version", lambda versions: GRADER):
+        assert rs.admin_metrics(window=28)["caveats"] == []
+
+
+def test_a_set_flip_day_inside_the_window_adds_one_caveat(engine, flags_on, monkeypatch):
+    day = served(10)[:10]
+    monkeypatch.setattr(rs, "RECEIPTS_SERIES_BREAK_DAY", day)
+    grade("g-old", 20)
+    grade("g-new", 2)
+    with patch.object(rs, "max_grader_version", lambda versions: GRADER):
+        assert rs.admin_metrics(window=28)["caveats"] == [{
+            "code": "series_break", "scope": "receipts", "day": day,
+            "detail": "U6/R-U6a: receipts move to viewed-or-first-30 cards at the "
+                      "packed-evidence flip"}]
+
+
+@pytest.mark.parametrize("days_ago", [30, 1])
+def test_a_set_flip_day_outside_the_window_adds_none(engine, flags_on, monkeypatch, days_ago):
+    monkeypatch.setattr(rs, "RECEIPTS_SERIES_BREAK_DAY", served(days_ago)[:10])
+    grade("g-old", 20)
+    grade("g-new", 2)
+    with patch.object(rs, "max_grader_version", lambda versions: GRADER):
+        assert rs.admin_metrics(window=28)["caveats"] == []
+
+
+def test_the_flip_day_ships_unset():
+    assert rs.RECEIPTS_SERIES_BREAK_DAY is None
