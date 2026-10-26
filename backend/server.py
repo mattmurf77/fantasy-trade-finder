@@ -3220,7 +3220,7 @@ def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
     # The worker stamps this after preparation; queued jobs already carry
     # the admission-time model/presentation/significance captures above.
     return (("safety_policy" not in job or job["safety_policy"] == expected_safety)
-            and _trade_fingerprints_match(job, fingerprints))
+            and _trade_fingerprints_match(job, fingerprints, running=True))
 
 
 def _start_trade_job_thread(*, target, args, kwargs):
@@ -3355,21 +3355,38 @@ def _trade_job_public_view(job: dict) -> dict:
     board_refresh = job.get("board_refresh")
     if board_refresh:
         out["board_refresh"] = board_refresh
+    kick_floor = None
     if out["cards"]:
         user_id, league_id, _format = job["key"]
         if job.get("prepared_inventory_id"):
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id, prepared=True)
         else:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
-        # S0 I-1: never serve an asset either side no longer owns. A failed
-        # check serves no cards, distinct from an empty deck.
-        if out["cards"] and league_id != "league_demo":
+        # S0 serve rules (contract v0.4 §3, §3b): I-1 never serves an asset
+        # either side no longer owns; a failed check serves no cards, distinct
+        # from an empty deck. `trade_i1_mode` 0 skips all of it.
+        mode = _trade_i1_mode()
+        block = past_bound = None
+        if out["cards"] and league_id != "league_demo" and mode:
+            gates = mode == 2 and _trade_gate_miss_on()
             try:
-                out["cards"] = _filter_cards_to_current_owners(
-                    out["cards"], league_id, job.get("league_user_id") or user_id)
+                out["cards"], block, past_bound = _roster_serve_check(
+                    out["cards"], league_id, job.get("league_user_id") or user_id, mode, gates)
             except Exception as err:
-                log.warning("trade-job %s: roster check unavailable: %s", job["job_id"], err)
-                out.update(cards=[], status="error", error="roster_check_unavailable")
+                log.warning("trade-job %s: roster check unavailable (%s): %s", job["job_id"],
+                            "no cards" if gates else f"{len(out['cards'])} cards served unchecked",
+                            err)
+                block, past_bound = ("roster_check_unavailable" if gates else None), False
+        if block == "roster_check_unavailable":
+            out.update(cards=[], status="error", error="roster_check_unavailable")
+        elif block == "roster_gate_miss":
+            # §3b: the existing building shape, so the client keeps polling;
+            # every poll re-runs the check.
+            out.update(cards=[], wait_reason="roster_check")
+            if out["status"] != "error":
+                out["status"] = "running"
+        if past_bound:
+            kick_floor = league_id
     revoked = revocation_error()
     if revoked:
         out.update(cards=[], status="error", error=revoked)
@@ -3379,36 +3396,73 @@ def _trade_job_public_view(job: dict) -> dict:
         out.update(cards=[], status="error", error="owner_model_changed")
     elif not _trade_significance_matches(job):
         out.update(cards=[], status="error", error="significance_policy_changed")
+    if kick_floor:
+        _kick_roster_floor(kick_floor)        # after the response is built, no lock held
     return out
 
 
-def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str):
-    """I-1 at serve: keep a card only if the viewer still owns every give asset
-    and its opponent still owns every receive asset, per the stored rosters and
-    pick ownership read now (roster_snapshot). Raises when the check cannot
-    run; the caller must then serve no cards.
+def _kick_roster_floor(league_id: str) -> None:
+    """P41: start one background Sleeper roster refresh for a league past the
+    roster bound. Non-blocking; `maybe_refresh_async` owns the single-flight,
+    the 60 s failure cooldown, the 429 circuit and the linked-platform skip."""
+    try:
+        _roster_refresh.maybe_refresh_async(
+            league_id, max_age_s=_s0_seconds_knob("trade_roster_bound_s", 300.0))
+    except Exception as err:          # it never raises; a kick must never fail a serve
+        log.warning("roster floor kick failed league=%s: %s", league_id, err)
 
-    Passed unchecked, with one `[i1] unchecked` log line per serve:
-    - every card, when the league has no stored rosters (`status == "missing"`;
-      lead ruling 2026-10-20: lenient on today's path, strict in P1);
-    - generic ladder picks (`generic_pick_{rnd}_{tier}`), which are universal
-      pool assets and never on a roster.
+
+
+def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates: bool):
+    """S0 at serve (contract v0.4 §3, §3b, §5b; C-a, C-d). Returns
+    `(cards, block, past_bound)`:
+      - `block`: None, "roster_check_unavailable" (no stored rosters: strict,
+        ruling 30) or "roster_gate_miss" (§3b: a Sleeper roster whose last
+        refresh failed and is past `trade_roster_bound_s`; the age falls back to
+        the newest `league_members.updated_at` when `refreshed_at` is NULL).
+        Only with `gates` (strict mode and `trade_gate_miss_mode` 1); without
+        it they're held: no rows serves every card unchecked, and the withhold
+        serves the I-1-filtered cards. The line logs `<outcome>_held`.
+      - `past_bound`: a Sleeper roster past the bound, so the caller kicks the
+        floor refresh after the response, gate misses held or not.
+    Strict (mode 2) drops cards whose give asset the viewer, or receive asset the
+    opponent, no longer owns. Lenient (mode 1) serves every card and never
+    blocks. Generic ladder picks are pool assets, never on a roster, and a pick
+    with no owner row is an unknown owner (C-d): both pass, counted. One log
+    line per serve (C-a). Raises when the stored rows can't be read.
     """
     from . import roster_snapshot
     from .database import engine as _engine
+    bound = _s0_seconds_knob("trade_roster_bound_s", 300.0)
     with _engine.connect() as conn:
-        snap = roster_snapshot.roster_snapshot(conn, league_id)
-    missing = snap.status == "missing"
+        snap = roster_snapshot.roster_snapshot(
+            conn, league_id, pick_source=_pick_read_source(),
+            import_fresh_s=_s0_seconds_knob("trade_import_roster_fresh_s", 86400.0))
+    past_bound = not snap.linked and (snap.age_s is None or snap.age_s > bound)
+    if snap.status == "missing":
+        block = "roster_check_unavailable"
+    elif snap.status == "stale" and past_bound:
+        block = "roster_gate_miss"
+    else:
+        block = None
     owners, nobody = snap.asset_owner, frozenset()
+    counts = dict.fromkeys(("dropped_give", "dropped_receive",
+                            "unchecked_generic", "unchecked_pick_owner"), 0)
 
-    def is_generic(asset):
-        return parse_generic_pick_id(str(asset)) is not None
+    def check(assets, owner):
+        """(moved, generic, unknown-owner pick) asset counts for one side."""
+        moved = generic = unknown = 0
+        for asset in map(str, assets):
+            if parse_generic_pick_id(asset) is not None:
+                generic += 1
+            elif asset not in owners and _parse_owned_pick_id(asset, league_id) is not None:
+                unknown += 1
+            elif owner not in owners.get(asset, nobody):
+                moved += 1
+        return moved, generic, unknown
 
-    def owned(assets, owner):
-        return all(is_generic(a) or owner in owners.get(str(a), nobody) for a in assets)
-
-    kept, unchecked_cards, generic_picks = [], 0, 0
-    for card in cards:
+    kept, unchecked = [], {}
+    for card in (cards if snap.status != "missing" else ()):   # no rows: nothing to check
         if isinstance(card, dict):
             give = [p["id"] for p in card.get("give", [])]
             receive = [p["id"] for p in card.get("receive", [])]
@@ -3416,18 +3470,34 @@ def _filter_cards_to_current_owners(cards, league_id: str, viewer_id: str):
         else:
             give, receive = card.give_player_ids, card.receive_player_ids
             target = card.target_user_id
-        if missing or (owned(give, viewer_id) and owned(receive, str(target))):
+        (give_moved, *give_unchecked), (receive_moved, *receive_unchecked) = (
+            check(give, viewer_id), check(receive, str(target)))
+        counts["dropped_give"] += bool(give_moved)
+        counts["dropped_receive"] += bool(receive_moved)
+        unchecked[id(card)] = [a + b for a, b in zip(give_unchecked, receive_unchecked)]
+        if not (give_moved or receive_moved):
             kept.append(card)
-            n_generic = sum(1 for a in (*give, *receive) if is_generic(a))
-            if missing or n_generic:
-                unchecked_cards += 1
-                generic_picks += n_generic
-    if unchecked_cards:
-        (log.warning if missing else log.info)(
-            "[i1] unchecked: %s league=%s cards=%d generic_picks=%d",
-            "league_members_missing" if missing else "generic_picks",
-            league_id, unchecked_cards, generic_picks)
-    return kept
+    if mode == 1:
+        served = list(cards)                  # lenient: checked and logged, all served
+    elif block == "roster_check_unavailable":
+        served = [] if gates else list(cards)  # held: served unchecked
+    elif block == "roster_gate_miss":
+        served = [] if gates else kept        # held: the I-1-filtered cards (v0.3)
+    else:
+        served = kept
+    for card in served:                       # exempted assets on the cards served
+        generic, unknown = unchecked.get(id(card), (0, 0))
+        counts["unchecked_generic"] += generic
+        counts["unchecked_pick_owner"] += unknown
+    outcome = (block + ("_held" if mode == 2 and not gates else "")) if block else "served"
+    log.log(logging.WARNING if block else logging.INFO,
+            "[i1] serve league=%s mode=%s status=%s outcome=%s age_s=%s cards=%d kept=%d "
+            "dropped_give=%d dropped_receive=%d unchecked_generic=%d unchecked_pick_owner=%d",
+            league_id, "lenient" if mode == 1 else "strict", snap.status, outcome,
+            "none" if snap.age_s is None else int(snap.age_s), len(cards), len(served),
+            counts["dropped_give"], counts["dropped_receive"],
+            counts["unchecked_generic"], counts["unchecked_pick_owner"])
+    return served, (block if gates else None), past_bound
 
 
 def _trade_paged_responses_on() -> bool:
@@ -3472,7 +3542,7 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
     served = [] if job.get("status") == "error" else raw[start:end]
     out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)})
-    if out["status"] == "error":
+    if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
         out.update(cursor=end, total_ready=len(raw), replace=replace)
@@ -3734,38 +3804,70 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     return _trade_fingerprints_match(job, fingerprints)
 
 
+def _trade_i1_mode() -> int:
+    """S0's live-path knob, model_config `trade_i1_mode` (default 2), read per
+    request. 2 = strict (S0). 1 = lenient: run the checks and log, but serve
+    every card and never withhold. 0 = off, the pre-S0 path: no I-1, no
+    fingerprint read or compare, no withhold, no floor kick. NaN, an
+    unreadable value or anything else reads as strict."""
+    value = _deck_cfg("trade_i1_mode", 2.0)
+    return int(value) if value in (0.0, 1.0) else 2
+
+
+def _trade_gate_miss_on() -> bool:
+    """model_config `trade_gate_miss_mode` (default 0), read per request. At 1,
+    S0 serves its two no-card gate misses: `roster_check_unavailable` and the
+    §3b withhold with `wait_reason`. At 0 both are held for binaries older than
+    1.22.0, which show either as "Search failed": a check that can't run serves
+    the cards unchecked with a loud log, and a past-bound stale Sleeper roster
+    serves its I-1-filtered cards. NaN or any other value reads as 0."""
+    return _deck_cfg("trade_gate_miss_mode", 0.0) == 1.0
+
+
+def _s0_seconds_knob(key: str, default: float) -> float:
+    """A finite, non-negative seconds knob; anything else reads as `default`."""
+    value = _deck_cfg(key, default)
+    return value if 0 <= value < float("inf") else float(default)
+
+
 def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[str, str] | None:
-    """S0 (scope-eng-200ms §6.1): (rfp1, vsn1) from stored rows and the current
-    pool, read now. Two indexed reads plus the hashes; no network, no pool build.
+    """S0 (contract v0.4 §2, §6): (rfp1, vsn1) from stored rows and the current
+    pool, read now. Three indexed reads plus the hashes; no network, no pool
+    build. None when the read failed, or when `trade_i1_mode` is 0 (no read).
 
     Callers read this BEFORE taking _trade_jobs_lock and pass it to the
-    freshness and join checks, which only compare. None means the read failed.
+    freshness and join checks, which only compare.
     """
+    if _trade_i1_mode() == 0:
+        return None
     from . import roster_snapshot
     from .database import engine as _engine
     try:
         with _engine.connect() as conn:
-            snap, vsn = roster_snapshot.snapshot_ids(
+            return roster_snapshot.snapshot_ids(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation())
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
-    return snap.fp, vsn
 
 
-def _trade_fingerprints_match(job: dict, current) -> bool:
+def _trade_fingerprints_match(job: dict, current, *, running: bool = False) -> bool:
     """A job built on rosters or values that have since moved is never reused.
 
     `current` is the caller's _trade_current_fingerprints() for the job's
-    league and format. Compare only: this runs under _trade_jobs_lock. None (a
-    failed or missing read) never matches, nor does a None stamp from a failed
-    kickoff read. Hand-built jobs without the stamp are not checked, like
-    `request_signature`.
+    league and format. Compare only: this runs under _trade_jobs_lock. A None
+    stamp from a failed kickoff read never matches. A None `current` (a failed
+    read) can't prove staleness (contract §4.4, A2): it keeps a RUNNING job
+    (`running=True`) and never makes a completed job fresh. Hand-built jobs
+    without the stamp are not checked, like `request_signature`; with
+    `trade_i1_mode` 0 nothing is.
     """
-    if "roster_fp" not in job:
+    if "roster_fp" not in job or _trade_i1_mode() == 0:
         return True
-    return current is not None and current == (job["roster_fp"], job.get("values_snapshot_id"))
+    if current is None:
+        return running
+    return current == (job["roster_fp"], job.get("values_snapshot_id"))
 
 
 def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlook_value,
@@ -9560,20 +9662,37 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
 
 
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
-    """S0 (scope-eng-200ms §6.1): platforms-eng's refresh calls this, through
-    roster_snapshot.on_roster_change, after committing rows whose rfp1 moved.
-    Every job in the league read those rosters, so revoke them all: viewers
-    with a job, plus every (identity, league) epoch, which covers admissions
-    not yet registered. P1 adds the debounced page rebuild here.
+    """S0's `on_roster_change` handler (contract v0.4 §4.3, A3). platforms-eng's
+    refresh calls it, through roster_snapshot.on_roster_change, after
+    committing rows whose rfp1 moved.
+
+    Revokes the league's jobs that weren't built on `new_fp`, so the next
+    request rebuilds from the new rows. Debounced by construction: a job
+    already stamped `new_fp` is kept, so a double call (two concurrent inits),
+    or one landing after a rebuild, changes nothing. An admission that stamped
+    the old rows before the commit misses at its next freshness or join check.
+
+    Never raises. Takes only `_trade_jobs_lock`, briefly, with no I/O under it.
+    No proactive rebuild in S0: a live session holds its own last init's
+    rosters, so a warm-up from it would rebuild the old rosters. P1's page
+    store rebuilds from stored rows. `trade_i1_mode` 0 makes it a no-op.
     """
-    with _trade_jobs_lock:
-        user_ids = {key[0] for key in (job.get("key") or () for job in _trade_jobs.values())
-                    if len(key) == 3 and key[1] == league_id}
-        user_ids.update(uid for uid, lid in list(_trade_input_epochs.keys()) if lid == league_id)
-    for user_id in user_ids:
-        _invalidate_trade_jobs(user_id=user_id, league_id=league_id)
+    try:
+        if _trade_i1_mode() == 0:
+            return
+        with _trade_jobs_lock:
+            for job in _trade_jobs.values():
+                key = job.get("key") or ()
+                if (len(key) == 3 and key[1] == league_id
+                        and job.get("roster_fp") != new_fp and not job.get("superseded")):
+                    _revoke_trade_job_locked(job)
+                    if _trade_jobs_by_key.get(key) == job.get("job_id"):
+                        _trade_jobs_by_key.pop(key)
+    except Exception:
+        log.exception("roster-change invalidation failed for league %s", league_id)
 
 
+from . import roster_refresh as _roster_refresh  # noqa: E402  (P41 floor kick)
 from . import roster_snapshot as _roster_snapshot  # noqa: E402
 _roster_snapshot.register_roster_change_handler(_invalidate_league_trade_jobs_on_roster_change)
 
