@@ -1,3 +1,18 @@
+## 2026-10-26 — I-2 (2/4): MFL send-time player + pick ownership + R3 (stacked on #411)
+
+Full gates. Part of the launch condition for the 200 ms waiver W-AC-L5. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** the new `test_i2_mfl_ownership.py` has 15 tests, including a send through the overhaul batch with the real `_mfl_propose_core`. The targeted set passes, 133 tests: `test_mfl_propose_route` (25; its fixture now serves both live exports), `test_mfl_trade_lifecycle` (22), `test_mfl_write` (21), `test_overhaul_api` (27), `test_overhaul_service` (23).
+- **Sabotage, each red then restored:**
+  - the player check removed → 4 red;
+  - the pick check removed → 5 red;
+  - the R3 read-failure returns removed → 4 red.
+- **Contract:** players are checked against MFL's live `rosters` export and FTF picks against its live `futureDraftPicks` export (live rather than the stored snapshot: the zero-auth fetcher already exists, so it is one read). A moved asset → 422 `asset_not_owned` / `counterparty_asset_not_owned` through #411's shared helper (names or pick labels, a count when one is missing, never a raw id). A failed read → 502 `mfl_write_failed` `kind:"network"` with "Couldn’t confirm rosters with MFL …".
+- **Client code-walk (no client change):**
+  - `SendInMflButton` sends the two 422s to its catch-all (`:169-173`), which shows `detail`.
+  - **The R3 502 is intercepted** by the `mfl_write_failed` branch (`:158-168`): the alert reads "MFL wouldn’t accept the send" / "MFL rejected the request: Couldn’t confirm rosters with MFL …", with an "Open MFL" button. The copy is readable but framed as an MFL rejection.
+- **Not covered:** pre-encoded `give_pick_assets` / `receive_pick_assets` (no client sends them).
+
 ## 2026-10-26 — I-2 (1/4): Sleeper send-time player ownership + R3 (#411)
 
 Full gates. This is the launch condition for the 200 ms waiver W-AC-L5 (Product, 2026-10-26). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
