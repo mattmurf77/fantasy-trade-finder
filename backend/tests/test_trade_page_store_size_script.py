@@ -36,7 +36,7 @@ def _seed(engine, monkeypatch):
         db_module.save_trade_page(dict(
             user_id=f"u{n % 2}", league_id=f"l{n}", scoring_format="1qb_ppr",
             request_scope="organic:f=0.50", roster_fp="rfp1:x", values_snapshot_id="vsn1:x",
-            engine_version="v3+x", config_signature="c", deck_job_id=f"j{n}",
+            engine_version="v3+x", config_signature="c", experiment_digest="e", deck_job_id=f"j{n}",
             built_at=db_module.page_store_iso(now - n * 86400),
             expires_at=db_module.page_store_iso(now + 86400), card_count=cards,
             pages_blob=blob, evidence_blob=None, stored_bytes=len(blob), state="ready",

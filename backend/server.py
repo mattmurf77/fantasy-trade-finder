@@ -3742,6 +3742,118 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # older page fall through.
 DECK_PIPELINE_VERSION = 1
 
+# The CI guard for that manual bump (models-eng's classification, 2026-10-26).
+# - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
+#   cards it holds, their order and their stored content), hashed as their
+#   normalized source (the AST, docstrings stripped, so comment and formatting
+#   edits don't move it).
+# - DECK_PIPELINE_CONSTANTS: the module-level constants they read, hashed by
+#   value (a stable repr: sets and dicts sorted).
+# - DECK_PIPELINE_IGNORED: what the listed functions reference but doesn't
+#   shape a deck, each with its reason.
+# A logic or constant change fails test_deck_pipeline_digest until
+# DECK_PIPELINE_VERSION is bumped and DECK_PIPELINE_DIGEST re-pinned. A listed
+# function that references an unclassified server.py function or literal
+# constant fails the closure test until it's classified. models-eng reviews.
+DECK_PIPELINE_FUNCTIONS = (
+    "_run_trade_job", "_run_value_core_job",
+    # the candidate pool and injected cards
+    "_inject_owned_picks", "_inject_likes_you_cards", "_inject_likes_you_cards_impl",
+    "_likes_you_cfg", "_likes_you_gate_level", "_likes_you_min_user_delta",
+    "_likes_you_min_user_gain", "_likes_you_user_delta", "_likes_you_seed_value",
+    "_likes_you_package_delta", "_likes_you_presentment_ok",
+    "_owned_pick_assets", "_pick_asset_elos", "_owned_picks_available", "_picks_pool_cap",
+    "_parse_owned_pick_id", "_priced_pick_value", "_pick_gap_equivalent",
+    "_asserted_picks_tradeable", "_standing_offer_inject_cap", "_pick_read_source",
+    # gates on the candidate set
+    "_evaluate_trade_significance", "_evaluate_deck_rosters", "_evaluate_deck_policy",
+    "_evaluate_card_policy", "_policy_context", "_card_concept_id",
+    "_significance_card_key", "_significance_exemptions_for",
+    "_load_presentment_exclusions", "_presentment_need_gate_bypass",
+    "_owner_cards_valid", "_owner_selected_assignment", "_owner_generation_context",
+    "_owner_canonical", "_first_session_confidence_ok", "_audition_statuses",
+    # order and composition of the served deck (the F-layers, quality, ghosts)
+    "_apply_deck_suppression", "_deck_fatigue_multipliers", "_order_deck",
+    "_deck_value_scores", "_split_exploration_pool", "_apply_exploration_slot",
+    "_apply_first_session_shaping", "_records_in_order",
+    "_ghost_holdout_active", "_is_ghost_card", "_served_cards",
+    "_cap_per_target", "_top_receive_asset", "_card_shape", "_card_archetype",
+    "_deck_cfg", "_deck_rng_seed", "_deck_trade_hash", "_deck_fatigue_state",
+    "_fatigue_centerpiece", "_fatigue_package_value", "_exploration_off_taste",
+    "_filter_suppressed_for_exploration", "_thompson_v2_multipliers",
+    "_thompson_v2_posterior", "_thompson_v2_arm_stats", "_thompson_prior_base_rate",
+    # derived inputs (their logic changes the result; not data fetches)
+    "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
+    "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
+    "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    # the flag gates that switch layers on
+    "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
+    "_deck_first_session_enabled", "_deck_quality_filters_enabled", "_deck_signal_v2_enabled",
+    "_deck_taste_enabled", "_deck_thompson_v2_enabled", "_deck_value_model_enabled",
+    "_likes_you_enabled", "_owner_enabled", "_standing_offers_enabled",
+    "_suggestion_telemetry_enabled", "_thompson_deck_enabled", "_value_core_enabled",
+    "_value_core_live", "_slot_labels_enabled",
+    # the stored card's content
+    "_stamp_own_standing_offers", "trade_card_to_dict", "_value_verdict_payload",
+    "_owner_public_selection", "player_to_dict",
+)
+DECK_PIPELINE_CONSTANTS = (
+    "_DECK_MIN_CARDS", "_EXPLORATION_BASE_PER_OPP", "_EXPLORATION_SLOT_MIN",
+    "_EXPLORATION_SLOT_MAX", "_FATIGUE_SESSION_PASS_MIN", "_LIKES_YOU_CAP",
+    "_OWNED_PICK_SEARCH_RANK", "_OWNER_SELECTED_VERSION", "_OWNER_EXCLUSIVE_VERSION",
+    "_THOMPSON_PRIOR_MIN_N", "_THOMPSON_V2_TTL_DAYS", "_THOMPSON_V2_WARM_MIN_OBS",
+    "VALID_POSITIONS", "_PLATFORM_DEFAULT_LINEUP", "_AUDITION_ESTABLISHED",
+)
+DECK_PIPELINE_IGNORED = {
+    # job lifecycle and publication bookkeeping
+    "_finish_trade_job": "job lifecycle: status and timing, not the deck",
+    "_job_live": "job lifecycle: whether a job may still publish",
+    "_job_superseded": "job lifecycle: the supersede fence",
+    "_revoke_trade_job_locked": "job lifecycle: revocation",
+    # logging and telemetry
+    "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
+    "_log_owner_selected_run": "run logging",
+    "_log_presentment_outcome": "a log line",
+    "_log_roster_rejections": "shadow logging of rejected candidates",
+    "_mirror_skip_rows": "shadow logging of skipped mirrors",
+    "_note_mirror_skip": "shadow logging of skipped mirrors",
+    "_tp_reason_roster": "a shadow-log reason code",
+    "_tp_reason_resolved": "a shadow-log reason code",
+    # freshness captures and matches (the job cache's, not the deck's)
+    "_capture_trade_execution": "captures the session for the worker",
+    "_capture_trade_presentation": "freshness capture; its result is in engine_version",
+    "_capture_trade_significance": "freshness capture; its result is in engine_version",
+    "_trade_owner_model_matches": "freshness match",
+    "_trade_significance_matches": "freshness match",
+    "_trade_safety_signature": "freshness capture; its result is in engine_version",
+    # inputs whose result is stamped elsewhere, or serve-time work
+    "_infer_user_outlook": "the seeded outlook is in config_signature",
+    "_project_trade_dispositions": "runs at serve on stored pages, never stored",
+    "_make_progress_cb": "progressive snapshots while running; the stored list is the final one",
+    "_first_session_board_refresh": "F9's header payload, never on stored cards",
+    "_active_format": "which format the session is in: an input, stamped in the page key",
+    "_league_user_id": "the viewer's league identity: an input",
+    "_league_on_block_ids": "trade-block data read and cache",
+    # Sleeper I/O, caches and utilities
+    "_sleeper_get": "Sleeper I/O",
+    "_load_sleeper_cache": "Sleeper players cache read",
+    "_players_cache_age_seconds": "cache bookkeeping",
+    "_fetch_sleeper_league_meta": "Sleeper I/O",
+    "_fa_league_meta": "Sleeper league meta read and cache",
+    "_outlook_sleeper_fetch": "Sleeper I/O for the outlook package",
+    "_iso_age_days": "a date utility",
+    "_FA_LEAGUE_META_TTL": "a cache TTL",
+    "_SLOT_ORDER_TTL_SECONDS": "a cache TTL",
+    "_THOMPSON_PRIOR_CACHE_TTL_S": "a cache TTL",
+    "_thompson_prior_cache": "a mutable cache, not a constant",
+    # copy and label formatting on stored cards (copy churn; models-eng's call: out)
+    "_standing_offer_reason": "label copy only",
+    "_owned_pick_label": "label copy only",
+    "_pick_labels_by_id": "label copy only",
+    "_seasons_phrase": "label copy only",
+}
+DECK_PIPELINE_DIGEST = "38068a074677acaa"
+
 # The modules whose code decides what cards a deck holds or their order. Their
 # bytes are hashed into every page's engine_version (backend/-relative globs,
 # sorted within each pattern). The reasons per module are in the P1 report and
@@ -3751,6 +3863,7 @@ _ENGINE_CODE_MODULES = (
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
     "power_rankings.py",          # value_core's lineup slots and optimal starters
     "ranking_service.py", "pick_values.py", "pick_slots.py",
+    "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
     "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
@@ -3763,6 +3876,11 @@ _ENGINE_CODE_MODULES = (
     "trade_narrative.py",
 )
 _engine_code_hash_value: str | None = None
+
+# The experiments whose variant changes a deck (experiments.py keys). A stored
+# page carries their digest (_trade_experiment_digest); a page built under one
+# variant never serves after the user's assignment changes.
+_DECK_EXPERIMENT_LAYERS = ("trade.aggression",)
 
 
 def _engine_code_hash_of(root: pathlib.Path) -> str:
@@ -3786,17 +3904,132 @@ def _trade_engine_code_hash() -> str:
     return _engine_code_hash_value
 
 
-def _trade_page_store_enabled() -> bool:
-    """The flag `trade.first_page_store` AND the deploy-free kill knob
-    `first_page_store_enabled` (model_config, default 1). The knob is on at any
-    finite value ≥ 1; 0, a negative, NaN or an unreadable value is off. Either
-    off ⇒ no store read, write, serve or stale mark.
+def _ast_shape(node):
+    """A Python-version-stable form of an AST: node type plus its non-empty
+    fields (3.13's ast.dump hides empty fields that 3.12 shows; CI runs 3.12).
+    Docstrings are already gone; positions are never included."""
+    import ast
+    if isinstance(node, ast.AST):
+        fields = []
+        for name, value in ast.iter_fields(node):
+            shaped = _ast_shape(value)
+            if shaped not in (None, [], ()):
+                fields.append((name, shaped))
+        return [type(node).__name__, fields]
+    if isinstance(node, list):
+        return [_ast_shape(item) for item in node]
+    if isinstance(node, (bytes, complex)) or node is Ellipsis:
+        return repr(node)
+    return node
 
-    Re-enabling (the knob or the flag): set the knob to its previous value + 1.
+
+def _strip_docstrings(tree):
+    import ast
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module))
+                and body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
+            node.body = body[1:] or [ast.Pass()]
+    return tree
+
+
+def _stable_repr(value) -> str:
+    """repr with sets and dicts sorted, so a constant's digest is stable."""
+    if isinstance(value, dict):
+        items = sorted(((_stable_repr(k), _stable_repr(v)) for k, v in value.items()))
+        return "{" + ", ".join(f"{k}: {v}" for k, v in items) + "}"
+    if isinstance(value, (set, frozenset)):
+        return type(value).__name__ + "{" + ", ".join(sorted(map(_stable_repr, value))) + "}"
+    if isinstance(value, (list, tuple)):
+        inner = ", ".join(map(_stable_repr, value))
+        return f"[{inner}]" if isinstance(value, list) else f"({inner})"
+    return repr(value)
+
+
+def _deck_pipeline_digest(names=DECK_PIPELINE_FUNCTIONS, constants=DECK_PIPELINE_CONSTANTS, *,
+                          source_of=None, value_of=None) -> str:
+    """sha256[:16] over each listed function's normalized source (its AST with
+    docstrings stripped, so comment and formatting edits don't move it) and
+    each listed constant's value."""
+    import ast
+    import inspect
+    import textwrap
+    source_of = source_of or (lambda name: inspect.getsource(globals()[name]))
+    value_of = value_of or (lambda name: globals()[name])
+    digest = hashlib.sha256()
+    for name in names:
+        tree = _strip_docstrings(ast.parse(textwrap.dedent(source_of(name))))
+        digest.update(name.encode() + b"\0")
+        digest.update(json.dumps(_ast_shape(tree), separators=(",", ":"), default=str).encode()
+                      + b"\0")
+    for name in constants:
+        digest.update(f"const:{name}\0{_stable_repr(value_of(name))}\0".encode())
+    return digest.hexdigest()[:16]
+
+
+# _trade_experiment_digest's memo: user_id -> (experiments cache generation,
+# engine flag, digest), least recently used first, capped. The experiments
+# cache refreshes at most once a minute, so a user costs at most one
+# evaluation (a users read and experiments' audit insert) per refresh, and a
+# serve inside a generation costs no DB work.
+_experiment_digest_memo: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+_experiment_digest_lock = threading.Lock()
+_EXPERIMENT_DIGEST_MEMO_MAX = 10_000
+
+
+def _trade_experiment_digest(user_id: str) -> str:
+    """sha256[:16] over, for each deck-affecting experiment, the user's
+    assignment: the experiment's layer and version, the variant and its
+    model_overlay. A user who isn't enrolled (the engine off, not running, not
+    targeted, or out of bucket: trade_service's deterministic MD5 bucket) hashes
+    as "fallback", so moving between enrolled and fallback still mismatches.
+    Uses the same evaluation the trade job uses (experiments.variant_overlay).
+
+    Memoized per user on the experiments cache generation (`_cache["at"]`,
+    refreshed at most every 60 s) and the `experiments.engine` flag: the
+    evaluation reruns only when either moves."""
+    from . import experiments as _experiments
+    engine_on = is_enabled("experiments.engine")
+    generation = _experiments._load_cache().get("at") if engine_on else None
+    with _experiment_digest_lock:
+        hit = _experiment_digest_memo.get(user_id)
+        if hit is not None and hit[:2] == (generation, engine_on):
+            _experiment_digest_memo.move_to_end(user_id)
+            return hit[2]
+    parts = []
+    for key in _DECK_EXPERIMENT_LAYERS:
+        variant, overlay = _experiments.variant_overlay(user_id, key)
+        if variant is None:
+            parts.append([key, "fallback"])
+            continue
+        running = next((exp for exp in _experiments._load_cache()["running"]
+                        if exp["key"] == key), {})
+        parts.append([key, running.get("layer"), running.get("version"), variant, overlay])
+    digest = hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    with _experiment_digest_lock:
+        _experiment_digest_memo[user_id] = (generation, engine_on, digest)
+        _experiment_digest_memo.move_to_end(user_id)
+        while len(_experiment_digest_memo) > _EXPERIMENT_DIGEST_MEMO_MAX:
+            _experiment_digest_memo.popitem(last=False)
+    return digest
+
+
+def _trade_page_store_enabled() -> bool:
+    """On only when all three hold, in order: the flag `trade.first_page_store`;
+    the flag `trade.packed_evidence` (#370's deferred evidence; without it,
+    backing jobs and rebuilds would write build-time evidence that reads as
+    fully exposed under eval rule v3. P1 doesn't register the key, so it reads
+    False until #370 does); and the deploy-free kill knob
+    `first_page_store_enabled` (model_config, default 1), on at any finite
+    value ≥ 1 (0, a negative, NaN or an unreadable value is off). Off ⇒ no
+    store read, write, serve or stale mark.
+
+    Re-enabling (the knob or a flag): set the knob to its previous value + 1.
     It's hashed into every page's config_signature, so each page stored before
     the off period, which missed that period's stale marks, falls through and
     rebuilds."""
-    if not is_enabled("trade.first_page_store"):
+    if not (is_enabled("trade.first_page_store") and is_enabled("trade.packed_evidence")):
         return False
     try:
         value = float(_trade_service_mod._cfg.get("first_page_store_enabled", 1.0))
@@ -3947,7 +4180,8 @@ def _store_trade_page(job_id: str) -> bool:
                 "engine_version": _trade_page_engine_version(
                     _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
                     job.get("presentation_capture")),
-                "config_signature": job["request_signature"], "deck_job_id": job_id,
+                "config_signature": job["request_signature"],
+                "experiment_digest": _trade_experiment_digest(user_id), "deck_job_id": job_id,
                 "built_at": _db.page_store_iso(built),
                 "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
                 "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
@@ -4721,10 +4955,10 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
                       request_signature, presentation_capture, search_id, backing,
                       kick) -> dict | None:
     """§6.2 for /generate `page: 1`. The response body, or None to fall through
-    to today's path: the engine or config moved; the stored cards expired; the
-    current read failed (a failed read can't prove a page fresh, A2); the
-    stored pages don't decode; or the page is stale while a complete, fresh
-    job is in this process (that job is newer).
+    to today's path: the engine, config or the user's deck experiment variants
+    moved; the stored cards expired; the current read failed (a failed read
+    can't prove a page fresh, A2); the stored pages don't decode; or the page
+    is stale while a complete, fresh job is in this process (that job is newer).
 
     `current` is the caller's _trade_current_snapshot(). `backing` is the
     status of the fresh or matching running job for this key in this process,
@@ -4746,6 +4980,9 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
     if (request_signature is None or row["config_signature"] != request_signature
             or row["engine_version"] != engine_now):
         log.info("trade-page %s: blocked (engine or config moved)", row["deck_job_id"])
+        return None
+    if row["experiment_digest"] != _trade_experiment_digest(user_id):
+        log.info("trade-page %s: blocked (experiment variant moved)", row["deck_job_id"])
         return None
     if row["expires_at"] <= _db.page_store_iso(time.time()) or current is None:
         return None
@@ -5445,13 +5682,14 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
 
 
 def _trade_i1_mode() -> int:
-    """S0's live-path knob, model_config `trade_i1_mode` (default 2), read per
+    """S0's live-path knob, model_config `trade_i1_mode` (default 1 until C-b,
+    models-lead option B), read per
     request. 2 = strict (S0). 1 = lenient: run the checks and log, but serve
     every card and never withhold. 0 = off, the pre-S0 path: no I-1, no
     fingerprint read or compare, no withhold, no floor kick. NaN, an
-    unreadable value or anything else reads as strict."""
-    value = _deck_cfg("trade_i1_mode", 2.0)
-    return int(value) if value in (0.0, 1.0) else 2
+    unreadable value or anything else reads as 1."""
+    value = _deck_cfg("trade_i1_mode", 1.0)
+    return int(value) if value in (0.0, 2.0) else 1
 
 
 def _trade_gate_miss_on() -> bool:

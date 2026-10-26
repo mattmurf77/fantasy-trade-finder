@@ -729,7 +729,7 @@ def test_each_backing_job_start_logs_one_line_with_its_reason(p1, spawned, caplo
 
 @pytest.fixture()
 def e2_on(e2, monkeypatch):
-    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True})
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True, "trade.packed_evidence": True})
     yield e2
 
 
@@ -1098,7 +1098,7 @@ def test_lineage_older_than_a_day_is_purged_with_the_store_on(file_db, monkeypat
     monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: False})
     server._evict_trade_page_store()
     assert len(lineage_rows()) == 2                        # store off: untouched
-    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True})
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), FLAG: True, "trade.packed_evidence": True})
     monkeypatch.setitem(server._trade_service_mod._cfg, "first_page_store_enabled", 1.0)
     server._evict_trade_page_store()
     assert [r["deck_job_id"] for r in lineage_rows()] == ["recent"]

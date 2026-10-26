@@ -1207,7 +1207,7 @@ class CompressedJSON(TypeDecorator):
 # per (user, league, format, request_scope): the first trade_pages_stored ×
 # trade_page_size cards of the latest complete organic job, in final served
 # order, plus the stamps the serve compares (roster_fp, values_snapshot_id,
-# engine_version, config_signature). Read and written only by server.py while
+# engine_version, config_signature, experiment_digest). Read and written only by server.py while
 # the store is on (the flag and the first_page_store_enabled knob). user_id is
 # the account deletion/export key
 # (accounts._ADDITIONAL_PRIVATE_TABLES). Upserted by save_trade_page with a
@@ -1228,6 +1228,7 @@ trade_page_store_table = Table("trade_page_store", metadata,
     Column("values_snapshot_id", String,  nullable=False),   # vsn1 at the job's kickoff
     Column("engine_version",     String,  nullable=False),
     Column("config_signature",   String,  nullable=False),   # the job's request signature
+    Column("experiment_digest",  String,  nullable=False),   # the user's deck-affecting experiment variants
     Column("deck_job_id",        String,  nullable=False),
     Column("built_at",           String,  nullable=False),   # ISO UTC, the job's admission
     Column("expires_at",         String,  nullable=False),   # ISO UTC, earliest stored card expiry
@@ -3097,7 +3098,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_page_size", 30.0, "/api/trades/generate `page: 1` and /api/trades/status `cursor` (opt-in paging): max cards per response; clamped to 1-200 at read. Unpaged (legacy) requests never read it"),
     ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
     # ── S0 serve rules (roster fingerprint contract v0.4 §3, §3b) ────────
-    ("trade_i1_mode", 2.0, "S0 live-path switch, read per request: 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as strict. Deploy-free"),
+    ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
@@ -7112,7 +7113,8 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
 _PAGE_STORE_KEY = ("user_id", "league_id", "scoring_format", "request_scope")
 # Replaced on a rebuild. last_served_at survives it: eviction is by use.
 _PAGE_STORE_REPLACED = (
-    "roster_fp", "values_snapshot_id", "engine_version", "config_signature", "deck_job_id",
+    "roster_fp", "values_snapshot_id", "engine_version", "config_signature",
+    "experiment_digest", "deck_job_id",
     "built_at", "expires_at", "card_count", "pages_blob", "evidence_blob", "stored_bytes", "state",
 )
 

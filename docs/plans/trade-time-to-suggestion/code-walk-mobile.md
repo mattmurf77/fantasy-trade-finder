@@ -59,7 +59,9 @@
   - S0's withhold (`wait_reason: "roster_check"` on a building response, parsed by `api/trades.ts`, cleared by
     the next response that lacks it via `nextDeckJob` or the legacy poller) shows `GateWaitCard` in place of
     "Looking for trades…" while the deck has no card; after `FIRST_CARD_TIMEOUT_MS` (R2b's 10 s) with still no
-    card it falls through to `GateErrorCard`. Cards arriving end it normally. Copy keys `trades.gate.*` are
+    card it falls through to `GateErrorCard`. Cards arriving end it normally. Its Retry (`handleGateRetry`) also
+    restarts the wait: a non-force repeat gets the SAME running job back, so the retry bumps `gateRetrySeq`, a
+    dep of the fall-through effect, rather than waiting for a new `job_id`. Copy keys `trades.gate.*` are
     placeholders for marketing-lead; none says "Searching…", "Finding more" or a time. Absent fields mean
     today's behavior. Guard: `check-gate-miss`.
 - **Guards:** `check-trade-pages`, `check-trade-buffer`, `check-trade-inplace-reveal`, `check-no-finding-more`,
@@ -130,8 +132,10 @@
 - **Swipes:** `advance()` removes the acted-on card (`removeDeviceCard`), so it never returns on the next tap.
 - **Which key a deck writes** (release-lead P1-a): the deck's own write-back (the device page effect) runs only
   while the screen's `deviceKey` equals `deckKeyRef`, the key the deck was validated under. It is bound at
-  adoption (the landing's key rides the handoff) and at a model answer (`lastModelKeyRef`, set with the request
-  in the same render). The league reset and a format change unbind it (`deckKeyRef`/`validatedAtRef`, and the
+  adoption (the landing's key rides the handoff) and at a model answer (`ctx.deviceKey`, stamped by that
+  dispatch's own `onMutate` next to its epoch — a format switch bumps no epoch, so a shared ref would let an
+  older answer bind a newer dispatch's key; `check-device-first-page` 3j runs that ordering). The league reset
+  and a format change unbind it (`deckKeyRef`/`validatedAtRef`, and the
   scope on a league switch), so a league or format switch never writes the old deck under the new key.
   `check-device-first-page` 3h runs the screen's own effect bodies through a league switch and then a format
   switch.
@@ -173,11 +177,12 @@ sees; "deck" is the pushed results deck (Acquire → Find a trade).
 4. **The P30 end card.** Swipe a deck to its true end (a small league, or a pinned search with few results).
    **Expect:** "You've seen every trade for now." / "New ideas show up as rosters and values change.", one tally
    line "N passed · N liked · N proposed", and two buttons: "Adjust your search" (primary) and "Back to Home"
-   (secondary; only with the Home tab). If you reach the end with no pass, like or proposal (every card
-   withdrawn and skipped with Next trade), **Expect:** no tally line at 0 · 0 · 0. Cards that arrive later never
-   replace the end card under your thumb.
-5. **Withdraw in place on an E2 `replace`.** Early in a deck from a large league (pages are still loading),
-   trade away on Sleeper a player in the fronted card's give side, then let FTF see it (open FTF on a second
+   (secondary; only with the Home tab). Cards that arrive later never replace the end card under your thumb.
+   The tally is hidden at 0 · 0 · 0 (P36), but an operator can't reach that state on purpose (every swipe, and
+   the Bad trade flag, counts); `check-no-finding-more` 4d pins it instead.
+5. **Withdraw in place on an E2 `replace`.** **Use a test league you control on Sleeper, never a real one.**
+   Early in a deck from a large league (pages are still loading), trade away on Sleeper a player in the fronted
+   card's give side, then let FTF see it (open FTF on a second
    device, or background and foreground this one) while the card stays fronted. **Expect:** at the next page
    fetch, the card keeps its slot and shows "This trade is no longer available." with Next trade; Like/Pass are
    gone on it; Next moves on. Nothing slides in by itself.
@@ -194,16 +199,23 @@ sees; "deck" is the pushed results deck (Acquire → Find a trade).
 9. **League switch, then format switch.** Find a trade in league A and swipe a few. Switch to league B (League
    picker), then Find a trade. Then switch the scoring format (1QB ↔ SF) and Find a trade again. **Expect:** no
    card from league A ever shows in league B, and no card from the other format after the format switch,
-   including the first card of the first tap (this is the release-lead P1-a check; with C on, repeat it within
-   5 min of the first deck).
-10. **Named gate misses (#339 item 12; reachable once S0 deploys).** With S0's roster check unavailable for the
-    league (S0's own test hook, or a league whose platform check fails), tap Find a trade. **Expect:** "Couldn't
-    confirm current rosters" / "We couldn't check rosters with your league's platform. Try again." with
-    **Retry** in the card slot, never "Search failed … waking up"; Retry starts a new search; Back works. While
-    S0 is withholding cards for the check, **expect** "Checking current rosters with your league's platform…"
+   including the first card of the first tap. With C on, step C9 gives the observable proxy for this
+   (release-lead P1-a).
+10. **Named gate misses (#339 item 12; reachable once S0, #367, deploys).** Prod keeps
+    `trade_gate_miss_mode` = 0 until 1.22.0 is distributed, so **force each state for your test league only**
+    with S0's admin hook (release-lead or the operator runs it; it needs `CRON_SECRET`). **The hook applies to every
+    member of that league, so use a league whose members are all operator test accounts:**
+    `POST /api/admin/trades/gate-miss-test` `{"league_id": "<test league>", "kind": "check_error", "ttl_s": 600}`
+    for the error, and `"kind": "withhold"` for the wait. `DELETE` with `{"league_id": …}` clears it, and it
+    expires by itself after `ttl_s` (≤ 900). With `check_error` set, tap Find a trade. **Expect:** "Couldn't
+    confirm current rosters" / "The roster check didn't go through." with
+    **Retry** in the card slot (VoiceOver says "Retry the roster check"), never "Search failed … waking up"; Retry starts a new search; Back works. While
+    S0 is withholding cards for the check, **expect** "Checking your league's current rosters…" beside the progress indicator
     in place of "Looking for trades…" (no seconds, no "Searching…"); if no card arrives within about 10 s it
-    turns into the error above with Retry; if cards arrive, the deck shows them normally. Copy is placeholder
-    (`trades.gate.*`, head-bizops due ~10-28).
+    turns into the error above with Retry; if cards arrive, the deck shows them normally. (`withhold` keeps
+    withholding until the hook expires or is cleared, so expect the 10 s fall-through to the error, then Retry
+    restarts the wait.) **Always `DELETE` the hook when done.** Copy is placeholder (`trades.gate.*`, head-bizops
+    due ~10-28).
 11. **Known behavior to log (P2-b):** on the first ~10 s of a cold search, note any card that turns into "This
     trade is no longer available." right after appearing. E2's `replace` can withdraw a fronted card that a later
     server layer dropped; log how often, don't file it as a bug.
@@ -242,11 +254,16 @@ inert and these steps don't apply.
    card, return to the landing and tap. **Expect:** no instant device card either way; the deck reflects the new
    ranks (release-lead P2-a).
 8. **Pass two cards, go back, re-tap within 5 min:** **Expect:** the passed cards never reappear.
-9. **League or format switch** (step A9 with C on, inside 5 min): **Expect:** never another league's or format's
-   card, not even for one frame.
+9. **League or format switch, the observable proxy** (release-lead P1-a). In format X, open the Acquire
+   landing and a deck, so a device page for X is held. Switch the scoring format to Y (one you haven't searched
+   in the last 5 min), **turn on airplane mode**, then go to the Acquire landing and tap Find a trade.
+   **Expect:** the Offline card at once, **never instant cards**: instant cards here would be a device page
+   written under Y from X's deck. Repeat with a league switch (league A → league B, B not searched in the
+   last 5 min) instead of the format switch.
 10. **Flag off:** **Expect:** identical to A.
 
-**M:** with the readout mounted and `testing.timing_readout` on, tap Find a trade and check that Settings ›
+**M:** **waits on #360** (onboarding-eng's mount of the readout row in Settings › Testing); until it lands there is
+nothing to see. Then, with `testing.timing_readout` on for the device, tap Find a trade and check that Settings ›
 Testing shows the last `ms_from_tap` with its network, launch state and serve source.
 
 **AC-L1 itself** (p95 ≤ 200 ms, the scripted two-device session) is app-manager's device checklist (OA-6, 11-07 to

@@ -7,10 +7,13 @@ per impression is legal — we reduce to booleans here).
 
 Narrow rows (C7 (i) scaffolding): a card may carry only a frozen compact
 scorer-input block (backend/eval/contract.py) instead of features_json.
-It is read from a `features_compact` column when the table has one; until
-that column exists, every card's features_compact is None. The same holds
-for `evidence_tier` (replay and calibration exclude 'partial_run'; every
-other tier, ghost/first30/delivered/archive/full_interim, is a usable row).
+It is read from a `features_compact` column when the live table has one
+(the DB's own columns, inspected per read, never the code's table
+metadata: an unmigrated DB lacks what the metadata may declare, and a DB
+column the metadata lacks is still read); without that column, every
+card's features_compact is None. The same holds for `evidence_tier`
+(replay and calibration exclude 'partial_run'; every other tier,
+ghost/first30/delivered/archive/full_interim, is a usable row).
 
 Packed cards (ADR-025 C1, C7 (i)): when the engine has a deck_evidence_packs
 table, each pack in the window is unpacked (backend/eval/evidence_pack.py)
@@ -30,6 +33,17 @@ card, so delivered = served at every position, as e(k) always counted it.
 
 LoggedDeck.exclusion, per deck: replay excludes the deck whole and never
 sinks it; calibration excludes its cards.
+  calibration_refresh
+                   a card's features_json (or compact block) carries
+                   deck_source CALIBRATION_REFRESH_SOURCE: Calibration's
+                   targeted refresh built the deck (ADR-025 S4), and it is
+                   never shown in Trades, so replay, e(k) and calibration
+                   leave it out. It takes precedence over every reason
+                   below: a refresh deck keeps full rows at build and is
+                   never packed, so from PACK_REQUIRED_SINCE on it would
+                   otherwise read as in_flight or incomplete_deck (a lost
+                   pack). Refresh decks built before #370's relabel carry
+                   deck_source 'replenish', can't be told apart, and stay in.
   pack_integrity   unpack_run refuses the pack (unreadable, unknown version,
                    checksum mismatch, row fields disagreeing with its
                    header, malformed deliveries), or it holds another run's
@@ -75,7 +89,8 @@ EVAL_COLUMNS = (
     "trade_hash", "features_json", "propensity", "base_score", "final_score",
     "archetype", "shape_bucket", "served_at", "is_ghost",
 )
-# Read only when the table has them (neither column exists yet).
+# Read only when the live table has them (inspected per read, not taken from
+# the code's table metadata; module docstring).
 OPTIONAL_COLUMNS = ("features_compact", "evidence_tier")
 # evidence_tier written on a partial run's delivered rows (head-eng ruling 21):
 # replay excludes the deck, calibration the card.
@@ -92,7 +107,12 @@ _PACKS = table(
     column("header_json", Text), column("cards_blob", LargeBinary),
     column("checksum", String), column("card_count", Integer),
 )
+# The deck_source a card of Calibration's targeted refresh deck carries in its
+# features_json (ADR-025 S4: #370's server._pregenerate_grading_targets builds
+# it through _replenish_deck_for(..., source="grading_refresh")).
+CALIBRATION_REFRESH_SOURCE = "grading_refresh"
 # LoggedDeck.exclusion values (also replay's exclusion reasons).
+CALIBRATION_REFRESH = "calibration_refresh"
 PACK_INTEGRITY = "pack_integrity"
 INCOMPLETE_DECK = "incomplete_deck"
 IN_FLIGHT = "in_flight"
@@ -147,7 +167,8 @@ class LoggedDeck:
     league_id: str
     served_at: str
     cards: list[LoggedCard] = field(default_factory=list)
-    # None, or PACK_INTEGRITY / INCOMPLETE_DECK / IN_FLIGHT (module doc).
+    # None, or CALIBRATION_REFRESH / PACK_INTEGRITY / INCOMPLETE_DECK /
+    # IN_FLIGHT (module doc).
     exclusion: str | None = None
 
 
@@ -231,22 +252,24 @@ def load_decks(
     eng = resolve_engine(engine, db_url)
 
     imp = deck_impressions_table
-    cols = [imp.c[name] for name in EVAL_COLUMNS]
-    cols += [c for c in (imp.c.get(name) for name in OPTIONAL_COLUMNS)
-             if c is not None]
-    q = select(*cols).order_by(imp.c.served_at, imp.c.deck_job_id, imp.c.card_index)
-    if since:
-        q = q.where(imp.c.served_at >= since)
-    if until:
-        q = q.where(imp.c.served_at < until)
-    if as_of:
-        q = q.where(imp.c.served_at <= as_of)
-    if user_id:
-        q = q.where(imp.c.user_id == user_id)
-    if league_id:
-        q = q.where(imp.c.league_id == league_id)
-
     with eng.connect() as conn:
+        # An optional column is selected iff the live table has it; one the
+        # code's metadata lacks is still read, by name.
+        live = {c["name"] for c in inspect(conn).get_columns(imp.name)}
+        cols = [imp.c[name] for name in EVAL_COLUMNS]
+        cols += [imp.c[name] if name in imp.c else column(name, Text)
+                 for name in OPTIONAL_COLUMNS if name in live]
+        q = select(*cols).order_by(imp.c.served_at, imp.c.deck_job_id, imp.c.card_index)
+        if since:
+            q = q.where(imp.c.served_at >= since)
+        if until:
+            q = q.where(imp.c.served_at < until)
+        if as_of:
+            q = q.where(imp.c.served_at <= as_of)
+        if user_id:
+            q = q.where(imp.c.user_id == user_id)
+        if league_id:
+            q = q.where(imp.c.league_id == league_id)
         rows = conn.execute(q).fetchall()
         packs = []
         if inspect(conn).has_table(PACK_TABLE):
@@ -282,12 +305,17 @@ def load_decks(
 
     decks: dict[str, LoggedDeck] = {}
     order: list[str] = []
+    refresh: set[str] = set()   # deck_job_ids of Calibration refresh decks
     for r in rows:
         features = _json_dict(r.features_json)
+        # getattr: None when the live table lacks the column (not selected).
+        features_compact = _json_dict(getattr(r, "features_compact", None))
+        # Before the projection trim: deck_source is not a PROJECTION_KEYS key.
+        if any(d is not None and d.get("deck_source") == CALIBRATION_REFRESH_SOURCE
+               for d in (features, features_compact)):
+            refresh.add(r.deck_job_id)
         if project_features and features is not None:
             features = {k: v for k, v in features.items() if k in PROJECTION_KEYS}
-        # The column does not exist yet; getattr keeps this a no-op until it does.
-        features_compact = _json_dict(getattr(r, "features_compact", None))
         card = LoggedCard(
             impression_id=r.impression_id,
             deck_job_id=r.deck_job_id,
@@ -349,6 +377,9 @@ def load_decks(
         result.sort(key=lambda d: (d.served_at, d.deck_job_id))
     for deck in result:
         deck.cards.sort(key=lambda c: (c.card_index, c.is_ghost))
+        if deck.deck_job_id in refresh:   # not a Trades deck: ahead of every other reason
+            deck.exclusion = CALIBRATION_REFRESH
+            continue
         if deck.exclusion is not None:
             continue
         idx = [c.card_index for c in deck.cards if not c.is_ghost]
