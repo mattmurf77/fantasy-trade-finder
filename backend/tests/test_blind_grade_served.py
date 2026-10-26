@@ -174,7 +174,7 @@ def test_a_chosen_card_without_a_full_row_is_skipped_and_counted(prod, tmp_path,
     assert shown(card_set) == ["T-g0", "T-g2"]           # never filled from card 5
     assert card_set["skipped_no_row"] == 3                # 1 (no assets), 3 and 4 (packed)
     assert json.loads(capsys.readouterr().out) == {"cards": 2, "leagues": 1,
-                                                   "skipped_no_row": 3}
+                                                   "skipped_no_row": 3, "leagues_without_deck": []}
 
 
 def test_the_read_only_check_still_fires(prod):
@@ -209,3 +209,30 @@ def test_a_deck_whose_evidence_contradicts_itself_is_not_graded(prod):
     put_deck(fake, "T", 4, served_at=_ago(3), delivered=range(4))
     put_deck(fake, "C", 4, served_at=_ago(1), rows=range(4), delivered=range(4), w0=[1])
     assert shown(served()) == ["T-g0", "T-g1", "T-g2", "T-g3"]
+
+
+def test_a_league_without_a_gradeable_deck_is_named_not_silent(prod):
+    """#423 QA P3: a league with no Trades deck in SERVED_LOOKBACK yields no
+    cards, and the CardSet names it rather than leaving a silent zero."""
+    fake = prod()
+    put_deck(fake, "T", 3, served_at=_ago(2), delivered=range(3))
+    card_set = blind_grade.served_card_set(secrets=Path("unused.env"),
+                                           league_ids=["lg", "empty-league"], user_id="u1")
+    assert shown(card_set) == ["T-g0", "T-g1", "T-g2"]
+    assert card_set["leagues_without_deck"] == ["empty-league"]
+
+
+def test_the_prod_engine_opens_every_connection_read_only(monkeypatch):
+    """#423 QA P3: pins _connect_readonly's startup option, which every
+    pooled connection (the loader's included) opens with; before this only
+    the runtime SHOW guard caught its removal."""
+    import sqlalchemy
+    seen = {}
+
+    def fake_create_engine(url, **kw):
+        seen.update(kw)
+        return object()
+
+    monkeypatch.setattr(sqlalchemy, "create_engine", fake_create_engine)
+    prod_analytics._connect_readonly("postgresql://u:p@h/db", 15000)
+    assert "-c default_transaction_read_only=on" in seen["connect_args"]["options"]
