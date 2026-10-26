@@ -109,7 +109,7 @@ from .database import (
     PASS_REASON_TEXT_MAX,
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
     # (matcher logic lives in suggestion_telemetry.py)
-    save_deck_candidate_set, suggestion_ratio_by_league,
+    save_deck_candidate_set, suggestion_ratio_by_league, suggestion_link_day_span,
     # trade.bakeoff — one bakeoff_runs row per bake-off job
     save_bakeoff_run,
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
@@ -4288,8 +4288,45 @@ def _store_trade_page(job_id: str) -> bool:
     """P1 write: store a just-finished job's first pages, in final served order.
 
     Called on the worker thread once _run_trade_job returns, inside the job's
-    user-data lease. True when a row was written. Never raises.
+    user-data lease. True when a row was written. Never raises. A deck with
+    evidence whose row wasn't written records stored count 0 (_deck_store_missed).
     """
+    written = False
+    try:
+        written = _store_trade_page_row(job_id)
+    finally:
+        if not written:
+            _deck_store_missed(job_id)
+    return written
+
+
+def _deck_store_missed(job_id: str) -> None:
+    """U4 (#434 QA P2-1): the store wrote no page row for this deck (the store
+    was off, the job revoked, the deck not page-eligible, the save raised, or
+    the supersede guard refused it), so none of its cards has a stored
+    snapshot: its stored count is 0, on the deck and in its pack's header (a
+    later flush retries a failed header write). Never raises."""
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        ev = job.get("evidence") if job is not None else None
+    if ev is None:
+        return
+    try:
+        with _deck_evidence_write_lock:
+            with ev.lock:
+                ev.stored_count = 0           # overwrites a refused store's len(cards)
+                dirty = ev.pack is not None and ev.pack.run.get("stored_count") != 0
+                if dirty:
+                    ev.pack.run["stored_count"] = 0
+                    ev.pack_dirty = True
+            if dirty:
+                _deck_pack_flush_header(ev)
+    except Exception:
+        log.warning("deck-evidence %s: stored count 0 not yet in the pack", job_id, exc_info=True)
+
+
+def _store_trade_page_row(job_id: str) -> bool:
+    """_store_trade_page's write: True when a row was written."""
     if not _trade_page_store_enabled():
         return False
     with _trade_jobs_lock:
@@ -5237,16 +5274,16 @@ def _upgrade_misses(run: Mapping) -> dict:
 def _deck_stored_count(known, run: Mapping) -> int:
     """#428 QA (c): the deck's own stored-page count, never a constant: the
     page store's (its job's stored_count, else its page row's card_count),
-    else the one its pack recorded, else 0 for a deck never page-stored (run
-    page_store 0: a weekly-replenishment deck has no page_scope, so no card has
-    a stored snapshot), else the knobs now. Lowering a knob later never turns
-    a restart split into other."""
+    else the one its pack recorded, else 0: no record that a store wrote, so
+    no stored snapshots (#434 QA P2-1). That covers a deck never page-stored
+    (run page_store 0: a weekly-replenishment deck has no page_scope), one
+    whose store didn't write, and one whose process died between its pack's
+    first write and its store. The knobs are never read: changing them can't
+    turn a restart split into other."""
     for value in (known, run.get("stored_count")):
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             return value
-    if run.get("page_store") == 0:
-        return 0
-    return _trade_pages_stored() * _trade_page_size()
+    return 0
 
 
 def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, delivered: bool) -> str:
@@ -14933,6 +14970,22 @@ def analytics_health_route():
     })
 
 
+_RATIO_SERIES_BREAK_DETAIL = ("U6/R-U6a: from the packed-evidence flip, `recommended` counts "
+                              "matches to viewed-or-first-30 suggestions")
+
+
+def _ratio_series_break_caveats(first_day: str | None, last_day: str | None) -> list[dict]:
+    """A `series_break` caveat when the packed-evidence flip day is set
+    (database.PACKED_EVIDENCE_FLIP_DAY, shared with receipts) and the links'
+    trade days span it (inclusive: the flip day itself is mixed)."""
+    from . import database as _db
+    day = _db.PACKED_EVIDENCE_FLIP_DAY
+    if day is None or first_day is None or last_day is None or not first_day <= day <= last_day:
+        return []
+    return [{"code": "series_break", "scope": "suggestion_ratio",
+             "detail": _RATIO_SERIES_BREAK_DETAIL, "day": day}]
+
+
 @app.route("/api/admin/suggestion-telemetry/ratio", methods=["GET"])
 def suggestion_telemetry_ratio_route():
     """GET /api/admin/suggestion-telemetry/ratio[?league_id=…] — the always-
@@ -14941,10 +14994,13 @@ def suggestion_telemetry_ratio_route():
 
     Operator-only (X-Cron-Secret, same as /api/cron/*). Per league:
     executed = captured Sleeper trades examined by the matcher,
-    recommended = those matching a RENDERED (non-ghost) logged suggestion,
+    recommended = those matching a shown (non-ghost) logged suggestion,
+    viewed or first 30 (R-U6a, database._evidence_shown),
     ratio = recommended / executed, ghost_matches = executed trades whose
     best ghost-suggestion match exists (the incrementality read: withheld
-    suggestions that happened anyway). 404 feature_disabled while dark.
+    suggestions that happened anyway). `caveats`: a `series_break` once the
+    packed-evidence flip day is set and the trades span it. 404
+    feature_disabled while dark.
     """
     _require_cron_auth()
     if not _suggestion_telemetry_enabled():
@@ -14961,6 +15017,7 @@ def suggestion_telemetry_ratio_route():
             "ratio":         round(recommended / executed, 4) if executed else None,
             "ghost_matches": sum(l["ghost_matches"] for l in leagues),
         },
+        "caveats": _ratio_series_break_caveats(*suggestion_link_day_span(league_id)),
     })
 
 

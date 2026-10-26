@@ -130,6 +130,25 @@ corpus predates the app serving suggestions in these leagues. This ratio is the
 going-forward endorsement metric (`GET /api/admin/suggestion-telemetry/ratio`), with
 ghost links as the incrementality control.
 
+## Seam: #424 (was_recommended redefined at the packed-evidence flip)
+
+**What changed** (PR #424, merged 2026-10-26, "Receipts and matcher: viewed-or-first-30 eligibility (U6 / R-U6a…)"):
+`suggestion_trade_links.was_recommended` goes from "a rendered card matched" to "a **viewed-or-first-30** card
+matched", per analytics-lead's U6 condition R-U6a and ADR-025 (`docs/adr/adr-025-packed-unseen-evidence.md`). The
+matcher reads the shared predicate `database._evidence_shown` (`database.py:7156-7160`, used at `:8116` @ `origin/main`).
+Pre-flip rows carry a NULL `evidence_tier` and stay eligible, so the new definition takes effect when
+`trade.packed_evidence` flips on (deferred evidence also needs `trade.first_page_store`, `server.py:4178`).
+
+- **The series break:** the per-league endorsement ratio SUM(`was_recommended`)/COUNT(*) **steps down at the flip**.
+  Unviewed cards past the first 30 no longer count as recommended. **Don't trend the ratio across the flip day.**
+- **Flip day:** the receipts break's constant, `RECEIPTS_SERIES_BREAK_DAY` (`receipts_service.py:1126-1133` @ `origin/main`),
+  `None` until the scribe fills it in at the flip. One flip day for both series, so they can't drift.
+- **Readout:** the ratio is comparable across the flip only if pre-flip links are recomputed on the same
+  viewed-or-first-30 basis (from `deck_outcomes` history plus `deck_impressions.card_index`). Until then, report
+  pre-flip and post-flip separately.
+- **Not yet in code:** the ratio endpoint (`server.py:14936` @ `origin/main`) returns no `series_break` caveat today.
+  analytics-lead has asked head-eng to add one keyed to the same constant (the #418 `SERIES_BREAKS` / R-U6b pattern).
+
 ## Method & caveats
 
 - **Completion-only corpus (proposal bias).** Sleeper exposes completed trades; rejected

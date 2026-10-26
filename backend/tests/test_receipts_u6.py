@@ -253,7 +253,7 @@ def test_the_matcher_logs_a_non_zero_other_at_error(engine, caplog):
 # ── R-U6b: the receipts series break at the flip ───────────────────────────
 
 def test_no_caveat_while_the_flip_day_is_none(engine, flags_on, monkeypatch):
-    monkeypatch.setattr(rs, "RECEIPTS_SERIES_BREAK_DAY", None)
+    monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", None)
     grade("g-old", 20)
     grade("g-new", 2)
     with patch.object(rs, "max_grader_version", lambda versions: GRADER):
@@ -262,7 +262,7 @@ def test_no_caveat_while_the_flip_day_is_none(engine, flags_on, monkeypatch):
 
 def test_a_set_flip_day_inside_the_window_adds_one_caveat(engine, flags_on, monkeypatch):
     day = served(10)[:10]
-    monkeypatch.setattr(rs, "RECEIPTS_SERIES_BREAK_DAY", day)
+    monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", day)
     grade("g-old", 20)
     grade("g-new", 2)
     with patch.object(rs, "max_grader_version", lambda versions: GRADER):
@@ -274,7 +274,7 @@ def test_a_set_flip_day_inside_the_window_adds_one_caveat(engine, flags_on, monk
 
 @pytest.mark.parametrize("days_ago", [30, 1])
 def test_a_set_flip_day_outside_the_window_adds_none(engine, flags_on, monkeypatch, days_ago):
-    monkeypatch.setattr(rs, "RECEIPTS_SERIES_BREAK_DAY", served(days_ago)[:10])
+    monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", served(days_ago)[:10])
     grade("g-old", 20)
     grade("g-new", 2)
     with patch.object(rs, "max_grader_version", lambda versions: GRADER):
@@ -282,4 +282,7 @@ def test_a_set_flip_day_outside_the_window_adds_none(engine, flags_on, monkeypat
 
 
 def test_the_flip_day_ships_unset():
-    assert rs.RECEIPTS_SERIES_BREAK_DAY is None
+    """One shared value (analytics-lead): receipts keeps no flip day of its
+    own, so the scribe sets database.PACKED_EVIDENCE_FLIP_DAY alone."""
+    assert db.PACKED_EVIDENCE_FLIP_DAY is None
+    assert not hasattr(rs, "RECEIPTS_SERIES_BREAK_DAY")
