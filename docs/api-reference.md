@@ -509,7 +509,9 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
 - **I-1:** a card whose give asset the viewer, or receive asset the opponent,
   no longer owns is not served. Generic ladder picks (`generic_pick_*`) and a
   pick with no stored owner row pass unchecked. Dropped cards just aren't in
-  `cards`; the response shape doesn't change.
+  `cards`; the response shape doesn't change. Not dropped: when the league's
+  last session write failed (C-e: Sleeper `stale` with `write_failed`), the
+  stored rows may be outdated, so every card is served unchecked.
 - **Two no-card gate misses, only at `trade_gate_miss_mode` = 1** (default 0
   until 1.22.0 is distributed; older binaries show either one as "Search
   failed"). At 0, both are held and the cards are served, as described in
@@ -527,6 +529,21 @@ stored rosters and picks, read at serve (roster fingerprint contract v0.4 §3,
   background refresh after the response is built.
 - **Test hook:** `POST /api/admin/trades/gate-miss-test` forces either gate
   miss on one league, whatever the knobs say (see the admin routes).
+- **The `[i1] serve` log line (C-a), for the readout.** One line per serve:
+  `league job mode status outcome age_s cards kept dropped_give
+  dropped_receive unchecked_generic unchecked_pick_owner`.
+  - **It's per serve, so per poll.** A legacy client polls `/status` and re-serves
+    the same cards, so a drop rate must **de-duplicate by `job`** (e.g. the last
+    line per job), and only `mode=strict` lines drop cards.
+  - **Drops are split by side, not by asset type.** `dropped_give` counts cards
+    with a moved give asset, `dropped_receive` cards with a moved receive asset,
+    players and picks alike. A card with moved assets on both sides counts once
+    per side, so `dropped_give + dropped_receive` can exceed `cards - kept`.
+  - **`outcome`:** `served` (strict, filtered), `served_lenient`
+    (`trade_i1_mode` 1: checked, nothing dropped), `unchecked_c_e` (C-e:
+    nothing dropped), `roster_check_unavailable` / `roster_gate_miss` (gate
+    misses served), and the same with `_held` (`trade_gate_miss_mode` 0). The
+    `dropped_*` counts are what strict mode would drop, whatever the outcome.
 
 ### First-page store (P1, flag `trade.first_page_store`, 2026-10-20)
 
