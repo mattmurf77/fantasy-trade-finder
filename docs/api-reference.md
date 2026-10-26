@@ -580,7 +580,9 @@ swipe or other outcome whose `impression_id` row is still being written
 waits for it (at most 2 s) instead of being dropped. A deck never delivered
 writes nothing. Calibration's targeted refresh writes its rows at build, as
 before, and no `trades_generated` or `trade_impressions` (with the store on
-or off). Details: [data dictionary](data-dictionary.md#deferred-evidence-evidence_tier-adr-025-stage-1-2026-10-20).
+or off); it is never registered under the user's Trades job key, so
+`/generate` and `/status` never serve it and it never replaces or revokes the
+user's own Trades job. Details: [data dictionary](data-dictionary.md#deferred-evidence-evidence_tier-adr-025-stage-1-2026-10-20).
 
 **The store is only read on a paged request**, so `trade_paged_responses` 0
 keeps it out too.

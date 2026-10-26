@@ -9572,7 +9572,7 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
     with _trade_jobs_lock:
         job_source = (_trade_jobs.get(job_id) or {}).get("source")
     try:
-        if job_source != "grading_refresh":   # S4: never a Trades deck (see _run_trade_job)
+        if job_source != "grading_refresh":   # S4: never pinned under the Trades key, so never shown in Trades
             log_trade_impressions(g_user_id, league_id, served)
     except Exception as imp_err:
         log.warning("value-core: trade impression logging failed (non-fatal): %s", imp_err)
@@ -9612,7 +9612,7 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
              diag.packages_viewer, diag.pairs_checked, diag.fair, len(served),
              diag.truncated_partners, diag.budget_exhausted, diag.elapsed_ms, total_ms)
     gen_ms = _finish_trade_job(job_id)
-    if gen_ms is None or job_source == "grading_refresh":   # S4: ruling 30
+    if gen_ms is None or job_source == "grading_refresh":   # S4, ruling 30: never pinned under the Trades key, so never shown in Trades
         return True
     try:
         props = {"count": len(served), "gen_ms": gen_ms, "engine_version": "value_core", "lanes": {}}
@@ -10983,7 +10983,8 @@ def _run_trade_job(
         # writes (this one, the bake-off run, trades_generated) wait for the
         # deck's first delivery (F3).
         # S4 (models-lead R2.6): Calibration's targeted refresh
-        # ("grading_refresh") is never shown in Trades, so it writes no
+        # ("grading_refresh") is never pinned under the Trades key, so never
+        # shown in Trades (_kickoff_trade_job's `shared`): it writes no
         # trade_impressions (replenishment's "active" eligibility reads them)
         # and emits no trades_generated (ruling 30). Its deck_impressions rows
         # still write at build: Calibration reads them.
@@ -11270,7 +11271,8 @@ def _run_trade_job(
             # (pull jobs carry no marker; props stay byte-identical for them).
             if job_source:
                 _ev_props["deck_source"] = job_source
-            if not _job_superseded(job_id) and job_source != "grading_refresh":   # S4: ruling 30
+            # S4, ruling 30: never pinned under the Trades key, so never shown in Trades.
+            if not _job_superseded(job_id) and job_source != "grading_refresh":
                 if deck_evidence is not None:
                     # Analytics-lead R3: exactly once per deck, at its first delivery.
                     deck_evidence.defer_generated(league_id, _ev_props)
@@ -11580,7 +11582,13 @@ def _kickoff_trade_job(
         job["final_checks_pending"] = True
     if presentation_exempt:
         job["presentation_exempt"] = True
-    shared = not is_pinned and not (presentation_capture[0] and presentation_exempt)
+    # Calibration's targeted refresh ("grading_refresh") is never pinned under
+    # the user's Trades key (#370 P2-2): it never joins, reuses or supersedes
+    # the key's Trades job, and Trades never reuses it, so it is never shown in
+    # Trades. (_replenish_deck_for reads the key itself first, to reuse a fresh
+    # Trades deck for Calibration.)
+    shared = (not is_pinned and not (presentation_capture[0] and presentation_exempt)
+              and source != "grading_refresh")
     with _trade_jobs_lock:
         if _trade_job_revoked(job):
             job.update(status="error", error="inputs_changed", finished_at=time.monotonic())

@@ -573,6 +573,43 @@ def test_s4_calibrations_refresh_never_makes_a_pair_active_or_emits_trades_gener
     assert db_module.load_grading_legacy_deck(UID, LEAGUE)[0] == job["job_id"]
 
 
+@pytest.mark.parametrize("flag", [False, True])
+def test_p2_2_trades_never_reuses_a_calibration_refresh_deck(deferred, generated_events, monkeypatch,
+                                                             flag):
+    """release-lead P2-2: a grading_refresh job is never pinned under the
+    user's Trades key, so the next Trades open starts its own deck, and emits
+    that deck's one trades_generated, instead of serving Calibration's."""
+    client, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": flag})
+    assert server._replenish_deck_for(UID, LEAGUE, source="grading_refresh") is not None
+    [grading] = replenished("grading_refresh")
+    assert grading["status"] == "complete" and generated_events == []
+    monkeypatch.setattr(server, "_start_trade_job_thread",          # Trades' job runs here
+                        lambda *, target, args, kwargs: target(*args, **kwargs))
+    body = generate(client).get_json()
+    assert body["job_id"] != grading["job_id"] and body["cards"]
+    assert server._trade_jobs[body["job_id"]].get("source") is None
+    assert len(generated_events) == 1
+
+
+@pytest.mark.parametrize("policy_matches", [True, False])
+def test_p2_2_a_calibration_refresh_never_revokes_or_supersedes_a_live_trades_job(
+        deferred, monkeypatch, policy_matches):
+    """release-lead P2-2: Calibration's refresh while the user's Trades job is
+    still running builds its own deck; the Trades job keeps running, unrevoked,
+    and stays the key's job. (Pinned under the key, the refresh would join that
+    job when its policy matched, and revoke it when not.)"""
+    monkeypatch.setattr(server, "_trade_running_policy_matches", lambda *a: policy_matches)
+    trades = run_job(synchronous=False)                    # its worker thread is recorded, not run
+    key = server._trade_jobs[trades]["key"]
+    assert server._replenish_deck_for(UID, LEAGUE, source="grading_refresh") is not None
+    [grading] = replenished("grading_refresh")
+    assert grading["job_id"] != trades and grading["status"] == "complete"
+    job = server._trade_jobs[trades]
+    assert job["status"] == "running" and not server._trade_job_revoked(job)
+    assert server._trade_jobs_by_key[key] == trades
+
+
 # ── #370: evidence for what S0's serve rules let through ───────────────────
 
 def move_away(engine, card_index):
