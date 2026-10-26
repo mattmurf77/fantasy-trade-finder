@@ -32966,15 +32966,47 @@ def _require_pro(fn):
     return wrapper
 
 
+from . import paywall_gate as _paywall_gate
+
+
+@app.before_request
+def _paywall_gate_hook():
+    """Global paywall gate: 402 pro_required on the rules backend/paywall_gate.py
+    marks gated. A rule that isn't gated, or a server that isn't enforcing,
+    returns before the session or any entitlement is read. No session → the
+    route's own auth answers. Pro counts only on a verified session. A
+    failed entitlement read fails open."""
+    rule = request.url_rule.rule if request.url_rule is not None else ""
+    if not _paywall_gate.applies(rule, request.method):
+        return None
+    sess = _get_session(request.headers.get("X-Session-Token", "")) or {}
+    try:
+        blocked = _paywall_gate.verdict(
+            rule, request.method, sess.get("user_id"),
+            _paywall_gate.is_mobile_request(request.headers),
+            bool(sess.get("verified") or _synthetic_demo_session(sess)))
+    except Exception:
+        log.exception("paywall gate failed open: %s %s", request.method, rule)
+        return None
+    return None if blocked is None else (jsonify(blocked[1]), blocked[0])
+
+
 @app.route("/api/me/entitlements", methods=["GET"])
 def me_entitlements():
     """Client bootstrap: resolved entitlement state + enforcement posture.
 
     Session-authed. The Chrome extension does NOT call this — its `pro`
     bool rides in POST /api/extension/auth's payload (pro-subscription LLD;
-    username-only auth can't carry a session token)."""
+    username-only auth can't carry a session token).
+
+    An unverified session gets the empty entitlement view (every field
+    blank/false), as the paywall gate treats it: an unverified username-only
+    session shares the subscriber's user_id. `enforcing` is server state."""
     sess = _require_session()
-    out = entl.get_entitlements(sess["user_id"])
+    if sess.get("verified") or _synthetic_demo_session(sess):
+        out = entl.get_entitlements(sess["user_id"])
+    else:
+        out = entl.empty_entitlements()
     out["enforcing"] = entl.is_enforcing()
     return jsonify(out)
 

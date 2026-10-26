@@ -919,6 +919,7 @@ Read through `_deck_cfg` only while the store is on (`trade_prefetch_remaining` 
 | Key | Default | Meaning |
 |---|---|---|
 | `paywall_enforce_enabled` | 0.0 (**OFF**) | The deploy-free third leg of Pro enforcement: `entitlements.check_pro` blocks (the gated route returns 402) only when `monetize.entitlements` ∧ `monetize.paywall` ∧ this knob == **exactly 1**. Read **live on every gated request** through `database.get_config()` (no cache, no `reload_config()` needed, every worker sees it), so **set 0 to kill enforcement without a deploy**: gated routes drop back to observe (`ENTITLE-OBSERVE` log, allow). A missing row or a failed read is **0**, not enforcing: the inline fallback matches the seed ([G-064](../living-memory/GOTCHAS.md)). |
+| `paywall_web_enforce_enabled` | 0.0 (**OFF**) | **Web-only** leg of the global paywall gate (`backend/paywall_gate.py`, [api-reference](api-reference.md#paywall-gate-402)). While `entitlements.is_enforcing()`, the gate 402s the native app (`X-Device` iphone/ipad/macos/android) always, and web requests (the web app, the extension, anything without a mobile `X-Device`) only when this knob == **exactly 1**. Read **live on every gated request** through `database.get_config()`, so 0 stops web 402s without a deploy. A missing row or a failed read is **0** (G-064). **Flipped by release-lead at launch together with `IOS_INSTALL_URL`** (web's 402 state points desktop users at the iPhone app); on release-lead's kill-knob list. |
 
 ### Consensus seed blend (#145/#148) — `backend/data_loader.py`, DB-seeded
 

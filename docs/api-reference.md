@@ -105,6 +105,7 @@ the operator reaches it by running the server locally.
 - [Analytics events (flag `analytics.client_events`, ships dark)](#analytics-events-flag-analyticsclient_events-ships-dark)
   - [Analytics admin](#analytics-admin)
 - [Monetization foundation (docs/plans/monetization/00-platform-foundation.md — always mounted, behavior flag-aware)](#monetization-foundation-docsplansmonetization00-platform-foundationmd-always-mounted-behavior-flag-aware)
+  - [Paywall gate (402)](#paywall-gate-402)
 - [Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)](#test-support-ftf_test_mode1-only-never-mounted-in-normal-operation)
 - [Test users (QA — flag `testing.stage_users`, ships dark)](#test-users-qa-flag-testingstage_users-ships-dark)
 - [Calibration — blind grading (`/api/grading/*`; flag `grading.blind`, on for every app user)](#calibration--blind-grading-apigrading-flag-gradingblind-on-for-every-app-user)
@@ -1383,12 +1384,43 @@ Sign-in routes (`/api/extension/auth`, `/api/auth/apple`, `/api/auth/google`, `/
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/me/entitlements` | Session-authed bootstrap → `{pro, ad_free, sources, expires_at, enforcing}`. Serves resolved state even while `monetize.entitlements` is off so clients can bootstrap before enforcement flips. `enforcing` is true only when `monetize.entitlements` AND `monetize.paywall` AND model_config `paywall_enforce_enabled` = 1 (dark while all flags are off); it is computed by the same `entitlements.is_enforcing()` that `check_pro` uses, so it always matches the 402 gate. The Chrome extension does **not** call this — its `pro` bool rides in `POST /api/extension/auth` (pro-subscription LLD). |
+| GET | `/api/me/entitlements` | Session-authed bootstrap → `{pro, ad_free, sources, expires_at, enforcing}`. Serves resolved state even while `monetize.entitlements` is off so clients can bootstrap before enforcement flips. `enforcing` is true only when `monetize.entitlements` AND `monetize.paywall` AND model_config `paywall_enforce_enabled` = 1 (dark while all flags are off); it is computed by the same `entitlements.is_enforcing()` that `check_pro` uses, so it always matches the 402 gate. **Unverified session → empty entitlement view (all fields blank/false)** (2026-10-25): unless `sess.verified` is true or the session is the server-made demo session, the response is `entitlements.empty_entitlements()` (`pro`/`ad_free` false, `sources` `[]`, `expires_at` null, and any later field blank by construction) plus `enforcing`, which stays the server's state. Same verification rule as the [paywall gate](#paywall-gate-402): an unverified username-only session carries the subscriber's user_id. The Chrome extension does **not** call this — its `pro` bool rides in `POST /api/extension/auth` (pro-subscription LLD). |
 | GET | `/api/paywall/config` | Session-authed server-driven paywall (pro-subscription LLD §3). `monetize.paywall` off → `{"enabled": false}` **and nothing else** — no SKUs, no prices. On → `{enabled, platform, pages[], products[], trial_eligible, dismissible}`: `pages` render in array order (`value_recap`/`trades_found`, `feature_grid`/`features`, `plans`/`purchase`); `products` are `ftf_pro_monthly` ($4.99/mo) and `ftf_pro_annual` ($34.99/yr, `per_month_equiv` $2.92, 14-day trial, `hero`, `badge: best_value`). `?platform=ios\|web\|extension` is display filtering only (no per-platform variation yet; unknown values degrade to `ios`, never 400) and is echoed back. Static config — **the route never recomputes trades**: page 1's `body_ref: matches_preview` tells the client to reuse matches it already fetched. **`display_price` is fallback copy** — the client must prefer the StoreKit-localized price from the matching RevenueCat offering. Also serves `tips[]` (`{product_id, display_price}` — `ftf_tip_199/499/999` consumables; display metadata only, a tip grants **no** entitlement by `entitlements.is_tip_product()`). Enum strings + SKU ids: [cross-client-invariants.md](cross-client-invariants.md#monetization-sku-ids-entitlement-values--paywall-config-enums-2026-08-28-flags-monetize-all-dark). |
 | POST | `/api/billing/revenuecat/webhook` | RevenueCat events → `subscription_events` ledger → projector. **Auth: `Authorization: Bearer <REVENUECAT_WEBHOOK_SECRET>`**; fails closed (503) in prod when unset. Idempotent on event id (`{duplicate: true}` on replay). **Alias reconciliation:** `event.aliases` (every id RevenueCat knows to be this subscriber) is resolved to one canonical working key — the first candidate that is a known `acct_*` or `sleeper_user_id`, `app_user_id` first — so a purchase made before sign-in (`$RCAnonymousID:*`) merges onto the account row instead of stranding a second entitlement; rows written earlier under a sibling id are re-keyed (billing sources only — manual grants and promo rewards are never moved). Unrecognised ids fall back to `app_user_id` verbatim: an anonymous purchase is stored and projected under the anon key, never dropped. **`TRANSFER`** moves the entitlement — active billing rows are re-keyed from `transferred_from` to the resolved `transferred_to` identity (a move, not an expiry or a revocation); no match → stored with a process note. **`BILLING_ISSUE`** extends the active row's `expires_at` to `grace_period_expiration_at_ms` when present (access persists through grace until `EXPIRATION`); extends only, never shortens, never touches a perpetual row; no grace field → stored no-op. `CANCELLATION` stays a no-op (access runs to period end); `TEST` is stored only. **`environment: SANDBOX`** events (App Review, TestFlight) project into their own sandbox rows (`granted_by = "sandbox:<event_id>"`, expiry capped at now + 24 h) and never touch a production row, and production events never touch sandbox rows ([config-reference § billing projector safety](config-reference.md#flags-monetization-platform-ships-dark-foundation-plan-index)). |
 | POST | `/api/billing/stripe/webhook` | Stripe events, same ledger/projector. **Auth: `Stripe-Signature` v1 HMAC** (`STRIPE_WEBHOOK_SECRET`); fails closed in prod when unset. `user_id`/`product_id` ride in Checkout `metadata`; events without them are stored + skipped. |
 
 Gate decorator: routes on the Pro gate list wear `@_require_pro` in `backend/server.py` (grep-auditable). Semantics (foundation §2.4, enforce rule 2026-10-24): `monetize.entitlements` off → no-op; on without the full enforce condition → observe mode (`ENTITLE-OBSERVE` log lines, never blocks); **enforce = `monetize.entitlements` ∧ `monetize.paywall` ∧ model_config `paywall_enforce_enabled` = 1** (`entitlements.is_enforcing()`, read live; set the knob to 0 to stop enforcement without a deploy) → 402 `{"error": "pro_required"}`. No route wears it yet — the gate list ships with the pro-subscription plan.
+
+### Paywall gate (402)
+
+One `before_request` hook (`backend/server.py`, `_paywall_gate_hook`) reads the per-route table in `backend/paywall_gate.py` (`ROUTES`, keyed by method + Flask rule string, never by prefix; `test_paywall_gate_allowlist.py` fails CI on any unclassified rule). **Lands dark.** A request on a `gated` rule is blocked only when all of these hold:
+
+1. `entitlements.is_enforcing()`: `monetize.entitlements` ∧ `monetize.paywall` ∧ model_config `paywall_enforce_enabled` == 1;
+2. the client is the native app (`X-Device` ∈ `iphone | ipad | macos | android`), **or** model_config `paywall_web_enforce_enabled` == 1. Everything else (the web app, the extension, `X-Device: web`) is web;
+3. the session resolves to a user (no session → the route's own 401, never a 402);
+4. that user is not entitled: `pro` is false, **or** `pro` is true on an unverified session (pro requires `sess.verified` or the server-made demo session).
+
+The body is exactly:
+
+```json
+{"error": "pro_required", "gate": "<reason>"}
+```
+
+| `gate` | When |
+|---|---|
+| `preview_used` | Never held pro; a deck route. The preview is 0 pages until the preview allowance ships, so it is always spent |
+| `never_trialed` | Never held pro; any other gated route |
+| `trial_expired` | Held pro only through an App Store intro trial (every ledger event for the row has RevenueCat `period_type` `TRIAL`) |
+| `lapsed` | Held pro any other way: a paid period, a comp or promo grant, founder, season pass, or a store row whose ledger can't prove a trial |
+| `verify_required` | The user_id holds pro, but the session is unverified ("sign in to use your subscription") |
+
+| Class | Rules |
+|---|---|
+| `gated` (32) | The deck (`POST /api/trades/generate`, `GET /api/trades`, `GET /api/trades/status`, `POST /api/trades/swipe`, `POST /api/trades/pass-reason`; Today's Trade rides these); send (`/api/trades/propose`, `/propose-espn`, `/propose-mfl`, `/respond-mfl`, `/queue`); `/api/trades/asset-ideas`, `/fair-packages`, `/standing-offer`, `/matches/<id>/disposition`; every `/api/overhauls*` and `/api/win-now/*` rule |
+| `never_gate` (46) | `/api/admin/*`, `/api/cron/*`, `/api/billing/*`, and the X-Cron-Secret routes outside them (`/api/feedback/admin*`, `/api/trades/flags/admin`, `/api/debug/log`, `/api/feature-flags/reload`) |
+| `free` (166) | Everything else: sign-in, session, onboarding and league connect, Settings, `DELETE /api/account`, export, `/api/me/entitlements`, `/api/paywall/config`, `/api/feature-flags`, `/api/events`, feedback, `/api/sleeper/link`, `/api/extension/*`, every rank write, `/api/trade/evaluate`, `GET /api/trades/matches[/all]`, `/api/trades/validate`, invites, profiles, static and web pages |
+
+A failed entitlement read fails open (logged). Set `paywall_enforce_enabled` = 0 to stop every 402 without a deploy; `paywall_web_enforce_enabled` = 0 to stop web 402s only.
 
 ## Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)
 
