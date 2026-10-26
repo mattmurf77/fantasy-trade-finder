@@ -3923,6 +3923,7 @@ def _store_trade_page(job_id: str) -> bool:
                 with ev.lock:
                     ev.stored_ids = {c.get("impression_id") for c in cards} - {None}
                     ev.stored_count = len(cards)
+                    ev.truncated = len(job.get("cards") or []) > len(cards)
                     ev.pages_bytes = len(blob)
                     evidence = ev.blob()
             written = _db.save_trade_page({
@@ -4061,6 +4062,7 @@ class _DeckEvidence:
         self.stored_ids = None        # impression ids whose snapshots the page store holds
         self.pages_bytes = None       # len(pages_blob) of this deck's stored row
         self.stored_count = None      # cards the page store holds
+        self.truncated = True         # the deck has cards past the stored ones (S1b)
         # Build-time writes moved to the deck's first delivery (F3), each once:
         self.trade_impressions = None # packed {"league_id", "cards"} for log_trade_impressions
         self.bakeoff_run = None       # the packed bakeoff_runs row (in process only)
@@ -4231,12 +4233,17 @@ class _DeckEvidence:
             "ghosts": list(self.ghosts.values()), "diagnostics": self.closure(rows),
             # Not the bakeoff_runs row: it can be megabytes (defer_bakeoff_run).
             "candidate_set": self.candidate_set, "trade_impressions": impressions,
-            "generated": self.generated, "served_at": self.served_at})
+            "generated": self.generated, "served_at": self.served_at,
+            "truncated": self.truncated})
 
     @classmethod
     def from_row(cls, user_id: str, deck_job_id: str, row: Mapping | None, lease) -> "_DeckEvidence":
         """A stored deck's evidence once its job has left this process: complete
-        (only a complete job stores pages), holding what the row's blob holds."""
+        (only a complete job stores pages), holding what the row's blob holds.
+        S1b: if the deck had cards past the stored ones and its rows were never
+        written, those cards are gone with the job, so replay must never see
+        it as whole: it is written as a partial run (its delivered cards,
+        ghosts and candidate set, 'partial_run')."""
         ev = cls(deck_job_id, user_id, lease)
         blob = (row or {}).get("evidence_blob")
         if isinstance(blob, Mapping) and blob.get("v") == _EVIDENCE_BLOB_FORMAT:
@@ -4249,6 +4256,7 @@ class _DeckEvidence:
                 ev.trade_impressions = _pack_row(blob["trade_impressions"])
             ev.generated = blob.get("generated")
             ev.served_at = blob.get("served_at")
+            ev.partial = bool(ev.rows) and blob.get("truncated", True)
         ev.sealed = ev.complete = True
         return ev
 

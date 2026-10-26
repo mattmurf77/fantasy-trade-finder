@@ -446,8 +446,9 @@ def test_f5_an_undelivered_deck_past_the_fresh_window_is_dropped_and_no_longer_s
     assert rows(engine) == []                              # still C2: nothing was written
     assert deliver_job(job_id, 90)["cards"] == []          # its in-process cards no longer serve
     page = status(client, job_id, 0).get_json()["cards"]   # its stored pages do, through the blob
-    assert len(page) == 30 and {marks(engine)[c["impression_id"]] for c in page} == {("first30", True)}
-    assert len(rows(engine)) == 90                         # the stored cards only
+    # S1b: the deck's cards past the stored 90 went with the job, so it's a partial run.
+    assert len(page) == 30 and {marks(engine)[c["impression_id"]] for c in page} == {("partial_run", True)}
+    assert len(rows(engine)) == 30
 
 
 def test_f5_delivered_and_running_decks_are_kept(deferred):
@@ -1068,23 +1069,42 @@ def test_the_budget_rule_keeps_exactly_the_snapshots_not_yet_written(deferred, m
 
 # ── Once the job has left the process ───────────────────────────────────────
 
-def test_the_first_delivery_after_the_job_left_the_process_writes_from_the_blob(deferred):
+def test_s1b_a_truncated_lost_job_deck_is_written_as_a_partial_run(deferred):
+    """Its first delivery came after the job left the process, and the job held
+    cards past the 90 stored ones: they are gone, so replay must never take the
+    deck as whole. Its delivered cards, ghosts and candidate set are written,
+    every row 'partial_run'; the undelivered stored cards wait in the blob."""
     client, engine, _ = deferred
     job_id, served, ghosts, _, _ = deferred_deck(120, ghost_every=9)
+    assert stored()["evidence_blob"]["truncated"] is True
     server._trade_jobs.clear()                             # restart, or the 4 h job eviction
     server._trade_jobs_by_key.clear()
-    page1 = [c["impression_id"] for c in status(client, job_id, 0).get_json()["cards"]]
+    page1 = {c["impression_id"] for c in status(client, job_id, 0).get_json()["cards"]}
+    written = rows(engine)
+    assert {r["impression_id"] for r in written if not r["is_ghost"]} == page1
+    assert {r["evidence_tier"] for r in written} == {"partial_run"}
+    assert {r["card_index"] for r in written if r["is_ghost"]} == {pos for pos, _ in ghosts}
+    assert all(set(json.loads(r["features_json"])) <= COMPACT for r in written if r["is_ghost"])
+    assert len(rows(engine, db_module.deck_candidate_sets_table)) == 1
+    assert sorted(r["card_index"] for r in stored()["evidence_blob"]["rows"]) == list(range(30, 90))
+    page2 = {c["impression_id"] for c in status(client, job_id, 30).get_json()["cards"]}
+    assert {tiers(engine)[iid] for iid in page2} == {"partial_run"}
+
+
+def test_s1b_an_untruncated_lost_job_deck_keeps_its_tiers(deferred):
+    """A deck the page store holds whole (60 cards here) lost nothing with its job."""
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(60)
+    assert stored()["evidence_blob"]["truncated"] is False
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    page1 = {c["impression_id"] for c in status(client, job_id, 0).get_json()["cards"]}
     written = by_index(engine)
-    assert {written[(0, i)]["impression_id"] for i in range(30)} == set(page1)
+    assert {written[(0, i)]["impression_id"] for i in range(30)} == page1
     assert {(written[(0, i)]["evidence_tier"], written[(0, i)]["delivered_at"] is not None)
             for i in range(30)} == {("first30", True)}
-    assert {written[(0, i)]["evidence_tier"] for i in range(30, 90)} == {"full_interim"}
-    assert not any((0, i) in written for i in range(90, 120))   # only the lost job held them
-    assert {k for k in written if k[0] == 1} == {(1, pos) for pos, _ in ghosts}
-    assert len(rows(engine, db_module.deck_candidate_sets_table)) == 1
+    assert {written[(0, i)]["evidence_tier"] for i in range(30, 60)} == {"full_interim"}
     assert stored()["evidence_blob"] is None
-    page2 = [c["impression_id"] for c in status(client, job_id, 30).get_json()["cards"]]
-    assert page2 and {tiers(engine)[iid] for iid in page2} == {"delivered"}
 
 
 def test_evidence_built_before_an_account_deletion_is_never_written(deferred):
