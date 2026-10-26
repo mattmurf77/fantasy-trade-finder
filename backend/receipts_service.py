@@ -1140,7 +1140,7 @@ def _receipts_series_break_caveats(rows: list[dict]) -> list[dict]:
     days = [str(r["served_at"])[:10] for r in rows if r.get("served_at")]
     if day is None or not days or not min(days) <= day <= max(days):
         return []
-    return [{"code": "series_break", "scope": "receipts",
+    return [{"code": db.SERIES_BREAK_CAVEAT, "scope": "receipts",
              "detail": RECEIPTS_SERIES_BREAK_DETAIL, "day": day}]
 
 

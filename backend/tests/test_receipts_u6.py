@@ -354,8 +354,59 @@ def test_a_set_flip_day_outside_the_window_adds_none(engine, flags_on, monkeypat
         assert rs.admin_metrics(window=28)["caveats"] == []
 
 
-def test_the_flip_day_ships_unset():
+def _a_utc_day(value) -> bool:
+    """The flip day's one valid form: "YYYY-MM-DD", exactly as isoformat
+    writes it (a str; "2026-11-4", a date or an int are not)."""
+    from datetime import date
+    try:
+        return isinstance(value, str) and date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def test_the_flip_day_is_unset_or_a_utc_day():
     """One shared value (analytics-lead): receipts keeps no flip day of its
-    own, so the scribe sets database.PACKED_EVIDENCE_FLIP_DAY alone."""
-    assert db.PACKED_EVIDENCE_FLIP_DAY is None
+    own, so the scribe sets database.PACKED_EVIDENCE_FLIP_DAY alone. Setting
+    it at the flip passes; a malformed value fails here instead of silently
+    dropping both caveats or 500ing both admin routes (#444 QA P2-1)."""
+    assert db.PACKED_EVIDENCE_FLIP_DAY is None or _a_utc_day(db.PACKED_EVIDENCE_FLIP_DAY), \
+        db.PACKED_EVIDENCE_FLIP_DAY
     assert not hasattr(rs, "RECEIPTS_SERIES_BREAK_DAY")
+
+
+@pytest.mark.parametrize("value, ok", [
+    ("2026-11-04", True), ("2026-11-4", False), ("2026-11-04T00:00:00", False),
+    ("11/04/2026", False), ("", False), (20261104, False)])
+def test_the_flip_day_form(value, ok):
+    from datetime import date
+    assert _a_utc_day(value) is ok
+    assert _a_utc_day(date(2026, 11, 4)) is False
+
+
+@pytest.mark.parametrize("edge", ["first", "last"])
+def test_the_receipts_break_is_inclusive_at_both_edges(engine, flags_on, monkeypatch, edge):
+    """#444 QA P3: the flip day equal to the first or last serve day still
+    flags (that day is mixed)."""
+    grade("g-old", 20)
+    grade("g-new", 2)
+    day = served(20 if edge == "first" else 2)[:10]
+    monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", day)
+    with patch.object(rs, "max_grader_version", lambda versions: GRADER):
+        assert [c["day"] for c in rs.admin_metrics(window=28)["caveats"]] == [day]
+
+
+def test_the_receipts_break_reads_utc_days_whatever_the_local_zone(monkeypatch):
+    """#444 QA P3: serve times near midnight UTC keep their UTC day under a
+    non-UTC local zone (CI runs at TZ=UTC, where a local-time bug can't show)."""
+    import time as _time
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    _time.tzset()
+    try:
+        monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-05")
+        rows = [{"served_at": "2026-11-01T00:30:00+00:00"}, {"served_at": "2026-11-04T23:30:00+00:00"}]
+        assert rs._receipts_series_break_caveats(rows) == []      # Tokyo's day would be 11-05
+        monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-04")
+        assert [c["day"] for c in rs._receipts_series_break_caveats(rows)] == ["2026-11-04"]
+    finally:
+        monkeypatch.undo()
+        _time.tzset()
