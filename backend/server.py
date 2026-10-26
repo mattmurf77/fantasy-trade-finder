@@ -9030,7 +9030,7 @@ def _record_trade_proposal(*, sess, provider: str, user_id: str,
         origin_hash = None
         if impression_id:
             try:
-                imp = _load_deck_impression_awaiting(impression_id)
+                imp = _load_deck_impression_awaiting(impression_id, user_id)
                 if imp is not None:
                     origin_hash = imp.get("trade_hash")
             except Exception:
