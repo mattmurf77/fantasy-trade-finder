@@ -153,6 +153,21 @@ def import_grades(sheet: Path, key: Path) -> dict:
     return summary
 
 
+def _valuation_markets(valuation: dict) -> dict:
+    """asset id -> market from a served valuation_json, in either shape it is
+    written in: the value core's evidence (assets: [{id, market}]) or the
+    personal-market snapshot (assets: {give: [...], receive: [...]}, each row
+    {id, market_value}). {} when it records no per-asset market."""
+    assets = (valuation or {}).get("assets")
+    if isinstance(assets, dict):          # the personal-market snapshot
+        rows, key = [*(assets.get("give") or []), *(assets.get("receive") or [])], "market_value"
+    elif isinstance(assets, list):        # the value core's evidence
+        rows, key = assets, "market"
+    else:
+        return {}
+    return {str(r["id"]): r.get(key) for r in rows if isinstance(r, dict) and "id" in r}
+
+
 def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                     top: int = 30, variant: str = "incumbent") -> dict:
     """The incumbent's latest served Trades deck per league as a CardSet (prod, read-only).
@@ -239,8 +254,7 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                         continue
                     assets = json.loads(r["assets_json"])
                     valuation = json.loads(r["valuation_json"]) if r["valuation_json"] else {}
-                    markets = {str(a.get("id")): a.get("market")
-                               for a in (valuation.get("assets") or []) if isinstance(a, dict)}
+                    markets = _valuation_markets(valuation)
                     features = json.loads(r["features_json"]) if r["features_json"] else {}
                     parsed.append(([str(i) for i in assets.get("give") or []],
                                    [str(i) for i in assets.get("receive") or []],

@@ -3,7 +3,8 @@
 Trades decks only (a Calibration refresh deck is skipped), never-delivered
 withdrawn cards removed, not-yet-paged first30 rows kept, the top N by
 displayed position, a chosen card without a full row skipped and counted,
-and a league with no gradeable deck, or whose deck yields no card, named.
+markets read from either valuation_json shape, and a league with no
+gradeable deck, or whose deck yields no card, named.
 An in-memory SQLite stands in for prod; it answers SHOW transaction_read_only
 like a read-only Postgres session (or, for the guard test, a writable one).
 """
@@ -76,11 +77,13 @@ def prod(monkeypatch):
 
 
 def put_deck(prod: Prod, job: str, n: int, *, served_at: str, rows=None, tier="first30",
-             delivered=(), no_assets=(), w0=(), w1=(), source=None):
+             delivered=(), no_assets=(), w0=(), w1=(), source=None, snapshot=()):
     """A deck of n built cards: full rows (assets and valuation) for `rows`
     (default every index not in w0), `tier` and delivered_at on the indexes
-    in `delivered`, no assets_json on `no_assets`, deck_source `source`, and
-    withdrawals: w0 served_before=0, w1 served_before=1."""
+    in `delivered`, no assets_json on `no_assets`, deck_source `source`,
+    valuation_json in the personal-market snapshot's shape on `snapshot` (the
+    value core's elsewhere), and withdrawals: w0 served_before=0, w1
+    served_before=1."""
     rows = [i for i in range(n) if i not in w0] if rows is None else rows
     out = []
     for i in rows:
@@ -91,9 +94,13 @@ def put_deck(prod: Prod, job: str, n: int, *, served_at: str, rows=None, tier="f
                     "delivered_at": served_at if i in delivered else None,
                     "assets_json": None if i in no_assets else json.dumps(
                         {"give": [f"{job}-g{i}"], "receive": [f"{job}-r{i}"]}),
-                    "valuation_json": json.dumps({"assets": [
-                        {"id": f"{job}-g{i}", "market": 1000.0 + i},
-                        {"id": f"{job}-r{i}", "market": 1100.0 + i}]})})
+                    "valuation_json": json.dumps(
+                        {"schema_version": 1, "assets": {
+                            "give": [{"id": f"{job}-g{i}", "market_value": 1000.0 + i}],
+                            "receive": [{"id": f"{job}-r{i}", "market_value": 1100.0 + i}]}}
+                        if i in snapshot else {"assets": [
+                            {"id": f"{job}-g{i}", "market": 1000.0 + i},
+                            {"id": f"{job}-r{i}", "market": 1100.0 + i}]})})
     with prod.eng.begin() as conn:
         conn.execute(insert(db.deck_impressions_table), out)
         for served_before, indexes in ((0, w0), (1, w1)):
@@ -133,6 +140,16 @@ def test_a_newer_refresh_deck_is_skipped_for_the_older_trades_deck(prod):
     # The guard ran first, and the loader read through the engine it vetted.
     assert fake.sql[0] == SHOW
     assert any("deck_impressions" in s and "served_at >=" in s for s in fake.sql[1:])
+
+
+def test_markets_are_read_from_either_valuation_shape(prod):
+    # trade_policy's personal-market snapshot keys its rows by side, each
+    # with market_value; the value core and owner evidence write a flat list
+    # keyed market. Each card gets its market from whichever its row holds.
+    fake = prod()
+    put_deck(fake, "T", 2, served_at=_ago(2), delivered=range(2), snapshot=[0])
+    sides = [(c["give"][0]["market"], c["receive"][0]["market"]) for c in served()["cards"]]
+    assert sides == [(1000.0, 1100.0), (1001.0, 1101.0)]
 
 
 def test_top_n_is_by_displayed_position_after_never_delivered_withdrawals(prod):
