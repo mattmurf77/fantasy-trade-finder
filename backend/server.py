@@ -243,6 +243,7 @@ from .database import (
     create_shared_package, load_shared_package, count_recent_shared_packages,
 )
 from . import sleeper_write as _sleeper_write
+from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
@@ -21043,32 +21044,14 @@ def _roster_id_for_owner(rosters, owner_id) -> int | None:
         return None
 
 
-# I-2 send-time refusal copy (final: marketing via head-bizops, accepted by
-# Product, 2026-10-26). A later swap is a change here and nowhere else.
-# Curly ’ throughout, like the shipped refusals. `{assets}` is either the named
-# list ("A", "A and B", "A, B and C", with no serial comma) or, when ANY
-# offending player has no name, the count subject below: a raw player id is
-# never shown. `{verb}` agrees with it ("is" / "are"). `{team}’s` takes ’s
-# even after a final s ("Chris’s").
-_I2_COPY_ASSET_NOT_OWNED = (
-    "{assets} {verb} no longer on your roster, so nothing was sent. Find a new trade.")
-_I2_COPY_COUNTERPARTY_NOT_OWNED = (
-    "{assets} {verb} no longer on {team}’s roster, so nothing was sent. Find a new trade.")
-_I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED = (
-    "{assets} {verb} no longer on the other manager’s roster, so nothing was sent. "
-    "Find a new trade.")
-_I2_COPY_ONE_UNNAMED_PLAYER = "A player in this trade"
-_I2_COPY_N_UNNAMED_PLAYERS = "{n} players in this trade"
-_I2_COPY_ROSTER_READ_FAILED = (
-    "Couldn’t confirm rosters with {platform} right now, so nothing was sent. "
-    "Try again in a moment.")
-
-
+# I-2 send-time refusal copy: the strings and their pure formatting live in
+# backend/ownership_copy.py, so team overhaul shares them without importing
+# the server.
 def _roster_read_failed_copy(platform: str) -> str:
     """I-2 / platforms-pm R3: the readable sentence for a send blocked because
     the live roster read failed. `platform` is the display name ("Sleeper",
     "MFL", "ESPN"); each core wraps it in its own error shape."""
-    return _I2_COPY_ROSTER_READ_FAILED.format(platform=platform)
+    return _ownership_copy.roster_read_failed(platform)
 
 
 def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tuple[dict, int]:
@@ -21088,24 +21071,8 @@ def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tupl
     their catch-all.
     """
     assets = [str(a) for a in assets]
-    labels = [(names or {}).get(a) for a in assets]
-    if all(labels):
-        labels = [str(n) for n in labels]
-        listed = labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
-    elif len(assets) == 1:
-        listed = _I2_COPY_ONE_UNNAMED_PLAYER
-    else:
-        listed = _I2_COPY_N_UNNAMED_PLAYERS.format(n=len(assets))
-    verb = "is" if len(assets) == 1 else "are"
-    if side == "give":
-        code, msg = "asset_not_owned", _I2_COPY_ASSET_NOT_OWNED.format(assets=listed, verb=verb)
-    elif counterparty_name:
-        code = "counterparty_asset_not_owned"
-        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED.format(assets=listed, verb=verb,
-                                                     team=counterparty_name)
-    else:
-        code = "counterparty_asset_not_owned"
-        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED.format(assets=listed, verb=verb)
+    code = "asset_not_owned" if side == "give" else "counterparty_asset_not_owned"
+    msg = _ownership_copy.refusal_message(side, assets, names, counterparty_name)
     return {"error": code, "assets": assets, "message": msg, "detail": msg}, 422
 
 
