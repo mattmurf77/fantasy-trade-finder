@@ -163,7 +163,7 @@ export async function linkSleeperUsername(
 export interface AccountInfo {
   ok: boolean;
   sleeper_user_id: string;
-  verified_via: 'sleeper' | 'apple' | 'google' | null;
+  verified_via: 'sleeper' | 'apple' | 'google' | 'mfl_login' | 'espn' | null;
   account: {
     account_id: string;
     sleeper_user_id: string | null;
