@@ -3371,11 +3371,15 @@ def _trade_job_public_view(job: dict) -> dict:
         out["board_refresh"] = board_refresh
     kick_floor = None
     withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
-    if out["cards"] and job.get("evidence") is not None:
+    live_paged = job.get("evidence_mode") == "live" and bool(job.get("page_scope"))
+    if out["cards"] and (job.get("evidence") is not None or live_paged):
         # C-b sticky drop: a card I-1 withdrew at an earlier serve of this deck
         # is never served again, whatever its roster says now.
-        with job["evidence"].lock:
-            sticky = set(job["evidence"].sticky)
+        if job.get("evidence") is not None:
+            with job["evidence"].lock:
+                sticky = set(job["evidence"].sticky)
+        else:
+            sticky = _deck_sticky(job["job_id"], job["key"][0])
         if sticky:
             out["cards"] = [c for c in out["cards"] if c.get("impression_id") not in sticky]
     if out["cards"]:
@@ -3417,6 +3421,9 @@ def _trade_job_public_view(job: dict) -> dict:
         _deck_evidence_delivered(job["evidence"], out["cards"],
                                  partial=job.get("status") == "error", withdrawn=withdrawn,
                                  league_id=job["key"][1])
+    elif live_paged and (out["cards"] or withdrawn):   # #417 P2-1: rows written at build
+        _deck_evidence_live_delivered(job["job_id"], job["key"][0], job["key"][1],
+                                      out["cards"], withdrawn)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
     return out
@@ -4362,6 +4369,10 @@ class _DeckEvidence:
         # Every id S0's I-1 withdrew at any serve of this deck: never served
         # again (the C-b sticky drop), and recorded in deck_card_withdrawals.
         self.sticky: set = set()
+        # Withdrawals not yet written: {impression_id: (served_before, at)}.
+        # They land in the same transaction as their serve's delivery evidence
+        # (the pack insert or header CAS, or stage 1's rows; #417 P3-5).
+        self.pending_withdrawals: dict = {}
         self.pending: set = set()     # delivered ids awaited until their row is written (F4)
         self.served_at = None         # F2: the deck's first delivery, every row's served_at
         self.marked: set = set()      # delivered ids already written or marked 'delivered'
@@ -4714,10 +4725,13 @@ def _deck_pack_input(ev: _DeckEvidence):
     return ev.pack_cards, run
 
 
-def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict) -> None:
-    """Write the deck's pack row (insert-or-ignore). A deck that can't pack
-    exactly (pack_run refuses) logs and keeps no pack: eval reads it as a
-    lost pack, which it excludes."""
+def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
+                           withdrawals=()) -> bool:
+    """Write the deck's pack row (insert-or-ignore) with this serve's
+    withdrawals in the same transaction. A deck that can't pack exactly
+    (pack_run refuses) logs and keeps no pack (eval reads it as a lost pack,
+    which it excludes); its withdrawals are written alone. True when the
+    withdrawals are written."""
     from . import database as _db
     from .eval import evidence_pack
     try:
@@ -4726,33 +4740,50 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict) -> N
     except ValueError:
         log.error("deck-evidence %s: the deck doesn't pack exactly; no pack written", ev.job_id,
                   exc_info=True)
-        return
+        _db.record_deck_withdrawals(list(withdrawals))
+        return True
     _db.save_deck_evidence_pack({
         "run_id": ev.job_id, "user_id": ev.user_id, "league_id": ev.league_id,
         "served_at": ev.served_at, "pack_version": packed.pack_version,
         "header_json": packed.header_json, "cards_blob": packed.cards_blob,
         "checksum": packed.checksum, "card_count": packed.card_count,
-        "created_at": datetime.now(timezone.utc).isoformat()})
+        "created_at": datetime.now(timezone.utc).isoformat()}, withdrawals)
     state = _PackState(ev.user_id, json.loads(packed.header_json), unpacked, packed.checksum)
     with ev.lock:
         ev.pack, ev.pack_cards = state, None
         ev.pack_dirty = state.run["deliveries"] != ev.deliveries
     if ev.pack_dirty:                     # a delivery landed while the pack was built
         _deck_pack_flush_header(ev)
+    return True
 
 
-def _deck_pack_flush_header(ev: _DeckEvidence) -> None:
+def _deck_pack_flush_header(ev: _DeckEvidence, withdrawals=()) -> bool:
     """A packed deck's later deliveries: one header-only update (a CAS commit;
-    the caller holds _deck_evidence_write_lock)."""
+    the caller holds _deck_evidence_write_lock), with the serve's withdrawals
+    in its transaction (#417 P3-5). A serve that withdrew a card and delivered
+    nothing new writes them alone. True when the withdrawals are written."""
+    from . import database as _db
     with ev.lock:
-        if ev.pack is None or not ev.pack_dirty:
-            return
+        if ev.pack is None:
+            return False
+        dirty = ev.pack_dirty
         state = ev.pack
-        state.run["deliveries"] = _merge_deliveries(state.run.get("deliveries"), ev.deliveries)
-        ev.pack_dirty = False
-    _deck_pack_commit(ev.job_id, state)
-    with ev.lock:                          # another instance's boundaries, if the CAS merged any
-        ev.deliveries = _merge_deliveries(ev.deliveries, state.run.get("deliveries"))
+        if dirty:
+            state.run["deliveries"] = _merge_deliveries(state.run.get("deliveries"), ev.deliveries)
+            ev.pack_dirty = False
+    if not dirty:
+        if withdrawals:
+            _db.record_deck_withdrawals(list(withdrawals))
+        return True
+    written = False
+    try:
+        written = _deck_pack_commit(ev.job_id, state, withdrawals)
+    finally:
+        with ev.lock:                      # another instance's boundaries, if the CAS merged any
+            ev.deliveries = _merge_deliveries(ev.deliveries, state.run.get("deliveries"))
+            if not written:
+                ev.pack_dirty = True       # the next flush tries again
+    return written
 
 
 _PACK_CAS_RETRIES = 5
@@ -4786,7 +4817,7 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     return merged
 
 
-def _deck_pack_commit(run_id: str, state) -> bool:
+def _deck_pack_commit(run_id: str, state, withdrawals=()) -> bool:
     """Write state's header with compare-and-swap on the stored checksum, so a
     deploy overlap (two instances) loses nothing: on a miss, re-read, merge
     (_merge_pack_runs), re-render from the fixed prefix and retry, at most
@@ -4794,7 +4825,8 @@ def _deck_pack_commit(run_id: str, state) -> bool:
     from . import database as _db
     for _attempt in range(_PACK_CAS_RETRIES):
         header_json, checksum = state.render()
-        if _db.update_deck_evidence_pack_header(run_id, header_json, checksum, state.checksum):
+        if _db.update_deck_evidence_pack_header(run_id, header_json, checksum, state.checksum,
+                                                list(withdrawals)):
             state.checksum, state.base_run = checksum, copy.deepcopy(state.run)
             return True
         row = _db.load_deck_evidence_pack_header(run_id)
@@ -5129,30 +5161,50 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
     """
     from . import database as _db
     with ev.lock:
-        if not ev.complete or ev.discarded or not (ev.delivered or ev.delivered_hashes):
+        if not ev.complete or ev.discarded:
             return
-        pack_input = (_deck_pack_input(ev) if ev.packed and not ev.partial and ev.pack is None
-                      else None)
-        (first, first_diag), (rest, rest_diag), candidate_set, upgrades = ev.plan()
-        covered, ev.pending = ev.pending, set()
-        served_at = ev.served_at
+        # #417 P3-5: the withdrawals ride this delivery's evidence transaction.
+        held_withdrawals, ev.pending_withdrawals = ev.pending_withdrawals, {}
+        withdrawals = _deck_withdrawal_rows(ev.job_id, ev.user_id, ev.league_id, held_withdrawals)
+        undelivered = not (ev.delivered or ev.delivered_hashes)
+        if not undelivered:
+            pack_input = (_deck_pack_input(ev) if ev.packed and not ev.partial and ev.pack is None
+                          else None)
+            (first, first_diag), (rest, rest_diag), candidate_set, upgrades = ev.plan()
+            covered, ev.pending = ev.pending, set()
+            served_at = ev.served_at
+            packed_path = ev.packed and not ev.partial
+    if undelivered:                       # withdrawals before any delivery: nothing to pair with
+        try:
+            if withdrawals:
+                _db.record_deck_withdrawals(withdrawals)
+        except Exception:
+            log.warning("deck-withdrawals %s: not recorded", ev.job_id, exc_info=True)
+            with ev.lock:
+                ev.pending_withdrawals = {**held_withdrawals, **ev.pending_withdrawals}
+        return
     for row in (*first, *rest):   # F2: one served_at per deck, its first delivery
         row["served_at"] = served_at or row["served_at"]
     if candidate_set is not None and ev.packed:
         candidate_set = _pack_candidate_set(candidate_set)
     shrunk = False
+    withdrawals_written = not withdrawals
     try:
-        if first or candidate_set is not None or upgrades:
+        if first or candidate_set is not None or upgrades or (withdrawals and not packed_path):
+            # Stage 1 and partial runs: the rows' transaction carries the withdrawals.
             _db.save_deck_evidence(first, candidate_set=candidate_set, diagnostics=first_diag,
                                    delivered=upgrades, deck_job_id=ev.job_id,
-                                   raise_to=None if ev.packed else "delivered")
+                                   raise_to=None if ev.packed else "delivered",
+                                   withdrawals=() if packed_path else withdrawals)
             with ev.lock:
                 ev.wrote(first, candidate_set, first_diag, upgrades)
             shrunk = bool(first) or candidate_set is not None
-        if pack_input is not None:
-            _deck_pack_first_write(ev, *pack_input)
-        elif ev.packed and not ev.partial:
-            _deck_pack_flush_header(ev)
+            withdrawals_written = withdrawals_written or not packed_path
+        if pack_input is not None:            # the pack insert carries them (P3-5)
+            withdrawals_written = _deck_pack_first_write(ev, *pack_input, withdrawals=withdrawals)
+        elif packed_path:                     # or this delivery's header CAS
+            withdrawals_written = (_deck_pack_flush_header(ev, withdrawals=withdrawals)
+                                   or withdrawals_written)
         _deck_evidence_settle(covered)        # the delivered rows are in: actions proceed
         covered = ()
         shrunk = _deck_evidence_build_writes(ev) or shrunk
@@ -5166,6 +5218,9 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
                     exc_info=True)
     finally:
         _deck_evidence_settle(covered)
+        if not withdrawals_written:          # kept with the delivery they go with
+            with ev.lock:
+                ev.pending_withdrawals = {**held_withdrawals, **ev.pending_withdrawals}
     if shrunk and ev.pages_bytes is not None and _trade_page_store_enabled():   # P1 kill knob: no store write
         try:
             with ev.lock:
@@ -5218,9 +5273,15 @@ def _deck_evidence_write(ev: _DeckEvidence) -> None:
 
 
 def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
-                                delivered_at: str | None = None, withdrawn: set = frozenset()) -> None:
+                                delivered_at: str | None = None, withdrawn: set = frozenset(),
+                                new_drops: set = frozenset(), league_id: str | None = None) -> None:
     """Thread target: a stored deck's delivery once its job has left this
-    process, from the row's evidence_blob read fresh under the write lock."""
+    process, from the row's evidence_blob read fresh under the write lock.
+    `new_drops`: this serve's new withdrawals, written in the same transaction
+    as the delivery's evidence (#417 P3-5); served_before is the deck's
+    evidence before this serve (a row's delivered_at, or the pack's last
+    boundary). A deck with no held evidence is a live-mode one (its rows'
+    delivered_at, P2-1) or a packed one already fully written (its header)."""
     from . import database as _db
     try:
         with lease.active() as active:
@@ -5233,15 +5294,49 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                     log.warning("deck-evidence %s: stored evidence unreadable", deck_job_id,
                                 exc_info=True)
                     return
-                ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
                 delivered_at = delivered_at or datetime.now(timezone.utc).isoformat()
+                league_id = league_id or (row or {}).get("league_id")
+                if not isinstance((row or {}).get("evidence_blob"), Mapping):
+                    state = _deck_pack_state(deck_job_id, user_id)
+                    if state is None:
+                        _deck_live_stamp(deck_job_id, user_id, league_id, ids, new_drops,
+                                         delivered_at)
+                        return
+                    ev = _DeckEvidence(deck_job_id, user_id, lease)
+                    ev.packed, ev.pack, ev.league_id = True, state, league_id
+                    ev.deliveries = [list(d) for d in state.run.get("deliveries") or []]
+                    ev.sealed = ev.complete = True
+                    ev.served_at = state.cards[0]["served_at"] if state.cards else delivered_at
+                else:
+                    ev = _DeckEvidence.from_row(user_id, deck_job_id, row, lease)
+                    ev.league_id = ev.league_id or league_id
+                last = ev.deliveries[-1][0] if ev.deliveries else -1
+                rowed = _db.load_delivered_impression_ids(new_drops) if new_drops else set()
+                for iid in new_drops:
+                    index = _deck_card_index(deck_job_id, iid)
+                    served = iid in rowed or (ev.packed and index is not None and index <= last)
+                    ev.pending_withdrawals[iid] = (1 if served else 0, delivered_at)
+                ev.sticky |= set(new_drops)
                 ev.delivered.update(ids)
                 ev.withdrawn = set(withdrawn) - ev.delivered
                 ev.delivered_at.update(dict.fromkeys(ids, delivered_at))
                 ev.served_at = ev.served_at or delivered_at
                 with ev.lock:
                     _deck_evidence_cover(ev, ids, delivered_at)
+                if not ids:                      # withdrawals only: nothing to pair them with
+                    try:
+                        _db.record_deck_withdrawals(_deck_withdrawal_rows(
+                            deck_job_id, user_id, ev.league_id, ev.pending_withdrawals))
+                    except Exception:
+                        log.warning("deck-withdrawals %s: not recorded", deck_job_id,
+                                    exc_info=True)
+                        _deck_withdrawn_unnote(deck_job_id, new_drops)
+                    return
                 _deck_evidence_flush(ev)
+                with ev.lock:                    # not written with their delivery: retried
+                    unwritten = set(ev.pending_withdrawals)
+                if unwritten:
+                    _deck_withdrawn_unnote(deck_job_id, unwritten)
     finally:
         _deck_evidence_settle(ids)
 
@@ -5272,11 +5367,15 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         if partial:
             ev.partial = ev.complete = True
         ev.withdrawn = (ev.withdrawn | (dropped - ev.delivered)) - ids
-        # C-b: served_before is whether an earlier response delivered the card.
-        withdrawals = {iid: iid in ev.delivered for iid in dropped - ev.sticky}
-        ev.sticky |= dropped
-        new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
         now = datetime.now(timezone.utc).isoformat()
+        # C-b: served_before is whether an earlier response delivered the card.
+        withdrawals = dropped - ev.sticky
+        for iid in withdrawals:
+            ev.pending_withdrawals[iid] = (1 if iid in ev.delivered else 0, now)
+        ev.sticky |= dropped
+        if league_id and ev.league_id is None:
+            ev.league_id = league_id
+        new = bool(ids - ev.delivered or hashes - ev.delivered_hashes)
         if ev.served_at is None and (ids or hashes):
             ev.served_at = now
         for key in (*ids, *hashes):   # G2: each card's first delivery
@@ -5289,11 +5388,7 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
         _deck_evidence_cover(ev, {i for h in hashes for i in ev.by_hash.get(h, ())} | ids, now)
-        go = new and ev.complete
-    if withdrawals and league_id:
-        _start_deck_evidence_thread(target=_deck_withdrawals_write, args=(
-            ev.job_id, ev.user_id, league_id, withdrawals, ev.lease,
-            datetime.now(timezone.utc).isoformat()))
+        go = (new or bool(withdrawals)) and ev.complete
     if go:
         _start_deck_evidence_thread(target=_deck_evidence_write, args=(ev,))
 
@@ -5329,6 +5424,14 @@ def _deck_withdrawn_note(deck_job_id: str, ids) -> None:
             _deck_withdrawn_cache[deck_job_id] = set(ids)
 
 
+def _deck_withdrawn_unnote(deck_job_id: str, ids) -> None:
+    """Withdrawals whose write failed (#417 P3-5): off the process cache, so
+    the next serve that drops the card records it again."""
+    with _deck_withdrawn_cache_lock:
+        if deck_job_id in _deck_withdrawn_cache:
+            _deck_withdrawn_cache[deck_job_id] -= set(ids)
+
+
 def _deck_sticky(deck_job_id: str, user_id: str, *, loaded_only: bool = False) -> set:
     """The ids I-1 withdrew in this deck, never served again: the deck's
     _DeckEvidence while its job is in this process, else the process cache,
@@ -5358,46 +5461,84 @@ def _deck_sticky(deck_job_id: str, user_id: str, *, loaded_only: bool = False) -
     return ids
 
 
-def _deck_withdrawals_write(deck_job_id: str, user_id: str, league_id: str,
-                            withdrawals: dict, lease, at: str) -> None:
-    """Thread target: record withdrawals ({impression_id: served_before, None
-    when unknown here}) in deck_card_withdrawals, inside the deck's lease. An
-    unknown served_before is read from the deck's delivered rows."""
+def _deck_withdrawal_rows(deck_job_id: str, user_id: str, league_id: str | None,
+                          held: dict) -> list:
+    """deck_card_withdrawals rows for {impression_id: (served_before, at)}; a
+    card without a contract id (a pre-S8 deck) isn't recorded."""
+    rows = []
+    for iid, (served, at) in sorted(held.items()):
+        index = _deck_card_index(deck_job_id, iid)
+        if index is None or not league_id:
+            log.warning("deck-withdrawals %s: %s not recorded (no contract id or league)",
+                        deck_job_id, iid)
+            continue
+        rows.append({"deck_job_id": deck_job_id, "card_index": index, "user_id": user_id,
+                     "league_id": league_id, "reason": "i1_dropped", "first_withdrawn_at": at,
+                     "impression_id": iid,
+                     "served_before": 1 if served else 0})   # exactly 0 or 1 (eval)
+    return rows
+
+
+_DECK_LIVE_STAMPED_MAX = 4096
+_deck_live_stamped: dict = {}              # deck_job_id -> ids already stamped in this process
+_deck_live_stamped_lock = threading.Lock()
+
+
+def _deck_evidence_live_delivered(deck_job_id: str, user_id: str, league_id: str, cards: list,
+                                  withdrawn: list = ()) -> None:
+    """#417 cross-check P2-1: a live-mode page-scoped deck (the value core,
+    prepared adoption) wrote its rows at build and carries the page-store
+    marker, so eval takes its delivered cards from delivered_at. Each
+    delivery stamps it, off the request thread, with the serve's withdrawals
+    in the same transaction (P3-5); repeat polls send nothing new. The stamp
+    is this response's time (models-eng's rule b), taken here."""
+    at = datetime.now(timezone.utc).isoformat()
+    ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
+    dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
+    new_drops = dropped - _deck_sticky(deck_job_id, user_id, loaded_only=True)
+    if new_drops:                          # C-b: recorded once; never served again here
+        _deck_withdrawn_note(deck_job_id, new_drops)
+    with _deck_live_stamped_lock:
+        seen = _deck_live_stamped.get(deck_job_id)
+        if seen is None:
+            while len(_deck_live_stamped) >= _DECK_LIVE_STAMPED_MAX:
+                _deck_live_stamped.pop(next(iter(_deck_live_stamped)))
+            seen = _deck_live_stamped[deck_job_id] = set()
+        fresh = ids - seen
+        seen |= fresh
+    if not fresh and not new_drops:
+        return
+    lease = _user_data_lifecycle.capture(
+        user_id, started=g.get("_user_data_started") if has_request_context() else None)
+    _start_deck_evidence_thread(target=_deck_evidence_live_write, args=(
+        deck_job_id, user_id, league_id, fresh, new_drops, lease, at))
+
+
+def _deck_evidence_live_write(deck_job_id: str, user_id: str, league_id: str, ids, new_drops,
+                              lease, at: str) -> None:
+    """Thread target: one live-mode delivery inside the deck's lease."""
+    with lease.active() as active:
+        if not active:
+            return
+        with _deck_evidence_write_lock:
+            _deck_live_stamp(deck_job_id, user_id, league_id, ids, new_drops, at)
+
+
+def _deck_live_stamp(deck_job_id: str, user_id: str, league_id: str | None, ids, new_drops,
+                     at: str) -> None:
+    """A live-mode delivery's one transaction (the caller holds the lease and
+    _deck_evidence_write_lock). A failure records neither the stamp nor the
+    withdrawals: this process forgets both, so the next serve of those cards
+    stamps them and the next serve that drops a card records it."""
     from . import database as _db
     try:
-        with lease.active() as active:
-            if not active:
-                return
-            unknown = [iid for iid, served in withdrawals.items() if served is None]
-            delivered = _db.load_delivered_impression_ids(unknown) if unknown else set()
-            if unknown:
-                # models-eng (#416 review): a card delivered past the first 30
-                # and never viewed has no row; the pack's deliveries say it was
-                # served. Read fresh, in this lease.
-                header = _db.load_deck_evidence_pack_header(deck_job_id)
-                if header is not None and header["user_id"] == user_id:
-                    deliveries = json.loads(header["header_json"])["run"].get("deliveries") or []
-                    last = deliveries[-1][0] if deliveries else -1
-                    delivered |= {iid for iid in unknown
-                                  if (_deck_card_index(deck_job_id, iid) or 0) <= last
-                                  and _deck_card_index(deck_job_id, iid) is not None}
-            rows = []
-            for iid, served in sorted(withdrawals.items()):
-                index = _deck_card_index(deck_job_id, iid)
-                if index is None:
-                    log.warning("deck-withdrawals %s: %s is no contract id; not recorded",
-                                deck_job_id, iid)
-                    continue
-                rows.append({"deck_job_id": deck_job_id, "card_index": index, "user_id": user_id,
-                             "league_id": league_id, "reason": "i1_dropped",
-                             "first_withdrawn_at": at, "impression_id": iid,
-                             # exactly 0 or 1 (eval reads anything else as 1)
-                             "served_before": 1 if (served if served is not None
-                                                    else iid in delivered) else 0})
-            if rows:
-                _db.record_deck_withdrawals(rows)
+        _db.stamp_live_deliveries(deck_job_id, user_id, league_id, sorted(ids), at,
+                                  sorted(new_drops))
     except Exception:
-        log.warning("deck-withdrawals %s: not recorded", deck_job_id, exc_info=True)
+        log.warning("deck-evidence %s: live delivery not recorded", deck_job_id, exc_info=True)
+        with _deck_live_stamped_lock:
+            _deck_live_stamped.get(deck_job_id, set()).difference_update(ids)
+        _deck_withdrawn_unnote(deck_job_id, new_drops)
 
 
 def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list = ()) -> None:
@@ -5412,8 +5553,10 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list =
     if ev is not None:
         _deck_evidence_delivered(ev, cards, withdrawn=withdrawn, league_id=row["league_id"])
         return
-    if live:
-        return   # a live-mode deck wrote its rows at build (an F5-dropped one uses its blob)
+    if live:                              # its rows were written at build: stamp them (P2-1)
+        _deck_evidence_live_delivered(row["deck_job_id"], row["user_id"], row["league_id"],
+                                      cards, withdrawn)
+        return
     ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
     dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
     lease = _user_data_lifecycle.capture(
@@ -5421,15 +5564,13 @@ def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list =
     new_drops = dropped - _deck_sticky(row["deck_job_id"], row["user_id"], loaded_only=True)
     if new_drops:                        # C-b: recorded once; never served again here
         _deck_withdrawn_note(row["deck_job_id"], new_drops)
-        _start_deck_evidence_thread(target=_deck_withdrawals_write, args=(
-            row["deck_job_id"], row["user_id"], row["league_id"], dict.fromkeys(new_drops),
-            lease, datetime.now(timezone.utc).isoformat()))
-    if not ids:
+    if not ids and not new_drops:
         return
     _deck_evidence_pend(ids)
     _start_deck_evidence_thread(target=_deck_evidence_write_stored,
                                 args=(row["user_id"], row["deck_job_id"], ids, lease,
-                                      datetime.now(timezone.utc).isoformat(), dropped - ids))
+                                      datetime.now(timezone.utc).isoformat(), dropped - ids,
+                                      new_drops, row["league_id"]))
 
 
 def _deck_evidence_job_done(job_id: str) -> None:

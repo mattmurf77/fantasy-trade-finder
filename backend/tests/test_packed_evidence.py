@@ -272,6 +272,7 @@ def restart():
     server._trade_jobs_by_key.clear()
     server._deck_withdrawn_cache.clear()
     server._deck_pack_states.clear()
+    server._deck_live_stamped.clear()
 
 
 def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_every_card(deferred):
@@ -418,7 +419,7 @@ def test_s8_the_shutdown_drain_flushes_pending_pack_updates(deferred, threaded, 
     server._deck_evidence_drain(5)
     real = server._deck_pack_flush_header
     monkeypatch.setattr(server, "_deck_pack_flush_header",
-                        lambda ev: (_time.sleep(0.5), real(ev))[1])
+                        lambda ev, **kw: (_time.sleep(0.5), real(ev, **kw))[1])
     status(client, job_id, 30)
     assert [d[0] for d in unpack(pack_of(engine, job_id))[0]["deliveries"]] == [29]
     assert server._deck_evidence_drain(5) == 0
@@ -767,3 +768,253 @@ def test_v5_reads_the_packed_deck_like_its_full_rows_with_withdrawals_and_in_fli
     now = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
     deck, _ = read(engine, as_of=now)
     assert deck.exclusion == "in_flight"
+
+
+# ── #417 cross-check P2-1: live-mode page-scoped decks stamp delivered_at ───
+
+def live_deck(n, *, kind="value_core", ghost_every=0):
+    """A live-mode page-scoped deck as the value core or prepared adoption
+    leaves it: admitted organic (a page_scope), switched to live
+    (_deck_evidence_live), its rows written at build by the real logger (uuid
+    ids, tier NULL, the page_store marker) and its cards published; the value
+    core's first pages are stored (prepared adoption stores none)."""
+    from backend.tests.test_deferred_evidence import public, synthetic_cards
+    job_id = run_job()
+    server._deck_evidence_live(job_id)
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[job_id]
+        assert job["evidence_mode"] == "live" and job["page_scope"]
+        job["append_only"] = True
+        if kind == "value_core":
+            job["value_core"] = {"served": n}
+        else:
+            job["prepared_inventory_id"] = "inventory-1"
+    with db_module.engine.begin() as conn:                 # the completion's page row goes
+        conn.execute(db_module.trade_page_store_table.delete().where(
+            db_module.trade_page_store_table.c.deck_job_id == job_id))
+    cards, players = synthetic_cards(n + (n // ghost_every if ghost_every else 0))
+    ghosts = [(pos, c) for pos, c in enumerate(cards)
+              if ghost_every and pos % (ghost_every + 1) == ghost_every]
+    ghost_ids = {id(c) for _, c in ghosts}
+    served = [c for c in cards if id(c) not in ghost_ids]
+    imp = server._log_deck_signal_impressions(
+        user_id=UID, league_id=LEAGUE, job_id=job_id, cards=served, players_dict=players,
+        capture=None, scoring_format="1qb_ppr", ghost_cards=ghosts, candidate_pool=[],
+        policy_version="pv-test")
+    with server._trade_jobs_lock:
+        job.update(cards=[public(c, imp[id(c)]) for c in served])
+    if kind == "value_core":
+        assert server._store_trade_page(job_id)
+    return job_id, [imp[id(c)] for c in served]
+
+
+def stamped(engine, job_id):
+    return {r["card_index"]: r["delivered_at"] for r in rows(engine)
+            if r["deck_job_id"] == job_id and not r["is_ghost"] and r["delivered_at"]}
+
+
+@pytest.fixture()
+def prepared_ok(monkeypatch):
+    monkeypatch.setattr(server, "_prepared_job_matches", lambda job: True)
+
+
+@pytest.mark.parametrize("kind", ["value_core", "prepared"])
+def test_p2_1_a_live_page_scoped_deck_stamps_exactly_the_pages_it_sends(deferred, prepared_ok, kind):
+    client, engine, _ = deferred
+    job_id, _ids = live_deck(120, kind=kind)
+    written = [r for r in rows(engine) if r["deck_job_id"] == job_id]
+    assert len(written) == 120 and {r["evidence_tier"] for r in written} == {None}
+    assert {json.loads(r["features_json"]).get("page_store") for r in written} == {1}
+    assert stamped(engine, job_id) == {}
+    status(client, job_id, 0)
+    assert sorted(stamped(engine, job_id)) == list(range(30))
+    if kind == "prepared":
+        status(client, job_id, 30)
+        assert sorted(stamped(engine, job_id)) == list(range(60))
+        return
+    # The value core's stored pages: in process, then after its job left.
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    assert sorted(stamped(engine, job_id)) == list(range(60))
+    restart()
+    client.get(f"/api/trades/status?deck={job_id}&cursor=60", headers=HEADERS)
+    assert sorted(stamped(engine, job_id)) == list(range(90))
+    assert {r["evidence_tier"] for r in rows(engine)} == {None}   # the stamp only
+
+
+def test_p2_1_a_page_with_an_i1_drop_stamps_every_card_but_the_dropped_one(deferred, prepared_ok):
+    """models-eng's rule (a): by impression_id, never by index range. The
+    drop is a never-delivered withdrawal (W0): recorded, its row unstamped."""
+    client, engine, _ = deferred
+    job_id, ids = live_deck(120)
+    own_all_but(engine, 7)
+    status(client, job_id, 0)
+    assert sorted(stamped(engine, job_id)) == [i for i in range(30) if i != 7]
+    got = withdrawals(engine)
+    assert set(got) == {7} and got[7]["served_before"] == 0 and got[7]["impression_id"] == ids[7]
+
+
+@pytest.mark.parametrize("kind", ["value_core", "prepared"])
+def test_p2_1_a_live_deck_drop_under_mode_2_is_recorded_and_stays_out(deferred, prepared_ok, kind):
+    """models-eng: a value-core deck under trade_i1_mode 2 records its I-1
+    drops (served_before right both ways) and never serves them again, in
+    process (its stored pages; prepared adoption's job pages) and after a
+    restart (the value core's stored pages)."""
+    client, engine, _ = deferred
+    assert server._trade_i1_mode() == 2
+    job_id, ids = live_deck(120, kind=kind)
+    status(client, job_id, 0)
+    own_all_but(engine, 4, 40)
+    status(client, job_id, 0)                              # card 4: delivered, then withdrawn
+    status(client, job_id, 30)                             # card 40: never delivered (W0)
+    got = withdrawals(engine)
+    assert (got[4]["served_before"], got[40]["served_before"]) == (1, 0)
+    own_all_but(engine)                                    # the rosters move back
+    again = deck_ids(status(client, job_id, 0).get_json()) + deck_ids(status(client, job_id, 30).get_json())
+    assert len(again) == 58 and not {ids[4], ids[40]} & set(again)
+    if kind == "prepared":                                 # no stored pages to serve after a restart
+        return
+    restart()
+    page = client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS).get_json()
+    assert len(page["cards"]) == 29 and ids[40] not in deck_ids(page)
+    assert stamped(engine, job_id).get(40) is None
+
+
+def test_p2_1_the_stamp_is_the_response_time_not_the_write_time(deferred, prepared_ok, monkeypatch):
+    """models-eng's rule (b): a delayed write still stamps the response time."""
+    import time as _time
+    from datetime import datetime, timezone
+    client, engine, _ = deferred
+    job_id, _ids = live_deck(60)
+    queued = []
+    monkeypatch.setattr(server, "_start_deck_evidence_thread",
+                        lambda *, target, args: queued.append((target, args)))
+    before = datetime.now(timezone.utc).isoformat()
+    status(client, job_id, 0)
+    after = datetime.now(timezone.utc).isoformat()
+    _time.sleep(0.05)
+    assert queued and stamped(engine, job_id) == {}
+    for target, args in queued:                            # the write runs later
+        target(*args)
+    times = set(stamped(engine, job_id).values())
+    assert len(times) == 1 and before <= next(iter(times)) <= after
+
+
+def test_p2_1_the_first_delivery_wins_and_ghosts_stay_null(deferred, prepared_ok):
+    """models-eng's rule (c)."""
+    import time as _time
+    client, engine, _ = deferred
+    job_id, _ids = live_deck(60, ghost_every=9)
+    status(client, job_id, 0)
+    first = stamped(engine, job_id)
+    assert sorted(first) == list(range(30))
+    _time.sleep(0.01)
+    server._deck_live_stamped.clear()                      # another process serves it again
+    status(client, job_id, 0)
+    assert stamped(engine, job_id) == first
+    ghost_ids = [r["impression_id"] for r in rows(engine) if r["is_ghost"]]
+    assert ghost_ids
+    db_module.stamp_live_deliveries(job_id, UID, LEAGUE, ghost_ids, "2026-10-27T00:00:00+00:00")
+    assert all(r["delivered_at"] is None for r in rows(engine) if r["is_ghost"])
+
+
+def test_p2_1_v5_reads_a_live_decks_delivered_positions_from_its_stamps(deferred, prepared_ok):
+    """Under eval v5 (#417): the delivered positions are the pages sent, the
+    W0 card removed."""
+    from backend.eval import data as eval_data
+    from backend.eval.data import load_decks
+    if not hasattr(eval_data, "PAGE_STORE_MARKER"):
+        pytest.skip("eval v5 (#417) isn't merged here")
+    client, engine, _ = deferred
+    job_id, _ids = live_deck(120)
+    own_all_but(engine, 40)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    [deck] = load_decks(engine=engine)
+    assert deck.exclusion is None and deck.withdrawn_removed == 1
+    assert [c.card_index for c in deck.cards if c.delivered and not c.is_ghost] == [
+        i for i in range(60) if i != 40]
+
+
+# ── #417 cross-check P3-5: a serve's withdrawals land with its delivery ─────
+
+def fail_withdrawal_inserts(monkeypatch):
+    """The withdrawal insert raises inside its transaction."""
+    def boom(conn, rows_):
+        if rows_:
+            raise RuntimeError("injected: the transaction fails")
+        return 0
+    monkeypatch.setattr(db_module, "_insert_withdrawals", boom)
+
+
+def boundaries(engine, job_id):
+    row = pack_of(engine, job_id)
+    return [d[0] for d in unpack(row)[0]["deliveries"]] if row is not None else None
+
+
+def test_p3_5_a_header_update_and_its_withdrawal_land_together(deferred, monkeypatch):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    own_all_but(engine, 40)
+    real = db_module._insert_withdrawals
+    fail_withdrawal_inserts(monkeypatch)
+    status(client, job_id, 30)                             # boundary 59 and card 40's drop
+    assert withdrawals(engine) == {} and boundaries(engine, job_id) == [29]
+    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
+    status(client, job_id, 60)                             # the next delivery carries both
+    assert withdrawals(engine)[40]["served_before"] == 0
+    assert boundaries(engine, job_id) == [29, 59, 89]
+
+
+def test_p3_5_the_pack_insert_and_its_withdrawal_land_together(deferred, monkeypatch):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    own_all_but(engine, 5)
+    real = db_module._insert_withdrawals
+    fail_withdrawal_inserts(monkeypatch)
+    status(client, job_id, 0)
+    assert withdrawals(engine) == {} and pack_of(engine, job_id) is None
+    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
+    status(client, job_id, 30)                             # the next delivery carries both
+    assert withdrawals(engine)[5]["served_before"] == 0 and boundaries(engine, job_id) == [29, 59]
+
+
+def test_p3_5_stage_1_rows_and_their_withdrawal_land_together(deferred, monkeypatch):
+    client, engine, _ = deferred
+    job_id, *_ = deferred_deck(120, store=False)
+    own_all_but(engine, 5)
+    real = db_module._insert_withdrawals
+    fail_withdrawal_inserts(monkeypatch)
+    status(client, job_id, 0)
+    assert withdrawals(engine) == {} and rows(engine) == []
+    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
+    status(client, job_id, 30)                             # the next delivery carries both
+    assert withdrawals(engine)[5]["served_before"] == 0
+    assert sorted(i for (g, i), r in by_index(engine).items() if not g and r["delivered_at"]) == [
+        i for i in range(60) if i != 5]
+
+
+def test_p3_5_a_live_stamp_and_its_withdrawal_land_together(deferred, prepared_ok, monkeypatch):
+    client, engine, _ = deferred
+    job_id, _ids = live_deck(120)
+    own_all_but(engine, 7)
+    real = db_module._insert_withdrawals
+    fail_withdrawal_inserts(monkeypatch)
+    status(client, job_id, 0)
+    assert withdrawals(engine) == {} and stamped(engine, job_id) == {}
+    monkeypatch.setattr(db_module, "_insert_withdrawals", real)
+    status(client, job_id, 0)                              # the next serve records both
+    assert set(withdrawals(engine)) == {7}
+    assert sorted(stamped(engine, job_id)) == [i for i in range(30) if i != 7]
+
+
+def test_p3_5_withdrawals_before_any_delivery_are_written_alone(deferred):
+    """A serve whose every card I-1 drops delivers nothing: its withdrawals
+    have no delivery evidence to ride, so they are written on their own."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    own_all_but(engine, *range(30))
+    assert status(client, job_id, 0).get_json()["cards"] == []
+    got = withdrawals(engine)
+    assert sorted(got) == list(range(30)) and {r["served_before"] for r in got.values()} == {0}
+    assert pack_of(engine, job_id) is None

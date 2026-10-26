@@ -1114,7 +1114,8 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("evidence_tier",             String),
     # ISO UTC: when this card was first sent to a client (any tier, first30
     # included). NULL for an undelivered card (first30, archive, full_interim),
-    # a ghost, and every row written at build (granted by head-eng, G2).
+    # a ghost, and every row written at build (granted by head-eng, G2) but a
+    # live-mode page-scoped deck's, stamped at each delivery (#417 P2-1).
     Column("delivered_at",              String),
 )
 
@@ -7113,8 +7114,9 @@ def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
 _EVIDENCE_TIERS_BELOW_DELIVERED = ("full_interim", "archive")
 # Tiers a first view raises to 'viewed' (R4.2: the revised C3).
 _EVIDENCE_TIERS_BELOW_VIEWED = ("full_interim", "archive", "delivered")
-# Tiers whose rows a later delivery stamps with delivered_at (never a ghost's,
-# never a build-time row's: their tier is NULL).
+# Tiers whose rows a later delivery stamps with delivered_at (never a ghost's;
+# a build-time row, tier NULL, only a live-mode page-scoped deck's, through
+# _stamp_delivered's build_rows: #417 cross-check P2-1).
 _EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive", "viewed")
 # R4.2 U6: rows of cards never shown as such (a C8 archive deck's extras, stage
 # 1's full_interim remainder) are not recommendations: receipts and the matcher
@@ -7127,9 +7129,41 @@ def _evidence_shown():
     return or_(i.c.evidence_tier.is_(None), i.c.evidence_tier.notin_(_EVIDENCE_TIERS_NOT_SHOWN))
 
 
+def _stamp_delivered(conn, deck_job_id: str, delivered: dict, raise_to: str | None, *,
+                     build_rows: bool = False) -> None:
+    """The delivery stamp, on the caller's transaction: each of `deck_job_id`'s
+    rows in `delivered` ({impression_id: delivery time}) gets that
+    `delivered_at` once (the first delivery wins), and from a lower tier the
+    tier `raise_to`. Never a ghost's row. `build_rows` (#417 cross-check P2-1):
+    a live-mode page-scoped deck's rows, written at build with no tier, are
+    stamped too (the stamp only: their tier stays NULL)."""
+    i = deck_impressions_table
+    stampable = i.c.evidence_tier.in_(_EVIDENCE_TIERS_DELIVERABLE)
+    if build_rows:
+        stampable = or_(stampable, and_(i.c.evidence_tier.is_(None),
+                                        or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0)))
+    by_time: dict = {}
+    for iid, at in delivered.items():
+        by_time.setdefault(at, []).append(iid)
+    for at, ids in by_time.items():
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            conn.execute(update(i).where(
+                i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                i.c.delivered_at.is_(None), stampable,
+            ).values(delivered_at=at))
+            if raise_to is not None:
+                conn.execute(update(i).where(
+                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
+                    i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_VIEWED if raise_to == "viewed"
+                                          else _EVIDENCE_TIERS_BELOW_DELIVERED),
+                ).values(evidence_tier=raise_to))
+
+
 def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
                        diagnostics: list | tuple = (), delivered: dict | None = None,
-                       deck_job_id: str | None = None, raise_to: str | None = "delivered") -> None:
+                       deck_job_id: str | None = None, raise_to: str | None = "delivered",
+                       withdrawals=()) -> None:
     """Deferred evidence (ADR-025 stage 1): one delivery write, one transaction.
 
     `rows` are a deferred deck's build-time deck_impressions rows, each with its
@@ -7146,7 +7180,7 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
     first view, R4.2), or None (a packed deck's delivery: the stamp only).
     """
     delivered = dict(delivered or {})
-    if not rows and candidate_set is None and not diagnostics and not delivered:
+    if not rows and candidate_set is None and not diagnostics and not delivered and not withdrawals:
         return
     from .deck_diagnostics import compact_rows
     columns = [c.name for c in deck_impressions_table.columns]
@@ -7155,6 +7189,7 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
             from sqlalchemy.dialects.postgresql import insert as upsert
         else:
             from sqlalchemy.dialects.sqlite import insert as upsert
+        _insert_withdrawals(conn, list(withdrawals))   # one transaction with the delivery (P3-5)
         _save_deck_diagnostic_snapshots(conn, list(diagnostics))
         for start in range(0, len(rows), DECK_IMPRESSION_INSERT_ROWS):
             compacted, snapshots = compact_rows(rows[start:start + DECK_IMPRESSION_INSERT_ROWS])
@@ -7165,23 +7200,7 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
         if candidate_set is not None:
             conn.execute(upsert(deck_candidate_sets_table).values(**candidate_set)
                          .on_conflict_do_nothing(index_elements=["candidate_set_id"]))
-        i = deck_impressions_table
-        by_time: dict = {}
-        for iid, at in delivered.items():
-            by_time.setdefault(at, []).append(iid)
-        for at, ids in by_time.items():
-            for start in range(0, len(ids), 500):
-                chunk = ids[start:start + 500]
-                conn.execute(update(i).where(
-                    i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
-                    i.c.delivered_at.is_(None), i.c.evidence_tier.in_(_EVIDENCE_TIERS_DELIVERABLE),
-                ).values(delivered_at=at))
-                if raise_to is not None:
-                    conn.execute(update(i).where(
-                        i.c.deck_job_id == deck_job_id, i.c.impression_id.in_(chunk),
-                        i.c.evidence_tier.in_(_EVIDENCE_TIERS_BELOW_VIEWED if raise_to == "viewed"
-                                              else _EVIDENCE_TIERS_BELOW_DELIVERED),
-                    ).values(evidence_tier=raise_to))
+        _stamp_delivered(conn, deck_job_id, delivered, raise_to)
     log.info("deck evidence: deck=%s rows=%d candidate_set=%s delivered=%d",
              deck_job_id, len(rows), candidate_set is not None, len(delivered))
 
@@ -7195,30 +7214,38 @@ def mark_deck_impression_viewed(impression_id: str) -> bool:
         ).values(evidence_tier="viewed")).rowcount)
 
 
-def save_deck_evidence_pack(row: dict) -> bool:
+def save_deck_evidence_pack(row: dict, withdrawals=()) -> bool:
     """Insert a deck's pack row (insert-or-ignore on run_id: written once, at
-    the deck's first delivery). True when it was inserted."""
+    the deck's first delivery), with that serve's withdrawals in the same
+    transaction (#417 cross-check P3-5). True when the pack was inserted."""
     t = deck_evidence_packs_table
     with engine.begin() as conn:
         if conn.dialect.name == "postgresql":
             from sqlalchemy.dialects.postgresql import insert as dialect_insert
         else:
             from sqlalchemy.dialects.sqlite import insert as dialect_insert
-        return bool(conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+        inserted = bool(conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
             index_elements=[t.c.run_id])).rowcount)
+        _insert_withdrawals(conn, list(withdrawals))
+        return inserted
 
 
 def update_deck_evidence_pack_header(run_id: str, header_json: str, checksum: str,
-                                     old_checksum: str) -> bool:
+                                     old_checksum: str, withdrawals=()) -> bool:
     """A later delivery, a counted miss or the retirement: rewrite header_json
     and checksum only, never cards_blob (fixed at build; Postgres keeps its
     TOAST), compare-and-swap on the checksum the writer last read, so a deploy
-    overlap can't lose an update. False when another writer got there first."""
+    overlap can't lose an update. The serve's withdrawals land in the same
+    transaction, only if the header did (#417 cross-check P3-5). False when
+    another writer got there first (nothing written)."""
     t = deck_evidence_packs_table
     with engine.begin() as conn:
-        return bool(conn.execute(update(t).where(
-            t.c.run_id == run_id, t.c.checksum == old_checksum,
-        ).values(header_json=header_json, checksum=checksum)).rowcount)
+        if not conn.execute(update(t).where(
+                t.c.run_id == run_id, t.c.checksum == old_checksum,
+        ).values(header_json=header_json, checksum=checksum)).rowcount:
+            return False
+        _insert_withdrawals(conn, list(withdrawals))
+        return True
 
 
 def load_deck_evidence_pack_header(run_id: str) -> dict | None:
@@ -7328,22 +7355,60 @@ def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
     return dict(row) if row is not None else None
 
 
-def record_deck_withdrawals(rows: list[dict]) -> int:
-    """Append C-b withdrawals, insert-or-ignore on (deck_job_id, card_index):
-    the first withdrawal of a card wins. The count of rows inserted."""
+def _insert_withdrawals(conn, rows) -> int:
+    """C-b withdrawals on the caller's transaction, insert-or-ignore on
+    (deck_job_id, card_index): the first withdrawal of a card wins."""
     if not rows:
         return 0
     t = deck_card_withdrawals_table
+    if conn.dialect.name == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as dialect_insert
+    else:
+        from sqlalchemy.dialects.sqlite import insert as dialect_insert
+    inserted = 0
+    for row in rows:
+        inserted += conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+            index_elements=[t.c.deck_job_id, t.c.card_index])).rowcount or 0
+    return inserted
+
+
+def record_deck_withdrawals(rows: list[dict]) -> int:
+    """Append C-b withdrawals on their own (a serve that withdrew a card and
+    delivered nothing new). The count of rows inserted."""
+    if not rows:
+        return 0
     with engine.begin() as conn:
-        if conn.dialect.name == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert as dialect_insert
-        else:
-            from sqlalchemy.dialects.sqlite import insert as dialect_insert
-        inserted = 0
-        for row in rows:
-            inserted += conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
-                index_elements=[t.c.deck_job_id, t.c.card_index])).rowcount or 0
-        return inserted
+        return _insert_withdrawals(conn, rows)
+
+
+def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
+                          at: str, withdrawn_ids=()) -> None:
+    """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
+    (the value core, prepared adoption), one transaction. Its rows were
+    written at build (tier NULL, the page_store marker), so the delivery
+    stamps `at`, the response's time, on the rows of exactly the cards sent
+    (by impression_id): _stamp_delivered with build_rows, so once each (the
+    first delivery wins) and never a ghost's. The serve's withdrawals land in
+    the same transaction, each card_index from its row and served_before from
+    its delivered_at before this stamp: both are recorded or neither."""
+    i = deck_impressions_table
+    delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
+    withdrawn_ids = [x for x in withdrawn_ids if isinstance(x, str)]
+    with engine.begin() as conn:
+        found = {}
+        if withdrawn_ids:
+            found = {r.impression_id: r for r in conn.execute(
+                select(i.c.impression_id, i.c.card_index, i.c.delivered_at).where(
+                    i.c.deck_job_id == deck_job_id, i.c.user_id == user_id,
+                    i.c.impression_id.in_(withdrawn_ids), or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0)))}
+        _stamp_delivered(conn, deck_job_id, dict.fromkeys(delivered_ids, at), None,
+                         build_rows=True)
+        _insert_withdrawals(conn, [
+            {"deck_job_id": deck_job_id, "card_index": found[iid].card_index, "user_id": user_id,
+             "league_id": league_id, "reason": "i1_dropped", "first_withdrawn_at": at,
+             "impression_id": iid,
+             "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
+            for iid in withdrawn_ids if iid in found])
 
 
 def load_delivered_impression_ids(impression_ids) -> set:
