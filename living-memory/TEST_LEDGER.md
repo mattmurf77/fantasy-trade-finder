@@ -1,43 +1,94 @@
 ## 2026-10-26 — MFL entry sign-in sends the login with the team-claim mint (proof-based sign-in, client half)
 
-Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11-06 binary") plus onboarding-eng's review addition (forward `account_only` / `username`). Mobile only, branch `feat/mfl-signin-proof-client`, unpushed. D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture. Safe before the server half: today's mint ignores unknown body fields and omits the new response fields.
+Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11-06 binary"), onboarding-eng's review addition (forward `account_only` / `username`), and the private-league follow-up (the entry sign-in path imports through the stored MFL cookie). Mobile only, draft PR #421 (`feat/mfl-signin-proof-client`). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
 
+- **Safe before the server half.** Today's mint ignores unknown body fields and omits the new response fields. On today's server the entry sign-in path still fails, now at `mflAuthLink` instead of at `/api/mfl/link`: both routes sit behind #279's unverified-write gate, and today's mint returns an unverified `entry:*` session. So this is no regression from main.
 - **Change:**
   - `platformEntry.ts`: the `mfl` mint args gain optional `username` / `password`, spread into the body only when both are present (`:167-169`). The ESPN body is unchanged. `EntryMintResponse` gains optional `verified`, `verified_via`, `account_id`, `account_only`; `user_id`'s comment now says `acct_*` (or a bound Sleeper id), with legacy `entry:*` before the server change. `username` stays a required string because today's server already sends `''`.
-  - `PlatformLinkSheet.tsx`: `mflEntryPickLeague` passes `mflUser.trim()` + `entryMflPassRef.current` to the mint (`:386-387`). The league-ID path (`pickTeam`, `:262`) passes no login.
-  - Both sheets' `onEntrySession` prop type gains optional `account_only?` / `username?`, and every call forwards `minted.account_only` / `minted.username` (`PlatformLinkSheet.tsx:271,392`; `EspnLinkSheet.tsx:382`). `SignInScreen.tsx` is untouched; its `handleEntrySession` still takes `{user_id, display_name}` and type-checks against the wider prop. onboarding-eng reads the new fields in their own PR.
-- **Password lifetime, unchanged:** the typed password is in React state (`mflPass`) until the `auth_leagues` call returns (`:329`, or `:353` on failure). From there it is held in `entryMflPassRef` (a ref, never rendered, never in `dirty`) until the league tap's import succeeds (`:406-407`, where it is read and cleared before the best-effort `mflAuthLink`), `reset()` (`:146`), or a failed sign-in (`:354`). The mint now reads the ref without clearing it. A failed mint or import leaves it in place for a retry tap, as it did before.
-- **No leak:** the three `track()` calls in `platformEntry.ts` (`:150,175,179`) carry only `method` / `error_code`. There is no `console.*` in `platformEntry.ts`, `client.ts` or the touched sheet paths, and POSTs are never retried (`client.ts:542-544`).
-- **New guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), 23 assertions:
+  - `PlatformLinkSheet.tsx`, `mflEntryPickLeague` (`:387`) does three steps, each skipped on a retry once it has succeeded:
+    1. the mint, with `mflUser.trim()` + `entryMflPassRef.current` as the proof (`:394-411`);
+    2. `mflAuthLink`, which stores the MFL cookie under the now-verified session (`:412-416`). This used to be best-effort; it is now required;
+    3. `mflAuthImport([lg.league_id], yr)` (`:417`), the same calls as the non-entry `mflImportSelected`. It replaces `linkPlatformLeague`, whose zero-auth read can't see a private league.
+  - The import's success goes to the existing `auth-done` step (`:425-426`). There, "Open league" runs `openAuthImported` (`:470`), which calls `reset()` and then `onLinked`.
+  - The league-ID path (`pickTeam`, `:264`) still mints with no login and still imports via `linkPlatformLeague`.
+  - Both sheets' `onEntrySession` prop type gains optional `account_only?` / `username?`, and every call forwards `minted.account_only` / `minted.username` (`PlatformLinkSheet.tsx:279,405`; `EspnLinkSheet.tsx:382`). `SignInScreen.tsx` is untouched; its `handleEntrySession` still takes `{user_id, display_name}` and type-checks against the wider prop.
+- **Retry safety:** two refs record how far a league tap got, `entryMflMintedRef` and `entryMflAuthLinkedRef` (`:122-123`). Each is set right after its step succeeds (`:404`, `:414`).
+  - A failed mint or a failed `mflAuthLink` keeps the password, so the next tap retries that step.
+  - A failed import, either thrown or a per-league `failed[]` entry in a 200 (`:418-423`), re-runs only the import.
+  - The refs are account-level: the session and the cookie serve any league the login can see.
+  - `clearEntryMflSignIn()` (`:124`) drops the password and both refs. It runs on `reset()` (`:157`), on a failed or empty sign-in (`:343`, `:365`), and on `mfl_auth_expired`, which goes back to input with "Your MFL sign-in expired — sign in again." (`:428-432`). Any other error shows `e.message` (`:434`).
+- **Password lifetime:** the typed password is in React state (`mflPass`) until the `auth_leagues` call returns (`:340`, or `:364` on failure). From there `entryMflPassRef` holds it (a ref, never rendered, never in `dirty`). It is cleared right after `mflAuthLink` succeeds (`:415`), before the import, which is earlier on the success path than before. It is also cleared by `clearEntryMflSignIn()`.
+- **No leak:** the three `track()` calls in `platformEntry.ts` (`:150,175,179`) carry only `method` / `error_code`. There is no `console.*` in `platformEntry.ts`, `platformLink.ts`, `client.ts` or either sheet, and POSTs are never retried (`client.ts:542-544`).
+- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), 35 assertions:
   - (a) the `mfl` mint body spreads `{username, password}` only behind `args.username && args.password`, with no bare property, and the ESPN body has neither;
-  - (b) `mflEntryPickLeague` passes `username` from `mflUser` and `password` from `entryMflPassRef`, still clears the ref, and `pickTeam` passes neither;
+  - (b) `mflEntryPickLeague` passes `username` from `mflUser` and `password` from `entryMflPassRef`, and `pickTeam` passes neither;
   - (c) no `track(` / `console.` call in `platformEntry.ts` references `password` or forwards `args`;
-  - (d) both sheets type `onEntrySession` with the optional `account_only` / `username`, and every call forwards `minted.account_only` / `minted.username`.
-- **Sabotage (each red, then green on restore, byte-identical): 6/6.**
-  - (a) the guard weakened to `args.password` only → 1 red;
-  - (b) the sign-in path's `password:` removed → 1 red; a `password:` added to `pickTeam`'s mint → 1 red;
-  - (c) `pw: (args as any).password` added to `signin_attempted` → 1 red;
-  - (d) `account_only` dropped from the ESPN sheet's call → 1 red; `username` dropped from the MFL `pickTeam` call → 1 red.
-- **Re-pinned:** `check-landing-platform-options` V2's ESPN `pickTeam` window went from 900 to 1200 chars, because the forwarded fields lengthen the span (874 → 956). The rule is unchanged; the MFL window (810) still fits.
-- **Local runs:** `npx tsc --noEmit` exit 0; `testid-lint OK`; all 118 `check-*.js` pass. `mobile/node_modules` was symlinked from `/Users/teresadickens/ftf-worktrees/build-1.21.4-168-200ms/mobile/node_modules`, which has an identical `package-lock.json`.
+  - (d) both sheets type `onEntrySession` with the optional `account_only` / `username`, and every call forwards `minted.account_only` / `minted.username`;
+  - (e) the entry sign-in path:
+    - order: mint → `mflAuthLink` → `mflAuthImport([lg.league_id])`, each called once, and never `linkPlatformLeague`;
+    - `mflAuthLink` is awaited, with no try of its own;
+    - the only direct password clear comes right after `mflAuthLink`, in the same block;
+    - `clearEntryMflSignIn()` is called only in the `mfl_auth_expired` then-branch, and that catch goes to input with the expired copy, otherwise `e.message`;
+    - the mint and `mflAuthLink` are gated on their progress refs and set them after succeeding, and the import is not gated;
+    - the helper drops all three refs, and `reset()` calls it.
+- **Sabotage, first commit (each red, then green on restore, byte-identical): 6/6.**
+  - (a) the guard weakened to `args.password` only;
+  - (b) the sign-in path's `password:` removed; a `password:` added to `pickTeam`'s mint;
+  - (c) `pw: (args as any).password` added to `signin_attempted`;
+  - (d) `account_only` dropped from the ESPN sheet's call; `username` dropped from the MFL `pickTeam` call.
+- **Sabotage, private-league follow-up: 12 new pins, each red, then green on restore.**
+  - **S1:** import through `linkPlatformLeague` → 5 red, plus 1 in `check-landing-platform-options`.
+  - **S2:** import moved before `mflAuthLink` → order red.
+  - **S3:** `mflAuthImport(undefined, yr)` → "exactly the tapped league" red, plus 2 in `check-landing-platform-options`.
+  - **S4:** `mflAuthLink` wrapped in `try { … } catch {}` → 2 red, plus 1 in `check-landing-platform-options`.
+  - **S5:** password cleared before `mflAuthLink` → red, plus 1 in `check-landing-platform-options`.
+  - **S6:** `clearEntryMflSignIn()` added to the generic-error branch.
+    - The first attempt landed in `pickTeam`, because its catch has the same text, so it proved nothing.
+    - Re-applied in `mflEntryPickLeague`, it stayed **green**: the pin accepted a call in the `else` branch, since that shares the nearest `if`.
+    - The pin now requires the then-branch, and the sabotage goes red.
+  - **S7:** `setStep('input')` dropped from the expired branch → red.
+  - **S8:** `entryMflMintedRef.current = true` removed → red.
+  - **S9:** `mflAuthLink` gated on `entryMflPassRef.current` instead → red.
+  - **S10:** the import gated behind a flag → red.
+  - **S11:** the helper stops resetting `entryMflAuthLinkedRef` → red.
+  - **S12:** `reset()` clears only the password → red.
+  - Pin (b) was re-run on the new code shape → red.
+- **Re-pinned in `check-landing-platform-options`:**
+  - V2's ESPN `pickTeam` window went from 900 to 1200 chars, because the forwarded fields lengthen the span (874 → 956).
+  - V2.1's three `mflEntryPickLeague` pins encoded the old contract. They said the import goes through `linkPlatformLeague`, that `mflAuthImport` is never used, and that the re-store is best-effort with the password dropped first. Per the follow-up, they now pin `mflAuthImport([lg.league_id], yr)` with no `linkPlatformLeague`, no default-ALL import, and a required `mflAuthLink` that drops the password only after it succeeds.
+- **Local runs:** `npx tsc --noEmit` exit 0; `testid-lint OK`; all 118 `check-*.js` pass.
+  - `mobile/node_modules` is symlinked from `/Users/teresadickens/ftf-worktrees/build-1.21.4-168-200ms/mobile/node_modules`, which has an identical `package-lock.json`.
 - **Code-walk (entry mode, `mfl.auth_link` on, proof-based server deployed):**
-  1. On the input step, tapping "Sign in & find my leagues" (`PlatformLinkSheet.tsx:525-529`) runs `mflSignIn` (`:310`). It copies the password (`:318`) and calls `entryMflAuthLeagues` (`:324`), which POSTs `action: 'auth_leagues'` with no session (`platformEntry.ts:117`).
-  2. When the call returns, `setMflPass('')` clears the state (`:329`), the ref takes the password (`:335`), and the step becomes `entry-pick` (`:336`).
-  3. Tapping a league row (`:771`) runs `mflEntryPickLeague` (`:372`). It calls `entryPlatformMint` with the franchise plus `username` / `password` (`:381-388`).
-  4. In `entryPlatformMint` (`platformEntry.ts:143`), `track('signin_attempted', {method})` fires (`:150`). The `mfl` body spreads the login because both are present (`:167-169`). The POST goes to `/api/entry/platform` with `skipAuth` (`:171`), and `setSessionToken` stores the minted token (`:174`).
-  5. `onEntrySession` hands `user_id`, `display_name`, `account_only` and `username` to the host (`PlatformLinkSheet.tsx:389-394`).
-  6. `linkPlatformLeague` runs the canonical import, `POST /api/mfl/link` (`:395`, `platformLink.ts:111`), under the now-verified session, so #279's gate lets it through.
-  7. The ref is read and cleared (`:406-407`), then `mflAuthLink` (`POST /api/mfl/auth-link`, `platformLink.ts:198`) re-stores the MFL cookie best-effort (`:410`). The step becomes `done`.
-  - **Refusal:** any mint error lands in the catch, which shows `e.message` (`:420`). That is the body's `message` (`client.ts:652`), so a `proof_required` / `mfl_bad_credentials` / `too_many_attempts` refusal reads as text and no session is stored.
+  1. On the input step, tapping "Sign in & find my leagues" (`PlatformLinkSheet.tsx:540-544`) runs `mflSignIn` (`:321`). It copies the password (`:329`) and calls `entryMflAuthLeagues` (`:335`), which POSTs `action: 'auth_leagues'` with no session (`platformEntry.ts:117`).
+  2. When the call returns, `setMflPass('')` clears the state (`:340`), the ref takes the password (`:346`), and the step becomes `entry-pick` (`:347`).
+  3. Tapping a league row (`:786`) runs `mflEntryPickLeague` (`:387`). Since `entryMflMintedRef` is false, it calls `entryPlatformMint` with the franchise plus `username` / `password` (`:396-403`).
+  4. In `entryPlatformMint` (`platformEntry.ts:143`):
+     - `track('signin_attempted', {method})` fires (`:150`);
+     - the `mfl` body spreads the login, because both are present (`:167-169`);
+     - the POST goes to `/api/entry/platform` with `skipAuth` (`:171`);
+     - `setSessionToken` stores the minted, verified session (`:174`).
+  5. `entryMflMintedRef` becomes true (`:404`), and `onEntrySession` hands `user_id`, `display_name`, `account_only` and `username` to the host (`:405-410`).
+  6. `mflAuthLink` (`POST /api/mfl/auth-link`, `platformLink.ts:198`) logs in to MFL and stores the cookie under the verified session (`:413`). Then `entryMflAuthLinkedRef` becomes true and the password ref is cleared (`:414-415`).
+  7. `mflAuthImport([lg.league_id], yr)` (`POST /api/mfl/auth-import`, `platformLink.ts:209`) imports that one league with the stored cookie, so a private league works (`:417`). The franchise is auto-bound server-side.
+  8. If the league is in `imported`, `setAuthResult` runs and the step becomes `auth-done` (`:425-426`, render at `:877`). "Open league" (`platform-link.mfl-open`, `:911-913`) runs `openAuthImported`, which calls `reset()` (`:472`) and then `onLinked` (`:474`); SignIn's `handleEntryLinked` routes to the league picker.
+  - **Refusals:**
+    - Any thrown error shows `e.message` (`:434`). That is the body's `message` (`client.ts:652`), so a mint `proof_required` / `mfl_bad_credentials` / `too_many_attempts` reads as text, and no session is stored when the mint fails.
+    - A per-league import failure shows the `failed[].message` (`:422`) and stays on the list.
 - **TestFlight checklist (operator, 11-06 binary, after the server half deploys with `landing.platform_options`, `mfl.link` and `mfl.auth_link` on; signed out):**
   1. **Correct login:** on Sign in, pick MFL, open "Sign in with MFL", enter a real MFL username and password, and tap "Sign in & find my leagues". Your leagues for the year are listed.
-  2. Tap a league whose team is detected. The sheet reaches the import summary with "Open league", with no error. Tap it: the league opens and Home loads with no "Verify your account" banner.
-  3. In Settings, the "Disconnect MFL sign-in" row is present. It only shows when `GET /api/mfl/auth-link` reports `connected`, so this proves the post-import re-store worked.
-  4. Force-quit and relaunch: you are still signed in to the same league. Sign out, repeat steps 1–2 with the same login, and you land in the same account with the same league (no duplicate).
-  5. **Wrong password:** signed out, enter your MFL username with a wrong password. "MFL didn't accept that username and password." shows on the input step, no league list appears, and you are not signed in.
-  6. **League-ID path:** signed out, pick MFL, type your league ID (no sign-in), tap "Continue", then tap your team. A readable refusal shows above the team list (`platform-link.error`, the server's placeholder copy, not "HTTP 403"), and you stay on Sign in.
-  7. **ESPN unchanged:** signed out, pick ESPN, sign in to ESPN, pick a private league and your team. You get the same screens as the previous binary. The result is either the import summary or the server's readable ESPN refusal; there is no new prompt and no crash.
-- **Not covered:** a wrong password at the mint itself (the password would have to change between the league list and the tap), shown by the same `e.message` path. The server half: its proof, limiter and tests. The TOC was not updated, following the other 10-26 entries.
+  2. Tap a **public** league whose team is detected. The sheet shows "Imported 1 of 1 league." with that league and "Open league". Tap it: the league opens and Home loads with no "Verify your account" banner.
+  3. **Private league:** sign out and repeat with a login that has a **private** MFL league (one that `myfantasyleague.com` won't show you when logged out). Tapping it reaches "Imported 1 of 1 league." and the league opens with its rosters. On the old binary, this tap failed.
+  4. In Settings, the "Disconnect MFL sign-in" row is present. It only shows when `GET /api/mfl/auth-link` reports `connected`, which proves the cookie was stored before the import.
+  5. **Retry after a failed step (airplane mode):** sign out and sign in with MFL. On the league list, tap a league, then turn on airplane mode while its row spinner shows (or before the tap, which fails the mint instead). An error shows above the list and you stay on it. Turn airplane mode off and tap the same league again: it imports and opens, with no "sign in again" prompt and no proof refusal. That shows the retry resumed at the failed step instead of re-minting without the password.
+  6. Force-quit and relaunch: you are still signed in to the same league. Sign out, repeat steps 1–2 with the same login, and you land in the same account with the same league (no duplicate).
+  7. **Wrong password:** signed out, enter your MFL username with a wrong password. "MFL didn't accept that username and password." shows on the input step, no league list appears, and you are not signed in.
+  8. **League-ID path:** signed out, pick MFL, type your league ID (no sign-in), tap "Continue", then tap your team. A readable refusal shows above the team list (`platform-link.error`, the server's placeholder copy, not "HTTP 403"), and you stay on Sign in.
+  9. **ESPN unchanged:** signed out, pick ESPN, sign in to ESPN, pick a private league and your team. You get the same screens as the previous binary. The result is either the import summary or the server's readable ESPN refusal; there is no new prompt and no crash.
+- **Not covered:**
+  - **Airplane mode in step 5** fails whichever step is in flight. If you toggle it before the tap, that is the mint; the retry then re-runs the mint with the kept password, which is still a valid retry. The step-precise cases (auth-link failed → retry auth-link; import failed → retry only the import) are pinned structurally, not exercised at runtime.
+  - **A wrong password at the mint itself:** the password would have to change between the league list and the tap.
+  - **The server half:** its proof, limiter and tests.
+  - **The TOC** was not updated, following the other 10-26 entries.
 
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 

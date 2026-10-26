@@ -16,12 +16,21 @@
 //       mint body; the ESPN body carries neither.
 //   (b) PlatformLinkSheet.tsx: mflEntryPickLeague (sign-in path) passes
 //       `username` + `password` (from entryMflPassRef) to entryPlatformMint;
-//       pickTeam (league-ID path) passes neither; the ref is still cleared.
+//       pickTeam (league-ID path) passes neither.
 //   (c) platformEntry.ts: no track( or console. call references `password`
 //       or forwards `args` wholesale.
 //   (d) EspnLinkSheet.tsx + PlatformLinkSheet.tsx: every onEntrySession(...)
 //       call forwards `account_only` and `username` from the mint response,
 //       and both prop types declare them as optional additions.
+//   (e) Private MFL leagues (2026-10-26 follow-up): with a verified session
+//       the entry sign-in path imports like the non-entry flow.
+//       mflEntryPickLeague calls mint → mflAuthLink → mflAuthImport([this
+//       league]), never the zero-auth linkPlatformLeague; mflAuthLink is
+//       required (no swallowed catch); the password ref is cleared only
+//       right after mflAuthLink succeeds (or when an expired sign-in sends
+//       the flow back to input); each step is skipped on a retry once it has
+//       succeeded; clearEntryMflSignIn drops the password and both progress
+//       refs, and reset() calls it.
 //
 // Run: node tests/check-mfl-entry-proof.js
 
@@ -246,12 +255,149 @@ if (pick) {
     !!pass && /entryMflPassRef\.current/.test(pass.getText()),
     'mflEntryPickLeague passes password (from entryMflPassRef) to the mint',
   );
-  // The ref is still dropped in this function (lifetime unchanged).
-  assert(
-    /entryMflPassRef\.current\s*=\s*''/.test(pick.getText()),
-    'mflEntryPickLeague still clears entryMflPassRef',
+}
+
+// ── (e) the entry sign-in path: mint → auth-link → auth-import, retry-safe ──
+
+// The statement of `block` that contains `node` (null if none does).
+function stmtIn(block, node) {
+  let n = node;
+  while (n && n.parent !== block) n = n.parent;
+  return n || null;
+}
+function enclosingIf(node, stop) {
+  let n = node.parent;
+  while (n && n !== stop) {
+    if (ts.isIfStatement(n)) return n;
+    n = n.parent;
+  }
+  return null;
+}
+function isAssign(n, left, right) {
+  return (
+    ts.isBinaryExpression(n) &&
+    n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+    n.left.getText() === left &&
+    (right === undefined || n.right.getText() === right)
   );
 }
+// `if (!<flag>) { …<call>…; <flag> = true; … }` — the call is skipped on a
+// retry once it has succeeded, and the flag is set only after it.
+function gatedByFlag(call, flag, stop) {
+  const ifs = call && enclosingIf(call, stop);
+  if (!ifs || ifs.expression.getText() !== `!${flag}`) return false;
+  const block = ifs.thenStatement;
+  if (!ts.isBlock(block)) return false;
+  const callIdx = block.statements.indexOf(stmtIn(block, call));
+  const setIdx = block.statements.findIndex(
+    (s) => ts.isExpressionStatement(s) && isAssign(s.expression, flag, 'true'),
+  );
+  return callIdx >= 0 && setIdx > callIdx;
+}
+
+if (pick) {
+  const mint = callsTo(pick, 'entryPlatformMint')[0];
+  const links = callsTo(pick, 'mflAuthLink');
+  const imports = callsTo(pick, 'mflAuthImport');
+  assert(
+    callsTo(pick, 'linkPlatformLeague').length === 0,
+    'mflEntryPickLeague never imports through the zero-auth linkPlatformLeague',
+  );
+  assert(
+    links.length === 1 && imports.length === 1,
+    'mflEntryPickLeague calls mflAuthLink once and mflAuthImport once',
+    `${links.length} / ${imports.length}`,
+  );
+  const link = links[0];
+  const imp = imports[0];
+  assert(
+    !!mint && !!link && !!imp && mint.pos < link.pos && link.pos < imp.pos,
+    'the order is mint → mflAuthLink → mflAuthImport',
+  );
+  assert(
+    !!imp && imp.arguments[0] && imp.arguments[0].getText() === '[lg.league_id]',
+    'mflAuthImport imports exactly the tapped league ([lg.league_id])',
+    imp && imp.arguments[0] ? imp.arguments[0].getText() : 'no argument',
+  );
+  assert(
+    !!link && ts.isAwaitExpression(link.parent) &&
+      findAll(pick, (n) => ts.isTryStatement(n)).length === 1,
+    'mflAuthLink is awaited and not wrapped in its own (best-effort) try',
+  );
+
+  // Password lifetime: every direct clear sits right after the awaited
+  // mflAuthLink, in the same block; the only other clear is the
+  // mfl_auth_expired branch sending the flow back to input.
+  const clears = findAll(pick, (n) => isAssign(n, 'entryMflPassRef.current', "''"));
+  const linkStmt = link && link.parent && link.parent.parent;
+  assert(
+    clears.length === 1 &&
+      !!linkStmt &&
+      ts.isExpressionStatement(linkStmt) &&
+      clears[0].parent.parent === linkStmt.parent &&
+      clears[0].pos > linkStmt.pos,
+    'entryMflPassRef is cleared only after mflAuthLink succeeds (same block, after the await)',
+    `${clears.length} direct clear(s)`,
+  );
+  const helperCalls = callsTo(pick, 'clearEntryMflSignIn');
+  // In the THEN branch: an else-branch call has the same nearest IfStatement.
+  assert(
+    helperCalls.every((c) => {
+      const ifs = enclosingIf(c, pick);
+      return (
+        !!ifs &&
+        /mfl_auth_expired/.test(ifs.expression.getText()) &&
+        c.pos >= ifs.thenStatement.pos &&
+        c.end <= ifs.thenStatement.end
+      );
+    }),
+    'clearEntryMflSignIn is called only on the mfl_auth_expired branch',
+  );
+  const expired = findAll(
+    pick,
+    (n) => ts.isIfStatement(n) && /'mfl_auth_expired'/.test(n.expression.getText()),
+  )[0];
+  assert(
+    !!expired &&
+      ts.isCatchClause(expired.parent.parent) &&
+      /clearEntryMflSignIn\(\)/.test(expired.thenStatement.getText()) &&
+      /setStep\('input'\)/.test(expired.thenStatement.getText()) &&
+      /Your MFL sign-in expired — sign in again\./.test(expired.thenStatement.getText()) &&
+      expired.elseStatement &&
+      /setError\(e\?\.message/.test(expired.elseStatement.getText()),
+    "catch: mfl_auth_expired → back to input with the sign-in-expired copy, else e.message",
+  );
+
+  // Retry safety.
+  assert(
+    gatedByFlag(mint, 'entryMflMintedRef.current', pick),
+    'the mint runs only while entryMflMintedRef is false, and sets it after',
+  );
+  assert(
+    gatedByFlag(link, 'entryMflAuthLinkedRef.current', pick),
+    'mflAuthLink runs only while entryMflAuthLinkedRef is false, and sets it after',
+  );
+  assert(
+    !!imp && !enclosingIf(imp, pick),
+    'mflAuthImport is not gated, so a retry re-runs only the import',
+  );
+}
+
+const clearFn = findFunction(sheet, 'clearEntryMflSignIn');
+assert(
+  !!clearFn &&
+    ['entryMflPassRef.current', 'entryMflMintedRef.current', 'entryMflAuthLinkedRef.current'].every(
+      (ref) =>
+        findAll(clearFn, (n) => isAssign(n, ref, ref === 'entryMflPassRef.current' ? "''" : 'false'))
+          .length === 1,
+    ),
+  'clearEntryMflSignIn drops the password and both progress refs',
+);
+const resetFn = findFunction(sheet, 'reset');
+assert(
+  !!resetFn && callsTo(resetFn, 'clearEntryMflSignIn').length === 1,
+  'reset() calls clearEntryMflSignIn',
+);
 
 const leagueIdPick = findFunction(sheet, 'pickTeam');
 assert(!!leagueIdPick, 'PlatformLinkSheet declares pickTeam (league-ID path)');

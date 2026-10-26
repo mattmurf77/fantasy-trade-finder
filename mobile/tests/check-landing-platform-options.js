@@ -415,22 +415,28 @@ assert(
 const mflEntryPick = platformSheet.match(
   /async function mflEntryPickLeague\([\s\S]{0,2200}?\n  \}/,
 );
+// 2026-10-26 (proof-based sign-in, private MFL leagues): the minted session
+// is verified, so the tap stores the MFL cookie (mflAuthLink) and imports
+// with it (mflAuthImport), like the non-entry flow; the zero-auth
+// linkPlatformLeague can't read a private league. Full pins in
+// check-mfl-entry-proof.js.
 assert(
   !!mflEntryPick && /entryPlatformMint\(\{/.test(mflEntryPick[0]) &&
     /teamId: franchiseId/.test(mflEntryPick[0]) &&
     /onEntrySession\?\.\(/.test(mflEntryPick[0]) &&
-    /await linkPlatformLeague\(\{/.test(mflEntryPick[0]),
-  'V2.1: an entry league tap mints directly, then runs the canonical import',
+    /await mflAuthImport\(\[lg\.league_id\], yr\)/.test(mflEntryPick[0]) &&
+    !/linkPlatformLeague\(/.test(mflEntryPick[0]),
+  'V2.1: an entry league tap mints directly, then imports with the stored MFL cookie',
 );
 assert(
-  !!mflEntryPick && !/mflAuthImport/.test(mflEntryPick[0]),
-  'V2.1: the entry path never uses the session-scoped bulk auth-import',
+  !!mflEntryPick && !/mflAuthImport\(\s*(\)|undefined)/.test(mflEntryPick[0]),
+  'V2.1: the entry path imports exactly the tapped league, never the default-ALL bulk import',
 );
 assert(
   !!mflEntryPick &&
-    /entryMflPassRef\.current = '';[\s\S]{0,300}await mflAuthLink\(/.test(mflEntryPick[0]) &&
-    /catch \{/.test(mflEntryPick[0]),
-  'V2.1: the credential re-store is best-effort and drops the password first',
+    /await mflAuthLink\([^;]*\);\s*\n\s*entryMflAuthLinkedRef\.current = true;\s*\n\s*entryMflPassRef\.current = '';/.test(mflEntryPick[0]) &&
+    !/catch \{/.test(mflEntryPick[0]),
+  'V2.1: the credential store is required and drops the password only after it succeeds',
 );
 assert(
   !/useState.{0,40}entryMflPass/.test(platformSheet) &&
