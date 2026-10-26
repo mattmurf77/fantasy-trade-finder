@@ -397,6 +397,14 @@ NON_INTENT_EVENTS = frozenset({
     # Add / Re-rank) stays deliberately ABSENT and counts as INTENT.
     "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Time to trade suggestion, 2026-10-23 — added in the SAME commit as
+    # the emitters (docs/business/analytics/2026-10-20-time-to-suggestion-
+    # events.md v2). R2/R2b are a system outcome echoing the R1 tap
+    # (`find_trades_tapped`, INTENT), which already counts the user.
+    "trade_first_card_shown",
+    "trade_first_card_failed",
+    # deck_buffer_empty (ruling 30): an AC-L4 system outcome, never a choice.
+    "deck_buffer_empty",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS

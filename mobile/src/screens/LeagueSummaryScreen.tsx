@@ -41,6 +41,7 @@ import {
 } from '../api/league';
 import { useSession } from '../state/useSession';
 import { useFinderTargets } from '../state/useFinderTargets';
+import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import type { Player } from '../shared/types';
 import { useFlag } from '../state/useFeatureFlags';
 import { useOutlookStripExpanded } from '../state/outlookStrip';
@@ -1286,6 +1287,15 @@ export default function LeagueSummaryScreen() {
       // the counterparty — but it makes the "Trading with" UI truthful).
       // Same store contract as the pins above: route params stay dead.
       if (selected) {
+        // R1 (time to suggestion, addendum v2) — the hand-off tap starts the
+        // search: `league_offer` (Offer) / `league_target` (Target), at the
+        // tap, with the client search id the deck's request will carry.
+        beginTradeSearch({
+          source: verb === 'offer' ? 'league_offer' : 'league_target',
+          mode: handoffDeckMode(1),
+          searchType: 'pinned',
+          screen: route.name,
+        });
         store.setHandoff({
           opponent: {
             userId: selected.tc.team.user_id,
