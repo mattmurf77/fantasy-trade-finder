@@ -3576,10 +3576,11 @@ def _evict_prerelease_espn_verified_stamps() -> int:
 # queued exclusive locks behind the still-serving old instance (#416: ~90 s in
 # init_db). `_migrate_db` now inspects the schema once and issues only the DDL
 # that is actually missing; a missing column's ALTER runs under a short
-# lock_timeout and is deferred to the next boot if the table stays busy.
+# lock_timeout, and if the table stays busy the boot FAILS (head-eng ruling on
+# #427): readers name every metadata column, so serving without it is worse.
 _DDL_LOCK_TIMEOUT = "3s"
 _DDL_STATEMENT_TIMEOUT = "30s"
-_DDL_ATTEMPTS = 3
+_DDL_ATTEMPTS = 10          # 10 × (3 s lock wait + ~1 s sleep) ≈ 40 s at most
 _DDL_RETRY_SLEEP_S = 1.0
 _PG_LOCK_BUSY_CODES = frozenset({"55P03", "57014"})   # lock_not_available, query_canceled
 
@@ -3633,7 +3634,8 @@ def _execute_ddl(conn, sql: str) -> None:
 def _add_column_guarded(table: str, col: str, col_type: str) -> bool:
     """ALTER TABLE … ADD COLUMN in its own transaction. Postgres: under
     SET LOCAL lock_timeout / statement_timeout, retried on a lock or statement
-    timeout, then deferred to the next boot (MIGRATION_DEFERRED at ERROR).
+    timeout up to _DDL_ATTEMPTS times; if the table is still busy, logs
+    MIGRATION_LOCK_BUSY at ERROR and RAISES, so init_db and the boot fail.
     Any other error is swallowed as before (e.g. the "already exists" race).
     Returns True when the column was added."""
     pg = _ddl_is_postgres()
@@ -3649,9 +3651,11 @@ def _add_column_guarded(table: str, col: str, col_type: str) -> bool:
             busy = getattr(getattr(exc, "orig", None), "pgcode", None) in _PG_LOCK_BUSY_CODES
             if not (pg and busy):
                 return False
-            if attempt < _DDL_ATTEMPTS:
-                time.sleep(_DDL_RETRY_SLEEP_S)
-    log.error("MIGRATION_DEFERRED %s.%s: lock busy, retried next boot", table, col)
+            if attempt == _DDL_ATTEMPTS:
+                log.error("MIGRATION_LOCK_BUSY %s.%s: table still locked after %d attempts; "
+                          "failing the boot", table, col, _DDL_ATTEMPTS)
+                raise RuntimeError(f"MIGRATION_LOCK_BUSY {table}.{col}") from exc
+            time.sleep(_DDL_RETRY_SLEEP_S)
     return False
 
 
@@ -3661,7 +3665,8 @@ def _migrate_db() -> None:
     The schema is inspected once per call; only a column (or index) that is
     actually missing gets DDL, each in its own transaction, so a normal boot
     issues no ADD COLUMN at all. See `_add_column_guarded` for the Postgres
-    lock guard.
+    lock guard: a column whose table stays locked raises MIGRATION_LOCK_BUSY,
+    which fails init_db and the boot.
 
     Also seeds model_config with default values (INSERT OR IGNORE so that
     any manually-tuned rows survive re-deploys).

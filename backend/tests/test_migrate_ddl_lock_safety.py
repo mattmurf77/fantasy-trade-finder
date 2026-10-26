@@ -4,31 +4,32 @@ On Postgres `ALTER TABLE … ADD COLUMN` takes ACCESS EXCLUSIVE before it checks
 whether the column exists, so running every listed ALTER on every boot queued
 exclusive locks behind the still-serving old instance. `_migrate_db` now
 inspects the schema once and only issues DDL that is missing; a missing
-column's ALTER runs under SET LOCAL lock_timeout and is deferred to the next
-boot (MIGRATION_DEFERRED) if the table stays busy. docs/runbook.md
-§ "Migration DDL never blocks boot".
+column's ALTER runs under SET LOCAL lock_timeout, and if the table stays busy
+the boot FAILS with MIGRATION_LOCK_BUSY (head-eng ruling on #427: readers need
+every metadata column). docs/runbook.md § "Migration DDL never blocks boot".
 
   T-a test_migrated_db_issues_no_add_column_or_create_index /
       test_only_the_missing_column_and_index_get_ddl — a SQLite file DB with
       the full schema: a second `_migrate_db()` issues no ADD COLUMN and no
       CREATE INDEX; with one column and one index dropped, exactly that ALTER
       and that CREATE INDEX run.
-  T-b test_lock_busy_column_is_deferred_then_added — the Postgres path forced
-      by stubbing `_ddl_is_postgres` and `_execute_ddl`: the ALTER raises
-      pgcode 55P03, so it is tried exactly 3 times, MIGRATION_DEFERRED is
-      logged at ERROR, `_migrate_db` returns normally, and the next call adds
-      the column.
+  T-b test_persistent_lock_busy_fails_the_boot — the Postgres path forced by
+      stubbing `_ddl_is_postgres` and `_execute_ddl`: the ALTER keeps raising
+      pgcode 55P03, so it is tried exactly 10 times, MIGRATION_LOCK_BUSY is
+      logged at ERROR, and `_migrate_db()` raises (init_db fails the boot).
+      Once the lock clears, the next call (the redeploy) adds the column.
   T-c test_lock_timeout_is_set_first_in_the_same_transaction — on that path
       SET LOCAL lock_timeout and statement_timeout precede the ALTER on the
       same connection, inside its transaction.
 
 No real Postgres test: .github/workflows/ci.yml has no Postgres service.
 
-Sabotage record (2026-10-26; each applied, observed red, reverted green):
+Sabotage record (each applied, observed red, reverted green):
   T-a  precheck bypassed (`if present is None or col in present` -> `if present
-       is None`)                                                    -> RED
-  T-b  timeout handling removed (busy errors return False at once)  -> RED
-  T-c  the two SET LOCAL lines removed                              -> RED
+       is None`)                                                    -> RED (2026-10-26)
+  T-b  persistent busy swallowed (log, then `return False` instead of raise)
+                                                                    -> RED (2026-10-27)
+  T-c  the two SET LOCAL lines removed                              -> RED (2026-10-26)
 """
 import logging
 
@@ -120,19 +121,20 @@ def postgres_path(sqlite_engine, monkeypatch):
     return state
 
 
-def test_lock_busy_column_is_deferred_then_added(sqlite_engine, postgres_path, caplog):
-    with caplog.at_level(logging.ERROR, logger="backend.database"):
-        db._migrate_db()                     # must return normally
+def test_persistent_lock_busy_fails_the_boot(sqlite_engine, postgres_path, caplog):
+    with caplog.at_level(logging.ERROR, logger="backend.database"), \
+            pytest.raises(RuntimeError, match=f"MIGRATION_LOCK_BUSY {TABLE}.{COLUMN}"):
+        db._migrate_db()                     # init_db (and the boot) fails
     alters = [sql for _, _, sql in postgres_path["calls"] if "ADD COLUMN" in sql]
-    assert alters == [ALTER] * db._DDL_ATTEMPTS == [ALTER] * 3
-    deferred = [r for r in caplog.records if "MIGRATION_DEFERRED" in r.getMessage()]
-    assert [r.levelno for r in deferred] == [logging.ERROR]
-    assert deferred[0].getMessage() == (
-        f"MIGRATION_DEFERRED {TABLE}.{COLUMN}: lock busy, retried next boot")
+    assert alters == [ALTER] * db._DDL_ATTEMPTS == [ALTER] * 10
+    busy = [r for r in caplog.records if "MIGRATION_LOCK_BUSY" in r.getMessage()]
+    assert [r.levelno for r in busy] == [logging.ERROR]
+    assert busy[0].getMessage().startswith(f"MIGRATION_LOCK_BUSY {TABLE}.{COLUMN}: ")
+    assert "MIGRATION_DEFERRED" not in caplog.text
     assert COLUMN not in _columns(sqlite_engine, TABLE)
 
     postgres_path["busy"], postgres_path["calls"] = False, []
-    db._migrate_db()                         # the next boot: table is quiet
+    db._migrate_db()                         # the redeploy: table is quiet
     assert [sql for _, _, sql in postgres_path["calls"] if "ADD COLUMN" in sql] == [ALTER]
     assert COLUMN in _columns(sqlite_engine, TABLE)
 
