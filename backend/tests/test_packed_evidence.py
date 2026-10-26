@@ -1382,28 +1382,20 @@ def test_u4_a_deck_that_stored_fewer_cards_splits_at_its_own_count(deferred, mon
     assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
 
 
-def test_u4_raising_the_knob_after_store_never_turns_a_split_into_other(deferred, monkeypatch):
-    """#428 QA (c): the deck stored 90. The knob is raised to 4 pages after,
-    and a rebuild replaced its page row: its pack's stored_count (90) still
-    classifies card 95, never the knobs now (120)."""
-    from sqlalchemy import delete
-    client, engine, _ = deferred
-    job_id, *_ = packed_deck(120)
-    status(client, job_id, 0)
-    status(client, job_id, 90)
-    restart()
-    pages_stored(monkeypatch, 4)
-    with engine.begin() as conn:                           # a rebuild replaced its page row
-        conn.execute(delete(db_module.trade_page_store_table))
-    view(job_id, 95)
-    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
-
-
-def test_u4_the_stored_count_order():
-    """The deck's job (or page row) first, then its pack, then the knobs now."""
+def test_u4_the_stored_count_order(monkeypatch):
+    """The deck's job (or page row) first, then its pack, then 0: no record
+    that a store wrote (#434 QA P2-1). The explicit counts come before the
+    fallback, page_store 0 included (#434 QA P3-2), and the knobs are never
+    read: raising or lowering them changes nothing."""
     assert server._deck_stored_count(75, {"stored_count": 90}) == 75
     assert server._deck_stored_count(None, {"stored_count": 90}) == 90
-    assert server._deck_stored_count(None, {}) == server._trade_pages_stored() * server._trade_page_size()
+    assert server._deck_stored_count(60, {"page_store": 0}) == 60
+    assert server._deck_stored_count(None, {"stored_count": 60, "page_store": 0}) == 60
+    for pages in (2, 4):
+        pages_stored(monkeypatch, pages)
+        assert server._deck_stored_count(None, {"page_store": 1}) == 0
+        assert server._deck_stored_count(None, {"page_store": 0}) == 0
+        assert server._deck_stored_count(None, {}) == 0
 
 
 def test_u4_a_deck_this_process_builds_is_noted_held(deferred, monkeypatch):
@@ -2017,5 +2009,18 @@ def test_store_count_zero_when_the_store_writes_no_row(deferred, how, pack_first
     assert (run["page_store"], run["stored_count"]) == (1, 0)
     assert db_module.load_trade_page_for_job(UID, job_id) is None
     restart()
+    view(job_id, 40)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_store_count_zero_when_the_process_died_before_its_store(deferred):
+    """#434 QA P2-1, the read side: the pack's first write happened (a page
+    delivered while the job ran) and the process died before its store ran:
+    no row, no stored_count anywhere. No record that a store wrote reads as
+    0, so a delivered card under 90 (40) is a restart_split."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, complete=False)
+    delivered_before_completion(client, job_id)
+    restart()                                              # no _store_trade_page
     view(job_id, 40)
     assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}

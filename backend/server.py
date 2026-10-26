@@ -5274,16 +5274,16 @@ def _upgrade_misses(run: Mapping) -> dict:
 def _deck_stored_count(known, run: Mapping) -> int:
     """#428 QA (c): the deck's own stored-page count, never a constant: the
     page store's (its job's stored_count, else its page row's card_count),
-    else the one its pack recorded, else 0 for a deck never page-stored (run
-    page_store 0: a weekly-replenishment deck has no page_scope, so no card has
-    a stored snapshot), else the knobs now. Lowering a knob later never turns
-    a restart split into other."""
+    else the one its pack recorded, else 0: no record that a store wrote, so
+    no stored snapshots (#434 QA P2-1). That covers a deck never page-stored
+    (run page_store 0: a weekly-replenishment deck has no page_scope), one
+    whose store didn't write, and one whose process died between its pack's
+    first write and its store. The knobs are never read: changing them can't
+    turn a restart split into other."""
     for value in (known, run.get("stored_count")):
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
             return value
-    if run.get("page_store") == 0:
-        return 0
-    return _trade_pages_stored() * _trade_page_size()
+    return 0
 
 
 def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, delivered: bool) -> str:
