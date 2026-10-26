@@ -1,3 +1,38 @@
+## 2026-10-26 — Global server paywall gate (#395): one before_request, C2 trade-only, 402 pro_required (dark)
+
+Full gates. It merges dark: both knobs are 0 and the flags are off. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** `test_paywall_gate.py` (326) and `test_paywall_gate_allowlist.py` (7) pass; with them, the entitlements files pass.
+  - The allowlist test checks that every Flask rule is classified. `main`'s `/api/admin/trades/gate-miss-test` was added as never_gate.
+  - Also covered: an unverified session's empty entitlement view, and the `BILLING-UNKNOWN-USER` log.
+- **Sabotage, each red then restored:**
+  - delete a table row;
+  - mark `DELETE /api/account` gated;
+  - set the web-knob fallback to 1;
+  - remove the not-enforcing early-out (a spy catches it);
+  - drop the verified check;
+  - re-expose `sources` to unverified sessions;
+  - remove the unknown-user log.
+- **release-lead QA:** GO-with-notes. 512 gated requests at real defaults gave 0 × 402 and 0 SQL, at about 1.8 µs per request.
+- **Flip preconditions (not merge):**
+  - #397 must be live (the uniform `verify_required`, R28.9);
+  - the 1.22.0 client must handle 402 (1.21.x shows the raw `pro_required`).
+
+## 2026-10-26 — Entitlements billing safety (#394): sandbox cap, sandbox lane, perpetual guard, enforce = flags ∧ knob (dark)
+
+Full gates. It merges dark: every `monetize.*` flag is off and `paywall_enforce_enabled` is 0. D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Backend:** `test_entitlements_billing_safety.py` has 75 tests. With `test_entitlements`, `test_paywall_config`, `test_account_deletion_coverage` and `test_universal_links`, 177 passed.
+- **Sabotage, each red then restored:**
+  - sandbox cap → 19;
+  - perpetual guard → 2;
+  - enforce rule → 4;
+  - G-064 fallback set to 1 → 2;
+  - `/api/me/entitlements` line → 1;
+  - **sandbox reaching production rows → 30.**
+- **The P2 fix (release-lead QA):** sandbox events touch only `granted_by = 'sandbox:*'` rows. Every event type is tested, and a production founder lifetime and a production annual stay byte-unchanged.
+- **release-lead QA:** GO-with-notes. A real-defaults run sent 512 gated requests and got 0 × 402 and 0 SQL. No DDL.
+
 ## 2026-10-26 — Timing readout mounted on Settings › Testing; hub row opens for it (#363 ruling 11)
 
 Full gates, not express (scope: #363's trades-200ms scope, head-eng ruling 11; in the 200 ms set on head-eng's call, 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
