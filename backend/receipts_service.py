@@ -1147,14 +1147,16 @@ def _receipts_series_break_caveats(rows: list[dict]) -> list[dict]:
 def _viewed_without_full_row(league_id: str | None) -> dict:
     """models-lead R3: acted-on cards receipts can't grade because they have
     no full row, reported (never silently dropped): totals by cause and the
-    runs (decks) they sit in. Every retained row, the league filter applied."""
+    runs (decks) they sit in. Every retained row, the league filter applied.
+    The causes are the writer's, from each run's pack (U4-R2)."""
+    causes = db.VIEWED_WITHOUT_FULL_ROW_CAUSES
     try:
         runs = db.load_viewed_without_full_row(league_id=league_id)
     except Exception as e:
         log.warning("receipts metrics: viewed-without-full-row read failed: %s", e)
-        return {"restart_split": None, "other": None, "runs": None, "unavailable": True}
-    return {"restart_split": sum(c["restart_split"] for c in runs.values()),
-            "other": sum(c["other"] for c in runs.values()), "runs": len(runs)}
+        return {**dict.fromkeys(causes), "runs": None, "unavailable": True}
+    return {**{cause: sum(c[cause] for c in runs.values()) for cause in causes},
+            "runs": len(runs)}
 
 
 def admin_metrics(*, window: int | None = None,

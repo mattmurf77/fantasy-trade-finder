@@ -137,3 +137,16 @@ def test_two_writers_that_missed_the_same_card_count_it_once(deferred):
     assert run["upgrade_miss_cards"] == {"95": "restart_split"}
     assert run["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
     assert len([r for r in rows(engine) if r["card_index"] == 95]) == 1
+
+
+def test_the_receipts_reader_reports_the_writers_causes(deferred):
+    """End to end: the writer's map is what #424's reader reports for the
+    run's acted-on, no-full-row cards (a card's index no longer decides)."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    delivered_to_119(client, job_id)
+    restart()
+    view(job_id, 95)
+    view(job_id, 101, "like")
+    assert db_module.load_viewed_without_full_row()[job_id] == {
+        "restart_split": 2, "evicted_split": 0, "other": 0}
