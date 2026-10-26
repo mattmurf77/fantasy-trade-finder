@@ -581,26 +581,55 @@ def test_the_admin_gate_miss_hook_applies_to_page_serves(p1, spawned, monkeypatc
                f"job={job_id}" for r in caplog.records)
 
 
+def _s0_lines(caplog):
+    return [r for r in caplog.records if r.getMessage().startswith("[i1] serve ")]
+
+
 def test_each_page_serve_logs_one_s0_line(p1, spawned, caplog):
-    """C-a: one `[i1] serve` line per serve, on the page path too."""
+    """C-a: one `[i1] serve` line per serve, on the page path too, with
+    `job=` the page's deck job."""
     client, _, _ = p1
-    build_page()
+    job_id = build_page()
     caplog.set_level(logging.INFO, logger="trade_finder")
     generate(client, page=1)
-    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[i1] serve ")]
-    assert len(lines) == 1 and f"league={LEAGUE} mode=strict" in lines[0]
-    assert "outcome=served" in lines[0] and "cards=30 kept=30" in lines[0]
+    lines = [r.getMessage() for r in _s0_lines(caplog)]
+    assert len(lines) == 1 and f"league={LEAGUE} job={job_id} mode=strict" in lines[0]
+    assert "outcome=served " in lines[0] and "cards=30 kept=30" in lines[0]
 
 
-def test_lenient_mode_serves_every_page_card(p1, spawned, monkeypatch):
+def test_a_c_e_league_page_serve_lets_every_card_through(p1, spawned, floor_kicks, caplog):
+    """S0's C-e: the last session write failed (Sleeper `stale` + `write_failed`),
+    so the stored rows may be outdated. The page serve drops nothing, even for
+    an asset the stored rows say moved, and logs `unchecked_c_e` at warning."""
+    client, engine, _ = p1
+    job_id = build_page()
+    with engine.begin() as conn:
+        conn.execute(insert(db_module.league_roster_state_table).values(
+            league_id=LEAGUE, status="stale", refreshed_at=OLD, last_error_code="write_failed",
+            updated_at=OLD))
+        conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
+                     .values(roster_data=json.dumps([])))     # strict would drop every g2 card
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    body = generate(client, page=1).get_json()
+    assert body["serve_source"] == "page" and body["status"] == "complete"
+    assert ids(body["cards"]) == [f"p1-{i:03d}" for i in range(30)]
+    (line,) = _s0_lines(caplog)
+    assert line.levelno == logging.WARNING
+    assert f"job={job_id}" in line.getMessage() and "outcome=unchecked_c_e" in line.getMessage()
+
+
+def test_lenient_mode_serves_every_page_card(p1, spawned, monkeypatch, caplog):
     client, engine, _ = p1
     monkeypatch.setitem(server._trade_service_mod._cfg, "trade_i1_mode", 1.0)
     build_page()
     with engine.begin() as conn:             # g2 leaves the viewer's roster
         conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
                      .values(roster_data=json.dumps([])))
+    caplog.set_level(logging.INFO, logger="trade_finder")
     body = generate(client, page=1).get_json()
     assert body["serve_source"] == "page" and len(body["cards"]) == 30
+    (line,) = _s0_lines(caplog)
+    assert "mode=lenient" in line.getMessage() and "outcome=served_lenient" in line.getMessage()
 
 
 def test_mode_0_never_reads_the_store(p1, spawned, statements, monkeypatch):

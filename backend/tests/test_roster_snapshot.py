@@ -253,7 +253,8 @@ def test_status_unknown_for_sleeper_without_a_state_row_or_table(engine, monkeyp
     with engine.begin() as conn:
         _seed(conn)
     snap = _snap(engine)
-    assert (snap.status, snap.refreshed_at, snap.linked) == ("unknown", None, False)
+    assert (snap.status, snap.refreshed_at, snap.linked, snap.lenient_reason) == (
+        "unknown", None, False, None)
     assert snap.age_s == 60.0                     # the newest league_members.updated_at
     bare = _engine(monkeypatch, tables=[t for t in metadata.sorted_tables
                                         if t.name != "league_roster_state"])
@@ -262,19 +263,21 @@ def test_status_unknown_for_sleeper_without_a_state_row_or_table(engine, monkeyp
     assert _snap(bare).status == "unknown"
 
 
-@pytest.mark.parametrize("stored, refreshed, error, status, age", [
-    ("fresh", 30, None, "fresh", 30.0),
-    ("stale", 600, "http_5xx", "stale", 600.0),
-    ("stale", None, "http_5xx", "stale", 60.0),   # NULL refreshed_at: age from the newest row
-    ("stale", 600, "write_failed", "unknown", 600.0),   # C-e: a failed session write
+@pytest.mark.parametrize("stored, refreshed, error, status, age, lenient", [
+    ("fresh", 30, None, "fresh", 30.0, None),
+    ("stale", 600, "http_5xx", "stale", 600.0, None),
+    ("stale", None, "http_5xx", "stale", 60.0, None),   # NULL refreshed_at: age from the newest row
+    ("stale", 600, "write_failed", "unknown", 600.0, "c_e"),   # C-e: a failed session write
 ])
-def test_status_from_the_sleeper_state_row(engine, stored, refreshed, error, status, age):
+def test_status_from_the_sleeper_state_row(engine, stored, refreshed, error, status, age,
+                                           lenient):
     with engine.begin() as conn:
         _seed(conn)
         _state(conn, status=stored, refreshed_at=None if refreshed is None else _iso(refreshed),
                error=error)
     snap = _snap(engine)
-    assert (snap.status, snap.age_s, snap.linked) == (status, age, False)
+    assert (snap.status, snap.age_s, snap.linked, snap.lenient_reason) == (
+        status, age, False, lenient)
     assert snap.refreshed_at == (None if refreshed is None else _iso(refreshed))
 
 

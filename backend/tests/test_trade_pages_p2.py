@@ -359,7 +359,8 @@ def test_the_admin_gate_miss_hook_withholds_every_deck_path(p1, spawned, monkeyp
 @pytest.mark.parametrize("path", sorted(DECK_PATHS))
 def test_each_deck_serve_logs_one_s0_line_and_kicks_the_floor_after(p1, spawned, caplog,
                                                                     floor_kicks, path):
-    """C-a: one `[i1] serve` line per deck serve; a Sleeper roster past the
+    """C-a: one `[i1] serve` line per deck serve, naming the served deck
+    (`job=`, the rebased deck's own id on a rebase); a Sleeper roster past the
     bound kicks the floor refresh once, after the response (gate mode 0: held)."""
     client, engine, _ = p1
     target, cursor = _deck_path(engine, path)
@@ -367,19 +368,19 @@ def test_each_deck_serve_logs_one_s0_line_and_kicks_the_floor_after(p1, spawned,
     caplog.set_level("INFO", logger=server.log.name)
     body = deck_status(client, target, cursor).get_json()
     assert body["cards"] and "wait_reason" not in body     # held at gate mode 0
-    assert len([r for r in caplog.records if r.getMessage().startswith("[i1] serve ")]) == 1
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[i1] serve ")]
+    assert len(lines) == 1 and f" job={body['deck_id']} " in lines[0]
     assert floor_kicks == [(LEAGUE, 300.0)]
 
 
-@pytest.mark.xfail(strict=True, reason="needs S0's C-e lenient marker (13cd3b5d), "
-                   "due with the next P1 merge; drop this marker then")
-@pytest.mark.parametrize("path", ["stored", "live", "rebased_row"])
-def test_a_c_e_league_lets_every_card_through_on_every_deck_path(p1, spawned, path):
+@pytest.mark.parametrize("path", sorted(DECK_PATHS))
+def test_a_c_e_league_lets_every_card_through_on_every_deck_path(p1, spawned, caplog, path):
     """C-e (the last session write failed): the stored rows may be outdated,
     so S0's rules serve every card, no I-1 drop, on the deck path too."""
     client, engine, _ = p1
     target, cursor = _deck_path(engine, path)
-    full = {"stored": 30, "live": 5, "rebased_row": 30}[path]
+    full = {"stored": 30, "live": 5, "rebased_row": 30, "rebased_job": 10}[path]
+    caplog.set_level("INFO", logger=server.log.name)
     with engine.begin() as conn:                           # g2 leaves the viewer's stored roster
         conn.execute(update(league_members_table).where(league_members_table.c.user_id == UID)
                      .values(roster_data=json.dumps([])))
@@ -389,6 +390,9 @@ def test_a_c_e_league_lets_every_card_through_on_every_deck_path(p1, spawned, pa
             updated_at=datetime.now(timezone.utc).isoformat(timespec="microseconds")))
     body = deck_status(client, target, cursor).get_json()
     assert len(body["cards"]) == full and "wait_reason" not in body
+    lines = [r for r in caplog.records if r.getMessage().startswith("[i1] serve ")]
+    assert len(lines) == 1 and "outcome=unchecked_c_e" in lines[0].getMessage()
+    assert lines[0].levelname == "WARNING"
 
 
 @pytest.mark.parametrize("path", sorted(DECK_PATHS))

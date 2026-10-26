@@ -64,6 +64,10 @@ class RosterSnapshot:
     # Additive to contract §3, for the §3b serve rules:
     linked: bool = False                  # ESPN/MFL/Fleaflicker (database.is_linked_platform_league)
     age_s: float | None = None            # seconds since the roster bound's stamp; None = no stamp
+    # Why I-1 must not drop cards on this serve, or None. "c_e": the last
+    # session write failed (C-e), so the stored rows may be outdated and would
+    # cause false drops. A plain `unknown` (no state row) still filters.
+    lenient_reason: str | None = None
 
 
 def _canonical(obj) -> str:
@@ -182,8 +186,10 @@ def roster_snapshot(conn, league_id: str, *, pick_source: str,
         ``import_fresh_s`` (model_config ``trade_import_roster_fresh_s``), else
         ``stale``, with ``refreshed_at`` = that newest row's ``updated_at``;
       - Sleeper with a ``league_roster_state`` row: that row's status, except a
-        failed session write (``write_failed``) reads ``unknown`` (C-e);
-      - Sleeper without a row, or without the table: ``unknown``.
+        failed session write (``write_failed``) reads ``unknown`` with
+        ``lenient_reason="c_e"`` (C-e: serve without I-1 drops);
+      - Sleeper without a row, or without the table: ``unknown`` (I-1 still
+        filters against the stored rows).
     ``age_s`` measures the roster bound (§3b): from ``refreshed_at``, else from
     the newest ``league_members.updated_at``.
     """
@@ -209,10 +215,11 @@ def roster_snapshot(conn, league_id: str, *, pick_source: str,
     if row is None:
         return RosterSnapshot(fp, owners, None, "unknown", age_s=age(newest))
     refreshed_at, status, error_code = row
+    lenient_reason = None
     if status == _db.ROSTER_STATE_STALE and error_code == "write_failed":
-        status = "unknown"
+        status, lenient_reason = "unknown", "c_e"
     return RosterSnapshot(fp, owners, _id(refreshed_at), status or "unknown",
-                          age_s=age(refreshed_at or newest))
+                          age_s=age(refreshed_at or newest), lenient_reason=lenient_reason)
 
 
 # fmt -> (pool generation, the seed map it was computed from, canonical seed JSON)

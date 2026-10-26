@@ -3492,7 +3492,7 @@ def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap
         gates = mode == 2 and _trade_gate_miss_on()
         try:
             cards, block, past_bound = _roster_serve_check(
-                cards, league_id, viewer_id, mode, gates, snap=snap)
+                cards, league_id, viewer_id, mode, gates, ref, snap=snap)
         except Exception as err:
             log.warning("trade-job %s: roster check unavailable (%s): %s", ref,
                         "no cards" if gates else f"{len(cards)} cards served unchecked", err)
@@ -3537,7 +3537,7 @@ def _roster_gate_now(league_id: str, ref: str, current) -> tuple[str | None, boo
 
 
 def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates: bool,
-                        *, snap=None):
+                        job_id: str = "", *, snap=None):
     """S0 at serve (contract v0.4 §3, §3b, §5b; C-a, C-d). Returns
     `(cards, block, past_bound)`:
       - `block`: None, "roster_check_unavailable" (no stored rosters: strict,
@@ -3551,11 +3551,16 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
         floor refresh after the response, gate misses held or not.
     Strict (mode 2) drops cards whose give asset the viewer, or receive asset the
     opponent, no longer owns. Lenient (mode 1) serves every card and never
-    blocks. Generic ladder picks are pool assets, never on a roster, and a pick
-    with no owner row is an unknown owner (C-d): both pass, counted. One log
-    line per serve (C-a). Raises when the stored rows can't be read. `snap`: a
-    roster_snapshot already read for this serve (P1 shares it with its
-    fingerprint compare); None reads one now.
+    blocks, and so does C-e (a failed session write, `snap.lenient_reason`):
+    the stored rows may be outdated, so drops would be false. A plain
+    `unknown` (no state row) still filters. Generic ladder picks are pool
+    assets, never on a roster, and a pick with no owner row is an unknown
+    owner (C-d): both pass, counted. One log line per serve (C-a), with outcome
+    served / served_lenient / unchecked_c_e / a gate miss (`_held` when held),
+    and `job=` the job (or, for a page-store serve, the page's deck job).
+    Raises when the stored rows can't be read. `snap`: a roster_snapshot
+    already read for this serve (P1 shares it with its fingerprint compare);
+    None reads one now.
     """
     if snap is None:
         snap = _trade_roster_snapshot(league_id)
@@ -3592,8 +3597,8 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
         unchecked[id(card)] = [a + b for a, b in zip(give_unchecked, receive_unchecked)]
         if not (give_moved or receive_moved):
             kept.append(card)
-    if mode == 1:
-        served = list(cards)                  # lenient: checked and logged, all served
+    if mode == 1 or snap.lenient_reason:
+        served = list(cards)                  # lenient or C-e: checked and logged, all served
     elif block == "roster_check_unavailable":
         served = [] if gates else list(cards)  # held: served unchecked
     elif block == "roster_gate_miss":
@@ -3604,11 +3609,18 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
         generic, unknown = unchecked.get(id(card), (0, 0))
         counts["unchecked_generic"] += generic
         counts["unchecked_pick_owner"] += unknown
-    outcome = (block + ("_held" if mode == 2 and not gates else "")) if block else "served"
-    log.log(logging.WARNING if block else logging.INFO,
-            "[i1] serve league=%s mode=%s status=%s outcome=%s age_s=%s cards=%d kept=%d "
+    if snap.lenient_reason:
+        outcome = f"unchecked_{snap.lenient_reason}"
+    elif mode == 1:
+        outcome = "served_lenient"
+    elif block:
+        outcome = block + ("" if gates else "_held")
+    else:
+        outcome = "served"
+    log.log(logging.WARNING if block or snap.lenient_reason else logging.INFO,
+            "[i1] serve league=%s job=%s mode=%s status=%s outcome=%s age_s=%s cards=%d kept=%d "
             "dropped_give=%d dropped_receive=%d unchecked_generic=%d unchecked_pick_owner=%d",
-            league_id, "lenient" if mode == 1 else "strict", snap.status, outcome,
+            league_id, job_id or "none", "lenient" if mode == 1 else "strict", snap.status, outcome,
             "none" if snap.age_s is None else int(snap.age_s), len(cards), len(served),
             counts["dropped_give"], counts["dropped_receive"],
             counts["unchecked_generic"], counts["unchecked_pick_owner"])
