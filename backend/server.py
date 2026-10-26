@@ -3996,6 +3996,35 @@ def _unpack_row(packed: bytes) -> dict:
     return json.loads(zlib.decompress(packed))
 
 
+def _slim_bakeoff_run(row: dict) -> dict:
+    """S5 (models-lead R2.6; rulings 22, 24, 25, 31): the bakeoff_runs row a
+    deck's evidence_blob carries, so a deck first delivered after its job left
+    the process still writes its run. Every column and config key as built
+    (base, arm_delta, significance, owner_presentment, the owner request's
+    assignment fields), but the owner request's frozen `input` and
+    `input_evidence` are replaced by the readers' not-sampled marker:
+    owner_request_sampled=false, input_sha256
+    (capture_owner_benchmark.input_fingerprint, the one definition) and
+    input_bytes (the input as config_json would have held it). A row without
+    an owner request input is unchanged."""
+    try:
+        config = json.loads(row.get("config_json") or "null")
+    except (TypeError, ValueError):
+        return dict(row)
+    request = config.get("owner_request") if isinstance(config, dict) else None
+    if not isinstance(request, dict) or "input" not in request:
+        return dict(row)
+    from .eval.capture_owner_benchmark import input_fingerprint
+    try:
+        sha = input_fingerprint({"input": request["input"]})
+    except (TypeError, ValueError):       # NaN or an unencodable value: no fingerprint
+        sha = None
+    config["owner_request"] = {k: v for k, v in request.items() if k not in ("input", "input_evidence")}
+    config.update(owner_request_sampled=False, input_sha256=sha,
+                  input_bytes=len(json.dumps(request["input"], default=str).encode()))
+    return {**row, "config_json": json.dumps(config, default=str)}
+
+
 def _diagnostic_refs(value) -> set:
     from .deck_diagnostics import REFERENCE_KEY, is_reference
     if is_reference(value):
@@ -4060,7 +4089,8 @@ class _DeckEvidence:
         self.truncated = True         # the deck has cards past the stored ones (S1b)
         # Build-time writes moved to the deck's first delivery (F3), each once:
         self.trade_impressions = None # packed {"league_id", "cards"} for log_trade_impressions
-        self.bakeoff_run = None       # the packed bakeoff_runs row (in process only)
+        self.bakeoff_run = None       # the packed bakeoff_runs row
+        self.bakeoff_slim = None      # its slim form, for the evidence_blob (S5)
         self.generated = None         # {"league_id", "props"} of trades_generated
 
     def __copy__(self):
@@ -4109,10 +4139,11 @@ class _DeckEvidence:
 
     def defer_bakeoff_run(self, row: dict) -> None:
         """Packed: an owner run's config_json carries the whole owner request
-        input (about 24 MB raw for the 2,354-card test deck)."""
-        packed = _pack_row(row)
+        input (about 24 MB raw for the 2,354-card test deck). Its slim form
+        rides in the evidence_blob (S5)."""
+        packed, slim = _pack_row(row), _slim_bakeoff_run(row)
         with self.lock:
-            self.bakeoff_run = packed
+            self.bakeoff_run, self.bakeoff_slim = packed, slim
 
     def defer_generated(self, league_id: str, props: dict) -> None:
         with self.lock:
@@ -4127,7 +4158,7 @@ class _DeckEvidence:
     def take_build_writes(self):
         """Under `lock`: the held build-time writes, each handed out once."""
         held = (self.trade_impressions, self.bakeoff_run, self.generated)
-        self.trade_impressions = self.bakeoff_run = self.generated = None
+        self.trade_impressions = self.bakeoff_run = self.bakeoff_slim = self.generated = None
         return held
 
     def seal(self) -> None:
@@ -4214,7 +4245,7 @@ class _DeckEvidence:
         is left."""
         rows = [_unpack_row(packed) for iid, (_, packed) in self.rows.items()
                 if self.stored_ids is None or iid in self.stored_ids]
-        held = self.trade_impressions or self.generated
+        held = self.trade_impressions or self.generated or self.bakeoff_slim
         if not (rows or self.ghosts or self.candidate_set or held):
             return None
         impressions = None
@@ -4226,8 +4257,9 @@ class _DeckEvidence:
             "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
             "pages_bytes": self.pages_bytes, "rows": rows,
             "ghosts": list(self.ghosts.values()), "diagnostics": self.closure(rows),
-            # Not the bakeoff_runs row: it can be megabytes (defer_bakeoff_run).
             "candidate_set": self.candidate_set, "trade_impressions": impressions,
+            # S5: the slim bakeoff_runs row (the full one can be megabytes).
+            "bakeoff_run": self.bakeoff_slim,
             "generated": self.generated, "served_at": self.served_at,
             "truncated": self.truncated})
 
@@ -4249,6 +4281,8 @@ class _DeckEvidence:
             ev.pages_bytes = blob.get("pages_bytes")
             if blob.get("trade_impressions") is not None:
                 ev.trade_impressions = _pack_row(blob["trade_impressions"])
+            if blob.get("bakeoff_run") is not None:   # S5: always written at first delivery
+                ev.bakeoff_run = _pack_row(blob["bakeoff_run"])
             ev.generated = blob.get("generated")
             ev.served_at = blob.get("served_at")
             ev.partial = bool(ev.rows) and blob.get("truncated", True)
@@ -4542,7 +4576,7 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                     continue
                 ev.discarded = True
                 ev.rows, ev.ghosts, ev.diagnostics, ev.candidate_set, ev.by_hash = {}, {}, {}, None, {}
-                ev.trade_impressions = ev.bakeoff_run = ev.generated = None
+                ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
             dropped += 1

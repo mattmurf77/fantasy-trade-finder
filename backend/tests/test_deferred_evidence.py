@@ -319,18 +319,48 @@ def test_f3_the_first_delivery_writes_them_once_with_todays_props(deferred, gene
 
 
 def test_f3_after_the_job_left_the_process_the_blob_carries_them(deferred, generated_events):
+    """S5: the bakeoff_runs row too, slim (this run has no owner request, so
+    the slim row is the row), so arm readouts never undercount."""
     client, engine, _ = deferred
     job_id = run_job()
     n = len(server._trade_jobs[job_id]["cards"])
+    held = server._unpack_row(server._trade_jobs[job_id]["evidence"].bakeoff_run)
     blob = stored()["evidence_blob"]
     assert blob["generated"]["props"]["count"] == n and len(blob["trade_impressions"]["cards"]) == n
-    assert "bakeoff_run" not in blob                       # megabytes on an owner run: in process only
+    assert blob["bakeoff_run"] == held
     server._trade_jobs.clear()
     server._trade_jobs_by_key.clear()
     status(client, job_id, 0)
     status(client, job_id, 0)
-    assert build_writes(engine) == (n, 0) and len(generated_events) == 1
+    assert build_writes(engine) == (n, 1) and len(generated_events) == 1
+    assert rows(engine, db_module.bakeoff_runs_table) == [held]
     assert stored()["evidence_blob"] is None
+
+
+def test_s5_the_slim_bakeoff_row_fingerprints_the_owner_input_with_the_readers_definition():
+    """Ruling 31's test vector, through capture_owner_benchmark.input_fingerprint
+    (imported, not restated); every other config key and column as built."""
+    from backend.eval.capture_owner_benchmark import input_fingerprint
+    owner_input = {"user_id": "u1", "user_elo": {"p2": 1612.5, "p1": 1500}, "outlook": "jéts",
+                   "user_roster": ["p2", "p1"]}
+    config = {"base": {"k": 1}, "arm_delta": {"b": {"k": 2}}, "significance": {"s": 1},
+              "owner_presentment": {"p": 1},
+              "owner_request": {"version": 3, "model_arm": "owner", "request_hash": "h",
+                                "input": owner_input, "input_evidence": {"big": "x" * 1000}}}
+    row = {"run_id": "r", "deck_job_id": "d", "arms_json": "{}", "config_json": json.dumps(config)}
+    slim = server._slim_bakeoff_run(row)
+    assert {k: v for k, v in slim.items() if k != "config_json"} == {
+        k: v for k, v in row.items() if k != "config_json"}
+    out = json.loads(slim["config_json"])
+    assert out["input_sha256"] == input_fingerprint({"input": owner_input}) == (
+        "51ebfed005e8fb980d467c86a901b1299679149ac04fec65886d1bc4dc345bc4")
+    assert out["owner_request_sampled"] is False
+    assert out["input_bytes"] == len(json.dumps(owner_input).encode())
+    assert out["owner_request"] == {"version": 3, "model_arm": "owner", "request_hash": "h"}
+    assert {k: out[k] for k in ("base", "arm_delta", "significance", "owner_presentment")} == {
+        k: config[k] for k in ("base", "arm_delta", "significance", "owner_presentment")}
+    plain = {"run_id": "r", "config_json": json.dumps({"base": {}})}
+    assert server._slim_bakeoff_run(plain) == plain
 
 
 def test_f3_a_partial_run_writes_its_held_rows_at_its_delivery_but_never_trades_generated(
@@ -1394,9 +1424,16 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
     rest_of_stored = db_module.CompressedJSON.encode([r for r in stored_rows if r["card_index"] >= 30])
     blob = json.loads(zlib.decompress(before))
     parts = {name: len(db_module.CompressedJSON.encode(blob[name]))
-             for name in ("rows", "diagnostics", "candidate_set", "trade_impressions", "generated")}
-    run_row = server._unpack_row(ev.bakeoff_run)            # held in process, never in the blob
+             for name in ("rows", "diagnostics", "candidate_set", "trade_impressions", "generated",
+                          "bakeoff_run")}
+    run_row = server._unpack_row(ev.bakeoff_run)            # the full row: in process only
     run_raw, run_z = len(json.dumps(run_row)), len(ev.bakeoff_run)
+    # S5: the blob's slim row, fingerprinting the owner input it leaves out.
+    from backend.eval.capture_owner_benchmark import input_fingerprint
+    slim_config = json.loads(blob["bakeoff_run"]["config_json"])
+    owner_input = json.loads(run_row["config_json"])["owner_request"]["input"]
+    assert slim_config["owner_request_sampled"] is False and "input" not in slim_config["owner_request"]
+    assert slim_config["input_sha256"] == input_fingerprint({"input": owner_input})
     row_raw = statistics_mean([len(json.dumps(r)) for r in deck.values()])
     varied = db_module.CompressedJSON.encode(vary(blob, random.Random(20261020)))
     diag_count = len(ev.diagnostics)
@@ -1418,7 +1455,7 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
           f"  evidence_blob before delivery    {kib(len(before))} (rows {kib(parts['rows'])}, "
           f"diagnostics {kib(parts['diagnostics'])} x{len(blob['diagnostics'])}, "
           f"candidate set {kib(parts['candidate_set'])}, trade_impressions {kib(parts['trade_impressions'])}, "
-          f"trades_generated {kib(parts['generated'])})\n"
+          f"trades_generated {kib(parts['generated'])}, slim bakeoff_runs row {kib(parts['bakeoff_run'])})\n"
           f"  bakeoff_runs row (in process only) raw {run_raw / 2**20:.1f} MiB, packed {kib(run_z)}\n"
           f"  per pair before delivery         {kib(len(pages) + len(before))}\n"
           f"  evidence_blob before, varied     {kib(len(varied))} (every value randomized: an upper bound)\n"
@@ -1432,8 +1469,8 @@ def test_measured_evidence_blob_bytes_for_a_production_size_owner_deck(sized_exc
     assert after is None and len(rows(engine)) == count
     with ev.lock:   # F5: freed once written
         assert (ev.rows, ev.ghosts, ev.diagnostics, ev.by_hash, ev.candidate_set,
-                ev.trade_impressions, ev.bakeoff_run, ev.generated) == (
-                    {}, {}, {}, {}, None, None, None, None)
+                ev.trade_impressions, ev.bakeoff_run, ev.bakeoff_slim, ev.generated) == (
+                    {}, {}, {}, {}, None, None, None, None, None)
     assert len(pages) + len(before) <= 200_000                # scope §7: ≤ about 0.2 MB per pair
 
 
