@@ -1091,12 +1091,24 @@ deck_impressions_table = Table("deck_impressions", metadata,
     Column("policy_variant",            String),
     Column("source_like_impression_id", String),
     # ── deferred evidence (ADR-025 stage 1; flag trade.first_page_store) ──
-    # Which evidence rule wrote this row: 'first30' | 'delivered' | 'ghost' |
-    # 'archive' | 'full_interim'. Set only on rows written at delivery from a
-    # deferred job's build-time snapshot (server._DeckEvidence); NULL on every
-    # row written at build (flag off, or a live-mode job) and on pre-change
-    # rows. No row is deleted: C8's archive retention waits for the packing
-    # stage (models-lead R2.6 S2).
+    # Which evidence rule wrote this row. Set only on rows written at delivery
+    # from a deferred job's build-time snapshot (server._DeckEvidence); NULL on
+    # every row written at build (flag off, or a live-mode job) and on
+    # pre-change rows. Ruling 17's precedence, highest first:
+    #   'ghost'        C5: never delivered; a narrow row, even inside the first 30
+    #   'first30'      C4: card_index < 30, full whether delivered or not
+    #   'delivered'    a card past the first 30 sent to a client
+    #   'archive'      C8: an undelivered card past the first 30 of a 2% deck
+    #                  (eval contract.is_archive_deck)
+    #   'full_interim' stage 1 only, at archive's rank: the same card on any
+    #                  other deck, written full until packing replaces it
+    # 'partial_run' overrides them all (ruling 21; replay excludes it): every
+    # row of a run that ended partial (error, timeout, supersede), and of a
+    # deck first delivered after its job left the process with cards past
+    # the stored ones (S1b). A card S0's I-1 dropped is never written (C-b).
+    # A later delivery raises only 'archive' and 'full_interim' to
+    # 'delivered'. No row is deleted: C8's archive retention waits for the
+    # packing stage (models-lead R2.6 S2).
     Column("evidence_tier",             String),
     # ISO UTC: when this card was first sent to a client (any tier, first30
     # included). NULL for an undelivered card (first30, archive, full_interim),
