@@ -461,8 +461,10 @@ def _log_viewed_without_full_row(league_id: str, since: str, until: str) -> None
                     league_id, e)
         return
     for run_id, counts in sorted(runs.items()):
-        log.warning("[matcher] viewed without full row league=%s run=%s restart_split=%d other=%d",
-                    league_id, run_id, counts["restart_split"], counts["other"])
+        # U4-R2: `other` must be zero, so a non-zero one is an ERROR; restart_split alone is expected.
+        level = logging.ERROR if counts["other"] else logging.WARNING
+        log.log(level, "[matcher] viewed without full row league=%s run=%s restart_split=%d other=%d",
+                league_id, run_id, counts["restart_split"], counts["other"])
 
 
 def _score_impression(

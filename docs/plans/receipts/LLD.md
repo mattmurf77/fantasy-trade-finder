@@ -268,8 +268,9 @@ only if one of these holds:
 acted on. The executed-trade matcher (`load_impressions_for_matching`, `was_recommended`) uses
 the same `database._evidence_shown()` predicate, so the two never disagree on what was
 recommended. The matcher also passes its ghost rows through, unchanged, for the incrementality
-read. On Postgres the outcome check is an indexed EXISTS on `ix_deck_outcomes_impression`
-(`deck_outcomes.impression_id`). That index was created with the table, so no migration is
+read. The outcome check is an EXISTS on `deck_outcomes.impression_id`, which never runs for a NULL-tier row; SQLite
+probes `ix_deck_outcomes_impression` per row, and Postgres may plan it as a hashed SubPlan (one scan of `deck_outcomes`
+per query, about 28 ms at 200k rows). That index was created with the table, so no migration is
 needed. An acted-on card with no full row can't be graded; it is counted in §2.3
 `viewed_without_full_row` instead.
 

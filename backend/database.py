@@ -7142,8 +7142,11 @@ _DECK_FIRST_OUTCOMES = ("viewed", "like", "pass", "propose", "undo", "not_intere
 
 
 def _deck_card_acted():
-    """EXISTS a first outcome of the row's card, joined by impression_id: an
-    index lookup (ix_deck_outcomes_impression) per row on both dialects."""
+    """EXISTS a first outcome of the row's card, joined by impression_id. It
+    never runs for a NULL-tier row (the OR short-circuits). SQLite probes
+    ix_deck_outcomes_impression per row; Postgres may plan it as a hashed
+    SubPlan instead (one scan of deck_outcomes per query, ~28 ms at 200k rows,
+    #424 QA): fine for the receipts queue and the matcher's league pass."""
     i, o = deck_impressions_table, deck_outcomes_table
     return (select(literal(1))
             .where(o.c.impression_id == i.c.impression_id, o.c.action.in_(_DECK_FIRST_OUTCOMES))

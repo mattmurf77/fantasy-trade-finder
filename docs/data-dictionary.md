@@ -1001,7 +1001,7 @@ Indexes: `ix_deck_evidence_packs_served` on `served_at`; `ix_deck_evidence_packs
 | `id` | int PK | autoincrement |
 | `transaction_id` | str UNIQUE | `sleeper_trades.transaction_id` |
 | `league_id` | str | |
-| `was_recommended` | int | 1 iff a **rendered** (non-ghost) suggestion matched — per-league ratio `SUM(was_recommended)/COUNT(*)` is the always-on endorsement dashboard (`GET /api/admin/suggestion-telemetry/ratio`) |
+| `was_recommended` | int | 1 iff a **shown** (non-ghost) suggestion matched: from the packed-evidence flip, "shown" is viewed-or-first-30 (`database._evidence_shown`, #424: NULL tier OR `first30` OR a first outcome by `impression_id`); before it, rendered. **The endorsement ratio has a series break at the flip** — per-league ratio `SUM(was_recommended)/COUNT(*)` is the always-on endorsement dashboard (`GET /api/admin/suggestion-telemetry/ratio`) |
 | `matched_impression_id` | str | best non-ghost match (soft ref → `deck_impressions`) |
 | `match_type` | str | `exact` \| `partial` \| `retro_exact` (backfill) \| NULL |
 | `overlap_score` | float | matched-token share of the larger asset set (1.0 on exact/retro_exact) |

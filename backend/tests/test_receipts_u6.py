@@ -231,6 +231,23 @@ def test_the_matcher_logs_the_viewed_cards_without_a_full_row(engine, caplog):
             if r.getMessage().startswith("[matcher] viewed without full row")] == [
         f"[matcher] viewed without full row league={LEAGUE} run=job-restart "
         f"restart_split=1 other=0"]
+    assert {r.levelname for r in caplog.records
+            if r.getMessage().startswith("[matcher] viewed without full row")} == {"WARNING"}
+
+
+def test_the_matcher_logs_a_non_zero_other_at_error(engine, caplog):
+    """U4-R2: `other` must be zero; a non-zero one is an ERROR, never a warning."""
+    trade = {"transaction_id": "tx-1", "traded_at": served(1), "synced_at": served(1)}
+    caplog.set_level(logging.WARNING, logger=st.log.name)
+    with patch.object(st, "load_unlinked_league_trades", lambda league_id: [trade]), \
+         patch.object(st, "executed_trade_sides", lambda tr, roster_map: {"x": ["p1"]}), \
+         patch.object(st, "save_suggestion_trade_links", lambda links: len(links)), \
+         patch.object(st, "load_viewed_without_full_row",
+                      lambda **kw: {"job-x": {"restart_split": 0, "other": 2}}):
+        st.match_league_trades(LEAGUE, roster_map={})
+    lines = [r for r in caplog.records if r.getMessage().startswith("[matcher] viewed without full row")]
+    assert [(r.levelname, r.getMessage()) for r in lines] == [
+        ("ERROR", f"[matcher] viewed without full row league={LEAGUE} run=job-x restart_split=0 other=2")]
 
 
 # ── R-U6b: the receipts series break at the flip ───────────────────────────
