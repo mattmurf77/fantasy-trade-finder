@@ -745,9 +745,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // back only while the screen's key is still that one: a league or format
   // switch (a new key) never receives the old deck's cards. Nulled by the
   // league reset and the format change below; bound wherever the deck is
-  // validated (adoption, a model answer via lastModelKeyRef).
+  // validated (adoption; a model answer, from ITS mutation's onMutate
+  // context — never a shared ref a later dispatch could overwrite).
   const deckKeyRef = useRef<string | null>(adopted?.deviceKey ?? null);
-  const lastModelKeyRef = useRef<string | null>(null);
   // Cards acted on in this deck (deckCardKey): never written back to the
   // device page, even while a deferred advance (decline reasons) still
   // fronts one.
@@ -2272,9 +2272,6 @@ export default function TradesScreen({ navigation, route }: any) {
             trade_intent: tradeIntent ?? undefined,
           };
       lastModelRequestRef.current = request;
-      // C — the device page key this request answers (same render as its
-      // league_id); onSuccess binds the deck to it.
-      lastModelKeyRef.current = deviceKey;
       // A handoff supplies one explicit canvas request. Subsequent new
       // targeting uses the pin store; Retry and regenerations use the saved
       // request.
@@ -2286,7 +2283,10 @@ export default function TradesScreen({ navigation, route }: any) {
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
-    onMutate: () => ({ epoch: deckEpochRef.current }),
+    // C — and the dispatch-time device page key: a format switch bumps no
+    // epoch, so an answer from before it must bind ITS key, not the newer
+    // dispatch's (the save effect then writes nothing under the new key).
+    onMutate: () => ({ epoch: deckEpochRef.current, deviceKey }),
     onSuccess: (snapshot, _vars, ctx) => {
       if (
         applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
@@ -2300,7 +2300,7 @@ export default function TradesScreen({ navigation, route }: any) {
       deckScopeRef.current = lastModelRequestRef.current
         ? devicePageScope(lastModelRequestRef.current)
         : null;
-      deckKeyRef.current = lastModelKeyRef.current;
+      deckKeyRef.current = ctx?.deviceKey ?? null;
       validatedAtRef.current = Date.now();
       // R2/R2b — the search's first response: what R2 reports, the job its
       // cards come from, and an honest `empty` when it finished with none.
@@ -4801,12 +4801,19 @@ export default function TradesScreen({ navigation, route }: any) {
   // the normal way (the wait no longer applies), and so does a new search.
   const rosterWait = isRosterCheckWait(job, deck.length);
   const [rosterWaitExpired, setRosterWaitExpired] = useState(false);
+  // Retry is a non-force repeat: the server answers with the SAME running job
+  // (same job_id, still withholding), so the retry itself restarts the wait.
+  const [gateRetrySeq, setGateRetrySeq] = useState(0);
   useEffect(() => {
     setRosterWaitExpired(false);
     if (!rosterWait) return;
     const t = setTimeout(() => setRosterWaitExpired(true), FIRST_CARD_TIMEOUT_MS);
     return () => clearTimeout(t);
-  }, [rosterWait, job?.job_id]);
+  }, [rosterWait, job?.job_id, gateRetrySeq]);
+  function handleGateRetry() {
+    setGateRetrySeq((n) => n + 1);
+    handleFindTrades('deck_error_retry');
+  }
   const topCardWithdrawn = !!rawTopCard && withdrawnIds.has(rawTopCard.trade_id);
   function handleWithdrawnNext() {
     haptics.selection();
@@ -9803,7 +9810,7 @@ export default function TradesScreen({ navigation, route }: any) {
             // #339 item 12 — S0's withhold, named; it ends in the named
             // error with Retry. Outranks the skeleton and "Looking…".
             rosterWaitExpired ? (
-              <GateErrorCard minHeight={topCardH} onRetry={() => handleFindTrades('deck_error_retry')} />
+              <GateErrorCard minHeight={topCardH} onRetry={handleGateRetry} />
             ) : (
               <GateWaitCard minHeight={topCardH} />
             )
@@ -10022,7 +10029,7 @@ export default function TradesScreen({ navigation, route }: any) {
             </Card>
           ) : deckFailure?.kind === 'roster_check' ? (
             // #339 item 12 — S0's check error, named (not "Search failed").
-            <GateErrorCard minHeight={topCardH} onRetry={() => handleFindTrades('deck_error_retry')} />
+            <GateErrorCard minHeight={topCardH} onRetry={handleGateRetry} />
           ) : deckFailure ? (
             // P0-2 — the last search FAILED, and this is the only state that
             // says so. Sits below row 7 (deck.length > 0) so a job that errors
