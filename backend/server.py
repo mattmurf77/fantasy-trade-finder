@@ -22,6 +22,7 @@ import functools
 import atexit
 import hashlib
 import hmac
+import http.client
 import json
 import logging
 import math
@@ -244,6 +245,7 @@ from .database import (
     create_shared_package, load_shared_package, count_recent_shared_packages,
 )
 from . import sleeper_write as _sleeper_write
+from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
@@ -22600,32 +22602,14 @@ def _roster_id_for_owner(rosters, owner_id) -> int | None:
         return None
 
 
-# I-2 send-time refusal copy (final: marketing via head-bizops, accepted by
-# Product, 2026-10-26). A later swap is a change here and nowhere else.
-# Curly ’ throughout, like the shipped refusals. `{assets}` is either the named
-# list ("A", "A and B", "A, B and C", with no serial comma) or, when ANY
-# offending player has no name, the count subject below: a raw player id is
-# never shown. `{verb}` agrees with it ("is" / "are"). `{team}’s` takes ’s
-# even after a final s ("Chris’s").
-_I2_COPY_ASSET_NOT_OWNED = (
-    "{assets} {verb} no longer on your roster, so nothing was sent. Find a new trade.")
-_I2_COPY_COUNTERPARTY_NOT_OWNED = (
-    "{assets} {verb} no longer on {team}’s roster, so nothing was sent. Find a new trade.")
-_I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED = (
-    "{assets} {verb} no longer on the other manager’s roster, so nothing was sent. "
-    "Find a new trade.")
-_I2_COPY_ONE_UNNAMED_PLAYER = "A player in this trade"
-_I2_COPY_N_UNNAMED_PLAYERS = "{n} players in this trade"
-_I2_COPY_ROSTER_READ_FAILED = (
-    "Couldn’t confirm rosters with {platform} right now, so nothing was sent. "
-    "Try again in a moment.")
-
-
+# I-2 send-time refusal copy: the strings and their pure formatting live in
+# backend/ownership_copy.py, so team overhaul shares them without importing
+# the server.
 def _roster_read_failed_copy(platform: str) -> str:
     """I-2 / platforms-pm R3: the readable sentence for a send blocked because
     the live roster read failed. `platform` is the display name ("Sleeper",
     "MFL", "ESPN"); each core wraps it in its own error shape."""
-    return _I2_COPY_ROSTER_READ_FAILED.format(platform=platform)
+    return _ownership_copy.roster_read_failed(platform)
 
 
 def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tuple[dict, int]:
@@ -22645,24 +22629,8 @@ def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tupl
     their catch-all.
     """
     assets = [str(a) for a in assets]
-    labels = [(names or {}).get(a) for a in assets]
-    if all(labels):
-        labels = [str(n) for n in labels]
-        listed = labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
-    elif len(assets) == 1:
-        listed = _I2_COPY_ONE_UNNAMED_PLAYER
-    else:
-        listed = _I2_COPY_N_UNNAMED_PLAYERS.format(n=len(assets))
-    verb = "is" if len(assets) == 1 else "are"
-    if side == "give":
-        code, msg = "asset_not_owned", _I2_COPY_ASSET_NOT_OWNED.format(assets=listed, verb=verb)
-    elif counterparty_name:
-        code = "counterparty_asset_not_owned"
-        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED.format(assets=listed, verb=verb,
-                                                     team=counterparty_name)
-    else:
-        code = "counterparty_asset_not_owned"
-        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED.format(assets=listed, verb=verb)
+    code = "asset_not_owned" if side == "give" else "counterparty_asset_not_owned"
+    msg = _ownership_copy.refusal_message(side, assets, names, counterparty_name)
     return {"error": code, "assets": assets, "message": msg, "detail": msg}, 422
 
 
@@ -22936,6 +22904,13 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     receive = [str(p) for p in (receive_ids or [])]
     if not league_id.isdigit() or (their_user_id is None and their_roster_id_in is None):
         return {"error": "bad_request"}, 400
+    # NEXT.md 0f / G-030 (prd-p0-6 §6.2): ESPN/MFL/Fleaflicker ids are numeric
+    # too, so isdigit() alone lets them reach Sleeper. Refuse a linked-platform
+    # league before any Sleeper call. Defensive: no client routes one here, but
+    # the message keeps the catch-all readable if one ever does.
+    if is_linked_platform_league(league_id):
+        _msg = "This league isn't on Sleeper, so it can't be sent there."
+        return {"error": "bad_request", "message": _msg, "detail": _msg}, 400
 
     cred = get_sleeper_credential(user_id)
     if not cred:
@@ -23004,10 +22979,21 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # A client-supplied their_roster_id that this successful read doesn't
         # hold: the receive side can't be checked, so it is never sent.
         return {"error": "opponent_roster_not_found"}, 400
+    def _refused(refusal):
+        # The stored roster behind the card is stale. Kick one background
+        # refresh so the same stale card isn't served again. It never blocks
+        # or raises; single-flight, the 60 s failure cooldown and the 429
+        # circuit all live in maybe_refresh_async.
+        try:
+            _roster_refresh.maybe_refresh_async(league_id, 0)
+        except Exception as err:
+            log.warning("I-2 refusal refresh kick failed league=%s: %s", league_id, err)
+        return refusal
+
     held = {str(x) for x in (mine.get("players") or []) if x}
     moved = [p for p in give_players if p not in held]
     if moved:
-        return _ownership_refusal("give", moved, _player_names_by_id(moved))
+        return _refused(_ownership_refusal("give", moved, _player_names_by_id(moved)))
     held = {str(x) for x in (theirs.get("players") or []) if x}
     moved = [p for p in recv_players if p not in held]
     if moved:
@@ -23018,7 +23004,7 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
                          if str(m.get("user_id")) == str(theirs.get("owner_id"))), None)
         except Exception as e:
             log.warning("I-2 counterparty name lookup failed: %s", e)
-        return _ownership_refusal("receive", moved, _player_names_by_id(moved), team)
+        return _refused(_ownership_refusal("receive", moved, _player_names_by_id(moved), team))
 
     encoded: list = []
     if give_picks or recv_picks:
@@ -35462,7 +35448,10 @@ def trades_validate():
     receive_player_ids[]}. → {ok, checked, warnings:[{code,severity,message}]}.
     `checked:false` = platform data unreachable (nothing validated). An
     MFL-linked league (flag `trade.send_in_mfl`) validates against a fresh MFL
-    `rosters` export; everything else takes the Sleeper path unchanged."""
+    `rosters` export; an ESPN-linked league (flag `espn.send`, I-2) against
+    ESPN's live mRoster read; any other linked-platform id returns
+    `checked:false` without a Sleeper call (G-030); everything else takes the
+    Sleeper path unchanged."""
     if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")):
         return jsonify({"error": "feature_disabled"}), 404
     sess = _require_session()
@@ -35490,6 +35479,20 @@ def trades_validate():
             return _validate_mfl_trade(sess, user_id, _mfl_row, league_id,
                                        their_user_id, body.get("their_franchise_id"),
                                        give, receive)
+    # ── ESPN branch (I-2): same rule. An ESPN-linked id checks its players
+    # against ESPN's live mRoster read instead of reaching Sleeper.
+    if is_enabled("espn.send"):
+        from .database import get_espn_league as _gel
+        _espn_row = _gel(league_id)
+        if _espn_row:
+            return _validate_espn_trade(sess, user_id, _espn_row, league_id,
+                                        their_user_id, body.get("their_team_id"),
+                                        give, receive)
+    # Any other linked-platform id (a platform whose branch is flagged off,
+    # Fleaflicker) is nothing Sleeper can check. G-014 / G-030: never send it
+    # to the Sleeper reads below.
+    if is_linked_platform_league(league_id):
+        return jsonify({"ok": True, "checked": False, "warnings": []})
 
     warnings: list[dict] = []
 
@@ -35695,13 +35698,20 @@ def _mfl_pick_snapshot_index(row) -> dict:
     league's stored futureDraftPicks snapshot (leagues.platform_future_picks,
     parse_future_picks' shape). Malformed entries are skipped — an absent key
     reads as "not a real pick in this league" and hard-blocks upstream."""
-    from . import mfl_write as _mfl_write
     try:
         snapshot = json.loads(row.get("platform_future_picks") or "[]")
     except (TypeError, ValueError):
         snapshot = []
+    return _mfl_pick_owner_index(snapshot)
+
+
+def _mfl_pick_owner_index(picks) -> dict:
+    """The index `_mfl_pick_snapshot_index` builds, over any list in
+    parse_future_picks' shape: the stored snapshot, or (I-2) a live
+    futureDraftPicks export parsed at send time."""
+    from . import mfl_write as _mfl_write
     index: dict = {}
-    for pk in snapshot if isinstance(snapshot, list) else []:
+    for pk in picks if isinstance(picks, list) else []:
         if not isinstance(pk, dict):
             continue
         try:
@@ -35996,6 +36006,85 @@ def _validate_mfl_trade(sess, user_id, row, league_id, their_user_id,
     return jsonify({"ok": True, "checked": True, "warnings": warnings})
 
 
+def _validate_espn_trade(sess, user_id, row, league_id, their_user_id,
+                         their_team_in, give, receive):
+    """I-2 ESPN pre-flight: advisory only, never blocks, mirroring the MFL
+    branch. Reads ESPN's live league (mTeam+mRoster, the same read the ESPN
+    propose core makes) and reports crosswalk misses (`asset_unmapped`),
+    players no longer on the expected team (`player_moved`) and unresolvable
+    teams (`roster_not_found`). Picks are left to the propose route's
+    `espn_pick_unsupported` hard block. Nothing reaches Sleeper."""
+    from . import espn_service as _espn
+    from .database import get_espn_credential
+
+    warnings: list[dict] = []
+    give_players = [p for p in give if not _is_ftf_pick_asset(league_id, p)]
+    recv_players = [p for p in receive if not _is_ftf_pick_asset(league_id, p)]
+    inverse = _sleeper_to_espn_map()
+    unmapped = [p for p in give_players + recv_players if p not in inverse]
+    if unmapped:
+        n = len(unmapped)
+        warnings.append({
+            "code": "asset_unmapped", "severity": "blocking",
+            "message": (f"{n} asset{'s' if n != 1 else ''} in this trade "
+                        "couldn't be matched to an ESPN player id — the send "
+                        "will be blocked rather than dropping them."),
+        })
+
+    espn_s2 = swid = None
+    cred = get_espn_credential(user_id) or {}
+    if cred.get("swid") and cred.get("espn_s2_encrypted"):
+        try:
+            espn_s2 = _sleeper_write.decrypt_token(cred["espn_s2_encrypted"])
+            swid = cred["swid"]
+        except Exception:
+            espn_s2 = swid = None
+    try:
+        raw = _espn.fetch_league(league_id, int(row.get("espn_season") or _ESPN_DEFAULT_SEASON),
+                                 espn_s2=espn_s2, swid=swid)
+    except (_espn.EspnError, OSError, http.client.HTTPException, UnicodeDecodeError):
+        raw = None
+    if not isinstance(raw, dict) or not isinstance(raw.get("teams"), list):
+        # ESPN unreachable — nothing roster-checkable (MFL branch's rule).
+        return jsonify({"ok": True, "checked": bool(warnings), "warnings": warnings})
+
+    teams = _espn.parse_league(raw)["teams"]
+    rostered = {t.get("id") for t in raw["teams"]
+                if isinstance(t, dict) and isinstance(t.get("roster"), dict)}
+    my_tid = row.get("espn_my_team_id")
+    if their_team_in is not None:
+        try:
+            their_tid = int(their_team_in)
+        except (TypeError, ValueError):
+            their_tid = None
+    else:
+        their_tid = _espn_team_id_from_member_id(league_id, their_user_id, teams)
+    by_tid = {t.team_id: t for t in teams if t.team_id in rostered}
+    mine = by_tid.get(int(my_tid)) if my_tid is not None else None
+    theirs = by_tid.get(their_tid)
+    if mine is None or theirs is None:
+        warnings.append({
+            "code": "roster_not_found", "severity": "blocking",
+            "message": "Couldn't match one of the teams to a roster in this "
+                       "ESPN league — a re-sync may be needed.",
+        })
+        return jsonify({"ok": True, "checked": True, "warnings": warnings})
+
+    mine_ids = {p.espn_id for p in mine.players}
+    theirs_ids = {p.espn_id for p in theirs.players}
+    moved = [p for p in give_players if p in inverse and str(inverse[p]) not in mine_ids]
+    moved += [p for p in recv_players if p in inverse and str(inverse[p]) not in theirs_ids]
+    if moved:
+        n = len(moved)
+        warnings.append({
+            "code": "player_moved", "severity": "blocking",
+            "message": (f"{n} player{'s' if n != 1 else ''} in this trade "
+                        "are no longer on the expected roster (dropped or "
+                        "already traded) — ESPN will reject the offer."),
+        })
+    return jsonify({"ok": True, "checked": True, "warnings": warnings})
+
+
 @app.route("/api/trades/propose-mfl", methods=["POST"])
 def propose_trade_to_mfl():
     """Send a built trade into MyFantasyLeague as a real pending proposal.
@@ -36016,6 +36105,7 @@ def propose_trade_to_mfl():
       409 mfl_franchise_unknown | 409 mfl_not_connected | 409 mfl_auth_expired
       422 mfl_asset_unmapped (+ unmapped[]) | 502 mfl_write_failed
       400 bad_request
+      422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
 
     Sibling of POST /api/trades/propose (Sleeper) rather than a platform
     switch on it: both platforms' league ids are numeric (#149/#150/#200
@@ -36177,6 +36267,107 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     except _mfl.MflError as e:
         return _platform_error_payload(e, "mfl")
 
+    # I-2: live ownership on BOTH sides, before any provider write. Players
+    # are checked against MFL's live `rosters` export and FTF picks against its
+    # live `futureDraftPicks` export (zero-auth, one read). The stored snapshot
+    # above stays the EXISTENCE check. Each read happens only when the trade
+    # carries that asset class. Both fetchers turn any MflError into `{}`, so
+    # a missing top-level key is a failed read (R3), never "nothing owned".
+    # Pre-encoded `give_pick_assets` / `receive_pick_assets` (no client sends
+    # them) are not checked. R3 uses `mfl_unavailable`, the 502 this core
+    # already returns for an MFL read failure (`_platform_error_payload`), not
+    # `mfl_write_failed`: SendInMflButton shows that one as "MFL rejected the
+    # request", while this one reaches its catch-all, which shows `detail`.
+    def _read_failed():
+        _msg = _roster_read_failed_copy("MFL")
+        return {"error": "mfl_unavailable", "kind": "network",
+                "detail": _msg, "message": _msg}, 502
+
+    def _auth_expired(detail):
+        # Dead/rejected cookie — drop the stored credential so the client
+        # re-prompts MFL sign-in (same treatment as mfl_auth_import). Shared
+        # by the I-2 ownership reads (a 401/403 export) and the write itself.
+        try:
+            delete_mfl_credential(user_id)
+        except Exception:
+            log.exception("mfl propose: credential delete failed")
+        sess.pop("mfl_cookie", None)
+        return {
+            "error": "mfl_auth_expired",
+            "message": "Your MFL sign-in expired — sign in again.",
+            "detail": (str(detail or ""))[:200],
+        }, 409
+
+    norm = _mfl_write.normalize_franchise_id
+    my_n, their_n = norm(my_fid), norm(their_fid)
+    moved_give: list = []
+    moved_recv: list = []
+    if give_players or recv_players:
+        try:
+            # raise_auth: a 401/403 is the sign-in expiring, not R3's flake.
+            raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
+        except _mfl.MflAuthError as e:
+            log.warning("mfl propose: ownership read auth-rejected: %s", e)
+            return _auth_expired(str(e))
+        except Exception as e:  # P2-1: rosters transport
+            # `_fetch_one` wraps only HTTPError / URLError / bad JSON. A read
+            # timeout, connection reset, IncompleteRead or BadStatusLine would
+            # escape as a 500 (or overhaul `outcome_unknown` holding the
+            # reservation). It is a failed read: R3.
+            log.warning("mfl propose: rosters read failed: %s", type(e).__name__)
+            return _read_failed()
+        if not isinstance(raw, dict) or "rosters" not in raw:
+            return _read_failed()
+        held = {}
+        for fid, ids in _mfl.parse_roster_ids(raw).items():
+            try:
+                held[norm(fid)] = ids
+            except _mfl_write.MflWriteError:
+                continue
+        if my_n not in held:
+            return {"error": "mfl_franchise_unknown",
+                    "message": "Couldn't determine your franchise — "
+                               "re-link this league."}, 409
+        if their_n not in held:
+            return {"error": "bad_request",
+                    "message": "Couldn't resolve the counterparty franchise."}, 400
+        moved_give += [p for p in give_players if inverse[p] not in held[my_n]]
+        moved_recv += [p for p in recv_players if inverse[p] not in held[their_n]]
+    if give_ftf_picks or recv_ftf_picks:
+        try:
+            raw = _mfl.fetch_future_draft_picks(league_id, year, host, cookie=cookie,
+                                                raise_auth=True)
+        except _mfl.MflAuthError as e:
+            log.warning("mfl propose: ownership read auth-rejected: %s", e)
+            return _auth_expired(str(e))
+        except Exception as e:  # P2-1: futureDraftPicks transport
+            log.warning("mfl propose: futureDraftPicks read failed: %s", type(e).__name__)
+            return _read_failed()
+        if not isinstance(raw, dict) or "futureDraftPicks" not in raw:
+            return _read_failed()
+        live = _mfl_pick_owner_index(_mfl.parse_future_picks(raw))
+
+        def _owner(pid):
+            yr, rnd, orig = _ftf_pick_parts(league_id, pid)   # mapped above
+            return live.get((yr, rnd, norm(orig)))
+
+        moved_give += [p for p in give_ftf_picks if _owner(p) != my_n]
+        moved_recv += [p for p in recv_ftf_picks if _owner(p) != their_n]
+    if moved_give or moved_recv:
+        side, moved = ("give", moved_give) if moved_give else ("receive", moved_recv)
+        names = {**_player_names_by_id(moved), **_pick_labels_by_id(moved)}
+        team = None
+        if side == "receive":
+            try:  # display enrichment only; the refusal never depends on it
+                for m in load_league_members(league_id):
+                    f = _mfl_franchise_from_member_id(league_id, m.get("user_id"))
+                    if f and norm(f) == their_n:
+                        team = m.get("display_name") or m.get("username")
+                        break
+            except Exception as e:
+                log.warning("I-2 MFL counterparty name lookup failed: %s", e)
+        return _ownership_refusal(side, moved, names, team)
+
     req = _mfl_write.ProposeTradeRequest(
         league_id=league_id,
         offered_to=their_fid,
@@ -36195,19 +36386,8 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
-        # Dead/rejected cookie — drop the stored credential so the client
-        # re-prompts MFL sign-in (same treatment as mfl_auth_import).
         log.warning("mfl propose auth-rejected: %s", getattr(e, "detail", None))
-        try:
-            delete_mfl_credential(user_id)
-        except Exception:
-            log.exception("mfl propose: credential delete failed")
-        sess.pop("mfl_cookie", None)
-        return {
-            "error": "mfl_auth_expired",
-            "message": "Your MFL sign-in expired — sign in again.",
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 409
+        return _auth_expired(getattr(e, "detail", ""))
     except _mfl_write.MflWriteError as e:
         log.warning("mfl propose write-failed [%s]: %s", e.kind,
                     getattr(e, "detail", None))
@@ -36526,6 +36706,8 @@ def propose_trade_to_espn():
       (stored credential dropped) | 422 espn_pick_unsupported (+ picks[])
       | 422 espn_asset_unmapped (+ unmapped[]) | 502 espn_write_failed
       | 400 bad_request
+      | 422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
+      | 502 espn_unavailable (`kind: "network"`; I-2 R3, live read failed)
 
     Sibling of propose / propose-mfl rather than a platform switch on them
     (the #149/#150/#200 numeric-league-id misroute class): the client routes
@@ -36679,6 +36861,17 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     # current scoringPeriodId (never a hardcoded week) and each player's real
     # lineup slot id, and proves the cookies still read before we write.
     season = int(row.get("espn_season") or _ESPN_DEFAULT_SEASON)
+
+    def _read_failed():
+        # I-2 / platforms-pm R3: the live mRoster read failed, so ownership
+        # can't be checked and nothing is sent. `espn_unavailable` is this
+        # core's existing read-failure 502, and SendInEspnButton shows it via
+        # its catch-all (`detail`). `espn_write_failed` would be framed there
+        # as "ESPN rejected the request".
+        _msg = _roster_read_failed_copy("ESPN")
+        return {"error": "espn_unavailable", "kind": "network",
+                "detail": _msg, "message": _msg}, 502
+
     try:
         raw = _espn.fetch_league(league_id, season, espn_s2=espn_s2, swid=swid)
     except _espn.EspnAuthError:
@@ -36694,7 +36887,19 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
             "message": "Your ESPN sign-in expired — connect ESPN again.",
         }, 409
     except _espn.EspnError as e:
-        return _espn_error_payload(e)
+        payload, status = _espn_error_payload(e)
+        # A 502-class read failure (HTTP error, non-JSON body) is R3; 404 / 400
+        # keep their own codes.
+        return _read_failed() if status == 502 else (payload, status)
+    except (OSError, http.client.HTTPException, UnicodeDecodeError) as e:
+        # A failure `fetch_league` doesn't wrap: transport (URLError, timeout,
+        # connection reset), `http.client.HTTPException` (IncompleteRead,
+        # BadStatusLine), or a body that isn't UTF-8. It used to escape as a
+        # 500, which the overhaul records as "outcome unknown".
+        log.warning("espn propose: pre-flight read failed: %s", type(e).__name__)
+        return _read_failed()
+    if not isinstance(raw, dict) or not isinstance(raw.get("teams"), list):
+        return _read_failed()
     league = _espn.parse_league(raw)
     teams = league["teams"]
     if not any(t.team_id == int(my_team_id) for t in teams):
@@ -36721,6 +36926,29 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         return {"error": "bad_request",
                         "message": "You can't send a trade to your own "
                                    "team."}, 400
+
+    # I-2: live player ownership on BOTH sides, against the mRoster read
+    # above, so it adds no ESPN call. Ids are compared in ESPN space (the same
+    # `inverse` the write uses), and mRoster entries include IR. A team whose
+    # payload carries no `roster` object was not actually read, so that is R3,
+    # never "moved".
+    rostered = {t.get("id") for t in raw["teams"]
+                if isinstance(t, dict) and isinstance(t.get("roster"), dict)}
+    if int(my_team_id) not in rostered or int(their_team_id) not in rostered:
+        return _read_failed()
+    by_tid = {t.team_id: t for t in teams}
+    held = {p.espn_id for p in by_tid[int(my_team_id)].players}
+    moved = [p for p in give if str(inverse[p]) not in held]
+    if moved:
+        return _ownership_refusal("give", moved, _player_names_by_id(moved))
+    their_team = by_tid[int(their_team_id)]
+    held = {p.espn_id for p in their_team.players}
+    moved = [p for p in receive if str(inverse[p]) not in held]
+    if moved:
+        # The live team name is what the import stores as the member's
+        # display_name (`_espn_import_payload`).
+        return _ownership_refusal("receive", moved, _player_names_by_id(moved),
+                                  their_team.name or None)
 
     req = _espn_write.EspnTradeProposalRequest(
         league_id=league_id,
