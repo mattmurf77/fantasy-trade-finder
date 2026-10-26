@@ -10,7 +10,8 @@ CardSet JSON: {"variant": str, "source": "value_core_bench" | "served",
                           "give": [{"id","name","position","market"}],
                           "receive": [{"id","name","position","market"}],
                           "reasons": [str]}],
-               "skipped_no_row": int}      # served sets only
+               "skipped_no_row": int,      # served sets only
+               "leagues_without_deck": [str]}   # served: no gradeable Trades deck in the lookback
 
 ``served_card_set`` is the only production touch: a read-only read of the
 incumbent's served decks, asserting ``transaction_read_only = on`` first.
@@ -192,6 +193,7 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     since = (datetime.now(timezone.utc) - SERVED_LOOKBACK).isoformat()
     cards: list[dict] = []
     skipped = 0
+    without_deck: list[str] = []
     try:
         with engine.connect() as conn:
             if conn.execute(text("SHOW transaction_read_only")).scalar() != "on":
@@ -201,7 +203,8 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                                                          user_id=str(user_id),
                                                          league_id=str(league_id))
                          if d.exclusion not in ungradeable]
-                if not decks:
+                if not decks:     # named, never a silent 0 cards (runbook §Blind grade)
+                    without_deck.append(str(league_id))
                     continue
                 deck = max(decks, key=lambda d: (d.served_at, d.deck_job_id))
                 chosen = sorted((c for c in deck.cards if not c.is_ghost),
@@ -249,7 +252,8 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                              for give, receive, partner, markets in parsed)
     finally:
         engine.dispose()
-    return {"variant": variant, "source": "served", "cards": cards, "skipped_no_row": skipped}
+    return {"variant": variant, "source": "served", "cards": cards, "skipped_no_row": skipped,
+            "leagues_without_deck": without_deck}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -288,7 +292,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit(f"served failed: {type(exc).__name__}") from None
         write_private_json(args.output, card_set)
         print(json.dumps({"cards": len(card_set["cards"]), "leagues": len(args.league),
-                          "skipped_no_row": card_set["skipped_no_row"]}))
+                          "skipped_no_row": card_set["skipped_no_row"],
+                          "leagues_without_deck": card_set["leagues_without_deck"]}))
     elif args.command == "export":
         card_sets = [json.loads(path.read_text()) for path in args.cards]
         print(json.dumps(export(card_sets, per_variant=args.per_variant, seed=args.seed,

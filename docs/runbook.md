@@ -484,6 +484,8 @@ python -m backend.eval.blind_grade export --cards A.json --cards B.json [...] --
 python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --key <NEW_DIR>/key.private.json
 ```
 
+`served` reads the latest Trades deck per league served in the last 30 days (`SERVED_LOOKBACK`), skipping Calibration refresh decks and decks whose evidence contradicts itself. It takes the top `--top` cards (30) by displayed position, after removing withdrawn cards nobody saw. Its stdout summary names `leagues_without_deck` (no gradeable deck in 30 days: pick another league or seat) and `skipped_no_row` (chosen cards with no full row, never back-filled).
+
 `export` samples 40 cards per variant, merges identical trades, shuffles, and writes `grade-sheet.csv` plus `key.private.json`. The sheet names no variant, and its reasons column is blank by default (`show_reasons=False`), because engine-specific phrasing would reveal the source. Give graders the CSV only, never the key. Grades are integers 1–5 (blank = ungraded). Tags are `;`-separated from `same_guy_again`, `too_small`, `never_accept`, `wrong_my_window`, `wrong_their_window`, `junk_filler`, `overpay`. `import` rejects anything else and names the card, then writes `summary.json` next to the sheet: per-variant mean, share graded 4 or more, and tag counts. Target: mean ≥ 4.0 and clearly above the incumbent.
 
 **Kill switch.** A value-core failure while building a deck is logged (`value-core: deck build failed … falling back to the legacy engine`) and that job is finished by the legacy engine, so a rising count of that log line is the signal to act.
