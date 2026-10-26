@@ -30034,13 +30034,17 @@ def entry_platform():
     `entry:*` id (D2) — the old deterministic entry:espn:/entry:mfl: ids and
     the ESPN public/no-cookie claim are gone.
 
-    The route does NOT import the league. The client follows the mint with
-    the canonical POST /api/{espn,mfl}/link import under the fresh token.
+    The route does NOT import the league. Since #421 the client follows the
+    mint, under the fresh token, with:
+      • ESPN: POST /api/espn/link (league + team + cookie pair);
+      • MFL:  POST /api/mfl/auth-link (stores the MFL session cookie), then
+        POST /api/mfl/auth-import for that league — so private MFL leagues
+        import too.
     That token is already VERIFIED, so the #279 @_gate_unverified_write gate
-    admits it unchanged — there is no exemption and no grace path for
-    unverified sessions. The import binds the claimed team to the account's
-    user and persists league/members/credentials through the one existing
-    implementation.
+    admits those routes unchanged — there is no exemption and no grace path
+    for unverified sessions. The imports bind the claimed team to the
+    account's user and persist league/members/credentials through the
+    existing implementations.
 
     Errors reuse the link routes' vocabulary (espn_auth_required /
     espn_bad_credentials + wrong_account / *_bad_league_id / *_bad_team_id /
@@ -30288,7 +30292,8 @@ def _entry_platform(audit: dict):
             # D5, log in FIRST: the bundle is then read with the user's own
             # cookie, so a PRIVATE league can be claimed. The cookie is used
             # for this request only — never stored, logged or returned (the
-            # client's follow-on /api/mfl/auth-link stores the session).
+            # client's follow-on POST /api/mfl/auth-link stores the session,
+            # then POST /api/mfl/auth-import imports the league).
             try:
                 try:
                     cookie = _mfl.login(username, password, year)["cookie"]

@@ -115,8 +115,10 @@ returned cookie** — so a private league can be claimed; a good login that
 still can't read the league is refused as `wrong_account` — then calls
 `fetch_my_leagues` with the same cookie, and the claimed (`league_id`,
 `franchise_id`) must be one of that login's franchises. **The mint stores nothing** — not the password, not the
-`MFL_USER_ID` cookie (the client's follow-on `POST /api/mfl/auth-link` stores
-the cookie as above). The identity kept is the username, trimmed and
+`MFL_USER_ID` cookie. Since #421 the client follows the mint with
+`POST /api/mfl/auth-link` (stores the cookie as above), then
+`POST /api/mfl/auth-import` for that league, so private leagues import
+too. The identity kept is the username, trimmed and
 lower-cased, as a `linked_identities` row (provider `mfl`); first controller
 wins and the row never moves. Every failed login gets the one
 `mfl_bad_credentials` body; a login that doesn't own the franchise gets the

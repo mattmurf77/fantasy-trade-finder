@@ -64,7 +64,7 @@ D-056: no Maestro flows and no simulator captures — that tooling is retired, s
   2. Sign out, repeat step 1 with the same ESPN account. Expect: the same board (rankings you made in step 1 are there) and the display name you had.
   3. ESPN → a **public** league you're in → claim a team. Expect "We can’t confirm this team is yours through ESPN. Sign in with Apple, then link your league." and no sign-in.
   4. ESPN private league → claim a team that is **not** yours. Expect "This ESPN login owns {your team} in this league, not the team you picked." and no sign-in.
-  5. Sign-in screen → MFL → sign in with your MFL username/password → pick your league (repeat with a **private** MFL league if you have one). Expect: signed in, import completes, "Send in MFL" works later (auth-link stored the cookie).
+  5. Sign-in screen → MFL → sign in with your MFL username/password → pick your league (repeat with a **private** MFL league if you have one). Expect: signed in; the client's `auth-link` → `auth-import` completes the import; "Send in MFL" works later (auth-link stored the cookie).
   6. MFL → wrong password. Expect "MFL didn't accept that username and password." Repeat 5 more times quickly: expect "Too many sign-in attempts…".
   7. Settings → disconnect the ESPN league, sign out, sign in with ESPN again. Expect the same account and board.
   8. Settings → Delete account on an ESPN-signed-in account. Expect deletion succeeds; signing in with ESPN again starts a fresh, empty account.
@@ -78,7 +78,7 @@ D-056: no Maestro flows and no simulator captures — that tooling is retired, s
 | `docs/api-reference.md` | updated | `/api/entry/platform` row: the proof, every refusal and its closed `reason` set (incl. `espn_unavailable`), named `wrong_account`, response fields incl. `account_created`, the 429, the fixed 500, the audit line, the verified handoff; the stale "unverified-write grace" text in that row and under the write-gate table fixed |
 | `living-memory/LLD.md` | n/a | no route/schema *convention* shifted: the provider and `verified_via` vocabularies live in `docs/data-dictionary.md` and `docs/cross-client-invariants.md`, both updated |
 | `docs/architecture.md` | n/a | no module wiring change — the proof runs inside the existing route with existing primitives |
-| `living-memory/HLD.md` | n/a | no new module, client or major flow; the entry flow's shape (preview → claim → canonical import) is unchanged |
+| `living-memory/HLD.md` | n/a | no new module, client or major flow; the entry flow's shape (preview → claim → import) is unchanged; since #421 the import is `POST /api/espn/link` (ESPN) or `POST /api/mfl/auth-link` → `POST /api/mfl/auth-import` (MFL) |
 | `docs/cross-client-invariants.md` | updated | "Verified-via strings": `mfl_login`, `espn`; `linked_identities.provider` `espn` / `mfl`; `PLATFORM_PROVIDERS` |
 | `docs/glossary.md` | updated | "Platform sign-in" (new); "Linked identity" note |
 | ADR or `DECISIONS.md` entry | deferred | the design doc (platforms-eng, D1–D10) plus head-eng's review are the decision record; the D- entry is written at merge by the decision owner. Build-level choices are recorded here |
