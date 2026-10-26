@@ -17521,7 +17521,9 @@ def trade_job_status():
             return jsonify({"error": "invalid_deck",
                             "message": "deck must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
         body = _trade_deck_status(sess, request.headers.get("X-Session-Token", ""), deck, int(cursor))
-        return jsonify(body) if body is not None else (jsonify({"error": "job not found"}), 404)
+        if body is None:
+            return jsonify({"error": "job not found"}), 404
+        return _serve_deck_status(sess["user_id"], body)
     page_row = None
     if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
             and _trade_i1_mode()):      # at trade_i1_mode 0 the store isn't read: the job path
@@ -32943,13 +32945,19 @@ def _paywall_gate_hook():
 
 
 def _paywall_deck_ask(user_id):
-    """The request facts the deck preview decides on (paywall_gate.DeckAsk)."""
+    """The request facts the deck preview decides on (paywall_gate.DeckAsk).
+    The deck is /status's `deck` (P2, #369) when trade_job_status honours it,
+    else its `job_id`."""
     cursor = request.args.get("cursor")
     body = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
     trade_id = body.get("trade_id") if isinstance(body, dict) else None
+    deck = (request.args.get("deck")
+            if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
+                and _trade_i1_mode())
+            else None)
     return _paywall_gate.DeckAsk(
         page_size=_trade_page_size(),
-        job_id=request.args.get("job_id"),
+        job_id=deck or request.args.get("job_id"),
         cursor=int(cursor) if cursor is not None and re.fullmatch(r"[0-9]{1,9}", cursor) else None,
         trade_id=trade_id if isinstance(trade_id, str) else None,
         page_trade_ids=lambda job_id, limit: _paywall_page_trade_ids(user_id, job_id, limit))
@@ -32991,7 +32999,29 @@ def _serve_stored_trade_page(user_id: str, out: dict, row: dict):
            "total_ready": min(out["total_ready"], preview.limit)}
     if out["cards"] and not _paywall_gate.record_preview(
             user_id, out["job_id"], preview.pages_for(out["cursor"])):
-        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+        return jsonify({"error": "pro_required", "gate": preview.gate}), 402
+    return jsonify(out)
+
+
+def _serve_deck_status(user_id: str, out: dict):
+    """The deck preview on P2's /status?deck=D&cursor=K response (#369:
+    _trade_deck_status builds it from D's stored pages, D's job, or a rebase
+    onto the scope's newer deck). Under g.paywall_preview, keep only cards
+    inside the window of the deck that served them (`deck_id`, else `job_id`),
+    hold the cursor at the window's end, and record the preview against that
+    deck: a rebase onto another deck after the preview is spent is a different
+    deck, so the claim fails and the answer is 402. Otherwise unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None or not out.get("cards"):
+        return jsonify(out)
+    served = out.get("deck_id") or out["job_id"]
+    window = _paywall_page_trade_ids(user_id, served, preview.limit)
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, served, preview.pages_for(out["cursor"])):
+        return jsonify({"error": "pro_required", "gate": preview.gate}), 402
     return jsonify(out)
 
 
@@ -33016,7 +33046,7 @@ def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
         raw_end = out["cursor"] if paged else len(snapshot["cards"])
         if not _paywall_gate.record_preview(user_id, snapshot["job_id"],
                                             preview.pages_for(raw_end)):
-            return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+            return jsonify({"error": "pro_required", "gate": preview.gate}), 402
     return jsonify(out)
 
 

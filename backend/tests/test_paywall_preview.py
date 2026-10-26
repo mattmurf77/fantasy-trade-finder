@@ -32,6 +32,7 @@ from backend.tests.test_trade_responses_small import JOB_ID, card, e2, seed_job 
 from backend.tests import test_trade_page_store as p1mod
 from backend.tests.test_i1_serve_filter import live  # noqa: F401 (fixture)
 from backend.tests.test_trade_page_store import p1, spawned  # noqa: F401 (fixtures)
+from backend.tests import test_trade_pages_p2 as p2mod
 
 PAGE = 5
 MOBILE = {"X-Session-Token": TOKEN, "X-Device": "iphone"}
@@ -223,7 +224,7 @@ def test_demo_session_exempt_real_account_gated(gate):
 def test_unverified_never_entitled_still_gets_the_preview(gate):
     ask = pg.DeckAsk(page_size=PAGE, job_id=JOB_ID, cursor=0)
     got = pg.verdict("/api/trades/status", "GET", ME, True, False, ask=ask)
-    assert got == pg.Preview(pages=1, page_size=PAGE)
+    assert got == pg.Preview(pages=1, page_size=PAGE, gate="verify_required")
 
 
 def test_trial_expired_gets_no_preview(gate):
@@ -452,3 +453,67 @@ def test_p1_store_serves_are_untouched_without_a_preview(p1_enforcing):
     assert p1mod.ids(p1mod.status(client, job_id, 30).get_json()["cards"]) == [
         f"p1-{i:03d}" for i in range(30, 60)]
     assert pg.preview_row(p1mod.UID) is None
+
+
+# ── #369's P2 next pages by deck id (/status?deck=D&cursor=K) ─────────────
+
+def _deck(client, deck, cursor, headers=None):
+    return p2mod.deck_status(client, deck, cursor) if headers is None else client.get(
+        f"/api/trades/status?deck={deck}&cursor={cursor}", headers=headers)
+
+
+def test_p2_deck_pages_hold_the_preview(p1_enforcing):
+    client = p1_enforcing
+    deck = p2mod.build_deck()
+    p2mod.restart()
+    first = p1mod.generate(client, page=1).get_json()
+    assert first["deck_id"] == deck and len(first["cards"]) == 30
+    assert pg.preview_row(p1mod.UID)["deck_key"] == deck
+    again = _deck(client, deck, 0).get_json()                    # page 1 by deck id
+    assert p1mod.ids(again["cards"]) == p2mod.p1_ids(0, 30) and again["deck_id"] == deck
+    inside = _deck(client, deck, 10).get_json()                  # capped at the window
+    assert p1mod.ids(inside["cards"]) == p2mod.p1_ids(10, 30) and inside["cursor"] == 30
+    assert _deck(client, deck, 30).get_json() == PREVIEW_USED     # page 2 by deck id
+    assert _deck(client, "another-deck", 0).get_json() == PREVIEW_USED
+
+
+def test_p2_rebase_onto_a_newer_deck_is_a_different_deck(p1_enforcing):
+    client = p1_enforcing
+    deck = p2mod.build_deck()
+    p2mod.restart()
+    assert len(p1mod.generate(client, page=1).get_json()["cards"]) == 30
+    p2mod.restart()                                               # drop the rebuild it kicked
+    newer = p2mod.build_deck()                                    # its row replaces deck's
+    p2mod.restart()
+    assert newer != deck and p1mod.stored()["deck_job_id"] == newer
+    r = _deck(client, deck, 0)                                    # P2 would rebase onto `newer`
+    assert r.status_code == 402 and r.get_json() == PREVIEW_USED
+    assert pg.preview_row(p1mod.UID)["deck_key"] == deck
+
+
+def test_p2_entitled_user_pages_by_deck_unaffected(p1_enforcing):
+    client = p1_enforcing
+    entl.grant(p1mod.UID, "pro", source="manual_grant")
+    deck = p2mod.build_deck()
+    assert p1mod.ids(_deck(client, deck, 30).get_json()["cards"]) == p2mod.p1_ids(30, 60)
+    assert pg.preview_row(p1mod.UID) is None
+
+
+def test_p2_unverified_session_preview_then_verify_required(p1_enforcing, monkeypatch):
+    """R28.9 on the deck-id path (/status swapped for its undecorated view:
+    the account-auth read gate would 403 an unverified session first)."""
+    client = p1_enforcing
+    view = server.app.view_functions["trade_job_status"]
+    monkeypatch.setitem(server.app.view_functions, "trade_job_status", view.__wrapped__)
+    deck = p2mod.build_deck()
+    entl.grant(p1mod.UID, "pro", source="manual_grant")          # a subscriber's user_id
+    with server._sessions_lock:
+        server._sessions["p2-unverified"] = {**server._sessions[p1mod.TOKEN], "verified": False}
+    try:
+        hdr = {"X-Session-Token": "p2-unverified"}
+        assert p1mod.ids(_deck(client, deck, 0, hdr).get_json()["cards"]) == p2mod.p1_ids(0, 30)
+        assert _deck(client, deck, 30, hdr).get_json() == VERIFY_REQUIRED
+        assert _deck(client, "another-deck", 0, hdr).get_json() == VERIFY_REQUIRED
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop("p2-unverified", None)

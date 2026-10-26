@@ -379,9 +379,11 @@ class DeckAsk:
 @dataclass(frozen=True)
 class Preview:
     """Allowed under the preview: serve at most `limit` raw cards (`pages`
-    pages of `page_size`) of the preview deck."""
+    pages of `page_size`) of the preview deck. `gate` is the 402 reason if the
+    serve-time claim fails (verify_required for an unverified session, R28.9)."""
     pages: int
     page_size: int
+    gate: str = PREVIEW_USED
 
     @property
     def limit(self) -> int:
@@ -470,7 +472,7 @@ def _preview(rule: str, user_id: str, ask: DeckAsk | None,
     pages = preview_pages()
     if pages == 0 or ask is None:
         return blocked
-    allowance = Preview(pages=pages, page_size=ask.page_size)
+    allowance = Preview(pages=pages, page_size=ask.page_size, gate=gate)
     row = preview_row(user_id)
     if rule == "/api/trades/generate":
         ok = row is None
