@@ -32550,13 +32550,20 @@ def _mfl_pick_snapshot_index(row) -> dict:
     league's stored futureDraftPicks snapshot (leagues.platform_future_picks,
     parse_future_picks' shape). Malformed entries are skipped — an absent key
     reads as "not a real pick in this league" and hard-blocks upstream."""
-    from . import mfl_write as _mfl_write
     try:
         snapshot = json.loads(row.get("platform_future_picks") or "[]")
     except (TypeError, ValueError):
         snapshot = []
+    return _mfl_pick_owner_index(snapshot)
+
+
+def _mfl_pick_owner_index(picks) -> dict:
+    """The index `_mfl_pick_snapshot_index` builds, over any list in
+    parse_future_picks' shape: the stored snapshot, or (I-2) a live
+    futureDraftPicks export parsed at send time."""
+    from . import mfl_write as _mfl_write
     index: dict = {}
-    for pk in snapshot if isinstance(snapshot, list) else []:
+    for pk in picks if isinstance(picks, list) else []:
         if not isinstance(pk, dict):
             continue
         try:
@@ -32871,6 +32878,7 @@ def propose_trade_to_mfl():
       409 mfl_franchise_unknown | 409 mfl_not_connected | 409 mfl_auth_expired
       422 mfl_asset_unmapped (+ unmapped[]) | 502 mfl_write_failed
       400 bad_request
+      422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
 
     Sibling of POST /api/trades/propose (Sleeper) rather than a platform
     switch on it: both platforms' league ids are numeric (#149/#150/#200
@@ -33031,6 +33039,69 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
             host = _mfl.resolve_host(league_id, year)
     except _mfl.MflError as e:
         return _platform_error_payload(e, "mfl")
+
+    # I-2: live ownership on BOTH sides, before any provider write. Players
+    # are checked against MFL's live `rosters` export and FTF picks against its
+    # live `futureDraftPicks` export (zero-auth, one read). The stored snapshot
+    # above stays the EXISTENCE check. Each read happens only when the trade
+    # carries that asset class. Both fetchers turn any MflError into `{}`, so
+    # a missing top-level key is a failed read (R3), never "nothing owned".
+    # Pre-encoded `give_pick_assets` / `receive_pick_assets` (no client sends
+    # them) are not checked.
+    def _read_failed():
+        _msg = _roster_read_failed_copy("MFL")
+        return {"error": "mfl_write_failed", "kind": "network",
+                "detail": _msg, "message": _msg}, 502
+
+    norm = _mfl_write.normalize_franchise_id
+    my_n, their_n = norm(my_fid), norm(their_fid)
+    moved_give: list = []
+    moved_recv: list = []
+    if give_players or recv_players:
+        raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie)
+        if not isinstance(raw, dict) or "rosters" not in raw:
+            return _read_failed()
+        held = {}
+        for fid, ids in _mfl.parse_roster_ids(raw).items():
+            try:
+                held[norm(fid)] = ids
+            except _mfl_write.MflWriteError:
+                continue
+        if my_n not in held:
+            return {"error": "mfl_franchise_unknown",
+                    "message": "Couldn't determine your franchise — "
+                               "re-link this league."}, 409
+        if their_n not in held:
+            return {"error": "bad_request",
+                    "message": "Couldn't resolve the counterparty franchise."}, 400
+        moved_give += [p for p in give_players if inverse[p] not in held[my_n]]
+        moved_recv += [p for p in recv_players if inverse[p] not in held[their_n]]
+    if give_ftf_picks or recv_ftf_picks:
+        raw = _mfl.fetch_future_draft_picks(league_id, year, host, cookie=cookie)
+        if not isinstance(raw, dict) or "futureDraftPicks" not in raw:
+            return _read_failed()
+        live = _mfl_pick_owner_index(_mfl.parse_future_picks(raw))
+
+        def _owner(pid):
+            yr, rnd, orig = _ftf_pick_parts(league_id, pid)   # mapped above
+            return live.get((yr, rnd, norm(orig)))
+
+        moved_give += [p for p in give_ftf_picks if _owner(p) != my_n]
+        moved_recv += [p for p in recv_ftf_picks if _owner(p) != their_n]
+    if moved_give or moved_recv:
+        side, moved = ("give", moved_give) if moved_give else ("receive", moved_recv)
+        names = {**_player_names_by_id(moved), **_pick_labels_by_id(moved)}
+        team = None
+        if side == "receive":
+            try:  # display enrichment only; the refusal never depends on it
+                for m in load_league_members(league_id):
+                    f = _mfl_franchise_from_member_id(league_id, m.get("user_id"))
+                    if f and norm(f) == their_n:
+                        team = m.get("display_name") or m.get("username")
+                        break
+            except Exception as e:
+                log.warning("I-2 MFL counterparty name lookup failed: %s", e)
+        return _ownership_refusal(side, moved, names, team)
 
     req = _mfl_write.ProposeTradeRequest(
         league_id=league_id,
