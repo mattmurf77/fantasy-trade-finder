@@ -932,8 +932,10 @@ DECODE_CASES = ("stored", "live", "end", "restart", "rebased_row", "unknown")
 @pytest.mark.parametrize("case", DECODE_CASES)
 def test_a_deck_poll_decodes_at_most_one_stored_page(p1, spawned, monkeypatch, case):
     """Other scopes' rows exist; only the row served (or proving the deck) is
-    decompressed, never every scope row."""
+    decompressed, never every scope row, and never its evidence_blob. The
+    delivery's evidence write runs on its own thread (not run here)."""
     client, engine, _ = p1
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda **kw: None)
     deck = (revoked_deck_row_rebuilt_elsewhere(engine) if case == "rebased_row"
             else build_deck())
     for scope in ("organic:f=0.75", "organic:f=0.60"):

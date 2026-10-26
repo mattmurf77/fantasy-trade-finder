@@ -4442,7 +4442,7 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                 return
             with _deck_evidence_write_lock:
                 try:
-                    row = _db.load_trade_page_for_job(user_id, deck_job_id)
+                    row = _db.load_trade_page_for_job(user_id, deck_job_id, evidence=True)
                 except Exception:
                     log.warning("deck-evidence %s: stored evidence unreadable", deck_job_id,
                                 exc_info=True)

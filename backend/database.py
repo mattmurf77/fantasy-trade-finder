@@ -7136,23 +7136,34 @@ def save_trade_page(row: dict) -> bool:
         return bool(conn.execute(stmt).rowcount)
 
 
+def _trade_page_columns(evidence: bool):
+    """A page row's columns. The serve reads leave out evidence_blob, so a
+    poll decodes one blob, its pages (#369 QA); only the deferred-evidence
+    writer (server._deck_evidence_write_stored) reads it."""
+    t = trade_page_store_table
+    return [c for c in t.c if evidence or c.name != "evidence_blob"]
+
+
 def load_trade_page(user_id: str, league_id: str, scoring_format: str,
-                    request_scope: str) -> dict | None:
-    """The page row for one key (a unique-index read), pages decoded, or None."""
+                    request_scope: str, *, evidence: bool = False) -> dict | None:
+    """The page row for one key (a unique-index read), pages decoded, or None.
+    `evidence`: include evidence_blob (decoded)."""
     t = trade_page_store_table
     with engine.connect() as conn:
-        row = conn.execute(select(t).where(
+        row = conn.execute(select(*_trade_page_columns(evidence)).where(
             t.c.user_id == user_id, t.c.league_id == league_id,
             t.c.scoring_format == scoring_format,
             t.c.request_scope == request_scope)).mappings().first()
     return dict(row) if row is not None else None
 
 
-def load_trade_page_for_job(user_id: str, deck_job_id: str) -> dict | None:
-    """The viewer's page row built by `deck_job_id`, or None."""
+def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
+                            evidence: bool = False) -> dict | None:
+    """The viewer's page row built by `deck_job_id`, or None. `evidence`:
+    include evidence_blob (decoded)."""
     t = trade_page_store_table
     with engine.connect() as conn:
-        row = conn.execute(select(t).where(
+        row = conn.execute(select(*_trade_page_columns(evidence)).where(
             t.c.user_id == user_id, t.c.deck_job_id == deck_job_id)).mappings().first()
     return dict(row) if row is not None else None
 

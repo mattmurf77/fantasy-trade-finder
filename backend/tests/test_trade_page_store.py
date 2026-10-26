@@ -131,7 +131,7 @@ def build_page():
 
 
 def stored():
-    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE)
+    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE, evidence=True)
 
 
 def set_row(engine, **values):

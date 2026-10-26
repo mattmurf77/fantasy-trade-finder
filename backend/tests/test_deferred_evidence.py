@@ -591,45 +591,68 @@ def response(client, path, deck, cursor=0):
     return client.get(f"/api/trades/status?deck={deck}&cursor={cursor}", headers=HEADERS).get_json()
 
 
-SERVE_PATHS = {   # path -> (store the page?, restart?, the deck asked for, cursor)
-    "legacy": (False, False, None, 0),
-    "job_cursor": (False, False, None, 0),
-    "page_one": (True, False, None, 0),
-    "deck_stored": (True, False, None, 30),
-    "deck_live": (True, False, None, 90),
-    "rebased_row": (True, True, "gone", 0),
-    "rebased_job": (False, False, "gone", 0),
+SERVE_PATHS = {   # path -> (store the page?, the deck asked for, cursor)
+    "legacy": (False, None, 0),
+    "job_cursor": (False, None, 0),
+    "page_one": (True, None, 0),
+    "deck_stored": (True, None, 30),
+    "deck_live": (True, None, 90),
+    "deck_own": (False, None, 0),            # set up as a replenished (non-organic) deck
+    "rebased_row": (True, "deck-old", 0),
+    "rebased_job": (False, "deck-old", 0),
 }
+
+
+def serve_deck(path, n=120):
+    """The deferred deck `path` serves; for the rebased paths, an organic deck
+    D ("deck-old") of the same scope, in this process and revoked, which P2
+    (7575dc02) rebases onto the deck's stored row (its job gone from the
+    process) or onto its job (no row)."""
+    store, asked, _ = SERVE_PATHS[path]
+    job_id, served, *rest = deferred_deck(n, store=store)
+    with server._trade_jobs_lock:
+        if path == "deck_own":                 # replenished: deferred, no page_scope
+            job = server._trade_jobs[job_id]
+            job.pop("page_scope")
+            job["source"] = "replenish"
+        if asked == "deck-old":
+            twin = {k: v for k, v in server._trade_jobs[job_id].items() if k != "evidence"}
+            twin["job_id"] = "deck-old"
+            server._trade_jobs["deck-old"] = twin
+            server._revoke_trade_job_locked(twin)
+            if store:
+                server._trade_jobs.pop(job_id)
+    return job_id, asked or job_id
 
 
 @pytest.mark.parametrize("path", sorted(SERVE_PATHS))
 def test_370_every_serve_path_writes_exactly_the_cards_it_sends(deferred, path):
     client, engine, _ = deferred
-    store, restart_, asked, cursor = SERVE_PATHS[path]
-    job_id, *_ = deferred_deck(120, store=store)
-    if restart_:
-        server._trade_jobs.clear()
-        server._trade_jobs_by_key.clear()
-    body = response(client, path, asked or job_id, cursor)
+    _, asked = serve_deck(path)
+    body = response(client, path, asked, SERVE_PATHS[path][2])
+    assert body.get("rebased", False) == (path.startswith("rebased"))
     sent = {c["impression_id"] for c in body["cards"]}
     assert sent and len(sent) == len(body["cards"])
     marked = {r["impression_id"] for r in rows(engine) if r["delivered_at"] is not None}
     assert marked == sent
 
 
-@pytest.mark.parametrize("path", ["job_cursor", "deck_stored", "page_one", "rebased_row"])
+@pytest.mark.parametrize("path", ["job_cursor", "deck_stored", "page_one", "deck_own",
+                                  "rebased_row"])
 def test_370_a_card_i1_drops_gets_no_row_at_all(deferred, path):
     """C-b, write after I-1: a dropped card was never served, so it is neither
-    marked delivered nor written as first30 / full_interim / partial_run."""
+    marked delivered nor written as first30 / full_interim / partial_run.
+    (Not rebased_job: the roster move revokes the in-process deck it would
+    rebase onto, so P2 kicks a rebuild instead of serving it.)"""
     client, engine, _ = deferred
-    store, restart_, asked, _ = SERVE_PATHS[path]
-    job_id, served, *_ = deferred_deck(120, store=store)
-    dropped_id = server._trade_jobs[job_id]["cards"][3]["impression_id"]
+    job_id, asked = serve_deck(path)
+    with server._trade_jobs_lock:          # the deck's cards: from its job, or (gone) its row
+        job = server._trade_jobs.get(job_id)
+        cards = list(job["cards"]) if job is not None else None
+    cards = cards if cards is not None else stored()["pages_blob"]["cards"]
+    dropped_id = cards[3]["impression_id"]
     move_away(engine, 3)
-    if restart_:
-        server._trade_jobs.clear()
-        server._trade_jobs_by_key.clear()
-    body = response(client, path, asked or job_id, 0)
+    body = response(client, path, asked, 0)
     sent = {c["impression_id"] for c in body["cards"]}
     assert len(sent) == 29 and dropped_id not in sent
     written = {r["impression_id"]: r for r in rows(engine)}
@@ -637,32 +660,31 @@ def test_370_a_card_i1_drops_gets_no_row_at_all(deferred, path):
     assert {iid for iid, r in written.items() if r["delivered_at"]} == sent
 
 
-@pytest.mark.parametrize("path", ["job_cursor", "deck_stored", "page_one"])
+@pytest.mark.parametrize("path", ["job_cursor", "deck_stored", "page_one", "deck_own"])
 def test_370_a_gate_miss_withholds_and_writes_nothing(deferred, monkeypatch, path):
     client, engine, _ = deferred
-    store, _, asked, cursor = SERVE_PATHS[path]
-    job_id, *_ = deferred_deck(120, store=store)
+    _, asked = serve_deck(path)
     monkeypatch.setitem(server._gate_miss_tests, LEAGUE, ("withhold", server.time.monotonic() + 60))
-    body = response(client, path, asked or job_id, cursor)
+    body = response(client, path, asked, SERVE_PATHS[path][2])
     assert body["cards"] == [] and body["wait_reason"] == "roster_check"
     assert rows(engine) == [] and rows(engine, db_module.deck_candidate_sets_table) == []
 
 
-@pytest.mark.parametrize("path", ["legacy", "job_cursor", "deck_stored", "page_one"])
+@pytest.mark.parametrize("path", ["legacy", "job_cursor", "deck_stored", "page_one", "deck_own"])
 def test_370_no_impression_is_written_twice_across_polls(deferred, path):
     """The second poll of the same cards issues no deck_impressions write."""
     from sqlalchemy import event
     client, engine, _ = deferred
-    store, _, asked, cursor = SERVE_PATHS[path]
-    job_id, *_ = deferred_deck(120, store=store)
-    response(client, path, asked or job_id, cursor)
+    _, asked = serve_deck(path)
+    cursor = SERVE_PATHS[path][2]
+    response(client, path, asked, cursor)
     first = sorted(rows(engine), key=lambda r: r["impression_id"])
     seen = []
     listen = lambda conn, cursor_, statement, *a: seen.append(statement)
     event.listen(engine, "before_cursor_execute", listen)
     try:
-        response(client, path, asked or job_id, cursor)
-        response(client, path, asked or job_id, cursor)
+        response(client, path, asked, cursor)
+        response(client, path, asked, cursor)
     finally:
         event.remove(engine, "before_cursor_execute", listen)
     writes = [s for s in seen if s.lstrip().upper().startswith(("INSERT INTO DECK_IMPRESSIONS",
