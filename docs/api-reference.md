@@ -1278,7 +1278,7 @@ The body is exactly:
 | Class | Rules |
 |---|---|
 | `gated` (32) | The deck (`POST /api/trades/generate`, `GET /api/trades`, `GET /api/trades/status`, `POST /api/trades/swipe`, `POST /api/trades/pass-reason`; Today's Trade rides these); send (`/api/trades/propose`, `/propose-espn`, `/propose-mfl`, `/respond-mfl`, `/queue`); `/api/trades/asset-ideas`, `/fair-packages`, `/standing-offer`, `/matches/<id>/disposition`; every `/api/overhauls*` and `/api/win-now/*` rule |
-| `never_gate` (44) | `/api/admin/*`, `/api/cron/*`, `/api/billing/*`, and the X-Cron-Secret routes outside them (`/api/feedback/admin*`, `/api/trades/flags/admin`, `/api/debug/log`, `/api/feature-flags/reload`) |
+| `never_gate` (46) | `/api/admin/*`, `/api/cron/*`, `/api/billing/*`, and the X-Cron-Secret routes outside them (`/api/feedback/admin*`, `/api/trades/flags/admin`, `/api/debug/log`, `/api/feature-flags/reload`) |
 | `free` (166) | Everything else: sign-in, session, onboarding and league connect, Settings, `DELETE /api/account`, export, `/api/me/entitlements`, `/api/paywall/config`, `/api/feature-flags`, `/api/events`, feedback, `/api/sleeper/link`, `/api/extension/*`, every rank write, `/api/trade/evaluate`, `GET /api/trades/matches[/all]`, `/api/trades/validate`, invites, profiles, static and web pages |
 
 A failed entitlement read fails open (logged). Set `paywall_enforce_enabled` = 0 to stop every 402 without a deploy; `paywall_web_enforce_enabled` = 0 to stop web 402s only.
