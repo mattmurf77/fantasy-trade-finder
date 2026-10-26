@@ -122,6 +122,7 @@ def test_a_newer_refresh_deck_is_skipped_for_the_older_trades_deck(prod):
     card_set = served()
     assert shown(card_set) == ["T-g0", "T-g1", "T-g2", "T-g3"]
     assert card_set["skipped_no_row"] == 0
+    assert card_set["skipped_decks_by_reason"]["calibration_refresh"] == 1   # never silent
     assert (card_set["variant"], card_set["source"]) == ("incumbent", "served")
     first = card_set["cards"][0]
     assert first["league"] == "Served League" and first["seat"] == "u1"
@@ -176,7 +177,11 @@ def test_a_chosen_card_without_a_full_row_is_skipped_and_counted(prod, tmp_path,
     assert card_set["skipped_no_row"] == 3                # 1 (no assets), 3 and 4 (packed)
     assert json.loads(capsys.readouterr().out) == {"cards": 2, "leagues": 1,
                                                    "skipped_no_row": 3, "leagues_without_deck": [],
-                                                   "leagues_with_no_cards": []}
+                                                   "leagues_with_no_cards": [],
+                                                   "skipped_decks_by_reason": {
+                                                       "calibration_refresh": 0,
+                                                       "pack_integrity": 0,
+                                                       "withdrawal_conflict": 0}}
 
 
 def test_the_read_only_check_still_fires(prod):
@@ -210,7 +215,12 @@ def test_a_deck_whose_evidence_contradicts_itself_is_not_graded(prod):
     fake = prod()
     put_deck(fake, "T", 4, served_at=_ago(3), delivered=range(4))
     put_deck(fake, "C", 4, served_at=_ago(1), rows=range(4), delivered=range(4), w0=[1])
-    assert shown(served()) == ["T-g0", "T-g1", "T-g2", "T-g3"]
+    card_set = served()
+    assert shown(card_set) == ["T-g0", "T-g1", "T-g2", "T-g3"]
+    # models-lead C5: the skip is counted by reason, never silent
+    assert card_set["skipped_decks_by_reason"] == {"calibration_refresh": 0,
+                                                   "pack_integrity": 0,
+                                                   "withdrawal_conflict": 1}
 
 
 def test_a_league_without_a_gradeable_deck_is_named_not_silent(prod):
@@ -242,7 +252,9 @@ def test_a_league_whose_deck_yields_no_gradeable_card_is_named(prod, tmp_path, c
     assert card_set["leagues_without_deck"] == ["empty-league"]
     assert json.loads(capsys.readouterr().out) == {
         "cards": 0, "leagues": 2, "skipped_no_row": 3, "leagues_without_deck": ["empty-league"],
-        "leagues_with_no_cards": ["lg"]}
+        "leagues_with_no_cards": ["lg"],
+        "skipped_decks_by_reason": {"calibration_refresh": 0, "pack_integrity": 0,
+                                    "withdrawal_conflict": 0}}
 
 
 def test_the_prod_engine_opens_every_connection_read_only(monkeypatch):
