@@ -566,6 +566,22 @@ exactly**, with the same knobs: I-1, both gate misses and their shapes
 admin gate-miss test hook, and the background floor kick past the roster bound.
 At `trade_i1_mode` 0 the store isn't read.
 
+**Evidence is written at delivery (ADR-025 stage 1; no response change).**
+While the store is on, an organic or replenished deck writes its
+`deck_impressions` rows, its `trade_impressions`, its `bakeoff_runs` row and
+its `trades_generated` event when a response first sends its cards, not at
+build: page 1 from the store or a job, `cursor` pages, `deck=` pages
+(stored, live, a non-organic deck's own, rebased onto a row, a job or a
+lineage scope row) and legacy polls. Only the cards the response actually
+sends **after the S0 rules** count: a card I-1 drops gets no row, and a gate
+miss (withhold or `roster_check_unavailable`) writes nothing. The write runs
+off the request thread, once per card; repeat polls write nothing again. A
+swipe or other outcome whose `impression_id` row is still being written
+waits for it (at most 2 s) instead of being dropped. A deck never delivered
+writes nothing. Calibration's targeted refresh writes its rows at build, as
+before, and no `trades_generated` or `trade_impressions` (with the store on
+or off). Details: [data dictionary](data-dictionary.md#deferred-evidence-evidence_tier-adr-025-stage-1-2026-10-20).
+
 **The store is only read on a paged request**, so `trade_paged_responses` 0
 keeps it out too.
 

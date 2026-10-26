@@ -53,6 +53,7 @@
 - [Usage Trends: global stats cache, per-caller roster maps, server order (2026-10-10, usage_trends.enabled)](#usage-trends-global-stats-cache-per-caller-roster-maps-server-order-2026-10-10-usage_trendsenabled)
 - [Trade deck on the device: append-only merge, device page, one trace per tap (2026-10-24, 200 ms path)](#trade-deck-on-the-device-append-only-merge-device-page-one-trace-per-tap-2026-10-24-200-ms-path)
 - [S0 serve rules: one roster read at serve, knobs per request (2026-10-26, trade-time-to-suggestion S0)](#s0-serve-rules-one-roster-read-at-serve-knobs-per-request-2026-10-26-trade-time-to-suggestion-s0)
+- [Deferred evidence: write what the serve sends, after S0's rules (2026-10-26, ADR-025 stage 1, #370)](#deferred-evidence-write-what-the-serve-sends-after-s0s-rules-2026-10-26-adr-025-stage-1-370)
 
 ---
 
@@ -922,3 +923,14 @@ Contract: the roster fingerprint contract v0.4 (`docs/plans/trade-time-to-sugges
 - **The `[i1] serve` line is per serve, so per poll.** A drop rate must de-duplicate by its `job` field. Drops are split by give/receive side (players and picks alike), and a card with moved assets on both sides counts once per side. Format: [api-reference](../docs/api-reference.md#s0-roster-check-at-serve).
 - **Three knobs, read per request, deploy-free:** `trade_i1_mode` (2 strict, 1 lenient, 0 the pre-S0 path), `trade_gate_miss_mode` (0 holds the no-card gate misses until 1.22.0; 1 serves `roster_check_unavailable` and `wait_reason`), `trade_roster_bound_s`, plus `trade_import_roster_fresh_s` for linked platforms. Unreadable values fall to the safe side (strict I-1, held gate misses).
 - **No per-session state.** The only process state: the `vsn1` seed memo and the "state table exists" marker (one module lock), and the admin gate-miss test hook's `{league_id: (kind, expiry)}`.
+
+## Deferred evidence: write what the serve sends, after S0's rules (2026-10-26, ADR-025 stage 1, #370)
+
+Flag `trade.first_page_store` (off). Schema and tiers: [data dictionary](../docs/data-dictionary.md#deferred-evidence-evidence_tier-adr-025-stage-1-2026-10-20). Code: `server._DeckEvidence` and the `_deck_evidence_*` functions.
+- **Two hooks, after the rules.** `_trade_job_public_view` and `_trade_page_view` call `_deck_evidence_delivered(_stored)` with the cards the response sends and, as `withdrawn`, the ones S0's I-1 dropped (an identity diff of the checked list against the kept one; `_roster_serve_check` keeps the card objects). A withdrawn card gets no row until a serve sends it (models-lead C-b); a gate miss sends and writes nothing. Every serve path, rebased and `deck=` ones included, reaches one of the two views: a new one must too.
+- **Off the request thread, once.** Writes run on `_start_deck_evidence_thread`, one at a time under `_deck_evidence_write_lock`, inside the job's user-data lease, idempotently. A deck whose job left the process is written from its page row's `evidence_blob`, which only that thread reads (`load_trade_page_for_job(..., evidence=True)`); serve reads leave it out, so a poll decodes only its pages (P2's #369 rule). Tests that count statements or decodes stub the thread; tests that run it for real use a file-backed SQLite (`threaded`).
+- **One contract.** The narrow ghost block is `backend/eval/contract.FROZEN_INPUT_KEYS` and C8's choice is `contract.is_archive_deck`: import them, never restate (S3). The slim `bakeoff_runs` row's `input_sha256` is `capture_owner_benchmark.input_fingerprint` (ruling 31).
+- **`partial_run` means "never whole".** A run that ended partial, or a lost-job deck the store truncated (S1b, the blob's `truncated`), writes every row `partial_run`; replay and Calibration's current arm skip such a job.
+- **`grading_refresh` is not a Trades deck.** On either engine it writes rows at build (Calibration reads them) but no `trade_impressions` (replenishment eligibility), no `trades_generated` (ruling 30), and receipts skip it (S4). Ungated, like the relabel.
+- **Nothing is purged before packing (S2).** The archive partial index stays for the packing stage's purge.
+- **`built_at` rides in the frozen full row** (`features_json`, spliced as the last key, so the rest stays byte-equal to the live row); ghosts stay narrow.
