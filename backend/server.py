@@ -5180,12 +5180,17 @@ _EVICTED_SPLIT_NAMED = False
 _DECK_LEDGER_MAX = 16384
 _deck_held: dict = {}                      # deck_job_id -> None: decks this process built
 _deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+# A leaf lock for the ledgers' writes (#428 QA item 2: kickoffs add concurrently,
+# and the FIFO trim at the cap raced). Never take another lock while holding it.
+# Readers stay lock-free: membership and .get are atomic.
+_deck_ledger_lock = threading.Lock()
 
 
 def _ledger_add(ledger: dict, key: str, value) -> None:
-    while len(ledger) >= _DECK_LEDGER_MAX:
-        ledger.pop(next(iter(ledger)))
-    ledger[key] = value
+    with _deck_ledger_lock:
+        while len(ledger) >= _DECK_LEDGER_MAX:
+            ledger.pop(next(iter(ledger)))
+        ledger[key] = value
 
 
 def _note_deck_held(job_id: str) -> None:

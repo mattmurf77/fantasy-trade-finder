@@ -1749,3 +1749,34 @@ def test_b4_a_page_whose_every_card_is_cut(deferred, prepared_ok, kind):
     assert {(r["reason"], r["served_before"]) for r in got.values()} == {("disposition_cut", 0)}
     nxt = client.get(f"/api/trades/status?deck={job_id}&cursor={body['cursor']}", headers=HEADERS)
     assert deck_ids(nxt.get_json()) == ids[60:90]
+
+
+# ── Fix-before-flip (#428 QA, release-lead) ─────────────────────────────────
+
+def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
+    """Item 2: kickoffs add to _deck_held concurrently; at the cap the FIFO
+    trim raced (KeyError, or the dict changing size). Under the leaf lock no
+    add raises and the ledger never passes the cap."""
+    import sys
+    import threading
+    monkeypatch.setattr(server, "_DECK_LEDGER_MAX", 8)
+    ledger, errors = {}, []
+
+    def hammer(t):
+        try:
+            for i in range(20000):
+                server._ledger_add(ledger, f"{t}-{i}", None)
+        except Exception as exc:                           # noqa: BLE001 (the race's symptom)
+            errors.append(repr(exc))
+
+    switch = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)
+    try:
+        threads = [threading.Thread(target=hammer, args=(t,)) for t in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    finally:
+        sys.setswitchinterval(switch)
+    assert errors == [] and len(ledger) <= 8
