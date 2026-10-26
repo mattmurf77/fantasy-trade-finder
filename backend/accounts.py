@@ -623,9 +623,16 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            strong roster-history owners and suggestion impression links.
 #            Weak user-keyed roster history is deleted. Other identified
 #            users' events/identity links on a shared device are preserved.
+#            Platform pick grids (draft_picks.platform set and not 'sleeper',
+#            i.e. MFL/ESPN): owner_user_id / original_user_id → the
+#            DELETED_USER_PLACEHOLDER where they name a deleted id. There the
+#            importer's own picks carry their FLEECED id (entry:*, acct_*;
+#            server._sync_mfl_owned_picks), and nothing re-syncs the grid once
+#            they are gone. The row itself stays: other members rely on it.
 #   KEEP     player_value_history + model_config (not user-keyed),
-#            draft_picks (public league pick grid other members rely on;
-#            re-synced from Sleeper), players.
+#            draft_picks on Sleeper grids (and legacy rows with no platform):
+#            public Sleeper ids other members rely on, re-synced from
+#            Sleeper, players.
 # ---------------------------------------------------------------------------
 
 def _user_data_scope(conn, user_id: str, account_id: str | None = None):
@@ -819,6 +826,20 @@ def _delete_user_data(sleeper_user_id: str,
             tbl = getattr(db, name + "_table")
             res = conn.execute(update(tbl).where(tbl.c[col].in_(user_ids)).values(**values))
             counts[name + "_" + col + "_anonymized"] = res.rowcount or 0
+        # Platform (non-Sleeper) pick grids hold the importer's Fleeced id as
+        # the owner of their own picks. `platform` is the LEAGUE's provenance,
+        # written by every draft_picks writer; Sleeper grids and legacy NULL
+        # rows keep their public Sleeper ids untouched.
+        picks = db.draft_picks_table
+        platform_grid = picks.c.platform.isnot(None) & (picks.c.platform != "sleeper")
+        named = conn.execute(select(picks.c.id).where(
+            platform_grid,
+            picks.c.owner_user_id.in_(user_ids) | picks.c.original_user_id.in_(user_ids),
+        )).scalars().all()
+        for col in ("owner_user_id", "original_user_id"):
+            conn.execute(update(picks).where(platform_grid, picks.c[col].in_(user_ids))
+                         .values({col: DELETED_USER_PLACEHOLDER}))
+        counts["draft_picks_owner_anonymized"] = len(named)
         # Weak roster keys embed the user ID; strong keys are public team slots.
         history = db.league_roster_history_table
         res = conn.execute(delete(history).where(history.c.owner_user_id.in_(user_ids),

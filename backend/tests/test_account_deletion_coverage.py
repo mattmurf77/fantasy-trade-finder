@@ -265,3 +265,74 @@ def test_win_now_private_data_exports_and_deletes_all_account_aliases(engine, na
     counts = accounts.delete_user_data(UID)
     assert counts[name + "_deleted"] == 2
     assert [row["user_id"] for row in rows(engine, table)] == [OTHER]
+
+
+def _pick(conn, pick_id, platform, owner, original, assigned_by=None):
+    seed(conn, db.draft_picks_table, pick_id, pick_id=pick_id, league_id=f"{platform}-league",
+         platform=platform, owner_user_id=owner, original_user_id=original,
+         owner_username="Team " + pick_id, original_username="Team " + pick_id,
+         assigned_by=assigned_by)
+
+
+def _picks(engine):
+    return {r["pick_id"]: r for r in rows(engine, db.draft_picks_table)}
+
+
+def test_platform_pick_grid_owner_ids_anonymized_sleeper_grid_untouched(engine):
+    """MFL/ESPN grids hold the importer's Fleeced id; Sleeper grids keep public ids."""
+    gone = accounts.DELETED_USER_PLACEHOLDER
+    with engine.begin() as conn:
+        _pick(conn, "mfl-own", "mfl", UID, UID)            # the importer's own pick
+        _pick(conn, "mfl-alias", "mfl", ALIAS, ALIAS)      # the bound acct_ alias
+        _pick(conn, "mfl-traded-in", "mfl", UID, OTHER)    # OTHER's pick, now UID's
+        _pick(conn, "mfl-traded-out", "mfl", OTHER, UID)   # UID's pick, now OTHER's
+        _pick(conn, "mfl-other", "mfl", OTHER, OTHER)      # another owner on the same grid
+        _pick(conn, "espn-own", "espn", UID, UID)
+        _pick(conn, "sleeper-own", "sleeper", UID, UID)    # public Sleeper ids: kept
+        _pick(conn, "legacy-own", None, UID, UID)          # pre-#158 row, no platform: kept
+    counts = accounts.delete_user_data(UID)
+    picks = _picks(engine)
+    owners = lambda pid: (picks[pid]["owner_user_id"], picks[pid]["original_user_id"])  # noqa: E731
+    assert owners("mfl-own") == (gone, gone)
+    assert owners("mfl-alias") == (gone, gone)
+    assert owners("mfl-traded-in") == (gone, OTHER)
+    assert owners("mfl-traded-out") == (OTHER, gone)
+    assert owners("mfl-other") == (OTHER, OTHER)
+    assert owners("espn-own") == (gone, gone)
+    assert owners("sleeper-own") == (UID, UID)
+    assert owners("legacy-own") == (UID, UID)
+    # Rows are kept (other members rely on the grid); only the ids change.
+    assert len(picks) == 8
+    assert counts["draft_picks_owner_anonymized"] == 5
+
+
+@pytest.mark.parametrize("deleted", ["acct_mfl-signin", "entry:mfl:61408.f0003"])
+def test_platform_only_users_pick_rows_anonymized_on_the_mfl_grid(engine, deleted):
+    """A proof-based MFL sign-in (acct_*) and an old entry user own picks by Fleeced id."""
+    gone = accounts.DELETED_USER_PLACEHOLDER
+    with engine.begin() as conn:
+        if deleted.startswith(accounts.ACCOUNT_USER_PREFIX):
+            conn.execute(insert(db.accounts_table).values(
+                account_id=deleted[len(accounts.ACCOUNT_USER_PREFIX):], created_at="2026-10-27"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _pick(conn, "mine", "mfl", deleted, deleted)
+        _pick(conn, "theirs", "mfl", OTHER, OTHER)
+        _pick(conn, "placeholder", "mfl", "mfl:61408.f0004", "mfl:61408.f0004")
+        _pick(conn, "sleeper", "sleeper", OTHER, OTHER)
+    counts = accounts.delete_user_data(deleted)
+    picks = _picks(engine)
+    assert (picks["mine"]["owner_user_id"], picks["mine"]["original_user_id"]) == (gone, gone)
+    assert (picks["theirs"]["owner_user_id"], picks["theirs"]["original_user_id"]) == (OTHER, OTHER)
+    assert picks["placeholder"]["owner_user_id"] == "mfl:61408.f0004"
+    assert picks["sleeper"]["owner_user_id"] == OTHER
+    assert counts["draft_picks_owner_anonymized"] == 1
+
+
+def test_export_of_draft_picks_is_unchanged_by_the_pick_grid_anonymization(engine):
+    """Export still keys draft_picks on assigned_by only, never on grid ownership."""
+    with engine.begin() as conn:
+        _pick(conn, "owned", "mfl", UID, UID)                       # owned, not assigned
+        _pick(conn, "assigned", "espn", OTHER, OTHER, assigned_by=UID)
+        _pick(conn, "alias-assigned", "mfl", OTHER, OTHER, assigned_by=ALIAS)
+    archive = accounts.export_user_data(UID)
+    assert {r["pick_id"] for r in archive["tables"]["draft_picks"]} == {"assigned", "alias-assigned"}
