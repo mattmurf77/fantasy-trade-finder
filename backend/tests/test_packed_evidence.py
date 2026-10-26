@@ -6,6 +6,7 @@ models-lead R2.4 addendum §2-§3 and R4.2 (U1-U8).
 Harness: test_deferred_evidence's `deferred` (p1's real worker and routes,
 flag on, evidence writes inline).
 """
+import collections
 import json
 
 import pytest
@@ -1311,8 +1312,8 @@ def test_u4_a_card_past_the_stored_pages_missing_its_snapshot_is_a_cause_coded_m
     - restart, a deploy overlap (the old instance delivered page 4 after this
       process started) and a re-fork (a fresh worker): this process never
       held the deck, so restart_split;
-    - an eviction here: other while _EVICTED_SPLIT_NAMED is off (its default
-      until models-lead rules), evicted_split with it on;
+    - an eviction here: evicted_split with _EVICTED_SPLIT_NAMED on (its
+      default since models-lead's addendum C), other with it off;
     - a deck this process built and still holds: other (a defect), at error."""
     from datetime import datetime, timezone
     client, engine, _ = deferred
@@ -1359,7 +1360,9 @@ def test_u4_the_classification_hook():
         assert cause("elsewhere", 89, 90, True) == "other"             # within the stored pages
         assert cause("elsewhere", 60, 60, True) == "restart_split"     # the deck's own count
         assert cause("held", 95, 90, True) == "other"                  # built here, still here
-        assert cause("gone", 95, 90, True) == "other"                  # evicted: off by default
+        assert cause("gone", 95, 90, True) == "evicted_split"          # evicted: named by default
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", False)
+        assert cause("gone", 95, 90, True) == "other"                  # off: other
         mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
         assert cause("gone", 95, 90, True) == "evicted_split"
         assert cause("gone", 95, 90, False) == "other"
@@ -1930,16 +1933,18 @@ def test_flip_a_miss_whose_row_save_raises_counts_once_after_the_retry(deferred)
 def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
     """Item 2: kickoffs add to _deck_held concurrently; at the cap the FIFO
     trim raced (KeyError, or the dict changing size). Under the leaf lock no
-    add raises and the ledger never passes the cap."""
+    add raises and the ledger never passes the cap (addendum C: the memory
+    guard; its warning is silenced here, every add trims a young entry)."""
     import sys
     import threading
-    monkeypatch.setattr(server, "_DECK_LEDGER_MAX", 8)
-    ledger, errors = {}, []
+    monkeypatch.setattr(server, "_DECK_LEDGER_GUARD", 8)
+    monkeypatch.setattr(server.log, "warning", lambda *a, **k: None)
+    ledger, errors = collections.OrderedDict(), []
 
     def hammer(t):
         try:
             for i in range(20000):
-                server._ledger_add(ledger, f"{t}-{i}", None)
+                server._ledger_add(ledger, f"{t}-{i}")
         except Exception as exc:                           # noqa: BLE001 (the race's symptom)
             errors.append(repr(exc))
 

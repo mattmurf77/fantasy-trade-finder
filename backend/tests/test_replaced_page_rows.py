@@ -5,11 +5,11 @@ The page store holds one row per (user, league, format, scope): a newer deck's
 store replaces it, and evict_trade_pages deletes it. Once the deck's job has
 left the process, a card it stored has no snapshot left then.
 
-- server._STORED_COUNT_FROM_ROW_NOW (option A; head-eng recommends it,
-  models-lead rules on it; off until then). Off, today: the deck's stored
-  count is the one its pack recorded, so a delivered card under it reads
-  other. On: the count is what the page store holds now, 0 with no row, so the
+- server._STORED_COUNT_FROM_ROW_NOW (option A; on per models-lead's addendum
+  C). On: the count is what the page store holds now, 0 with no row, so the
   card reads restart_split after a restart (evicted_split after an eviction).
+  Off (kept covered by monkeypatching): the deck's stored count is the one its
+  pack recorded, so a delivered card under it reads other.
 - head-eng's condition 1: either way the writer records the card in
   run["upgrade_miss_row_gone"] = {"<card_index>": the recorded count}, in the
   miss-map entry's commit and only when that entry is new. A raising commit
@@ -230,8 +230,8 @@ def test_a_raising_commit_takes_the_row_gone_entry_back_with_its_map_entry(defer
     assert (state.run["upgrade_miss_cards"], row_gone(state.run)) == ({}, {})
     assert (run_of(engine, job_id)["upgrade_miss_cards"], row_gone(run_of(engine, job_id))) == ({}, {})
     view(job_id, 41)
-    run = run_of(engine, job_id)
-    assert (run["upgrade_miss_cards"], row_gone(run)) == ({"41": "other"}, {"41": 90})
+    run = run_of(engine, job_id)                           # option A on: no row, so 0
+    assert (run["upgrade_miss_cards"], row_gone(run)) == ({"41": "restart_split"}, {"41": 90})
     assert_joined(run)
 
 
@@ -251,9 +251,9 @@ def test_two_writers_row_gone_entries_are_unioned_with_their_cards(deferred):
         with server._deck_evidence_write_lock:
             assert server._deck_upgrade_stored_locked(
                 state, job_id, contract.card_impression_id(job_id, index), index, UID, now)
-    run = run_of(engine, job_id)
-    assert run["upgrade_miss_cards"] == {"40": "other", "41": "other"}
-    assert run["upgrade_misses"] == {**NO_MISSES, "other": 2}
+    run = run_of(engine, job_id)                           # option A on: no row, so 0
+    assert run["upgrade_miss_cards"] == {"40": "restart_split", "41": "restart_split"}
+    assert run["upgrade_misses"] == {**NO_MISSES, "restart_split": 2}
     assert row_gone(run) == {"40": 90, "41": 90}
     assert_joined(run)
 
@@ -313,6 +313,7 @@ def test_p3_1_the_miss_line_names_its_stored_counts_source(deferred, monkeypatch
     and its store is the legitimate case)."""
     client, engine, _ = deferred
     seen = {}
+    monkeypatch.setattr(server, "_STORED_COUNT_FROM_ROW_NOW", False)   # "pack" is option A off's
     # job: held here, snapshot gone
     job_id, *_ = packed_deck(120)
     delivered(client, job_id, 0, 30, 60, 90)

@@ -4304,8 +4304,9 @@ def _deck_store_missed(job_id: str) -> None:
     """U4 (#434 QA P2-1): the store wrote no page row for this deck (the store
     was off, the job revoked, the deck not page-eligible, the save raised, or
     the supersede guard refused it), so none of its cards has a stored
-    snapshot: its stored count is 0, on the deck and in its pack's header (a
-    later flush retries a failed header write). Never raises."""
+    snapshot: its stored count is 0, on the deck and in its pack's header when
+    the header has none (models-lead addendum C (d3): a recorded count is never
+    rewritten; a later flush retries a failed header write). Never raises."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         ev = job.get("evidence") if job is not None else None
@@ -4315,7 +4316,7 @@ def _deck_store_missed(job_id: str) -> None:
         with _deck_evidence_write_lock:
             with ev.lock:
                 ev.stored_count = 0           # a store that returned before its save, too
-                dirty = ev.pack is not None and ev.pack.run.get("stored_count") != 0
+                dirty = ev.pack is not None and ev.pack.run.get("stored_count") is None
                 if dirty:
                     ev.pack.run["stored_count"] = 0
                     ev.pack_dirty = True
@@ -5243,48 +5244,81 @@ def _deck_pack_card(state, index: int) -> dict:
     return by_index[index]
 
 
-# U4 (models-lead addendum A, R1/R2): a display past snapshot retention is
-# impossible, with one named exception, restart_split: a card past the deck's
-# stored pages, delivered before a process restart and viewed after it. It is
-# counted per run in the pack's run metadata (upgrade_misses, an object with
-# every cause, always present); its outcome joins the packed card by
-# impression_id and it scores normally. Any other miss is a defect: "other",
-# logged at error level. The cause comes from provenance, never a clock
-# (#428 QA (d): an import-time stamp called a deploy overlap's or a re-fork's
-# misses "other"): which decks this process built (_deck_held) and which it
-# evicted (_deck_evicted_at).
-# evicted_split (trades-eng 2026-10-26): the same card when its job left this
-# process by the cleanup loop's eviction (4 h). Off until models-lead rules:
-# while _EVICTED_SPLIT_NAMED is False those misses are "other". Eval reads any
-# key but "other" as a named cause.
+# U4 (models-lead addendum C (c4), R1; R2): a display past snapshot retention
+# is impossible, with two named exceptions, both for a card at or past the
+# deck's effective stored count (its current page-row count, else 0):
+# restart_split, when this process never held the deck's job, and
+# evicted_split, when this process evicted it. Each is counted per run in the
+# pack's run metadata (upgrade_misses, an object with every cause, always
+# present); its outcome joins the packed card by impression_id and it scores
+# normally. Any other miss is a defect: "other", logged at error level. The
+# cause comes from provenance, never a clock (#428 QA (d): an import-time stamp
+# called a deploy overlap's or a re-fork's misses "other"): which decks this
+# process built (_deck_held) and which it evicted (_deck_evicted_at). Eval
+# reads any key but "other" as a named cause.
 _UPGRADE_MISS_CAUSES = ("restart_split", "evicted_split", "other")
-_EVICTED_SPLIT_NAMED = False
-# Option A (head-eng's recommendation; models-lead rules on it): a deck's stored
-# pages are what the page store holds now. On the stored path the count is the
+# evicted_split named: models-lead ruled, addendum C, 2026-10-26 (C1). Off,
+# those misses would count as "other".
+_EVICTED_SPLIT_NAMED = True
+# Option A: models-lead ruled, addendum C, 2026-10-26 (C4). A deck's stored
+# pages are what the page store holds now: on the stored path the count is the
 # deck's current page row's card_count, and 0 when it has none (a newer deck's
 # row replaced it, or evict_trade_pages deleted it), instead of the count its
-# pack recorded. Off: today's behaviour exactly. A one-line switch; either way
-# the writer records such misses in run["upgrade_miss_row_gone"].
-_STORED_COUNT_FROM_ROW_NOW = False
-_DECK_LEDGER_MAX = 16384
-_deck_held: dict = {}                      # deck_job_id -> None: decks this process built
-_deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+# pack recorded (which is never rewritten, (d3)). Off, the pack's count. A
+# one-line switch; either way the writer records such misses in
+# run["upgrade_miss_row_gone"].
+_STORED_COUNT_FROM_ROW_NOW = True
+# models-lead addendum C (c2): a ledger entry lives at least the 24 h display
+# cap, so a late view of an evicted (or held) deck keeps its cause. Entries are
+# trimmed by age; the count cap is a memory guard only, far above a day's adds
+# (131,072 entries ≈ 23 MiB per ledger as OrderedDicts, ~180 B an entry with its
+# id; it normally holds one day of adds), and a guard trim of an entry younger
+# than 24 h logs a warning.
+_DECK_LEDGER_RETAIN_S = 24 * 3600          # _DECK_DISPLAY_CAP_S
+_DECK_LEDGER_GUARD = 131072
+# OrderedDicts (#451 QA P2-1): peeking at and popping the oldest entry are O(1).
+# A plain dict's next(iter()) rescans the deleted slots at its front, so a mass
+# age trim (a ledger idle for 24 h, then one add) was O(n²): 11.9 s at the guard,
+# under the leaf lock and, for evictions, under _trade_jobs_lock.
+_deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> built here (epoch s)
+_deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
+_ledger_now = time.time                    # the ledgers' clock (tests replace it)
+_DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
+_ledger_guard_young = 0                    # young entries the guard trimmed since its last warning
+_ledger_guard_warned_at = float("-inf")
 # A leaf lock for the ledgers' writes (#428 QA item 2: kickoffs add concurrently,
-# and the FIFO trim at the cap raced). Never take another lock while holding it.
-# Readers stay lock-free: membership and .get are atomic.
+# and the trim raced). Never take another lock while holding it (the guard's
+# warning is logged after it's released). Readers stay lock-free: membership
+# and .get are atomic.
 _deck_ledger_lock = threading.Lock()
 
 
-def _ledger_add(ledger: dict, key: str, value) -> None:
+def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None:
+    """Note `key` now. Entries stay in time order (a re-add moves to the end),
+    so the trims take the oldest first, each in O(1): every entry older than
+    the retention, then, at the guard, the oldest young ones (warned at most
+    once a minute, with the count since the last warning)."""
+    global _ledger_guard_young, _ledger_guard_warned_at
+    now = _ledger_now()
+    warn = 0
     with _deck_ledger_lock:
-        while len(ledger) >= _DECK_LEDGER_MAX:
-            ledger.pop(next(iter(ledger)))
-        ledger[key] = value
+        ledger.pop(key, None)
+        while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
+            ledger.popitem(last=False)
+        while len(ledger) >= _DECK_LEDGER_GUARD:
+            _ledger_guard_young += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
+        ledger[key] = now
+        if _ledger_guard_young and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S:
+            warn, _ledger_guard_young, _ledger_guard_warned_at = _ledger_guard_young, 0, now
+    if warn:
+        log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
+                    "24 h since its last warning: a late view of such a deck reads "
+                    "restart_split", _DECK_LEDGER_GUARD, warn, "y" if warn == 1 else "ies")
 
 
 def _note_deck_held(job_id: str) -> None:
     """A flag-on deck this process built (its job's evidence admitted here)."""
-    _ledger_add(_deck_held, job_id, None)
+    _ledger_add(_deck_held, job_id)
 
 
 def _note_deck_evicted(job_id: str, job: Mapping) -> None:
@@ -5293,7 +5327,12 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     ev = job.get("evidence")
     if ev is None or not ev.packed or ev.pack is None:
         return
-    _ledger_add(_deck_evicted_at, job_id, datetime.now(timezone.utc).isoformat())
+    _ledger_add(_deck_evicted_at, job_id)
+    # #451 QA P3-1: the two ledgers trim independently, so an evicted deck
+    # leaves the held one. Once its eviction record ages out, a late view reads
+    # restart_split (C (c2)'s assumption), never other.
+    with _deck_ledger_lock:
+        _deck_held.pop(job_id, None)
 
 
 def _upgrade_miss_cards(run: Mapping) -> dict:
@@ -5435,8 +5474,11 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
                 raise
         line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d stored_from=%s "
                 "held_here=%s evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
+        evicted_at = _deck_evicted_at.get(deck_job_id)
         args = (cause, deck_job_id, index, stored, stored_from, deck_job_id in _deck_held,
-                _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
+                None if evicted_at is None
+                else datetime.fromtimestamp(evicted_at, timezone.utc).isoformat(),
+                state.delivered_at(index), now)
         if cause == "other":              # U4-R2: must be zero; it goes back to models-lead
             log.error(line, *args)
         else:
