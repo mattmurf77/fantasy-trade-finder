@@ -4831,6 +4831,30 @@ def _log_backing_job_start(job_id: str, since: float, *, scope: str, reason: str
         log.info("[trade-page] backing-job start scope=%s reason=%s job=%s", scope, reason, job_id)
 
 
+def _record_trade_deck_lineage(job_id: str) -> None:
+    """P2: record an organic deck's lineage when its worker starts, before
+    the engine runs: off the request path, and in place even if the deck is
+    still running when a deploy restarts the worker (it never stored a page
+    row), so /status?deck= can still prove it organic and rebase it. Only
+    with the store on and an organic `page_scope` (none with the flag off).
+    Best-effort: its own transaction, logged, never fails the job."""
+    if not _trade_page_store_enabled():
+        return
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id) or {}
+        scope, key = job.get("page_scope"), job.get("key")
+    if not scope:
+        return
+    from . import database as _db
+    try:
+        user_id, league_id, scoring_format = key
+        _db.record_trade_deck_lineage({
+            "user_id": user_id, "deck_job_id": job_id, "league_id": league_id,
+            "scoring_format": scoring_format, "request_scope": scope})
+    except Exception:
+        log.warning("trade-deck %s: lineage not recorded", job_id, exc_info=True)
+
+
 def _trade_page_kick(sess: Mapping, *, sess_token: str, league_id: str, scoring_format: str,
                      fairness_threshold, prefs_preload, opponents_total: int,
                      presentation_capture, input_epochs, scope: str, reason: str) -> str:
@@ -5034,11 +5058,11 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
          D's own response when the check can't run;
       4. else P1's kick (reason "stale" at D's end, "status_restart" when D
          is gone) and its first page. A kick that starts no deck to move to:
-         at D's end, the end when nothing can rebuild the scope (the kick
-         returned D itself, still fresh here, or failed), else D's own
-         response to ask again (it joined a job outside the scope, another
-         fairness or an intent search, or raced a revocation); with D gone,
-         no cards on D.
+         failed, its error (status "error", the cursor held, never the
+         end); at D's end with the kick returning D itself (still fresh
+         here), the end; else D's own response to ask again (it joined a job
+         outside the scope, another fairness or an intent search, or raced a
+         revocation), with D gone no cards on D.
     A stale scope converges: its rebuild starts, the client is rebased onto
     it, and that deck's own end follows once it lands and is stored.
     """
@@ -5076,13 +5100,19 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
             revoked = _trade_job_revoked(kicked)
         failed = kicked.get("status") == "error" and not revoked
         if job_id == deck_id or failed or revoked or kicked.get("page_scope") != scope:
-            if finished is None:
-                return {**_trade_deck_waiting(deck_id, cursor), "deck_id": deck_id}
-            if job_id == deck_id or failed:
-                # Nothing can rebuild the scope now: D is still fresh here (its
-                # row was marked stale elsewhere), or the kick failed. The end.
+            base = finished or _trade_deck_waiting(deck_id, cursor)
+            if failed:
+                # The kick failed (a capture error, worker_start_failed): its
+                # error with the cursor held, never the end. The app shows its
+                # job-error state, whose Try again re-runs the search; "ask
+                # again" would re-poll forever, kicking a failing job each time.
+                return {**base, "deck_id": deck_id, "status": "error", "error": kicked.get("error"),
+                        "cards": [], "total_ready": 0, "replace": False}
+            if finished is not None and job_id == deck_id:
+                # D is still fresh here (its row was marked stale elsewhere):
+                # nothing can rebuild the scope now. The end.
                 return {**finished, "deck_id": deck_id, "pool_exhausted": True}
-            return {**finished, "deck_id": deck_id}   # joined a job outside the scope: ask again
+            return {**base, "deck_id": deck_id}   # joined a job outside the scope: ask again
         newest = kicked
     return {**_trade_job_page_view(newest, 0), "deck_id": newest["job_id"], "rebased": True}
 
@@ -11422,6 +11452,8 @@ def _kickoff_trade_job(
                 with _trade_jobs_lock:
                     if not _job_live(_trade_jobs.get(job_id)):
                         return
+                # P2: an organic deck's lineage, before the engine runs (store on only).
+                _record_trade_deck_lineage(job_id)
                 if (source not in ("replenish", "grading_refresh") and not is_pinned
                         and not trade_intent and not force_fresh
                         and not presentation_exempt and execution_context is not None):

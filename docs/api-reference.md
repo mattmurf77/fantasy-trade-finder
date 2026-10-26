@@ -685,9 +685,10 @@ page row is read and decoded per poll.
 
 **Only a deck that is provably organic is ever rebased**: `D`'s job is in this
 server process with an organic page scope, or a stored row `D` built exists,
-or `D`'s [lineage](data-dictionary.md#trade_deck_lineage) row (written with
-every page row, kept 24 h) names its scope. **A gone organic deck rebases
-across restarts; a gone non-organic deck 404s.** Its scope (league, scoring
+or `D`'s [lineage](data-dictionary.md#trade_deck_lineage) row (written when
+`D`'s job starts, kept 24 h) names its scope. **A gone organic deck rebases
+across restarts, also one still running at the restart; a gone non-organic
+deck 404s.** Its scope (league, scoring
 format, `fairness_threshold`) is then `D`'s own, so an intent or other search
 that changes the session's fairness never moves it. Anything else is never
 rebased onto the organic deck:
