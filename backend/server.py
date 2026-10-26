@@ -225,6 +225,8 @@ from .database import (
     load_leaderboard, get_self_leaderboard_row,
     # In-app feedback (TestFlight helper) — POST /api/feedback writes here
     save_feedback,
+    # #360 QA P2-1: an unverified session's notes follow it when it verifies
+    attach_session_feedback,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
     list_feedback,
     # Bad-trade flags (FB #85) — POST /api/trades/flag + admin readback
@@ -11237,6 +11239,40 @@ def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> d
 FEEDBACK_TEXT_MAX = 8000
 
 
+def _feedback_session_key(token: str) -> str:
+    """sha256 hex of a session token: the proof that links an unverified
+    session's notes to that same session later (#360 QA P2-1). The token is
+    a bearer secret, so only its hash is ever stored."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _attach_presession_feedback(sess) -> None:
+    """Hand the notes this session sent while unverified to its user, now
+    that it has verified in place (#360 QA P2-1, head-eng's ruling).
+
+    Call right after an in-place `sess["verified"] = True`. The key is the
+    hash of THIS request's X-Session-Token, the session being verified, so
+    another session that verifies as the same user gets nothing (the proof
+    is the bearer token, never the username). It never raises: a failure
+    here must not fail the verification itself. No analytics event (the
+    BL-10 waiver allows no new events).
+    """
+    try:
+        token = request.headers.get("X-Session-Token", "")
+        user_id = sess.get("user_id") if sess is not None else None
+        if not token or not user_id:
+            return
+        moved = attach_session_feedback(
+            _feedback_session_key(token), user_id,
+            sess.get("display_name") or sess.get("username"))
+        if moved:
+            log.info("feedback: attached %d pre-verify note(s) to user_id=%s",
+                     moved, user_id)
+    except Exception as e:
+        log.warning("feedback: attach on verify failed (verification "
+                    "unaffected): %s", e)
+
+
 @app.route("/api/feedback", methods=["POST"])
 def submit_feedback_route():
     """POST /api/feedback — in-app feedback capture from mobile.
@@ -11256,7 +11292,9 @@ def submit_feedback_route():
     route takes anonymous notes anyway, so the gate protected nothing and
     only 403'd an unverified user's note on every retry. An unverified
     session's user_id is a claim anyone can make by naming a username
-    (D-183), so it never attributes a note.
+    (D-183), so it never attributes a note. Its note stores the sha256 of
+    the session token instead (session_key), and moves to the user if that
+    same session later verifies in place (#360 QA P2-1).
 
     Idempotent on client_id — retries return 200 with `duplicate: true`.
 
@@ -11289,8 +11327,12 @@ def submit_feedback_route():
                         "limit": FEEDBACK_TEXT_MAX}), 400
 
     # ── Best-effort session lookup; attribute verified sessions only ───
+    # An UNVERIFIED session's note stays anonymous but carries the hash of
+    # its token (#360 QA P2-1), so the note follows the session if it
+    # verifies in place (_attach_presession_feedback). Never the raw token.
     user_id = None
     username = None
+    session_key = None
     token = request.headers.get("X-Session-Token", "")
     if token:
         with _sessions_lock:
@@ -11298,6 +11340,8 @@ def submit_feedback_route():
         if sess and sess.get("verified"):
             user_id  = sess.get("user_id")
             username = sess.get("display_name") or sess.get("username")
+        elif sess:
+            session_key = _feedback_session_key(token)
 
     # Device snapshot — same headers client.ts already attaches.
     platform_label = "ios" if (request.headers.get("X-Device") or "").lower() in ("iphone", "ipad", "macos") else None
@@ -11318,6 +11362,7 @@ def submit_feedback_route():
             device_type=device_type,
             os_version=os_version,
             client_created_at=client_created_at if isinstance(client_created_at, str) else None,
+            session_key=session_key,
         )
     except Exception as e:
         log.exception("save_feedback failed: %s", e)
@@ -19591,6 +19636,7 @@ def sleeper_link():
         # Claim matches + oracle passed → this session controls the account.
         sess["verified"] = True
         sess["verified_via"] = "sleeper"
+        _attach_presession_feedback(sess)
         try:
             from . import accounts as _accounts
             first_time = _accounts.get_user_verified_via(user_id) is None
@@ -27838,6 +27884,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             sess["_persisted_at"] = 0  # re-auth refreshes the durable row now
             _persist_session_if_eligible(
                 request.headers.get("X-Session-Token", ""), sess)
@@ -27859,6 +27906,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             out["verified_via"] = provider
             try:
                 _accounts.mark_user_verified(sess["user_id"], provider)
@@ -32078,6 +32126,7 @@ def mfl_auth_link():
     # controller (first-verified-wins, same as the Sleeper path).
     sess["verified"] = True
     sess["verified_via"] = "mfl_login"
+    _attach_presession_feedback(sess)
     try:
         from . import accounts as _accounts
         first_time = _accounts.get_user_verified_via(user_id) is None
