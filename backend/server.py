@@ -29591,38 +29591,70 @@ _SIGNIN_LIMITER_MAX_KEYS = 50_000
 _signin_failures: dict[str, collections.deque] = {}
 _signin_failures_lock = threading.Lock()
 
-# Placeholder refusal copy (marketing copy comes later, routed via head-eng).
-_SIGNIN_PROOF_REQUIRED_MSG = {
+# Sign-in refusal copy: the FINAL 14-row set (marketing-lead-copy.md §6
+# addendum 8, C; rows 7, 8 and 12 approved by legal R28.16). Each string is
+# defined once here, row noted per constant. Apostrophes follow the
+# codebase's user-copy convention (U+2019), except row 10, which stays
+# byte-identical to the auth_leagues / auth-link body. The link routes keep
+# their own copy (_espn_error_payload, _platform_error_payload,
+# _ESPN_WRONG_ACCOUNT_MSG) — none of these strings replaces theirs.
+_SIGNIN_PROOF_REQUIRED_MSG = {                                    # rows 1, 2
     "espn": "Sign in to ESPN to claim your team.",
     "mfl": "Sign in to MFL to claim your team.",
 }
-_SIGNIN_PROOF_UNAVAILABLE_MSG = (
-    "We can’t confirm this team is yours through ESPN. Sign in with "
-    "Apple, then link your league.")
-_SIGNIN_ESPN_UNAVAILABLE_MSG = (
-    "We couldn’t confirm this team with ESPN just now. Try again in a few "
-    "minutes, or sign in with Apple and link your league.")
-# wrong_account, naming the team this login DOES own in the same league —
-# only ever built after the proof read (ESPN cookie read / MFL login)
-# succeeded, so it names nothing the caller couldn't already see as a member.
-_SIGNIN_OWNS_OTHER_TEAM_MSG = ("This {platform} login owns {team} in this "
-                               "league, not the team you picked.")
-_SIGNIN_GENERIC_ERROR_MSG = ("Something went wrong signing you in. Try "
-                             "again shortly.")
-_SIGNIN_IDENTITY_IN_USE_MSG = {
-    "espn": "This ESPN account is already connected to a Fleeced account. "
-            "Sign in the way you did before.",
-    "mfl": "This MFL account is already connected to a Fleeced account. "
-           "Sign in the way you did before.",
+_SIGNIN_PROOF_UNAVAILABLE_MSG = {                                 # rows 3-5
+    "espn_public_league":
+        "In a public ESPN league, team ownership can’t be confirmed. "
+        "Sign in with Apple, then link your league.",
+    "espn_unproven_pair":
+        "This team can’t be confirmed as yours through ESPN. Sign in "
+        "with Apple, then link your league.",
+    "espn_ownerless_team":
+        "This team has no owner listed on ESPN, so it can’t be confirmed "
+        "as yours. Sign in with Apple, then link your league.",
 }
+_SIGNIN_ESPN_UNAVAILABLE_MSG = (                                  # row 6
+    "Couldn’t confirm this team with ESPN right now. Try again in a "
+    "few minutes, or sign in with Apple, then link your league.")
+# wrong_account, the login owns ANOTHER team in this league (row 7). Built
+# only after the proof read (ESPN cookie read / MFL login) succeeded, so it
+# names nothing the caller couldn't already see as a member (D8).
+_SIGNIN_OWNS_OTHER_TEAM_MSG = ("This {platform} login owns {team} in this "
+                               "league. Pick that team to continue.")
+# wrong_account, the login owns NO team in this league (row 8). Sign-in
+# only; the link route keeps _ESPN_WRONG_ACCOUNT_MSG.
+_SIGNIN_NOT_OWNER_MSG = {
+    "espn": "This ESPN login isn’t listed as the owner of that team. "
+            "Use the login that is, or sign in with Apple, then link your "
+            "league.",
+    "mfl": "This MFL login isn’t listed as an owner of that team. Use "
+           "the login that is, or sign in with Apple, then link your league.",
+}
+# The sign-in proof's own cookie read refused (espn_auth_required at the
+# mint only; the preview and /api/espn/* keep the cookie-paste copy). row 9
+_SIGNIN_ESPN_AUTH_REQUIRED_MSG = (
+    "This ESPN sign-in couldn’t open the league. Sign in to ESPN "
+    "again.")
 # Byte-identical to the auth_leagues / auth-link bad-login body (D8: MFL
-# keeps ONE body for every failed login).
+# keeps ONE body for every failed login; straight apostrophe).    row 10
 _SIGNIN_MFL_BAD_LOGIN_MSG = "MFL didn't accept that username and password."
-_SIGNIN_MFL_WRONG_ACCOUNT_MSG = (
-    "That MFL account doesn’t own this team. Sign in with the MFL "
-    "account that owns it.")
-_SIGNIN_TOO_MANY_MSG = ("Too many sign-in attempts. Wait a few minutes, "
-                        "then try again.")
+# MFL not answering during the sign-in proof (mfl_unavailable at the mint
+# only; _platform_error_payload keeps serving the other routes).   row 11
+_SIGNIN_MFL_UNAVAILABLE_MSG = (
+    "Couldn’t reach MFL right now. Try again in a few minutes, or sign "
+    "in with Apple, then link your league.")
+_SIGNIN_IDENTITY_IN_USE_MSG = {                                   # row 12
+    "espn": "This ESPN login is already connected to a Fleeced account. "
+            "Sign in the way you did before, or email fleecedapp@gmail.com "
+            "if that wasn’t you.",
+    "mfl": "This MFL login is already connected to a Fleeced account. "
+           "Sign in the way you did before, or email fleecedapp@gmail.com "
+           "if that wasn’t you.",
+}
+_SIGNIN_TOO_MANY_MSG = (                                          # row 13
+    "Too many sign-in attempts. Try again in a few minutes.")
+_SIGNIN_GENERIC_ERROR_MSG = (                                     # row 14
+    "Sign-in didn’t go through. Try again in a few minutes.")
 
 
 def _xff_hops() -> list[str]:
@@ -29805,7 +29837,8 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
     # 3. The league must be cookie-gated: an anonymous read must need auth.
     anon = _espn_signin_read(_espn, league_id, season, None, None)
     if anon == "ok":
-        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_public_league"],
                        "espn_public_league")
     if anon != "auth":
         return _unavailable()
@@ -29820,21 +29853,24 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
          if _ident(t.owner_swid) and _ident(t.owner_swid) != subject),
         None)
     if control_swid is None:
-        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_unproven_pair"],
                        "espn_unproven_pair")
     control = _espn_signin_read(_espn, league_id, season, espn_s2,
                                 control_swid)
     if control == "ok":
         log.warning("ESPN-PAIR-UNBOUND control read with another member's "
                     "SWID succeeded; refusing ESPN sign-in")
-        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_unproven_pair"],
                        "espn_unproven_pair")
     if control != "auth":
         return _unavailable()
 
     # 5. The claimed team must be owned by the proven SWID (#321).
     if not _ident(team.owner_swid):
-        return _refuse("proof_unavailable", _SIGNIN_PROOF_UNAVAILABLE_MSG,
+        return _refuse("proof_unavailable",
+                       _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_ownerless_team"],
                        "espn_ownerless_team")
     if _ident(team.owner_swid) != subject:
         # Proof reads all succeeded, so naming the team this login owns in
@@ -29844,7 +29880,7 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
         message = (_SIGNIN_OWNS_OTHER_TEAM_MSG.format(
                        platform="ESPN", team=owned.name)
                    if owned is not None and owned.name
-                   else _ESPN_WRONG_ACCOUNT_MSG)
+                   else _SIGNIN_NOT_OWNER_MSG["espn"])
         return _refuse("espn_bad_credentials", message, "wrong_account")
     return None
 
@@ -30211,7 +30247,12 @@ def _entry_platform(audit: dict):
         except _espn.EspnError as e:
             if subject and getattr(e, "kind", None) == "auth":
                 # D4 step 2 failed: ESPN rejected the pair for this league.
-                _signin_note_failure("espn", subject)
+                # Same error code, the sign-in's own copy (row 9); the
+                # preview and /api/espn/* keep the cookie-paste copy.
+                return _signin_refusal(audit, 403, "espn_auth_required",
+                                       _SIGNIN_ESPN_AUTH_REQUIRED_MSG,
+                                       provider="espn", subject=subject,
+                                       failed_proof=True)
             return _espn_error_response(e)
 
         team_id = body.get("team_id")
@@ -30280,12 +30321,21 @@ def _entry_platform(audit: dict):
                                    reason, provider="mfl", subject=subject,
                                    failed_proof=True)
 
+        def _mfl_error(e):
+            # Row 11: MFL not answering DURING THE SIGN-IN PROOF gets the
+            # sign-in's own copy, same status and error code. The preview
+            # and every other route keep _platform_error_payload's copy.
+            payload, status = _platform_error_payload(e, "mfl")
+            if claim and payload.get("error") == "mfl_unavailable":
+                payload["message"] = _SIGNIN_MFL_UNAVAILABLE_MSG
+            return jsonify(payload), status
+
         try:
             # Parse + (public) host resolution first: a malformed league id
             # is refused before any password is sent.
             league_id, year, host = _mfl_resolve(body)
         except _mfl.MflError as e:
-            return _platform_error_response(e, "mfl")
+            return _mfl_error(e)
 
         cookie = None
         if claim:
@@ -30302,7 +30352,7 @@ def _entry_platform(audit: dict):
             except _mfl.MflAuthError:
                 return _refuse_login()
             except _mfl.MflError as e:
-                return _platform_error_response(e, "mfl")
+                return _mfl_error(e)
 
         try:
             raw = _mfl.fetch_league_bundle(league_id, year, host, cookie=cookie)
@@ -30311,10 +30361,10 @@ def _entry_platform(audit: dict):
                 # A good login that still can't read this league holds no
                 # franchise in it.
                 return _refuse_login("wrong_account",
-                                     _SIGNIN_MFL_WRONG_ACCOUNT_MSG)
+                                     _SIGNIN_NOT_OWNER_MSG["mfl"])
             return _platform_error_response(e, "mfl")
         except _mfl.MflError as e:
-            return _platform_error_response(e, "mfl")
+            return _mfl_error(e)
 
         parsed = _mfl.parse_bundle(raw)
         mapped = _mfl.map_franchises(parsed, _shared_crosswalk())
@@ -30349,7 +30399,7 @@ def _entry_platform(audit: dict):
         except _mfl.MflAuthError:
             return _refuse_login()
         except _mfl.MflError as e:
-            return _platform_error_response(e, "mfl")
+            return _mfl_error(e)
         in_league = [lg for lg in mine
                      if str(lg.get("league_id") or "") == str(league_id)]
         if not any(str(lg.get("franchise_id") or "") == franchise_id
@@ -30365,7 +30415,7 @@ def _entry_platform(audit: dict):
             return _refuse_login(
                 "wrong_account",
                 _SIGNIN_OWNS_OTHER_TEAM_MSG.format(platform="MFL", team=owned)
-                if owned else _SIGNIN_MFL_WRONG_ACCOUNT_MSG)
+                if owned else _SIGNIN_NOT_OWNER_MSG["mfl"])
         return _platform_sign_in(audit, "mfl", subject,
                                  franchise["name"] or f"Franchise {franchise_id}",
                                  league_id, franchise_id)

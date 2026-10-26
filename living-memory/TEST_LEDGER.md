@@ -10,6 +10,10 @@ Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_S
   - `test_espn_signin_off_404s_the_whole_espn_entry_branch_with_zero_espn_calls`: five ESPN entry requests all get 404, with zero ESPN league/fan calls and no limiter state; MFL sign-in still 200; `/api/espn/link` still 200.
   - Sabotage: drop the check → red (`500 == 404`, the action reached the fail-if-called fan stub). Restored.
 - **Runbook:** a new entry, "ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user", for the accepted per-subject lockout residual.
+- **Refusal copy (follow-up commit):** marketing's final 14-row set (§6 addendum 8, C) is applied, with rows 7, 8 and 12 approved by legal R28.16, so the set is complete. Apostrophes are U+2019, except row 10, which stays byte-identical. Rows 8, 9 and 11 are sign-in-only constants; the link-route copy is unchanged.
+  - New: `test_signin_refusal_copy_is_the_final_set_verbatim` (21 cases, literal expected bodies on the real route) and `test_link_routes_and_previews_keep_their_own_copy`.
+  - Sabotage: row-13 constant reworded → `[row13-too-many]` red. Restored.
+  - `test_platform_sign_in.py` + `test_entry_platform_route.py`: **135 passed**.
 - **Runs:**
   - `test_platform_sign_in.py` (86) + `test_entry_platform_route.py` (27): **113 passed**.
   - With the cohort test, the MFL auth-link and ESPN link suites, and the flag-registry/mirror suites (`test_seed_ui_test_db`, `test_blind_grading_routes`, `test_events_api`, `test_avoid_positions`, `test_invite_links`, `test_draft_extensions_w1`, `test_outlook_route_cache`, `test_packed_evidence`): **513 passed, 0 failed** on the final code. One earlier run showed 1 failure, from the audit-log test's `PLATFORM-SIGNIN` prefix also matching the new `PLATFORM-SIGNIN-XFF` lines; that filter is fixed.

@@ -48,7 +48,7 @@ D-056: no Maestro flows and no simulator captures — that tooling is retired, s
 | 5 | The R1 script is env-only, GET-only, ESPN-only, prints statuses + a verdict, writes nothing | `scripts/espn_pair_check.py` rewritten: standard library only (no `backend` import), environment only, four GETs, status lines + verdict | `test_c5_r1_script_is_stdlib_only_and_matches_espn_service`, `test_c5_r1_script_verdicts` (×9), `test_c5_r1_script_env_only_get_only_espn_only_prints_statuses` (×2; `open` patched to fail, all requests GET to `lm-api-reads.fantasy.espn.com`, 5 output lines, no marker) |
 | 6 | Disconnect keeps the identity | Routes unchanged (confirmed); pinned | `test_c6_espn_disconnect_keeps_the_identity_then_same_account`, `test_c6_mfl_disconnect_keeps_the_identity_then_same_account` |
 | 7 | Refusal per code; mint → import → delete; race; #279 gate pinned | — | `test_c7_refusal_espn_proof_required`, `test_c7_refusal_mfl_proof_required_makes_zero_mfl_calls`, `test_c7_refusal_espn_public_league`, `test_c7_refusal_espn_ownerless_team`, `test_c7_refusal_espn_unproven_pair_leaguemate_attack`, condition-3 cases (`espn_unavailable`), `test_c7_c8_refusal_espn_wrong_account_…`, `test_c7_c8_refusal_mfl_wrong_account_…`, `test_c7_refusal_espn_platform_identity_in_use`, `test_c7_refusal_mfl_platform_identity_in_use_case_insensitive`, `test_c7_too_many_attempts_ip_limit_counts_claims_and_actions`, `test_c7_too_many_attempts_subject_limit`, `test_c7_c11_mint_import_delete_then_a_fresh_sign_in_is_a_new_account`, `test_c7_c9_uq_linked_identity_race_signs_into_the_winner`, `test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes` (sha256 of the four gate functions pinned to `origin/main` @ `732a6b7f`, `_MUTATING_METHODS`, and the gate wrapper on all four link routes), `test_c7_unverified_session_still_403s_on_espn_link_but_minted_passes` |
-| 8 | `wrong_account` names the login's own team, only after proof | ESPN: after all three reads succeeded, a team in this league whose `owner_swid` is the pair's → "This ESPN login owns {Team} in this league, not the team you picked."; MFL: after login, a franchise of this login in this league (myleagues `franchise_name`, else the bundle's) → same wording with "MFL"; otherwise the generic copy | `test_c7_c8_refusal_espn_wrong_account_names_the_team_this_login_owns`, `test_c8_espn_wrong_account_generic_when_login_owns_no_team_here`, `test_c7_c8_refusal_mfl_wrong_account_names_the_franchise_this_login_owns`, `test_c8_mfl_wrong_account_generic_when_login_owns_nothing_here`, `test_c8_nothing_is_named_before_the_proof_read` |
+| 8 | `wrong_account` names the login's own team, only after proof | ESPN: after all three reads succeeded, a team in this league whose `owner_swid` is the pair's → "This ESPN login owns {Team} in this league. Pick that team to continue."; MFL: after login, a franchise of this login in this league (myleagues `franchise_name`, else the bundle's) → same wording with "MFL"; otherwise the sign-in's own not-the-owner line (row 8) | `test_c7_c8_refusal_espn_wrong_account_names_the_team_this_login_owns`, `test_c8_espn_wrong_account_generic_when_login_owns_no_team_here`, `test_c7_c8_refusal_mfl_wrong_account_names_the_franchise_this_login_owns`, `test_c8_mfl_wrong_account_generic_when_login_owns_nothing_here`, `test_c8_nothing_is_named_before_the_proof_read` |
 | 9 | Response gains `account_created` | `true` = the proof created the account; `false` = existing account (incl. the race loser and the bound-Sleeper restore) | `test_c9_second_sign_in_same_identity_returns_the_same_account`, `test_c7_c9_uq_linked_identity_race_signs_into_the_winner`, plus assertions in the first-sign-in, bound-Sleeper, condition-2 and condition-6 tests |
 | 10 | Export has the identity, never the secrets | Already true: `accounts.export_user_data` exports `linked_identities` (provider + subject) and omits `espn_credentials.espn_s2_encrypted` / `mfl_credentials.cookie_encrypted`; no code change | `test_c10_espn_export_has_the_identity_not_the_cookie`, `test_c10_mfl_export_has_the_identity_not_the_cookie_or_password` |
 | 11 | Deletion releases the identity | Already true: `DELETE /api/account` removes `accounts` + `linked_identities`; the next proof creates a new account | `test_c7_c11_mint_import_delete_then_a_fresh_sign_in_is_a_new_account`, `test_c11_mfl_deletion_releases_the_identity` |
@@ -62,8 +62,8 @@ D-056: no Maestro flows and no simulator captures — that tooling is retired, s
 - [x] **Manual TestFlight checklist** (operator, on the 11-06 binary that carries the client MFL change; flag `landing.platform_options` on in a test window only). Prerequisite: head-eng has reviewed `scripts/espn_pair_check.py`, and the operator's run printed `PAIR_BOUND`. If it printed `PAIR_NOT_BOUND`, steps 1–2 are expected to refuse and only the refusal copy is checked.
   1. Sign-in screen → ESPN → sign in to ESPN in the WebView → pick a **private** league → claim your own team. Expect: you land signed in; Settings → Account shows an account (no Sleeper); the league import completes (no "verification required" error).
   2. Sign out, repeat step 1 with the same ESPN account. Expect: the same board (rankings you made in step 1 are there) and the display name you had.
-  3. ESPN → a **public** league you're in → claim a team. Expect "We can’t confirm this team is yours through ESPN. Sign in with Apple, then link your league." and no sign-in.
-  4. ESPN private league → claim a team that is **not** yours. Expect "This ESPN login owns {your team} in this league, not the team you picked." and no sign-in.
+  3. ESPN → a **public** league you're in → claim a team. Expect "In a public ESPN league, team ownership can’t be confirmed. Sign in with Apple, then link your league." and no sign-in.
+  4. ESPN private league → claim a team that is **not** yours. Expect "This ESPN login owns {your team} in this league. Pick that team to continue." and no sign-in.
   5. Sign-in screen → MFL → sign in with your MFL username/password → pick your league (repeat with a **private** MFL league if you have one). Expect: signed in; the client's `auth-link` → `auth-import` completes the import; "Send in MFL" works later (auth-link stored the cookie).
   6. MFL → wrong password. Expect "MFL didn't accept that username and password." Repeat 5 more times quickly: expect "Too many sign-in attempts…".
   7. Settings → disconnect the ESPN league, sign out, sign in with ESPN again. Expect the same account and board.
@@ -122,3 +122,34 @@ head-eng's 11-06 item. Full gates (it is a feature-flag surface).
   - The flag-registry tests (`test_seed_ui_test_db`, `test_blind_grading_routes` and the per-flag mirror tests) stay green.
 - **Client half:** hiding the ESPN chip is a separate mobile PR by another worker. This build touches no `mobile/src`.
 - **Waivers:** the manual TestFlight check of the switch rides with the client PR. A server-side check is to flip `espn.signin` to `false` via `FTF_FLAGS` on a test deploy and confirm a 404.
+
+---
+
+## Refusal copy — final and complete (2026-10-27)
+
+The mint's refusal `message`s are the **final 14-row set** from marketing-lead (`marketing-lead-copy.md` §6 addendum 8, C), with rows 7, 8 and 12 approved by legal (**R28.16**). No placeholder remains.
+
+- **Where the strings live:** each one is a single constant next to the sign-in helper in `backend/server.py`:
+  - `_SIGNIN_PROOF_REQUIRED_MSG` (rows 1–2);
+  - `_SIGNIN_PROOF_UNAVAILABLE_MSG[reason]` (rows 3–5);
+  - `_SIGNIN_ESPN_UNAVAILABLE_MSG` (6);
+  - `_SIGNIN_OWNS_OTHER_TEAM_MSG` (7);
+  - `_SIGNIN_NOT_OWNER_MSG[platform]` (8);
+  - `_SIGNIN_ESPN_AUTH_REQUIRED_MSG` (9);
+  - `_SIGNIN_MFL_BAD_LOGIN_MSG` (10);
+  - `_SIGNIN_MFL_UNAVAILABLE_MSG` (11);
+  - `_SIGNIN_IDENTITY_IN_USE_MSG[platform]` (12);
+  - `_SIGNIN_TOO_MANY_MSG` (13);
+  - `_SIGNIN_GENERIC_ERROR_MSG` (14).
+- **Apostrophes:** U+2019, the codebase's user-copy convention, per the coordinator. Marketing's table and legal's text use U+0027. Row 10 (`MFL didn't accept that username and password.`) keeps its straight apostrophe, byte-identical to the `auth_leagues` / `auth-link` body (D8).
+- **Sign-in only.** Rows 8, 9 and 11 have their own constants, so the link routes keep their copy:
+  - `_ESPN_WRONG_ACCOUNT_MSG` is unchanged;
+  - `_espn_error_payload`'s cookie-paste text still serves the preview and `/api/espn/*`;
+  - `_platform_error_payload`'s "Couldn't reach MFL — try again shortly." still serves the preview, the actions and `/api/mfl/*`.
+- **Mint-only behaviour for rows 9 and 11:**
+  - Row 9: the sign-in's cookie read refused → 403 `espn_auth_required` with row 9's text.
+  - Row 11: MFL not answering during the proof (host resolution, login, bundle or myleagues) → today's 502 `mfl_unavailable` with row 11's text.
+- **Evidence:**
+  - `test_signin_refusal_copy_is_the_final_set_verbatim` pins every row's exact body on the real route: 21 cases, covering both platforms for rows 7, 8 and 12, the four MFL failure points for row 11, and both 5xx codes for row 14.
+  - `test_link_routes_and_previews_keep_their_own_copy` pins the non-sign-in copy.
+  - Sabotage: the row-13 constant reworded → `[row13-too-many]` red. Restored.

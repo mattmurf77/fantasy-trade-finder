@@ -327,7 +327,8 @@ def test_c7_refusal_espn_public_league(env):
     body = r.get_json()
     assert body["error"] == "proof_unavailable"
     assert body["reason"] == "espn_public_league"
-    assert body["message"].startswith("We can’t confirm this team is yours")
+    assert body["message"] == server._SIGNIN_PROOF_UNAVAILABLE_MSG[
+        "espn_public_league"]
     _assert_nothing_created(env)
 
 
@@ -390,8 +391,8 @@ def test_c7_c8_refusal_espn_wrong_account_names_the_team_this_login_owns(env):
     assert r.status_code == 403
     assert r.get_json() == {
         "error": "espn_bad_credentials", "reason": "wrong_account",
-        "message": "This ESPN login owns Icy Veins in this league, not the "
-                   "team you picked."}
+        "message": "This ESPN login owns Icy Veins in this league. Pick "
+                   "that team to continue."}
     _assert_nothing_created(env)
 
 
@@ -400,7 +401,7 @@ def test_c8_espn_wrong_account_generic_when_login_owns_no_team_here(env):
     assert r.status_code == 403
     assert r.get_json() == {"error": "espn_bad_credentials",
                             "reason": "wrong_account",
-                            "message": server._ESPN_WRONG_ACCOUNT_MSG}
+                            "message": server._SIGNIN_NOT_OWNER_MSG["espn"]}
 
 
 def test_c8_nothing_is_named_before_the_proof_read(env):
@@ -459,8 +460,8 @@ def test_c7_c8_refusal_mfl_wrong_account_names_the_franchise_this_login_owns(env
     assert r.status_code == 403
     assert r.get_json() == {
         "error": "mfl_bad_credentials", "reason": "wrong_account",
-        "message": "This MFL login owns Other Franchise in this league, not "
-                   "the team you picked."}
+        "message": "This MFL login owns Other Franchise in this league. "
+                   "Pick that team to continue."}
     _assert_nothing_created(env)
 
 
@@ -470,7 +471,7 @@ def test_c8_mfl_wrong_account_generic_when_login_owns_nothing_here(env):
     assert r.status_code == 403
     assert r.get_json() == {"error": "mfl_bad_credentials",
                             "reason": "wrong_account",
-                            "message": server._SIGNIN_MFL_WRONG_ACCOUNT_MSG}
+                            "message": server._SIGNIN_NOT_OWNER_MSG["mfl"]}
 
 
 def _recorder(calls, name):
@@ -534,7 +535,7 @@ def test_mfl_private_league_unreadable_by_this_login_is_wrong_account(env):
     assert r.status_code == 403
     assert r.get_json() == {"error": "mfl_bad_credentials",
                             "reason": "wrong_account",
-                            "message": server._SIGNIN_MFL_WRONG_ACCOUNT_MSG}
+                            "message": server._SIGNIN_NOT_OWNER_MSG["mfl"]}
     assert seen == ["MFL_USER_ID=c-loner"]
     _assert_nothing_created(env)
 
@@ -1494,3 +1495,206 @@ def test_mfl_mint_then_auth_link_passes_the_unchanged_gate(env):
                         headers={"X-Session-Token": token})
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.get_json()["verified"] is True
+
+
+
+# ── Refusal copy: the final 14-row set, pinned verbatim ─────────────────────
+# marketing-lead-copy.md §6 addendum 8, C (rows 7, 8 and 12 approved by legal
+# R28.16). The expected strings are LITERALS on purpose, so a drifted
+# constant turns this red. Apostrophes are U+2019 (the codebase's user-copy
+# convention) except row 10, which stays byte-identical to the auth_leagues /
+# auth-link body.
+
+def _espn_anon_503(env):
+    def fetch(league_id, season, espn_s2=None, swid=None, **kw):
+        if not (espn_s2 and swid):
+            raise es.EspnError("ESPN HTTP 503", kind="http")
+        return env.espn(league_id, season, espn_s2=espn_s2, swid=swid)
+    return patch.object(es, "fetch_league", fetch)
+
+
+def _mfl_down(env, target):
+    def down(*a, **kw):
+        raise mfl.MflError("MFL HTTP 503", kind="http")
+    return patch.object(mfl, target, down)
+
+
+def _ownerless(env):
+    for t in env.espn.payload["teams"]:
+        if t["id"] == 1:
+            t["primaryOwner"] = ""
+            t["owners"] = []
+
+
+def _seed_espn_credential(env):
+    with env.engine.begin() as conn:
+        conn.execute(insert(db_module.espn_credentials_table).values(
+            user_id="other_user", swid=SWID_A, espn_s2_encrypted="x",
+            created_at="x", updated_at="x"))
+
+
+def _seed_mfl_credential(env):
+    with env.engine.begin() as conn:
+        conn.execute(insert(db_module.mfl_credentials_table).values(
+            user_id="other_user", mfl_username="MattM", cookie_encrypted="x",
+            created_at="x", updated_at="x"))
+
+
+def _lock_mfl_subject(env):
+    for i in range(5):
+        _mfl_claim(env, ip=f"192.0.2.{i}", password="bad")
+
+
+def _raise(*a, **kw):
+    raise RuntimeError("boom")
+
+
+_COPY_CASES = [
+    # (id, setup(env) -> context manager or None, request(env), status,
+    #  error, reason, exact message)
+    ("row1-espn", None, lambda e: _espn_claim(e, s2=None, swid=None),
+     403, "proof_required", None,
+     "Sign in to ESPN to claim your team."),
+    ("row2-mfl", None, lambda e: _mfl_claim(e, password=None),
+     403, "proof_required", None,
+     "Sign in to MFL to claim your team."),
+    ("row3-public", lambda e: setattr(e.espn, "public", True),
+     lambda e: _espn_claim(e), 403, "proof_unavailable", "espn_public_league",
+     "In a public ESPN league, team ownership can’t be confirmed. "
+     "Sign in with Apple, then link your league."),
+    ("row4-unproven", lambda e: setattr(e.espn, "bound", False),
+     lambda e: _espn_claim(e, s2=S2_B, swid=SWID_A), 403, "proof_unavailable",
+     "espn_unproven_pair",
+     "This team can’t be confirmed as yours through ESPN. Sign in with "
+     "Apple, then link your league."),
+    ("row5-ownerless", _ownerless, lambda e: _espn_claim(e), 403,
+     "proof_unavailable", "espn_ownerless_team",
+     "This team has no owner listed on ESPN, so it can’t be confirmed "
+     "as yours. Sign in with Apple, then link your league."),
+    ("row6-espn-unavailable", _espn_anon_503, lambda e: _espn_claim(e), 403,
+     "proof_unavailable", "espn_unavailable",
+     "Couldn’t confirm this team with ESPN right now. Try again in a "
+     "few minutes, or sign in with Apple, then link your league."),
+    ("row7-espn", None, lambda e: _espn_claim(e, s2=S2_B, swid=SWID_B), 403,
+     "espn_bad_credentials", "wrong_account",
+     "This ESPN login owns Icy Veins in this league. Pick that team to "
+     "continue."),
+    ("row7-mfl", None,
+     lambda e: _mfl_claim(e, username="Rival", password="pw-rival"), 403,
+     "mfl_bad_credentials", "wrong_account",
+     "This MFL login owns Other Franchise in this league. Pick that team to "
+     "continue."),
+    ("row8-espn", None, lambda e: _espn_claim(e, s2=S2_D, swid=SWID_D), 403,
+     "espn_bad_credentials", "wrong_account",
+     "This ESPN login isn’t listed as the owner of that team. Use the "
+     "login that is, or sign in with Apple, then link your league."),
+    ("row8-mfl", None,
+     lambda e: _mfl_claim(e, username="loner", password="pw-loner"), 403,
+     "mfl_bad_credentials", "wrong_account",
+     "This MFL login isn’t listed as an owner of that team. Use the "
+     "login that is, or sign in with Apple, then link your league."),
+    ("row9-espn-cookie-read", None,
+     lambda e: _espn_claim(e, s2="not-issued", swid=SWID_A), 403,
+     "espn_auth_required", None,
+     "This ESPN sign-in couldn’t open the league. Sign in to ESPN "
+     "again."),
+    ("row10-mfl-bad-login", None, lambda e: _mfl_claim(e, password="wrong"),
+     403, "mfl_bad_credentials", None,
+     "MFL didn't accept that username and password."),
+    ("row11-mfl-resolve", lambda e: _mfl_down(e, "resolve_host"),
+     lambda e: _mfl_claim(e), 502, "mfl_unavailable", None,
+     "Couldn’t reach MFL right now. Try again in a few minutes, or "
+     "sign in with Apple, then link your league."),
+    ("row11-mfl-login", lambda e: _mfl_down(e, "login"),
+     lambda e: _mfl_claim(e), 502, "mfl_unavailable", None,
+     "Couldn’t reach MFL right now. Try again in a few minutes, or "
+     "sign in with Apple, then link your league."),
+    ("row11-mfl-bundle", lambda e: _mfl_down(e, "fetch_league_bundle"),
+     lambda e: _mfl_claim(e), 502, "mfl_unavailable", None,
+     "Couldn’t reach MFL right now. Try again in a few minutes, or "
+     "sign in with Apple, then link your league."),
+    ("row11-mfl-myleagues", lambda e: _mfl_down(e, "fetch_my_leagues"),
+     lambda e: _mfl_claim(e), 502, "mfl_unavailable", None,
+     "Couldn’t reach MFL right now. Try again in a few minutes, or "
+     "sign in with Apple, then link your league."),
+    ("row12-espn", _seed_espn_credential, lambda e: _espn_claim(e), 409,
+     "platform_identity_in_use", None,
+     "This ESPN login is already connected to a Fleeced account. Sign in "
+     "the way you did before, or email fleecedapp@gmail.com if that "
+     "wasn’t you."),
+    ("row12-mfl", _seed_mfl_credential, lambda e: _mfl_claim(e), 409,
+     "platform_identity_in_use", None,
+     "This MFL login is already connected to a Fleeced account. Sign in "
+     "the way you did before, or email fleecedapp@gmail.com if that "
+     "wasn’t you."),
+    ("row13-too-many", _lock_mfl_subject, lambda e: _mfl_claim(e), 429,
+     "too_many_attempts", None,
+     "Too many sign-in attempts. Try again in a few minutes."),
+    ("row14-internal",
+     lambda e: patch.object(server._accounts, "find_or_create_account",
+                            _raise),
+     lambda e: _espn_claim(e), 500, "internal_error", None,
+     "Sign-in didn’t go through. Try again in a few minutes."),
+    ("row14-session-build",
+     lambda e: patch.object(server, "_account_build_session", _raise),
+     lambda e: _mfl_claim(e), 500, "session_build_failed", None,
+     "Sign-in didn’t go through. Try again in a few minutes."),
+]
+
+
+@pytest.mark.parametrize(
+    "setup, send, status, error, reason, message",
+    [c[1:] for c in _COPY_CASES], ids=[c[0] for c in _COPY_CASES])
+def test_signin_refusal_copy_is_the_final_set_verbatim(
+        env, setup, send, status, error, reason, message):
+    ctx = setup(env) if setup else None
+    if hasattr(ctx, "__enter__"):
+        with ctx:
+            r = send(env)
+    else:
+        r = send(env)
+    assert r.status_code == status, r.get_data(as_text=True)
+    expected = {"error": error, "message": message}
+    if reason:
+        expected["reason"] = reason
+    assert r.get_json() == expected
+
+
+def test_link_routes_and_previews_keep_their_own_copy(env):
+    """The sign-in copy is mint-only. /api/espn/link, the entry preview and
+    the MFL routes keep _espn_error_payload / _platform_error_payload /
+    _ESPN_WRONG_ACCOUNT_MSG byte-for-byte."""
+    espn_auth = ("ESPN wouldn't share this league — it's private or the "
+                 "saved cookies expired. Paste fresh espn_s2 + SWID cookies "
+                 "to continue.")
+    mfl_down = "Couldn't reach MFL — try again shortly."
+    assert server._ESPN_WRONG_ACCOUNT_MSG == (
+        "That ESPN account can't open your linked league, so nothing was "
+        "saved. Sign in with the ESPN account that owns your team.")
+    # ESPN: entry preview + /api/espn/link on a private league, no cookies.
+    r = _post(env, platform="espn", espn_league_id=ESPN_LEAGUE)
+    assert r.status_code == 403
+    assert r.get_json() == {"error": "espn_auth_required",
+                            "message": espn_auth}
+    token = _mfl_claim(env).get_json()["session_token"]
+    r = env.client.post("/api/espn/link",
+                        json={"espn_league_id": ESPN_LEAGUE},
+                        headers={"X-Session-Token": token})
+    assert r.status_code == 403
+    assert r.get_json() == {"error": "espn_auth_required",
+                            "message": espn_auth}
+    # MFL: entry preview, the auth_leagues action and /api/mfl/link.
+    with _mfl_down(env, "fetch_league_bundle"):
+        r = _post(env, platform="mfl", mfl_league_id=MFL_LEAGUE, year=2026)
+        assert (r.status_code, r.get_json()) == (
+            502, {"error": "mfl_unavailable", "message": mfl_down})
+        r = env.client.post("/api/mfl/link",
+                            json={"mfl_league_id": MFL_LEAGUE, "year": 2026},
+                            headers={"X-Session-Token": token})
+        assert (r.status_code, r.get_json()) == (
+            502, {"error": "mfl_unavailable", "message": mfl_down})
+    with _mfl_down(env, "login"):
+        r = _post(env, platform="mfl", action="auth_leagues",
+                  username="MattM", password="hunter2")
+        assert (r.status_code, r.get_json()) == (
+            502, {"error": "mfl_unavailable", "message": mfl_down})

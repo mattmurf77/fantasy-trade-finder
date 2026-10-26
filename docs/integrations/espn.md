@@ -384,7 +384,7 @@ makes **three** reads of the same §1.1 URL (`_espn_import_payload` +
 Then the claimed team's `owner_swid` must equal the pair's SWID (else
 `espn_bad_credentials` / `wrong_account` — the message names the team this
 login owns in the league when it owns one, which is safe only because all
-three reads already succeeded; otherwise the #321 copy. An ownerless team →
+three reads already succeeded; otherwise the sign-in's own not-the-owner line, with the link route's #321 copy left untouched. Every sign-in refusal message is the final copy set; see the scope block. An ownerless team →
 `proof_unavailable` / `espn_ownerless_team`). On reads 2 and 3, only a clean
 401/403 counts as auth-required: a 5xx, ESPN's own 429, any other status, a
 timeout or transport error, or a non-JSON 200 fails **closed** → 403
