@@ -465,6 +465,7 @@ is new work on every serve path, not just a constraint on a faster one.
   - the card on screen is never silently rewritten. If it became invalid it is withdrawn with an
     explanation, and if it is still valid it stays where it is;
   - historical likes and passes keep their original terms (`research-plan.md:70`).
+  - **At launch (W-AC-L5):** I-1 runs log-only (`trade_i1_mode` = 1), so withdrawal on display isn't active. I-2 blocks **sends**, with a readable message in the send alert; likes aren't blocked at launch (AC-6b post-launch). In-place withdrawal applies when strict mode lands.
 - **Exception 1, ownership:** a card that fails the ownership invariant is never shown, at any
   staleness. Filtering is allowed; "show and fix later" is not. Speed never outranks "never offer
   an asset you no longer own".
@@ -472,6 +473,7 @@ is new work on every serve path, not just a constraint on a faster one.
     **Superseded by head-product P40, 2026-10-24 for the viewer's roster:** AC-L3 governs. There is no refetch on
     the search tap or the first-page serve; the §5.5 U2 fallback applies instead.
   - What stays: I-1 and I-2 hold, and the first-page request makes no platform call (AC-L3).
+  - **At launch (W-AC-L5):** I-1 runs log-only (`trade_i1_mode` = 1), so withdrawal on display isn't active. I-2 blocks **sends**, with a readable message in the send alert; likes aren't blocked at launch (AC-6b post-launch). In-place withdrawal applies when strict mode lands.
 - **Exception 2, wrong math:** if the served model or config version, or the league's scoring or
   roster settings, changed since the deck was built, every card's valuation is wrong. Block: generate
   fresh, show the progress state, and count the tap as a gate miss.
@@ -491,6 +493,11 @@ is new work on every serve path, not just a constraint on a faster one.
 - **I-1 Ownership.** No card is displayed with an asset the stated side no longer owns, per the
   freshest roster the system holds at display time. For the viewer's own roster, that roster is
   never older than the §5.1 bound.
+  - **The display invariant is waived at launch (W-AC-L5); strict mode follows post-launch.** The
+    ownership filter (S0, #367) runs **log-only** (`trade_i1_mode` = 1), so a card with a moved
+    asset can be shown. **At launch I-2 covers sends only**, with a readable message in the send
+    alert; likes (AC-6b) and the on-card message follow after launch (head-product, 2026-10-26; decision
+    record: W-AC-L5 in Decisions).
 - **I-2 Action-time revalidation**, split by action (platforms-pm R2).
 
   **Today this guard is incomplete.**
@@ -538,17 +545,21 @@ is new work on every serve path, not just a constraint on a faster one.
     - Name the moved asset or assets, with `detail` equal to `message`. Fielded builds render
       `detail` in their catch-all.
     - Sleeper reports the block through `sleeper_send_failed.error_code` (§4.6).
-  - **A like that would create a match** (it writes nothing to a platform). Check it against the
+  - **A like that would create a match** (it writes nothing to a platform). **At launch
+    (head-product, 2026-10-26) likes aren't blocked:** a like on a stale card can still record and create a
+    match, and the send is blocked at the core. The rest of this bullet applies post-launch
+    (AC-6b). Check it against the
     freshest roster held, within the §5.1 viewer and partner bounds, and refetch if past the bound.
     No live platform read per like: ESPN and MFL would need the viewer's credentials for every like
     (platforms-pm R2).
 
   **When the asset has moved** (trades-pm decision, 2026-10-15, on ux-lead F-7):
-  - **Like:** the like is **not** recorded and no match is created.
+  - **Like (post-launch, AC-6b; head-product, 2026-10-26):** the like is **not** recorded and no match is
+    created. At launch it records.
     - The card is withdrawn in place (§5.4, the withdrawn card), with the reason.
     - Its disposition is set so it isn't re-served (I-3).
     - D-170's "the ✓ always records the like" is scoped to the calculator queue, which is unchanged.
-  - **Send:** blocked with the platforms-pm R4 refusal contract and copy, **on the card**, with a next step. It never
+  - **Send:** blocked with the platforms-pm R4 refusal contract and copy, **on the card**, with a next step. **At launch (head-product, 2026-10-26):** the server returns 422 `asset_not_owned` / `counterparty_asset_not_owned` with a readable `detail`, which the 1.22.0 send buttons show in an **alert** through their catch-all branch (platforms-eng audit, `docs/plans/org-bringup/reports/platforms-eng.md` § "I-2 status"). The on-card placement follows after launch. It never
     reports success, never leaves the controls dead, and never silently loses the user's choice
     (ux-lead F-7).
   - **Dependency:** `NEXT.md` 0f (the Sleeper propose route's `isdigit()` gate, the G-030 trap) lands
@@ -601,6 +612,11 @@ The **exact slot** is open as **Decision D11**: design-lead proposes a trailing 
 header row, and ux-lead proposes the progress-strip slot. Both are settled jointly before any UI
 build.
 
+**At launch (W-AC-L5),** withdrawal triggered by I-1 at display isn't active, because the filter
+is log-only. The spec below applies when strict mode lands. The withdrawal that follows an
+**I-2-blocked like** (§5.3) is action-time and **also post-launch**, since likes aren't blocked at launch
+(head-product, 2026-10-26).
+
 **The withdrawn fronted card** (trades-pm decision, 2026-10-15: ux-lead F-4's structure with
 design-lead 4's treatment; design-lead owns the visual spec):
 - It keeps its slot and its terms, visible but dimmed. It is never silently removed.
@@ -612,7 +628,7 @@ design-lead 4's treatment; design-lead owns the visual spec):
   until the user acts.
 - If a guide step is spotlighting that card (`mobile/tests/check-guide-spotlight-tracking.js`),
   onboarding-pm says how the guide continues (ux-lead F-4).
-- The same withdrawal applies to a like blocked under I-2 (trades-pm decision 3, §5.3).
+- The same withdrawal applies to a like blocked under I-2 (trades-pm decision 3, §5.3). That is post-launch: likes aren't blocked at launch (head-product, 2026-10-26).
 
 **Refresh failed** (design-lead 3 and 5):
 - It says the deck may be out of date and offers Retry. It reuses the Banner construction (ink-2,
@@ -659,6 +675,7 @@ is accepted (design-lead 3).
     is within the §5.1 bounds when the user taps.
   - The hard rule holds (I-1, I-2): a card is never shown whose assets either side no longer owns.
     If a background check invalidates a visible card, it is **withdrawn in place** (§5.4).
+    - **At launch (W-AC-L5):** I-1 runs log-only (`trade_i1_mode` = 1), so withdrawal on display isn't active. I-2 blocks **sends**, with a readable message in the send alert; likes aren't blocked at launch (AC-6b post-launch). In-place withdrawal applies when strict mode lands.
   - The quiet "Updating" state appears only while a background refresh runs, and never blocks
     Like/Pass (§5.4).
   - **A roster move FTF completes** (the #351 add/drop; **K-F5 activates when #351 D1 ships; not a launch gate**, because #351's
@@ -685,8 +702,12 @@ is accepted (design-lead 3).
     path; the tap never awaits it**. If the refresh shows a roster change, affected cards are
     withdrawn in place (§5.4) **at the client's next whole-deck response or focus/revalidation,
     not instantly**, and the next page is built from the fresh roster.
+    - **At launch (W-AC-L5),** the kick still refreshes the roster, but its withdrawal effect
+      waits for strict mode: with I-1 log-only, the affected card isn't withdrawn and I-2 blocks
+      actions on it.
     - **Until the withdrawal lands,** the fronted card stays visible, but **I-2 blocks any action
-      on it** (like, match, send). That is the same as a partner's roster move today.
+      on it** (like, match, send). That is the same as a partner's roster move today. **At launch
+      (head-product, 2026-10-26) that means sends only, via the send alert; likes aren't blocked.**
     - **Why option (a)** (head-product, 2026-10-24, picking head-eng's option): Pass A withdraws
       held cards only on whole-deck responses (`mobile/src/utils/tradePages.ts:52-59` (`isWholeDeck`) and `:87-111` (`mergeDeckPage`), on `feat/trades-200ms-mobile` @ `e01c7831`). The client asks only at the
       prefetch threshold or on focus/revalidation. There is **no client change and no API change
@@ -805,9 +826,9 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 |---|---|---|---|
 | AC-L1 | **p95 ≤ 200 ms** from the tap on a search-starting control (table A, plus table B if D10 ships) to the first frame where a real card is ≥ 50% visible with Like and Pass enabled (the §4.2 clock). Measured by client telemetry on a TestFlight build. Cells: Wi-Fi and cellular × first tap and repeat tap. n ≥ 40 per cell, from at least 2 devices including the operator's. **A device-held first card counts** if it meets U2: within the freshness bounds, passing I-2, and withdrawn in place if invalidated (head-product P32). **Measurement terms (analytics-lead, launch, T1–T6):** <br>**T1:** R2 fires at exactly this frame. <br>**T2:** p95 is taken over R2 ∪ R2b, one per `search_id`, and every R2b (timeout, error, empty, abandoned) counts as above 200 ms. <br>**T3:** `cold_launch` is its own row and is not joined to first tap; AC-L7 reads `cold_launch` for accounts created that day. <br>**T4:** if the app leaves `active` between tap and card, the search ends as R2b `abandoned`, never a long R2. <br>**T5:** the AC-L1 query runs **with tester devices included** (the default `device_exclusion` would strip them and return n ≈ 0). <br>**T6:** nearest-rank p95 (the 38th-fastest at n = 40) with a 90% order-statistic CI. A point p95 ≤ 200 ms whose CI upper end is > 200 ms reads "pass, not robust", so collect more before calling it. <br>**T7** (events contract): `entry_point=prefs_changed_strip` and `team_review` are excluded from the cells and reported separately. <br>`network_type` `offline` and `unknown` stay out of the cells. Distinct `device_id` per cell proves ≥ 2 devices | **The proof is the scripted two-device session in §9.6** (organic volume is too low; §6). A: R1, R2 and R2b with the `network_type` prop, read by analytics-lead under T1–T6. Cross-check: the §9.5 readout per tap. Organic telemetry after launch is monitoring, not the gate | **Supersedes AC-3's threshold and cells** |
 | AC-L2 | No animated push or transition on the Find a trade path (U1), decided per entry point (ux-lead, launch; §4.7): an instant route (`animation: 'none'`) for the canvas, D10, hand-off and deep-link entries, and in place for in-deck searches. Back from the deck is instant too. No motion on the deck at all, including no on-load stagger (design-lead's deck exemption) | Code-walk plus a guard (`check-trade-first-card.js`: `animation: 'none'` on every search-starting route, no transition on the in-place reveal, no stagger on the deck). TF step 1: zero transition frames | **Supersedes AC-2b.** Its "short fade" option is withdrawn |
-| AC-L3 | No live Sleeper or platform call on the tap path. The background floor's launch triggers are session start, app foreground (session-init, 60 s throttle) and **a tap past bound as a non-blocking kick** (head-product P41, 2026-10-24). Trades focus is a post-launch candidate (head-product, 2026-10-25): enqueued off the critical path and never awaited, so the tap's critical path still makes no platform call | Code-walk, plus the server trace for the first-page request (the kick's refresh appears as a separate, later background call, never inside the first-page request), plus the §9.2 kick test | **New.** It strengthens platforms-pm R7. AC-L3 governs over §5.2 exception 1 (head-product P40, 2026-10-24): the §5.5 U2 fallback applies to the viewer's roster, and I-6's lineup lookup moves to the background floor |
+| AC-L3 | No live Sleeper or platform call on the tap path. The background floor's launch triggers are session start, app foreground (session-init, 60 s throttle) and **a tap past bound as a non-blocking kick** (head-product P41, 2026-10-24). Trades focus is a post-launch candidate (head-product, 2026-10-25): enqueued off the critical path and never awaited, so the tap's critical path still makes no platform call. **At launch (W-AC-L5)** the kick's withdrawal effect waits for strict mode; I-2 blocks sends (via the send alert), and likes aren't blocked at launch | Code-walk, plus the server trace for the first-page request (the kick's refresh appears as a separate, later background call, never inside the first-page request), plus the §9.2 kick test | **New.** It strengthens platforms-pm R7. AC-L3 governs over §5.2 exception 1 (head-product P40, 2026-10-24): the §5.5 U2 fallback applies to the viewer's roster, and I-6's lineup lookup moves to the background floor |
 | AC-L4 | The next page is always ready: across all test sessions, **zero** page ends are reached without the next page already in the deck. There is no "Finding more" card in the build. The prefetch threshold is in §4.7. ux-lead's state table (§4.7) defines the outcomes: an online fetch failure at a page end (row 3b) **fails** AC-L4; offline at a page end (row 3a) is reported separately and doesn't. The P30 end card shows only when every candidate is seen and **never while a page is pending**, with no Like or Pass | G: no "Finding more" component or copy on the Find a trade path; the page N+2 request starts when page N is fronted; the P30 card never renders while a page is pending, and renders no Like/Pass. A: `deck_buffer_empty` (events contract; any occurrence is a miss). TF: the U3 three-page run and the P30 step | **New; supersedes AC-13** (strengthened) |
-| AC-L5 | Zero cards shown with an asset either side no longer owns (I-1 at display, I-2 at action). **Including after a roster move FTF itself completes** (the #351 add/drop, K-F5): the viewer-roster refresh runs immediately, and affected cards are withdrawn in place before they are displayed or acted on again | T: the roster-change fixture, plus a **backend fixture where an FTF add/drop completes and the card with the dropped player is withdrawn** (K-F5 parts activates when #351 D1 ships; not a launch gate). TF: the U2 roster-change run (steps 11, 12 and 18) and the K-F5 step (L4b, activates when #351 D1 ships; not a launch gate) | **Same as AC-5** for display; AC-6a/6b cover actions. The K-F5 fixture is new |
+| AC-L5 | **Waiver W-AC-L5 (operator, 2026-10-26).** The **display half (I-1 at display) is waived at launch:** the ownership filter runs log-only (`trade_i1_mode` = 1), so a card with a moved asset can be shown. **The action half (I-2) holds:** **sends** on a moved asset are blocked at action time, with a readable message in the send alert. Likes (AC-6b) and the on-card message (AC-6a placement) follow after launch. **The full AC returns when strict mode ships.** Full criterion: zero cards shown with an asset either side no longer owns (I-1 at display, I-2 at action). **Including after a roster move FTF itself completes** (the #351 add/drop, K-F5): the viewer-roster refresh runs immediately, and affected cards are withdrawn in place before they are displayed or acted on again | T: the roster-change fixture, plus a **backend fixture where an FTF add/drop completes and the card with the dropped player is withdrawn** (K-F5 parts activates when #351 D1 ships; not a launch gate). TF: the U2 roster-change run (steps 11, 12 and 18) and the K-F5 step (L4b, activates when #351 D1 ships; not a launch gate) | **Same as AC-5** for display; AC-6a/6b cover actions. The K-F5 fixture is new |
 | AC-L6 | Quality parity: first-page cards pass `deck.quality_filters`; Calibration integrity holds per D12 | As AC-9a to AC-9e | **Same as AC-9a to AC-9e and D12.** No new test |
 | AC-L7 | A new account's first Find a trade after onboarding meets AC-L1 (U5) | A: a new-account first-tap cell. TF: the U5 fresh-account run | **New.** D2 decided in part |
 | AC-L8 | Storage: the first-page artifact and evidence writes fit the P23 byte budget and the DB capacity plan. Unseen candidates follow DEC-2 as ADR-025: packed evidence, with narrow rows only as the fallback (operator-approved 2026-10-20) | As AC-11 and AC-11b, plus Q8 table sizes before and after | **Same as AC-11 and AC-11b (P23), plus DEC-2 as ADR-025** (packed evidence; budget in `scope-eng-200ms.md` §7) |
@@ -822,11 +843,11 @@ MUSTs. Each row says how it relates to the existing criteria in §8.2, so nothin
 | AC-2b | **Superseded by AC-L2** (2026-10-20); the "short fade" option is withdrawn. Original text: **The push can't spend the budget** (ux-lead F-1). Search-starting pushes keep `push` and the back stack (D-171), but run with no animation or with a short fade that design-lead specs. | Code-walk names the animation option on every search-starting push. TF step 1 counts tap → transition-end frames separately from tap → card; ux-lead's target is ≤ 6 frames (≈ 100 ms) |
 | AC-3 | **Superseded by AC-L1** (2026-10-20): p95 ≤ 200 ms, Wi-Fi and cellular × first and repeat tap, n ≥ 40 per cell from at least 2 devices including the operator's. The earlier 250 ms threshold is withdrawn. | See AC-L1. |
 | AC-4 | Cold-launch, pinned/targeted and fair-sweep cells are reported with the same percentiles. They are gated only per Decisions D1/D2. | A. |
-| AC-5 | I-1: no displayed card contains an asset its stated side doesn't own per the freshest roster held. A roster change between prepare and display, or before a deck regains focus, withdraws or filters the card before display. | T: backend test on every serve path (fresh, cached, joined, prepared) that mutates a roster after build and asserts the card is absent. TF steps 11, 12 and 18. |
-| AC-6a | **Sends** (platforms-pm R1–R5, R8). Every send on every surface (deck, match/awaiting card, calculator, team overhaul), to Sleeper, ESPN or MFL, checks ownership against the **live** platform roster at roster level (co-owners pass). MFL also checks picks; ESPN picks stay hard-blocked. A moved asset is refused with `asset_not_owned` / `counterparty_asset_not_owned` and their copy (`detail` = `message`), on the card. A failed roster read blocks the send, which is never sent unchecked. | T: backend route tests per platform with moved-asset fixtures and with read-failure fixtures (Sleeper 1010, ESPN fetch failure, MFL host), plus a file:line code-walk per path (platforms-pm evidence plan). TF step 13, in an operator-named test league only |
-| AC-6b | **Likes** (platforms-pm R2; trades-pm decision 3). A like that would create a match on a card whose asset has moved, per the freshest roster held within the §5.1 bounds (refetched if past the bound), records **no like and no match**. The card is withdrawn in place with the reason (§5.4), and its disposition is set so it isn't re-served. The calculator queue (D-170) is unchanged. | T: route tests asserting no `trade_decisions` like row, no match, a withdrawal payload and the disposition set; a regression test that the calculator queue still records. TF step 13 |
-| AC-7 | §5.1 bounds are enforced, at display and when a deck regains focus (ux-lead F-2). For each input, a deck past its bound triggers the §5.2 behavior: serve-and-refresh, block (exception 2), or, for the viewer's roster, **the §5.5 U2 fallback** (head-product P40, 2026-10-24). Under that fallback, if the floor has failed and the roster is past its bound at tap, those cards aren't shown, the honest gate-miss state shows while the floor refreshes, and the tap counts as a gate miss. **That is distinct from a healthy floor past bound,** where the tap is served and a non-blocking kick refreshes the roster (P41). Cards the kick invalidates are withdrawn at the next whole-deck response or focus/revalidation, and I-2 blocks actions on them until then (option (a)). A deck within bounds serves with no freshness UI. Roster refetches happen only on user action; nothing is scheduled or headless for Sleeper (platforms-pm R7). | T: one test per input row, the §9.2 kick test (withdrawal on the next whole-deck response; I-2 blocks actions before it), a focus-regain test, a block test for a model/config change and one for a league-settings change, and a guard that no scheduled job reads Sleeper rosters. TF steps 10, 15 and 16. |
-| AC-8 | §5.4 "updating" and withdrawn states. "Updating" shows only when serving past a bound. It meets the seven shared constraints: no layout shift, no interrupt claim, its own copy, a maximum duration then refresh-failed, controls enabled, no highlight accent, built from existing parts. The withdrawn fronted card keeps dimmed terms, replaces Like/Pass with the reason line plus "Next trade", and changes only after a swipe settles. | G: the state is driven by `freshness_state` from the payload; the updating component calls no `useInterruptSlot` and renders no Toast; the strings contain no "Searching…" and no seconds figure. TF steps 10–12 and 16–18. |
+| AC-5 | **Display half waived at launch (W-AC-L5; strict post-launch).** I-1: no displayed card contains an asset its stated side doesn't own per the freshest roster held. A roster change between prepare and display, or before a deck regains focus, withdraws or filters the card before display. | T: backend test on every serve path (fresh, cached, joined, prepared) that mutates a roster after build and asserts the card is absent. TF steps 11, 12 and 18. |
+| AC-6a | **Sends** (platforms-pm R1–R5, R8). **At launch (head-product, 2026-10-26):** sends on a moved asset are blocked at action time, with a readable message in the **send alert** (the 1.22.0 buttons' catch-all shows the server's 422 `detail`). The on-card placement follows after launch. I-2 isn't live today; platforms-eng is adding the live player-ownership check to the Sleeper, ESPN and MFL propose cores plus overhaul and the calculator queue, server-only, target about 2026-10-31 (`docs/plans/org-bringup/reports/platforms-eng.md` § "I-2 status"). Every send on every surface (deck, match/awaiting card, calculator, team overhaul), to Sleeper, ESPN or MFL, checks ownership against the **live** platform roster at roster level (co-owners pass). MFL also checks picks; ESPN picks stay hard-blocked. A moved asset is refused with `asset_not_owned` / `counterparty_asset_not_owned` and their copy (`detail` = `message`), on the card. A failed roster read blocks the send, which is never sent unchecked. | T: backend route tests per platform with moved-asset fixtures and with read-failure fixtures (Sleeper 1010, ESPN fetch failure, MFL host), plus a file:line code-walk per path (platforms-pm evidence plan). TF step 13, in an operator-named test league only |
+| AC-6b | **Likes — post-launch (head-product, 2026-10-26).** At launch a like on a stale card can still record and create a match; the send is blocked at the core (AC-6a). The criterion below applies after launch. (platforms-pm R2; trades-pm decision 3.) A like that would create a match on a card whose asset has moved, per the freshest roster held within the §5.1 bounds (refetched if past the bound), records **no like and no match**. The card is withdrawn in place with the reason (§5.4), and its disposition is set so it isn't re-served. The calculator queue (D-170) is unchanged. | T: route tests asserting no `trade_decisions` like row, no match, a withdrawal payload and the disposition set; a regression test that the calculator queue still records. TF step 13 |
+| AC-7 | §5.1 bounds are enforced, at display and when a deck regains focus (ux-lead F-2). For each input, a deck past its bound triggers the §5.2 behavior: serve-and-refresh, block (exception 2), or, for the viewer's roster, **the §5.5 U2 fallback** (head-product P40, 2026-10-24). Under that fallback, if the floor has failed and the roster is past its bound at tap, those cards aren't shown, the honest gate-miss state shows while the floor refreshes, and the tap counts as a gate miss. **That is distinct from a healthy floor past bound,** where the tap is served and a non-blocking kick refreshes the roster (P41). Cards the kick invalidates are withdrawn at the next whole-deck response or focus/revalidation, and I-2 blocks actions on them until then (option (a); at launch, sends only, via the send alert). A deck within bounds serves with no freshness UI. Roster refetches happen only on user action; nothing is scheduled or headless for Sleeper (platforms-pm R7). | T: one test per input row, the §9.2 kick test (withdrawal on the next whole-deck response; I-2 blocks a send before it), a focus-regain test, a block test for a model/config change and one for a league-settings change, and a guard that no scheduled job reads Sleeper rosters. TF steps 10, 15 and 16. |
+| AC-8 | §5.4 "updating" and withdrawn states. **At launch (W-AC-L5) the I-1-driven withdrawal isn't active; that part is checked when strict mode lands.** "Updating" shows only when serving past a bound. It meets the seven shared constraints: no layout shift, no interrupt claim, its own copy, a maximum duration then refresh-failed, controls enabled, no highlight accent, built from existing parts. The withdrawn fronted card keeps dimmed terms, replaces Like/Pass with the reason line plus "Next trade", and changes only after a swipe settles. | G: the state is driven by `freshness_state` from the payload; the updating component calls no `useInterruptSlot` and renders no Toast; the strings contain no "Searching…" and no seconds figure. TF steps 10–12 and 16–18. |
 | AC-8b | **Gate-miss wait** (ux-lead F-5). It names its real reason, makes no timing promise, and ends: on timeout it shows the error with Retry, and Back stays usable. The false "within a few seconds" copy is gone. | G: a string check on the placeholder, plus a recovery guard in the pattern of `check-win-now-recovery.js`. TF step 5 |
 | AC-8c | **Offline** (ux-lead F-6). Inside the bounds, cards may show with the refresh-failed state at once, and a match-creating like or a send fails visibly and keeps the choice. Past the viewer's roster bound, the offline state shows, with no cards. | G: a pattern of `check-swipe-failure-recovery.js` for the offline like/send. TF steps 14 and 17 |
 
@@ -897,9 +918,14 @@ them, models-lead's sign-off follows the two-line packet route in R.a (ii).
     withdrawn in place on the **next whole-deck response** (or a focus/revalidation), and the next
     page is built from the fresh roster (option (a));
   - **before that response, an action on the stale fronted card (like, match, send) is blocked by
-    I-2** with the refusal message.
+    I-2** with the refusal message. At launch that is the **send** only (a 422 with a readable
+    `detail`); the like assertion is post-launch (AC-6b).
   - A paired case keeps the withhold rule: a failed floor past bound gives the gate-miss state and
     no cards.
+  - **Run the withdrawal assertions in strict mode** (`trade_i1_mode` = 2). In **log-only mode** (1,
+    the launch value under W-AC-L5), assert that the card is served, that an `[i1]` would-drop line
+    is logged, and that I-2 blocks a **send** on it (a 422 `asset_not_owned` /
+    `counterparty_asset_not_owned` with a readable `detail`).
 - **Action-time revalidation:** per platform write path, including team-overhaul sends, with
   moved-asset and read-failure fixtures (AC-6a); and likes on moved-asset cards (AC-6b).
 - **Quality:** filter parity at display, with a roster/value mutation between prepare and display
@@ -982,19 +1008,25 @@ and skip the second (canvas) tap in steps 1 and 3.
 11. **Roster freshness, yours:** in the Sleeper app, drop a bench player of yours who appears in your
     offers (pick one you can re-add, or use a test league). Return to the app within 2 minutes and
     tap canvas Find a Trade. **Expect:** no displayed card includes that player, now or after the
-    refresh.
+    refresh. **At launch (W-AC-L5):** the card may still show. Expect **Send** on it to be blocked,
+    with the `detail` text in the send alert. A Like may still record, because AC-6b is
+    post-launch.
 12. **Roster freshness, partner [test league]** (or a cooperating leaguemate): the partner drops or
     trades away a player your deck offered from them. **Expect:** no card shows that player as
-    theirs within the §5.1 bound.
+    theirs within the §5.1 bound. **At launch (W-AC-L5):** it may show. A Send on it is blocked by
+    I-2, with the `detail` in the send alert; likes aren't blocked at launch.
 13. **Blocked actions [test league the operator names]** (platforms-pm evidence plan; AC-6a, AC-6b).
     The operator approves the attempt when it runs and cancels any proposal that lands. Start with
     Sleeper; add ESPN and MFL only where a test league exists. Find a card containing a player who
     moved after the card was built (from step 11 or 12, or a test-league setup).
-    - Tap **Like** where it would create a match. **Expect:** no like and no match. The card is
-      withdrawn in place with "<player> is no longer on <team>" and "Next trade".
-    - On a second such card, tap **Send**. **Expect:** blocked on the card with the refusal copy
-      ("You no longer own X" or "X no longer owns Y"), naming the platform and saying nothing was
-      sent, with a next step. Nothing reaches the platform.
+    - **Post-launch step (AC-6b):** tap **Like** where it would create a match. **Expect:** no like
+      and no match. The card is withdrawn in place with "<player> is no longer on <team>" and
+      "Next trade". **At launch, likes aren't blocked** (head-product, 2026-10-26), so skip this step for the
+      launch run.
+    - Tap **Send**. **Expect at launch:** an **alert** with the server's readable `detail` (the
+      refusal copy, e.g. "You no longer own X" or "X no longer owns Y"), and nothing reaches the
+      platform. **Post-launch (AC-6a placement):** the message shows on the card, names the
+      platform, says nothing was sent, and offers a next step.
 14. With no cards loaded, turn on Airplane Mode and tap canvas Find a Trade. **Expect:**
     - past the viewer's roster bound: the offline state with no cards;
     - inside the bounds: cards may show with the refresh-failed state at once;
@@ -1012,7 +1044,9 @@ and skip the second (canvas) tap in steps 1 and 3.
     - a like that would match fails visibly and keeps the choice (ux-lead F-6).
 18. **[test league]** The partner trades away a player on your fronted card while it's on screen.
     **Expect:** the card stays, dimmed, with the reason line and "Next trade". Nothing slides in
-    mid-swipe (ux-lead F-4).
+    mid-swipe (ux-lead F-4). **At launch (W-AC-L5):** no withdrawal. A Send on it is blocked, with the
+    `detail` in the send alert; likes aren't blocked. Run the withdrawal check once strict mode
+    lands.
 19. **[first-run, fresh install]** If D10 ships: from the Trades landing, the guide's canvas Find a
     Trade step still appears, and its adoption event fires once.
 20. Log the outcomes in `living-memory/TEST_LEDGER.md`: times, misses, transition frames, and any
@@ -1054,7 +1088,9 @@ authority):
   appear (AC-L7). Record it if it does.
 - **L4. U2 roster-change run.** As steps 11 and 12, with the readout open. **Expect:** no card with a
   moved asset, a withdrawn-in-place card if one was showing, and no platform call on the tap
-  (AC-L3, AC-L5).
+  (AC-L3, AC-L5). **At launch (W-AC-L5):** cards with the moved asset may show. A **send** on them
+  is blocked (the `detail` in the send alert), and a like may still record (AC-6b post-launch).
+  There's still no platform call on the tap.
 - **L4b. K-F5: a move FTF makes** (activates when #351 D1 ships; not a launch gate; #351's D1 add/drop is post-launch). From a deck showing a card that
   includes one of your bench players, use FTF's add/drop to drop that player. Return to the deck.
   **Expect:** that card is withdrawn in place, with the reason line, before you can act on it. No
@@ -1069,10 +1105,12 @@ authority):
 
   **Expect:**
   - the first card appears without waiting (the readout stays in the normal range);
-  - before the deck next fetches a page, **Like or Send on a card with the dropped player is blocked
-    with the I-2 message**;
+  - before the deck next fetches a page, **Send on a card with the dropped player is blocked**, with
+    the `detail` in the send alert. Likes aren't blocked at launch (AC-6b post-launch);
   - after the next page fetch (swipe to the prefetch point) or a focus change (switch tabs and
-    back), that card is withdrawn in place with the reason line, not instantly (option (a));
+    back), that card is withdrawn in place with the reason line, not instantly (option (a)).
+    **At launch (W-AC-L5)** this step waits for strict mode; until then the card stays and I-2
+    keeps blocking actions;
   - later pages never include that player (AC-L3, AC-L5).
 
 ### 9.5 The hidden ms readout (for the operator's device runs)
@@ -1381,7 +1419,8 @@ product-side summary; §15 lists where they differ from main.
 - **No animated push.** The ~350 ms transition alone breaks the budget (AC-L2, U1).
 - **On cellular, a device-held first page** ("Option 2") may be needed. Approach B in §10.1.
   **head-product P32:** a device-held first card counts toward 200 ms if it meets U2: within the
-  freshness bounds, passing I-2, and withdrawn in place if invalidated (AC-L1).
+  freshness bounds, passing I-2, and withdrawn in place if invalidated (AC-L1). At launch
+  (W-AC-L5), withdrawal waits for strict mode; I-2 blocks sends, via the send alert.
 
 The storage side (DEC-2 as ADR-025's packed evidence, and the P23 byte budget in `scope-eng-200ms.md` §7) is in §10.4 and AC-L8.
 
@@ -1424,7 +1463,8 @@ Review status as of 2026-10-15, folded in. The 2026-10-20 launch revision adds t
 - **The P41 `/generate` caller.** The hook is built and on main (`backend/roster_refresh.py:123`,
   #378), so the hook-slip risk is closed. What remains is the caller in trades-eng's server stack
   (`scope-eng-200ms.md:15-16`). If it misses the 2026-11-06 binary, the Q1 aging-roster gap stays
-  open at launch. I-2 still blocks actions on moved assets.
+  open at launch. I-2 still blocks sends on moved assets (via the send alert); likes aren't blocked
+  at launch.
 - ~~Background replenishment is paused~~ **Not a 200 ms ship gate (head-product, 2026-10-25).** It is #361's
   S3 deferral, returning after C2 and the self-renewal fix (`daily-tick-fix/scope.md:42,69-71`).
 - **Page-end misses** (AC-L4). With zero misses allowed, a slow page N+2 build under load or an
@@ -1450,7 +1490,7 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
 1. **Withdrawn fronted card:** ux-lead F-4's structure with design-lead 4's treatment (§5.4).
    design-lead owns the visual spec.
 2. **"Updating" placement:** the PRD pins the seven shared constraints (§5.4). The exact slot is D11.
-3. **Like on a moved asset:** no like recorded, no match created, the card withdrawn in place, and
+3. **Like on a moved asset** (post-launch, AC-6b; at launch likes aren't blocked, head-product, 2026-10-26): no like recorded, no match created, the card withdrawn in place, and
    the disposition set (I-3). D-170 stays scoped to the calculator queue. Sends are blocked on the
    card with platforms-pm R4's contract (§5.3, AC-6a, AC-6b).
 4. **D4:** serve-and-refresh stays the proposal, with design-lead and ux-lead support (F-3, F-4, F-6
@@ -1488,6 +1528,8 @@ head-product (2026-10-15): "Fold them in." These calls settle points the reviews
       the client's next whole-deck response or focus/revalidation, not instantly, and I-2 blocks
       actions on the stale fronted card until then. Pass A withdraws only on whole-deck responses
       (`mobile/src/utils/tradePages.ts:52-59` (`isWholeDeck`) and `:87-111` (`mergeDeckPage`), on `feat/trades-200ms-mobile` @ `e01c7831`). No client or API change for launch.
+    - **At launch (W-AC-L5),** I-1 is log-only, so the withdrawal effect waits for strict mode. I-2
+      blocks sends, via the send alert; likes aren't blocked at launch.
     - **Option (b)**, a `roster_refreshing` field plus one `/status` poll, is a first-update
       candidate (post-launch).
     - **Dependency:** P41 needs platforms-eng's `maybe_refresh_async` hook, due about 2026-11-01.
@@ -1575,6 +1617,7 @@ product requirement main doesn't yet meet, with the owner. Main's docs were not 
 | D12 | Calibration integrity before the round-3 read (2026-11-05): hold any fast path until then, or pin Calibration's current-arm sampling to the fresh path? | Either satisfies AC-9e (models-lead R.b). Impressions carry a serve-path tag in both cases. **Proposed:** pin the sampling to the fresh path if a fast path is ready before 2026-11-05; otherwise the date passes first. models-lead confirms; the operator decides. |
 | D13 | Remove the deck's "Find more trades" button once U3 ships? | **Adopted (trades-pm decision, 2026-10-20; accepted (head-product P33, 2026-10-20)).** Removed once U3 ships, because a "more" button that restarts the search is mislabelled when the deck never ends (ux-lead, launch). Retry stays only in the error and offline states. `trades.find-btn` leaves table A, TF step 2 checks that it's absent, and the §9.1 guard asserts it. |
 | D14 | P30 open items (raised by ux-lead and design-lead) | **Decided (trades-pm decision, 2026-10-20; accepted (head-product P33, 2026-10-20)):** <br>**(a)** (supersedes P30's "opens the targeting builder") "Adjust your search" (P36 copy) opens the deck's own preferences (fairness and filters), and the changed search runs in place. It's search-starting, measured under the §4 clock (AC-L1 cells). <br>**(b)** Keep D-171 ruling 4's end-of-deck tally on the P30 card as one chalk-dim line (design-lead places it); retiring it would amend an operator ruling. **Amended by head-product P36 (2026-10-23):** suppressed at 0 · 0 · 0. <br>**(c)** No third action and no notice: new candidates behind the P30 card appear on the next search. P30's copy and actions are unchanged. |
+| W-AC-L5 | **Waiver of AC-L5's display half at launch.** **Decided** | **Operator sign-off** (head-product's session, 2026-10-26, relayed by head-product): "I sign off on W-AC-L5: launch with the ownership filter in log-only mode, sends still blocked." <br>**Background (head-eng):** S0 (PR #367, still OPEN, head `bc25dd1d`) is the I-1 ownership filter at serve. QA strict mode served only 2 of 6 cards because of stale roster rows. Launch runs the filter **log-only**, and strict mode follows after launch, once C-b and the full stale-row fix land, on models-lead's sign-off. <br>**Conditions:** <br>(1) **sends** on a moved asset are blocked at action time, with a readable message in the send alert. Likes (AC-6b) and the on-card message (AC-6a placement) follow after launch. I-2 isn't live today on any platform (platforms-eng audit, `docs/plans/org-bringup/reports/platforms-eng.md` § "I-2 status"); <br>(1b) **I-2 (platforms-eng, server-side, target about 2026-10-31) must be live before the operator's 200 ms device run (§9.6);** <br>(2) analytics-lead reads the `[i1]` would-drop rate in launch week (2026-11-18 to 11-25, readout 11-26); <br>(3) strict mode follows after launch. <br>**Knob discrepancy (recorded, not resolved):** on #367 @ `bc25dd1d`, `backend/database.py:2971` seeds `trade_i1_mode` with **default 2.0 = strict** (1 = lenient, check and log and serve every card; 0 = off; a deploy-free knob). Launching log-only therefore needs `trade_i1_mode` = 1 set in prod `model_config` at or before launch, or the default changed. Owner: head-eng → release-lead/models-eng. <br>**Exit criteria:** strict mode (`trade_i1_mode` = 2) ships after C-b and the full stale-row fix land, with models-lead's sign-off, informed by the 11-26 would-drop readout. AC-L5 then returns in full. |
 
 ## Handoffs
 
@@ -1587,6 +1630,19 @@ product requirement main doesn't yet meet, with the owner. Main's docs were not 
   never a bare "Updating" (§15 item 12).
 - **Trades-focus floor trigger: closed for launch** (head-product, 2026-10-25: main's triggers cover it). It
   is a post-launch candidate, revisitable from R2b data (§15 item 10).
+- **W-AC-L5 (operator, 2026-10-26):**
+  - **platforms-eng (through head-eng):** I-2, server-side, target about 2026-10-31, **must be live
+    before the operator's 200 ms device run (§9.6).** It is a W-AC-L5 condition. Scope: the live
+    player-ownership check in the Sleeper, ESPN and MFL propose cores plus overhaul and the
+    calculator queue, returning 422 `asset_not_owned` / `counterparty_asset_not_owned` with a
+    readable `detail` (`docs/plans/org-bringup/reports/platforms-eng.md` § "I-2 status").
+  - **analytics-lead:** read the `[i1]` would-drop rate in launch week (2026-11-18 to 11-25), with
+    the readout on 2026-11-26.
+  - **models-lead (via head-bizops):** sign off on strict mode after C-b and the full stale-row fix
+    land.
+  - **head-eng → release-lead / models-eng:** set the `trade_i1_mode` launch value. #367 seeds a
+    default of 2.0 (strict) at `backend/database.py:2971` @ `bc25dd1d`, so log-only needs = 1 in
+    prod `model_config` at or before launch, or the default changed.
 - **analytics-lead + trades-eng (W3 finding):** 10 taps had no source, and 9 of them got no card
   (§6). Investigate it as an instrumentation or flow gap; this PRD doesn't diagnose it.
 - **head-eng (launch, through head-product):** the critical-path build plan for 200 ms against
