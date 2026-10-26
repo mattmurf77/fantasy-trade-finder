@@ -668,18 +668,23 @@ response. A gate miss holds the cursor (`cursor` echoes `K`, `total_ready`
 page row is read and decoded per poll.
 
 **Only a deck that is provably organic is ever rebased**: `D`'s job is in this
-server process with an organic page scope, or a stored row `D` built exists.
-Its scope (league, scoring format, `fairness_threshold`) is then `D`'s own, so
-an intent or other search that changes the session's fairness never moves it.
-Anything else is never rebased onto the organic deck:
+server process with an organic page scope, or a stored row `D` built exists,
+or `D`'s [lineage](data-dictionary.md#trade_deck_lineage) row (written with
+every page row, kept 24 h) names its scope. **A gone organic deck rebases
+across restarts; a gone non-organic deck 404s.** Its scope (league, scoring
+format, `fairness_threshold`) is then `D`'s own, so an intent or other search
+that changes the session's fairness never moves it. Anything else is never
+rebased onto the organic deck:
 - **A pinned, Specific Team (`opponent_user_id`), intent or other non-organic
   search** (`D` in this process without an organic page scope): its own job's
   page at `K`, exactly the `job_id` + `cursor` form (no `deck_id`, no
   `rebased`), with its own error passed through (a timeout, `inputs_changed`,
   a policy change). At its own end (complete, `K` at its last card), a gate
   miss holds the cursor, else `pool_exhausted: true` with `cards: []`.
-- **A deck that is gone** (not in this process, no stored row built by it, or
-  another user's): the legacy `404 {"error": "job not found"}`.
+- **A deck that is gone and was never organic** (not in this process, with no
+  page or lineage row of the requester's: a non-organic search never writes
+  one, and another user's deck isn't the requester's) or whose lineage is
+  older than 24 h: the legacy `404 {"error": "job not found"}`.
 
 For an organic `D`, the server resolves, in order:
 
