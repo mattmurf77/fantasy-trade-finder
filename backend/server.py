@@ -3765,7 +3765,8 @@ DECK_PIPELINE_VERSION = 2
 # - DECK_PIPELINE_IGNORED: what the listed functions reference but doesn't
 #   shape a deck, each with its reason.
 # A logic or constant change fails test_deck_pipeline_digest until
-# DECK_PIPELINE_VERSION is bumped and DECK_PIPELINE_DIGEST re-pinned. A listed
+# DECK_PIPELINE_VERSION is bumped and its digest pinned in DECK_PIPELINE_PINS
+# (a new row; an existing row never changes). A listed
 # function that references an unclassified server.py function or literal
 # constant fails the closure test until it's classified. models-eng reviews.
 DECK_PIPELINE_FUNCTIONS = (
@@ -3836,7 +3837,8 @@ DECK_PIPELINE_IGNORED = {
     # freshness captures and matches (the job cache's, not the deck's)
     "_capture_trade_execution": "captures the session for the worker",
     "_capture_trade_presentation": "freshness capture; its result is in engine_version",
-    "_capture_trade_significance": "freshness capture; its result is in engine_version",
+    "_capture_trade_significance": ("freshness capture; its knobs are in config_signature "
+                                    "and trade_significance.VERSION in the engine code hash"),
     "_trade_owner_model_matches": "freshness match",
     "_trade_significance_matches": "freshness match",
     "_trade_safety_signature": "freshness capture; its result is in engine_version",
@@ -3866,7 +3868,14 @@ DECK_PIPELINE_IGNORED = {
     "_pick_labels_by_id": "label copy only",
     "_seasons_phrase": "label copy only",
 }
-DECK_PIPELINE_DIGEST = "9e79b6087f6e1a42"
+# DECK_PIPELINE_VERSION -> its digest. Append-only: a bump adds a row and no
+# row is ever re-pinned in place (a re-pinned version would leave the pages
+# stored under it stamped current). test_deck_pipeline_digest holds a frozen
+# copy of these rows.
+DECK_PIPELINE_PINS = {
+    1: "38068a074677acaa",
+    2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
+}
 
 # The modules whose code decides what cards a deck holds or their order. Their
 # bytes are hashed into every page's engine_version (backend/-relative globs,
@@ -3876,6 +3885,7 @@ _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
     "power_rankings.py",          # value_core's lineup slots and optimal starters
+    "outlook/league_state.py",    # value core's standings
     "ranking_service.py", "pick_values.py", "pick_slots.py",
     "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
     # gates and filters on the candidate set
@@ -3889,6 +3899,14 @@ _ENGINE_CODE_MODULES = (
     # the card copy itself
     "trade_narrative.py",
 )
+# Excluded on purpose (models-eng, 2026-10-26):
+# - outlook/, except league_state.py: the Outlook feature. Value core's
+#   standings (_value_core_standings -> outlook.build_league_state, a thin
+#   wrapper in pipeline.py -> get_league_state_provider(platform).load) come
+#   from league_state.py alone; hashing the rest would cold every page and
+#   trigger MOD-M1 on edits that can't change a deck.
+# - trade_input_evidence.py: provenance with its own VERSION, never a model
+#   input; a row-format change bumps that VERSION.
 _engine_code_hash_value: str | None = None
 
 # The experiments whose variant changes a deck (experiments.py keys). A stored
@@ -4141,7 +4159,8 @@ def _job_page_eligible(job: dict) -> bool:
                 and not job.get("trade_intent") and not job.get("source")
                 and not job.get("presentation_exempt")
                 and job.get("roster_fp") is not None and job.get("values_snapshot_id") is not None
-                and job.get("request_signature") is not None and not ceiling)
+                and job.get("request_signature") is not None
+                and job.get("experiment_digest") is not None and not ceiling)
 
 
 def _trade_card_expiry(card) -> float | None:
@@ -4195,7 +4214,7 @@ def _store_trade_page(job_id: str) -> bool:
                     _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
                     job.get("presentation_capture")),
                 "config_signature": job["request_signature"],
-                "experiment_digest": _trade_experiment_digest(user_id), "deck_job_id": job_id,
+                "experiment_digest": job["experiment_digest"], "deck_job_id": job_id,
                 "built_at": _db.page_store_iso(built),
                 "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
                 "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
@@ -12365,6 +12384,20 @@ def _kickoff_trade_job(
                             context=execution_context, fairness=fairness_threshold, prefs=prefs_preload):
                         _deck_evidence_live(job_id)   # its runtime owns its evidence
                         return
+                # P1: the experiment assignment the deck is built under, read
+                # here at job start (the memo, on this worker thread) so the
+                # stored page never carries a variant that moved mid-build.
+                with _trade_jobs_lock:
+                    page_eligible = bool((_trade_jobs.get(job_id) or {}).get("page_scope"))
+                if page_eligible:
+                    try:
+                        digest = _trade_experiment_digest(user_id)
+                    except Exception:
+                        log.warning("trade-page %s: experiment digest failed", job_id, exc_info=True)
+                    else:
+                        with _trade_jobs_lock:
+                            if job_id in _trade_jobs:
+                                _trade_jobs[job_id]["experiment_digest"] = digest
                 _run_trade_job(*args, **kwargs)
                 # ADR-025 stage 1: seal or discard a deferred deck's evidence and
                 # write deliveries made while it ran (no evidence ⇒ no-op).
@@ -22426,6 +22459,72 @@ def _roster_id_for_owner(rosters, owner_id) -> int | None:
         return None
 
 
+# I-2 send-time refusal copy (final: marketing via head-bizops, accepted by
+# Product, 2026-10-26). A later swap is a change here and nowhere else.
+# Curly ’ throughout, like the shipped refusals. `{assets}` is either the named
+# list ("A", "A and B", "A, B and C", with no serial comma) or, when ANY
+# offending player has no name, the count subject below: a raw player id is
+# never shown. `{verb}` agrees with it ("is" / "are"). `{team}’s` takes ’s
+# even after a final s ("Chris’s").
+_I2_COPY_ASSET_NOT_OWNED = (
+    "{assets} {verb} no longer on your roster, so nothing was sent. Find a new trade.")
+_I2_COPY_COUNTERPARTY_NOT_OWNED = (
+    "{assets} {verb} no longer on {team}’s roster, so nothing was sent. Find a new trade.")
+_I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED = (
+    "{assets} {verb} no longer on the other manager’s roster, so nothing was sent. "
+    "Find a new trade.")
+_I2_COPY_ONE_UNNAMED_PLAYER = "A player in this trade"
+_I2_COPY_N_UNNAMED_PLAYERS = "{n} players in this trade"
+_I2_COPY_ROSTER_READ_FAILED = (
+    "Couldn’t confirm rosters with {platform} right now, so nothing was sent. "
+    "Try again in a moment.")
+
+
+def _roster_read_failed_copy(platform: str) -> str:
+    """I-2 / platforms-pm R3: the readable sentence for a send blocked because
+    the live roster read failed. `platform` is the display name ("Sleeper",
+    "MFL", "ESPN"); each core wraps it in its own error shape."""
+    return _I2_COPY_ROSTER_READ_FAILED.format(platform=platform)
+
+
+def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tuple[dict, int]:
+    """I-2 (trade-time-to-suggestion PRD §5.3, platforms-pm R4): the one
+    send-time refusal for an asset that a live roster read shows has moved.
+    Platform-neutral. The Sleeper core uses it now; the MFL and ESPN cores
+    adopt it in I-2 PRs 2 and 3.
+
+    `side` "give"    → 422 `asset_not_owned` (team overhaul's code)
+    `side` "receive" → 422 `counterparty_asset_not_owned`, naming the
+                       counterparty when `counterparty_name` is known
+    `assets` are the offending ids as sent, and stay in the body for the
+    client and analytics. `names` maps id → display name. The readable
+    `message` never shows a raw id: if any offending player has no name, it
+    counts them instead ("A player in this trade" / "2 players in this
+    trade"). `detail` == `message`, because fielded builds render `detail` in
+    their catch-all.
+    """
+    assets = [str(a) for a in assets]
+    labels = [(names or {}).get(a) for a in assets]
+    if all(labels):
+        labels = [str(n) for n in labels]
+        listed = labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+    elif len(assets) == 1:
+        listed = _I2_COPY_ONE_UNNAMED_PLAYER
+    else:
+        listed = _I2_COPY_N_UNNAMED_PLAYERS.format(n=len(assets))
+    verb = "is" if len(assets) == 1 else "are"
+    if side == "give":
+        code, msg = "asset_not_owned", _I2_COPY_ASSET_NOT_OWNED.format(assets=listed, verb=verb)
+    elif counterparty_name:
+        code = "counterparty_asset_not_owned"
+        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED.format(assets=listed, verb=verb,
+                                                     team=counterparty_name)
+    else:
+        code = "counterparty_asset_not_owned"
+        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED.format(assets=listed, verb=verb)
+    return {"error": code, "assets": assets, "message": msg, "detail": msg}, 422
+
+
 @app.route("/api/sleeper/link", methods=["GET", "POST", "DELETE"])
 def sleeper_link():
     """Manage the caller's stored Sleeper write token.
@@ -22616,6 +22715,7 @@ def propose_trade_to_sleeper():
       409 sleeper_expired | 503 sleeper_unconfigured | 502 sleeper_write_failed
       422 sleeper_pick_unmapped | 422 sleeper_pick_untradable (#428)
       422 sleeper_pick_not_owned | 400 bad_request
+      422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
     """
     if _TEST_MODE:
         # Fail closed: there is no legitimate automated send. Route-hit
@@ -22711,6 +22811,15 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     # mine from the linked Sleeper account, the counterparty's from their user_id
     # (FTF user_id == Sleeper user_id). A client-supplied their_roster_id wins.
     rosters = _fetch_league_rosters(league_id)
+    if rosters is None:
+        # I-2 / platforms-pm R3: the rosters READ failed. `_fetch_league_rosters`
+        # returns None for an exception (HTTP error, timeout, the open 429
+        # circuit) or a non-list body; a successful read is always a list.
+        # Ownership can't be checked, so nothing is sent. Uses R10's 502 shape
+        # (below). A successful read without the caller's roster stays 400.
+        _msg = _roster_read_failed_copy("Sleeper")
+        return {"error": "sleeper_write_failed", "kind": "network",
+                "detail": _msg, "message": _msg}, 502
     my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
     if my_roster_id is None:
         return {"error": "roster_not_found"}, 400
@@ -22736,6 +22845,40 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     give_picks = [p for p in give if _is_ftf_pick_asset(league_id, p)]
     recv_players = [p for p in receive if not _is_ftf_pick_asset(league_id, p)]
     recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
+
+    # I-2: live player ownership on BOTH sides, checked against the rosters
+    # payload already in hand, so it adds no Sleeper call. It works at roster
+    # level, so co-owners pass (D-051). `players` is the whole Sleeper roster:
+    # starters, bench, IR (`reserve`) and `taxi` are all listed in it.
+    # Players are checked BEFORE picks. The check is free, and a moved player
+    # refuses the send without the pick path's extra reads.
+    by_rid = {}
+    for r in rosters:
+        try:
+            by_rid[int(r.get("roster_id"))] = r
+        except (TypeError, ValueError, AttributeError):
+            continue
+    mine, theirs = by_rid.get(my_roster_id), by_rid.get(their_rid)
+    if theirs is None:
+        # A client-supplied their_roster_id that this successful read doesn't
+        # hold: the receive side can't be checked, so it is never sent.
+        return {"error": "opponent_roster_not_found"}, 400
+    held = {str(x) for x in (mine.get("players") or []) if x}
+    moved = [p for p in give_players if p not in held]
+    if moved:
+        return _ownership_refusal("give", moved, _player_names_by_id(moved))
+    held = {str(x) for x in (theirs.get("players") or []) if x}
+    moved = [p for p in recv_players if p not in held]
+    if moved:
+        team = None
+        try:  # display enrichment only; the refusal never depends on it
+            team = next((m.get("display_name") or m.get("username")
+                         for m in load_league_members(league_id)
+                         if str(m.get("user_id")) == str(theirs.get("owner_id"))), None)
+        except Exception as e:
+            log.warning("I-2 counterparty name lookup failed: %s", e)
+        return _ownership_refusal("receive", moved, _player_names_by_id(moved), team)
+
     encoded: list = []
     if give_picks or recv_picks:
         # A LITERAL platform read on purpose (the #328 `_mock_owned_pick_overlay`
