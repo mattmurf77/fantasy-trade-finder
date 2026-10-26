@@ -61,8 +61,21 @@ if DATABASE_URL.startswith("postgres://"):
 # below — analytics-platform LLD §3.3, NFR-2.)
 _connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
+
+def _pg_engine_kwargs(**connect_args) -> dict:
+    """Postgres-only engine options (docs/runbook.md § "DB connections and
+    background threads across fork"): recycle a pooled connection before the
+    server side drops it idle, and turn on libpq TCP keepalives so a dead peer
+    is noticed. `connect_args` (e.g. ro_engine's `options`) are kept. These
+    are libpq conninfo keys, accepted by psycopg2 (shipped, G-073) and psycopg 3."""
+    return {"pool_recycle": 280,
+            "connect_args": {**connect_args, "keepalives": 1, "keepalives_idle": 30,
+                             "keepalives_interval": 10, "keepalives_count": 5}}
+
+
 engine   = create_engine(DATABASE_URL, echo=False, future=True,
-                         connect_args=_connect_args)
+                         **({"connect_args": _connect_args} if DATABASE_URL.startswith("sqlite")
+                            else _pg_engine_kwargs()))
 metadata = MetaData()
 
 # Silent prepared offers are private artifacts, not shown impressions. The
@@ -351,6 +364,8 @@ overhaul_reservations_table = Table("overhaul_reservations", metadata,
 #   ro_engine     — read-only report queries (P2 consumers); mode=ro URI on
 #                   SQLite, default_transaction_read_only on Postgres
 
+_PG_RO_OPTIONS = "-c default_transaction_read_only=on -c statement_timeout=5s"
+
 if engine.dialect.name == "sqlite":
     @sa_event.listens_for(engine, "connect")
     def _sqlite_on_connect(dbapi_conn, _rec):
@@ -399,8 +414,21 @@ else:
                              # sqlite-only)
     ro_engine = create_engine(
         DATABASE_URL, future=True, pool_size=2, max_overflow=1,
-        connect_args={"options": "-c default_transaction_read_only=on "
-                                 "-c statement_timeout=5s"})
+        **_pg_engine_kwargs(options=_PG_RO_OPTIONS))
+
+
+def _reset_pools_after_fork() -> None:
+    """os.register_at_fork child hook. gunicorn 26.x imports the app in the
+    MASTER before forking, so a worker inherits pooled DB connections whose
+    sockets (and SSL state) the master still holds. Drop them from the child's
+    pools WITHOUT closing (close=False): the parent keeps its sockets, and the
+    child opens fresh ones on first use. Engines are read at call time."""
+    for eng in {id(e): e for e in (engine, ingest_engine, ro_engine)}.values():
+        eng.dispose(close=False)
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_pools_after_fork)
 
 
 def analytics_boot_status() -> dict:

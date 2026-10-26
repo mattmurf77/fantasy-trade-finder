@@ -10,6 +10,7 @@
 ---
 
 ## Table of Contents
+- [2026-10-27](#2026-10-27)
 - [2026-10-05](#2026-10-05)
 - [2026-08-28](#2026-08-28)
 - [2026-08-15](#2026-08-15)
@@ -19,6 +20,26 @@
 - [Outstanding / Known Gaps](#outstanding--known-gaps)
 
 ---
+
+## 2026-10-27
+
+### Backend: `gunicorn` pinned to the version prod runs
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| `gunicorn` | `==26.2.0` (was `>=22.0.0`) | branch `fix/fork-safe-db-and-worker-threads` | Prod runs 26.2.0, while local dev had 25.3.0 and CI installed whatever was latest. Under 26.x the app is imported in the **master** before the fork, even without `--preload`: every boot logs "Database initialised" before "Listening at" and "Booting worker". |
+
+- **Found in** release-lead's read-only deploy watch on 2026-10-27, while chasing "decryption failed or bad record mac" and "SSL SYSCALL EOF".
+- **What it broke:**
+  - Threads started at import ran in the master and died in the worker at fork, so `_cleanup_loop` never ran where requests are served.
+  - The worker inherited the master's pooled SSL connections.
+- **The fix does not depend on the version:**
+  - an `os.register_at_fork` child hook disposes every engine's pool (`close=False`);
+  - Postgres engines get `pool_recycle=280` and libpq keepalives;
+  - the cleanup loop starts per process from a `before_request` hook.
+
+  The pin exists so local, CI and prod import the app the same way. See `docs/runbook.md` § "DB connections and background threads across fork".
+- **Bumping it later:** re-check the boot-log order ("Booting worker" relative to "Database initialised") on the new version before relying on any import-time side effect.
 
 ## 2026-10-05
 

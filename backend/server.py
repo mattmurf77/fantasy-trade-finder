@@ -2933,8 +2933,35 @@ def _cleanup_loop() -> None:
             log.warning("prepared inventory maintenance unavailable", exc_info=True)
 
 
-if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":  # tests set it (conftest); prod never does
-    threading.Thread(target=_cleanup_loop, daemon=True).start()
+# Long-lived background threads start in the process that SERVES requests,
+# once per pid. gunicorn 26.x imports the app in the master before forking,
+# and threads do not survive fork, so a start at import time ran the loop only
+# in the master and never in the worker (docs/runbook.md § "DB connections and
+# background threads across fork"). The master never serves a request.
+_bg_threads_lock = threading.Lock()
+_bg_threads_pid: int | None = None
+
+
+def _ensure_background_threads() -> None:
+    """Start `_cleanup_loop` once in this process. Idempotent per pid; a
+    forked child (new pid) starts its own. FTF_DISABLE_CLEANUP_LOOP=1 (tests,
+    via conftest) skips it; prod never sets it."""
+    global _bg_threads_pid
+    if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") == "1":
+        return
+    pid = os.getpid()
+    if _bg_threads_pid == pid:
+        return
+    with _bg_threads_lock:
+        if _bg_threads_pid == pid:
+            return
+        threading.Thread(target=_cleanup_loop, name="cleanup-loop", daemon=True).start()
+        _bg_threads_pid = pid
+
+
+@app.before_request
+def _start_background_threads():
+    _ensure_background_threads()
 
 
 # ---------------------------------------------------------------------------
