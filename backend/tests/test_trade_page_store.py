@@ -87,6 +87,10 @@ def p1(live, monkeypatch):
     monkeypatch.setattr(server, "_experiment_digest_memo", collections.OrderedDict())
     monkeypatch.setattr(server, "_deck_withdrawn_cache", {})   # C-b sticky drops, per process
     monkeypatch.setattr(server, "_deck_live_stamped", {})      # live decks' stamped ids (#417 P2-1)
+    # F4's awaited ids, per test: a test that stubs the evidence thread out
+    # leaves its delivery's ids pending forever (#419 QA: the F4 test failed
+    # after the page suites).
+    monkeypatch.setattr(server, "_deck_evidence_pending", {})
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)

@@ -2882,7 +2882,12 @@ def _cleanup_loop() -> None:
 
         # S8: retire the packed decks that can't be delivered again here
         # (superseded, revoked, at the 24 h cap, or about to be evicted below).
-        _retire_deck_evidence()
+        # A DB error on a retirement never stops this loop: it is logged, the
+        # deck stays unretired, and the next tick tries again.
+        try:
+            _retire_deck_evidence()
+        except Exception:
+            log.exception("deck-evidence retirement failed")
 
         # Trade jobs — three reasons to evict:
         #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
@@ -4500,6 +4505,7 @@ class _DeckEvidence:
         self.pack = None              # its _PackState once the pack row is written
         self.pack_dirty = False       # a delivery the pack's header doesn't carry yet
         self.pack_cards = None        # the pack's cards, fixed at the first write attempt
+        self.pack_rows = None         # the first attempt's row snapshot (W0 included), until the cards are built
         self.deck_source = None       # the job's source (F10 "replenish"), for the run metadata
 
     def __copy__(self):
@@ -4809,17 +4815,39 @@ def _pack_card(row: dict, served_at: str) -> dict:
 
 
 def _deck_pack_input(ev: _DeckEvidence):
-    """Under `ev.lock`, at the deck's first write: (cards, run). Every built
-    card but ghosts (all held: nothing is written yet), in card_index order,
-    fixed at the first attempt so a retry packs the same N cards."""
-    if ev.pack_cards is None:
-        ev.pack_cards = [_pack_card(_unpack_row(packed), ev.served_at)
-                         for _iid, (_index, packed) in sorted(ev.rows.items(), key=lambda kv: kv[1][0])]
+    """Under `ev.lock`, at the deck's first write: what its pack is built from.
+    Every built card but ghosts (all held: nothing is written yet, and this
+    runs before plan() drops a withdrawn card's row). Only a snapshot of the
+    rows is taken here; _deck_pack_cards builds the cards outside the lock
+    (#416 QA: building them under it held a next-page serve ~40 ms at 2,354
+    cards)."""
+    if ev.pack_cards is None and ev.pack_rows is None:
+        # Fixed at the first attempt (#420 QA P2): plan() drops a never-delivered
+        # withdrawn card's row right after this, so a retry after a failed
+        # rows transaction must reuse this snapshot, or the pack loses that card.
+        ev.pack_rows = list(ev.rows.values())
+    rows = None if ev.pack_cards is not None else ev.pack_rows
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False, "upgrade_misses": 0}
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
         run["deck_source"] = ev.deck_source
-    return ev.pack_cards, run
+    return ev.pack_cards, rows, ev.served_at, run
+
+
+def _deck_pack_cards(ev: _DeckEvidence, source) -> tuple[list, dict]:
+    """Outside `ev.lock`: (cards, run) from _deck_pack_input's snapshot, in
+    card_index order. The cards are kept on `ev` at the first attempt, so a
+    retry packs the same N cards."""
+    cards, rows, served_at, run = source
+    if cards is None:
+        built = [_pack_card(_unpack_row(packed), served_at)
+                 for _index, packed in sorted(rows, key=lambda row: row[0])]
+        with ev.lock:
+            if ev.pack_cards is None:
+                ev.pack_cards = built
+            ev.pack_rows = None
+            cards = ev.pack_cards
+    return cards, run
 
 
 def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
@@ -4827,7 +4855,10 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
     """Write the deck's pack row (insert-or-ignore) with this serve's
     withdrawals in the same transaction. A deck that can't pack exactly
     (pack_run refuses) logs and keeps no pack (eval reads it as a lost pack,
-    which it excludes); its withdrawals are written alone. True when the
+    which it excludes); its withdrawals are written alone. If another
+    instance wrote the pack first (a deploy overlap: the insert is ignored),
+    its cards stand and this delivery merges into its header through the CAS
+    (the union of deliveries), with the withdrawals. True when the
     withdrawals are written."""
     from . import database as _db
     from .eval import evidence_pack
@@ -4839,16 +4870,25 @@ def _deck_pack_first_write(ev: _DeckEvidence, cards: list[dict], run: dict,
                   exc_info=True)
         _db.record_deck_withdrawals(list(withdrawals))
         return True
-    _db.save_deck_evidence_pack({
+    inserted = _db.save_deck_evidence_pack({
         "run_id": ev.job_id, "user_id": ev.user_id, "league_id": ev.league_id,
         "served_at": ev.served_at, "pack_version": packed.pack_version,
         "header_json": packed.header_json, "cards_blob": packed.cards_blob,
         "checksum": packed.checksum, "card_count": packed.card_count,
         "created_at": datetime.now(timezone.utc).isoformat()}, withdrawals)
-    state = _PackState(ev.user_id, json.loads(packed.header_json), unpacked, packed.checksum)
+    if inserted:
+        state = _PackState(ev.user_id, json.loads(packed.header_json), unpacked, packed.checksum)
+    else:                                 # the stored pack's cards and checksum, read fresh
+        state = _load_pack_state(ev.job_id, ev.user_id)
+        if state is None:
+            log.warning("deck-evidence %s: pack insert ignored and no pack readable; "
+                        "retried at the next delivery", ev.job_id)
+            return False
     with ev.lock:
         ev.pack, ev.pack_cards = state, None
-        ev.pack_dirty = state.run["deliveries"] != ev.deliveries
+        ev.pack_dirty = not inserted or state.run["deliveries"] != ev.deliveries
+    if not inserted:                      # our deliveries and withdrawals, merged in by the CAS
+        return _deck_pack_flush_header(ev, withdrawals=withdrawals)
     if ev.pack_dirty:                     # a delivery landed while the pack was built
         _deck_pack_flush_header(ev)
     return True
@@ -4937,37 +4977,66 @@ def _deck_pack_commit(run_id: str, state, withdrawals=()) -> bool:
     return False
 
 
-def _deck_evidence_cover(ev: _DeckEvidence, ids, at: str) -> None:
+def _deck_evidence_cover(ev: _DeckEvidence, ids, at: str, *, prior_known: bool = True) -> None:
     """Under `ev.lock`: a delivery's page boundary (U1), the highest build index
-    it sent, appended when it extends the deck's deliveries."""
+    among `ids`, the cards it sends for the first time. Past the last boundary
+    it is appended. Below it (concurrent pages finishing out of order, #416 QA)
+    it is added too, the union of deliveries, so each page keeps its own time;
+    unless that stretch of the deck, between the next boundary down and it,
+    was delivered before, whose earlier time stands. In process `ev` knows
+    every delivered card; after the job left (`prior_known` false: `ev` holds
+    this delivery only) a boundary at or past it no later than `at` says so."""
     indexes = [i for i in (_deck_card_index(ev.job_id, iid) for iid in ids) if i is not None]
-    if indexes and max(indexes) > (ev.deliveries[-1][0] if ev.deliveries else -1):
-        ev.deliveries.append([max(indexes), at])
+    if not indexes:
+        return
+    top = max(indexes)
+    if top > (ev.deliveries[-1][0] if ev.deliveries else -1):
+        ev.deliveries.append([top, at])
         ev.pack_dirty = True
+        return
+    if prior_known:
+        below = max((index for index, _at in ev.deliveries if index < top), default=-1)
+        prior = (ev.delivered | {i for h in ev.delivered_hashes for i in ev.by_hash.get(h, ())}) - set(ids)
+        if any(i is not None and below < i <= top
+               for i in (_deck_card_index(ev.job_id, iid) for iid in prior)):
+            return
+    elif any(index >= top and when <= at for index, when in ev.deliveries):
+        return
+    merged = _merge_deliveries(ev.deliveries, [[top, at]])
+    if merged != ev.deliveries:
+        ev.deliveries, ev.pack_dirty = merged, True
 
 
 def _deck_pack_state(deck_job_id: str, user_id: str):
     """The pack state of a deck whose job has left the process: cached, else
     rebuilt once from its row (decode, then the checksum prefix). None when
     the deck has no pack."""
-    from . import database as _db
-    from .eval import evidence_pack
     with _deck_pack_states_lock:
         state = _deck_pack_states.get(deck_job_id)
     if state is not None:
         return state if state.user_id == user_id else None
+    state = _load_pack_state(deck_job_id, user_id)
+    if state is None:
+        return None
+    with _deck_pack_states_lock:
+        while len(_deck_pack_states) >= _DECK_PACK_CACHE_MAX:
+            _deck_pack_states.pop(next(iter(_deck_pack_states)))
+        _deck_pack_states[deck_job_id] = state
+    return state
+
+
+def _load_pack_state(deck_job_id: str, user_id: str):
+    """A deck's pack state read fresh from its row (decode, then the checksum
+    prefix), uncached. None when the deck has no pack (or it isn't the user's)."""
+    from . import database as _db
+    from .eval import evidence_pack
     row = _db.load_deck_evidence_pack(deck_job_id)
     if row is None or row["user_id"] != user_id:
         return None
     _run, cards = evidence_pack.unpack_run(evidence_pack.PackedRun(
         row["pack_version"], row["header_json"], bytes(row["cards_blob"]), row["checksum"],
         row["card_count"]))
-    state = _PackState(user_id, json.loads(row["header_json"]), cards, row["checksum"])
-    with _deck_pack_states_lock:
-        while len(_deck_pack_states) >= _DECK_PACK_CACHE_MAX:
-            _deck_pack_states.pop(next(iter(_deck_pack_states)))
-        _deck_pack_states[deck_job_id] = state
-    return state
+    return _PackState(user_id, json.loads(row["header_json"]), cards, row["checksum"])
 
 
 def _pack_candidate_set(row: dict) -> dict:
@@ -5136,8 +5205,11 @@ def _retire_deck_evidence(now: float | None = None) -> int:
         except (TypeError, ValueError):
             capped = False
         if gone or capped:
-            _deck_evidence_retire(ev)
-            retired += 1
+            try:                          # one deck's error never skips the rest (#420 QA P3)
+                _deck_evidence_retire(ev)
+                retired += 1
+            except Exception:
+                log.exception("deck-evidence %s: retirement failed; retried next tick", ev.job_id)
     return retired
 
 
@@ -5152,7 +5224,14 @@ def _deck_evidence_retire(ev) -> None:
                 ev.pack.run["retired"] = True
                 ev.pack.run["retired_at"] = datetime.now(timezone.utc).isoformat()
                 ev.pack_dirty = True
-            _deck_pack_flush_header(ev)
+            written = False
+            try:
+                written = _deck_pack_flush_header(ev)
+            finally:
+                if not written:           # not stored: unretired here, so the next tick retries
+                    with ev.lock:
+                        ev.pack.run["retired"] = False
+                        ev.pack.run.pop("retired_at", None)
 
 
 # Condition 4: pending pack updates survive Render's SIGTERM drain. Each write
@@ -5298,7 +5377,8 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             shrunk = bool(first) or candidate_set is not None
             withdrawals_written = withdrawals_written or not packed_path
         if pack_input is not None:            # the pack insert carries them (P3-5)
-            withdrawals_written = _deck_pack_first_write(ev, *pack_input, withdrawals=withdrawals)
+            withdrawals_written = _deck_pack_first_write(ev, *_deck_pack_cards(ev, pack_input),
+                                                         withdrawals=withdrawals)
         elif packed_path:                     # or this delivery's header CAS
             withdrawals_written = (_deck_pack_flush_header(ev, withdrawals=withdrawals)
                                    or withdrawals_written)
@@ -5419,7 +5499,7 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                 ev.delivered_at.update(dict.fromkeys(ids, delivered_at))
                 ev.served_at = ev.served_at or delivered_at
                 with ev.lock:
-                    _deck_evidence_cover(ev, ids, delivered_at)
+                    _deck_evidence_cover(ev, ids, delivered_at, prior_known=False)
                 if not ids:                      # withdrawals only: nothing to pair them with
                     try:
                         _db.record_deck_withdrawals(_deck_withdrawal_rows(
@@ -5482,9 +5562,11 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         awaited = {iid for iid in ids - ev.delivered - ev.pending if iid in ev.rows}
         ev.pending |= awaited
         _deck_evidence_pend(awaited)
+        fresh = (ids - ev.delivered) | {i for h in hashes - ev.delivered_hashes
+                                        for i in ev.by_hash.get(h, ())}
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
-        _deck_evidence_cover(ev, {i for h in hashes for i in ev.by_hash.get(h, ())} | ids, now)
+        _deck_evidence_cover(ev, fresh, now)
         go = (new or bool(withdrawals)) and ev.complete
     if go:
         _start_deck_evidence_thread(target=_deck_evidence_write, args=(ev,))
@@ -23031,8 +23113,10 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # circuit) or a non-list body; a successful read is always a list.
         # Ownership can't be checked, so nothing is sent. Uses R10's 502 shape
         # (below). A successful read without the caller's roster stays 400.
+        # `kind: "roster_read"`, not "network": it tells this refused-before-send
+        # read apart from a real Sleeper write failure in sleeper_send_failed.kind.
         _msg = _roster_read_failed_copy("Sleeper")
-        return {"error": "sleeper_write_failed", "kind": "network",
+        return {"error": "sleeper_write_failed", "kind": "roster_read",
                 "detail": _msg, "message": _msg}, 502
     my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
     if my_roster_id is None:
@@ -35550,7 +35634,8 @@ def trades_validate():
     ESPN's live mRoster read; any other linked-platform id returns
     `checked:false` without a Sleeper call (G-030); everything else takes the
     Sleeper path unchanged."""
-    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")):
+    if not (is_enabled("trade.send_in_sleeper") or is_enabled("trade.send_in_mfl")
+            or is_enabled("espn.send")):
         return jsonify({"error": "feature_disabled"}), 404
     sess = _require_session()
     user_id = sess.get("user_id")

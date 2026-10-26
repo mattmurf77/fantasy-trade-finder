@@ -7281,17 +7281,20 @@ def mark_deck_impression_viewed(impression_id: str) -> bool:
 def save_deck_evidence_pack(row: dict, withdrawals=()) -> bool:
     """Insert a deck's pack row (insert-or-ignore on run_id: written once, at
     the deck's first delivery), with that serve's withdrawals in the same
-    transaction (#417 cross-check P3-5). True when the pack was inserted."""
+    transaction (#417 cross-check P3-5). True when the pack was inserted;
+    False (nothing written) when another writer's pack is there: the caller
+    merges into its header, withdrawals included."""
     t = deck_evidence_packs_table
     with engine.begin() as conn:
         if conn.dialect.name == "postgresql":
             from sqlalchemy.dialects.postgresql import insert as dialect_insert
         else:
             from sqlalchemy.dialects.sqlite import insert as dialect_insert
-        inserted = bool(conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
-            index_elements=[t.c.run_id])).rowcount)
+        if not conn.execute(dialect_insert(t).values(**row).on_conflict_do_nothing(
+                index_elements=[t.c.run_id])).rowcount:
+            return False
         _insert_withdrawals(conn, list(withdrawals))
-        return inserted
+        return True
 
 
 def update_deck_evidence_pack_header(run_id: str, header_json: str, checksum: str,
