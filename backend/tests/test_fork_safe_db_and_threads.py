@@ -24,8 +24,12 @@ docs/runbook.md § "DB connections and background threads across fork".
           (psycopg2) accepts every key.
   T-pin   test_gunicorn_is_pinned_to_prod — requirements pins gunicorn==26.2.0.
 
-Sabotage record (each applied, observed red, reverted green): see
-docs/plans scope / the PR body; summarized in the fix-2 report.
+Sabotage record (2026-10-27; each applied, observed red, reverted green):
+  register_at_fork line removed                 -> T-fork RED (child saw 1)
+  module-level cleanup-loop .start() restored   -> T-threads (i) RED
+  @app.before_request removed from the hook     -> T-threads (iii) RED
+  keepalives dropped from _pg_engine_kwargs      -> T-pool RED
+  requirements back to gunicorn>=22.0.0         -> T-pin RED
 """
 import ast
 import os

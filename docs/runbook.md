@@ -70,6 +70,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Independent offline model scorecard](#independent-offline-model-scorecard)
 - [Local dev](#local-dev)
 - [Deploy (Render)](#deploy-render)
+- [DB connections and background threads across fork](#db-connections-and-background-threads-across-fork)
 - [Pre-ship simulator gate (2026-08-08)](#pre-ship-simulator-gate-2026-08-08)
   - [Risk-tier matrix (operator-owned; deviations are decisions, recorded in the feature's scope block)](#risk-tier-matrix-operator-owned-deviations-are-decisions-recorded-in-the-features-scope-block)
   - [Evidence](#evidence)
@@ -215,6 +216,30 @@ now remain terminal instead of allowing a late worker to revive the job. Ordinar
 identical requests join; input changes/force can revoke old work. No database
 cleanup, arm adjustment or new TestFlight binary is required for this compatible
 backend increment. Physical-device checks and the three-second KPI remain separate.
+
+---
+
+## DB connections and background threads across fork
+
+**Root cause** (found in release-lead's 2026-10-27 deploy watch):
+- Prod runs gunicorn 26.2.0, which imports the app in the **master** before forking the worker, even without `--preload`. Every boot logs "Database initialised" before "Listening at" and "Booting worker".
+- Pooled DB connections opened during import (init_db, player sync) were inherited by the worker. Master and worker then shared the same SSL sockets, which gave "decryption failed or bad record mac", for example in `load_pending_matches_older_than` inside `cron_realtime_tick`.
+- The import-time `_cleanup_loop` thread ran **only in the master**: threads do not survive fork. So the serving worker never swept its own sessions or trade jobs, while the master's loop issued its DB purges over the shared connections.
+- "SSL SYSCALL EOF" on later idle passes was the server dropping idle connections.
+
+**Fix.** It does not depend on the gunicorn version, and uses no gunicorn hooks or conf file.
+- `backend/database.py`:
+  - `os.register_at_fork(after_in_child=_reset_pools_after_fork)` calls `dispose(close=False)` on `engine`, `ingest_engine` and `ro_engine`. A forked child starts with empty pools, and the parent keeps its sockets.
+  - Postgres engines get `pool_recycle=280` and libpq TCP keepalives (`keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=5`) via `_pg_engine_kwargs`. `ro_engine` keeps its read-only `options`.
+  - No `pool_pre_ping`.
+- `backend/server.py`: `_ensure_background_threads()` starts `_cleanup_loop` once per pid from a `before_request` hook, so the loop runs in whichever process serves requests (the gunicorn worker, or `python run.py` on its first request). `FTF_DISABLE_CLEANUP_LOOP=1` (tests) still skips it.
+- `requirements.txt` pins `gunicorn==26.2.0`, so local, CI and prod agree (see `living-memory/DEPENDENCIES.md` 2026-10-27).
+
+**What to watch after the deploy:**
+- **No** "decryption failed or bad record mac" and **no** "SSL SYSCALL EOF" for 24 h.
+- "Cleaned up N stale session(s)" and "Trade jobs swept: … evicted" now appear with the **worker's** pid, starting about 5 min after the first request. Before this fix they could only come from the master, where the session and job maps are empty.
+- In-process trade jobs older than `_JOB_RETENTION` (4 h) are now evicted in prod for the first time. A tap after that rebuilds the deck instead of reusing a long-finished job.
+- Worker memory should flatten instead of growing with every session since the last restart.
 
 ---
 
