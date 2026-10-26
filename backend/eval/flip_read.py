@@ -9,9 +9,17 @@ models-lead rules on it.
         [--i1-mode {0,1,2}]
 
 The window is decks served in [since, until) and at or before as_of
-(as_of defaults to now, until to none), read through
-data.load_decks(as_of=...) plus a few direct read-only queries. The G-table
-(a barred G prints PASS or FAIL):
+(as_of defaults to now minus STAMP_SETTLE, until to none), read through
+data.load_decks(as_of=...) plus a few direct read-only queries.
+
+The CLI settles as_of itself: delivered_at is stamped off the request
+thread, so near now an outcome can commit before its card's stamp and a
+live deck reads as incomplete_deck (a transient G2 FAIL). as_of defaults to
+the wall clock minus STAMP_SETTLE (5 min), and an --as-of later than that is
+clamped to it, with a note on stderr giving both values. flip_read() takes
+as_of as given; only the CLI reads the clock.
+
+The G-table (a barred G prints PASS or FAIL):
 
   G1   pack integrity: pack_integrity decks among the decks with a pack row,
        retired or not. Bar 0.
@@ -36,9 +44,13 @@ data.load_decks(as_of=...) plus a few direct read-only queries. The G-table
        the evidence directly: a non-ghost deck_impressions row with that id,
        or a pack row of its run whose card_count covers its index; it is
        counted apart, as joined outside the window. An outcome joining a
-       loaded ghost row (LoggedCard.is_ghost) is counted apart too, as on a
-       ghost row: ghosts are never shown, so it means a ghost reached a
-       client. Bar 0 on each: orphans and outcomes on a ghost row.
+       ghost row, loaded (LoggedCard.is_ghost) or of a deck not loaded (a
+       deck_impressions row with is_ghost = 1), is counted apart too, as on
+       a ghost row: ghosts are never shown, so it means a ghost reached a
+       client. Bar 0 on each: orphans and outcomes on a ghost row. The kill
+       recommendation (B3 (f4)) prints when G1 fails or G3 has orphans (lost
+       data); an outcome on a ghost row is a serve bug and goes back to
+       models-lead.
   G7   upgrade misses (U4-R2), every cause summed over the loaded packs.
        Bar: other == 0.
   G8   withdrawal_conflict decks. Bar 0.
@@ -75,11 +87,12 @@ Exit status:
   0  PASS (and no weekly ceiling OVER);
   1  FAIL, or a weekly ceiling OVER (either wins over INSUFFICIENT);
   2  a refused database or a ReadOnlyViolation (nothing is printed to
-     stdout), or a usage error;
+     stdout), or a usage error, a malformed ISO 8601 --since, --until or
+     --as-of included;
   3  INSUFFICIENT: fewer than 10 final packed decks, nothing failed; not a
-     pass, extend the window to 48 h.
-Any other error is not caught: it prints a traceback and exits non-zero
-(Python's 1), never 0.
+     pass, extend the window to 48 h;
+  4  an unexpected error (a crash, not a verdict): its traceback goes to
+     stderr, nothing to stdout.
 
 Read-only, enforced, not promised:
   - a SQLite path or sqlite:/// URL opens with mode=ro;
@@ -97,6 +110,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import traceback
 from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
@@ -124,6 +138,9 @@ DISPOSITION_CUT = "disposition_cut"
 # G10: I-1's withdrawal reason, barred unless trade_i1_mode is 2 (module doc).
 I1_DROPPED = "i1_dropped"
 WEEK = timedelta(days=7)
+# The CLI's as_of is at most the wall clock minus this: delivered_at is
+# stamped off the request thread, so an outcome can commit before its stamp.
+STAMP_SETTLE = timedelta(minutes=5)
 LIST_CAP = 20                   # ids listed per G
 LOADER_EXCLUSIONS = (CALIBRATION_REFRESH, PACK_INTEGRITY, WITHDRAWAL_CONFLICT, IN_FLIGHT,
                      INCOMPLETE_DECK, NO_DELIVERY_EVIDENCE)
@@ -308,8 +325,9 @@ def _g3(conn, decks, outcome_ids: list[str]) -> dict:
             orphans.append(iid)
         else:
             elsewhere.append(iid)
-    found = _joins_elsewhere(conn, set(elsewhere))
-    orphans += [iid for iid in elsewhere if iid not in found]
+    found, ghost_rows = _joins_elsewhere(conn, set(elsewhere))
+    on_ghost += [iid for iid in elsewhere if iid in ghost_rows]
+    orphans += [iid for iid in elsewhere if iid not in found and iid not in ghost_rows]
     return {"outcomes": len(outcome_ids), "joined": joined,
             "joined_outside_window": sum(1 for iid in elsewhere if iid in found),
             "on_ghost": len(on_ghost), "ghost_ids": sorted(set(on_ghost))[:LIST_CAP],
@@ -324,15 +342,18 @@ def _run_of(impression_id: str) -> tuple[str | None, int | None]:
     return (run, int(index)) if sep and index.isdigit() else (None, None)
 
 
-def _joins_elsewhere(conn, ids: set[str]) -> set[str]:
-    """The ids that join a card of a deck outside the window: a non-ghost
-    deck_impressions row, or a pack of their run covering their index."""
+def _joins_elsewhere(conn, ids: set[str]) -> tuple[set[str], set[str]]:
+    """Of ids whose deck was not loaded: those that join a card of a deck
+    outside the window (a non-ghost deck_impressions row, or a pack of their
+    run covering their index), and those on a ghost row there (is_ghost = 1)."""
     imp = deck_impressions_table
     found: set[str] = set()
+    ghosts: set[str] = set()
     for chunk in _chunks(sorted(ids)):
-        found.update(conn.execute(select(imp.c.impression_id).where(
-            imp.c.impression_id.in_(chunk), func.coalesce(imp.c.is_ghost, 0) == 0)).scalars())
-    parsed = {iid: _run_of(iid) for iid in ids - found}
+        for iid, ghost in conn.execute(select(imp.c.impression_id, func.coalesce(
+                imp.c.is_ghost, 0)).where(imp.c.impression_id.in_(chunk))):
+            (ghosts if ghost else found).add(iid)
+    parsed = {iid: _run_of(iid) for iid in ids - found - ghosts}
     parsed = {iid: ri for iid, ri in parsed.items() if ri[0] is not None}
     if parsed and inspect(conn).has_table(PACK_TABLE):
         counts: dict[str, int] = {}
@@ -341,7 +362,7 @@ def _joins_elsewhere(conn, ids: set[str]) -> set[str]:
                                        .where(_PACK_ROWS.c.run_id.in_(chunk))).all())
         found.update(iid for iid, (run, index) in parsed.items()
                      if run in counts and index < counts[run])
-    return found
+    return found, ghosts
 
 
 def _pack_rows(conn, since, until, as_of) -> dict[str, tuple[str, str]]:
@@ -496,7 +517,7 @@ def render(r: FlipRead) -> str:
     # join no card (G3 orphans). An outcome on a ghost row is a serve bug (a
     # ghost reached a client), not lost data: it goes back to models-lead.
     if g1["status"] == FAIL or g3["orphans"]:
-        lines.append("G1 or G3 failed: models-lead recommends the kill "
+        lines.append("G1 failed or G3 has orphans: models-lead recommends the kill "
                      "(first_page_store_enabled 0) at once; the operator decides via "
                      "release-lead (B3 (f4)).")
     elif r.overall == FAIL:
@@ -522,12 +543,21 @@ def _ceiling_line(label: str, c: dict) -> str:
 
 
 def _iso(value: str) -> str:
-    """An ISO time as UTC isoformat (naive means UTC), so it compares
-    lexically with the stored timestamps."""
-    dt = datetime.fromisoformat(value)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat()
+    """argparse type: an ISO time as UTC isoformat (naive means UTC), so it
+    compares lexically with the stored timestamps. A malformed one is a
+    usage error (exit 2)."""
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    except (ValueError, OverflowError):
+        raise argparse.ArgumentTypeError(f"not an ISO 8601 time: {value!r}") from None
+
+
+def _now() -> datetime:
+    """The wall clock, UTC: the CLI's only clock read (tests pin it)."""
+    return datetime.now(timezone.utc)
 
 
 def main(argv=None) -> int:
@@ -539,11 +569,14 @@ def main(argv=None) -> int:
     ap.add_argument("--db", required=True,
                     help="SQLite path or sqlite:/// URL (opened mode=ro), or a Postgres URL "
                          "with --allow-postgres-readonly")
-    ap.add_argument("--since", required=True,
+    ap.add_argument("--since", required=True, type=_iso,
                     help="ISO start of the window: decks served, outcomes acted and "
                          "withdrawals first withdrawn at or after it")
-    ap.add_argument("--until", help="ISO end of the window, exclusive (default: none)")
-    ap.add_argument("--as-of", help="ISO clock of the read (default: now)")
+    ap.add_argument("--until", type=_iso,
+                    help="ISO end of the window, exclusive (default: none)")
+    ap.add_argument("--as-of", type=_iso,
+                    help="ISO clock of the read (default: now minus STAMP_SETTLE, 5 min; a "
+                         "later value is clamped to that, with a note on stderr)")
     ap.add_argument("--allow-postgres-readonly", action="store_true",
                     help="allow a Postgres URL; the session is set read-only and must "
                          "report transaction_read_only = on before anything reads")
@@ -561,17 +594,29 @@ def main(argv=None) -> int:
                          "value): at 0 or 1 any i1_dropped withdrawal fails G10; at 2 it is "
                          "only reported")
     args = ap.parse_args(argv)
+    try:
+        return _run(args)
+    except Exception:             # a crash is never a verdict: 4, apart from FAIL's 1
+        traceback.print_exc()
+        return 4
 
+
+def _run(args) -> int:
+    """main() past parsing: the read, its output and its exit status."""
     try:
         eng = read_only_engine(args.db, allow_postgres_readonly=args.allow_postgres_readonly)
     except ValueError as e:
         print(f"flip_read: {e}", file=sys.stderr)
         return 2
-    as_of = (_iso(args.as_of) if args.as_of
-             else datetime.now(timezone.utc).replace(microsecond=0).isoformat())
+    settled = (_now() - STAMP_SETTLE).replace(microsecond=0).isoformat()
+    as_of = args.as_of or settled
+    if datetime.fromisoformat(as_of) > datetime.fromisoformat(settled):
+        print(f"flip_read: note: --as-of {as_of} is later than now minus STAMP_SETTLE "
+              f"({STAMP_SETTLE.total_seconds() / 60:g} min); clamped to {settled}",
+              file=sys.stderr)
+        as_of = settled
     try:
-        result = flip_read(eng, since=_iso(args.since), as_of=as_of,
-                           until=_iso(args.until) if args.until else None,
+        result = flip_read(eng, since=args.since, as_of=as_of, until=args.until,
                            i1_mode=args.i1_mode)
         if args.weekly:
             result.weekly = weekly_read(eng, as_of=as_of)

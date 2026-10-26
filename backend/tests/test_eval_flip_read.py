@@ -1,10 +1,12 @@
 """backend.eval.flip_read, the model-side 24 h read after the one-step 200 ms
 flip (models-lead-launch.md §Gate-11-03 §3, addenda A3 and B3 (f3)): each
 barred G passing and failing (a failing G fails the read), G2 over final
-packed decks and every pack-less deck, G3's ghost-row bucket, G10 at
-trade_i1_mode 1 and 2, the two weekly ceilings (U4-R4, B4) at, under and
-over, each exit status, the read-only guard and engine options, and that
-the module never imports backend.server.
+packed decks and every pack-less deck, G3's ghost-row bucket (a loaded
+ghost row, and one of a deck served before the window), G10 at
+trade_i1_mode 0, 1 and 2, the two weekly ceilings (U4-R4, B4) at, under and
+over, the CLI's as_of settle (STAMP_SETTLE) on a pinned clock, each exit
+status, the read-only guard and engine options, and that the module never
+imports backend.server.
 
 The DBs are in-memory SQLite built with the v5 tests' helpers (the pack and
 withdrawals tables are test-local there); the CLI tests write the same tables
@@ -16,6 +18,7 @@ import sqlite3
 import subprocess
 import sys
 from dataclasses import replace
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -242,6 +245,28 @@ def test_g3_fails_on_an_outcome_on_a_ghost_row():
     # A serve bug, not lost data: back to models-lead, never the kill (B3 (f4)).
     assert "recommends the kill" not in text
     assert "Back to models-lead" in text
+
+
+OLD_GHOST_ID = "9a1e7c44-0d2b-4f8e-b3a6-5c7d2e1f0a98"
+
+
+def test_g3_an_outcome_on_a_ghost_row_of_a_deck_served_before_the_window():
+    """#431 QA P3: the ghost row of a deck served before the window is not
+    loaded, and its uuid4 id names no run, so the out-of-window lookup finds
+    it by id (is_ghost = 1). The outcome is on a ghost row (barred, back to
+    models-lead), not an orphan that prints the kill."""
+    db = _joins_db()
+    old = _deck_cards("old", 10, served_at=BEFORE)
+    with db.eng.begin() as conn:
+        conn.execute(insert(db.imp).values({**_row(old[3], ghost=True),
+                                            "impression_id": OLD_GHOST_ID}))
+    _post(db, OLD_GHOST_ID)
+    r = flip_read(db.eng, since=SINCE, as_of=LATE)
+    assert (r.g3["on_ghost"], r.g3["ghost_ids"], r.g3["orphans"]) == (1, [OLD_GHOST_ID], 0)
+    assert r.g3["joined_outside_window"] == 2
+    assert r.g3["status"] == FAIL and r.overall == FAIL
+    text = render(r)
+    assert "recommends the kill" not in text and "Back to models-lead" in text
 
 
 def test_an_orphan_outcome_recommends_the_kill():
@@ -562,6 +587,57 @@ def test_the_cli_i1_mode_defaults_to_1(tmp_path, capsys):
     assert usage.value.code == 2
 
 
+def test_the_cli_at_i1_mode_0_bars_i1_dropped_too(tmp_path, capsys):
+    """#431 QA P3: trade_i1_mode 0 never withdraws for I-1 either, so an
+    i1_dropped withdrawal fails G10 and the read at --i1-mode 0, as at 1."""
+    path = tmp_path / "flip.db"
+    db = _file_db(path)
+    _example(db)
+    withdraw(db, "packed", 29, 0, reason="i1_dropped")
+    db.eng.dispose()
+    assert main(["--db", str(path), "--since", SINCE, "--as-of", _after(20),
+                 "--i1-mode", "0"]) == 1
+    out = capsys.readouterr().out
+    assert "trade_i1_mode 0 | disposition_cut=1, i1_dropped=1 | i1_dropped 0 | FAIL |" in out
+    assert "any i1_dropped at trade_i1_mode 0 is a bug (barred at 0)" in out
+    assert "OVERALL: FAIL" in out
+
+
+def test_the_cli_settles_as_of_behind_the_clock(tmp_path, capsys, monkeypatch):
+    """#431 QA P3: delivered_at is stamped off the request thread, so near
+    now an outcome can commit before its card's stamp, and a live deck reads
+    incomplete_deck (a transient G2 FAIL). The CLI's as_of is at most the
+    clock minus STAMP_SETTLE: that by default, and a later --as-of is clamped
+    to it with a note giving both values. flip_read() takes as_of as given."""
+    clock = datetime.fromisoformat(_after(3))
+    settled = (clock - timedelta(minutes=5)).isoformat()
+    assert fr.STAMP_SETTLE == timedelta(minutes=5)
+    monkeypatch.setattr(fr, "_now", lambda: clock)
+    path = tmp_path / "flip.db"
+    db = _file_db(path)
+    put_deck(db, "vc", 10, delivered=range(5), extra={"page_store": 1})
+    act(db, "vc", 7, "viewed", at=(clock - timedelta(minutes=2)).isoformat())   # stamp not landed
+    raw = flip_read(db.eng, since=SINCE, as_of=clock.isoformat())                # un-clamped
+    assert raw.as_of == clock.isoformat() and raw.g2["ids"] == [["vc", SERVED]]
+    db.eng.dispose()
+    args = ["--db", str(path), "--since", SINCE, "--json"]
+
+    assert main(args) == 3                               # default: the clock minus 5 min
+    out, err = capsys.readouterr()
+    got = json.loads(out)
+    assert got["as_of"] == settled and got["g2"]["status"] == PASS and err == ""
+
+    assert main(args + ["--as-of", clock.isoformat()]) == 3      # later: clamped, noted
+    out, err = capsys.readouterr()
+    assert json.loads(out)["as_of"] == settled
+    assert err == (f"flip_read: note: --as-of {clock.isoformat()} is later than now minus "
+                   f"STAMP_SETTLE (5 min); clamped to {settled}\n")
+
+    assert main(args + ["--as-of", _after(2)]) == 3              # earlier: as given
+    out, err = capsys.readouterr()
+    assert json.loads(out)["as_of"] == _after(2) and err == ""
+
+
 def test_a_read_only_violation_inside_the_read_exits_2(tmp_path, capsys, monkeypatch):
     """The statement guard firing mid-read is exit 2, as a refused database
     is, and nothing goes to stdout."""
@@ -580,9 +656,9 @@ def test_a_read_only_violation_inside_the_read_exits_2(tmp_path, capsys, monkeyp
     assert path.read_bytes() == before
 
 
-def test_an_unexpected_error_inside_the_read_is_never_exit_0(tmp_path, monkeypatch):
-    """main() catches only the refusals it maps to 2: anything else
-    propagates (a traceback, Python's exit 1), never a quiet 0."""
+def test_an_unexpected_error_inside_the_read_exits_4(tmp_path, capsys, monkeypatch):
+    """#431 QA P3: a crash is exit 4 with its traceback on stderr, never 0
+    and never FAIL's 1."""
     path = tmp_path / "flip.db"
     _file_db(path).eng.dispose()
 
@@ -590,8 +666,26 @@ def test_an_unexpected_error_inside_the_read_is_never_exit_0(tmp_path, monkeypat
         raise RuntimeError("boom")
 
     monkeypatch.setattr(fr, "load_decks", boom)
-    with pytest.raises(RuntimeError, match="boom"):
-        main(["--db", str(path), "--since", SINCE, "--as-of", EARLY])
+    assert main(["--db", str(path), "--since", SINCE, "--as-of", EARLY]) == 4
+    out, err = capsys.readouterr()
+    assert out == "" and "Traceback (most recent call last)" in err
+    assert "RuntimeError: boom" in err
+
+
+@pytest.mark.parametrize("flag, value", [
+    ("--since", "2026-10-23T25:00:00Z"), ("--until", "tomorrow"),
+    ("--as-of", "2026-13-01"), ("--as-of", "0001-01-01T00:00:00+01:00"),   # out of range in UTC
+])
+def test_a_malformed_time_is_a_usage_error(flag, value, capsys):
+    """#431 QA P3: --since, --until and --as-of are parsed as ISO 8601 by
+    argparse, so a malformed one is usage exit 2, not a traceback."""
+    args = {"--db": "unused.db", "--since": SINCE, flag: value}
+    with pytest.raises(SystemExit) as usage:
+        main([part for pair in args.items() for part in pair])
+    assert usage.value.code == 2
+    err = capsys.readouterr().err
+    assert f"argument {flag}: not an ISO 8601 time: {value!r}" in err
+    assert "Traceback" not in err
 
 
 def test_help_documents_the_exit_codes(capsys):
@@ -601,7 +695,7 @@ def test_help_documents_the_exit_codes(capsys):
     out = capsys.readouterr().out
     assert "--i1-mode" in out and "Exit status:" in out
     for line in ("0  PASS", "1  FAIL, or a weekly ceiling OVER", "2  a refused database or a "
-                 "ReadOnlyViolation", "3  INSUFFICIENT"):
+                 "ReadOnlyViolation", "3  INSUFFICIENT", "4  an unexpected error"):
         assert line in out
 
 

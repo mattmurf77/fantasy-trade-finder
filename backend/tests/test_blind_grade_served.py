@@ -2,7 +2,8 @@
 
 Trades decks only (a Calibration refresh deck is skipped), never-delivered
 withdrawn cards removed, not-yet-paged first30 rows kept, the top N by
-displayed position, and a chosen card without a full row skipped and counted.
+displayed position, a chosen card without a full row skipped and counted,
+and a league with no gradeable deck, or whose deck yields no card, named.
 An in-memory SQLite stands in for prod; it answers SHOW transaction_read_only
 like a read-only Postgres session (or, for the guard test, a writable one).
 """
@@ -174,7 +175,8 @@ def test_a_chosen_card_without_a_full_row_is_skipped_and_counted(prod, tmp_path,
     assert shown(card_set) == ["T-g0", "T-g2"]           # never filled from card 5
     assert card_set["skipped_no_row"] == 3                # 1 (no assets), 3 and 4 (packed)
     assert json.loads(capsys.readouterr().out) == {"cards": 2, "leagues": 1,
-                                                   "skipped_no_row": 3, "leagues_without_deck": []}
+                                                   "skipped_no_row": 3, "leagues_without_deck": [],
+                                                   "leagues_with_no_cards": []}
 
 
 def test_the_read_only_check_still_fires(prod):
@@ -220,6 +222,27 @@ def test_a_league_without_a_gradeable_deck_is_named_not_silent(prod):
                                            league_ids=["lg", "empty-league"], user_id="u1")
     assert shown(card_set) == ["T-g0", "T-g1", "T-g2"]
     assert card_set["leagues_without_deck"] == ["empty-league"]
+    assert card_set["leagues_with_no_cards"] == []
+
+
+def test_a_league_whose_deck_yields_no_gradeable_card_is_named(prod, tmp_path, capsys):
+    """#426 QA P3: the latest deck is found, but every chosen card lacks a
+    full row, so the league yields 0 cards; before, only the total
+    skipped_no_row showed it. It is named in leagues_with_no_cards, apart
+    from a league with no deck at all, and the CLI summary prints both."""
+    fake = prod()
+    put_deck(fake, "T", 3, served_at=_ago(2), delivered=range(3), no_assets=range(3))
+    out = tmp_path / "served.json"
+    assert blind_grade.main(["served", "--secrets", str(tmp_path / "s.env"), "--user", "u1",
+                             "--league", "lg", "--league", "empty-league",
+                             "--output", str(out)]) == 0
+    card_set = json.loads(out.read_text())
+    assert card_set["cards"] == [] and card_set["skipped_no_row"] == 3
+    assert card_set["leagues_with_no_cards"] == ["lg"]
+    assert card_set["leagues_without_deck"] == ["empty-league"]
+    assert json.loads(capsys.readouterr().out) == {
+        "cards": 0, "leagues": 2, "skipped_no_row": 3, "leagues_without_deck": ["empty-league"],
+        "leagues_with_no_cards": ["lg"]}
 
 
 def test_the_prod_engine_opens_every_connection_read_only(monkeypatch):
