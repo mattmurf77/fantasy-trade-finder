@@ -4479,8 +4479,8 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
     runs off the request thread. A card published before its impression id
     existed counts by trade_hash. `partial`: the job has errored (a timed-out
     job's published batches still serve on the legacy path), so the run has
-    ended partial. `withdrawn`: the cards S0's I-1 dropped at this serve; until
-    a serve delivers one, it gets no row (C-b)."""
+    ended partial. `withdrawn`: the cards S0's I-1 dropped at this serve: no row (C-b),
+    even if a serve after the deck's write sends one."""
     dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
     ids, hashes = set(), set()
     for card in cards:
