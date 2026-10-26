@@ -521,6 +521,25 @@ def test_f6_calibrations_refresh_reuses_a_delivered_deferred_deck(deferred):
     assert db_module.load_grading_legacy_deck(UID, LEAGUE)[0] == organic
 
 
+@pytest.mark.parametrize("flag", [True, False])
+def test_s4_calibrations_refresh_never_makes_a_pair_active_or_emits_trades_generated(
+        deferred, generated_events, monkeypatch, flag):
+    """ADR-025 S4 and ruling 30, ungated like the relabel: Calibration's
+    targeted refresh is never a Trades deck. It emits no trades_generated and
+    writes no trade_impressions, so it never makes the pair "active" for the
+    weekly replenishment; Calibration still reads its rows."""
+    _, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": flag})
+    pair = {"user_id": UID, "league_id": LEAGUE}
+    assert pair not in db_module.load_active_deck_user_leagues()
+    assert server._replenish_deck_for(UID, LEAGUE, source="grading_refresh") is not None
+    [job] = replenished("grading_refresh")
+    assert job["status"] == "complete" and job["cards"]
+    assert generated_events == [] and rows(engine, db_module.trade_impressions_table) == []
+    assert pair not in db_module.load_active_deck_user_leagues()
+    assert db_module.load_grading_legacy_deck(UID, LEAGUE)[0] == job["job_id"]
+
+
 # ── #370: evidence for what S0's serve rules let through ───────────────────
 
 def move_away(engine, card_index):

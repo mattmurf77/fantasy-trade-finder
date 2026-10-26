@@ -15405,6 +15405,12 @@ def _receipts_serve_date_expr():
     return func.substr(deck_impressions_table.c.served_at, 1, 10)
 
 
+# deck_source as server._log_deck_signal_impressions dumps it (default
+# separators), and the compact form, for the receipts exclusion (S4).
+_CALIBRATION_REFRESH_MARKERS = ('"deck_source": "grading_refresh"',
+                                '"deck_source":"grading_refresh"')
+
+
 def _receipts_candidate_where(window_days: int, grader_version: str,
                               serve_dates: list[str]):
     """Shared WHERE for the grading queue and its backlog COUNT (LLD §4.1).
@@ -15425,6 +15431,9 @@ def _receipts_candidate_where(window_days: int, grader_version: str,
         starve a run.
       * no grade row at this (window, grader_version) — the queue is defined
         by ABSENCE, which is what makes the job idempotent by construction.
+      * not a Calibration refresh deck (features_json `deck_source` =
+        'grading_refresh', ADR-025 S4): never shown in Trades, so never a
+        receipt. A NULL features_json stays eligible.
     """
     g = receipts_grades_table
     already = (
@@ -15440,6 +15449,9 @@ def _receipts_candidate_where(window_days: int, grader_version: str,
             deck_impressions_table.c.is_ghost == 0),
         _receipts_serve_date_expr().in_([str(d) for d in serve_dates]),
         ~already,
+        or_(deck_impressions_table.c.features_json.is_(None),
+            and_(*(~deck_impressions_table.c.features_json.contains(marker, autoescape=True)
+                   for marker in _CALIBRATION_REFRESH_MARKERS))),
     )
 
 

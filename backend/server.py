@@ -9426,7 +9426,8 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
     with _trade_jobs_lock:
         job_source = (_trade_jobs.get(job_id) or {}).get("source")
     try:
-        log_trade_impressions(g_user_id, league_id, served)
+        if job_source != "grading_refresh":   # S4: never a Trades deck (see _run_trade_job)
+            log_trade_impressions(g_user_id, league_id, served)
     except Exception as imp_err:
         log.warning("value-core: trade impression logging failed (non-fatal): %s", imp_err)
     imp_by_card = {}
@@ -9465,7 +9466,7 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
              diag.packages_viewer, diag.pairs_checked, diag.fair, len(served),
              diag.truncated_partners, diag.budget_exhausted, diag.elapsed_ms, total_ms)
     gen_ms = _finish_trade_job(job_id)
-    if gen_ms is None:
+    if gen_ms is None or job_source == "grading_refresh":   # S4: ruling 30
         return True
     try:
         props = {"count": len(served), "gen_ms": gen_ms, "engine_version": "value_core", "lanes": {}}
@@ -10835,10 +10836,17 @@ def _run_trade_job(
         # writes none (publication then waits on no commit); its build-time
         # writes (this one, the bake-off run, trades_generated) wait for the
         # deck's first delivery (F3).
+        # S4 (models-lead R2.6): Calibration's targeted refresh
+        # ("grading_refresh") is never shown in Trades, so it writes no
+        # trade_impressions (replenishment's "active" eligibility reads them)
+        # and emits no trades_generated (ruling 30). Its deck_impressions rows
+        # still write at build: Calibration reads them.
         with _trade_jobs_lock:
-            deck_evidence = None if preparation else (_trade_jobs.get(job_id) or {}).get("evidence")
+            _job_now = _trade_jobs.get(job_id) or {}
+            deck_evidence = None if preparation else _job_now.get("evidence")
+            calibration_refresh = _job_now.get("source") == "grading_refresh"
         try:
-            if league_id != "league_demo" and not preparation:
+            if league_id != "league_demo" and not preparation and not calibration_refresh:
                 if deck_evidence is not None:
                     deck_evidence.defer_trade_impressions(league_id, served_final)
                 else:
@@ -11116,7 +11124,7 @@ def _run_trade_job(
             # (pull jobs carry no marker; props stay byte-identical for them).
             if job_source:
                 _ev_props["deck_source"] = job_source
-            if not _job_superseded(job_id):
+            if not _job_superseded(job_id) and job_source != "grading_refresh":   # S4: ruling 30
                 if deck_evidence is not None:
                     # Analytics-lead R3: exactly once per deck, at its first delivery.
                     deck_evidence.defer_generated(league_id, _ev_props)
