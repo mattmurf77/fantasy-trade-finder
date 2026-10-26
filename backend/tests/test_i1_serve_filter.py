@@ -69,6 +69,7 @@ def live(monkeypatch):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
+    monkeypatch.setitem(ts._cfg, "trade_i1_mode", 2.0)   # strict; the default is pinned below
 
     pool = [Player(id=pid, name=pid.upper(), position="RB", team="AAA", age=25)
             for pid in ("g1", "g2", "r1", "r2")]
@@ -184,9 +185,10 @@ def test_moved_players_and_picks_are_never_served(live, path, caplog):
     assert "wait_reason" not in body
     assert {c["trade_id"] for c in body["cards"]} == SERVABLE
     line = _serve_lines(caplog)[-1]                     # C-a: one line per serve
-    assert {k: line[k] for k in ("league", "mode", "status", "outcome", "cards", "kept",
+    assert {k: line[k] for k in ("league", "job", "mode", "status", "outcome", "cards", "kept",
                                  "dropped_give", "dropped_receive")} == {
-        "league": LEAGUE, "mode": "strict", "status": "unknown", "outcome": "served",
+        "league": LEAGUE, "job": job["job_id"], "mode": "strict", "status": "unknown",
+        "outcome": "served",
         "cards": "6", "kept": "2", "dropped_give": "2", "dropped_receive": "2"}
 
 
@@ -262,13 +264,14 @@ def test_mode_lenient_checks_and_logs_but_serves_every_card(live, monkeypatch, c
     body = _via_status(client, job["job_id"])
     assert {c["trade_id"] for c in body["cards"]} == set(CARDS)
     line = _serve_lines(caplog)[-1]
-    assert (line["mode"], line["kept"], line["dropped_give"], line["dropped_receive"]) == (
-        "lenient", "6", "2", "2")
+    assert (line["mode"], line["outcome"], line["kept"], line["dropped_give"],
+            line["dropped_receive"]) == ("lenient", "served_lenient", "6", "2", "2")
     with engine.begin() as conn:                      # missing rows: served, logged
         conn.execute(delete(league_members_table))
     body = _via_status(client, job["job_id"])
     assert len(body["cards"]) == len(CARDS) and body["status"] == "complete"
-    assert _serve_lines(caplog)[-1]["outcome"] == "roster_check_unavailable"
+    line = _serve_lines(caplog)[-1]
+    assert (line["status"], line["outcome"]) == ("missing", "served_lenient")
     with patch.object(roster_snapshot, "roster_snapshot",
                       MagicMock(side_effect=RuntimeError("db unavailable"))):
         body = _via_status(client, job["job_id"])
@@ -287,6 +290,11 @@ def test_mode_off_is_the_pre_s0_path(live, monkeypatch, caplog):
     for body in (generated, polled):
         assert {c["trade_id"] for c in body["cards"]} == set(CARDS)
     assert reads.call_count == 0 and _serve_lines(caplog) == []
+
+
+def test_the_default_mode_is_strict(monkeypatch):
+    monkeypatch.delitem(ts._cfg, "trade_i1_mode", raising=False)
+    assert server._trade_i1_mode() == 2
 
 
 @pytest.mark.parametrize("value", [float("nan"), 7.0, -1.0, "strict please"])
@@ -327,7 +335,6 @@ def _members_updated(engine, seconds_ago):
     ("stale", None, 100, None, False),
     ("fresh", 600, 600, None, False),            # Q1: fresh at any age serves
     (None, None, 600, None, False),              # no state row: unknown, serves
-    ("stale", 600, 600, "write_failed", False),  # C-e: a failed session write reads unknown
 ])
 @pytest.mark.parametrize("path", ["generate", "status"])
 def test_withhold_by_state_and_age(live, gates_on, caplog, path, status, refreshed_ago,
@@ -346,6 +353,35 @@ def test_withhold_by_state_and_age(live, gates_on, caplog, path, status, refresh
         assert {c["trade_id"] for c in body["cards"]} == SERVABLE
         assert body["status"] == "complete" and "wait_reason" not in body
 
+
+
+@pytest.mark.parametrize("path", ["generate", "status"])
+def test_c_e_a_failed_session_write_serves_every_card_unchecked(live, gates_on, caplog, path):
+    """C-e (release-lead #367 QA, P1): the last session write failed, so the
+    stored rows may be outdated and would cause false drops. Every card is
+    served at strict mode, logged `unchecked_c_e`, never withheld."""
+    client, engine, _ = live
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    job = _complete_job_with_cards()
+    _roster_state(engine, status="stale", refreshed_ago=600, error="write_failed")
+    body = _via_generate(client) if path == "generate" else _via_status(client, job["job_id"])
+    assert {c["trade_id"] for c in body["cards"]} == set(CARDS)
+    assert body["status"] == "complete" and "wait_reason" not in body
+    line = _serve_lines(caplog)[-1]
+    assert (line["mode"], line["status"], line["outcome"], line["kept"], line["dropped_give"],
+            line["dropped_receive"]) == ("strict", "unknown", "unchecked_c_e", "6", "2", "2")
+
+
+def test_a_plain_unknown_still_filters(live, caplog):
+    """No state row is `unknown` too, but without C-e: I-1 filters strictly."""
+    client, engine, _ = live
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    job = _complete_job_with_cards()
+    _roster_state(engine, status=None, refreshed_ago=None)
+    body = _via_status(client, job["job_id"])
+    assert {c["trade_id"] for c in body["cards"]} == SERVABLE
+    assert (_serve_lines(caplog)[-1]["status"], _serve_lines(caplog)[-1]["outcome"]) == (
+        "unknown", "served")
 
 def test_a_linked_platform_never_withholds(live, caplog):
     """Ruling 29: ESPN/MFL/Fleaflicker stale rows serve with I-1, logged."""
