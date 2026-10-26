@@ -235,7 +235,8 @@ GROUP BY 1 ORDER BY 2 DESC;
 -- 7f. FIT_DIAG NULL-SHARE PER ARM — the M3 stamp is contractually present
 --     (null-valued allowed) on every bake-off row. Null-share > 5% on any
 --     arm => data bug (executemany column drop, HANDOVER trap 3); window
---     suspect until explained.
+--     suspect until explained. This counts full rows only: a viewed card with
+--     no full row (packed evidence) is counted by its companion, 7i.
 SELECT model_arm,
        COUNT(*) FILTER (WHERE features_json::json->'fit_diag' IS NULL
                            OR (features_json::json->>'fit_diag') IS NULL) AS null_fit_diag,
@@ -273,13 +274,68 @@ GROUP BY 1, 2;
 
 -- 7h. SCORER-VERSION SKEW (failure row 11) — mixed fit.ver / fit_diag.ver
 --     inside one window => the bucket comparison is invalid for the window;
---     fall back to pooled and flag it in the readout header.
+--     fall back to pooled and flag it in the readout header. This counts full
+--     rows only: a viewed card with no full row is counted by 7i.
 SELECT COALESCE(features_json::json->'fit'->>'ver',
                 features_json::json->'fit_diag'->>'ver') AS scorer_ver,
        COUNT(*)
 FROM deck_impressions
 WHERE served_at >= :window_start AND model_arm IS NOT NULL
 GROUP BY 1;
+
+-- 7i. VIEWED, NO FULL ROW (models-lead U4-R3; the companion to 7f and 7h).
+--     Under packed evidence (trade.packed_evidence) a card can be viewed and
+--     never get a deck_impressions full row: one past the stored first 90,
+--     delivered before a deploy and viewed after it (restart_split), or
+--     another named cause in the pack's run.upgrade_misses. Such a card is
+--     VIEWED, never "unviewed": "viewed" comes from its outcome, which joins
+--     the packed card by impression_id (U2), and eval scores it normally.
+--     So it is counted here, never dropped; 7f and 7h just don't see it.
+--     Rows:
+--       viewed_no_full_row.packed   its run has a pack row: the expected case,
+--                                   read against the named causes below;
+--       viewed_no_full_row.no_pack  joins no evidence at all: must be 0 (a
+--                                   flip_read G3 failure);
+--       upgrade_misses.<cause>      the window's packs' run.upgrade_misses,
+--                                   summed per cause (a legacy int n is
+--                                   other = n). upgrade_misses.other must be
+--                                   0 (U4-R2): any other > 0 goes to
+--                                   models-lead.
+WITH viewed_no_row AS (
+  SELECT DISTINCT o.impression_id,
+         regexp_replace(o.impression_id, ':[0-9]+$', '') AS run_id
+  FROM deck_outcomes o
+  WHERE o.action = 'viewed'
+    AND o.acted_at >= :window_start
+    AND NOT EXISTS (SELECT 1 FROM deck_impressions i
+                    WHERE i.impression_id = o.impression_id)
+),
+misses AS (
+  SELECT header_json::json->'run'->'upgrade_misses' AS m
+  FROM deck_evidence_packs
+  WHERE served_at >= :window_start
+),
+by_cause AS (
+  SELECT c.key AS cause, (c.value::text)::bigint AS n
+  FROM misses,
+       LATERAL json_each(CASE WHEN json_typeof(misses.m) = 'object'
+                              THEN misses.m ELSE '{}'::json END) AS c(key, value)
+  UNION ALL
+  SELECT 'other', (m::text)::bigint FROM misses WHERE json_typeof(m) = 'number'
+  UNION ALL
+  SELECT 'other', 0                                -- always print other
+)
+SELECT CASE WHEN p.run_id IS NULL THEN 'viewed_no_full_row.no_pack'
+            ELSE 'viewed_no_full_row.packed' END AS what,
+       COUNT(*)                                    AS n
+FROM viewed_no_row v
+LEFT JOIN deck_evidence_packs p ON p.run_id = v.run_id
+GROUP BY 1
+UNION ALL
+SELECT 'upgrade_misses.' || cause, SUM(n)
+FROM by_cause
+GROUP BY cause
+ORDER BY 1;
 
 
 -- ===========================================================================
