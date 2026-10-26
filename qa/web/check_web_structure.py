@@ -608,6 +608,45 @@ def run() -> int:
     r.check("POL-faq-extension-link", bool(release) and set(faq_release) == {release[0]},
             f"FAQ extension link {faq_release} != index.html's {release[:1]}")
 
+    # Q5/Q6 first paragraphs: marketing's OA-8 text (marketing-lead-copy.md §2;
+    # §1g rows 3-4, FIXED), which legal R28.15 row 7 treats as the live
+    # pre-launch Q5/Q6: sign in with Apple or Sleeper, then link the league.
+    # Neither may say "choose ESPN" / "choose MFL" (the old sign-in chips). At
+    # the 11-18 flip, R28.15 row 7's release sentences replace these.
+    OA8 = (
+        ("Q5", "How do I connect an ESPN league?",
+         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
+         "ESPN league and sign in on ESPN's own page inside the app. Your ESPN password stays on "
+         "ESPN's sign-in page, and the app lists your leagues."),
+        ("Q6", "How do I connect an MFL league?",
+         "In the iPhone app, sign in with Apple or Sleeper, then go to Settings → Leagues → Link an "
+         "MFL league. Sign in with your MFL username and password, or enter a league ID or a "
+         "myfantasyleague.com league URL."),
+    )
+
+    def inline_text(fragment: str) -> str:
+        text = unescape(re.sub(r"<[^>]+>", "", fragment)).replace("’", "'")
+        return re.sub(r"\s+", " ", text).strip()
+
+    faq_items = {inline_text(s): b for s, b in re.findall(
+        r'<summary>(.*?)</summary>\s*<div class="faq-body">(.*?)</div>',
+        strip_comments(faq), flags=re.S)}
+    problems = []
+    for label, question, want in OA8:
+        if question not in faq_items:
+            problems.append(f'{label} "{question}" not found')
+            continue
+        first = re.search(r"<p\b[^>]*>(.*?)</p>", faq_items[question], flags=re.S)
+        lead = inline_text(first.group(1)) if first else ""
+        if " ".join(want.split()) not in lead:
+            problems.append(f"{label} first paragraph is not marketing's OA-8 text")
+        chose = re.findall(r"\bchoose\s+(?:ESPN|MFL)\b", lead, flags=re.I)
+        if chose:
+            problems.append(f'{label} first paragraph says "{chose[0]}"')
+    r.check("POL-faq-oa8", not problems,
+            "; ".join(problems) if problems
+            else 'Q5/Q6 open with "sign in with Apple or Sleeper, then … Link an ESPN/MFL league"')
+
     return r.report(), r
 
 
