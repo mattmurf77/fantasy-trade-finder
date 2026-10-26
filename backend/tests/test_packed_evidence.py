@@ -1018,3 +1018,58 @@ def test_p3_5_withdrawals_before_any_delivery_are_written_alone(deferred):
     got = withdrawals(engine)
     assert sorted(got) == list(range(30)) and {r["served_before"] for r in got.values()} == {0}
     assert pack_of(engine, job_id) is None
+
+
+# ── #416 QA follow-ups (release-lead, 2026-10-26) ───────────────────────────
+
+class _StopLoop(BaseException):
+    """Ends _cleanup_loop from its sleep (not an Exception: the loop must not catch it)."""
+
+
+def test_a_retirement_db_error_never_stops_the_cleanup_loop(deferred, monkeypatch, caplog):
+    """P2: an OperationalError on the retirement CAS is logged; the loop keeps
+    running, evicts on that tick and the next, and retires the deck on the
+    next tick (the failed retirement is undone in memory, so it retries)."""
+    import time as real_time
+    from sqlalchemy.exc import OperationalError
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    with server._trade_jobs_lock:                          # superseded: due, and not evicted
+        server._trade_jobs_by_key[server._trade_jobs[job_id]["key"]] = "a-newer-job"
+    real_cas = db_module.update_deck_evidence_pack_header
+
+    def locked(*_a, **_k):
+        raise OperationalError("UPDATE deck_evidence_packs", {}, Exception("database is locked"))
+
+    def stale(jid):                                        # a finished job past retention
+        with server._trade_jobs_lock:
+            server._trade_jobs[jid] = {"job_id": jid, "key": ("u", jid, "f"), "status": "complete",
+                                       "finished_at": real_time.monotonic() - server._JOB_RETENTION - 60}
+
+    ticks = []
+
+    class FakeTime:
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+        def sleep(self, _seconds):
+            ticks.append(1)
+            if len(ticks) == 1:
+                monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", locked)
+                stale("stale-1")
+            elif len(ticks) == 2:
+                assert "stale-1" not in server._trade_jobs   # evicted on the failing tick
+                assert unpack(pack_of(engine, job_id))[0]["retired"] is False
+                monkeypatch.setattr(db_module, "update_deck_evidence_pack_header", real_cas)
+                stale("stale-2")
+            else:
+                raise _StopLoop
+
+    monkeypatch.setattr(server, "time", FakeTime())
+    with pytest.raises(_StopLoop):
+        server._cleanup_loop()
+    assert len(ticks) == 3 and "stale-2" not in server._trade_jobs
+    run = unpack(pack_of(engine, job_id))[0]
+    assert run["retired"] is True and run["retired_at"]
+    assert any("retirement failed" in r.getMessage() for r in caplog.records)

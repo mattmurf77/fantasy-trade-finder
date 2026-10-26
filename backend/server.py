@@ -2882,7 +2882,12 @@ def _cleanup_loop() -> None:
 
         # S8: retire the packed decks that can't be delivered again here
         # (superseded, revoked, at the 24 h cap, or about to be evicted below).
-        _retire_deck_evidence()
+        # A DB error on a retirement never stops this loop: it is logged, the
+        # deck stays unretired, and the next tick tries again.
+        try:
+            _retire_deck_evidence()
+        except Exception:
+            log.exception("deck-evidence retirement failed")
 
         # Trade jobs — three reasons to evict:
         #   (a) running jobs older than _JOB_HARD_TIMEOUT → mark as error so
@@ -5057,7 +5062,14 @@ def _deck_evidence_retire(ev) -> None:
                 ev.pack.run["retired"] = True
                 ev.pack.run["retired_at"] = datetime.now(timezone.utc).isoformat()
                 ev.pack_dirty = True
-            _deck_pack_flush_header(ev)
+            written = False
+            try:
+                written = _deck_pack_flush_header(ev)
+            finally:
+                if not written:           # not stored: unretired here, so the next tick retries
+                    with ev.lock:
+                        ev.pack.run["retired"] = False
+                        ev.pack.run.pop("retired_at", None)
 
 
 # Condition 4: pending pack updates survive Render's SIGTERM drain. Each write
