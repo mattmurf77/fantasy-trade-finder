@@ -3654,19 +3654,21 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
 # ── P1 first-page store (flag trade.first_page_store) ─────────────────────────
 # Scope: docs/plans/trade-time-to-suggestion/scope-eng-200ms.md §2, §6.2, §6.8.
 # Rows live in trade_page_store (database.py). Off (the flag, or the kill knob
-# first_page_store_enabled) ⇒ nothing here reads or writes the table and no
+# first_page_store_enabled below 1) ⇒ nothing here reads or writes the table and no
 # response gains a field. Every page serve goes through S0's serve rules
 # (_roster_serve_rules): the same I-1, gate misses, knobs, log line and floor kick.
 
 _TRADE_PAGE_FORMAT = 1           # pages_blob = {"v", "opponents_total", "cards"}
 _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card without one
 
-# The deck pipeline version (MOD-M1's re-run trigger). Bump it whenever
-# _run_trade_job's deck-shaping layers in server.py change what cards a deck
-# holds or their order (gates, ordering, quality filters, ghosting,
-# publication). Stored pages carry it in their engine_version, so a bump makes
-# every older page fall through. server.py itself is not hashed below; hashing
-# it would cold every page on every deploy.
+# The deck pipeline version (MOD-M1's re-run trigger). server.py is NOT hashed
+# below (hashing it would cold every page on every deploy), so its deck layers
+# are covered only by this number: bump it BY HAND whenever _run_trade_job's
+# or _run_value_core_job's deck-shaping code in server.py changes what cards a
+# deck holds or their order (gates, ordering, quality filters, ghosting,
+# publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
+# trigger. Stored pages carry it in their engine_version, so a bump makes every
+# older page fall through.
 DECK_PIPELINE_VERSION = 1
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -3676,6 +3678,7 @@ DECK_PIPELINE_VERSION = 1
 _ENGINE_CODE_MODULES = (
     # the engines and their generators
     "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
+    "power_rankings.py",          # value_core's lineup slots and optimal starters
     "ranking_service.py", "pick_values.py", "pick_slots.py",
     # gates and filters on the candidate set
     "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
@@ -3714,10 +3717,21 @@ def _trade_engine_code_hash() -> str:
 
 def _trade_page_store_enabled() -> bool:
     """The flag `trade.first_page_store` AND the deploy-free kill knob
-    `first_page_store_enabled` (model_config, default 1; only exactly 1 keeps
-    the store on). Either off ⇒ no store read, write or serve."""
-    return (is_enabled("trade.first_page_store")
-            and _deck_cfg("first_page_store_enabled", 1.0) == 1.0)
+    `first_page_store_enabled` (model_config, default 1). The knob is on at any
+    finite value ≥ 1; 0, a negative, NaN or an unreadable value is off. Either
+    off ⇒ no store read, write, serve or stale mark.
+
+    Re-enabling (the knob or the flag): set the knob to its previous value + 1.
+    It's hashed into every page's config_signature, so each page stored before
+    the off period, which missed that period's stale marks, falls through and
+    rebuilds."""
+    if not is_enabled("trade.first_page_store"):
+        return False
+    try:
+        value = float(_trade_service_mod._cfg.get("first_page_store_enabled", 1.0))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(value) and value >= 1
 
 
 def _trade_page_knob(key: str, default: float, low: int, high: int) -> int:
@@ -4025,14 +4039,14 @@ def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewe
 def _trade_page_status_view(row: dict, cursor: int, sess: Mapping) -> dict:
     """/status?cursor=K inside a page-served deck's stored pages: the slice,
     dispositions and S0's serve rules on a roster snapshot read now; the floor
-    kick after the response. (P2 extends this past the stored pages.)"""
+    kick after the response. Never called at `trade_i1_mode` 0. (P2 extends
+    this past the stored pages.)"""
     league_id = row["league_id"]
     snap = None
-    if _trade_i1_mode():
-        try:
-            snap = _trade_roster_snapshot(league_id)
-        except Exception as err:     # S0's rules re-read, and handle a failure
-            log.warning("trade-page %s: roster snapshot unavailable: %s", row["deck_job_id"], err)
+    try:
+        snap = _trade_roster_snapshot(league_id)
+    except Exception as err:         # S0's rules re-read, and handle a failure
+        log.warning("trade-page %s: roster snapshot unavailable: %s", row["deck_job_id"], err)
     try:
         out, past_bound = _trade_page_view(row, cursor, user_id=sess["user_id"],
                                            viewer_id=_trade_page_viewer(sess, league_id),
@@ -16839,7 +16853,8 @@ def trade_job_status():
         return jsonify({"error": "invalid_cursor",
                         "message": "cursor must be a non-negative integer"}), 400
     page_row = None
-    if cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled():
+    if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
+            and _trade_i1_mode()):      # at trade_i1_mode 0 the store isn't read: the job path
         from . import database as _db
         try:
             page_row = _db.load_trade_page_for_job(sess["user_id"], job_id)
