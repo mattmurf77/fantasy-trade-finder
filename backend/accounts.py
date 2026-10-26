@@ -656,6 +656,7 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
     "trade_proposals", "trade_policy_shadow", "deck_diagnostic_snapshots",
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
+    "deck_card_withdrawals", "deck_evidence_packs",
 )
 
 
@@ -999,6 +1000,36 @@ def _rows_as_dicts(rows, omit: tuple = ()) -> list[dict]:
     ]
 
 
+def _export_candidate_set(row: dict) -> None:
+    """A packed deck_candidate_sets row (S8, eng-evidence-contract §9) exports
+    the reader's unpacked JSON in candidates_json, not the bytes; a pack that
+    can't be read exports candidates_json None and its error."""
+    packed = row.pop("candidates_packed", None)
+    if packed is None:
+        return
+    from .eval import evidence_pack
+    try:
+        _run, members = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
+            row.get("cand_pack_version"), bytes(packed)))
+    except evidence_pack.PackIntegrityError as e:
+        row.update(candidates_json=None, candidates_pack_error=str(e))
+    else:
+        row["candidates_json"] = json.dumps(members)
+
+
+def _export_evidence_pack(row: dict) -> None:
+    """A deck_evidence_packs row exports its unpacked run metadata and cards
+    (`run`, `cards`), not cards_blob; an unreadable pack exports its error."""
+    from .eval import evidence_pack
+    blob = row.pop("cards_blob", None)
+    try:
+        row["run"], row["cards"] = evidence_pack.unpack_run(evidence_pack.PackedRun(
+            row["pack_version"], row["header_json"], bytes(blob or b""), row["checksum"],
+            row["card_count"]))
+    except evidence_pack.PackIntegrityError as e:
+        row["pack_error"] = str(e)
+
+
 def _export_deck_features(raw):
     """Remove only prepared recovery evidence; retain the existing text contract."""
     if not isinstance(raw, str):
@@ -1036,6 +1067,12 @@ def export_user_data(sleeper_user_id: str,
             if key == "deck_impressions":
                 for row in tables[key]:
                     row["features_json"] = _export_deck_features(row["features_json"])
+            elif key == "deck_candidate_sets":
+                for row in tables[key]:
+                    _export_candidate_set(row)
+            elif key == "deck_evidence_packs":
+                for row in tables[key]:
+                    _export_evidence_pack(row)
 
         for name, predicate, omit in (
             ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)
