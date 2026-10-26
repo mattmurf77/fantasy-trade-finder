@@ -471,6 +471,86 @@ def run() -> int:
             'still says "We and our service providers process data in the United States" (R28.9)'
             if us_only else "none")
 
+    # Legal R28.12 row 1 and R28.15 (2026-10-26), pinned word for word. Each
+    # sentence must appear verbatim in the page's rendered text, whitespace-
+    # normalized: block tags become a space and inline tags (<strong>, <a>)
+    # vanish, so "email <a …>fleecedapp@gmail.com</a>." reads as it renders.
+    # The text is hard-coded from R28.15's table and legal-lead-drafts.md
+    # Parts 1-2; any edit to it comes back through legal-lead.
+    def rendered(page: str) -> str:
+        body = strip_style_and_script(strip_comments(body_of(all_sources[page])))
+        text = re.sub(r"<[^>]+>", "", BLOCK_TAG.sub(" ", body))
+        return re.sub(r"\s+", " ", unescape(text).replace("’", "'")).strip()
+
+    R28_15 = {
+        "privacy.html": (
+            ('§1 "How you sign in" lead',
+             'You can sign in with Apple, with your Sleeper username, or, where available, with your '
+             'ESPN or MyFantasyLeague (MFL) login. Each method creates a Fleeced account with an '
+             'internal account ID. You can also connect ESPN and MFL leagues after you sign in (see '
+             '"Platform connections" below). Depending on the method, we store:'),
+            ("§1 ESPN sub-item",
+             "ESPN: your ESPN member ID (called SWID), which identifies your account. You log in on "
+             "ESPN's own page inside the app, and we check the login with ESPN (see \"Platform "
+             'connections" below).'),
+            ("§1 MFL sub-item",
+             "MFL: your MFL username, which identifies your account. Your MFL password is used once "
+             'to sign in to MFL and is never stored (see "Platform connections" below).'),
+            ("§5 SWID clause",
+             "Platform connections (Sleeper, ESPN, MFL): the sign-in tokens, cookies and sessions are "
+             "kept encrypted (except ESPN's SWID cookie, your member ID, which is stored as is) until "
+             "any of these happens:"),
+            ("§6 request line",
+             "Tell us how you sign in (Apple, Sleeper, ESPN or MFL) and how to find your account: your "
+             "Sleeper or MFL username, your ESPN league ID and team name, or the email on your Apple ID."),
+        ),
+        "terms.html": (
+            ("§2 sign-in paragraph",
+             "You can sign in with Apple, with a Sleeper username, or, where available, with your ESPN "
+             "or MyFantasyLeague login. You can also connect ESPN and MyFantasyLeague leagues after you "
+             "sign in. Only sign in with, and connect, accounts you own or are authorized to use."),
+            ("§14.1 subscribe line",
+             "To subscribe, you need a verified account: Sign in with Apple, a verified Sleeper "
+             "sign-in, or, where available, an ESPN or MFL sign-in."),
+        ),
+        "contact.html": (
+            ("c3",
+             "To find your account, say how you sign in (Apple, Sleeper, ESPN or MFL) and your Sleeper "
+             "or MFL username, or for ESPN your league ID and team name. Requests are acted on only "
+             "when they can be verified, so send this while signed in, or email fleecedapp@gmail.com."),
+        ),
+        "faq.html": (
+            ("Q6 MFL storage",
+             "Your password goes to MFL to sign you in. It's never stored. Your MFL username and the "
+             "encrypted session MFL returns are kept."),
+        ),
+    }
+    for page, sentences in R28_15.items():
+        text = rendered(page)
+        missing = [label for label, s in sentences if " ".join(s.split()) not in text]
+        r.check(f"POL-r28-15[{page}]", not missing,
+                "not verbatim (legal R28.15): " + "; ".join(missing) if missing
+                else f"{len(sentences)} R28.15 sentence(s) verbatim")
+
+    # R28.12 row 1: "Fleeced" is the Service, so the operator is "the developer
+    # of Fleeced", and "we"/"us" attach to the operator, not the definition.
+    OPERATOR = {
+        "privacy.html": ('Fleeced: Dynasty Trade Finder ("Fleeced" or "the Service")',
+                         'It is operated by the developer of Fleeced ("we", "us").',
+                         "The Service is operated by the developer of Fleeced."),
+        "terms.html": ('Fleeced: Dynasty Trade Finder ("Fleeced" or "the Service")',
+                       'The Service is operated by the developer of Fleeced ("we", "us").',
+                       "The Service is operated by the developer of Fleeced."),
+    }
+    for page, sentences in OPERATOR.items():
+        text = rendered(page)
+        missing = [s for s in sentences if s not in text]
+        self_run = re.findall(r"\boperated by Fleeced\b[^.]*\.?", text)
+        r.check(f"POL-operator[{page}]", not missing and not self_run,
+                ('says "operated by Fleeced" (the Service operating itself): ' + " | ".join(self_run)
+                 if self_run else "not verbatim (legal R28.12 row 1): " + " | ".join(missing))
+                if (missing or self_run) else 'operated by "the developer of Fleeced", never by "Fleeced"')
+
     EFFECTIVE = re.compile(r"Effective date:\s*([A-Z][a-z]+ \d{1,2}, \d{4})\b")
     dates = {}
     for page in POLICY:
