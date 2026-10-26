@@ -1883,3 +1883,54 @@ def test_flip_a_past_stored_card_with_no_recorded_delivery_is_other(deferred):
     restart()
     view(job_id, 95)
     assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "other": 1}
+
+
+def test_flip_eviction_is_checked_before_holding():
+    """Item 5 (a): a deck this process built and then evicted is in both
+    ledgers: with evicted_split named it reads evicted_split, never other (a
+    held check first) nor restart_split (a not-held check first, as for a
+    deck the held ledger's cap trimmed)."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(server, "_deck_held", {"built_and_evicted": None})
+        mp.setattr(server, "_deck_evicted_at", {"built_and_evicted": "t", "trimmed": "t"})
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
+        assert server._upgrade_miss_cause("built_and_evicted", 95, 90, True) == "evicted_split"
+        assert server._upgrade_miss_cause("trimmed", 95, 90, True) == "evicted_split"
+
+
+def test_flip_the_stored_path_counts_against_the_page_rows_card_count(deferred):
+    """Item 5 (b): the page row says 90 cards were stored; the pack's run is
+    made to say 100. After a restart card 95 is past the row's 90: the stored
+    path passes the row's card_count, so restart_split (the run's 100 would
+    read other)."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    state = server._load_pack_state(job_id, UID)
+    state.run["stored_count"] = 100
+    assert server._deck_pack_commit(job_id, state)
+    restart()
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_flip_the_live_path_counts_against_the_jobs_stored_count(deferred):
+    """Item 5 (c): in process the job's ev.stored_count (90) is passed, not the
+    run's (made 100). The deck is taken off the held ledger so the count
+    decides: card 95 is past 90, restart_split (the run's 100 would read
+    other)."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 90)
+    ev = server._trade_jobs[job_id]["evidence"]
+    assert ev.stored_count == 90
+    with server._deck_evidence_write_lock:
+        ev.pack.run["stored_count"] = 100
+        assert server._deck_pack_commit(job_id, ev.pack)
+    server._deck_held.clear()
+    with ev.lock:
+        ev.rows.pop(contract.card_impression_id(job_id, 95))
+    view(job_id, 95)
+    assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
