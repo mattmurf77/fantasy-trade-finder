@@ -21,6 +21,7 @@ import concurrent.futures
 import functools
 import hashlib
 import hmac
+import http.client
 import json
 import logging
 import math
@@ -34454,7 +34455,7 @@ def _validate_espn_trade(sess, user_id, row, league_id, their_user_id,
     try:
         raw = _espn.fetch_league(league_id, int(row.get("espn_season") or _ESPN_DEFAULT_SEASON),
                                  espn_s2=espn_s2, swid=swid)
-    except (_espn.EspnError, OSError):
+    except (_espn.EspnError, OSError, http.client.HTTPException, UnicodeDecodeError):
         raw = None
     if not isinstance(raw, dict) or not isinstance(raw.get("teams"), list):
         # ESPN unreachable — nothing roster-checkable (MFL branch's rule).
@@ -35303,10 +35304,11 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         # A 502-class read failure (HTTP error, non-JSON body) is R3; 404 / 400
         # keep their own codes.
         return _read_failed() if status == 502 else (payload, status)
-    except OSError as e:
-        # A transport failure `fetch_league` doesn't wrap (URLError, timeout).
-        # It used to escape as a 500, which the overhaul records as "outcome
-        # unknown".
+    except (OSError, http.client.HTTPException, UnicodeDecodeError) as e:
+        # A failure `fetch_league` doesn't wrap: transport (URLError, timeout,
+        # connection reset), `http.client.HTTPException` (IncompleteRead,
+        # BadStatusLine), or a body that isn't UTF-8. It used to escape as a
+        # 500, which the overhaul records as "outcome unknown".
         log.warning("espn propose: pre-flight read failed: %s", type(e).__name__)
         return _read_failed()
     if not isinstance(raw, dict) or not isinstance(raw.get("teams"), list):

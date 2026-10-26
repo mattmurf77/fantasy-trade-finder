@@ -23,6 +23,7 @@ No network: `espn_service.fetch_league` and `espn_write.propose_trade` are
 mocks; the Sleeper reads are mocks asserted never called.
 """
 import copy
+import http.client
 import json
 import urllib.error
 from types import SimpleNamespace
@@ -150,6 +151,22 @@ def _no_roster_object(raw):
 ], ids=["http", "parse", "urlerror", "non_dict", "no_teams", "team_without_roster"])
 def test_failed_mroster_read_blocks_with_readable_502(client, fetch):
     r, fake = _send(client, fetch=fetch())
+    assert r.status_code == 502, r.get_data(as_text=True)
+    assert r.get_json() == {"error": "espn_unavailable", "kind": "network",
+                            "message": R3_COPY, "detail": R3_COPY}
+    fake.assert_not_called()
+
+
+@pytest.mark.parametrize("exc", [
+    lambda: http.client.IncompleteRead(b'{"teams"'),
+    lambda: http.client.BadStatusLine("garbage"),
+    lambda: http.client.RemoteDisconnected("Remote end closed connection"),
+    lambda: UnicodeDecodeError("utf-8", b"\xff\xfe", 0, 1, "invalid start byte"),
+], ids=["incomplete_read", "bad_status_line", "remote_disconnected", "non_utf8_body"])
+def test_unwrapped_read_failures_are_a_readable_502_not_a_500(client, exc):
+    """P3: `fetch_league` wraps only HTTPError and bad JSON. An
+    `http.client.HTTPException` or a body that isn't UTF-8 escaped as a 500."""
+    r, fake = _send(client, fetch=MagicMock(side_effect=exc()))
     assert r.status_code == 502, r.get_data(as_text=True)
     assert r.get_json() == {"error": "espn_unavailable", "kind": "network",
                             "message": R3_COPY, "detail": R3_COPY}
