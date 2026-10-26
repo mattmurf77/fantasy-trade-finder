@@ -681,17 +681,21 @@ def test_interleaved_header_updates_from_two_instances_lose_nothing(deferred):
     b = server._deck_pack_state(job_id, UID)               # instance B, the same stored header
     assert a is not b and a.checksum == b.checksum
     a.run["deliveries"] = first + [[59, "2026-10-27T00:00:59+00:00"], [89, "2026-10-27T00:01:29+00:00"]]
-    a.run["upgrade_misses"] = {"restart_split": 1, "evicted_split": 0, "other": 0}
+    a.run["upgrade_miss_cards"] = {"91": "restart_split"}
+    a.run["upgrade_misses"] = server._upgrade_miss_tally(a.run["upgrade_miss_cards"])
     assert server._deck_pack_commit(job_id, a)
     b.run["deliveries"] = first + [[59, "2026-10-27T00:09:59+00:00"], [74, "2026-10-27T00:01:14+00:00"]]
     b.run.update(retired=True, retired_at="2026-10-27T01:00:00+00:00",
-                 upgrade_misses={"restart_split": 0, "evicted_split": 2, "other": 0})
+                 upgrade_miss_cards={"95": "evicted_split", "96": "evicted_split"})
+    b.run["upgrade_misses"] = server._upgrade_miss_tally(b.run["upgrade_miss_cards"])
     assert server._deck_pack_commit(job_id, b)             # a CAS miss, merged, retried
     run, _cards = unpack(pack_of(engine, job_id))          # the checksum holds
     assert run["deliveries"] == first + [[59, "2026-10-27T00:00:59+00:00"],
                                          [74, "2026-10-27T00:01:14+00:00"],
                                          [89, "2026-10-27T00:01:29+00:00"]]
-    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (    # summed per key
+    assert run["upgrade_miss_cards"] == {"91": "restart_split", "95": "evicted_split",
+                                         "96": "evicted_split"}      # the union
+    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (    # the map's tally
         {"restart_split": 1, "evicted_split": 2, "other": 0}, True, "2026-10-27T01:00:00+00:00")
 
 
@@ -1502,6 +1506,10 @@ def test_u4_importing_the_server_leaves_the_deck_ledgers_empty(tmp_path):
     env = {k: v for k, v in os.environ.items()
            if k not in ("FTF_TEST_MODE", "FTF_SLEEPER_RECORD", "DATABASE_URL")}
     env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
+    # A players cache, as prod's build bakes one (#436 QA): without it the boot
+    # sync stops at "sync deferred" and its sync branch never runs here.
+    env["FTF_PLAYERS_CACHE_FILE"] = str(
+        REPO / "backend/tests/fixtures/draft/players-bulk/players/nfl.json")
     child = subprocess.run(
         [sys.executable, "-c", "import backend.server as s; "
          "s._fetch_sleeper_adp = lambda: {}; import run; "
