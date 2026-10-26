@@ -32,7 +32,8 @@ Three responsibilities:
    captured `sleeper_trades` row not yet linked, find the best-matching
    logged suggestion by the documented asset-set similarity rule and write
    one `suggestion_trade_links` row. `was_recommended` counts only NON-ghost
-   (actually rendered) matches; the best ghost match is linked separately —
+   matches that were shown: viewed or first 30 (R-U6a); the best ghost match
+   is linked separately —
    ghost_impression_id hits are the incrementality read. Eligible cards
    (R-U6a, models-lead R3; `database._evidence_shown`): a row written at
    build (legacy, flag off), or a deferred/packed deck's card in the first 30

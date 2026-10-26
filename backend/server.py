@@ -4374,6 +4374,18 @@ def _store_trade_page_row(job_id: str) -> bool:
                     "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
                     "stored_bytes": len(blob) + len(evidence or b""), "state": "ready",
                 })
+            except Exception:
+                # #445 QA P3-4, the double fault: a save that committed and then
+                # raised left its row. Re-read it by deck_job_id to settle
+                # `written`; no row, or a failed re-read, re-raises as before.
+                try:
+                    written = _db.load_trade_page_for_job(user_id, job_id) is not None
+                except Exception:
+                    written = False
+                if not written:
+                    raise
+                log.warning("trade-page %s: the save raised, but its row is stored", job_id,
+                            exc_info=True)
             finally:
                 if ev is not None:
                     # #438 QA P3-2: the deck's stored count is set only here, once
@@ -5313,7 +5325,9 @@ _deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   
 _deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
 _ledger_now = time.time                    # the ledgers' clock (tests replace it)
 _DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
-_ledger_guard_young = 0                    # young entries the guard trimmed since its last warning
+# Young entries the guard trimmed since its last warning, per ledger (#451 QA:
+# the warning names which). Reset per test by backend/tests/conftest.py.
+_ledger_guard_young = {"held": 0, "evicted": 0}
 _ledger_guard_warned_at = float("-inf")
 # A leaf lock for the ledgers' writes (#428 QA item 2: kickoffs add concurrently,
 # and the trim raced). Never take another lock while holding it (the guard's
@@ -5326,23 +5340,28 @@ def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None
     """Note `key` now. Entries stay in time order (a re-add moves to the end),
     so the trims take the oldest first, each in O(1): every entry older than
     the retention, then, at the guard, the oldest young ones (warned at most
-    once a minute, with the count since the last warning)."""
+    once a minute, with the counts since the last warning, per ledger)."""
     global _ledger_guard_young, _ledger_guard_warned_at
     now = _ledger_now()
-    warn = 0
+    which = "evicted" if ledger is _deck_evicted_at else "held"
+    warn = None
     with _deck_ledger_lock:
         ledger.pop(key, None)
         while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
             ledger.popitem(last=False)
         while len(ledger) >= _DECK_LEDGER_GUARD:
-            _ledger_guard_young += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
+            _ledger_guard_young[which] += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
         ledger[key] = now
-        if _ledger_guard_young and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S:
-            warn, _ledger_guard_young, _ledger_guard_warned_at = _ledger_guard_young, 0, now
+        if (any(_ledger_guard_young.values())
+                and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S):
+            warn, _ledger_guard_young = _ledger_guard_young, {"held": 0, "evicted": 0}
+            _ledger_guard_warned_at = now
     if warn:
+        total = sum(warn.values())
         log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
-                    "24 h since its last warning: a late view of such a deck reads "
-                    "restart_split", _DECK_LEDGER_GUARD, warn, "y" if warn == 1 else "ies")
+                    "24 h since its last warning (held=%d, evicted=%d): a late view of such "
+                    "a deck reads restart_split", _DECK_LEDGER_GUARD, total,
+                    "y" if total == 1 else "ies", warn["held"], warn["evicted"])
 
 
 def _note_deck_held(job_id: str) -> None:
@@ -5518,14 +5537,25 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
             except Exception:
                 record(False)
                 raise
+        # The cause the commit kept: a deploy overlap's CAS merge keeps the
+        # stored one (#439/#445 QA P3-1), and the line logs that, with ours as
+        # local_cause when they differ (then at WARNING: the writer whose cause
+        # stood logged its own line).
+        if ev_for_header is not None:
+            with ev_for_header.lock:
+                kept = _upgrade_miss_cards(state.run).get(key, cause)
+        else:
+            kept = _upgrade_miss_cards(state.run).get(key, cause)
         line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d stored_from=%s "
                 "held_here=%s evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
         evicted_at = _deck_evicted_at.get(deck_job_id)
-        args = (cause, deck_job_id, index, stored, stored_from, deck_job_id in _deck_held,
+        args = (kept, deck_job_id, index, stored, stored_from, deck_job_id in _deck_held,
                 None if evicted_at is None
                 else datetime.fromtimestamp(evicted_at, timezone.utc).isoformat(),
                 state.delivered_at(index), now)
-        if cause == "other":              # U4-R2: must be zero; it goes back to models-lead
+        if kept != cause:
+            log.warning(line + " local_cause=%s", *args, cause)
+        elif cause == "other":            # U4-R2: must be zero; it goes back to models-lead
             log.error(line, *args)
         else:
             log.warning(line, *args)
@@ -6193,12 +6223,14 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
     builds a new deck. Its in-process evidence is dropped and its job revoked,
     so no response serves it from this process (P2's live-job pages past the
     stored ones included); its stored pages, if any, serve and write through
-    the page store's evidence_blob, as after a restart. Delivered decks keep
-    theirs (written, and freed, at their first delivery). Returns the count."""
+    the page store's evidence_blob, as after a restart: it leaves _deck_held
+    too, so an upgrade miss on it reads as a restart's (release-lead's #451 QA
+    P2). Delivered decks keep theirs (written, and freed, at their first
+    delivery). Returns the count."""
     now = time.monotonic() if now is None else now
     dropped = 0
     with _trade_jobs_lock:
-        for job in _trade_jobs.values():
+        for job_id, job in _trade_jobs.items():
             ev = job.get("evidence")
             if (ev is None or job.get("status") == "running" or not job.get("finished_at")
                     or now - job["finished_at"] <= _PREGEN_TTL_SECONDS):
@@ -6211,6 +6243,14 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                 ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
+            # The deck's snapshots left this process: a miss on it is
+            # restart_split, as after a restart, never "other" (a held deck).
+            # The later eviction can't record it (no evidence left). Pending
+            # models-lead's ruling via head-eng: evicted_split would mean noting
+            # it in _deck_evicted_at here instead. Order: jobs, then the ledger
+            # (leaf), as in _note_deck_evicted.
+            with _deck_ledger_lock:
+                _deck_held.pop(job_id, None)
             dropped += 1
     if dropped:
         log.info("deck-evidence: dropped %d undelivered deck(s) past %d s", dropped,
@@ -15152,10 +15192,12 @@ _RATIO_SERIES_BREAK_DETAIL = ("U6/R-U6a: from the packed-evidence flip, `recomme
 
 def _ratio_series_break_caveats(first_day: str | None, last_day: str | None) -> list[dict]:
     """A `series_break` caveat when the packed-evidence flip day is set
-    (database.PACKED_EVIDENCE_FLIP_DAY, shared with receipts) and the links'
-    trade days span it (inclusive: the flip day itself is mixed)."""
+    (database.PACKED_EVIDENCE_FLIP_DAY, shared with receipts, read through
+    database.packed_evidence_flip_day: a malformed value is no caveat and one
+    warning) and the links' trade days span it (inclusive: the flip day itself
+    is mixed)."""
     from . import database as _db
-    day = _db.PACKED_EVIDENCE_FLIP_DAY
+    day = _db.packed_evidence_flip_day()
     if day is None or first_day is None or last_day is None or not first_day <= day <= last_day:
         return []
     return [{"code": _db.SERIES_BREAK_CAVEAT, "scope": "suggestion_ratio",
