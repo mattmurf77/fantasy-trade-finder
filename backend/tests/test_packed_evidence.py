@@ -509,6 +509,10 @@ def test_s8_the_pack_round_trips_through_the_eval_reader_to_the_full_rows(deferr
     db_module.metadata.create_all(full)
     first = rows(engine)
     served_at = pack_of(engine, job_id)["served_at"]
+    with ev.lock:                                          # retired: final for eval v5 too
+        ev.pack.run.update(retired=True, retired_at=served_at)
+        ev.pack_dirty = True
+    server._deck_pack_flush_header(ev)
     with full.begin() as conn:
         conn.execute(insert(db_module.deck_impressions_table), first + [
             {**{c.name: r.get(c.name) for c in db_module.deck_impressions_table.columns},
@@ -747,10 +751,13 @@ def test_v5_reads_the_packed_deck_like_its_full_rows_with_withdrawals_and_in_fli
     (pdeck, packed_read), (fdeck, full_read) = read(engine), read(full)
     assert pdeck.exclusion is None and fdeck.exclusion is None
     assert packed_read == full_read
+    w = {r["served_before"]: r["card_index"] for r in rows(engine, db_module.deck_card_withdrawals_table)}
     kept = [i for i, ghost, *_ in packed_read if not ghost]
-    assert 40 not in kept and 3 in kept and pdeck.withdrawn_removed == fdeck.withdrawn_removed == 1
+    assert w[0] not in kept and w[1] in kept and pdeck.withdrawn_removed == fdeck.withdrawn_removed == 1
     assert [i for i, ghost, delivered, *_ in packed_read if delivered and not ghost] == [
-        i for i in range(60) if i != 40]
+        i for i in range(60) if i != w[0]]
+    positions = [p for _i, ghost, _d, p, _c in packed_read if not ghost]
+    assert positions == list(range(len(positions)))       # displayed positions, the W0 gap closed
     # A non-retired pack inside its window is in_flight (as of now).
     with ev.lock:
         ev.pack.run["retired"] = False
