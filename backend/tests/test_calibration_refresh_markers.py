@@ -46,10 +46,15 @@ def test_the_server_stamps_evals_refresh_source_where_calibration_pregenerates()
 
 
 def _source_comparison_literals():
-    """Every string literal a `source` / `job_source` value is compared against
+    """Every string literal a `source` / `job_source` / `….get("source")` value is compared against
     (==, !=, in, not in, including tuple members) anywhere in server.py."""
     def is_source(node):
-        return isinstance(node, ast.Name) and node.id in ("source", "job_source")
+        if isinstance(node, ast.Name):
+            return node.id in ("source", "job_source")
+        # job.get("source") / _job_now.get("source") (#420 QA: the trade_impressions guard)
+        return (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get" and node.args
+                and isinstance(node.args[0], ast.Constant) and node.args[0].value == "source")
     out = []
     for node in ast.walk(_server_tree()):
         if isinstance(node, ast.Compare) and is_source(node.left):
@@ -63,5 +68,5 @@ def test_every_server_guard_on_the_refresh_source_uses_evals_spelling():
     """S4's guards (no trades_generated, no trade_impressions, never pinned under
     the Trades key, never prepared-adopted) all compare against the same string."""
     refresh = [lit for lit in _source_comparison_literals() if "refresh" in lit]
-    assert len(refresh) >= 4, refresh
+    assert len(refresh) >= 7, refresh
     assert set(refresh) == {eval_data.CALIBRATION_REFRESH_SOURCE}

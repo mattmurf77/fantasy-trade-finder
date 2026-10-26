@@ -4505,6 +4505,7 @@ class _DeckEvidence:
         self.pack = None              # its _PackState once the pack row is written
         self.pack_dirty = False       # a delivery the pack's header doesn't carry yet
         self.pack_cards = None        # the pack's cards, fixed at the first write attempt
+        self.pack_rows = None         # the first attempt's row snapshot (W0 included), until the cards are built
         self.deck_source = None       # the job's source (F10 "replenish"), for the run metadata
 
     def __copy__(self):
@@ -4820,7 +4821,12 @@ def _deck_pack_input(ev: _DeckEvidence):
     rows is taken here; _deck_pack_cards builds the cards outside the lock
     (#416 QA: building them under it held a next-page serve ~40 ms at 2,354
     cards)."""
-    rows = None if ev.pack_cards is not None else list(ev.rows.values())
+    if ev.pack_cards is None and ev.pack_rows is None:
+        # Fixed at the first attempt (#420 QA P2): plan() drops a never-delivered
+        # withdrawn card's row right after this, so a retry after a failed
+        # rows transaction must reuse this snapshot, or the pack loses that card.
+        ev.pack_rows = list(ev.rows.values())
+    rows = None if ev.pack_cards is not None else ev.pack_rows
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False, "upgrade_misses": 0}
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
@@ -4839,6 +4845,7 @@ def _deck_pack_cards(ev: _DeckEvidence, source) -> tuple[list, dict]:
         with ev.lock:
             if ev.pack_cards is None:
                 ev.pack_cards = built
+            ev.pack_rows = None
             cards = ev.pack_cards
     return cards, run
 
@@ -5198,8 +5205,11 @@ def _retire_deck_evidence(now: float | None = None) -> int:
         except (TypeError, ValueError):
             capped = False
         if gone or capped:
-            _deck_evidence_retire(ev)
-            retired += 1
+            try:                          # one deck's error never skips the rest (#420 QA P3)
+                _deck_evidence_retire(ev)
+                retired += 1
+            except Exception:
+                log.exception("deck-evidence %s: retirement failed; retried next tick", ev.job_id)
     return retired
 
 
