@@ -1413,38 +1413,106 @@ def test_u4_a_deck_this_process_builds_is_noted_held(deferred, monkeypatch):
     assert off != job_id and off not in server._deck_held
 
 
-def test_u4_restart_splits_assume_one_worker_per_instance():
-    """models-eng: "this process never held the deck" means a restart only
-    with one gunicorn worker per instance. --preload is fine (#428 QA: Render
-    preloads by default through GUNICORN_CMD_ARGS, which this file can't see):
-    the master's import leaves the ledgers empty, pinned below."""
-    # Plain text, no PyYAML (not a CI dependency): the web service's block runs
-    # from its "- type: web" line to the next "- type:" line.
-    lines = (REPO / "render.yaml").read_text().splitlines()
+def _web_start_command(render_yaml: str) -> list[str]:
+    """The web service's startCommand in `render_yaml`, as shell words. Plain
+    text, no PyYAML (not a CI dependency): the service's block runs from its
+    "- type: web" line to the next "- type:" line, and the command is either
+    on its own line or a folded/literal block (`>`, `|`) indented below it.
+    Everything from a " #" on is dropped: a YAML comment, or a shell one."""
+    lines = render_yaml.splitlines()
     starts = [i for i, line in enumerate(lines) if line.strip().startswith("- type:")]
     [web_at] = [i for i in starts if lines[i].split(":", 1)[1].strip() == "web"]
     block = lines[web_at:min([i for i in starts if i > web_at], default=len(lines))]
-    [command_line] = [line for line in block if line.strip().startswith("startCommand:")]
-    command = command_line.split(":", 1)[1].split()
+    [at] = [i for i, line in enumerate(block) if line.strip().startswith("startCommand:")]
+    value = block[at].split(":", 1)[1]
+    if value.strip()[:1] in (">", "|"):
+        indent = len(block[at]) - len(block[at].lstrip())
+        body = []
+        for line in block[at + 1:]:
+            if line.strip() and len(line) - len(line.lstrip()) <= indent:
+                break
+            body.append(line)
+        value = " ".join(body)
+    value = (" " + value).split(" #", 1)[0].strip()
+    if value[:1] in "\"'" and value[-1:] == value[:1]:
+        value = value[1:-1]
+    return value.split()
+
+
+def _gunicorn_workers(words: list[str]) -> list[str]:
+    """Every workers value the command gives gunicorn, in order (it uses the
+    last): --workers N, --workers=N, -w N, -wN."""
+    values = []
+    for i, word in enumerate(words):
+        if word in ("--workers", "-w"):
+            values.append(words[i + 1] if i + 1 < len(words) else "")
+        elif word.startswith("--workers="):
+            values.append(word.split("=", 1)[1])
+        elif word.startswith("-w") and len(word) > 2:
+            values.append(word[2:])
+    return values
+
+
+_WEB = "services:\n  - type: web\n    name: x\n"
+_CRON = "  - type: cron\n    startCommand: gunicorn run:app --workers 9\n"
+
+
+@pytest.mark.parametrize("command, workers", [
+    ("    startCommand: gunicorn run:app --workers 1 --threads 4\n", ["1"]),
+    ("    startCommand: gunicorn run:app -w 1\n", ["1"]),
+    ("    startCommand: gunicorn run:app --workers=1\n", ["1"]),
+    ("    startCommand: gunicorn run:app -w1\n", ["1"]),
+    ("    startCommand: >\n      gunicorn run:app\n      --workers 1 --threads 4\n", ["1"]),
+    ("    startCommand: \"gunicorn run:app --workers 1\"\n", ["1"]),
+    ("    startCommand: gunicorn run:app --timeout 120  # --workers 1\n", []),
+    ("    startCommand: gunicorn run:app --workers 1 -w 2\n", ["1", "2"]),
+    ("    startCommand: gunicorn run:app --workers 1 --workers=2\n", ["1", "2"]),
+    ("    startCommand: gunicorn run:app -w 2\n", ["2"]),
+    ("    startCommand: gunicorn run:app --threads 4\n", []),
+])
+def test_u4_the_workers_pin_reads_every_form(command, workers):
+    """#433 QA P3: the pin's parser. A trailing comment never counts, every
+    repeat is seen (gunicorn takes the last), and each spelling is read,
+    including a folded block. Only the web service's command is read."""
+    assert _gunicorn_workers(_web_start_command(_WEB + command + _CRON)) == workers
+
+
+def test_u4_restart_splits_assume_one_worker_per_instance():
+    """models-eng: "this process never held the deck" means a restart only
+    with one gunicorn worker per instance. The command line's workers win over
+    GUNICORN_CMD_ARGS and WEB_CONCURRENCY (Render sets the latter from the
+    CPUs: 2 on a 2-CPU plan), so this explicit value is the only reliable pin.
+    --preload is fine (#428 QA: Render preloads by default through
+    GUNICORN_CMD_ARGS): the master's import leaves the ledgers empty, pinned
+    below."""
+    words = _web_start_command((REPO / "render.yaml").read_text())
     message = ("restart_split's provenance rule assumes one worker per instance: add a "
                "cross_worker cause to _upgrade_miss_cause (models-eng's reader is cause-generic) "
                "before raising --workers")
-    assert command[command.index("--workers") + 1] == "1", message
+    assert _gunicorn_workers(words) == ["1"], message
 
 
 def test_u4_importing_the_server_leaves_the_deck_ledgers_empty(tmp_path):
     """#428 QA: the preload hazard. Under --preload the gunicorn master imports
     the app and forks its worker, which inherits the master's _deck_held and
     _deck_evicted_at. A deck noted there would never read as a restart's.
-    Observable only in a fresh interpreter (this one imported the server)."""
+    Observable only in a fresh interpreter (this one imported the server). It
+    imports run, gunicorn's target (run:app), so a boot-time step there is
+    covered too (#433 QA P3), with the boot sync's one network call, Sleeper's
+    ADP, stubbed out."""
     import os
     import subprocess
     import sys
     env = {k: v for k, v in os.environ.items()
            if k not in ("FTF_TEST_MODE", "FTF_SLEEPER_RECORD", "DATABASE_URL")}
     env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
+    # A players cache, as prod's build bakes one (#436 QA): without it the boot
+    # sync stops at "sync deferred" and its sync branch never runs here.
+    env["FTF_PLAYERS_CACHE_FILE"] = str(
+        REPO / "backend/tests/fixtures/draft/players-bulk/players/nfl.json")
     child = subprocess.run(
         [sys.executable, "-c", "import backend.server as s; "
+         "s._fetch_sleeper_adp = lambda: {}; import run; "
          "print(len(s._deck_held), len(s._deck_evicted_at))"],
         capture_output=True, text=True, cwd=REPO, env=env, timeout=180)
     assert child.returncode == 0, child.stderr[-2000:]
