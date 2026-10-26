@@ -523,3 +523,62 @@ def test_ratio_route_gated_and_served(mem_engine):
             assert body["total"]["executed"] == 1
             assert body["total"]["recommended"] == 1
             assert body["total"]["ratio"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# The ratio's series break at the packed-evidence flip (analytics-lead)
+# ---------------------------------------------------------------------------
+
+def _link(txid, *, traded_at, league=LEAGUE, computed_at="2026-11-20T00:00:00+00:00"):
+    save_suggestion_trade_links([{
+        "transaction_id": txid, "league_id": league, "was_recommended": 0,
+        "matched_impression_id": None, "match_type": None, "overlap_score": None,
+        "ghost_impression_id": None, "ghost_match_type": None, "ghost_overlap_score": None,
+        "traded_at": traded_at, "computed_at": computed_at}])
+
+
+def test_the_link_day_span(mem_engine):
+    assert db_module.suggestion_link_day_span() == (None, None)
+    _link("tx_a", traded_at="2026-11-01T10:00:00+00:00")
+    _link("tx_b", traded_at="2026-11-09T23:00:00+00:00")
+    _link("tx_c", traded_at=None, computed_at="2026-11-12T01:00:00+00:00")   # computed_at instead
+    _link("tx_d", traded_at="2026-10-01T00:00:00+00:00", league="other-league")
+    assert db_module.suggestion_link_day_span(LEAGUE) == ("2026-11-01", "2026-11-12")
+    assert db_module.suggestion_link_day_span() == ("2026-10-01", "2026-11-12")
+
+
+@pytest.mark.parametrize("flip_day, flagged", [
+    (None, False),               # ships unset: no caveat
+    ("2026-11-05", True),        # inside the trades' span
+    ("2026-11-01", True),        # the first day (mixed)
+    ("2026-11-09", True),        # the last day (mixed)
+    ("2026-10-31", False),       # before every trade
+    ("2026-11-10", False),       # after every trade
+])
+def test_the_ratio_carries_the_flip_series_break(mem_engine, monkeypatch, flip_day, flagged):
+    monkeypatch.setattr(db_module, "PACKED_EVIDENCE_FLIP_DAY", flip_day)
+    _link("tx_a", traded_at="2026-11-01T10:00:00+00:00")
+    _link("tx_b", traded_at="2026-11-09T23:00:00+00:00")
+    server.app.config["TESTING"] = True
+    client = server.app.test_client()
+    with patch.object(server, "_require_cron_auth", lambda: None), _telemetry(True):
+        body = client.get("/api/admin/suggestion-telemetry/ratio").get_json()
+    assert body["caveats"] == ([{
+        "code": "series_break", "scope": "suggestion_ratio", "day": flip_day,
+        "detail": "U6/R-U6a: from the packed-evidence flip, `recommended` counts matches "
+                  "to viewed-or-first-30 suggestions"}] if flagged else [])
+
+
+def test_no_links_no_caveat(mem_engine, monkeypatch):
+    monkeypatch.setattr(db_module, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-05")
+    assert server._ratio_series_break_caveats(*db_module.suggestion_link_day_span()) == []
+
+
+def test_receipts_and_the_ratio_read_one_flip_day(monkeypatch):
+    """analytics-lead: one value, so the two series' breaks can't drift."""
+    import backend.receipts_service as rs
+    monkeypatch.setattr(db_module, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-05")
+    [ratio] = server._ratio_series_break_caveats("2026-11-01", "2026-11-09")
+    [receipts] = rs._receipts_series_break_caveats([{"served_at": "2026-11-01T00:00:00+00:00"},
+                                                    {"served_at": "2026-11-09T00:00:00+00:00"}])
+    assert ratio["day"] == receipts["day"] == "2026-11-05"
