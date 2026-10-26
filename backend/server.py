@@ -4228,7 +4228,11 @@ def _trade_page_request_inputs(sess: Mapping, league_id: str) -> dict:
 def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int) -> dict | None:
     """P2: GET /api/trades/status?deck=D&cursor=K. The body, or None (404).
 
-    In order (design §2), every serve under S0's rules:
+    The app sends `deck` on every paged poll, organic or not, so P2 rebases
+    only a deck it can prove organic: D in this process with an organic
+    `page_scope`, or a stored row D built (looked up by deck_job_id). Its scope
+    is then D's own, so an intent or pinned search that moves the session's
+    fairness never moves it. Every serve goes through S0's rules:
       (a) the scope's stored row was built by D and K < its count: its stored
           pages (_trade_page_status_view: P1's slice, S0's rules, floor kick);
       (b) D is the requester's job in this process: E2's page view of its raw
@@ -4237,13 +4241,12 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
           or the §3b withhold's wait_reason) holds the cursor: never an end or
           a rebase. A complete D asked past its last card is the deck's end:
           _trade_deck_rebase decides between a newer deck and the end;
-      (c) otherwise (D unknown, gone, revoked, errored, or its policy moved)
-          the deck changed: _trade_deck_rebase.
-    The organic scope is D's own, so an intent or pinned search that moves
-    the session's fairness never moves the deck: D's `page_scope` when D is in
-    this process; else the requester's stored row built by D (one read of the
-    user's rows for the league and format, then a match); else the session's
-    last non-pinned fairness.
+      (c) otherwise (D gone, revoked, errored, or its policy moved) the deck
+          changed: _trade_deck_rebase.
+    A deck that isn't provably organic (pinned, Specific Team, intent,
+    replenish, or admitted with the store off) gets its own page view and
+    its own end or error (_trade_deck_own), never a rebase; gone, the legacy
+    404. One page row read per poll, and only that row's pages decoded.
     The server never dedupes against the client; the client does, by trade_hash.
     """
     from . import database as _db
@@ -4251,45 +4254,69 @@ def _trade_deck_status(sess: Mapping, sess_token: str, deck_id: str, cursor: int
     with _trade_jobs_lock:
         job = _trade_jobs.get(deck_id)
         deck = dict(job) if job is not None and job["key"][0] == user_id else None
-    if deck is not None and deck.get("page_scope"):
-        _, league_id, fmt = deck["key"]
-        scope, fairness = deck["page_scope"], deck["fairness_threshold"]
-    else:
-        league_id = getattr(sess.get("league"), "league_id", None)
-        fmt = _active_format(sess)
-        scope, fairness = None, sess.get("trade_fairness_threshold", 0.5)
-    stored = league_id is not None and league_id != "league_demo"
-    rows = []
-    if stored:
-        try:
-            rows = _db.load_trade_pages_for_user(user_id, league_id, fmt)
-        except Exception as err:
-            log.warning("trade-page read failed for league %s: %s", league_id, err)
-    if scope is None and stored:
-        built = next((r for r in rows if r["deck_job_id"] == deck_id), None)
-        if built is not None:
-            scope = built["request_scope"]
-            fairness = float(scope.rpartition("=")[2])
+    if deck is not None and not deck.get("page_scope"):
+        return _trade_deck_own(deck, cursor)
+    row = None
+    try:
+        if deck is not None:
+            _, league_id, fmt = deck["key"]
+            scope, fairness = deck["page_scope"], deck["fairness_threshold"]
+            row = _db.load_trade_page(user_id, league_id, fmt, scope)
         else:
-            scope = _trade_page_scope(fairness)
-    row = next((r for r in rows if r["request_scope"] == scope), None)
+            row = _db.load_trade_page_for_job(user_id, deck_id)
+    except Exception as err:
+        log.warning("trade-page read failed for deck %s: %s", deck_id, err)
+    if deck is None:
+        if row is None:
+            return None                       # gone, and not provably organic: the legacy 404
+        league_id, fmt, scope = row["league_id"], row["scoring_format"], row["request_scope"]
+        fairness = float(scope.rpartition("=")[2])
     if row is not None and row["deck_job_id"] == deck_id and cursor < row["card_count"]:
         return {**_trade_page_status_view(row, cursor, sess), "deck_id": deck_id}
     finished = None
     if deck is not None:
-        out = _trade_job_page_view(deck, cursor)
-        held = out.get("error") == "roster_check_unavailable" or "wait_reason" in out
-        continues = (deck["status"] != "complete" or out["replace"]
-                     or cursor < len(deck.get("cards") or []))
-        if scope is None or held or (out["status"] != "error" and continues):
+        out, at_end = _trade_deck_job_view(deck, cursor)
+        if not at_end and (out["status"] != "error" or _trade_deck_held(out)):
             return {**out, "deck_id": deck_id}
-        if out["status"] != "error":
+        if at_end:
             finished = out
-    if scope is None:
-        return None
     return _trade_deck_rebase(sess, sess_token, deck_id, cursor, row, finished, deck,
                               league_id=league_id, scoring_format=fmt,
                               fairness_threshold=fairness, scope=scope)
+
+
+def _trade_deck_held(out: dict) -> bool:
+    """An S0 gate miss on this response: it holds the cursor."""
+    return out.get("error") == "roster_check_unavailable" or "wait_reason" in out
+
+
+def _trade_deck_job_view(deck: dict, cursor: int) -> tuple[dict, bool]:
+    """E2's page view of a deck's job at K, and whether that is the deck's end:
+    the job is complete, the page is neither an error nor a gate miss, and K
+    is at or past its last card without a `replace`, or exactly at its length
+    with one. A complete deck's list is final, so a re-sorting deck (E2
+    re-sends its final list on every cursor) ends at its length too, with
+    that list in the response for the client to merge; otherwise its end
+    would never come."""
+    out = _trade_job_page_view(deck, cursor)
+    raw = len(deck.get("cards") or [])
+    at_end = (out["status"] != "error" and not _trade_deck_held(out)
+              and deck["status"] == "complete" and cursor >= raw
+              and (not out["replace"] or cursor == raw))
+    return out, at_end
+
+
+def _trade_deck_own(deck: dict, cursor: int) -> dict:
+    """A deck in this process that isn't provably organic (pinned, Specific
+    Team, intent, replenish, or admitted with the store off): its own page
+    view, exactly the job_id + cursor form's (no deck_id), never a rebase. Its
+    error passes through; at its own end (_trade_deck_end, `organic` False) a
+    gate miss holds the cursor, else `pool_exhausted: true`."""
+    out, at_end = _trade_deck_job_view(deck, cursor)
+    if not at_end:
+        return out
+    _, league_id, fmt = deck["key"]
+    return _trade_deck_end(out, deck, None, None, league_id, fmt, organic=False)
 
 
 def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int,
@@ -4311,9 +4338,14 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
          cursor; the end (`pool_exhausted`) only when nothing can add cards;
          D's own response when the check can't run;
       4. else P1's kick (reason "stale" at D's end, "status_restart" when D
-         is gone) and its first page. A kick that joins a job outside the
-         scope (another fairness, an intent search) or D itself is no deck to
-         move to: D's own response, or no cards on D, without the end.
+         is gone) and its first page. A kick that starts no deck to move to:
+         at D's end, the end when nothing can rebuild the scope (the kick
+         returned D itself, still fresh here, or failed), else D's own
+         response to ask again (it joined a job outside the scope, another
+         fairness or an intent search, or raced a revocation); with D gone,
+         no cards on D.
+    A stale scope converges: its rebuild starts, the client is rebased onto
+    it, and that deck's own end follows once it lands and is stored.
     """
     key = _trade_job_key(sess["user_id"], league_id, scoring_format)
     with _trade_jobs_lock:
@@ -4346,24 +4378,38 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
             reason="stale" if finished is not None else "status_restart")
         with _trade_jobs_lock:
             kicked = dict(_trade_jobs.get(job_id) or {})
-        if (job_id == deck_id or kicked.get("page_scope") != scope
-                or _trade_job_revoked(kicked) or kicked.get("status") == "error"):
-            return {**(finished or _trade_deck_waiting(deck_id, cursor)), "deck_id": deck_id}
+            revoked = _trade_job_revoked(kicked)
+        failed = kicked.get("status") == "error" and not revoked
+        if job_id == deck_id or failed or revoked or kicked.get("page_scope") != scope:
+            if finished is None:
+                return {**_trade_deck_waiting(deck_id, cursor), "deck_id": deck_id}
+            if job_id == deck_id or failed:
+                # Nothing can rebuild the scope now: D is still fresh here (its
+                # row was marked stale elsewhere), or the kick failed. The end.
+                return {**finished, "deck_id": deck_id, "pool_exhausted": True}
+            return {**finished, "deck_id": deck_id}   # joined a job outside the scope: ask again
         newest = kicked
     return {**_trade_job_page_view(newest, 0), "deck_id": newest["job_id"], "rebased": True}
 
 
 def _trade_deck_end(finished: dict, deck: dict, row: dict | None, key, league_id: str,
-                    scoring_format: str) -> dict | None:
-    """A live, complete deck D asked past its last card, with no newer deck
-    for the scope. One snapshot read (_trade_current_snapshot) decides:
+                    scoring_format: str, *, organic: bool = True) -> dict | None:
+    """A live, complete deck D asked past its last card (`finished`, D's E2
+    response), with no newer deck for the scope. One snapshot read
+    (_trade_current_snapshot) decides:
       - a gate miss under S0's rules (_roster_gate_now: the knobs, the admin
         hook) gets the job views' shape and holds the cursor, never the end;
       - the read failed: D's own response, no end (it can't be proven);
-      - `pool_exhausted: true` only when D's rosters and values still match
-        the stored rows, its row isn't stale and no job for the key is
-        running (a rebuild or backing job may still add cards);
-      - otherwise None: the caller kicks the rebuild.
+      - a deck that isn't organic (`organic` False: pinned, Specific Team,
+        intent...) has nothing to rebuild: `pool_exhausted: true`, its own end;
+      - an organic deck: `pool_exhausted: true` only when D's rosters and
+        values still match the stored rows, its row isn't stale and no job
+        for the key is running (a rebuild or backing job may still add cards);
+        otherwise None, and the caller kicks the rebuild.
+    At `trade_i1_mode` 0 there is no snapshot read, so no gate miss and no
+    stamp compare: the end needs only a row that isn't stale and no running
+    job, as before S0. (/status ignores `deck` at mode 0, so only a mode flip
+    mid-request reaches this.)
     Past the roster bound, S0's floor kick runs after the response is built."""
     current = _trade_current_snapshot(league_id, scoring_format)
     block, past_bound = _roster_gate_now(league_id, deck["job_id"], current)
@@ -4373,6 +4419,8 @@ def _trade_deck_end(finished: dict, deck: dict, row: dict | None, key, league_id
         out = {**finished, "status": "running", "wait_reason": "roster_check"}
     elif current is None and _trade_i1_mode():
         out = finished
+    elif not organic:
+        out = {**finished, "pool_exhausted": True}
     elif ((current is None
            or (current[0].fp, current[1]) == (deck.get("roster_fp"), deck.get("values_snapshot_id")))
           and (row is None or row["state"] != "stale") and not _trade_rebuild_running(key)):
