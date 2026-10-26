@@ -16476,7 +16476,8 @@ def generate_trades():
             presentation_capture=presentation_capture, opponents_total=opponents_total,
             search_id=search_id)
         if served is not None:
-            return jsonify({**served, "deck_id": served["job_id"]})
+            return _serve_stored_trade_page(g_user_id, {**served, "deck_id": served["job_id"]},
+                                            page_row)
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -16518,12 +16519,10 @@ def generate_trades():
                 _trade_jobs_by_key.pop(key, None)
 
     if reuse_snapshot is not None:
-        if paged:
-            out = _trade_job_page_view(reuse_snapshot, 0, search_id)
-            return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
-        return jsonify(_trade_job_public_view(copy.deepcopy(reuse_snapshot)))
+        return _serve_trade_job(g_user_id, reuse_snapshot, paged, 0, search_id,
+                                deck_named=deck_named)
 
     # Kick off a fresh job. No locks held during the worker spawn so we
     # don't accidentally serialize parallel users.
@@ -16548,10 +16547,7 @@ def generate_trades():
     )
     with _trade_jobs_lock:
         snapshot = dict(_trade_jobs[job_id])
-    if paged:
-        out = _trade_job_page_view(snapshot, 0, search_id)
-        return jsonify({**out, "deck_id": out["job_id"]} if deck_named else out)
-    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
+    return _serve_trade_job(g_user_id, snapshot, paged, 0, search_id, deck_named=deck_named)
 
 
 @app.route("/api/trades/asset-ideas", methods=["POST"])
@@ -17558,7 +17554,9 @@ def trade_job_status():
             return jsonify({"error": "invalid_deck",
                             "message": "deck must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
         body = _trade_deck_status(sess, request.headers.get("X-Session-Token", ""), deck, int(cursor))
-        return jsonify(body) if body is not None else (jsonify({"error": "job not found"}), 404)
+        if body is None:
+            return jsonify({"error": "job not found"}), 404
+        return _serve_deck_status(sess["user_id"], body)
     page_row = None
     if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
             and _trade_i1_mode()):      # at trade_i1_mode 0 the store isn't read: the job path
@@ -17568,7 +17566,8 @@ def trade_job_status():
         except Exception as err:
             log.warning("trade-page read failed for job %s: %s", job_id, err)
         if page_row is not None and int(cursor) < page_row["card_count"]:
-            return jsonify(_trade_page_status_view(page_row, int(cursor), sess))
+            return _serve_stored_trade_page(
+                sess["user_id"], _trade_page_status_view(page_row, int(cursor), sess), page_row)
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if not job and page_row is not None:
@@ -17582,9 +17581,9 @@ def trade_job_status():
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         snapshot = dict(job)
-    if cursor is not None and _trade_paged_responses_on():
-        return jsonify(_trade_job_page_view(snapshot, int(cursor)))
-    return jsonify(_trade_job_public_view(copy.deepcopy(snapshot)))
+    return _serve_trade_job(sess["user_id"], snapshot,
+                            cursor is not None and _trade_paged_responses_on(),
+                            int(cursor) if cursor is not None else 0)
 
 
 def _pending_owner_cards(cards, config, exemptions):
@@ -32975,20 +32974,131 @@ def _paywall_gate_hook():
     marks gated. A rule that isn't gated, or a server that isn't enforcing,
     returns before the session or any entitlement is read. No session → the
     route's own auth answers. Pro counts only on a verified session. A
-    failed entitlement read fails open."""
+    failed entitlement read fails open. A request allowed under the deck
+    preview leaves g.paywall_preview for _serve_trade_job to cap and record."""
     rule = request.url_rule.rule if request.url_rule is not None else ""
     if not _paywall_gate.applies(rule, request.method):
         return None
     sess = _get_session(request.headers.get("X-Session-Token", "")) or {}
     try:
-        blocked = _paywall_gate.verdict(
+        result = _paywall_gate.verdict(
             rule, request.method, sess.get("user_id"),
             _paywall_gate.is_mobile_request(request.headers),
-            bool(sess.get("verified") or _synthetic_demo_session(sess)))
+            bool(sess.get("verified") or _synthetic_demo_session(sess)),
+            demo=_synthetic_demo_session(sess), ask=_paywall_deck_ask(sess.get("user_id")))
     except Exception:
         log.exception("paywall gate failed open: %s %s", request.method, rule)
         return None
-    return None if blocked is None else (jsonify(blocked[1]), blocked[0])
+    if isinstance(result, _paywall_gate.Preview):
+        g.paywall_preview = result
+        return None
+    return None if result is None else (jsonify(result[1]), result[0])
+
+
+def _paywall_deck_ask(user_id):
+    """The request facts the deck preview decides on (paywall_gate.DeckAsk).
+    The deck is /status's `deck` (P2, #369) when trade_job_status honours it,
+    else its `job_id`."""
+    cursor = request.args.get("cursor")
+    body = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
+    trade_id = body.get("trade_id") if isinstance(body, dict) else None
+    deck = (request.args.get("deck")
+            if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
+                and _trade_i1_mode())
+            else None)
+    return _paywall_gate.DeckAsk(
+        page_size=_trade_page_size(),
+        job_id=deck or request.args.get("job_id"),
+        cursor=int(cursor) if cursor is not None and re.fullmatch(r"[0-9]{1,9}", cursor) else None,
+        trade_id=trade_id if isinstance(trade_id, str) else None,
+        page_trade_ids=lambda job_id, limit: _paywall_page_trade_ids(user_id, job_id, limit))
+
+
+def _paywall_page_trade_ids(user_id, job_id: str, limit: int) -> set:
+    """Trade ids among the deck's first `limit` raw cards (the preview window):
+    the live job's, plus the P1 stored page built by that job (a page-served
+    deck may have no job in this process)."""
+    with _trade_jobs_lock:
+        cards = (_trade_jobs.get(job_id) or {}).get("cards") or []
+        ids = {c.get("trade_id") for c in cards[:limit] if isinstance(c, dict)}
+    if user_id and _trade_page_store_enabled():
+        from . import database as _db
+        row = _db.load_trade_page_for_job(user_id, job_id)
+        ids |= _stored_window_ids(row, limit)
+    return ids
+
+
+def _stored_window_ids(row, limit: int) -> set:
+    """Trade ids among a P1 stored page row's first `limit` raw cards."""
+    pages = (row or {}).get("pages_blob")
+    cards = pages.get("cards") if isinstance(pages, Mapping) else None
+    return {c.get("trade_id") for c in (cards or [])[:limit] if isinstance(c, dict)}
+
+
+def _serve_stored_trade_page(user_id: str, out: dict, row: dict):
+    """The deck preview on a P1 stored-page response (#368: _serve_trade_page
+    and _trade_page_status_view build it, not _serve_trade_job). Under
+    g.paywall_preview, keep only cards inside the window of the stored raw
+    list, hold the cursor at the window's end, and record the preview when a
+    card is served. Otherwise the body is unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None:
+        return jsonify(out)
+    window = _stored_window_ids(row, preview.limit)
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, out["job_id"], preview.pages_for(out["cursor"])):
+        return jsonify({"error": "pro_required", "gate": preview.gate}), 402
+    return jsonify(out)
+
+
+def _serve_deck_status(user_id: str, out: dict):
+    """The deck preview on P2's /status?deck=D&cursor=K response (#369:
+    _trade_deck_status builds it from D's stored pages, D's job, or a rebase
+    onto the scope's newer deck). Under g.paywall_preview, keep only cards
+    inside the window of the deck that served them (`deck_id`, else `job_id`),
+    hold the cursor at the window's end, and record the preview against that
+    deck: a rebase onto another deck after the preview is spent is a different
+    deck, so the claim fails and the answer is 402. Otherwise unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None or not out.get("cards"):
+        return jsonify(out)
+    served = out.get("deck_id") or out["job_id"]
+    window = _paywall_page_trade_ids(user_id, served, preview.limit)
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, served, preview.pages_for(out["cursor"])):
+        return jsonify({"error": "pro_required", "gate": preview.gate}), 402
+    return jsonify(out)
+
+
+def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
+                     search_id=None, *, deck_named: bool = False):
+    """The /generate and /status response for a job snapshot. Under the deck
+    preview (g.paywall_preview, set by _paywall_gate_hook) the job's raw cards
+    are capped to the preview window, and a response that serves cards records
+    the preview: this is the only consumption point, so warm-up and cron-built
+    jobs never consume it. Otherwise byte-identical to the views. `deck_named`
+    (P2, #369): a paged organic /generate names its deck (`deck_id`)."""
+    preview = g.get("paywall_preview")
+    if preview is not None:
+        snapshot = {**snapshot, "cards": (snapshot.get("cards") or [])[:preview.limit]}
+    if paged:
+        out = _trade_job_page_view(snapshot, cursor, search_id)
+        if deck_named:
+            out = {**out, "deck_id": out["job_id"]}
+    else:
+        out = _trade_job_public_view(copy.deepcopy(snapshot))
+    if preview is not None and out.get("cards"):
+        raw_end = out["cursor"] if paged else len(snapshot["cards"])
+        if not _paywall_gate.record_preview(user_id, snapshot["job_id"],
+                                            preview.pages_for(raw_end)):
+            return jsonify({"error": "pro_required", "gate": preview.gate}), 402
+    return jsonify(out)
 
 
 @app.route("/api/me/entitlements", methods=["GET"])

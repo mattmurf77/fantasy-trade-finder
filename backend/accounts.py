@@ -656,6 +656,7 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
     "trade_proposals", "trade_policy_shadow", "deck_diagnostic_snapshots",
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
+    "paywall_previews",
 )
 
 
