@@ -142,9 +142,11 @@ PRD: [prd.md](prd.md) · Baseline query spec: [baseline-request.md](baseline-req
     waiting (serve latency is independent of a stubbed slow refresh), a floor refresh is enqueued,
     and, in strict mode, a changed roster withdraws the affected card in place **on the next whole-deck response**
     (option (a); not instantly) and builds the next page from the fresh roster. Before that
-    response, an action on the stale fronted card is blocked by I-2. A paired failed-floor case
+    response, a **send** on the stale fronted card is blocked by I-2 (at launch, likes aren't blocked;
+    AC-6b is post-launch). A paired failed-floor case
     keeps the gate-miss withhold. In log-only mode (the launch value under W-AC-L5), the card is
-    served, an `[i1]` would-drop line is logged, and I-2 blocks actions on it;
+    served, an `[i1]` would-drop line is logged, and I-2 blocks a send on it (a 422 with a readable
+    `detail`);
   - action-time revalidation: per platform send path, including team overhaul, with moved-asset and
     read-failure fixtures (prd AC-6a); likes on moved-asset cards record no like and no match
     (AC-6b);
