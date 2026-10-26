@@ -7128,15 +7128,69 @@ _EVIDENCE_TIERS_BELOW_VIEWED = ("full_interim", "archive", "delivered")
 # a build-time row, tier NULL, only a live-mode page-scoped deck's, through
 # _stamp_delivered's build_rows: #417 cross-check P2-1).
 _EVIDENCE_TIERS_DELIVERABLE = ("first30", "delivered", "full_interim", "archive", "viewed")
-# R4.2 U6: rows of cards never shown as such (a C8 archive deck's extras, stage
-# 1's full_interim remainder) are not recommendations: receipts and the matcher
-# skip them, so they read viewed cards, the first 30 and pre-change rows.
-_EVIDENCE_TIERS_NOT_SHOWN = ("archive", "full_interim")
+# R-U6a and models-lead's R3 (2026-10-26; ADR-025 C3, R4.2 U6): which rows
+# receipts and the executed-trade matcher read as recommendations. A row
+# written at build (tier NULL: legacy and flag-off rows) as before; a deferred
+# or packed deck's card only when it's in the first 30 or the user acted on it:
+# a first outcome of any kind, joined by impression_id (U2's contract ids). R3:
+# "viewed" comes from that outcome, never from the tier or from whether a full
+# row exists. So 'delivered' (sent, not seen), 'archive', 'full_interim' and
+# 'partial_run' rows count only once acted on. Ghost rows pass as before: never
+# a recommendation, each reader handles them by is_ghost (receipts skip them;
+# the matcher links them as its incrementality read).
+_DECK_FIRST_OUTCOMES = ("viewed", "like", "pass", "propose", "undo", "not_interested")
+
+
+def _deck_card_acted():
+    """EXISTS a first outcome of the row's card, joined by impression_id: an
+    index lookup (ix_deck_outcomes_impression) per row on both dialects."""
+    i, o = deck_impressions_table, deck_outcomes_table
+    return (select(literal(1))
+            .where(o.c.impression_id == i.c.impression_id, o.c.action.in_(_DECK_FIRST_OUTCOMES))
+            .exists())
 
 
 def _evidence_shown():
+    """The one eligibility predicate receipts and the matcher share (R-U6a)."""
     i = deck_impressions_table
-    return or_(i.c.evidence_tier.is_(None), i.c.evidence_tier.notin_(_EVIDENCE_TIERS_NOT_SHOWN))
+    return or_(i.c.evidence_tier.is_(None), i.c.evidence_tier == "first30",
+               i.c.is_ghost == 1, _deck_card_acted())
+
+
+# R3: a card the user acted on whose row isn't a full row (no assets): neither
+# reader can grade or match it, so each reports it instead of dropping it
+# silently. Its cause is 'restart_split' when it sits past the page store's
+# stored cards (card_index >= 90 at the defaults) and its row was built from
+# the pack ('viewed', no assets: the snapshot-less upgrade, which happens only
+# once the deck's job has left the process, as a deploy's restart does);
+# otherwise 'other'.
+_RESTART_SPLIT_INDEX = 90
+
+
+def load_viewed_without_full_row(*, league_id: str | None = None, since_iso: str | None = None,
+                                 until_iso: str | None = None) -> dict[str, dict[str, int]]:
+    """Per run (deck_job_id), R3's acted-on cards with no full row, by cause:
+    {run_id: {"restart_split": n, "other": m}}. Non-ghost rows of a deferred
+    or packed deck (tier set: a pre-telemetry row has no assets either and
+    isn't counted), optionally in one league and a served_at window."""
+    i = deck_impressions_table
+    where = [or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0), i.c.evidence_tier.isnot(None),
+             i.c.assets_json.is_(None), _deck_card_acted()]
+    if league_id is not None:
+        where.append(i.c.league_id == league_id)
+    if since_iso is not None:
+        where.append(i.c.served_at >= since_iso)
+    if until_iso is not None:
+        where.append(i.c.served_at <= until_iso)
+    runs: dict[str, dict[str, int]] = {}
+    with engine.connect() as conn:
+        for r in conn.execute(select(i.c.deck_job_id, i.c.card_index, i.c.evidence_tier)
+                              .where(and_(*where))):
+            cause = ("restart_split" if r.evidence_tier == "viewed"
+                     and (r.card_index or 0) >= _RESTART_SPLIT_INDEX else "other")
+            counts = runs.setdefault(r.deck_job_id, {"restart_split": 0, "other": 0})
+            counts[cause] += 1
+    return runs
 
 
 def _stamp_delivered(conn, deck_job_id: str, delivered: dict, raise_to: str | None, *,

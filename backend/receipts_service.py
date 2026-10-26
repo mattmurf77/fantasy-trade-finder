@@ -1123,6 +1123,18 @@ def _render_row(spine_row: dict, name_lookup=None) -> dict:
 #: behind it (PLAN §3.6).
 LOW_SHARE_FLAG = 0.70
 
+def _viewed_without_full_row(league_id: str | None) -> dict:
+    """models-lead R3: acted-on cards receipts can't grade because they have
+    no full row, reported (never silently dropped): totals by cause and the
+    runs (decks) they sit in. Every retained row, the league filter applied."""
+    try:
+        runs = db.load_viewed_without_full_row(league_id=league_id)
+    except Exception as e:
+        log.warning("receipts metrics: viewed-without-full-row read failed: %s", e)
+        return {"restart_split": None, "other": None, "runs": None, "unavailable": True}
+    return {"restart_split": sum(c["restart_split"] for c in runs.values()),
+            "other": sum(c["other"] for c in runs.values()), "runs": len(runs)}
+
 
 def admin_metrics(*, window: int | None = None,
                   shape_bucket: str | None = None,
@@ -1184,6 +1196,7 @@ def admin_metrics(*, window: int | None = None,
         "cells": out,
         "effective_window": _effective_window(rows),
         "runs": db.load_receipts_grade_runs(limit=10),
+        "viewed_without_full_row": _viewed_without_full_row(league_id),
         "note": (None if dedup else
                  "dedup=0 — re-serves of one card are included; rows within a "
                  "card identity are correlated and n overstates independence."),
