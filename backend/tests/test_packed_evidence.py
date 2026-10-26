@@ -2024,3 +2024,17 @@ def test_store_count_zero_when_the_process_died_before_its_store(deferred):
     restart()                                              # no _store_trade_page
     view(job_id, 40)
     assert unpack(pack_of(engine, job_id))[0]["upgrade_misses"] == {**NO_MISSES, "restart_split": 1}
+
+
+def test_store_count_a_late_store_keeps_a_count_the_pack_already_has(deferred):
+    """#434 QA P3-2: the late store only fills a missing stored_count; a pack
+    that already has one (77, here) keeps it when the store lands."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120, complete=False)
+    delivered_before_completion(client, job_id)
+    ev = server._trade_jobs[job_id]["evidence"]
+    with server._deck_evidence_write_lock:
+        ev.pack.run["stored_count"] = 77
+        assert server._deck_pack_commit(job_id, ev.pack)
+    assert server._store_trade_page(job_id)
+    assert unpack(pack_of(engine, job_id))[0]["stored_count"] == 77
