@@ -13515,17 +13515,31 @@ _feedback_rate_lock = threading.Lock()
 _feedback_rate: dict[str, collections.deque] = {}
 
 
-def _client_ip() -> str:
-    """The caller's IP: the RIGHTMOST X-Forwarded-For hop, else the socket
-    peer. Render's proxy appends the address it saw; every hop to the left of
-    it is client-supplied, so the leftmost is attacker-chosen and would let
-    one client rotate through budgets. Same rule as the ESPN/MFL sign-in
-    limiter (feat/platform-sign-in); whichever of the two merges second
-    reuses the other's helper instead of keeping a second definition."""
-    hops = [h.strip() for h in
+# _SIGNIN_TRUSTED_PROXY_HOPS, _xff_hops and _client_ip below are copied byte
+# for byte from #430 (feat/platform-sign-in, server.py). Whichever PR merges
+# second deletes its own three definitions; two would shadow each other
+# (test_server_module_shape).
+_SIGNIN_TRUSTED_PROXY_HOPS = 1
+
+
+def _xff_hops() -> list[str]:
+    return [h.strip() for h in
             (request.headers.get("X-Forwarded-For") or "").split(",")
             if h.strip()]
-    return hops[-1] if hops else (request.remote_addr or "unknown")
+
+
+def _client_ip() -> str:
+    """The caller's IP for the D7 limiter: the X-Forwarded-For hop
+    _SIGNIN_TRUSTED_PROXY_HOPS from the right (1 = rightmost), else
+    remote_addr when the header has fewer hops than that. Every hop left of
+    the ones our proxies append is client-supplied (a client can send any
+    XFF it likes), so the leftmost value is attacker-chosen and would let one
+    client rotate through unlimited buckets."""
+    hops = _xff_hops()
+    n = _SIGNIN_TRUSTED_PROXY_HOPS
+    if n >= 1 and len(hops) >= n:
+        return hops[-n]
+    return request.remote_addr or "unknown"
 
 
 def _feedback_rate_key(user_id, session_key=None) -> str:

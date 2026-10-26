@@ -172,6 +172,29 @@ def test_no_device_id_falls_back_to_the_rightmost_forwarded_hop(harness):
     assert _post(client, "fb-ip2-0", xff="1.2.3.4, 9.9.9.8").status_code == 201
 
 
+def test_no_forwarded_header_falls_back_to_remote_addr(harness):
+    client, engine = harness
+    assert _post(client, "fb-ra-0").status_code == 201
+    assert list(server._feedback_rate) == ["ip:127.0.0.1"]     # the test client's peer
+
+
+# #360 release-lead QA P2-1: the helper is #430's, byte for byte.
+@pytest.mark.parametrize("xff, hops, want", [
+    ("1.2.3.4, 9.9.9.9", 1, "9.9.9.9"),          # rightmost: the hop Render's proxy saw
+    ("9.9.9.9", 1, "9.9.9.9"),
+    (None, 1, "203.0.113.7"),                     # no XFF: the socket peer
+    (" , ", 1, "203.0.113.7"),                    # only empty hops: the socket peer
+    ("1.2.3.4, 9.9.9.9", 2, "1.2.3.4"),           # N from the right
+    ("9.9.9.9", 2, "203.0.113.7"),                # fewer hops than N: the socket peer
+])
+def test_client_ip_takes_the_trusted_hop_from_the_right_else_remote_addr(xff, hops, want):
+    headers = {"X-Forwarded-For": xff} if xff is not None else {}
+    with patch.object(server, "_SIGNIN_TRUSTED_PROXY_HOPS", hops), \
+         server.app.test_request_context(headers=headers,
+                                         environ_base={"REMOTE_ADDR": "203.0.113.7"}):
+        assert server._client_ip() == want
+
+
 # ── unverified sessions: keyed by token hash, not the shared IP ─────────────
 # The mobile POST and the web form send no X-Device-Id, so without a session
 # key every unverified note behind one carrier NAT shared the IP's budget.
