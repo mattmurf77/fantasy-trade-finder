@@ -88,6 +88,9 @@ def p1(live, monkeypatch):
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)
+    # Flag on, organic jobs defer their evidence to delivery (ADR-025 stage 1).
+    # Write it inline, never on a thread that could outlive this test's engine.
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda *, target, args: target(*args))
     # Production's knob values, whatever a local DB seeded.
     for knob, value in (("first_page_store_enabled", 1.0), ("trade_paged_responses", 1.0),
                         ("trade_i1_mode", 2.0), ("trade_gate_miss_mode", 0.0)):
@@ -134,7 +137,7 @@ def build_page():
 
 
 def stored():
-    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE)
+    return db_module.load_trade_page(UID, LEAGUE, "1qb_ppr", SCOPE, evidence=True)
 
 
 def set_row(engine, **values):
@@ -171,8 +174,13 @@ def test_a_complete_organic_job_stores_its_first_pages_with_its_stamps(p1):
     assert row["card_count"] == PAGES == 90
     assert row["pages_blob"] == {"v": 1, "opponents_total": job["opponents_total"],
                                  "cards": job["cards"][:PAGES]}
-    assert row["stored_bytes"] == len(db_module.CompressedJSON.encode(row["pages_blob"]))
-    assert row["evidence_blob"] is None and row["last_served_at"] is None
+    # ADR-025 stage 1: the deferred deck's unwritten evidence rides along (the
+    # replaced cards are not the deck's, so only its candidate set is left).
+    evidence = row["evidence_blob"]
+    assert evidence["deck_job_id"] == job_id and evidence["rows"] == []
+    assert row["stored_bytes"] == (len(db_module.CompressedJSON.encode(row["pages_blob"]))
+                                   + len(db_module.CompressedJSON.encode(evidence)))
+    assert row["last_served_at"] is None
     assert row["built_at"] <= db_module.page_store_iso(time.time())
     assert row["expires_at"] == min(db_module.page_store_iso(
         datetime.fromisoformat(c["expires_at"]).timestamp()) for c in job["cards"][:PAGES])
@@ -516,14 +524,16 @@ def test_other_requests_never_read_the_store(p1, spawned, statements, body):
     assert not [s for s in page_queries(statements) if s.startswith("SELECT")]
 
 
-def test_the_serve_path_reads(p1, spawned, statements):
+def test_the_serve_path_reads(p1, spawned, statements, monkeypatch):
     """The page serve's own statements: one page read; one S0 roster snapshot
     (league_members, draft_picks, leagues, league_roster_state) shared by the
     fingerprint compare and S0's serve check, plus the vsn1 pick read; the
     disposition read; one last_served_at write. Everything else is
     /generate's existing preamble (session touch, preference/outlook reads).
+    The delivery's evidence write runs on its own thread (not run here).
     """
     client, _, _ = p1
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda **kw: None)
     build_page()
     statements.clear()
     assert generate(client, page=1).get_json()["serve_source"] == "page"

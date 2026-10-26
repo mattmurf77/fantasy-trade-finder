@@ -37,6 +37,7 @@ LITERAL_CALLS = {"frozenset", "set", "tuple", "dict", "float", "int", "str", "li
 # row here; an existing row never changes.
 FROZEN_PINS = {
     1: "38068a074677acaa",
+    2: "9e79b6087f6e1a42",
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 

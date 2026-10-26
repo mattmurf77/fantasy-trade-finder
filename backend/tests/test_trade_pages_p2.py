@@ -836,10 +836,12 @@ def test_trade_hash_equals_the_impression_rows(p1, spawned):
     with patch.object(server, "_deck_signal_v2_enabled", lambda: True):
         deck = run_job()
     assert stored()["deck_job_id"] == deck and stored()["card_count"] > 0
+    bodies = [generate(client, page=1).get_json(), deck_status(client, deck, 0).get_json()]
+    # ADR-025 stage 1: the deck's rows are written at its first delivery.
     with engine.connect() as conn:
         rows = {r.impression_id: r.trade_hash
                 for r in conn.execute(select(db_module.deck_impressions_table))}
-    for body in (generate(client, page=1).get_json(), deck_status(client, deck, 0).get_json()):
+    for body in bodies:
         assert body["cards"]
         for c in body["cards"]:
             assert c["trade_hash"] == rows[c["impression_id"]]
@@ -935,8 +937,10 @@ DECODE_CASES = ("stored", "live", "end", "restart", "rebased_row", "unknown")
 @pytest.mark.parametrize("case", DECODE_CASES)
 def test_a_deck_poll_decodes_at_most_one_stored_page(p1, spawned, monkeypatch, case):
     """Other scopes' rows exist; only the row served (or proving the deck) is
-    decompressed, never every scope row."""
+    decompressed, never every scope row, and never its evidence_blob. The
+    delivery's evidence write runs on its own thread (not run here)."""
     client, engine, _ = p1
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda **kw: None)
     deck = (revoked_deck_row_rebuilt_elsewhere(engine) if case == "rebased_row"
             else build_deck())
     for scope in ("organic:f=0.75", "organic:f=0.60"):
@@ -979,6 +983,8 @@ def restarted_deck_with_rebuilt_row():
 
 def test_a_gone_organic_deck_rebases_across_a_restart(p1, spawned, monkeypatch):
     client, _, _ = p1
+    # The delivery's evidence write runs on its own thread (not run here).
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda **kw: None)
     deck, rebuilt = restarted_deck_with_rebuilt_row()
     decoded = []
     real = db_module.zlib.decompress

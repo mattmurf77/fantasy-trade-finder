@@ -19,7 +19,7 @@ import backend.value_model as vm
 from backend.database import deck_impressions_table, deck_outcomes_table, metadata, user_taste_table
 from backend.eval import contract as C
 from backend.eval import nightly
-from backend.eval.data import EVAL_COLUMNS, load_decks
+from backend.eval.data import EVAL_COLUMNS, OPTIONAL_COLUMNS, load_decks
 from backend.eval.persistence import append_run, load_runs
 from backend.eval.scorers import registered_names
 from backend.eval.synth import build_synthetic_db
@@ -78,7 +78,10 @@ def test_load_decks_selects_only_eval_columns():
     eng = create_engine("sqlite:///:memory:")
     metadata.create_all(eng, tables=[deck_impressions_table, deck_outcomes_table])
     cols = _selected_columns(eng, lambda: load_decks(engine=eng))
-    assert cols == set(EVAL_COLUMNS)
+    # The eval columns plus whichever optional columns the real table has
+    # (evidence_tier is real schema once packed evidence, #370, lands).
+    present = {c for c in OPTIONAL_COLUMNS if c in deck_impressions_table.c}
+    assert cols == set(EVAL_COLUMNS) | present
     assert not cols & {"valuation_json", "assets_json"}
 
 
@@ -86,8 +89,9 @@ def test_load_decks_adds_optional_columns_when_the_table_has_them(monkeypatch):
     import backend.eval.data as data_mod
     md = MetaData()
     imp = deck_impressions_table.to_metadata(md)
-    imp.append_column(Column("features_compact", Text))
-    imp.append_column(Column("evidence_tier", Text))
+    for name in ("features_compact", "evidence_tier"):   # add only what the schema lacks
+        if name not in imp.c:
+            imp.append_column(Column(name, Text))
     deck_outcomes_table.to_metadata(md)
     eng = create_engine("sqlite:///:memory:")
     md.create_all(eng)
