@@ -47,14 +47,21 @@ def register(cls):
     return cls
 
 
-def get_scorer(name: str, seed: int | None = None):
+def get_scorer(name: str, seed: int | None = None, config: dict | None = None):
+    """A fresh scorer. `config` is a pinned model_config record
+    (value_model.pin_config): a scorer that reads configuration
+    (`takes_config = True`) takes it as its constructor argument and reads
+    nothing live; a scorer that reads none ignores it. Omitted, a configured
+    scorer pins the live values itself. Either way the scorer's `config` is
+    what an EvalRun records (models-lead R5.2 (a))."""
     try:
         factory = _REGISTRY[name]
     except KeyError:
         raise KeyError(
             f"unknown scorer {name!r}; registered: {sorted(_REGISTRY)}"
         ) from None
-    scorer = factory()
+    scorer = (factory(config=config)
+              if config is not None and getattr(factory, "takes_config", False) else factory())
     if seed is not None and hasattr(scorer, "reseed"):
         scorer.reseed(seed)
     return scorer
@@ -142,11 +149,17 @@ class ValueModelScorer:
     on), every score()/predict_proba() call raises — the harness then
     excludes each deck under its printed `scorer_error` accounting, which
     is the honest signal: there is no model to grade, and falling back to
-    any proxy score would grade a fake."""
-    name = "value_model"
+    any proxy score would grade a fake.
 
-    def __init__(self):
-        from backend.value_model import load_latest_model
+    Its V-vector is a pinned model_config record (`config`, R5.2 (a)):
+    passed in to replay a recorded run, else pinned from live model_config
+    once, here. Every score uses it; nothing reads model_config live."""
+    name = "value_model"
+    takes_config = True
+
+    def __init__(self, config: dict | None = None):
+        from backend.value_model import SCORE_CONFIG, load_latest_model, pin_config
+        self.config = config if config is not None else pin_config(SCORE_CONFIG)
         self._model = load_latest_model()
 
     def _require_model(self):
@@ -157,7 +170,8 @@ class ValueModelScorer:
         return self._model
 
     def score(self, card: dict) -> float:
-        return float(self._require_model().rank_score_from_card(card))
+        return float(self._require_model().rank_score_from_card(
+            card, v_values=self.config["values"]))
 
     def predict_proba(self, card: dict) -> float:
         return float(self._require_model().p_like_from_card(card))

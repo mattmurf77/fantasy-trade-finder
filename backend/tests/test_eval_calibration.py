@@ -105,9 +105,35 @@ def test_calibration_pairs_inclusion_and_labels():
     ]
     pairs, excluded = calibration_pairs(ProbaScorer(), [_deck("jc", cards)])
     assert pairs == [(0.25, 1.0), (0.25, 0.0)]
-    assert excluded == {"null_propensity": 1, "never_viewed": 1,
+    assert excluded == {"calibration_refresh": 0,
+                        "partial_run": 0, "in_flight": 0, "pack_integrity": 0,
+                        "incomplete_deck": 0, "null_propensity": 1, "never_viewed": 1,
                         "undo_reversed": 1, "bad_features": 1,
                         "scorer_error": 0}
+
+
+def test_calibration_scores_compact_only_cards():
+    """A card with no features_json but a compact block is scoreable; only
+    a card with neither is bad_features, and only that card is excluded."""
+    served = _iso(1)
+    cards = [_card("jk", p, viewed=True, liked=(p == 0), served_at=served)
+             for p in range(3)]
+    cards[1].features = None
+    cards[1].features_compact = {"shape": "1x1"}    # narrow row: scored
+    cards[2].features = None                        # neither: excluded alone
+    pairs, excluded = calibration_pairs(ProbaScorer(), [_deck("jk", cards)])
+    assert pairs == [(0.25, 1.0), (0.25, 0.0)]
+    assert excluded["bad_features"] == 1
+
+
+def test_calibration_excludes_partial_run_cards():
+    served = _iso(1)
+    cards = [_card("jp", p, viewed=True, liked=(p == 0), served_at=served)
+             for p in range(3)]
+    cards[1].evidence_tier = "partial_run"
+    pairs, excluded = calibration_pairs(ProbaScorer(), [_deck("jp", cards)])
+    assert pairs == [(0.25, 1.0), (0.05, 0.0)]
+    assert excluded["partial_run"] == 1 and sum(excluded.values()) == 1
 
 
 def test_calibration_requires_predict_proba():

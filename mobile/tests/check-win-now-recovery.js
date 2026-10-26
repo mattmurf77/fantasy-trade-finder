@@ -123,6 +123,8 @@ function sessionHarness() {
     '../observability/sentry': {setUser: () => {}},
     './queryClient': {seedLeagueSessionCaches: (id, seed) => seeds.push({id, seed}), queryClient: {invalidateQueries: input => invalidations.push(input)}},
     '../api/rankings': {getActiveScoringFormat: async () => '1qb_ppr'},
+    // 200 ms path C: sign-out / account switch clear the device-held trade pages.
+    './devicePageStore': {clearDevicePages: async () => {}},
   };
   state = load('src/state/useSession.ts', name => {
     if (name === './leagueSession') return load('src/state/leagueSession.ts', dep => { assert.equal(dep, '../api/client'); return h.client; }, h.time);
