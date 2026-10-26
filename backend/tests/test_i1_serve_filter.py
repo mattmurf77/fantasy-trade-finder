@@ -292,15 +292,18 @@ def test_mode_off_is_the_pre_s0_path(live, monkeypatch, caplog):
     assert reads.call_count == 0 and _serve_lines(caplog) == []
 
 
-def test_the_default_mode_is_strict(monkeypatch):
+def test_the_default_mode_is_lenient(monkeypatch):
+    """Option (B): S0 merges lenient until C-b; strict is an explicit 2."""
     monkeypatch.delitem(ts._cfg, "trade_i1_mode", raising=False)
+    assert server._trade_i1_mode() == 1
+    monkeypatch.setitem(ts._cfg, "trade_i1_mode", 2.0)
     assert server._trade_i1_mode() == 2
 
 
 @pytest.mark.parametrize("value", [float("nan"), 7.0, -1.0, "strict please"])
-def test_mode_reads_strict_for_anything_unexpected(live, monkeypatch, value):
+def test_mode_reads_lenient_for_anything_unexpected(live, monkeypatch, value):
     _set_mode(monkeypatch, value)
-    assert server._trade_i1_mode() == 2
+    assert server._trade_i1_mode() == 1
 
 
 def test_mode_is_read_per_request(live, monkeypatch):
