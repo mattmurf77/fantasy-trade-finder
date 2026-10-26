@@ -1456,3 +1456,122 @@ def test_p2_1_a4_a_live_deck_replays_like_the_same_deck_stored_as_a_pack(deferre
             evaluated = evaluate(get_scorer(name, seed=3), [deck], ess_min=1, bootstrap=50, seed=2)
             out.append((repr(evaluated), weights))
         assert out[0] == out[1], name
+
+
+# ── models-lead B4 (C): disposition cuts are withdrawals too ────────────────
+
+def pass_elsewhere(engine, *card_indexes, give=None, receive=None):
+    """The user passed on these cards' exact packages on another surface
+    (a trade_decisions pass): the serve's disposition projection cuts them."""
+    from datetime import datetime, timezone
+    from sqlalchemy import insert
+    with engine.begin() as conn:
+        for i in card_indexes:
+            conn.execute(insert(db_module.trade_decisions_table).values(
+                user_id=UID, league_id=LEAGUE, trade_id=f"elsewhere-{i}",
+                give_player_ids=json.dumps(give or [f"mine{i}"]),
+                receive_player_ids=json.dumps(receive or [f"theirs{i}"]),
+                decision="pass", created_at=datetime.now(timezone.utc).isoformat()))
+
+
+def undo_passes(engine):
+    from sqlalchemy import delete
+    with engine.begin() as conn:
+        conn.execute(delete(db_module.trade_decisions_table))
+
+
+@pytest.mark.parametrize("kind", ["packed", "live"])
+def test_b4_a_cut_never_delivered_is_recorded_w0_and_stays_out(deferred, prepared_ok, kind):
+    client, engine, _ = deferred
+    if kind == "packed":
+        job_id, *_ = packed_deck(120)
+        cut_id = contract.card_impression_id(job_id, 40)
+    else:
+        job_id, ids = live_deck(120)
+        cut_id = ids[40]
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 40)
+    page = deck_ids(status(client, job_id, 30).get_json())
+    assert cut_id not in page and len(page) == 29
+    got = withdrawals(engine)
+    assert set(got) == {40}
+    assert (got[40]["reason"], got[40]["served_before"], got[40]["impression_id"]) == (
+        "disposition_cut", 0, cut_id)
+    undo_passes(engine)                                    # sticky, whatever the pass does now
+    assert cut_id not in deck_ids(status(client, job_id, 30).get_json())
+    if kind == "live":
+        assert 40 not in stamped(engine, job_id)
+
+
+def test_b4_a_cut_after_delivery_was_served_before_and_is_distinct_from_i1(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 5)                              # card 5 was delivered on page 1
+    own_all_but(engine, 7)
+    status(client, job_id, 0)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {
+        5: ("disposition_cut", 1), 7: ("i1_dropped", 1)}
+
+
+def test_b4_a_stored_page_cut_after_a_restart_is_recorded(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    pass_elsewhere(engine, 3, 40)                          # 3 delivered before, 40 never
+    client.get(f"/api/trades/status?deck={job_id}&cursor=0", headers=HEADERS)
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    got = withdrawals(engine)
+    assert {i: (r["reason"], r["served_before"]) for i, r in got.items()} == {
+        3: ("disposition_cut", 1), 40: ("disposition_cut", 0)}
+
+
+@pytest.mark.parametrize("side", SIDES)
+def test_b4_a_cut_lands_with_its_delivery(deferred, side):
+    """The cut rides the delivery's transaction, as I-1's withdrawals do."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 40)
+    with failing(engine, "header", side):
+        status(client, job_id, 30)
+    assert withdrawals(engine) == {} and boundaries(engine, job_id) == [29]
+    status(client, job_id, 60)
+    assert withdrawals(engine)[40]["reason"] == "disposition_cut"
+    assert boundaries(engine, job_id) == [29, 59, 89]
+
+
+def test_b4_the_flag_off_path_records_no_cut(deferred, monkeypatch):
+    client, engine, _ = deferred
+    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
+    job_id = run_job()
+    cards = server._trade_jobs[job_id]["cards"]
+    first = cards[0]
+    pass_elsewhere(engine, 0, give=[p["id"] for p in first["give"]],
+                   receive=[p["id"] for p in first["receive"]])
+    body = client.get(f"/api/trades/status?job_id={job_id}", headers=HEADERS).get_json()
+    assert first["trade_id"] not in {c["trade_id"] for c in body["cards"]}   # cut, as today
+    assert rows(engine, db_module.deck_card_withdrawals_table) == []
+
+
+@pytest.mark.parametrize("kind", ["packed", "live"])
+def test_b4_v5_removes_a_never_delivered_cut_like_an_i1_withdrawal(deferred, prepared_ok, kind):
+    """models-lead B4: eval v5 removes a cut never delivered (served_before 0)
+    exactly as it removes I-1's: gone from the deck, the displayed positions
+    dense, counted in withdrawn_removed."""
+    from datetime import datetime, timedelta, timezone
+    from backend.eval.data import load_decks
+    client, engine, _ = deferred
+    job_id = packed_deck(120)[0] if kind == "packed" else live_deck(120)[0]
+    status(client, job_id, 0)
+    pass_elsewhere(engine, 40)
+    status(client, job_id, 30)
+    as_of = (datetime.now(timezone.utc) + timedelta(hours=26)).isoformat()   # packs settled
+    [deck] = load_decks(engine=engine, as_of=as_of)
+    assert deck.exclusion is None and deck.withdrawn_removed == 1
+    kept = [c for c in deck.cards if not c.is_ghost]
+    assert 40 not in [c.card_index for c in kept]
+    assert [c.position for c in kept] == list(range(len(kept)))
+    assert [c.card_index for c in kept if c.delivered] == [i for i in range(60) if i != 40]

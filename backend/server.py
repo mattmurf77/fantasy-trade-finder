@@ -3382,6 +3382,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
         out["board_refresh"] = board_refresh
     kick_floor = None
     withdrawn = []                        # cards S0's I-1 drops at this serve (evidence, C-b)
+    cut = []                              # cards the disposition projection cuts (models-lead B4)
     live_paged = job.get("evidence_mode") == "live" and bool(job.get("page_scope"))
     if out["cards"] and (job.get("evidence") is not None or live_paged):
         # C-b sticky drop: a card I-1 withdrew at an earlier serve of this deck
@@ -3396,10 +3397,13 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
     i1_report = {}                        # deck_i1_check props, when the check ran
     if out["cards"]:
         user_id, league_id, _format = job["key"]
+        projected = out["cards"]
         if job.get("prepared_inventory_id"):
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id, prepared=True)
         else:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
+        if job.get("evidence") is not None or live_paged:   # flag-on decks only
+            cut = _disposition_cut(projected, out["cards"])
         checked = out["cards"]
         out["cards"], block, past_bound = _roster_serve_rules(
             out["cards"], league_id, job.get("league_user_id") or user_id, job["job_id"],
@@ -3430,13 +3434,13 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
     # legacy responses alike), counted after S0's serve rules. Only flag-on
     # organic jobs carry `evidence`. An errored job's published batches (ruling
     # 9, legacy) are a partial run's.
-    if job.get("evidence") is not None and (out["cards"] or withdrawn):
+    if job.get("evidence") is not None and (out["cards"] or withdrawn or cut):
         _deck_evidence_delivered(job["evidence"], out["cards"],
                                  partial=job.get("status") == "error", withdrawn=withdrawn,
-                                 league_id=job["key"][1])
-    elif live_paged and (out["cards"] or withdrawn):   # #417 P2-1: rows written at build
+                                 cut=cut, league_id=job["key"][1])
+    elif live_paged and (out["cards"] or withdrawn or cut):   # #417 P2-1: rows written at build
         _deck_evidence_live_delivered(job["job_id"], job["key"][0], job["key"][1],
-                                      out["cards"], withdrawn)
+                                      out["cards"], withdrawn, cut)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
     # One event per page; a legacy cumulative body re-serves the whole deck on
@@ -5514,10 +5518,11 @@ def _deck_evidence_write(ev: _DeckEvidence) -> None:
 
 def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                                 delivered_at: str | None = None, withdrawn: set = frozenset(),
-                                new_drops: set = frozenset(), league_id: str | None = None) -> None:
+                                new_drops: Mapping = {}, league_id: str | None = None) -> None:
     """Thread target: a stored deck's delivery once its job has left this
     process, from the row's evidence_blob read fresh under the write lock.
-    `new_drops`: this serve's new withdrawals, written in the same transaction
+    `new_drops`: this serve's new withdrawals ({impression_id: reason}),
+    written in the same transaction
     as the delivery's evidence (#417 P3-5); served_before is the deck's
     evidence before this serve (a row's delivered_at, or the pack's last
     boundary). A deck with no held evidence is a live-mode one (its rows'
@@ -5555,7 +5560,7 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                 for iid in new_drops:
                     index = _deck_card_index(deck_job_id, iid)
                     served = iid in rowed or (ev.packed and index is not None and index <= last)
-                    ev.pending_withdrawals[iid] = (1 if served else 0, delivered_at)
+                    ev.pending_withdrawals[iid] = (1 if served else 0, delivered_at, new_drops[iid])
                 ev.sticky |= set(new_drops)
                 ev.delivered.update(ids)
                 ev.withdrawn = set(withdrawn) - ev.delivered
@@ -5582,7 +5587,8 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
 
 
 def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = False,
-                             withdrawn: list = (), league_id: str | None = None) -> None:
+                             withdrawn: list = (), cut: list = (),
+                             league_id: str | None = None) -> None:
     """Record a delivery of `cards` (public dicts: what the response sends,
     after S0's serve rules) from `ev`'s deck. Once its run has ended, the write
     runs off the request thread. A card published before its impression id
@@ -5590,8 +5596,10 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
     job's published batches still serve on the legacy path), so the run has
     ended partial. `withdrawn`: the cards S0's I-1 dropped at this serve: no row (C-b),
     and never served again in this deck (the sticky drop); each is recorded once
-    in deck_card_withdrawals (`league_id`: the deck's league)."""
-    dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
+    in deck_card_withdrawals (`league_id`: the deck's league). `cut`: the cards
+    the disposition projection removed, withdrawn the same way (models-lead B4)."""
+    reasons = _withdrawal_reasons(withdrawn, cut)
+    dropped = set(reasons)
     ids, hashes = set(), set()
     for card in cards:
         iid = card.get("impression_id")
@@ -5611,7 +5619,7 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         # C-b: served_before is whether an earlier response delivered the card.
         withdrawals = dropped - ev.sticky
         for iid in withdrawals:
-            ev.pending_withdrawals[iid] = (1 if iid in ev.delivered else 0, now)
+            ev.pending_withdrawals[iid] = (1 if iid in ev.delivered else 0, now, reasons[iid])
         ev.sticky |= dropped
         if league_id and ev.league_id is None:
             ev.league_id = league_id
@@ -5703,19 +5711,38 @@ def _deck_sticky(deck_job_id: str, user_id: str, *, loaded_only: bool = False) -
     return ids
 
 
+def _disposition_cut(before: list, after: list) -> list:
+    """The cards _project_trade_dispositions removed (the user already acted
+    on them elsewhere), by impression_id."""
+    kept = {c.get("impression_id") for c in after}
+    return [c for c in before if c.get("impression_id") not in kept]
+
+
+def _withdrawal_reasons(withdrawn=(), cut=()) -> dict:
+    """{impression_id: reason} for a serve's withdrawals: I-1's drops
+    ("i1_dropped") and the disposition projection's cuts ("disposition_cut",
+    models-lead B4). The same sticky drop, served_before and transaction rules
+    apply to both; eval removes both and counts them by reason."""
+    reasons = {c["impression_id"]: "i1_dropped" for c in withdrawn
+               if isinstance(c.get("impression_id"), str)}
+    reasons.update((c["impression_id"], "disposition_cut") for c in cut
+                   if isinstance(c.get("impression_id"), str))
+    return reasons
+
+
 def _deck_withdrawal_rows(deck_job_id: str, user_id: str, league_id: str | None,
                           held: dict) -> list:
-    """deck_card_withdrawals rows for {impression_id: (served_before, at)}; a
-    card without a contract id (a pre-S8 deck) isn't recorded."""
+    """deck_card_withdrawals rows for {impression_id: (served_before, at,
+    reason)}; a card without a contract id (a pre-S8 deck) isn't recorded."""
     rows = []
-    for iid, (served, at) in sorted(held.items()):
+    for iid, (served, at, reason) in sorted(held.items()):
         index = _deck_card_index(deck_job_id, iid)
         if index is None or not league_id:
             log.warning("deck-withdrawals %s: %s not recorded (no contract id or league)",
                         deck_job_id, iid)
             continue
         rows.append({"deck_job_id": deck_job_id, "card_index": index, "user_id": user_id,
-                     "league_id": league_id, "reason": "i1_dropped", "first_withdrawn_at": at,
+                     "league_id": league_id, "reason": reason, "first_withdrawn_at": at,
                      "impression_id": iid,
                      "served_before": 1 if served else 0})   # exactly 0 or 1 (eval)
     return rows
@@ -5727,7 +5754,7 @@ _deck_live_stamped_lock = threading.Lock()
 
 
 def _deck_evidence_live_delivered(deck_job_id: str, user_id: str, league_id: str, cards: list,
-                                  withdrawn: list = ()) -> None:
+                                  withdrawn: list = (), cut: list = ()) -> None:
     """#417 cross-check P2-1: a live-mode page-scoped deck (the value core,
     prepared adoption) wrote its rows at build and carries the page-store
     marker, so eval takes its delivered cards from delivered_at. Each
@@ -5736,8 +5763,9 @@ def _deck_evidence_live_delivered(deck_job_id: str, user_id: str, league_id: str
     is this response's time (models-eng's rule b), taken here."""
     at = datetime.now(timezone.utc).isoformat()
     ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
-    dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
-    new_drops = dropped - _deck_sticky(deck_job_id, user_id, loaded_only=True)
+    reasons = _withdrawal_reasons(withdrawn, cut)
+    sticky = _deck_sticky(deck_job_id, user_id, loaded_only=True)
+    new_drops = {iid: reason for iid, reason in reasons.items() if iid not in sticky}
     if new_drops:                          # C-b: recorded once; never served again here
         _deck_withdrawn_note(deck_job_id, new_drops)
     with _deck_live_stamped_lock:
@@ -5775,7 +5803,7 @@ def _deck_live_stamp(deck_job_id: str, user_id: str, league_id: str | None, ids,
     from . import database as _db
     try:
         _db.stamp_live_deliveries(deck_job_id, user_id, league_id, sorted(ids), at,
-                                  sorted(new_drops))
+                                  dict(new_drops))
     except Exception:
         log.warning("deck-evidence %s: live delivery not recorded", deck_job_id, exc_info=True)
         with _deck_live_stamped_lock:
@@ -5783,27 +5811,32 @@ def _deck_live_stamp(deck_job_id: str, user_id: str, league_id: str | None, ids,
         _deck_withdrawn_unnote(deck_job_id, new_drops)
 
 
-def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list = ()) -> None:
+def _deck_evidence_delivered_stored(row: Mapping, cards: list, withdrawn: list = (),
+                                    cut: list = ()) -> None:
     """A delivery of a stored page's `cards` (sent, after S0's serve rules; the
-    `withdrawn` ones I-1 dropped): through the deck's job while it is in this
-    process, else through the row's evidence_blob."""
+    `withdrawn` ones I-1 dropped, the `cut` ones the disposition projection
+    removed): through the deck's job while it is in this process, else
+    through the row's evidence_blob."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(row["deck_job_id"])
         in_process = job is not None and job["key"][0] == row["user_id"]
         ev = job.get("evidence") if in_process else None
         live = in_process and job.get("evidence_mode") != "deferred"
     if ev is not None:
-        _deck_evidence_delivered(ev, cards, withdrawn=withdrawn, league_id=row["league_id"])
+        _deck_evidence_delivered(ev, cards, withdrawn=withdrawn, cut=cut,
+                                 league_id=row["league_id"])
         return
     if live:                              # its rows were written at build: stamp them (P2-1)
         _deck_evidence_live_delivered(row["deck_job_id"], row["user_id"], row["league_id"],
-                                      cards, withdrawn)
+                                      cards, withdrawn, cut)
         return
     ids = {c["impression_id"] for c in cards if isinstance(c.get("impression_id"), str)}
-    dropped = {c["impression_id"] for c in withdrawn if isinstance(c.get("impression_id"), str)}
+    reasons = _withdrawal_reasons(withdrawn, cut)
+    dropped = set(reasons)
     lease = _user_data_lifecycle.capture(
         row["user_id"], started=g.get("_user_data_started") if has_request_context() else None)
-    new_drops = dropped - _deck_sticky(row["deck_job_id"], row["user_id"], loaded_only=True)
+    sticky = _deck_sticky(row["deck_job_id"], row["user_id"], loaded_only=True)
+    new_drops = {iid: reason for iid, reason in reasons.items() if iid not in sticky}
     if new_drops:                        # C-b: recorded once; never served again here
         _deck_withdrawn_note(row["deck_job_id"], new_drops)
     if not ids and not new_drops:
@@ -5966,14 +5999,15 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
     if sticky:
         page = [c for c in page if c.get("impression_id") not in sticky]
     checked = _project_trade_dispositions(page, user_id, league_id)
+    cut = _disposition_cut(page, checked)  # models-lead B4: recorded like I-1's withdrawals
     i1_report = {}
     cards, block, past_bound = _roster_serve_rules(checked, league_id, viewer_id,
                                                    row["deck_job_id"], snap=snap, report=i1_report)
     kept = {id(c) for c in cards}
     withdrawn = [] if block else [c for c in checked if id(c) not in kept]
     cards = _with_trade_hash(cards)       # P2: the client's dedupe key
-    if cards or withdrawn:                # ADR-025 stage 1: a delivery, after S0's rules
-        _deck_evidence_delivered_stored(row, cards, withdrawn)
+    if cards or withdrawn or cut:         # ADR-025 stage 1: a delivery, after S0's rules
+        _deck_evidence_delivered_stored(row, cards, withdrawn, cut)
     opponents = pages.get("opponents_total") or 0
     out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
            "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,
