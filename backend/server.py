@@ -21349,9 +21349,11 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         return {"error": "bad_request"}, 400
     # NEXT.md 0f / G-030 (prd-p0-6 §6.2): ESPN/MFL/Fleaflicker ids are numeric
     # too, so isdigit() alone lets them reach Sleeper. Refuse a linked-platform
-    # league before any Sleeper call.
+    # league before any Sleeper call. Defensive: no client routes one here, but
+    # the message keeps the catch-all readable if one ever does.
     if is_linked_platform_league(league_id):
-        return {"error": "bad_request"}, 400
+        _msg = "This league isn't on Sleeper, so it can't be sent there."
+        return {"error": "bad_request", "message": _msg, "detail": _msg}, 400
 
     cred = get_sleeper_credential(user_id)
     if not cred:

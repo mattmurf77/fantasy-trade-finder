@@ -261,7 +261,9 @@ def test_sleeper_core_refuses_a_linked_platform_league(sleeper_client, platform)
         r = c.post("/api/trades/propose", headers=propose_t._h(token), data=json.dumps({
             "league_id": propose_t.LEAGUE, "their_roster_id": 2,
             "give_player_ids": ["100"], "receive_player_ids": ["200"]}))
-    assert r.status_code == 400 and r.get_json() == {"error": "bad_request"}
+    msg = "This league isn't on Sleeper, so it can't be sent there."
+    assert r.status_code == 400
+    assert r.get_json() == {"error": "bad_request", "message": msg, "detail": msg}
     sleeper_get.assert_not_called()
     fake.assert_not_called()
 
