@@ -11,7 +11,8 @@ CardSet JSON: {"variant": str, "source": "value_core_bench" | "served",
                           "receive": [{"id","name","position","market"}],
                           "reasons": [str]}],
                "skipped_no_row": int,      # served sets only
-               "leagues_without_deck": [str]}   # served: no gradeable Trades deck in the lookback
+               "leagues_without_deck": [str],   # served: no gradeable Trades deck in the lookback
+               "leagues_with_no_cards": [str]}  # served: a deck found, 0 gradeable cards
 
 ``served_card_set`` is the only production touch: a read-only read of the
 incumbent's served decks, asserting ``transaction_read_only = on`` first.
@@ -169,7 +170,10 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     then assets_json, valuation_json and features_json are read for exactly
     those impression_ids. A chosen card without a full row (a packed-only
     card, or a row without assets_json) is skipped and counted in
-    "skipped_no_row", never replaced by a later card.
+    "skipped_no_row", never replaced by a later card. A league with no such
+    deck is named in "leagues_without_deck", and one whose deck yields no
+    gradeable card (every chosen card skipped, or none to choose) in
+    "leagues_with_no_cards": neither is a silent 0 cards.
 
     Every read runs on the engine prod_analytics._connect_readonly returns,
     whose connections all open with default_transaction_read_only=on; the
@@ -194,6 +198,7 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     cards: list[dict] = []
     skipped = 0
     without_deck: list[str] = []
+    no_cards: list[str] = []
     try:
         with engine.connect() as conn:
             if conn.execute(text("SHOW transaction_read_only")).scalar() != "on":
@@ -233,6 +238,8 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
                     parsed.append(([str(i) for i in assets.get("give") or []],
                                    [str(i) for i in assets.get("receive") or []],
                                    features.get("partner_user_id"), markets))
+                if not parsed:    # a deck, but nothing to grade: named too
+                    no_cards.append(str(league_id))
                 ids = sorted({a for give, receive, _, _ in parsed for a in give + receive})
                 players = {}
                 if ids:
@@ -253,7 +260,7 @@ def served_card_set(*, secrets: Path, league_ids: Sequence[str], user_id: str,
     finally:
         engine.dispose()
     return {"variant": variant, "source": "served", "cards": cards, "skipped_no_row": skipped,
-            "leagues_without_deck": without_deck}
+            "leagues_without_deck": without_deck, "leagues_with_no_cards": no_cards}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -293,7 +300,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         write_private_json(args.output, card_set)
         print(json.dumps({"cards": len(card_set["cards"]), "leagues": len(args.league),
                           "skipped_no_row": card_set["skipped_no_row"],
-                          "leagues_without_deck": card_set["leagues_without_deck"]}))
+                          "leagues_without_deck": card_set["leagues_without_deck"],
+                          "leagues_with_no_cards": card_set["leagues_with_no_cards"]}))
     elif args.command == "export":
         card_sets = [json.loads(path.read_text()) for path in args.cards]
         print(json.dumps(export(card_sets, per_variant=args.per_variant, seed=args.seed,
