@@ -2906,8 +2906,7 @@ def _cleanup_loop() -> None:
 
         # P1 first-page store: age, then the byte ceiling; flag off ⇒ untouched.
         _evict_trade_page_store()
-        # ADR-025 C8: archive extras past 90 days; flag off ⇒ untouched.
-        _purge_archive_evidence()
+        # ADR-025 C8: no archive purge until packing (models-lead R2.6 S2).
         # F5: undelivered deferred decks past the fresh window (only flag-on
         # jobs carry evidence).
         _drop_stale_deck_evidence()
@@ -3991,12 +3990,8 @@ _INJECTED_FEATURE_KEYS = ("partner_user_id", "taste_attrs")
 # One evidence write at a time (the web service runs one worker). The page
 # store holds it too while it writes a deck's evidence_blob.
 _deck_evidence_write_lock = threading.RLock()
-_ARCHIVE_RETENTION_DAYS = 90
-_ARCHIVE_PURGE_EVERY_S = 3600
-_ARCHIVE_PURGE_BATCHES = 20
-# -inf, not 0.0: time.monotonic() counts from boot, so 0.0 would skip the first
-# purge for an hour on a freshly booted host (a CI runner, a new Render host).
-_archive_purge_last = float("-inf")
+# C8 retention is deferred to the packing stage (models-lead R2.6 S2): until
+# packing writes the archive's packed copy, no deck_impressions row is purged.
 
 
 def _deck_archive_selected(deck_job_id: str) -> bool:
@@ -4578,29 +4573,6 @@ def _deck_evidence_live(job_id: str) -> None:
         job = _trade_jobs.get(job_id)
         if job is not None and job.pop("evidence", None) is not None:
             job["evidence_mode"] = "live"
-
-
-def _purge_archive_evidence() -> None:
-    """C8 retention (the cleanup loop, flag on only): delete archive extras older
-    than 90 days, in bounded batches, at most once an hour. Never first30,
-    delivered, ghost or full_interim rows."""
-    global _archive_purge_last
-    if not _trade_page_store_enabled() or time.monotonic() - _archive_purge_last < _ARCHIVE_PURGE_EVERY_S:
-        return
-    _archive_purge_last = time.monotonic()
-    from . import database as _db
-    try:
-        purged = 0
-        for _ in range(_ARCHIVE_PURGE_BATCHES):
-            n = _db.purge_archive_deck_impressions(days=_ARCHIVE_RETENTION_DAYS, batch_size=500)
-            purged += n
-            if n < 500:
-                break
-        if purged:
-            log.info("deck-evidence: purged %d archive rows older than %d days", purged,
-                     _ARCHIVE_RETENTION_DAYS)
-    except Exception:
-        log.exception("deck-evidence: archive retention failed")
 
 
 def _mark_trade_pages_stale(marked_at: float, *, user_id: str | None = None,

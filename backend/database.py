@@ -1095,8 +1095,8 @@ deck_impressions_table = Table("deck_impressions", metadata,
     # 'archive' | 'full_interim'. Set only on rows written at delivery from a
     # deferred job's build-time snapshot (server._DeckEvidence); NULL on every
     # row written at build (flag off, or a live-mode job) and on pre-change
-    # rows. 'archive' rows (C8 extras) are deleted after 90 days
-    # (purge_archive_deck_impressions); the other tiers never are.
+    # rows. No row is deleted: C8's archive retention waits for the packing
+    # stage (models-lead R2.6 S2).
     Column("evidence_tier",             String),
     # ISO UTC: when this card was first sent to a client (any tier, first30
     # included). NULL for an undelivered card (first30, archive, full_interim),
@@ -1113,9 +1113,11 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
-# C8 retention (ADR-025): purge_archive_deck_impressions reads only archive
-# rows by age. Partial, so it indexes the archive extras alone (both dialects);
-# _migrate_db adds it to existing databases.
+# C8 retention (ADR-025): the archive extras by age, for the purge the packing
+# stage restores (models-lead R2.6 S2 removed it until then). Partial, so it
+# indexes the archive extras alone (both dialects) and costs nothing on other
+# rows; kept so packing needs no migration. _migrate_db adds it to existing
+# databases.
 _ARCHIVE_INDEX_WHERE = "evidence_tier = 'archive'"
 Index(
     "ix_deck_impressions_archive",
@@ -7084,21 +7086,6 @@ def save_deck_evidence(rows: list[dict], *, candidate_set: dict | None = None,
                 ).values(evidence_tier="delivered"))
     log.info("deck evidence: deck=%s rows=%d candidate_set=%s delivered=%d",
              deck_job_id, len(rows), candidate_set is not None, len(delivered))
-
-
-def purge_archive_deck_impressions(*, days: int = 90, batch_size: int = 500) -> int:
-    """C8 retention: delete one bounded batch of `evidence_tier = 'archive'` rows
-    (an archive deck's undelivered extras) served more than `days` ago. Never
-    'first30', 'delivered', 'ghost' or 'full_interim' rows."""
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    i = deck_impressions_table
-    with engine.begin() as conn:
-        # The archive predicate as the index's literal text, so both planners
-        # match ix_deck_impressions_archive (a bound parameter may not).
-        ids = select(i.c.impression_id).where(
-            text(_ARCHIVE_INDEX_WHERE), i.c.served_at < cutoff,
-        ).limit(max(1, min(batch_size, 1000)))
-        return conn.execute(delete(i).where(i.c.impression_id.in_(ids))).rowcount or 0
 
 
 # ---------------------------------------------------------------------------

@@ -10,7 +10,7 @@ Pinned here:
   * C3: a later cursor page changes exactly its newly delivered cards;
   * C6: written rows equal the build-time snapshot, whatever moves after build;
   * C5: ghost rows are narrow (assets_json and the compact inputs only);
-  * idempotent retries, evidence_tier per row, C8 selection and retention;
+  * idempotent retries, evidence_tier per row, C8 selection, no purge before packing (S2);
   * the budget rule (the stored evidence_blob shrinks after delivery);
   * the blob path once the job has left the process, partial runs, the lease;
   * evidence mode per path; flag off is today's write; deferred rows equal the
@@ -988,48 +988,43 @@ def old_row(iid, tier, days_ago):
             "served_at": db_module.page_store_iso(time.time() - days_ago * 86400), "evidence_tier": tier}
 
 
-def test_archive_retention_deletes_only_archive_rows_older_than_90_days(deferred, monkeypatch):
+class _OnePass(Exception):
+    pass
+
+
+def test_s2_no_evidence_row_is_purged_before_packing(deferred, monkeypatch):
+    """models-lead R2.6 S2: C8's archive retention waits for the packing stage.
+    One real pass of the cleanup loop leaves every tier's rows at any age,
+    archive rows 91 days old included; no purge function is left to call."""
     _, engine, _ = deferred
-    seeded = [old_row(f"{tier}-{age}", tier, age) for tier in (*TIERS, None) for age in (91, 89)]
+    seeded = [old_row(f"{tier}-{age}", tier, age) for tier in (*TIERS, "partial_run", None)
+              for age in (91, 365)]
     with engine.begin() as conn:
         conn.execute(insert(db_module.deck_impressions_table), seeded)
-    monkeypatch.setattr(server, "_archive_purge_last", float("-inf"))
-    monkeypatch.setattr(server.time, "monotonic", lambda: 120.0)   # a host booted 2 minutes ago (CI)
-    server._purge_archive_evidence()
-    assert {r["impression_id"] for r in rows(engine)} == {r["impression_id"] for r in seeded} - {"archive-91"}
-    with engine.begin() as conn:                            # throttled: once an hour
-        conn.execute(insert(db_module.deck_impressions_table), [old_row("archive-92", "archive", 92)])
-    server._purge_archive_evidence()
-    assert "archive-92" in {r["impression_id"] for r in rows(engine)}
+    sleeps = []
+
+    def sleep(seconds):              # the loop's first sleep returns; its second ends the pass
+        sleeps.append(seconds)
+        if len(sleeps) > 1:
+            raise _OnePass
+
+    monkeypatch.setattr(server.time, "sleep", sleep)
+    monkeypatch.setattr("backend.prepared_trade_runtime.tick", lambda *_: None)
+    with pytest.raises(_OnePass):
+        server._cleanup_loop()
+    assert len(sleeps) == 2
+    assert sorted(r["impression_id"] for r in rows(engine)) == sorted(r["impression_id"] for r in seeded)
+    assert not hasattr(server, "_purge_archive_evidence")
+    assert not hasattr(db_module, "purge_archive_deck_impressions")
 
 
-def test_archive_retention_is_off_with_the_flag(deferred, monkeypatch):
-    _, engine, _ = deferred
-    with engine.begin() as conn:
-        conn.execute(insert(db_module.deck_impressions_table), [old_row("archive-91", "archive", 91)])
-    monkeypatch.setattr(ff, "_flags_cache", {**ff.flags_dict(), "trade.first_page_store": False})
-    monkeypatch.setattr(server, "_archive_purge_last", float("-inf"))
-    server._purge_archive_evidence()
-    assert [r["impression_id"] for r in rows(engine)] == ["archive-91"]
-
-
-def test_g3_the_archive_purge_uses_the_partial_index(deferred):
-    from sqlalchemy import event, text
+def test_g3_the_archive_partial_index_is_kept_for_packing(deferred):
+    """S2 left the index with no reader; it indexes archive rows alone."""
+    from sqlalchemy import text
     _, engine, _ = deferred
     with engine.connect() as conn:
         ddl = conn.execute(text("SELECT sql FROM sqlite_master WHERE name = 'ix_deck_impressions_archive'")).scalar()
     assert ddl.endswith("(evidence_tier, served_at) WHERE evidence_tier = 'archive'")
-    seen = []
-    listen = lambda conn, cursor, statement, params, *a: seen.append((statement, params))
-    event.listen(engine, "before_cursor_execute", listen)
-    try:
-        db_module.purge_archive_deck_impressions(days=90, batch_size=500)
-    finally:
-        event.remove(engine, "before_cursor_execute", listen)
-    [(statement, params)] = [(st, pa) for st, pa in seen if st.lstrip().startswith("DELETE")]
-    with engine.connect() as conn:
-        plan = [r[-1] for r in conn.exec_driver_sql("EXPLAIN QUERY PLAN " + statement, params)]
-    assert any("USING INDEX ix_deck_impressions_archive" in step for step in plan), plan
 
 
 def test_g3_the_migration_adds_the_partial_index_to_an_existing_database(tmp_path, monkeypatch):
