@@ -978,6 +978,8 @@ def restarted_deck_with_rebuilt_row():
 
 def test_a_gone_organic_deck_rebases_across_a_restart(p1, spawned, monkeypatch):
     client, _, _ = p1
+    # The delivery's evidence write runs on its own thread (not run here).
+    monkeypatch.setattr(server, "_start_deck_evidence_thread", lambda **kw: None)
     deck, rebuilt = restarted_deck_with_rebuilt_row()
     decoded = []
     real = db_module.zlib.decompress

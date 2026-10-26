@@ -600,6 +600,7 @@ SERVE_PATHS = {   # path -> (store the page?, the deck asked for, cursor)
     "deck_own": (False, None, 0),            # set up as a replenished (non-organic) deck
     "rebased_row": (True, "deck-old", 0),
     "rebased_job": (False, "deck-old", 0),
+    "rebased_lineage": (True, "deck-old", 0),
 }
 
 
@@ -607,15 +608,22 @@ def serve_deck(path, n=120):
     """The deferred deck `path` serves; for the rebased paths, an organic deck
     D ("deck-old") of the same scope, in this process and revoked, which P2
     (7575dc02) rebases onto the deck's stored row (its job gone from the
-    process) or onto its job (no row)."""
+    process) or onto its job (no row); or (9d42f9c3) D gone from the process,
+    its lineage row naming the scope whose row the deck rebuilt."""
     store, asked, _ = SERVE_PATHS[path]
     job_id, served, *rest = deferred_deck(n, store=store)
+    if path == "rebased_lineage":
+        with db_module.engine.begin() as conn:
+            conn.execute(db_module.trade_deck_lineage_insert(
+                conn.dialect.name, {**stored(), "deck_job_id": "deck-old"}))
     with server._trade_jobs_lock:
         if path == "deck_own":                 # replenished: deferred, no page_scope
             job = server._trade_jobs[job_id]
             job.pop("page_scope")
             job["source"] = "replenish"
-        if asked == "deck-old":
+        if path == "rebased_lineage":
+            server._trade_jobs.pop(job_id)
+        elif asked == "deck-old":
             twin = {k: v for k, v in server._trade_jobs[job_id].items() if k != "evidence"}
             twin["job_id"] = "deck-old"
             server._trade_jobs["deck-old"] = twin
@@ -638,7 +646,7 @@ def test_370_every_serve_path_writes_exactly_the_cards_it_sends(deferred, path):
 
 
 @pytest.mark.parametrize("path", ["job_cursor", "deck_stored", "page_one", "deck_own",
-                                  "rebased_row"])
+                                  "rebased_row", "rebased_lineage"])
 def test_370_a_card_i1_drops_gets_no_row_at_all(deferred, path):
     """C-b, write after I-1: a dropped card was never served, so it is neither
     marked delivered nor written as first30 / full_interim / partial_run.
