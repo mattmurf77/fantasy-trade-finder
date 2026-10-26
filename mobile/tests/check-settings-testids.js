@@ -85,9 +85,11 @@ const NEW = [
   { id: 'settings.feedback-inbox',       file: 'AboutSection.tsx',       why: '#354 BL-10 feedback inbox row on Help & about' },
   // #354 review items, also not this plan: the plain Credits block on Help &
   // about (design-lead change 2), and the Testing page's honest unavailable
-  // line for a non-tester deep link (D-7).
+  // line for a non-tester deep link (D-7), with its "Back to Settings"
+  // button (marketing-lead copy addendum 6A).
   { id: 'settings.credits',              file: 'AboutSection.tsx',       why: '#354 Credits block on Help & about' },
   { id: 'settings.testing-unavailable',  file: 'SettingsTestingScreen.tsx', why: '#354 D-7 Testing page unavailable line' },
+  { id: 'settings.testing-unavailable.back', file: 'SettingsTestingScreen.tsx', why: 'addendum 6A Back to Settings on the unavailable page' },
 ];
 
 // The Testing hub row is the seventh group row but is gated

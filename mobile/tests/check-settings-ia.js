@@ -31,6 +31,11 @@
 //      other branch is the honest unavailable line, never an empty page.
 //      5e: #363's TimingReadoutRow sits right after TestingSection, imported
 //      from components/, default testID, under no gate but that predicate.
+//      U1-U4 (marketing-lead copy addendum 6A): the non-tester state reads
+//      exactly "There's nothing on this page.", has a "Back to Settings"
+//      Button that calls navigate('Settings') and never goBack, overrides
+//      the header title to "Settings" only while the predicate is false, and
+//      the old "This page isn't available." is gone from src.
 //   6. D-6 — FeedbackSheet renders no Screen field (its only TextInput is the
 //      note) but still submits `screen`, falling back to 'Unknown'.
 //
@@ -561,6 +566,152 @@ console.log(`Settings tree: ${pageFiles.length} page module(s), ${sectionFiles.l
       fail('5e. SettingsTestingScreen mounts <TimingReadoutRow /> right after <TestingSection>, ungated, with its default testID',
            problems.join('; '));
     }
+  }
+
+  // U1-U4. The non-tester state (useTesterSurface() false), marketing-lead
+  //     copy addendum 6A: the final body line, a "Back to Settings" button
+  //     that navigates to Settings (never goBack: a cold-start deep link has
+  //     nothing to pop), a header title that no longer says "Testing", and
+  //     the placeholder line gone from src.
+  {
+    const PAGE = path.join(SETTINGS_DIR, 'SettingsTestingScreen.tsx');
+    const page = parseFile(PAGE);
+    const jsxTextOf = (el) => {
+      const node = ts.isJsxOpeningElement(el) ? el.parent : el;
+      if (!ts.isJsxElement(node)) return { text: '', pure: false };
+      const pure = node.children.every((c) => ts.isJsxText(c));
+      const text = node.children.filter((c) => ts.isJsxText(c)).map((c) => c.text).join('')
+        .replace(/\s+/g, ' ').trim();
+      return { text, pure };
+    };
+    const sections = byTag(page, 'TestingSection');
+    const sg = sections.length === 1 ? innermostGuard(sections[0]) : null;
+    // In the non-tester branch: the same predicate conditional TestingSection
+    // sits under (5d), on its other side.
+    const inNonTesterBranch = (el) => {
+      const g = innermostGuard(el);
+      return !!(g && sg && g.test === sg.test && !g.inTrue && isPredicate(page, g.test));
+    };
+
+    // U1. The body line, exactly.
+    const BODY = "There's nothing on this page.";
+    const lines = byTestId(page, 'settings.testing-unavailable');
+    const body = lines.length === 1 ? jsxTextOf(lines[0]) : null;
+    if (body && body.pure && body.text === BODY && inNonTesterBranch(lines[0])) {
+      ok(`U1. settings.testing-unavailable (${line(page, lines[0])}) reads exactly "${BODY}", in the non-tester branch`);
+    } else {
+      fail(`U1. settings.testing-unavailable reads exactly "${BODY}", in the non-tester branch`,
+           lines.length !== 1 ? `found ${lines.length} settings.testing-unavailable elements`
+             : !body.pure ? 'its children are not plain JSX text'
+             : body.text !== BODY ? `reads "${body.text}"`
+             : 'not in the false branch of the shared useTesterSurface() conditional');
+    }
+
+    // U2. The Back to Settings button: the chalkline Button, exact label,
+    //     no separate a11y label, an inline handler that calls exactly
+    //     navigate('Settings'), and no goBack anywhere on the page.
+    const backs = byTestId(page, 'settings.testing-unavailable.back');
+    const b = backs.length === 1 ? backs[0] : null;
+    const onPress = b ? attr(b, 'onPress') : null;
+    const handler = onPress && onPress.initializer && ts.isJsxExpression(onPress.initializer)
+      ? onPress.initializer.expression : null;
+    const isFn = !!handler && (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler));
+    const calls = isFn ? findAll(handler.body, (n) => ts.isCallExpression(n)) : [];
+    const navs = calls.filter((c) => ts.isPropertyAccessExpression(c.expression) && c.expression.name.text === 'navigate');
+    const navOk = calls.length === 1 && navs.length === 1 && navs[0].arguments.length === 1
+      && isStr(navs[0].arguments[0]) && navs[0].arguments[0].text === 'Settings';
+    const goBacks = findAll(page, (n) => ts.isIdentifier(n) && n.text === 'goBack');
+    const problems = [
+      [!!b, `found ${backs.length} settings.testing-unavailable.back elements, want 1`],
+      [!b || b.tagName.getText(page) === 'Button', b ? `is a <${b.tagName.getText(page)}>, not the chalkline <Button>` : ''],
+      [!b || attrStr(b, 'label') === 'Back to Settings', b ? `label is ${JSON.stringify(attrStr(b, 'label'))}, want "Back to Settings"` : ''],
+      [!b || !attr(b, 'accessibilityLabel'), 'passes an accessibilityLabel; VoiceOver should read the visible label'],
+      [!b || isFn, 'onPress is not an inline function'],
+      [!b || !isFn || navOk,
+        `onPress makes ${calls.length} call(s): ${calls.map((c) => c.getText(page)).join(', ') || 'none'}; want exactly navigation.navigate('Settings')`],
+      [goBacks.length === 0, `goBack at ${goBacks.map((n) => line(page, n)).join(', ')}; a cold-start deep link has nothing to pop`],
+      [!b || inNonTesterBranch(b), 'not in the non-tester branch beside the unavailable line'],
+    ].filter(([okay]) => !okay).map(([, why]) => why);
+    if (problems.length === 0) {
+      ok(`U2. "Back to Settings" (${line(page, b)}) calls navigate('Settings'), never goBack, in the non-tester branch`);
+    } else {
+      fail('U2. settings.testing-unavailable.back is <Button label="Back to Settings"> calling navigate(\'Settings\'), never goBack',
+           problems.join('; '));
+    }
+
+    // U3. The header title: one setOptions call, setting title AND the
+    //     rendered headerTitle to "Settings" (RootNav's headerTitle is a
+    //     closure over 'Testing', so `title` alone changes nothing on screen),
+    //     inside a layout/effect hook that re-runs on the predicate, and
+    //     guarded so it runs ONLY when useTesterSurface() is false.
+    const setOpts = findAll(page, (n) => ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)
+      && n.expression.name.text === 'setOptions');
+    const so = setOpts.length === 1 ? setOpts[0] : null;
+    const obj = so && so.arguments.length === 1 && ts.isObjectLiteralExpression(so.arguments[0]) ? so.arguments[0] : null;
+    const prop = (name) => obj && obj.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText(page) === name);
+    const titleP = prop('title');
+    const headP = prop('headerTitle');
+    const titleOk = !!titleP && isStr(titleP.initializer) && titleP.initializer.text === 'Settings';
+    const headTexts = headP ? findAll(headP.initializer, (n) => ts.isJsxText(n) && n.text.trim()).map((n) => n.text.trim()) : [];
+    const headOk = !!headP && (ts.isArrowFunction(headP.initializer) || ts.isFunctionExpression(headP.initializer))
+      && headTexts.length === 1 && headTexts[0] === 'Settings';
+    // Every guard between the call and its enclosing function, with polarity.
+    const guards = [];
+    let fn = null;
+    if (so) {
+      for (let child = so, p = so.parent; p; child = p, p = p.parent) {
+        if (isFnLike(p)) { fn = p; break; }
+        if (ts.isIfStatement(p) && child !== p.expression) guards.push({ cond: p.expression, pos: child === p.thenStatement });
+        if (ts.isConditionalExpression(p) && child !== p.condition) guards.push({ cond: p.condition, pos: child === p.whenTrue });
+        if (ts.isBinaryExpression(p) && child === p.right) {
+          const k = p.operatorToken.kind;
+          if (k === ts.SyntaxKind.AmpersandAmpersandToken) guards.push({ cond: p.left, pos: true });
+          if (k === ts.SyntaxKind.BarBarToken || k === ts.SyntaxKind.QuestionQuestionToken) guards.push({ cond: p.left, pos: false });
+        }
+      }
+    }
+    const unparen = (n) => { while (n && ts.isParenthesizedExpression(n)) n = n.expression; return n; };
+    // "Runs only when the predicate is false": `if (!P)` / `!P && …`, or the
+    // negative side of a bare `P` test.
+    const negOfPred = (g) => {
+      const c = unparen(g.cond);
+      if (ts.isPrefixUnaryExpression(c) && c.operator === ts.SyntaxKind.ExclamationToken) {
+        return g.pos && isPredicate(page, unparen(c.operand)) ? unparen(c.operand) : null;
+      }
+      return !g.pos && isPredicate(page, c) ? c : null;
+    };
+    const predNode = guards.length === 1 ? negOfPred(guards[0]) : null;
+    const hookCall = fn && fn.parent && ts.isCallExpression(fn.parent) && fn.parent.arguments[0] === fn ? fn.parent : null;
+    const hookName = hookCall ? hookCall.expression.getText(page).replace(/^React\./, '') : '';
+    const deps = hookCall && hookCall.arguments[1] && ts.isArrayLiteralExpression(hookCall.arguments[1])
+      ? hookCall.arguments[1].elements.map((e) => e.getText(page)) : [];
+    const depsOk = !!predNode && (ts.isCallExpression(predNode) || deps.includes(predNode.getText(page)));
+    const u3 = [
+      [setOpts.length === 1, `found ${setOpts.length} setOptions calls, want 1`],
+      [!so || titleOk, "no `title: 'Settings'`"],
+      [!so || headOk, `headerTitle doesn't render exactly "Settings" (${headTexts.join(' | ') || 'no text'}); RootNav's closure would still show "Testing"`],
+      [!so || guards.length === 1, guards.length === 0 ? 'unconditional: a tester would lose RootNav\'s "Testing" title'
+        : `under ${guards.length} guards (${guards.map((g) => (g.pos ? '' : 'not ') + g.cond.getText(page)).join(', ')}), want only !useTesterSurface()`],
+      [!so || guards.length !== 1 || !!predNode, guards.length === 1
+        ? `runs when \`${guards[0].pos ? '' : '!'}(${guards[0].cond.getText(page)})\`, not only when useTesterSurface() is false` : ''],
+      [!so || ['useLayoutEffect', 'useEffect'].includes(hookName), `not inside a useLayoutEffect/useEffect callback (${hookName || 'none'})`],
+      [!so || !predNode || depsOk, `the hook's deps [${deps.join(', ')}] miss \`${predNode ? predNode.getText(page) : ''}\`, so a flag change never re-runs it`],
+    ].filter(([okay]) => !okay).map(([, why]) => why);
+    if (u3.length === 0) {
+      ok(`U3. the header title is overridden to "Settings" (${line(page, so)}, ${hookName}) only when useTesterSurface() is false`);
+    } else {
+      fail('U3. the header title reads "Settings", not "Testing", only when useTesterSurface() is false', u3.join('; '));
+    }
+
+    // U4. The placeholder is gone from mobile/src (raw text, comments too).
+    const OLD = ["This page isn't available.", 'This page isn’t available.'];
+    const oldHits = [];
+    for (const abs of walkSrc(SRC)) {
+      const text = fs.readFileSync(abs, 'utf8');
+      if (OLD.some((s) => text.includes(s))) oldHits.push(path.relative(MOBILE_ROOT, abs));
+    }
+    if (oldHits.length === 0) ok('U4. "This page isn\'t available." appears nowhere in mobile/src');
+    else fail('U4. "This page isn\'t available." appears nowhere in mobile/src', `still in ${oldHits.join(', ')}`);
   }
 
   // 6. D-6: no Screen field in the sheet, but `screen` is still submitted.

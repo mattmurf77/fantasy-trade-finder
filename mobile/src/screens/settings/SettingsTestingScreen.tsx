@@ -21,17 +21,28 @@
 // (the RookieRanksScreen stale-link precedent); the header Back stays. When it
 // is true the section renders, and each row inside keeps its own flag gate.
 //
+// NON-TESTER STATE (marketing-lead copy addendum 6A). The line reads "There's
+// nothing on this page." (no tester vocabulary, no promise it comes back),
+// with a "Back to Settings" button under it. The button calls
+// navigate('Settings'), never goBack(): on a cold-start deep link the header
+// Back has nothing to pop and goes to `Main` (RootNav settingsPageOptions), so
+// only this button is sure to land in Settings. And the header title reads
+// "Settings", not "Testing": RootNav renders the title through a headerTitle
+// closure over 'Testing', so this page replaces both `title` and `headerTitle`
+// in a layout effect, only while the predicate is false. With it true,
+// RootNav's "Testing" stands.
+//
 // Data (plan §6): no queries.
 
-import React, { useState } from 'react';
+import React, { useLayoutEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import FeedbackFAB from '../../components/FeedbackFAB';
 import Toast from '../../components/Toast';
 import { TimingReadoutRow } from '../../components/TimingReadoutRow';
-import { Text } from '../../components/chalkline';
-import { space } from '../../theme/chalkline';
+import { Button, Text } from '../../components/chalkline';
+import { chalk, fonts, space } from '../../theme/chalkline';
 import { styles } from './styles';
 import TestingSection from './sections/TestingSection';
 import { useTesterSurface } from './useTesterSurface';
@@ -48,6 +59,16 @@ export default function SettingsTestingScreen({ navigation }: any) {
   const onNotice = (msg: string, tone?: 'success' | 'warn') => setToast({ msg, tone });
   const testerSurface = useTesterSurface();
 
+  // Addendum 6A: a non-tester's header never names the hidden page.
+  useLayoutEffect(() => {
+    if (!testerSurface) {
+      navigation.setOptions({
+        title: 'Settings',
+        headerTitle: () => <PageHeaderTitle>Settings</PageHeaderTitle>,
+      });
+    }
+  }, [navigation, testerSurface]);
+
   return (
     <SafeAreaView style={styles.root} edges={['bottom']}>
       {testerSurface ? (
@@ -62,8 +83,13 @@ export default function SettingsTestingScreen({ navigation }: any) {
       ) : (
         <View style={local.unavailable}>
           <Text testID="settings.testing-unavailable" variant="bodySm" style={local.unavailableText}>
-            This page isn't available.
+            There's nothing on this page.
           </Text>
+          <Button
+            testID="settings.testing-unavailable.back"
+            label="Back to Settings"
+            onPress={() => navigation.navigate('Settings')}
+          />
         </View>
       )}
       <Toast
@@ -77,7 +103,32 @@ export default function SettingsTestingScreen({ navigation }: any) {
   );
 }
 
+// The stack-header title in RootNav's style (Barlow Condensed caps on the
+// ink-0 bar). A LOCAL copy of RootNav's private HeaderTitle, the
+// LeagueSummaryScreen StackHeaderTitle precedent: RootNav imports this screen,
+// so importing from it would close a cycle.
+function PageHeaderTitle({ children }: { children: string }) {
+  return (
+    <Text scale="display" numberOfLines={1} style={local.headerTitle}>
+      {children}
+    </Text>
+  );
+}
+
 const local = StyleSheet.create({
-  unavailable: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.lg },
+  unavailable: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.lg,
+    padding: space.lg,
+  },
   unavailableText: { textAlign: 'center' },
+  headerTitle: {
+    fontFamily: fonts.displaySemi,
+    fontSize: 18,
+    letterSpacing: 0.54,
+    textTransform: 'uppercase',
+    color: chalk.base,
+  },
 });
