@@ -21010,6 +21010,72 @@ def _roster_id_for_owner(rosters, owner_id) -> int | None:
         return None
 
 
+# I-2 send-time refusal copy (final: marketing via head-bizops, accepted by
+# Product, 2026-10-26). A later swap is a change here and nowhere else.
+# Curly ’ throughout, like the shipped refusals. `{assets}` is either the named
+# list ("A", "A and B", "A, B and C", with no serial comma) or, when ANY
+# offending player has no name, the count subject below: a raw player id is
+# never shown. `{verb}` agrees with it ("is" / "are"). `{team}’s` takes ’s
+# even after a final s ("Chris’s").
+_I2_COPY_ASSET_NOT_OWNED = (
+    "{assets} {verb} no longer on your roster, so nothing was sent. Find a new trade.")
+_I2_COPY_COUNTERPARTY_NOT_OWNED = (
+    "{assets} {verb} no longer on {team}’s roster, so nothing was sent. Find a new trade.")
+_I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED = (
+    "{assets} {verb} no longer on the other manager’s roster, so nothing was sent. "
+    "Find a new trade.")
+_I2_COPY_ONE_UNNAMED_PLAYER = "A player in this trade"
+_I2_COPY_N_UNNAMED_PLAYERS = "{n} players in this trade"
+_I2_COPY_ROSTER_READ_FAILED = (
+    "Couldn’t confirm rosters with {platform} right now, so nothing was sent. "
+    "Try again in a moment.")
+
+
+def _roster_read_failed_copy(platform: str) -> str:
+    """I-2 / platforms-pm R3: the readable sentence for a send blocked because
+    the live roster read failed. `platform` is the display name ("Sleeper",
+    "MFL", "ESPN"); each core wraps it in its own error shape."""
+    return _I2_COPY_ROSTER_READ_FAILED.format(platform=platform)
+
+
+def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tuple[dict, int]:
+    """I-2 (trade-time-to-suggestion PRD §5.3, platforms-pm R4): the one
+    send-time refusal for an asset that a live roster read shows has moved.
+    Platform-neutral. The Sleeper core uses it now; the MFL and ESPN cores
+    adopt it in I-2 PRs 2 and 3.
+
+    `side` "give"    → 422 `asset_not_owned` (team overhaul's code)
+    `side` "receive" → 422 `counterparty_asset_not_owned`, naming the
+                       counterparty when `counterparty_name` is known
+    `assets` are the offending ids as sent, and stay in the body for the
+    client and analytics. `names` maps id → display name. The readable
+    `message` never shows a raw id: if any offending player has no name, it
+    counts them instead ("A player in this trade" / "2 players in this
+    trade"). `detail` == `message`, because fielded builds render `detail` in
+    their catch-all.
+    """
+    assets = [str(a) for a in assets]
+    labels = [(names or {}).get(a) for a in assets]
+    if all(labels):
+        labels = [str(n) for n in labels]
+        listed = labels[0] if len(labels) == 1 else f"{', '.join(labels[:-1])} and {labels[-1]}"
+    elif len(assets) == 1:
+        listed = _I2_COPY_ONE_UNNAMED_PLAYER
+    else:
+        listed = _I2_COPY_N_UNNAMED_PLAYERS.format(n=len(assets))
+    verb = "is" if len(assets) == 1 else "are"
+    if side == "give":
+        code, msg = "asset_not_owned", _I2_COPY_ASSET_NOT_OWNED.format(assets=listed, verb=verb)
+    elif counterparty_name:
+        code = "counterparty_asset_not_owned"
+        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED.format(assets=listed, verb=verb,
+                                                     team=counterparty_name)
+    else:
+        code = "counterparty_asset_not_owned"
+        msg = _I2_COPY_COUNTERPARTY_NOT_OWNED_UNNAMED.format(assets=listed, verb=verb)
+    return {"error": code, "assets": assets, "message": msg, "detail": msg}, 422
+
+
 @app.route("/api/sleeper/link", methods=["GET", "POST", "DELETE"])
 def sleeper_link():
     """Manage the caller's stored Sleeper write token.
@@ -21200,6 +21266,7 @@ def propose_trade_to_sleeper():
       409 sleeper_expired | 503 sleeper_unconfigured | 502 sleeper_write_failed
       422 sleeper_pick_unmapped | 422 sleeper_pick_untradable (#428)
       422 sleeper_pick_not_owned | 400 bad_request
+      422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
     """
     if _TEST_MODE:
         # Fail closed: there is no legitimate automated send. Route-hit
@@ -21295,6 +21362,15 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     # mine from the linked Sleeper account, the counterparty's from their user_id
     # (FTF user_id == Sleeper user_id). A client-supplied their_roster_id wins.
     rosters = _fetch_league_rosters(league_id)
+    if rosters is None:
+        # I-2 / platforms-pm R3: the rosters READ failed. `_fetch_league_rosters`
+        # returns None for an exception (HTTP error, timeout, the open 429
+        # circuit) or a non-list body; a successful read is always a list.
+        # Ownership can't be checked, so nothing is sent. Uses R10's 502 shape
+        # (below). A successful read without the caller's roster stays 400.
+        _msg = _roster_read_failed_copy("Sleeper")
+        return {"error": "sleeper_write_failed", "kind": "network",
+                "detail": _msg, "message": _msg}, 502
     my_roster_id = _roster_id_for_owner(rosters, cred.get("sleeper_user_id"))
     if my_roster_id is None:
         return {"error": "roster_not_found"}, 400
@@ -21320,6 +21396,40 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
     give_picks = [p for p in give if _is_ftf_pick_asset(league_id, p)]
     recv_players = [p for p in receive if not _is_ftf_pick_asset(league_id, p)]
     recv_picks = [p for p in receive if _is_ftf_pick_asset(league_id, p)]
+
+    # I-2: live player ownership on BOTH sides, checked against the rosters
+    # payload already in hand, so it adds no Sleeper call. It works at roster
+    # level, so co-owners pass (D-051). `players` is the whole Sleeper roster:
+    # starters, bench, IR (`reserve`) and `taxi` are all listed in it.
+    # Players are checked BEFORE picks. The check is free, and a moved player
+    # refuses the send without the pick path's extra reads.
+    by_rid = {}
+    for r in rosters:
+        try:
+            by_rid[int(r.get("roster_id"))] = r
+        except (TypeError, ValueError, AttributeError):
+            continue
+    mine, theirs = by_rid.get(my_roster_id), by_rid.get(their_rid)
+    if theirs is None:
+        # A client-supplied their_roster_id that this successful read doesn't
+        # hold: the receive side can't be checked, so it is never sent.
+        return {"error": "opponent_roster_not_found"}, 400
+    held = {str(x) for x in (mine.get("players") or []) if x}
+    moved = [p for p in give_players if p not in held]
+    if moved:
+        return _ownership_refusal("give", moved, _player_names_by_id(moved))
+    held = {str(x) for x in (theirs.get("players") or []) if x}
+    moved = [p for p in recv_players if p not in held]
+    if moved:
+        team = None
+        try:  # display enrichment only; the refusal never depends on it
+            team = next((m.get("display_name") or m.get("username")
+                         for m in load_league_members(league_id)
+                         if str(m.get("user_id")) == str(theirs.get("owner_id"))), None)
+        except Exception as e:
+            log.warning("I-2 counterparty name lookup failed: %s", e)
+        return _ownership_refusal("receive", moved, _player_names_by_id(moved), team)
+
     encoded: list = []
     if give_picks or recv_picks:
         # A LITERAL platform read on purpose (the #328 `_mock_owned_pick_overlay`
