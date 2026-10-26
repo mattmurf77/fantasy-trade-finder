@@ -142,6 +142,8 @@ ROUTES = {
     ("POST", "/api/admin/segments"): NEVER_GATE,
     ("DELETE", "/api/admin/segments/<int:seg_id>"): NEVER_GATE,
     ("GET", "/api/admin/suggestion-telemetry/ratio"): NEVER_GATE,
+    ("DELETE", "/api/admin/trades/gate-miss-test"): NEVER_GATE,
+    ("POST", "/api/admin/trades/gate-miss-test"): NEVER_GATE,
     ("POST", "/api/billing/revenuecat/webhook"): NEVER_GATE,
     ("POST", "/api/billing/stripe/webhook"): NEVER_GATE,
     ("POST", "/api/cron/daily-tick"): NEVER_GATE,

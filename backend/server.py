@@ -127,6 +127,7 @@ from .database import (
     replenish_week_done, log_deck_replenish,
     set_feedback_status, list_feedback_for_user, FEEDBACK_STATUSES, FEEDBACK_SEVERITIES,
     upsert_league_members, upsert_member_rankings,
+    replace_league_members_snapshot,   # S0 — authoritative Sleeper membership
     load_member_rankings, load_league_members, get_ranking_coverage,
     find_mirror_like, save_trade_policy_shadow, save_trade_proposal,
     # FB-147 — Sleeper trade-block snapshot (read side; sync lives in
@@ -251,6 +252,7 @@ from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
+from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
 from . import bakeoff_runner as _bakeoff      # trade.bakeoff — three-model bake-off (Phase 3)
 from types import SimpleNamespace   # proposal-time policy shim (see
                                    # _record_trade_proposal)
@@ -582,6 +584,18 @@ def _sleeper_record(url: str, data) -> None:
 
 
 def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
+    """Fetch JSON from Sleeper API, behind the per-process 429 circuit (S0).
+
+    While the circuit is open this raises `sleeper_http.SleeperRateLimited`
+    (a URLError) without touching the network; a 429 opens it. Fixture mode
+    goes through the circuit too, so cassette 429s exercise the real path.
+    """
+    league = _api_obs.sleeper_endpoint_class(url)[1]
+    with _sleeper_http.guard(league):
+        return _sleeper_get_unguarded(url, timeout)
+
+
+def _sleeper_get_unguarded(url: str, timeout: int = 15) -> dict | list:
     """Fetch JSON from Sleeper API with full request/response logging."""
     global _SSL_CTX  # may be replaced on first SSL failure
     if _SLEEPER_FIXTURES_DIR and not _SLEEPER_RECORD:
@@ -595,7 +609,8 @@ def _sleeper_get(url: str, timeout: int = 15) -> dict | list:
         doc = json.loads(fpath.read_text())
         log.info("sleeper-fixture HIT %s", url)
         if isinstance(doc, dict) and "__http_error__" in doc:
-            raise urllib.error.HTTPError(url, int(doc["__http_error__"]), "fixture", None, None)
+            raise urllib.error.HTTPError(url, int(doc["__http_error__"]), "fixture",
+                                         doc.get("__headers__"), None)
         return doc
     if _TEST_MODE:
         # Unreachable given the startup rules; belt-and-braces rail counter.
@@ -2888,6 +2903,9 @@ def _cleanup_loop() -> None:
         if evicted or timed_out:
             log.info("Trade jobs swept: %d evicted, %d timed out", evicted, timed_out)
 
+        # P1 first-page store: age, then the byte ceiling; flag off ⇒ untouched.
+        _evict_trade_page_store()
+
         # Silent durable inventory refresh is deliberately separate from the
         # notification-bearing daily tick and weekly replenishment.
         try:
@@ -3180,10 +3198,10 @@ def _trade_request_signature(prefs_preload):
 
 def _trade_running_matches(job, fairness_threshold, outlook_value,
                            trade_intent=None, presentation_capture=None,
-                           request_signature=None):
+                           request_signature=None, fingerprints=None):
     if presentation_capture is None:
         presentation_capture = _capture_trade_presentation()
-    return bool(_trade_running_policy_matches(job, presentation_capture)
+    return bool(_trade_running_policy_matches(job, presentation_capture, fingerprints)
         and job.get("fairness_threshold") == fairness_threshold
         and (job.get("outlook_value") or None) == (outlook_value or None)
         and (job.get("trade_intent") or None) == (trade_intent or None)
@@ -3191,8 +3209,9 @@ def _trade_running_matches(job, fairness_threshold, outlook_value,
              or job["request_signature"] == request_signature))
 
 
-def _trade_running_policy_matches(job, presentation_capture):
-    """Preserve user intent/fairness, never work under an obsolete policy."""
+def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
+    """Preserve user intent/fairness, never work under an obsolete policy.
+    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
     if not (_job_live(job) and _trade_presentation_matches(job, presentation_capture)
             and _trade_owner_model_matches(job) and _trade_significance_matches(job)
             and _prepared_job_matches(job)):
@@ -3203,7 +3222,8 @@ def _trade_running_policy_matches(job, presentation_capture):
                        else _trade_safety_signature())
     # The worker stamps this after preparation; queued jobs already carry
     # the admission-time model/presentation/significance captures above.
-    return "safety_policy" not in job or job["safety_policy"] == expected_safety
+    return (("safety_policy" not in job or job["safety_policy"] == expected_safety)
+            and _trade_fingerprints_match(job, fingerprints, running=True))
 
 
 def _start_trade_job_thread(*, target, args, kwargs):
@@ -3338,12 +3358,25 @@ def _trade_job_public_view(job: dict) -> dict:
     board_refresh = job.get("board_refresh")
     if board_refresh:
         out["board_refresh"] = board_refresh
+    kick_floor = None
     if out["cards"]:
         user_id, league_id, _format = job["key"]
         if job.get("prepared_inventory_id"):
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id, prepared=True)
         else:
             out["cards"] = _project_trade_dispositions(out["cards"], user_id, league_id)
+        out["cards"], block, past_bound = _roster_serve_rules(
+            out["cards"], league_id, job.get("league_user_id") or user_id, job["job_id"])
+        if block == "roster_check_unavailable":
+            out.update(cards=[], status="error", error="roster_check_unavailable")
+        elif block == "roster_gate_miss":
+            # §3b: the existing building shape, so the client keeps polling;
+            # every poll re-runs the check.
+            out.update(cards=[], wait_reason="roster_check")
+            if out["status"] != "error":
+                out["status"] = "running"
+        if past_bound:
+            kick_floor = league_id
     revoked = revocation_error()
     if revoked:
         out.update(cards=[], status="error", error=revoked)
@@ -3353,7 +3386,226 @@ def _trade_job_public_view(job: dict) -> dict:
         out.update(cards=[], status="error", error="owner_model_changed")
     elif not _trade_significance_matches(job):
         out.update(cards=[], status="error", error="significance_policy_changed")
+    if kick_floor:
+        _kick_roster_floor(kick_floor)        # after the response is built, no lock held
     return out
+
+
+def _kick_roster_floor(league_id: str) -> None:
+    """P41: start one background Sleeper roster refresh for a league past the
+    roster bound. Non-blocking; `maybe_refresh_async` owns the single-flight,
+    the 60 s failure cooldown, the 429 circuit and the linked-platform skip."""
+    try:
+        _roster_refresh.maybe_refresh_async(
+            league_id, max_age_s=_s0_seconds_knob("trade_roster_bound_s", 300.0))
+    except Exception as err:          # it never raises; a kick must never fail a serve
+        log.warning("roster floor kick failed league=%s: %s", league_id, err)
+
+
+# S0 admin test hook (the operator's TestFlight step A10): force one gate miss
+# on one test league while `trade_gate_miss_mode` stays 0 for everyone. Admin
+# test state, not per-session state: in-process, lost on restart.
+_GATE_MISS_TEST_KINDS = ("withhold", "check_error")
+_GATE_MISS_TEST_MAX_TTL_S = 900
+_gate_miss_tests: dict[str, tuple[str, float]] = {}   # league_id -> (kind, monotonic expiry)
+_gate_miss_tests_lock = threading.Lock()
+
+
+def _gate_miss_test(league_id: str) -> str | None:
+    """The gate miss forced on this league by the admin test hook, or None."""
+    with _gate_miss_tests_lock:
+        entry = _gate_miss_tests.get(league_id)
+        if entry is not None and entry[1] <= time.monotonic():
+            del _gate_miss_tests[league_id]
+            log.info("[i1] gate-miss test expired league=%s kind=%s", league_id, entry[0])
+            return None
+    return entry[0] if entry is not None else None
+
+
+@app.route("/api/admin/trades/gate-miss-test", methods=["POST", "DELETE"])
+def admin_trade_gate_miss_test():
+    """POST /api/admin/trades/gate-miss-test  {league_id, kind, ttl_s}
+    DELETE /api/admin/trades/gate-miss-test {league_id}
+
+    Operator-only test hook (X-Cron-Secret, like /api/cron/*). Until `ttl_s`
+    (at most 900) runs out, every serve of that league's cards forces one S0
+    gate miss, whatever the knobs say: `withhold` = the building shape plus
+    `wait_reason: "roster_check"`; `check_error` = status "error", error
+    "roster_check_unavailable". Other leagues are untouched. DELETE clears it.
+    """
+    _require_cron_auth()
+    body = request.get_json(silent=True) or {}
+    league_id = body.get("league_id")
+    if not isinstance(league_id, str) or not league_id:
+        return jsonify({"error": "invalid_league_id"}), 400
+    if request.method == "DELETE":
+        with _gate_miss_tests_lock:
+            cleared = _gate_miss_tests.pop(league_id, None) is not None
+        log.warning("[i1] gate-miss test cleared league=%s was_set=%s", league_id, cleared)
+        return jsonify({"league_id": league_id, "cleared": cleared})
+    kind, ttl_s = body.get("kind"), body.get("ttl_s")
+    if kind not in _GATE_MISS_TEST_KINDS:
+        return jsonify({"error": "invalid_kind",
+                        "message": "kind must be 'withhold' or 'check_error'"}), 400
+    if (isinstance(ttl_s, bool) or not isinstance(ttl_s, (int, float))
+            or not 0 < ttl_s <= _GATE_MISS_TEST_MAX_TTL_S):
+        return jsonify({"error": "invalid_ttl_s",
+                        "message": f"ttl_s must be a number in (0, {_GATE_MISS_TEST_MAX_TTL_S}]"}), 400
+    with _gate_miss_tests_lock:
+        _gate_miss_tests[league_id] = (kind, time.monotonic() + ttl_s)
+    log.warning("[i1] gate-miss test set league=%s kind=%s ttl_s=%s", league_id, kind, ttl_s)
+    return jsonify({"league_id": league_id, "kind": kind, "ttl_s": ttl_s})
+
+
+def _trade_roster_snapshot(league_id: str):
+    """S0's serve-time roster snapshot (contract v0.4 §3), read now: the
+    engine's pick rows and the roster status. Raises when the read fails."""
+    from . import roster_snapshot
+    from .database import engine as _engine
+    with _engine.connect() as conn:
+        return roster_snapshot.roster_snapshot(
+            conn, league_id, pick_source=_pick_read_source(),
+            import_fresh_s=_s0_seconds_knob("trade_import_roster_fresh_s", 86400.0))
+
+
+def _roster_serve_rules(cards, league_id: str, viewer_id: str, ref: str, *, snap=None):
+    """S0's serve rules (contract v0.4 §3, §3b) for one serve: the job views
+    (/generate and /status, legacy and paged) and P1's page-store serve all go
+    through here. I-1 never serves an asset either side no longer owns; a
+    failed check serves no cards, distinct from an empty deck.
+    `trade_i1_mode` 0 skips all of it; only the admin gate-miss test hook
+    applies whatever the knobs say.
+
+    Returns `(cards, block, past_bound)`; a block serves no cards. The caller
+    applies the block's shape and, when `past_bound`, kicks the roster floor
+    after the response is built. `ref` names the deck in log lines; `snap` is
+    a roster_snapshot the caller already read (P1), else one is read here.
+    """
+    mode = _trade_i1_mode()
+    forced = _gate_miss_test(league_id) if cards else None
+    block = past_bound = None
+    if forced:                            # admin test hook (TestFlight A10)
+        block = "roster_gate_miss" if forced == "withhold" else "roster_check_unavailable"
+        log.warning("[i1] gate-miss test applied league=%s kind=%s job=%s",
+                    league_id, forced, ref)
+    elif cards and league_id != "league_demo" and mode:
+        gates = mode == 2 and _trade_gate_miss_on()
+        try:
+            cards, block, past_bound = _roster_serve_check(
+                cards, league_id, viewer_id, mode, gates, ref, snap=snap)
+        except Exception as err:
+            log.warning("trade-job %s: roster check unavailable (%s): %s", ref,
+                        "no cards" if gates else f"{len(cards)} cards served unchecked", err)
+            block, past_bound = ("roster_check_unavailable" if gates else None), False
+    return ([] if block else cards), block, past_bound
+
+
+def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates: bool,
+                        job_id: str = "", *, snap=None):
+    """S0 at serve (contract v0.4 §3, §3b, §5b; C-a, C-d). Returns
+    `(cards, block, past_bound)`:
+      - `block`: None, "roster_check_unavailable" (no stored rosters: strict,
+        ruling 30) or "roster_gate_miss" (§3b: a Sleeper roster whose last
+        refresh failed and is past `trade_roster_bound_s`; the age falls back to
+        the newest `league_members.updated_at` when `refreshed_at` is NULL).
+        Only with `gates` (strict mode and `trade_gate_miss_mode` 1); without
+        it they're held: no rows serves every card unchecked, and the withhold
+        serves the I-1-filtered cards. The line logs `<outcome>_held`.
+      - `past_bound`: a Sleeper roster past the bound, so the caller kicks the
+        floor refresh after the response, gate misses held or not.
+    Strict (mode 2) drops cards whose give asset the viewer, or receive asset the
+    opponent, no longer owns. Lenient (mode 1) serves every card and never
+    blocks, and so does C-e (a failed session write, `snap.lenient_reason`):
+    the stored rows may be outdated, so drops would be false. A plain
+    `unknown` (no state row) still filters. Generic ladder picks are pool
+    assets, never on a roster, and a pick with no owner row is an unknown
+    owner (C-d): both pass, counted. One log line per serve (C-a), with outcome
+    served / served_lenient / unchecked_c_e / a gate miss (`_held` when held),
+    and `job=` the job (or, for a page-store serve, the page's deck job).
+    Raises when the stored rows can't be read. `snap`: a roster_snapshot
+    already read for this serve (P1 shares it with its fingerprint compare);
+    None reads one now.
+    """
+    bound = _s0_seconds_knob("trade_roster_bound_s", 300.0)
+    if snap is None:
+        snap = _trade_roster_snapshot(league_id)
+    past_bound = not snap.linked and (snap.age_s is None or snap.age_s > bound)
+    if snap.status == "missing":
+        block = "roster_check_unavailable"
+    elif snap.status == "stale" and past_bound:
+        block = "roster_gate_miss"
+    else:
+        block = None
+    owners, nobody = snap.asset_owner, frozenset()
+    counts = dict.fromkeys(("dropped_give", "dropped_receive",
+                            "unchecked_generic", "unchecked_pick_owner"), 0)
+
+    def check(assets, owner):
+        """(moved, generic, unknown-owner pick) asset counts for one side."""
+        moved = generic = unknown = 0
+        for asset in map(str, assets):
+            if parse_generic_pick_id(asset) is not None:
+                generic += 1
+            elif asset not in owners and _parse_owned_pick_id(asset, league_id) is not None:
+                unknown += 1
+            elif owner not in owners.get(asset, nobody):
+                moved += 1
+        return moved, generic, unknown
+
+    kept, unchecked = [], {}
+    for card in (cards if snap.status != "missing" else ()):   # no rows: nothing to check
+        if isinstance(card, dict):
+            give = [p["id"] for p in card.get("give", [])]
+            receive = [p["id"] for p in card.get("receive", [])]
+            target = card.get("target_user_id")
+        else:
+            give, receive = card.give_player_ids, card.receive_player_ids
+            target = card.target_user_id
+        (give_moved, *give_unchecked), (receive_moved, *receive_unchecked) = (
+            check(give, viewer_id), check(receive, str(target)))
+        counts["dropped_give"] += bool(give_moved)
+        counts["dropped_receive"] += bool(receive_moved)
+        unchecked[id(card)] = [a + b for a, b in zip(give_unchecked, receive_unchecked)]
+        if not (give_moved or receive_moved):
+            kept.append(card)
+    if mode == 1 or snap.lenient_reason:
+        served = list(cards)                  # lenient or C-e: checked and logged, all served
+    elif block == "roster_check_unavailable":
+        served = [] if gates else list(cards)  # held: served unchecked
+    elif block == "roster_gate_miss":
+        served = [] if gates else kept        # held: the I-1-filtered cards (v0.3)
+    else:
+        served = kept
+    for card in served:                       # exempted assets on the cards served
+        generic, unknown = unchecked.get(id(card), (0, 0))
+        counts["unchecked_generic"] += generic
+        counts["unchecked_pick_owner"] += unknown
+    if snap.lenient_reason:
+        outcome = f"unchecked_{snap.lenient_reason}"
+    elif mode == 1:
+        outcome = "served_lenient"
+    elif block:
+        outcome = block + ("" if gates else "_held")
+    else:
+        outcome = "served"
+    log.log(logging.WARNING if block or snap.lenient_reason else logging.INFO,
+            "[i1] serve league=%s job=%s mode=%s status=%s outcome=%s age_s=%s cards=%d kept=%d "
+            "dropped_give=%d dropped_receive=%d unchecked_generic=%d unchecked_pick_owner=%d",
+            league_id, job_id or "none", "lenient" if mode == 1 else "strict", snap.status, outcome,
+            "none" if snap.age_s is None else int(snap.age_s), len(cards), len(served),
+            counts["dropped_give"], counts["dropped_receive"],
+            counts["unchecked_generic"], counts["unchecked_pick_owner"])
+    return served, (block if gates else None), past_bound
+
+
+def _trade_paged_responses_on() -> bool:
+    """Deploy-free kill switch for E2's opt-in paging (`trade_paged_responses`,
+    default 1). At 0, /generate ignores `page` and /status ignores `cursor`, so
+    a paging client (#363) gets the legacy cumulative body, which it handles
+    as the pre-paging deck path. A missing, NaN or unreadable value keeps
+    paging on."""
+    value = _deck_cfg("trade_paged_responses", 1.0)
+    return not (value == value and value <= 0)
 
 
 def _trade_page_size() -> int:
@@ -3388,13 +3640,687 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
     served = [] if job.get("status") == "error" else raw[start:end]
     out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)})
-    if out["status"] == "error":
+    if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
         out.update(cursor=end, total_ready=len(raw), replace=replace)
     if search_id is not None:
         out["search_id"] = search_id
+    if _trade_page_store_enabled():
+        out["prefetch_remaining"] = _trade_prefetch_remaining()
     return out
+
+
+# ── P1 first-page store (flag trade.first_page_store) ─────────────────────────
+# Scope: docs/plans/trade-time-to-suggestion/scope-eng-200ms.md §2, §6.2, §6.8.
+# Rows live in trade_page_store (database.py). Off (the flag, or the kill knob
+# first_page_store_enabled below 1) ⇒ nothing here reads or writes the table and no
+# response gains a field. Every page serve goes through S0's serve rules
+# (_roster_serve_rules): the same I-1, gate misses, knobs, log line and floor kick.
+
+_TRADE_PAGE_FORMAT = 1           # pages_blob = {"v", "opponents_total", "cards"}
+_TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card without one
+
+# The deck pipeline version (MOD-M1's re-run trigger). server.py is NOT hashed
+# below (hashing it would cold every page on every deploy), so its deck layers
+# are covered only by this number: bump it BY HAND whenever _run_trade_job's
+# or _run_value_core_job's deck-shaping code in server.py changes what cards a
+# deck holds or their order (gates, ordering, quality filters, ghosting,
+# publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
+# trigger. Stored pages carry it in their engine_version, so a bump makes every
+# older page fall through.
+DECK_PIPELINE_VERSION = 1
+
+# The CI guard for that manual bump (models-eng's classification, 2026-10-26).
+# - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
+#   cards it holds, their order and their stored content), hashed as their
+#   normalized source (the AST, docstrings stripped, so comment and formatting
+#   edits don't move it).
+# - DECK_PIPELINE_CONSTANTS: the module-level constants they read, hashed by
+#   value (a stable repr: sets and dicts sorted).
+# - DECK_PIPELINE_IGNORED: what the listed functions reference but doesn't
+#   shape a deck, each with its reason.
+# A logic or constant change fails test_deck_pipeline_digest until
+# DECK_PIPELINE_VERSION is bumped and DECK_PIPELINE_DIGEST re-pinned. A listed
+# function that references an unclassified server.py function or literal
+# constant fails the closure test until it's classified. models-eng reviews.
+DECK_PIPELINE_FUNCTIONS = (
+    "_run_trade_job", "_run_value_core_job",
+    # the candidate pool and injected cards
+    "_inject_owned_picks", "_inject_likes_you_cards", "_inject_likes_you_cards_impl",
+    "_likes_you_cfg", "_likes_you_gate_level", "_likes_you_min_user_delta",
+    "_likes_you_min_user_gain", "_likes_you_user_delta", "_likes_you_seed_value",
+    "_likes_you_package_delta", "_likes_you_presentment_ok",
+    "_owned_pick_assets", "_pick_asset_elos", "_owned_picks_available", "_picks_pool_cap",
+    "_parse_owned_pick_id", "_priced_pick_value", "_pick_gap_equivalent",
+    "_asserted_picks_tradeable", "_standing_offer_inject_cap", "_pick_read_source",
+    # gates on the candidate set
+    "_evaluate_trade_significance", "_evaluate_deck_rosters", "_evaluate_deck_policy",
+    "_evaluate_card_policy", "_policy_context", "_card_concept_id",
+    "_significance_card_key", "_significance_exemptions_for",
+    "_load_presentment_exclusions", "_presentment_need_gate_bypass",
+    "_owner_cards_valid", "_owner_selected_assignment", "_owner_generation_context",
+    "_owner_canonical", "_first_session_confidence_ok", "_audition_statuses",
+    # order and composition of the served deck (the F-layers, quality, ghosts)
+    "_apply_deck_suppression", "_deck_fatigue_multipliers", "_order_deck",
+    "_deck_value_scores", "_split_exploration_pool", "_apply_exploration_slot",
+    "_apply_first_session_shaping", "_records_in_order",
+    "_ghost_holdout_active", "_is_ghost_card", "_served_cards",
+    "_cap_per_target", "_top_receive_asset", "_card_shape", "_card_archetype",
+    "_deck_cfg", "_deck_rng_seed", "_deck_trade_hash", "_deck_fatigue_state",
+    "_fatigue_centerpiece", "_fatigue_package_value", "_exploration_off_taste",
+    "_filter_suppressed_for_exploration", "_thompson_v2_multipliers",
+    "_thompson_v2_posterior", "_thompson_v2_arm_stats", "_thompson_prior_base_rate",
+    # derived inputs (their logic changes the result; not data fetches)
+    "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
+    "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
+    "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    # the flag gates that switch layers on
+    "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
+    "_deck_first_session_enabled", "_deck_quality_filters_enabled", "_deck_signal_v2_enabled",
+    "_deck_taste_enabled", "_deck_thompson_v2_enabled", "_deck_value_model_enabled",
+    "_likes_you_enabled", "_owner_enabled", "_standing_offers_enabled",
+    "_suggestion_telemetry_enabled", "_thompson_deck_enabled", "_value_core_enabled",
+    "_value_core_live", "_slot_labels_enabled",
+    # the stored card's content
+    "_stamp_own_standing_offers", "trade_card_to_dict", "_value_verdict_payload",
+    "_owner_public_selection", "player_to_dict",
+)
+DECK_PIPELINE_CONSTANTS = (
+    "_DECK_MIN_CARDS", "_EXPLORATION_BASE_PER_OPP", "_EXPLORATION_SLOT_MIN",
+    "_EXPLORATION_SLOT_MAX", "_FATIGUE_SESSION_PASS_MIN", "_LIKES_YOU_CAP",
+    "_OWNED_PICK_SEARCH_RANK", "_OWNER_SELECTED_VERSION", "_OWNER_EXCLUSIVE_VERSION",
+    "_THOMPSON_PRIOR_MIN_N", "_THOMPSON_V2_TTL_DAYS", "_THOMPSON_V2_WARM_MIN_OBS",
+    "VALID_POSITIONS", "_PLATFORM_DEFAULT_LINEUP", "_AUDITION_ESTABLISHED",
+)
+DECK_PIPELINE_IGNORED = {
+    # job lifecycle and publication bookkeeping
+    "_finish_trade_job": "job lifecycle: status and timing, not the deck",
+    "_job_live": "job lifecycle: whether a job may still publish",
+    "_job_superseded": "job lifecycle: the supersede fence",
+    "_revoke_trade_job_locked": "job lifecycle: revocation",
+    # logging and telemetry
+    "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
+    "_log_owner_selected_run": "run logging",
+    "_log_presentment_outcome": "a log line",
+    "_log_roster_rejections": "shadow logging of rejected candidates",
+    "_mirror_skip_rows": "shadow logging of skipped mirrors",
+    "_note_mirror_skip": "shadow logging of skipped mirrors",
+    "_tp_reason_roster": "a shadow-log reason code",
+    "_tp_reason_resolved": "a shadow-log reason code",
+    # freshness captures and matches (the job cache's, not the deck's)
+    "_capture_trade_execution": "captures the session for the worker",
+    "_capture_trade_presentation": "freshness capture; its result is in engine_version",
+    "_capture_trade_significance": "freshness capture; its result is in engine_version",
+    "_trade_owner_model_matches": "freshness match",
+    "_trade_significance_matches": "freshness match",
+    "_trade_safety_signature": "freshness capture; its result is in engine_version",
+    # inputs whose result is stamped elsewhere, or serve-time work
+    "_infer_user_outlook": "the seeded outlook is in config_signature",
+    "_project_trade_dispositions": "runs at serve on stored pages, never stored",
+    "_make_progress_cb": "progressive snapshots while running; the stored list is the final one",
+    "_first_session_board_refresh": "F9's header payload, never on stored cards",
+    "_active_format": "which format the session is in: an input, stamped in the page key",
+    "_league_user_id": "the viewer's league identity: an input",
+    "_league_on_block_ids": "trade-block data read and cache",
+    # Sleeper I/O, caches and utilities
+    "_sleeper_get": "Sleeper I/O",
+    "_load_sleeper_cache": "Sleeper players cache read",
+    "_players_cache_age_seconds": "cache bookkeeping",
+    "_fetch_sleeper_league_meta": "Sleeper I/O",
+    "_fa_league_meta": "Sleeper league meta read and cache",
+    "_outlook_sleeper_fetch": "Sleeper I/O for the outlook package",
+    "_iso_age_days": "a date utility",
+    "_FA_LEAGUE_META_TTL": "a cache TTL",
+    "_SLOT_ORDER_TTL_SECONDS": "a cache TTL",
+    "_THOMPSON_PRIOR_CACHE_TTL_S": "a cache TTL",
+    "_thompson_prior_cache": "a mutable cache, not a constant",
+    # copy and label formatting on stored cards (copy churn; models-eng's call: out)
+    "_standing_offer_reason": "label copy only",
+    "_owned_pick_label": "label copy only",
+    "_pick_labels_by_id": "label copy only",
+    "_seasons_phrase": "label copy only",
+}
+DECK_PIPELINE_DIGEST = "38068a074677acaa"
+
+# The modules whose code decides what cards a deck holds or their order. Their
+# bytes are hashed into every page's engine_version (backend/-relative globs,
+# sorted within each pattern). The reasons per module are in the P1 report and
+# docs/data-dictionary.md (trade_page_store.engine_version).
+_ENGINE_CODE_MODULES = (
+    # the engines and their generators
+    "trade_service.py", "trade_optimizer.py", "trade_gen_*.py", "value_core/*.py",
+    "power_rankings.py",          # value_core's lineup slots and optimal starters
+    "ranking_service.py", "pick_values.py", "pick_slots.py",
+    "tier_config.json",           # ruling 25: clamps priced Elo, drives the tier deck logic
+    # gates and filters on the candidate set
+    "trade_policy.py", "trade_significance.py", "trade_mutual_benefit.py",
+    "trade_roster.py", "trade_roster_adapter.py", "trade_outlook_utility.py",
+    "negmem.py", "trade_breaker.py", "deck_quality.py",
+    # composition and order of the served deck
+    "bakeoff_runner.py", "bakeoff_profiles.py", "taste_service.py", "value_model.py",
+    "suggestion_telemetry.py", "trade_bilateral_presentment.py",
+    "small_trade_presentment.py",
+    # the card copy itself
+    "trade_narrative.py",
+)
+_engine_code_hash_value: str | None = None
+
+# The experiments whose variant changes a deck (experiments.py keys). A stored
+# page carries their digest (_trade_experiment_digest); a page built under one
+# variant never serves after the user's assignment changes.
+_DECK_EXPERIMENT_LAYERS = ("trade.aggression",)
+
+
+def _engine_code_hash_of(root: pathlib.Path) -> str:
+    """sha256[:12] over each engine module's backend-relative path and bytes."""
+    digest = hashlib.sha256()
+    for pattern in _ENGINE_CODE_MODULES:
+        paths = sorted(root.glob(pattern))
+        if not paths:
+            digest.update(f"{pattern}\0missing\0".encode())
+        for path in paths:
+            digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+            digest.update(path.read_bytes() + b"\0")
+    return digest.hexdigest()[:12]
+
+
+def _trade_engine_code_hash() -> str:
+    """The engine modules' code hash, computed once per process on first use."""
+    global _engine_code_hash_value
+    if _engine_code_hash_value is None:
+        _engine_code_hash_value = _engine_code_hash_of(pathlib.Path(__file__).resolve().parent)
+    return _engine_code_hash_value
+
+
+def _ast_shape(node):
+    """A Python-version-stable form of an AST: node type plus its non-empty
+    fields (3.13's ast.dump hides empty fields that 3.12 shows; CI runs 3.12).
+    Docstrings are already gone; positions are never included."""
+    import ast
+    if isinstance(node, ast.AST):
+        fields = []
+        for name, value in ast.iter_fields(node):
+            shaped = _ast_shape(value)
+            if shaped not in (None, [], ()):
+                fields.append((name, shaped))
+        return [type(node).__name__, fields]
+    if isinstance(node, list):
+        return [_ast_shape(item) for item in node]
+    if isinstance(node, (bytes, complex)) or node is Ellipsis:
+        return repr(node)
+    return node
+
+
+def _strip_docstrings(tree):
+    import ast
+    for node in ast.walk(tree):
+        body = getattr(node, "body", None)
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Module))
+                and body and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
+            node.body = body[1:] or [ast.Pass()]
+    return tree
+
+
+def _stable_repr(value) -> str:
+    """repr with sets and dicts sorted, so a constant's digest is stable."""
+    if isinstance(value, dict):
+        items = sorted(((_stable_repr(k), _stable_repr(v)) for k, v in value.items()))
+        return "{" + ", ".join(f"{k}: {v}" for k, v in items) + "}"
+    if isinstance(value, (set, frozenset)):
+        return type(value).__name__ + "{" + ", ".join(sorted(map(_stable_repr, value))) + "}"
+    if isinstance(value, (list, tuple)):
+        inner = ", ".join(map(_stable_repr, value))
+        return f"[{inner}]" if isinstance(value, list) else f"({inner})"
+    return repr(value)
+
+
+def _deck_pipeline_digest(names=DECK_PIPELINE_FUNCTIONS, constants=DECK_PIPELINE_CONSTANTS, *,
+                          source_of=None, value_of=None) -> str:
+    """sha256[:16] over each listed function's normalized source (its AST with
+    docstrings stripped, so comment and formatting edits don't move it) and
+    each listed constant's value."""
+    import ast
+    import inspect
+    import textwrap
+    source_of = source_of or (lambda name: inspect.getsource(globals()[name]))
+    value_of = value_of or (lambda name: globals()[name])
+    digest = hashlib.sha256()
+    for name in names:
+        tree = _strip_docstrings(ast.parse(textwrap.dedent(source_of(name))))
+        digest.update(name.encode() + b"\0")
+        digest.update(json.dumps(_ast_shape(tree), separators=(",", ":"), default=str).encode()
+                      + b"\0")
+    for name in constants:
+        digest.update(f"const:{name}\0{_stable_repr(value_of(name))}\0".encode())
+    return digest.hexdigest()[:16]
+
+
+# _trade_experiment_digest's memo: user_id -> (experiments cache generation,
+# engine flag, digest), least recently used first, capped. The experiments
+# cache refreshes at most once a minute, so a user costs at most one
+# evaluation (a users read and experiments' audit insert) per refresh, and a
+# serve inside a generation costs no DB work.
+_experiment_digest_memo: "collections.OrderedDict[str, tuple]" = collections.OrderedDict()
+_experiment_digest_lock = threading.Lock()
+_EXPERIMENT_DIGEST_MEMO_MAX = 10_000
+
+
+def _trade_experiment_digest(user_id: str) -> str:
+    """sha256[:16] over, for each deck-affecting experiment, the user's
+    assignment: the experiment's layer and version, the variant and its
+    model_overlay. A user who isn't enrolled (the engine off, not running, not
+    targeted, or out of bucket: trade_service's deterministic MD5 bucket) hashes
+    as "fallback", so moving between enrolled and fallback still mismatches.
+    Uses the same evaluation the trade job uses (experiments.variant_overlay).
+
+    Memoized per user on the experiments cache generation (`_cache["at"]`,
+    refreshed at most every 60 s) and the `experiments.engine` flag: the
+    evaluation reruns only when either moves."""
+    from . import experiments as _experiments
+    engine_on = is_enabled("experiments.engine")
+    generation = _experiments._load_cache().get("at") if engine_on else None
+    with _experiment_digest_lock:
+        hit = _experiment_digest_memo.get(user_id)
+        if hit is not None and hit[:2] == (generation, engine_on):
+            _experiment_digest_memo.move_to_end(user_id)
+            return hit[2]
+    parts = []
+    for key in _DECK_EXPERIMENT_LAYERS:
+        variant, overlay = _experiments.variant_overlay(user_id, key)
+        if variant is None:
+            parts.append([key, "fallback"])
+            continue
+        running = next((exp for exp in _experiments._load_cache()["running"]
+                        if exp["key"] == key), {})
+        parts.append([key, running.get("layer"), running.get("version"), variant, overlay])
+    digest = hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+    with _experiment_digest_lock:
+        _experiment_digest_memo[user_id] = (generation, engine_on, digest)
+        _experiment_digest_memo.move_to_end(user_id)
+        while len(_experiment_digest_memo) > _EXPERIMENT_DIGEST_MEMO_MAX:
+            _experiment_digest_memo.popitem(last=False)
+    return digest
+
+
+def _trade_page_store_enabled() -> bool:
+    """On only when all three hold, in order: the flag `trade.first_page_store`;
+    the flag `trade.packed_evidence` (#370's deferred evidence; without it,
+    backing jobs and rebuilds would write build-time evidence that reads as
+    fully exposed under eval rule v3. P1 doesn't register the key, so it reads
+    False until #370 does); and the deploy-free kill knob
+    `first_page_store_enabled` (model_config, default 1), on at any finite
+    value ≥ 1 (0, a negative, NaN or an unreadable value is off). Off ⇒ no
+    store read, write, serve or stale mark.
+
+    Re-enabling (the knob or a flag): set the knob to its previous value + 1.
+    It's hashed into every page's config_signature, so each page stored before
+    the off period, which missed that period's stale marks, falls through and
+    rebuilds."""
+    if not (is_enabled("trade.first_page_store") and is_enabled("trade.packed_evidence")):
+        return False
+    try:
+        value = float(_trade_service_mod._cfg.get("first_page_store_enabled", 1.0))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(value) and value >= 1
+
+
+def _trade_page_knob(key: str, default: float, low: int, high: int) -> int:
+    """A P1 model_config knob as an int, held to [low, high]."""
+    try:
+        return max(low, min(high, int(_deck_cfg(key, default))))
+    except (ValueError, OverflowError):  # NaN / inf
+        return int(default)
+
+
+def _trade_pages_stored() -> int:
+    return _trade_page_knob("trade_pages_stored", 3.0, 1, 10)
+
+
+def _trade_prefetch_remaining() -> int:
+    return _trade_page_knob("trade_prefetch_remaining", 50.0, 1, 200)   # ruling 19
+
+
+def _trade_page_scope(fairness_threshold) -> str:
+    """The canonical organic request scope: the fairness threshold, 2 decimals."""
+    return f"organic:f={float(fairness_threshold):.2f}"
+
+
+def _trade_page_request_scope(body: dict, league_id: str, fairness_threshold,
+                              force_fresh: bool) -> str | None:
+    """The scope a paged /generate request may read the store under, or None.
+
+    Only the organic default search: no pins, no opponent, no intent, no
+    `force` (which a fatigue refresh implies), never the demo league. Never at
+    `trade_i1_mode` 0: without S0's reads the stamps can't be compared.
+    """
+    if (not _trade_page_store_enabled() or force_fresh or league_id == "league_demo"
+            or _trade_i1_mode() == 0
+            or any(body.get(name) for name in ("pinned_give_players", "pinned_receive_players",
+                                               "opponent_user_id", "trade_intent"))):
+        return None
+    return _trade_page_scope(fairness_threshold)
+
+
+def _trade_engine_name(value_core: bool) -> str:
+    """The deck's engine as trades_generated names it; the value core also
+    carries its ENGINE_VERSION, so a core release misses every older page."""
+    if value_core:
+        from .value_core.types import ENGINE_VERSION
+        return "value_core:" + ENGINE_VERSION
+    return ("v3" if is_enabled("trade_engine.v3")
+            else "v2" if is_enabled("trade_engine.v2") else "v1")
+
+
+def _trade_page_engine_version(engine_name: str, safety_policy, presentation_capture) -> str:
+    """`engine_version`: the engine; a hash of the serving policy that the job
+    cache also requires to match (_trade_job_is_fresh's safety signature and
+    presentation mode); the engine modules' code hash; and
+    DECK_PIPELINE_VERSION. A stored page never outlives a policy rollout or an
+    engine code change across a deploy."""
+    presentation = (presentation_capture[:2] if presentation_capture is not None
+                    else _simple_presentment.OFF)
+    policy = json.dumps([list(safety_policy or []), list(presentation)], default=str)
+    return (f"{engine_name}+policy:{hashlib.sha256(policy.encode()).hexdigest()[:12]}"
+            f"+code:{_trade_engine_code_hash()}+pipeline:{DECK_PIPELINE_VERSION}")
+
+
+def _trade_page_viewer(sess: Mapping, league_id: str) -> str:
+    """The viewer's league identity in `league_id` (co-owners differ), for I-1."""
+    league = sess.get("league")
+    if getattr(league, "league_id", None) == league_id:
+        return _league_user_id(sess)
+    return str(sess.get("user_id") or "")
+
+
+def _job_page_eligible(job: dict) -> bool:
+    """Store pages only from a complete, organic, fully stamped job (§6.8).
+
+    INTEGRATION POINT: models-eng's count-bounded conversion (not merged) marks
+    a deck cut short by the value core's safety ceiling. Each place that flag
+    may land refuses the page.
+    """
+    value_core = job.get("value_core") or {}
+    diag = value_core.get("diag") or {}
+    ceiling = (job.get("safety_ceiling_hit") or value_core.get("safety_ceiling_hit")
+               or (diag.get("safety_ceiling_hit") if isinstance(diag, Mapping)
+                   else getattr(diag, "safety_ceiling_hit", False)))
+    return bool(job.get("page_scope") and job.get("status") == "complete"
+                and job.get("error") is None and not job.get("superseded")
+                and not job.get("prepared_inventory_id") and not job.get("is_pinned")
+                and not job.get("trade_intent") and not job.get("source")
+                and not job.get("presentation_exempt")
+                and job.get("roster_fp") is not None and job.get("values_snapshot_id") is not None
+                and job.get("request_signature") is not None and not ceiling)
+
+
+def _trade_card_expiry(card) -> float | None:
+    try:
+        return datetime.fromisoformat(card["expires_at"].replace("Z", "+00:00")).timestamp()
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _store_trade_page(job_id: str) -> bool:
+    """P1 write: store a just-finished job's first pages, in final served order.
+
+    Called on the worker thread once _run_trade_job returns, inside the job's
+    user-data lease. True when a row was written. Never raises.
+    """
+    if not _trade_page_store_enabled():
+        return False
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if job is None or _trade_job_revoked(job):
+            return False
+        job = dict(job)   # published card lists are replaced, never mutated
+    if not _job_page_eligible(job):
+        return False
+    from . import database as _db
+    try:
+        user_id, league_id, scoring_format = job["key"]
+        cards = list(job.get("cards") or [])[:_trade_pages_stored() * _trade_page_size()]
+        built = job["page_built_at"]   # the admission: when the deck's inputs were read
+        expiries = [t for t in map(_trade_card_expiry, cards) if t is not None]
+        blob = _db.CompressedJSON.encode({"v": _TRADE_PAGE_FORMAT,
+                                          "opponents_total": job.get("opponents_total") or 0,
+                                          "cards": cards})
+        written = _db.save_trade_page({
+            "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
+            "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
+            "values_snapshot_id": job["values_snapshot_id"],
+            "engine_version": _trade_page_engine_version(
+                _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
+                job.get("presentation_capture")),
+            "config_signature": job["request_signature"],
+            "experiment_digest": _trade_experiment_digest(user_id), "deck_job_id": job_id,
+            "built_at": _db.page_store_iso(built),
+            "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
+            "card_count": len(cards), "pages_blob": blob, "evidence_blob": None,
+            "stored_bytes": len(blob), "state": "ready",
+        })
+        log.info("trade-page %s: stored=%s scope=%s cards=%d bytes=%d", job_id, written,
+                 job["page_scope"], len(cards), len(blob))
+        return written
+    except Exception:
+        log.warning("trade-page %s: store failed", job_id, exc_info=True)
+        return False
+
+
+def _mark_trade_pages_stale(marked_at: float, *, user_id: str | None = None,
+                            league_id: str | None = None) -> None:
+    """P1: an input change makes the stored pages it touches stale (one
+    bounded UPDATE). Call with _trade_jobs_lock released. `marked_at` is
+    taken before the in-process fence, so the supersede guard also refuses a
+    deck admitted before the change. Store off ⇒ no-op. Never raises."""
+    if not _trade_page_store_enabled():
+        return
+    from . import database as _db
+    try:
+        _db.mark_trade_pages_stale(marked_at=_db.page_store_iso(marked_at),
+                                   user_id=user_id, league_id=league_id)
+    except Exception as err:
+        log.warning("trade-page stale mark failed (user=%s league=%s): %s", user_id, league_id, err)
+
+
+def _trade_current_snapshot(league_id: str, scoring_format: str):
+    """P1's serve read: `(roster_snapshot, vsn1)`, or None when the read failed
+    or `trade_i1_mode` is 0. One snapshot feeds the fingerprint compare (its
+    `fp` is S0's rfp1) and S0's serve check; read before the job lock."""
+    if _trade_i1_mode() == 0:
+        return None
+    from . import roster_snapshot
+    from .database import engine as _engine
+    try:
+        snap = _trade_roster_snapshot(league_id)
+        with _engine.connect() as conn:
+            vsn = roster_snapshot.values_snapshot_id(
+                conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
+                pick_source=_pick_read_source(), generation=pool_generation())
+    except Exception as err:
+        log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
+        return None
+    return snap, vsn
+
+
+def _trade_page_read(user_id: str, league_id: str, scoring_format: str, scope: str):
+    """The serve's reads, before the job lock: the page row (one unique-index
+    read; a failed read is no row) and the current snapshot."""
+    from . import database as _db
+    try:
+        row = _db.load_trade_page(user_id, league_id, scoring_format, scope)
+    except Exception as err:
+        log.warning("trade-page read failed for league %s: %s", league_id, err)
+        row = None
+    return row, _trade_current_snapshot(league_id, scoring_format)
+
+
+def _trade_rebuild_running(key) -> bool:
+    """A live (running, unrevoked) job for this key: the deck is rebuilding."""
+    with _trade_jobs_lock:
+        return _job_live(_trade_jobs.get(_trade_jobs_by_key.get(key)))
+
+
+def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, snap=None,
+                     search_id=None) -> tuple[dict, bool]:
+    """A stored page as a paged response, and S0's `past_bound`.
+
+    Slices the stored raw list at `cursor`, then runs the disposition
+    projection and S0's serve rules (_roster_serve_rules: I-1, the gate misses
+    and their knobs, the C-a log line) on the slice only, so a filtered card
+    never shifts a later card's index (E2's rule). A gate miss gets the job
+    views' shapes: `roster_check_unavailable` is status "error"; the §3b
+    withhold is status "running" with `wait_reason: "roster_check"`; the
+    cursor holds either way. The caller sets `freshness_state` and kicks the
+    floor. Raises only when the stored pages don't decode.
+    """
+    pages = row["pages_blob"]
+    if not isinstance(pages, Mapping) or not isinstance(pages.get("cards"), list):
+        raise ValueError("stored pages do not decode")
+    league_id = row["league_id"]
+    end = min(len(pages["cards"]), cursor + _trade_page_size())
+    cards = _project_trade_dispositions(pages["cards"][cursor:end], user_id, league_id)
+    cards, block, past_bound = _roster_serve_rules(cards, league_id, viewer_id,
+                                                   row["deck_job_id"], snap=snap)
+    opponents = pages.get("opponents_total") or 0
+    out = {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
+           "opponents_total": opponents, "cards": cards, "error": None, "cursor": end,
+           "total_ready": row["card_count"], "replace": False, "serve_source": "page",
+           "freshness_state": "fresh", "prefetch_remaining": _trade_prefetch_remaining()}
+    if block == "roster_check_unavailable":
+        out.update(status="error", error="roster_check_unavailable", cursor=cursor, total_ready=0)
+    elif block == "roster_gate_miss":
+        out.update(status="running", wait_reason="roster_check", cursor=cursor, total_ready=0)
+    if search_id is not None:
+        out["search_id"] = search_id
+    return out, past_bound
+
+
+def _trade_page_stale(row: dict, snap, vsn=None) -> bool:
+    """The row was marked stale by an input change, or its roster or values
+    stamp no longer matches the stored rows (`vsn` None = not compared)."""
+    return (row["state"] == "stale" or (snap is not None and snap.fp != row["roster_fp"])
+            or (vsn is not None and vsn != row["values_snapshot_id"]))
+
+
+def _trade_page_freshness(stale: bool, snap, key) -> str:
+    """Ruling 29: "updating" only while a rebuild actually runs, and never for
+    an ESPN/MFL/Fleaflicker league."""
+    linked = snap is None or snap.linked
+    return "updating" if stale and not linked and _trade_rebuild_running(key) else "fresh"
+
+
+def _serve_trade_page(row: dict, current, *, user_id: str, league_id: str, viewer_id: str,
+                      request_signature, presentation_capture, search_id, backing,
+                      kick) -> dict | None:
+    """§6.2 for /generate `page: 1`. The response body, or None to fall through
+    to today's path: the engine, config or the user's deck experiment variants
+    moved; the stored cards expired; the current read failed (a failed read
+    can't prove a page fresh, A2); the stored pages don't decode; or the page
+    is stale while a complete, fresh job is in this process (that job is newer).
+
+    `current` is the caller's _trade_current_snapshot(). `backing` is the
+    status of the fresh or matching running job for this key in this process,
+    or None. `kick()` starts (or joins, preserve_running) the organic rebuild.
+    It runs whenever no job backs the page (after a restart, or after an input
+    change revoked it) and the serve isn't a gate miss. The page serves now;
+    the rebuild replaces it, `ready`, for the next request. A stale page is
+    "updating" only while that rebuild runs (ruling 29). Past the roster bound,
+    S0's floor kick runs after the response is built.
+    """
+    from . import database as _db
+    started = time.perf_counter()
+    engine_now = _trade_page_engine_version(
+        _trade_engine_name(_value_core_live(league_id=league_id, user_id=user_id,
+                                            league_user_id=viewer_id, trade_intent=None,
+                                            preparation=False)),
+        _trade_safety_signature(), presentation_capture)
+    if (request_signature is None or row["config_signature"] != request_signature
+            or row["engine_version"] != engine_now):
+        log.info("trade-page %s: blocked (engine or config moved)", row["deck_job_id"])
+        return None
+    if row["experiment_digest"] != _trade_experiment_digest(user_id):
+        log.info("trade-page %s: blocked (experiment variant moved)", row["deck_job_id"])
+        return None
+    if row["expires_at"] <= _db.page_store_iso(time.time()) or current is None:
+        return None
+    snap, vsn = current
+    stale = _trade_page_stale(row, snap, vsn)
+    if stale and backing == "complete":
+        return None
+    try:
+        out, past_bound = _trade_page_view(row, 0, user_id=user_id, viewer_id=viewer_id,
+                                           snap=snap, search_id=search_id)
+    except Exception as err:
+        log.warning("trade-page %s: unusable, today's path: %s", row["deck_job_id"], err)
+        return None
+    blocked = out["status"] != "complete"
+    if backing is None and not blocked:
+        kick()
+    out["freshness_state"] = _trade_page_freshness(stale, snap, (user_id, league_id, row["scoring_format"]))
+    if not blocked:
+        try:
+            _db.touch_trade_page(row["id"], _db.page_store_iso(time.time()))
+        except Exception as err:
+            log.warning("trade-page %s: last_served_at not updated: %s", row["deck_job_id"], err)
+    log.info("trade-page %s: served source=page status=%s freshness=%s cards=%d rebuild=%s ms=%.1f",
+             row["deck_job_id"], out["status"], out["freshness_state"], len(out["cards"]),
+             backing is None and not blocked, (time.perf_counter() - started) * 1000)
+    if past_bound:
+        _kick_roster_floor(league_id)        # after the response is built, no lock held
+    return out
+
+
+def _trade_page_status_view(row: dict, cursor: int, sess: Mapping) -> dict:
+    """/status?cursor=K inside a page-served deck's stored pages: the slice,
+    dispositions and S0's serve rules on a roster snapshot read now; the floor
+    kick after the response. Never called at `trade_i1_mode` 0. (P2 extends
+    this past the stored pages.)"""
+    league_id = row["league_id"]
+    snap = None
+    try:
+        snap = _trade_roster_snapshot(league_id)
+    except Exception as err:         # S0's rules re-read, and handle a failure
+        log.warning("trade-page %s: roster snapshot unavailable: %s", row["deck_job_id"], err)
+    try:
+        out, past_bound = _trade_page_view(row, cursor, user_id=sess["user_id"],
+                                           viewer_id=_trade_page_viewer(sess, league_id),
+                                           snap=snap)
+    except Exception as err:
+        log.warning("trade-page %s: stored pages unusable: %s", row["deck_job_id"], err)
+        return _trade_page_past_stored(row, cursor)
+    out["freshness_state"] = _trade_page_freshness(
+        _trade_page_stale(row, snap), snap, (row["user_id"], league_id, row["scoring_format"]))
+    if past_bound:
+        _kick_roster_floor(league_id)        # after the response is built, no lock held
+    return out
+
+
+def _trade_page_past_stored(row: dict, cursor: int) -> dict:
+    """No cards for a page-served deck at `cursor`, on the deck's own job id."""
+    pages = row["pages_blob"] if isinstance(row["pages_blob"], Mapping) else {}
+    opponents = pages.get("opponents_total") or 0
+    return {"job_id": row["deck_job_id"], "status": "complete", "opponents_done": opponents,
+            "opponents_total": opponents, "cards": [], "error": None, "cursor": cursor,
+            "total_ready": row["card_count"], "replace": False, "serve_source": "page",
+            "freshness_state": "fresh", "prefetch_remaining": _trade_prefetch_remaining()}
+
+
+def _evict_trade_page_store() -> None:
+    """P1 eviction (§7): one bounded pass per cleanup tick. Store off ⇒ no-op."""
+    if not _trade_page_store_enabled():
+        return
+    from . import database as _db
+    try:
+        aged, over_budget = _db.evict_trade_pages(
+            evict_days=_trade_page_knob("trade_page_store_evict_days", 30.0, 1, 3650),
+            max_bytes=_trade_page_knob("trade_page_store_max_bytes", 262144000.0, 0, 2 ** 62))
+        if aged or over_budget:
+            log.info("trade page store evicted: %d aged, %d over the byte ceiling", aged, over_budget)
+    except Exception:
+        log.exception("trade page store eviction failed")
 
 
 def _project_trade_dispositions(cards, user_id: str, league_id: str, *, prepared=False):
@@ -3611,9 +4537,10 @@ def _trade_presentation_matches(job, captured):
 
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
                         trade_intent: str | None = None, presentation_capture=None,
-                        request_signature=None) -> bool:
+                        request_signature=None, fingerprints=None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
-    i.e. it's complete, recent, and was generated for the same parameters."""
+    i.e. it's complete, recent, and was generated for the same parameters.
+    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
     if job.get("status") != "complete" or _trade_job_revoked(job):
         return False
     if not _prepared_job_matches(job):
@@ -3646,7 +4573,74 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     # deck filtered for a different (or no) shape.
     if (job.get("trade_intent") or None) != (trade_intent or None):
         return False
-    return True
+    return _trade_fingerprints_match(job, fingerprints)
+
+
+def _trade_i1_mode() -> int:
+    """S0's live-path knob, model_config `trade_i1_mode` (default 1 until C-b,
+    models-lead option B), read per
+    request. 2 = strict (S0). 1 = lenient: run the checks and log, but serve
+    every card and never withhold. 0 = off, the pre-S0 path: no I-1, no
+    fingerprint read or compare, no withhold, no floor kick. NaN, an
+    unreadable value or anything else reads as 1."""
+    value = _deck_cfg("trade_i1_mode", 1.0)
+    return int(value) if value in (0.0, 2.0) else 1
+
+
+def _trade_gate_miss_on() -> bool:
+    """model_config `trade_gate_miss_mode` (default 0), read per request. At 1,
+    S0 serves its two no-card gate misses: `roster_check_unavailable` and the
+    §3b withhold with `wait_reason`. At 0 both are held for binaries older than
+    1.22.0, which show either as "Search failed": a check that can't run serves
+    the cards unchecked with a loud log, and a past-bound stale Sleeper roster
+    serves its I-1-filtered cards. NaN or any other value reads as 0."""
+    return _deck_cfg("trade_gate_miss_mode", 0.0) == 1.0
+
+
+def _s0_seconds_knob(key: str, default: float) -> float:
+    """A finite, non-negative seconds knob; anything else reads as `default`."""
+    value = _deck_cfg(key, default)
+    return value if 0 <= value < float("inf") else float(default)
+
+
+def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[str, str] | None:
+    """S0 (contract v0.4 §2, §6): (rfp1, vsn1) from stored rows and the current
+    pool, read now. Three indexed reads plus the hashes; no network, no pool
+    build. None when the read failed, or when `trade_i1_mode` is 0 (no read).
+
+    Callers read this BEFORE taking _trade_jobs_lock and pass it to the
+    freshness and join checks, which only compare.
+    """
+    if _trade_i1_mode() == 0:
+        return None
+    from . import roster_snapshot
+    from .database import engine as _engine
+    try:
+        with _engine.connect() as conn:
+            return roster_snapshot.snapshot_ids(
+                conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
+                pick_source=_pick_read_source(), generation=pool_generation())
+    except Exception as err:
+        log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
+        return None
+
+
+def _trade_fingerprints_match(job: dict, current, *, running: bool = False) -> bool:
+    """A job built on rosters or values that have since moved is never reused.
+
+    `current` is the caller's _trade_current_fingerprints() for the job's
+    league and format. Compare only: this runs under _trade_jobs_lock. A None
+    stamp from a failed kickoff read never matches. A None `current` (a failed
+    read) can't prove staleness (contract §4.4, A2): it keeps a RUNNING job
+    (`running=True`) and never makes a completed job fresh. Hand-built jobs
+    without the stamp are not checked, like `request_signature`; with
+    `trade_i1_mode` 0 nothing is.
+    """
+    if "roster_fp" not in job or _trade_i1_mode() == 0:
+        return True
+    if current is None:
+        return running
+    return current == (job["roster_fp"], job.get("values_snapshot_id"))
 
 
 def _make_progress_cb(job_id: str, players_dict: dict, real_user_ids: set, outlook_value,
@@ -7686,6 +8680,17 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
         log.exception("value-core: deck build failed for job %s; falling back to the legacy engine: %s",
                       job_id, vc_err)
         return False
+    diag = result.core
+    # Set by models-eng's count-bounded core (a2006b28); a core without the key never hit it.
+    ceiling_hit = bool(getattr(diag, "safety_ceiling_hit", False))
+    if ceiling_hit:
+        # Ruling 15: a safety-ceiling run is a partial pool. It is never registered, logged
+        # or served, and the job fails with Calibration's code (blind_grading.run_value_core).
+        log.error("trade-job %s value_core: safety ceiling hit (partners=%d checked=%d core_ms=%d); "
+                  "refusing the partial pool", job_id, diag.partners, diag.pairs_checked,
+                  diag.elapsed_ms)
+        _finish_trade_job(job_id, error="value_core_failed")
+        return True
     for card in cards:
         trade_service._trade_cards[card.trade_id] = card
     served = _project_trade_dispositions(cards, g_user_id, league_id)
@@ -7714,7 +8719,6 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
         if imp_by_card.get(id(card)):
             row["impression_id"] = imp_by_card[id(card)]
         snapshot_rows.append(row)
-    diag = result.core
     total_ms = int((time.monotonic() - started) * 1000)
     with _trade_jobs_lock:
         j = _trade_jobs.get(job_id)
@@ -7725,7 +8729,8 @@ def _run_value_core_job(*, job_id, ctx, service, trade_service, g_user_id, g_lea
             j["value_core"] = {"fair": diag.fair, "served": len(served),
                                "core_ms": diag.elapsed_ms, "total_ms": total_ms,
                                "truncated_partners": diag.truncated_partners,
-                               "budget_exhausted": diag.budget_exhausted}
+                               "budget_exhausted": diag.budget_exhausted,
+                               "safety_ceiling_hit": ceiling_hit}
     log.info("trade-job %s value_core: partners=%d packages=%d checked=%d fair=%d served=%d "
              "truncated=%d budget_exhausted=%s core_ms=%d total_ms=%d", job_id, diag.partners,
              diag.packages_viewer, diag.pairs_checked, diag.fair, len(served),
@@ -8857,6 +9862,17 @@ def _run_trade_job(
             if j is not None and significance_diag:
                 j["significance"] = significance_diag
 
+        def _replace_significance(old, **updates):
+            # E1 F9: once attached, job["significance"] is copy-on-write. Job snapshots
+            # deep-copy it, the /generate reuse path outside _trade_jobs_lock, so the
+            # attached dict is never mutated: build the next state, swap it in, return it.
+            new = {**old, **updates}
+            with _trade_jobs_lock:
+                j = _trade_jobs.get(job_id)
+                if j is not None and j.get("significance") is old:
+                    j["significance"] = new
+            return new
+
         # One bounded post-policy permutation, before the FIRST evaluated
         # publication. Every later boundary retains this order or removes
         # authoritative dispositions; none re-sorts an old snapshot.
@@ -9016,7 +10032,8 @@ def _run_trade_job(
                     presentation["records"] = _records_in_order(
                         before_quality, presentation["records"], final_cards)
                 if significance_diag is not None:
-                    significance_diag["quality_filters"] = quality_counts
+                    significance_diag = _replace_significance(
+                        significance_diag, quality_filters=quality_counts)
                 log.info("trade-job %s: deck quality filters %s served=%d", job_id,
                          quality_counts, len(final_cards))
             except Exception as quality_err:
@@ -9038,14 +10055,15 @@ def _run_trade_job(
                 served_final, ghost_cards = final_cards, []
 
         if significance_diag:
-            significance_diag["final_served"] = len(served_final)
+            served_diag = {"final_served": len(served_final)}
             if bakeoff_run is not None:
                 served_counts = {}
                 for card in served_final:
                     credit = bakeoff_run.attribution_for(card)
                     arm = credit[0] if credit else "injected"
                     served_counts[arm] = served_counts.get(arm, 0) + 1
-                significance_diag["final_served_per_arm"] = served_counts
+                served_diag["final_served_per_arm"] = served_counts
+            significance_diag = _replace_significance(significance_diag, **served_diag)
 
         # Publish the filtered final list even with F1 disabled. Later F1
         # annotation adds impression IDs without altering package membership.
@@ -9281,16 +10299,15 @@ def _run_trade_job(
         # superseded run measures just as well. Never allowed to fail the job.
         if significance_diag and (owner_impression_error or _job_superseded(job_id)):
             retained = owner_published_cards if not _job_superseded(job_id) else []
-            significance_diag["final_served"] = len(retained)
-            significance_diag["final_served_per_arm"] = {}
+            counts = {}
             if bakeoff_run is not None:
                 for card in retained:
                     credit = bakeoff_run.attribution_for(card)
                     arm = credit[0] if credit else "injected"
-                    counts = significance_diag["final_served_per_arm"]
                     counts[arm] = counts.get(arm, 0) + 1
-            significance_diag["withheld"] = ("impression_unavailable" if owner_impression_error
-                                               else "superseded")
+            significance_diag = _replace_significance(
+                significance_diag, final_served=len(retained), final_served_per_arm=counts,
+                withheld=("impression_unavailable" if owner_impression_error else "superseded"))
         if bakeoff_run is not None:
             try:
                 run_row = bakeoff_run.run_row(
@@ -9382,7 +10399,12 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
     one. Jobs consuming this member's inputs retain the same scoped token.
     Selected jobs are fenced too even though they have no cache pointer.
     Durable offer IDs and the session's action store are never replaced here.
+
+    P1 (flag trade.first_page_store): the stored pages the change affects are
+    then marked stale, after the lock is released: the user's rows, or a
+    league-scoped change's whole league.
     """
+    marked_at = time.time()   # before the fence: decks admitted earlier never write
     dropped = 0
     with _trade_jobs_lock:
         token = _trade_input_epochs.pop((user_id, league_id), None)
@@ -9400,6 +10422,10 @@ def _invalidate_trade_jobs(*, user_id: str, league_id: str | None = None) -> int
             if _trade_jobs_by_key.get(key) == job.get("job_id"):
                 _trade_jobs_by_key.pop(key)
                 dropped += 1
+    if league_id is None:
+        _mark_trade_pages_stale(marked_at, user_id=user_id)
+    else:
+        _mark_trade_pages_stale(marked_at, league_id=league_id)
     return dropped
 
 
@@ -9410,11 +10436,54 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
     a new member epoch and read old stored rankings before this write commits;
     the final fence closes that gap, including failed or uncertain writes.
     Ordinary initialization and database writers do not use this helper.
+    P1: league-mates' decks read the published board, so the league's stored
+    pages are marked stale too.
     """
     try:
         return upsert_member_rankings(user_id=user_id, **kwargs)
     finally:
+        marked_at = time.time()
         _invalidate_trade_jobs(user_id=user_id)
+        if kwargs.get("league_id"):
+            _mark_trade_pages_stale(marked_at, league_id=kwargs["league_id"])
+
+
+def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
+    """S0's `on_roster_change` handler (contract v0.4 §4.3, A3). platforms-eng's
+    refresh calls it, through roster_snapshot.on_roster_change, after
+    committing rows whose rfp1 moved.
+
+    Revokes the league's jobs that weren't built on `new_fp`, so the next
+    request rebuilds from the new rows. Debounced by construction: a job
+    already stamped `new_fp` is kept, so a double call (two concurrent inits),
+    or one landing after a rebuild, changes nothing. An admission that stamped
+    the old rows before the commit misses at its next freshness or join check.
+
+    Never raises. Takes only `_trade_jobs_lock`, briefly, with no I/O under it.
+    No proactive rebuild in S0: a live session holds its own last init's
+    rosters, so a warm-up from it would rebuild the old rosters. P1's page
+    store doesn't either: its next serve sees the roster_fp move, serves the
+    I-1-filtered page and kicks the rebuild then. `trade_i1_mode` 0 makes it
+    a no-op.
+    """
+    try:
+        if _trade_i1_mode() == 0:
+            return
+        with _trade_jobs_lock:
+            for job in _trade_jobs.values():
+                key = job.get("key") or ()
+                if (len(key) == 3 and key[1] == league_id
+                        and job.get("roster_fp") != new_fp and not job.get("superseded")):
+                    _revoke_trade_job_locked(job)
+                    if _trade_jobs_by_key.get(key) == job.get("job_id"):
+                        _trade_jobs_by_key.pop(key)
+    except Exception:
+        log.exception("roster-change invalidation failed for league %s", league_id)
+
+
+from . import roster_refresh as _roster_refresh  # noqa: E402  (P41 floor kick)
+from . import roster_snapshot as _roster_snapshot  # noqa: E402
+_roster_snapshot.register_roster_change_handler(_invalidate_league_trade_jobs_on_roster_change)
 
 
 def _kickoff_trade_job(
@@ -9485,6 +10554,8 @@ def _kickoff_trade_job(
                             context=execution_context, fairness=fairness_threshold, prefs=prefs_preload):
                         return
                 _run_trade_job(*args, **kwargs)
+                # P1: a complete organic job stores its first pages (flag off ⇒ no-op).
+                _store_trade_page(job_id)
             else:
                 _finish_trade_job(job_id, error="account_deleted")
 
@@ -9523,6 +10594,11 @@ def _kickoff_trade_job(
     outlook_value = (((prefs_preload or {}).get("prefs") or {}).get("team_outlook")
                      or (prefs_preload or {}).get("seeded_outlook"))
     request_signature = _trade_request_signature(prefs_preload) if prefs_preload is not None else None
+    # S0: the stored rosters and values this job is built against, stamped
+    # before the worker starts. The same read, taken outside the lock, is what
+    # the dedupe checks below compare with. None on a failed read never matches.
+    fingerprints = _trade_current_fingerprints(league_id, scoring_format)
+    roster_fp, values_snapshot_id = fingerprints or (None, None)
     force_supersedes = force_fresh and _force_supersede_enabled()
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -9546,9 +10622,21 @@ def _kickoff_trade_job(
         "presentation_capture": presentation_capture,
         "input_epochs":       input_epochs,
         "request_signature":  request_signature,
+        "roster_fp":          roster_fp,
+        "values_snapshot_id": values_snapshot_id,
+        # The viewer's league identity (a co-owner's differs from user_id):
+        # the I-1 serve filter checks give-side ownership against it.
+        "league_user_id":     (execution_context.league_user_id
+                               if execution_context is not None else user_id),
     }
     if source:
         job["source"] = source
+    # P1: the organic scope this job's completion may store pages under. A
+    # forced organic job stores too: it is the newest deck for the scope.
+    if (_trade_page_store_enabled() and not is_pinned and not trade_intent
+            and not presentation_exempt and not source and league_id != "league_demo"):
+        job["page_scope"] = _trade_page_scope(fairness_threshold)
+        job["page_built_at"] = time.time()   # wall-clock admission: the row's built_at
     admission_owner_config = dict(_trade_service_mod._cfg)
     selected_owner = _bakeoff.owner_arm(admission_owner_config)
     if selected_owner == _bakeoff.ARM_OWNER_BILATERAL:
@@ -9570,14 +10658,15 @@ def _kickoff_trade_job(
         if existing is not None:
             if (not force_fresh and request_signature is not None
                     and _trade_job_is_fresh(existing, fairness_threshold, outlook_value,
-                        trade_intent, presentation_capture, request_signature)):
+                        trade_intent, presentation_capture, request_signature, fingerprints)):
                 return existing["job_id"]
             if _job_live(existing):
-                if preserve_running and _trade_running_policy_matches(existing, presentation_capture):
+                if preserve_running and _trade_running_policy_matches(
+                        existing, presentation_capture, fingerprints):
                     return existing["job_id"]
                 if (request_signature is not None and not force_supersedes
                         and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                            trade_intent, presentation_capture, request_signature)):
+                            trade_intent, presentation_capture, request_signature, fingerprints)):
                     return existing["job_id"]
                 _revoke_trade_job_locked(existing, "superseded")
         _trade_jobs[job_id] = job
@@ -14436,6 +15525,13 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                     "unavailable (keeping prior snapshot)", league_id,
                     "rosters" if not _prosters else "league meta")
         return None
+    if _tp is None:
+        # S0 / R10 — traded_picks couldn't be read (any failure, incl. the open
+        # 429 circuit). Replace-syncing without it would reset every traded pick
+        # to its original team (the G-015 clobber class): keep the prior snapshot.
+        log.warning("  owned-pick sync skipped for %s — Sleeper traded_picks "
+                    "unavailable (keeping prior snapshot)", league_id)
+        return None
     _rid_to_user = {
         str(r.get("roster_id")): str(r.get("owner_id") or "")
         for r in _prosters if isinstance(r, dict)
@@ -14794,6 +15890,10 @@ def generate_trades():
                                       and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", search_id)):
         return jsonify({"error": "invalid_search_id",
                         "message": "search_id must be 1-64 characters of A-Z a-z 0-9 _ -"}), 400
+    if paged and not _trade_paged_responses_on():
+        # Kill switch (trade_paged_responses = 0): validated, then served the
+        # legacy body exactly as a request without `page`.
+        paged, search_id = False, None
     league_id          = body.get("league_id") or g_league.league_id
     pinned_give        = body.get("pinned_give_players") or []
     # FB-47 — "I want to acquire X". Honored only when trade.finder_targeting
@@ -14891,6 +15991,41 @@ def generate_trades():
     presentation_exempt = bool(body.get("pinned_receive_players"))
     presentation_uncached = bool(presentation_capture[0] and presentation_exempt)
     reuse_snapshot = None
+    # P1 (flag trade.first_page_store): only a paged organic request reads the
+    # store. Its one snapshot read also feeds the job-cache checks below.
+    page_scope = (_trade_page_request_scope(body, league_id, fairness_threshold, force_fresh)
+                  if paged else None)
+    if page_scope is not None:
+        page_row, page_current = _trade_page_read(g_user_id, league_id, fmt, page_scope)
+        fingerprints = (page_current[0].fp, page_current[1]) if page_current else None
+    else:
+        # S0: read before the lock; the checks under it only compare.
+        fingerprints = None if _any_pinned else _trade_current_fingerprints(league_id, fmt)
+    if page_scope is not None and page_row is not None:
+        # The fresh, or matching running, job behind this key in this process.
+        with _trade_jobs_lock:
+            current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
+            backing = None
+            if current_job is not None and not any(token.revoked for token in input_epochs):
+                if _trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
+                                       presentation_capture, request_signature, fingerprints):
+                    backing = "complete"
+                elif _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
+                                            presentation_capture, request_signature, fingerprints):
+                    backing = "running"
+        served = _serve_trade_page(
+            page_row, page_current, user_id=g_user_id, league_id=league_id,
+            viewer_id=_trade_page_viewer(sess, league_id), request_signature=request_signature,
+            presentation_capture=presentation_capture, search_id=search_id,
+            backing=backing,
+            kick=lambda: _kickoff_trade_job(
+                sess_token=sess_token, user_id=g_user_id, league_id=league_id,
+                scoring_format=fmt, fairness_threshold=fairness_threshold,
+                opponents_total=opponents_total, prefs_preload=prefs_preload,
+                session_context=sess, presentation_capture=presentation_capture,
+                input_epochs=input_epochs, preserve_running=True))
+        if served is not None:
+            return jsonify(served)
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -14901,7 +16036,8 @@ def generate_trades():
             # Cache hit: complete + fresh + same params → return instantly.
             if request_signature is not None and not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
                                                       presentation_capture=presentation_capture,
-                                                      request_signature=request_signature):
+                                                      request_signature=request_signature,
+                                                      fingerprints=fingerprints):
                 reuse_snapshot = dict(existing)
             # Share in-flight work only for matching fairness and shape.
             # A warm-up must never answer a differently configured search.
@@ -14916,7 +16052,7 @@ def generate_trades():
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
             elif request_signature is not None and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                    trade_intent, presentation_capture, request_signature):
+                    trade_intent, presentation_capture, request_signature, fingerprints):
                 if not force_supersedes:
                     reuse_snapshot = dict(existing)
                 else:
@@ -15938,7 +17074,11 @@ def trade_job_status():
     Snapshot plus one batched disposition read. Used to poll an in-flight
     /api/trades/generate job. 404 if the job has been evicted.
     E2 (opt-in): `cursor=K` returns only the raw cards after index K, at most
-    `trade_page_size` (see _trade_job_page_view)."""
+    `trade_page_size` (see _trade_job_page_view).
+    P1 (flag trade.first_page_store): a cursor into a page-served deck (the
+    job id of a stored page) inside its stored pages is served from them;
+    past them, from the live job if one exists, else no cards (P2 completes
+    this)."""
     sess = _require_session()
     sess["last_active"] = time.time()
     job_id = request.args.get("job_id") or ""
@@ -15946,8 +17086,20 @@ def trade_job_status():
     if cursor is not None and not re.fullmatch(r"[0-9]{1,9}", cursor):
         return jsonify({"error": "invalid_cursor",
                         "message": "cursor must be a non-negative integer"}), 400
+    page_row = None
+    if (cursor is not None and _trade_paged_responses_on() and _trade_page_store_enabled()
+            and _trade_i1_mode()):      # at trade_i1_mode 0 the store isn't read: the job path
+        from . import database as _db
+        try:
+            page_row = _db.load_trade_page_for_job(sess["user_id"], job_id)
+        except Exception as err:
+            log.warning("trade-page read failed for job %s: %s", job_id, err)
+        if page_row is not None and int(cursor) < page_row["card_count"]:
+            return jsonify(_trade_page_status_view(page_row, int(cursor), sess))
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
+        if not job and page_row is not None:
+            return jsonify(_trade_page_past_stored(page_row, int(cursor)))
         if not job:
             return jsonify({"error": "job not found"}), 404
         # Defense: don't leak another user's job. The lookup key includes
@@ -15957,7 +17109,8 @@ def trade_job_status():
         # Published card lists are replaced, never mutated in place. Capture
         # their reference under the lock and do the expensive copy outside it.
         snapshot = dict(job)
-    return _serve_trade_job(sess["user_id"], snapshot, cursor is not None,
+    return _serve_trade_job(sess["user_id"], snapshot,
+                            cursor is not None and _trade_paged_responses_on(),
                             int(cursor) if cursor is not None else 0)
 
 
@@ -17282,20 +18435,31 @@ def _fetch_league_rosters(league_id: str):
     return rosters if isinstance(rosters, list) else None
 
 
-def _fetch_sleeper_traded_picks(league_id: str) -> list[dict]:
-    """Public traded-picks list for a Sleeper league (fail-soft → []).
+def _fetch_sleeper_traded_picks(league_id: str) -> list[dict] | None:
+    """Public traded-picks list for a Sleeper league, or None when it can't be read.
 
     Endpoint: https://api.sleeper.app/v1/league/<id>/traded_picks — unauth,
     same trust level as _fetch_league_rosters. Each entry is roster_id-keyed:
     {round, season(str), roster_id(orig), owner_id(current), previous_owner_id}.
+
+    S0 / R10 — None on ANY failure (HTTP error, timeout, unparseable or
+    non-list body, the open 429 circuit, a non-Sleeper id): "ownership
+    unknown", distinct from a successful `[]` ("no pick has been traded"). It
+    used to fail soft to `[]`, which the owned-pick REPLACE-sync then wrote as
+    "every pick is back with its original team" and a pick-bearing send
+    encoded as if nothing had moved. Every caller treats None as an error:
+    `_sync_sleeper_owned_picks` skips (keeps the prior snapshot), the propose
+    core refuses before any provider call, and validate reports nothing
+    checked.
     """
     if not league_id or not str(league_id).isdigit():
-        return []
+        return None
     try:
         tp = _sleeper_get(f"https://api.sleeper.app/v1/league/{league_id}/traded_picks")
-    except Exception:
-        return []
-    return tp if isinstance(tp, list) else []
+    except Exception as e:
+        log.warning("  traded_picks unavailable for %s: %s", league_id, type(e).__name__)
+        return None
+    return tp if isinstance(tp, list) else None
 
 
 def _fetch_sleeper_drafts(league_id: str) -> list[dict]:
@@ -19356,6 +20520,12 @@ def _refresh_league_draft_status(league_id: str, force: bool = False):
         if not force and _draft_status_is_fresh(ctx):
             return None
         verdict = _detect_league_draft_status(league_id, ctx)
+        if ((ctx.get("platform") or "sleeper").lower() == "sleeper"
+                and _sleeper_http.is_open()):
+            # S0 — the Sleeper signals above were skipped reads, not evidence.
+            # Keep the cached verdict; the TTL lets the next pass retry.
+            log.info("  draft status for %s not written — Sleeper circuit open", league_id)
+            return None
         set_league_draft_status(league_id, verdict.status, verdict.confidence)
         _invalidate_draft_context_cache(league_id)
         log.info("  ✅ draft status for %s: %s (%s via %s) %s", league_id,
@@ -19718,6 +20888,14 @@ def _sleeper_propose_core(sess, *, league_id, their_user_id, give_ids, receive_i
         # never follow the `picks.assign_tradeable` pricing flag.
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
+        if traded is None:
+            # S0 / R10 — pick ownership is unknown, so the send can't be checked:
+            # refuse before any provider call, never send as if no pick had moved.
+            # The route's existing 502 provider-error shape (`detail` == `message`).
+            _msg = ("Sleeper's draft-pick ownership couldn’t be confirmed right now, so "
+                    "nothing was sent. Try again in a moment.")
+            return {"error": "sleeper_write_failed", "kind": "network",
+                    "detail": _msg, "message": _msg}, 502
         # #428 — third ground truth: Sleeper's tradable window. A spent
         # current-season pick keeps its grid row (one flaked drafts read
         # re-populates it) AND its traded_picks holder, so only the live
@@ -22328,11 +23506,16 @@ def session_init():
     incoming_token = request.headers.get("X-Session-Token", "")
     existing_sess = _get_session(incoming_token)
     from .session_input import resolve_session_input, SessionInputError
+    _s0_raw: dict = {}   # S0 — this init's Sleeper rosters + meta, handed to the daemon
     try:
-        authoritative = resolve_session_input(existing_sess, body, _sleeper_get)
+        authoritative = resolve_session_input(existing_sess, body, _sleeper_get, raw=_s0_raw)
     except SessionInputError as exc:
         return jsonify({"error": exc.error}), exc.status
     body = {**body, **authoritative}
+    if _s0_raw.get("meta"):
+        # S0 — seed the 15-min league-meta cache from the read just made, so
+        # the trade paths' lineup lookups (_sleeper_lineup_slots) don't refetch.
+        _FA_LEAGUE_META_CACHE[authoritative["league_id"]] = (time.time(), _s0_raw["meta"])
 
     user_id           = body.get("user_id",          DEMO_USER_ID)
     league_id         = body.get("league_id",        "sleeper_league")
@@ -22738,7 +23921,7 @@ def session_init():
             nonlocal _meta_fetched, _meta_payload
             if not _meta_fetched:
                 _meta_fetched = True
-                _meta_payload = _fetch_sleeper_league_meta(league_id)
+                _meta_payload = _s0_raw.get("meta") or _fetch_sleeper_league_meta(league_id)
             return _meta_payload
 
         try:
@@ -22930,6 +24113,7 @@ def session_init():
                 log.warning("  DB upsert failed (continuing): %s", db_err)
 
             # ── Persist full league membership roster ────────────────
+            _s0_members_ok, _s0_picks_ok = False, True   # S0 refresh outcome
             try:
                 all_members_for_db = [
                     {
@@ -22963,8 +24147,16 @@ def session_init():
                     for opp in opponent_rosters
                     if opp.get("user_id")
                 ]
-                upsert_league_members(league_id=league_id, members=all_members_for_db)
-                log.info("  ✅ league_members upserted (%d members)", len(all_members_for_db))
+                if _s0_raw and not _platform_linked:
+                    # S0 — the request thread's Sleeper read is the complete,
+                    # authoritative membership: replace, so departed managers'
+                    # rows go (G-075). Refuses an empty snapshot (G-015).
+                    _s0_members_ok = replace_league_members_snapshot(
+                        league_id, all_members_for_db)
+                else:
+                    upsert_league_members(league_id=league_id, members=all_members_for_db)
+                    _s0_members_ok = True
+                log.info("  ✅ league_members written (%d members)", len(all_members_for_db))
                 # Roster changed → drop cached _league_members projections
                 # so the next /api/league/members call rebuilds the
                 # join-status list. (Picked up from PR #63 #B4 cache.)
@@ -22992,7 +24184,8 @@ def session_init():
                              or is_enabled("market.roster_history")
                              or is_enabled("picks.owned_sync"))):
                     from .trade_block_service import _fetch_rosters as _tb_fetch
-                    _rh_roster_rows = _tb_fetch(league_id)
+                    # S0 — reuse the request thread's read (D-178: once per init).
+                    _rh_roster_rows = _s0_raw.get("rosters") or _tb_fetch(league_id)
             except Exception as _rr_err:
                 log.warning("  shared rosters fetch failed (continuing): %s", _rr_err)
 
@@ -23058,7 +24251,10 @@ def session_init():
                     if _n_picks is not None:
                         log.info("  ✅ owned draft picks synced (%d picks)",
                                  len(_n_picks))
+                    else:
+                        _s0_picks_ok = False
             except Exception as pk_err:
+                _s0_picks_ok = False
                 log.warning("  owned-pick sync failed (continuing): %s", pk_err)
 
             # ── #207: refresh the league's rookie-draft status ────────
@@ -23069,6 +24265,14 @@ def session_init():
             # self-contained failure handling inside the helper, so it can
             # never affect the syncs above.
             _refresh_league_draft_status(league_id)
+
+            # ── S0: record this init's Sleeper roster refresh ─────────
+            # After members, picks and draft state are committed. Never raises.
+            if _s0_raw and not _platform_linked:
+                from . import roster_refresh as _roster_refresh
+                _roster_refresh.record_outcome(
+                    league_id, _s0_raw.get("fetch_started_at"),
+                    members_ok=_s0_members_ok, picks_ok=_s0_picks_ok)
 
             # ── Market-data readiness: capture executed league trades ──
             # Raw Sleeper trade transactions → sleeper_trades (PRD #43
@@ -23175,15 +24379,18 @@ def session_init():
         pregen_signature = _trade_request_signature(pregen_prefs)
         pregen_key = _trade_job_key(user_id, league_id, active_format)
         presentation_capture = _capture_trade_presentation()
+        # S0: read before the lock; the checks under it only compare.
+        pregen_fingerprints = _trade_current_fingerprints(league_id, active_format)
         with _trade_jobs_lock:
             existing_id = _trade_jobs_by_key.get(pregen_key)
             existing    = _trade_jobs.get(existing_id) if existing_id else None
             # Warm-up preserves an active request's fairness/intent, but
             # obsolete policy/model work must be replaced, not left running.
-            should_kickoff = not (existing and (_trade_running_policy_matches(existing, presentation_capture)
+            should_kickoff = not (existing and (_trade_running_policy_matches(
+                    existing, presentation_capture, pregen_fingerprints)
                 or _trade_job_is_fresh(existing, pregen_fairness, pregen_outlook,
                     presentation_capture=presentation_capture,
-                    request_signature=pregen_signature)))
+                    request_signature=pregen_signature, fingerprints=pregen_fingerprints)))
         if should_kickoff:
             opp_total = sum(1 for m in members if m.user_id != user_id and m.elo_ratings)
             _kickoff_trade_job(
@@ -24009,12 +25216,15 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
         prior_rows = []
 
     cards: list | None = None
+    # S0: read before the lock; the checks under it only compare.
+    fingerprints = _trade_current_fingerprints(league_id, fmt)
     with _trade_jobs_lock:
         jid = _trade_jobs_by_key.get(key)
         job = _trade_jobs.get(jid) if jid else None
         if (job and not any(epoch.revoked for epoch in input_epochs)
                 and _trade_job_is_fresh(job, fairness, outlook,
-                    presentation_capture=presentation_capture, request_signature=request_signature)):
+                    presentation_capture=presentation_capture, request_signature=request_signature,
+                    fingerprints=fingerprints)):
             cards = list(job.get("cards") or [])   # cached deck still fresh
 
     if cards is None:
@@ -24032,6 +25242,8 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
             input_epochs = input_epochs,
             preserve_running = True,
         )
+        # Re-read: rosters or values may have moved while the job ran.
+        fingerprints = _trade_current_fingerprints(league_id, fmt)
         with _trade_jobs_lock:
             job = _trade_jobs.get(job_id) or {}
             if job.get("status") != "complete":
@@ -24039,7 +25251,8 @@ def _replenish_deck_for(user_id: str, league_id: str) -> tuple[int, int] | None:
                             user_id, league_id, job.get("error"))
                 return None
             if not _trade_job_is_fresh(job, fairness, outlook,
-                    presentation_capture=presentation_capture, request_signature=request_signature):
+                    presentation_capture=presentation_capture, request_signature=request_signature,
+                    fingerprints=fingerprints):
                 return None
             cards = list(job.get("cards") or [])
 
@@ -27397,7 +28610,8 @@ def _refresh_sleeper_members(league_id: str) -> int:
              for u in users if isinstance(u, dict)}
     members = [{"user_id": str(r["owner_id"]), "username": names.get(str(r["owner_id"]), ""),
                 "display_name": names.get(str(r["owner_id"]), ""),
-                "player_ids": [str(x) for x in (r.get("players") or [])]}
+                "player_ids": [str(x) for x in (r.get("players") or [])
+                               if x not in (None, "")]}   # G-004
                for r in rosters if isinstance(r, dict) and r.get("owner_id")]
     if not members:
         return 0
@@ -32257,6 +33471,11 @@ def trades_validate():
         # Literal platform read, same reason as the propose route (#328 precedent).
         grid_rows = load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)
         traded = _fetch_sleeper_traded_picks(league_id)
+        if traded is None:
+            # S0 / R10 — pick ownership is unknown: never judge the picks against
+            # an empty overlay. The existing unreachable outcome (checked:false,
+            # nothing validated); the propose route hard-refuses the send.
+            return jsonify({"ok": True, "checked": False, "warnings": []})
         # #428 — the tradable window; `meta` is already in hand here, so this
         # is one extra `/drafts` read, only on a pick-bearing validate.
         window = _sleeper_pick_window_for_send(league_id, meta, traded)

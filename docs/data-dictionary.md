@@ -126,6 +126,7 @@ counterparty board disclosure or client analytics event is added.
 - [`users`](#users)
 - [`leagues`](#leagues)
 - [`league_members`](#league_members)
+- [`league_roster_state`](#league_roster_state)
 - [`accounts`](#accounts)
 - [`linked_identities`](#linked_identities)
 - [`sessions`](#sessions)
@@ -164,6 +165,7 @@ counterparty board disclosure or client analytics event is added.
 - [`deck_outcomes`](#deck_outcomes)
 - [`trade_pass_reasons`](#trade_pass_reasons)
 - [`deck_candidate_sets`](#deck_candidate_sets)
+- [`trade_page_store`](#trade_page_store)
 - [`suggestion_trade_links`](#suggestion_trade_links)
 - [`bakeoff_runs`](#bakeoff_runs)
 - [`deck_suppressions`](#deck_suppressions)
@@ -352,7 +354,7 @@ The guard is not a distributed lock — two genuinely simultaneous requests on s
 
 ## `league_members`
 
-Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, keyed by roster `owner_id`) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
+Members of every league `session_init` has seen. Uniqueness enforced via `(league_id, user_id)`. **Sleeper leagues are replace-synced (S0, 2026-10-20):** each session init writes the authoritative snapshot from its Sleeper read with `replace_league_members_snapshot` (delete-then-insert in one transaction; an empty snapshot is refused, G-015), so rows of managers who left are removed (G-075). Rows are keyed by the roster's canonical `owner_id` (ADR-012): one row per roster, co-owners included. Sleeper rows are also refreshed server-side by `server._refresh_sleeper_members` (Sleeper `/rosters` + `/users`, same row shape, still an upsert) when the admin targeted pre-generation runs with `refresh_rosters` (2026-10-09); otherwise a league's rows only change when a member opens it in the app.
 
 For ESPN-imported leagues (`espn.link`), rows are written by `replace_espn_league_members` (delete-then-insert snapshot): the linking user's team carries their real FTF `user_id`; every other team gets a synthetic `espn:{SWID}` (fallback `espn:{league_id}.t{team_id}`) id. Synthetic ids must never reach push/notification paths (same class as unlinked Sleeper members). `roster_data` always holds **Sleeper** player ids — ESPN ids are crosswalked at import (`backend/espn_service.py`).
 
@@ -364,8 +366,30 @@ MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same w
 | `league_id` | str | |
 | `user_id` | str | Real FTF id, or a synthetic id for imported-league counterparties (`espn:` / `mfl:` / `flea:`) |
 | `username`, `display_name` | str | |
-| `roster_data` | JSON text | |
+| `roster_data` | JSON text | Sleeper player ids (strings). For Sleeper this is the roster's `players` array, which includes reserve/IR and taxi players. Null/empty slots are dropped at the writer (G-004, S0) |
 | `updated_at` | str | |
+
+---
+
+## `league_roster_state`
+
+S0 (launch §3a, `docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md`). One row per league recording the
+last **Sleeper roster refresh**: the read `/api/session/init` makes at app open and foreground. Written by
+`backend/roster_refresh.py` through `database.mark_league_roster_fresh` / `mark_league_roster_failed`; read
+with `get_league_roster_state`. Every write is a single-row dialect-aware upsert. A failed read **never** touches
+`league_members` or `draft_picks`: the last good rows stay and only this row changes. ESPN/MFL/Fleaflicker
+leagues get no row from session init (they're not refreshed from the platform there). League-keyed with no
+`user_id`, so it is outside account deletion/export. Created by `metadata.create_all` (new table; no migration
+row).
+
+| Column | Type | Notes |
+|---|---|---|
+| `league_id` | str PK | Platform-native league id (same semantics as `leagues.sleeper_league_id`) |
+| `roster_fp` | str, nullable | `rfp1:…` roster fingerprint (trades-eng's `roster_snapshot`), stamped after a committed refresh. NULL until that stamp ships (S0 PR-B). Never changed by a failure |
+| `refreshed_at` | str, nullable | ISO-8601 UTC (fixed microsecond precision): fetch **start** time of the last refresh whose members **and** owned picks both committed. Only moves forward. NULL = never fully refreshed |
+| `status` | str | `fresh` (the last attempt committed) · `stale` (the last attempt failed; any stored rows are the last good ones). **Only these two values are stored** (fingerprint contract v0.3 §3). "Missing" (no cards) is **derived** by trades-eng's `roster_snapshot` from absent `league_members` rows, never stored here, and no state row (or no table) reads as `unknown`. This describes the last attempt, not an age bound; consumers compute age from `refreshed_at` |
+| `last_error_code` | str, nullable | NULL after a success. Otherwise one of `rate_limited` (429 or the circuit is open) · `blocked` (403, incl. Cloudflare 1010) · `http_4xx` · `http_5xx` · `timeout` · `network` · `invalid_payload` · `picks_unavailable` (owned-pick sync skipped on a throttled read) · `write_failed` |
+| `updated_at` | str | ISO-8601 UTC of this write |
 
 ---
 
@@ -861,6 +885,36 @@ Candidates the **treatment policy rejected**, plus liked mirrors that were never
 | `created_at` | str | ISO UTC |
 
 Indexes: `ix_deck_candidate_sets_user_league` on `(user_id, league_id)`.
+
+---
+
+## `trade_page_store`
+
+**P1 first-page store** (flag `trade.first_page_store`, default **false**; [scope](plans/trade-time-to-suggestion/scope-eng-200ms.md) §2, §6.2, §7 on `plan/trades-200ms-eng-scope`). One row per `(user_id, league_id, scoring_format, request_scope)`: the first `trade_pages_stored` × `trade_page_size` cards (90 at the defaults) of the latest **complete organic** trade job, in final served order, so `POST /api/trades/generate` with `page: 1` can serve page 1 in one round trip from a DB read, also after a restart. Written by `server._store_trade_page` once `_run_trade_job` returns (worker thread, inside the job's user-data lease) and read by `server._serve_trade_page` / `_trade_page_status_view`, **only while the store is on** (the flag, AND `trade.packed_evidence` (#370's), AND the `model_config` kill knob `first_page_store_enabled`): off ⇒ the table is never queried. Every page serve goes through S0's serve rules (`server._roster_serve_rules`), like the job views. Never written from an errored, timed-out, revoked, superseded, safety-ceiling-hit, pinned, opponent-scoped, intent, replenishment, prepared-inventory or demo-league job, nor from one with a missing fingerprint stamp. Upserted (`database.save_trade_page`, `ON CONFLICT … DO UPDATE … WHERE built_at <= excluded.built_at`, both dialects), so a row is replaced only by a build at least as new, and concurrent writers leave one row. Private user data: deleted and exported by `user_id` via `accounts._ADDITIONAL_PRIVATE_TABLES`; the export carries the decoded pages as JSON. Evicted by `server._evict_trade_page_store` (the cleanup loop, store on only): rows unused for `trade_page_store_evict_days`, then least recently used rows while `SUM(stored_bytes)` exceeds `trade_page_store_max_bytes`. Size report: `scripts/report_trade_page_store_size.py` (read only).
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | int PK | autoincrement |
+| `user_id` | str, not null | the viewer's account id (deletion/export key) |
+| `league_id` | str, not null | |
+| `scoring_format` | str, not null | `1qb_ppr` \| `sf_tep` |
+| `request_scope` | str, not null | `organic:f=<fairness, 2 decimals>`, e.g. `organic:f=0.50`. Only the organic default search is stored |
+| `roster_fp` | str, not null | `rfp1:` roster fingerprint stamped at the job's kickoff (S0, `roster_snapshot`) |
+| `values_snapshot_id` | str, not null | `vsn1:` values snapshot id stamped at kickoff (S0) |
+| `engine_version` | str, not null | `<engine>+policy:<12 hex>+code:<12 hex>+pipeline:<N>`: `v1`/`v2`/`v3` (as `trades_generated` names it) or `value_core:<value_core.types.ENGINE_VERSION>`; sha256[:12] of the job's safety-policy signature and presentation mode (what `_trade_job_is_fresh` also requires); `server._trade_engine_code_hash()`, sha256[:12] over the bytes of the modules that decide a deck's cards or their order (`server._ENGINE_CODE_MODULES`: `trade_service`, `trade_optimizer`, `trade_gen_*`, `value_core/*`, `power_rankings`, `ranking_service`, `pick_values`, `pick_slots`, `tier_config.json` (ruling 25), `trade_policy`, `trade_significance`, `trade_mutual_benefit`, `trade_roster`, `trade_roster_adapter`, `trade_outlook_utility`, `negmem`, `trade_breaker`, `deck_quality`, `bakeoff_runner`, `bakeoff_profiles`, `taste_service`, `value_model`, `suggestion_telemetry`, `trade_bilateral_presentment`, `small_trade_presentment`, `trade_narrative`; computed once per process; `server.py` is deliberately excluded); and `server.DECK_PIPELINE_VERSION` (MOD-M1's re-run trigger). `server.py`'s own deck layers (`_run_trade_job`, `_run_value_core_job` and the layer helpers in `server.DECK_PIPELINE_FUNCTIONS`) are not hashed, so a change to them needs a manual `DECK_PIPELINE_VERSION` bump; `test_deck_pipeline_digest` pins their digest, with the constants they read (`server.DECK_PIPELINE_CONSTANTS`), as `server.DECK_PIPELINE_DIGEST`, and its closure test makes every helper they reference classified (listed, or in `DECK_PIPELINE_IGNORED`), so CI enforces it. A different value at serve time means today's path, so an engine code change or a pipeline bump never serves an older page across a deploy |
+| `config_signature` | str, not null | the job's `request_signature` (preferences + `model_config` + flags) |
+| `experiment_digest` | str, not null | sha256[:16] over the user's assignment in each deck-affecting experiment (`server._DECK_EXPERIMENT_LAYERS`, today `trade.aggression`): its layer, version, variant and `model_overlay`, as `experiments.variant_overlay` reports it, or `"fallback"` when the user isn't enrolled (trade_service's deterministic MD5 bucket). Stamped when the page is stored; at serve a different digest falls through to the job path, logged `blocked (experiment variant moved)`. Memoized in process per user on the experiments cache generation (refreshed at most every 60 s) and the `experiments.engine` flag, capped at 10,000 users, so a serve inside a generation does no DB work |
+| `deck_job_id` | str, not null | the building job; served as `job_id`, and the key `/api/trades/status?cursor=` pages by |
+| `built_at` | str, not null | ISO UTC, microseconds: the job's admission (when its inputs were read). The supersede guard compares it. A stale mark advances it to the input change's time, so no deck admitted before the change can overwrite the mark |
+| `expires_at` | str, not null | ISO UTC: the earliest `expires_at` among the stored cards. Past it, the page is not served |
+| `last_served_at` | str, nullable | ISO UTC of the last `/generate` page serve; kept across rebuilds. Eviction reads `COALESCE(last_served_at, built_at)` |
+| `card_count` | int, not null | cards stored (≤ 90 at the defaults); served as `total_ready` |
+| `pages_blob` | binary (BLOB / BYTEA), not null | zlib-compressed JSON `{"v": 1, "opponents_total", "cards": [...]}`; `cards` are the job's raw public card dicts, before the serve-time disposition projection and I-1 filter (`database.CompressedJSON`) |
+| `evidence_blob` | binary, nullable | reserved for the packed-evidence piece; NULL in P1 |
+| `stored_bytes` | int, not null | `len(pages_blob) + len(evidence_blob or b"")` |
+| `state` | str, not null | `ready` (written by a complete job) or `stale`: every `server._invalidate_trade_jobs` call (rankings, preferences, dispositions) marks the user's rows, or a league-scoped change's whole league, and a board publish (`_publish_member_rankings_for_trade_refresh`) marks the league; one bounded UPDATE (`database.mark_trade_pages_stale`), run with `_trade_jobs_lock` released. A roster move needs no mark: the serve compares `roster_fp`. A stale row serves its checked cards and kicks a rebuild (`freshness_state: "updating"` while that rebuild runs, never for ESPN/MFL/Fleaflicker); the rebuild writes `ready` |
+
+Constraints and indexes: unique `uq_trade_page_store_scope` on `(user_id, league_id, scoring_format, request_scope)`; `ix_trade_page_store_last_served` on `last_served_at`; `ix_trade_page_store_league` on `league_id` (league-scoped stale marks). Measured (2026-10-20, a 2,354-card deck, 90 cards stored): about 109–122 KB raw JSON, **2.9 KiB** compressed for the replicated golden card and **29.2 KiB** for fully random card contents, against the §7 budget of about 0.2 MB per pair.
 
 ---
 

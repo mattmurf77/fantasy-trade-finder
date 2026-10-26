@@ -296,8 +296,10 @@ def fetch_league_roster_map(
     for k, v in _HEADERS.items():
         request.add_header(k, v)
     opener = _opener or urllib.request.urlopen
-    with opener(request, timeout=timeout) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
+    from . import sleeper_http as _sleeper_http   # S0 — the shared 429 circuit
+    with _sleeper_http.guard(league_id):
+        with opener(request, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
     out: dict[str, str] = {}
     for r in payload if isinstance(payload, list) else []:
         rid, owner = r.get("roster_id"), r.get("owner_id")
