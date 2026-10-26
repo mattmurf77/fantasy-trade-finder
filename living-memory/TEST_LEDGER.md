@@ -29,10 +29,15 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
 - **No leak (release-lead P2): pin (c) now covers all three touched files** (`platformEntry.ts`, `PlatformLinkSheet.tsx`, `EspnLinkSheet.tsx`).
   - It flags any `track(`, `console.*(`, `AsyncStorage.*(`, `SecureStore.*(`, `captureException(` or `Sentry.*(` call with an argument mentioning `password`, `mflPass`, `pass`, `entryMflPassRef`, `espnS2`, `espn_s2`, `swid` or `body`, or forwarding the mint `args` wholesale.
   - **No allow-list is needed.** The only sink calls in those files are the three `signin_*` `track()` calls in `platformEntry.ts` (`:153,178,181`), which carry `method` / `error_code` only. POSTs are never retried (`client.ts:542-544`).
-- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **40 assertions**:
+  - **QA delta (after `fec5cb73`): the guard is textual, so it is hardened against getting around it.**
+    - **Sinks may only be called directly.** Any other use of `track`, `console`, `AsyncStorage`, `SecureStore`, `Sentry` or `captureException` fails: an alias (`= console.log`, `= console[…]`, `= track`, `= AsyncStorage`), destructuring (`const { log } = console`), `.bind`, `{ track }`, or a hand-off such as `setTimeout(console.log, …)`. Import specifiers, declaration names, property names and type positions are not uses.
+    - **No sink through the global object:** `globalThis` / `window` / `global` / `self` `.console` (or `['console']`, or another sink) fails.
+    - **New sensitive keywords:** `session_token`, `minted` and `res`.
+    - **Zero false positives:** the three `signin_*` `track()` calls and the `track` import stay green. One assertion per rule per file.
+- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **46 assertions**:
   - (a) the `mfl` mint body spreads `{username, password}` only behind `args.username && args.password`, with no bare property, and the ESPN body has neither;
   - (b) `mflEntryPickLeague` passes `username` from `mflUser` and `password` from `entryMflPassRef`, and `pickTeam` passes neither;
-  - (c) the three-file leak guard above, one assertion per file;
+  - (c) the three-file leak guard above: sink arguments, direct-call-only use, and no global-object route, one assertion each per file (9);
   - (d) both sheets type `onEntrySession` with the optional `account_only` / `username`, and every call forwards `minted.account_only` / `minted.username`;
   - (e) the entry sign-in path:
     - order: mint → `mflAuthLink` → `mflAuthImport([lg.league_id])`, each called once, and never `linkPlatformLeague`;
@@ -77,6 +82,18 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
   - **P2:** `setAuthResult(res)` moved above the guard → red.
   - **P3:** `failed?.message` replaced by fixed copy → red.
   - C2's first run also turned 3 `check-landing-platform-options` pins red. The cause was that check's 2200-char `mflEntryPickLeague` window (the body is now 2188 chars), not the leak. The window is widened to 3200 with a comment, and C2 re-run shows only the leak pin red.
+- **Sabotage, QA delta on the leak guard: 11/11 red, then green on restore, byte-identical.**
+  - **A1:** `const l = console.log; l(pass)` in the sheet → red.
+  - **A2:** `const w = console['warn']` in `EspnLinkSheet` → red.
+  - **A3:** `const t = track` in `platformEntry` → red.
+  - **A4:** `const store = AsyncStorage` in the sheet → red.
+  - **A5:** `const { log } = console` in `platformEntry` → red.
+  - **G1:** `globalThis.console.log(pass)` in the sheet → red.
+  - **G2:** `window.console.error(teamId)` in `EspnLinkSheet` → red.
+  - **K1:** `console.log(res.session_token)` in `platformEntry` → red.
+  - **K2:** `console.info(minted)` in the sheet → red.
+  - **K3:** `track('signin_succeeded', { …, r: res.user_id })` → red, plus `check-landing-platform-options`' signin-funnel pin.
+  - **H1 (extra):** `setTimeout(console.log, 0, pass)` → red.
 - **Re-pinned in `check-landing-platform-options`:**
   - V2's ESPN `pickTeam` window went from 900 to 1200 chars, because the forwarded fields lengthen the span (874 → 956).
   - V2.1's three `mflEntryPickLeague` pins encoded the old contract. They said the import goes through `linkPlatformLeague`, that `mflAuthImport` is never used, and that the re-store is best-effort with the password dropped first. Per the follow-up, they now pin `mflAuthImport([lg.league_id], yr)` with no `linkPlatformLeague`, no default-ALL import, and a required `mflAuthLink` that drops the password only after it succeeds.

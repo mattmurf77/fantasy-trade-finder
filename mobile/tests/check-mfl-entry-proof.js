@@ -20,9 +20,12 @@
 //   (c) platformEntry.ts, PlatformLinkSheet.tsx, EspnLinkSheet.tsx: no
 //       track( / console.*( / AsyncStorage.*( / SecureStore.*( /
 //       captureException( / Sentry.*( call has an argument mentioning
-//       password, mflPass, pass, entryMflPassRef, espnS2, espn_s2, swid or
-//       body, or forwards the mint `args` wholesale (release-lead P2,
-//       2026-10-26).
+//       password, mflPass, pass, entryMflPassRef, espnS2, espn_s2, swid,
+//       body, session_token, minted or res, or forwards the mint `args`
+//       wholesale (release-lead P2, 2026-10-26). The guard is textual, so
+//       sinks may only be CALLED directly: no alias, destructure, bind or
+//       hand-off of a sink, and no globalThis / window / global / self route
+//       to one (QA delta, 2026-10-26).
 //   (d) EspnLinkSheet.tsx + PlatformLinkSheet.tsx: every onEntrySession(...)
 //       call forwards `account_only` and `username` from the mint response,
 //       and both prop types declare them as optional additions.
@@ -225,6 +228,8 @@ if (mint) {
 // signin_* track() calls, which carry `method` / `error_code` only.
 
 const SINK_CALLEE = /^(track|captureException|(console|AsyncStorage|SecureStore|Sentry)\.\w+)$/;
+const SINK_ROOTS = new Set(['track', 'captureException', 'console', 'AsyncStorage', 'SecureStore', 'Sentry']);
+const GLOBAL_OBJECTS = new Set(['globalThis', 'window', 'global', 'self']);
 const LEAK_TERMS = [
   /password/i,
   /mflPass/,
@@ -236,7 +241,74 @@ const LEAK_TERMS = [
   /\bbody\b/,
   /^args$/, // the whole mint args object (carries the password)
   /\.\.\.\s*args\b/,
+  // The mint response carries the session token (2026-10-26 QA delta).
+  /session_token/i,
+  /\bminted\b/,
+  /\bres\b/,
 ];
+
+// A sink root may only be CALLED directly: `track(…)` or `console.log(…)` /
+// `console?.log(…)` / `console['log'](…)`. Any other expression use is an
+// alias or a hand-off that the argument scan can't follow, e.g.
+// `const l = console.log`, `const { log } = console`, `= console[…]`,
+// `= track`, `= AsyncStorage`, `{ track }`, `.bind(console)`,
+// `setTimeout(console.log, …)`. Declaration names, import specifiers,
+// property names (`x.track`, `{ track: 1 }`) and type positions are not uses.
+function isDirectSinkCall(id) {
+  const p = id.parent;
+  if (ts.isCallExpression(p) && p.expression === id) return true;
+  if (
+    (ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) &&
+    p.expression === id &&
+    ts.isCallExpression(p.parent) &&
+    p.parent.expression === p
+  ) {
+    return true;
+  }
+  return false;
+}
+function isNonUsePosition(id) {
+  const p = id.parent;
+  if (ts.isShorthandPropertyAssignment(p)) return false; // `{ track }` passes the value
+  if (p && p.name === id) return true; // declarations, x.track, { track: … }, imports
+  if (p && ts.isBindingElement(p) && p.propertyName === id) return true;
+  for (let a = p; a; a = a.parent) {
+    if (ts.isImportDeclaration(a) || ts.isTypeNode(a)) return true;
+  }
+  return false;
+}
+function sinkMisuses(sf) {
+  return findAll(
+    sf,
+    (n) =>
+      ts.isIdentifier(n) &&
+      SINK_ROOTS.has(n.text) &&
+      !isNonUsePosition(n) &&
+      !isDirectSinkCall(n),
+  );
+}
+// `globalThis.console`, `window.console`, `globalThis['console']`, … — reach
+// a sink through the global object, past the root-identifier rule.
+function globalSinkAccess(sf) {
+  return findAll(sf, (n) => {
+    if (ts.isPropertyAccessExpression(n)) {
+      return (
+        ts.isIdentifier(n.expression) &&
+        GLOBAL_OBJECTS.has(n.expression.text) &&
+        SINK_ROOTS.has(n.name.text)
+      );
+    }
+    if (ts.isElementAccessExpression(n)) {
+      return (
+        ts.isIdentifier(n.expression) &&
+        GLOBAL_OBJECTS.has(n.expression.text) &&
+        ts.isStringLiteralLike(n.argumentExpression) &&
+        SINK_ROOTS.has(n.argumentExpression.text)
+      );
+    }
+    return false;
+  });
+}
 
 const sinkFiles = {
   'src/api/platformEntry.ts': entry,
@@ -259,8 +331,20 @@ for (const [rel, sf] of Object.entries(sinkFiles)) {
   );
   assert(
     leaky.length === 0,
-    `${path.basename(rel)}: no track/console/storage/crash-report call mentions a credential or a body`,
+    `${path.basename(rel)}: no track/console/storage/crash-report call mentions a credential, a body or the mint response`,
     leaky.map((c) => c.getText().slice(0, 80)).join(' | '),
+  );
+  const misuses = sinkMisuses(sf);
+  assert(
+    misuses.length === 0,
+    `${path.basename(rel)}: sinks are only called directly, never aliased, destructured or passed on`,
+    misuses.map((n) => n.parent.getText().slice(0, 80)).join(' | '),
+  );
+  const globals = globalSinkAccess(sf);
+  assert(
+    globals.length === 0,
+    `${path.basename(rel)}: no sink reached through globalThis / window / global / self`,
+    globals.map((n) => n.getText().slice(0, 80)).join(' | '),
   );
 }
 
