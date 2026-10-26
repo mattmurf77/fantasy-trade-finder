@@ -116,6 +116,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
+from urllib.parse import unquote
 
 from sqlalchemy import Integer, String, Text, column, create_engine, event, func, inspect, select, table
 
@@ -549,30 +550,40 @@ def _iso(value: str) -> str:
     usage error (exit 2)."""
     try:
         dt = datetime.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an ISO 8601 time: {value!r}") from None
+    try:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         dt = dt.astimezone(timezone.utc)
         dt - _WINDOW_REACH            # the read reaches back this far: must not overflow
-        return dt.isoformat()
     except (ValueError, OverflowError):
-        raise argparse.ArgumentTypeError(f"not an ISO 8601 time: {value!r}") from None
+        raise argparse.ArgumentTypeError(
+            f"too near the minimum date to read back from: {value!r}") from None
+    return dt.isoformat()
 
 
-# The furthest any window reaches back from as_of (the weekly 7 d plus the 25 h
-# in-flight window): a time too near datetime.min is a usage error, not a crash.
+# The furthest a read reaches back from as_of: the weekly window (7 d) and the
+# in-flight window (25 h) both start at as_of, so 9 days covers either with a
+# margin. A time too near datetime.min is a usage error, not a crash.
 _WINDOW_REACH = timedelta(days=9)
 
 
 def _secret_fragments(db: str) -> list[str]:
-    """The pieces of a database URL a driver's connect error may echo: the
-    whole credentials-and-host part and each piece of it split on ':', '@' and
-    '/' (a password with an unencoded '@' comes back as part of a "host").
-    Pieces shorter than 3 characters are left (they would redact noise)."""
-    if "://" not in db:
+    """The pieces of a database URL a driver or URL parser may echo in an
+    error: everything after the scheme, and each piece of it split on
+    ':', '@', '/', '?', '&', '=' and '#' (so an unencoded '@', '?' or '/' in a
+    password, or a query-string password, can't shift what counts as the
+    host), each also percent-decoded. Longest first, so a username inside a
+    password can't leave the password's tail behind. Pieces shorter than 3
+    characters are left (they would redact noise), and harmless words in the
+    URL (a username like postgres) are redacted too: a safe-side cost. A SQLite
+    URL carries no credentials, so nothing."""
+    if "://" not in db or db.split("://", 1)[0].lower().startswith("sqlite"):
         return []
-    rest = db.split("://", 1)[1].split("?", 1)[0]
-    netloc = rest.rsplit("/", 1)[0] if "/" in rest else rest
-    pieces = {netloc, *re.split(r"[:@/]", netloc)}
+    rest = db.split("://", 1)[1]
+    pieces = {rest, *re.split(r"[:@/?&=#]", rest)}
+    pieces |= {unquote(p) for p in pieces}
     return sorted((p for p in pieces if len(p) >= 3), key=len, reverse=True)
 
 
@@ -633,8 +644,8 @@ def _run(args) -> int:
     """main() past parsing: the read, its output and its exit status."""
     try:
         eng = read_only_engine(args.db, allow_postgres_readonly=args.allow_postgres_readonly)
-    except ValueError as e:
-        print(f"flip_read: {e}", file=sys.stderr)
+    except ValueError as e:              # a URL parser's message can echo the URL
+        print(f"flip_read: {_redact(str(e), args.db)}", file=sys.stderr)
         return 2
     settled = (_now() - STAMP_SETTLE).replace(microsecond=0).isoformat()
     as_of = args.as_of or settled
@@ -649,7 +660,7 @@ def _run(args) -> int:
         if args.weekly:
             result.weekly = weekly_read(eng, as_of=as_of)
     except ReadOnlyViolation as e:
-        print(f"flip_read: {e}", file=sys.stderr)
+        print(f"flip_read: {_redact(str(e), args.db)}", file=sys.stderr)
         return 2
     finally:
         eng.dispose()

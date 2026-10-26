@@ -695,12 +695,70 @@ def test_a_crash_never_echoes_the_database_credentials(capsys, monkeypatch):
         assert secret not in err
 
 
-@pytest.mark.parametrize("flag, value", [
-    ("--since", "2026-10-23T25:00:00Z"), ("--until", "tomorrow"),
-    ("--as-of", "2026-13-01"), ("--as-of", "0001-01-01T00:00:00+01:00"),   # out of range in UTC
-    ("--as-of", "0001-01-01T00:00:00Z"),        # in range, but the window can't reach back
+def _crash_err(monkeypatch, capsys, db, message, *, exc=RuntimeError):
+    """Run the CLI with --db `db` whose engine creation raises `exc(message)`;
+    returns (exit status, stderr)."""
+    def boom(url, **_kw):
+        raise exc(message)
+
+    monkeypatch.setattr(fr, "read_only_engine", boom)
+    status = main(["--db", db, "--allow-postgres-readonly", "--since", SINCE,
+                   "--as-of", EARLY])
+    out, err = capsys.readouterr()
+    assert out == ""
+    return status, err
+
+
+@pytest.mark.parametrize("db, message, exc, status, secrets", [
+    # exit 2: SQLAlchemy reads an unencoded password's tail as the port
+    ("postgresql://u:Tr0ub4dor@x:9k2LmQ@dpg-host.oregon/ftf",
+     "invalid literal for int() with base 10: '9k2LmQ@dpg-host.oregon'", ValueError, 2,
+     ("Tr0ub4dor", "9k2LmQ", "dpg-host.oregon")),
+    # a query-string password with an unencoded '&'
+    ("postgresql://u@dpg-host/ftf?password=S3cr&et=x",
+     'invalid connection option "et" (S3cr)', RuntimeError, 4, ("S3cr", "dpg-host")),
+    # a '?' in an unencoded password must not cut the host off the redaction
+    ("postgresql://u:ab?cdefg@host.example/ftf",
+     'could not translate host name "host.example" (cdefg)', RuntimeError, 4,
+     ("host.example", "cdefg")),
+    # a percent-encoded username comes back decoded
+    ("postgresql://ops%40team:pw12345@h.example/main",
+     'FATAL: password authentication failed for user "ops@team"', RuntimeError, 4,
+     ("ops@team", "pw12345")),
+    # a 3-character piece is redacted (the minimum)
+    ("postgresql://u:abc@h.example/ftf", "auth failed: abc", RuntimeError, 4, ("abc",)),
+    # longest first: a username inside the password leaves no tail behind
+    ("postgresql://sec:secret99@h.example/ftf", "bad password secret99", RuntimeError, 4,
+     ("secret99", "ret99")),
+], ids=["exit2_port", "query", "question_mark", "decoded_user", "three_chars",
+        "longest_first"])
+def test_no_exit_path_echoes_database_credentials(monkeypatch, capsys, db, message, exc,
+                                                   status, secrets):
+    """#435 QA P3: every exit path (2 and 4) redacts every 3+ character piece of
+    --db, split on ':@/?&=#' and percent-decoded, longest first."""
+    got, err = _crash_err(monkeypatch, capsys, db, message, exc=exc)
+    assert got == status and "***" in err
+    for secret in secrets:
+        assert secret not in err
+
+
+def test_a_sqlite_url_is_not_redacted(monkeypatch, capsys):
+    """A SQLite URL carries no credentials: crash output keeps its paths."""
+    got, err = _crash_err(monkeypatch, capsys, "sqlite:///backend/eval/flip.db",
+                          "unable to open backend/eval/flip.db")
+    assert got == 4 and "***" not in err and "backend/eval/flip.db" in err
+
+
+@pytest.mark.parametrize("flag, value, why", [
+    ("--since", "2026-10-23T25:00:00Z", "not an ISO 8601 time"),
+    ("--until", "tomorrow", "not an ISO 8601 time"),
+    ("--as-of", "2026-13-01", "not an ISO 8601 time"),
+    ("--as-of", "0001-01-01T00:00:00+01:00",        # valid, but out of range in UTC
+     "too near the minimum date to read back from"),
+    ("--as-of", "0001-01-01T00:00:00Z",             # in range, but the window can't reach back
+     "too near the minimum date to read back from"),
 ])
-def test_a_malformed_time_is_a_usage_error(flag, value, capsys):
+def test_a_malformed_time_is_a_usage_error(flag, value, why, capsys):
     """#431 QA P3: --since, --until and --as-of are parsed as ISO 8601 by
     argparse, so a malformed one is usage exit 2, not a traceback."""
     args = {"--db": "unused.db", "--since": SINCE, flag: value}
@@ -708,7 +766,7 @@ def test_a_malformed_time_is_a_usage_error(flag, value, capsys):
         main([part for pair in args.items() for part in pair])
     assert usage.value.code == 2
     err = capsys.readouterr().err
-    assert f"argument {flag}: not an ISO 8601 time: {value!r}" in err
+    assert f"argument {flag}: {why}: {value!r}" in err
     assert "Traceback" not in err
 
 
