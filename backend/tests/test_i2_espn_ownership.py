@@ -23,6 +23,7 @@ No network: `espn_service.fetch_league` and `espn_write.propose_trade` are
 mocks; the Sleeper reads are mocks asserted never called.
 """
 import copy
+import http.client
 import json
 import urllib.error
 from types import SimpleNamespace
@@ -156,6 +157,22 @@ def test_failed_mroster_read_blocks_with_readable_502(client, fetch):
     fake.assert_not_called()
 
 
+@pytest.mark.parametrize("exc", [
+    lambda: http.client.IncompleteRead(b'{"teams"'),
+    lambda: http.client.BadStatusLine("garbage"),
+    lambda: http.client.RemoteDisconnected("Remote end closed connection"),
+    lambda: UnicodeDecodeError("utf-8", b"\xff\xfe", 0, 1, "invalid start byte"),
+], ids=["incomplete_read", "bad_status_line", "remote_disconnected", "non_utf8_body"])
+def test_unwrapped_read_failures_are_a_readable_502_not_a_500(client, exc):
+    """P3: `fetch_league` wraps only HTTPError and bad JSON. An
+    `http.client.HTTPException` or a body that isn't UTF-8 escaped as a 500."""
+    r, fake = _send(client, fetch=MagicMock(side_effect=exc()))
+    assert r.status_code == 502, r.get_data(as_text=True)
+    assert r.get_json() == {"error": "espn_unavailable", "kind": "network",
+                            "message": R3_COPY, "detail": R3_COPY}
+    fake.assert_not_called()
+
+
 def test_league_not_found_keeps_its_own_code(client):
     r, fake = _send(client, fetch=MagicMock(side_effect=EspnError("gone", kind="not_found")))
     assert r.status_code == 404 and r.get_json()["error"] == "espn_league_not_found"
@@ -244,7 +261,9 @@ def test_sleeper_core_refuses_a_linked_platform_league(sleeper_client, platform)
         r = c.post("/api/trades/propose", headers=propose_t._h(token), data=json.dumps({
             "league_id": propose_t.LEAGUE, "their_roster_id": 2,
             "give_player_ids": ["100"], "receive_player_ids": ["200"]}))
-    assert r.status_code == 400 and r.get_json() == {"error": "bad_request"}
+    msg = "This league isn't on Sleeper, so it can't be sent there."
+    assert r.status_code == 400
+    assert r.get_json() == {"error": "bad_request", "message": msg, "detail": msg}
     sleeper_get.assert_not_called()
     fake.assert_not_called()
 

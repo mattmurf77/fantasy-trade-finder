@@ -365,7 +365,9 @@ def test_all_equal_serves_page_one_inline(p1, spawned):
     response = generate(client, page=1, search_id="s-1")
     assert response.status_code == 200
     body = response.get_json()
-    assert body["cards"] == stored()["pages_blob"]["cards"][:30]
+    # P2 adds each card's trade_hash at serve (test_trade_pages_p2); the rest is the stored card.
+    assert [{k: v for k, v in c.items() if k != "trade_hash"}
+            for c in body["cards"]] == stored()["pages_blob"]["cards"][:30]
     assert ids(body["cards"]) == [f"p1-{i:03d}" for i in range(30)]
     assert {k: body[k] for k in ("job_id", "status", "error", "cursor", "total_ready", "replace",
                                  "serve_source", "freshness_state", "search_id",
