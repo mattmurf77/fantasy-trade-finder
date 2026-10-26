@@ -251,6 +251,7 @@ from . import ranking_service as _ranking_service_mod
 from . import rankings_import as _rankings_import   # #232 follow-on (ranks.import)
 from . import trends_service as _trends_service_mod
 from . import draft_status as _draft_status_mod   # W3 M-A — ROOKIE_MAX_ROUNDS
+from .eval import contract as _evidence_contract  # ADR-025 S3: the one evidence contract (#382)
 from . import pick_slots                          # D-090 — real-slot pick labels AND, since D-144, per-slot prices
 from . import api_observability as _api_obs   # obs.api_events — inbound/outbound API event capture
 from . import sleeper_http as _sleeper_http   # S0 — per-process Sleeper 429 circuit
@@ -3978,26 +3979,11 @@ def _store_trade_page(job_id: str) -> bool:
 
 _EVIDENCE_FIRST_N = 30         # C4: the always-full first cards of a served deck
 _EVIDENCE_BLOB_FORMAT = 1
-# A ghost row's features_json keeps only these (C5): exactly what
-# value_model.extract_features reads (models-lead §DEC-2 §2), plus the two
-# _inject inputs (Confirmation §1, edit E2).
-_COMPACT_FEATURE_KEYS = (
-    "give_value", "receive_value", "surplus_margin", "fairness_score", "ranked_player_count",
-    "shape", "lane", "basis", "give_positions", "receive_positions",
-    "involves_pick", "likes_you", "relaxed", "user_value_basis",
-)
-_INJECTED_FEATURE_KEYS = ("partner_user_id", "taste_attrs")
 # One evidence write at a time (the web service runs one worker). The page
 # store holds it too while it writes a deck's evidence_blob.
 _deck_evidence_write_lock = threading.RLock()
 # C8 retention is deferred to the packing stage (models-lead R2.6 S2): until
 # packing writes the archive's packed copy, no deck_impressions row is purged.
-
-
-def _deck_archive_selected(deck_job_id: str) -> bool:
-    """C8: the deterministic 2% whole-deck archive sample, chosen by deck only."""
-    digest = hashlib.sha256(f"c8-archive-v1|{deck_job_id}".encode()).hexdigest()
-    return int(digest, 16) % 10000 < 200
 
 
 def _pack_row(row: dict) -> bytes:
@@ -4024,12 +4010,12 @@ def _diagnostic_refs(value) -> set:
 def _narrow_ghost_row(row: dict) -> dict:
     """C5: a ghost's row without the wide features_json or valuation_json:
     every other column as built (impression_id, assets_json, the scalars) and a
-    features_json holding only the compact inputs."""
+    features_json holding only the frozen scorer inputs, the eval contract's
+    FROZEN_INPUT_KEYS (S3: one definition), in the built row's key order."""
     features = json.loads(row["features_json"])
     narrow = {k: v for k, v in row.items() if k != "valuation_json"}
-    narrow["features_json"] = json.dumps({k: features[k] for k in
-                                          (*_COMPACT_FEATURE_KEYS, *_INJECTED_FEATURE_KEYS)
-                                          if k in features})
+    narrow["features_json"] = json.dumps({k: v for k, v in features.items()
+                                          if k in _evidence_contract.FROZEN_INPUT_KEYS})
     return narrow
 
 
@@ -4067,7 +4053,7 @@ class _DeckEvidence:
         self.complete = False         # the run ended: its deliveries may write
         self.partial = False          # it ended partial: delivered cards only, 'partial_run'
         self.discarded = False        # it hit the safety ceiling: nothing is ever written
-        self.archive = _deck_archive_selected(job_id)
+        self.archive = _evidence_contract.is_archive_deck(job_id)   # C8, S3
         self.stored_ids = None        # impression ids whose snapshots the page store holds
         self.pages_bytes = None       # len(pages_blob) of this deck's stored row
         self.stored_count = None      # cards the page store holds

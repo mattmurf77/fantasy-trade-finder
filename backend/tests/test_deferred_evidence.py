@@ -37,6 +37,7 @@ import backend.database as db_module
 import backend.feature_flags as ff
 import backend.server as server
 from backend import trade_service as ts, user_data_lifecycle
+from backend.eval import contract
 from backend.database import league_members_table
 from backend.ranking_service import Player
 from backend.tests.test_i1_serve_filter import LEAGUE, OPP, UID, live  # noqa: F401  (fixture)
@@ -48,14 +49,14 @@ from backend.tests.test_owner_only_routes import exclusive  # noqa: F401  (fixtu
 from backend.tests.test_owner_batch_publication import sized_exclusive  # noqa: F401  (fixture)
 
 TIERS = ("first30", "delivered", "ghost", "archive", "full_interim")
-COMPACT = set(server._COMPACT_FEATURE_KEYS) | set(server._INJECTED_FEATURE_KEYS)
+COMPACT = contract.FROZEN_INPUT_KEYS
 VOLATILE = ("impression_id", "served_at", "candidate_set_id", "evidence_tier", "delivered_at")
 
 
 def archive_id(selected=True):
     """A job id the C8 rule selects (or not)."""
     return next(f"deck-{i:04d}" for i in range(100000)
-                if server._deck_archive_selected(f"deck-{i:04d}") is selected)
+                if contract.is_archive_deck(f"deck-{i:04d}") is selected)
 
 
 def rows(engine, table=db_module.deck_impressions_table):
@@ -892,10 +893,10 @@ def test_c5_ghost_rows_are_narrow_at_every_rank_and_inside_the_first_30(deferred
         assert json.loads(r["assets_json"]) == {"give": card.give_player_ids, "receive": card.receive_player_ids}
         features = json.loads(r["features_json"])
         assert set(features) <= COMPACT
-        assert set(server._COMPACT_FEATURE_KEYS) | {"partner_user_id"} <= set(features)
+        assert contract.COMPACT_KEYS | {"partner_user_id"} <= set(features)
         assert features["give_value"] == card.give_value and features["partner_user_id"] == OPP
     full = json.loads(next(r for r in rows(engine) if r["is_ghost"] == 0)["features_json"])
-    assert "give_value_band" in full and set(full) > COMPACT   # full rows keep the wide shape
+    assert "give_value_band" in full and contract.COMPACT_KEYS < set(full)   # full rows keep the wide shape
 
 
 def test_ghost_rows_still_serve_the_matcher_and_the_value_model(deferred):
@@ -970,16 +971,28 @@ def test_a_non_archive_deck_marks_its_rest_full_interim(deferred):
     assert {r["evidence_tier"] for r in rows(engine) if r["card_index"] >= 30} == {"full_interim"}
 
 
-def test_the_c8_selection_is_deterministic_by_deck_and_about_2_percent():
+def test_the_c8_selection_is_the_contracts_by_deck_and_about_2_percent():
+    """S3: the writer's C8 choice is contract.is_archive_deck, chosen by deck only."""
     ids = [hashlib.md5(str(i).encode()).hexdigest() for i in range(20000)]   # job-id shaped
-    picks = [server._deck_archive_selected(i) for i in ids]
-    assert picks == [server._deck_archive_selected(i) for i in ids]
+    picks = [server._DeckEvidence(i, "a").archive for i in ids]
+    assert picks == [contract.is_archive_deck(i) for i in ids]
     assert 0.017 < sum(picks) / len(picks) < 0.023
-    for i in ids[:200]:
-        assert server._deck_archive_selected(i) == (
-            int(hashlib.sha256(f"c8-archive-v1|{i}".encode()).hexdigest(), 16) % 10000 < 200)
     job = archive_id(True)
     assert (server._DeckEvidence(job, "a").archive, server._DeckEvidence(job, "b").archive) == (True, True)
+
+
+def test_s3_a_ghost_row_keeps_exactly_the_contracts_frozen_inputs():
+    """S3: the narrow row's block is contract.FROZEN_INPUT_KEYS, the eval
+    loader's definition (#382), with no local copy left in server.py; the
+    serve-time taste matches ride along when the card carries them."""
+    wide = {k: f"v-{k}" for k in contract.FROZEN_INPUT_KEYS}
+    wide.update(give_value_band="b", shape_bucket="1x1", taste_pref_long=0.25, taste_pref_short=0.5)
+    narrow = server._narrow_ghost_row({"impression_id": "i", "features_json": json.dumps(wide),
+                                       "valuation_json": "{}"})
+    assert set(json.loads(narrow["features_json"])) == contract.FROZEN_INPUT_KEYS
+    assert "valuation_json" not in narrow
+    assert not any(hasattr(server, name) for name in
+                   ("_COMPACT_FEATURE_KEYS", "_INJECTED_FEATURE_KEYS", "_deck_archive_selected"))
 
 
 def old_row(iid, tier, days_ago):
