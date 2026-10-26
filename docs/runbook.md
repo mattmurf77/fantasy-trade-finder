@@ -184,6 +184,18 @@ from historical decisions/inbound offers, which must retain original terms.
 - **Static:** `web/` served by Flask.
 - Set `ANTHROPIC_API_KEY` in Render dashboard if smart matchups should be enabled in prod.
 
+### The gthread switch (E1)
+
+The web service runs one gunicorn worker with **`--threads 4`** (E1). The live start command comes from the
+service settings, **not** `render.yaml` (G-018; confirmed 2026-10-24 by an API read, which showed the dashboard
+command while the blueprint said `plan: free` against a live `standard`). So merging this file changes nothing
+by itself. On the operator's word, set the start command on the service (Render API `PATCH /v1/services/<id>`
+or the dashboard), then deploy and read the live command back. **Rollback:** the same command without
+`--threads 4`, then deploy. Watch the first 13:30 UTC daily tick and the request p95 after the switch.
+
+As of 2026-10-24 the service reports **`autoDeploy: yes`**: every merge to `main` deploys at once. That
+supersedes the 2026-09-20 note above.
+
 ### First-action latency release (2026-09-21)
 
 This backend release changes job admission, diagnostic preparation and incremental
@@ -479,7 +491,7 @@ python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --ke
 1. **Stop it:** set `trade.value_core` to `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The safety signature changes, so the next `/api/trades/generate` runs the legacy engine and no cached value-core deck is reused.
 2. **Narrow it (deploy-free):** `vc_testers_only` → `1` with `scripts/set_knob.py` or `PUT /api/admin/config/vc_testers_only` (`X-Cron-Secret`). Serving returns to the tester allowlist only.
 
-**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. `budget_exhausted=True` means the 8 s core budget stopped enumeration and a partial pool was ranked and served. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
+**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. The only thing that sets `budget_exhausted` is the 30 s safety ceiling (pathology), always together with `CoreDiagnostics.safety_ceiling_hit`. The core is bounded by its check caps, never by the clock, so this is not load. A ceiling run never reaches this INFO line, because the job refuses the partial pool (head-eng ruling 15). Look instead for two ERROR lines: `value-core: safety ceiling … hit; stopped with N/M partners done, K pairs checked` and `trade-job <id> value_core: safety ceiling hit (…); refusing the partial pool`. The job ends with error `value_core_failed`. Check for a machine stall (a frozen or starved process, a paused instance) or a pathological input (an extreme roster or package count), not traffic. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
 
 ### Gate 2 — Calibration (in-app blind grading)
 
