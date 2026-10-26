@@ -29,6 +29,9 @@ import backend.paywall_gate as pg
 from backend import accounts, database as db, server, trade_service as ts
 from backend.tests.test_fair_packages import harness, ME, LEAGUE, TOKEN  # noqa: F401 (fixture)
 from backend.tests.test_trade_responses_small import JOB_ID, card, e2, seed_job  # noqa: F401
+from backend.tests import test_trade_page_store as p1mod
+from backend.tests.test_i1_serve_filter import live  # noqa: F401 (fixture)
+from backend.tests.test_trade_page_store import p1, spawned  # noqa: F401 (fixtures)
 
 PAGE = 5
 MOBILE = {"X-Session-Token": TOKEN, "X-Device": "iphone"}
@@ -395,3 +398,57 @@ def test_deleted_and_exported_with_the_account(gate):
     assert [r["deck_key"] for r in archive["tables"]["paywall_previews"]] == [JOB_ID]
     accounts.delete_user_data(ME)
     assert pg.preview_row(ME) is None and pg.preview_row("someone-else") is not None
+
+
+# ── #368's P1 first-page store (flag trade.first_page_store on) ───────────
+#
+# /generate `page: 1` and /status cursors inside a page-served deck answer from
+# the store (server._serve_trade_page / _trade_page_status_view), not from a
+# job snapshot. The preview must cap and consume those serves too.
+
+@pytest.fixture
+def p1_enforcing(p1, spawned):
+    client, engine, _sess = p1
+    _config(engine, paywall_enforce_enabled=1.0, paywall_web_enforce_enabled=1.0,
+            paywall_preview_pages=1.0)
+    with patch.object(entl, "is_enabled", lambda k: k in BOTH_FLAGS):
+        yield client
+
+
+def test_p1_stored_first_page_is_previewed_and_consumed(p1_enforcing, monkeypatch):
+    client = p1_enforcing
+    job_id = p1mod.build_page()
+    server._trade_jobs.clear()               # a restart: only the store can serve
+    server._trade_jobs_by_key.clear()
+    r = p1mod.generate(client, page=1)
+    body = r.get_json()
+    assert r.status_code == 200 and body["serve_source"] == "page"
+    assert p1mod.ids(body["cards"]) == [f"p1-{i:03d}" for i in range(30)]
+    row = pg.preview_row(p1mod.UID)
+    assert (row["deck_key"], row["pages_served"]) == (job_id, 1)
+    # A stored cursor inside the window is capped at the window's end.
+    inside = p1mod.status(client, job_id, 10).get_json()
+    assert p1mod.ids(inside["cards"]) == [f"p1-{i:03d}" for i in range(10, 30)]
+    assert inside["cursor"] == 30
+    # Page 2 (stored) and a new deck request are past the preview.
+    assert p1mod.status(client, job_id, 30).get_json() == PREVIEW_USED
+    assert p1mod.generate(client, page=1).get_json() == PREVIEW_USED
+    # Swipes: a stored page-1 card passes the gate, a page-2 card doesn't.
+    monkeypatch.setitem(server.app.view_functions, "swipe_trade", lambda **_kw: ("ok", 200))
+    swipe = lambda tid: client.post("/api/trades/swipe", headers=p1mod.HEADERS,
+                                    json={"trade_id": tid, "decision": "like"})
+    assert swipe("p1-005").status_code == 200
+    assert swipe("p1-030").get_json() == PREVIEW_USED
+
+
+def test_p1_store_serves_are_untouched_without_a_preview(p1_enforcing):
+    """An entitled user gets the stored pages exactly as before."""
+    client = p1_enforcing
+    entl.grant(p1mod.UID, "pro", source="manual_grant")
+    job_id = p1mod.build_page()
+    server._trade_jobs.clear()
+    server._trade_jobs_by_key.clear()
+    assert len(p1mod.generate(client, page=1).get_json()["cards"]) == 30
+    assert p1mod.ids(p1mod.status(client, job_id, 30).get_json()["cards"]) == [
+        f"p1-{i:03d}" for i in range(30, 60)]
+    assert pg.preview_row(p1mod.UID) is None

@@ -16025,7 +16025,7 @@ def generate_trades():
                 session_context=sess, presentation_capture=presentation_capture,
                 input_epochs=input_epochs, preserve_running=True))
         if served is not None:
-            return jsonify(served)
+            return _serve_stored_trade_page(g_user_id, served, page_row)
     with _trade_jobs_lock:
         existing_id = (_trade_jobs_by_key.get(key)
                        if not _any_pinned and not presentation_uncached
@@ -17095,7 +17095,8 @@ def trade_job_status():
         except Exception as err:
             log.warning("trade-page read failed for job %s: %s", job_id, err)
         if page_row is not None and int(cursor) < page_row["card_count"]:
-            return jsonify(_trade_page_status_view(page_row, int(cursor), sess))
+            return _serve_stored_trade_page(
+                sess["user_id"], _trade_page_status_view(page_row, int(cursor), sess), page_row)
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if not job and page_row is not None:
@@ -32385,7 +32386,7 @@ def _paywall_gate_hook():
             rule, request.method, sess.get("user_id"),
             _paywall_gate.is_mobile_request(request.headers),
             bool(sess.get("verified") or _synthetic_demo_session(sess)),
-            demo=_synthetic_demo_session(sess), ask=_paywall_deck_ask())
+            demo=_synthetic_demo_session(sess), ask=_paywall_deck_ask(sess.get("user_id")))
     except Exception:
         log.exception("paywall gate failed open: %s %s", request.method, rule)
         return None
@@ -32395,7 +32396,7 @@ def _paywall_gate_hook():
     return None if result is None else (jsonify(result[1]), result[0])
 
 
-def _paywall_deck_ask():
+def _paywall_deck_ask(user_id):
     """The request facts the deck preview decides on (paywall_gate.DeckAsk)."""
     cursor = request.args.get("cursor")
     body = (request.get_json(silent=True) or {}) if request.method == "POST" else {}
@@ -32405,14 +32406,47 @@ def _paywall_deck_ask():
         job_id=request.args.get("job_id"),
         cursor=int(cursor) if cursor is not None and re.fullmatch(r"[0-9]{1,9}", cursor) else None,
         trade_id=trade_id if isinstance(trade_id, str) else None,
-        page_trade_ids=_paywall_page_trade_ids)
+        page_trade_ids=lambda job_id, limit: _paywall_page_trade_ids(user_id, job_id, limit))
 
 
-def _paywall_page_trade_ids(job_id: str, limit: int) -> set:
-    """Trade ids among the job's first `limit` raw cards (the preview window)."""
+def _paywall_page_trade_ids(user_id, job_id: str, limit: int) -> set:
+    """Trade ids among the deck's first `limit` raw cards (the preview window):
+    the live job's, plus the P1 stored page built by that job (a page-served
+    deck may have no job in this process)."""
     with _trade_jobs_lock:
         cards = (_trade_jobs.get(job_id) or {}).get("cards") or []
-        return {c.get("trade_id") for c in cards[:limit] if isinstance(c, dict)}
+        ids = {c.get("trade_id") for c in cards[:limit] if isinstance(c, dict)}
+    if user_id and _trade_page_store_enabled():
+        from . import database as _db
+        row = _db.load_trade_page_for_job(user_id, job_id)
+        ids |= _stored_window_ids(row, limit)
+    return ids
+
+
+def _stored_window_ids(row, limit: int) -> set:
+    """Trade ids among a P1 stored page row's first `limit` raw cards."""
+    pages = (row or {}).get("pages_blob")
+    cards = pages.get("cards") if isinstance(pages, Mapping) else None
+    return {c.get("trade_id") for c in (cards or [])[:limit] if isinstance(c, dict)}
+
+
+def _serve_stored_trade_page(user_id: str, out: dict, row: dict):
+    """The deck preview on a P1 stored-page response (#368: _serve_trade_page
+    and _trade_page_status_view build it, not _serve_trade_job). Under
+    g.paywall_preview, keep only cards inside the window of the stored raw
+    list, hold the cursor at the window's end, and record the preview when a
+    card is served. Otherwise the body is unchanged."""
+    preview = g.get("paywall_preview")
+    if preview is None:
+        return jsonify(out)
+    window = _stored_window_ids(row, preview.limit)
+    out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
+           "cursor": min(out["cursor"], preview.limit),
+           "total_ready": min(out["total_ready"], preview.limit)}
+    if out["cards"] and not _paywall_gate.record_preview(
+            user_id, out["job_id"], preview.pages_for(out["cursor"])):
+        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
+    return jsonify(out)
 
 
 def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
