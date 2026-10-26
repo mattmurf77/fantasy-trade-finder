@@ -1472,15 +1472,19 @@ def test_p2_1_a4_a_live_deck_replays_like_the_same_deck_stored_as_a_pack(deferre
         position_mean=0.4, trained_at="t", train_date="t")
     monkeypatch.setattr(vm, "load_latest_model", lambda: model)
     real = replay_mod._estimate
+    import dataclasses
     for name in registered_names():
-        out = []
+        out, misses = [], []
         for deck in (deck_live, deck_pack):
             weights = []
             monkeypatch.setattr(replay_mod, "_estimate",
                                 lambda *a, w=weights: w.append(list(a[1])) or real(*a))
             evaluated = evaluate(get_scorer(name, seed=3), [deck], ess_min=1, bootstrap=50, seed=2)
-            out.append((repr(evaluated), weights))
+            misses.append(evaluated.upgrade_misses)
+            # Upgrade misses are a pack's own count (#425): compared apart, below.
+            out.append((repr(dataclasses.replace(evaluated, upgrade_misses={})), weights))
         assert out[0] == out[1], name
+        assert misses[0] == {} and misses[1] and set(misses[1].values()) == {0}, (name, misses)
 
 
 # ── models-lead B4 (C): disposition cuts are withdrawals too ────────────────
