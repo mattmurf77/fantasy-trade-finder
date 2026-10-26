@@ -12,6 +12,7 @@ import { ink, chalk, ice, semantic, space, radii, type, fonts } from '../theme/c
 import { useSession } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { useFinderTargets } from '../state/useFinderTargets';
+import { beginTradeSearch, handoffDeckMode } from '../state/tradeSearchTrace';
 import { track } from '../api/events';
 import {
   saveLeaguePreferences, getLeaguePreferences, getAssetPrefs,
@@ -344,6 +345,19 @@ export default function TeamReviewScreen() {
               // — no new state layer, no new route, and nothing fires when the
               // user never scoped anyone.
               if (scoped) {
+                // R1 (time to suggestion; source `team_review`, granted Q-A):
+                // the scoped hand-off's auto-run is a search, so the tap
+                // begins it here — the deck's dispatch claims this id, as for
+                // League Summary. No partner ⇒ no search ⇒ no R1. `mode` is
+                // the deck this lands on: the hand-off sets no pins, so it
+                // reads whatever pins the finder already holds.
+                const { pinnedGive, pinnedReceive } = useFinderTargets.getState();
+                beginTradeSearch({
+                  source: 'team_review',
+                  mode: handoffDeckMode(pinnedGive.length + pinnedReceive.length),
+                  searchType: 'pinned',
+                  screen: 'TeamReview',
+                });
                 useFinderTargets.getState().setHandoff({
                   opponent: { userId: scoped.id, name: scoped.name },
                   autoRun: true,

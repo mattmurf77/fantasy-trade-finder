@@ -439,6 +439,8 @@ FLAG_KEYS: tuple[str, ...] = (
     # so the flag being on never exposes the surface to real users.
     "testing.stage_users",   # POST/DELETE /api/test-users — synthetic stage-user
                              # spawner for onboarding QA (backend/test_users.py)
+    "testing.timing_readout",  # client-only: the Settings > Testing tap-to-card
+                               # readout (mobile TimingReadoutRow, ruling 11)
     # ── #158/#170/#171 — owned draft picks in calculator + suggestions ──
     # picks.owned_sync: revive sync_draft_picks on the league-sync path
     # (session_init daemon for Sleeper; link/import for MFL) + normalize MFL

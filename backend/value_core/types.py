@@ -165,7 +165,8 @@ class CoreDiagnostics:
     fair: int = 0
     rejected: dict[str, int] = field(default_factory=dict)   # reason code -> count
     truncated_partners: int = 0     # partners that hit max_per_partner or the check cap
-    budget_exhausted: bool = False  # the time budget stopped enumeration early
+    budget_exhausted: bool = False  # enumeration stopped early (only the safety ceiling does this)
+    safety_ceiling_hit: bool = False  # core.SAFETY_CEILING_S fired: pathology, partial pool
     elapsed_ms: int = 0
 
 
