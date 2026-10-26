@@ -201,17 +201,20 @@ sees; "deck" is the pushed results deck (Acquire → Find a trade).
    card from league A ever shows in league B, and no card from the other format after the format switch,
    including the first card of the first tap. With C on, step C9 gives the observable proxy for this
    (release-lead P1-a).
-10. **Named gate misses (#339 item 12; reachable once S0 deploys).** **Blocked on a hook:** S0 names no test
-    hook today. On `feat/trades-200ms-s0-serve` the check error fires only when the I-1 owner filter
-    (`_filter_cards_to_current_owners`) raises, and `wait_reason` isn't built yet (contract v0.4 §3b). Ask
-    trades-eng / platforms-eng for a staging switch for each before running this step. Then, with the check
-    unavailable for the league, tap Find a trade. **Expect:** "Couldn't
+10. **Named gate misses (#339 item 12; reachable once S0, #367, deploys).** Prod keeps
+    `trade_gate_miss_mode` = 0 until 1.22.0 is distributed, so **force each state for your test league only**
+    with S0's admin hook (release-lead or the operator runs it; it needs `CRON_SECRET`):
+    `POST /api/admin/trades/gate-miss-test` `{"league_id": "<test league>", "kind": "check_error", "ttl_s": 600}`
+    for the error, and `"kind": "withhold"` for the wait. `DELETE` with `{"league_id": …}` clears it, and it
+    expires by itself after `ttl_s` (≤ 900). With `check_error` set, tap Find a trade. **Expect:** "Couldn't
     confirm current rosters" / "We couldn't check rosters with your league's platform. Try again." with
     **Retry** in the card slot, never "Search failed … waking up"; Retry starts a new search; Back works. While
     S0 is withholding cards for the check, **expect** "Checking current rosters with your league's platform…"
     in place of "Looking for trades…" (no seconds, no "Searching…"); if no card arrives within about 10 s it
-    turns into the error above with Retry; if cards arrive, the deck shows them normally. Copy is placeholder
-    (`trades.gate.*`, head-bizops due ~10-28).
+    turns into the error above with Retry; if cards arrive, the deck shows them normally. (`withhold` keeps
+    withholding until the hook expires or is cleared, so expect the 10 s fall-through to the error, then Retry
+    restarts the wait.) **Always `DELETE` the hook when done.** Copy is placeholder (`trades.gate.*`, head-bizops
+    due ~10-28).
 11. **Known behavior to log (P2-b):** on the first ~10 s of a cold search, note any card that turns into "This
     trade is no longer available." right after appearing. E2's `replace` can withdraw a fronted card that a later
     server layer dropped; log how often, don't file it as a bug.
