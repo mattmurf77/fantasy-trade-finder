@@ -1124,3 +1124,65 @@ def test_two_instances_first_writes_keep_both_boundaries(deferred):
     assert {c["served_at"] for c in stored_cards} == {a.served_at}      # the first writer's cards
     assert set(withdrawals(engine)) == {70}
     assert b.pack.checksum == pack_of(engine, job_id)["checksum"]       # later updates CAS on it
+
+
+def deliveries_of(engine, job_id):
+    return unpack(pack_of(engine, job_id))[0]["deliveries"]
+
+
+def test_pages_delivered_out_of_order_each_keep_their_boundary(deferred):
+    """P3 (concurrent pages): page 3 finishes before page 2. Page 2's boundary
+    is added below the last one (the union), so its cards read its own time
+    instead of collapsing into page 3's."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 60)
+    status(client, job_id, 30)
+    delivered = deliveries_of(engine, job_id)
+    assert [d[0] for d in delivered] == [29, 59, 89]
+    assert delivered[1][1] >= delivered[2][1]              # page 2 went out after page 3
+    state =server._trade_jobs[job_id]["evidence"].pack
+    assert state.delivered_at(40) == delivered[1][1] and state.delivered_at(70) == delivered[2][1]
+
+
+def test_a_first_send_inside_a_delivered_stretch_adds_no_boundary(deferred):
+    """A card sent for the first time where its neighbours were delivered
+    earlier (as if a disposition had hidden it at that page's serve): no
+    boundary, so its neighbours keep their earlier time."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    status(client, job_id, 30)
+    before = deliveries_of(engine, job_id)
+    ev = server._trade_jobs[job_id]["evidence"]
+    card45 = server._trade_jobs[job_id]["cards"][45]
+    with ev.lock:
+        ev.delivered.discard(card45["impression_id"])
+    server._deck_evidence_delivered(ev, [card45], league_id=LEAGUE)
+    assert ev.deliveries == before and deliveries_of(engine, job_id) == before
+
+
+def test_stored_path_writes_landing_out_of_order_keep_both_boundaries(deferred, monkeypatch):
+    """After the job left: pages 2 and 3 are requested in order, their writes
+    land in reverse. Each keeps its request's time; a later re-serve of page 2
+    (its top card now dropped) adds nothing."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    status(client, job_id, 0)
+    restart()
+    queued = []
+    monkeypatch.setattr(server, "_start_deck_evidence_thread",
+                        lambda *, target, args: queued.append((target, args)))
+    for cursor in (30, 60):
+        client.get(f"/api/trades/status?deck={job_id}&cursor={cursor}", headers=HEADERS)
+    for target, args in reversed(queued):
+        target(*args)
+    delivered = deliveries_of(engine, job_id)
+    assert [d[0] for d in delivered] == [29, 59, 89] and delivered[1][1] < delivered[2][1]
+    queued.clear()
+    own_all_but(engine, 59)
+    client.get(f"/api/trades/status?deck={job_id}&cursor=30", headers=HEADERS)
+    for target, args in queued:
+        target(*args)
+    assert deliveries_of(engine, job_id) == delivered

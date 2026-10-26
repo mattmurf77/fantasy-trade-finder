@@ -4859,13 +4859,34 @@ def _deck_pack_commit(run_id: str, state, withdrawals=()) -> bool:
     return False
 
 
-def _deck_evidence_cover(ev: _DeckEvidence, ids, at: str) -> None:
+def _deck_evidence_cover(ev: _DeckEvidence, ids, at: str, *, prior_known: bool = True) -> None:
     """Under `ev.lock`: a delivery's page boundary (U1), the highest build index
-    it sent, appended when it extends the deck's deliveries."""
+    among `ids`, the cards it sends for the first time. Past the last boundary
+    it is appended. Below it (concurrent pages finishing out of order, #416 QA)
+    it is added too, the union of deliveries, so each page keeps its own time;
+    unless that stretch of the deck, between the next boundary down and it,
+    was delivered before, whose earlier time stands. In process `ev` knows
+    every delivered card; after the job left (`prior_known` false: `ev` holds
+    this delivery only) a boundary at or past it no later than `at` says so."""
     indexes = [i for i in (_deck_card_index(ev.job_id, iid) for iid in ids) if i is not None]
-    if indexes and max(indexes) > (ev.deliveries[-1][0] if ev.deliveries else -1):
-        ev.deliveries.append([max(indexes), at])
+    if not indexes:
+        return
+    top = max(indexes)
+    if top > (ev.deliveries[-1][0] if ev.deliveries else -1):
+        ev.deliveries.append([top, at])
         ev.pack_dirty = True
+        return
+    if prior_known:
+        below = max((index for index, _at in ev.deliveries if index < top), default=-1)
+        prior = (ev.delivered | {i for h in ev.delivered_hashes for i in ev.by_hash.get(h, ())}) - set(ids)
+        if any(i is not None and below < i <= top
+               for i in (_deck_card_index(ev.job_id, iid) for iid in prior)):
+            return
+    elif any(index >= top and when <= at for index, when in ev.deliveries):
+        return
+    merged = _merge_deliveries(ev.deliveries, [[top, at]])
+    if merged != ev.deliveries:
+        ev.deliveries, ev.pack_dirty = merged, True
 
 
 def _deck_pack_state(deck_job_id: str, user_id: str):
@@ -5356,7 +5377,7 @@ def _deck_evidence_write_stored(user_id: str, deck_job_id: str, ids: set, lease,
                 ev.delivered_at.update(dict.fromkeys(ids, delivered_at))
                 ev.served_at = ev.served_at or delivered_at
                 with ev.lock:
-                    _deck_evidence_cover(ev, ids, delivered_at)
+                    _deck_evidence_cover(ev, ids, delivered_at, prior_known=False)
                 if not ids:                      # withdrawals only: nothing to pair them with
                     try:
                         _db.record_deck_withdrawals(_deck_withdrawal_rows(
@@ -5419,9 +5440,11 @@ def _deck_evidence_delivered(ev: _DeckEvidence, cards: list, *, partial: bool = 
         awaited = {iid for iid in ids - ev.delivered - ev.pending if iid in ev.rows}
         ev.pending |= awaited
         _deck_evidence_pend(awaited)
+        fresh = (ids - ev.delivered) | {i for h in hashes - ev.delivered_hashes
+                                        for i in ev.by_hash.get(h, ())}
         ev.delivered |= ids
         ev.delivered_hashes |= hashes
-        _deck_evidence_cover(ev, {i for h in hashes for i in ev.by_hash.get(h, ())} | ids, now)
+        _deck_evidence_cover(ev, fresh, now)
         go = (new or bool(withdrawals)) and ev.complete
     if go:
         _start_deck_evidence_thread(target=_deck_evidence_write, args=(ev,))
