@@ -155,7 +155,9 @@ def test_one_event_per_job_page_across_repeat_polls(env, monkeypatch):
     for _ in range(3):
         _status()                                  # the legacy cumulative body
     pages = [json.loads(r["props"])["cards"] for r in _events(engine)]
-    assert pages == [4, 3, 7]                      # page 0, page 4, the legacy deck once
+    # page 0, page 4, the legacy deck once. Each is written by its own daemon
+    # thread, so the insert order isn't fixed: compare as a multiset.
+    assert sorted(pages) == [3, 4, 7]
 
 
 def test_a_running_legacy_deck_counts_once_complete(env):
