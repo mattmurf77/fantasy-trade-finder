@@ -1013,29 +1013,30 @@ export default function SettingsScreen({ navigation }: any) {
     </>
   );
 
-  const testingSection = (
+  // The banner shares its only row's gate (#360 QA P3): with "Test stages"
+  // off there is nothing under "Testing", so neither renders. The legacy
+  // layout mounts this unconditionally and used to show an empty banner.
+  const testingSection = stageUsersEnabled ? (
     <>
       <View style={styles.section}>
         <TickLabel>Testing</TickLabel>
       </View>
-      {stageUsersEnabled ? (
-        <Pressable
-          testID="settings.test-stages"
-          accessibilityRole="button"
-          onPress={() => navigation.navigate?.('TestStages')}
-          style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={styles.rowKey}>Test stages</Text>
-            <Text style={styles.rowSub}>
-              Spawn a synthetic user at any adoption stage (operator QA).
-            </Text>
-          </View>
-          <Icon name="chevron-right" color={chalk.dim} size={16} />
-        </Pressable>
-      ) : null}
+      <Pressable
+        testID="settings.test-stages"
+        accessibilityRole="button"
+        onPress={() => navigation.navigate?.('TestStages')}
+        style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={styles.rowKey}>Test stages</Text>
+          <Text style={styles.rowSub}>
+            Spawn a synthetic user at any adoption stage (operator QA).
+          </Text>
+        </View>
+        <Icon name="chevron-right" color={chalk.dim} size={16} />
+      </Pressable>
     </>
-  );
+  ) : null;
 
   // Subscription entry point (iap-enablement, flag `monetize.paywall`). One
   // row, one destination — the flag gates the row, never the Paywall route.

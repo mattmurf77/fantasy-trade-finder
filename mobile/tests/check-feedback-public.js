@@ -20,6 +20,8 @@
 //      (settings/sections/AboutSection.tsx, plus the flat SettingsScreen
 //      `aboutSection` that is the `account.settings_hub` rollback), never in
 //      the Testing section, and never behind `__DEV__` / `stageUsersEnabled`.
+//      2g (#360 QA P3): the flat `testingSection`'s "Testing" banner shares
+//      its rows' gate, so the legacy layout never shows an empty banner.
 //   3. ONE SUPPORT ADDRESS (BL10-R7). Across mobile/src exactly one string
 //      literal, template literal or JSX text contains fleecedapp@gmail.com,
 //      and it is the whole literal of an exported const; no U+FF20 look-alike
@@ -376,6 +378,54 @@ function textNodes(root) {
     } else {
       fail('2f. aboutSection is mounted in both settings_v2 branches of SettingsScreen.tsx, ungated',
            uses.length < 2 ? `only ${uses.length} mount(s) found` : useGated.join('; '));
+    }
+
+    // 2g (#360 QA P3). No empty "Testing" banner: inside testingSection the
+    //     banner sits under exactly the conditions its rows do, and under at
+    //     least one, so the legacy layout's unconditional {testingSection}
+    //     can't render a banner with nothing beneath it. A row is any element
+    //     carrying a testID. Each guard keeps its polarity (a ternary's false
+    //     branch, an else, or a || right side reads as `!(cond)`), so a banner
+    //     on one branch of a condition and its row on the other never match.
+    const isOpen = (n) => ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n);
+    const banners = findAll(testingDecl, (n) => ts.isJsxElement(n)
+      && n.openingElement.tagName.getText(flat) === 'TickLabel'
+      && n.children.some((c) => ts.isJsxText(c) && c.text.trim() === 'Testing'));
+    const rows = findAll(testingDecl, (n) => isOpen(n) && n.attributes.properties.some((a) =>
+      ts.isJsxAttribute(a) && a.name.getText(flat) === 'testID'));
+    const polarGuards = (node) => {
+      const out = [];
+      for (let child = node, p = node.parent; p && p !== testingDecl; child = p, p = p.parent) {
+        if (ts.isConditionalExpression(p) && child !== p.condition) {
+          const c = p.condition.getText(flat);
+          out.push(child === p.whenTrue ? c : `!(${c})`);
+        }
+        if (ts.isBinaryExpression(p) && child === p.right) {
+          const k = p.operatorToken.kind;
+          const c = p.left.getText(flat);
+          if (k === ts.SyntaxKind.AmpersandAmpersandToken) out.push(c);
+          if (k === ts.SyntaxKind.BarBarToken) out.push(`!(${c})`);
+          if (k === ts.SyntaxKind.QuestionQuestionToken) out.push(`(${c}) == null`);
+        }
+        if (ts.isIfStatement(p) && child !== p.expression) {
+          const c = p.expression.getText(flat);
+          out.push(child === p.thenStatement ? c : `!(${c})`);
+        }
+      }
+      return out;
+    };
+    const guardKey = (n) => polarGuards(n).sort().join(' && ');
+    const bannerKey = banners.length === 1 ? guardKey(banners[0]) : null;
+    const rowKeys = rows.map((r) => ({ at: at(flat, r), key: guardKey(r) }));
+    const mismatched = rowKeys.filter((r) => r.key !== bannerKey);
+    if (banners.length === 1 && bannerKey && rows.length > 0 && mismatched.length === 0) {
+      ok(`2g. testingSection's "Testing" banner renders only with its rows (both under \`${bannerKey}\`)`);
+    } else {
+      fail('2g. testingSection\'s "Testing" banner shares its rows\' gate (no empty banner)',
+           banners.length !== 1 ? `found ${banners.length} "Testing" TickLabels in testingSection`
+             : rows.length === 0 ? 'no testID row found in testingSection — the parse is vacuous'
+             : !bannerKey ? 'the banner is unconditional — with its row off it renders alone'
+             : mismatched.map((r) => `${r.at} under \`${r.key || 'nothing'}\`, banner under \`${bannerKey}\``).join('; '));
     }
   }
 }
