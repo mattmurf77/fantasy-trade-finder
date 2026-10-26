@@ -7153,6 +7153,16 @@ def _deck_card_acted():
             .exists())
 
 
+# The packed-evidence flip (analytics-lead 2026-10-26): the UTC day ("YYYY-MM-DD")
+# trade.first_page_store and trade.packed_evidence went on together. From it,
+# _evidence_shown narrows a packed deck's rows to viewed-or-first-30 (R-U6a), so
+# receipts' graded volume and the endorsement ratio's `recommended` both change
+# meaning. None until the flip: the scribe sets this one value on flip day, and
+# both series' `series_break` caveats read it (receipts_service.admin_metrics,
+# server.suggestion_telemetry_ratio_route), so the two can't drift.
+PACKED_EVIDENCE_FLIP_DAY: str | None = None
+
+
 def _evidence_shown():
     """The one eligibility predicate receipts and the matcher share (R-U6a)."""
     i = deck_impressions_table
@@ -8172,8 +8182,9 @@ def save_suggestion_trade_links(rows: list[dict]) -> int:
 
 def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
     """The always-on endorsement dashboard: per league, executed trades
-    examined, how many matched a rendered suggestion (was_recommended), the
-    ratio, and how many matched a withheld ghost (the incrementality read)."""
+    examined, how many matched a shown suggestion, viewed or first 30
+    (was_recommended; R-U6a, _evidence_shown), the ratio, and how many matched
+    a withheld ghost (the incrementality read)."""
     q = select(
         suggestion_trade_links_table.c.league_id,
         func.count(suggestion_trade_links_table.c.id).label("executed"),
@@ -8196,6 +8207,20 @@ def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
             "ghost_matches": int(r.ghost_matches or 0),
         })
     return out
+
+
+def suggestion_link_day_span(league_id: str | None = None) -> tuple[str | None, str | None]:
+    """The first and last UTC day of the links' trades (traded_at, else
+    computed_at), optionally in one league: (None, None) with no links. The
+    ratio route's series-break caveat reads it."""
+    t = suggestion_trade_links_table
+    day = func.substr(func.coalesce(t.c.traded_at, t.c.computed_at), 1, 10)
+    q = select(func.min(day), func.max(day))
+    if league_id:
+        q = q.where(t.c.league_id == league_id)
+    with engine.connect() as conn:
+        first, last = conn.execute(q).one()
+    return first, last
 
 
 def load_board_state(
