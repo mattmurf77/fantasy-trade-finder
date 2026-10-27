@@ -219,6 +219,111 @@ def test_execute_deletes_verified_users_credential_rows_only_with_the_flag(engin
     assert "(g) entry users without verified_via (legal R28.16 part 1): 0 -> OK" in out
 
 
+def _creds(engine):
+    with engine.connect() as conn:
+        return sorted([r.user_id for r in conn.execute(select(db.espn_credentials_table))]
+                      + [r.user_id for r in conn.execute(select(db.mfl_credentials_table))])
+
+
+def test_the_flag_deletes_only_verified_entry_users_rows(engine, capsys):
+    """release-lead #452 r5 P2-1: rows on an unverified entry user and on
+    non-entry users sit next to the verified one, and stay."""
+    add_undated(engine)
+    with engine.begin() as conn:
+        seed(conn, db.mfl_credentials_table, "verified", user_id=VERIFIED, mfl_username="a")
+        seed(conn, db.espn_credentials_table, "undated", user_id=UNDATED, swid="{UNDATED}")
+        seed(conn, db.mfl_credentials_table, "sleeper", user_id=SLEEPER, mfl_username="b")
+        seed(conn, db.espn_credentials_table, "acct", user_id=ACCT, swid="{ACCT}")
+    code, out = run(capsys, "--execute", "--expect", "3", "--delete-verified-credentials", "1")
+    assert code == 0, out
+    assert _creds(engine) == sorted([UNDATED, SLEEPER, ACCT])
+
+
+def _seed_verified_credential(engine):
+    with engine.begin() as conn:
+        seed(conn, db.mfl_credentials_table, "verified", user_id=VERIFIED, mfl_username="a")
+
+
+def test_a_failed_target_skips_the_credential_step(engine, capsys, monkeypatch):
+    """release-lead #452 r5 P1-1 (1): no credential delete after a failed target."""
+    _seed_verified_credential(engine)
+    real = accounts.delete_user_data
+    monkeypatch.setattr(accounts, "delete_user_data",
+                        lambda uid, *a, **k: (_ for _ in ()).throw(RuntimeError("x"))
+                        if uid == MFL else real(uid, *a, **k))
+    code, out = run(capsys, "--execute", "--expect", "3", "--delete-verified-credentials", "1")
+    assert code == 1
+    assert "targets: 3; deleted: 2; failed: 1" in out
+    assert "verified entry users' credential rows: SKIPPED, 1 kept, because a target failed." in out
+    assert VERIFIED in _creds(engine)
+
+
+def test_the_credential_step_rolls_back_unless_exactly_m_rows_go(engine, capsys, monkeypatch):
+    """release-lead #452 r5 P1-1 (4) and P2-2: a verified holder's row added
+    after the count makes the write match 2, not 1, so nothing is deleted."""
+    _seed_verified_credential(engine)
+    real = accounts.delete_user_data
+    added = []
+
+    def deletion_then_a_new_row(uid, *a, **k):
+        counts = real(uid, *a, **k)
+        if not added:
+            added.append(1)
+            with engine.begin() as conn:
+                seed(conn, db.espn_credentials_table, "late", user_id=LATE, swid="{LATE}")
+        return counts
+    monkeypatch.setattr(accounts, "delete_user_data", deletion_then_a_new_row)
+    code, out = run(capsys, "--execute", "--expect", "3", "--delete-verified-credentials", "1")
+    assert code == 1
+    assert "targets: 3; deleted: 3; failed: 0" in out          # the purge's summary first
+    assert out.index("purge_entry_users: EXECUTE.") < out.index("ROLLED BACK")
+    assert ("verified entry users' credential rows: ROLLED BACK, nothing deleted: 2 matched at "
+            "the write, not 1.") in out
+    assert _creds(engine) == sorted([VERIFIED, LATE])
+
+
+def test_a_credential_step_error_prints_its_type_only_and_deletes_nothing(engine, capsys, monkeypatch):
+    """release-lead #452 r5 P1-1 (2), (3): the summary is printed first; the
+    error shows its type only, never an id; the transaction rolls back."""
+    _seed_verified_credential(engine)
+    real_delete = purge.delete
+    calls = []
+
+    def second_delete_fails(table):
+        calls.append(table.name)
+        if len(calls) > 1:
+            raise RuntimeError(f"boom {VERIFIED}")
+        return real_delete(table)
+    monkeypatch.setattr(purge, "delete", second_delete_fails)
+    code, out = run(capsys, "--execute", "--expect", "3", "--delete-verified-credentials", "1")
+    assert code == 1
+    assert out.index("purge_entry_users: EXECUTE.") < out.index("FAILED (RuntimeError)")
+    assert ("verified entry users' credential rows: FAILED (RuntimeError), rolled back, nothing "
+            "deleted.") in out
+    assert VERIFIED not in out and "boom" not in out
+    assert VERIFIED in _creds(engine)
+
+
+def test_verify_b_counts_entry_rows_case_sensitively(engine, capsys):
+    """SQLite's LIKE ignores case; an "ENTRY:" id is not an entry user."""
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.begin() as conn:
+        seed(conn, db.espn_credentials_table, "upper", user_id="ENTRY:espn:1.t1", swid="{UP}")
+    code, out = run(capsys, "--verify")
+    assert code == 0, out
+    assert ("(b) credential rows on any entry: id: espn_credentials.user_id 0, "
+            "mfl_credentials.user_id 0 -> OK") in out
+
+
+def test_a_blank_verified_via_is_not_a_verification(engine, capsys):
+    blank = "entry:mfl:61408.f0011"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=blank, created_at=BEFORE,
+                                                   verified_via=" "))
+    code, out = run(capsys)
+    assert "targets: 4 (unverified, created before the cutoff: 3;" in out
+
+
 def test_delete_verified_credentials_only_goes_with_execute(engine, capsys):
     with pytest.raises(SystemExit):
         run(capsys, "--delete-verified-credentials", "1")

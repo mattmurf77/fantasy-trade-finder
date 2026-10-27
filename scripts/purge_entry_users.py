@@ -212,7 +212,7 @@ def discover(cutoff: datetime) -> dict:
         if r is None:
             out["targets"].add(uid)
             out["orphans"] += 1
-        elif r.verified_via:
+        elif (r.verified_via or "").strip():   # a blank value isn't a verification
             out["skipped_verified"].add(uid)
         else:
             created = _parse_iso(r.created_at)
@@ -246,6 +246,20 @@ def _count_like(pairs, existing, pattern) -> dict[str, int]:
         for tbl, col in _present(pairs, existing):
             counts[f"{tbl.name}.{col}"] = conn.execute(
                 select(func.count()).select_from(tbl).where(tbl.c[col].like(pattern))).scalar() or 0
+    return counts
+
+
+def _count_entry_prefixed(pairs, existing) -> dict[str, int]:
+    """Rows whose column starts with `entry:`, case-sensitively on every
+    dialect: SQLite's LIKE ignores ASCII case, so an "ENTRY:" row would count."""
+    counts = {}
+    with db.engine.connect() as conn:
+        for tbl, col in _present(pairs, existing):
+            c = tbl.c[col]
+            counts[f"{tbl.name}.{col}"] = conn.execute(
+                select(func.count()).select_from(tbl).where(
+                    c.like(ENTRY_PREFIX + "%"),
+                    func.substr(c, 1, len(ENTRY_PREFIX)) == ENTRY_PREFIX)).scalar() or 0
     return counts
 
 
@@ -416,30 +430,65 @@ def execute(cutoff, expect: int, expect_creds: int = 0) -> int:
         except Exception as e:  # the id is never printed; only the error type
             failed += 1
             print(f"  a target failed ({type(e).__name__}); continuing")
-    removed: Counter = Counter()
-    if n_creds:
-        # ONLY the credential rows: users, accounts, sessions, entitlements and
-        # everything else of theirs stays (legal R28.17 A1).
-        with db.engine.begin() as conn:
-            for tbl, col in _present([(a, "user_id") for a in CREDENTIAL_TABLES], found["existing"]):
-                for chunk in _chunks(verified):
-                    res = conn.execute(delete(tbl).where(tbl.c[col].in_([_guard(u) for u in chunk])))
-                    removed[tbl.name] += res.rowcount or 0
+    # The purge's own summary first, so it's on record whatever the credential
+    # step does next.
     print("\n".join([f"purge_entry_users: EXECUTE. targets: {len(targets)}; "
                      f"deleted: {len(targets) - failed}; failed: {failed}",
                      "summed delete_user_data counts:",
-                     json.dumps({k: v for k, v in sorted(totals.items()) if v}, indent=2),
-                     f"verified entry users' credential rows deleted (accounts kept): "
-                     f"{sum(removed.values())}"
-                     + "".join(f"; {k} {v}" for k, v in sorted(removed.items()) if v)]))
-    return 1 if failed else 0
+                     json.dumps({k: v for k, v in sorted(totals.items()) if v}, indent=2)]))
+    if not n_creds:
+        return 1 if failed else 0
+    # The credential step fails closed (release-lead #452 round 5, P1-1): it
+    # runs only after a clean purge, in one transaction that deletes exactly
+    # the M rows the operator confirmed or nothing, and an error prints its
+    # type only.
+    label = "verified entry users' credential rows"
+    if failed:
+        print(f"{label}: SKIPPED, {n_creds} kept, because a target failed. Fix that, dry-run "
+              "again and run the command it prints.")
+        return 1
+    try:
+        removed = _delete_verified_credentials(found, verified, n_creds)
+    except _CountChanged as e:
+        print(f"{label}: ROLLED BACK, nothing deleted: {e.count} matched at the write, not "
+              f"{n_creds}. Dry-run again and run the command it prints.")
+        return 1
+    except Exception as e:  # the type only: no id, no SQL parameters
+        print(f"{label}: FAILED ({type(e).__name__}), rolled back, nothing deleted. Dry-run "
+              "again and run the command it prints.")
+        return 1
+    print(f"{label} deleted (accounts kept): {sum(removed.values())}"
+          + "".join(f"; {k} {v}" for k, v in sorted(removed.items()) if v))
+    return 0
+
+
+class _CountChanged(Exception):
+    def __init__(self, count: int):
+        super().__init__("credential count changed")
+        self.count = count
+
+
+def _delete_verified_credentials(found, verified, expect: int) -> Counter:
+    """Delete ONLY the ESPN/MFL credential rows of `verified` (legal R28.17
+    A1): users, accounts, sessions, entitlements and everything else of
+    theirs stays. One transaction: unless exactly `expect` rows go (a row
+    added or removed since the count), it rolls back and raises."""
+    removed: Counter = Counter()
+    with db.engine.begin() as conn:
+        for tbl, col in _present([(a, "user_id") for a in CREDENTIAL_TABLES], found["existing"]):
+            for chunk in _chunks(verified):
+                res = conn.execute(delete(tbl).where(tbl.c[col].in_([_guard(u) for u in chunk])))
+                removed[tbl.name] += res.rowcount or 0
+        if sum(removed.values()) != expect:
+            raise _CountChanged(sum(removed.values()))
+    return removed
 
 
 def verify(cutoff) -> int:
     found = discover(cutoff)
     remaining = _count_naming(found["keys"], found["targets"])
     cred_pairs = [(attr, "user_id") for attr in CREDENTIAL_TABLES]
-    creds = _count_like(cred_pairs, found["existing"], ENTRY_PREFIX + "%")
+    creds = _count_entry_prefixed(cred_pairs, found["existing"])
     skipped = set().union(found["skipped_verified"], found["skipped_after_cutoff"],
                           found["skipped_no_created_at"])
     on_skipped = _count_naming(_present(cred_pairs, found["existing"]), skipped)

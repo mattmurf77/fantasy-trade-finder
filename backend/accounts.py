@@ -847,8 +847,10 @@ def _delete_user_data(sleeper_user_id: str,
         # member's own name (server._sync_mfl_owned_picks, the assignment
         # seeder), so each scrubbed side's name becomes those writers' own
         # fallback, "Team <slot>". The original side's slot is the row's
-        # original_roster_id; the owner side's is this person's slot in the
-        # same league (their own original picks), else the placeholder.
+        # original_roster_id. The owner side's is the same when the person is
+        # on both sides (their own pick); otherwise it's their one slot in that
+        # league (their own original picks, aliases included), else the
+        # placeholder.
         picks = db.draft_picks_table
         platform_grid = picks.c.platform.isnot(None) & (picks.c.platform != "sleeper")
         named = conn.execute(select(
@@ -865,6 +867,10 @@ def _delete_user_data(sleeper_user_id: str,
         def _team(slot) -> str:
             return f"Team {slot}" if slot else DELETED_USER_PLACEHOLDER
 
+        # One UPDATE per distinct set of new values, not per row: a person's
+        # rows share a handful of slots, and this runs inside the deletion
+        # transaction.
+        batches: dict[tuple, list] = {}
         for r in named:
             values = {}
             if r.original_user_id in user_ids:
@@ -872,9 +878,13 @@ def _delete_user_data(sleeper_user_id: str,
                               original_username=_team(r.original_roster_id))
             if r.owner_user_id in user_ids:
                 slots = own_slots.get(r.league_id, set())
-                values.update(owner_user_id=DELETED_USER_PLACEHOLDER,
-                              owner_username=_team(next(iter(slots)) if len(slots) == 1 else None))
-            conn.execute(update(picks).where(picks.c.id == r.id).values(**values))
+                slot = (r.original_roster_id if r.original_user_id in user_ids
+                        else next(iter(slots)) if len(slots) == 1 else None)
+                values.update(owner_user_id=DELETED_USER_PLACEHOLDER, owner_username=_team(slot))
+            batches.setdefault(tuple(sorted(values.items())), []).append(r.id)
+        for key, ids in batches.items():
+            for i in range(0, len(ids), 500):
+                conn.execute(update(picks).where(picks.c.id.in_(ids[i:i + 500])).values(**dict(key)))
         counts["draft_picks_owner_anonymized"] = len(named)
         # recorded_picks.picking_team_id (a league_members.user_id) has no
         # platform column to apply the rule above with, so it is anonymized

@@ -342,6 +342,11 @@ def test_platform_pick_grid_names_follow_the_anonymized_ids(engine):
         pick("out", "L1", OTHER, UID, "0003")           # UID's pick, now OTHER's
         pick("alias-in", "L1", ALIAS, OTHER, "0006")    # the bound alias is the same person
         pick("orphan-in", "L2", UID, OTHER, "0001")     # no own pick in L2: slot unknown
+        pick("alias-own", "L3", ALIAS, ALIAS, "0009")   # the slot comes from the alias's pick
+        pick("in-L3", "L3", UID, OTHER, "0002")
+        pick("two-a", "L4", UID, UID, "0001")           # two slots in one league:
+        pick("two-b", "L4", ALIAS, ALIAS, "0002")       # a traded-in pick can't tell which,
+        pick("in-L4", "L4", UID, OTHER, "0003")         # but an own pick still can
         pick("espn-own", "E1", UID, UID, "2", platform="espn")
         pick("sleeper", "S1", UID, UID, "4", platform="sleeper")
     accounts.delete_user_data(UID)
@@ -352,6 +357,10 @@ def test_platform_pick_grid_names_follow_the_anonymized_ids(engine):
     assert names("out") == ("Name of " + OTHER, "Team 0003")
     assert names("alias-in") == ("Team 0003", "Name of " + OTHER)
     assert names("orphan-in") == (gone, "Name of " + OTHER)
+    assert names("in-L3") == ("Team 0009", "Name of " + OTHER)
+    assert names("two-a") == ("Team 0001", "Team 0001")
+    assert names("two-b") == ("Team 0002", "Team 0002")
+    assert names("in-L4") == (gone, "Name of " + OTHER)
     assert names("espn-own") == ("Team 2", "Team 2")
     assert names("sleeper") == ("Name of " + UID, "Name of " + UID)    # public Sleeper data
     for pid, r in picks.items():
