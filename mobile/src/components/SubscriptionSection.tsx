@@ -47,9 +47,11 @@ import {
 //     opening the VerifySheet. No See plans, no Restore, no status, the same
 //     for every unverified session. That branch is a separate component that
 //     reads no subscription field, so it can't vary by what the account has.
-//   - verified member: the plan line (mon.pay.sub_status), for a Founding GM
+//   - verified member: Manage subscription (Apple's page) and Restore. The
+//     STATUS block (the plan line mon.pay.sub_status; for a Founding GM
 //     "Founding GM since {date}" with the FounderTag, the kept-price and
-//     lapse lines; Manage subscription (Apple's page) and Restore.
+//     lapse lines) waits for update 1 (head-eng's B8 ruling): it renders only
+//     when STATUS_ROWS_AT_LAUNCH flips, and until then RevenueCat isn't read.
 //   - verified non-subscriber: See plans (→ the paywall, source 'settings',
 //     the mon.pay.headline variant; it emits paywall_viewed) and Restore.
 // NO trial state, NO dates but the join date, NO countdown (D10). A value
@@ -62,6 +64,12 @@ import {
 
 /** Apple's own subscription-management page (Manage subscription). */
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
+
+/** B8 (head-eng, 2026-10-27): the 11-06 binary ships Settings › Subscription
+ *  WITHOUT the member status block (plan line, "Founding GM since" + the
+ *  FounderTag, kept-price, lapse). Update 1 flips this. While false the block
+ *  doesn't render and getActivePro (RevenueCat) is never called. */
+export const STATUS_ROWS_AT_LAUNCH: boolean = false;
 
 /** B8 #1 (head-eng): the Settings tip-jar row shows only while the server
  *  offers tips, i.e. the cached /api/paywall/config `tips` is a non-empty
@@ -109,7 +117,6 @@ function UnverifiedRow() {
 }
 
 function VerifiedRows() {
-  const queryClient = useQueryClient();
   const userId = useSession((s) => s.user?.user_id ?? null);
   const loaded = useEntitlements((s) => s.loaded);
   const pro = useEntitlements((s) => s.pro);
@@ -117,8 +124,9 @@ function VerifiedRows() {
   const noteCustomerInfo = useEntitlements((s) => s.noteCustomerInfo);
   const refreshEntitlements = useEntitlements((s) => s.refresh);
 
-  // RevenueCat's view of THIS user's plan, for display only. Asked only once
-  // its identity is confirmed as the session user.
+  // RevenueCat's view of THIS user's plan, for the status block only, so
+  // never asked while that block is off (B8). Asked only once its identity is
+  // confirmed as the session user.
   const [idReady, setIdReady] = useState(() => isIdentityReady(userId));
   useEffect(() => {
     setIdReady(isIdentityReady(userId));
@@ -126,7 +134,7 @@ function VerifiedRows() {
   }, [userId]);
   const [active, setActive] = useState<Awaited<ReturnType<typeof getActivePro>>>(null);
   useEffect(() => {
-    if (!pro || !userId || !idReady) {
+    if (!STATUS_ROWS_AT_LAUNCH || !pro || !userId || !idReady) {
       setActive(null);
       return;
     }
@@ -203,6 +211,27 @@ function VerifiedRows() {
     );
   }
 
+  return (
+    <>
+      {/* B8: the status block waits for update 1. */}
+      {STATUS_ROWS_AT_LAUNCH ? <MemberStatus active={active} founder={founder} /> : null}
+      <ManageSubscriptionLink />
+      {restoreRows}
+    </>
+  );
+}
+
+/** The member status block (update 1; off while STATUS_ROWS_AT_LAUNCH is
+ *  false): the plan line, and for a Founding GM the join date with the
+ *  FounderTag, the kept-price and lapse lines. */
+function MemberStatus({
+  active,
+  founder,
+}: {
+  active: Awaited<ReturnType<typeof getActivePro>>;
+  founder: boolean;
+}) {
+  const queryClient = useQueryClient();
   // The member's plan: StoreKit's period for the active product, else the
   // cached config's. A Founding GM's price is the Founder price the legal
   // lines below name; anyone else's is StoreKit's (else the config's).
@@ -251,8 +280,6 @@ function VerifiedRows() {
           </ChalkText>
         </View>
       ) : null}
-      <ManageSubscriptionLink />
-      {restoreRows}
     </>
   );
 }

@@ -1400,11 +1400,13 @@ check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription �
   assert(/if \(!pro\) \{\s*return \(\s*<>\s*<LinkRow\s*testID="settings-subscription-see-plans"\s*title=\{MON\['mon\.pay\.see_plans'\]\}\s*onPress=\{\(\) => void openPaywall\(\{ source: 'settings' \}\)\}\s*\/>\s*\{restoreRows\}/.test(ver),
     'non-member: See plans → the paywall (source settings: it emits paywall_viewed) + Restore');
   assert(/<ManageSubscriptionLink \/>\s*\{restoreRows\}\s*<\/>\s*\);\s*\}$/.test(ver), 'member: Manage + Restore last');
-  assert(/testID="settings-subscription-status"/.test(ver) && /\{status\}/.test(ver) && /subStatus\(period, price, founder\)/.test(ver), 'member: the status line');
-  assert(/founder\s*\?\s*FOUNDER_PRICE\[period\]/.test(ver), 'a Founding GM\'s line carries the Founder price');
-  assert(/testID="settings-subscription-since"[\s\S]*<ChalkText variant="data">\{since\.date\}<\/ChalkText>[\s\S]*\{FOUNDER_TAG\}/.test(ver), 'Founding GM since {date} (Plex Mono) with the FounderTag trailing');
-  assert(/\{keptSettings\(period\)\}/.test(ver) && /\{MON\['mon\.club\.lapse'\]\}/.test(ver), 'kept_settings + lapse');
-  assert(/const since = founder \? clubSince\(active\?\.since\) : null;/.test(ver), 'the club lines are for members of the club only');
+  // The member status block (update 1; §9j pins that it's off for the binary).
+  const st = fnText(SUBS, 'MemberStatus');
+  assert(/testID="settings-subscription-status"/.test(st) && /\{status\}/.test(st) && /subStatus\(period, price, founder\)/.test(st), 'member: the status line');
+  assert(/founder\s*\?\s*FOUNDER_PRICE\[period\]/.test(st), 'a Founding GM\'s line carries the Founder price');
+  assert(/testID="settings-subscription-since"[\s\S]*<ChalkText variant="data">\{since\.date\}<\/ChalkText>[\s\S]*\{FOUNDER_TAG\}/.test(st), 'Founding GM since {date} (Plex Mono) with the FounderTag trailing');
+  assert(/\{keptSettings\(period\)\}/.test(st) && /\{MON\['mon\.club\.lapse'\]\}/.test(st), 'kept_settings + lapse');
+  assert(/const since = founder \? clubSince\(active\?\.since\) : null;/.test(st), 'the club lines are for members of the club only');
   assert(/testID = 'settings-subscription-manage'/.test(sub) && /'https:\/\/apps\.apple\.com\/account\/subscriptions'/.test(sub), 'Manage subscription → Apple\'s page');
   assert(/testID="settings-subscription-restore"/.test(sub), 'Restore');
   const restore = ver.slice(ver.indexOf('const onRestore'), ver.indexOf('const restoreRows'));
@@ -1513,6 +1515,30 @@ check('9i. B8 #1 [executed]: the Settings tip row is data-driven — shown only 
   cached = { tips: [{ product_id: 'ftf_tip_499' }] }; eq(hook(), true, 'hook: tips → shown');
   eq(JSON.stringify(opts.queryKey), JSON.stringify(['paywall-config', 'ios']), 'the paywall config cache key');
   eq(opts.enabled, false, 'a subscription that never fetches (the hub\'s rule 1)');
+});
+
+check('9j. B8 [shape]: the 11-06 binary ships Settings › Subscription WITHOUT the member status block (STATUS_ROWS_AT_LAUNCH = false), never reads RevenueCat for it, and keeps Restore reachable for every verified session (member, non-member, entitlements still loading)', () => {
+  const sub = strip(read(SUBS));
+  assert(/export const STATUS_ROWS_AT_LAUNCH: boolean = false;/.test(sub), 'the update-1 switch is OFF');
+  const ver = fnText(SUBS, 'VerifiedRows');
+  eq((sub.match(/<MemberStatus\b/g) || []).length, 1, 'one mount of the status block');
+  assert(/\{STATUS_ROWS_AT_LAUNCH \? <MemberStatus active=\{active\} founder=\{founder\} \/> : null\}/.test(ver), 'the status block renders only behind the switch');
+  for (const id of ['settings-subscription-status', 'settings-subscription-since']) {
+    assert(!ver.includes(id) && fnText(SUBS, 'MemberStatus').includes(id), `${id} lives only in the switched-off block`);
+  }
+  assert(!/FOUNDER_TAG|keptSettings|mon\.club\.lapse|subStatus/.test(ver), 'no status line, tag, kept-price or lapse outside the block');
+  eq((sub.match(/getActivePro\(/g) || []).length, 1, 'one RevenueCat display read');
+  assert(/useEffect\(\(\) => \{\s*if \(!STATUS_ROWS_AT_LAUNCH \|\| !pro \|\| !userId \|\| !idReady\) \{\s*setActive\(null\);\s*return;\s*\}\s*let alive = true;\s*void getActivePro\(userId\)/.test(ver),
+    'getActivePro is never called while the switch is off');
+  // Restore on every verified path: still loading, non-member, member.
+  assert(/if \(!loaded\) return restoreRows;/.test(ver), 'loading → Restore');
+  assert(/if \(!pro\) \{\s*return \(\s*<>[\s\S]*?\{restoreRows\}\s*<\/>\s*\);\s*\}/.test(ver), 'non-member → See plans + Restore');
+  assert(/<ManageSubscriptionLink \/>\s*\{restoreRows\}\s*<\/>\s*\);\s*\}$/.test(ver), 'member → Manage + Restore');
+  assert(/testID="settings-subscription-restore"/.test(ver.slice(ver.indexOf('const restoreRows'), ver.indexOf('if (!loaded)'))), 'restoreRows is the Restore row');
+  // A session whose verification isn't known yet (null) is NOT unverified:
+  // it gets the verified rows, so Restore stays reachable (B8 #3).
+  assert(/const unverified = useSession\(\(s\) => !s\.isDemo && s\.verification\?\.session_verified === false\);/.test(fnText(SUBS, 'SubscriptionSection')),
+    'null verification reads as not-unverified (Restore reachable)');
 });
 
 function walk(dir, out = []) {
