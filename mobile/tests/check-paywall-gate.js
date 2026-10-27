@@ -13,6 +13,17 @@
 //     identity, so the webhook grants the wrong user_id and the reviewer who
 //     paid stays gated (D12): an App Review rejection;
 //   - a Send re-sent for the user after verifying, with no fresh tap (D18).
+// M3 (account surfaces; §9) adds:
+//   - Apple's sheet (or a Restore) reached by an unverified session, or a
+//     purchase made FOR the user after they verify (D9);
+//   - the Founding GMs welcome after the cut-off, twice, after a Restore, or
+//     with a countdown or confetti (D10, design §4.1);
+//   - Settings › Subscription varying by subscription for an unverified
+//     session, or showing a trial state or any date but the join date
+//     (R28.9 3f, D10);
+//   - the legal Delete line drifting from its verbatim text;
+//   - an invitee eyebrow with a raw "{inviter}" / "{league}" in it;
+//   - the Home mark or kept-price line shipping early.
 // M2 (the deck; §8) adds:
 //   - a prefetch, poll or auto-start that opens the paywall under the thumb
 //     (the pinned background set, D2);
@@ -275,7 +286,9 @@ check('2a. [shape] the gate routing, router and sheet read no entitlement field'
     'components/VerifySheet.tsx': strip(read('components/VerifySheet.tsx')),
   };
   for (const [name, s] of Object.entries(files)) {
-    const hit = s.match(/useEntitlements|getEntitlements|entitlement|founder|\.pro\b|\bpro:|\bsources\b|expires_at/i);
+    // `\bfounder\b`: the entitlement field, not the FounderWelcome route
+    // name the M3 trigger hold names (§9d).
+    const hit = s.match(/useEntitlements|getEntitlements|entitlement|\bfounder\b|\.pro\b|\bpro:|\bsources\b|expires_at/i);
     assert(!hit, `${name} reads "${hit && hit[0]}"`);
   }
 });
@@ -580,6 +593,11 @@ const sdk = {
     this.calls.push(['eligibility', ids.join(',')]);
     return this.eligibility;
   },
+  // M3 (§9e): Settings' display-only read of the active plan.
+  customerInfo: null,
+  products: {},
+  async getCustomerInfo() { this.calls.push(['customerInfo', this.appUserId]); return this.customerInfo; },
+  async getProducts(ids) { this.calls.push(['products', ids.join(',')]); return ids.map((id) => this.products[id]).filter(Boolean); },
 };
 process.env.EXPO_PUBLIC_REVENUECAT_IOS_KEY = 'appl_test';
 const purchases = load('api/purchases.ts', { 'react-native-purchases': { default: sdk } });
@@ -703,11 +721,12 @@ check('6c. [shape] testIDs kept + the scope\'s added; paywall_viewed carries gat
   assert(/track\('paywall_viewed', \{\s*source,\s*platform: 'ios',\s*\.\.\.\(gate \? \{ gate \} : \{\}\),\s*\.\.\.\(kind \? \{ kind \} : \{\}\),/.test(s),
     'paywall_viewed {source, platform, gate?, kind?}');
 });
-check('6d. [shape] an unverified session never sees the paywall (backstop → the sheet)', () => {
+check('6d. [shape] an unverified session never sees the paywall (backstop → the sheet, through M3\'s one D9 route)', () => {
   const s = strip(read('screens/PaywallScreen.tsx'));
   assert(/!s\.isDemo && s\.verification\?\.session_verified === false/.test(s), 'unverified read');
   assert(/if \(!paywallOn \|\| unverified\) return null;/.test(s), 'renders nothing while unverified');
-  assert(/openVerify\(\)/.test(s), 'opens the VerifySheet');
+  assert(/useEffect\(\(\) => \{\s*if \(!paywallOn \|\| !unverified\) return;\s*verifyFirst\(\);\s*\}, \[paywallOn, unverified, verifyFirst\]\);/.test(s),
+    'the backstop opens the VerifySheet through verifyFirst (§9b)');
 });
 check('6e. [shape] the analytics row is registered with the emitter (gate + kind)', () => {
   const tax = fs.readFileSync(path.join(ROOT, '..', 'backend', 'analytics_taxonomy.py'), 'utf8');
@@ -1171,6 +1190,283 @@ check('8n. head-eng grant (b) [executed]: the active-overhaul probe is backgroun
   await rejects(overhaul.getOffers('o1'));
   eq(signals.length, 1, 'getOffers is user-initiated');
   assert(/queryFn: \(\) => getActiveOverhaul\(leagueId!\),/.test(strip(read(TRADES))), "TradesScreen's probe line is untouched (the defaults do it)");
+});
+
+// ═══ 9. M3 — account surfaces (D9, D10, design §4.1/§5, copy §9.4–9.6) ═══
+// What runs under node is EXECUTED: the router's verify-then-return, the
+// club window and the once-per-user welcome memory, the copy helpers (the
+// status line, the join date, the invitee template), and the purchases
+// display read. What lives in a screen's JSX or closures is pinned by
+// shape, and says so ("[shape]").
+const PAYWALL = 'screens/PaywallScreen.tsx';
+const WELCOME = 'screens/FounderWelcomeScreen.tsx';
+const SUBS = 'components/SubscriptionSection.tsx';
+const ACCOUNT_DATA = 'screens/settings/sections/AccountDataSection.tsx';
+const DELETE_LINE = "Deleting your account doesn't cancel an active subscription. To stop future charges, cancel it in your Apple ID settings first.";
+/** The body of `const <name> = useCallback(<arrow>, …)` in a file. */
+function callbackBody(rel, name) {
+  const { sf } = astOf(rel);
+  const decl = findNodes(sf, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === name
+    && n.initializer && ts.isCallExpression(n.initializer) && n.initializer.expression.getText(sf) === 'useCallback')[0];
+  if (!decl) throw new Error(`${rel}: useCallback ${name} not found`);
+  return { sf, body: decl.initializer.arguments[0].body };
+}
+/** One top-level function declaration's source text, comments out. */
+function fnText(rel, name) {
+  const { sf } = astOf(rel);
+  const node = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === name)[0];
+  if (!node) throw new Error(`${rel}: function ${name} not found`);
+  return strip(node.getText(sf));
+}
+const NO_ENTITLEMENT = /useEntitlements|getEntitlements|entitlement|\bfounder\b|\.pro\b|\bpro\b|\bsources\b|expires_at|getActivePro/i;
+
+check('9a. D9 [executed]: verifyThenReturn opens the sheet only; on `verified` the SAME paywall comes back (variant + plan) and nothing is bought; Cancel / a new sign-in open nothing more', async () => {
+  navCalls.length = 0;
+  session.verification = { session_verified: false };
+  const back = { source: 'gate', gate: 'preview_used', kind: 'send', plan: 'ftf_pro_monthly' };
+  let held = gateMod.verifyThenReturn(back);
+  eq(gateMod.usePaywallGate.getState().verifyOpen, true, 'the sheet is up');
+  eq(navCalls.length, 0, 'no paywall while unverified');
+  session.verification = { session_verified: true };
+  gateMod.settleVerify('verified');
+  eq(await held, 'verified', 'outcome');
+  eq(JSON.stringify(navCalls), JSON.stringify([['Paywall', back]]), 'the same paywall, same plan');
+  for (const outcome of ['dismissed', 'signed_in']) {
+    navCalls.length = 0;
+    session.verification = { session_verified: false };
+    held = gateMod.verifyThenReturn(back);
+    gateMod.settleVerify(outcome);
+    eq(await held, outcome, outcome);
+    eq(navCalls.length, 0, `${outcome}: nothing reopens`);
+  }
+  navCalls.length = 0;
+  session.verification = { session_verified: true };
+  gateMod.openPaywall({ source: 'settings' });
+  eq(JSON.stringify(navCalls[0]), JSON.stringify(['Paywall', { source: 'settings' }]), 'no plan → none passed');
+  session.verification = null;
+  assert(!NO_ENTITLEMENT.test(fnText('state/usePaywallGate.ts', 'verifyThenReturn')), '[shape] verifyThenReturn reads a subscription field');
+});
+
+check('9b. D9 [shape]: the purchase button and Restore check the session FIRST and route an unverified one to the one verify route; Apple\'s sheet / the restore come after; that route reads the session only and pre-selects the plan', () => {
+  for (const [name, sdkCall] of [['onPurchase', 'purchasePackage('], ['onRestore', 'restorePurchases(']]) {
+    const { sf, body } = callbackBody(PAYWALL, name);
+    const first = body.statements[0];
+    assert(first && /^if \(isUnverifiedSession\(\)\) \{\s*verifyFirst\(\);\s*return;\s*\}$/.test(strip(first.getText(sf)).trim()),
+      `${name}: its FIRST statement must be the unverified check → verifyFirst; return`);
+    const text = strip(body.getText(sf));
+    assert(text.indexOf(sdkCall) > text.indexOf('verifyFirst();'), `${name}: ${sdkCall} precedes the check`);
+  }
+  const vf = callbackBody(PAYWALL, 'verifyFirst');
+  const route = strip(vf.body.getText(vf.sf));
+  assert(/if \(leavingForVerify\.current\) return;\s*leavingForVerify\.current = true;/.test(route), 'once per mount (the backstop and a tap never both pop the stack)');
+  assert(/const back = \{\s*source,\s*\.\.\.\(gate \? \{ gate \} : \{\}\),\s*\.\.\.\(kind \? \{ kind \} : \{\}\),\s*\.\.\.\(selectedId \? \{ plan: selectedId \} : \{\}\),\s*\};\s*dismiss\(\);\s*setTimeout\(\(\) => void verifyThenReturn\(back\), 450\);/.test(route),
+    'close this modal, then the sheet; on verified the same variant with the selected plan');
+  assert(!NO_ENTITLEMENT.test(route), 'the D9 route reads a subscription field');
+  assert(!/purchasePackage|restorePurchases/.test(route), 'the D9 route buys or restores');
+  const code = strip(read(PAYWALL));
+  eq((code.match(/verifyThenReturn\(/g) || []).length, 1, 'one route to the sheet from the paywall');
+  assert(!/\bopenVerify\(/.test(code), 'no second path to the sheet');
+  assert(/const pick = plans\.find\(\(p\) => p\.product\.product_id === planParam\)\s*\?\? plans\.find\(\(p\) => p\.period === 'annual'\)/.test(code), 'the carried plan is pre-selected');
+});
+
+check('9c. D10 [executed]: the welcome only inside the club window (server open AND before closes_at on this clock); once per user, remembered first; unreadable storage never shows it', async () => {
+  const open = extractFn(WELCOME, 'clubWindowOpen', {});
+  const CUT = '2027-01-01T00:00:00Z';
+  const before = Date.parse('2026-12-31T23:59:00Z');
+  eq(open({ open: true, closes_at: CUT }, before), true, 'in the window');
+  eq(open({ open: true, closes_at: CUT }, Date.parse(CUT)), false, 'at the cut-off');
+  eq(open({ open: true, closes_at: CUT }, Date.parse('2027-01-01T00:01:00Z')), false, 'a cached open:true after the cut-off');
+  eq(open({ open: false, closes_at: CUT }, before), false, 'server says closed');
+  eq(open({ open: true }, before), false, 'no closes_at');
+  eq(open({ open: true, closes_at: 'soon' }, before), false, 'unreadable closes_at');
+  eq(open(undefined, before), false, 'no club (older server)');
+  const store = new Map();
+  const writes = [];
+  let broken = false;
+  const fakeAS = {
+    getItem: async (k) => { if (broken) throw new Error('io'); return store.has(k) ? store.get(k) : null; },
+    setItem: async (k, v) => { writes.push(k); store.set(k, v); },
+  };
+  const prefix = (read(WELCOME).match(/const WELCOME_SHOWN_KEY_PREFIX = '([^']+)';/) || [])[1];
+  eq(prefix, 'ftf_founder_welcome_shown_', 'the per-user key');
+  const claim = extractFn(WELCOME, 'claimFounderWelcome', { AsyncStorage: fakeAS, WELCOME_SHOWN_KEY_PREFIX: prefix });
+  eq(await claim('u1'), true, 'first time');
+  eq(writes[0], 'ftf_founder_welcome_shown_u1', 'remembered under the user');
+  eq(await claim('u1'), false, 'never twice');
+  eq(await claim('u2'), true, 'per user, not per device');
+  eq(await claim(''), false, 'no user');
+  broken = true;
+  eq(await claim('u3'), false, 'unreadable storage → no welcome');
+});
+
+check('9d. D10 / design §4.1 [shape + executed]: only a SUCCESSFUL purchase opens it (never Restore), replacing the paywall; the §9.5 keys verbatim, the ram\'s `celebrate`, one Primary (founder-welcome-back), a Reduce-Motion-static stagger, title focus; no confetti or countdown; the trigger\'s slot is held through it', async () => {
+  const pb = callbackBody(PAYWALL, 'onPurchase');
+  const buy = strip(pb.body.getText(pb.sf));
+  const at = buy.search(/if \(clubWindowOpen\(config\?\.club, Date\.now\(\)\) && \(await claimFounderWelcome\(userId\)\)\) \{\s*navigation\.replace\('FounderWelcome', \{\s*period: selected\.period,\s*since: activeProFrom\(result\.customerInfo\)\?\.since \?\? new Date\(\)\.toISOString\(\),\s*\}\);\s*return;\s*\}\s*dismiss\(\);/);
+  assert(at > -1, 'the window check + the once claim → replace with FounderWelcome, else close');
+  assert(at > buy.indexOf("track('paywall_purchase_completed'") && at > buy.indexOf('await purchasePackage('), 'only after Apple\'s sheet succeeded');
+  const rb = callbackBody(PAYWALL, 'onRestore');
+  assert(!/FounderWelcome|clubWindowOpen|claimFounderWelcome/.test(strip(rb.body.getText(rb.sf))), 'a Restore never welcomes');
+  eq((strip(read(PAYWALL)).match(/'FounderWelcome'/g) || []).length, 1, 'one way in');
+  eq(copy.MON['mon.club.welcome_title'], 'Welcome, Founding GM.', 'welcome_title');
+  eq(copy.welcomeBody('annual'), 'Your plan is at the Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (annual)');
+  eq(copy.welcomeBody('monthly'), 'Your plan is at the Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.', 'welcome_body (monthly)');
+  eq(copy.MON['mon.club.since'], 'Founding GM since {join date}', 'since');
+  eq(copy.MON['mon.club.back'], 'Back to my trades', 'back');
+  const w = strip(read(WELCOME));
+  assert(/\{MON\['mon\.club\.welcome_title'\]\}/.test(w) && /\{welcomeBody\(period\)\}/.test(w) && /clubSince\(route\?\.params\?\.since\)/.test(w), 'title, body (plan variant), since');
+  assert(/<Button testID="founder-welcome-back" label=\{MON\['mon\.club\.back'\]\} onPress=\{back\} \/>/.test(w), 'the one Primary');
+  eq((w.match(/<Button\b/g) || []).length, 1, 'one action');
+  assert(/navigation\.goBack\(\)/.test(w), 'Back returns to the same card');
+  assert(/<RamAvatar pose="celebrate"/.test(w) && fs.existsSync(path.join(ROOT, 'assets/mascot/ram/celebrate@3x.png')), 'the ram\'s celebrate pose');
+  assert(/<ChalkText variant="data">\{since\.date\}<\/ChalkText>/.test(w), 'the date in Plex Mono');
+  assert(/const ITEMS = 6;/.test(w) && /Animated\.stagger\(\s*40,/.test(w) && /outputRange: \[8, 0\]/.test(w), '≤6 items, 40 ms apart, an 8 px rise');
+  assert(/new Animated\.Value\(reduceMotion \? 1 : 0\)/.test(w) && /if \(reduceMotion\) \{\s*items\.forEach\(\(v\) => v\.setValue\(1\)\);\s*return;\s*\}/.test(w), 'static under Reduce Motion');
+  assert(/AccessibilityInfo\.setAccessibilityFocus\(node\)/.test(w) && /ref=\{titleRef\}/.test(w), 'VoiceOver starts on the title');
+  assert(!/confetti|countdown|days? left|ends? soon|last chance|expires|FeedbackFAB|welcome_tester|kept_home|LinearGradient|BlurView/i.test(w), 'no confetti, countdown, FAB, tester title or kept-price line');
+  assert(!/closes_at/.test(w.replace(fnText(WELCOME, 'clubWindowOpen'), '')), 'closes_at is read only to decide, never rendered');
+  const nav = strip(read('navigation/RootNav.tsx'));
+  eq((nav.match(/name="FounderWelcome"/g) || []).length, 1, 'registered once');
+  assert(/name="FounderWelcome"\s*component=\{FounderWelcomeScreen\}\s*options=\{\{ presentation: 'fullScreenModal', headerShown: false, gestureEnabled: false \}\}/.test(nav), 'a full-screen modal (no FAB, #188)');
+  // executed: the trigger's interrupt slot is held through the welcome
+  let route = 'Trades';
+  const listeners = new Set();
+  const nav2 = {
+    isReady: () => true,
+    navigate: (name) => { route = name; listeners.forEach((l) => l()); },
+    getCurrentRoute: () => ({ name: route }),
+    addListener: (_t, cb) => { listeners.add(cb); return () => listeners.delete(cb); },
+    reset() {},
+  };
+  gateMod.installPaywallGate(nav2);
+  try {
+    session.verification = { session_verified: true };
+    await gateMod.hydrateOfferShown('w1');
+    const closed = gateMod.openOfferTrigger('first_opinion', 'w1');
+    let resolved = false;
+    closed.then(() => { resolved = true; });
+    route = 'FounderWelcome'; listeners.forEach((l) => l()); await tick();
+    eq(resolved, false, 'held while the welcome is up');
+    route = 'Trades'; listeners.forEach((l) => l()); await tick();
+    eq(resolved, true, 'released once it is gone');
+  } finally {
+    session.verification = null;
+    gateMod.installPaywallGate(fakeNav);
+  }
+});
+
+check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription — flag-gated, NOT enforcing-gated; unverified → ONE row (Verify this session first → the sheet), decided with no subscription read; member / Founding GM / non-member rows and their testIDs; no trial state, no date but the join date', async () => {
+  const sub = strip(read(SUBS));
+  const main = fnText(SUBS, 'SubscriptionSection');
+  assert(/const paywallOn = useFlag\('monetize\.paywall'\);/.test(main) && /if \(!paywallOn\) return null;/.test(main), 'self-gated on monetize.paywall');
+  assert(!/enforcing/.test(sub), 'never gated on enforcing (Restore stays reachable once the flag is on)');
+  assert(/const unverified = useSession\(\(s\) => !s\.isDemo && s\.verification\?\.session_verified === false\);/.test(main), 'the session decides');
+  assert(/<View testID="settings-subscription-row">[\s\S]*\{unverified \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), 'the container, then the branch');
+  for (const [name, t] of [['SubscriptionSection', main], ['UnverifiedRow', fnText(SUBS, 'UnverifiedRow')]]) {
+    assert(!NO_ENTITLEMENT.test(t), `${name} reads a subscription field`);
+  }
+  const un = fnText(SUBS, 'UnverifiedRow');
+  eq((un.match(/<LinkRow\b/g) || []).length, 1, 'ONE row');
+  assert(/title=\{MON\['mon\.verify\.title'\]\}/.test(un) && /onPress=\{\(\) => void openVerify\(\)\}/.test(un), 'Verify this session first → the sheet');
+  assert(!/restore|see_plans|sub_status|Manage|club|FOUNDER/i.test(un), 'no Restore, See plans, status or club line');
+  eq(copy.MON['mon.verify.title'], 'Verify this session first', 'the row reuses mon.verify.title');
+  const ver = fnText(SUBS, 'VerifiedRows');
+  assert(/if \(!loaded\) return restoreRows;/.test(ver), 'never guesses before the entitlements answer');
+  assert(/if \(!pro\) \{\s*return \(\s*<>\s*<LinkRow\s*testID="settings-subscription-see-plans"\s*title=\{MON\['mon\.pay\.see_plans'\]\}\s*onPress=\{\(\) => void openPaywall\(\{ source: 'settings' \}\)\}\s*\/>\s*\{restoreRows\}/.test(ver),
+    'non-member: See plans → the paywall (source settings: it emits paywall_viewed) + Restore');
+  assert(/<ManageSubscriptionLink \/>\s*\{restoreRows\}\s*<\/>\s*\);\s*\}$/.test(ver), 'member: Manage + Restore last');
+  assert(/testID="settings-subscription-status"/.test(ver) && /\{status\}/.test(ver) && /subStatus\(period, price, founder\)/.test(ver), 'member: the status line');
+  assert(/founder\s*\?\s*FOUNDER_PRICE\[period\]/.test(ver), 'a Founding GM\'s line carries the Founder price');
+  assert(/testID="settings-subscription-since"[\s\S]*<ChalkText variant="data">\{since\.date\}<\/ChalkText>[\s\S]*\{FOUNDER_TAG\}/.test(ver), 'Founding GM since {date} (Plex Mono) with the FounderTag trailing');
+  assert(/\{keptSettings\(period\)\}/.test(ver) && /\{MON\['mon\.club\.lapse'\]\}/.test(ver), 'kept_settings + lapse');
+  assert(/const since = founder \? clubSince\(active\?\.since\) : null;/.test(ver), 'the club lines are for members of the club only');
+  assert(/testID = 'settings-subscription-manage'/.test(sub) && /'https:\/\/apps\.apple\.com\/account\/subscriptions'/.test(sub), 'Manage subscription → Apple\'s page');
+  assert(/testID="settings-subscription-restore"/.test(sub), 'Restore');
+  const restore = ver.slice(ver.indexOf('const onRestore'), ver.indexOf('const restoreRows'));
+  assert(/if \(isUnverifiedSession\(\)\) \{\s*void openVerify\(\);\s*return;\s*\}/.test(restore) && restore.indexOf('isUnverifiedSession') < restore.indexOf('restorePurchases('),
+    'Restore checks the session before restoring');
+  assert(/track\('paywall_restore', \{ restored \}\)/.test(restore), 'Restore tracks the registered event');
+  assert(/useSession\.subscribe\(\(s, prev\) => \{\s*if \(prev\.verification\?\.session_verified === false && s\.verification\?\.session_verified === true\) \{\s*void useEntitlements\.getState\(\)\.refresh\(\);/.test(strip(read('state/useEntitlements.ts'))),
+    'a session that turns verified re-reads its (no longer blanked) entitlements');
+  assert(!/trial|expir|periodType|latestPurchase|renew|countdown|days? left|ends? soon|closes_at|toLocaleDateString|getMonth|Date\(/i.test(sub),
+    'no trial state, no expiry/renewal, no date but the join date (formatted by clubSince)');
+  eq(copy.subStatus('annual', '$24.99', true), 'Founding GM · Fleeced Pro Annual · $24.99/year', 'sub_status (member)');
+  eq(copy.subStatus('monthly', '$4.99', false), 'Fleeced Pro Monthly · $4.99/month', 'sub_status (non-club)');
+  eq(copy.keptSettings('annual'), 'Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active.', 'kept_settings (annual)');
+  eq(copy.keptSettings('monthly'), 'Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active.', 'kept_settings (monthly)');
+  eq(copy.MON['mon.club.lapse'], 'If you switch plans or your subscription ends, you may lose the Founder price.', 'lapse');
+  eq(copy.MON['mon.pay.manage'], 'Manage subscription', 'manage');
+  eq(JSON.stringify(copy.FOUNDER_PRICE), JSON.stringify({ annual: '$24.99', monthly: '$4.99' }), 'the Founder prices the legal lines name');
+  const since = copy.clubSince('2026-11-06T12:00:00Z');
+  eq(`${since.lead} ${since.date}`, 'Founding GM since November 6, 2026', 'since (a join date)');
+  eq(copy.clubSince(null), null, 'no date → no line');
+  eq(copy.clubSince('not a date'), null, 'an unreadable date → no line');
+  eq(copy.periodFromStore('P1Y'), 'annual', 'P1Y');
+  eq(copy.periodFromStore('P1M'), 'monthly', 'P1M');
+  eq(copy.periodFromStore('P1W'), null, 'P1W');
+  // executed: the display read waits for THIS user's identity
+  const before = sdk.calls.length;
+  eq(await purchases.getActivePro('someone-else'), null, 'identity not this user → nothing');
+  assert(!sdk.calls.slice(before).some((c) => c[0] === 'customerInfo'), 'no CustomerInfo read for another identity');
+  sdk.customerInfo = { entitlements: { active: { pro: { productIdentifier: 'ftf_pro_annual', originalPurchaseDate: '2026-11-06T12:00:00Z', expirationDate: '2026-12-06T12:00:00Z', periodType: 'TRIAL' } } } };
+  sdk.products = { ftf_pro_annual: { identifier: 'ftf_pro_annual', subscriptionPeriod: 'P1Y', priceString: '$24.99' } };
+  eq(JSON.stringify(await purchases.getActivePro('u2')),
+    JSON.stringify({ productId: 'ftf_pro_annual', since: '2026-11-06T12:00:00Z', period: 'P1Y', priceString: '$24.99' }),
+    'the plan, the join date and the price; no expiry or trial field passes through');
+  sdk.customerInfo = { entitlements: { active: {} } };
+  eq(await purchases.getActivePro('u2'), null, 'no active pro → nothing');
+  sdk.customerInfo = null;
+  sdk.products = {};
+});
+
+check('9f. legal privacy §6 [shape]: the Delete line verbatim, body-sm chalk-dim, ABOVE the Delete account row; Manage subscription beside it; nothing else in AccountDataSection', () => {
+  const a = read(ACCOUNT_DATA);
+  eq(a.split(DELETE_LINE).length - 1, 1, 'the line, verbatim, once');
+  const lineAt = a.indexOf(DELETE_LINE);
+  const deleteAt = a.indexOf('accessibilityLabel="Delete account"');
+  assert(lineAt > a.indexOf('{exportRow}') && lineAt < deleteAt, 'directly above the Delete account row (after Download my data)');
+  assert(/<Text style=\{styles\.rowSub\} testID="settings\.delete-subscription-note">\s*\{"Deleting your account/.test(a), 'in the body-sm row-sub style');
+  assert(/rowSub: \{\s*\.\.\.type\.bodySm,/.test(read('screens/settings/styles.ts')) && /bodySm: \{[^}]*color: chalk\.dim,/.test(read('theme/chalkline.ts')), 'row-sub is body-sm chalk-dim');
+  const manageAt = a.indexOf('<ManageSubscriptionLink testID="settings.delete-manage-subscription" />');
+  assert(manageAt > lineAt && manageAt < deleteAt, 'Manage subscription between the line and Delete account');
+  const m = fnText(SUBS, 'ManageSubscriptionLink');
+  assert(/const paywallOn = useFlag\('monetize\.paywall'\);\s*if \(!paywallOn\) return null;/.test(m) && !NO_ENTITLEMENT.test(m), 'the link self-gates on the flag and is the same for every session');
+  eq((a.match(/SubscriptionSection|ManageSubscriptionLink|#393/g) || []).length, 4, 'the M3 hunk in AccountDataSection is the import, the comment and the mount');
+});
+
+check('9g. copy §9.6 [executed + shape]: the invitee eyebrow and board line — trigger variant only, only with BOTH values; never a raw {inviter} / {league}', () => {
+  const C = copy.inviteeContext;
+  eq(C('jdoe', 'Dynasty Degenerates'), 'jdoe invited you to Dynasty Degenerates.', 'both values');
+  for (const [a, b] of [[null, 'L'], ['jdoe', null], ['', 'L'], ['jdoe', '  '], [undefined, undefined]]) {
+    eq(C(a, b), null, `missing value ${JSON.stringify([a, b])} → nothing`);
+  }
+  eq(C('$&x', 'y$1'), '$&x invited you to y$1.', 'values are inserted literally');
+  eq(copy.MON['mon.invitee.board'], "Ranking doesn't need a subscription, and your board shapes the trades your leaguemates see.", 'board verbatim');
+  const code = strip(read(PAYWALL));
+  assert(/const trigger = source === 'first_opinion' \|\| source === 'left_deck';\s*const invitee = trigger \? inviteeContext\(invitedBy, invitedLeagueName\) : null;/.test(code), 'trigger variant only, both values');
+  assert(/\{invitee \? \(\s*<ChalkText variant="label" testID="paywall-invitee-context">\s*\{invitee\}\s*<\/ChalkText>\s*\) : null\}\s*<ChalkText variant="display" testID="paywall-headline">/.test(code), 'the eyebrow, directly above the headline');
+  assert(/\{body \? \([\s\S]{0,200}\) : null\}\s*\{invitee \? \(\s*<ChalkText variant="bodySm" testID="paywall-invitee-board">\s*\{MON\['mon\.invitee\.board'\]\}/.test(code), 'the board line, under the body');
+  for (const f of walk(SRC)) {
+    const rel = path.relative(SRC, f).split(path.sep).join('/');
+    let t = strip(fs.readFileSync(f, 'utf8'));
+    if (rel === 'copy/monetization.ts') {
+      t = t.replace("'mon.invitee.context': '{inviter} invited you to {league}.',", '')
+        .replace("MON['mon.invitee.context'].replace('{inviter}', () => who).replace('{league}', () => where)", '');
+    }
+    // `${league}` is a JS interpolation, not the template's placeholder.
+    assert(!/mon\.invitee\.context|(^|[^$])\{(inviter|league)\}/.test(t), `${rel}: the raw template or a raw placeholder`);
+  }
+});
+
+check('9h. not in this build: the Home mark (mon.club.mark_a11y), the kept-price Home line (mon.club.kept_home), the tester title; the FounderTag only on the paywall, the welcome and Settings', () => {
+  const allowed = new Set([PAYWALL, WELCOME, SUBS, 'copy/monetization.ts']);
+  for (const f of walk(SRC)) {
+    const t = strip(fs.readFileSync(f, 'utf8'));
+    const rel = path.relative(SRC, f).split(path.sep).join('/');
+    assert(!/mark_a11y|kept_home|welcome_tester|You kept the Founder price|New members now pay/.test(t), `${rel}: a later-update line`);
+    if (!allowed.has(rel)) assert(!/FOUNDER_TAG|FOUNDING GM/.test(t), `${rel}: the FounderTag outside the paywall, welcome and Settings`);
+  }
+  for (const k of ['mon.club.kept_home', 'mon.club.mark_a11y', 'mon.club.welcome_tester']) assert(!(k in copy.MON), `${k} in the copy module`);
 });
 
 function walk(dir, out = []) {
