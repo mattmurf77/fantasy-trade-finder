@@ -37,6 +37,8 @@ The values are the same, so the deck's shape doesn't change. models-eng reviews 
   - **v4 is re-pinned in place** (`864cf30974da20ea`, in DECK_PIPELINE_PINS and FROZEN_PINS), since v4 was never on main.
   - **Tests (3 new):** the owner context builds from the job's reads; a raising picks read forfeits the owner arm; a raising draft read forfeits it.
   - **Sabotage, each red then restored (4):** the owner path given each degrading memo; each view never raising. QA's T5 is still red on the new call site.
+  - **Full suite** on `54e42967`: 9340 passed, 2 skipped, 0 failed (12m12s). An earlier run on `56d395d0` is discarded: its 15 failures were source-reading tests that saw `server.py` mid-edit, and they pass on this head.
+  - **models-eng OK at `54e42967` (2026-10-27).** The objection is resolved and the pin reproduces. Their stricter-edge note: an earlier failed read in the same job now forfeits the owner arm, where its own re-read might have succeeded. That fails closed, by design.
 
 ## 2026-10-27 — S0 stamp hashes the picks the worker read (#484 QA P2-1); deck pipeline v3
 
