@@ -7,6 +7,9 @@ import FeedbackFAB from '../components/FeedbackFAB';
 import { useSession, loadSeasonProjections } from '../state/useSession';
 import { useFlag } from '../state/useFeatureFlags';
 import { searchWinNow, getWinNowJob, evaluateWinNow, decideWinNow } from '../api/winNow';
+import { ApiError } from '../api/client';
+import { useEntitlements } from '../state/useEntitlements';
+import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
 import type { SeasonProjection, SeasonTeam, WinNowAsset, WinNowScenario, WinNowObjective, WinNowEvaluation, SeasonMeta } from '../shared/types';
 import { probability, numeric, impact, nextThree, sourceReceipt, seasonStale, projectedStandings, samplingEvidence } from '../utils/winNow';
 import { ink, chalk, ice, space, radii, type } from '../theme/chalkline';
@@ -48,6 +51,12 @@ function errorCopy(error: unknown): string {
   const err = error as {message?: string; body?: {message?: string; reason?: string}};
   return err?.body?.message || err?.body?.reason?.replace(/_/g, ' ') || err?.message || 'Could not load Win Now. Please retry.';
 }
+// #393 M2 (D16 (c)): a Win Now action's 402, or its verify 403, already
+// opened the paywall or the VerifySheet (api/client's gate): no line here,
+// never the raw "HTTP 402" errorCopy would fall back to.
+function actionErrorCopy(error: unknown): string {
+  return error instanceof ApiError && (error.isProRequired || error.isVerificationRequired) ? '' : errorCopy(error);
+}
 
 export default function WinNowScreen() {
   const leagueId = useSession(state => state.league?.league_id);
@@ -82,6 +91,13 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
   const epoch = useRef(0);
   const controller = useRef<AbortController | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // #393 M2 (D16 GRANTED (c)) — the paywall is on "Find Win Now trades" only;
+  // the entries and the standings stay free. Dark unless `monetize.paywall`
+  // is on AND the server is enforcing.
+  const paywallOn = useFlag('monetize.paywall');
+  const payEnforcing = useEntitlements(state => state.enforcing);
+  const payEntitled = useEntitlements(state => state.pro);
+  const [searchAfterVerify, setSearchAfterVerify] = useState(false);
   const cancel = () => {
     epoch.current += 1;
     controller.current?.abort();
@@ -129,8 +145,26 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
   const params = {league_id: leagueId || '', objective, max_dynasty_spend_pct: Number(budget), min_fairness: Number(fairness) / 100, protected_ids: protectedIds};
   const begin = () => { cancel(); controller.current = new AbortController(); setBusy(true); setMessage(''); return {id: epoch.current, signal: controller.current.signal}; };
   const current = (id: number) => id === epoch.current;
-  const search = async () => {
+  // The pre-check, on the tap and before any request. Unverified: the
+  // VerifySheet on session_verified alone (R28.9); once verified the search
+  // runs again and the SERVER decides (D18). Verified, not entitled: the
+  // paywall's find variant (mon.lock.find). The 402 stays the backstop: on the
+  // search, the job poll, Edit & evaluate or Like/Pass it opens the same
+  // paywall (api/client). Closing either returns to the standings, controls
+  // and all.
+  const findLocked = (): boolean => {
+    if (!paywallOn || !payEnforcing) return false;
+    if (isUnverifiedSession()) {
+      void openVerify({ onVerified: () => setSearchAfterVerify(true) });
+      return true;
+    }
+    if (payEntitled) return false;
+    void openPaywall({ source: 'gate', kind: 'find' });
+    return true;
+  };
+  const search = async (afterVerify?: unknown) => {
     if (!canSearch || busy || seasonStale(baseline?.meta)) return;
+    if (afterVerify !== true && findLocked()) return;
     const request = begin(); setTrades(null); setEditor(null); setEvaluation(null);
     const startedAt = Date.now();
     const apply = async (job: Awaited<ReturnType<typeof searchWinNow>>): Promise<void> => {
@@ -149,12 +183,20 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
       timer.current = setTimeout(async () => {
         if (!current(request.id)) return;
         try { await apply(await getWinNowJob(job.job_id!, request.signal)); }
-        catch (error) { if (current(request.id)) { setBusy(false); setMessage(errorCopy(error)); } }
+        catch (error) { if (current(request.id)) { setBusy(false); setMessage(actionErrorCopy(error)); } }
       }, 1500);
     };
     try { await apply(await searchWinNow(params, request.signal)); }
-    catch (error) { if (current(request.id)) { setBusy(false); setMessage(errorCopy(error)); } }
+    catch (error) { if (current(request.id)) { setBusy(false); setMessage(actionErrorCopy(error)); } }
   };
+  // After a verify from the pre-check: once this screen is back (focused, the
+  // standings reloaded), the search runs once, unchecked: the server decides.
+  useEffect(() => {
+    if (!searchAfterVerify || !focused || !canSearch || busy) return;
+    setSearchAfterVerify(false);
+    void search(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchAfterVerify, focused, canSearch, busy]);
   const edit = (trade: WinNowScenario) => {
     revealEditor.current = true;
     cancel(); setBusy(false); setMessage(''); setEvaluation(null); setEditor(trade);
@@ -171,7 +213,7 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
     try {
       const result = await evaluateWinNow({...params, partner_roster_id: editor.partner_roster_id, give_ids: giveIds, receive_ids: receiveIds}, request.signal);
       if (current(request.id)) { setEvaluation(result); setBusy(false); }
-    } catch (error) { if (current(request.id)) { setBusy(false); setMessage(errorCopy(error)); } }
+    } catch (error) { if (current(request.id)) { setBusy(false); setMessage(actionErrorCopy(error)); } }
   };
   const decide = async (trade: WinNowScenario, decision: 'like' | 'pass') => {
     if (busy || !canSearch || seasonStale(resultMeta) || seasonStale(baseline?.meta)) return;
@@ -179,7 +221,7 @@ function WinNowContent({leagueId}: {leagueId?: string}) {
     try {
       const response = await decideWinNow(trade.scenario_id, decision, request.signal);
       if (current(request.id)) { setBusy(false); if (response.ok) setDecisions(prev => ({...prev, [trade.scenario_id]: decision})); else setMessage(response.message || response.reason?.replace(/_/g, ' ') || 'Decision was not saved. Please retry.'); }
-    } catch (error) { if (current(request.id)) { setBusy(false); setMessage(errorCopy(error)); } }
+    } catch (error) { if (current(request.id)) { setBusy(false); setMessage(actionErrorCopy(error)); } }
   };
   const assets = baseline?.assets || [];
   const buyerAssets = assets.filter(asset => asset.owner_roster_id === baseline?.buyer_roster_id);
