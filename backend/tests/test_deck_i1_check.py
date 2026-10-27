@@ -14,6 +14,8 @@ file-backed SQLite DB (the event is written on a background thread, and an
 in-memory SQLite DB is per thread).
 """
 import collections
+import contextlib
+import types
 import hashlib
 import json
 import queue
@@ -27,6 +29,7 @@ import backend.database as db_module
 import backend.server as server
 from backend import analytics_queries, analytics_taxonomy
 from backend import trade_service as ts
+from backend import user_data_lifecycle
 from backend.database import (draft_picks_table, league_members_table, metadata,
                               user_events_table, users_table)
 
@@ -465,3 +468,151 @@ def test_a_fixture_that_queues_a_write_at_teardown(queues_a_write_at_teardown):
 
 def test_the_next_test_finds_both_written():
     assert _LANDED_AT_TEARDOWN == ["written"]
+
+
+# ── #468 QA follow-ups: the worker, the lease, exit, the drop tail, gaps ─────
+
+@pytest.fixture()
+def fresh_queue(monkeypatch):
+    """A private queue and worker, so a test's worker never serves another's."""
+    q = queue.Queue(maxsize=10)
+    monkeypatch.setattr(server, "_i1_event_queue", q)
+    monkeypatch.setattr(server, "_i1_event_worker_for", None)
+    monkeypatch.setattr(server, "_i1_event_worker_thread", None)
+    monkeypatch.setattr(server, "_i1_event_dropped", 0)
+    monkeypatch.setattr(server, "_i1_event_drop_warned_at", float("-inf"))
+    return q
+
+
+def _lease(*, active=True, deleting=False):
+    @contextlib.contextmanager
+    def _active():
+        yield active
+    return types.SimpleNamespace(active=_active, deleting=lambda: deleting)
+
+
+def _landed(write_log, item, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while item not in write_log and time.monotonic() < deadline:
+        time.sleep(0.01)
+    return item in write_log
+
+
+class _Die(BaseException):
+    pass
+
+
+def test_a_dead_worker_is_restarted_by_the_next_enqueue(fresh_queue, monkeypatch):
+    """P3-1: a BaseException ends the worker; the next enqueue starts another."""
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)   # the death is expected
+    written = []
+    server._i1_event_enqueue(_lease(), lambda: (_ for _ in ()).throw(_Die()))
+    first = server._i1_event_worker_thread
+    first.join(5)
+    assert not first.is_alive()
+    server._i1_event_enqueue(_lease(), lambda: written.append("after"))
+    assert _landed(written, "after")
+    assert server._i1_event_worker_thread is not first
+
+
+def test_an_exception_in_a_write_never_ends_the_worker(fresh_queue, monkeypatch):
+    """The worker's own `except`: a raising record leaves the same worker
+    running for the next write."""
+    real = server._record_deck_i1_check
+    calls = []
+
+    def flaky(lease, write):
+        calls.append(write)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+        real(lease, write)
+    monkeypatch.setattr(server, "_record_deck_i1_check", flaky)
+    written = []
+    server._i1_event_enqueue(_lease(), lambda: written.append("first"))
+    worker = server._i1_event_worker_thread
+    server._i1_event_enqueue(_lease(), lambda: written.append("second"))
+    assert _landed(written, "second") and written == ["second"]
+    assert server._i1_event_worker_thread is worker and worker.is_alive()
+
+
+def test_a_deleting_user_s_write_never_holds_another_user_s(fresh_queue):
+    """P3-2: while one user's deletion holds new work, their queued write is
+    skipped, not waited on, and the next user's write lands at once."""
+    gone, kept = "i1ev-deleting-user", "i1ev-other-user"
+    lease_gone = user_data_lifecycle.capture(gone)
+    lease_kept = user_data_lifecycle.capture(kept)
+    written = []
+    with user_data_lifecycle.hold([gone], timeout=5):
+        assert lease_gone.deleting() and not lease_kept.deleting()
+        server._i1_event_enqueue(lease_gone, lambda: written.append(gone))
+        server._i1_event_enqueue(lease_kept, lambda: written.append(kept))
+        assert _landed(written, kept, timeout=2.0)
+    assert server._drain_deck_i1_checks(5)
+    assert written == [kept]
+
+
+def test_a_lease_that_refuses_writes_nothing(fresh_queue):
+    written = []
+    server._i1_event_enqueue(_lease(active=False), lambda: written.append("refused"))
+    server._i1_event_enqueue(_lease(), lambda: written.append("admitted"))
+    assert _landed(written, "admitted") and written == ["admitted"]
+
+
+def test_the_exit_drain_lands_queued_writes_and_logs_pending_drops(fresh_queue, monkeypatch,
+                                                                   caplog):
+    """P3-3: registered with atexit; it waits for the queue, then warns the
+    drops not yet warned whatever the minute says."""
+    written = []
+    monkeypatch.setattr(server, "_i1_event_dropped", 3)
+    monkeypatch.setattr(server, "_i1_event_drop_warned_at", time.monotonic())
+    server._i1_event_enqueue(_lease(), lambda: (time.sleep(0.2), written.append("queued")))
+    with caplog.at_level("WARNING"):
+        server._i1_event_exit_drain()
+    assert written == ["queued"]
+    assert [r.getMessage() for r in caplog.records if "queue full" in r.getMessage()] == \
+        ["deck_i1_check queue full (10): dropped 3 emits since the last warning"]
+    assert server._i1_event_dropped == 0
+
+
+def test_the_exit_drain_is_registered_with_atexit():
+    with open(server.__file__) as fh:
+        assert "\natexit.register(_i1_event_exit_drain)\n" in fh.read()
+
+
+def test_a_burst_s_tail_is_logged_once_the_drops_stop(fresh_queue, monkeypatch, caplog):
+    """P3-5: drops counted after the last warning are logged by the worker's
+    idle tick once the minute (0.2 s here) has passed, with no later drop."""
+    monkeypatch.setattr(server, "_I1_EVENT_DROP_WARN_EVERY_S", 0.2)
+    monkeypatch.setattr(server, "_i1_event_dropped", 2)
+    monkeypatch.setattr(server, "_i1_event_drop_warned_at", time.monotonic())
+    written = []
+    with caplog.at_level("WARNING"):
+        server._i1_event_enqueue(_lease(), lambda: written.append("w"))
+        deadline = time.monotonic() + 3
+        while server._i1_event_dropped and time.monotonic() < deadline:
+            time.sleep(0.02)
+    assert [r.getMessage() for r in caplog.records if "queue full" in r.getMessage()] == \
+        ["deck_i1_check queue full (10): dropped 2 emits since the last warning"]
+
+
+def test_the_fallback_identity_keeps_the_partner():
+    """A card with neither id is its assets AND its partner: the same trade
+    with two opponents is two cards."""
+    def bare(partner):
+        return {"target_user_id": partner, "give": [{"id": "a"}], "receive": [{"id": "b"}]}
+    assert server._i1_card_identity(bare("opp-1")) != server._i1_card_identity(bare("opp-2"))
+    assert server._i1_card_identity(bare("opp-1")) == server._i1_card_identity(bare("opp-1"))
+
+
+def test_the_dedupe_evicts_the_least_recently_served_job(env, monkeypatch):
+    """The per-job record is an LRU: a job served again moves to the end
+    (`move_to_end`), so the next eviction takes the job served longest ago and
+    keeps the one just served."""
+    monkeypatch.setattr(server, "_I1_EVENT_DEDUPE_MAX", 2)
+    for job_id in ("lru-a", "lru-b"):
+        assert server._i1_new_cards(job_id, _report("card")) is not None
+    assert server._i1_new_cards("lru-a", _report("card")) is None     # a repeat, and A is now newest
+    assert server._i1_new_cards("lru-c", _report("card")) is not None  # evicts B, not A
+    assert list(server._i1_events_seen) == ["lru-a", "lru-c"]
+    assert server._i1_new_cards("lru-a", _report("card")) is None
+    assert server._i1_new_cards("lru-b", _report("card")) is not None  # B counts afresh
