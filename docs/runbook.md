@@ -1409,9 +1409,11 @@ only its type (exit 3) and the next move is a fresh dry run.
 **Who runs what** (release-lead, 2026-10-26). A deletion has no rollback, so
 **the operator runs step 5, `--execute`, themself.** release-lead may run the
 read-only steps (the dry run, `--verify`), the flag flip, the Render restarts
-and **the snapshot (step 4)** on the operator's word, and **owns deleting that
-snapshot**: put a dated reminder in the step-8 record. Nobody else runs
-`--execute`. Pass **`--expect-db <the prod database's name>`** in every
+and **takes the snapshot (step 4)** on the operator's word. Deleting a backup
+destroys data permanently, the same class as `--execute`, so **the operator
+deletes the snapshot, not release-lead**: release-lead records its deletion
+due date in the step-8 record and reminds the operator before it. Nobody else
+runs `--execute`. Pass **`--expect-db <the prod database's name>`** in every
 command: the script refuses (exit 2) when the connected database's name
 differs.
 
@@ -1449,7 +1451,8 @@ unless `--allow-local` is passed (local test runs only).
    full restore that loses every write made after it**, every user's, not just
    the purge's: a last resort. **Delete it once step 7 passes, and in any case
    within 7 days** (privacy §5 promises deleted data leaves backups within 7
-   days; a manual snapshot would otherwise outlive that).
+   days; a manual snapshot would otherwise outlive that). **The operator
+   deletes it**; release-lead reminds them before the due date.
 5. **Execute. The operator runs it, nobody else, after re-checking that the
    printed database identity is prod.** Copy the exact command the dry run
    printed under "next (the operator runs this exact command, after a DB
@@ -1480,8 +1483,10 @@ unless `--allow-local` is passed (local test runs only).
      `standing_offers.team_user_ids`, `leagues.opponent_data` and other event
      types' `user_events.props`, and overhaul references (the known general
      deletion gap, privacy §6 "not yet").
-8. **Record counts only**, plus the snapshot's deletion due date (release-lead
-   owns it), and send the purge date to head-bizops. Support uses
+8. **Record counts only**, plus the snapshot's deletion due date (once step 7
+   passes, and no later than 7 days after it was taken). **The operator
+   deletes the snapshot**; release-lead records the due date here and reminds
+   the operator before it. Send the purge date to head-bizops. Support uses
    it: "data from ESPN and MFL sign-ins made before <date> was deleted on that
    date".
 
