@@ -1,18 +1,24 @@
 """deck_i1_check: the S0 C-a readout's data path (analytics-lead's pre-grant,
 2026-10-26 §2 (a); models-lead's R2.4 addendum (ii) and (iv)).
 
-Pins: one server-fired NON_INTENT row per job serve page that ran the I-1
-check, deduped across repeat polls; none at trade_i1_mode 0; the exact prop
-keys, with no league id or raw job id; the give/receive x player/pick split
-with a both-sides card counted once in `dropped_cards`; the write is
-non-touching, owned by the viewer, and never on the request thread; the
-lenient label. Harness: a hand-built complete job served through
-/api/trades/status over a file-backed SQLite DB (the event is written on a
-background thread, and an in-memory SQLite DB is per thread).
+Pins: one server-fired NON_INTENT row per serve with newly served cards that
+ran the I-1 check, each card counted once per job (repeat polls record
+nothing; a replace serve and a legacy body after pages record only their new
+cards; #419 QA P3); none at trade_i1_mode 0; the exact prop keys, with no
+league id or raw job id; the give/receive x player/pick split with a
+both-sides card counted once in `dropped_cards`; the write is non-touching,
+owned by the viewer, and never on the request thread, but on one worker with a
+bounded queue; the page-store serve's emit; the drain; the lenient label.
+Harness: a hand-built complete job served through /api/trades/status over a
+file-backed SQLite DB (the event is written on a background thread, and an
+in-memory SQLite DB is per thread).
 """
+import collections
 import hashlib
 import json
+import queue
 import threading
+import time
 
 import pytest
 from sqlalchemy import create_engine, delete, insert, select
@@ -66,8 +72,8 @@ def env(monkeypatch, tmp_path):
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
     monkeypatch.setitem(ts._cfg, "trade_i1_mode", 2.0)
-    with server._i1_events_lock:
-        server._i1_events_seen.clear()
+    monkeypatch.setattr(server, "_i1_events_seen", collections.OrderedDict())
+    monkeypatch.setattr(server, "_i1_events_counted", 0)
     with engine.begin() as conn:
         for uid, roster in STORED_ROSTERS.items():
             conn.execute(insert(league_members_table).values(
@@ -93,14 +99,10 @@ def env(monkeypatch, tmp_path):
             server._sessions.pop(TOKEN, None)
         with server._trade_jobs_lock:
             server._trade_jobs.pop(JOB, None)
-        with server._i1_events_lock:
-            server._i1_events_seen.clear()
 
 
 def _drain():
-    for thread in threading.enumerate():
-        if thread.name == "deck-i1-check":
-            thread.join(5)
+    assert server._drain_deck_i1_checks(5)
 
 
 def _status(query=""):
@@ -145,7 +147,10 @@ def test_split_by_side_and_asset_type_counts_a_both_sides_card_once(env):
         "dropped_receive_player": 2, "dropped_receive_pick": 1}
 
 
-def test_one_event_per_job_page_across_repeat_polls(env, monkeypatch):
+def test_a_repeat_poll_of_a_page_emits_nothing(env, monkeypatch):
+    """Each card is counted once per job: page 0 (4 cards) and page 4 (3)
+    record once each across repeat polls, and the legacy body, whose cards the
+    pages already counted, records nothing."""
     engine, _ = env
     monkeypatch.setitem(ts._cfg, "trade_page_size", 4.0)
     for _ in range(3):
@@ -155,9 +160,89 @@ def test_one_event_per_job_page_across_repeat_polls(env, monkeypatch):
     for _ in range(3):
         _status()                                  # the legacy cumulative body
     pages = [json.loads(r["props"])["cards"] for r in _events(engine)]
-    # page 0, page 4, the legacy deck once. Each is written by its own daemon
-    # thread, so the insert order isn't fixed: compare as a multiset.
-    assert sorted(pages) == [3, 4, 7]
+    assert sorted(pages) == [3, 4]
+
+
+def totals(engine):
+    """The rows' counts summed, as the readout sums a deck's rows by job_key."""
+    rows = [json.loads(r["props"]) for r in _events(engine)]
+    names = ("cards", "kept", "dropped_cards", "dropped_give_player", "dropped_give_pick",
+             "dropped_receive_player", "dropped_receive_pick", "unchecked_generic",
+             "unchecked_pick_owner")
+    return len(rows), {n: sum(r[n] for r in rows) for n in names}
+
+
+WHOLE_DECK = {"cards": 7, "kept": 2, "dropped_cards": 5, "dropped_give_player": 2,
+              "dropped_give_pick": 1, "dropped_receive_player": 2, "dropped_receive_pick": 1,
+              "unchecked_generic": 0, "unchecked_pick_owner": 0}
+
+
+def test_a_replace_serve_counts_its_new_cards(env, monkeypatch):
+    """#419 QA P3: a re-sorting deck's cursor>0 serve is a replace (the full
+    list from index 0). Its cards past page 0 are counted, once: the rows sum
+    to the whole deck, and a second replace serve records nothing."""
+    engine, job = env
+    monkeypatch.setitem(ts._cfg, "trade_page_size", 4.0)
+    _status("&cursor=0")
+    for card in job["cards"]:                      # the worker re-sorted: not append-only
+        card.pop("preserve_server_order")
+    assert _status("&cursor=4")["replace"] is True
+    _status("&cursor=4")
+    count, summed = totals(engine)
+    assert (count, summed) == (2, WHOLE_DECK)
+
+
+def test_cards_published_before_their_impression_ids_count_once(env, monkeypatch):
+    """#468 QA P2-1 (probe D): the non-owner path publishes cards without
+    impression_ids, then re-publishes them with ids. A card a paged client saw
+    before the ids were stamped is not counted again by the next replace
+    serve: the identity is the trade_id, so the rows sum to the whole deck."""
+    engine, job = env
+    monkeypatch.setitem(ts._cfg, "trade_page_size", 4.0)
+    assert not any("impression_id" in card for card in job["cards"])
+    _status("&cursor=0")
+    job["cards"] = [dict(card, impression_id=f"imp-{card['trade_id']}")
+                    for card in job["cards"]]
+    for card in job["cards"]:                      # the re-publish re-sorted the deck
+        card.pop("preserve_server_order")
+    assert _status("&cursor=4")["replace"] is True
+    _status("&cursor=4")
+    assert totals(engine) == (2, WHOLE_DECK)
+
+
+def test_the_identity_is_the_trade_id_first():
+    card = _card("t-1", ["a"], ["b"])
+    assert server._i1_card_identity(card) == "t-1"
+    assert server._i1_card_identity(dict(card, impression_id="imp-1")) == "t-1"
+    assert server._i1_card_identity({"impression_id": "imp-1"}) == "imp-1"
+
+
+def test_legacy_and_paged_serves_of_one_job_count_each_card_once(env, monkeypatch):
+    """#419 QA P3: a job served to a paged client (page 0) and a legacy one
+    (the whole deck, complete) records page 0's 4 cards and the legacy body's
+    3 others: the rows sum to the whole deck, never 4 + 7."""
+    engine, _ = env
+    monkeypatch.setitem(ts._cfg, "trade_page_size", 4.0)
+    _status("&cursor=0")
+    _status()
+    _status()
+    assert totals(engine) == (2, WHOLE_DECK)
+
+
+def test_a_new_job_counts_its_cards_afresh(env):
+    """The record is per job: the same cards served under another job count."""
+    engine, job = env
+    _status()
+    with server._trade_jobs_lock:
+        server._trade_jobs["job-i1ev-2"] = {**job, "job_id": "job-i1ev-2"}
+    try:
+        resp = server.app.test_client().get("/api/trades/status?job_id=job-i1ev-2",
+                                            headers={"X-Session-Token": TOKEN})
+        assert resp.status_code == 200
+        assert [json.loads(r["props"])["cards"] for r in _events(engine)] == [7, 7]
+    finally:
+        with server._trade_jobs_lock:
+            server._trade_jobs.pop("job-i1ev-2", None)
 
 
 def test_a_running_legacy_deck_counts_once_complete(env):
@@ -253,3 +338,130 @@ def test_registered_server_fired_and_non_intent():
                                            (3600, "1h_to_24h"), (86400, "over_24h")])
 def test_age_buckets(age_s, bucket):
     assert server._i1_age_bucket(age_s) == bucket
+
+
+# ── #419 QA P3: the page-store emit, the bounded queue, the drain ───────────
+
+def test_a_stored_page_serve_emits_once_per_new_card_set(env, monkeypatch):
+    """The page-store serve (_trade_page_view) records its page's new cards:
+    page 0's 4 once across repeat serves, then page 4's 3."""
+    engine, job = env
+    monkeypatch.setitem(ts._cfg, "trade_page_size", 4.0)
+    monkeypatch.setattr(server, "_deck_evidence_delivered_stored", lambda *a, **k: None)
+    row = {"deck_job_id": "deck-i1ev-page", "user_id": UID, "league_id": LEAGUE, "card_count": 7,
+           "pages_blob": {"v": 1, "opponents_total": 2, "cards": [
+               {**c, "impression_id": f"deck-i1ev-page:{i}"} for i, c in enumerate(job["cards"])]}}
+    for cursor in (0, 0, 4, 4):
+        with server.app.test_request_context():
+            out, _past = server._trade_page_view(row, cursor, user_id=UID, viewer_id=UID)
+        assert out["serve_source"] == "page"
+    rows = [json.loads(r["props"]) for r in _events(engine)]
+    assert sorted(r["cards"] for r in rows) == [3, 4]
+    assert {r["job_key"] for r in rows} == {hashlib.sha256(b"deck-i1ev-page").hexdigest()[:12]}
+
+
+def _report(ident):
+    return {"mode": "strict", "status": "fresh", "outcome": "served", "age_bucket": "under_5m",
+            "cards": 1, "kept": 1, "dropped_cards": 0, "dropped_give_player": 0,
+            "dropped_give_pick": 0, "dropped_receive_player": 0, "dropped_receive_pick": 0,
+            "unchecked_generic": 0, "unchecked_pick_owner": 0,
+            "_cards": [(ident, {"cards": 1, "kept": 1, "dropped_cards": 0,
+                                "dropped_give_player": 0, "dropped_give_pick": 0,
+                                "dropped_receive_player": 0, "dropped_receive_pick": 0,
+                                "unchecked_generic": 0, "unchecked_pick_owner": 0})]}
+
+
+def test_a_full_queue_drops_the_emit_with_a_warning_and_never_blocks(env, monkeypatch, caplog):
+    """One worker, a bounded queue: with the worker held on one write and the
+    queue (2 here) full, further emits are dropped at once, never blocking the
+    serve, warned at most once a minute with the count."""
+    small = queue.Queue(maxsize=2)
+    monkeypatch.setattr(server, "_i1_event_queue", small)
+    monkeypatch.setattr(server, "_i1_event_worker_for", None)
+    monkeypatch.setattr(server, "_i1_event_dropped", 0)
+    monkeypatch.setattr(server, "_i1_event_drop_warned_at", float("-inf"))
+    started, release = threading.Event(), threading.Event()
+
+    def held(lease, write):
+        started.set()
+        release.wait(10)
+    monkeypatch.setattr(server, "_record_deck_i1_check", held)
+    try:
+        with caplog.at_level("WARNING"), server.app.test_request_context():
+            server._emit_deck_i1_check(UID, LEAGUE, "job-q-0", _report("c"))
+            assert started.wait(5)                 # the worker holds the first write
+            began = time.monotonic()
+            for i in range(1, 6):                  # 2 queued, 3 dropped
+                server._emit_deck_i1_check(UID, LEAGUE, f"job-q-{i}", _report("c"))
+            assert time.monotonic() - began < 1.0  # never blocked
+        assert small.qsize() == 2
+        lines = [r.getMessage() for r in caplog.records if "queue full" in r.getMessage()]
+        assert lines == ["deck_i1_check queue full (2): dropped 1 emit since the last warning"]
+        assert server._i1_event_dropped == 2       # counted for the next warning
+    finally:
+        release.set()
+        small.join()
+
+
+def test_the_drain_waits_for_queued_and_in_flight_writes(env, monkeypatch):
+    engine, _ = env
+    done = []
+
+    def slow(lease, write):
+        time.sleep(0.3)
+        done.append(write)
+    monkeypatch.setattr(server, "_record_deck_i1_check", slow)
+    with server.app.test_request_context():
+        server._emit_deck_i1_check(UID, LEAGUE, "job-d-0", _report("c"))
+        server._emit_deck_i1_check(UID, LEAGUE, "job-d-1", _report("c"))
+    assert server._drain_deck_i1_checks(5) is True and len(done) == 2
+
+
+def test_the_drain_gives_up_at_its_timeout(env, monkeypatch):
+    release = threading.Event()
+    monkeypatch.setattr(server, "_record_deck_i1_check", lambda lease, write: release.wait(10))
+    try:
+        with server.app.test_request_context():
+            server._emit_deck_i1_check(UID, LEAGUE, "job-t-0", _report("c"))
+        started = time.monotonic()
+        assert server._drain_deck_i1_checks(0.2) is False
+        assert time.monotonic() - started < 2.0
+    finally:
+        release.set()
+        assert server._drain_deck_i1_checks(5)
+
+
+# conftest.py's drains: a test's queued writes finish as its call ends (inside
+# the call's capture), and a write a fixture queues at teardown finishes at
+# teardown. These pairs run in file order.
+_LANDED = []
+_LANDED_AT_TEARDOWN = []
+
+
+def _slow_write(into):
+    lease = server._user_data_lifecycle.capture(UID)
+    server._i1_event_enqueue(lease, lambda: (time.sleep(1.0), into.append("written")))
+
+
+@pytest.fixture()
+def landed_before_teardown():
+    yield
+    assert _LANDED == ["written"]                  # the call-phase drain already finished it
+
+
+def test_a_test_that_leaves_a_slow_write_queued(landed_before_teardown):
+    _slow_write(_LANDED)
+
+
+@pytest.fixture()
+def queues_a_write_at_teardown():
+    yield
+    _slow_write(_LANDED_AT_TEARDOWN)
+
+
+def test_a_fixture_that_queues_a_write_at_teardown(queues_a_write_at_teardown):
+    assert _LANDED == ["written"]
+
+
+def test_the_next_test_finds_both_written():
+    assert _LANDED_AT_TEARDOWN == ["written"]

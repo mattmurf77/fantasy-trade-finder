@@ -135,6 +135,33 @@ def test_first_stamp_writes_rfp1_and_calls_the_hook_with_old_none(env, monkeypat
     assert server._trade_roster_snapshot(LID).fp == fp       # what the serve computes
 
 
+def test_stamp_follows_the_platform_pick_source_when_assign_tradeable_is_off(env, monkeypatch, request):
+    """#470 QA P3: CI runs with `picks.assign_tradeable` on (`'any'`), so the pin
+    above can't tell a hard-coded `'any'` from the engine's source. Off, the
+    engine reads platform rows only; a member-asserted row makes the two
+    sources hash differently, and the stamp must match the serve's."""
+    import backend.feature_flags as ff
+    ff.flags_dict()                                          # populate the cache
+    monkeypatch.setitem(ff._flags_cache, "picks.assign_tradeable", False)
+    assert server._pick_read_source() == db_module.PICK_SOURCE_PLATFORM
+    db_module._invalidate_contested(LID)
+    request.addfinalizer(lambda: db_module._invalidate_contested(LID))
+    platform_row = {"pick_id": f"{LID}_2027_1_1", "league_id": LID, "season": 2027, "round": 1,
+                    "owner_user_id": "u1", "original_roster_id": "1", "platform": "sleeper"}
+    asserted_row = {"pick_id": f"{LID}_2027_2_2", "league_id": LID, "season": 2027, "round": 2,
+                    "owner_user_id": "u2", "original_roster_id": "2", "platform": "sleeper",
+                    "source": db_module.PICK_SOURCE_USER, "assigned_by": "u1",
+                    "assigned_at": "2026-10-27T00:00:00.000000+00:00"}
+    with db_module.engine.begin() as conn:                   # one row per insert: same keys
+        conn.execute(insert(db_module.draft_picks_table).values(platform_row))
+        conn.execute(insert(db_module.draft_picks_table).values(asserted_row))
+    assert _refresh() == "fresh"
+    with db_module.engine.connect() as conn:
+        any_fp = rs.roster_snapshot(conn, LID, pick_source=db_module.PICK_SOURCE_ANY).fp
+    assert any_fp != _fp()                                   # the fixture tells the sources apart
+    assert server._trade_roster_snapshot(LID).fp == _fp()    # the serve, flag off
+
+
 def test_changed_roster_calls_the_hook_with_old_and_new(env):
     calls = _recorder()
     assert _refresh(("p1",)) == "fresh"
