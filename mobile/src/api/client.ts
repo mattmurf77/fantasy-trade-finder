@@ -168,6 +168,9 @@ export class ApiError extends Error {
   // Internal receipt for THIS request's authorized token clear. No token,
   // wire field or analytics property: identity guards may preserve its 401.
   sessionExpiry?: {from: number; to: number};
+  // Internal: the session revision this response answered. The paywall gate
+  // opens nothing for an answer to a session that has since changed.
+  requestRevision?: number;
   // isTimeout marks an error produced by the internal request deadline (FR-4),
   // so UI layers can show a truthful deadline failure instead of a
   // hosting diagnosis. A caller-supplied signal abort (e.g. TanStack
@@ -207,6 +210,23 @@ export class ApiError extends Error {
       (this.body as any).error === 'espn_auth_required'
     );
   }
+  /** Paywall gate (#395/#397): 402 `{"error":"pro_required","gate":…}`. */
+  get isProRequired() {
+    return (
+      this.status === 402 &&
+      typeof this.body === 'object' &&
+      this.body !== null &&
+      (this.body as any).error === 'pro_required'
+    );
+  }
+  /** The 402's reason: `preview_used | trial_expired | lapsed |
+   *  never_trialed | verify_required`. Null on any other error, or when an
+   *  old server sends no `gate`. */
+  get gate(): string | null {
+    if (!this.isProRequired) return null;
+    const g = (this.body as any).gate;
+    return typeof g === 'string' && g ? g : null;
+  }
 }
 
 export function isCurrentSessionExpiry(error: unknown, fromRevision: number): boolean {
@@ -237,6 +257,120 @@ export function setOnVerificationRequired(fn: (() => void) | null): void {
 let _onSessionExpired: (() => void) | null = null;
 export function setOnSessionExpired(fn: (() => void) | null): void {
   _onSessionExpired = fn;
+}
+
+// ── paywall gate listener (#393 M1; D1, D3, D17) ────────────────────────────
+// One global handler for the paywall's 402 and the account-auth 403, so no
+// screen maps either itself. Same callback-not-import pattern as the two
+// listeners above: state/usePaywallGate registers the router at app start.
+//
+// It fires for USER-INITIATED calls only. A call made with
+// `background: true` (a poll, a prefetch, an auto-start) opens nothing; its
+// caller gets the rejection exactly as before. The routing below reads the
+// status, the body's `error` / `gate` and the path, and nothing else: never
+// an entitlement field (legal R28.9, D15).
+export type GateKind = 'find' | 'send';
+export type GateSignal =
+  /** 402 pro_required with any gate but verify_required → the paywall. */
+  | { action: 'paywall'; gate: string | null; kind: GateKind }
+  /** 402 gate=verify_required, or a 403 verification_required on a gated
+   *  route → the VerifySheet. */
+  | { action: 'verify'; gate: string | null; kind: GateKind }
+  /** 403 token_user_mismatch from the Sleeper verify link: the one verify
+   *  outcome the sheet can't see from the session store (SleeperConnect
+   *  keeps its own error state). Nothing changed server-side. */
+  | { action: 'verify_mismatch' };
+/** How the VerifySheet closed. Only `verified` retries the original call. */
+export type GateOutcome = 'verified' | 'dismissed' | 'signed_in';
+let _onProRequired: ((signal: GateSignal) => Promise<GateOutcome> | void) | null = null;
+export function setOnProRequired(
+  fn: ((signal: GateSignal) => Promise<GateOutcome> | void) | null,
+): void {
+  _onProRequired = fn;
+}
+
+function _pathname(path: string): string {
+  return path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
+}
+
+/** D3: the send family opens `mon.lock.send`; everything else `mon.lock.find`. */
+export function gateKindForPath(path: string): GateKind {
+  const p = _pathname(path);
+  if (/^\/api\/trades\/propose(-espn|-mfl)?$/.test(p)) return 'send';
+  if (p === '/api/trades/queue' || p === '/api/trades/respond-mfl') return 'send';
+  if (/^\/api\/trades\/matches\/[^/]+\/disposition$/.test(p)) return 'send';
+  return 'find';
+}
+
+/** Calls that put something in front of a leaguemate. After verifying, these
+ *  are NEVER re-sent for the user (D18: a Send returns to its confirm step
+ *  and needs a fresh tap); every other gated call is retried once. */
+function _neverAutoRetry(path: string): boolean {
+  const p = _pathname(path);
+  return gateKindForPath(p) === 'send'
+    || p === '/api/trades/standing-offer'
+    || /^\/api\/overhauls\/[^/]+\/send$/.test(p);
+}
+
+/** The paywall gate's route classes (#395 `paywall_gate.ROUTES`, `gated`).
+ *  A 403 verification_required opens the VerifySheet only here: on a free
+ *  surface (a ranking read) it keeps today's banner and nothing else,
+ *  because the sheet is never shown on free surfaces (design-lead §3). */
+function _isGatedPath(path: string): boolean {
+  const p = _pathname(path);
+  return /^\/api\/trades(\/(generate|status|swipe|pass-reason|propose|propose-espn|propose-mfl|respond-mfl|queue|asset-ideas|fair-packages|standing-offer))?$/.test(p)
+    || /^\/api\/trades\/matches\/[^/]+\/disposition$/.test(p)
+    || /^\/api\/overhauls(\/|$)/.test(p)
+    || /^\/api\/win-now\//.test(p);
+}
+
+/** Pure: what a failed call means for the gate. Null = not a gate answer. */
+export function gateSignalFor(err: unknown, path: string): GateSignal | null {
+  if (!(err instanceof ApiError)) return null;
+  const kind = gateKindForPath(path);
+  if (err.isProRequired) {
+    return err.gate === 'verify_required'
+      ? { action: 'verify', gate: err.gate, kind }
+      : { action: 'paywall', gate: err.gate, kind };
+  }
+  if (err.isVerificationRequired && _isGatedPath(path)) {
+    return { action: 'verify', gate: null, kind };
+  }
+  if (
+    err.status === 403 &&
+    _pathname(path) === '/api/sleeper/link' &&
+    (err.body as any)?.error === 'token_user_mismatch'
+  ) {
+    return { action: 'verify_mismatch' };
+  }
+  return null;
+}
+
+// The one thing the gate may do with a failure is WAIT: a user-initiated
+// call that needs a verified session holds its rejection while the
+// VerifySheet is up and, once the session verifies, is sent once more so the
+// SERVER decides (D18: the free page, a 402 → the paywall, or entitled → the
+// call just succeeds). Cancel, a different sign-in or a session change
+// rejects with the original error. A send-like call is never re-sent: its
+// caller gets the rejection at once and needs a fresh tap. Called from
+// apiRequest's catch, outside the request deadline.
+const _gateRetries = new WeakSet<RequestOptions>();
+async function _afterGateFailure<T>(err: unknown, path: string, opts: RequestOptions): Promise<T> {
+  const signal = opts.background ? null : gateSignalFor(err, path);
+  const revision = (err as ApiError | null)?.requestRevision;
+  if (!signal || !_onProRequired || revision !== getSessionRevision()) throw err;
+  let outcome: Promise<GateOutcome> | void;
+  try {
+    outcome = _onProRequired(signal);
+  } catch {
+    throw err; // a listener never masks the API error
+  }
+  if (!outcome || _gateRetries.has(opts) || _neverAutoRetry(path)) throw err;
+  const result = await outcome.catch((): GateOutcome => 'dismissed');
+  if (result !== 'verified' || revision !== getSessionRevision() || opts.signal?.aborted) throw err;
+  const retryOpts: RequestOptions = { ...opts };
+  _gateRetries.add(retryOpts);
+  return apiRequest<T>(path, retryOpts);
 }
 
 // ── write-request listener (200 ms path, C: the device-held first page) ──
@@ -370,6 +504,10 @@ export interface RequestOptions {
   deadlineAt?: number;
   // State-owned identity fence. No store import belongs in this layer.
   beforeDispatch?: () => void;
+  // A call the user didn't make with a tap (a poll, a prefetch, an
+  // auto-start). Its 402 / 403 opens no paywall and no VerifySheet; the
+  // caller just gets the rejection. Default false: user-initiated.
+  background?: boolean;
 }
 
 // ── Universal API-failure observability (tracking plan addendum 2026-07-19) ──
@@ -483,7 +621,7 @@ export async function apiRequest<T = unknown>(
       _clockMs() - startedAt,
       _leftForegroundCount !== foregroundEpoch,
     );
-    throw err;
+    return _afterGateFailure<T>(err, path, opts);
   } finally {
     _noteWrite(path, opts.method || 'GET');
   }
@@ -652,6 +790,7 @@ async function _apiRequestInner<T = unknown>(
             const msg = (parsed && (parsed.message || parsed.error)) || `HTTP ${res!.status}`;
             const apiErr = new ApiError(res!.status, parsed, msg);
             apiErr.sessionExpiry = sessionExpiry;
+            apiErr.requestRevision = requestRevision;
             // Central read-gate signal — see setOnVerificationRequired above.
             if (apiErr.isVerificationRequired && _onVerificationRequired) {
               const sent = headers['X-Session-Token'];
