@@ -4078,7 +4078,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 3
+DECK_PIPELINE_VERSION = 4
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4202,6 +4202,7 @@ DECK_PIPELINE_PINS = {
     1: "38068a074677acaa",
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
+    4: "7ee7abc3baec3f02",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context (same values; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -7391,9 +7392,11 @@ def _trade_fingerprints_match(job: dict, current, *, running: bool = False,
 
     `current` is the caller's _trade_current_fingerprints() for the job's
     league and format. Compare only: this runs under _trade_jobs_lock. A None
-    stamp from a failed kickoff read never matches. A None `current` (a failed
+    stamp (a failed kickoff read, or a worker that read other picks:
+    `_note_job_picks_read`) never matches a read. A None `current` (a failed
     read) can't prove staleness (contract §4.4, A2): it keeps a RUNNING job
-    (`running=True`) and never makes a completed job fresh. Hand-built jobs
+    (`running=True`), whatever its stamp, None included, and never makes a
+    completed job fresh. Hand-built jobs
     without the stamp are not checked, like `request_signature`; with
     `trade_i1_mode` 0 nothing is.
 
@@ -11662,6 +11665,21 @@ def _run_trade_job(
         # one: 0.0 share, empty opponent shares.
         _picks_memo: list = []
         _picks_loaded = False
+        _draft_memo: dict = {}
+        _draft_loaded = False
+
+        def _job_draft_context() -> dict:
+            # ONE draft-verdict read per job, like the picks: the owner path's
+            # draft context and the stamp check share it (#486 QA P3-5).
+            nonlocal _draft_memo, _draft_loaded
+            if not _draft_loaded:
+                _draft_loaded = True
+                try:
+                    _draft_memo = get_league_draft_context(league_id) or {}
+                except Exception as draft_err:
+                    log.warning("trade-job: draft context read failed: %s", draft_err)
+                    _draft_memo = {}
+            return _draft_memo
 
         def _job_draft_picks() -> list:
             nonlocal _picks_memo, _picks_loaded
@@ -11673,7 +11691,8 @@ def _run_trade_job(
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
                     _picks_memo = []
-                _note_job_picks_read(job_id, _picks_memo)
+                _note_job_picks_read(job_id, _picks_memo,
+                                     _job_draft_context().get("status") == "drafted")
             return _picks_memo
 
         # Outlook + positional preferences
@@ -12036,7 +12055,8 @@ def _run_trade_job(
                     seed_map=seed_map, user_elo=elo_map_rt, user_roster=g_user_roster,
                     scoring_format=active_format, fairness_threshold=fairness_threshold,
                     captured_rankings=real_rankings, captured_preferences=_opp_prefs,
-                    captured_config=owner_config,
+                    captured_config=owner_config, job_draft_picks=_job_draft_picks,
+                    job_draft_context=_job_draft_context,
                     viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
@@ -13332,19 +13352,22 @@ def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
         return False
 
 
-def _note_job_picks_read(job_id, picks) -> None:
-    """The worker read its picks (once per job, `_job_draft_picks`). The kickoff
-    stamp (and `roster_fp_expected`) hashed the picks stored at kickoff; when
-    the worker read different ones (a pick move, or an older refresh writing
-    back, between the two reads), the stamp doesn't describe the job: it is
-    dropped to None (never reused, never stored) with the expected fp, so no
-    later re-stamp can mark it fresh (#484 QA P2-1). Never raises."""
+def _note_job_picks_read(job_id, picks, drafted: bool = False) -> None:
+    """The worker read its picks and draft state (once per job,
+    `_job_draft_picks` and `_job_draft_context`). The kickoff stamp (and
+    `roster_fp_expected`) hashed the picks and draft verdict stored at kickoff;
+    when the worker read different ones (a pick move, an older refresh writing
+    back, or a draft verdict flip, between the two reads), the stamp doesn't
+    describe the job: it is dropped to None (never reused, never stored) with
+    the expected fp, so no later re-stamp can mark it fresh (#484 QA P2-1,
+    #486 QA P3-5). A key that can't be computed unstamps too (#486 QA P3-4).
+    Never raises."""
     try:
         from . import roster_snapshot
-        key = roster_snapshot.picks_key(picks)
+        key = roster_snapshot.picks_key(picks, drafted)
     except Exception as err:
         log.warning("trade-job %s: picks key unavailable: %s", job_id, err)
-        return
+        key = None
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if job is None or job.get("roster_picks_key") in (None, key):
@@ -19480,12 +19503,16 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
                               user_elo, user_roster, scoring_format,
                               fairness_threshold, captured_rankings=None,
                               captured_preferences=None, viewer_preferences=None,
-                              captured_config=None, **selection):
+                              captured_config=None, job_draft_picks=None,
+                              job_draft_context=None, **selection):
     """One captured raw-input adapter for organic AND selected entrances.
 
     Clone members: refreshing real boards here must not change a control's
     inputs. Seeded/simulated opponents never become observed personal data.
     Source tags describe actions; their counts never discount willingness.
+    `job_draft_picks` / `job_draft_context`: a trade job's one memoized read of
+    each, the ones its roster stamp is checked against (#486 QA P3-1); other
+    entrances read their own.
     """
     user_id = sess["user_id"]
     config = dict(_trade_service_mod._cfg if captured_config is None else captured_config)
@@ -19523,10 +19550,12 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     if _bakeoff.owner_arm(config) == _bakeoff.ARM_OWNER_BILATERAL:
         # Only positive league draft evidence determines next-year protection
         # or expiry. The original manager, not today's holder, owns that intent.
-        draft = get_league_draft_context(league.league_id) or {}
+        draft = (job_draft_context() if job_draft_context is not None
+                 else get_league_draft_context(league.league_id) or {})
         verified = (draft.get("season") and draft.get("confidence") in {"high", "medium"}
                     and draft.get("status") in {"drafted", "not_drafted"})
-        pick_rows = load_draft_picks(league_id=league.league_id, source=_pick_read_source()) or []
+        pick_rows = (job_draft_picks() if job_draft_picks is not None
+                     else load_draft_picks(league_id=league.league_id, source=_pick_read_source())) or []
         next_year = (int(draft["season"]) + int(draft["status"] == "drafted")) if verified else None
         for uid, prefs in manager_preferences.items():
             prefs["draft_context"] = dict(draft)

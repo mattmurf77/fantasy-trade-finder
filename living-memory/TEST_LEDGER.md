@@ -1,3 +1,37 @@
+## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
+
+Gates: QA follow-ups to #486 (stacked on it). No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 3 → 4:
+- `_run_trade_job` gains `_job_draft_context` (one memoized draft-verdict read);
+- `_job_draft_picks` notes the picks with that verdict;
+- the worker hands both reads to `_owner_generation_context` (new `job_draft_picks` / `job_draft_context` params; other entrances read their own).
+
+The values are the same, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Covered:**
+  - P3-1: the owner path's second picks read is gone for trade jobs.
+  - P3-2: the match docstring states the A2 rule for None stamps.
+  - P3-3: spy tests for "one kickoff read" and "every worker picks read is noted", with the owner path on.
+  - P3-4: a key that can't be computed unstamps.
+  - P3-5: the picks key covers the draft verdict (kickoff and worker).
+- **Backend:** `test_trade_freshness_roster.py` is now 49 tests (6 new):
+  - a draft-verdict flip unstamps;
+  - an unchanged verdict keeps the stamp;
+  - a failed key unstamps;
+  - one kickoff read;
+  - every worker picks read noted;
+  - the owner context uses the job's reads.
+- `test_deck_pipeline_digest.py` (v4 in FROZEN_PINS) and `test_pick_assignment.py` pass, 44 together.
+- **Sabotage, each red then restored (10):**
+  - the owner path reading its own picks (QA's T5);
+  - the inject path reading its own (`picks=None`);
+  - the opponent shares reading their own;
+  - the owner path ignoring the job's picks, or its draft;
+  - the kickoff key without the verdict;
+  - the note without the verdict;
+  - a failed key keeping the stamp;
+  - the kickoff reading twice.
+  - Green by design: the seeded-outlook site (`_infer_user_outlook(..., _job_draft_picks())`) runs only without `prefs_preload`, which a kickoff always supplies.
+
 ## 2026-10-27 — S0 stamp hashes the picks the worker read (#484 QA P2-1); deck pipeline v3
 
 Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 2 → 3: `_run_trade_job`'s `_job_draft_picks` now calls `_note_job_picks_read`, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
