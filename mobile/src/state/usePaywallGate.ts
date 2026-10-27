@@ -36,6 +36,7 @@ import { useSession, type SavedUser } from './useSession';
 //     paywall, or entitled → the call just succeeds).
 //   openOfferTrigger(source, userId) (M2) → the trigger variant, at most
 //     once per user (the memory below).
+//   verifyThenReturn(params) (M3, D9) → the sheet, then the same paywall.
 
 export type { GateKind, PaywallSource, VerifyPath };
 
@@ -43,6 +44,9 @@ export interface PaywallParams {
   source: PaywallSource | string;
   gate?: string;
   kind?: GateKind;
+  /** M3 (D9): the plan the user had selected, when the paywall reopens
+   *  after a verify. The screen pre-selects it; nothing is bought. */
+  plan?: string;
 }
 
 /** The slice of RootNav's `navigationRef` the gate uses. */
@@ -145,7 +149,18 @@ export function openPaywall(params: PaywallParams): Promise<GateOutcome> | void 
     source: params.source,
     ...(params.gate ? { gate: params.gate } : {}),
     ...(params.kind ? { kind: params.kind } : {}),
+    ...(params.plan ? { plan: params.plan } : {}),
   });
+}
+
+/** D9 (#393 M3): the paywall's purchase button or Restore, tapped by a
+ *  session the server reported unverified. The VerifySheet first, and only
+ *  on `verified` the SAME paywall again (same variant, same plan selected),
+ *  through openPaywall. It never buys or restores: the user taps again.
+ *  Cancel, or a new Apple sign-in, opens nothing more. Reads the session
+ *  only, never a subscription field (D15). */
+export function verifyThenReturn(params: PaywallParams): Promise<GateOutcome> {
+  return openVerify({ onVerified: () => void openPaywall(params) });
 }
 
 // ── The offer trigger (#393 M2; D4, ux-lead §1) ─────────────────────────────
@@ -194,7 +209,12 @@ export function openOfferTrigger(
   AsyncStorage.setItem(`${OFFER_SHOWN_KEY_PREFIX}${userId}`, '1').catch(() => {});
   nav.navigate('Paywall', { source });
   return new Promise<void>((resolve) => {
-    const onPaywall = () => nav.getCurrentRoute()?.name === 'Paywall';
+    // M3: a purchase in the club window replaces the paywall with its
+    // one-time welcome; the slot stays held until that is gone too.
+    const onPaywall = () => {
+      const name = nav.getCurrentRoute()?.name;
+      return name === 'Paywall' || name === 'FounderWelcome';
+    };
     let sawPaywall = onPaywall();
     let done = false;
     const finish = () => {

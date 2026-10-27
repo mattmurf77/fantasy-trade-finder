@@ -17,6 +17,7 @@ import { chalk, flare, ice, ink, radii, space } from '../theme/chalkline';
 import { getBaseUrl } from '../api/client';
 import { getPaywallConfig, type PaywallConfig, type PaywallProduct } from '../api/billing';
 import {
+  activeProFrom,
   checkIntroEligibility,
   getOfferings,
   hasProEntitlement,
@@ -34,8 +35,9 @@ import {
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
 import { useSession } from '../state/useSession';
-import { openVerify } from '../state/usePaywallGate';
+import { isUnverifiedSession, verifyThenReturn } from '../state/usePaywallGate';
 import { track } from '../api/events';
+import { claimFounderWelcome, clubWindowOpen } from './FounderWelcomeScreen';
 import {
   FOUNDER_TAG,
   MON,
@@ -44,6 +46,7 @@ import {
   ctaLabel,
   disclosure,
   headlineFor,
+  inviteeContext,
   offerBodyFor,
   planPeriod,
   pricePerPeriod,
@@ -67,6 +70,22 @@ import {
 //   mon.offer.headline, no body · settings / anything else → mon.pay.headline.
 // VERIFIED SESSIONS ONLY: a session the server reported unverified gets the
 // VerifySheet instead, never the paywall or the trial offer (R28.9).
+// D9 (M3): ONE route to it from here, `verifyFirst`, for both the backstop
+// (unverified while this is up) and the button / Restore tapped by an
+// unverified session: this modal closes, the sheet opens, and only on
+// `verified` does the SAME paywall come back (same variant, same plan
+// selected). Nothing reaches Apple's sheet first; nothing is bought for the
+// user after verifying. The routing reads the session only (D15).
+//
+// THE WELCOME (M3, D10): a purchase (trial start or paid) made inside the
+// Founding GMs window replaces this modal with FounderWelcome, once per
+// user; its Back returns to the same card. After the cut-off, or once it
+// has shown, the paywall just closes.
+//
+// INVITEES (M3, §9.6): the trigger variant shows `mon.invitee.context` as
+// the eyebrow and `mon.invitee.board` under the body, only when the
+// session still holds BOTH the inviter and the league name; otherwise
+// neither line renders (never a broken template).
 //
 // LAYOUT: a scroll area (headline, body, value + bullets, free line, the
 // Founding GMs block in the club window) above a BOTTOM-ANCHORED block that
@@ -123,6 +142,10 @@ export default function PaywallScreen({ navigation, route }: any) {
   const noteCustomerInfo = useEntitlements((s) => s.noteCustomerInfo);
   const userId = useSession((s) => s.user?.user_id ?? null);
   const unverified = useSession((s) => !s.isDemo && s.verification?.session_verified === false);
+  const planParam: string | undefined = route?.params?.plan || undefined;
+  // Read-only: the invite intent as the session holds it (useSession P0-3).
+  const invitedBy = useSession((s) => s.invitedBy);
+  const invitedLeagueName = useSession((s) => s.invitedLeagueName);
   const { height: windowHeight } = useWindowDimensions();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -151,17 +174,34 @@ export default function PaywallScreen({ navigation, route }: any) {
     if (!paywallOn) dismiss();
   }, [paywallOn, dismiss]);
 
-  // Backstop for a direct navigate (the router already sends these to the
-  // sheet): an unverified session gets the VerifySheet, after this modal is
-  // gone so the two never present at once. Nothing subscription-specific
-  // renders in between (R28.9).
-  useEffect(() => {
-    if (!paywallOn || !unverified) return;
+  // D9 — the ONE route from this screen to the VerifySheet: close this
+  // modal, then (once it's gone, so the two never present at once) the
+  // sheet; on `verified`, the same paywall with the same plan selected.
+  // Reads the session only (D15). Once per mount: the backstop and a tap
+  // can't both pop the stack.
+  const leavingForVerify = useRef(false);
+  const verifyFirst = useCallback(() => {
+    if (leavingForVerify.current) return;
+    leavingForVerify.current = true;
+    const back = {
+      source,
+      ...(gate ? { gate } : {}),
+      ...(kind ? { kind } : {}),
+      ...(selectedId ? { plan: selectedId } : {}),
+    };
     dismiss();
     // Not cleared on unmount: dismissing unmounts this screen, and the sheet
     // must still open once the modal is gone. openVerify is idempotent.
-    setTimeout(() => void openVerify(), 450);
-  }, [paywallOn, unverified, dismiss]);
+    setTimeout(() => void verifyThenReturn(back), 450);
+  }, [source, gate, kind, selectedId, dismiss]);
+
+  // Backstop for a direct navigate (the router already sends these to the
+  // sheet): an unverified session gets the VerifySheet. Nothing
+  // subscription-specific renders in between (R28.9).
+  useEffect(() => {
+    if (!paywallOn || !unverified) return;
+    verifyFirst();
+  }, [paywallOn, unverified, verifyFirst]);
 
   const configQuery = useQuery({
     queryKey: ['paywall-config', 'ios'],
@@ -223,11 +263,15 @@ export default function PaywallScreen({ navigation, route }: any) {
   });
   const eligibleFor = (productId: string) => eligibilityQuery.data?.[productId] === true;
 
-  // Default selection = Annual (the hero), else the first plan.
+  // Default selection = the plan a verify round-trip carried back (D9), else
+  // Annual (the hero), else the first plan.
   useEffect(() => {
     if (selectedId || plans.length === 0) return;
-    setSelectedId((plans.find((p) => p.period === 'annual') ?? plans[0]).product.product_id);
-  }, [plans, selectedId]);
+    const pick = plans.find((p) => p.product.product_id === planParam)
+      ?? plans.find((p) => p.period === 'annual')
+      ?? plans[0];
+    setSelectedId(pick.product.product_id);
+  }, [plans, selectedId, planParam]);
 
   const selected = plans.find((p) => p.product.product_id === selectedId) ?? null;
   const eligible = !!selected && eligibleFor(selected.product.product_id);
@@ -266,6 +310,11 @@ export default function PaywallScreen({ navigation, route }: any) {
   }, [paywallOn, unverified, source, gate, kind]);
 
   const onPurchase = useCallback(async () => {
+    // D9: an unverified session never reaches Apple's sheet.
+    if (isUnverifiedSession()) {
+      verifyFirst();
+      return;
+    }
     if (!selected || busy || !userId) return;
     const productId = selected.product.product_id;
     setStatus(null);
@@ -290,6 +339,15 @@ export default function PaywallScreen({ navigation, route }: any) {
       // below are what actually decide, and the server can still say no.
       noteCustomerInfo(hasProEntitlement(result.customerInfo));
       await refreshEntitlements();
+      // D10: the Founding GMs welcome, once per user, only inside the club
+      // window. It REPLACES this modal, so its Back lands on the same card.
+      if (clubWindowOpen(config?.club, Date.now()) && (await claimFounderWelcome(userId))) {
+        navigation.replace('FounderWelcome', {
+          period: selected.period,
+          since: activeProFrom(result.customerInfo)?.since ?? new Date().toISOString(),
+        });
+        return;
+      }
       dismiss();
     } catch (err) {
       const cancelled = isUserCancelled(err);
@@ -305,9 +363,14 @@ export default function PaywallScreen({ navigation, route }: any) {
     } finally {
       setBusy(false);
     }
-  }, [selected, busy, userId, source, noteCustomerInfo, refreshEntitlements, dismiss, closeSoon]);
+  }, [selected, busy, userId, source, noteCustomerInfo, refreshEntitlements, dismiss, closeSoon, verifyFirst, config, navigation]);
 
   const onRestore = useCallback(async () => {
+    // D9: Restore waits for verification too (R28.9 3f).
+    if (isUnverifiedSession()) {
+      verifyFirst();
+      return;
+    }
     if (busy || !userId) return;
     setBusy(true);
     setStatus(null);
@@ -332,7 +395,7 @@ export default function PaywallScreen({ navigation, route }: any) {
     } finally {
       setBusy(false);
     }
-  }, [busy, userId, noteCustomerInfo, refreshEntitlements, closeSoon]);
+  }, [busy, userId, noteCustomerInfo, refreshEntitlements, closeSoon, verifyFirst]);
 
   const openLegal = useCallback((path: '/privacy' | '/terms') => {
     // The backend origin serves the web app at `/` (client.ts getBaseUrl), so
@@ -344,6 +407,9 @@ export default function PaywallScreen({ navigation, route }: any) {
 
   const loading = configQuery.isLoading || offeringsQuery.isLoading;
   const body = offerBodyFor(source, eligible);
+  // §9.6: invitees, on the trigger variant only.
+  const trigger = source === 'first_opinion' || source === 'left_deck';
+  const invitee = trigger ? inviteeContext(invitedBy, invitedLeagueName) : null;
   const clubOpen = config?.club?.open === true;
   // Dynamic Type: past half the window, the block joins the scroll's end.
   const unanchored = blockHeight > 0 && blockHeight > windowHeight * 0.5;
@@ -520,12 +586,22 @@ export default function PaywallScreen({ navigation, route }: any) {
 
       <ScrollView>
         <View style={styles.scrollPad}>
+          {invitee ? (
+            <ChalkText variant="label" testID="paywall-invitee-context">
+              {invitee}
+            </ChalkText>
+          ) : null}
           <ChalkText variant="display" testID="paywall-headline">
             {headlineFor(source, kind)}
           </ChalkText>
           {body ? (
             <ChalkText variant="body" style={styles.dim}>
               {body}
+            </ChalkText>
+          ) : null}
+          {invitee ? (
+            <ChalkText variant="bodySm" testID="paywall-invitee-board">
+              {MON['mon.invitee.board']}
             </ChalkText>
           ) : null}
 
