@@ -43,10 +43,14 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
     - **`track` comes only from the events module, unrenamed.** It may only be an unrenamed named import from `src/api/events`, resolved from each file's own directory. No `track as x`, no `x as track`, no `track` from another module, and no default, namespace, `require` or `import()` of the events module. A positive pin checks that `platformEntry.ts` imports `track` from `./events`.
     - **The global-object rule sees through wrappers:** `(…)`, `as`, `!`, `satisfies` and `<T>`.
     - **Declared residual, unchanged:** `track(` with a variable that holds a secret.
-- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **56 assertions**:
+  - **Round 4 (2026-10-27).** #421's head is frozen at `f00bbb13`; this is the stacked branch `feat/mfl-entry-leakguard-r4`.
+    - **Computed keys on a global object fail.** Any non-literal element access on `globalThis` / `window` / `global` / `self`, after unwrapping, fails (`globalThis['con' + 'sole']`, `window[k]`).
+    - **No dynamic code.** `eval(`, `Function(` and `new Function(` are banned: any value use of `eval` / `Function`, including indirect `(0, eval)(…)`, and either one read off a global object. `Function` as a type is allowed.
+    - **Generic keywords match identifiers only.** `pass`, `body`, `res` and `minted` no longer match inside string literals, so `step: 'minted'` passes. The credential-named terms still match anywhere in an argument's text.
+- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **62 assertions** (56 at `f00bbb13`):
   - (a) the `mfl` mint body spreads `{username, password}` only behind `args.username && args.password`, with no bare property, and the ESPN body has neither;
   - (b) `mflEntryPickLeague` passes `username` from `mflUser` and `password` from `entryMflPassRef`, and `pickTeam` passes neither;
-  - (c) the three-file leak guard above: sink arguments, direct-call-only use, no global-object route, the outright log/storage/crash-report ban, no storage/crash SDK import, and `track` imports, one assertion each per file (18), plus the positive `./events` import pin;
+  - (c) the three-file leak guard above: sink arguments, direct-call-only use, no global-object route, the outright log/storage/crash-report ban, no storage/crash SDK import, `track` imports, no computed global access, and no `eval` / `Function`, one assertion each per file (24), plus the positive `./events` import pin;
   - (d) both sheets type `onEntrySession` with the optional `account_only` / `username`, and every call forwards `minted.account_only` / `minted.username`;
   - (e) the entry sign-in path:
     - order: mint → `mflAuthLink` → `mflAuthImport([lg.league_id])`, each called once, and never `linkPlatformLeague`;
@@ -123,6 +127,20 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
   - **U3:** `((globalThis)).console.info('x')` → red.
   - **U4:** `(globalThis satisfies object)['console']` → red.
   - U1–U4 fail only the global-object rule, so the unwrapping is what catches them.
+- **Sabotage, round 4 (2026-10-27): 8 expected-red sabotages, all red, plus 2 expected-green controls, both green.** Every file was restored byte-identical.
+  - **Red:**
+    - **N1:** `globalThis['con' + 'sole'].log('x')` → red.
+    - **N2:** `(window as any)[k].warn('x')` → red.
+    - **E1:** `eval('1')` → red.
+    - **E2:** `new Function('return 1')` → red.
+    - **E3:** `(0, eval)('1')` → red.
+    - **E4:** `globalThis.Function('return 1')()` → red.
+    - **M1:** `track('mfl_entry_pick', { id: minted.user_id })` → red.
+    - **R1 (regression):** `track('signin_succeeded', { method, r: res.user_id })` → red.
+  - **Green:**
+    - **M2:** `track('signin_succeeded', { method, step: 'minted' })` passes. The round-3 check at HEAD fails it (exit 1), so the false positive is gone.
+    - **R2:** `{ k: 'body' }` passes.
+  - M2, R1 and R2 also fail `check-landing-platform-options`' exact signin-funnel pin, because they edit the `track` call text. That pin is independent of this guard.
 - **Re-pinned in `check-landing-platform-options`:**
   - V2's ESPN `pickTeam` window went from 900 to 1200 chars, because the forwarded fields lengthen the span (874 → 956).
   - V2.1's three `mflEntryPickLeague` pins encoded the old contract. They said the import goes through `linkPlatformLeague`, that `mflAuthImport` is never used, and that the re-store is best-effort with the password dropped first. Per the follow-up, they now pin `mflAuthImport([lg.league_id], yr)` with no `linkPlatformLeague`, no default-ALL import, and a required `mflAuthLink` that drops the password only after it succeeds.
