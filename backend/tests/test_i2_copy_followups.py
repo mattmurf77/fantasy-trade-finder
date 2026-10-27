@@ -1,15 +1,16 @@
 """I-2 post-launch copy follow-ups: the asset-aware unnamed fallback, and the
 receipt variants of the ownership sentence (`backend/ownership_copy.py`).
 
-The wording of the pick and asset subjects and of the receipt variants is a
-PLACEHOLDER pending marketing (head-eng -> head-bizops -> marketing-lead).
-These tests pin the mechanism and the current placeholders, so a copy swap is
-a change to `ownership_copy.py` and to the strings here.
+The wording of the pick and asset subjects and of the receipt variants is
+marketing's final copy (marketing-lead §6 addendum 9, 2026-10-27). These tests
+pin the mechanism and the exact strings, so a copy change is a change to
+`ownership_copy.py` and to the strings here.
 
   1. A refused asset with no name on file is counted, never shown by id. The
-     count subject now matches the assets: one pick -> "A pick in this trade",
-     several picks -> "{n} picks in this trade", players and picks together
-     -> "{n} assets in this trade". Players only is unchanged.
+     count subject matches the assets: one pick -> "A draft pick in this
+     trade", several picks -> "{n} draft picks in this trade", players and
+     picks together -> "{n} of the players and picks in this trade". Players
+     only is unchanged.
   2. `refusal_message(..., receipt=True)` is the same sentence minus "so
      nothing was sent", for team overhaul's prepare-send receipt (wired and
      tested in test_i2_overhaul.py). Send-time stays the default.
@@ -48,30 +49,68 @@ def _msg(side, assets, names=None, team=None, *, receipt=False):
 # ---------------------------------------------------------------------------
 
 def test_one_unnamed_pick_says_pick():
-    assert _msg("give", [PICK]) == "A pick in this trade is no longer on your roster" + SEND
-    assert _msg("give", [GENERIC]) == "A pick in this trade is no longer on your roster" + SEND
+    assert _msg("give", [PICK]) == "A draft pick in this trade is no longer on your roster" + SEND
+    assert _msg("give", [GENERIC]) == "A draft pick in this trade is no longer on your roster" + SEND
 
 
 def test_two_unnamed_picks_are_counted_as_picks():
-    assert _msg("give", [PICK, PICK2]) == "2 picks in this trade are no longer on your roster" + SEND
-    assert _msg("give", [PICK, GENERIC, PICK2]) == "3 picks in this trade are no longer on your roster" + SEND
+    assert _msg("give", [PICK, PICK2]) == "2 draft picks in this trade are no longer on your roster" + SEND
+    assert _msg("give", [PICK, GENERIC, PICK2]) == "3 draft picks in this trade are no longer on your roster" + SEND
 
 
 def test_a_mixed_unnamed_set_is_counted_as_assets():
-    assert _msg("give", [PLAYER, PICK]) == "2 assets in this trade are no longer on your roster" + SEND
+    assert _msg("give", [PLAYER, PICK]) == "2 of the players and picks in this trade are no longer on your roster" + SEND
     assert (_msg("give", [PICK, PLAYER, PLAYER2])
-            == "3 assets in this trade are no longer on your roster" + SEND)
+            == "3 of the players and picks in this trade are no longer on your roster" + SEND)
 
 
 def test_one_missing_name_counts_every_offending_asset_by_what_they_all_are():
     # The count covers ALL the offending assets (as it always did), so the
     # subject describes all of them, not just the unnamed one.
     assert (_msg("give", [PLAYER, PICK], {PLAYER: "Josh Allen"})
-            == "2 assets in this trade are no longer on your roster" + SEND)
+            == "2 of the players and picks in this trade are no longer on your roster" + SEND)
     assert (_msg("give", [PICK, PICK2], {PICK: "2027 1st (from Dolphins Den)"})
-            == "2 picks in this trade are no longer on your roster" + SEND)
+            == "2 draft picks in this trade are no longer on your roster" + SEND)
     assert (_msg("give", [PLAYER, PLAYER2], {PLAYER: "Josh Allen"})
             == "2 players in this trade are no longer on your roster" + SEND)
+
+
+def test_marketings_final_strings_exact():
+    """Marketing-lead §6 addendum 9 (2026-10-27), verbatim: the three
+    subjects, and each in a full sentence (send-time, receipt, both sides)."""
+    assert oc.ONE_UNNAMED_PICK == "A draft pick in this trade"
+    assert oc.N_UNNAMED_PICKS == "{n} draft picks in this trade"
+    assert oc.N_UNNAMED_ASSETS == "{n} of the players and picks in this trade"
+    # Approved unchanged from the draft.
+    assert oc.RECEIPT_ASSET_NOT_OWNED == "{assets} {verb} no longer on your roster. Find a new trade."
+    assert oc.RECEIPT_COUNTERPARTY_NOT_OWNED == (
+        "{assets} {verb} no longer on {team}’s roster. Find a new trade.")
+    assert oc.RECEIPT_COUNTERPARTY_NOT_OWNED_UNNAMED == (
+        "{assets} {verb} no longer on the other manager’s roster. Find a new trade.")
+
+    assert _msg("give", [PICK]) == (
+        "A draft pick in this trade is no longer on your roster, so nothing was sent. Find a new trade.")
+    assert _msg("give", [PICK, PICK2]) == (
+        "2 draft picks in this trade are no longer on your roster, so nothing was sent. Find a new trade.")
+    assert _msg("give", [PLAYER, PICK]) == (
+        "2 of the players and picks in this trade are no longer on your roster, "
+        "so nothing was sent. Find a new trade.")
+    assert _msg("receive", [PICK], team="Chris") == (
+        "A draft pick in this trade is no longer on Chris’s roster, so nothing was sent. Find a new trade.")
+    assert _msg("receive", [PLAYER, PICK]) == (
+        "2 of the players and picks in this trade are no longer on the other manager’s roster, "
+        "so nothing was sent. Find a new trade.")
+
+    assert _msg("give", [PICK], receipt=True) == (
+        "A draft pick in this trade is no longer on your roster. Find a new trade.")
+    assert _msg("give", [PICK, PICK2], receipt=True) == (
+        "2 draft picks in this trade are no longer on your roster. Find a new trade.")
+    assert _msg("give", [PLAYER, PICK], receipt=True) == (
+        "2 of the players and picks in this trade are no longer on your roster. Find a new trade.")
+    assert _msg("receive", [PLAYER, PICK], team="Chris", receipt=True) == (
+        "2 of the players and picks in this trade are no longer on Chris’s roster. Find a new trade.")
+    assert _msg("receive", [PICK, PICK2], receipt=True) == (
+        "2 draft picks in this trade are no longer on the other manager’s roster. Find a new trade.")
 
 
 def test_a_named_pick_still_uses_its_name():
@@ -97,11 +136,11 @@ def test_the_player_fallback_is_unchanged():
 
 def test_the_counterparty_side_follows_the_assets_too():
     assert _msg("receive", [PICK], team="Dolphins Den") == (
-        "A pick in this trade is no longer on Dolphins Den’s roster" + SEND)
+        "A draft pick in this trade is no longer on Dolphins Den’s roster" + SEND)
     assert _msg("receive", [PICK, PICK2]) == (
-        "2 picks in this trade are no longer on the other manager’s roster" + SEND)
+        "2 draft picks in this trade are no longer on the other manager’s roster" + SEND)
     assert _msg("receive", [PICK, PLAYER], team="Chris") == (
-        "2 assets in this trade are no longer on Chris’s roster" + SEND)
+        "2 of the players and picks in this trade are no longer on Chris’s roster" + SEND)
 
 
 @pytest.mark.parametrize("assets", [
@@ -154,14 +193,14 @@ def test_receipt_variant_is_the_send_time_sentence_without_nothing_was_sent():
 
 
 def test_receipt_variant_keeps_the_pick_and_count_fallbacks():
-    assert _msg("give", [PICK], receipt=True) == "A pick in this trade is no longer on your roster" + RECEIPT
-    assert _msg("give", [PICK, PICK2], receipt=True) == "2 picks in this trade are no longer on your roster" + RECEIPT
-    assert _msg("give", [PLAYER, PICK], receipt=True) == "2 assets in this trade are no longer on your roster" + RECEIPT
+    assert _msg("give", [PICK], receipt=True) == "A draft pick in this trade is no longer on your roster" + RECEIPT
+    assert _msg("give", [PICK, PICK2], receipt=True) == "2 draft picks in this trade are no longer on your roster" + RECEIPT
+    assert _msg("give", [PLAYER, PICK], receipt=True) == "2 of the players and picks in this trade are no longer on your roster" + RECEIPT
     assert _msg("give", [PLAYER], receipt=True) == "A player in this trade is no longer on your roster" + RECEIPT
     assert (_msg("receive", [PICK, PICK2], receipt=True)
-            == "2 picks in this trade are no longer on the other manager’s roster" + RECEIPT)
+            == "2 draft picks in this trade are no longer on the other manager’s roster" + RECEIPT)
     assert (_msg("receive", [PLAYER, PICK], team="Chris", receipt=True)
-            == "2 assets in this trade are no longer on Chris’s roster" + RECEIPT)
+            == "2 of the players and picks in this trade are no longer on Chris’s roster" + RECEIPT)
 
 
 def test_send_time_is_still_the_default():

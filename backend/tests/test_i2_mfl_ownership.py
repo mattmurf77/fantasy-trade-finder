@@ -193,26 +193,26 @@ def test_moved_receive_pick_refuses_with_its_label(client):
 
 def test_unlabeled_moved_pick_is_counted_never_shown_by_id(client):
     # No draft_picks row, so no label: the count fallback, never the pick id.
-    # It says "pick", not "player" (I-2 follow-up; placeholder copy).
+    # It says "pick", not "player" (I-2 follow-up).
     r, fake, _, _ = _send(client, [GIVE], [RECV, THEIR_PICK],
                           picks=_picks(their_2028_2nd_owner="0009"))
     body = r.get_json()
     assert r.status_code == 422 and body["assets"] == [THEIR_PICK]
     assert body["message"] == (
-        "A pick in this trade is no longer on the other manager’s roster" + TAIL)
+        "A draft pick in this trade is no longer on the other manager’s roster" + TAIL)
     _no_raw_ids(body)
     fake.assert_not_called()
 
 
 def test_unnamed_moved_player_and_pick_are_counted_as_assets(client):
     # Both moved, neither has a name on file: "assets", not "players" or "picks"
-    # (I-2 follow-up; placeholder copy). Give side, players and picks together.
+    # (I-2 follow-up). Give side, players and picks together.
     r, fake, _, _ = _send(client, [GIVE, MY_PICK], [RECV],
                           rosters=_rosters(mine=(MFL_GIVE2,)),
                           picks=_picks(my_2027_1st_owner="0007"))
     body = r.get_json()
     assert r.status_code == 422 and set(body["assets"]) == {GIVE, MY_PICK}
-    assert body["message"] == "2 assets in this trade are no longer on your roster" + TAIL
+    assert body["message"] == "2 of the players and picks in this trade are no longer on your roster" + TAIL
     _no_raw_ids(body)
     fake.assert_not_called()
 

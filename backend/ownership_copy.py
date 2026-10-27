@@ -13,10 +13,10 @@ is never shown. `{verb}` agrees with it ("is" / "are"). `{team}’s` takes ’s
 even after a final s ("Chris’s").
 
 The unnamed-asset fallback is asset-aware: a player, a pick, or a mixed set
-each get their own subject. The pick and asset subjects, and the receipt
-variants (a prepare receipt, where nothing has been attempted yet, so "so
-nothing was sent" would read oddly), are PLACEHOLDERS pending marketing
-(I-2 post-launch). Marketing replaces the strings below and nothing else.
+each get their own subject. The receipt variants are for a prepare receipt,
+where nothing has been attempted yet, so "so nothing was sent" would read
+oddly. Final copy for the pick and asset subjects and the receipt variants:
+marketing-lead §6 addendum 9 (2026-10-27).
 """
 from __future__ import annotations
 
@@ -31,21 +31,21 @@ COUNTERPARTY_NOT_OWNED_UNNAMED = (
     "Find a new trade.")
 ONE_UNNAMED_PLAYER = "A player in this trade"
 N_UNNAMED_PLAYERS = "{n} players in this trade"
-# PLACEHOLDER pending marketing (head-eng → head-bizops → marketing-lead), I-2 post-launch
-ONE_UNNAMED_PICK = "A pick in this trade"
-# PLACEHOLDER pending marketing (head-eng → head-bizops → marketing-lead), I-2 post-launch
-N_UNNAMED_PICKS = "{n} picks in this trade"
-# PLACEHOLDER pending marketing (head-eng → head-bizops → marketing-lead), I-2 post-launch
-N_UNNAMED_ASSETS = "{n} assets in this trade"
+# Final copy: marketing-lead §6 addendum 9 (2026-10-27)
+ONE_UNNAMED_PICK = "A draft pick in this trade"
+# Final copy: marketing-lead §6 addendum 9 (2026-10-27)
+N_UNNAMED_PICKS = "{n} draft picks in this trade"
+# Final copy: marketing-lead §6 addendum 9 (2026-10-27)
+N_UNNAMED_ASSETS = "{n} of the players and picks in this trade"
 # The prepare-receipt variants: the send-time sentence minus "so nothing was
 # sent", because a receipt has attempted nothing yet. Used only by team
 # overhaul's prepare-send receipt; every send result keeps the send-time copy.
-# PLACEHOLDER pending marketing (head-eng → head-bizops → marketing-lead), I-2 post-launch
+# Final copy: marketing-lead §6 addendum 9 (2026-10-27)
 RECEIPT_ASSET_NOT_OWNED = "{assets} {verb} no longer on your roster. Find a new trade."
-# PLACEHOLDER pending marketing (head-eng → head-bizops → marketing-lead), I-2 post-launch
+# Final copy: marketing-lead §6 addendum 9 (2026-10-27)
 RECEIPT_COUNTERPARTY_NOT_OWNED = (
     "{assets} {verb} no longer on {team}’s roster. Find a new trade.")
-# PLACEHOLDER pending marketing (head-eng → head-bizops → marketing-lead), I-2 post-launch
+# Final copy: marketing-lead §6 addendum 9 (2026-10-27)
 RECEIPT_COUNTERPARTY_NOT_OWNED_UNNAMED = (
     "{assets} {verb} no longer on the other manager’s roster. Find a new trade.")
 ROSTER_READ_FAILED = (

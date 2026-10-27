@@ -18,8 +18,8 @@ R8) and AC-6a. Stacked on I-2 PRs 1–3 (#411–#413).
   * Post-launch follow-up: the PREPARE receipt (nothing attempted yet) uses
     the receipt variant, the send-time sentence minus "so nothing was sent".
     Only /prepare-send does; /send, /assemble's stored compat and every
-    attempts[].error.message keep the send-time copy. The wording is a
-    placeholder pending marketing.
+    attempts[].error.message keep the send-time copy. The wording is
+    marketing's final copy (§6 addendum 9, 2026-10-27).
   * A per-offer core 422 inside a 200 batch reaches `attempts[].error.message`
     on both the /send response and GET /api/overhauls/{id} (OverhaulPlanScreen
     reads the latter).
@@ -197,9 +197,9 @@ def test_receipt_variant_keeps_the_pick_and_count_fallbacks():
                        receipt_copy=True)
     msgs = {b["offer_id"]: b["message"] for b in receipt["blockers"] if b["code"] == "asset_not_owned"}
     assert msgs == {
-        "o_a": "A pick in this trade is no longer on your roster" + RECEIPT_TAIL,
-        "o_b": "2 picks in this trade are no longer on your roster" + RECEIPT_TAIL,
-        "o_c": "2 assets in this trade are no longer on your roster" + RECEIPT_TAIL}
+        "o_a": "A draft pick in this trade is no longer on your roster" + RECEIPT_TAIL,
+        "o_b": "2 draft picks in this trade are no longer on your roster" + RECEIPT_TAIL,
+        "o_c": "2 of the players and picks in this trade are no longer on your roster" + RECEIPT_TAIL}
     _no_raw_ids(" ".join(msgs.values()), [pick, pick2, player])
 
 
