@@ -425,11 +425,18 @@ SWID), HTTP statuses only, verdict `PAIR_BOUND` / `PAIR_NOT_BOUND` /
 co-owner who is not the primary owner is now proven like the primary: the
 owner check uses `owner_swids` membership. The identity is still the
 claimant's **own** SWID, so each co-owner signs into their own account.
-**Known gap:** `/api/espn/link` (the client's post-mint import) and its #321
-team-binding / membership checks still compare against the primary
-`owner_swid` only — pinned and deliberately unchanged here — so a co-owner's
-import there is refused `wrong_account` after a successful sign-in. Making
-the link route accept `owner_swids` is the follow-up.
+The #321 checks use the same rule, so the co-owner's post-mint import works
+too: `/api/espn/link`'s team-binding check (R3), `/api/espn/import`'s re-sync
+check (R3b), the store-time membership assertion in `_espn_verify_credential`
+(R1) and the sync sweep's wrong-account nudge (R9) all go through
+`server._espn_binding_mismatch`. That function returns a conclusive mismatch
+only when the team lists owners and the SWID is none of them; an ownerless team
+stays inconclusive-accept. A non-owner still gets 403 `espn_bad_credentials` +
+`wrong_account` with the unchanged copy. Until 2026-10-27 those checks compared
+the primary `owner_swid` only, so a co-owner — whether signed in with ESPN or
+with Apple — was refused there. Still primary-only, by design: the synthetic
+`espn:{SWID}` member id (`_espn_member_id`) and its resolver for trade sends,
+and the prepared-inventory cohort's identity check (dark).
 
 ---
 
@@ -475,8 +482,8 @@ de-duplicated, with empty and non-string entries dropped; a missing, null or
 non-list `owners` adds nothing, and `()` means ownerless. `owner_swid`
 (`primaryOwner or owners[0]`, as ESPN sent it) is unchanged for every existing
 caller (the #321 link checks, the cohort, member ids). An `EspnTeam` built
-without `owner_swids` derives it from `owner_swid`. Only the platform sign-in
-reads it today (§2.5).
+without `owner_swids` derives it from `owner_swid`. Read by the platform
+sign-in and by every #321 team-binding check (§2.5).
 
 **Position mapping:** `defaultPositionId` → label via `ESPN_POSITION_BY_ID`
 (`backend/espn_service.py:60`): `1→QB, 2→RB, 3→WR, 4→TE, 5→K, 16→DST`. Only

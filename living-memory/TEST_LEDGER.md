@@ -4,14 +4,20 @@ Full gates. Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the t
 
 - **What changed:** `EspnTeam.owner_swids` (every listed owner, `swid_identity` form; `owner_swid` unchanged). D4 step 5 and row 7's named-team lookup use `owner_swids` membership. The step-4 control code is unchanged (a primary `owner_swid`, never the claimant's own). `/api/espn/link` and the #321 checks are unchanged (pinned).
 - **New tests:**
-  - `test_platform_sign_in.py` (+9): the co-owner is proven into its own account (after the primary imported the league; the same account on re-sign-in; the control is the team's primary); the primary is still proven; a non-owner is still `wrong_account`; row 7 names a co-owned team; the control never uses the claimant's SWID (×3 layouts); ownerless with `owners` missing; and `test_known_gap_coowner_import_at_espn_link_is_still_refused_by_321`, which pins the follow-up gap.
+  - `test_platform_sign_in.py` (+10): the co-owner is proven into its own account (after the primary imported the league; the same account on re-sign-in; the control is the team's primary); the primary is still proven; a non-owner is still `wrong_account`; row 7 names a co-owned team; the control never uses the claimant's SWID (×3 layouts); ownerless with `owners` missing; `test_coowner_signs_in_then_imports_the_league_at_espn_link` (was the known-gap pin, now flipped: the import succeeds, then `/api/espn/import` re-syncs); `test_non_owner_signed_in_elsewhere_still_cannot_import_a_co_owned_team`.
   - `test_espn_service.py` (+11): the `owner_swids` parse, including missing, empty, null, blank, non-list and non-string `owners`, and a hand-built `EspnTeam`.
 - **Sabotage, each red then restored:**
   - step 5 back to primary-only matching → 5 red (the co-owner test, row 7, all 3 control layouts);
   - parse back to the primary only → 8 red (those 5 + 3 parse tests);
   - control allowed to pick the claimant's own SWID → 43 red (incl. 2 of the 3 control layouts; the third places the claimant on no primary, so that sabotage can't reach it).
 - **Run:** `test_platform_sign_in.py`, `test_entry_platform_route.py`, `test_mfl_auth_link_route.py`, `test_mfl_link_route.py`, `test_espn_link_route.py`, `test_espn_identity_binding.py`, `test_espn_service.py`, `test_mfl_service.py`, `test_espn_my_leagues_route.py`, `test_link_status_routes.py`, `test_mfl_propose_route.py`, `test_prepared_trade_cohort.py`, `test_espn_draft_order.py`, `test_espn_propose_route.py`, `test_i2_espn_ownership.py`, `test_espn_write.py`: **562 passed, 0 failed**. `check-landing-platform-options.js` passes.
-- **Full suite** (`backend/tests`, Python 3.14): **9112 passed, 2 skipped**, 0 failed (36 min).
+- **Full suite** (first commit `69586563`; `backend/tests`, Python 3.14): **9112 passed, 2 skipped**, 0 failed (36 min).
+- **#321 extension (second commit):** co-owners at every #321 team-binding site, via one rule, `server._espn_binding_mismatch`.
+  - Sites changed: `/api/espn/link` R3 (its stale "co-owned … INCONCLUSIVE-ACCEPT" comment rewritten), `/api/espn/import` R3b, `_espn_verify_credential`'s R1 membership assertion, and the `_sweep_fetch_teams` R9 nudge.
+  - Left primary-only (not binding checks): `_espn_member_id`, `_espn_team_id_from_member_id` and the dark prepared-inventory cohort's identity check.
+  - New tests: `test_espn_identity_binding.py` +3 (`test_coowner_pair_binds_at_link_and_passes_the_store_time_membership`, `test_import_resync_accepts_a_coowner_swid`, `test_binding_mismatch_rule`); `test_roster_history.py` +1 (`test_sweep_coowner_swid_no_nudge_non_owner_still_nudged`); the sign-in pair above. Non-owners are still refused at R3, R1 and R3b, and still nudged at R9.
+  - Sabotage: primary-only at `/api/espn/link` → 2 red; primary-only in the shared rule → 5 red. Restored.
+  - Run: the ESPN link, #321, sweep, sign-in, entry, ESPN service/propose/write/draft-order, cohort and MFL link suites (17 files): **591 passed, 0 failed**; `check-landing-platform-options.js` passes. Full suite on the final tree: **9117 passed, 2 skipped**, 0 failed (17 min).
 
 ## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
 

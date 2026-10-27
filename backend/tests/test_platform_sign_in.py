@@ -480,24 +480,52 @@ def test_espn_coowner_who_is_not_primary_is_proven_into_its_own_account(env):
     assert again["account_id"] == body["account_id"]
 
 
-def test_known_gap_coowner_import_at_espn_link_is_still_refused_by_321(env):
-    """KNOWN GAP, deliberately out of scope (/api/espn/link and its #321
-    team-binding check are pinned and unchanged): the co-owner's sign-in now
-    succeeds, but the client's follow-on import binds the team with the
-    co-owner's pair and #321 compares it to the PRIMARY owner_swid only →
-    403 wrong_account, nothing imported. Flip this test when the follow-up
-    makes the link route accept owner_swids too."""
+def test_coowner_signs_in_then_imports_the_league_at_espn_link(env):
+    """Was the known gap: the co-owner's sign-in succeeded but the client's
+    follow-on POST /api/espn/link was refused wrong_account, because #321's
+    team-binding check compared the pair to the PRIMARY owner_swid only. It
+    now accepts any listed owner (_espn_binding_mismatch), so the co-owner's
+    import binds team 1 to their own account, stores their pair, and a
+    re-sync (/api/espn/import, #321 R3b) passes too."""
     _co_own(env, 1, SWID_D)
     minted = _espn_claim(env, team_id=1, s2=S2_D, swid=SWID_D).get_json()
     assert minted["verified"] is True
+    tok = {"X-Session-Token": minted["session_token"]}
     r = env.client.post(
         "/api/espn/link",
         json={"espn_league_id": ESPN_LEAGUE, "team_id": 1, "espn_s2": S2_D,
               "swid": SWID_D},
+        headers=tok)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["ok"] is True and body["my_team_id"] == 1
+    assert body["credential_stored"] is True
+    [lg] = _rows(env, db_module.leagues_table)
+    assert lg.user_id == minted["user_id"]
+    [cred] = _rows(env, db_module.espn_credentials_table)
+    assert cred.user_id == minted["user_id"]
+    assert es.swid_identity(cred.swid) == SWID_D.upper()
+    assert cred.verified_at
+    r = env.client.post("/api/espn/import", json={"league_id": ESPN_LEAGUE},
+                        headers=tok)
+    assert r.status_code == 200, r.get_data(as_text=True)
+
+
+def test_non_owner_signed_in_elsewhere_still_cannot_import_a_co_owned_team(
+        env):
+    """B (team 2's owner) signs in, then tries to import team 1 (A + co-owner
+    D) with B's own pair → the unchanged #321 refusal, nothing imported."""
+    _co_own(env, 1, SWID_D)
+    minted = _espn_claim(env, team_id=2, s2=S2_B, swid=SWID_B).get_json()
+    r = env.client.post(
+        "/api/espn/link",
+        json={"espn_league_id": ESPN_LEAGUE, "team_id": 1, "espn_s2": S2_B,
+              "swid": SWID_B},
         headers={"X-Session-Token": minted["session_token"]})
     assert r.status_code == 403
-    assert r.get_json()["error"] == "espn_bad_credentials"
-    assert r.get_json()["reason"] == "wrong_account"
+    assert r.get_json() == {"error": "espn_bad_credentials",
+                            "reason": "wrong_account",
+                            "message": server._ESPN_WRONG_ACCOUNT_MSG}
     assert _rows(env, db_module.leagues_table) == []
     assert _rows(env, db_module.espn_credentials_table) == []
 
