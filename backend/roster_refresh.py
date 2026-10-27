@@ -123,6 +123,10 @@ def stamp(league_id: str) -> bool:
         log.warning("roster fp stamp failed league=%s error=%s", lid, type(exc).__name__)
         return False
     if not won:
+        # No retry: the stored fp can lag one roster change (the winner may
+        # have hashed older rows) until the next refresh stamps again. That
+        # self-heals and is safe, because the serve recomputes rfp1 from rows
+        # rather than trusting this column.
         log.info("roster fp stamp lost the CAS league=%s", lid)
         return False
     try:
