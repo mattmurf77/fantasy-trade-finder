@@ -2,7 +2,8 @@
 
 Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
 
-- **Backend:** `test_filter_inputs.py` (9) and `test_filter_inputs_pack.py` (2):
+- **CI fix (`backend-tests` at `c2253799`):** recording on the job broke `test_bakeoff_serving`'s flag-off golden, which pins the job's keys. The record now lives on the deck's evidence (`ev.filter_inputs`), and v5 is re-pinned in place (`99d62fcaf7ad01ef`).
+- **Backend:** `test_filter_inputs.py` (5, unit) and `test_filter_inputs_pack.py` (6, real organic jobs with deferred evidence, and a real packed job for the header):
   - the record holds what the filter read (nulls, coverage, `qb_te` for the viewer and counterparties only, `protected`);
   - the lineup recorded as read (null / empty / list);
   - not a frozen input;
@@ -11,8 +12,10 @@ Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names
   - a failed record never unfilters the deck;
   - the pack's run header carries it; a deck with no record has none.
 - `test_deck_pipeline_digest.py`: v5 added to FROZEN_PINS.
-- **Sabotage, each red then restored (6):**
+- **Sabotage, each red then restored (8):**
   - job done dropping it;
+  - the worker never setting it;
+  - recording it on the job too (the golden goes red);
   - a record failure unfiltering the deck;
   - an unseeded asset absent instead of null;
   - `qb_te` for every team;

@@ -4204,7 +4204,7 @@ DECK_PIPELINE_PINS = {
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
-    5: "d4e4206b771dd50b",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
+    5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4798,6 +4798,7 @@ class _DeckEvidence:
         self.league_id = None
         self.built_at = None          # the build time (the logger's served_at)
         self.run_meta: dict = {}      # values_snapshot_id, config_ref (the job's stamps)
+        self.filter_inputs: dict | None = None   # the quality filter's inputs (addendum D2)
         self.deliveries: list = []    # [[last_card_index, delivered_at]], card_index space (U1)
         self.written: set = set()     # ids whose deck_impressions row is written
         self.pack = None              # its _PackState once the pack row is written
@@ -6431,9 +6432,9 @@ def _deck_evidence_job_done(job_id: str) -> None:
             # can tell a replaced row from none (_row_gone_why). Omitted for a
             # deck with no page scope (it never has a page row).
             ev.run_meta.update(scoring_format=job["key"][2], page_scope=job["page_scope"])
-        if job.get("filter_inputs") is not None:
+        if ev.filter_inputs is not None:
             # models-lead addendum D2: the quality filter's inputs, per run.
-            ev.run_meta["filter_inputs"] = job["filter_inputs"]
+            ev.run_meta["filter_inputs"] = ev.filter_inputs
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
 
@@ -8353,7 +8354,8 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
     frozen once per run in the pack's run header (`run["filter_inputs"]`), so
     #453's audit re-runs B-DK-4/5/6 on the filter's own inputs. Audit
     provenance, never a scorer input (not in FROZEN_INPUT_KEYS); eval reads its
-    named fields only. `cards`: the cards the filter returned; `market`,
+    named fields only. Kept on the deck's evidence (`ev.filter_inputs`), never
+    on the job. `cards`: the cards the filter returned; `market`,
     `position`, `rosters` and `lineup_slots`: the very ones it was given.
     - market / position: every asset on those cards (both sides) and in the
       qb_te holdings; an unseeded asset is null, a None position null, so an
@@ -12928,10 +12930,14 @@ def _run_trade_job(
                             job_id, quality_err)
                 final_cards = before_quality
                 filter_inputs = {"v": 1, "filter_ran": False}
+        # models-lead addendum D2: on the deck's evidence, never on the job (its
+        # shape stays as it was); job done carries it into the pack's run header.
         with _trade_jobs_lock:
             _fi_job = _trade_jobs.get(job_id)
-            if _job_live(_fi_job):
-                _fi_job["filter_inputs"] = filter_inputs
+            _fi_ev = _fi_job.get("evidence") if _job_live(_fi_job) else None
+        if _fi_ev is not None:
+            with _fi_ev.lock:
+                _fi_ev.filter_inputs = filter_inputs
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
