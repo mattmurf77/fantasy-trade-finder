@@ -588,6 +588,22 @@ def run() -> int:
                 "not verbatim (legal R28.16): " + "; ".join(missing) if missing
                 else f"{len(sentences)} R28.16 sentence(s) verbatim")
 
+    # R28.17 A2 (2026-10-27): privacy §5's platform-connection list gains a
+    # fourth removal trigger (legal-lead-drafts.md Part 1, §5), which covers
+    # the credential cleanup for verified entry users and D6's removals. Pinned
+    # as the run from the third trigger through the list's closing line, so it
+    # stays IN the "until any of these happens" list.
+    R28_17_SECTION5 = (
+        "until any of these happens: you disconnect (they're deleted immediately); your account is "
+        "deleted; we find that the platform has expired or rejected them; we remove them to protect "
+        "the owner of that platform login, for example because they were stored without proof that "
+        "the login was yours, or because the login's owner asked us to. An expired connection we "
+        "haven't used again stays stored until one of those happens.")
+    r.check("POL-r28-17[privacy.html]", R28_17_SECTION5 in rendered("privacy.html"),
+            "§5 platform connections: the fourth removal trigger isn't verbatim in the list (legal R28.17 A2)"
+            if R28_17_SECTION5 not in rendered("privacy.html")
+            else "§5 fourth removal trigger verbatim, inside the list")
+
     # R28.12 row 1: "Fleeced" is the Service, so the operator is "the developer
     # of Fleeced", and "we"/"us" attach to the operator, not the definition.
     OPERATOR = {
