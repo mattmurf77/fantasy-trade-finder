@@ -347,6 +347,7 @@ class PagedPreparedEvidenceCapture:
 
     def candidate_set(self, row):
         _require(not self._finished and not self._candidate_seen, "capture_state")
+        row = _candidate_json_row(row, self.user_id, self.league_id, self.job_id)
         _size(row, MAX_CANDIDATE_BYTES)
         _json(row["candidates_json"], MAX_CANDIDATE_BYTES)
         v1._candidate(row, user_id=self.user_id, league_id=self.league_id, job_id=self.job_id)
@@ -442,9 +443,23 @@ def _card(record, user_id, league_id, now):
     return card
 
 
+def _candidate_json_row(row, user_id, league_id, job_id):
+    """R6.2: a packed candidate row (candidates_packed IS NOT NULL, the
+    authority) as the JSON row the validators read: its members decoded
+    (MAX_CANDIDATE_BYTES on the packed bytes and on the JSON) into
+    candidates_json, the two pack columns dropped. A legacy row is unchanged."""
+    if row is None or row.get("candidates_packed") is None:
+        return row
+    members = v1._candidate(row, user_id=user_id, league_id=league_id, job_id=job_id,
+                            limit=MAX_CANDIDATE_BYTES)
+    return {**{k: v for k, v in row.items() if k not in v1._CANDIDATE_PACK_KEYS},
+            "candidates_json": json.dumps(members)}
+
+
 def _candidate(row, user_id, league_id, job_id):
     if row is None:
         return None
+    row = _candidate_json_row(row, user_id, league_id, job_id)
     _size(row, MAX_CANDIDATE_BYTES)
     _json(row["candidates_json"], MAX_CANDIDATE_BYTES)
     members = v1._candidate(row, user_id=user_id, league_id=league_id, job_id=job_id)

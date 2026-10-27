@@ -134,6 +134,27 @@ they include all graded rows and report `gradeable_share` / `flag_low_share` ins
 `n == rows used` invariant holds on both surfaces over their respective row sets. Available regardless of
 `receipts.screen`; requires `receipts.grading` on (404 `feature_disabled` while fully dark).
 
+**Series break at the packed-evidence flip (U6 R-U6b, 2026-10-26).** The response always
+carries `caveats` (usually `[]`). Once `database.PACKED_EVIDENCE_FLIP_DAY` is set (one value,
+shared with the endorsement ratio's caveat at `/api/admin/suggestion-telemetry/ratio`),
+and the serve dates of the graded rows used span that day, it holds one entry:
+`{code: "series_break", scope: "receipts", detail: "U6/R-U6a: receipts move to viewed-or-first-30
+cards at the packed-evidence flip", day}`. This is the #418 `analytics_queries.SERIES_BREAKS`
+pattern. The constant ships `None`, and the scribe fills it in at the flip, because before then
+no row carries a non-NULL `evidence_tier` and nothing breaks. A readout that straddles the flip
+compares two populations: every built card before it, and viewed-or-first-30 cards after it
+(§4.1).
+
+**`viewed_without_full_row` (models-lead R3).** `{restart_split, evicted_split, other, runs}` counts the
+cards a user acted on that have no full row (no `assets_json`), so they can be neither graded
+nor matched; they are counted here so they are never silently dropped. Each card's cause is
+the one the evidence writer recorded when its upgrade missed: its run's pack header,
+`run["upgrade_miss_cards"]` (`restart_split`, `evicted_split` or `other`), read in one query
+for the runs involved; no pack or no entry for the card is `other`. The card's index no
+longer decides. The matcher logs the same counts once per run. If the
+count fails, the block is `{…: null, unavailable: true}` and the rest of the response is
+unaffected.
+
 Route additions land in `docs/api-reference.md` in the same PR (mandatory docs gate).
 
 ## 3. Data structures & schema
@@ -223,6 +244,12 @@ todo = SELECT i.* FROM deck_impressions i
        WHERE i.assets_json IS NOT NULL                   -- telemetry era only (NG-7)
          AND (i.is_ghost IS NULL OR i.is_ghost = 0)      -- operator ruling 2026-08-21:
                                                          -- ghost rows are never graded
+         AND (i.evidence_tier IS NULL                    -- U6 R-U6a + models-lead R3:
+              OR i.evidence_tier = 'first30'             -- database._evidence_shown, the
+              OR EXISTS (SELECT 1 FROM deck_outcomes o   -- same predicate the matcher's
+                          WHERE o.impression_id = i.impression_id   -- was_recommended uses
+                            AND o.action IN ('viewed','like','pass',
+                                             'propose','undo','not_interested')))
          AND date(i.served_at) + :w <= utc_today()       -- per window w ∈ (14,28,56)
          AND NOT EXISTS (SELECT 1 FROM receipts_grades g
                           WHERE g.impression_id = i.impression_id
@@ -230,6 +257,24 @@ todo = SELECT i.* FROM deck_impressions i
                             AND g.grader_version = :GRADER_VERSION)
        ORDER BY i.served_at LIMIT :batch
 ```
+
+**Eligibility (U6 R-U6a, models-lead R3, 2026-10-26).** Under ADR-025 packed evidence, a
+`deck_impressions` row no longer means a card was shown. A row counts as a recommendation
+only if one of these holds:
+- it was written at build (`evidence_tier` NULL: legacy and flag-off rows, unchanged);
+- it is a `first30` card;
+- the card has a first outcome of any kind, joined by `impression_id`.
+
+"Viewed" comes from `deck_outcomes`, never from the tier or from whether a full row exists. So
+`delivered`, `archive`, `full_interim`, `partial_run` and even a `viewed` row count only once
+acted on. The executed-trade matcher (`load_impressions_for_matching`, `was_recommended`) uses
+the same `database._evidence_shown()` predicate, so the two never disagree on what was
+recommended. The matcher also passes its ghost rows through, unchanged, for the incrementality
+read. The outcome check is an EXISTS on `deck_outcomes.impression_id`, which never runs for a NULL-tier row; SQLite
+probes `ix_deck_outcomes_impression` per row, and Postgres may plan it as a hashed SubPlan (one scan of `deck_outcomes`
+per query, about 28 ms at 200k rows). That index was created with the table, so no migration is
+needed. An acted-on card with no full row can't be graded; it is counted in §2.3
+`viewed_without_full_row` instead, by the cause its run's pack records.
 
 Date arithmetic is shown PG-flavored; the implementation computes cutoff dates in Python
 so the identical query runs on SQLite (tests) and Postgres (prod). Retry-pending

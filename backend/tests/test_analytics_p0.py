@@ -20,6 +20,7 @@ into backend.database, Flask test client, flags forced via patched
 `is_enabled`.
 """
 import json
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -281,6 +282,7 @@ class _FakeRankings:
 
 
 class _FakeService:
+    _lock = threading.RLock()
     _elo_overrides: dict = {}
     _seed: dict = {}
 

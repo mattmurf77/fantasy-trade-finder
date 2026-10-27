@@ -128,6 +128,30 @@ def test_load_grading_legacy_deck_picks_newest_qualifying_job(engine):
     assert db.load_grading_legacy_deck("nobody", "L1") == (None, None, [])
 
 
+def test_a_job_with_a_partial_run_row_never_qualifies(engine):
+    """ADR-025 ruling 25: Calibration's current arm skips a deck job with any
+    'partial_run' row (a run that ended partial), as replay does, for the
+    newest complete one; the candidate list skips it too."""
+    with engine.begin() as conn:
+        conn.execute(insert(db.deck_impressions_table), [
+            impression("A", 0, "2026-10-01T10:00:00+00:00", evidence_tier="first30"),
+            impression("A", 1, "2026-10-01T10:00:00+00:00", evidence_tier=None),
+            impression("B", 0, "2026-10-02T10:00:00+00:00", evidence_tier="first30"),
+            impression("B", 1, "2026-10-02T10:00:00+00:00", evidence_tier="partial_run"),
+            impression("C", 0, "2026-10-02T10:00:00+00:00", evidence_tier="partial_run",
+                       user_id=OTHER),
+        ])
+        conn.execute(insert(db.league_members_table), [
+            {"league_id": "L1", "user_id": UID}, {"league_id": "L1", "user_id": OTHER}])
+    job, served_at, got = db.load_grading_legacy_deck(UID, "L1")
+    assert (job, served_at) == ("A", "2026-10-01T10:00:00+00:00")
+    assert [r["card_index"] for r in got] == [0, 1]
+    assert db.load_grading_legacy_deck(OTHER, "L1") == (None, None, [])
+    assert [(c["user_id"], c["league_id"]) for c in db.list_grading_candidates("2026-10-02T00:00:00+00:00")] == []
+    assert [(c["user_id"], c["league_id"]) for c in db.list_grading_candidates("2026-09-01T00:00:00+00:00")] == [
+        (UID, "L1")]
+
+
 def test_insert_load_round_trip_and_next_card_never_returns_arms(engine):
     cards = [card_row("c3", "s1", 3, arms=("current", "value_core")),
              card_row("c1", "s1", 1), card_row("c2", "s1", 2, arms=("value_core",))]

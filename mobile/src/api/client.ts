@@ -239,6 +239,21 @@ export function setOnSessionExpired(fn: (() => void) | null): void {
   _onSessionExpired = fn;
 }
 
+// ── write-request listener (200 ms path, C: the device-held first page) ──
+// Told the path of every non-GET request when it is sent and again when it
+// settles, so a rankings or preference write discards the trade page the
+// phone holds (state/devicePageStore.ts) before a tap can render it, and a
+// page refreshed while the write was in flight is dropped. Same
+// callback-not-import pattern as the two listeners above. Never throws.
+let _onWriteRequest: ((path: string) => void) | null = null;
+export function setOnWriteRequest(fn: ((path: string) => void) | null): void {
+  _onWriteRequest = fn;
+}
+function _noteWrite(path: string, method: string): void {
+  if (method === 'GET' || !_onWriteRequest) return;
+  try { _onWriteRequest(path); } catch { /* a listener never breaks a request */ }
+}
+
 // ── Request deadlines (INIT-12 Wave 1, FR-1/FR-2) ───────────────────────────
 // Default cap for any request; the known-slow cold-start POSTs get a generous
 // cap so a legitimately-slow-but-progressing session_init isn't aborted.
@@ -337,6 +352,10 @@ export function runWithDeadline<T>(
 function timeoutForRequest(path: string, method: string): number {
   const pathname = path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
   if (method === 'GET' && pathname === '/api/league/season-projections') return SLOW_TIMEOUT_MS;
+  // LEG-S6 (#446): the server may spend up to 2 x APPLE_HTTP_TIMEOUT_S on the
+  // Sign in with Apple revoke before it deletes; the slow cap keeps a slow
+  // Apple from showing "took too long" while the deletion still completes.
+  if (method === 'DELETE' && pathname === '/api/account') return SLOW_TIMEOUT_MS;
   if (method === 'POST' && SLOW_POST_PATHS.some((p) => path.includes(p))) {
     return SLOW_TIMEOUT_MS;
   }
@@ -457,6 +476,7 @@ export async function apiRequest<T = unknown>(
   const startedAt = _clockMs();
   const foregroundEpoch = _leftForegroundCount;
   const deadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + timeoutForRequest(path, opts.method || 'GET'));
+  _noteWrite(path, opts.method || 'GET');
   try {
     return await runWithDeadline(signal => _apiRequestInner<T>(path, {...opts, signal, deadlineAt}), deadlineAt, opts.signal);
   } catch (err) {
@@ -468,6 +488,8 @@ export async function apiRequest<T = unknown>(
       _leftForegroundCount !== foregroundEpoch,
     );
     throw err;
+  } finally {
+    _noteWrite(path, opts.method || 'GET');
   }
 }
 
