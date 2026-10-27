@@ -3217,10 +3217,11 @@ def _trade_request_signature(prefs_preload):
 
 def _trade_running_matches(job, fairness_threshold, outlook_value,
                            trade_intent=None, presentation_capture=None,
-                           request_signature=None, fingerprints=None):
+                           request_signature=None, fingerprints=None, session_read=None):
     if presentation_capture is None:
         presentation_capture = _capture_trade_presentation()
-    return bool(_trade_running_policy_matches(job, presentation_capture, fingerprints)
+    return bool(_trade_running_policy_matches(job, presentation_capture, fingerprints,
+                                              session_read=session_read)
         and job.get("fairness_threshold") == fairness_threshold
         and (job.get("outlook_value") or None) == (outlook_value or None)
         and (job.get("trade_intent") or None) == (trade_intent or None)
@@ -3228,9 +3229,11 @@ def _trade_running_matches(job, fairness_threshold, outlook_value,
              or job["request_signature"] == request_signature))
 
 
-def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
+def _trade_running_policy_matches(job, presentation_capture, fingerprints=None,
+                                  session_read=None):
     """Preserve user intent/fairness, never work under an obsolete policy.
-    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
+    `fingerprints`: _trade_current_fingerprints(), read before the lock.
+    `session_read`: the caller's session read (_trade_fingerprints_match)."""
     if not (_job_live(job) and _trade_presentation_matches(job, presentation_capture)
             and _trade_owner_model_matches(job) and _trade_significance_matches(job)
             and _prepared_job_matches(job)):
@@ -3242,7 +3245,8 @@ def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
     # The worker stamps this after preparation; queued jobs already carry
     # the admission-time model/presentation/significance captures above.
     return (("safety_policy" not in job or job["safety_policy"] == expected_safety)
-            and _trade_fingerprints_match(job, fingerprints, running=True))
+            and _trade_fingerprints_match(job, fingerprints, running=True,
+                                          session_read=session_read))
 
 
 def _start_trade_job_thread(*, target, args, kwargs):
@@ -4332,7 +4336,9 @@ def _store_trade_page_row(job_id: str) -> bool:
         return False
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
-        if job is None or _trade_job_revoked(job):
+        # #481 QA P3-1: pages from rosters the league has since replaced are
+        # never shared through the store, whatever the stamp says.
+        if job is None or _trade_job_revoked(job) or _job_read_predates_move(job):
             return False
         job = dict(job)   # published card lists are replaced, never mutated
     if not _job_page_eligible(job):
@@ -6559,11 +6565,14 @@ def _serve_trade_page_for(sess: Mapping, row: dict, current, *, sess_token: str,
         current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
         backing = None
         if current_job is not None and not any(token.revoked for token in input_epochs):
+            session_read = sess.get("roster_fetch_started_at")
             if _trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
-                                   presentation_capture, request_signature, fingerprints):
+                                   presentation_capture, request_signature, fingerprints,
+                                   session_read=session_read):
                 backing = "complete"
             elif _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
-                                        presentation_capture, request_signature, fingerprints):
+                                        presentation_capture, request_signature, fingerprints,
+                                        session_read=session_read):
                 backing = "running"
     return _serve_trade_page(
         row, current, user_id=user_id, league_id=league_id,
@@ -7074,10 +7083,12 @@ def _trade_presentation_matches(job, captured):
 
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
                         trade_intent: str | None = None, presentation_capture=None,
-                        request_signature=None, fingerprints=None) -> bool:
+                        request_signature=None, fingerprints=None,
+                        session_read=None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters.
-    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
+    `fingerprints`: _trade_current_fingerprints(), read before the lock.
+    `session_read`: the caller's session read (_trade_fingerprints_match)."""
     if job.get("status") != "complete" or _trade_job_revoked(job):
         return False
     if not _prepared_job_matches(job):
@@ -7110,7 +7121,7 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     # deck filtered for a different (or no) shape.
     if (job.get("trade_intent") or None) != (trade_intent or None):
         return False
-    return _trade_fingerprints_match(job, fingerprints)
+    return _trade_fingerprints_match(job, fingerprints, session_read=session_read)
 
 
 def _trade_i1_mode() -> int:
@@ -7162,7 +7173,8 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[st
         return None
 
 
-def _trade_fingerprints_match(job: dict, current, *, running: bool = False) -> bool:
+def _trade_fingerprints_match(job: dict, current, *, running: bool = False,
+                              session_read=None) -> bool:
     """A job built on rosters or values that have since moved is never reused.
 
     `current` is the caller's _trade_current_fingerprints() for the job's
@@ -7172,9 +7184,18 @@ def _trade_fingerprints_match(job: dict, current, *, running: bool = False) -> b
     (`running=True`) and never makes a completed job fresh. Hand-built jobs
     without the stamp are not checked, like `request_signature`; with
     `trade_i1_mode` 0 nothing is.
+
+    `session_read`: the requesting session's `roster_fetch_started_at`. A job
+    built on a read older than both it and the league's last roster move
+    (`_job_read_predates_move`) was built on rosters that session has
+    replaced, whatever its stamp says, so it never matches (#481 QA P3-1). The
+    stale session itself still reuses it. None skips this check.
     """
     if "roster_fp" not in job or _trade_i1_mode() == 0:
         return True
+    if (session_read and (job.get("roster_fetch_started_at") or "") < session_read
+            and _job_read_predates_move(job)):
+        return False
     if current is None:
         return running
     return current == (job["roster_fp"], job.get("values_snapshot_id"))
@@ -13042,10 +13063,25 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
 
 def _roster_change_revoke_on() -> bool:
     """model_config `trade_roster_change_revoke` (default 1), read per call. 0
-    makes the `on_roster_change` handler a no-op and leaves the rest of S0 (I-1,
-    the fingerprint checks, the floor kick) as `trade_i1_mode` says. NaN or any
-    other value reads as 1."""
+    makes the `on_roster_change` handler a no-op (no revoke, no re-stamp, no
+    move recorded) and leaves the rest of S0 (I-1, the fingerprint checks, the
+    floor kick) as `trade_i1_mode` says. NaN or any other value reads as 1."""
     return _deck_cfg("trade_roster_change_revoke", 1.0) != 0.0
+
+
+# {league_id: the Sleeper read (`refreshed_at`) behind the league's last rfp1
+# move in this process}, written by the roster-change handler under
+# _trade_jobs_lock. One web worker (render.yaml), so it sees every move.
+_roster_moved_reads: dict = {}
+
+
+def _job_read_predates_move(job) -> bool:
+    """Under _trade_jobs_lock: was this job built on a Sleeper read older than
+    its league's last roster move? Its stamp may still match: a stale session's
+    rebuild is stamped from the moved rows (#481 QA P3-1)."""
+    key = job.get("key") or ()
+    moved = _roster_moved_reads.get(key[1]) if len(key) == 3 else None
+    return bool(moved) and (job.get("roster_fetch_started_at") or "") < moved
 
 
 def _league_session_reads(league_id) -> dict:
@@ -13060,6 +13096,34 @@ def _league_session_reads(league_id) -> dict:
                 if read > newest.get(uid, ""):
                     newest[uid] = read
     return newest
+
+
+def _roster_picks_key(league_id) -> str:
+    """rfp1's pick and draft-state part for the league's stored rows (members
+    left out): two equal keys mean two rfp1 differ only in their members."""
+    from . import roster_snapshot
+    from .database import engine as _engine
+    with _engine.connect() as conn:
+        return roster_snapshot.picks_key(conn, league_id, pick_source=_pick_read_source())
+
+
+def _roster_picks_key_pending(league_id, roster_read):
+    """At kickoff: the league's `_roster_picks_key` when the job's session read
+    is newer than the league's refreshed rows (that read's refresh is still in
+    flight), else None. The handler re-stamps such a job once its read lands
+    if the picks it was stamped with are the ones committed (#481 QA P3-2).
+    Never raises."""
+    if not roster_read or _trade_i1_mode() == 0:
+        return None
+    try:
+        from .database import get_league_roster_state
+        refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
+        if refreshed_at and refreshed_at >= roster_read:
+            return None
+        return _roster_picks_key(league_id)
+    except Exception as err:
+        log.warning("roster picks key unavailable for league %s: %s", league_id, err)
+        return None
 
 
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
@@ -13084,12 +13148,22 @@ def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
     `_trade_fingerprints_match` (P3-1). Debounced by construction: a job
     already stamped `new_fp` is kept, so a double call changes nothing.
 
-    Never raises. One state-row read and a pass over the sessions (under
-    `_sessions_lock`) come first, then `_trade_jobs_lock`, briefly, with no I/O
-    under it. No proactive rebuild in S0. P1's page store doesn't either: its
-    next serve sees the roster_fp move, serves the I-1-filtered page and kicks
-    the rebuild then. `trade_i1_mode` 0 or `trade_roster_change_revoke` 0
-    makes it a no-op.
+    #481 QA follow-ups:
+    - P3-1: it records the move's read in `_roster_moved_reads`. A job built on
+      an older read is then reused only by a session no newer than the job,
+      and never stored as pages (`_job_read_predates_move`).
+    - P3-2: a job built on exactly the refreshed read (`refreshed_at`) whose
+      kickoff picks key (`roster_picks_key`) equals the stored rows' is
+      re-stamped `new_fp`: its members are that read's and its picks the
+      committed ones, so it was built on `new_fp`, and the next tap reuses it.
+
+    Never raises. The state-row read, the pass over the sessions (under
+    `_sessions_lock`) and the picks-key read all run outside
+    `_trade_jobs_lock`, which is held briefly with no I/O under it. No
+    proactive rebuild in S0. P1's page store doesn't either: its next serve
+    sees the roster_fp move, serves the I-1-filtered page and kicks the
+    rebuild then. `trade_i1_mode` 0 or `trade_roster_change_revoke` 0 makes it
+    a no-op.
     """
     try:
         if _trade_i1_mode() == 0 or not _roster_change_revoke_on():
@@ -13100,18 +13174,30 @@ def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
             return
         fresh_users = {uid for uid, read in _league_session_reads(league_id).items()
                        if read >= refreshed_at}
-        if not fresh_users:
-            return
+        restamp = []
         with _trade_jobs_lock:
+            if refreshed_at > _roster_moved_reads.get(league_id, ""):
+                _roster_moved_reads[league_id] = refreshed_at
             for job in _trade_jobs.values():
                 key = job.get("key") or ()
-                if (len(key) == 3 and key[1] == league_id and key[0] in fresh_users
-                        and "roster_fp" in job and job["roster_fp"] != new_fp
-                        and (job.get("roster_fetch_started_at") or "") < refreshed_at
-                        and not job.get("superseded")):
+                if (len(key) != 3 or key[1] != league_id or "roster_fp" not in job
+                        or job["roster_fp"] == new_fp or job.get("superseded")):
+                    continue
+                read = job.get("roster_fetch_started_at") or ""
+                if read < refreshed_at and key[0] in fresh_users:
                     _revoke_trade_job_locked(job)
                     if _trade_jobs_by_key.get(key) == job.get("job_id"):
                         _trade_jobs_by_key.pop(key)
+                elif read == refreshed_at and job.get("roster_picks_key"):
+                    restamp.append(job)
+        if not restamp:
+            return
+        stored = _roster_picks_key(league_id)
+        with _trade_jobs_lock:
+            for job in restamp:
+                if (job.get("roster_picks_key") == stored and not job.get("superseded")
+                        and job["roster_fp"] != new_fp):
+                    job["roster_fp"] = new_fp
     except Exception:
         log.exception("roster-change invalidation failed for league %s", league_id)
 
@@ -13257,6 +13343,7 @@ def _kickoff_trade_job(
     # the dedupe checks below compare with. None on a failed read never matches.
     fingerprints = _trade_current_fingerprints(league_id, scoring_format)
     roster_fp, values_snapshot_id = fingerprints or (None, None)
+    picks_key = _roster_picks_key_pending(league_id, roster_read) if roster_fp else None
     force_supersedes = force_fresh and _force_supersede_enabled()
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -13291,6 +13378,8 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
+    if picks_key is not None:
+        job["roster_picks_key"] = picks_key   # #481 QA P3-2: the handler may re-stamp it
     # P1: the organic scope this job's completion may store pages under. A
     # forced organic job stores too: it is the newest deck for the scope.
     organic = (not is_pinned and not trade_intent and not presentation_exempt
@@ -13350,15 +13439,17 @@ def _kickoff_trade_job(
         if existing is not None:
             if (not force_fresh and request_signature is not None
                     and _trade_job_is_fresh(existing, fairness_threshold, outlook_value,
-                        trade_intent, presentation_capture, request_signature, fingerprints)):
+                        trade_intent, presentation_capture, request_signature, fingerprints,
+                        session_read=roster_read)):
                 return existing["job_id"]
             if _job_live(existing):
                 if preserve_running and _trade_running_policy_matches(
-                        existing, presentation_capture, fingerprints):
+                        existing, presentation_capture, fingerprints, session_read=roster_read):
                     return existing["job_id"]
                 if (request_signature is not None and not force_supersedes
                         and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                            trade_intent, presentation_capture, request_signature, fingerprints)):
+                            trade_intent, presentation_capture, request_signature, fingerprints,
+                            session_read=roster_read)):
                     return existing["job_id"]
                 _revoke_trade_job_locked(existing, "superseded")
         _trade_jobs[job_id] = job
@@ -18739,7 +18830,8 @@ def generate_trades():
             if request_signature is not None and not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
                                                       presentation_capture=presentation_capture,
                                                       request_signature=request_signature,
-                                                      fingerprints=fingerprints):
+                                                      fingerprints=fingerprints,
+                                                      session_read=sess.get("roster_fetch_started_at")):
                 reuse_snapshot = dict(existing)
             # Share in-flight work only for matching fairness and shape.
             # A warm-up must never answer a differently configured search.
@@ -18754,7 +18846,8 @@ def generate_trades():
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
             elif request_signature is not None and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                    trade_intent, presentation_capture, request_signature, fingerprints):
+                    trade_intent, presentation_capture, request_signature, fingerprints,
+                    session_read=sess.get("roster_fetch_started_at")):
                 if not force_supersedes:
                     reuse_snapshot = dict(existing)
                 else:
@@ -27210,11 +27303,13 @@ def session_init():
             existing    = _trade_jobs.get(existing_id) if existing_id else None
             # Warm-up preserves an active request's fairness/intent, but
             # obsolete policy/model work must be replaced, not left running.
+            pregen_read = session_payload.get("roster_fetch_started_at")
             should_kickoff = not (existing and (_trade_running_policy_matches(
-                    existing, presentation_capture, pregen_fingerprints)
+                    existing, presentation_capture, pregen_fingerprints, session_read=pregen_read)
                 or _trade_job_is_fresh(existing, pregen_fairness, pregen_outlook,
                     presentation_capture=presentation_capture,
-                    request_signature=pregen_signature, fingerprints=pregen_fingerprints)))
+                    request_signature=pregen_signature, fingerprints=pregen_fingerprints,
+                    session_read=pregen_read)))
         if should_kickoff:
             opp_total = sum(1 for m in members if m.user_id != user_id and m.elo_ratings)
             _kickoff_trade_job(

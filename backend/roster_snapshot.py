@@ -273,6 +273,14 @@ def snapshot_ids(conn, fmt: str, league_id: str, pool: Mapping, *,
     return fp, _values_snapshot_id(fmt, pool, picks, generation)
 
 
+def picks_key(conn, league_id: str, *, pick_source: str) -> str:
+    """rfp1's pick and draft-state part, from one read of each: the rfp1 of no
+    members with these picks and this draft state. Two equal keys mean two
+    rfp1 that differ only in their members (#481 QA P3-2)."""
+    lid = str(league_id)
+    return _roster_fp((), _read_picks(conn, lid, pick_source), _read_drafted(conn, lid))[0]
+
+
 # ── on_roster_change: platforms-eng notifies, trades-eng reacts ───────────────
 _roster_change_handlers: list[Callable[[str, str | None, str], None]] = []
 
