@@ -373,7 +373,7 @@ makes **three** reads of the same §1.1 URL (`_espn_import_payload` +
    public, so step 1 proved nothing → 403 `proof_unavailable`,
    `reason: "espn_public_league"`.
 3. **Pair-binding control** — the same `espn_s2` with **another member's**
-   SWID (another team's `owner_swid` from the step-1 payload) must fail with
+   SWID (a primary `owner_swid` from the step-1 payload, as ESPN listed it, and never the claimant's own — when the claimant is a co-owner, the claimed team's primary owner may be the control) must fail with
    auth-required. This closes the **leaguemate attack**: SWIDs are visible to
    every leaguemate, so a member's own valid `espn_s2` plus a victim's SWID
    would pass steps 1-2 and the owner check unless ESPN binds the cookie to
@@ -381,9 +381,11 @@ makes **three** reads of the same §1.1 URL (`_espn_import_payload` +
    and a WARN `ESPN-PAIR-UNBOUND` log line (no ids); a league with no second
    owner SWID gets the same refusal without the log line.
 
-Then the claimed team's `owner_swid` must equal the pair's SWID (else
+Then the pair's SWID must be one of the claimed team's **listed owners** —
+`primaryOwner` or any `owners[]` entry (`EspnTeam.owner_swids`, §3.2;
+co-owners accepted since 2026-10-27) — else
 `espn_bad_credentials` / `wrong_account` — the message names the team this
-login owns in the league when it owns one, which is safe only because all
+login owns (as primary or co-owner) in the league when it owns one, which is safe only because all
 three reads already succeeded; otherwise the sign-in's own not-the-owner line, with the link route's #321 copy left untouched. Every sign-in refusal message is the final copy set; see the scope block. An ownerless team →
 `proof_unavailable` / `espn_ownerless_team`). On reads 2 and 3, only a clean
 401/403 counts as auth-required: a 5xx, ESPN's own 429, any other status, a
@@ -395,7 +397,7 @@ logged. `probe_fan_profile` is never used.
 **One SWID form.** Every identity comparison goes through
 `espn_service.swid_identity` (braced, upper-cased, trimmed; exposed as
 `accounts.platform_subject("espn", …)`): the claimed SWID, each team's
-`owner_swid`, `linked_identities.provider_subject`, and the D6 check against
+`owner_swid` and `owner_swids`, `linked_identities.provider_subject`, and the D6 check against
 `espn_credentials.swid` — which `/api/espn/link` stores **as captured**
 (braced or bare, any case), so that comparison normalises both sides.
 `canonical_swid` stays the Cookie-header wire form.
@@ -419,9 +421,22 @@ SWID), HTTP statuses only, verdict `PAIR_BOUND` / `PAIR_NOT_BOUND` /
 `INCONCLUSIVE`. Its URL, headers and cookie forms are pinned equal to
 `espn_service`'s by `test_c5_r1_script_is_stdlib_only_and_matches_espn_service`.
 
-Known limit: `owner_swid` is `primaryOwner or owners[0]` (§3.2), so a
-co-owner who is not the primary owner gets `wrong_account` and signs in with
-Apple instead.
+**Co-owners (post-launch, 2026-10-27, `feat/espn-signin-coowners`).** A
+co-owner who is not the primary owner is now proven like the primary: the
+owner check uses `owner_swids` membership. The identity is still the
+claimant's **own** SWID, so each co-owner signs into their own account.
+The #321 checks use the same rule, so the co-owner's post-mint import works
+too: `/api/espn/link`'s team-binding check (R3), `/api/espn/import`'s re-sync
+check (R3b), the store-time membership assertion in `_espn_verify_credential`
+(R1) and the sync sweep's wrong-account nudge (R9) all go through
+`server._espn_binding_mismatch`. That function returns a conclusive mismatch
+only when the team lists owners and the SWID is none of them; an ownerless team
+stays inconclusive-accept. A non-owner still gets 403 `espn_bad_credentials` +
+`wrong_account` with the unchanged copy. Until 2026-10-27 those checks compared
+the primary `owner_swid` only, so a co-owner — whether signed in with ESPN or
+with Apple — was refused there. Still primary-only, by design: the synthetic
+`espn:{SWID}` member id (`_espn_member_id`) and its resolver for trade sends,
+and the prepared-inventory cohort's identity check (dark).
 
 ---
 
@@ -449,7 +464,8 @@ consumed:
 
 **Per team (`EspnTeam`, `backend/espn_service.py:148-172`):** `id`, `name`
 (or `location`+`nickname` fallback for older payload shapes), `primaryOwner`
-(or first entry of `owners[]`), `roster.entries[].playerPoolEntry.player`
+(or first entry of `owners[]`) as `owner_swid`, **every** listed owner as
+`owner_swids`, `roster.entries[].playerPoolEntry.player`
 (`id`, `fullName`, `defaultPositionId`), `record.overall.{wins,losses,ties,
 pointsFor}`, `playoffSeed`, `rankCalculatedFinal`.
 
@@ -458,6 +474,16 @@ The last four fields (`wins`/`losses`/`ties`/`points_for`/`playoff_seed`/
 standings-derived draft-order feature, read from the SAME `mTeam` response the
 roster import already fetches (no extra view token, no extra request; see
 comment block at `backend/espn_service.py:155-161`).
+
+**`owner_swids` (additive, 2026-10-27, ESPN sign-in co-owners):** every listed
+owner of the team — `primaryOwner` first, then `owners[]` in ESPN's order —
+each in the one SWID identity form (`swid_identity`: braced, upper-cased),
+de-duplicated, with empty and non-string entries dropped; a missing, null or
+non-list `owners` adds nothing, and `()` means ownerless. `owner_swid`
+(`primaryOwner or owners[0]`, as ESPN sent it) is unchanged for every existing
+caller (the #321 link checks, the cohort, member ids). An `EspnTeam` built
+without `owner_swids` derives it from `owner_swid`. Read by the platform
+sign-in and by every #321 team-binding check (§2.5).
 
 **Position mapping:** `defaultPositionId` → label via `ESPN_POSITION_BY_ID`
 (`backend/espn_service.py:60`): `1→QB, 2→RB, 3→WR, 4→TE, 5→K, 16→DST`. Only

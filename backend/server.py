@@ -27899,12 +27899,11 @@ def _sweep_fetch_teams(lg: dict) -> tuple[list[dict] | None, str | None]:
         # wrong-account nudge (same `espn_reconnect` type, deduped per
         # credential episode) instead of a later mislabeled "stopped
         # working". The sync itself CONTINUES — league rosters are league
-        # truth regardless of whose credential read them.
+        # truth regardless of whose credential read them. "Owns" = any listed
+        # owner, co-owners included (_espn_binding_mismatch).
         if swid and my_tid is not None:
             _bound = next((t for t in league["teams"] if t.team_id == my_tid), None)
-            if _bound and (_bound.owner_swid or "").strip() and \
-                    _espn.canonical_swid(_bound.owner_swid).upper() != \
-                    _espn.canonical_swid(swid).upper():
+            if _espn_binding_mismatch(_bound, swid):
                 _espn_reconnect_nudge(lg, reason="wrong_account")
         teams = []
         for t in league["teams"]:
@@ -29919,7 +29918,10 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
     #    (from this league's own owners; never echoed or logged) must fail
     #    auth, or ESPN isn't binding espn_s2 to the SWID and a leaguemate's
     #    own espn_s2 + a victim's (league-visible) SWID would pass steps 2,
-    #    3 and 5. No second owner SWID → no control → refuse.
+    #    3 and 5. No second owner SWID → no control → refuse. The control is
+    #    a primary owner_swid exactly as ESPN listed it, and NEVER the
+    #    claimant's own (identity compare). When the claimant is a co-owner,
+    #    the claimed team's primary owner may be the control — that's fine.
     control_swid = next(
         (t.owner_swid for t in league["teams"]
          if _ident(t.owner_swid) and _ident(t.owner_swid) != subject),
@@ -29939,16 +29941,22 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
     if control != "auth":
         return _unavailable()
 
-    # 5. The claimed team must be owned by the proven SWID (#321).
-    if not _ident(team.owner_swid):
+    # 5. The proven SWID must be one of the claimed team's LISTED owners —
+    #    the primary owner or a co-owner (EspnTeam.owner_swids, 2026-10-27).
+    #    The identity stays the claimant's own SWID, so each co-owner signs
+    #    into their own account.
+    def _owners(t):
+        return {_ident(s) for s in t.owner_swids} - {""}
+
+    if not _owners(team):
         return _refuse("proof_unavailable",
                        _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_ownerless_team"],
                        "espn_ownerless_team")
-    if _ident(team.owner_swid) != subject:
+    if subject not in _owners(team):
         # Proof reads all succeeded, so naming the team this login owns in
         # this league tells the caller nothing a member can't already see.
         owned = next((t for t in league["teams"]
-                      if _ident(t.owner_swid) == subject), None)
+                      if subject in _owners(t)), None)
         message = (_SIGNIN_OWNS_OTHER_TEAM_MSG.format(
                        platform="ESPN", team=owned.name)
                    if owned is not None and owned.name
@@ -30083,7 +30091,8 @@ def entry_platform():
           espn_public_league); the same espn_s2 with ANOTHER member's SWID
           must fail auth (else proof_unavailable / espn_unproven_pair +
           WARN ESPN-PAIR-UNBOUND; no other owner SWID → the same refusal);
-          the claimed team's owner_swid must be the pair's SWID (else 403
+          the pair's SWID must be one of the claimed team's listed owners,
+          primary or co-owner (EspnTeam.owner_swids; else 403
           espn_bad_credentials / wrong_account, naming the team this login
           owns in the league when there is one; ownerless →
           proof_unavailable / espn_ownerless_team). Any answer to the
@@ -32473,6 +32482,32 @@ def session_signout():
 _ESPN_DEFAULT_SEASON = 2026
 
 
+def _espn_binding_mismatch(team, swid) -> bool:
+    """The #321 team-binding identity rule, shared by every site that asks
+    "does this SWID own the bound / chosen team?": /api/espn/link's R3 check,
+    /api/espn/import's R3b re-sync, the store-time membership assertion in
+    _espn_verify_credential, and the sync sweep's R9 nudge.
+
+    True ONLY for a CONCLUSIVE mismatch: the team lists owners and the SWID
+    is none of them. "Owners" = EspnTeam.owner_swids — the primary AND every
+    co-owner (2026-10-27, feat/espn-signin-coowners), so a co-owner's own
+    pair binds; until then only the primary owner_swid counted and a
+    co-owner was refused wrong_account. Compared in the one SWID identity
+    form (espn_service.swid_identity). No team, an ownerless team or an
+    empty SWID → False (inconclusive-accept: zero false rejects). A team
+    object without owner_swids falls back to its owner_swid."""
+    from . import espn_service as _espn
+    if team is None:
+        return False
+    listed = getattr(team, "owner_swids", None)
+    if listed is None:
+        listed = (getattr(team, "owner_swid", None),)
+    owners = {_espn.swid_identity(s) for s in listed if isinstance(s, str)}
+    owners.discard("")
+    ident = _espn.swid_identity(swid) if isinstance(swid, str) else ""
+    return bool(owners and ident and ident not in owners)
+
+
 def _espn_member_id(league_id: str, team) -> str:
     """Deterministic synthetic user_id for a non-FTF ESPN manager."""
     if team.owner_swid:
@@ -32693,13 +32728,13 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
     # WHOSE. Every linked league with a team binding is evaluated (set
     # semantics — deliberately not "first" or "newest"). At most ONE live
     # read per league, store time only; cookies ride along (public leagues
-    # ignore them, cookie-gated ones need them). ZERO FALSE REJECTS:
-    # ownerless / co-owned / missing owner_swid, purged leagues, and
-    # vanished teams are all INCONCLUSIVE-ACCEPT — and deliberately WITHOUT
-    # plan §F1's "is any team's owner" fallback (dropped in review round 1;
-    # do not restore it). No bound league at all → vacuous; the auth
-    # verdict stands.
-    target = _espn.canonical_swid(swid or "").upper()
+    # ignore them, cookie-gated ones need them). The pair's SWID must be one
+    # of each bound team's LISTED owners — the primary or a co-owner
+    # (_espn_binding_mismatch; co-owners since 2026-10-27). ZERO FALSE
+    # REJECTS: ownerless teams, purged leagues and vanished teams are all
+    # INCONCLUSIVE-ACCEPT — and deliberately WITHOUT plan §F1's "is any
+    # team's owner" fallback (dropped in review round 1; do not restore it).
+    # No bound league at all → vacuous; the auth verdict stands.
     mismatch_detail = None
     unavailable_detail = None
     for lg in linked:
@@ -32742,9 +32777,8 @@ def _espn_verify_credential(user_id: str, espn_s2: str, swid: str,
             fetched_teams[lid] = teams
         bound = next((t for t in teams
                       if t.team_id == lg.get("my_team_id")), None)
-        if bound is None or not (bound.owner_swid or "").strip():
-            continue   # team vanished / ownerless — inconclusive-accept
-        if target and _espn.canonical_swid(bound.owner_swid).upper() != target:
+        # Team vanished / ownerless → no mismatch (inconclusive-accept).
+        if _espn_binding_mismatch(bound, swid):
             mismatch_detail = f"league {lid} bound-team owner mismatch"
             break      # nothing outranks a conclusive mismatch
 
@@ -33007,18 +33041,20 @@ def espn_link():
 
     # ── #321 R3 — identity assertion at the team-binding step, regardless
     # of cookie provenance (pasted, captured, or the stored-credential
-    # fallback). The team list with owner_swids is already in hand from the
-    # import fetch — comparison only, no extra ESPN read. Zero false
-    # rejects: an ownerless / co-owned / owner_swid-less chosen team is
-    # INCONCLUSIVE-ACCEPT. This closes the store-then-link hole: a pair
+    # fallback). The team list is already in hand from the import fetch —
+    # comparison only, no extra ESPN read. The pair's SWID must be one of
+    # the chosen team's LISTED owners: the primary owner or any co-owner
+    # (EspnTeam.owner_swids, via _espn_binding_mismatch — since 2026-10-27,
+    # so a co-owner who signed in with ESPN can import their league; before,
+    # only the primary counted and a co-owner got wrong_account). Anyone
+    # else → 403 wrong_account. Zero false rejects: an ownerless chosen team
+    # is INCONCLUSIVE-ACCEPT. This closes the store-then-link hole: a pair
     # stored under a vacuous accept (no league yet) is re-checked the
     # moment a league gets a team binding.
     if espn_s2 and swid:
         chosen = next((t for t in league["teams"] if t.team_id == team_id), None)
-        chosen_owner = _espn.canonical_swid(chosen.owner_swid).upper() \
-            if chosen and (chosen.owner_swid or "").strip() else None
         pair_swid = _espn.canonical_swid(swid).upper()
-        if chosen_owner and pair_swid and chosen_owner != pair_swid:
+        if _espn_binding_mismatch(chosen, swid):
             # When the mismatching SWID is the STORED credential's (the
             # stored-cookie fallback, or a paste equal to the stored pair),
             # null that row's verified_at so GET status stops lying — row
@@ -33324,13 +33360,12 @@ def espn_import():
     # hand — comparison only, no extra ESPN read. Catches wrong-identity
     # rows bound BEFORE identity binding shipped, which the R10 migration
     # alone cannot identify. Only asserted for the linker's own binding
-    # (zero false rejects if another user ever re-syncs), and an ownerless
-    # / owner_swid-less bound team is inconclusive-accept.
+    # (zero false rejects if another user ever re-syncs). "Owns" = any listed
+    # owner, co-owners included (_espn_binding_mismatch); an ownerless bound
+    # team is inconclusive-accept.
     if swid and str(row.get("user_id") or "") == str(user_id):
         bound = next((t for t in league["teams"] if t.team_id == my_team_id), None)
-        pair_swid = _espn.canonical_swid(swid).upper()
-        if bound and (bound.owner_swid or "").strip() and pair_swid and \
-                _espn.canonical_swid(bound.owner_swid).upper() != pair_swid:
+        if _espn_binding_mismatch(bound, swid):
             clear_espn_credential_verification(user_id)
             log.info("espn_import: re-sync identity mismatch — stamp nulled "
                      "user=%s league=%s team=%s", user_id, league_id, my_team_id)

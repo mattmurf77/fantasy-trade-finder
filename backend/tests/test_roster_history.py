@@ -469,17 +469,21 @@ def test_espn_reconnect_nudge_once_per_episode(tmp_path):
 # (g) #321 R9 — identity-aware ESPN sweep: wrong-account nudge (QA F-1)
 # ---------------------------------------------------------------------------
 
-def _espn_sweep(eng, *, stored_swid, bound_owner_swid):
+def _espn_sweep(eng, *, stored_swid, bound_owner_swid, bound_co_owners=None):
     """Run _sweep_fetch_teams for a cookie-auth ESPN league whose bound team
     (espn_my_team_id) is owned by `bound_owner_swid` while the stored
-    credential carries `stored_swid`. Returns ((teams, skip), inbox rows)."""
+    credential carries `stored_swid`. Returns ((teams, skip), inbox rows).
+    `bound_co_owners` (2026-10-27) gives the bound team an owner_swids list
+    (primary + co-owners), as parse_league's EspnTeam carries."""
     import backend.server as server
     lg = {"league_id": "777", "user_id": "u1", "platform": "espn",
           "espn_auth": "cookie", "espn_my_team_id": 3, "espn_season": 2026}
     cred = {"verified_at": "2026-07-01T00:00:00", "updated_at": "x",
             "swid": stored_swid, "espn_s2_encrypted": "enc"}
+    bound_extra = ({} if bound_co_owners is None else
+                   {"owner_swids": (bound_owner_swid, *bound_co_owners)})
     league = {"teams": [
-        SimpleNamespace(team_id=3, owner_swid=bound_owner_swid),
+        SimpleNamespace(team_id=3, owner_swid=bound_owner_swid, **bound_extra),
         SimpleNamespace(team_id=4,
                         owner_swid="{CCCCCCCC-0000-0000-0000-0000000000CC}"),
     ]}
@@ -526,3 +530,26 @@ def test_sweep_matching_swid_no_nudge(tmp_path):
         bound_owner_swid="{AAAAAAAA-0000-0000-0000-000000000001}")
     assert skip is None and teams is not None and len(teams) == 2
     assert rows == [], "no mismatch, no nudge"
+
+
+def test_sweep_coowner_swid_no_nudge_non_owner_still_nudged(tmp_path):
+    """R9 with co-owners (2026-10-27, feat/espn-signin-coowners): a stored
+    SWID that is a CO-OWNER of the bound team (not its primary) owns it — no
+    wrong-account nudge; a SWID that is no listed owner still gets one.
+    Proven RED by making _espn_binding_mismatch primary-only."""
+    co = "{DDDDDDDD-0000-0000-0000-00000000000D}"
+    (tmp_path / "co").mkdir()
+    (teams, skip), rows = _espn_sweep(
+        _engine(tmp_path / "co"), stored_swid=co.lower(),
+        bound_owner_swid="{AAAAAAAA-0000-0000-0000-000000000001}",
+        bound_co_owners=(co,))
+    assert skip is None and teams is not None and len(teams) == 2
+    assert rows == [], "a co-owner owns the team: no nudge"
+    (tmp_path / "other").mkdir()
+    (teams, skip), rows = _espn_sweep(
+        _engine(tmp_path / "other"),
+        stored_swid="{EEEEEEEE-0000-0000-0000-00000000000E}",
+        bound_owner_swid="{AAAAAAAA-0000-0000-0000-000000000001}",
+        bound_co_owners=(co,))
+    assert skip is None and teams is not None and len(teams) == 2
+    assert len(rows) == 1 and rows[0].type == "espn_reconnect"
