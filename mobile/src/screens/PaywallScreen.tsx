@@ -158,8 +158,9 @@ export default function PaywallScreen({ navigation, route }: any) {
   useEffect(() => {
     if (!paywallOn || !unverified) return;
     dismiss();
-    const t = setTimeout(() => void openVerify(), 450);
-    return () => clearTimeout(t);
+    // Not cleared on unmount: dismissing unmounts this screen, and the sheet
+    // must still open once the modal is gone. openVerify is idempotent.
+    setTimeout(() => void openVerify(), 450);
   }, [paywallOn, unverified, dismiss]);
 
   const configQuery = useQuery({
