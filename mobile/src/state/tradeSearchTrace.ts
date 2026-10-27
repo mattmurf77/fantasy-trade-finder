@@ -160,6 +160,15 @@ export function dropPendingSearch(searchId: string): void {
   failFirstCard(searchId, 'abandoned');
 }
 
+/** The search still waiting for its first card, if any (a newer tap
+ *  abandons every older one, so there is at most one). The paywall router's
+ *  gate listener settles it with R2b `paywall` / `verify` (#393 M2). */
+export function openSearchId(): string | null {
+  let open: string | null = null;
+  for (const t of traces.values()) if (!t.settled) open = t.searchId;
+  return open;
+}
+
 export function isSearchOpen(searchId: string | null | undefined): boolean {
   const t = searchId ? traces.get(searchId) : undefined;
   return !!t && !t.settled;
@@ -214,8 +223,8 @@ export function reportFirstCardShown(searchId: string, o: { cardIndex: number })
   }, 'Trades');
 }
 
-/** R2b — instead of R2: empty | error | abandoned | timeout. Once per
- *  search_id, and never after an R2. */
+/** R2b — instead of R2: empty | error | abandoned | timeout | paywall |
+ *  verify. Once per search_id, and never after an R2. */
 export function failFirstCard(searchId: string, reason: FirstCardFailure): void {
   const t = traces.get(searchId);
   if (!t || t.settled) return;

@@ -8,6 +8,8 @@ import {
   type GateSignal,
 } from '../api/client';
 import type { PaywallSource, VerifyPath } from '../copy/monetization';
+import { gateFailureReason } from '../utils/firstCardEvent';
+import { failFirstCard, openSearchId } from './tradeSearchTrace';
 import { useSession, type SavedUser } from './useSession';
 
 // The paywall router (#393 M1; D1, D3, D9, D15–D18).
@@ -217,6 +219,17 @@ export function openOfferTrigger(
 
 /** The client.ts seam handler. Exported for the structural check. */
 export function handleGateSignal(signal: GateSignal): Promise<GateOutcome> | void {
+  // R2b (analytics-lead's grant): a FIND gate answer settles the open search
+  // the moment it arrives, before the paywall or the sheet shows. Later, the
+  // verify hold would turn it into `timeout`, `abandoned` (the sheet blurs
+  // the deck) or an R2 that counts time spent in the sheet; a verified retry
+  // that shows cards then sends nothing more (one R2/R2b per search). A send
+  // never touches R2b. client.ts calls this for user-initiated calls only:
+  // the deck settles a background one with the same mapping.
+  if (signal.action !== 'verify_mismatch' && signal.kind === 'find') {
+    const open = openSearchId();
+    if (open) failFirstCard(open, gateFailureReason(signal));
+  }
   if (signal.action === 'paywall') {
     return openPaywall({ source: 'gate', gate: signal.gate ?? undefined, kind: signal.kind });
   }

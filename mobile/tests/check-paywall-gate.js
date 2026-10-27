@@ -308,8 +308,14 @@ const fakeStorage = {
   getItem: async (k) => (storage.has(k) ? storage.get(k) : null),
   setItem: async (k, v) => { storageWrites.push([k, v]); storage.set(k, v); },
 };
+// M2: the gate listener settles the open search's R2b (the trace is faked
+// here; check-trade-first-card-events §10 runs it against the real trace).
+let traceOpen = null;
+const traceCalls = [];
 const gateMod = load('state/usePaywallGate.ts', {
   '@react-native-async-storage/async-storage': { default: fakeStorage },
+  './tradeSearchTrace': { openSearchId: () => traceOpen, failFirstCard: (id, reason) => traceCalls.push([id, reason]) },
+  '../utils/firstCardEvent': load('utils/firstCardEvent.ts', {}),
   zustand: { create: makeZustandCreate() },
   '../api/client': { setOnProRequired: (fn) => { seamHandler = fn; } },
   './useSession': { useSession: { getState: () => session } },
@@ -974,7 +980,7 @@ check('8f3. trades-eng follow-up 2 [shape]: a gate answer at the landing never p
   assert(!/\bgo\(/.test(gateCatch) && !/pushDeck\(/.test(gateCatch), 'the gate path never pushes');
   assert(/const deckPushed = pushed && resultsPushPendingRef\.current;[\s\S]*if \(deckPushed && mountedRef\.current\) popToLanding\(\);\s*pushed = true;/.test(gateCatch),
     'a deck the deadline already pushed is popped back; then nothing else pushes');
-  assert(/failFirstCard\(fork\.searchId, 'error'\);/.test(gateCatch), "R2b keeps 'error'");
+  assert(/failFirstCard\(fork\.searchId, gateFailureReason\(gate\)\);/.test(gateCatch), 'R2b paywall / verify from the gate signal');
   // the pushed deck's own 402 (anchored, offline or deadline pushes) pops an empty deck back
   eq((code.match(/if \(isResultsPushed && deckRef\.current\.length === 0\) popToLanding\(\);/g) || []).length, 2, 'generate and fair-sweep 402s on an empty pushed deck pop to the landing');
 });
@@ -1016,14 +1022,14 @@ check('8h. D19 [shape]: a 402 never reaches a deck error variant or the swipe to
     return strip(m.arguments[0].properties.find((p) => p.name && p.name.getText(sf) === 'onError').getText(sf));
   };
   // a Find a trade (generate): no toast, no deck-failure card, no auto retry
-  before(mutation(/return generateTrades\(request/), /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\('error'\);/, 'setToast(', 'setDeckFailure(', "autoGenRef.current = 'retrying'");
+  before(mutation(/return generateTrades\(request/), /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/generate'\)\)\);/, 'setToast(', 'setDeckFailure(', "autoGenRef.current = 'retrying'");
   // a swipe: the card is restored FIRST, then no toast
   const swipeErr = mutation(/swipeTrade\(card, decision, signal, 'deck'\)/);
   before(swipeErr, /if \(err instanceof ApiError && err\.isProRequired\) return;/, 'setToast(');
   assert(swipeErr.indexOf('return cur - 1') < swipeErr.search(/err\.isProRequired\) return;/), 'the existing swipe-failure recovery restores the card first');
   // the fair sweep
   const fair = code.slice(code.indexOf('await getFairPackages('), code.indexOf('setFairDeck(false);\n    } finally'));
-  before(fair, /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\('error'\);\s*setFairDeck\(false\);[^}]*return;/, 'setDeckFailure(');
+  before(fair, /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/fair-packages'\)\)\);\s*setFairDeck\(false\);[^}]*return;/, 'setDeckFailure(');
   // the legacy poll: no "Network hiccup" toast, no poll_abandoned card
   assert(/\} catch \(e\) \{\s*if \(cancelled\) return;\s*if \(e instanceof ApiError && e\.isProRequired\) \{\s*setJob\(null\);\s*return;\s*\}\s*failures \+= 1;/.test(code), 'the legacy poll');
   // the page path: the deck's terminal state, never MoreError

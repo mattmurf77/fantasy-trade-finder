@@ -120,6 +120,7 @@ import {
   FIRST_CARD_TIMEOUT_MS,
   searchTypeOf,
   visibleFraction,
+  gateFailureReason,
   type FirstCardFailure,
   type R1Source,
 } from '../utils/firstCardEvent';
@@ -2370,7 +2371,10 @@ export default function TradesScreen({ navigation, route }: any) {
       // opens nothing and is not retried, so the deck rests on Find a Trade.
       // R2b still records the failed search.
       if (e instanceof ApiError && e.isProRequired) {
-        failDeckSearch('error');
+        // R2b paywall / verify (analytics-lead's grant): a user-initiated
+        // answer was settled on arrival by the gate listener; this covers a
+        // background one.
+        failDeckSearch(gateFailureReason(gateSignalFor(e, '/api/trades/generate')));
         if (vars?.auto) {
           autoGenRef.current = 'failed';
           setAutoGenFailed(true);
@@ -3869,7 +3873,7 @@ export default function TradesScreen({ navigation, route }: any) {
         const deckPushed = pushed && resultsPushPendingRef.current;
         clearTimeout(deadline);
         resultsPushPendingRef.current = false;
-        failFirstCard(fork.searchId, 'error');
+        failFirstCard(fork.searchId, gateFailureReason(gate));
         dropPendingSearch(fork.searchId);
         if (deckPushed && mountedRef.current) popToLanding();
         pushed = true;
@@ -4316,7 +4320,7 @@ export default function TradesScreen({ navigation, route }: any) {
       // #393 M2 (D19): a 402 already opened the paywall or the VerifySheet
       // (api/client); no deck-failure card. R2b still records it.
       if (e instanceof ApiError && e.isProRequired) {
-        failDeckSearch('error');
+        failDeckSearch(gateFailureReason(gateSignalFor(e, '/api/trades/fair-packages')));
         setFairDeck(false);
         // trades-eng's grant: never an empty pushed deck behind the paywall.
         if (isResultsPushed && deckRef.current.length === 0) popToLanding();

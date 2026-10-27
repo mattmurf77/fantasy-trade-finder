@@ -1012,9 +1012,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
                                           "network_type", "serve_source",
                                           "freshness_state", "job_id",
                                           "card_index"}),
-    # R2b — instead of R2. `reason` empty | error | abandoned (unmount, blur,
-    # or the app leaving `active` before a card, T4) | timeout (10,000 ms
-    # from the tap). Every R2b counts as > 200 ms in the p95 (T2).
+    # R2b — instead of R2. `reason` is the closed set empty | error |
+    # abandoned (unmount, blur, or the app leaving `active` before a card,
+    # T4) | timeout (10,000 ms from the tap) | paywall | verify. Every R2b
+    # counts as > 200 ms in the p95 (T2), except paywall / verify, which the
+    # AC-L1 p95 excludes (product gates, reported as their own rows).
+    # paywall = a 402 pro_required with any gate but verify_required; verify
+    # = a 402 gate=verify_required or a 403 verification_required on a gated
+    # route (the client's gateSignalFor; analytics-lead's grant, #393 M2).
     "trade_first_card_failed": frozenset({"search_id", "ms_from_tap", "reason",
                                           "entry_point", "search_type",
                                           "launch_state", "network_type",
