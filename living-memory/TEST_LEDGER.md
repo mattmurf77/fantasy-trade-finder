@@ -30,6 +30,29 @@ Full gates (platforms-eng lead). Server only; no API, schema, flag or analytics 
   - Targeted: the 15 S0 files + `test_pick_assignment_tradeable` → 531 passed.
 - **Not in PR-B:** the §B.6 stamps on the other writers (ESPN/MFL imports, the MFL pick normalizer, draft-status refresh, `_refresh_sleeper_members`). The serve recomputes `rfp1` from rows, so only the proactive hook is missing there.
 
+## 2026-10-27 — S0 roster-change handler: revoke only what a fresher session would rebuild (#470 QA P2-2, P2-1, P3-1, P3-3)
+
+Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). It adds one model_config kill knob (`trade_roster_change_revoke`, default 1) and changes no route, schema or event. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_trade_freshness_roster.py` (25; the handler tests are rewritten for the new rule, with 7 new) and `test_roster_refresh_state.py` (15; 1 new: session init stamps `roster_fetch_started_at` on the session and on the pre-gen's session context, equal to the `refreshed_at` its daemon writes).
+- **Targeted, 312 passed:** freshness, roster refresh state, roster snapshot, module shape, I-1 serve filter, page store, floor kick, unlocked fingerprint reads, `deck_i1_check`, and session init (single flight, Sleeper calls, guard).
+- **Sabotage, each red then restored:**
+  - no session check → 1 red (the league-mate's deck);
+  - no read compare → 2 red (the P2-2 repro and the kept-read test);
+  - no stamp-key check → 1 red (P3-1);
+  - no knob → 1 red;
+  - the job's read not stamped → 1 red (the repro);
+  - the session's read not set → 1 red (session init).
+- **Full suite** on `8ad40822`: `pytest backend/tests -q` → 9260 passed, 2 skipped, 0 failed (13m10s).
+- **Combined with #470** (a local merge of `8ad40822` with `de8c2af5`): #470's `test_roster_fp_stamp.py` plus the above, 97 passed.
+  - A scratch end-to-end repro used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint (release-lead's ordering).
+  - With a player move: 1 hook, and the pre-gen was kept. With the old handler, the same run revoked it (P2-2 reproduced).
+  - With no change: no hook.
+  - The scratch worktree is ledgered in `docs/recovery/2026-10-27-trades-eng-scratch.md`.
+- **Not covered:**
+  - A refreshing user's own deck from before their new read still ends at its next page with "Couldn't load more trades." + Try again. Revoking it is intended, since Try again rebuilds on the newer read. An automatic re-search is a mobile change (offered for the 11-06 binary).
+  - A user with two devices: a newer session on one device makes the other device's older deck revocable (the rule is per user, not per session). That is no worse than #470 as it stands.
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.

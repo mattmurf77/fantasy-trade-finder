@@ -13040,32 +13040,75 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
             _mark_trade_pages_stale(marked_at, league_id=kwargs["league_id"])
 
 
+def _roster_change_revoke_on() -> bool:
+    """model_config `trade_roster_change_revoke` (default 1), read per call. 0
+    makes the `on_roster_change` handler a no-op and leaves the rest of S0 (I-1,
+    the fingerprint checks, the floor kick) as `trade_i1_mode` says. NaN or any
+    other value reads as 1."""
+    return _deck_cfg("trade_roster_change_revoke", 1.0) != 0.0
+
+
+def _league_session_reads(league_id) -> dict:
+    """{user_id: newest `roster_fetch_started_at`} over the live sessions that
+    hold `league_id`: the Sleeper read a rebuild from that user's session uses."""
+    newest = {}
+    with _sessions_lock:
+        for sess in _sessions.values():
+            read = sess.get("roster_fetch_started_at")
+            if read and getattr(sess.get("league"), "league_id", None) == league_id:
+                uid = sess.get("user_id")
+                if read > newest.get(uid, ""):
+                    newest[uid] = read
+    return newest
+
+
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
     """S0's `on_roster_change` handler (contract v0.4 §4.3, A3). platforms-eng's
     refresh calls it, through roster_snapshot.on_roster_change, after
-    committing rows whose rfp1 moved.
+    committing rows whose rfp1 moved and marking the league fresh.
 
-    Revokes the league's jobs that weren't built on `new_fp`, so the next
-    request rebuilds from the new rows. Debounced by construction: a job
-    already stamped `new_fp` is kept, so a double call (two concurrent inits),
-    or one landing after a rebuild, changes nothing. An admission that stamped
-    the old rows before the commit misses at its next freshness or join check.
+    A job is built on its session's rosters (`_capture_trade_execution` reads
+    `sess["league"]`, that session's own Sleeper read), not on the stored rows
+    its `roster_fp` stamps, so a revoke helps only when a rebuild would read
+    newer rosters. It revokes a league job not stamped `new_fp` only when the
+    job's read (`roster_fetch_started_at`) is older than the refreshed rows'
+    (`league_roster_state.refreshed_at`, which only moves forward) and its user
+    holds a session in the league whose read is at least that new (#470 QA):
+    - P2-2: the refreshing init's own pre-gen, or a tap in that window, is
+      built on the very read being committed, so it is kept.
+    - P2-1: a league-mate's rebuild would read their own, no newer, session,
+      so their open deck is kept.
+    A kept job keeps its stamp, so it is never reused once the rows moved, and
+    the I-1 serve filter checks what it serves. A job without a `roster_fp`
+    key (prepared inventory, hand-built) is unchecked, as in
+    `_trade_fingerprints_match` (P3-1). Debounced by construction: a job
+    already stamped `new_fp` is kept, so a double call changes nothing.
 
-    Never raises. Takes only `_trade_jobs_lock`, briefly, with no I/O under it.
-    No proactive rebuild in S0: a live session holds its own last init's
-    rosters, so a warm-up from it would rebuild the old rosters. P1's page
-    store doesn't either: its next serve sees the roster_fp move, serves the
-    I-1-filtered page and kicks the rebuild then. `trade_i1_mode` 0 makes it
-    a no-op.
+    Never raises. One state-row read and a pass over the sessions (under
+    `_sessions_lock`) come first, then `_trade_jobs_lock`, briefly, with no I/O
+    under it. No proactive rebuild in S0. P1's page store doesn't either: its
+    next serve sees the roster_fp move, serves the I-1-filtered page and kicks
+    the rebuild then. `trade_i1_mode` 0 or `trade_roster_change_revoke` 0
+    makes it a no-op.
     """
     try:
-        if _trade_i1_mode() == 0:
+        if _trade_i1_mode() == 0 or not _roster_change_revoke_on():
+            return
+        from .database import get_league_roster_state
+        refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
+        if not refreshed_at:
+            return
+        fresh_users = {uid for uid, read in _league_session_reads(league_id).items()
+                       if read >= refreshed_at}
+        if not fresh_users:
             return
         with _trade_jobs_lock:
             for job in _trade_jobs.values():
                 key = job.get("key") or ()
-                if (len(key) == 3 and key[1] == league_id
-                        and job.get("roster_fp") != new_fp and not job.get("superseded")):
+                if (len(key) == 3 and key[1] == league_id and key[0] in fresh_users
+                        and "roster_fp" in job and job["roster_fp"] != new_fp
+                        and (job.get("roster_fetch_started_at") or "") < refreshed_at
+                        and not job.get("superseded")):
                     _revoke_trade_job_locked(job)
                     if _trade_jobs_by_key.get(key) == job.get("job_id"):
                         _trade_jobs_by_key.pop(key)
@@ -13177,10 +13220,12 @@ def _kickoff_trade_job(
     # pregen supplies the freshly built payload; headless cron resolves here.
     execution_context = None
     capture_error = None
+    roster_read = None          # the Sleeper read the captured rosters came from
     try:
         with _sessions_lock:
             base_session = session_context if session_context is not None else _sessions.get(sess_token)
             base_session = dict(base_session) if base_session is not None else None
+        roster_read = (base_session or {}).get("roster_fetch_started_at")
         execution_context = _capture_trade_execution(base_session, user_id, league_id, scoring_format)
         # The worker reads member rankings/outlooks for this captured league.
         # Keep original viewer epochs: recapturing after a racing viewer edit
@@ -13237,6 +13282,8 @@ def _kickoff_trade_job(
         "request_signature":  request_signature,
         "roster_fp":          roster_fp,
         "values_snapshot_id": values_snapshot_id,
+        # The roster-change handler compares it with the refreshed rows' read.
+        "roster_fetch_started_at": roster_read,
         # The viewer's league identity (a co-owner's differs from user_id):
         # the I-1 serve filter checks give-side ownership against it.
         "league_user_id":     (execution_context.league_user_id
@@ -26609,6 +26656,10 @@ def session_init():
         # M0 — the generation these services were built from. A later bump
         # makes the NEXT session_init rebuild once (membership only).
         "pool_generation": current_generation,
+        # S0: when this init's Sleeper read started (None without one), so the
+        # roster-change handler knows which sessions hold the refreshed rosters.
+        # Always set: `update` must not keep an older init's value.
+        "roster_fetch_started_at": _s0_raw.get("fetch_started_at"),
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
