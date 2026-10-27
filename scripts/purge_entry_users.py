@@ -26,7 +26,10 @@ Targets (head-eng's filter): an `entry:` id with a users row whose
 with NO users row (an orphan; a proven sign-in always writes one with
 `verified_via`). Verified ids, ids created at or after the cutoff, and ids
 whose users row has no usable `created_at` are skipped, counted, and never
-touched.
+touched. But an UNVERIFIED entry id created at or after the cutoff means a
+live entry session minted it after the flag went off (the flip or the
+restart didn't take): the dry run says STOP and prints no execute command,
+and --verify fails on it.
 
 Output is COUNTS ONLY: never an id, SWID, team or league name (legal). The DB
 is whatever `backend.database` points at (DATABASE_URL, default
@@ -234,7 +237,14 @@ def dry_run(cutoff) -> int:
     lines += [f"  {k}: {v}" for k, v in sorted(counts.items())] or ["  (none)"]
     lines.append(f"  total: {sum(counts.values())}")
     lines += _info(found)
-    if found["targets"]:
+    late = len(found["skipped_after_cutoff"])
+    lines.append(f"unverified created after cutoff: {late}")
+    if late:
+        # The flag flip or the restart didn't take: live entry sessions are
+        # still minting users. No execute command is printed.
+        lines.append("  STOP: unverified entry users were created at or after the cutoff, so the "
+                     "flag flip or the restart didn't take. Don't run --execute; ask head-eng.")
+    elif found["targets"]:
         # The exact execute command, pre-filled, for the OPERATOR to run after
         # a DB snapshot (runbook). The cutoff is printed in UTC so the copied
         # command selects exactly the targets this dry run counted.
@@ -280,6 +290,11 @@ def verify(cutoff) -> int:
     on_skipped = _count_naming(_present(cred_pairs, found["existing"]), skipped)
     ok_a = not found["targets"]
     ok_b = not any(creds.values())
+    # Re-created ids: an UNVERIFIED entry user created at or after the cutoff
+    # means a live entry session minted it after the flag went off. Verified
+    # entry users stay skipped and only (b) applies to them.
+    late = len(found["skipped_after_cutoff"])
+    ok_c = not late
     lines = ["purge_entry_users: VERIFY", *(_summary(found)),
              f"(a) target ids remaining in key columns: {len(found['targets'])} "
              f"-> {'OK' if ok_a else 'FAIL'}"]
@@ -291,9 +306,14 @@ def verify(cutoff) -> int:
         lines.append("    of those, on a SKIPPED entry user (verified, after the cutoff or no "
                      f"created_at): {sum(on_skipped.values())}. A human must look; the real "
                      "owner's sign-in would get 409.")
+    if ok_c:
+        lines.append("(c) unverified entry users created after the cutoff: 0 -> OK")
+    else:
+        lines.append(f"(c) unverified entry users created after the cutoff: {late}. The flag or "
+                     "restart wasn't done; investigate before re-running. -> FAIL")
     lines += _info(found)
     print("\n".join(lines))
-    return 0 if ok_a and ok_b else 1
+    return 0 if ok_a and ok_b and ok_c else 1
 
 
 def _identity(url) -> str:

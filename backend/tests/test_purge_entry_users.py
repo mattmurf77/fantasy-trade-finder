@@ -40,7 +40,7 @@ ESPN = f"entry:espn:{SWID}"                       # target: users row, unverifie
 MFL = "entry:mfl:61408.f0003"                     # target: users row, unverified, before
 ORPHAN = "entry:espn:4242.t4"                     # target: no users row
 VERIFIED = "entry:mfl:61408.f0007"                # skipped: verified_via set
-LATE = "entry:espn:{0BADF00D-1111-2222-3333-444455556666}"   # skipped: after the cutoff
+LATE = "entry:espn:{0BADF00D-1111-2222-3333-444455556666}"   # skipped: a proven sign-in after the cutoff
 UNDATED = "entry:espn:7777.t1"                    # skipped: no created_at
 SLEEPER = "313560442465169408"                    # untouched
 ACCT = "acct_mfl-signin-proof"                    # untouched
@@ -91,7 +91,8 @@ def engine(monkeypatch, tmp_path):
         conn.execute(insert(users).values(sleeper_user_id=MFL, created_at=BEFORE))
         conn.execute(insert(users).values(sleeper_user_id=VERIFIED, created_at=BEFORE,
                                           verified_via="mfl_login"))
-        conn.execute(insert(users).values(sleeper_user_id=LATE, created_at=AFTER))
+        conn.execute(insert(users).values(sleeper_user_id=LATE, created_at=AFTER,
+                                          verified_via="espn_login"))
         conn.execute(insert(users).values(sleeper_user_id=UNDATED, created_at=None))
         conn.execute(insert(users).values(sleeper_user_id=SLEEPER, created_at=BEFORE,
                                           verified_via="sleeper"))
@@ -146,7 +147,8 @@ def test_dry_run_counts_and_changes_nothing(engine, capsys):
     code, out = run(capsys)
     assert code == 0
     assert "targets: 3 (unverified, created before the cutoff: 2; orphans with no users row: 1)" in out
-    assert "skipped (verified or after cutoff): 2 (verified: 1; created at or after the cutoff: 1)" in out
+    assert "skipped (verified or after cutoff): 2 (verified: 2; created at or after the cutoff: 0)" in out
+    assert "unverified created after cutoff: 0" in out and "STOP" not in out
     assert "skipped (no usable created_at): 1" in out
     assert "espn_credentials.user_id: 1" in out and "mfl_credentials.user_id: 1" in out
     assert "draft_picks.owner_user_id: 1" in out
@@ -214,6 +216,27 @@ def test_verify_fails_on_a_credential_left_on_a_skipped_entry_user(engine, capsy
     assert "(a) target ids remaining in key columns: 0 -> OK" in out
     assert "espn_credentials.user_id 1" in out and "-> FAIL" in out
     assert "on a SKIPPED entry user (verified, after the cutoff or no created_at): 1" in out
+
+
+def test_an_id_minted_after_the_cutoff_stops_the_dry_run_and_fails_verify(engine, capsys):
+    """A live entry session (flag still on, or no restart) mints users after the cutoff."""
+    minted = "entry:mfl:61408.f0009"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=minted, created_at=AFTER))
+        seed(conn, db.sessions_table, "minted", token_hash="tok-minted", user_id=minted)
+    code, out = run(capsys)
+    assert code == 0 and "targets: 3" in out
+    assert "unverified created after cutoff: 1" in out
+    assert "STOP: unverified entry users were created at or after the cutoff" in out
+    assert "--execute --expect" not in out          # no command to copy
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.begin() as conn:                    # a purged id, re-created
+        conn.execute(insert(db.users_table).values(sleeper_user_id=ESPN, created_at=AFTER))
+    code, out = run(capsys, "--verify")
+    assert code == 1
+    assert "(a) target ids remaining in key columns: 0 -> OK" in out
+    assert ("(c) unverified entry users created after the cutoff: 2. The flag or restart "
+            "wasn't done; investigate before re-running. -> FAIL") in out
 
 
 def test_info_counts_never_fail_verify(engine, capsys):
