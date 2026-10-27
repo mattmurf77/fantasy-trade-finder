@@ -19,6 +19,58 @@ Gates: #419's QA follow-ups. No new event, prop, route or schema; the event's co
   - a drop burst's tail count is logged only by a later drop;
   - test gaps: the fallback identity's partner, LRU eviction of the current job, `move_to_end`, the worker's `except`, the lease.
 
+## 2026-10-27 — Owned-pick sync: an empty `/drafts` read keeps the prior current-season exclusion (#470 QA P3-2)
+
+Server only, platforms-eng lead; one commit on `fix/owned-picks-drafts-flake`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, schema, route or analytics change.
+
+- **The flip:** init A's live `/drafts` read excluded the current season. Init B's read flaked to `[]` while the cached #207 verdict didn't say `drafted`, so B re-populated the season and the next good read removed it again. Each flip moved `rfp1`. Fix: on an empty read without a cached `drafted`, `server._sleeper_prior_grid_excludes` reads the prior platform grid (`load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)`) before the replace. If the grid has later seasons but none for the current one, the sync keeps the season excluded and logs it at INFO.
+- **New tests in `test_owned_picks.py` (7; the file is now 38):**
+  - complete, then an empty read with no verdict: the season stays excluded;
+  - complete → flake → complete → flake: `roster_snapshot(...).fp` is the same throughout;
+  - a prior grid that carries the season keeps it on an empty read;
+  - a first sync on an empty read includes it (D-089);
+  - the live read wins both ways (complete → pre_draft re-includes → complete excludes);
+  - a season rollover (meta season 2027) ends the sticky exclusion;
+  - a cached `drafted` still excludes a season the prior grid carries.
+- **`test_pick_assignment.py`:** `_sleeper_prior_grid_excludes` was added to `_SANCTIONED_SOURCE_CALLERS`. It is a literal platform read of the sync's own provenance and never follows `picks.assign_tradeable`.
+- **Sabotage, red then restored:** with the sticky branch disabled (`elif False and …`), 2 tests went red: the row test (2026 came back) and the fp test (the fp alternated `rfp1:2adc…` / `rfp1:8c3f…`).
+- **Targeted:** the 59 files that grep `owned_pick|draft_status|pick_tradab|roster_refresh|roster_snapshot` → 1840 passed. The only red was the AST reader guard above, fixed by registering the new reader.
+- **Full suite:** `pytest backend/tests -q` → 9255 passed, 2 skipped, 0 failed (12m55s, Python 3.14 locally; CI runs 3.12).
+- **Not run:** `tsc --noEmit` and testid-lint (no mobile change).
+- **QA follow-up (#482 GO-with-notes; tests and docs only, no code change):** QA's sabotage "a prior-grid read error returns True" stayed green on the 7 tests above. New: `test_prior_grid_read_error_falls_back_to_including_the_season`. A complete read excludes 2026; then `srv.load_draft_picks` raises on an empty read with no verdict, and 2026 is included (D-089). That sabotage (`return True` in the `except`) → that 1 test red (`[2027, 2028, 2029] == [2026, 2027, 2028]`), then restored; `test_owned_picks.py` → 39 passed. The commissioner-reset cost is now named in the D-189 amendment and `docs/integrations/sleeper.md`.
+
+## 2026-10-27 — S0 PR-B: `rfp1` roster fingerprint stamp after a refresh (CAS) + `on_roster_change`
+
+Full gates (platforms-eng lead). Server only; no API, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. Branch `feat/s0-roster-fp-stamp`.
+
+- **What:** `roster_refresh.record_outcome` → `stamp` after a `fresh` write, so both the session-init daemon and the P41 kick stamp. `stamp` reads the stored `roster_fp` and computes `roster_snapshot(...).fp` with `server._pick_read_source()`. It then compare-and-sets through `database.cas_league_roster_fp`, and on a won, changed stamp calls `on_roster_change(lid, old, new)` with no transaction open and no lock held.
+- **New `backend/tests/test_roster_fp_stamp.py` (17):**
+  - the first stamp is `rfp1` (equal to the serve's `_trade_roster_snapshot`) and calls the hook with `old=None`;
+  - a change calls `(old, new)`; no change makes no CAS and no call;
+  - a lost CAS (rival stamp) makes no call ×2;
+  - no state row writes nothing;
+  - a handler exception and a raising hook are swallowed and logged;
+  - a failed refresh ×2, a failed read and a failed state write, and a failed kick read don't stamp;
+  - an fp or pick-source error leaves the fp as stored, with the outcome still `fresh` ×2;
+  - a linked-platform league is never stamped;
+  - **A3** on a file-backed SQLite: `pool.checkedout()==0`, both module locks acquire non-blocking, and a second connection writes, on `roster-refresh-<id>`;
+  - session init hooks on a real `session-init-bg-writes` thread, never the request thread.
+- **Updated:** `test_roster_refresh_state.py::test_success_marks_fresh_and_never_stores_none_ids` now expects `rfp1:` (was NULL until PR-B).
+- **Sabotage, each red then restored byte-identical:**
+  - (1a) the hook inside the CAS transaction → the A3 test red (`checked_out: 1`, second-connection write `OperationalError`);
+  - (1b) the hook under `_inflight_lock` → the A3 test red;
+  - (2) the CAS `WHERE roster_fp = old` dropped → both lost-CAS cases red (rival overwritten);
+  - (3) the `new == old` early return dropped → the unchanged-roster test red (1 call).
+- **Targeted:** 15 S0 / trade-serve files → 493 passed.
+- **Full suite:** `python3 -m pytest backend/tests -q` → **9208 passed, 2 skipped, 0 failed**, exit 0, 35m37s (Python 3.14 local; the known `test_ranking_service_threads` flake didn't fire).
+- **Docs:** `docs/data-dictionary.md` (`roster_fp` row + intro), `docs/architecture.md` (new "Roster refresh and fingerprint stamp (S0)" data-flow paragraph), and the scope (§B.1 seam, §B.3 step 7 "As built", §3 evidence, §4 docs rows, §5 item 3).
+- **#470 QA P3 follow-up (branch `feat/s0-stamp-p3s`, stacked):**
+  - New `test_stamp_follows_the_platform_pick_source_when_assign_tradeable_is_off` (the file is now 18 tests). With the flag off, a platform row plus a member-asserted row: the stamp equals the serve's fp and differs from the `'any'` fp.
+  - Sabotage: `roster_refresh._pick_read_source` hard-coded to `'any'` → the new case red. The existing flag-on pin stays green, which was QA's point. Restored byte-identical.
+  - A lost-CAS lag comment in `stamp()`.
+  - Targeted: the 15 S0 files + `test_pick_assignment_tradeable` → 531 passed.
+- **Not in PR-B:** the §B.6 stamps on the other writers (ESPN/MFL imports, the MFL pick normalizer, draft-status refresh, `_refresh_sleeper_members`). The serve recomputes `rfp1` from rows, so only the proactive hook is missing there.
+
 ## 2026-10-27 — S0 roster-change handler: revoke only what a fresher session would rebuild (#470 QA P2-2, P2-1, P3-1, P3-3)
 
 Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). It adds one model_config kill knob (`trade_roster_change_revoke`, default 1) and changes no route, schema or event. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
