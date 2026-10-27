@@ -73,7 +73,16 @@ them). A served_before=1 index changes nothing: its card keeps its
 position and outcomes, and an absent one is an unexplained gap.
 LoggedCard.position is the displayed position, the card's dense rank among
 the deck's kept non-ghost cards (card_index minus the W0 indexes below it);
-with no withdrawals it is card_index. The reason column ('i1_dropped',
+with no withdrawals it is card_index. Display moves (models-lead addendum
+D3): a pack's run metadata may carry "display_moves", {"<index>": anchor
+index}, the cards a serve displayed out of build order (the repeat cap
+re-applied after serve-time withdrawals), each right after its anchor's card
+in the same response. A move counts once its card is delivered as of the
+read; the order is then build order with each moved card right after its
+anchor, several behind one anchor in build order, and position is the rank
+in it (a pack holds every built card, so the rank is dense). A malformed
+entry (a key that isn't a decimal index, an anchor that isn't an int above
+it) is ignored. No pack, or no moves: positions as above. The reason column ('i1_dropped',
 'disposition_cut', ...) is read only to count: LoggedDeck.
 withdrawn_removed_by_reason splits the W0 removals by it (models-lead B4).
 No rule gates on it.
@@ -525,6 +534,7 @@ def load_decks(
                       (datetime.fromisoformat(as_of) - IN_FLIGHT_WINDOW).isoformat())
     # run_id -> (card_count, final, last delivered card_index as of the read)
     packed: dict[str, tuple[int, bool, int]] = {}
+    display_moves: dict[str, dict[int, int]] = {}   # run_id -> its pack's moves (D3)
     pack_only = False
     for p in packs:
         deck = decks.get(p.run_id)
@@ -540,6 +550,7 @@ def load_decks(
             continue
         run, last_delivered, cards = got
         deck.upgrade_misses = _upgrade_misses(run)
+        display_moves[p.run_id] = _display_moves(run)
         if run.get(PAGE_STORE_MARKER) == 1:
             marked.add(p.run_id)
         # deck_source is not a pack key (CONTRACT_KEYS): refresh decks are kept
@@ -601,9 +612,19 @@ def load_decks(
         deck.withdrawn_removed = len(w0)
         reason_of = reasons.get(deck.deck_job_id, {})
         deck.withdrawn_removed_by_reason = dict(sorted(Counter(reason_of[i] for i in w0).items()))
-        for c in deck.cards:
-            if not c.is_ghost:
-                c.position = c.card_index - bisect_left(w0, c.card_index)
+        moved = ({i: a for i, a in display_moves.get(deck.deck_job_id, {}).items()
+                  if i <= pack[2]} if pack else {})
+        if moved:                                  # D3 (module doc): rank in the shown order
+            shown = sorted((c for c in deck.cards if not c.is_ghost),
+                           key=lambda c: ((moved[c.card_index], 1, c.card_index)
+                                          if c.card_index in moved
+                                          else (c.card_index, 0, c.card_index)))
+            for rank, c in enumerate(shown):
+                c.position = rank
+        else:
+            for c in deck.cards:
+                if not c.is_ghost:
+                    c.position = c.card_index - bisect_left(w0, c.card_index)
         if pack:
             _n, final, last_delivered = pack
             if not final:
@@ -679,6 +700,16 @@ def _upgrade_misses(run: dict) -> dict[str, int]:
     if isinstance(raw, dict):
         return {cause: int(n) for cause, n in sorted(raw.items())}
     return {UPGRADE_MISS_OTHER: int(raw)}
+
+
+def _display_moves(run: dict) -> dict[int, int]:
+    """A pack's run["display_moves"] as index -> anchor index (module doc, D3),
+    its malformed entries dropped; {} when absent."""
+    raw = run.get("display_moves")
+    if not isinstance(raw, dict):
+        return {}
+    return {int(k): a for k, a in raw.items()
+            if isinstance(k, str) and k.isdecimal() and type(a) is int and a > int(k)}
 
 
 def _pack_state(run: dict, last_delivered: int, served_at: str, as_of: str | None,
