@@ -1472,6 +1472,10 @@ def test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes(env):
     assert found == _GATE_PINS
     assert server._MUTATING_METHODS == ("POST", "PUT", "PATCH", "DELETE")
     gate_code = server._gate_unverified_write(lambda: None).__code__
+    # feat/mfl-auth-link-throttle changes mfl_auth_link's BODY on purpose (the
+    # D7 limiter on its MFL login, the OverflowError year parse, the marker
+    # block's comment). Nothing here hashes a route body — only the four gate
+    # functions above and the gate wrapper on each route — so no pin moves.
     for endpoint in ("espn_link", "espn_import", "mfl_link", "mfl_auth_link"):
         view = server.app.view_functions[endpoint]
         assert view.__code__ is gate_code, endpoint

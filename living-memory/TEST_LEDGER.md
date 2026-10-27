@@ -1,3 +1,30 @@
+## 2026-10-27 — MFL auth-link: D7 limiter on the password login; non-finite year 400 (`feat/mfl-auth-link-throttle`, stacked on #430 @ `d3248d35`)
+
+Full gates (a new 429 on an API route). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the tests below plus the code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups).
+
+- **What changed:** `POST /api/mfl/auth-link`'s MFL login now goes through #430's D7 limiter (`_signin_limit_gate` / `_signin_release`, in-flight bound), with the same keys as the sign-in: subject = `accounts.platform_subject("mfl", username)`, plus the client IP. Only an MFL bad login counts; a good login clears the subject. The year range and admission run before the MFL call. Over the limit → 429 `too_many_attempts` + `Retry-After` + the row-13 constant. A JSON `Infinity` / `-Infinity` / `1e400` year on auth-link and auth-import → 400 `mfl_bad_year` (was a 500 `OverflowError`).
+- **Verify-block finding:** the `mfl_login` block is not dead. It re-stamps a verified session's `verified_via` (session + `users`) to `mfl_login` and runs for unverified synthetic demo sessions (#279 demo exemption). Behaviour kept; the comment is rewritten; two pins added.
+- **New tests** (`test_mfl_auth_link_route.py`, +12 cases):
+  - `test_auth_link_d7_sixth_attempt_after_five_bad_logins_is_429_no_mfl_call` (the right password on the 6th: 429, 5 MFL calls in all);
+  - `test_auth_link_d7_shares_the_subject_window_with_platform_sign_in`;
+  - `test_auth_link_d7_per_ip_window`;
+  - `test_auth_link_d7_good_login_clears_the_subject_not_the_ip`;
+  - `test_auth_link_d7_uncounted_outcomes_never_consume_the_budget`;
+  - `test_auth_link_d7_in_flight_slot_is_released_on_an_exception`;
+  - `test_auth_link_year_out_of_range_is_400_before_any_mfl_call`;
+  - `test_auth_link_and_auth_import_non_finite_year_is_400_not_500` (×3);
+  - `test_auth_link_verify_block_restamps_a_verified_sessions_verified_via`, `test_auth_link_verify_block_runs_for_an_unverified_demo_session`.
+  - The suite's fixture now resets the limiter before and after each test.
+- **Sabotage, each red then restored:**
+  - gate call removed → 4 red (6th-attempt, shared-window, per-IP, clear);
+  - the bad-login `_counted_failure` dropped → the same 4 red;
+  - `finally` release replaced by explicit releases on the normal paths → `…_in_flight_slot_is_released_on_an_exception` red;
+  - no `outcome = "proven"` on a good login → `…_good_login_clears_the_subject_not_the_ip` red;
+  - `OverflowError` dropped from auth-link's year parse → all 3 non-finite cases red (500 `internal_error`); dropped from auth-import's → all 3 red at the auth-import step.
+- **#430's gate pin:** `test_c7_the_279_gate_is_byte_identical_…` hashes only the four gate functions and checks the wrapper, so no hash changed (a comment names this branch). Still green.
+- **Run:** `test_platform_sign_in.py`, `test_entry_platform_route.py`, `test_mfl_auth_link_route.py`, `test_mfl_link_route.py`, `test_espn_link_route.py`, `test_espn_identity_binding.py`, `test_espn_service.py`, `test_mfl_service.py`, `test_espn_my_leagues_route.py`, `test_link_status_routes.py`, `test_mfl_propose_route.py`, `test_prepared_trade_cohort.py`, `test_mfl_write.py`, `test_mfl_trade_lifecycle.py`, `test_i2_mfl_ownership.py`: **510 passed, 0 failed**.
+- **Full suite:** FULLSUITE_A
+
 ## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
 
 Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. This builds on the 2026-10-26 entry below.

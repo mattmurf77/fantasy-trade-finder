@@ -36091,6 +36091,9 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
 def mfl_auth_link():
     """Sign in with MFL and list the user's leagues (no import yet).
 
+    POST's MFL login shares the platform sign-in's D7 failure limits (per
+    MFL username + per IP; 429 too_many_attempts + Retry-After).
+
     GET → sign-in status, mirroring GET /api/sleeper/link (send-auth lazy
     flow, 2026-08-11): {connected, mfl_username, year}. Never returns the
     cookie. `connected` is true when an encrypted credential row exists OR
@@ -36143,22 +36146,45 @@ def mfl_auth_link():
     password = body.get("password") or ""
     try:
         year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):   # JSON Infinity / 1e400
         return jsonify({"error": "mfl_bad_year",
                         "message": "year must be numeric"}), 400
     if not username or not password:
         return jsonify({"error": "mfl_missing_credentials",
                         "message": "MFL username and password are required."}), 400
 
+    # D7 limiter on this password login (feat/mfl-auth-link-throttle): the
+    # same in-process windows the platform sign-in uses, keyed on the same
+    # MFL subject (lower-cased username) and client IP, so a verified session
+    # can't use this route as an unthrottled MFL password oracle. Year range
+    # and admission run BEFORE any MFL call. Only an MFL bad login counts; a
+    # good login clears the subject; outages and input errors don't count.
+    # _signin_release runs in the `finally`, so an exception never leaks the
+    # in-flight slot.
+    bad_year = _mfl_entry_year_refusal(body.get("year"))
+    if bad_year is not None:
+        return bad_year
+    from . import accounts as _accounts
+    audit: dict = {}
+    limited = _signin_limit_gate(
+        audit, "mfl", _accounts.platform_subject("mfl", username))
+    if limited is not None:
+        log.info("MFL-AUTH-LINK outcome=limited reason=%s",
+                 audit.get("reason"))
+        return limited
     try:
         auth = _mfl.login(username, password, year)
         del password  # transient use only — never persisted, never logged
         leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
+        audit["outcome"] = "proven"   # good login → the subject's count clears
     except _mfl.MflAuthError:
+        audit["_counted_failure"] = True
         return jsonify({"error": "mfl_bad_credentials",
                         "message": "MFL didn't accept that username and password."}), 403
     except _mfl.MflError as e:
         return _platform_error_response(e, "mfl")
+    finally:
+        _signin_release(audit)
 
     # Store ONLY the returned cookie — encrypted at rest when the key exists,
     # otherwise session-only (fail closed: plaintext never reaches the DB).
@@ -36176,21 +36202,23 @@ def mfl_auth_link():
     if storage == "session":
         sess["mfl_cookie"] = auth["cookie"]
 
-    # ── A successful MFL login counts as session verification ────────────
-    # Operator decision (2026-08-11, Send-in-MFL follow-ups): MFL accepting
-    # the username/password THIS request carried is proof-of-person — the
-    # MFL analogue of the Sleeper-JWT oracle — so an MFL-only user (no
-    # Sleeper/Apple/Google sign-in) can pass the hard verified gate on
-    # POST /api/trades/propose-mfl. Mirrors sleeper_link's proven-live
-    # block exactly: session marked verified, users.verified_via persisted,
-    # durable row upserted. D-018 (unverified sessions keep the short
-    # expiry) is honored by construction: the 90-day rolling expiry is
-    # granted by _session_persist_eligible reading sess["verified"], so
-    # verifying here IS what flips this session from the 4h posture to the
-    # long one — nothing else to set. Squatter safety is unchanged:
-    # @_gate_unverified_write already 403s an unverified session whenever a
-    # verified controller exists, so this path can only mint the FIRST
-    # controller (first-verified-wins, same as the Sleeper path).
+    # ── The mfl_login marker block (what it does today) ──────────────────
+    # Written 2026-08-11 as "a successful MFL login verifies the session".
+    # Since #279, @_gate_unverified_write 403s every unverified session
+    # before this route runs, so for real sessions it no longer verifies
+    # anything — and it is NOT first-verified-wins. What it does on every
+    # successful POST:
+    #   * already-verified session (sleeper / apple / google / espn /
+    #     mfl_login): RE-STAMPS sess["verified_via"] and users.verified_via
+    #     (+ verified_at) to 'mfl_login', overwriting the earlier value, and
+    #     force-persists the durable session row;
+    #   * synthetic demo session (is_demo + demo_user_*, exempt from the
+    #     #279 gate; /api/session/demo needs landing.try_before_sync): marks
+    #     it verified via mfl_login in memory and on its users row (demo
+    #     sessions are never persisted).
+    # Behaviour kept as-is (reported to platforms-eng from
+    # feat/mfl-auth-link-throttle); pinned by
+    # test_auth_link_verify_block_restamps_a_verified_sessions_verified_via.
     sess["verified"] = True
     sess["verified_via"] = "mfl_login"
     try:
@@ -36207,9 +36235,9 @@ def mfl_auth_link():
     except Exception:
         log.exception("persisting verified marker failed (session still "
                       "verified in memory)")
-    # Durable session (flag auth.persistent_sessions): the session just
-    # became verified — persist it so it survives deploys/idle sweeps and
-    # picks up the verified 90d rolling expiry.
+    # Durable session (flag auth.persistent_sessions): force the upsert so
+    # the row carries the re-stamped verified_via (a demo session is never
+    # persist-eligible).
     sess["_persisted_at"] = 0  # force the upsert past the throttle
     _persist_session_if_eligible(
         request.headers.get("X-Session-Token", ""), sess)
@@ -36243,7 +36271,7 @@ def mfl_auth_import():
     body = request.get_json(force=True) or {}
     try:
         year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):   # JSON Infinity / 1e400
         return jsonify({"error": "mfl_bad_year",
                         "message": "year must be numeric"}), 400
 

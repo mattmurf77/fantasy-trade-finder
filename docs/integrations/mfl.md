@@ -135,6 +135,22 @@ clears the username's count. The audit line
 MFL accepts an email address as the login, one person can end up with two
 identities (username and email).
 
+**`POST /api/mfl/auth-link` is rate-limited too (2026-10-27,
+`feat/mfl-auth-link-throttle`).** Before this, any verified session could
+call it with unlimited username/password guesses — an MFL password oracle.
+Its login now goes through the same D7 limiter as the sign-in, with the
+same keys and windows: per username (trimmed + lower-cased via
+`accounts.platform_subject("mfl", …)`) 5 bad logins per 15 min, per client
+IP 300 per 10 min, in-flight attempts counted at admission. The year range
+(2000..current season + 1) and the admission check run **before**
+`mfl_service.login`; over the limit the route answers 429
+`too_many_attempts` + `Retry-After` and makes no MFL call. Only an MFL bad
+login (`MflAuthError` from `login` or `fetch_my_leagues`) counts; MFL
+outages and input errors don't; a good login clears the username's count
+(never the IP window). The sign-in and auth-link share one budget, so 5 bad
+guesses at either lock both for that username. A JSON `Infinity` / `1e400`
+year on auth-link or auth-import is now a 400 `mfl_bad_year`, not a 500.
+
 **What IS persisted:** the `MFL_USER_ID` cookie only, in `mfl_credentials`
 (`backend/database.py:1339`) — Fernet-encrypted at rest using the same
 `SLEEPER_TOKEN_KEY` as Sleeper/ESPN credentials
