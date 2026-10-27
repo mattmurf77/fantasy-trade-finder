@@ -297,12 +297,6 @@ def run() -> int:
             re.search(r'platform\s*:\s*["\']web["\']', events_js) is not None,
             'web/js/events.js does not declare platform:"web" in the body')
 
-    tiers = read("positional-tiers.html")
-    r.check("HYG-no-stale-sample-roster", "SAMPLE_PLAYERS" not in tiers,
-            "hardcoded 2024-era roster rendered before the API responds")
-    r.check("HYG-excluded-documented", set(EXCLUDED) <= set(EXCLUDED),
-            f"{len(EXCLUDED)} pages excluded with reasons")
-
     # ── GATE: the web's ESPN/MFL chips stay off (head-eng 2026-10-27) ────
     # landing.platform_options now means the APP's proof-based ESPN/MFL
     # sign-in, and the web has none until after launch. So no web script reads
@@ -334,6 +328,12 @@ def run() -> int:
              if not via_gate else
              f"not hidden in the markup: {', '.join(shown)}")
             if not ok else "web ESPN/MFL chips hard-off; landing.platform_options is the app's flag")
+
+    tiers = read("positional-tiers.html")
+    r.check("HYG-no-stale-sample-roster", "SAMPLE_PLAYERS" not in tiers,
+            "hardcoded 2024-era roster rendered before the API responds")
+    r.check("HYG-excluded-documented", set(EXCLUDED) <= set(EXCLUDED),
+            f"{len(EXCLUDED)} pages excluded with reasons")
 
     return r.report(), r
 
