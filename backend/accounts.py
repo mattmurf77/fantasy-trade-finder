@@ -625,10 +625,13 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            users' events/identity links on a shared device are preserved.
 #            Platform pick grids (draft_picks.platform set and not 'sleeper',
 #            i.e. MFL/ESPN): owner_user_id / original_user_id → the
-#            DELETED_USER_PLACEHOLDER where they name a deleted id. There the
-#            importer's own picks carry their FLEECED id (entry:*, acct_*;
-#            server._sync_mfl_owned_picks), and nothing re-syncs the grid once
-#            they are gone. The row itself stays: other members rely on it.
+#            DELETED_USER_PLACEHOLDER where they name a deleted id, and that
+#            side's owner_username / original_username → "Team <slot>" (the
+#            writers' own fallback; the placeholder if no slot is known). There
+#            the importer's own picks carry their FLEECED id (entry:*, acct_*;
+#            server._sync_mfl_owned_picks) and their name, and nothing re-syncs
+#            the grid once they are gone. The row itself stays: other members
+#            rely on it.
 #            recorded_picks.picking_team_id → the placeholder where it is a
 #            deleted Fleeced-minted id (entry:*, acct_*; no platform column).
 #            pick_assignment_changed events (OTHER users'): old_owner /
@@ -638,10 +641,11 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            importers'): a deleted Fleeced-minted id → the placeholder in
 #            place, so other owners' slot positions don't shift.
 #   KEEP     player_value_history + model_config (not user-keyed),
-#            draft_picks on Sleeper grids (and legacy rows with no platform)
-#            and recorded_picks.picking_team_id holding a Sleeper id: public
-#            Sleeper ids other members rely on, re-synced from Sleeper,
-#            players.
+#            draft_picks on Sleeper grids (and legacy rows with no platform),
+#            ids and usernames alike, and recorded_picks.picking_team_id
+#            holding a Sleeper id: public Sleeper data other members rely on,
+#            re-synced from Sleeper. Platform grids keep the row, never the
+#            deleted person's id or name (ANONYMIZE above). players.
 # ---------------------------------------------------------------------------
 
 def _user_data_scope(conn, user_id: str, account_id: str | None = None):
@@ -839,15 +843,38 @@ def _delete_user_data(sleeper_user_id: str,
         # the owner of their own picks. `platform` is the LEAGUE's provenance,
         # written by every draft_picks writer; Sleeper grids and legacy NULL
         # rows keep their public Sleeper ids untouched.
+        # The writers also fill owner_username / original_username from the
+        # member's own name (server._sync_mfl_owned_picks, the assignment
+        # seeder), so each scrubbed side's name becomes those writers' own
+        # fallback, "Team <slot>". The original side's slot is the row's
+        # original_roster_id; the owner side's is this person's slot in the
+        # same league (their own original picks), else the placeholder.
         picks = db.draft_picks_table
         platform_grid = picks.c.platform.isnot(None) & (picks.c.platform != "sleeper")
-        named = conn.execute(select(picks.c.id).where(
+        named = conn.execute(select(
+            picks.c.id, picks.c.league_id, picks.c.owner_user_id,
+            picks.c.original_user_id, picks.c.original_roster_id).where(
             platform_grid,
             picks.c.owner_user_id.in_(user_ids) | picks.c.original_user_id.in_(user_ids),
-        )).scalars().all()
-        for col in ("owner_user_id", "original_user_id"):
-            conn.execute(update(picks).where(platform_grid, picks.c[col].in_(user_ids))
-                         .values({col: DELETED_USER_PLACEHOLDER}))
+        )).all()
+        own_slots: dict[str, set] = {}
+        for r in named:
+            if r.original_user_id in user_ids and r.original_roster_id:
+                own_slots.setdefault(r.league_id, set()).add(str(r.original_roster_id))
+
+        def _team(slot) -> str:
+            return f"Team {slot}" if slot else DELETED_USER_PLACEHOLDER
+
+        for r in named:
+            values = {}
+            if r.original_user_id in user_ids:
+                values.update(original_user_id=DELETED_USER_PLACEHOLDER,
+                              original_username=_team(r.original_roster_id))
+            if r.owner_user_id in user_ids:
+                slots = own_slots.get(r.league_id, set())
+                values.update(owner_user_id=DELETED_USER_PLACEHOLDER,
+                              owner_username=_team(next(iter(slots)) if len(slots) == 1 else None))
+            conn.execute(update(picks).where(picks.c.id == r.id).values(**values))
         counts["draft_picks_owner_anonymized"] = len(named)
         # recorded_picks.picking_team_id (a league_members.user_id) has no
         # platform column to apply the rule above with, so it is anonymized

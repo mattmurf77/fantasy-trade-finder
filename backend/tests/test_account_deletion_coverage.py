@@ -328,6 +328,38 @@ def test_platform_only_users_pick_rows_anonymized_on_the_mfl_grid(engine, delete
     assert counts["draft_picks_owner_anonymized"] == 1
 
 
+def test_platform_pick_grid_names_follow_the_anonymized_ids(engine):
+    """A kept platform row named the person too: each scrubbed side becomes "Team <slot>"."""
+    gone = accounts.DELETED_USER_PLACEHOLDER
+    with engine.begin() as conn:
+        def pick(pick_id, league, owner, original, slot, platform="mfl"):
+            seed(conn, db.draft_picks_table, pick_id, pick_id=pick_id, league_id=league,
+                 platform=platform, owner_user_id=owner, owner_username="Name of " + owner,
+                 original_user_id=original, original_username="Name of " + original,
+                 original_roster_id=slot)
+        pick("own", "L1", UID, UID, "0003")             # UID's own pick; UID's slot is 0003
+        pick("in", "L1", UID, OTHER, "0005")            # OTHER's pick, now UID's
+        pick("out", "L1", OTHER, UID, "0003")           # UID's pick, now OTHER's
+        pick("alias-in", "L1", ALIAS, OTHER, "0006")    # the bound alias is the same person
+        pick("orphan-in", "L2", UID, OTHER, "0001")     # no own pick in L2: slot unknown
+        pick("espn-own", "E1", UID, UID, "2", platform="espn")
+        pick("sleeper", "S1", UID, UID, "4", platform="sleeper")
+    accounts.delete_user_data(UID)
+    picks = _picks(engine)
+    names = lambda pid: (picks[pid]["owner_username"], picks[pid]["original_username"])  # noqa: E731
+    assert names("own") == ("Team 0003", "Team 0003")
+    assert names("in") == ("Team 0003", "Name of " + OTHER)
+    assert names("out") == ("Name of " + OTHER, "Team 0003")
+    assert names("alias-in") == ("Team 0003", "Name of " + OTHER)
+    assert names("orphan-in") == (gone, "Name of " + OTHER)
+    assert names("espn-own") == ("Team 2", "Team 2")
+    assert names("sleeper") == ("Name of " + UID, "Name of " + UID)    # public Sleeper data
+    for pid, r in picks.items():
+        if pid != "sleeper":
+            text = json.dumps(r, default=str)
+            assert UID not in text and ALIAS not in text, pid
+
+
 def test_export_of_draft_picks_is_unchanged_by_the_pick_grid_anonymization(engine):
     """Export still keys draft_picks on assigned_by only, never on grid ownership."""
     with engine.begin() as conn:
