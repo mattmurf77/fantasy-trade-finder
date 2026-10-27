@@ -26699,7 +26699,7 @@ def session_init():
 
         try:
             # Platform-link state is a DB fact that nothing in this daemon
-            # writes, so the three guards below read it once.
+            # writes, so every guard below reads it once.
             _platform_linked = is_linked_platform_league(league_id)
 
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
