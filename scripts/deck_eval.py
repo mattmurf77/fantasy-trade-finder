@@ -253,6 +253,10 @@ def write_report(path: pathlib.Path, run: dict) -> None:
       f"({s['seat_errors']} errored, counted as empty)")
     a(f"- First page size: min {s['first_page_size']['min']} · mean {s['first_page_size']['mean']} "
       f"· max {s['first_page_size']['max']}")
+    if s["unpriced_cards"]:
+        a(f"- **First-5 cards with an asset outside the consensus seed (scored at value 0): "
+          f"{s['unpriced_cards']}, {s['unpriced_insult_cards']} of them insults.** Check those "
+          "cards (`unpriced` in the JSON) before reading the insult rate.")
     for label, key in (("Session init", "session_init"), ("Deck build", "deck_build"),
                        ("First page (generate)", "first_page")):
         x = s["latency_ms"][key]

@@ -312,8 +312,8 @@ def test_the_cli_refuses_a_process_that_already_imported_the_backend(tmp_path):
 
 
 def test_summary_rates_and_bars():
-    def card(insult):
-        return {"insult": insult, "i1": insult, "i2": False}
+    def card(insult, unpriced=()):
+        return {"insult": insult, "i1": insult, "i2": False, "unpriced": list(unpriced)}
 
     def seat(n_cards, insults=0, status="complete"):
         return {"first_page_size": n_cards, "status": status, "init_ms": 1.0, "job_ms": 2.0,
@@ -323,7 +323,10 @@ def test_summary_rates_and_bars():
     fmt = {"qb": "SF", "tep": False, "teams": 12}
     # 20 teams, 1 empty (5.0%: fails the strict < 5% bar); 95 first-5 cards, 2 insults (2.1%).
     seats = [seat(0)] + [seat(30, insults=1 if i < 2 else 0) for i in range(19)]
+    seats[1]["cards"][0]["unpriced"] = ["pick-x"]          # an insult with an unpriced asset
+    seats[2]["cards"][3]["unpriced"] = ["pick-y"]          # a clean card with one
     s = fd.summarize([{"format": fmt, "seats": seats, "error": None}])
+    assert (s["unpriced_cards"], s["unpriced_insult_cards"]) == (2, 1)
     assert (s["seats"], s["empty_decks"], s["empty_deck_rate_pct"]) == (20, 1, 5.0)
     assert (s["first5_cards"], s["insult_cards"], s["insult_rate_pct"]) == (95, 2, 2.11)
     assert s["pass"] == {"empty_deck": False, "insult": True}

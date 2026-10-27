@@ -444,6 +444,10 @@ def summarize(leagues: list) -> dict:
         "i1_cards": sum(c["i1"] for c in cards),
         "i2_cards": sum(c["i2"] for c in cards),
         "insult_rate_pct": insult_rate,
+        # An asset outside the consensus seed is scored at value 0 (card_record),
+        # which can make a card an insult: counted so a reader can check them.
+        "unpriced_cards": sum(1 for c in cards if c.get("unpriced")),
+        "unpriced_insult_cards": sum(1 for c in insults if c.get("unpriced")),
         "bars": dict(BARS),
         "pass": {"empty_deck": empty_rate is not None and empty_rate < BARS["empty_deck_rate_pct"],
                  "insult": insult_rate is not None and insult_rate < BARS["insult_rate_pct"]},
