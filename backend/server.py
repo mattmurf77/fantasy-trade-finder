@@ -28,6 +28,7 @@ import logging
 import math
 import os
 import pathlib
+import queue
 import random
 import re
 import secrets
@@ -3323,8 +3324,8 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
     with a copied snapshot: one current history projection owns every card.
     `page_start`: the served slice's start index for a paged serve
-    (_trade_job_page_view), None for the legacy cumulative body; it keys the
-    `deck_i1_check` dedupe."""
+    (_trade_job_page_view), None for the legacy cumulative body, which
+    `deck_i1_check` counts only once the job is complete."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3443,10 +3444,12 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
                                       out["cards"], withdrawn, cut)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
-    # One event per page; a legacy cumulative body re-serves the whole deck on
-    # every poll, so it counts once, when the job is complete.
+    # Each card counted once per job (_emit_deck_i1_check): a page serve, a
+    # replace serve included, counts its new cards; a legacy cumulative body
+    # re-serves the whole deck on every poll, so it counts only once the job
+    # is complete, and then only the cards no page counted.
     if i1_report and (page_start is not None or job.get("status") == "complete"):
-        _emit_deck_i1_check(user_id, league_id, job["job_id"], page_start, i1_report)
+        _emit_deck_i1_check(user_id, league_id, job["job_id"], i1_report)
     return out
 
 
@@ -3462,12 +3465,28 @@ def _kick_roster_floor(league_id: str) -> None:
 
 
 # deck_i1_check: the C-a readout's data path (analytics-lead's pre-grant,
-# 2026-10-26). One server-fired NON_INTENT row per job serve page, recorded
-# off the request thread after the response is built.
+# 2026-10-26). One server-fired NON_INTENT row per serve with newly served
+# cards, each card counted once per job (#419 QA P3: a replace serve's cards
+# past page 0, and a job served both legacy and paged, were miscounted by the
+# old (job, page) key), recorded off the request thread after the response.
 _I1_AGE_BUCKETS = ((300, "under_5m"), (3600, "5m_to_1h"), (86400, "1h_to_24h"))
+# The cards counted per job, an LRU of at most _I1_EVENT_DEDUPE_MAX jobs and
+# _I1_EVENT_DEDUPE_CARDS card identities in all (the bound that holds memory:
+# ~130 B an identity once its job has left, so ~26 MB at most).
 _I1_EVENT_DEDUPE_MAX = 20000
-_i1_events_seen: "collections.OrderedDict[tuple, None]" = collections.OrderedDict()
+_I1_EVENT_DEDUPE_CARDS = 200_000
+_i1_events_seen: "collections.OrderedDict[str, set]" = collections.OrderedDict()
+_i1_events_counted = 0                     # identities held across _i1_events_seen
 _i1_events_lock = threading.Lock()
+# One worker, a bounded queue (#419 QA P3: a thread per emit peaked at 188 in a
+# 500-emit burst). A full queue drops the emit, warned at most once a minute
+# with the count; a serve never blocks or fails on it.
+_I1_EVENT_QUEUE_MAX = 1000
+_I1_EVENT_DROP_WARN_EVERY_S = 60
+_i1_event_queue: "queue.Queue" = queue.Queue(maxsize=_I1_EVENT_QUEUE_MAX)
+_i1_event_worker_for = None                # the queue the running worker serves
+_i1_event_dropped = 0
+_i1_event_drop_warned_at = float("-inf")
 
 
 def _i1_age_bucket(age_s) -> str:
@@ -3479,39 +3498,134 @@ def _i1_age_bucket(age_s) -> str:
     return next((label for limit, label in _I1_AGE_BUCKETS if age_s < limit), "over_24h")
 
 
-def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, page, report: dict) -> None:
-    """Record `deck_i1_check` for one serve page, at most once per (job, page)
-    in this process; repeat polls of the same page are dropped. `page` is the
-    served slice's start index, or None for a legacy cumulative serve (which
-    the caller sends only once the job is complete). Never raises, never
-    blocks: the row is written on a daemon thread, non-touching
+def _i1_card_identity(card):
+    """A card's identity for deck_i1_check's once-per-job count: its
+    impression_id, else its trade_id, else its assets and partner (a card
+    built without either). Stable across a re-sorted (replace) serve."""
+    if isinstance(card, dict):
+        ident = card.get("impression_id") or card.get("trade_id")
+        if ident:
+            return ident
+        return ("assets", tuple(str(p["id"]) for p in card.get("give", [])),
+                tuple(str(p["id"]) for p in card.get("receive", [])),
+                str(card.get("target_user_id")))
+    ident = getattr(card, "impression_id", None) or getattr(card, "trade_id", None)
+    return ident or ("assets", tuple(map(str, card.give_player_ids)),
+                     tuple(map(str, card.receive_player_ids)), str(card.target_user_id))
+
+
+def _i1_new_cards(job_id: str, report: dict) -> dict | None:
+    """The serve's props over the cards not yet counted for this job, which
+    are now counted; None when there are none (a repeat poll). The serve-level
+    fields (mode, status, outcome, age_bucket) are the serve's; the counts sum
+    only the new cards."""
+    global _i1_events_counted
+    per_card = report.get("_cards") or ()
+    with _i1_events_lock:
+        seen = _i1_events_seen.get(job_id)
+        if seen is None:
+            seen = _i1_events_seen[job_id] = set()
+        _i1_events_seen.move_to_end(job_id)
+        new = []
+        for ident, counts in per_card:
+            if ident not in seen:
+                seen.add(ident)
+                new.append(counts)
+        _i1_events_counted += len(new)
+        while _i1_events_seen and (len(_i1_events_seen) > _I1_EVENT_DEDUPE_MAX
+                                   or _i1_events_counted > _I1_EVENT_DEDUPE_CARDS):
+            _old, gone = _i1_events_seen.popitem(last=False)
+            _i1_events_counted -= len(gone)
+            if _old == job_id:            # this job alone is over the budget
+                break
+    if not new:
+        return None
+    props = {k: v for k, v in report.items() if not k.startswith("_")}
+    for name in new[0]:
+        props[name] = sum(counts[name] for counts in new)
+    return props
+
+
+def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, report: dict) -> None:
+    """Record `deck_i1_check` for one serve's newly served cards: each card is
+    counted once per job in this process (by _i1_card_identity), so a repeat
+    poll records nothing, a replace serve records its cards not yet counted,
+    and a legacy body (sent only once the job is complete) its cards no page
+    counted. Never raises, never blocks: the row goes on a bounded queue to
+    one daemon worker (_i1_event_enqueue), written non-touching
     (`touch_user=False`), owned by the viewer, with the league in the row's
     `league_id` column and only a hashed job key in the props. A serve is an
     HTTP response: a view built outside a request records nothing."""
     if not has_request_context():
         return
     try:
-        key = (job_id, page)
-        with _i1_events_lock:
-            if key in _i1_events_seen:
-                return
-            _i1_events_seen[key] = None
-            if len(_i1_events_seen) > _I1_EVENT_DEDUPE_MAX:
-                _i1_events_seen.popitem(last=False)
-        props = dict(report, job_key=hashlib.sha256(str(job_id).encode()).hexdigest()[:12])
+        props = _i1_new_cards(job_id, report)
+        if props is None:
+            return
+        props["job_key"] = hashlib.sha256(str(job_id).encode()).hexdigest()[:12]
         device = dict(getattr(g, "device_info", {}) or {})
         # Like the trade worker: a write after an account deletion must not land.
         lease = _user_data_lifecycle.capture(user_id, started=g.get("_user_data_started"))
-        # The writer and engine in effect for this serve, so a late thread
-        # can't write through a different one.
+        # The writer and engine in effect for this serve, so a late write can't
+        # go through a different one.
         from . import database as _database
         write = functools.partial(record_event, user_id, "deck_i1_check", league_id=league_id,
                                   source="api", props=props, touch_user=False,
                                   bind=_database.engine, **device)
-        threading.Thread(target=_record_deck_i1_check, name="deck-i1-check", daemon=True,
-                         args=(lease, write)).start()
+        _i1_event_enqueue(lease, write)
     except Exception as err:          # analytics must never fail a serve
         log.warning("deck_i1_check not recorded job=%s: %s", job_id, err)
+
+
+def _i1_event_enqueue(lease, write) -> None:
+    """Queue one write for the worker (started for the current queue on first
+    use); a full queue drops it, warned at most once a minute with the count."""
+    global _i1_event_worker_for, _i1_event_dropped, _i1_event_drop_warned_at
+    q = _i1_event_queue
+    with _i1_events_lock:
+        if _i1_event_worker_for is not q:
+            threading.Thread(target=_i1_event_work, args=(q,), name="deck-i1-check",
+                             daemon=True).start()
+            _i1_event_worker_for = q
+    try:
+        q.put_nowait((lease, write))
+        return
+    except queue.Full:
+        pass
+    now, warn = time.monotonic(), 0
+    with _i1_events_lock:
+        _i1_event_dropped += 1
+        if now - _i1_event_drop_warned_at >= _I1_EVENT_DROP_WARN_EVERY_S:
+            warn, _i1_event_dropped, _i1_event_drop_warned_at = _i1_event_dropped, 0, now
+    if warn:
+        log.warning("deck_i1_check queue full (%d): dropped %d emit%s since the last warning",
+                    q.maxsize, warn, "" if warn == 1 else "s")
+
+
+def _i1_event_work(q) -> None:
+    """The worker: one write at a time, forever; a write's failure is logged."""
+    while True:
+        lease, write = q.get()
+        try:
+            _record_deck_i1_check(lease, write)
+        except Exception as err:      # never let the worker die
+            log.warning("deck_i1_check worker: %s", err)
+        finally:
+            q.task_done()
+
+
+def _drain_deck_i1_checks(timeout: float = 5.0) -> bool:
+    """Wait up to `timeout` s for the queued and in-flight deck_i1_check writes
+    (tests, at teardown); True when none is left."""
+    q = _i1_event_queue
+    deadline = time.monotonic() + timeout
+    with q.all_tasks_done:
+        while q.unfinished_tasks:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            q.all_tasks_done.wait(remaining)
+    return True
 
 
 def _record_deck_i1_check(lease, write) -> None:
@@ -3712,7 +3826,7 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
                 picks, players = (picks + 1, players) if pick else (picks, players + 1)
         return players, picks, generic, unknown
 
-    kept, unchecked = [], {}
+    kept, unchecked, card_split = [], {}, {}
     for card in (cards if snap.status != "missing" else ()):   # no rows: nothing to check
         if isinstance(card, dict):
             give = [p["id"] for p in card.get("give", [])]
@@ -3728,11 +3842,14 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
         counts["dropped_give"] += bool(give_moved)
         counts["dropped_receive"] += bool(receive_moved)
         # deck_i1_check: the side x asset-type split, and distinct cards.
-        split["dropped_give_player"] += bool(give_players)
-        split["dropped_give_pick"] += bool(give_picks)
-        split["dropped_receive_player"] += bool(receive_players)
-        split["dropped_receive_pick"] += bool(receive_picks)
-        split["dropped_cards"] += bool(give_moved or receive_moved)
+        card_split[id(card)] = {
+            "dropped_give_player": int(bool(give_players)),
+            "dropped_give_pick": int(bool(give_picks)),
+            "dropped_receive_player": int(bool(receive_players)),
+            "dropped_receive_pick": int(bool(receive_picks)),
+            "dropped_cards": int(bool(give_moved or receive_moved))}
+        for name, value in card_split[id(card)].items():
+            split[name] += value
         unchecked[id(card)] = [a + b for a, b in zip(give_unchecked, receive_unchecked)]
         if not (give_moved or receive_moved):
             kept.append(card)
@@ -3769,6 +3886,17 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
                       cards=len(cards), kept=len(served),
                       unchecked_generic=counts["unchecked_generic"],
                       unchecked_pick_owner=counts["unchecked_pick_owner"], **split)
+        # Each checked card's share of those counts, so the event can count a
+        # card once per job (_emit_deck_i1_check sums the cards not yet counted).
+        served_ids = {id(c) for c in served}
+        report["_cards"] = [
+            (_i1_card_identity(card), {
+                "cards": 1, "kept": int(id(card) in served_ids),
+                **card_split.get(id(card), dict.fromkeys(split, 0)),
+                **dict(zip(("unchecked_generic", "unchecked_pick_owner"),
+                           unchecked.get(id(card), (0, 0)) if id(card) in served_ids
+                           else (0, 0)))})
+            for card in cards]
     return served, (block if gates else None), past_bound
 
 
@@ -6364,8 +6492,8 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         out.update(status="running", wait_reason="roster_check", cursor=cursor, total_ready=0)
     if search_id is not None:
         out["search_id"] = search_id
-    if i1_report:                         # off-thread, once per (deck, page)
-        _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], cursor, i1_report)
+    if i1_report:                         # off-thread, each card once per deck
+        _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], i1_report)
     return out, past_bound
 
 
