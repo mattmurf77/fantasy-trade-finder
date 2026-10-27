@@ -293,6 +293,10 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
       <Pressable
         onPress={handleInvite}
         style={({ pressed }) => [styles.inviteBtn, pressed && !busy && styles.inviteBtnPressed]}
+        // AC-4b (design F2): 36pt visible + 4pt vertical slop = a 44pt
+        // target, the Chalkline compact-button pattern; the banner's 8pt
+        // vertical padding holds the slop. minWidth 44 covers the width.
+        hitSlop={{ top: 4, bottom: 4 }}
         accessibilityRole="button"
         accessibilityLabel={busy ? INVITE_BUSY_LABEL : "Invite leaguemates"}
         accessibilityState={{ busy }}

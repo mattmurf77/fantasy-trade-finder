@@ -581,6 +581,10 @@ function runStatic() {
   check('L ux-4 no pressed fill while busy',
         /pressed && !busy && styles\.inviteBtnPressed/.test(bannerFn),
         'a dropped repeat tap must not flash the pressed fill');
+  check('L AC-4b 44pt target: minHeight 36 + 4pt top/bottom hitSlop, minWidth 44',
+        /hitSlop=\{\{ top: 4, bottom: 4 \}\}/.test(bannerFn)
+          && /inviteBtn: \{\s*minHeight: 36,\s*minWidth: 44,/.test(bannerSrc),
+        'the banner Invite button fell under the 44pt touch floor');
 
   finish();
 }
