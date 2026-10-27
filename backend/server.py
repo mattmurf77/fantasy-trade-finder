@@ -4078,7 +4078,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 2
+DECK_PIPELINE_VERSION = 3
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4149,6 +4149,7 @@ DECK_PIPELINE_IGNORED = {
     "_job_live": "job lifecycle: whether a job may still publish",
     "_job_superseded": "job lifecycle: the supersede fence",
     "_revoke_trade_job_locked": "job lifecycle: revocation",
+    "_note_job_picks_read": "the job's roster stamp: records which picks it read (#484 QA P2-1); never shapes the deck",
     # logging and telemetry
     "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
@@ -4200,6 +4201,7 @@ DECK_PIPELINE_IGNORED = {
 DECK_PIPELINE_PINS = {
     1: "38068a074677acaa",
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
+    3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -7358,10 +7360,12 @@ def _s0_seconds_knob(key: str, default: float) -> float:
     return value if 0 <= value < float("inf") else float(default)
 
 
-def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[str, str] | None:
+def _trade_current_fingerprints(league_id: str, scoring_format: str, *,
+                                parts: dict | None = None) -> tuple[str, str] | None:
     """S0 (contract v0.4 §2, §6): (rfp1, vsn1) from stored rows and the current
     pool, read now. Three indexed reads plus the hashes; no network, no pool
     build. None when the read failed, or when `trade_i1_mode` is 0 (no read).
+    `parts` (kickoff only): filled from the same read (roster_snapshot.snapshot_ids).
 
     Callers read this BEFORE taking _trade_jobs_lock and pass it to the
     freshness and join checks, which only compare.
@@ -7370,11 +7374,12 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[st
         return None
     from . import roster_snapshot
     from .database import engine as _engine
+    extra = {"parts": parts} if parts is not None else {}
     try:
         with _engine.connect() as conn:
             return roster_snapshot.snapshot_ids(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(), **extra)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
@@ -11668,6 +11673,7 @@ def _run_trade_job(
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
                     _picks_memo = []
+                _note_job_picks_read(job_id, _picks_memo)
             return _picks_memo
 
         # Outlook + positional preferences
@@ -13307,29 +13313,46 @@ def _league_session_reads(league_id) -> dict:
     return newest
 
 
-def _roster_fp_expected_pending(league_id, roster_read, read_rows):
-    """At kickoff: the rfp1 the stored rows will have once the job's session
-    read lands (`read_rows`, the member rows session init writes from it, with
-    the stored picks and draft state as they are now), taken only while that
-    read is newer than the league's refreshed rows (its refresh is in flight);
-    else None. The handler re-stamps the job when this equals `new_fp`
-    (#481 QA P3-2, #484 QA P1-1). Never raises."""
+def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
+    """At kickoff: is the job's session read newer than the league's refreshed
+    rows (its refresh still in flight)? Then the kickoff's fingerprint read
+    also takes `expected_fp`: the rfp1 the stored rows will have once that read
+    lands (`read_rows`, the member rows session init writes from it, with the
+    picks and draft state of the same read). The handler re-stamps the job
+    when it equals `new_fp` (#481 QA P3-2, #484 QA P1-1). Never raises."""
     if (not roster_read or not read_rows or _trade_i1_mode() == 0
             or not _roster_change_revoke_on()):
-        return None
+        return False
     try:
         from .database import get_league_roster_state
         refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
-        if refreshed_at and refreshed_at >= roster_read:
-            return None
-        from . import roster_snapshot
-        from .database import engine as _engine
-        with _engine.connect() as conn:
-            return roster_snapshot.expected_fp(conn, league_id, read_rows,
-                                               pick_source=_pick_read_source())
+        return not (refreshed_at and refreshed_at >= roster_read)
     except Exception as err:
-        log.warning("roster expected fp unavailable for league %s: %s", league_id, err)
-        return None
+        log.warning("roster refresh state unavailable for league %s: %s", league_id, err)
+        return False
+
+
+def _note_job_picks_read(job_id, picks) -> None:
+    """The worker read its picks (once per job, `_job_draft_picks`). The kickoff
+    stamp (and `roster_fp_expected`) hashed the picks stored at kickoff; when
+    the worker read different ones (a pick move, or an older refresh writing
+    back, between the two reads), the stamp doesn't describe the job: it is
+    dropped to None (never reused, never stored) with the expected fp, so no
+    later re-stamp can mark it fresh (#484 QA P2-1). Never raises."""
+    try:
+        from . import roster_snapshot
+        key = roster_snapshot.picks_key(picks)
+    except Exception as err:
+        log.warning("trade-job %s: picks key unavailable: %s", job_id, err)
+        return
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if job is None or job.get("roster_picks_key") in (None, key):
+            return
+        job["roster_fp"] = None
+        job.pop("roster_fp_expected", None)
+    log.info("trade-job %s: its picks moved between kickoff and the worker's read; unstamped",
+             job_id)
 
 
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
@@ -13542,10 +13565,14 @@ def _kickoff_trade_job(
     # S0: the stored rosters and values this job is built against, stamped
     # before the worker starts. The same read, taken outside the lock, is what
     # the dedupe checks below compare with. None on a failed read never matches.
-    fingerprints = _trade_current_fingerprints(league_id, scoring_format)
+    # One read for the stamp, its picks key and, while the session's refresh is
+    # in flight, the expected fp (#484 QA P2-1).
+    parts = ({"member_rows": read_rows}
+             if _roster_read_in_flight(league_id, roster_read, read_rows) else {})
+    fingerprints = _trade_current_fingerprints(league_id, scoring_format, parts=parts)
     roster_fp, values_snapshot_id = fingerprints or (None, None)
-    fp_expected = (_roster_fp_expected_pending(league_id, roster_read, read_rows)
-                   if roster_fp else None)
+    picks_key = parts.get("picks_key") if roster_fp else None
+    fp_expected = parts.get("expected_fp") if roster_fp else None
     force_supersedes = force_fresh and _force_supersede_enabled()
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -13582,6 +13609,8 @@ def _kickoff_trade_job(
         job["source"] = source
     if fp_expected is not None:
         job["roster_fp_expected"] = fp_expected   # #481 QA P3-2: the handler may re-stamp it
+    if picks_key is not None:
+        job["roster_picks_key"] = picks_key       # #484 QA P2-1: checked at the worker's read
     # P1: the organic scope this job's completion may store pages under. A
     # forced organic job stores too: it is the newest deck for the scope.
     organic = (not is_pinned and not trade_intent and not presentation_exempt

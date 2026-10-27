@@ -1,3 +1,37 @@
+## 2026-10-27 — S0 stamp hashes the picks the worker read (#484 QA P2-1); deck pipeline v3
+
+Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 2 → 3: `_run_trade_job`'s `_job_draft_picks` now calls `_note_job_picks_read`, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The bug (QA's E1b, E1c-moved, 5/5 STALE):**
+  - The stamp and `roster_fp_expected` hashed the picks stored at kickoff, but the worker reads picks later.
+  - A pick move, or an older refresh writing back (ABA), between the two reads re-stamped or kept a deck whose picks differ from its stamp.
+  - Main had the sibling with no member move.
+- **The fix:**
+  - One kickoff read gives the stamp, `roster_picks_key` (`roster_snapshot.picks_key`) and the expected fp.
+  - The worker's read checks the key. On a mismatch the stamp goes to None (never reused or stored) and the expected fp is dropped, so no later re-stamp can mark it fresh. A re-stamp that came first is undone.
+- **Backend:** `test_trade_freshness_roster.py` is now 43 tests (7 new):
+  - one kickoff read;
+  - a matching read keeps the stamp;
+  - main's sibling (P0, then P1, then back to P0) is unstamped and never reused;
+  - the pre-gen pick ABA is never re-stamped;
+  - a worker read after a re-stamp undoes it;
+  - a failed worker read is unstamped;
+  - the co-owner keying of `_session_member_rows` (QA P3).
+- `test_deck_pipeline_digest.py`: the v3 pin is added to FROZEN_PINS. 68 passed across the two files plus `test_roster_refresh_state.py`.
+- **Full suite** on `922517fb`: `pytest backend/tests -q` → 9322 passed, 2 skipped, 0 failed (11m19s).
+- **models-eng reviewed the v3 bump (OK, 2026-10-27).** An AST diff of every pinned function against main shows only the `_note_job_picks_read` line in `_job_draft_picks`. The pin reproduces, and the IGNORED classification holds: it never mutates the picks, writes only `roster_fp` and `roster_fp_expected`, and no call site holds `_trade_jobs_lock`.
+- **Sabotage, each red then restored (7):**
+  - the worker doesn't note (6 red, the digest among them);
+  - the note keeps the expected fp;
+  - the note keeps the stamp;
+  - no kickoff picks key;
+  - the expected fp from a separate read;
+  - the builder's ids not strings;
+  - the builder keeps a blank owner.
+- **Not covered:**
+  - rebase case 2's freshness (flag-dark) is still a follow-up;
+  - QA's D/B0 regressed-row re-stamp, which is informational: its content equals the stored rows.
+
 ## 2026-10-27 — `deck_i1_check` worker follow-ups: restart, deletion skip, exit drain, drop tail (#468 QA P3-1…P3-5)
 
 Gates: QA follow-ups to #468 (stacked on it). No new event, prop, route or schema; the event's write path changes. One additive method, `user_data_lifecycle.Lease.deleting()`. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
