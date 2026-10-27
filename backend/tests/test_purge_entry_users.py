@@ -484,6 +484,9 @@ NOT_USER_KEYS = {
     # = comparisons against fixed enum values, not ids.
     ("rank_sets", "visibility"), ("league_roster_history", "team_key_quality"),
     ("prepared_trade_participants", "subject_kind"),
+    # the pick audit-trail scrub selects its events by type (#452 QA round 2);
+    # the ids it rewrites live in props, which (d) checks.
+    ("user_events", "event_type"),
 }
 
 
@@ -505,3 +508,66 @@ def test_discovery_covers_every_user_column_delete_user_data_filters_on(engine):
     written = {t for s in statements for t in re.findall(r"^(?:DELETE FROM|UPDATE) ([a-z_0-9]+)", s)}
     reachable = {t for t, _ in discovered | NOT_USER_KEYS} | {"prepared_trade_sweeps"}
     assert written <= reachable, sorted(written - reachable)
+
+
+# ── #452 QA round 2 ────────────────────────────────────────────────────────
+
+def _assignment_event(conn, marker, new_owner):
+    seed(conn, db.user_events_table, marker, user_id=SLEEPER, event_type="pick_assignment_changed",
+         props=f'{{"pick_id": "{marker}", "actor": "{SLEEPER}", "new_owner": "{new_owner}"}}')
+
+
+def test_execute_anonymizes_targets_in_the_pick_audit_trail_and_verify_d_passes(engine, capsys):
+    with engine.begin() as conn:
+        _assignment_event(conn, "to-espn", ESPN)        # a target, named in another user's event
+        _assignment_event(conn, "to-kept", VERIFIED)    # a skipped (kept) entry user may remain
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.connect() as conn:
+        text = " ".join(conn.execute(select(db.user_events_table.c.props).where(
+            db.user_events_table.c.event_type == "pick_assignment_changed")).scalars())
+    assert ESPN not in text and accounts.DELETED_USER_PLACEHOLDER in text and VERIFIED in text
+    code, out = run(capsys, "--verify")
+    assert code == 0, out
+    assert "(d) pick_assignment_changed events naming a removed entry id: 0 -> OK" in out
+
+
+def test_verify_d_fails_on_a_removed_entry_id_left_in_the_pick_audit_trail(engine, capsys):
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.begin() as conn:
+        _assignment_event(conn, "stale", ESPN)          # written after the deletion, e.g. a replay
+    code, out = run(capsys, "--verify")
+    assert code == 1
+    assert "(d) pick_assignment_changed events naming a removed entry id: 1 -> FAIL" in out
+    assert ESPN not in out and SWID not in out
+
+
+def test_verify_e_fails_on_an_empty_or_wrong_database(engine, capsys, monkeypatch):
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    monkeypatch.setattr(purge, "_users_count", lambda found: 0)
+    code, out = run(capsys, "--verify")
+    assert code == 1 and "(e) users rows in this database: 0 -> FAIL (empty or wrong database)" in out
+    monkeypatch.setattr(purge, "_users_count", lambda found: None)
+    code, out = run(capsys, "--verify")
+    assert code == 1 and "(e) users rows in this database: table missing -> FAIL" in out
+
+
+def test_expect_db_refuses_a_different_database_in_every_mode(engine, capsys):
+    name = purge._db_name(db.engine.url)
+    for args in ((), ("--verify",), ("--execute", "--expect", "3")):
+        before = snapshot(engine)
+        code, out = run(capsys, "--expect-db", "fleeced-prod", *args)
+        assert code == 2 and "REFUSED. The database name doesn't match --expect-db" in out
+        assert snapshot(engine) == before
+    assert run(capsys, "--expect-db", name)[0] == 0
+
+
+def test_a_failing_target_prints_only_the_error_type(engine, capsys, monkeypatch):
+    def boom(uid, *a, **k):
+        raise RuntimeError(f"cannot delete {uid} ({SWID})")
+    monkeypatch.setattr(accounts, "delete_user_data", boom)
+    code, out = run(capsys, "--execute", "--expect", "3")
+    err = capsys.readouterr().err
+    assert code == 1
+    assert out.count("a target failed (RuntimeError); continuing") == 3
+    for secret in (ESPN, MFL, ORPHAN, SWID, "cannot delete"):
+        assert secret not in out + err

@@ -100,7 +100,8 @@ DELETION_ONLY_KEYS = (
 )
 # Reported as info counts, never a failure (onboarding-eng, 2026-10-26).
 # user_events.props: OTHER users' events can name an entry id (e.g.
-# pick_assignment_changed.new_owner); delete_user_data doesn't scrub them.
+# pick_assignment_changed.new_owner). delete_user_data anonymizes those
+# audit-trail ids and --verify (d) fails on any left; other event types are info.
 JSON_MENTIONS = (("standing_offers_table", "team_user_ids"),
                  ("leagues_table", "opponent_data"),
                  ("user_events_table", "props"))
@@ -241,6 +242,35 @@ def _count_like(pairs, existing, pattern) -> dict[str, int]:
     return counts
 
 
+def _assignment_event_entry_ids(found) -> set[str]:
+    """entry: ids still named in pick_assignment_changed events (old_owner /
+    new_owner / actor). delete_user_data anonymizes a deleted Fleeced-minted id
+    there, so after --execute only skipped (kept) entry users may remain."""
+    if "user_events" not in found["existing"]:
+        return set()
+    ev = db.user_events_table
+    named: set[str] = set()
+    with db.engine.connect() as conn:
+        for raw in conn.execute(select(ev.c.props).where(
+                ev.c.event_type == "pick_assignment_changed",
+                ev.c.props.like("%" + ENTRY_PREFIX + "%"))).scalars():
+            try:
+                props = json.loads(raw or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            named.update(v for k in ("old_owner", "new_owner", "actor")
+                         if isinstance(v := props.get(k), str) and v.startswith(ENTRY_PREFIX))
+    return named
+
+
+def _users_count(found) -> int | None:
+    """Rows in users, or None when the table is missing (wrong or empty DB)."""
+    if "users" not in found["existing"]:
+        return None
+    with db.engine.connect() as conn:
+        return conn.execute(select(func.count()).select_from(db.users_table)).scalar() or 0
+
+
 def _info(found) -> list[str]:
     json_counts = _count_like(JSON_MENTIONS, found["existing"], "%" + ENTRY_PREFIX + "%")
     overhaul = _count_like(OVERHAUL_REFS, found["existing"], ENTRY_PREFIX + "%")
@@ -286,8 +316,10 @@ def dry_run(cutoff) -> int:
         # command selects exactly the targets this dry run counted.
         stamp = cutoff.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         lines.append("next (the operator runs this exact command, after a DB snapshot):")
+        # --expect-db pins the copied command to the database this dry run read.
         lines.append(f"  python3 scripts/purge_entry_users.py --cutoff {stamp} "
-                     f"--execute --expect {len(found['targets'])}")
+                     f"--execute --expect {len(found['targets'])} "
+                     f"--expect-db {_db_name(db.engine.url)}")
     print("\n".join(lines))
     return 0
 
@@ -337,6 +369,13 @@ def verify(cutoff) -> int:
     # entry users stay skipped and only (b) applies to them.
     late = len(found["skipped_after_cutoff"])
     ok_c = not late
+    # (d) the pick grid's audit trail names no deleted entry user (a skipped,
+    # kept entry user may still appear: they still exist).
+    leftover_events = _assignment_event_entry_ids(found) - skipped
+    ok_d = not leftover_events
+    # (e) a machine identity check: an empty or wrong database must not pass.
+    n_users = _users_count(found)
+    ok_e = bool(n_users)
     lines = ["purge_entry_users: VERIFY", *(_summary(found)),
              f"(a) target ids remaining in key columns: {len(found['targets'])} "
              f"-> {'OK' if ok_a else 'FAIL'}"]
@@ -353,9 +392,19 @@ def verify(cutoff) -> int:
     else:
         lines.append(f"(c) unverified entry users created after the cutoff: {late}. The flag or "
                      "restart wasn't done; investigate before re-running. -> FAIL")
+    lines.append(f"(d) pick_assignment_changed events naming a removed entry id: "
+                 f"{len(leftover_events)} -> {'OK' if ok_d else 'FAIL'}")
+    lines.append(f"(e) users rows in this database: "
+                 f"{'table missing' if n_users is None else n_users} -> "
+                 f"{'OK' if ok_e else 'FAIL (empty or wrong database)'}")
     lines += _info(found)
     print("\n".join(lines))
-    return 0 if ok_a and ok_b and ok_c else 1
+    return 0 if ok_a and ok_b and ok_c and ok_d and ok_e else 1
+
+
+def _db_name(url) -> str:
+    name = url.database or ""
+    return Path(name).name if url.get_backend_name() == "sqlite" else name
 
 
 def _identity(url) -> str:
@@ -416,11 +465,15 @@ def _run(argv) -> int:
     mode.add_argument("--execute", action="store_true",
                       help="delete every target through accounts.delete_user_data")
     mode.add_argument("--verify", action="store_true",
-                      help="exit 0 only if no target, no entry: credential row and no unverified "
-                           "entry user created after the cutoff remains")
+                      help="exit 0 only if no target, no entry: credential row, no unverified entry "
+                           "user created after the cutoff and no removed entry id in the pick audit "
+                           "trail remains, on a non-empty users table")
     ap.add_argument("--expect", type=int, help="with --execute: the dry run's target count")
     ap.add_argument("--allow-local", action="store_true",
                     help="allow a local SQLite database (local test runs only)")
+    ap.add_argument("--expect-db", metavar="NAME",
+                    help="refuse unless the database name matches NAME (the runbook passes "
+                         "the prod database's name in every mode)")
     args = ap.parse_args(argv)
     cutoff = _parse_cutoff(args.cutoff)
     if cutoff is None:
@@ -437,6 +490,10 @@ def _run(argv) -> int:
         print("purge_entry_users: REFUSED. That is a local SQLite database, not the target. "
               "Set DATABASE_URL in this shell (runbook), or pass --allow-local for a local "
               "test run.")
+        return 2
+    if args.expect_db is not None and _db_name(db.engine.url) != args.expect_db:
+        print("purge_entry_users: REFUSED. The database name doesn't match --expect-db; "
+              "check DATABASE_URL in this shell.")
         return 2
     with _engines(read_only=not args.execute):
         if args.execute:
