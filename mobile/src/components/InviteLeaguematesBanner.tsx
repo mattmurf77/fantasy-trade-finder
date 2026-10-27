@@ -29,7 +29,6 @@ import { useSession } from '../state/useSession';
 
 interface Props {
   leagueId: string;
-  leagueName?: string | null;
   username?: string | null;   // referrer attribution; omitted if unknown
   total: number;              // league-mates excluding the current user
 }
@@ -141,7 +140,6 @@ export function useInviteBusy(): boolean {
 
 export interface ShareInviteArgs {
   leagueId:   string;
-  leagueName?: string | null;
   username?:  string | null;   // referrer attribution; omitted if unknown
   surface:    InviteSurface;
   /** int | null. `null` means HONESTLY UNKNOWN — never substitute 0. The
@@ -252,7 +250,7 @@ export async function shareInvite(args: ShareInviteArgs): Promise<void> {
   }
 }
 
-export default function InviteLeaguematesBanner({ leagueId, leagueName, username, total }: Props) {
+export default function InviteLeaguematesBanner({ leagueId, username, total }: Props) {
   // The busy state is shareInvite's own guard (ux change 1), so it also
   // covers the sheet being open and taps from any other Invite surface.
   const busy = useInviteBusy();
@@ -261,7 +259,6 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
     // league-mate TOTAL but no join counts, and 0 would be a lie.
     await shareInvite({
       leagueId,
-      leagueName,
       username,
       surface:    'trades_banner',
       notJoined:  null,

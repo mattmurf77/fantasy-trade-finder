@@ -88,8 +88,9 @@ const ROW_GLYPHS: Record<string, { name: IconName; color: string }> = {
   // notif-inbox-growth, 2026-08-13. `referral_joined` and
   // `league_member_joined` share the `plus` glyph because they are the same
   // object — a person arrived. The COLOR carries the difference: flare is
-  // the informational highlight, reserved here for the one row that says
-  // the user's own invite worked. Everything else is ice.
+  // the informational highlight, reserved here for the rows that say the
+  // user's own invite worked (`referral_joined`, `referral_activated`).
+  // Everything else is ice.
   referral_joined:               { name: 'plus',  color: flare.base },
   // Referral loop FR-19: that invitee weighed in on their first trade. Same
   // rule as `league_member_unlocked_trades` below — the glyph names what
@@ -293,7 +294,6 @@ export default function TopBar() {
     setOpen(false);
     void shareInvite({
       leagueId:   league?.league_id || '',
-      leagueName: league?.league_name,
       username:   useSession.getState().user?.username,
       surface:    'notif_empty',
       notJoined:  totalMates !== null && joinedMates !== null

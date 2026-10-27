@@ -197,7 +197,7 @@ function runBanner() {
   });
   const { shareInvite, buildInviteUrl, useInviteBusy } = banner;
   const args = (o = {}) => ({
-    leagueId: LEAGUE, leagueName: 'Dynasty Dorks', username: USER, surface: 'trades_banner',
+    leagueId: LEAGUE, username: USER, surface: 'trades_banner',
     notJoined: null, totalMates: null, platform: 'sleeper', screen: 'Trades', ...o,
   });
   const urlOf = (log) => {

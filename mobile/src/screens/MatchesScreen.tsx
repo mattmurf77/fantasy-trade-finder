@@ -929,7 +929,6 @@ export default function MatchesScreen() {
   const onInviteFromMatches = () =>
     shareInvite({
       leagueId:   activeLeagueId || '',
-      leagueName: matchesSummary?.league_name || activeLeague?.league_name,
       username:   user?.username,
       surface:    'matches_empty',
       notJoined:  inviteTotalMates - inviteJoinedMates,

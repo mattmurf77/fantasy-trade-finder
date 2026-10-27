@@ -489,7 +489,6 @@ export default function LeagueScreen() {
     if (!leagueId) return;
     await shareInvite({
       leagueId,
-      leagueName: summary?.league_name || league?.league_name,
       username:   user?.username,
       surface:    'league_home',
       // null, not 0, while the summary has not landed — "unknown" and
@@ -1007,7 +1006,6 @@ export default function LeagueScreen() {
               onPress={() =>
                 shareInvite({
                   leagueId,
-                  leagueName: summary?.league_name || league?.league_name,
                   username:   user?.username,
                   surface:    'members_overlay',
                   notJoined:  totalMates - joinedMates,
