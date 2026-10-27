@@ -214,9 +214,13 @@ Full gates (it changes an API contract: a new 429 on a route).
   - **Over the limit:** 429 `too_many_attempts` + `Retry-After` with the row-13 constant `_SIGNIN_TOO_MANY_MSG` (reused; no new copy), and a `MFL-AUTH-LINK outcome=limited reason=…` log line (no ids).
   - **Release:** `_signin_release` runs in a `finally` around the MFL calls, so an exception never leaks an in-flight slot.
 - **Year parse (coordinator addition):** a JSON `Infinity`, `-Infinity` or `1e400` year made `int(...)` raise `OverflowError` → 500 on auth-link and auth-import. Both now catch it with the existing 400 `mfl_bad_year` / "year must be numeric". `_mfl_resolve` and `/api/mfl/link` are untouched.
-- **The `mfl_login` verify block — a finding, behaviour unchanged.** The brief expected it to be dead code since #279. It isn't:
+- **The `mfl_login` verify block — a finding; guarded in a follow-up commit (below).** The brief expected it to be dead code since #279. It isn't:
   - It runs on **every successful POST by an already-verified session**. It re-stamps `sess["verified_via"]` and `users.verified_via` (+ `verified_at`) to `mfl_login`, overwriting `sleeper` / `apple` / `google` / `espn`, and force-persists the durable session row.
   - It also runs for an **unverified synthetic demo session** (`is_demo` + `demo_user_*`): the #279 gate exempts those, so the block marks the demo session verified via `mfl_login`. Demo sessions come from `/api/session/demo`, which 404s while `landing.try_before_sync` is off (it is off today).
+  - **Guard (follow-up commit, platforms-eng + onboarding-eng, which owns the accounts seam):** the block now runs only `if not sess.get("verified")`. `verified_via` / `verified_at` record how the account was **first** verified, not the latest platform connected. So an already-verified session's `verified_via` (session + `users`), `verified_at` and durable row are left alone, while the MFL credential is still stored. Demo sessions keep the old behaviour.
+    - Pinned by `test_auth_link_keeps_a_verified_sleeper_sessions_verified_via` (incl. the durable row) and `test_auth_link_keeps_a_verified_apple_account_sessions_verified_via` (an `acct_*` account-only session), plus the demo pin.
+    - They replace the re-stamp pin and the two 2026-08-11 tests that encoded the re-stamp: `test_auth_link_verified_owner_persists_platform_marker` and `test_auth_link_verification_grants_long_expiry_durable_row`.
+    - Sabotage: the guard removed → both new tests red (`'mfl_login' == 'sleeper'` / `'apple'`).
   - So it is not provably unreachable. The block stays; its stale "login counts as verification / first-verified-wins" comment is rewritten to say what it does. Pinned by `test_auth_link_verify_block_restamps_a_verified_sessions_verified_via` and `test_auth_link_verify_block_runs_for_an_unverified_demo_session`. Whether the re-stamp should stay is platforms-eng's / head-eng's call.
 - **#430's byte-identical pin:** `test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes` hashes only the four gate functions and checks the gate wrapper on the four link routes. It does not hash `mfl_auth_link`'s body, so **no expected hash changes**; a comment in the test names this branch. Code-walk item 5's "`/api/mfl/auth-link` … untouched" no longer holds on this branch: the route body changed, the gate didn't.
 - **Analytics / schema / flags:** none. `too_many_attempts` is already in the closed `signin_failed.error_code` domain; auth-link fires no sign-in events.
@@ -229,7 +233,7 @@ Full gates (it changes an API contract: a new 429 on a route).
   - `…_in_flight_slot_is_released_on_an_exception`;
   - `test_auth_link_year_out_of_range_is_400_before_any_mfl_call`;
   - `test_auth_link_and_auth_import_non_finite_year_is_400_not_500` (×3);
-  - the two verify-block pins.
+  - the two verify-block pins (superseded by the guard commit: the re-stamp pin is replaced, the demo pin stays).
 - **Docs:** `docs/api-reference.md` (the auth-link POST row: the 429, the year range, the re-stamp; the auth-import row's 400; the entry row's counted list), `docs/integrations/mfl.md` §2, `docs/runbook.md` (the lockout entry now covers auth-link). `living-memory/LLD.md` / `HLD.md` / `docs/architecture.md`: n/a (no convention or wiring change).
 
 #### #430 round-3 P3s carried here (2026-10-27, after release-lead froze #430 at `7e52912d`)

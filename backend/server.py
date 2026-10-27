@@ -36211,45 +36211,47 @@ def mfl_auth_link():
     if storage == "session":
         sess["mfl_cookie"] = auth["cookie"]
 
-    # ── The mfl_login marker block (what it does today) ──────────────────
-    # Written 2026-08-11 as "a successful MFL login verifies the session".
-    # Since #279, @_gate_unverified_write 403s every unverified session
-    # before this route runs, so for real sessions it no longer verifies
-    # anything — and it is NOT first-verified-wins. What it does on every
-    # successful POST:
-    #   * already-verified session (sleeper / apple / google / espn /
-    #     mfl_login): RE-STAMPS sess["verified_via"] and users.verified_via
-    #     (+ verified_at) to 'mfl_login', overwriting the earlier value, and
-    #     force-persists the durable session row;
-    #   * synthetic demo session (is_demo + demo_user_*, exempt from the
-    #     #279 gate; /api/session/demo needs landing.try_before_sync): marks
-    #     it verified via mfl_login in memory and on its users row (demo
-    #     sessions are never persisted).
-    # Behaviour kept as-is (reported to platforms-eng from
-    # feat/mfl-auth-link-throttle); pinned by
-    # test_auth_link_verify_block_restamps_a_verified_sessions_verified_via.
-    sess["verified"] = True
-    sess["verified_via"] = "mfl_login"
-    try:
-        from . import accounts as _accounts
-        first_time = _accounts.get_user_verified_via(user_id) is None
-        if not user_exists(user_id):
-            # Login can beat session_init's background user upsert; make
-            # sure the row exists so the marker isn't dropped.
-            upsert_user(sleeper_user_id=user_id)
-        _accounts.mark_user_verified(user_id, "mfl_login")
-        if first_time:
-            log.info("AUTH-VERIFIED first verified controller user_id=%s "
-                     "via=mfl_login", user_id)
-    except Exception:
-        log.exception("persisting verified marker failed (session still "
-                      "verified in memory)")
-    # Durable session (flag auth.persistent_sessions): force the upsert so
-    # the row carries the re-stamped verified_via (a demo session is never
-    # persist-eligible).
-    sess["_persisted_at"] = 0  # force the upsert past the throttle
-    _persist_session_if_eligible(
-        request.headers.get("X-Session-Token", ""), sess)
+    # ── The mfl_login marker: ONLY for a session that isn't verified yet ──
+    # verified_via records how the account was FIRST verified, not the latest
+    # platform connected (platforms-eng + onboarding-eng, 2026-10-27,
+    # feat/mfl-auth-link-throttle). Since #279, @_gate_unverified_write 403s
+    # every unverified session before this route runs, so an
+    # already-verified session (sleeper / apple / google / espn / mfl_login)
+    # keeps its sess["verified_via"], users.verified_via + verified_at and
+    # durable session row untouched here — connecting MFL only stores the
+    # MFL credential above. (Until this guard, the block re-stamped all of
+    # them to 'mfl_login'.)
+    # The one unverified caller that still reaches this point is a synthetic
+    # demo session (is_demo + demo_user_*, exempt from the #279 gate;
+    # /api/session/demo 404s while landing.try_before_sync is off). It keeps
+    # the original behaviour: verified via mfl_login in memory and on its
+    # users row (demo sessions are never persisted).
+    # Pinned by test_auth_link_keeps_a_verified_sleeper_sessions_verified_via,
+    # test_auth_link_keeps_a_verified_apple_account_sessions_verified_via and
+    # test_auth_link_verify_block_runs_for_an_unverified_demo_session.
+    if not sess.get("verified"):
+        sess["verified"] = True
+        sess["verified_via"] = "mfl_login"
+        try:
+            from . import accounts as _accounts
+            first_time = _accounts.get_user_verified_via(user_id) is None
+            if not user_exists(user_id):
+                # Login can beat session_init's background user upsert; make
+                # sure the row exists so the marker isn't dropped.
+                upsert_user(sleeper_user_id=user_id)
+            _accounts.mark_user_verified(user_id, "mfl_login")
+            if first_time:
+                log.info("AUTH-VERIFIED first verified controller user_id=%s "
+                         "via=mfl_login", user_id)
+        except Exception:
+            log.exception("persisting verified marker failed (session still "
+                          "verified in memory)")
+        # Durable session (flag auth.persistent_sessions): force the upsert
+        # (a demo session is never persist-eligible, so this is a no-op for
+        # the only caller that reaches it today).
+        sess["_persisted_at"] = 0  # force the upsert past the throttle
+        _persist_session_if_eligible(
+            request.headers.get("X-Session-Token", ""), sess)
 
     log.info("mfl_auth_link: user=%s year=%s leagues=%d storage=%s",
              user_id, year, len(leagues), storage)

@@ -194,21 +194,86 @@ def test_auth_link_without_key_falls_back_to_session_only(client, monkeypatch):
 
 
 # ── Platform linking requires an already verified account owner ──────────
-# MFL credentials alone do not prove control of the claimed app identity.
-# Successful linking records its platform marker without granting a claimant
-# access to somebody else's private state.
+# MFL credentials alone do not prove control of the claimed app identity, and
+# connecting MFL doesn't rewrite how the account was verified: verified_via /
+# verified_at record the FIRST verification (platforms-eng + onboarding-eng,
+# 2026-10-27, feat/mfl-auth-link-throttle). Before that guard, a successful
+# auth-link re-stamped both to 'mfl_login'.
 
-def test_auth_link_verified_owner_persists_platform_marker(client):
+def _users_verified(engine, user_id):
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(db_module.users_table.c.verified_via,
+                   db_module.users_table.c.verified_at).where(
+                db_module.users_table.c.sleeper_user_id == user_id)
+        ).fetchone()
+    return tuple(row) if row else None
+
+
+def _mfl_cred_user_ids(engine):
+    with engine.connect() as conn:
+        return [r.user_id for r in
+                conn.execute(select(db_module.mfl_credentials_table))]
+
+
+def test_auth_link_keeps_a_verified_sleeper_sessions_verified_via(client):
+    """An already-verified Sleeper session connects MFL: the credential is
+    stored, and verified_via / verified_at stay exactly as they were in the
+    session, on the users row and on the durable session row.
+
+    Sabotage: the `if not sess.get("verified")` guard removed → red
+    (verified_via re-stamped to 'mfl_login')."""
     from backend import accounts
     c, token, engine, sess = client
-    assert sess.get("verified")
-    r = _auth_link(c, token)
+    server.upsert_user(sleeper_user_id=USER)
+    accounts.mark_user_verified(USER, "sleeper")
+    before = _users_verified(engine, USER)
+    sess["verified_via"] = "sleeper"
+    with patch.object(server, "is_enabled",
+                      lambda k: k in ("mfl.auth_link",
+                                      "auth.persistent_sessions")):
+        sess["_persisted_at"] = 0
+        server._persist_session_if_eligible(token, sess)   # signed in earlier
+        r = _auth_link(c, token)
     assert r.status_code == 200, r.get_data(as_text=True)
     assert r.get_json()["verified"] is True
-    assert sess.get("verified") is True
-    assert sess.get("verified_via") == "mfl_login"
-    # persisted controller marker (first-verified-wins applies from here)
-    assert accounts.get_user_verified_via(USER) == "mfl_login"
+    assert r.get_json()["storage"] == "encrypted"
+    assert _mfl_cred_user_ids(engine) == [USER]                # MFL stored
+    assert sess["verified"] is True and sess["verified_via"] == "sleeper"
+    assert _users_verified(engine, USER) == before == ("sleeper", before[1])
+    row = db_module.load_persisted_session(token)              # D-018 row
+    assert row["verified_via"] == "sleeper"
+    assert server._persisted_row_expired(row) is False
+
+
+def test_auth_link_keeps_a_verified_apple_account_sessions_verified_via(
+        client):
+    """An already-verified Apple account-only session (acct_*) connects MFL:
+    the credential is stored under the acct_ id, and verified_via /
+    verified_at stay 'apple' in the session and on the users row."""
+    from backend import accounts
+    c, _, engine, _ = client
+    acct_uid = "acct_3f9c2a71e0b84d5e"
+    apple_tok = "apple-acct-sess-tok"
+    apple = {"user_id": acct_uid, "account_id": "3f9c2a71e0b84d5e",
+             "account_only": True, "verified": True, "verified_via": "apple",
+             "active_format": "1qb_ppr", "last_active": 0.0}
+    server.upsert_user(sleeper_user_id=acct_uid)
+    accounts.mark_user_verified(acct_uid, "apple")
+    before = _users_verified(engine, acct_uid)
+    with server._sessions_lock:
+        server._sessions[apple_tok] = apple
+    try:
+        r = _auth_link(c, apple_tok)
+        assert r.status_code == 200, r.get_data(as_text=True)
+        assert r.get_json()["verified"] is True
+        assert _mfl_cred_user_ids(engine) == [acct_uid]        # MFL stored
+        assert apple["verified"] is True and apple["verified_via"] == "apple"
+        assert _users_verified(engine, acct_uid) == before == ("apple",
+                                                               before[1])
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop(apple_tok, None)
 
 
 def test_auth_link_bad_credentials_do_not_verify(client):
@@ -223,27 +288,6 @@ def test_auth_link_bad_credentials_do_not_verify(client):
     assert r.status_code == 403
     assert sess.get("verified")  # A failed platform login cannot revoke account proof.
     assert accounts.get_user_verified_via(USER) is None
-
-
-def test_auth_link_verification_grants_long_expiry_durable_row(client):
-    """D-018: the 90d rolling expiry is verified-only and rides the durable
-    sessions row. MFL verification must not half-set it — with the
-    persistent-sessions flag on, a successful auth-link persists the row
-    (verified_via='mfl_login') and that row reads back unexpired."""
-    c, token, engine, sess = client
-    with patch.object(server, "is_enabled",
-                      lambda k: k in ("mfl.auth_link", "auth.persistent_sessions")):
-        r = _auth_link(c, token)
-    assert r.status_code == 200, r.get_data(as_text=True)
-    # the session became persist-eligible the moment it verified…
-    assert server._session_persist_eligible(sess) is True
-    # …and the durable row actually exists, carries the marker, and is not
-    # expired under the 90d rolling read-time check.
-    row = db_module.load_persisted_session(token)
-    assert row is not None
-    assert row["user_id"] == USER
-    assert row["verified_via"] == "mfl_login"
-    assert server._persisted_row_expired(row) is False
 
 
 # ── D7 limiter on the password login (feat/mfl-auth-link-throttle) ──────────
@@ -423,27 +467,12 @@ def test_auth_link_and_auth_import_non_finite_year_is_400_not_500(client,
     assert server._signin_failures == {} and server._signin_inflight == {}
 
 
-# ── The mfl_login marker block: what it actually does (finding) ──────────────
+# ── The mfl_login marker: the one unverified caller ──────────────────────────
 # Since #279, @_gate_unverified_write 403s unverified sessions before the
-# route runs (test_auth_link_unverified_claim_cannot_upgrade_… below), so the
-# block's old "a login verifies the session / first-verified-wins" story is
-# stale. It is NOT dead code, though: it runs on every successful POST.
-# Behaviour is unchanged on feat/mfl-auth-link-throttle; these pin it so a
-# future change is a deliberate one.
-
-def test_auth_link_verify_block_restamps_a_verified_sessions_verified_via(
-        client):
-    from backend import accounts
-    c, token, _, sess = client
-    server.upsert_user(sleeper_user_id=USER)
-    accounts.mark_user_verified(USER, "sleeper")
-    sess["verified_via"] = "sleeper"
-    r = _auth_link(c, token)
-    assert r.status_code == 200, r.get_data(as_text=True)
-    assert sess["verified"] is True
-    assert sess["verified_via"] == "mfl_login"                  # overwritten
-    assert accounts.get_user_verified_via(USER) == "mfl_login"  # overwritten
-
+# route runs (test_auth_link_unverified_claim_cannot_upgrade_… below). The
+# marker block now runs only for a session that isn't verified yet, and the
+# only such caller is a synthetic demo session (the gate's demo exemption).
+# It keeps its original behaviour, pinned here.
 
 def test_auth_link_verify_block_runs_for_an_unverified_demo_session(client):
     """The #279 gate exempts synthetic demo sessions, so an UNVERIFIED demo
