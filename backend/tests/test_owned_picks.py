@@ -9,6 +9,7 @@ flag-off parity.
 import json
 
 import pytest
+from sqlalchemy import insert
 
 import backend.server as srv
 import backend.database as db
@@ -575,8 +576,59 @@ def test_prior_grid_read_error_falls_back_to_including_the_season(
 
     def _read_fails(*a, **k):
         raise RuntimeError("draft_picks read failed")
-    monkeypatch.setattr(srv, "load_draft_picks", _read_fails)
+    monkeypatch.setattr(srv, "load_draft_pick_seasons", _read_fails)
     assert _sync_seasons(monkeypatch, []) == [2026, 2027, 2028]
+
+
+def test_prior_grid_season_reader_reads_platform_rows_only(_clean_league):
+    """The season-only reader uses `load_draft_picks`'s platform predicate: a
+    user-asserted row's season is not in it, and any other source raises."""
+    _seed_grid(_LEAGUE)                                   # 2026..2028
+    with db.engine.begin() as conn:
+        conn.execute(insert(db.draft_picks_table).values(
+            pick_id=db.make_pick_id(_LEAGUE, 2031, 1, "9"), league_id=_LEAGUE,
+            season=2031, round=1, source=db.PICK_SOURCE_USER))
+    try:
+        assert db.load_draft_pick_seasons(_LEAGUE) == {2026, 2027, 2028}
+        with pytest.raises(ValueError):
+            db.load_draft_pick_seasons(_LEAGUE, source=db.PICK_SOURCE_ANY)
+    finally:
+        db.replace_draft_picks(_LEAGUE, [], preserve_source=db.PICK_SOURCE_USER)
+
+
+def _sync_seasons_with_verdict(monkeypatch, status, confidence):
+    db.set_league_draft_status(_LEAGUE, status, confidence)
+    return _sync_seasons(monkeypatch, [])
+
+
+def test_always_empty_drafts_trusts_a_cached_not_drafted_verdict(
+        _clean_league, monkeypatch):
+    """P3-3: `/drafts` is always empty. A cached `drafted` excluded 2026; once
+    the verdict flips to `not_drafted` the season comes back. RED before the
+    verdict gate: the prior grid held it excluded forever."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        assert _sync_seasons_with_verdict(monkeypatch, "drafted", "high") == \
+            [2027, 2028, 2029]
+        assert _sync_seasons_with_verdict(monkeypatch, "not_drafted", "high") == \
+            [2026, 2027, 2028]
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
+def test_always_empty_drafts_keeps_the_exclusion_on_an_unknown_verdict(
+        _clean_league, monkeypatch):
+    """An `unknown` verdict is no answer, so the prior grid still holds."""
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        assert _sync_seasons_with_verdict(monkeypatch, "drafted", "high") == \
+            [2027, 2028, 2029]
+        assert _sync_seasons_with_verdict(monkeypatch, "unknown", "low") == \
+            [2027, 2028, 2029]
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
 
 
 def test_live_drafts_read_still_wins_in_both_directions(

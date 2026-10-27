@@ -1,3 +1,19 @@
+## 2026-10-27 — Owned-pick sync follow-ups: season-only prior-grid read; a cached `not_drafted` wins over the sticky rule (#482 QA nit + P3-3)
+
+Server only, platforms-eng lead. Stacked on `fix/owned-picks-drafts-flake` as `fix/owned-picks-drafts-flake-followups`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, route, schema or analytics change.
+
+- **(a) Nit:** the prior-grid check now reads one `SELECT DISTINCT season` through the new `database.load_draft_pick_seasons(league_id, source='platform')`, which uses `load_draft_picks`'s platform predicate and raises on any other source. The W3 AST guard in `test_pick_assignment.py` now enumerates both readers (`_PICK_READERS`), so `_sleeper_prior_grid_excludes` stays in `_SANCTIONED_SOURCE_CALLERS`.
+- **(b) P3-3:** the sticky rule applies only when the cached verdict is absent or `unknown`. A cached `not_drafted` is trusted and the season is included. Before, a league whose `/drafts` is always empty stayed excluded forever once its verdict flipped to not-drafted.
+- **New tests in `test_owned_picks.py` (3; the file is now 42):**
+  - `test_prior_grid_season_reader_reads_platform_rows_only`: a user row's season is not in the set, and `source='any'` raises;
+  - `test_always_empty_drafts_trusts_a_cached_not_drafted_verdict`: `drafted` excludes, then `not_drafted` re-includes;
+  - `test_always_empty_drafts_keeps_the_exclusion_on_an_unknown_verdict`.
+  - The read-error test now injects into `srv.load_draft_pick_seasons`.
+- **Sabotage, red then restored:** the verdict gate dropped (back to `elif _sleeper_prior_grid_excludes(...)`) → 1 red, the `not_drafted` test (`[2027, 2028, 2029] == [2026, 2027, 2028]`).
+- **Targeted:** `test_owned_picks` + `test_pick_assignment` → 78 passed. The 59 files that grep `owned_pick|draft_status|pick_tradab|roster_refresh|roster_snapshot` → 1845 passed, 0 failed.
+- **Not run:** the full suite (CI runs it), `tsc` and testid-lint (no mobile change).
+- **Docs:** `docs/integrations/sleeper.md` (the rule and the read-cost row), `docs/data-dictionary.md` (the new reader, in the containment section), and the D-189 amendment.
+
 ## 2026-10-27 — Owned-pick sync: an empty `/drafts` read keeps the prior current-season exclusion (#470 QA P3-2)
 
 Server only, platforms-eng lead; one commit on `fix/owned-picks-drafts-flake`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, schema, route or analytics change.

@@ -12486,6 +12486,25 @@ def load_draft_picks(
     return out
 
 
+def load_draft_pick_seasons(league_id: str,
+                            source: str = PICK_SOURCE_PLATFORM) -> set[int]:
+    """The distinct seasons of one league's PLATFORM draft-pick rows, from one
+    `SELECT DISTINCT season` (no full rows). Same predicate as
+    `load_draft_picks`'s default. Platform only: the contested/orphaned
+    exclusion for user rows is a row filter a season set can't carry, so any
+    other `source` raises. Read by `server._sleeper_prior_grid_excludes`
+    (#470 QA P3-2)."""
+    if source != PICK_SOURCE_PLATFORM:
+        raise ValueError(f"load_draft_pick_seasons reads platform rows only, not {source!r}")
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(draft_picks_table.c.season).distinct()
+            .where(draft_picks_table.c.league_id == league_id)
+            .where(_pick_source_predicate(source))
+        ).fetchall()
+    return {int(r[0]) for r in rows}
+
+
 def seed_pick_grid(
     league_id: str,
     member_user_ids: list[str],

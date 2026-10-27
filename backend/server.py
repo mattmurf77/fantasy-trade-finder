@@ -158,6 +158,7 @@ from .database import (
     create_mock_draft, load_mock_draft, load_current_mock_draft,
     update_mock_draft, abandon_completed_mock_drafts,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
+    load_draft_pick_seasons,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
@@ -18155,14 +18156,13 @@ def _sleeper_prior_grid_excludes(league_id: str, season: int) -> bool:
     """True when the league's stored PLATFORM pick grid (the rows the owned-pick
     sync replaces) carries a later season but none of `season`: a prior sync
     excluded it on a positive read. #470 QA P3-2: the corroboration the sync
-    consults ONLY when `/drafts` is empty and the cached verdict doesn't say
-    `drafted`, so one flake can't re-populate a spent class and flip `rfp1`.
+    consults ONLY when `/drafts` is empty and the cached verdict is absent or
+    `unknown`, so one flake can't re-populate a spent class and flip `rfp1`.
     No prior rows (a first sync), a grid that carries `season`, or a failed
     read → False (the D-089 fail-safe). A season rollover ends it: the new
     current season is in the prior grid."""
     try:
-        seasons = {int(r["season"]) for r in
-                   load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)}
+        seasons = load_draft_pick_seasons(league_id, source=PICK_SOURCE_PLATFORM)
     except Exception:
         log.warning("prior pick-grid read failed for %s", league_id, exc_info=True)
         return False
@@ -18190,8 +18190,9 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     #228 — leagues whose CURRENT-season rookie draft is already complete
     must not carry that season's picks (they no longer exist as assets).
     The drafts read is best-effort: a flake excludes nothing — unless the
-    cached #207 verdict corroborates `drafted` (#428 / D-189, below) or the
-    prior platform grid already excludes the season (#470 QA P3-2); future
+    cached #207 verdict corroborates `drafted` (#428 / D-189, below) or, with
+    no verdict or an `unknown` one, the prior platform grid already excludes
+    the season (#470 QA P3-2 / P3-3); future
     seasons are always included. The replace-sync cleans previously synced
     stale rows for the excluded season automatically.
 
@@ -18243,9 +18244,11 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     # cached #207 verdict is consulted: a positive `drafted` excludes the
     # current season, so one flaked read can no longer re-populate a spent
     # class for the whole league (the replace-sync made that league-wide).
-    # #470 QA P3-2 — without a cached `drafted`, the league's own prior
-    # platform grid corroborates: if it already excludes the current season,
-    # keep excluding it (a flake must not flip the grid, and `rfp1`, back).
+    # #470 QA P3-2 — when the cached verdict is absent or `unknown`, the
+    # league's own prior platform grid corroborates: if it already excludes
+    # the current season, keep excluding it (a flake must not flip the grid,
+    # and `rfp1`, back). P3-3 — a cached `not_drafted` is trusted instead, so
+    # a league whose `/drafts` is always empty isn't held excluded forever.
     # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = drafts if drafts is not None else _fetch_sleeper_drafts(league_id)
     _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
@@ -18256,7 +18259,8 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
             log.info("  owned-pick sync for %s: drafts read empty — excluding "
                      "%s on the cached %s/%s verdict (D-189)", league_id,
                      _cur_season, _cached.status, _cached.confidence)
-        elif _sleeper_prior_grid_excludes(league_id, _cur_season):
+        elif ((_cached is None or _cached.status == _draft_status_mod.UNKNOWN)
+              and _sleeper_prior_grid_excludes(league_id, _cur_season)):
             _exclude.add(_cur_season)
             log.info("  owned-pick sync for %s: drafts read empty — keeping %s "
                      "excluded, as the prior platform grid has it excluded "
