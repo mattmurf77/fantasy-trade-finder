@@ -3499,17 +3499,19 @@ def _i1_age_bucket(age_s) -> str:
 
 
 def _i1_card_identity(card):
-    """A card's identity for deck_i1_check's once-per-job count: its
-    impression_id, else its trade_id, else its assets and partner (a card
-    built without either). Stable across a re-sorted (replace) serve."""
+    """A card's identity for deck_i1_check's once-per-job count: its trade_id,
+    else its impression_id, else its assets and partner (a card built without
+    either). trade_id first: it is stable across every publish, the page store
+    and a re-sorted (replace) serve, while the non-owner path publishes cards
+    before their impression_ids are stamped (#468 QA P2-1)."""
     if isinstance(card, dict):
-        ident = card.get("impression_id") or card.get("trade_id")
+        ident = card.get("trade_id") or card.get("impression_id")
         if ident:
             return ident
         return ("assets", tuple(str(p["id"]) for p in card.get("give", [])),
                 tuple(str(p["id"]) for p in card.get("receive", [])),
                 str(card.get("target_user_id")))
-    ident = getattr(card, "impression_id", None) or getattr(card, "trade_id", None)
+    ident = getattr(card, "trade_id", None) or getattr(card, "impression_id", None)
     return ident or ("assets", tuple(map(str, card.give_player_ids)),
                      tuple(map(str, card.receive_player_ids)), str(card.target_user_id))
 

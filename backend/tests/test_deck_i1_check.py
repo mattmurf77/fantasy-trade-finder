@@ -192,6 +192,31 @@ def test_a_replace_serve_counts_its_new_cards(env, monkeypatch):
     assert (count, summed) == (2, WHOLE_DECK)
 
 
+def test_cards_published_before_their_impression_ids_count_once(env, monkeypatch):
+    """#468 QA P2-1 (probe D): the non-owner path publishes cards without
+    impression_ids, then re-publishes them with ids. A card a paged client saw
+    before the ids were stamped is not counted again by the next replace
+    serve: the identity is the trade_id, so the rows sum to the whole deck."""
+    engine, job = env
+    monkeypatch.setitem(ts._cfg, "trade_page_size", 4.0)
+    assert not any("impression_id" in card for card in job["cards"])
+    _status("&cursor=0")
+    job["cards"] = [dict(card, impression_id=f"imp-{card['trade_id']}")
+                    for card in job["cards"]]
+    for card in job["cards"]:                      # the re-publish re-sorted the deck
+        card.pop("preserve_server_order")
+    assert _status("&cursor=4")["replace"] is True
+    _status("&cursor=4")
+    assert totals(engine) == (2, WHOLE_DECK)
+
+
+def test_the_identity_is_the_trade_id_first():
+    card = _card("t-1", ["a"], ["b"])
+    assert server._i1_card_identity(card) == "t-1"
+    assert server._i1_card_identity(dict(card, impression_id="imp-1")) == "t-1"
+    assert server._i1_card_identity({"impression_id": "imp-1"}) == "imp-1"
+
+
 def test_legacy_and_paged_serves_of_one_job_count_each_card_once(env, monkeypatch):
     """#419 QA P3: a job served to a paged client (page 0) and a legacy one
     (the whole deck, complete) records page 0's 4 cards and the legacy body's
