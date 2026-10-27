@@ -528,12 +528,38 @@ async function gateScenarios() {
   responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
   await client.api.post('/api/trades/propose', {}).catch(() => {});
   check('10c. EXECUTED: a send-kind gate answer never settles the open search', h.mod.isSearchOpen(sid) && outcomes(sid).length === 0);
+  // trades-eng P3: another FIND route's gate answer (tapping into an
+  // overhaul) is not the search's answer. It settles nothing; the search
+  // later gets its own R2 or R2b.
+  for (const [label, own, want] of [
+    ['its own card → R2', { status: 200, body: { job_id: 'j1', status: 'complete', cards: [] } }, 'R2'],
+    ['its own 402 → paywall', { status: 402, body: { error: 'pro_required', gate: 'preview_used' } }, 'paywall'],
+  ]) {
+    h = freshTraceWithTimers();
+    const oid = h.mod.beginTradeSearch({ mode: 'deck', searchType: 'organic', screen: 'Trades' });
+    responses.length = 0;
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+    await client.api.get('/api/overhauls/o1').catch(() => {});
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+    await client.api.get('/api/overhauls/o1/offers?decision=undecided').catch(() => {});
+    const untouched = h.mod.isSearchOpen(oid) && outcomes(oid).length === 0;
+    responses.push(own);
+    const r = await client.api.post('/api/trades/generate', { search_id: oid }).then((v) => ({ ok: v }), (e) => ({ err: e }));
+    if (r.ok) h.mod.reportFirstCardShown(oid, { cardIndex: 0 });
+    h.mod.failFirstCard(oid, 'abandoned');
+    h.tick(20_000);
+    const got = outcomes(oid).map((e) => (e.type === 'trade_first_card_shown' ? 'R2' : e.props.reason)).join(',');
+    check(`10g. EXECUTED: a gated getOverhaul / getOffers while a search is open settles nothing; ${label}`,
+      untouched && got === want, `open after the overhaul 402s: ${untouched}; got [${got}]`);
+  }
 }
 
 {
   const gateSrc = stripComments(read('state/usePaywallGate.ts'));
-  check('10d. the router sends R2b FIRST in the gate listener, for a find signal only, before it opens anything',
-    /export function handleGateSignal\(signal: GateSignal\): Promise<GateOutcome> \| void \{\s*if \(signal\.action !== 'verify_mismatch' && signal\.kind === 'find'\) \{\s*const open = openSearchId\(\);\s*if \(open\) failFirstCard\(open, gateFailureReason\(signal\)\);\s*\}\s*if \(signal\.action === 'paywall'\)/.test(gateSrc));
+  check('10d. the router sends R2b FIRST in the gate listener, for a SEARCH route\'s find answer only, before it opens anything',
+    /export function handleGateSignal\(signal: GateSignal, path\?: string\): Promise<GateOutcome> \| void \{\s*if \(signal\.action !== 'verify_mismatch' && signal\.kind === 'find' && !!path && SEARCH_PATHS\.has\(path\)\) \{\s*const open = openSearchId\(\);\s*if \(open\) failFirstCard\(open, gateFailureReason\(signal\)\);\s*\}\s*if \(signal\.action === 'paywall'\)/.test(gateSrc)
+      && /const SEARCH_PATHS: ReadonlySet<string> = new Set\(\['\/api\/trades\/generate', '\/api\/trades\/fair-packages'\]\);/.test(gateSrc)
+      && /outcome = _onProRequired\(signal, _pathname\(path\)\);/.test(stripComments(read('api/client.ts'))));
   const deckR2b = trades.match(/failDeckSearch\(gateFailureReason\(gateSignalFor\(e, '\/api\/trades\/(generate|fair-packages)'\)\)\);/g) || [];
   check('10e. the deck settles a gate error with the same mapping (generate and the fair sweep), never a bare error',
     deckR2b.length === 2 && /failFirstCard\(fork\.searchId, gateFailureReason\(gate\)\);/.test(trades));

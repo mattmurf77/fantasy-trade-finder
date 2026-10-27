@@ -282,9 +282,12 @@ export type GateSignal =
   | { action: 'verify_mismatch' };
 /** How the VerifySheet closed. Only `verified` retries the original call. */
 export type GateOutcome = 'verified' | 'dismissed' | 'signed_in';
-let _onProRequired: ((signal: GateSignal) => Promise<GateOutcome> | void) | null = null;
+// The listener also gets the failed call's pathname (M2, a pure addition:
+// the signal is unchanged). The router keys R2b on it: only a search
+// route's gate answer settles the open search.
+let _onProRequired: ((signal: GateSignal, path?: string) => Promise<GateOutcome> | void) | null = null;
 export function setOnProRequired(
-  fn: ((signal: GateSignal) => Promise<GateOutcome> | void) | null,
+  fn: ((signal: GateSignal, path?: string) => Promise<GateOutcome> | void) | null,
 ): void {
   _onProRequired = fn;
 }
@@ -362,7 +365,7 @@ async function _afterGateFailure<T>(err: unknown, path: string, opts: RequestOpt
   if (!signal || !_onProRequired || revision !== getSessionRevision()) throw err;
   let outcome: Promise<GateOutcome> | void;
   try {
-    outcome = _onProRequired(signal);
+    outcome = _onProRequired(signal, _pathname(path));
   } catch {
     throw err; // a listener never masks the API error
   }

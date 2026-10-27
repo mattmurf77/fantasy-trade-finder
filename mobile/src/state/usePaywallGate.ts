@@ -217,16 +217,23 @@ export function openOfferTrigger(
   });
 }
 
+/** The search routes: a trade search's own request (the deck's model search
+ *  and its fair sweep; the calculator's Find a trade forks to one of the
+ *  two). Only THEIR gate answer is the open search's answer: any other find
+ *  route (an overhaul, Win Now, Shop) never settles it (trades-eng P3). */
+const SEARCH_PATHS: ReadonlySet<string> = new Set(['/api/trades/generate', '/api/trades/fair-packages']);
+
 /** The client.ts seam handler. Exported for the structural check. */
-export function handleGateSignal(signal: GateSignal): Promise<GateOutcome> | void {
-  // R2b (analytics-lead's grant): a FIND gate answer settles the open search
-  // the moment it arrives, before the paywall or the sheet shows. Later, the
-  // verify hold would turn it into `timeout`, `abandoned` (the sheet blurs
-  // the deck) or an R2 that counts time spent in the sheet; a verified retry
-  // that shows cards then sends nothing more (one R2/R2b per search). A send
-  // never touches R2b. client.ts calls this for user-initiated calls only:
-  // the deck settles a background one with the same mapping.
-  if (signal.action !== 'verify_mismatch' && signal.kind === 'find') {
+export function handleGateSignal(signal: GateSignal, path?: string): Promise<GateOutcome> | void {
+  // R2b (analytics-lead's grant): a search route's gate answer settles the
+  // open search the moment it arrives, before the paywall or the sheet
+  // shows. Later, the verify hold would turn it into `timeout`, `abandoned`
+  // (the sheet blurs the deck) or an R2 that counts time spent in the sheet;
+  // a verified retry that shows cards then sends nothing more (one R2/R2b per
+  // search). A send never touches R2b. client.ts calls this for
+  // user-initiated calls only: the deck settles a background one with the
+  // same mapping.
+  if (signal.action !== 'verify_mismatch' && signal.kind === 'find' && !!path && SEARCH_PATHS.has(path)) {
     const open = openSearchId();
     if (open) failFirstCard(open, gateFailureReason(signal));
   }

@@ -1173,6 +1173,31 @@ check('8n. head-eng grant (b) [executed]: the active-overhaul probe is backgroun
   assert(/queryFn: \(\) => getActiveOverhaul\(leagueId!\),/.test(strip(read(TRADES))), "TradesScreen's probe line is untouched (the defaults do it)");
 });
 
+check('8o. trades-eng P3 [executed]: the gate listener settles R2b only for a SEARCH route (generate, fair-packages); another find route (an overhaul) never; the client hands the listener the pathname', async () => {
+  traceOpen = 's1';
+  traceCalls.length = 0;
+  const find = { action: 'paywall', gate: 'lapsed', kind: 'find' };
+  gateMod.handleGateSignal(find, '/api/overhauls/o1');
+  gateMod.handleGateSignal(find, '/api/overhauls/o1/offers');
+  gateMod.handleGateSignal(find, '/api/win-now/search');
+  gateMod.handleGateSignal(find);
+  eq(traceCalls.length, 0, 'no search route, no R2b');
+  gateMod.handleGateSignal(find, '/api/trades/generate');
+  gateMod.handleGateSignal({ action: 'verify', gate: 'verify_required', kind: 'find' }, '/api/trades/fair-packages');
+  eq(JSON.stringify(traceCalls), JSON.stringify([['s1', 'paywall'], ['s1', 'verify']]), 'the search routes settle it');
+  traceOpen = null;
+  const paths = [];
+  client.setOnProRequired((s, p) => { paths.push(p); });
+  try {
+    reset();
+    responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+    await rejects(client.api.post('https://api.test/api/trades/generate?x=1', {}));
+    eq(paths[0], '/api/trades/generate', 'the listener gets the pathname');
+  } finally {
+    client.setOnProRequired((s) => { signals.push(s); return handlerReturn(s); });
+  }
+});
+
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
