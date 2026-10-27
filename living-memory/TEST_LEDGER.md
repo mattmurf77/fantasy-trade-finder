@@ -1,3 +1,17 @@
+## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
+
+Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/trade-capture-platform-guard`.
+
+- **Defect:** the `market.trade_capture` block in `session_init`'s background daemon gated on `str(league_id).isdigit()` alone. ESPN, MFL and Fleaflicker native ids are numeric, so every init on a linked league sent Sleeper `GET /league/<id>/transactions/<week>` reads with a platform-native id. A league with no captured rows is re-backfilled each time (`sweep_weeks` returns 1..18 until `has_sleeper_trades`), and a linked league never captures any, so that was 18 reads per init.
+- **Fix (`backend/server.py`, the `market.trade_capture` block):** added `and not _platform_linked`, the `is_linked_platform_league(league_id)` result the daemon already reads once at its top (the same guard the roster-history snapshot beside it uses). Sleeper leagues are unchanged.
+- **Tests (`test_session_init_sleeper_calls.py`, 7 tests):**
+  - The old MFL test tolerated `transactions` as a "known, pre-existing" Sleeper call. It is now `test_numeric_mfl_league_makes_no_sleeper_calls` and asserts `calls == {}`.
+  - New `test_numeric_espn_league_makes_no_sleeper_calls` (a numeric ESPN-linked league, same assertion).
+  - New `test_sleeper_league_still_captures_trades` (a Sleeper league with no captured rows makes exactly 18 `transactions` reads).
+- **Sabotage, red then restored:** the `and not _platform_linked` line removed → the MFL and ESPN tests red (`assert {'transactions': 18} == {}`); the other 5 stay green.
+- **Targeted:** `test_session_init_sleeper_calls`, `test_session_init_single_flight`, `test_market_data_readiness`, `test_co_owner_rosters`, `test_roster_refresh_state`, `test_players_refresh`, `test_account_only_harness`, `test_verified_sessions`, `test_trade_fingerprint_reads_unlocked`, `test_prepared_trade_runtime` → 162 passed.
+- **Not run:** the full suite (CI runs it); no live Sleeper calls (every fetch is mocked).
+
 ## 2026-10-27 — B2: the launched onboarding flags in first-paint defaults (Product's pre-launch review)
 
 Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b2-flag-defaults.md`). Mobile only; no flag value changes; D-056: `FTF_SKIP_SIM_GATE=1` posture.
