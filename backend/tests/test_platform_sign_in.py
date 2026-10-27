@@ -1922,29 +1922,87 @@ def test_s16_actions_release_their_in_flight_slot(env):
     assert server._signin_inflight == {}
 
 
-@pytest.mark.parametrize("year", [1999, 0.5, -2026, 2028, 3000, "1850"])
+_BAD_YEAR = {"error": "mfl_bad_year", "message": "year must be numeric"}
+
+
+def _no_mfl_calls(calls):
+    return (patch.object(mfl, "resolve_host", _recorder(calls, "resolve_host")),
+            patch.object(mfl, "fetch_league_bundle", _recorder(calls, "bundle")),
+            patch.object(mfl, "login", _recorder(calls, "login")),
+            patch.object(mfl, "fetch_my_leagues", _recorder(calls, "myleagues")))
+
+
+@pytest.mark.parametrize("year", [
+    1999, 0.5, -2026, server._MFL_DEFAULT_YEAR + 2, 3000, "1850"])
 def test_mfl_year_out_of_range_is_400_before_any_mfl_call(env, year):
     calls: list = []
-    with patch.object(mfl, "resolve_host", _recorder(calls, "resolve_host")), \
-         patch.object(mfl, "fetch_league_bundle", _recorder(calls, "bundle")), \
-         patch.object(mfl, "login", _recorder(calls, "login")), \
-         patch.object(mfl, "fetch_my_leagues", _recorder(calls, "myleagues")):
+    a, b, c, d = _no_mfl_calls(calls)
+    with a, b, c, d:
         claim = _mfl_claim(env, year=year)
         preview = _post(env, platform="mfl", mfl_league_id=MFL_LEAGUE,
                         year=year)
         action = _post(env, platform="mfl", action="auth_leagues",
                        username="MattM", password="bad", year=year)
-    top = server._MFL_DEFAULT_YEAR + 1
     for r in (claim, preview, action):
         assert r.status_code == 400, r.get_data(as_text=True)
-        assert r.get_json() == {
-            "error": "mfl_bad_year",
-            "message": f"year must be between 2000 and {top}."}
+        assert r.get_json() == _BAD_YEAR       # the existing copy, no new copy
     assert calls == []                              # no MFL call at all
     assert server._signin_failures == {}            # uncounted
     assert server._signin_inflight == {}
 
 
-@pytest.mark.parametrize("year", [2000, 2026, 2027])
+@pytest.mark.parametrize("literal", ["Infinity", "-Infinity", "1e400"])
+def test_mfl_year_overflow_is_400_not_500(env, literal):
+    """JSON Infinity / -Infinity / 1e400 make int() raise OverflowError; that
+    is a bad year (400), never a 500, and still no MFL call."""
+    calls: list = []
+    bodies = [
+        '{"platform": "mfl", "mfl_league_id": "%s", "franchise_id": "0001", '
+        '"username": "MattM", "password": "hunter2", "year": %s}',
+        '{"platform": "mfl", "mfl_league_id": "%s", "year": %s}',
+        '{"platform": "mfl", "action": "auth_leagues", "username": "MattM", '
+        '"password": "bad", "mfl_league_id": "%s", "year": %s}',
+    ]
+    a, b, c, d = _no_mfl_calls(calls)
+    with a, b, c, d:
+        for body in bodies:
+            r = env.client.post("/api/entry/platform",
+                                data=body % (MFL_LEAGUE, literal),
+                                content_type="application/json")
+            assert r.status_code == 400, (body, r.get_data(as_text=True))
+            assert r.get_json() == _BAD_YEAR
+    assert calls == []
+    assert server._signin_failures == {} and server._signin_inflight == {}
+
+
+def test_auth_leagues_year_check_runs_before_the_limiter_gate(env):
+    """An out-of-range year on auth_leagues is refused BEFORE admission: the
+    gate is never consulted, no slot is taken and nothing is counted — even
+    for a subject that is currently locked."""
+    gate_calls: list = []
+    real_gate = server._signin_limit_gate
+
+    def spy(audit, provider, subject):
+        gate_calls.append(provider)
+        return real_gate(audit, provider, subject)
+
+    with patch.object(server, "_signin_limit_gate", spy):
+        r = _post(env, platform="mfl", action="auth_leagues",
+                  username="MattM", password="bad", year=1999)
+    assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
+    assert gate_calls == []
+    assert server._signin_failures == {} and server._signin_inflight == {}
+    # A locked subject still gets the input error, not a 429.
+    for i in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
+        assert _post(env, ip=f"192.0.2.{i}", platform="mfl",
+                     action="auth_leagues", username="MattM",
+                     password="bad").status_code == 403
+    r = _post(env, platform="mfl", action="auth_leagues", username="MattM",
+              password="bad", year=1999)
+    assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
+
+
+@pytest.mark.parametrize("year", [
+    2000, server._MFL_DEFAULT_YEAR, server._MFL_DEFAULT_YEAR + 1])
 def test_mfl_year_in_range_is_admitted(env, year):
     assert _mfl_claim(env, year=year).status_code == 200
