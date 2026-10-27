@@ -880,39 +880,127 @@ def test_c4_xff_diagnostic_logs_only_the_hop_count(env, caplog):
 
 
 def test_c7_too_many_attempts_subject_limit(env):
-    for i in range(5):    # five bad passwords for one login, from 5 IPs
-        r = _mfl_claim(env, ip=f"192.0.2.{i}", password="bad")
+    """The 5-failure lock is per (subject, client IP) since the lockout fix:
+    five bad passwords for one login from ONE IP lock that pair, even for
+    the right password; another client IP is not locked."""
+    ip = "192.0.2.10"
+    for _ in range(5):
+        r = _mfl_claim(env, ip=ip, password="bad")
         assert r.status_code == 403
-    r = _mfl_claim(env, ip="192.0.2.200")          # right password now
+    r = _mfl_claim(env, ip=ip)                     # right password now
     assert r.status_code == 429
     assert 0 < int(r.headers["Retry-After"]) <= server._SIGNIN_SUBJECT_WINDOW_S
     # The username is the subject regardless of case, and the auth_leagues
     # proxy shares the budget.
-    r = _post(env, ip="192.0.2.201", platform="mfl", action="auth_leagues",
+    r = _post(env, ip=ip, platform="mfl", action="auth_leagues",
               username="MATTM", password="hunter2")
     assert r.status_code == 429
-    # Other subjects are unaffected.
-    assert _mfl_claim(env, ip="192.0.2.202", username="Rival",
-                      password="pw-rival", franchise_id="0002"
-                      ).status_code == 200
+    # Other subjects from the same IP are unaffected ...
+    assert _mfl_claim(env, ip=ip, username="Rival", password="pw-rival",
+                      franchise_id="0002").status_code == 200
+    # ... and so is this subject from another client IP.
+    assert _mfl_claim(env, ip="192.0.2.200").status_code == 200
 
 
 def test_espn_subject_limit_covers_the_claimed_swid(env):
-    for i in range(5):   # the sign-in cookie read refused: counted (row 9)
-        r = _espn_claim(env, ip=f"192.0.2.{i}", s2="not-issued")
+    ip = "192.0.2.20"
+    for _ in range(5):   # the sign-in cookie read refused: counted (row 9)
+        r = _espn_claim(env, ip=ip, s2="not-issued")
         assert r.get_json()["error"] == "espn_auth_required"
-    r = _espn_claim(env, ip="192.0.2.99", swid=SWID_A.lower())  # any format
+    r = _espn_claim(env, ip=ip, swid=SWID_A.lower())        # any format
     assert r.status_code == 429
     assert "Retry-After" in r.headers
 
 
 def test_d7_unproven_pair_counts(env):
     env.espn.bound = False          # every leaguemate attack → unproven_pair
-    for i in range(5):
-        r = _espn_claim(env, ip=f"192.0.2.{i}", s2=S2_B, swid=SWID_A)
+    ip = "192.0.2.30"
+    for _ in range(5):
+        r = _espn_claim(env, ip=ip, s2=S2_B, swid=SWID_A)
         assert r.get_json()["reason"] == "espn_unproven_pair"
-    assert _espn_claim(env, ip="192.0.2.99", s2=S2_B,
-                       swid=SWID_A).status_code == 429
+    assert _espn_claim(env, ip=ip, s2=S2_B, swid=SWID_A).status_code == 429
+
+
+# ── Lockout fix (head-eng re-open, 2026-10-27, feat/mfl-auth-link-throttle) ─
+# The 5 / 15 min lock is keyed on (subject, client IP), so a griefer who
+# knows a victim's SWID / MFL username locks only their own IP's bucket. A
+# subject-wide ceiling (_SIGNIN_SUBJECT_CEILING_FAILURES per
+# _SIGNIN_SUBJECT_CEILING_WINDOW_S, any IP) is the password-guessing guard.
+
+GRIEFER_IP, VICTIM_IP = "198.51.100.66", "203.0.113.200"
+
+
+def test_lockout_griefer_ip_cannot_lock_the_victims_ip(env):
+    """A griefer burns the victim's MFL username and ESPN SWID from one IP
+    and keeps renewing: their own bucket is locked, the victim (another IP)
+    still signs in. Sabotage: key the 5-failure lock on the subject only →
+    red (the victim gets 429)."""
+    for _ in range(3):              # three rounds of "renewing" the lock
+        for _ in range(5):
+            _mfl_claim(env, ip=GRIEFER_IP, password="bad")
+            _espn_claim(env, ip=GRIEFER_IP, s2="not-issued")
+        assert _mfl_claim(env, ip=GRIEFER_IP).status_code == 429
+        assert _espn_claim(env, ip=GRIEFER_IP).status_code == 429
+    assert _mfl_claim(env, ip=VICTIM_IP).status_code == 200
+    assert _espn_claim(env, ip=VICTIM_IP).status_code == 200
+    # The griefer's own pair bucket is still locked (no reset by the
+    # victim's success on another IP).
+    assert _mfl_claim(env, ip=GRIEFER_IP, password="bad").status_code == 429
+
+
+def test_lockout_subject_ceiling_locks_the_subject_on_every_ip(env, caplog):
+    """30 bad passwords for one subject spread over 6 IPs (5 each, under the
+    per-pair cap) lock the subject on EVERY IP, including a fresh one, with
+    reason=subject_ceiling and a Retry-After within the hour. Other subjects
+    are unaffected. Sabotage: drop the subject-wide key → red."""
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    cap = server._SIGNIN_SUBJECT_CEILING_FAILURES
+    assert cap == 30 and server._SIGNIN_SUBJECT_CEILING_WINDOW_S == 3600
+    for i in range(cap):
+        r = _mfl_claim(env, ip=f"10.9.{i // 5}.1", password="bad")
+        assert r.status_code == 403, i
+    for ip in ("10.9.0.1", "10.9.99.1", VICTIM_IP):
+        r = _mfl_claim(env, ip=ip)                 # right password
+        assert r.status_code == 429, ip
+        assert 0 < int(r.headers["Retry-After"]) <= 3600
+    assert ("PLATFORM-SIGNIN provider=mfl outcome=limited "
+            "reason=subject_ceiling") in caplog.text
+    assert _mfl_claim(env, ip=VICTIM_IP, username="Rival",
+                      password="pw-rival", franchise_id="0002"
+                      ).status_code == 200
+
+
+def test_lockout_one_ip_cannot_reach_the_subject_ceiling(env):
+    """From one IP the pair bucket stops a guesser at 5 per window, far
+    under the ceiling: the subject-wide counter never exceeds 5."""
+    for _ in range(12):
+        _mfl_claim(env, ip=GRIEFER_IP, password="bad")
+    sub = [k for k in server._signin_failures if k.startswith("sub:")]
+    assert len(sub) == 1
+    assert len(server._signin_failures[sub[0]]) == \
+        server._SIGNIN_SUBJECT_MAX_FAILURES
+
+
+def test_lockout_success_clears_its_pair_bucket_and_the_ceiling_only(env):
+    """A proven sign-in clears the subject's bucket for ITS IP and the
+    subject-wide counter; other IPs' pair buckets and the IP windows stay."""
+    for ip in ("10.8.0.1", "10.8.0.2", "10.8.0.3"):
+        for _ in range(4):
+            _mfl_claim(env, ip=ip, password="bad")
+    sub = [k for k in server._signin_failures if k.startswith("sub:")]
+    assert len(server._signin_failures[sub[0]]) == 12
+    assert _mfl_claim(env, ip="10.8.0.1").status_code == 200     # proven
+    assert not any(k.startswith("sub:") for k in server._signin_failures)
+    pairs = [k for k in server._signin_failures if k.startswith("subip:")]
+    assert len(pairs) == 2                       # 10.8.0.2 / .3 keep theirs
+    assert all(len(server._signin_failures[k]) == 4 for k in pairs)
+    assert len(server._signin_failures["ip:10.8.0.1"]) == 4      # IP untouched
+    # 10.8.0.1's pair was cleared: four more bad attempts are still 403.
+    for _ in range(4):
+        assert _mfl_claim(env, ip="10.8.0.1", password="bad").status_code == 403
+    # 10.8.0.2's pair wasn't: its 5th failure locks it.
+    assert _mfl_claim(env, ip="10.8.0.2", password="bad").status_code == 403
+    assert _mfl_claim(env, ip="10.8.0.2").status_code == 429
 
 
 def test_d7_uncounted_refusals_never_consume_the_budget(env):
@@ -958,11 +1046,9 @@ def test_d7_a_proven_claim_clears_the_subject_count_not_the_ip(env):
     assert len(server._signin_failures[ip_key]) == 8          # IP untouched
 
 
-def test_d7_concurrent_bad_attempts_never_exceed_the_cap(env):
-    """QA saw 8 admitted with a cap of 5 on 4 threads. In-flight attempts
-    now count at admission, so N concurrent bad logins for one subject admit
-    exactly the cap."""
-    n = 12
+def _concurrent_bad_claims(n, ip_for):
+    """n concurrent bad MFL claims for one subject behind a barrier, each
+    from ip_for(i), with a 0.2 s login. Returns their statuses."""
     barrier = threading.Barrier(n)
 
     def slow_bad_login(username, password, year, **kw):
@@ -979,7 +1065,7 @@ def test_d7_concurrent_bad_attempts_never_exceed_the_cap(env):
                         json={"platform": "mfl", "mfl_league_id": MFL_LEAGUE,
                               "year": 2026, "franchise_id": "0001",
                               "username": "MattM", "password": "bad"},
-                        headers={"X-Forwarded-For": f"192.0.2.{i}"})
+                        headers={"X-Forwarded-For": ip_for(i)})
         with lock:
             statuses.append(r.status_code)
 
@@ -993,10 +1079,33 @@ def test_d7_concurrent_bad_attempts_never_exceed_the_cap(env):
             t.start()
         for t in threads:
             t.join(timeout=30)
+    return statuses
+
+
+def test_d7_concurrent_bad_attempts_never_exceed_the_cap(env):
+    """QA saw 8 admitted with a cap of 5 on 4 threads. In-flight attempts
+    count at admission on every key, so N concurrent bad logins for one
+    subject from ONE IP admit exactly the pair cap."""
+    n = 12
+    statuses = _concurrent_bad_claims(n, lambda i: "192.0.2.77")
     assert len(statuses) == n
     assert statuses.count(403) == server._SIGNIN_SUBJECT_MAX_FAILURES
     assert statuses.count(429) == n - server._SIGNIN_SUBJECT_MAX_FAILURES
     assert server._signin_inflight == {}                    # all released
+
+
+def test_d7_concurrent_bad_attempts_across_ips_never_exceed_the_ceiling(
+        env, monkeypatch):
+    """The same exactness on the subject-wide ceiling: concurrent bad logins
+    from N distinct IPs (each under its pair cap) admit exactly the ceiling.
+    The ceiling is patched to 6 so the test admits few concurrent requests."""
+    monkeypatch.setattr(server, "_SIGNIN_SUBJECT_CEILING_FAILURES", 6)
+    n = 12
+    statuses = _concurrent_bad_claims(n, lambda i: f"192.0.2.{100 + i}")
+    assert len(statuses) == n
+    assert statuses.count(403) == 6
+    assert statuses.count(429) == n - 6
+    assert server._signin_inflight == {}
 
 
 def test_d7_in_flight_slot_is_released_on_an_exception(env):
@@ -1046,8 +1155,8 @@ def test_audit_log_one_line_per_claim_and_no_secrets(env, caplog):
 
 def test_audit_log_marks_limited(env, caplog):
     caplog.set_level(logging.INFO, logger="trade_finder")
-    for i in range(5):
-        _mfl_claim(env, ip=f"192.0.2.{i}", password="bad")
+    for _ in range(5):
+        _mfl_claim(env, ip="192.0.2.50", password="bad")
     _mfl_claim(env, ip="192.0.2.50")
     assert ("PLATFORM-SIGNIN provider=mfl outcome=limited "
             "reason=subject_limit") in caplog.text
@@ -1689,8 +1798,10 @@ def _seed_mfl_credential(env):
 
 
 def _lock_mfl_subject(env):
-    for i in range(5):
-        _mfl_claim(env, ip=f"192.0.2.{i}", password="bad")
+    # The 5-failure lock is per (subject, client IP): lock the pair for the
+    # IP _mfl_claim uses by default.
+    for _ in range(5):
+        _mfl_claim(env, password="bad")
 
 
 def _raise(*a, **kw):
@@ -1875,6 +1986,21 @@ def test_link_routes_and_previews_keep_their_own_copy(env):
 
 # ── QA pins: in-flight Retry-After (S12), action audit wiring (S16), MFL year ──
 
+def test_espn_signin_cookie_read_warning_logs_only_the_kind(env, caplog):
+    """head-eng's #430 nit (carried on feat/mfl-auth-link-throttle): the
+    sign-in's ESPN cookie-read warning logs the error KIND only, never the
+    exception message. Sabotage: restore `: %s`, e → red."""
+    caplog.set_level(logging.WARNING, logger="trade_finder")
+    marker = "ESPN HTTP 503 MSG-MARKER-7f3a"
+    with _espn_cookie_read_fails(es.EspnError(marker, kind="http"))(env):
+        r = _espn_claim(env)
+    assert r.status_code == 502
+    lines = [rec.getMessage() for rec in caplog.records
+             if rec.getMessage().startswith("espn fetch failed")]
+    assert lines == ["espn fetch failed [http]"]
+    assert marker not in caplog.text
+
+
 def test_s12_in_flight_saturation_answers_retry_after_5s(env):
     """A window full only because of IN-FLIGHT attempts answers 429 with the
     short _SIGNIN_INFLIGHT_RETRY_S, not the failure-window expiry."""
@@ -1887,13 +2013,13 @@ def test_s12_in_flight_saturation_answers_retry_after_5s(env):
             audit: dict = {}
             assert server._signin_limit_gate(audit, "mfl", "mattm") is None
             held.append(audit)                    # in flight, not released
-    r = _mfl_claim(env, ip="192.0.2.11")
+    r = _mfl_claim(env, ip="192.0.2.10")        # the same (subject, IP)
     assert r.status_code == 429
     assert r.headers["Retry-After"] == "5"
     for audit in held:                            # they finish (no failure)
         server._signin_release(audit)
     assert server._signin_inflight == {}
-    assert _mfl_claim(env, ip="192.0.2.12").status_code == 200
+    assert _mfl_claim(env, ip="192.0.2.10").status_code == 200
 
 
 def test_s16_actions_release_their_in_flight_slot(env):
@@ -1992,11 +2118,14 @@ def test_auth_leagues_year_check_runs_before_the_limiter_gate(env):
     assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
     assert gate_calls == []
     assert server._signin_failures == {} and server._signin_inflight == {}
-    # A locked subject still gets the input error, not a 429.
-    for i in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
-        assert _post(env, ip=f"192.0.2.{i}", platform="mfl",
-                     action="auth_leagues", username="MattM",
-                     password="bad").status_code == 403
+    # A locked subject still gets the input error, not a 429. (The 5-failure
+    # lock is per (subject, client IP) since the lockout fix, so the lock and
+    # the check use the same — default — IP.)
+    for _ in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
+        assert _post(env, platform="mfl", action="auth_leagues",
+                     username="MattM", password="bad").status_code == 403
+    assert _post(env, platform="mfl", action="auth_leagues", username="MattM",
+                 password="hunter2").status_code == 429       # locked
     r = _post(env, platform="mfl", action="auth_leagues", username="MattM",
               password="bad", year=1999)
     assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
@@ -2030,9 +2159,9 @@ def test_mfl_claim_and_preview_year_checks_run_before_the_limiter_gate(
         assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
     assert gate_calls == []
     assert server._signin_failures == {} and server._signin_inflight == {}
-    # Lock the subject, then: still the input error, not a 429.
-    for i in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
-        assert _mfl_claim(env, ip=f"192.0.2.{i}",
+    # Lock the (subject, IP) pair, then: still the input error, not a 429.
+    for _ in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
+        assert _mfl_claim(env, ip="192.0.2.99",
                           password="bad").status_code == 403
     assert _mfl_claim(env, ip="192.0.2.99").status_code == 429
     r = _mfl_claim(env, ip="192.0.2.99", year=year)

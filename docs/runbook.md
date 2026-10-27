@@ -815,12 +815,25 @@ Both read **official/sanctioned** APIs (far lower churn risk than ESPN), zero-au
 
 ## ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user (platform sign-in, 2026-10-27)
 
-Platform sign-in (`POST /api/entry/platform`, [scope](plans/platform-sign-in/scope.md)) rate-limits CREDENTIAL failures per subject: 5 per 15 minutes per ESPN SWID or MFL username. Since 2026-10-27 the Settings MFL sign-in, `POST /api/mfl/auth-link`, uses the **same** windows and keys for its MFL login, so bad MFL passwords there and at the sign-in share one budget per username. The counted failures are an MFL bad login, the ESPN sign-in cookie read being refused, and `espn_unproven_pair`. There is also a loose per-IP ceiling (300 per 10 minutes). A proven sign-in clears that subject's count; the IP window is left alone.
+Platform sign-in (`POST /api/entry/platform`, [scope](plans/platform-sign-in/scope.md)) and the Settings MFL sign-in (`POST /api/mfl/auth-link`) share one in-process limiter on CREDENTIAL failures. The counted failures are an MFL bad login, the ESPN sign-in cookie read being refused, and `espn_unproven_pair`. Since the lockout fix (2026-10-27, `feat/mfl-auth-link-throttle`) every attempt is checked against three windows:
 
-- **Cause:** anyone who knows a person's SWID (visible to every leaguemate) or MFL username can spend that subject's 5 failed attempts and lock that person's ESPN/MFL sign-in for 15 minutes. **By retrying, they can renew the lock indefinitely**: each new failure restarts the window. head-eng accepted this residual (2026-10-27).
-- **Impact:** a locked user can't sign in with ESPN/MFL while the attacker keeps retrying, and for MFL can't connect the MFL login in Settings either (auth-link answers the same 429). An already-signed-in session is otherwise unaffected. **Don't steer them to Sign in with Apple as the fix.** Apple signs them into a **different, empty** account unless they set one up before.
-- **Support:** escalate to eng. There is **no manual reset**: the limiter state is in-process, so the only reset is a **service restart** (any deploy also clears it), and eng restarts if needed. Once the user gets one proven sign-in through, their failure count clears.
-- **Logs:** the user's attempts show as `PLATFORM-SIGNIN provider=… outcome=limited reason=subject_limit` (no ids are logged); refused auth-link logins show as `MFL-AUTH-LINK outcome=limited reason=subject_limit|ip_limit`. `reason=ip_limit` instead means the per-IP ceiling. If that fires for many users at once, suspect a wrong `_SIGNIN_TRUSTED_PROXY_HOPS`: compare it with the temporary `PLATFORM-SIGNIN-XFF hops=N cf=0|1 tci=0|1` lines (hop count and header presence only, never an IP).
+| Window | Key | Limit | `reason` when it refuses |
+|---|---|---|---|
+| Per client IP | the IP | 300 failures / 10 min (deliberately loose) | `ip_limit` |
+| Per (subject, client IP) | ESPN SWID or MFL username **plus** the IP | 5 failures / 15 min | `subject_limit` |
+| Per subject, any IP | ESPN SWID or MFL username | 30 failures / hour | `subject_ceiling` |
+
+A proven sign-in or a good auth-link login clears that subject's bucket for **its** IP and the subject-wide counter. It never clears the IP window or another IP's bucket.
+
+- **Cause and residual:**
+  - **A single-IP griefer can no longer lock the victim out.** Before the fix, anyone who knew a person's SWID (visible to every leaguemate) or MFL username could spend that subject's 5 failed attempts and lock the person's ESPN/MFL sign-in, renewably. Now those 5 failures lock only the griefer's own (subject, IP) bucket. One IP can't reach the 30-per-hour subject-wide ceiling, because its own bucket caps it at 20 per hour.
+  - **What can still lock a subject everywhere** is 30 failures within an hour across **two or more** IPs (password guessing, or a griefer with several addresses). That answers `reason=subject_ceiling` and clears an hour after the oldest of those failures, or on the subject's next proven sign-in.
+- **Impact:** a locked user can't sign in with ESPN/MFL from the locked IP (`subject_limit`) or from anywhere (`subject_ceiling`) until the window clears. For MFL they also can't connect the MFL login in Settings: auth-link answers the same 429. An already-signed-in session is otherwise unaffected. **Don't steer them to Sign in with Apple as the fix.** Apple signs them into a **different, empty** account unless they set one up before.
+- **Support:** for `subject_limit`, the user can simply try from another network (for example, cellular instead of Wi-Fi), or wait 15 minutes. For `subject_ceiling`, escalate to eng. There is **no manual reset**: the limiter state is in-process, so the only reset is a **service restart** (any deploy also clears it), and eng restarts if needed.
+- **Logs:**
+  - Sign-in attempts show as `PLATFORM-SIGNIN provider=… outcome=limited reason=subject_limit|subject_ceiling|ip_limit`; refused auth-link logins show as `MFL-AUTH-LINK outcome=limited reason=…`. No ids are logged.
+  - Many `subject_ceiling` lines for one provider point at distributed password guessing.
+  - `ip_limit` firing for many users at once suggests a wrong `_SIGNIN_TRUSTED_PROXY_HOPS`: compare it with the temporary `PLATFORM-SIGNIN-XFF hops=N cf=0|1 tci=0|1` lines (hop count and header presence only, never an IP).
 - **ESPN sign-in kill switch:** set `espn.signin` to `false` in `config/features.json` (or `FTF_FLAGS`). The whole ESPN entry branch then 404s `feature_disabled`, while MFL sign-in and Settings ESPN linking (`espn.link`) keep working.
 
 ## Bare workflow: `app.json` iOS config is silently ignored (feedback #131, 2026-07-12)

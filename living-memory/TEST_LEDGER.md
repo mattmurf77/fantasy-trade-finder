@@ -1,3 +1,39 @@
+## 2026-10-27 — Lockout fix: the 5-failure lock keyed on (subject, client IP) + a 30/hour subject-wide ceiling (`feat/mfl-auth-link-throttle`, #477; draft, not yet QA'd)
+
+Full gates (D7 limit changes). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups → Lockout fix).
+
+- **What changed:** `_signin_limit_keys` now returns three windows for each attempt:
+  - `ip:` 300 / 10 min (unchanged);
+  - `subip:` (subject, client IP) 5 / 15 min;
+  - `sub:` subject across IPs 30 / hour (`_SIGNIN_SUBJECT_CEILING_*`, new).
+
+  A new `reason=subject_ceiling` joins `subject_limit` and `ip_limit`. A success clears its pair bucket and the subject-wide counter. In-flight admission and `Retry-After` are unchanged, and the sign-in and auth-link share the keys. head-eng's nit: the sign-in ESPN cookie-read warning logs the kind only.
+- **New tests:**
+  - `test_platform_sign_in.py` +6:
+    - `test_lockout_griefer_ip_cannot_lock_the_victims_ip`: MFL + ESPN, 3 renewal rounds; the victim's IP gets 200, the griefer's bucket stays locked;
+    - `test_lockout_subject_ceiling_locks_the_subject_on_every_ip`: 30 failures over 6 IPs → 429 on old and fresh IPs, `reason=subject_ceiling`, `Retry-After` ≤ 3600; other subjects are fine;
+    - `test_lockout_one_ip_cannot_reach_the_subject_ceiling`;
+    - `test_lockout_success_clears_its_pair_bucket_and_the_ceiling_only`;
+    - `test_d7_concurrent_bad_attempts_across_ips_never_exceed_the_ceiling` (ceiling patched to 6, 12 threads on distinct IPs → exactly 6 admitted);
+    - `test_espn_signin_cookie_read_warning_logs_only_the_kind`.
+  - `test_mfl_auth_link_route.py` +2: `test_auth_link_lockout_griefer_ip_cannot_lock_the_victims_ip` (also checks the sign-in from the griefer's IP is locked) and `test_auth_link_lockout_subject_ceiling_spans_ips_and_routes` (30 failures split across auth-link and the sign-in).
+  - **Updated, because they encoded the subject-only key** (each now locks and checks from ONE IP):
+    - `test_c7_too_many_attempts_subject_limit`, which also asserts another IP still gets 200;
+    - `test_espn_subject_limit_covers_the_claimed_swid`;
+    - `test_d7_unproven_pair_counts`;
+    - `test_d7_concurrent_bad_attempts_never_exceed_the_cap` (12 threads, one IP → exactly 5);
+    - `test_audit_log_marks_limited`;
+    - `test_s12_in_flight_saturation_answers_retry_after_5s`;
+    - `_lock_mfl_subject` (row 13);
+    - the two year-ordering tests;
+    - `test_auth_link_d7_sixth_attempt_…` and `test_auth_link_d7_shares_the_subject_window_…`.
+  - The concurrency pair is stable over 5 loops on a loaded machine.
+- **Sabotage, each red then restored:**
+  - the 5-failure lock keyed on the subject only → 7 red, incl. both griefer tests (`429 == 200`);
+  - the subject-wide key dropped → 5 red, incl. both ceiling tests (a fresh IP: `200 == 429`);
+  - the log line back to `: %s`, e → the log-kind test red.
+- **Run:** the 15 branch-A suites: **529 passed, 0 failed** (521 + 8); `check-landing-platform-options.js` passes. Full suite: **9123 passed, 2 skipped**, 0 failed (76 min on a machine at load ~36).
+
 ## 2026-10-27 — MFL auth-link: D7 limiter on the password login; non-finite year 400 (`feat/mfl-auth-link-throttle`, stacked on #430 @ `d3248d35`)
 
 Full gates (a new 429 on an API route). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the tests below plus the code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups).

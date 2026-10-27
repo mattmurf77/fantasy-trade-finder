@@ -29579,11 +29579,19 @@ def extension_auth():
 # league or post-proof outcomes (espn_public_league, espn_ownerless_team,
 # wrong_account), upstream outages and input errors never count, and
 # successes never count, because carrier NAT puts many honest users behind
-# one IP. A PROVEN claim clears its subject's count (not the IP window).
-# Admission counts in-flight attempts too, so concurrent requests can't
-# overshoot a cap. The per-IP ceiling is deliberately loose (head-eng, C4): a
-# wrong proxy-hop count must never 429 real users at launch; the
-# per-subject limit is the real guard.
+# one IP. Three windows per attempt (lockout fix, head-eng re-open,
+# 2026-10-27, feat/mfl-auth-link-throttle):
+#   * per client IP — 300 / 10 min (loose on purpose, head-eng C4: a wrong
+#     proxy-hop count must never 429 real users);
+#   * per (subject, client IP) — 5 / 15 min. Keying the 5-failure lock on
+#     the PAIR means a griefer who knows a victim's SWID / MFL username can
+#     only lock their OWN IP's bucket, never the victim's;
+#   * per subject across all IPs — 30 / hour: the password-guessing
+#     ceiling. One IP can't reach it (its pair bucket caps it at 20 / hour).
+# A PROVEN claim (or a good auth-link login) clears that subject's pair
+# bucket for the caller's IP AND the subject-wide counter; never the IP
+# window, and never another IP's pair bucket. Admission counts in-flight
+# attempts on every key, so concurrent requests can't overshoot any cap.
 _SIGNIN_IP_MAX_FAILURES = 300
 _SIGNIN_IP_WINDOW_S = 10 * 60
 # How many X-Forwarded-For hops, counted from the RIGHT, our own proxies
@@ -29591,8 +29599,12 @@ _SIGNIN_IP_WINDOW_S = 10 * 60
 # 2 = second from the right, and so on. Pending release-lead's confirmation
 # of Render's layout (see PLATFORM-SIGNIN-XFF below).
 _SIGNIN_TRUSTED_PROXY_HOPS = 1
+# Per (subject, client IP) — the 5-failure lock.
 _SIGNIN_SUBJECT_MAX_FAILURES = 5
 _SIGNIN_SUBJECT_WINDOW_S = 15 * 60
+# Per subject, any IP — the password-guessing ceiling.
+_SIGNIN_SUBJECT_CEILING_FAILURES = 30
+_SIGNIN_SUBJECT_CEILING_WINDOW_S = 60 * 60
 _SIGNIN_LIMITER_MAX_KEYS = 50_000
 # Retry-After when a window is full only because of IN-FLIGHT attempts (their
 # outcome isn't known yet, so the failure-window expiry doesn't apply).
@@ -29727,21 +29739,32 @@ def _log_xff_hop_count() -> None:
 
 
 def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
-    """[(key, max_failures, window_s)] for this request. The subject key is
-    a hash, so no SWID/username sits in limiter memory either."""
-    keys = [("ip:" + _client_ip(), _SIGNIN_IP_MAX_FAILURES,
-             _SIGNIN_IP_WINDOW_S)]
+    """[(key, max_failures, window_s)] for this request: the client IP;
+    with a subject, also the (subject, client IP) pair ("subip:") and the
+    subject across all IPs ("sub:"). Subject keys are hashes, so no
+    SWID/username sits in limiter memory either."""
+    ip = _client_ip()
+    keys = [("ip:" + ip, _SIGNIN_IP_MAX_FAILURES, _SIGNIN_IP_WINDOW_S)]
     if subject:
-        digest = hashlib.sha256(f"{provider}\0{subject}".encode()).hexdigest()
-        keys.append(("sub:" + digest, _SIGNIN_SUBJECT_MAX_FAILURES,
+        pair = hashlib.sha256(
+            f"{provider}\0{subject}\0{ip}".encode()).hexdigest()
+        keys.append(("subip:" + pair, _SIGNIN_SUBJECT_MAX_FAILURES,
                      _SIGNIN_SUBJECT_WINDOW_S))
+        digest = hashlib.sha256(f"{provider}\0{subject}".encode()).hexdigest()
+        keys.append(("sub:" + digest, _SIGNIN_SUBJECT_CEILING_FAILURES,
+                     _SIGNIN_SUBJECT_CEILING_WINDOW_S))
     return keys
+
+
+# The audit / log `reason` each limiter key reports when it refuses.
+_SIGNIN_LIMIT_SCOPES = {"ip": "ip_limit", "subip": "subject_limit",
+                        "sub": "subject_ceiling"}
 
 
 def _signin_full_locked(keys, now):
     """Caller holds _signin_failures_lock. (retry_after_s, 'ip_limit' |
-    'subject_limit') when any key's recorded failures PLUS in-flight
-    attempts reach its cap, else None. Sliding window over the newest `cap`
+    'subject_limit' | 'subject_ceiling') when any key's recorded failures
+    PLUS in-flight attempts reach its cap, else None. Sliding window over the newest `cap`
     failure stamps."""
     worst = None
     for key, cap, window in keys:
@@ -29756,7 +29779,7 @@ def _signin_full_locked(keys, now):
         if failures + _signin_inflight.get(key, 0) >= cap:
             wait = (max(1, math.ceil(q[0] + window - now)) if failures >= cap
                     else _SIGNIN_INFLIGHT_RETRY_S)
-            scope = "ip_limit" if key.startswith("ip:") else "subject_limit"
+            scope = _SIGNIN_LIMIT_SCOPES[key.split(":", 1)[0]]
             if worst is None or wait > worst[0]:
                 worst = (wait, scope)
     return worst
@@ -29776,8 +29799,10 @@ def _signin_record_failure_locked(keys, now) -> None:
 def _signin_release(audit: dict) -> None:
     """Finish an admitted attempt — always called from entry_platform's
     `finally`, so an exception can never leak an in-flight slot. Frees the
-    slot, records a counted credential failure, or — on a PROVEN claim —
-    clears the subject's failure count (never the IP window)."""
+    slot, records a counted credential failure, or — on a PROVEN claim /
+    good auth-link login — clears the subject's (subject, this IP) bucket
+    and its subject-wide counter (never the IP window, never another IP's
+    pair bucket)."""
     keys = audit.pop("_limiter_keys", None)
     if not keys:
         return
@@ -29793,7 +29818,7 @@ def _signin_release(audit: dict) -> None:
             _signin_record_failure_locked(keys, now)
         elif audit.get("outcome") == "proven":
             for key, _cap, _window in keys:
-                if key.startswith("sub:"):
+                if key.startswith(("subip:", "sub:")):
                     _signin_failures.pop(key, None)
 
 
@@ -30339,8 +30364,10 @@ def _entry_platform(audit: dict):
                                        failed_proof=True)
             if subject and kind not in ("not_found", "input"):
                 # ESPN not answering during the proof (5xx / parse): the
-                # same 502 espn_unavailable, with row 6's sign-in copy.
-                log.warning("espn fetch failed [%s]: %s", kind, e)
+                # same 502 espn_unavailable, with row 6's sign-in copy. Only
+                # the error KIND is logged — never the exception message
+                # (head-eng's #430 nit, carried here).
+                log.warning("espn fetch failed [%s]", kind)
                 return _signin_refusal(audit, 502, "espn_unavailable",
                                        _SIGNIN_ESPN_UNAVAILABLE_MSG)
             return _espn_error_response(e)
@@ -36101,7 +36128,8 @@ def mfl_auth_link():
     """Sign in with MFL and list the user's leagues (no import yet).
 
     POST's MFL login shares the platform sign-in's D7 failure limits (per
-    MFL username + per IP; 429 too_many_attempts + Retry-After).
+    client IP, per (MFL username, IP), per MFL username across IPs; 429
+    too_many_attempts + Retry-After).
 
     GET → sign-in status, mirroring GET /api/sleeper/link (send-auth lazy
     flow, 2026-08-11): {connected, mfl_username, year}. Never returns the
@@ -36163,11 +36191,13 @@ def mfl_auth_link():
                         "message": "MFL username and password are required."}), 400
 
     # D7 limiter on this password login (feat/mfl-auth-link-throttle): the
-    # same in-process windows the platform sign-in uses, keyed on the same
-    # MFL subject (lower-cased username) and client IP, so a verified session
-    # can't use this route as an unthrottled MFL password oracle. Year range
-    # and admission run BEFORE any MFL call. Only an MFL bad login counts; a
-    # good login clears the subject; outages and input errors don't count.
+    # same in-process windows and keys the platform sign-in uses (the client
+    # IP, the (MFL subject, IP) pair and the MFL subject across IPs; subject
+    # = lower-cased username), so a verified session can't use this route as
+    # an unthrottled MFL password oracle. Year range and admission run
+    # BEFORE any MFL call. Only an MFL bad login counts; a good login clears
+    # the pair bucket and the subject-wide counter; outages and input errors
+    # don't count.
     # _signin_release runs in the `finally`, so an exception never leaks the
     # in-flight slot.
     bad_year = _mfl_entry_year_refusal(body.get("year"))

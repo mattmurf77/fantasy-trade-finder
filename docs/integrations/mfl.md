@@ -127,10 +127,11 @@ that login owns in the same league, if any — only after the login
 succeeded). Disconnecting (`DELETE /api/mfl/auth-link`) removes the stored
 cookie but **keeps** the sign-in identity, so the next MFL sign-in lands in
 the same account; only `DELETE /api/account` releases it. Failed logins here and in the
-`auth_leagues` action count toward the sign-in failure limits (5 per username
-per 15 min, 300 per IP per 10 min → 429 `too_many_attempts`); a
-`wrong_account` after a good login doesn't count, and a proven sign-in
-clears the username's count. The audit line
+`auth_leagues` action count toward the sign-in failure limits (5 per
+username per client IP per 15 min, 30 per username across IPs per hour, 300
+per IP per 10 min → 429 `too_many_attempts`); a `wrong_account` after a good
+login doesn't count, and a proven sign-in clears the username's bucket for
+its IP and the subject-wide counter. The audit line
 (`PLATFORM-SIGNIN`) never carries the username or password. Known limit: if
 MFL accepts an email address as the login, one person can end up with two
 identities (username and email).
@@ -139,16 +140,20 @@ identities (username and email).
 `feat/mfl-auth-link-throttle`).** Before this, any verified session could
 call it with unlimited username/password guesses — an MFL password oracle.
 Its login now goes through the same D7 limiter as the sign-in, with the
-same keys and windows: per username (trimmed + lower-cased via
-`accounts.platform_subject("mfl", …)`) 5 bad logins per 15 min, per client
-IP 300 per 10 min, in-flight attempts counted at admission. The year range
+same keys and windows: per (username, client IP) 5 bad logins per 15 min,
+per username across IPs 30 per hour, per client IP 300 per 10 min (the
+username trimmed + lower-cased via `accounts.platform_subject("mfl", …)`),
+in-flight attempts counted at admission. The year range
 (2000..current season + 1) and the admission check run **before**
 `mfl_service.login`; over the limit the route answers 429
 `too_many_attempts` + `Retry-After` and makes no MFL call. Only an MFL bad
 login (`MflAuthError` from `login` or `fetch_my_leagues`) counts; MFL
-outages and input errors don't; a good login clears the username's count
-(never the IP window). The sign-in and auth-link share one budget, so 5 bad
-guesses at either lock both for that username. A JSON `Infinity` / `1e400`
+outages and input errors don't; a good login clears the username's
+bucket for its IP and the subject-wide counter (never the IP window). The
+sign-in and auth-link share the same buckets, so 5 bad guesses at either
+from one IP lock both for that username from that IP (the 2026-10-27
+lockout fix keys the 5-failure lock on the pair, so a griefer can't lock
+the real owner's IP). A JSON `Infinity` / `1e400`
 year on auth-link or auth-import is now a 400 `mfl_bad_year`, not a 500.
 
 **What IS persisted:** the `MFL_USER_ID` cookie only, in `mfl_credentials`

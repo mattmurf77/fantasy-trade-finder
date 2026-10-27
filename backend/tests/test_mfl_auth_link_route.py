@@ -320,14 +320,15 @@ def test_auth_link_d7_sixth_attempt_after_five_bad_logins_is_429_no_mfl_call(
         client):
     c, token, engine, _ = client
     calls: list = []
+    ip = "192.0.2.10"     # the 5-failure lock is per (subject, client IP)
     with patch.object(mfl, "login", _counting_login(calls)):
-        for i in range(5):   # five bad passwords for one login, from 5 IPs
-            r = _auth_link_from(c, token, f"192.0.2.{i}", password="bad")
+        for _ in range(5):   # five bad passwords for one login, one IP
+            r = _auth_link_from(c, token, ip, password="bad")
             assert r.status_code == 403
             assert r.get_json()["error"] == "mfl_bad_credentials"
         # The RIGHT password now — and in another case: still refused, with
         # no MFL call, so the answer says nothing about the password.
-        r = _auth_link_from(c, token, "192.0.2.200", username="MattM")
+        r = _auth_link_from(c, token, ip, username="MattM")
     assert r.status_code == 429
     assert r.get_json() == {"error": "too_many_attempts", "message": TOO_MANY}
     assert server._SIGNIN_TOO_MANY_MSG == TOO_MANY        # reused, not new copy
@@ -335,19 +336,21 @@ def test_auth_link_d7_sixth_attempt_after_five_bad_logins_is_429_no_mfl_call(
     assert len(calls) == 5                                 # none for the 6th
     with engine.connect() as conn:
         assert conn.execute(select(db_module.mfl_credentials_table)).fetchall() == []
-    # Other MFL logins are unaffected.
+    # Other MFL logins are unaffected, and so is this login from another IP.
     with patch.object(mfl, "login", _counting_login(calls)):
-        assert _auth_link_from(c, token, "192.0.2.201",
+        assert _auth_link_from(c, token, ip,
                                username="someone-else").status_code == 200
+        assert _auth_link_from(c, token, "192.0.2.201").status_code == 200
 
 
 def test_auth_link_d7_shares_the_subject_window_with_platform_sign_in(client):
-    """Same subject key as POST /api/entry/platform: 5 bad logins here lock
-    the MFL sign-in for that username too (no 5 + 5 budget)."""
+    """Same keys as POST /api/entry/platform: 5 bad logins here from one IP
+    lock the MFL sign-in for that username from that IP too (no 5 + 5
+    budget)."""
     c, token, _, _ = client
     with patch.object(mfl, "login", _counting_login([])):
-        for i in range(5):
-            assert _auth_link_from(c, token, f"192.0.2.{i}",
+        for _ in range(5):
+            assert _auth_link_from(c, token, "192.0.2.99",
                                    password="bad").status_code == 403
     flags = {"landing.platform_options", "mfl.link", "mfl.auth_link"}
     with patch.object(server, "is_enabled", lambda k: k in flags), \
@@ -360,6 +363,58 @@ def test_auth_link_d7_shares_the_subject_window_with_platform_sign_in(client):
     assert r.status_code == 429
     assert r.get_json()["error"] == "too_many_attempts"
     login.assert_not_called()
+
+
+def test_auth_link_lockout_griefer_ip_cannot_lock_the_victims_ip(client):
+    """Lockout fix: a griefer's bad auth-link logins for the victim's MFL
+    username lock only the griefer's (subject, IP) bucket — on auth-link AND
+    the sign-in — while the victim's IP still connects and signs in."""
+    c, token, _, _ = client
+    flags = {"landing.platform_options", "mfl.link", "mfl.auth_link"}
+    with patch.object(mfl, "login", _counting_login([])):
+        for _ in range(7):
+            _auth_link_from(c, token, "198.51.100.66", password="bad")
+        assert _auth_link_from(c, token, "198.51.100.66").status_code == 429
+        assert _auth_link_from(c, token, "203.0.113.200").status_code == 200
+    with patch.object(server, "is_enabled", lambda k: k in flags), \
+         patch.object(mfl, "login") as login:
+        r = c.post("/api/entry/platform",
+                   json={"platform": "mfl", "mfl_league_id": "10005",
+                         "year": 2026, "franchise_id": "0001",
+                         "username": "mattm", "password": PASSWORD},
+                   headers={"X-Forwarded-For": "198.51.100.66"})
+    assert r.status_code == 429                  # the griefer's own bucket
+    login.assert_not_called()
+
+
+def test_auth_link_lockout_subject_ceiling_spans_ips_and_routes(client):
+    """30 bad logins for one username over 6 IPs, half on auth-link and half
+    on the sign-in, reach the subject-wide ceiling: auth-link from a fresh
+    IP is then 429 with no MFL call."""
+    c, token, _, _ = client
+    flags = {"landing.platform_options", "mfl.link", "mfl.auth_link"}
+    calls: list = []
+    cap = server._SIGNIN_SUBJECT_CEILING_FAILURES
+    with patch.object(server, "is_enabled", lambda k: k in flags), \
+         patch.object(mfl, "login", _counting_login(calls)):
+        for i in range(cap):
+            ip = f"10.7.{i // 5}.1"
+            if i % 2:
+                r = _auth_link_from(c, token, ip, password="bad")
+            else:
+                r = c.post("/api/entry/platform",
+                           json={"platform": "mfl", "mfl_league_id": "10005",
+                                 "year": 2026, "franchise_id": "0001",
+                                 "username": "mattm", "password": "bad"},
+                           headers={"X-Forwarded-For": ip})
+            assert r.status_code == 403, i
+        before = len(calls)
+        r = _auth_link_from(c, token, "203.0.113.201")       # fresh IP
+    assert r.status_code == 429
+    assert r.get_json()["error"] == "too_many_attempts"
+    assert 0 < int(r.headers["Retry-After"]) <= \
+        server._SIGNIN_SUBJECT_CEILING_WINDOW_S
+    assert len(calls) == before                              # no MFL call
 
 
 def test_auth_link_d7_per_ip_window(client, monkeypatch):

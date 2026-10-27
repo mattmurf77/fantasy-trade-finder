@@ -27,7 +27,7 @@
 
 - New/changed tables or columns: **none (no DDL).** `linked_identities.provider` gains `espn` / `mfl` (subject = canonical SWID braced + upper-cased / MFL username trimmed + lower-cased, both via `accounts.platform_subject`) and `verified_via` (users, sessions) gains `espn` (`mfl_login` already existed). Neither column has a CHECK constraint (design D3). → `docs/data-dictionary.md` updated.
 - New/changed feature flags: **`espn.signin`** (new, ships `true`) — the ESPN sign-in kill switch; see the addendum below. Otherwise gated by the existing `landing.platform_options` + `espn.link` / `mfl.link` (actions also by `espn.league_picker` / `mfl.auth_link`). Rollback levers: `espn.signin` → false (ESPN sign-in only), `landing.platform_options` → false (the whole entry surface); both deploy-free and hot-reloadable.
-- New env vars / `model_config` keys: **none.** The D7 limits are module constants in `backend/server.py` (`_SIGNIN_IP_MAX_FAILURES` = 300 / `_SIGNIN_IP_WINDOW_S` = 600, `_SIGNIN_SUBJECT_MAX_FAILURES` = 5 / `_SIGNIN_SUBJECT_WINDOW_S` = 900, `_SIGNIN_TRUSTED_PROXY_HOPS` = 1); state is in-process and resets on deploy (one gunicorn worker × 4 threads, lock-guarded).
+- New env vars / `model_config` keys: **none.** The D7 limits are module constants in `backend/server.py` (`_SIGNIN_IP_MAX_FAILURES` = 300 / `_SIGNIN_IP_WINDOW_S` = 600, `_SIGNIN_SUBJECT_MAX_FAILURES` = 5 / `_SIGNIN_SUBJECT_WINDOW_S` = 900 — per (subject, client IP) since the 2026-10-27 lockout fix, `_SIGNIN_SUBJECT_CEILING_FAILURES` = 30 / `_SIGNIN_SUBJECT_CEILING_WINDOW_S` = 3600 — per subject across IPs, added by that fix, `_SIGNIN_TRUSTED_PROXY_HOPS` = 1); state is in-process and resets on deploy (one gunicorn worker × 4 threads, lock-guarded).
 - Code-level vocabulary: `accounts.PLATFORM_PROVIDERS = ("espn", "mfl")`, allowed by `find_or_create_account`; `accounts.PROVIDERS` stays `("apple", "google")` and keeps meaning the `/api/auth/*` issuers. `accounts.VERIFIED_VIA_ESPN` / `VERIFIED_VIA_MFL`. `espn_service.swid_identity` (the one SWID identity form). `prepared_trade_cohort.VERIFIED` gains `"espn"`.
 
 ## 3. Evidence scope
@@ -251,3 +251,25 @@ Full gates (it changes an API contract: a new 429 on a route).
    - `test_mfl_non_numeric_year_is_bad_year_on_claim_preview_and_action` (×5) covers the claim, the preview and `auth_leagues`, with no MFL call and no limiter state.
    - Sabotage: the old `ValueError → None` fall-through → all 5 red, plus the `"abc"` ordering case.
    - **`""` is not a bad year.** Like a missing year it means the default season, which is how `auth_leagues`' own parse has always read it. Pinned by `test_mfl_empty_year_is_the_default_season_on_claim_preview_and_action`.
+
+#### Lockout fix: the 5-failure lock keyed on (subject, client IP), plus a subject-wide ceiling (2026-10-27, head-eng re-opened the residual)
+
+Full gates. These are D7 limit changes, server-only, with no new copy, flag, schema or event. Draft, not yet QA'd.
+
+- **Problem:** the 5 / 15 min lock was keyed on the subject alone. Anyone holding a victim's SWID (league-visible) or MFL username could renew it indefinitely, and the Apple fallback lands in a different, empty account. head-eng had accepted this residual for launch and re-opened it.
+- **Keys** (`_signin_limit_keys`). Each attempt is checked against three windows:
+  - `ip:` — per client IP, 300 / 10 min, unchanged;
+  - `subip:` — per (subject, client IP), 5 / 15 min (`_SIGNIN_SUBJECT_MAX_FAILURES` / `_WINDOW_S`, values unchanged, now keyed on the pair);
+  - `sub:` — per subject across all IPs, **30 / hour** (`_SIGNIN_SUBJECT_CEILING_FAILURES` / `_SIGNIN_SUBJECT_CEILING_WINDOW_S`, new module constants): the password-guessing guard.
+
+  The subject keys are still hashes. The sign-in claims, both actions and auth-link all use these keys.
+- **What a single IP can do:** a griefer on one IP locks only their own `subip:` bucket. That bucket also caps one IP at 20 failures an hour, under the ceiling. So a single-IP griefer can no longer lock the victim out.
+- **Residual:** 30 failures within an hour from **two or more** IPs still lock the subject everywhere (`reason=subject_ceiling`) until the hour passes or the subject's next proven sign-in. Any cross-IP ceiling has this property. If head-eng wants it narrower, one option is to exempt a (subject, IP) pair that has recently signed in from the ceiling. Not built.
+- **Unchanged:**
+  - in-flight admission per key (`failures + in_flight >= cap`, now on all three keys);
+  - `Retry-After` (the longest wait among the refusing keys; 5 s when only in-flight attempts fill a window);
+  - 429 `too_many_attempts` with the row-13 copy.
+- **New audit / log `reason`:** `subject_ceiling`, next to `subject_limit` (now the pair) and `ip_limit`. Logs only; `signin_failed.error_code` stays `too_many_attempts`.
+- **Success clears:** a proven claim or a good auth-link login clears the subject's bucket **for its IP and the subject-wide counter** (my choice, as platforms-eng suggested). It never clears the IP window or another IP's pair bucket, so a griefer's own lock survives the victim's success.
+- **head-eng's #430 nit:** the sign-in's ESPN cookie-read warning now logs `espn fetch failed [<kind>]` only, never the exception message. The link routes' `_espn_error_response` warning is unchanged.
+- **Evidence:** `living-memory/TEST_LEDGER.md` 2026-10-27, "Lockout fix".
