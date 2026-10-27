@@ -30,6 +30,9 @@ These tests pin:
      player's 1qb seed value (a slight upgrade, not a downgrade).
   7. Copy-level (#124 value_rank remap): a 1QB→SF-TEP copy no longer
      demotes the top TEs below their 1QB tier.
+  8. S5 health: each blend records its state in KTC_BLEND_STATUS and prints
+     one KTC-BLEND-DEGRADED line when KTC is unavailable, thin, or
+     disagrees with DP's ordering, and still blends exactly as before.
 """
 import json
 from pathlib import Path
@@ -66,6 +69,7 @@ def _dp_maps(fmt):
 def _reset_ktc_cache(monkeypatch):
     monkeypatch.setattr(dl, "_ktc_cache", None)
     monkeypatch.setattr(dl, "_ktc_fetched_at", 0.0)
+    monkeypatch.setattr(dl, "KTC_BLEND_STATUS", {})
 
 
 def _use_fixture_ktc(monkeypatch):
@@ -275,3 +279,74 @@ def test_copy_1qb_to_sf_tep_does_not_demote_top_te(monkeypatch):
     order = list(ORDERED_TIERS)
     assert order.index(tier_sf) <= order.index(tier_1qb), (
         f"top TE demoted on copy: 1qb {tier_1qb} -> sf_tep {tier_sf}")
+
+
+# ---------------------------------------------------------------------------
+# 8. S5: blend health (KTC_BLEND_STATUS + the KTC-BLEND-DEGRADED line)
+# ---------------------------------------------------------------------------
+
+def _blend_1qb(monkeypatch, ktc):
+    monkeypatch.setattr(dl, "_blend_config", lambda: (0.5, 1.0))
+    monkeypatch.setattr(dl, "_qb_cap_config", lambda: (0.0, 0.0))  # #313 off
+    monkeypatch.setattr(dl, "_ktc_consensus", lambda: ktc)
+    elo, val, pos = _dp_maps("1qb_ppr")
+    return dict(val), _apply_consensus_blend("1qb_ppr", elo, val, pos)[1]
+
+
+def test_a_healthy_blend_is_ok_and_silent(monkeypatch, capsys):
+    """The real 2026-07-17 data: 441 matched, KTC and DP orderings agree
+    (rank correlation 0.935, well above the 0.7 floor)."""
+    _blend_1qb(monkeypatch, _KTC)
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert (status["state"], status["matched"]) == ("ok", 441)
+    assert status["rank_corr"] >= 0.9 > dl.KTC_MIN_RANK_CORR
+    assert "KTC-BLEND-DEGRADED" not in capsys.readouterr().out
+
+
+def test_unavailable_ktc_is_flagged_and_dp_only(monkeypatch, capsys):
+    before, after = _blend_1qb(monkeypatch, {})
+    assert after == before
+    assert dl.KTC_BLEND_STATUS["1qb_ppr"]["state"] == "unavailable"
+    out = capsys.readouterr().out
+    assert "KTC-BLEND-DEGRADED fmt=1qb_ppr reason=unavailable matched=0/" in out
+    assert "consensus seeds are DP-only" in out and "ktc_blend_weight=0" in out
+
+
+def test_a_thin_match_is_flagged(monkeypatch, capsys):
+    """A page change that still parses but matches few pool players."""
+    few = dict(list(_KTC.items())[:dl.KTC_MIN_MATCHED - 1])
+    _blend_1qb(monkeypatch, few)
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert (status["state"], status["rank_corr"]) == ("thin", None)
+    assert status["matched"] < dl.KTC_MIN_MATCHED
+    assert "reason=thin" in capsys.readouterr().out
+
+
+def test_an_ordering_that_disagrees_with_dp_is_flagged_but_still_blended(monkeypatch, capsys):
+    """Garbage that still parses: KTC's values inverted. The blend runs as
+    before (S5 only reports); the line names the lever."""
+    hi = max(r["values"]["1qb_ppr"] for r in _KTC.values() if "1qb_ppr" in r["values"])
+    flipped = {k: {**r, "values": {f: hi + 1 - v for f, v in r["values"].items()}}
+               for k, r in _KTC.items()}
+    before, after = _blend_1qb(monkeypatch, flipped)
+    status = dl.KTC_BLEND_STATUS["1qb_ppr"]
+    assert status["state"] == "disagrees" and status["rank_corr"] < 0
+    assert after != before                                    # still blended
+    out = capsys.readouterr().out
+    assert "reason=disagrees" in out and "blended anyway" in out
+
+
+def test_blend_off_records_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(dl, "_blend_config", lambda: (0.0, 1.0))
+    monkeypatch.setattr(dl, "_ktc_consensus", lambda: pytest.fail("fetched with the blend off"))
+    elo, val, pos = _dp_maps("1qb_ppr")
+    _apply_consensus_blend("1qb_ppr", elo, val, pos)
+    assert dl.KTC_BLEND_STATUS == {}
+    assert "KTC-BLEND-DEGRADED" not in capsys.readouterr().out
+
+
+def test_rank_corr():
+    assert dl._rank_corr([1, 2, 3, 4], [10, 20, 30, 40]) == pytest.approx(1.0)
+    assert dl._rank_corr([1, 2, 3, 4], [4, 3, 2, 1]) == pytest.approx(-1.0)
+    assert dl._rank_corr([1, 2, 2, 4], [1, 2, 3, 4]) == pytest.approx(0.9486833)   # ties averaged
+    assert dl._rank_corr([5, 5, 5], [1, 2, 3]) == 0.0
