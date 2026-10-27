@@ -803,3 +803,175 @@ def test_the_session_member_rows_key_a_co_owned_roster_on_the_league_identity():
          "player_ids": ["101", "102"]},
         {"user_id": "7", "username": "opp", "display_name": "opp", "player_ids": ["201", "202"]},
     ]
+
+
+# ── #486 QA P3s: the draft verdict, a failed key, the owner path, the spies ───
+
+def _set_draft_status(engine, status):
+    from backend.database import leagues_table
+    with engine.begin() as conn:
+        conn.execute(leagues_table.delete().where(leagues_table.c.sleeper_league_id == LEAGUE))
+        conn.execute(insert(leagues_table).values(sleeper_league_id=LEAGUE, user_id=UID,
+                                                  season="2026", draft_status=status))
+
+
+def test_a_draft_verdict_flip_before_the_worker_read_unstamps_the_job(live, monkeypatch):
+    """#486 QA P3-5: the picks key covers the draft verdict too, so a flip
+    between the kickoff's read and the worker's unstamps the job."""
+    client, engine = live
+    _set_draft_status(engine, "not_drafted")
+    real_run = server._run_trade_job
+
+    def run(*a, **k):
+        _set_draft_status(engine, "drafted")
+        return real_run(*a, **k)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                                       scoring_format="1qb_ppr", opponents_total=1,
+                                       synchronous=True)
+    with server._trade_jobs_lock:
+        assert server._trade_jobs[job_id]["roster_fp"] is None
+
+
+def test_an_unchanged_draft_verdict_keeps_the_stamp(live):
+    client, engine = live
+    _set_draft_status(engine, "drafted")
+    job = _complete_job()
+    assert job["roster_fp"].startswith("rfp1:") and _fresh(job)
+
+
+def test_a_picks_key_that_cannot_be_computed_unstamps(live, monkeypatch):
+    """#486 QA P3-4: no key, no trust."""
+    job = _complete_job()
+    monkeypatch.setattr(roster_snapshot, "picks_key", MagicMock(side_effect=RuntimeError("x")))
+    server._note_job_picks_read(job["job_id"], [])
+    assert job["roster_fp"] is None
+
+
+def test_the_kickoff_reads_the_rows_once(live, monkeypatch):
+    """#486 QA P3-3: one fingerprint read per kickoff, and it is the one that
+    fills the picks key."""
+    real = roster_snapshot.snapshot_ids
+    calls = []
+
+    def spy(*a, **k):
+        calls.append(k.get("parts"))
+        return real(*a, **k)
+    monkeypatch.setattr(roster_snapshot, "snapshot_ids", spy)
+    with patch.object(server, "_start_trade_job_thread", MagicMock()):
+        job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                                           scoring_format="1qb_ppr", opponents_total=1)
+    assert len(calls) == 1 and calls[0] is not None and "picks_key" in calls[0]
+    with server._trade_jobs_lock:
+        assert server._trade_jobs[job_id]["roster_picks_key"] == calls[0]["picks_key"]
+
+
+def test_every_picks_read_in_the_worker_is_noted(live, monkeypatch):
+    """#486 QA P3-3: inside the worker, every draft_picks read is the noted
+    one (`_job_draft_picks`): one read, one note, owner path on."""
+    monkeypatch.setattr(server, "_owner_enabled", lambda league_id: True)
+    monkeypatch.setitem(server._trade_service_mod._cfg, "owner_bilateral_enabled", 1.0)
+    in_worker = []
+    real_run = server._run_trade_job
+
+    def run(*a, **k):
+        in_worker.append(True)
+        try:
+            return real_run(*a, **k)
+        finally:
+            in_worker.clear()
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    reads, notes = [], []
+    real_load = server.load_draft_picks
+
+    def load(*a, **k):
+        if in_worker:
+            reads.append(k.get("league_id"))
+        return real_load(*a, **k)
+    monkeypatch.setattr(server, "load_draft_picks", load)
+    real_note = server._note_job_picks_read
+    monkeypatch.setattr(server, "_note_job_picks_read",
+                        lambda *a, **k: (notes.append(a[0]), real_note(*a, **k)))
+    server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                              scoring_format="1qb_ppr", opponents_total=1, synchronous=True)
+    assert reads and len(reads) == len(notes) == 1
+
+
+def test_the_owner_context_uses_the_job_s_reads(live, monkeypatch):
+    """#486 QA P3-1: the worker hands the owner path its one memoized picks and
+    draft reads; the owner path issues neither read itself."""
+    client, engine = live
+    monkeypatch.setattr(server, "load_draft_picks",
+                        MagicMock(side_effect=AssertionError("owner path read picks itself")))
+    monkeypatch.setattr(server, "get_league_draft_context",
+                        MagicMock(side_effect=AssertionError("owner path read the draft itself")))
+    with server._sessions_lock:
+        sess = dict(server._sessions[TOKEN])
+    used = []
+    picks = [{"pick_id": "p-2027", "season": 2027, "original_user_id": UID}]
+    draft = {"season": 2026, "confidence": "high", "status": "drafted"}
+    ctx = server._owner_generation_context(
+        sess=sess, service=sess["service"], league=sess["league"], players={}, seed_map={},
+        user_elo={}, user_roster=["g1", "g2"], scoring_format="1qb_ppr", fairness_threshold=0.5,
+        captured_rankings={}, captured_preferences={},
+        captured_config={"owner_bilateral_enabled": 1.0},
+        job_draft_picks=lambda: used.append("picks") or picks,
+        job_draft_context=lambda: used.append("draft") or draft)
+    assert sorted(used) == ["draft", "picks"]
+    assert ctx is not None
+
+
+def _owner_on_and_spied(monkeypatch):
+    """The owner path on, and a record of whether its context capture raised."""
+    monkeypatch.setattr(server, "_owner_enabled", lambda league_id: True)
+    monkeypatch.setitem(server._trade_service_mod._cfg, "owner_bilateral_enabled", 1.0)
+    outcomes = []
+    real = server._owner_generation_context
+
+    def spy(**kw):
+        try:
+            ctx = real(**kw)
+        except Exception as err:
+            outcomes.append(type(err).__name__)
+            raise
+        outcomes.append("built")
+        return ctx
+    monkeypatch.setattr(server, "_owner_generation_context", spy)
+    return outcomes
+
+
+def _fail_in_worker(monkeypatch, name):
+    """`server.<name>` raises, only while the worker (`_run_trade_job`) runs."""
+    real_fn, real_run = getattr(server, name), server._run_trade_job
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, name, MagicMock(side_effect=RuntimeError("db")))
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, name, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+
+
+def _kick_sync():
+    server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                              scoring_format="1qb_ppr", opponents_total=1, synchronous=True)
+
+
+def test_the_owner_context_builds_from_the_job_s_reads(live, monkeypatch):
+    outcomes = _owner_on_and_spied(monkeypatch)
+    _kick_sync()
+    assert outcomes == ["built"]
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_failed_read_still_forfeits_the_owner_arm(live, monkeypatch, read):
+    """#487 models-eng: when the owner path read for itself, a raising picks or
+    draft read failed its context capture and the owner arm forfeited
+    (`owner_context_unavailable`). The shared memos keep that: the owner view
+    re-raises the memoized failure, never serving cards without draft
+    protection. The stamp check still degrades to empty."""
+    outcomes = _owner_on_and_spied(monkeypatch)
+    _fail_in_worker(monkeypatch, read)
+    _kick_sync()
+    assert outcomes == ["RuntimeError"]
