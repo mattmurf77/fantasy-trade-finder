@@ -29565,9 +29565,11 @@ def cron_hourly_tick():
 def cron_daily_tick():
     """Once per day (Render cron `notif-daily-tick`). Authenticates, starts
     ONE single-flight runner thread (`backend/daily_tick.py`) and returns
-    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one sync
-    gunicorn worker (`--timeout 120`, render.yaml) serves every request, and
-    the inline tick was killed at 120 s every day (runbook § Cron schedule).
+    **202 `{"ok": true, "started": <bool>}` at once**. Never inline: one
+    gunicorn worker (render.yaml) serves every request. Under the old sync
+    worker the inline tick was killed at the 120 s timeout every day (runbook
+    § Cron schedule); under `--threads 4` (#398) it would hold a request
+    thread and the GIL for minutes.
     `started: false` means a run is already in flight (single-flight, not a
     queue).
 

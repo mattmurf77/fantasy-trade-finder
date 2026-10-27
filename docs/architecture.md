@@ -747,7 +747,7 @@ External scheduler (Render cron) hits four endpoints:
 
 ### Daily-tick runner (S3 fix, 2026-10-22)
 
-[Scope](plans/daily-tick-fix/scope.md) · [code-walk](plans/daily-tick-fix/code-walk.md). Render's `notif-daily-tick` cron is an HTTP POST into the one sync gunicorn worker (`--workers 1 --timeout 120`), so the tick must never do its work on the request thread; done inline, it was killed at 120 s every day.
+[Scope](plans/daily-tick-fix/scope.md) · [code-walk](plans/daily-tick-fix/code-walk.md). Render's `notif-daily-tick` cron is an HTTP POST into the single gunicorn web worker, so the tick must never do its work on the request thread. When S3 shipped that worker was sync (`--workers 1 --timeout 120`) and the inline tick was killed at 120 s every day. Since #398 it runs `--threads 4`, where the timeout no longer bounds a request, but an inline tick would still hold a request thread and the GIL for minutes during user traffic.
 
 - **Wiring:** `cron_daily_tick` runs `_require_cron_auth()`, takes `now`, calls `daily_tick.start(_daily_tick_steps(), now, log=log)` and returns `202 {ok, started}`. `backend/daily_tick.py` holds a module lock taken non-blocking (a second tick while one runs gets `started: false` and a warning with the run's age) and runs the table on one `daily-tick-runner` daemon thread. Each step is wrapped in `try/except Exception` and logs `daily-tick step=<key> ms=<int> outcome=<ok|skipped|error> detail=<…>`; the lock is released in `finally`.
 - **Step table** (`server._daily_tick_steps()`, in run order; permanent-loss writers first, CPU-heavy last):

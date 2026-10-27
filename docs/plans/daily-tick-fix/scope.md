@@ -206,5 +206,5 @@ self-renewal fix land."
   run is in flight logs a warning with that run's age, so it is visible. Restarting the worker clears it.
 - **A worker restart mid-run** (deploy at 13:30, OOM) loses the rest of that run. Each step is idempotent and the
   weekday gates are `>=`, so the next day retries. The permanent-loss writers go first.
-- **CPU:** the run shares the free instance's CPU with the 200 ms tap path for its duration. Steps 1–6 are mostly
+- **CPU:** the run shares the web worker's CPU with the 200 ms tap path for its duration (the free instance when this was written; since #376/#398 the `standard` plan with `--threads 4`, one GIL). Steps 1–6 are mostly
   I/O, and the CPU-heavy steps (7 once re-enabled, 8) run last.
