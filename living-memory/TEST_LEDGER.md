@@ -1,3 +1,34 @@
+## 2026-10-27 — Concurrent swipes no longer lose a taste update (user_taste upsert)
+
+Gates: head-eng's assigned bug fix (release-lead's prod log: `UniqueViolation` on `user_taste_pkey` at `taste_service.py:363`, 20:23:49Z). The scope block is waived: this is a bug fix that makes F5 store what it already claimed to store. There is no route, schema, event, flag or knob change, and the data dictionary and config reference each gain a line. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest on SQLite and on a local Postgres 18.
+
+- **The bug:**
+  - Two outcomes in flight each read the user's taste rows, then wrote them with delete + insert.
+  - On Postgres the second insert failed on the primary key and the update was dropped (logged non-fatal). On SQLite it silently replaced the first.
+  - Either way one swipe's reward was lost.
+- **The fix:** `database.merge_user_taste_rows`, called by `update_taste_from_outcome`, does one transaction:
+  - an `UPDATE … RETURNING` writes the computed weights to rows still as read (`updated_at` unchanged);
+  - every other row is upserted on the PK as the reward, added to whatever is there: a row written, created or deleted since the read, or one that was never there;
+  - rows left below `taste_epsilon` on both vectors are deleted (GC on update).
+- **Tests:** `test_taste_concurrent_writes.py`, 5 tests on SQLite, plus Postgres when `FTF_TEST_POSTGRES_URL` is set.
+  - Threads read before either writes:
+    - two first swipes;
+    - two swipes on 10-day-old rows;
+    - a pass that empties a row next to a like, in both write orders;
+    - and the one-swipe baseline.
+  - **On main's code:** 8 of 10 fail. The Postgres cases log the prod error verbatim; only the baseline passes.
+  - **With the fix:** 10/10 pass. The taste-adjacent suites (deck taste, frozen taste, exploration, account deletion, age pref, bake-off serving, evidence pack, nightly lean, scorer contract) all pass, 207 tests.
+- **Sabotage, each red then restored (5):**
+  - the merge overwrites instead of adding (6 red);
+  - no "still as read" check (4);
+  - a non-matching row inserts its computed weights, not the reward (6);
+  - no GC after the write (2);
+  - GC only after a merge (2).
+- **Not covered (follow-ups):**
+  - the read-side GC in `load_taste_vectors` still deletes by what it read, so it can drop a reward written in between;
+  - `replace_user_taste_prior` is still delete + insert, so two concurrent board saves can hit the same primary-key error;
+  - CI has no Postgres, so the Postgres cases run only where the URL is set.
+
 ## 2026-10-27 — S0 stamp hashes the picks the worker read (#484 QA P2-1); deck pipeline v3
 
 Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 2 → 3: `_run_trade_job`'s `_job_draft_picks` now calls `_note_job_picks_read`, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
