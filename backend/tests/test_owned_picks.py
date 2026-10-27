@@ -567,6 +567,18 @@ def test_flaked_drafts_on_a_first_sync_includes_the_season(
     assert _sync_seasons(monkeypatch, []) == [2026, 2027, 2028]
 
 
+def test_prior_grid_read_error_falls_back_to_including_the_season(
+        _no_cached_verdict, monkeypatch):
+    """A failed prior-grid read is no corroboration: an empty read with no
+    verdict includes the season (D-089), even over a grid that excludes it."""
+    assert _sync_seasons(monkeypatch, _COMPLETE_2026) == [2027, 2028, 2029]
+
+    def _read_fails(*a, **k):
+        raise RuntimeError("draft_picks read failed")
+    monkeypatch.setattr(srv, "load_draft_picks", _read_fails)
+    assert _sync_seasons(monkeypatch, []) == [2026, 2027, 2028]
+
+
 def test_live_drafts_read_still_wins_in_both_directions(
         _no_cached_verdict, monkeypatch):
     """The prior grid is consulted only on an EMPTY read: a live answer

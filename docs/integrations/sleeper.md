@@ -211,7 +211,9 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
   spent class until the next good read, and each flip moved the league's
   `rfp1` fingerprint. A first sync (no prior rows) and a grid that carries the
   season are unchanged; a season rollover ends it. Propose and validate are
-  unchanged.
+  unchanged. Known cost: a commissioner reset (the draft back to
+  `pre_draft`) followed only by `/drafts` flakes keeps an undrafted season
+  hidden until the next non-empty `/drafts` read.
 
 ### 3.3 GraphQL shapes
 - `league_players` rows: `{player_id, settings:{otb: <roster_id>|null,
