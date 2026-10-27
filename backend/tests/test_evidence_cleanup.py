@@ -2,9 +2,11 @@
 
 - (A) F5 (_drop_stale_deck_evidence) drops an undelivered pre-built deck's
   evidence and notes the drop as this process's eviction (_deck_evicted_at,
-  which also leaves _deck_held), so a later miss on it (its stored pages
-  served, then its row gone) reads evicted_split, never other (models-lead's
-  ruling via head-eng; release-lead's #451 QA P2 was restart_split).
+  instead of #457's removal from _deck_held), so a later miss on it past its
+  effective stored count (its stored pages served, then its row gone) reads
+  evicted_split, never other (models-lead addendum D1). Below it: other.
+  An evicted_split miss at or past the pack-recorded stored count logs
+  f5_past_stored apart.
 - (B) A deploy overlap's second writer logs the cause the CAS merge kept,
   with its own as local_cause, at WARNING (#439/#445 QA P3-1).
 - (C) The ledger guard warning per ledger; its rate-limit state reset per
@@ -87,7 +89,8 @@ def test_a_deck_f5_dropped_reads_evicted_split_once_its_row_goes(
                 time.monotonic() - server._PREGEN_TTL_SECONDS - 60)
         assert server._drop_stale_deck_evidence() == 1
         assert "evidence" not in server._trade_jobs[job_id]
-        assert job_id not in server._deck_held and job_id in server._deck_evicted_at
+        assert job_id in server._deck_evicted_at and job_id in server._deck_f5_dropped
+        assert job_id in server._deck_held                  # D1: instead of #457's removal
         if path == "f5_then_job_evicted":
             with server._trade_jobs_lock:                  # the cleanup loop's eviction lines
                 job = server._trade_jobs.pop(job_id)       # (its tick would also expire sessions)
@@ -428,3 +431,63 @@ def test_the_decks_own_row_back_leaves_the_entry_unsplit(deferred, monkeypatch):
     view(job_id, 40)
     run = run_of(engine, job_id)
     assert (row_gone(run), run.get("upgrade_miss_row_gone_why", {})) == ({"40": 90}, {})
+
+
+
+# ── (A2) models-lead addendum D1: the effective stored count, and f5_past_stored ──
+
+def _f5_drop(job_id):
+    with server._trade_jobs_lock:
+        server._trade_jobs[job_id]["finished_at"] = (
+            time.monotonic() - server._PREGEN_TTL_SECONDS - 60)
+    assert server._drop_stale_deck_evidence() == 1
+
+
+def test_an_f5_dropped_deck_is_other_below_its_effective_stored_count(deferred):
+    """C3 (c1) still applies: an F5 drop, then a miss below the effective
+    stored count (the row present, 90 stored) is other; past it,
+    evicted_split."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(90)
+    _f5_drop(job_id)
+    assert server._upgrade_miss_cause(job_id, 40, 90, True) == "other"
+    assert server._upgrade_miss_cause(job_id, 90, 90, True) == "evicted_split"
+    assert server._upgrade_miss_cause(job_id, 40, 0, True) == "evicted_split"   # the row gone
+
+
+def test_f5_past_stored_is_only_an_f5_evicted_miss_past_the_recorded_count(deferred):
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(90)
+    _f5_drop(job_id)
+    run = {"stored_count": 90}
+    assert server._f5_past_stored(job_id, 95, "evicted_split", run) == 90
+    assert server._f5_past_stored(job_id, 90, "evicted_split", run) == 90
+    assert server._f5_past_stored(job_id, 40, "evicted_split", run) is None
+    assert server._f5_past_stored(job_id, 95, "other", run) is None
+    assert server._f5_past_stored(job_id, 95, "evicted_split", {}) is None
+    assert server._f5_past_stored("never-dropped", 95, "evicted_split", run) is None
+
+
+def test_an_f5_past_stored_miss_logs_apart_and_keeps_its_cause(deferred, monkeypatch, caplog):
+    """The anomaly can't happen for real (only an F5 deck's stored pages are
+    ever delivered), so the cause is forced for card 40 with the pack's
+    recorded count lowered under it: the miss stays evicted_split and one
+    f5_past_stored line goes to models-lead."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(90)
+    _f5_drop(job_id)
+    for cursor in (0, 30):
+        assert deck_ids(client.get(f"/api/trades/status?deck={job_id}&cursor={cursor}",
+                                   headers=HEADERS).get_json())
+    the_row_goes(job_id, "evicted")
+    real = server._f5_past_stored
+    monkeypatch.setattr(server, "_f5_past_stored",
+                        lambda deck, index, cause, run: real(deck, index, cause, {"stored_count": 30}))
+    with caplog.at_level("WARNING"):
+        view(job_id, 40)
+    run = run_of(engine, job_id)
+    assert run["upgrade_miss_cards"] == {"40": "evicted_split"}
+    lines = [r.getMessage() for r in caplog.records if "f5_past_stored" in r.getMessage()]
+    assert lines == [f"[evidence] f5_past_stored job={job_id} index=40 pack_stored=30: an F5-dropped "
+                     "deck's evicted_split miss past its recorded stored pages (a "
+                     "delivery-recording gap?)"]
