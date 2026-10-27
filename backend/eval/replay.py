@@ -129,6 +129,12 @@ are compared (R2.5 (2)). The model_config a scorer reads is pinned, passed
 to it explicitly (get_scorer(name, config=...)) and recorded on
 EvalRun.config (R5.2 (a)); the read's as_of and settle lag are chosen by
 settled_read (R5.2 (b)).
+
+Every EvalRun is self-describing (models-lead R6.3): `config` is the pinned
+record the scorer read, or {} (explicitly empty) when it reads none, never
+None; `model_config_sha256` is the live model_config's SHA-256 at run time,
+whatever the scorer read; `code_sha` is the deployed commit (code_sha()); and
+`as_of`, `settle_lag_days` and `exclusion_rule_version` describe the read.
 """
 
 from __future__ import annotations
@@ -138,6 +144,7 @@ import json
 import math
 import os
 import random
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -242,11 +249,43 @@ class EvalRun:
     eval_start: str | None = None
     ess_min: float = DEFAULT_ESS_MIN
     exclusion_rule_version: int = EXCLUSION_RULE_VERSION
-    config: dict | None = None       # the pinned model_config the run read (R5.2 (a))
+    config: dict | None = None       # the pinned model_config the run read (R5.2 (a)); {} if none
+    model_config_sha256: str | None = None   # the live model_config at run time (R6.3)
+    code_sha: str | None = None      # the commit that ran (R6.3)
+    as_of: str | None = None         # the read's clock (R5.2 (b))
+    settle_lag_days: float | None = None     # the read's settle lag, None when as_of was given
 
     @property
     def unreliable(self) -> bool:
         return any(m.ess < self.ess_min for m in self.metrics.values())
+
+
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+_code_sha: str | None = None
+
+
+def code_sha() -> str:
+    """The commit this code runs at: Render's RENDER_GIT_COMMIT when deployed,
+    else `git rev-parse HEAD`, else "unknown". Read once per process."""
+    global _code_sha
+    if _code_sha is None:
+        sha = os.environ.get("RENDER_GIT_COMMIT")
+        if not sha:
+            try:
+                sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT,
+                                     capture_output=True, text=True, timeout=5,
+                                     check=True).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                sha = ""
+        _code_sha = sha or "unknown"
+    return _code_sha
+
+
+def scorer_config(scorer) -> dict:
+    """What an EvalRun records as the scorer's config (R6.3): the pinned
+    record a configured scorer (`takes_config`) read, or {} for one that reads
+    none. A configured scorer always holds its pin (get_scorer)."""
+    return scorer.config if getattr(scorer, "takes_config", False) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -338,13 +377,18 @@ def evaluate(
     bootstrap: int = DEFAULT_BOOTSTRAP,
     seed: int = 0,
     curve: dict[int, float] | None = None,
+    as_of: str | None = None,
+    settle_lag_days: float | None = None,
 ) -> EvalRun:
     """Replay `decks` under `scorer`. Enforces the time-ordered protocol:
     a fit-capable scorer requires eval_start, is fitted on pre-split decks
     only, and is evaluated on post-split decks only. The scorer's pinned
     model_config (`scorer.config`, set by get_scorer(name, config=...);
     R5.2 (a)) is recorded on EvalRun.config, so building the scorer with
-    the recorded config replays the run."""
+    the recorded config replays the run. `as_of` and `settle_lag_days` are
+    the read's (recorded, not applied: the decks are already loaded as of
+    it); the live model_config's SHA-256 and the code sha are taken here
+    (R6.3)."""
     fit_capable = hasattr(scorer, "fit")
     if fit_capable and not eval_start:
         raise ValueError(
@@ -371,7 +415,11 @@ def evaluate(
         exposure_positions=len(curve),
         eval_start=eval_start,
         ess_min=ess_min,
-        config=getattr(scorer, "config", None),
+        config=scorer_config(scorer),
+        model_config_sha256=_value_model.model_config_sha256(),
+        code_sha=code_sha(),
+        as_of=as_of,
+        settle_lag_days=settle_lag_days,
     )
 
     # A data-quality count: every deck loaded (both sides of a split), any exclusion.
@@ -741,16 +789,17 @@ def main(argv=None) -> int:
     # One pin for every scorer in the run: a recorded one to replay, else live now.
     config = (json.loads(args.config) if args.config
               else _value_model.pin_config(_value_model.SCORE_CONFIG))
+    read = {"as_of": as_of, "settle_lag_days": None if args.as_of else args.settle_lag_days}
     baseline = evaluate(get_scorer(args.baseline, config=config), decks,
                         eval_start=args.eval_start, ess_min=args.ess_min,
-                        bootstrap=args.bootstrap, seed=args.seed)
+                        bootstrap=args.bootstrap, seed=args.seed, **read)
     runs = [baseline]
     for name in scorer_names:
         if name == args.baseline:
             continue
         runs.append(evaluate(get_scorer(name, seed=args.seed, config=config), decks,
                              eval_start=args.eval_start, ess_min=args.ess_min,
-                             bootstrap=args.bootstrap, seed=args.seed))
+                             bootstrap=args.bootstrap, seed=args.seed, **read))
     report = render_report(runs, baseline)
     print(report)
 

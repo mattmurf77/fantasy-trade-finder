@@ -46,7 +46,11 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "n_included": run.n_included,
         "excluded": dict(run.excluded),
         "exclusion_rule_version": run.exclusion_rule_version,
-        "config": run.config,          # pinned model_config values + its SHA-256 (R5.2 (a))
+        "config": run.config,          # pinned model_config values + its SHA-256 (R5.2 (a)); {} if none
+        "model_config_sha256": run.model_config_sha256,   # the live snapshot at run time (R6.3)
+        "code_sha": run.code_sha,
+        "as_of": run.as_of,
+        "settle_lag_days": run.settle_lag_days,
         "missing_inputs_decks": run.missing_inputs_decks,
         "partial_run_decks": run.partial_run_decks,
         "in_flight_decks": run.in_flight_decks,
