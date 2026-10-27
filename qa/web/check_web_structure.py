@@ -692,15 +692,20 @@ def run() -> int:
          "In the iPhone app, sign in with ESPN on ESPN's own page inside the app, or sign in another "
          "way and go to Settings → Leagues → Link an ESPN league. Your ESPN password stays on ESPN's "
          "sign-in page, and the app lists your leagues."),
+        # R28.17 B: the staged "confirm the login is yours" sentence is
+        # withdrawn (ESPN sign-in keeps no cookies), so the live wording stays.
         ("Q5 cookie paragraph", "How do I connect an ESPN league?", 1,
          "The app keeps two ESPN sign-in cookies: espn_s2 (encrypted) and SWID (your ESPN member ID). "
-         "They're used to confirm the login is yours, import your leagues and send trades you "
-         "approve. Disconnect any time in Settings."),
+         "They're used to import your leagues and to send trades you approve. Disconnect any time in "
+         "Settings."),
+        # R28.17 B: paragraph 1 in full; OA-8's second sentence is dropped.
         ("Q6 first paragraph", "How do I connect an MFL league?", 0,
          "In the iPhone app, sign in with your MFL username and password, or sign in another way and "
          "go to Settings → Leagues → Link an MFL league, where you can also enter a league ID or a "
-         "myfantasyleague.com league URL. Sign in with your MFL username and password, or enter a "
-         "league ID or a myfantasyleague.com league URL."),
+         "myfantasyleague.com league URL."),
+        ("Q6 second paragraph", "How do I connect an MFL league?", 1,
+         "Your password goes to MFL to sign you in. It's never stored. Your MFL username and the "
+         "encrypted session MFL returns are kept."),
     )
 
     def inline_text(fragment: str) -> str:
