@@ -966,7 +966,9 @@ _EXPORT_TABLES: tuple = (
     ("leagues",                 "leagues_table",                 "user_id",         ("espn_auth", "platform_auth")),
     ("bad_trade_flags",         "bad_trade_flags_table",         "user_id",         ()),
     ("trade_impressions",       "trade_impressions_table",       "user_id",         ()),
-    ("app_feedback",            "app_feedback_table",            "user_id",         ()),
+    # session_key is NULL on every user-linked row (attach clears it); omitted
+    # anyway so a token hash can never leave in an export.
+    ("app_feedback",            "app_feedback_table",            "user_id",         ("session_key",)),
     ("espn_credentials", "espn_credentials_table", "user_id", ("espn_s2_encrypted",)),
     ("mfl_credentials", "mfl_credentials_table", "user_id", ("cookie_encrypted",)),
     ("deck_impressions", "deck_impressions_table", "user_id", ()),
