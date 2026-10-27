@@ -12,6 +12,7 @@ Gates: QA follow-ups to #468 (stacked on it). No new event, prop, route or schem
   - the fallback identity keeps the partner;
   - the LRU evicts the least recently served job (`move_to_end`).
 - **Sabotage, each red then restored** (9): no restart; no deletion skip; no worker `except`; the lease ignored; the exit warning not forced; no idle tick; no `atexit`; the fallback without the partner; no `move_to_end`.
+- **Full suite** on `28c63587`: `pytest backend/tests -q` → 9281 passed, 2 skipped, 0 failed (12m08s).
 - **Not covered:** a deletion that starts between `deleting()` and `active()` still holds the worker for that deletion's length (a narrow race). A skipped write for a deletion that then aborts is lost (one analytics row).
 
 ## 2026-10-27 — `deck_i1_check` follow-ups: each card counted once per job, one bounded worker, drained in tests (#468)
