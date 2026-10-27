@@ -4356,7 +4356,8 @@ def _store_trade_page_row(job_id: str) -> bool:
                     ev.stored_ids = {c.get("impression_id") for c in cards} - {None}
                     ev.truncated = len(job.get("cards") or []) > len(cards)
                     ev.pages_bytes = len(blob)
-                    evidence = ev.blob(stored_count=len(cards))
+                    evidence_input = ev.blob_input(stored_count=len(cards))
+                evidence = _deck_blob(evidence_input)   # encoded outside ev.lock
             written = False
             try:
                 written = _db.save_trade_page({
@@ -4667,19 +4668,20 @@ class _DeckEvidence:
 
     def closure(self, rows: list[dict], exclude=()) -> list[dict]:
         """Under `lock`: the held diagnostic snapshots `rows` reference, transitively."""
-        pending = set().union(*(_diagnostic_refs(json.loads(r["features_json"] or "null"))
-                                for r in rows))
-        found = {}
-        while pending:
-            sid = pending.pop()
-            if sid in self.diagnostics and sid not in found and sid not in exclude:
-                found[sid] = _unpack_row(self.diagnostics[sid])
-                pending |= _diagnostic_refs(json.loads(found[sid]["payload_json"]))
-        return list(found.values())
+        return _diagnostic_closure(self.diagnostics, rows, exclude)
 
     def plan(self):
-        """Under `lock`: ((first, its snapshots), (rest, its snapshots),
-        candidate_set, upgrades) for a write now.
+        """Under `lock`: plan_input() and _deck_plan() in one step. The flush
+        takes the input under the lock and builds the plan outside it."""
+        return _deck_plan(self.plan_input())
+
+    def plan_input(self):
+        """Under `lock`, cheaply: what _deck_plan() builds ((first, its
+        snapshots), (rest, its snapshots), candidate_set, upgrades) for a write
+        now from, by reference: each row's packed bytes with the fields it gets,
+        the ghost rows, a shallow copy of the snapshots. Everything referenced is
+        immutable or replaced, never changed in place, so the plan built from it
+        outside the lock is the one plan() built under it.
 
         Tiers by head-eng's ruling 17, ghost > first30 > delivered > archive: a
         ghost is 'ghost' (never delivered, narrow even inside the first 30); a
@@ -4701,43 +4703,39 @@ class _DeckEvidence:
         delivered = at.keys()
         for iid in self.withdrawn - delivered:   # C-b: a dropped card is never written
             self.rows.pop(iid, None)
+        diagnostics = dict(self.diagnostics)
         if self.partial:
-            first = [{**_unpack_row(packed), "evidence_tier": "partial_run", "delivered_at": at[iid]}
+            first = [(packed, {"evidence_tier": "partial_run", "delivered_at": at[iid]})
                      for iid, (_, packed) in self.rows.items() if iid in delivered]
-            first += [{**row, "evidence_tier": "partial_run", "delivered_at": None}
+            ghosts = [(row, {"evidence_tier": "partial_run", "delivered_at": None})
                       for row in self.ghosts.values()]
-            return (first, self.closure(first)), ([], []), self.candidate_set, {}
+            return first, ghosts, None, diagnostics, self.candidate_set, {}
         if self.packed:
             # R4.2's revised C3: full rows for the first 30 (C4), the ghosts
             # (C5) and, on a C8 archive deck, every card; every other card is
             # packed, its delivery in the pack. A view upgrades it later.
-            first = [{**_unpack_row(packed),
-                      "evidence_tier": "first30" if index < _EVIDENCE_FIRST_N else "archive",
-                      "delivered_at": at.get(iid)}
+            first = [(packed, {"evidence_tier": "first30" if index < _EVIDENCE_FIRST_N else "archive",
+                               "delivered_at": at.get(iid)})
                      for iid, (index, packed) in self.rows.items()
                      if index < _EVIDENCE_FIRST_N or self.archive]
-            first += [{**row, "evidence_tier": "ghost", "delivered_at": None}
+            ghosts = [(row, {"evidence_tier": "ghost", "delivered_at": None})
                       for row in self.ghosts.values()]
             upgrades = {iid: at[iid] for iid in sorted(delivered - self.marked)
                         if iid in self.written}
-            return (first, self.closure(first)), ([], []), self.candidate_set, upgrades
+            return first, ghosts, None, diagnostics, self.candidate_set, upgrades
         first, rest = [], []
         for iid, (index, packed) in self.rows.items():
             if index < _EVIDENCE_FIRST_N:
-                first.append({**_unpack_row(packed), "evidence_tier": "first30",
-                              "delivered_at": at.get(iid)})
+                first.append((packed, {"evidence_tier": "first30", "delivered_at": at.get(iid)}))
             elif iid in delivered:
-                first.append({**_unpack_row(packed), "evidence_tier": "delivered",
-                              "delivered_at": at[iid]})
+                first.append((packed, {"evidence_tier": "delivered", "delivered_at": at[iid]}))
             else:
-                rest.append({**_unpack_row(packed), "delivered_at": None,
-                             "evidence_tier": "archive" if self.archive else "full_interim"})
-        first += [{**row, "evidence_tier": "ghost", "delivered_at": None}
+                rest.append((packed, {"delivered_at": None,
+                                      "evidence_tier": "archive" if self.archive else "full_interim"}))
+        ghosts = [(row, {"evidence_tier": "ghost", "delivered_at": None})
                   for row in self.ghosts.values()]
         upgrades = {iid: at[iid] for iid in sorted(delivered - self.marked - self.rows.keys())}
-        first_diag = self.closure(first)
-        rest_diag = self.closure(rest, exclude={d["snapshot_id"] for d in first_diag})
-        return (first, first_diag), (rest, rest_diag), self.candidate_set, upgrades
+        return first, ghosts, rest, diagnostics, self.candidate_set, upgrades
 
     def wrote(self, rows: list[dict], candidate_set=None, diagnostics=(), upgrades=()) -> None:
         """Under `lock`: drop the written snapshots (the budget rule)."""
@@ -4754,36 +4752,37 @@ class _DeckEvidence:
         self.marked.update(upgrades)
 
     def blob(self, stored_count: int | None = None) -> bytes | None:
-        """Under `lock`: the page store's evidence_blob (CompressedJSON): the not
-        yet written snapshots of the stored cards, every not yet written ghost
-        row, the diagnostic snapshots and the candidate set; None once nothing
-        is left. `stored_count`: the store's count, before its row is written
-        (else the deck's)."""
+        """Under `lock`: blob_input() and _deck_blob() in one step. The store
+        and the shrink take the input under the lock and encode outside it."""
+        return _deck_blob(self.blob_input(stored_count))
+
+    def blob_input(self, stored_count: int | None = None):
+        """Under `lock`, cheaply: what _deck_blob() encodes as the page store's
+        evidence_blob, by reference (the stored cards' packed rows, the ghost
+        rows, a shallow copy of the snapshots, the held build-time writes),
+        or None once nothing is left. `stored_count`: the store's count, before
+        its row is written (else the deck's)."""
         if stored_count is None:
             stored_count = self.stored_count
-        rows = [_unpack_row(packed) for iid, (_, packed) in self.rows.items()
+        rows = [packed for iid, (_, packed) in self.rows.items()
                 if self.stored_ids is None or iid in self.stored_ids]
         held = self.trade_impressions or self.generated or self.bakeoff_slim
         if not (rows or self.ghosts or self.candidate_set or held):
             return None
-        impressions = None
-        if self.trade_impressions is not None:   # the stored cards' only
-            impressions = _unpack_row(self.trade_impressions)
-            impressions["cards"] = impressions["cards"][:stored_count]
-        from .database import CompressedJSON
-        return CompressedJSON.encode({
-            "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
-            "pages_bytes": self.pages_bytes, "rows": rows,
-            "ghosts": list(self.ghosts.values()), "diagnostics": self.closure(rows),
-            "candidate_set": self.candidate_set, "trade_impressions": impressions,
-            # S5: the slim bakeoff_runs row (the full one can be megabytes).
-            "bakeoff_run": self.bakeoff_slim,
-            "generated": self.generated, "served_at": self.served_at,
-            "truncated": self.truncated,
-            # S8: the packed-mode fields a delivery after the job left needs.
-            "packed": self.packed, "page_store": self.page_store, "league_id": self.league_id,
-            "built_at": self.built_at, "run_meta": self.run_meta,
-            "pack_written": self.pack is not None, "deck_source": self.deck_source})
+        return {"rows": rows, "diagnostics": dict(self.diagnostics), "stored_count": stored_count,
+                "trade_impressions": self.trade_impressions, "fields": {
+                    "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
+                    "pages_bytes": self.pages_bytes, "ghosts": list(self.ghosts.values()),
+                    "candidate_set": self.candidate_set,
+                    # S5: the slim bakeoff_runs row (the full one can be megabytes).
+                    "bakeoff_run": self.bakeoff_slim,
+                    "generated": self.generated, "served_at": self.served_at,
+                    "truncated": self.truncated,
+                    # S8: the packed-mode fields a delivery after the job left needs.
+                    "packed": self.packed, "page_store": self.page_store,
+                    "league_id": self.league_id, "built_at": self.built_at,
+                    "run_meta": dict(self.run_meta), "pack_written": self.pack is not None,
+                    "deck_source": self.deck_source}}
 
     @classmethod
     def from_row(cls, user_id: str, deck_job_id: str, row: Mapping | None, lease) -> "_DeckEvidence":
@@ -4826,6 +4825,68 @@ class _DeckEvidence:
                     ev.deliveries = [list(d) for d in ev.pack.run.get("deliveries") or []]
         ev.sealed = ev.complete = True
         return ev
+
+
+# The evidence lock (`ev.lock`) is held only to take an input by reference; the
+# decoding, planning and encoding below run outside it, so a next page's
+# delivery never waits on them (its marking takes only `ev.lock`). Their
+# results go to the DB under _deck_evidence_write_lock, as before.
+
+def _diagnostic_closure(diagnostics: Mapping, rows: list[dict], exclude=()) -> list[dict]:
+    """The diagnostic snapshots `rows` reference, transitively, from
+    `diagnostics` (a deck's held snapshots, or a copy of them)."""
+    pending = set().union(*(_diagnostic_refs(json.loads(r["features_json"] or "null"))
+                            for r in rows))
+    found = {}
+    while pending:
+        sid = pending.pop()
+        if sid in diagnostics and sid not in found and sid not in exclude:
+            found[sid] = _unpack_row(diagnostics[sid])
+            pending |= _diagnostic_refs(json.loads(found[sid]["payload_json"]))
+    return list(found.values())
+
+
+def _deck_plan(plan_input):
+    """Outside `ev.lock`: _DeckEvidence.plan_input()'s rows unpacked and their
+    snapshots closed over, as plan() always built them. A partial or packed
+    run has no `rest` (None), and no closure for it."""
+    first_rows, ghosts, rest_rows, diagnostics, candidate_set, upgrades = plan_input
+    first = [{**_unpack_row(packed), **fields} for packed, fields in first_rows]
+    first += [{**row, **fields} for row, fields in ghosts]
+    first_diag = _diagnostic_closure(diagnostics, first)
+    if rest_rows is None:
+        return (first, first_diag), ([], []), candidate_set, upgrades
+    rest = [{**_unpack_row(packed), **fields} for packed, fields in rest_rows]
+    rest_diag = _diagnostic_closure(diagnostics, rest,
+                                    exclude={d["snapshot_id"] for d in first_diag})
+    return (first, first_diag), (rest, rest_diag), candidate_set, upgrades
+
+
+def _deck_blob(blob_input) -> bytes | None:
+    """Outside `ev.lock`: _DeckEvidence.blob_input() encoded as the page
+    store's evidence_blob (CompressedJSON), byte for byte as blob() always
+    encoded it: the not yet written snapshots of the stored cards, every not
+    yet written ghost row, the diagnostic snapshots and the candidate set."""
+    if blob_input is None:
+        return None
+    rows = [_unpack_row(packed) for packed in blob_input["rows"]]
+    impressions = None
+    if blob_input["trade_impressions"] is not None:   # the stored cards' only
+        impressions = _unpack_row(blob_input["trade_impressions"])
+        impressions["cards"] = impressions["cards"][:blob_input["stored_count"]]
+    fields = blob_input["fields"]
+    from .database import CompressedJSON
+    return CompressedJSON.encode({
+        "v": fields["v"], "deck_job_id": fields["deck_job_id"],
+        "pages_bytes": fields["pages_bytes"], "rows": rows, "ghosts": fields["ghosts"],
+        "diagnostics": _diagnostic_closure(blob_input["diagnostics"], rows),
+        "candidate_set": fields["candidate_set"], "trade_impressions": impressions,
+        "bakeoff_run": fields["bakeoff_run"], "generated": fields["generated"],
+        "served_at": fields["served_at"], "truncated": fields["truncated"],
+        "packed": fields["packed"], "page_store": fields["page_store"],
+        "league_id": fields["league_id"], "built_at": fields["built_at"],
+        "run_meta": fields["run_meta"], "pack_written": fields["pack_written"],
+        "deck_source": fields["deck_source"]})
 
 
 # ── ADR-025 stage 2: the packed deck-evidence writer (S8) ────────────────────
@@ -5736,7 +5797,7 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
         if not undelivered:
             pack_input = (_deck_pack_input(ev) if ev.packed and not ev.partial and ev.pack is None
                           else None)
-            (first, first_diag), (rest, rest_diag), candidate_set, upgrades = ev.plan()
+            plan_input = ev.plan_input()      # built below, outside ev.lock
             covered, ev.pending = ev.pending, set()
             served_at = ev.served_at
             packed_path = ev.packed and not ev.partial
@@ -5749,6 +5810,7 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
             with ev.lock:
                 ev.pending_withdrawals = {**held_withdrawals, **ev.pending_withdrawals}
         return
+    (first, first_diag), (rest, rest_diag), candidate_set, upgrades = _deck_plan(plan_input)
     for row in (*first, *rest):   # F2: one served_at per deck, its first delivery
         row["served_at"] = served_at or row["served_at"]
     if candidate_set is not None and ev.packed:
@@ -5791,8 +5853,9 @@ def _deck_evidence_flush(ev: _DeckEvidence) -> None:
     if shrunk and ev.pages_bytes is not None and _trade_page_store_enabled():   # P1 kill knob: no store write
         try:
             with ev.lock:
-                blob = ev.blob()
-            _db.save_trade_page_evidence(ev.user_id, ev.job_id, blob, ev.pages_bytes)
+                blob_input = ev.blob_input()
+            _db.save_trade_page_evidence(ev.user_id, ev.job_id, _deck_blob(blob_input),
+                                         ev.pages_bytes)
         except Exception:
             log.warning("deck-evidence %s: evidence_blob not shrunk", ev.job_id, exc_info=True)
     with ev.lock:
