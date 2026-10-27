@@ -594,6 +594,7 @@ export const useSession = create<SessionState>((set, get) => ({
       isDemo:   true,
     });
     sentrySetUser({ id: demoUser.user_id });   // pseudonymous id only (PRD OQ-1)
+    void initPurchases(demoUser.user_id);
   },
 
   connectLeague: async (sleeperUrl) => {

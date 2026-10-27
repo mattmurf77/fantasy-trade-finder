@@ -1763,7 +1763,19 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # them. `restored` (bool) is whether Restore Purchases actually found an
     # entitlement; a false-heavy series is the "I paid and it's gone"
     # support ticket before it is filed.
-    "paywall_viewed":              frozenset({"source", "platform"}),
+    #
+    # paywall_viewed, #393 (analytics-lead's grant; registered with the M1
+    # emitter, PaywallScreen.tsx): `source` is the CLOSED set
+    #   first_opinion | left_deck | gate | settings | preview_end | unknown
+    # (first_opinion / left_deck = the offer trigger after the first opinion
+    # or on leaving the deck; gate = a locked action's 402 or a pre-check;
+    # preview_end = the free page's end card; settings = Settings › See plans).
+    # `gate` is the 402's reason, verbatim from the server's closed enum
+    #   preview_used | trial_expired | lapsed | never_trialed
+    # (verify_required never reaches the paywall: it opens the VerifySheet).
+    # `kind` is the locked action's family, find | send, which picks the
+    # headline. Both ride ONLY when a locked action opened the paywall.
+    "paywall_viewed":              frozenset({"source", "platform", "gate", "kind"}),
     "paywall_purchase_initiated":  frozenset({"product_id", "source"}),
     "paywall_purchase_completed":  frozenset({"product_id", "source"}),
     "paywall_purchase_failed":     frozenset({"product_id", "user_cancelled"}),
