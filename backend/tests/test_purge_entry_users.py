@@ -101,7 +101,7 @@ def engine(monkeypatch, tmp_path):
         conn.execute(insert(db.accounts_table).values(account_id=ACCT[len("acct_"):],
                                                       created_at=BEFORE))
         _import_rows(conn, ESPN, 1, "espn", "10101")
-        # release-lead's case: a verified Fleeced user also belongs to 10101.
+        # A verified Fleeced user also belongs to 10101 (release-lead's case).
         seed(conn, db.league_members_table, "lm-shared", league_id="10101", user_id=SLEEPER)
         seed(conn, db.recorded_picks_table, "rp", league_id="10101", season=2027, round=1, slot=1,
              overall=1, picking_team_id=ESPN, recorded_by=SLEEPER)
@@ -182,8 +182,10 @@ def test_execute_removes_targets_everywhere_and_keeps_everyone_else(engine, caps
         leagues = {r.sleeper_league_id: r.user_id for r in conn.execute(select(db.leagues_table))}
         recorded = conn.execute(select(db.recorded_picks_table)).one()
     assert (recorded.picking_team_id, recorded.recorded_by) == (accounts.DELETED_USER_PLACEHOLDER, SLEEPER)
-    # 10101 is shared with a live member: kept, importer anonymized. 61408 is solo: gone.
-    assert leagues == {"10101": accounts.DELETED_USER_PLACEHOLDER}
+    # Every league a purged entry user imported is deleted, shared or not
+    # (main's behaviour; #452 D1 was reverted): a remaining member re-links it
+    # and owns the new row, so linker-gated routes keep working.
+    assert leagues == {}
     assert picks["61408_2027_1_0003"].owner_user_id == accounts.DELETED_USER_PLACEHOLDER
     assert picks["61408_2027_1_0004"].owner_user_id == "mfl:61408.f0004"
     # The shared match is anonymized on the entry side; the counterparty's
@@ -469,10 +471,8 @@ def test_postgres_engines_hide_parameters_and_reads_are_read_only(monkeypatch):
 
 # delete_user_data filters on these columns, but they are not user ids: they
 # are reached through an id the purge already discovers (account, device,
-# impression, rank set, inventory, and the leagues a deleted user imported or
-# belongs to, for the shared-league check).
+# impression, rank set, inventory).
 NOT_USER_KEYS = {
-    ("leagues", "sleeper_league_id"), ("league_members", "league_id"),
     ("accounts", "account_id"), ("linked_identities", "account_id"),
     ("sessions", "account_id"), ("entitlements", "account_id"),
     ("subscription_events", "account_id"), ("identity_links", "account_id"),

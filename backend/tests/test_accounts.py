@@ -298,12 +298,9 @@ def test_delete_user_data_matrix(engine):
     remaining_users = rows(d.users_table)
     assert [r.sleeper_user_id for r in remaining_users] == [OTHER]
 
-    # The leagues row USER imported is shared with OTHER, a live member, so
-    # it is kept with the importer anonymized (#452 D1). A solo league is
-    # deleted: test_account_deletion_coverage pins both.
-    (league,) = rows(d.leagues_table)
-    assert league.user_id == accounts.DELETED_USER_PLACEHOLDER
-    assert (counts["leagues_anonymized"], counts["leagues_deleted"]) == (1, 0)
+    # leagues row synced by USER is dropped (recreated from Sleeper's
+    # public API by any member's next session_init).
+    assert rows(d.leagues_table) == []
 
     # trade_matches: shared row is KEPT; the deleted side is tombstoned and
     # the counterparty's side + outcome are untouched.

@@ -595,9 +595,9 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            user_player_skips, notifications, device_tokens,
 #            notification_prefs, notification_events_log, notification_queue,
 #            user_events, wrapped_events, sleeper_credentials,
-#            league_members (own row), leagues (rows this user imported, when
-#            no other live Fleeced user is a member; see ANONYMIZE),
-#            bad_trade_flags (own flags — dedupe_key embeds
+#            league_members (own row), leagues (rows this user synced —
+#            recreated from Sleeper's public API by any member's next
+#            session_init), bad_trade_flags (own flags — dedupe_key embeds
 #            the user id, so anonymizing in place would still retain it),
 #            trade_impressions (own decks), accounts + linked_identities.
 #
@@ -631,11 +631,6 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            they are gone. The row itself stays: other members rely on it.
 #            recorded_picks.picking_team_id → the placeholder where it is a
 #            deleted Fleeced-minted id (entry:*, acct_*; no platform column).
-#            leagues rows this user imported that another live Fleeced user
-#            (a users row outside this deletion) still belongs to, per
-#            league_members: user_id → the placeholder, roster_data /
-#            opponent_data → "[]"; league settings and the team binding stay.
-#            Such a row is deleted with its last live member.
 #   KEEP     player_value_history + model_config (not user-keyed),
 #            draft_picks on Sleeper grids (and legacy rows with no platform)
 #            and recorded_picks.picking_team_id holding a Sleeper id: public
@@ -896,33 +891,8 @@ def _delete_user_data(sleeper_user_id: str,
         _del("notification_queue", db.notification_queue_table)
         _del("wrapped_events", db.wrapped_events_table)
         _del("sleeper_credentials", db.sleeper_credentials_table)
-        # `leagues` holds ONE row per league (the PK is the league id alone),
-        # owned by its first importer. Deleting it by user_id took a SHARED
-        # league away from every other Fleeced member until someone re-linked
-        # it (#452 D1). A row this deletion reaches survives while another
-        # live Fleeced user (a users row outside this deletion) still has a
-        # league_members row in it: the importer becomes the placeholder and
-        # their import snapshot (roster_data / opponent_data, never read
-        # back) is cleared. Otherwise it is deleted, as before. "Reaches":
-        # rows this user imported, plus rows an earlier deletion kept in a
-        # league this user belongs to; those go with their last live member.
-        # Runs before league_members is deleted: it reads this user's rows.
-        lg, lm = db.leagues_table, db.league_members_table
-        reached = set(conn.execute(select(lg.c.sleeper_league_id).where(
-            lg.c.user_id.in_(user_ids)
-            | ((lg.c.user_id == DELETED_USER_PLACEHOLDER)
-               & lg.c.sleeper_league_id.in_(
-                   select(lm.c.league_id).where(lm.c.user_id.in_(user_ids)))))).scalars())
-        live = set(conn.execute(select(lm.c.league_id).join(
-            db.users_table, db.users_table.c.sleeper_user_id == lm.c.user_id).where(
-            lm.c.league_id.in_(reached), lm.c.user_id.notin_(user_ids))).scalars())
-        res = conn.execute(update(lg).where(
-            lg.c.sleeper_league_id.in_(live), lg.c.user_id.in_(user_ids)).values(
-                user_id=DELETED_USER_PLACEHOLDER, roster_data="[]", opponent_data="[]"))
-        counts["leagues_anonymized"] = res.rowcount or 0
-        res = conn.execute(delete(lg).where(lg.c.sleeper_league_id.in_(reached - live)))
-        counts["leagues_deleted"] = res.rowcount or 0
         _del("league_members", db.league_members_table)
+        _del("leagues", db.leagues_table)
         _del("bad_trade_flags", db.bad_trade_flags_table)
         _del("trade_impressions", db.trade_impressions_table)
 
