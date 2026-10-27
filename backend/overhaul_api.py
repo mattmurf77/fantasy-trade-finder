@@ -1004,9 +1004,9 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                                  and b["code"] == "asset_not_owned"), None)
             if readable:
                 # I-2: the shared readable copy as `detail` == `message`, which
-                # OverhaulSummaryScreen's errorDetail(e) shows. Other blocker
-                # messages can still name raw ids, so they keep the client's
-                # own fallback copy.
+                # OverhaulSummaryScreen's errorDetail(e) shows. Other blockers
+                # (their messages named too, never a raw id) keep the client's
+                # own fallback copy for the 409.
                 raise _Conflict(first["code"], readable, receipt=receipt, message=readable)
             raise _Conflict(first["code"], receipt=receipt)
         package_of = {oid: p["package_id"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}

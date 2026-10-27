@@ -668,12 +668,15 @@ def validate_prepare(*, selected, packages, offers_by_id, my_roster_ids, my_pick
                 moved.append(a)
                 slot = len(blockers) if slot is None else slot
             if a not in pool_set:
-                blockers.append(_item("pool_violation", f"{a} is outside your eligible pool.", pkg_id, offer["offer_id"]))
+                blockers.append(_item("pool_violation", ownership_copy.asset_sentence(
+                    ownership_copy.POOL_VIOLATION, a, names), pkg_id, offer["offer_id"]))
             if a in reserved:
-                blockers.append(_item("asset_reserved", f"{a} is reserved by a live offer.", pkg_id, offer["offer_id"]))
+                blockers.append(_item("asset_reserved", ownership_copy.asset_sentence(
+                    ownership_copy.ASSET_RESERVED_BY_OFFER, a, names), pkg_id, offer["offer_id"]))
             prior = give_owner.get(a)
             if prior is not None and prior != pkg_id:
-                blockers.append(_item("give_overlap", f"{a} is in two packages.", pkg_id, offer["offer_id"]))
+                blockers.append(_item("give_overlap", ownership_copy.asset_sentence(
+                    ownership_copy.GIVE_OVERLAP, a, names), pkg_id, offer["offer_id"]))
             give_owner.setdefault(a, pkg_id)
             if a not in outgoing:
                 outgoing.append(a)

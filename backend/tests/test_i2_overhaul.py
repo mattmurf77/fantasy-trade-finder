@@ -269,3 +269,55 @@ def test_per_offer_core_refusal_reaches_the_plan_view(real_core):
     view = c.get(f"/api/overhauls/{oid}", headers=ovh_t._h()).get_json()
     shown = [a["error"] for a in view["attempts"] if a["state"] == "send_failed"]
     assert shown == [expected, expected]
+
+
+# ── Overhaul's per-asset blockers name the asset (trades-eng's post-launch item) ──
+
+def _validate(offers, *, mine, pool, reserved=(), packages=None):
+    by_id = {o["offer_id"]: o for o in offers}
+    packages = packages or [{"package_id": f"p{o['offer_id']}", "give_ids": o["give_ids"],
+                             "tiers": [{"tier": 1, "offer_ids": [o["offer_id"]]}]} for o in offers]
+    return svc.validate_prepare(
+        selected=list(by_id), packages=packages, offers_by_id=by_id, my_roster_ids=mine,
+        my_pick_ids=[], pool=pool, rosters={o["counterparty_user_id"]: o["receive_ids"] for o in offers},
+        reserved_asset_ids=list(reserved), capacity=None, recovery={}, package_states={},
+        checked_at="t", is_pick=svc_t._is_pick)
+
+
+def _messages(receipt, code):
+    return [b["message"] for b in receipt["blockers"] if b["code"] == code]
+
+
+def test_pool_violation_names_the_asset():
+    o = _offer("o_a", ["4046", "9999"], ["X1"], "o1", {"4046": "Josh Allen"})   # 9999 -> "Unknown"
+    receipt = _validate([o], mine=["4046", "9999"], pool=[])
+    assert _messages(receipt, "pool_violation") == [
+        "Josh Allen is outside your eligible pool.",
+        "A player in this trade is outside your eligible pool."]
+    for m in _messages(receipt, "pool_violation"):
+        _no_raw_ids(m, ["4046", "9999"])
+
+
+def test_asset_reserved_names_the_asset():
+    o = _offer("o_a", ["4046"], ["X1"], "o1", {"4046": "Josh Allen"})
+    receipt = _validate([o], mine=["4046"], pool=["4046"], reserved=["4046"])
+    assert _messages(receipt, "asset_reserved") == ["Josh Allen is reserved by a live offer."]
+
+
+def test_give_overlap_names_the_asset():
+    a = _offer("o_a", ["4046"], ["X1"], "o1", {"4046": "Josh Allen"})
+    b = _offer("o_b", ["4046"], ["X2"], "o2", {})                                   # no name on this card
+    receipt = _validate([a, b], mine=["4046"], pool=["4046"])
+    assert _messages(receipt, "give_overlap") == ["A player in this trade is in two packages."]
+    _no_raw_ids(_messages(receipt, "give_overlap")[0], ["4046"])
+
+
+def test_no_overhaul_blocker_shows_a_raw_id():
+    """Every blocker a mixed failing receipt carries reads without an id."""
+    a = _offer("o_a", ["4046", "9509"], ["X1"], "o1", {"4046": "Josh Allen", "9509": "Bijan Robinson"})
+    b = _offer("o_b", ["9509"], ["X2"], "o2", {"9509": "Bijan Robinson"})
+    receipt = _validate([a, b], mine=["9509"], pool=["9509"], reserved=["9509"])
+    assert {"asset_not_owned", "pool_violation", "asset_reserved", "give_overlap"} <= {
+        bl["code"] for bl in receipt["blockers"]}
+    for bl in receipt["blockers"]:
+        _no_raw_ids(bl["message"], ["4046", "9509"])
