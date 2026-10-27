@@ -9299,6 +9299,22 @@ def mark_league_roster_failed(league_id: str, error_code: str) -> str:
     return status
 
 
+def cas_league_roster_fp(league_id: str, old_fp: str | None, new_fp: str) -> bool:
+    """S0 PR-B: set `roster_fp` to `new_fp` only while it still equals `old_fp`.
+
+    One UPDATE … WHERE (`IS NULL` when `old_fp` is None, a league's first
+    stamp), committed before it returns. True when this call won; False when
+    another refresh stamped first, or the league has no row. Touches no
+    other column.
+    """
+    t = league_roster_state_table
+    same = t.c.roster_fp.is_(None) if old_fp is None else t.c.roster_fp == old_fp
+    with engine.begin() as conn:
+        result = conn.execute(update(t).where(t.c.league_id == str(league_id), same)
+                              .values(roster_fp=new_fp))
+    return result.rowcount == 1
+
+
 def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool:
     """S0 — replace a league's membership with an authoritative snapshot.
 
