@@ -36,6 +36,7 @@ import { deleteAccount } from '../../../api/auth';
 import { exportAccountData, getProfileVisibility, setProfileVisibility } from '../../../api/accountPrefs';
 import { useSession } from '../../../state/useSession';
 import { useFlag } from '../../../state/useFeatureFlags';
+import { ManageSubscriptionLink } from '../../../components/SubscriptionSection';
 import { styles } from '../styles';
 import Row from '../Row';
 import type { SettingsSectionProps } from './types';
@@ -235,6 +236,12 @@ export default function AccountDataSection({
     <>
       {publicProfileRow}
       {exportRow}
+      {/* #393 M3 — legal privacy §6, verbatim, above the delete confirm; then
+          Manage subscription (self-gated on monetize.paywall). */}
+      <Text style={styles.rowSub} testID="settings.delete-subscription-note">
+        {"Deleting your account doesn't cancel an active subscription. To stop future charges, cancel it in your Apple ID settings first."}
+      </Text>
+      <ManageSubscriptionLink testID="settings.delete-manage-subscription" />
       <Pressable
         // S8 PRD-02 acceptance: Delete account announces as a button
         // with a clear destructive label (was a plain text group).
