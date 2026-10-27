@@ -658,6 +658,31 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 })}
               </View>
             ) : null}
+            {landingOn && appleShown ? (
+              <>
+                {/* B1 (Product's pre-launch review, 2026-10-27; guideline 4.8
+                    and Apple's sign-in HIG): once ESPN/MFL sign-in mints
+                    accounts, Sign in with Apple must be an equivalent, equally
+                    prominent option. So the landing shows Apple's own button
+                    (CONTINUE, white outline on the dark landing), the platform
+                    chips' height, right under them, in place of the old
+                    "Already have an account?" text link. The username field
+                    below stays the primary door. ADR-006 (amended by ux-lead).
+                    An ESPN/MFL chip selection still rides this flow
+                    (handleAppleSignIn's platformIntent). */}
+                <AppleAuthentication.AppleAuthenticationButton
+                  testID="signin.apple-continue-btn"
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                  buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE_OUTLINE}
+                  cornerRadius={radii.sm}
+                  style={styles.appleContinueButton}
+                  onPress={handleAppleSignIn}
+                />
+                {appleBusy ? (
+                  <ActivityIndicator color={chalk.dim} style={styles.appleBusy} />
+                ) : null}
+              </>
+            ) : null}
             {!landingOn && appleShown ? (
               <>
                 {/* P2.6 — Apple is the PRIMARY portal. Official Apple button
@@ -844,32 +869,6 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
               </Pressable>
             ) : null}
 
-            {landingOn && appleShown ? (
-              // ADR-006: quiet re-entry door for existing Apple-bound
-              // (P2.6 account-only) users — they may have no Sleeper
-              // username to type. Text link by design: it must never
-              // compete with the username field. (Conscious HIG tradeoff:
-              // the official Apple button is reserved for the flags-off
-              // layout; revisit if App Review objects.)
-              <Pressable
-                testID="signin.apple-link"
-                accessibilityRole="button"
-                onPress={handleAppleSignIn}
-                disabled={busy || demoBusy || appleBusy}
-                style={styles.tryDemoBtn}
-                hitSlop={8}
-              >
-                {({ pressed }) =>
-                  appleBusy ? (
-                    <ActivityIndicator color={chalk.dim} />
-                  ) : (
-                    <Text style={[styles.tryDemoText, pressed && styles.tryDemoTextPressed]}>
-                      Already have an account? Sign in with Apple
-                    </Text>
-                  )
-                }
-              </Pressable>
-            ) : null}
 
             <Text style={styles.legalLine}>
               By signing in you agree to the{' '}
@@ -1067,6 +1066,13 @@ const styles = StyleSheet.create({
     marginBottom: space.md,
   },
   appleBusy: {
+    marginBottom: space.md,
+  },
+  // B1: the landing's Apple button matches the platform chips' height
+  // (platformChip.minHeight) so it reads as an equal option, not a footnote.
+  appleContinueButton: {
+    alignSelf: 'stretch',
+    height: 36,
     marginBottom: space.md,
   },
   orDivider: {

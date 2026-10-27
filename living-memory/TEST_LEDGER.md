@@ -1,3 +1,16 @@
+## 2026-10-27 — B1: Sign in with Apple parity on the landing (Product's pre-launch review; stacked on #443)
+
+Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b1-apple-continue.md`). Mobile only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** the landing's "Already have an account? Sign in with Apple" text link becomes Apple's own button.
+  - CONTINUE, WHITE_OUTLINE, `signin.apple-continue-btn`;
+  - directly under the chip row, at the chips' height;
+  - the same `handleAppleSignIn`.
+  - The flags-off SIGN_IN button is unchanged.
+- **New guard `check-signin-apple-parity.js`** (6 AST pins). **Sabotage 10/10 red,** restored byte-identical. A comment-only rename, which isn't a real mutation, correctly stays green.
+- **Runs:** see the PR (tsc, the full `check-*.js` loop, testid-lint).
+- **App Review notes:** legal's R28.16 row 7 paragraph covers the four doors, and release-lead owns the submission text.
+
 ## 2026-10-27 — `espn.signin` (client half): the flag hides only the ESPN chip on the sign-in platform picker; entry mint keeps a Sleeper-bound identity
 
 Client half only, for the 11-06 binary; the server half (flag registered in `config/features.json` default `true`, 404 on the ESPN entry route) is a separate PR and nothing under `backend/` or `config/` is touched here. D-056: `FTF_SKIP_SIM_GATE=1` posture; no simulator, no Maestro. The evidence is the structural pin, the code-walk and the TestFlight checklist below. Branch `feat/espn-signin-flag-client`.
