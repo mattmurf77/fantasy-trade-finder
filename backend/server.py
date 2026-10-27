@@ -109,7 +109,7 @@ from .database import (
     PASS_REASON_TEXT_MAX,
     # suggestion.telemetry — candidate-set persistence + ratio dashboard
     # (matcher logic lives in suggestion_telemetry.py)
-    save_deck_candidate_set, suggestion_ratio_by_league,
+    save_deck_candidate_set, suggestion_ratio_by_league, suggestion_link_day_span,
     # trade.bakeoff — one bakeoff_runs row per bake-off job
     save_bakeoff_run,
     # F2 (deck.thompson_v2) — bandit hygiene (viewed-gated arm events,
@@ -4304,8 +4304,9 @@ def _deck_store_missed(job_id: str) -> None:
     """U4 (#434 QA P2-1): the store wrote no page row for this deck (the store
     was off, the job revoked, the deck not page-eligible, the save raised, or
     the supersede guard refused it), so none of its cards has a stored
-    snapshot: its stored count is 0, on the deck and in its pack's header (a
-    later flush retries a failed header write). Never raises."""
+    snapshot: its stored count is 0, on the deck and in its pack's header when
+    the header has none (models-lead addendum C (d3): a recorded count is never
+    rewritten; a later flush retries a failed header write). Never raises."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         ev = job.get("evidence") if job is not None else None
@@ -4314,8 +4315,8 @@ def _deck_store_missed(job_id: str) -> None:
     try:
         with _deck_evidence_write_lock:
             with ev.lock:
-                ev.stored_count = 0           # overwrites a refused store's len(cards)
-                dirty = ev.pack is not None and ev.pack.run.get("stored_count") != 0
+                ev.stored_count = 0           # a store that returned before its save, too
+                dirty = ev.pack is not None and ev.pack.run.get("stored_count") is None
                 if dirty:
                     ev.pack.run["stored_count"] = 0
                     ev.pack_dirty = True
@@ -4353,24 +4354,45 @@ def _store_trade_page_row(job_id: str) -> bool:
             if ev is not None:
                 with ev.lock:
                     ev.stored_ids = {c.get("impression_id") for c in cards} - {None}
-                    ev.stored_count = len(cards)
                     ev.truncated = len(job.get("cards") or []) > len(cards)
                     ev.pages_bytes = len(blob)
-                    evidence = ev.blob()
-            written = _db.save_trade_page({
-                "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
-                "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
-                "values_snapshot_id": job["values_snapshot_id"],
-                "engine_version": _trade_page_engine_version(
-                    _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
-                    job.get("presentation_capture")),
-                "config_signature": job["request_signature"],
-                "experiment_digest": job["experiment_digest"], "deck_job_id": job_id,
-                "built_at": _db.page_store_iso(built),
-                "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
-                "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
-                "stored_bytes": len(blob) + len(evidence or b""), "state": "ready",
-            })
+                    evidence = ev.blob(stored_count=len(cards))
+            written = False
+            try:
+                written = _db.save_trade_page({
+                    "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
+                    "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
+                    "values_snapshot_id": job["values_snapshot_id"],
+                    "engine_version": _trade_page_engine_version(
+                        _trade_engine_name(bool(job.get("value_core"))),
+                        job.get("safety_policy", []), job.get("presentation_capture")),
+                    "config_signature": job["request_signature"],
+                    "experiment_digest": job["experiment_digest"], "deck_job_id": job_id,
+                    "built_at": _db.page_store_iso(built),
+                    "expires_at": _db.page_store_iso(min(expiries,
+                                                         default=built + _TRADE_CARD_TTL_S)),
+                    "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
+                    "stored_bytes": len(blob) + len(evidence or b""), "state": "ready",
+                })
+            except Exception:
+                # #445 QA P3-4, the double fault: a save that committed and then
+                # raised left its row. Re-read it by deck_job_id to settle
+                # `written`; no row, or a failed re-read, re-raises as before.
+                try:
+                    written = _db.load_trade_page_for_job(user_id, job_id) is not None
+                except Exception:
+                    written = False
+                if not written:
+                    raise
+                log.warning("trade-page %s: the save raised, but its row is stored", job_id,
+                            exc_info=True)
+            finally:
+                if ev is not None:
+                    # #438 QA P3-2: the deck's stored count is set only here, once
+                    # the save is known, under the write lock a delivery takes: a
+                    # first delivery never packs a count a refused store set.
+                    with ev.lock:
+                        ev.stored_count = len(cards) if written else 0
             # U4 (#428 QA item 4): a delivery while the job ran writes the pack at
             # _deck_evidence_job_done, before this store, so it lacks the deck's
             # stored count. Record it in the header now (a later flush retries).
@@ -4731,11 +4753,14 @@ class _DeckEvidence:
             self.diagnostics.pop(snapshot["snapshot_id"], None)
         self.marked.update(upgrades)
 
-    def blob(self) -> bytes | None:
+    def blob(self, stored_count: int | None = None) -> bytes | None:
         """Under `lock`: the page store's evidence_blob (CompressedJSON): the not
         yet written snapshots of the stored cards, every not yet written ghost
         row, the diagnostic snapshots and the candidate set; None once nothing
-        is left."""
+        is left. `stored_count`: the store's count, before its row is written
+        (else the deck's)."""
+        if stored_count is None:
+            stored_count = self.stored_count
         rows = [_unpack_row(packed) for iid, (_, packed) in self.rows.items()
                 if self.stored_ids is None or iid in self.stored_ids]
         held = self.trade_impressions or self.generated or self.bakeoff_slim
@@ -4744,7 +4769,7 @@ class _DeckEvidence:
         impressions = None
         if self.trade_impressions is not None:   # the stored cards' only
             impressions = _unpack_row(self.trade_impressions)
-            impressions["cards"] = impressions["cards"][:self.stored_count]
+            impressions["cards"] = impressions["cards"][:stored_count]
         from .database import CompressedJSON
         return CompressedJSON.encode({
             "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
@@ -4776,6 +4801,9 @@ class _DeckEvidence:
             ev.diagnostics = {d["snapshot_id"]: _pack_row(d) for d in blob.get("diagnostics") or []}
             ev.candidate_set = blob.get("candidate_set")
             ev.pages_bytes = blob.get("pages_bytes")
+            # #438 QA P2-1: the deck's stored count is its row's, so a pack first
+            # written on the stored path records it too.
+            ev.stored_count = (row or {}).get("card_count")
             if blob.get("trade_impressions") is not None:
                 ev.trade_impressions = _pack_row(blob["trade_impressions"])
             if blob.get("bakeoff_run") is not None:   # S5: always written at first delivery
@@ -4838,10 +4866,6 @@ class _PackState:
                                       separators=(",", ":")) + ',"header":').encode("utf-8"))
         self.checksum = checksum                  # the stored row's: the CAS predicate
         self.base_run = copy.deepcopy(header.get("run"))   # the run as last stored
-        # Indexes whose upgrade miss a header commit counted (U4): a retried
-        # outcome never counts the same card twice. _deck_upgrade_from_pack's
-        # callers all hold _deck_evidence_write_lock, so it needs no lock of its own.
-        self.miss_counted: set = set()
 
     @property
     def run(self) -> dict:
@@ -4891,7 +4915,8 @@ def _deck_pack_input(ev: _DeckEvidence):
     rows = None if ev.pack_cards is not None else ev.pack_rows
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False,
-           "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)}
+           "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0), "upgrade_miss_cards": {},
+           "upgrade_miss_row_gone": {}, "upgrade_miss_row_gone_why": {}}
     if ev.stored_count is not None:       # U4: the deck's own stored count (#428 QA (c))
         run["stored_count"] = ev.stored_count
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
@@ -5005,8 +5030,11 @@ def _merge_deliveries(a, b) -> list:
 def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     """Another instance updated the header first: keep both. Deliveries are
     the union (earliest time per index); retired stays true once true (the
-    earliest retired_at); each upgrade_misses cause is the stored count plus
-    ours since our base."""
+    earliest retired_at); upgrade_miss_cards is the union, a card both
+    missed keeping the stored cause (it landed first), and upgrade_misses is
+    that map's tally, so a card two instances missed counts once;
+    upgrade_miss_row_gone and upgrade_miss_row_gone_why are unions the same
+    way, each kept to its parent's keys."""
     merged = {**ours, **stored}
     merged["deliveries"] = _merge_deliveries(stored.get("deliveries"), ours.get("deliveries"))
     if stored.get("retired") or ours.get("retired"):
@@ -5014,10 +5042,15 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
         stamps = [t for t in (stored.get("retired_at"), ours.get("retired_at")) if t]
         if stamps:
             merged["retired_at"] = min(stamps)
-    merged["upgrade_misses"] = {
-        cause: _upgrade_misses(stored)[cause] + max(
-            0, _upgrade_misses(ours)[cause] - _upgrade_misses(base or {})[cause])
-        for cause in _UPGRADE_MISS_CAUSES}
+    cards = {**_upgrade_miss_cards(ours), **_upgrade_miss_cards(stored)}
+    merged["upgrade_miss_cards"] = cards
+    merged["upgrade_misses"] = _upgrade_miss_tally(cards)
+    gone = {**_upgrade_miss_row_gone(ours), **_upgrade_miss_row_gone(stored)}
+    # The union, the stored entry winning; a row-gone key is always a miss-map
+    # key (flip_read joins them), so one without its card is dropped.
+    merged["upgrade_miss_row_gone"] = gone = {k: v for k, v in gone.items() if k in cards}
+    why = {**_upgrade_miss_row_gone_why(ours), **_upgrade_miss_row_gone_why(stored)}
+    merged["upgrade_miss_row_gone_why"] = {k: v for k, v in why.items() if k in gone}
     return merged
 
 
@@ -5202,13 +5235,47 @@ def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, ind
     stored = _DeckEvidence.from_row(user_id, deck_job_id, page, None) if page else None
     held = stored.rows.get(impression_id) if stored is not None else None
     if held is None:
+        # The deck's page row gone (a newer deck's row replaced it, or eviction
+        # deleted it) while its pack recorded stored pages above this card:
+        # recorded either way (head-eng's condition 1); option A decides the cause.
+        recorded = state.run.get("stored_count")
+        row_gone = (recorded if page is None and isinstance(recorded, int)
+                    and not isinstance(recorded, bool) and recorded > index else None)
+        known = page["card_count"] if page else (0 if _STORED_COUNT_FROM_ROW_NOW else None)
+        why = (_row_gone_why(state, deck_job_id, index)
+               if row_gone is not None and str(index) not in _upgrade_miss_cards(state.run)
+               else None)
         return _deck_upgrade_from_pack(state, deck_job_id, impression_id, index, now,
-                                       stored_count=page["card_count"] if page else None)
+                                       stored_count=known, row_gone=row_gone,
+                                       stored_from="row" if page else "no_row", row_gone_why=why)
     card = _deck_pack_card(state, index)
     row = {**_unpack_row(held[1]), "evidence_tier": "viewed", "served_at": card["served_at"],
            "delivered_at": state.delivered_at(index) or now}
     _db.save_deck_evidence([row], diagnostics=stored.closure([row]), deck_job_id=deck_job_id)
     return True
+
+
+def _row_gone_why(state, deck_job_id: str, index: int) -> str | None:
+    """models-lead (d1): why a row-gone miss's page row is gone, from one indexed
+    read of the deck's page-store key (scoring_format and page_scope from its
+    run, the league from its packed card): "replaced" when the key's row now
+    holds another deck, "no_row" when the key has none (aged, over budget, or a
+    bug). None, unsplit, for a pack written before the key was recorded, or
+    when the read fails (it's a report field: the miss never waits on it)."""
+    from . import database as _db
+    scoring_format, scope = state.run.get("scoring_format"), state.run.get("page_scope")
+    if not (scoring_format and scope):
+        return None
+    try:
+        holder = _db.load_trade_page_deck_job_id(
+            state.user_id, _deck_pack_card(state, index)["league_id"], scoring_format, scope)
+    except Exception:
+        log.warning("[evidence] row-gone why job=%s index=%d: the page-store read failed",
+                    deck_job_id, index, exc_info=True)
+        return None
+    if holder is None:
+        return "no_row"
+    return "replaced" if holder != deck_job_id else None    # its own row is back: unsplit
 
 
 def _deck_pack_card(state, index: int) -> dict:
@@ -5218,41 +5285,88 @@ def _deck_pack_card(state, index: int) -> dict:
     return by_index[index]
 
 
-# U4 (models-lead addendum A, R1/R2): a display past snapshot retention is
-# impossible, with one named exception, restart_split: a card past the deck's
-# stored pages, delivered before a process restart and viewed after it. It is
-# counted per run in the pack's run metadata (upgrade_misses, an object with
-# every cause, always present); its outcome joins the packed card by
-# impression_id and it scores normally. Any other miss is a defect: "other",
-# logged at error level. The cause comes from provenance, never a clock
-# (#428 QA (d): an import-time stamp called a deploy overlap's or a re-fork's
-# misses "other"): which decks this process built (_deck_held) and which it
-# evicted (_deck_evicted_at).
-# evicted_split (trades-eng 2026-10-26): the same card when its job left this
-# process by the cleanup loop's eviction (4 h). Off until models-lead rules:
-# while _EVICTED_SPLIT_NAMED is False those misses are "other". Eval reads any
-# key but "other" as a named cause.
+# U4 (models-lead addendum C (c4), R1; R2): a display past snapshot retention
+# is impossible, with two named exceptions, both for a card at or past the
+# deck's effective stored count (its current page-row count, else 0):
+# restart_split, when this process never held the deck's job, and
+# evicted_split, when this process evicted it. Each is counted per run in the
+# pack's run metadata (upgrade_misses, an object with every cause, always
+# present); its outcome joins the packed card by impression_id and it scores
+# normally. Any other miss is a defect: "other", logged at error level. The
+# cause comes from provenance, never a clock (#428 QA (d): an import-time stamp
+# called a deploy overlap's or a re-fork's misses "other"): which decks this
+# process built (_deck_held) and which it evicted (_deck_evicted_at). Eval
+# reads any key but "other" as a named cause.
 _UPGRADE_MISS_CAUSES = ("restart_split", "evicted_split", "other")
-_EVICTED_SPLIT_NAMED = False
-_DECK_LEDGER_MAX = 16384
-_deck_held: dict = {}                      # deck_job_id -> None: decks this process built
-_deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+# evicted_split named: models-lead ruled, addendum C, 2026-10-26 (C1). Off,
+# those misses would count as "other".
+_EVICTED_SPLIT_NAMED = True
+# Option A: models-lead ruled, addendum C, 2026-10-26 (C4). A deck's stored
+# pages are what the page store holds now: on the stored path the count is the
+# deck's current page row's card_count, and 0 when it has none (a newer deck's
+# row replaced it, or evict_trade_pages deleted it), instead of the count its
+# pack recorded (which is never rewritten, (d3)). Off, the pack's count. A
+# one-line switch; either way the writer records such misses in
+# run["upgrade_miss_row_gone"].
+_STORED_COUNT_FROM_ROW_NOW = True
+# models-lead addendum C (c2): a ledger entry lives at least the 24 h display
+# cap, so a late view of an evicted (or held) deck keeps its cause. Entries are
+# trimmed by age; the count cap is a memory guard only, far above a day's adds
+# (131,072 entries ≈ 23 MiB per ledger as OrderedDicts, ~180 B an entry with its
+# id; it normally holds one day of adds), and a guard trim of an entry younger
+# than 24 h logs a warning.
+_DECK_LEDGER_RETAIN_S = 24 * 3600          # _DECK_DISPLAY_CAP_S
+_DECK_LEDGER_GUARD = 131072
+# OrderedDicts (#451 QA P2-1): peeking at and popping the oldest entry are O(1).
+# A plain dict's next(iter()) rescans the deleted slots at its front, so a mass
+# age trim (a ledger idle for 24 h, then one add) was O(n²): 11.9 s at the guard,
+# under the leaf lock and, for evictions, under _trade_jobs_lock.
+_deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> built here (epoch s)
+_deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
+_ledger_now = time.time                    # the ledgers' clock (tests replace it)
+_DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
+# Young entries the guard trimmed since its last warning, per ledger (#451 QA:
+# the warning names which). Reset per test by backend/tests/conftest.py.
+_ledger_guard_young = {"held": 0, "evicted": 0}
+_ledger_guard_warned_at = float("-inf")
 # A leaf lock for the ledgers' writes (#428 QA item 2: kickoffs add concurrently,
-# and the FIFO trim at the cap raced). Never take another lock while holding it.
-# Readers stay lock-free: membership and .get are atomic.
+# and the trim raced). Never take another lock while holding it (the guard's
+# warning is logged after it's released). Readers stay lock-free: membership
+# and .get are atomic.
 _deck_ledger_lock = threading.Lock()
 
 
-def _ledger_add(ledger: dict, key: str, value) -> None:
+def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None:
+    """Note `key` now. Entries stay in time order (a re-add moves to the end),
+    so the trims take the oldest first, each in O(1): every entry older than
+    the retention, then, at the guard, the oldest young ones (warned at most
+    once a minute, with the counts since the last warning, per ledger)."""
+    global _ledger_guard_young, _ledger_guard_warned_at
+    now = _ledger_now()
+    which = "evicted" if ledger is _deck_evicted_at else "held"
+    warn = None
     with _deck_ledger_lock:
-        while len(ledger) >= _DECK_LEDGER_MAX:
-            ledger.pop(next(iter(ledger)))
-        ledger[key] = value
+        ledger.pop(key, None)
+        while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
+            ledger.popitem(last=False)
+        while len(ledger) >= _DECK_LEDGER_GUARD:
+            _ledger_guard_young[which] += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
+        ledger[key] = now
+        if (any(_ledger_guard_young.values())
+                and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S):
+            warn, _ledger_guard_young = _ledger_guard_young, {"held": 0, "evicted": 0}
+            _ledger_guard_warned_at = now
+    if warn:
+        total = sum(warn.values())
+        log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
+                    "24 h since its last warning (held=%d, evicted=%d): a late view of such "
+                    "a deck reads restart_split", _DECK_LEDGER_GUARD, total,
+                    "y" if total == 1 else "ies", warn["held"], warn["evicted"])
 
 
 def _note_deck_held(job_id: str) -> None:
     """A flag-on deck this process built (its job's evidence admitted here)."""
-    _ledger_add(_deck_held, job_id, None)
+    _ledger_add(_deck_held, job_id)
 
 
 def _note_deck_evicted(job_id: str, job: Mapping) -> None:
@@ -5261,14 +5375,46 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     ev = job.get("evidence")
     if ev is None or not ev.packed or ev.pack is None:
         return
-    _ledger_add(_deck_evicted_at, job_id, datetime.now(timezone.utc).isoformat())
+    _ledger_add(_deck_evicted_at, job_id)
+    # #451 QA P3-1: the two ledgers trim independently, so an evicted deck
+    # leaves the held one. Once its eviction record ages out, a late view reads
+    # restart_split (C (c2)'s assumption), never other.
+    with _deck_ledger_lock:
+        _deck_held.pop(job_id, None)
 
 
-def _upgrade_misses(run: Mapping) -> dict:
-    """A run's upgrade_misses, every cause present (0 when absent)."""
-    misses = run.get("upgrade_misses")
-    misses = misses if isinstance(misses, Mapping) else {}
-    return {cause: int(misses.get(cause) or 0) for cause in _UPGRADE_MISS_CAUSES}
+def _upgrade_miss_cards(run: Mapping) -> dict:
+    """A run's upgrade_miss_cards, {"<card_index>": cause} (models-eng's per-card
+    miss map): which cards missed, each once, with its cause. {} when absent."""
+    cards = run.get("upgrade_miss_cards")
+    return {str(k): v for k, v in cards.items()} if isinstance(cards, Mapping) else {}
+
+
+def _upgrade_miss_row_gone(run: Mapping) -> dict:
+    """A run's upgrade_miss_row_gone, {"<card_index>": the pack's recorded
+    stored_count} (head-eng's condition 1): the misses where the deck's page
+    row was gone and its recorded count was above the card, i.e. where option
+    A decides (or, off, explains) the cause. {} when absent."""
+    gone = run.get("upgrade_miss_row_gone")
+    return {str(k): v for k, v in gone.items()} if isinstance(gone, Mapping) else {}
+
+
+def _upgrade_miss_row_gone_why(run: Mapping) -> dict:
+    """A run's upgrade_miss_row_gone_why, {"<card_index>": "replaced" | "no_row"}
+    (models-lead (d1), _row_gone_why): a row-gone entry's split, when its pack
+    records the deck's page-store key. {} when absent."""
+    why = run.get("upgrade_miss_row_gone_why")
+    return {str(k): v for k, v in why.items()} if isinstance(why, Mapping) else {}
+
+
+def _upgrade_miss_tally(cards: Mapping) -> dict:
+    """upgrade_misses as the per-card map's tally: every cause present, and
+    any other cause the map carries counted under its own key. The writer
+    keeps this invariant: upgrade_misses always equals its map's tally."""
+    tally = dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)
+    for cause in cards.values():
+        tally[cause] = tally.get(cause, 0) + 1
+    return tally
 
 
 def _deck_stored_count(known, run: Mapping) -> int:
@@ -5280,10 +5426,17 @@ def _deck_stored_count(known, run: Mapping) -> int:
     whose store didn't write, and one whose process died between its pack's
     first write and its store. The knobs are never read: changing them can't
     turn a restart split into other."""
-    for value in (known, run.get("stored_count")):
+    return _deck_stored_count_from(known, run)[0]
+
+
+def _deck_stored_count_from(known, run: Mapping, known_from: str = "job") -> tuple[int, str]:
+    """_deck_stored_count, with where the count came from (#438 QA P3-1, the
+    miss log's stored_from): `known_from` (the job; the page row; with option
+    A, no_row: the row is gone, so 0), else "pack", else "fallback"."""
+    for value, source in ((known, known_from), (run.get("stored_count"), "pack")):
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            return value
-    return 0
+            return value, source
+    return 0, "fallback"
 
 
 def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, delivered: bool) -> str:
@@ -5306,15 +5459,21 @@ def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, deliver
 
 
 def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: int, now: str,
-                            ev_for_header=None, stored_count: int | None = None) -> bool:
+                            ev_for_header=None, stored_count: int | None = None,
+                            row_gone: int | None = None, stored_from: str = "job",
+                            row_gone_why: str | None = None) -> bool:
     """The upgrade miss (U4's fallback): the card's row built from its packed
     card (its columns, and every other packed key as its features; no assets,
     no valuation), so the outcome still joins it, and the miss counted by
     cause. `stored_count`: the deck's stored-page count, when the caller
-    knows it (_deck_stored_count)."""
+    knows it (_deck_stored_count), and `stored_from` where it came from.
+    `row_gone`: the pack's recorded stored count when the deck's page row is
+    gone and that count was above the card (recorded in
+    run["upgrade_miss_row_gone"] with the miss), and `row_gone_why` its split
+    (run["upgrade_miss_row_gone_why"], only with a row-gone entry)."""
     from . import database as _db
     card = _deck_pack_card(state, index)
-    stored = _deck_stored_count(stored_count, state.run)
+    stored, stored_from = _deck_stored_count_from(stored_count, state.run, stored_from)
     cause = _upgrade_miss_cause(deck_job_id, index, stored, state.delivered_at(index) is not None)
     # The packed card is the row's features plus its columns (_pack_card): the
     # inverse keeps every packed key the columns don't hold, so eval reads this
@@ -5327,42 +5486,84 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
-    def count(delta: int) -> None:
-        misses = _upgrade_misses(state.run)
-        misses[cause] += delta
-        state.run["upgrade_misses"] = misses
+    key = str(index)
 
-    # Once per card (#428 QA item 1): a commit that raises takes its increment
-    # back (the outcome's retry counts again); a commit that returns, even False
-    # (the CAS gave up: the count stays in state.run for a later flush), marks
-    # the index counted, so a retry after the row save below raised doesn't.
-    if index not in state.miss_counted:
+    def record(add: bool) -> None:
+        """The card in (or out of) the run's miss map, upgrade_misses its tally,
+        and its row-gone entry when it has one."""
+        cards = _upgrade_miss_cards(state.run)
+        gone = _upgrade_miss_row_gone(state.run)
+        why = _upgrade_miss_row_gone_why(state.run)
+        base = state.base_run or {}
+        if add:
+            cards[key] = cause
+            if row_gone is not None:
+                gone[key] = row_gone
+                if row_gone_why is not None:
+                    why[key] = row_gone_why
+        else:                         # ours only: an entry another writer stored stays
+            if key not in _upgrade_miss_cards(base):
+                cards.pop(key, None)
+            if key not in cards or key not in _upgrade_miss_row_gone(base):
+                gone.pop(key, None)   # with its card: a row-gone key is always a map key
+            if key not in gone or key not in _upgrade_miss_row_gone_why(base):
+                why.pop(key, None)    # with its row-gone entry: a why key is always one
+        state.run["upgrade_miss_cards"] = cards
+        state.run["upgrade_misses"] = _upgrade_miss_tally(cards)
+        state.run["upgrade_miss_row_gone"] = gone
+        state.run["upgrade_miss_row_gone_why"] = why
+
+    # Once per card, by the persisted map (models-eng): a card already in it
+    # is never counted again, by this process or one that reloaded the header
+    # after a deploy or an eviction (#434 QA P3-1). A commit that raises takes
+    # the entry back and re-raises (the outcome's retry counts it then); a
+    # commit that returns, even False (the CAS gave up: the entry waits in
+    # state.run for a later flush), keeps it.
+    if key not in _upgrade_miss_cards(state.run):
         if ev_for_header is not None:
             with ev_for_header.lock:
-                count(1)
+                record(True)
                 ev_for_header.pack_dirty = True
             try:
                 _deck_pack_flush_header(ev_for_header)
             except Exception:
                 with ev_for_header.lock:
-                    count(-1)
+                    record(False)
                 raise
         else:
-            count(1)
+            record(True)
             try:
                 _deck_pack_commit(deck_job_id, state)
             except Exception:
-                count(-1)
+                record(False)
                 raise
-        state.miss_counted.add(index)
-        line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
-                "evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
-        args = (cause, deck_job_id, index, stored, deck_job_id in _deck_held,
-                _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
-        if cause == "other":              # U4-R2: must be zero; it goes back to models-lead
+        # The cause the commit kept: a deploy overlap's CAS merge keeps the
+        # stored one (#439/#445 QA P3-1), and the line logs that, with ours as
+        # local_cause when they differ (then at WARNING: the writer whose cause
+        # stood logged its own line).
+        if ev_for_header is not None:
+            with ev_for_header.lock:
+                kept = _upgrade_miss_cards(state.run).get(key, cause)
+        else:
+            kept = _upgrade_miss_cards(state.run).get(key, cause)
+        line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d stored_from=%s "
+                "held_here=%s evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
+        evicted_at = _deck_evicted_at.get(deck_job_id)
+        args = (kept, deck_job_id, index, stored, stored_from, deck_job_id in _deck_held,
+                None if evicted_at is None
+                else datetime.fromtimestamp(evicted_at, timezone.utc).isoformat(),
+                state.delivered_at(index), now)
+        if kept != cause:
+            log.warning(line + " local_cause=%s", *args, cause)
+        elif cause == "other":            # U4-R2: must be zero; it goes back to models-lead
             log.error(line, *args)
         else:
             log.warning(line, *args)
+        if stored_from == "fallback" and state.run.get("page_store"):
+            # #438 QA P3-1: never silent. Not other: the process dying between
+            # the deck's job_done and its store is the legitimate case.
+            log.warning("[evidence] stored count fallback job=%s index=%d: a page-scoped "
+                        "deck with no recorded stored count reads 0", deck_job_id, index)
     _db.save_deck_evidence([row], deck_job_id=deck_job_id)
     return True
 
@@ -6007,6 +6208,11 @@ def _deck_evidence_job_done(job_id: str) -> None:
         ev.complete = True
         ev.run_meta = {"values_snapshot_id": job.get("values_snapshot_id"),
                        "config_ref": job.get("request_signature")}
+        if job.get("page_scope"):
+            # models-lead (d1): the deck's page-store key, so a row-gone miss
+            # can tell a replaced row from none (_row_gone_why). Omitted for a
+            # deck with no page scope (it never has a page row).
+            ev.run_meta.update(scoring_format=job["key"][2], page_scope=job["page_scope"])
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
 
@@ -6017,12 +6223,14 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
     builds a new deck. Its in-process evidence is dropped and its job revoked,
     so no response serves it from this process (P2's live-job pages past the
     stored ones included); its stored pages, if any, serve and write through
-    the page store's evidence_blob, as after a restart. Delivered decks keep
-    theirs (written, and freed, at their first delivery). Returns the count."""
+    the page store's evidence_blob, as after a restart: it leaves _deck_held
+    too, so an upgrade miss on it reads as a restart's (release-lead's #451 QA
+    P2). Delivered decks keep theirs (written, and freed, at their first
+    delivery). Returns the count."""
     now = time.monotonic() if now is None else now
     dropped = 0
     with _trade_jobs_lock:
-        for job in _trade_jobs.values():
+        for job_id, job in _trade_jobs.items():
             ev = job.get("evidence")
             if (ev is None or job.get("status") == "running" or not job.get("finished_at")
                     or now - job["finished_at"] <= _PREGEN_TTL_SECONDS):
@@ -6035,6 +6243,14 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                 ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
+            # The deck's snapshots left this process: a miss on it is
+            # restart_split, as after a restart, never "other" (a held deck).
+            # The later eviction can't record it (no evidence left). Pending
+            # models-lead's ruling via head-eng: evicted_split would mean noting
+            # it in _deck_evicted_at here instead. Order: jobs, then the ledger
+            # (leaf), as in _note_deck_evicted.
+            with _deck_ledger_lock:
+                _deck_held.pop(job_id, None)
             dropped += 1
     if dropped:
         log.info("deck-evidence: dropped %d undelivered deck(s) past %d s", dropped,
@@ -12824,32 +13040,75 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
             _mark_trade_pages_stale(marked_at, league_id=kwargs["league_id"])
 
 
+def _roster_change_revoke_on() -> bool:
+    """model_config `trade_roster_change_revoke` (default 1), read per call. 0
+    makes the `on_roster_change` handler a no-op and leaves the rest of S0 (I-1,
+    the fingerprint checks, the floor kick) as `trade_i1_mode` says. NaN or any
+    other value reads as 1."""
+    return _deck_cfg("trade_roster_change_revoke", 1.0) != 0.0
+
+
+def _league_session_reads(league_id) -> dict:
+    """{user_id: newest `roster_fetch_started_at`} over the live sessions that
+    hold `league_id`: the Sleeper read a rebuild from that user's session uses."""
+    newest = {}
+    with _sessions_lock:
+        for sess in _sessions.values():
+            read = sess.get("roster_fetch_started_at")
+            if read and getattr(sess.get("league"), "league_id", None) == league_id:
+                uid = sess.get("user_id")
+                if read > newest.get(uid, ""):
+                    newest[uid] = read
+    return newest
+
+
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
     """S0's `on_roster_change` handler (contract v0.4 §4.3, A3). platforms-eng's
     refresh calls it, through roster_snapshot.on_roster_change, after
-    committing rows whose rfp1 moved.
+    committing rows whose rfp1 moved and marking the league fresh.
 
-    Revokes the league's jobs that weren't built on `new_fp`, so the next
-    request rebuilds from the new rows. Debounced by construction: a job
-    already stamped `new_fp` is kept, so a double call (two concurrent inits),
-    or one landing after a rebuild, changes nothing. An admission that stamped
-    the old rows before the commit misses at its next freshness or join check.
+    A job is built on its session's rosters (`_capture_trade_execution` reads
+    `sess["league"]`, that session's own Sleeper read), not on the stored rows
+    its `roster_fp` stamps, so a revoke helps only when a rebuild would read
+    newer rosters. It revokes a league job not stamped `new_fp` only when the
+    job's read (`roster_fetch_started_at`) is older than the refreshed rows'
+    (`league_roster_state.refreshed_at`, which only moves forward) and its user
+    holds a session in the league whose read is at least that new (#470 QA):
+    - P2-2: the refreshing init's own pre-gen, or a tap in that window, is
+      built on the very read being committed, so it is kept.
+    - P2-1: a league-mate's rebuild would read their own, no newer, session,
+      so their open deck is kept.
+    A kept job keeps its stamp, so it is never reused once the rows moved, and
+    the I-1 serve filter checks what it serves. A job without a `roster_fp`
+    key (prepared inventory, hand-built) is unchecked, as in
+    `_trade_fingerprints_match` (P3-1). Debounced by construction: a job
+    already stamped `new_fp` is kept, so a double call changes nothing.
 
-    Never raises. Takes only `_trade_jobs_lock`, briefly, with no I/O under it.
-    No proactive rebuild in S0: a live session holds its own last init's
-    rosters, so a warm-up from it would rebuild the old rosters. P1's page
-    store doesn't either: its next serve sees the roster_fp move, serves the
-    I-1-filtered page and kicks the rebuild then. `trade_i1_mode` 0 makes it
-    a no-op.
+    Never raises. One state-row read and a pass over the sessions (under
+    `_sessions_lock`) come first, then `_trade_jobs_lock`, briefly, with no I/O
+    under it. No proactive rebuild in S0. P1's page store doesn't either: its
+    next serve sees the roster_fp move, serves the I-1-filtered page and kicks
+    the rebuild then. `trade_i1_mode` 0 or `trade_roster_change_revoke` 0
+    makes it a no-op.
     """
     try:
-        if _trade_i1_mode() == 0:
+        if _trade_i1_mode() == 0 or not _roster_change_revoke_on():
+            return
+        from .database import get_league_roster_state
+        refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
+        if not refreshed_at:
+            return
+        fresh_users = {uid for uid, read in _league_session_reads(league_id).items()
+                       if read >= refreshed_at}
+        if not fresh_users:
             return
         with _trade_jobs_lock:
             for job in _trade_jobs.values():
                 key = job.get("key") or ()
-                if (len(key) == 3 and key[1] == league_id
-                        and job.get("roster_fp") != new_fp and not job.get("superseded")):
+                if (len(key) == 3 and key[1] == league_id and key[0] in fresh_users
+                        and "roster_fp" in job and job["roster_fp"] != new_fp
+                        and (job.get("roster_fetch_started_at") or "") < refreshed_at
+                        and not job.get("superseded")):
                     _revoke_trade_job_locked(job)
                     if _trade_jobs_by_key.get(key) == job.get("job_id"):
                         _trade_jobs_by_key.pop(key)
@@ -12961,10 +13220,12 @@ def _kickoff_trade_job(
     # pregen supplies the freshly built payload; headless cron resolves here.
     execution_context = None
     capture_error = None
+    roster_read = None          # the Sleeper read the captured rosters came from
     try:
         with _sessions_lock:
             base_session = session_context if session_context is not None else _sessions.get(sess_token)
             base_session = dict(base_session) if base_session is not None else None
+        roster_read = (base_session or {}).get("roster_fetch_started_at")
         execution_context = _capture_trade_execution(base_session, user_id, league_id, scoring_format)
         # The worker reads member rankings/outlooks for this captured league.
         # Keep original viewer epochs: recapturing after a racing viewer edit
@@ -13021,6 +13282,8 @@ def _kickoff_trade_job(
         "request_signature":  request_signature,
         "roster_fp":          roster_fp,
         "values_snapshot_id": values_snapshot_id,
+        # The roster-change handler compares it with the refreshed rows' read.
+        "roster_fetch_started_at": roster_read,
         # The viewer's league identity (a co-owner's differs from user_id):
         # the I-1 serve filter checks give-side ownership against it.
         "league_user_id":     (execution_context.league_user_id
@@ -14970,6 +15233,24 @@ def analytics_health_route():
     })
 
 
+_RATIO_SERIES_BREAK_DETAIL = ("U6/R-U6a: from the packed-evidence flip, `recommended` counts "
+                              "matches to viewed-or-first-30 suggestions")
+
+
+def _ratio_series_break_caveats(first_day: str | None, last_day: str | None) -> list[dict]:
+    """A `series_break` caveat when the packed-evidence flip day is set
+    (database.PACKED_EVIDENCE_FLIP_DAY, shared with receipts, read through
+    database.packed_evidence_flip_day: a malformed value is no caveat and one
+    warning) and the links' trade days span it (inclusive: the flip day itself
+    is mixed)."""
+    from . import database as _db
+    day = _db.packed_evidence_flip_day()
+    if day is None or first_day is None or last_day is None or not first_day <= day <= last_day:
+        return []
+    return [{"code": _db.SERIES_BREAK_CAVEAT, "scope": "suggestion_ratio",
+             "detail": _RATIO_SERIES_BREAK_DETAIL, "day": day}]
+
+
 @app.route("/api/admin/suggestion-telemetry/ratio", methods=["GET"])
 def suggestion_telemetry_ratio_route():
     """GET /api/admin/suggestion-telemetry/ratio[?league_id=…] — the always-
@@ -14978,10 +15259,13 @@ def suggestion_telemetry_ratio_route():
 
     Operator-only (X-Cron-Secret, same as /api/cron/*). Per league:
     executed = captured Sleeper trades examined by the matcher,
-    recommended = those matching a RENDERED (non-ghost) logged suggestion,
+    recommended = those matching a shown (non-ghost) logged suggestion,
+    viewed or first 30 (R-U6a, database._evidence_shown),
     ratio = recommended / executed, ghost_matches = executed trades whose
     best ghost-suggestion match exists (the incrementality read: withheld
-    suggestions that happened anyway). 404 feature_disabled while dark.
+    suggestions that happened anyway). `caveats`: a `series_break` once the
+    packed-evidence flip day is set and the trades span it. 404
+    feature_disabled while dark.
     """
     _require_cron_auth()
     if not _suggestion_telemetry_enabled():
@@ -14998,6 +15282,7 @@ def suggestion_telemetry_ratio_route():
             "ratio":         round(recommended / executed, 4) if executed else None,
             "ghost_matches": sum(l["ghost_matches"] for l in leagues),
         },
+        "caveats": _ratio_series_break_caveats(*suggestion_link_day_span(league_id)),
     })
 
 
@@ -26371,6 +26656,10 @@ def session_init():
         # M0 — the generation these services were built from. A later bump
         # makes the NEXT session_init rebuild once (membership only).
         "pool_generation": current_generation,
+        # S0: when this init's Sleeper read started (None without one), so the
+        # roster-change handler knows which sessions hold the refreshed rosters.
+        # Always set: `update` must not keep an older init's value.
+        "roster_fetch_started_at": _s0_raw.get("fetch_started_at"),
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
