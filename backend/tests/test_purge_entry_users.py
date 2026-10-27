@@ -162,6 +162,34 @@ def test_dry_run_counts_and_changes_nothing(engine, capsys):
     assert snapshot(engine) == before
 
 
+def test_dry_run_census_counts_skipped_users_credentials_and_shared_leagues(engine, capsys):
+    """head-eng 2026-10-27 (i) and (ii), counts only."""
+    odd = "entry:espn:8888.t3"
+    with engine.begin() as conn:
+        # A verified_via that isn't enum-shaped is counted as "other", never printed.
+        conn.execute(insert(db.users_table).values(sleeper_user_id=odd, created_at=BEFORE,
+                                                   verified_via=f"oops {SWID}"))
+        seed(conn, db.mfl_credentials_table, "verified", user_id=VERIFIED, mfl_username="a")
+        seed(conn, db.espn_credentials_table, "undated", user_id=UNDATED, swid="{UNDATED}")
+        # 10101 (ESPN's) already has SLEEPER; another target there doesn't count.
+        seed(conn, db.league_members_table, "lm-target", league_id="10101", user_id=MFL)
+        # 61408 (MFL's) gains a Fleeced member; its synthetic member doesn't count.
+        seed(conn, db.league_members_table, "lm-acct", league_id="61408", user_id=ACCT)
+    before = snapshot(engine)
+    code, out = run(capsys)
+    assert code == 0
+    assert ("  verified entry users (skipped): 3; by kind and verified_via: "
+            "espn espn_login 1, espn other 1, mfl mfl_login 1") in out
+    assert ("  skipped entry users holding an ESPN/MFL credential row (--verify (b) fails on any): "
+            "verified: espn_credentials 0, mfl_credentials 1; "
+            "other skipped: espn_credentials 1, mfl_credentials 0") in out
+    assert ("  leagues owned by a target: 2; with another Fleeced member (a users row, "
+            "not a target): 2 (members: 2)") in out
+    for secret in (SWID, "oops", odd, "8888", "10101", "61408"):
+        assert secret not in out, secret
+    assert snapshot(engine) == before
+
+
 def test_execute_refuses_a_stale_expect(engine, capsys):
     before = snapshot(engine)
     code, out = run(capsys, "--execute", "--expect", "4")

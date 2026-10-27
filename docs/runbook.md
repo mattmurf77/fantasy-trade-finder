@@ -1423,6 +1423,19 @@ first prints the database identity (dialect, the host's first label, the
 database name; never credentials), and it refuses a local SQLite database
 unless `--allow-local` is passed (local test runs only).
 
+**Before step 1: the census** (read-only, on the operator's word; head-eng
+2026-10-27). Run the dry run now with `--cutoff <the current UTC time>`;
+nothing changes. Send head-eng the target count and the `census` lines only:
+- the verified entry users the purge skips, by kind and `verified_via`
+  (`mfl_login` is an MFL auth-link; `apple` / `google` an identity link);
+- the skipped entry users holding an ESPN/MFL credential row. **Any non-zero
+  count fails `--verify` (b) at step 7.** head-eng recommends deleting only
+  those users' credential rows, so they keep their accounts. That waits on
+  Product and legal and isn't part of this procedure yet, so settle it before
+  step 1;
+- the target-owned leagues another Fleeced user belongs to (informational:
+  those members re-link, above).
+
 1. **Flip `landing.platform_options` OFF** (operator ask 12, release-lead's
    session), then **confirm it reads false via `GET /api/feature-flags`**.
 2. **Restart the Render web service,** so live in-memory entry sessions can't

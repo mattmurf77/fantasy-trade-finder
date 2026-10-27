@@ -307,6 +307,69 @@ def _info(found) -> list[str]:
     ]
 
 
+# A verified_via value is printed only when it looks like an enum (sleeper,
+# apple, google, mfl_login, …); anything else, which could carry an id, is
+# counted as "other".
+_VIA = re.compile(r"[a-z_]{1,24}")
+
+
+def _kind(uid: str) -> str:
+    """entry:espn:… → espn; entry:mfl:… → mfl."""
+    kind = uid[len(ENTRY_PREFIX):].split(":", 1)[0]
+    return kind if kind in ("espn", "mfl") else "other"
+
+
+def _census(found) -> list[str]:
+    """head-eng 2026-10-27, counts only, never a failure: the verified entry
+    users the purge skips (by kind and verified_via), which skipped users hold
+    an ESPN/MFL credential (--verify (b) fails on any), and the target-owned
+    leagues another Fleeced user (a users row, not a target) belongs to."""
+    targets = found["targets"]
+    verified = found["skipped_verified"]
+    others = found["skipped_after_cutoff"] | found["skipped_no_created_at"]
+    users, lg, lm = db.users_table, db.leagues_table, db.league_members_table
+    by_via: Counter = Counter()
+    holders: dict[str, dict[str, int]] = {"verified": {}, "other skipped": {}}
+    owned: set[str] = set()
+    shared: set[str] = set()
+    members = 0
+    with db.engine.connect() as conn:
+        for chunk in _chunks(verified):
+            for r in conn.execute(select(users.c.sleeper_user_id, users.c.verified_via)
+                                  .where(users.c.sleeper_user_id.in_(chunk))):
+                via = r.verified_via if isinstance(r.verified_via, str) and _VIA.fullmatch(
+                    r.verified_via) else "other"
+                by_via[(_kind(r.sleeper_user_id), via)] += 1
+        for label, ids in (("verified", verified), ("other skipped", others)):
+            for tbl, _col in _present([(a, "user_id") for a in CREDENTIAL_TABLES], found["existing"]):
+                holders[label][tbl.name] = sum(
+                    conn.execute(select(func.count(func.distinct(tbl.c.user_id)))
+                                 .where(tbl.c.user_id.in_(chunk))).scalar() or 0
+                    for chunk in _chunks(ids))
+        if {"leagues", "league_members", "users"} <= found["existing"]:
+            for chunk in _chunks(targets):
+                owned.update(conn.execute(select(lg.c.sleeper_league_id)
+                                          .where(lg.c.user_id.in_(chunk))).scalars())
+            for chunk in _chunks(owned):
+                for league, uid in conn.execute(
+                        select(lm.c.league_id, lm.c.user_id)
+                        .join(users, users.c.sleeper_user_id == lm.c.user_id)
+                        .where(lm.c.league_id.in_(chunk))):
+                    if uid not in targets:
+                        shared.add(league)
+                        members += 1
+    fmt = lambda counts: ", ".join(f"{k} {v}" for k, v in counts.items()) or "none"  # noqa: E731
+    return [
+        "census (head-eng 2026-10-27; counts only, never a failure):",
+        f"  verified entry users (skipped): {len(verified)}; by kind and verified_via: "
+        + (", ".join(f"{k} {v} {n}" for (k, v), n in sorted(by_via.items())) or "none"),
+        "  skipped entry users holding an ESPN/MFL credential row (--verify (b) fails on any): "
+        f"verified: {fmt(holders['verified'])}; other skipped: {fmt(holders['other skipped'])}",
+        f"  leagues owned by a target: {len(owned)}; with another Fleeced member (a users row, "
+        f"not a target): {len(shared)} (members: {members})",
+    ]
+
+
 def _summary(found) -> list[str]:
     skipped = len(found["skipped_verified"]) + len(found["skipped_after_cutoff"])
     return [
@@ -327,6 +390,7 @@ def dry_run(cutoff) -> int:
     lines += [f"  {k}: {v}" for k, v in sorted(counts.items())] or ["  (none)"]
     lines.append(f"  total: {sum(counts.values())}")
     lines += _info(found)
+    lines += _census(found)
     late = len(found["skipped_after_cutoff"])
     lines.append(f"unverified created after cutoff: {late}")
     if late:
