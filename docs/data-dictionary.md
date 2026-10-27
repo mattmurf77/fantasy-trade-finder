@@ -256,7 +256,7 @@ Sleeper user identities + denormalized hot-read activity columns.
 | `events_count` | int | |
 | `last_device_type`, `last_os_version`, `last_app_version` | str | most recent client snapshot |
 | `verified_at` | str | ISO — when this user record was last proven controlled (account-auth plan P1/P2) |
-| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` — the proof source; NULL = never verified (username-only) |
+| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` / `'mfl_login'` / `'espn'` — the proof source; NULL = never verified (username-only). `'mfl_login'` = an MFL login (`/api/mfl/auth-link`, or the MFL sign-in at `/api/entry/platform`); `'espn'` = the ESPN cookie-pair sign-in proof at `/api/entry/platform` |
 | `profile_public` | int | Public-profile opt-in (teardown 06-04, flag `profiles.user_toggle`): 1 = user opted into `/u/<username>` exposure; NULL/0 = private. Checked by the public profile routes IN ADDITION to the global `profiles.public_pages` flag; managed via GET/PUT `/api/profile/visibility` |
 | `stud_tax_mode` | str | #214/#215 — per-user stud-tax mode: `'market'` (retuned default; NULL/unknown reads as market) / `'heavy'` (pre-#214 legacy adjustment math) / `'off'` (no crown premium or package-depth discount). Managed via GET/PUT `/api/settings/stud-tax`; read by `trade_service.stud_tax_mode_for_user` for `/api/trade/evaluate` + deck generation |
 | `pick_pricing_mode` | str | ⚠️ **DEAD DATA since 2026-08-21 (D-146) — written by nothing, read by nothing.** (Unrelated but adjacent: `draft_picks.pool_value` is still written and still holds the LADDER price; every surface reprices it at read time since D-148 — Q-026 CLOSED.) Every row still says `'tier_ladder'` (or NULL); ignore it. It was **M6b**'s per-user draft-pick pricing mode, managed via GET/PUT `/api/settings/pick-pricing` and read by `trade_service.pick_pricing_mode_for_user`. The operator ruled market pricing *"not an opt-in or even an option to flip"*, so the resolver now returns `'market_slots'` unconditionally without touching this column, the PUT is 410 Gone, and the GET serves the fixed state rather than echoing this value back. **The column is deliberately NOT dropped** (additive-schema rule — never drop a column): keeping it means a restore of the per-user axis, if one is ever authorised, needs no migration, and it costs one unread VARCHAR. `db.get_pick_pricing_mode` / `set_pick_pricing_mode` still exist and still round-trip; nothing in production calls them. Pinned by `test_db_accessors_survive_as_dead_data` and `test_m6b_02_the_stored_column_is_no_longer_read` |
@@ -1639,7 +1639,7 @@ ESPN league linking (`espn.link`, [plan](plans/espn-league-linking-plan-2026-07-
 | Column | Type | Notes |
 |---|---|---|
 | `user_id` | str PK | FTF user_id (one ESPN cookie pair per user) |
-| `swid` | str | Braced GUID — doubles as the user's ESPN member id in league payloads; plaintext |
+| `swid` | str | Braced GUID — doubles as the user's ESPN member id in league payloads; plaintext. Stored **as captured** (braced or bare, any case); platform sign-in's D6 conflict check compares it through `accounts.platform_subject` (braced, upper-cased) on both sides |
 | `espn_s2_encrypted` | text | **Fernet ciphertext** of the `espn_s2` cookie — never plaintext, never logged |
 | `expires_hint_at` | str | ISO UTC guess (~1yr community consensus; undocumented). NULL = unknown — 401s drive reconnect |
 | `verified_at` | str | ISO UTC of the last live authenticated ESPN read that PROVED this pair (credential-honesty fix, 2026-08-12). Means EXACTLY ONE THING: the **server** observed a successful **authenticated** read using this pair — never "the client captured cookies", "the user looked signed in", or "ESPN answered 200". Stamped by both `/api/espn/link` store paths; the credential-only path proves it via `server._espn_verify_credential` (authenticated read of a linked private league, else a fan-profile probe that returned account data — result asserted, not just exception-free). **Identity binding (#321, 2026-08-16):** since this release the stamp additionally implies the pair's SWID passed the membership assertion (owns the caller's bound team, or the check was conclusively inconclusive — zero-false-reject posture); a conclusive mismatch discovered later (team-binding step, re-sync) NULLs the stamp in place (`clear_espn_credential_verification`, row kept). **One-time invalidation migration (2026-08-16, `_evict_prerelease_espn_verified_stamps`):** every stamp `< 2026-08-17T06:00:00+00:00` (the release cutoff) was nulled at deploy — **no pre-identity-binding stamp is identity-trustworthy** — so NULL now also means "evicted pending an identity-bound re-sign-in", not only "never proven". NULL → `GET /api/espn/link` reports not connected. **Do not widen:** a device-reported "looks connected" signal needs its own column |
@@ -1656,7 +1656,7 @@ MFL authenticated linking (#177, `mfl.auth_link`). Encrypted MFL session cookies
 | Column | Type | Notes |
 |---|---|---|
 | `user_id` | str PK | FTF user_id (one MFL link per user) |
-| `mfl_username` | str | MFL login handle — identifier only (for "connected as" display), not a secret |
+| `mfl_username` | str | MFL login handle — identifier only (for "connected as" display), not a secret. Stored as typed; platform sign-in's D6 conflict check compares it trimmed + lower-cased on both sides |
 | `cookie_encrypted` | text | **Fernet ciphertext** of `MFL_USER_ID=<value>` — never plaintext, never logged |
 | `year` | int | Season the cookie was minted for |
 | `created_at`, `updated_at` | str | |
@@ -1683,14 +1683,14 @@ Identity-anchor layer above the app's working key (`sleeper_user_id`) — accoun
 
 ## `linked_identities`
 
-One row per provider identity. Keyed on the provider's stable `sub` claim — **never** on email (Apple only returns email on first authorization).
+One row per provider identity. Keyed on the provider's stable `sub` claim — **never** on email (Apple only returns email on first authorization). Since platform sign-in (2026-10-26) a proven ESPN/MFL team claim at `POST /api/entry/platform` also anchors an account here (`accounts.PLATFORM_PROVIDERS`; deliberately outside `accounts.PROVIDERS`, which stays the Apple/Google `/api/auth/*` set). No CHECK constraint, so no DDL.
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | autoincrement |
 | `account_id` | str, not null | → `accounts.account_id` |
-| `provider` | str, not null | `'apple'` / `'google'` |
-| `provider_subject` | str, not null | Provider's stable `sub`; unique per provider (`uq_linked_identity`) |
+| `provider` | str, not null | `'apple'` / `'google'` / `'espn'` / `'mfl'` |
+| `provider_subject` | str, not null | Provider's stable `sub`; unique per provider (`uq_linked_identity`). `espn`: the canonical braced SWID, upper-cased. `mfl`: the MFL login username, trimmed and lower-cased (first controller wins — the row never moves) |
 | `email_hash` | str | SHA-256 hex of the normalized provider email; raw email is never stored |
 | `linked_at` | str | ISO UTC |
 
@@ -1705,7 +1705,7 @@ One row per provider identity. Keyed on the provider's stable `sub` claim — **
 | `token_hash` | str PK | **SHA-256 hex of the bearer token** — the raw token is never stored (a DB leak must not yield live credentials) |
 | `user_id` | str, not null | Sleeper user id or `acct_<account_id>` working key. Indexed (`ix_sessions_user`) for the delete-all-for-user eviction paths |
 | `account_id` | str | → `accounts.account_id` when the session is account-anchored |
-| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` — re-stamped onto the rebuilt session |
+| `verified_via` | str | `'sleeper'` / `'apple'` / `'google'` / `'mfl_login'` / `'espn'` — re-stamped onto the rebuilt session |
 | `account_only` | int | 0/1 — 1 = `acct_*` session with no Sleeper source (rebuilds as the empty-sentinel-league account session) |
 | `username` | str | Snapshot for rebuild; falls back to the `users` profile when null |
 | `display_name` | str | Snapshot for rebuild |

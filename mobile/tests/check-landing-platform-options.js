@@ -266,7 +266,7 @@ assert(
 
 // V2.6 — backend route exists, sessionless, dual-gated, deterministic ids.
 const entryRoute = serverPy.match(
-  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,20000}?\n@app\.route/,
+  /@app\.route\("\/api\/entry\/platform", methods=\["POST"\]\)\s*\ndef entry_platform\(\):[\s\S]{0,30000}?\n@app\.route/,
 );
 assert(!!entryRoute, 'V2: POST /api/entry/platform route exists');
 assert(
@@ -280,16 +280,18 @@ assert(
   !!entryRoute && !/_require_session\(\)/.test(entryRoute[0]),
   'V2: entry route is sessionless (no _require_session)',
 );
+// Platform sign-in (2026-10-26) superseded the deterministic entry: ids: a
+// team claim is PROVEN and signs into a verified acct_* account session.
 assert(
-  !!entryRoute &&
-    /entry:espn:\{_espn\.canonical_swid\(team\.owner_swid\)\}/.test(entryRoute[0]) &&
-    /entry:espn:\{league_id\}\.t\{team_id\}/.test(entryRoute[0]) &&
-    /f"entry:\{_mfl_member_id\(league_id, franchise_id\)\}"/.test(entryRoute[0]),
-  'V2: deterministic entry: ids, distinct from the espn:/mfl: placeholder class',
+  !!entryRoute && !/f"entry:/.test(entryRoute[0]),
+  'Platform sign-in: the mint never creates an entry:* id',
 );
 assert(
-  !!entryRoute && /_extension_build_session\(/.test(entryRoute[0]),
-  'V2: mint goes through the one reusable session builder',
+  !!entryRoute &&
+    /_espn_signin_proof\(/.test(entryRoute[0]) &&
+    /_mfl\.login\(username, password, year\)[\s\S]*_mfl\.fetch_league_bundle\(league_id, year, host, cookie=cookie\)[\s\S]*_mfl\.fetch_my_leagues\(cookie, year\)[\s\S]*_platform_sign_in\(audit, "mfl"/.test(entryRoute[0]) &&
+    /_platform_sign_in\(audit, "espn"/.test(entryRoute[0]),
+  'Platform sign-in: both claims prove ownership, then mint via _platform_sign_in',
 );
 
 // ── V2.1: "log in" as a first-class entry option ─────────────────────────
@@ -461,13 +463,14 @@ assert(
 );
 assert(
   !!actionBlock && !/upsert_/.test(actionBlock[0]) &&
-    !/_extension_build_session\(/.test(actionBlock[0]),
+    !/_extension_build_session\(/.test(actionBlock[0]) &&
+    !/_platform_sign_in\(/.test(actionBlock[0]),
   'V2.1: the action branches store nothing and mint nothing',
 );
 assert(
   !!entryRoute && !!actionBlock &&
     entryRoute[0].indexOf(actionBlock[0]) <
-      entryRoute[0].indexOf('_extension_build_session('),
+      entryRoute[0].indexOf('_platform_sign_in('),
   'V2.1: the action branches run BEFORE the mint',
 );
 assert(

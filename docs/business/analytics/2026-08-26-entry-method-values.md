@@ -23,3 +23,7 @@ opening the sheet or previewing a league is not.
 Downstream: funnel queries that bucket by `method` gain two buckets; nothing
 existing changes meaning. `league_selected.platform` continues to carry the
 platform on the far side of the picker.
+
+**See also (2026-10-27):** the closed domain of `signin_failed.error_code` for
+`method` = `espn` / `mfl`, including the four platform sign-in refusal codes, is
+in [`2026-10-27-signin-failed-error-codes.md`](2026-10-27-signin-failed-error-codes.md).

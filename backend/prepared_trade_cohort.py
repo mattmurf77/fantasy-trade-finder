@@ -18,7 +18,10 @@ from .sleeper_roster import owns_roster
 VERSION = "prepared-cohort-1"
 PLATFORMS = frozenset({"sleeper", "espn", "mfl", "fleaflicker"})
 FORMATS = frozenset({"1qb_ppr", "sf_tep"})
-VERIFIED = frozenset({"sleeper", "apple", "google", "mfl_login"})
+# verified_via values eligible for prepared-trade discovery. "espn" = the ESPN
+# sign-in's verified_via (accounts.VERIFIED_VIA_ESPN; analytics-lead grant
+# 2026-10-26, E1 pinned by test_prepared_trade_cohort.py).
+VERIFIED = frozenset({"sleeper", "apple", "google", "mfl_login", "espn"})
 SOURCE_REASONS = frozenset({"source_unavailable", "source_auth_failed", "source_invalid",
     "source_stale", "source_identity_mismatch", "source_unmapped_players",
     "source_credentials_missing", "source_crosswalk_missing", "unsupported_platform"})

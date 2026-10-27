@@ -1,3 +1,81 @@
+## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
+
+Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. This builds on the 2026-10-26 entry below.
+
+- **C4 (XFF):** `_client_ip()` now takes the hop `_SIGNIN_TRUSTED_PROXY_HOPS` (= 1) from the right, falling back to `remote_addr` when there are fewer hops. The per-IP ceiling is raised 30 → **300** failures per 10 min; the per-subject 5 per 15 min is unchanged. The TEMPORARY `PLATFORM-SIGNIN-XFF hops=N` line (count only) is logged on claims and the two actions, to be removed after release-lead confirms Render's layout.
+  - New tests: `test_c4_trusted_proxy_hops_pick_the_hop_counted_from_the_right` (×4), `test_c4_two_trusted_hops_key_the_ip_limit_on_the_client_hop`, `test_c4_ip_ceiling_is_300_failures_per_10_minutes`, `test_c4_xff_diagnostic_logs_only_the_hop_count` (caplog holds the count and none of the test IPs, incl. `remote_addr`).
+  - `test_c4_spoofed_leading_xff_…` and the other IP tests still pass at a test-local 30 ceiling.
+  - Sabotage: hard-coded rightmost → 4 red (hops 2/3, the fewer-hops fallback, the hops=2 limit test). Restored.
+- **`espn.signin` kill switch:** registered in `FLAG_KEYS`, `config/features.json` (`true`), `release.json` and the four release-derived profiles. When off, the whole ESPN entry branch returns 404 `feature_disabled` before any ESPN call or limiter accounting.
+  - `test_espn_signin_off_404s_the_whole_espn_entry_branch_with_zero_espn_calls`: five ESPN entry requests all get 404, with zero ESPN league/fan calls and no limiter state; MFL sign-in still 200; `/api/espn/link` still 200.
+  - Sabotage: drop the check → red (`500 == 404`, the action reached the fail-if-called fan stub). Restored.
+- **Runbook:** a new entry, "ESPN/MFL sign-in temporarily refused (429 `too_many_attempts`) for one user", for the accepted per-subject lockout residual.
+- **release-lead QA follow-ups (#430 GO-with-notes):**
+  - **D7 narrowed.** Only credential failures count: an MFL bad login, the ESPN sign-in cookie read refused for auth, and `espn_unproven_pair`. Public/ownerless/`wrong_account`/outages don't count.
+  - **A proven claim clears its subject's count** (not the IP window).
+  - **In-flight admission:** `failures + in_flight >= cap` refuses, and the slot is released in a `finally`.
+  - New tests: `test_d7_unproven_pair_counts`, `test_d7_uncounted_refusals_never_consume_the_budget`, `test_d7_a_proven_claim_clears_the_subject_count_not_the_ip`, `test_d7_concurrent_bad_attempts_never_exceed_the_cap` (12 threads, barrier, 0.2 s login; stable over 6 runs), `test_d7_in_flight_slot_is_released_on_an_exception`. `test_espn_subject_limit_covers_the_claimed_swid` now uses counted cookie-read refusals.
+  - **Sabotage:** admission ignoring in-flight → concurrency test red (`12 == 5`); no subject clear on success → clear test red. Both restored.
+  - **XFF line** gains `cf=0|1 tci=0|1` (presence only). Its test asserts six test IPs are absent from caplog.
+  - The runbook lockout entry is reworded: renewable lock, Apple gives a different empty account, restart is the only reset, escalate to eng.
+  - The MFL username-case decision rule (QA P2-3) is in `scope.md`, TestFlight step 6b and a code comment at `accounts.platform_subject`; no code change.
+  - Doc nits fixed (preview 500 comment, 300 per IP, case count 24).
+  - Run: `test_platform_sign_in.py` (116) + `test_entry_platform_route.py` (27) = **143 passed**.
+- **Second QA pass (#430 @ `6ffcfb65`):**
+  - **Flake fix:** the concurrency test stubs `api_observability._write_event`; the in-memory SQLite `SingletonThreadPool` segfaulted on Python 3.14. Loop: **20 of 20 passed** (separate processes).
+  - **New pins:** `test_s12_in_flight_saturation_answers_retry_after_5s` (`Retry-After: 5`) and `test_s16_actions_release_their_in_flight_slot`.
+  - **S16 sabotage:** `my_leagues` gated on a throwaway `{}` → red (`{'ip:…': 1, 'sub:…': 1} == {}`, the slot leaks).
+  - **Dead code:** `_signin_note_failure` / `_signin_retry_after` removed; the 300-ceiling test uses the live gate and release path.
+  - **MFL year range** (2000..season+1, 400 `mfl_bad_year` before any MFL call or limiter accounting): `test_mfl_year_out_of_range_is_400_before_any_mfl_call` ×6 (claim, preview and action each) and `test_mfl_year_in_range_is_admitted` ×3. Sabotage (check removed) → all 6 red.
+  - Run: **154 passed** (`test_platform_sign_in.py` 127 + `test_entry_platform_route.py` 27).
+- **Round-3 QA (#430 @ `d3248d35`, optional P3s):**
+  - **Year overflow:** JSON `Infinity` / `-Infinity` / `1e400` (int() raises OverflowError) now returns 400 `mfl_bad_year`, not 500, on the claim, the preview and `auth_leagues`, with no MFL call. Fixed in `_mfl_entry_year_refusal` and the entry route's own `auth_leagues` parse. The same gap is LEFT in code #430 doesn't own: `_mfl_resolve` (shared with the pinned `/api/mfl/link`), `/api/mfl/auth-link` and `/api/mfl/auth-import`.
+  - **Copy:** the range case reuses the existing `mfl_bad_year` message, "year must be numeric"; no new copy.
+  - **Tests:** the out-of-range test is parametrized on `_MFL_DEFAULT_YEAR + 2` and the in-range test on `+ 1`. New: `test_mfl_year_overflow_is_400_not_500` ×3 and `test_auth_leagues_year_check_runs_before_the_limiter_gate` (gate spy never called; no slot or count; a locked subject still gets the 400, not a 429).
+  - **Sabotage:** check moved after the gate → ordering test red (`['mfl'] == []`); OverflowError uncaught → all 3 overflow cases red (`500 == 400`). Both restored.
+  - Run: **158 passed** (131 + 27); with the link/cohort/accounts suites, **293 passed**.
+- **Refusal copy (follow-up commit):** marketing's final 14-row set (§6 addendum 8, C) is applied, with rows 7, 8 and 12 approved by legal R28.16, so the set is complete. Apostrophes are U+2019, except row 10, which stays byte-identical. Rows 8, 9 and 11 are sign-in-only constants; the link-route copy is unchanged.
+  - New: `test_signin_refusal_copy_is_the_final_set_verbatim` (21 cases, literal expected bodies on the real route) and `test_link_routes_and_previews_keep_their_own_copy`.
+  - Sabotage: row-13 constant reworded → `[row13-too-many]` red. Restored.
+  - `test_platform_sign_in.py` + `test_entry_platform_route.py`: **135 passed**.
+- **Row 6 at step 2 (follow-up commit):** the sign-in's own ESPN cookie read failing with a 5xx, parse error or timeout now returns 502 `espn_unavailable` with row 6's copy. A timeout there used to fall to 500 `internal_error`. The preview keeps the link-route copy.
+  - New cases: `[row6-step2-5xx]`, `[row6-step2-parse]` and `[row6-step2-timeout]`, plus a preview assertion in `test_link_routes_and_previews_keep_their_own_copy`.
+  - Sabotage: the step-2 branch disabled → `[row6-step2-5xx]` and `[row6-step2-parse]` red. Restored.
+  - Run: **138 passed**.
+- **Runs:**
+  - `test_platform_sign_in.py` (86) + `test_entry_platform_route.py` (27): **113 passed**.
+  - With the cohort test, the MFL auth-link and ESPN link suites, and the flag-registry/mirror suites (`test_seed_ui_test_db`, `test_blind_grading_routes`, `test_events_api`, `test_avoid_positions`, `test_invite_links`, `test_draft_extensions_w1`, `test_outlook_route_cache`, `test_packed_evidence`): **513 passed, 0 failed** on the final code. One earlier run showed 1 failure, from the audit-log test's `PLATFORM-SIGNIN` prefix also matching the new `PLATFORM-SIGNIN-XFF` lines; that filter is fixed.
+  - `check-landing-platform-options.js` passes.
+  - Full suite left to CI.
+
+## 2026-10-26 — Platform sign-in: proof-based ESPN/MFL team claim mints a verified `acct_*` session (dark; `feat/platform-sign-in`)
+
+Full gates. Server only (plus the R1 operator script); ships dark behind `landing.platform_options`. D-056: `FTF_SKIP_SIM_GATE=1` posture — no simulator; evidence is the tests below, a code-walk and the TestFlight checklist in [scope.md](../docs/plans/platform-sign-in/scope.md). Includes head-eng's security conditions 1–11 (review dated 2026-10-27) and analytics-lead's two grants.
+
+- **Backend:** the new `test_platform_sign_in.py` has 78 tests; `test_entry_platform_route.py` (27) was rewritten where it asserted claim-only `entry:*` mints; `test_prepared_trade_cohort.py` gains 1 pin. The condition-1 and condition-3 tests run the **real** `espn_service.fetch_league` / `mfl_service.login` / `fetch_my_leagues` over a fake urllib opener, so the real `obs.api_events` capture and error mapping are exercised. Related suites green (421 tests: accounts, account-first, Apple harness, deletion, data rights, ESPN/MFL link + auth-link, persistent sessions, verified reads/sessions, signout). `mobile/tests/check-landing-platform-options.js` updated and passing.
+- **Sabotage, each red then restored** (final code):
+  - skip the anonymous read → 12 red, incl. `test_c7_refusal_espn_public_league` (`'espn_unproven_pair' == 'espn_public_league'`);
+  - skip the pair-binding control read → 13 red, incl. `test_c7_refusal_espn_unproven_pair_leaguemate_attack` (the attacker signs in: `200 == 403`);
+  - skip the D6 `platform_identity_in_use` check → 5 red (both 409 tests, both condition-2 D6 cases, the condition-1 sweep);
+  - limiter disabled → 6 red (IP, spoofed-XFF, subject, ESPN subject, audit `limited`, condition-1 sweep);
+  - skip the MFL franchise match → 3 red (both MFL `wrong_account` tests, condition-1 sweep);
+  - **C1** unexpected exceptions fall through to the global handler → `test_c1_markers_never_leak_through_any_outcome` red (`('logs', 'S2MARKER')`);
+  - **C2** ESPN subject = raw `.strip()` instead of the normaliser → 6 red (all four condition-2 tests, the bare-lower 409 test, the ESPN subject-limit test);
+  - **C3** non-auth answers on steps 3/4 treated as auth → 19 red (all 18 `test_c3_…` cases + condition-1 sweep);
+  - **C4** leftmost XFF hop → `test_c4_spoofed_leading_xff_neither_resets_nor_splits_the_ip_count` red;
+  - **C5** script prints the Cookie header → both `test_c5_r1_script_env_only_…` red; script reads `secrets.local.env` → both red (`file access`);
+  - **C6** `delete_espn_credential` also drops identities → `test_c6_espn_disconnect_…` red; same on `delete_mfl_credential` → `test_c6_mfl_disconnect_…` red;
+  - **C7** an `entry` exemption added to `_verified_write_denial` → `test_c7_the_279_gate_is_byte_identical_and_still_on_the_link_routes` red (hash pinned to `origin/main` @ `732a6b7f`);
+  - **C8** ESPN `wrong_account` always generic → `test_c7_c8_refusal_espn_wrong_account_names_the_team_this_login_owns` red;
+  - **C9** `account_created` always true → 6 red (second sign-in, bound restore, race, condition-2 identity, both condition-6 tests);
+  - **C10** `linked_identities` dropped from the export → both `test_c10_…` red; credential secrets no longer omitted → both red;
+  - **C11** deletion skips `accounts` + `linked_identities` → `test_c7_c11_mint_import_delete_…` and `test_c11_mfl_deletion_releases_the_identity` red;
+  - **E1** cohort literal `espn` → `espn_login` → `test_platform_sign_in_verified_via_values_are_cohort_eligible` red.
+- **Suite:** `python -m pytest backend/tests -q` before head-eng's conditions: **8867 passed, 2 skipped** (25 min). After (final code): **8912 passed, 2 skipped, 0 failed** (12 min; +45 = the 44 new sign-in tests + the cohort pin). The known `test_ranking_service_threads` flake did not fire.
+- **Private MFL leagues (follow-up delta):** the MFL claim now logs in first and reads the league bundle with the login's cookie; `proof_required` makes zero MFL calls. New: `test_mfl_private_league_bundle_is_read_with_the_login_cookie`, `test_mfl_private_league_unreadable_by_this_login_is_wrong_account`, `test_mfl_bad_login_is_refused_before_any_bundle_fetch`, `test_c7_refusal_mfl_proof_required_makes_zero_mfl_calls` (MFL service + `urlopen` patched to fail if called). Sabotage: bundle fetched with `cookie=None` → both private-league tests red (`assert 403 == 200`), restored. Targeted run: `test_platform_sign_in` (78) + `test_entry_platform_route` (27) + cohort + MFL link/auth-link suites → **200 passed**; structural check passes (its route window widened 20000 → 30000 chars). Full suite not re-run for this delta (CI runs it). Caveat: before the route-test fixture gained its deny-by-default `mfl.login` patch, one run of `test_mfl_bad_franchise_400` reached the real `mfl.login` with the dummy credentials `matt` / `hunter2` (a 403 came back, so the POST likely reached MFL). Fixed; that path is now denied by default.
+- **Analytics:** no new events. Grant 1 → value-only addendum `docs/business/analytics/2026-10-27-signin-failed-error-codes.md` (closed `signin_failed.error_code` domain for espn/mfl). Grant 2 → `espn` in `prepared_trade_cohort.VERIFIED`, the value defined once as `accounts.VERIFIED_VIA_ESPN` and pinned (E1); `prepared_trade_inventory_enabled` untouched (E2).
+- **Not covered:** live ESPN/MFL behaviour. Open risk R1 (does ESPN bind `espn_s2` to the SWID?) is unobserved until head-eng reviews `scripts/espn_pair_check.py` and the operator runs it; the design fails closed either way. TestFlight checklist owed on the 11-06 binary.
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.

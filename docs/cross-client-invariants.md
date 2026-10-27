@@ -181,9 +181,9 @@ Allowed values: `'1qb_ppr'`, `'sf_tep'`. Null in legacy rows is treated as `'1qb
 
 ## Verified-via strings (account-auth P1/P2)
 
-`users.verified_via` / session `verified_via` / `GET /api/account`: `'sleeper'`, `'apple'`, `'google'`. NULL = never verified. Identity-provider strings double as `linked_identities.provider` values (`'apple'`, `'google'`).
+`users.verified_via` / session `verified_via` / `GET /api/account`: `'sleeper'`, `'apple'`, `'google'`, `'mfl_login'`, `'espn'`. NULL = never verified. `'mfl_login'` = an MFL login (`/api/mfl/auth-link`, or the MFL sign-in at `POST /api/entry/platform`); `'espn'` = the ESPN cookie-pair sign-in at `POST /api/entry/platform` (platform sign-in, 2026-10-26; its mint response also carries `verified_via`). Identity-provider strings double as `linked_identities.provider` values (`'apple'`, `'google'`, plus `'espn'` / `'mfl'` for platform sign-in — note the MFL identity provider is `'mfl'` while its `verified_via` is `'mfl_login'`).
 
-**Locations:** `backend/accounts.py` (`PROVIDERS`), `backend/server.py` (auth routes), `mobile/src/api/auth.ts` (`AccountInfo` / `AccountAuthResponse` types).
+**Locations:** `backend/accounts.py` (`PROVIDERS` = Apple/Google only; `PLATFORM_PROVIDERS` = ESPN/MFL), `backend/server.py` (auth routes, `_PLATFORM_SIGNIN_VERIFIED_VIA`), `mobile/src/api/auth.ts` (`AccountInfo` / `AccountAuthResponse` types).
 
 ---
 
