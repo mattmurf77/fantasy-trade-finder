@@ -797,6 +797,8 @@ const BACKGROUND_SET = [
   [TRADES, /if \(vars\.auto\) \{\s*return generateTrades\(request, vars\.searchId \? \{ searchId: vars\.searchId \} : undefined, \{ background: true \}\);\s*\}/,
     'the first-run auto-start and its silent retry'],
   [TRADES, /await getTradeStatus\(job\.job_id, undefined, \{ background: true \}\)/, "the deck's legacy status poll"],
+  ['api/overhaul.ts', /request: \{ background\?: boolean \} = \{ background: true \},/,
+    "the active-overhaul probe (TradesScreen's getActiveOverhaul query, every mount)"],
 ];
 check('8b. D2 [shape]: the pinned background set; nothing else in mobile/src is background; the callers the API defaults cover still match them', () => {
   const want = {};
@@ -1121,6 +1123,40 @@ check('8m. paywall_viewed: M2 opens the paywall with sources first_opinion | lef
   assert(/openPaywall\(\{ source: 'preview_end' \}\)/.test(strip(read(TRADES))), 'the end card source');
   eq(copy.headlineFor('left_deck'), "There's a full deck behind this page.", 'the trigger headline');
   assert(copy.offerBodyFor('first_opinion', false) && copy.offerBodyFor('left_deck', true), 'the trigger body');
+});
+
+check('8n. head-eng grant (b) [executed]: the active-overhaul probe is background — a 402 of any gate or the verify 403 opens NOTHING and RESOLVES {active:null}; a 500 still throws; getOverhaul / getOffers stay user-initiated', async () => {
+  const overhaul = load('api/overhaul.ts', {
+    './client': { apiRequest: client.apiRequest, gateSignalFor: client.gateSignalFor },
+    './trades': { normalizeTradeCard: (c) => c },
+  });
+  const gated = [
+    [402, { error: 'pro_required', gate: 'preview_used' }],
+    [402, { error: 'pro_required', gate: 'lapsed' }],
+    [402, { error: 'pro_required', gate: 'verify_required' }],
+    [402, { error: 'pro_required' }],
+    [403, { error: 'verification_required' }],
+  ];
+  for (const [status, body] of gated) {
+    reset();
+    responses.push({ status, body });
+    const r = await overhaul.getActiveOverhaul('L1');
+    eq(JSON.stringify(r), JSON.stringify({ active: null }), `${status} ${body.gate || body.error}: resolves {active:null}`);
+    eq(signals.length, 0, `${status} ${body.gate || body.error}: opens nothing`);
+  }
+  reset();
+  responses.push({ status: 500, body: { error: 'boom' } });
+  const e5 = await rejects(overhaul.getActiveOverhaul('L1'));
+  eq(e5.status, 500, 'a 500 still throws');
+  reset();
+  responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+  await rejects(overhaul.getOverhaul('o1'));
+  eq(signals.length, 1, 'getOverhaul is user-initiated (tapping in opens the paywall)');
+  reset();
+  responses.push({ status: 402, body: { error: 'pro_required', gate: 'lapsed' } });
+  await rejects(overhaul.getOffers('o1'));
+  eq(signals.length, 1, 'getOffers is user-initiated');
+  assert(/queryFn: \(\) => getActiveOverhaul\(leagueId!\),/.test(strip(read(TRADES))), "TradesScreen's probe line is untouched (the defaults do it)");
 });
 
 function walk(dir, out = []) {
