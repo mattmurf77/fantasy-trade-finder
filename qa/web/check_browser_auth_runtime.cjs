@@ -84,8 +84,11 @@ let context;
   await page.getByText('Verify your Sleeper account to continue.', { exact: false }).waitFor();
   assert.equal(await page.evaluate(() => localStorage.getItem('fumble_session_token')), null);
   assert.equal(calls.filter(c => c.path === '/api/session/init').length, 0);
-  await page.locator('#platform-chip-espn').click();
-  await page.getByText('For ESPN or MyFantasyLeague, verify and link your account in the Fleeced mobile app.', { exact: false }).waitFor();
+  // The web's ESPN/MFL chips are hard-off even with landing.platform_options
+  // on (head-eng 2026-10-27; check_web_structure.py GATE-web-espn-mfl-off).
+  assert.equal(await page.locator('#platform-row').isVisible(), false);
+  assert.equal(await page.locator('#platform-chip-espn').isVisible(), false);
+  assert.equal(await page.locator('#platform-chip-mfl').isVisible(), false);
   assert.equal(calls.filter(c => c.path === '/api/entry/platform').length, 0);
   // The actual extension popup must discard cached data when proof is denied.
   const extensionId = new URL(worker.url()).hostname;

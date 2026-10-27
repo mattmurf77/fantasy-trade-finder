@@ -40,6 +40,24 @@ The values are the same, so the deck's shape doesn't change. models-eng reviews 
   - **Full suite** on `54e42967`: 9340 passed, 2 skipped, 0 failed (12m12s). An earlier run on `56d395d0` is discarded: its 15 failures were source-reading tests that saw `server.py` mid-edit, and they pass on this head.
   - **models-eng OK at `54e42967` (2026-10-27).** The objection is resolved and the pin reproduces. Their stricter-edge note: an earlier failed read in the same job now forfeits the owner arm, where its own re-read might have succeeded. That fails closed, by design.
 
+## 2026-10-27 — Web gate: the web's ESPN/MFL chips are hard-off (before ask 16)
+
+Full gates (head-eng's ask, item 3; scope: [scope-web-gate.md](../docs/plans/landing-platform-options/scope-web-gate.md)). Web only; D-056: `FTF_SKIP_SIM_GATE=1` posture, no mobile change.
+
+- **Change:** `web/js/app.js` `const WEB_PLATFORM_ENTRY = false` replaces both reads of `landing.platform_options` (the chip reveal and `selectEntryPlatform`). It's declared above `_applyLandingFlags()`, which runs the reveal at once (no TDZ).
+- **Pin `GATE-web-espn-mfl-off[index.html]`** (`qa/web/check_web_structure.py`):
+  - no web script or page reads the flag;
+  - exactly one `const WEB_PLATFORM_ENTRY = false;`;
+  - the reveal and the handler both go through it;
+  - the row and both chips ship `hidden`.
+  - **Sabotage 8/8 red,** each restored byte-identical.
+- **Runtime (local static serve):** every flag forced on and `ftf:flags-ready` fired leaves the row and chips hidden, and `selectEntryPlatform('espn')` is a no-op. The same script on the pre-change code shows them and selects ESPN (the control). The console shows only the static server's `/api/feature-flags` 404.
+- **Runs:** `python3 qa/web/check_web_structure.py` 196/196 (CI's `web-structure` job); `node --check` OK on both changed JS files.
+- **`qa/web/check_browser_auth_runtime.cjs`** (local Playwright harness, not in CI): its ESPN-chip click now asserts the row and both chips are hidden, with no `/api/entry/platform` call.
+  - **Not run:** no Playwright install here.
+  - The replaced lines were already stale on main: they waited for an ESPN/MyFantasyLeague sentence that's gone from `web/`.
+- **Not covered:** no JS unit harness on web; the operator's optional post-deploy look (signed out, flag ON: Sleeper door only) is in the scope block.
+
 ## 2026-10-27 — S0 stamp hashes the picks the worker read (#484 QA P2-1); deck pipeline v3
 
 Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 2 → 3: `_run_trade_job`'s `_job_draft_picks` now calls `_note_job_picks_read`, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
