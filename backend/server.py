@@ -28,6 +28,7 @@ import logging
 import math
 import os
 import pathlib
+import queue
 import random
 import re
 import secrets
@@ -158,6 +159,7 @@ from .database import (
     create_mock_draft, load_mock_draft, load_current_mock_draft,
     update_mock_draft, abandon_completed_mock_drafts,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
+    load_draft_pick_seasons,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
@@ -228,6 +230,12 @@ from .database import (
     load_leaderboard, get_self_leaderboard_row,
     # In-app feedback (TestFlight helper) — POST /api/feedback writes here
     save_feedback,
+    # #360 QA P2-1: an unverified session's notes follow it when it verifies
+    attach_session_feedback,
+    # release-lead delta QA E: a re-pointed token's notes never attach
+    detach_session_feedback,
+    # #360 QA P2-2: a throttled retry of a held note still answers `duplicate`
+    find_feedback_by_client_id,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
     list_feedback,
     # Bad-trade flags (FB #85) — POST /api/trades/flag + admin readback
@@ -2572,6 +2580,46 @@ def _restore_persisted_session(token: str) -> dict | None:
     return payload
 
 
+def _session_member_rows(league_user_id, league_display_name, user_player_ids,
+                         opponent_rosters) -> list[dict]:
+    """The `league_members` rows session init writes from its roster inputs.
+    One builder for the daemon's write and the session's `roster_read_rows`,
+    so the roster-change handler's expected fingerprint hashes exactly what
+    is written (#484 QA P1-1)."""
+    return [
+        {
+            # Keyed on the LEAGUE identity, not the account:
+            # `league_members` is league-SHARED (every member's
+            # session_init writes into it), so a co-owned roster
+            # must land on the same row no matter which co-owner
+            # syncs it. Identical to `user_id` for a sole owner.
+            # The name is the roster owner's for the same reason —
+            # this row is what every OTHER member sees for that
+            # team; the caller's own team is marked by `is_you`.
+            "user_id":      league_user_id,
+            "username":     league_display_name,
+            "display_name": league_display_name,
+            # #151 — store the RAW client-sent ids, matching the
+            # opponent rows below. `new_user_roster` is filtered
+            # to the default-format pool, which made the caller's
+            # own off-pool players (e.g. SF-only QBs) invisible
+            # to the free-agent exclusion set. Consumers that
+            # need pool membership already filter on read
+            # (session init's DB-member merge, compute_free_agents).
+            "player_ids":   user_player_ids,
+        }
+    ] + [
+        {
+            "user_id":      str(opp.get("user_id", "")),
+            "username":     opp.get("username", ""),
+            "display_name": opp.get("username", ""),
+            "player_ids":   [str(x) for x in opp.get("player_ids", [])],
+        }
+        for opp in opponent_rosters
+        if opp.get("user_id")
+    ]
+
+
 def _sync_persisted_session_after_init(token: str, sess: dict,
                                        user_changed: bool) -> None:
     """Durable-row hygiene after /api/session/init reuses a token.
@@ -3217,10 +3265,11 @@ def _trade_request_signature(prefs_preload):
 
 def _trade_running_matches(job, fairness_threshold, outlook_value,
                            trade_intent=None, presentation_capture=None,
-                           request_signature=None, fingerprints=None):
+                           request_signature=None, fingerprints=None, session_read=None):
     if presentation_capture is None:
         presentation_capture = _capture_trade_presentation()
-    return bool(_trade_running_policy_matches(job, presentation_capture, fingerprints)
+    return bool(_trade_running_policy_matches(job, presentation_capture, fingerprints,
+                                              session_read=session_read)
         and job.get("fairness_threshold") == fairness_threshold
         and (job.get("outlook_value") or None) == (outlook_value or None)
         and (job.get("trade_intent") or None) == (trade_intent or None)
@@ -3228,9 +3277,11 @@ def _trade_running_matches(job, fairness_threshold, outlook_value,
              or job["request_signature"] == request_signature))
 
 
-def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
+def _trade_running_policy_matches(job, presentation_capture, fingerprints=None,
+                                  session_read=None):
     """Preserve user intent/fairness, never work under an obsolete policy.
-    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
+    `fingerprints`: _trade_current_fingerprints(), read before the lock.
+    `session_read`: the caller's session read (_trade_fingerprints_match)."""
     if not (_job_live(job) and _trade_presentation_matches(job, presentation_capture)
             and _trade_owner_model_matches(job) and _trade_significance_matches(job)
             and _prepared_job_matches(job)):
@@ -3242,7 +3293,8 @@ def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
     # The worker stamps this after preparation; queued jobs already carry
     # the admission-time model/presentation/significance captures above.
     return (("safety_policy" not in job or job["safety_policy"] == expected_safety)
-            and _trade_fingerprints_match(job, fingerprints, running=True))
+            and _trade_fingerprints_match(job, fingerprints, running=True,
+                                          session_read=session_read))
 
 
 def _start_trade_job_thread(*, target, args, kwargs):
@@ -3323,8 +3375,8 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
     with a copied snapshot: one current history projection owns every card.
     `page_start`: the served slice's start index for a paged serve
-    (_trade_job_page_view), None for the legacy cumulative body; it keys the
-    `deck_i1_check` dedupe."""
+    (_trade_job_page_view), None for the legacy cumulative body, which
+    `deck_i1_check` counts only once the job is complete."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3443,10 +3495,12 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
                                       out["cards"], withdrawn, cut)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
-    # One event per page; a legacy cumulative body re-serves the whole deck on
-    # every poll, so it counts once, when the job is complete.
+    # Each card counted once per job (_emit_deck_i1_check): a page serve, a
+    # replace serve included, counts its new cards; a legacy cumulative body
+    # re-serves the whole deck on every poll, so it counts only once the job
+    # is complete, and then only the cards no page counted.
     if i1_report and (page_start is not None or job.get("status") == "complete"):
-        _emit_deck_i1_check(user_id, league_id, job["job_id"], page_start, i1_report)
+        _emit_deck_i1_check(user_id, league_id, job["job_id"], i1_report)
     return out
 
 
@@ -3462,12 +3516,30 @@ def _kick_roster_floor(league_id: str) -> None:
 
 
 # deck_i1_check: the C-a readout's data path (analytics-lead's pre-grant,
-# 2026-10-26). One server-fired NON_INTENT row per job serve page, recorded
-# off the request thread after the response is built.
+# 2026-10-26). One server-fired NON_INTENT row per serve with newly served
+# cards, each card counted once per job (#419 QA P3: a replace serve's cards
+# past page 0, and a job served both legacy and paged, were miscounted by the
+# old (job, page) key), recorded off the request thread after the response.
 _I1_AGE_BUCKETS = ((300, "under_5m"), (3600, "5m_to_1h"), (86400, "1h_to_24h"))
+# The cards counted per job, an LRU of at most _I1_EVENT_DEDUPE_MAX jobs and
+# _I1_EVENT_DEDUPE_CARDS card identities in all (the bound that holds memory:
+# ~130 B an identity once its job has left, so ~26 MB at most).
 _I1_EVENT_DEDUPE_MAX = 20000
-_i1_events_seen: "collections.OrderedDict[tuple, None]" = collections.OrderedDict()
+_I1_EVENT_DEDUPE_CARDS = 200_000
+_i1_events_seen: "collections.OrderedDict[str, set]" = collections.OrderedDict()
+_i1_events_counted = 0                     # identities held across _i1_events_seen
 _i1_events_lock = threading.Lock()
+# One worker, a bounded queue (#419 QA P3: a thread per emit peaked at 188 in a
+# 500-emit burst). A full queue drops the emit, warned at most once a minute
+# with the count; a serve never blocks or fails on it.
+_I1_EVENT_QUEUE_MAX = 1000
+_I1_EVENT_DROP_WARN_EVERY_S = 60
+_i1_event_queue: "queue.Queue" = queue.Queue(maxsize=_I1_EVENT_QUEUE_MAX)
+_i1_event_worker_for = None                # the queue the running worker serves
+_i1_event_worker_thread = None             # that worker, restarted once it died
+_I1_EVENT_EXIT_DRAIN_S = 5.0
+_i1_event_dropped = 0
+_i1_event_drop_warned_at = float("-inf")
 
 
 def _i1_age_bucket(age_s) -> str:
@@ -3479,48 +3551,179 @@ def _i1_age_bucket(age_s) -> str:
     return next((label for limit, label in _I1_AGE_BUCKETS if age_s < limit), "over_24h")
 
 
-def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, page, report: dict) -> None:
-    """Record `deck_i1_check` for one serve page, at most once per (job, page)
-    in this process; repeat polls of the same page are dropped. `page` is the
-    served slice's start index, or None for a legacy cumulative serve (which
-    the caller sends only once the job is complete). Never raises, never
-    blocks: the row is written on a daemon thread, non-touching
+def _i1_card_identity(card):
+    """A card's identity for deck_i1_check's once-per-job count: its trade_id,
+    else its impression_id, else its assets and partner (a card built without
+    either). trade_id first: it is stable across every publish, the page store
+    and a re-sorted (replace) serve, while the non-owner path publishes cards
+    before their impression_ids are stamped (#468 QA P2-1)."""
+    if isinstance(card, dict):
+        ident = card.get("trade_id") or card.get("impression_id")
+        if ident:
+            return ident
+        return ("assets", tuple(str(p["id"]) for p in card.get("give", [])),
+                tuple(str(p["id"]) for p in card.get("receive", [])),
+                str(card.get("target_user_id")))
+    ident = getattr(card, "trade_id", None) or getattr(card, "impression_id", None)
+    return ident or ("assets", tuple(map(str, card.give_player_ids)),
+                     tuple(map(str, card.receive_player_ids)), str(card.target_user_id))
+
+
+def _i1_new_cards(job_id: str, report: dict) -> dict | None:
+    """The serve's props over the cards not yet counted for this job, which
+    are now counted; None when there are none (a repeat poll). The serve-level
+    fields (mode, status, outcome, age_bucket) are the serve's; the counts sum
+    only the new cards."""
+    global _i1_events_counted
+    per_card = report.get("_cards") or ()
+    with _i1_events_lock:
+        seen = _i1_events_seen.get(job_id)
+        if seen is None:
+            seen = _i1_events_seen[job_id] = set()
+        _i1_events_seen.move_to_end(job_id)
+        new = []
+        for ident, counts in per_card:
+            if ident not in seen:
+                seen.add(ident)
+                new.append(counts)
+        _i1_events_counted += len(new)
+        while _i1_events_seen and (len(_i1_events_seen) > _I1_EVENT_DEDUPE_MAX
+                                   or _i1_events_counted > _I1_EVENT_DEDUPE_CARDS):
+            _old, gone = _i1_events_seen.popitem(last=False)
+            _i1_events_counted -= len(gone)
+            if _old == job_id:            # this job alone is over the budget
+                break
+    if not new:
+        return None
+    props = {k: v for k, v in report.items() if not k.startswith("_")}
+    for name in new[0]:
+        props[name] = sum(counts[name] for counts in new)
+    return props
+
+
+def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, report: dict) -> None:
+    """Record `deck_i1_check` for one serve's newly served cards: each card is
+    counted once per job in this process (by _i1_card_identity), so a repeat
+    poll records nothing, a replace serve records its cards not yet counted,
+    and a legacy body (sent only once the job is complete) its cards no page
+    counted. Never raises, never blocks: the row goes on a bounded queue to
+    one daemon worker (_i1_event_enqueue), written non-touching
     (`touch_user=False`), owned by the viewer, with the league in the row's
     `league_id` column and only a hashed job key in the props. A serve is an
     HTTP response: a view built outside a request records nothing."""
     if not has_request_context():
         return
     try:
-        key = (job_id, page)
-        with _i1_events_lock:
-            if key in _i1_events_seen:
-                return
-            _i1_events_seen[key] = None
-            if len(_i1_events_seen) > _I1_EVENT_DEDUPE_MAX:
-                _i1_events_seen.popitem(last=False)
-        props = dict(report, job_key=hashlib.sha256(str(job_id).encode()).hexdigest()[:12])
+        props = _i1_new_cards(job_id, report)
+        if props is None:
+            return
+        props["job_key"] = hashlib.sha256(str(job_id).encode()).hexdigest()[:12]
         device = dict(getattr(g, "device_info", {}) or {})
         # Like the trade worker: a write after an account deletion must not land.
         lease = _user_data_lifecycle.capture(user_id, started=g.get("_user_data_started"))
-        # The writer and engine in effect for this serve, so a late thread
-        # can't write through a different one.
+        # The writer and engine in effect for this serve, so a late write can't
+        # go through a different one.
         from . import database as _database
         write = functools.partial(record_event, user_id, "deck_i1_check", league_id=league_id,
                                   source="api", props=props, touch_user=False,
                                   bind=_database.engine, **device)
-        threading.Thread(target=_record_deck_i1_check, name="deck-i1-check", daemon=True,
-                         args=(lease, write)).start()
+        _i1_event_enqueue(lease, write)
     except Exception as err:          # analytics must never fail a serve
         log.warning("deck_i1_check not recorded job=%s: %s", job_id, err)
 
 
-def _record_deck_i1_check(lease, write) -> None:
+def _i1_event_enqueue(lease, write) -> None:
+    """Queue one write for the worker (started for the current queue on first
+    use, and again if it died: #468 QA P3-1); a full queue drops it, warned at
+    most once a minute with the count."""
+    global _i1_event_worker_for, _i1_event_worker_thread
+    q = _i1_event_queue
+    with _i1_events_lock:
+        thread = _i1_event_worker_thread
+        if _i1_event_worker_for is not q or thread is None or not thread.is_alive():
+            thread = threading.Thread(target=_i1_event_work, args=(q,), name="deck-i1-check",
+                                      daemon=True)
+            thread.start()
+            _i1_event_worker_for, _i1_event_worker_thread = q, thread
     try:
+        q.put_nowait((lease, write))
+    except queue.Full:
+        _i1_event_drop_warning(q, 1)
+
+
+def _i1_event_drop_warning(q, dropped: int = 0, *, force: bool = False) -> None:
+    """Count `dropped` emits; warn the count not yet warned at most once a
+    minute (any time with `force`, at exit). The worker calls it after each
+    write and when idle, so a burst's tail is logged once the drops stop
+    (#468 QA P3-5)."""
+    global _i1_event_dropped, _i1_event_drop_warned_at
+    now, warn = time.monotonic(), 0
+    with _i1_events_lock:
+        _i1_event_dropped += dropped
+        if _i1_event_dropped and (force or now - _i1_event_drop_warned_at
+                                  >= _I1_EVENT_DROP_WARN_EVERY_S):
+            warn, _i1_event_dropped, _i1_event_drop_warned_at = _i1_event_dropped, 0, now
+    if warn:
+        log.warning("deck_i1_check queue full (%d): dropped %d emit%s since the last warning",
+                    q.maxsize, warn, "" if warn == 1 else "s")
+
+
+def _i1_event_work(q) -> None:
+    """The worker: one write at a time, forever; a write's failure is logged.
+    A BaseException ends it, and the next enqueue starts another."""
+    while True:
+        try:
+            lease, write = q.get(timeout=_I1_EVENT_DROP_WARN_EVERY_S)
+        except queue.Empty:
+            _i1_event_drop_warning(q)
+            continue
+        try:
+            _record_deck_i1_check(lease, write)
+        except Exception as err:      # never let the worker die
+            log.warning("deck_i1_check worker: %s", err)
+        finally:
+            q.task_done()
+        _i1_event_drop_warning(q)
+
+
+def _i1_event_exit_drain() -> None:
+    """atexit (gunicorn exits its worker normally on SIGTERM): let the queued
+    writes land, bounded, then log the drops not yet warned (#468 QA P3-3)."""
+    _drain_deck_i1_checks(_I1_EVENT_EXIT_DRAIN_S)
+    _i1_event_drop_warning(_i1_event_queue, force=True)
+
+
+def _drain_deck_i1_checks(timeout: float = 5.0) -> bool:
+    """Wait up to `timeout` s for the queued and in-flight deck_i1_check writes
+    (tests, at teardown); True when none is left."""
+    q = _i1_event_queue
+    deadline = time.monotonic() + timeout
+    with q.all_tasks_done:
+        while q.unfinished_tasks:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            q.all_tasks_done.wait(remaining)
+    return True
+
+
+def _record_deck_i1_check(lease, write) -> None:
+    """One write, inside the viewer's user-data lease. A user whose deletion is
+    in progress is skipped, not waited on: the one worker would hold every
+    other user's write behind it, and a finished deletion refuses the write
+    anyway (#468 QA P3-2)."""
+    try:
+        if lease.deleting():
+            log.info("deck_i1_check skipped: the user's deletion is in progress")
+            return
         with lease.active() as active:
             if active:
                 write()
     except Exception as err:
         log.warning("deck_i1_check write failed: %s", err)
+
+
+atexit.register(_i1_event_exit_drain)
 
 
 # S0 admin test hook (the operator's TestFlight step A10): force one gate miss
@@ -3712,7 +3915,7 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
                 picks, players = (picks + 1, players) if pick else (picks, players + 1)
         return players, picks, generic, unknown
 
-    kept, unchecked = [], {}
+    kept, unchecked, card_split = [], {}, {}
     for card in (cards if snap.status != "missing" else ()):   # no rows: nothing to check
         if isinstance(card, dict):
             give = [p["id"] for p in card.get("give", [])]
@@ -3728,11 +3931,14 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
         counts["dropped_give"] += bool(give_moved)
         counts["dropped_receive"] += bool(receive_moved)
         # deck_i1_check: the side x asset-type split, and distinct cards.
-        split["dropped_give_player"] += bool(give_players)
-        split["dropped_give_pick"] += bool(give_picks)
-        split["dropped_receive_player"] += bool(receive_players)
-        split["dropped_receive_pick"] += bool(receive_picks)
-        split["dropped_cards"] += bool(give_moved or receive_moved)
+        card_split[id(card)] = {
+            "dropped_give_player": int(bool(give_players)),
+            "dropped_give_pick": int(bool(give_picks)),
+            "dropped_receive_player": int(bool(receive_players)),
+            "dropped_receive_pick": int(bool(receive_picks)),
+            "dropped_cards": int(bool(give_moved or receive_moved))}
+        for name, value in card_split[id(card)].items():
+            split[name] += value
         unchecked[id(card)] = [a + b for a, b in zip(give_unchecked, receive_unchecked)]
         if not (give_moved or receive_moved):
             kept.append(card)
@@ -3769,6 +3975,17 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
                       cards=len(cards), kept=len(served),
                       unchecked_generic=counts["unchecked_generic"],
                       unchecked_pick_owner=counts["unchecked_pick_owner"], **split)
+        # Each checked card's share of those counts, so the event can count a
+        # card once per job (_emit_deck_i1_check sums the cards not yet counted).
+        served_ids = {id(c) for c in served}
+        report["_cards"] = [
+            (_i1_card_identity(card), {
+                "cards": 1, "kept": int(id(card) in served_ids),
+                **card_split.get(id(card), dict.fromkeys(split, 0)),
+                **dict(zip(("unchecked_generic", "unchecked_pick_owner"),
+                           unchecked.get(id(card), (0, 0)) if id(card) in served_ids
+                           else (0, 0)))})
+            for card in cards]
     return served, (block if gates else None), past_bound
 
 
@@ -3867,7 +4084,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 2
+DECK_PIPELINE_VERSION = 4
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -3938,6 +4155,7 @@ DECK_PIPELINE_IGNORED = {
     "_job_live": "job lifecycle: whether a job may still publish",
     "_job_superseded": "job lifecycle: the supersede fence",
     "_revoke_trade_job_locked": "job lifecycle: revocation",
+    "_note_job_picks_read": "the job's roster stamp: records which picks it read (#484 QA P2-1); never shapes the deck",
     # logging and telemetry
     "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
@@ -3989,6 +4207,8 @@ DECK_PIPELINE_IGNORED = {
 DECK_PIPELINE_PINS = {
     1: "38068a074677acaa",
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
+    3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
+    4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4332,7 +4552,9 @@ def _store_trade_page_row(job_id: str) -> bool:
         return False
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
-        if job is None or _trade_job_revoked(job):
+        # #481 QA P3-1: pages from rosters the league has since replaced are
+        # never shared through the store, whatever the stamp says.
+        if job is None or _trade_job_revoked(job) or _job_read_predates_move(job):
             return False
         job = dict(job)   # published card lists are replaced, never mutated
     if not _job_page_eligible(job):
@@ -6364,8 +6586,8 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         out.update(status="running", wait_reason="roster_check", cursor=cursor, total_ready=0)
     if search_id is not None:
         out["search_id"] = search_id
-    if i1_report:                         # off-thread, once per (deck, page)
-        _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], cursor, i1_report)
+    if i1_report:                         # off-thread, each card once per deck
+        _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], i1_report)
     return out, past_bound
 
 
@@ -6559,11 +6781,14 @@ def _serve_trade_page_for(sess: Mapping, row: dict, current, *, sess_token: str,
         current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
         backing = None
         if current_job is not None and not any(token.revoked for token in input_epochs):
+            session_read = sess.get("roster_fetch_started_at")
             if _trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
-                                   presentation_capture, request_signature, fingerprints):
+                                   presentation_capture, request_signature, fingerprints,
+                                   session_read=session_read):
                 backing = "complete"
             elif _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
-                                        presentation_capture, request_signature, fingerprints):
+                                        presentation_capture, request_signature, fingerprints,
+                                        session_read=session_read):
                 backing = "running"
     return _serve_trade_page(
         row, current, user_id=user_id, league_id=league_id,
@@ -7074,10 +7299,12 @@ def _trade_presentation_matches(job, captured):
 
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
                         trade_intent: str | None = None, presentation_capture=None,
-                        request_signature=None, fingerprints=None) -> bool:
+                        request_signature=None, fingerprints=None,
+                        session_read=None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters.
-    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
+    `fingerprints`: _trade_current_fingerprints(), read before the lock.
+    `session_read`: the caller's session read (_trade_fingerprints_match)."""
     if job.get("status") != "complete" or _trade_job_revoked(job):
         return False
     if not _prepared_job_matches(job):
@@ -7110,7 +7337,7 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     # deck filtered for a different (or no) shape.
     if (job.get("trade_intent") or None) != (trade_intent or None):
         return False
-    return _trade_fingerprints_match(job, fingerprints)
+    return _trade_fingerprints_match(job, fingerprints, session_read=session_read)
 
 
 def _trade_i1_mode() -> int:
@@ -7140,10 +7367,12 @@ def _s0_seconds_knob(key: str, default: float) -> float:
     return value if 0 <= value < float("inf") else float(default)
 
 
-def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[str, str] | None:
+def _trade_current_fingerprints(league_id: str, scoring_format: str, *,
+                                parts: dict | None = None) -> tuple[str, str] | None:
     """S0 (contract v0.4 §2, §6): (rfp1, vsn1) from stored rows and the current
     pool, read now. Three indexed reads plus the hashes; no network, no pool
     build. None when the read failed, or when `trade_i1_mode` is 0 (no read).
+    `parts` (kickoff only): filled from the same read (roster_snapshot.snapshot_ids).
 
     Callers read this BEFORE taking _trade_jobs_lock and pass it to the
     freshness and join checks, which only compare.
@@ -7152,29 +7381,42 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[st
         return None
     from . import roster_snapshot
     from .database import engine as _engine
+    extra = {"parts": parts} if parts is not None else {}
     try:
         with _engine.connect() as conn:
             return roster_snapshot.snapshot_ids(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(), **extra)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
 
 
-def _trade_fingerprints_match(job: dict, current, *, running: bool = False) -> bool:
+def _trade_fingerprints_match(job: dict, current, *, running: bool = False,
+                              session_read=None) -> bool:
     """A job built on rosters or values that have since moved is never reused.
 
     `current` is the caller's _trade_current_fingerprints() for the job's
     league and format. Compare only: this runs under _trade_jobs_lock. A None
-    stamp from a failed kickoff read never matches. A None `current` (a failed
+    stamp (a failed kickoff read, or a worker that read other picks:
+    `_note_job_picks_read`) never matches a read. A None `current` (a failed
     read) can't prove staleness (contract §4.4, A2): it keeps a RUNNING job
-    (`running=True`) and never makes a completed job fresh. Hand-built jobs
+    (`running=True`), whatever its stamp, None included, and never makes a
+    completed job fresh. Hand-built jobs
     without the stamp are not checked, like `request_signature`; with
     `trade_i1_mode` 0 nothing is.
+
+    `session_read`: the requesting session's `roster_fetch_started_at`. A job
+    built on a read older than both it and the league's last roster move
+    (`_job_read_predates_move`) was built on rosters that session has
+    replaced, whatever its stamp says, so it never matches (#481 QA P3-1). The
+    stale session itself still reuses it. None skips this check.
     """
     if "roster_fp" not in job or _trade_i1_mode() == 0:
         return True
+    if (session_read and (job.get("roster_fetch_started_at") or "") < session_read
+            and _job_read_predates_move(job)):
+        return False
     if current is None:
         return running
     return current == (job["roster_fp"], job.get("values_snapshot_id"))
@@ -11429,9 +11671,26 @@ def _run_trade_job(
         # one: 0.0 share, empty opponent shares.
         _picks_memo: list = []
         _picks_loaded = False
+        _picks_failure = None
+        _draft_memo: dict = {}
+        _draft_loaded = False
+        _draft_failure = None
+
+        def _job_draft_context() -> dict:
+            # ONE draft-verdict read per job, like the picks: the owner path's
+            # draft context and the stamp check share it (#486 QA P3-5).
+            nonlocal _draft_memo, _draft_loaded, _draft_failure
+            if not _draft_loaded:
+                _draft_loaded = True
+                try:
+                    _draft_memo = get_league_draft_context(league_id) or {}
+                except Exception as draft_err:
+                    log.warning("trade-job: draft context read failed: %s", draft_err)
+                    _draft_memo, _draft_failure = {}, draft_err
+            return _draft_memo
 
         def _job_draft_picks() -> list:
-            nonlocal _picks_memo, _picks_loaded
+            nonlocal _picks_memo, _picks_loaded, _picks_failure
             if not _picks_loaded:
                 _picks_loaded = True
                 try:
@@ -11439,8 +11698,25 @@ def _run_trade_job(
                                                    source=_pick_read_source())
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
-                    _picks_memo = []
+                    _picks_memo, _picks_failure = [], picks_err
+                _note_job_picks_read(job_id, _picks_memo,
+                                     _job_draft_context().get("status") == "drafted")
             return _picks_memo
+
+        # The owner path's view of the same two reads: a failed read raises, so
+        # its context capture fails and the owner arm forfeits, as when it read
+        # them itself. Every other reader keeps the degrade-to-empty above.
+        def _owner_job_draft_picks() -> list:
+            picks = _job_draft_picks()
+            if _picks_failure is not None:
+                raise _picks_failure
+            return picks
+
+        def _owner_job_draft_context() -> dict:
+            draft = _job_draft_context()
+            if _draft_failure is not None:
+                raise _draft_failure
+            return draft
 
         # Outlook + positional preferences
         outlook_value        = None
@@ -11802,7 +12078,8 @@ def _run_trade_job(
                     seed_map=seed_map, user_elo=elo_map_rt, user_roster=g_user_roster,
                     scoring_format=active_format, fairness_threshold=fairness_threshold,
                     captured_rankings=real_rankings, captured_preferences=_opp_prefs,
-                    captured_config=owner_config,
+                    captured_config=owner_config, job_draft_picks=_owner_job_draft_picks,
+                    job_draft_context=_owner_job_draft_context,
                     viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
@@ -13040,32 +13317,152 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
             _mark_trade_pages_stale(marked_at, league_id=kwargs["league_id"])
 
 
+def _roster_change_revoke_on() -> bool:
+    """model_config `trade_roster_change_revoke` (default 1), read per call. 0
+    makes the `on_roster_change` handler a no-op (no revoke, no re-stamp, no
+    move recorded) and leaves the rest of S0 (I-1, the fingerprint checks, the
+    floor kick) as `trade_i1_mode` says. NaN or any other value reads as 1."""
+    return _deck_cfg("trade_roster_change_revoke", 1.0) != 0.0
+
+
+# {league_id: the Sleeper read (`refreshed_at`) behind the league's last rfp1
+# move in this process}, written by the roster-change handler under
+# _trade_jobs_lock. One web worker (render.yaml), so it sees every move.
+_roster_moved_reads: dict = {}
+
+
+def _job_read_predates_move(job) -> bool:
+    """Under _trade_jobs_lock: was this job built on a Sleeper read older than
+    its league's last roster move? Its stamp may still match: a stale session's
+    rebuild is stamped from the moved rows (#481 QA P3-1)."""
+    if _trade_i1_mode() == 0 or not _roster_change_revoke_on():
+        return False                      # the kill switches stop it at once (#484 QA P3-3)
+    key = job.get("key") or ()
+    moved = _roster_moved_reads.get(key[1]) if len(key) == 3 else None
+    return bool(moved) and (job.get("roster_fetch_started_at") or "") < moved
+
+
+def _league_session_reads(league_id) -> dict:
+    """{user_id: newest `roster_fetch_started_at`} over the live sessions that
+    hold `league_id`: the Sleeper read a rebuild from that user's session uses."""
+    newest = {}
+    with _sessions_lock:
+        for sess in _sessions.values():
+            read = sess.get("roster_fetch_started_at")
+            if read and getattr(sess.get("league"), "league_id", None) == league_id:
+                uid = sess.get("user_id")
+                if read > newest.get(uid, ""):
+                    newest[uid] = read
+    return newest
+
+
+def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
+    """At kickoff: is the job's session read newer than the league's refreshed
+    rows (its refresh still in flight)? Then the kickoff's fingerprint read
+    also takes `expected_fp`: the rfp1 the stored rows will have once that read
+    lands (`read_rows`, the member rows session init writes from it, with the
+    picks and draft state of the same read). The handler re-stamps the job
+    when it equals `new_fp` (#481 QA P3-2, #484 QA P1-1). Never raises."""
+    if (not roster_read or not read_rows or _trade_i1_mode() == 0
+            or not _roster_change_revoke_on()):
+        return False
+    try:
+        from .database import get_league_roster_state
+        refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
+        return not (refreshed_at and refreshed_at >= roster_read)
+    except Exception as err:
+        log.warning("roster refresh state unavailable for league %s: %s", league_id, err)
+        return False
+
+
+def _note_job_picks_read(job_id, picks, drafted: bool = False) -> None:
+    """The worker read its picks and draft state (once per job,
+    `_job_draft_picks` and `_job_draft_context`). The kickoff stamp (and
+    `roster_fp_expected`) hashed the picks and draft verdict stored at kickoff;
+    when the worker read different ones (a pick move, an older refresh writing
+    back, or a draft verdict flip, between the two reads), the stamp doesn't
+    describe the job: it is dropped to None (never reused, never stored) with
+    the expected fp, so no later re-stamp can mark it fresh (#484 QA P2-1,
+    #486 QA P3-5). A key that can't be computed unstamps too (#486 QA P3-4).
+    Never raises."""
+    try:
+        from . import roster_snapshot
+        key = roster_snapshot.picks_key(picks, drafted)
+    except Exception as err:
+        log.warning("trade-job %s: picks key unavailable: %s", job_id, err)
+        key = None
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if job is None or job.get("roster_picks_key") in (None, key):
+            return
+        job["roster_fp"] = None
+        job.pop("roster_fp_expected", None)
+    log.info("trade-job %s: its picks moved between kickoff and the worker's read; unstamped",
+             job_id)
+
+
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
     """S0's `on_roster_change` handler (contract v0.4 §4.3, A3). platforms-eng's
     refresh calls it, through roster_snapshot.on_roster_change, after
-    committing rows whose rfp1 moved.
+    committing rows whose rfp1 moved and marking the league fresh.
 
-    Revokes the league's jobs that weren't built on `new_fp`, so the next
-    request rebuilds from the new rows. Debounced by construction: a job
-    already stamped `new_fp` is kept, so a double call (two concurrent inits),
-    or one landing after a rebuild, changes nothing. An admission that stamped
-    the old rows before the commit misses at its next freshness or join check.
+    A job is built on its session's rosters (`_capture_trade_execution` reads
+    `sess["league"]`, that session's own Sleeper read), not on the stored rows
+    its `roster_fp` stamps, so a revoke helps only when a rebuild would read
+    newer rosters. It revokes a league job not stamped `new_fp` only when the
+    job's read (`roster_fetch_started_at`) is older than the refreshed rows'
+    (`league_roster_state.refreshed_at`, which only moves forward) and its user
+    holds a session in the league whose read is at least that new (#470 QA):
+    - P2-2: the refreshing init's own pre-gen, or a tap in that window, is
+      built on the very read being committed, so it is kept.
+    - P2-1: a league-mate's rebuild would read their own, no newer, session,
+      so their open deck is kept.
+    A kept job keeps its stamp, so it is never reused once the rows moved, and
+    the I-1 serve filter checks what it serves. A job without a `roster_fp`
+    key (prepared inventory, hand-built) is unchecked, as in
+    `_trade_fingerprints_match` (P3-1). Debounced by construction: a job
+    already stamped `new_fp` is kept, so a double call changes nothing.
 
-    Never raises. Takes only `_trade_jobs_lock`, briefly, with no I/O under it.
-    No proactive rebuild in S0: a live session holds its own last init's
-    rosters, so a warm-up from it would rebuild the old rosters. P1's page
-    store doesn't either: its next serve sees the roster_fp move, serves the
-    I-1-filtered page and kicks the rebuild then. `trade_i1_mode` 0 makes it
+    #481 QA follow-ups:
+    - P3-1: it records the move's read in `_roster_moved_reads`. A job built on
+      an older read is then reused only by a session no newer than the job,
+      and never stored as pages (`_job_read_predates_move`).
+    - P3-2: a job whose kickoff `roster_fp_expected` (the rfp1 of its own
+      session read's member rows with the picks then stored) equals `new_fp`
+      was built on exactly the rows now stamped, so it is re-stamped `new_fp`
+      and the next tap reuses it. Hash equality, not read times (#484 QA
+      P1-1): when another refresh's rows landed first (two refreshes in
+      flight), `new_fp` hashes those and the job keeps its stamp.
+
+    Never raises. The state-row read and the pass over the sessions (under
+    `_sessions_lock`) run outside `_trade_jobs_lock`, which is held briefly
+    with no I/O under it. No
+    proactive rebuild in S0. P1's page store doesn't either: its next serve
+    sees the roster_fp move, serves the I-1-filtered page and kicks the
+    rebuild then. `trade_i1_mode` 0 or `trade_roster_change_revoke` 0 makes it
     a no-op.
     """
     try:
-        if _trade_i1_mode() == 0:
+        if _trade_i1_mode() == 0 or not _roster_change_revoke_on():
             return
+        from .database import get_league_roster_state
+        refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
+        if not refreshed_at:
+            return
+        fresh_users = {uid for uid, read in _league_session_reads(league_id).items()
+                       if read >= refreshed_at}
         with _trade_jobs_lock:
+            if refreshed_at > _roster_moved_reads.get(league_id, ""):
+                _roster_moved_reads[league_id] = refreshed_at
             for job in _trade_jobs.values():
                 key = job.get("key") or ()
-                if (len(key) == 3 and key[1] == league_id
-                        and job.get("roster_fp") != new_fp and not job.get("superseded")):
+                if (len(key) != 3 or key[1] != league_id or "roster_fp" not in job
+                        or job["roster_fp"] == new_fp or job.get("superseded")):
+                    continue
+                if job.get("roster_fp_expected") == new_fp:
+                    job["roster_fp"] = new_fp     # built on exactly the rows now stamped
+                elif ((job.get("roster_fetch_started_at") or "") < refreshed_at
+                        and key[0] in fresh_users):
                     _revoke_trade_job_locked(job)
                     if _trade_jobs_by_key.get(key) == job.get("job_id"):
                         _trade_jobs_by_key.pop(key)
@@ -13177,10 +13574,14 @@ def _kickoff_trade_job(
     # pregen supplies the freshly built payload; headless cron resolves here.
     execution_context = None
     capture_error = None
+    roster_read = None          # the Sleeper read the captured rosters came from
+    read_rows = None            # the member rows session init writes from that read
     try:
         with _sessions_lock:
             base_session = session_context if session_context is not None else _sessions.get(sess_token)
             base_session = dict(base_session) if base_session is not None else None
+        roster_read = (base_session or {}).get("roster_fetch_started_at")
+        read_rows = (base_session or {}).get("roster_read_rows")
         execution_context = _capture_trade_execution(base_session, user_id, league_id, scoring_format)
         # The worker reads member rankings/outlooks for this captured league.
         # Keep original viewer epochs: recapturing after a racing viewer edit
@@ -13210,8 +13611,14 @@ def _kickoff_trade_job(
     # S0: the stored rosters and values this job is built against, stamped
     # before the worker starts. The same read, taken outside the lock, is what
     # the dedupe checks below compare with. None on a failed read never matches.
-    fingerprints = _trade_current_fingerprints(league_id, scoring_format)
+    # One read for the stamp, its picks key and, while the session's refresh is
+    # in flight, the expected fp (#484 QA P2-1).
+    parts = ({"member_rows": read_rows}
+             if _roster_read_in_flight(league_id, roster_read, read_rows) else {})
+    fingerprints = _trade_current_fingerprints(league_id, scoring_format, parts=parts)
     roster_fp, values_snapshot_id = fingerprints or (None, None)
+    picks_key = parts.get("picks_key") if roster_fp else None
+    fp_expected = parts.get("expected_fp") if roster_fp else None
     force_supersedes = force_fresh and _force_supersede_enabled()
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -13237,6 +13644,8 @@ def _kickoff_trade_job(
         "request_signature":  request_signature,
         "roster_fp":          roster_fp,
         "values_snapshot_id": values_snapshot_id,
+        # The roster-change handler compares it with the refreshed rows' read.
+        "roster_fetch_started_at": roster_read,
         # The viewer's league identity (a co-owner's differs from user_id):
         # the I-1 serve filter checks give-side ownership against it.
         "league_user_id":     (execution_context.league_user_id
@@ -13244,6 +13653,10 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
+    if fp_expected is not None:
+        job["roster_fp_expected"] = fp_expected   # #481 QA P3-2: the handler may re-stamp it
+    if picks_key is not None:
+        job["roster_picks_key"] = picks_key       # #484 QA P2-1: checked at the worker's read
     # P1: the organic scope this job's completion may store pages under. A
     # forced organic job stores too: it is the newest deck for the scope.
     organic = (not is_pinned and not trade_intent and not presentation_exempt
@@ -13303,15 +13716,17 @@ def _kickoff_trade_job(
         if existing is not None:
             if (not force_fresh and request_signature is not None
                     and _trade_job_is_fresh(existing, fairness_threshold, outlook_value,
-                        trade_intent, presentation_capture, request_signature, fingerprints)):
+                        trade_intent, presentation_capture, request_signature, fingerprints,
+                        session_read=roster_read)):
                 return existing["job_id"]
             if _job_live(existing):
                 if preserve_running and _trade_running_policy_matches(
-                        existing, presentation_capture, fingerprints):
+                        existing, presentation_capture, fingerprints, session_read=roster_read):
                     return existing["job_id"]
                 if (request_signature is not None and not force_supersedes
                         and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                            trade_intent, presentation_capture, request_signature, fingerprints)):
+                            trade_intent, presentation_capture, request_signature, fingerprints,
+                            session_read=roster_read)):
                     return existing["job_id"]
                 _revoke_trade_job_locked(existing, "superseded")
         _trade_jobs[job_id] = job
@@ -14923,8 +15338,175 @@ def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> d
 FEEDBACK_TEXT_MAX = 8000
 
 
+# #360 QA P2-2: the public POST's body cap and throttle. The cap is checked
+# against Content-Length BEFORE the body is read (the analytics_ingest idiom;
+# never Flask's app-global MAX_CONTENT_LENGTH). The throttle is in-process:
+# a per-key deque of accepted-note times over a rolling hour, so it resets
+# on deploy, like the analytics limiter. It is a brake on runaway or abusive
+# volume, not authentication: the device id and X-Forwarded-For are
+# client-supplied, so only a verified user_id is a key a caller can't pick.
+# An unverified session is keyed by its token's hash, so users behind one
+# carrier NAT don't share the IP's budget (the mobile POST and the web form
+# send no X-Device-Id); a token must resolve to a live session to count, so
+# an unknown one falls through to device / IP rather than minting budgets.
+FEEDBACK_MAX_BODY_BYTES = 64 * 1024
+FEEDBACK_RATE_LIMIT = 20             # accepted notes per rolling hour per key
+FEEDBACK_RATE_WINDOW_S = 3600
+FEEDBACK_RATE_MAX_KEYS = 10_000      # memory bound: attacker-chosen keys
+# Release-lead delta QA B (P2-1): one shared ceiling across every ANONYMOUS
+# note (neither a verified user nor a resolvable session, i.e. the device and
+# IP tiers). Those keys are client-chosen (X-Device-Id) or may be a rotating
+# Render-internal peer, so per-key budgets alone can't stop deliberate abuse.
+# A separate deque, never in _feedback_rate: flooding new keys there evicts
+# old keys, and must not be able to evict this one. Bounded by the limit.
+FEEDBACK_ANON_GLOBAL_LIMIT = 300     # accepted anonymous notes per rolling hour, all callers
+_feedback_rate_lock = threading.Lock()
+_feedback_rate: dict[str, collections.deque] = {}
+_feedback_anon_global: collections.deque = collections.deque()
+
+
+# _SIGNIN_TRUSTED_PROXY_HOPS, _xff_hops and _client_ip below are copied byte
+# for byte from #430 (feat/platform-sign-in, server.py). Whichever PR merges
+# second deletes its own three definitions; two would shadow each other
+# (test_server_module_shape).
+_SIGNIN_TRUSTED_PROXY_HOPS = 1
+
+
+def _xff_hops() -> list[str]:
+    return [h.strip() for h in
+            (request.headers.get("X-Forwarded-For") or "").split(",")
+            if h.strip()]
+
+
+def _client_ip() -> str:
+    """The caller's IP for the D7 limiter: the X-Forwarded-For hop
+    _SIGNIN_TRUSTED_PROXY_HOPS from the right (1 = rightmost), else
+    remote_addr when the header has fewer hops than that. Every hop left of
+    the ones our proxies append is client-supplied (a client can send any
+    XFF it likes), so the leftmost value is attacker-chosen and would let one
+    client rotate through unlimited buckets."""
+    hops = _xff_hops()
+    n = _SIGNIN_TRUSTED_PROXY_HOPS
+    if n >= 1 and len(hops) >= n:
+        return hops[-n]
+    return request.remote_addr or "unknown"
+
+
+def _feedback_rate_key(user_id, session_key=None) -> str:
+    """Verified user, else an unverified session (by `session_key`, the
+    sha256 hex _feedback_session_key gives, never the raw token), else
+    X-Device-Id, else the client IP."""
+    if user_id:
+        return f"user:{user_id}"
+    if session_key:
+        return f"session:{session_key}"
+    device = (request.headers.get("X-Device-Id") or "").strip()
+    if device:
+        return f"device:{device[:200]}"
+    return f"ip:{_client_ip()}"
+
+
+def _feedback_rate_reserve(key: str, now: float) -> bool:
+    """Reserve one accepted-note slot for `key`. False when the rolling hour
+    is full. A reservation the save doesn't use (a duplicate, a failure) is
+    given back with _feedback_rate_release, so duplicates never count."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times is None:
+            if len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                # Prune keys with nothing in the window, then the oldest.
+                for k in [k for k, d in _feedback_rate.items() if not d or d[-1] <= cutoff]:
+                    del _feedback_rate[k]
+                while len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                    _feedback_rate.pop(next(iter(_feedback_rate)))
+            times = _feedback_rate[key] = collections.deque()
+        while times and times[0] <= cutoff:
+            times.popleft()
+        if len(times) >= FEEDBACK_RATE_LIMIT:
+            return False
+        times.append(now)
+        return True
+
+
+def _feedback_rate_release(key: str, now: float) -> None:
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times:
+            try:
+                times.remove(now)
+            except ValueError:
+                pass
+
+
+def _feedback_anon_global_reserve(now: float) -> bool:
+    """Reserve one slot under FEEDBACK_ANON_GLOBAL_LIMIT (anonymous notes
+    only). False when the shared rolling hour is full; given back with
+    _feedback_anon_global_release like a per-key slot."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        while _feedback_anon_global and _feedback_anon_global[0] <= cutoff:
+            _feedback_anon_global.popleft()
+        if len(_feedback_anon_global) >= FEEDBACK_ANON_GLOBAL_LIMIT:
+            return False
+        _feedback_anon_global.append(now)
+        return True
+
+
+def _feedback_anon_global_release(now: float) -> None:
+    with _feedback_rate_lock:
+        try:
+            _feedback_anon_global.remove(now)
+        except ValueError:
+            pass
+
+
+def _feedback_session_key(token: str) -> str:
+    """sha256 hex of a session token: the proof that links an unverified
+    session's notes to that same session later (#360 QA P2-1). The token is
+    a bearer secret, so only its hash is ever stored."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _attach_presession_feedback(sess) -> None:
+    """Hand the notes this session sent while unverified to its user, now
+    that it has verified in place (#360 QA P2-1, head-eng's ruling).
+
+    Call right after an in-place `sess["verified"] = True`. The key is the
+    hash of THIS request's X-Session-Token, the session being verified, so
+    another session that verifies as the same user gets nothing (the proof
+    is the bearer token, never the username). It never raises: a failure
+    here must not fail the verification itself. No analytics event (the
+    BL-10 waiver allows no new events).
+
+    What attaches TODAY (release-lead delta QA D): only an in-place verify
+    that actually runs for an unverified session, i.e. POST
+    /api/sleeper/link with a proven token. The other two hooks are
+    defensive and reach no unverified session today:
+      - POST /api/mfl/auth-link sits behind @_gate_unverified_write, which
+        403s every unverified session before the verify;
+      - provider re-auth (/api/auth/<provider>) from an unverified session
+        drops that session and mints a new one with a new token.
+    So pre-verify notes from ESPN/MFL-entry and Apple/Google sessions stay
+    anonymous. The hooks stay, harmless, in case either path changes.
+    """
+    try:
+        token = request.headers.get("X-Session-Token", "")
+        user_id = sess.get("user_id") if sess is not None else None
+        if not token or not user_id:
+            return
+        moved = attach_session_feedback(
+            _feedback_session_key(token), user_id,
+            sess.get("display_name") or sess.get("username"))
+        if moved:
+            log.info("feedback: attached %d pre-verify note(s) to user_id=%s",
+                     moved, user_id)
+    except Exception as e:
+        log.warning("feedback: attach on verify failed (verification "
+                    "unaffected): %s", e)
+
+
 @app.route("/api/feedback", methods=["POST"])
-@_gate_unverified_write
 def submit_feedback_route():
     """POST /api/feedback — in-app feedback capture from mobile.
 
@@ -14935,14 +15517,61 @@ def submit_feedback_route():
       text                required, non-empty, ≤ FEEDBACK_TEXT_MAX chars
       client_created_at   required, ISO timestamp from the client
 
-    Auth is best-effort: if X-Session-Token resolves to a session we
-    attribute the note to that user, otherwise we accept anonymously.
-    External testers' submissions land regardless of sign-in state.
+    Auth is best-effort: if X-Session-Token resolves to a VERIFIED session
+    we attribute the note to that user; every other request (unverified,
+    no token, expired or unknown token) is accepted anonymously.
+
+    Deliberately NOT behind @_gate_unverified_write (#354 D-2(a)): the
+    route takes anonymous notes anyway, so the gate protected nothing and
+    only 403'd an unverified user's note on every retry. An unverified
+    session's user_id is a claim anyone can make by naming a username
+    (D-183), so it never attributes a note. Its note stores the sha256 of
+    the session token instead (session_key), and moves to the user if that
+    same session later verifies in place (#360 QA P2-1).
 
     Idempotent on client_id — retries return 200 with `duplicate: true`.
 
+    Public-write limits (#360 QA P2-2): a body over FEEDBACK_MAX_BODY_BYTES
+    is 413 `too_large`, before it is read when it has a Content-Length, and
+    capped as it is read when chunked (exactly the cap is accepted); past FEEDBACK_RATE_LIMIT accepted
+    notes in a rolling hour per key (verified user, else an unverified
+    session's token hash, else X-Device-Id, else client IP) a NEW note is
+    429 `rate_limited`. Anonymous notes (no verified user and no resolvable
+    session: the device and IP tiers) also share one ceiling,
+    FEEDBACK_ANON_GLOBAL_LIMIT per rolling hour across ALL callers; past it a
+    new anonymous note is 429 `rate_limited` too, while verified users and
+    unverified sessions are neither counted nor blocked by it. Duplicates
+    never count, and a duplicate is still answered 200 when its key is
+    throttled.
+
     Contract spec: docs/plans/feedback-backend-sync.md
     """
+    # Size cap, pre-read (#360 QA P2-2). Clients keep a rejected note and
+    # retry it later (useFeedback._syncOne treats any error as unsynced).
+    # A body is too large when it is MORE than FEEDBACK_MAX_BODY_BYTES:
+    # exactly the cap is accepted, cap + 1 is 413.
+    if (request.content_length or 0) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
+    # A chunked body has no Content-Length, so the pre-check can't see it
+    # (release-lead delta QA C, P2-2). Cap the read itself with a
+    # per-request max_content_length. Werkzeug's limited stream returns the
+    # first `limit` bytes and only raises RequestEntityTooLarge on a read
+    # PAST the limit, so with limit == cap an over-cap body would come back
+    # silently truncated (and a 400) and a body of exactly the cap couldn't
+    # be told from a bigger one. So the limit is cap + 1 and the length is
+    # checked: at most cap + 1 bytes are ever read. get_data surfaces the
+    # error get_json(silent=True) would swallow; get_json then parses the
+    # cached bytes.
+    from werkzeug.exceptions import RequestEntityTooLarge
+    request.max_content_length = FEEDBACK_MAX_BODY_BYTES + 1
+    try:
+        raw_body = request.get_data(cache=True)
+    except RequestEntityTooLarge:
+        raw_body = None
+    if raw_body is None or len(raw_body) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
     body = request.get_json(force=True, silent=True) or {}
 
     client_id_raw = body.get("client_id")
@@ -14969,22 +15598,55 @@ def submit_feedback_route():
         return jsonify({"error": "text_too_long",
                         "limit": FEEDBACK_TEXT_MAX}), 400
 
-    # ── Best-effort session lookup; anonymous on miss ──────────────────
+    # ── Best-effort session lookup; attribute verified sessions only ───
+    # An UNVERIFIED session's note stays anonymous but carries the hash of
+    # its token (#360 QA P2-1), so the note follows the session if it
+    # verifies in place (_attach_presession_feedback). Never the raw token.
     user_id = None
     username = None
+    session_key = None
     token = request.headers.get("X-Session-Token", "")
     if token:
         with _sessions_lock:
             sess = _sessions.get(token)
-        if sess:
+        if sess and sess.get("verified"):
             user_id  = sess.get("user_id")
             username = sess.get("display_name") or sess.get("username")
+        elif sess:
+            session_key = _feedback_session_key(token)
 
     # Device snapshot — same headers client.ts already attaches.
     platform_label = "ios" if (request.headers.get("X-Device") or "").lower() in ("iphone", "ipad", "macos") else None
     device_type    = request.headers.get("X-Device")
     os_version     = request.headers.get("X-OS-Version")
     app_version    = request.headers.get("X-App-Version")
+
+    # Throttle (#360 QA P2-2): reserve an accepted-note slot; a duplicate or
+    # a failed save gives it back below, so only new notes count. An
+    # unverified session is keyed by its token hash (session_key above).
+    rate_key = _feedback_rate_key(user_id, session_key)
+    rate_at = time.time()
+    # Anonymous = neither a verified user nor a resolvable session (the
+    # device and IP tiers): those also spend FEEDBACK_ANON_GLOBAL_LIMIT.
+    anonymous = not user_id and not session_key
+    limited_by = None
+    if not _feedback_rate_reserve(rate_key, rate_at):
+        limited_by = rate_key.split(":", 1)[0]
+    elif anonymous and not _feedback_anon_global_reserve(rate_at):
+        _feedback_rate_release(rate_key, rate_at)
+        limited_by = "anon_global"
+    if limited_by:
+        held = find_feedback_by_client_id(client_id)
+        if held:
+            return jsonify({"ok": True, "server_id": held["server_id"],
+                            "created_at": held["created_at"], "duplicate": True}), 200
+        log.warning("feedback: rate_limited key=%s", limited_by)
+        return jsonify({"error": "rate_limited"}), 429
+
+    def _release_reservations():
+        _feedback_rate_release(rate_key, rate_at)
+        if anonymous:
+            _feedback_anon_global_release(rate_at)
 
     try:
         result = save_feedback(
@@ -14998,11 +15660,15 @@ def submit_feedback_route():
             platform=platform_label,
             device_type=device_type,
             os_version=os_version,
-            client_created_at=client_created_at if isinstance(client_created_at, str) else None,
+            client_created_at=client_created_at[:40] if isinstance(client_created_at, str) else None,
+            session_key=session_key,
         )
     except Exception as e:
+        _release_reservations()
         log.exception("save_feedback failed: %s", e)
         return jsonify({"error": "internal"}), 500
+    if result.get("duplicate"):
+        _release_reservations()
 
     # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
     # anonymous submissions (no session) have no user to attribute to, and
@@ -18151,6 +18817,23 @@ def _sleeper_cached_draft_verdict(league_id: str):
                                          ctx.get("confidence") or _draft_status_mod.LOW)
 
 
+def _sleeper_prior_grid_excludes(league_id: str, season: int) -> bool:
+    """True when the league's stored PLATFORM pick grid (the rows the owned-pick
+    sync replaces) carries a later season but none of `season`: a prior sync
+    excluded it on a positive read. #470 QA P3-2: the corroboration the sync
+    consults ONLY when `/drafts` is empty and the cached verdict doesn't say
+    `drafted`, so one flake can't re-populate a spent class and flip `rfp1`.
+    No prior rows (a first sync), a grid that carries `season`, or a failed
+    read → False (the D-089 fail-safe). A season rollover ends it: the new
+    current season is in the prior grid."""
+    try:
+        seasons = load_draft_pick_seasons(league_id, source=PICK_SOURCE_PLATFORM)
+    except Exception:
+        log.warning("prior pick-grid read failed for %s", league_id, exc_info=True)
+        return False
+    return season not in seasons and any(s > season for s in seasons)
+
+
 def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                               scoring_format: str, *,
                               rosters: list | None = None,
@@ -18172,7 +18855,8 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     #228 — leagues whose CURRENT-season rookie draft is already complete
     must not carry that season's picks (they no longer exist as assets).
     The drafts read is best-effort: a flake excludes nothing — unless the
-    cached #207 verdict corroborates `drafted` (#428 / D-189, below); future
+    cached #207 verdict corroborates `drafted` (#428 / D-189, below) or the
+    prior platform grid already excludes the season (#470 QA P3-2); future
     seasons are always included. The replace-sync cleans previously synced
     stale rows for the excluded season automatically.
 
@@ -18224,6 +18908,15 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     # cached #207 verdict is consulted: a positive `drafted` excludes the
     # current season, so one flaked read can no longer re-populate a spent
     # class for the whole league (the replace-sync made that league-wide).
+    # #470 QA P3-2 — without a cached `drafted`, the league's own prior
+    # platform grid corroborates: if it already excludes the current season,
+    # keep excluding it (a flake must not flip the grid, and `rfp1`, back).
+    # A cached `not_drafted` does NOT override it: a completed startup draft
+    # with a pending rookie draft reads `not_drafted`/high while the live
+    # read excludes the season (#483 QA P3-1). Accepted limitation (P3-3): a
+    # league whose `/drafts` is ALWAYS empty keeps an excluded season hidden
+    # after its verdict flips to not-drafted, until a non-empty read or the
+    # season rolls over.
     # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = drafts if drafts is not None else _fetch_sleeper_drafts(league_id)
     _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
@@ -18234,6 +18927,11 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
             log.info("  owned-pick sync for %s: drafts read empty — excluding "
                      "%s on the cached %s/%s verdict (D-189)", league_id,
                      _cur_season, _cached.status, _cached.confidence)
+        elif _sleeper_prior_grid_excludes(league_id, _cur_season):
+            _exclude.add(_cur_season)
+            log.info("  owned-pick sync for %s: drafts read empty — keeping %s "
+                     "excluded, as the prior platform grid has it excluded "
+                     "(#470 QA P3-2)", league_id, _cur_season)
     elif _exclude:
         log.info("  owned-pick sync for %s: excluding %s — Sleeper reports the "
                  "draft complete", league_id, sorted(_exclude))
@@ -18692,7 +19390,8 @@ def generate_trades():
             if request_signature is not None and not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
                                                       presentation_capture=presentation_capture,
                                                       request_signature=request_signature,
-                                                      fingerprints=fingerprints):
+                                                      fingerprints=fingerprints,
+                                                      session_read=sess.get("roster_fetch_started_at")):
                 reuse_snapshot = dict(existing)
             # Share in-flight work only for matching fairness and shape.
             # A warm-up must never answer a differently configured search.
@@ -18707,7 +19406,8 @@ def generate_trades():
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
             elif request_signature is not None and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                    trade_intent, presentation_capture, request_signature, fingerprints):
+                    trade_intent, presentation_capture, request_signature, fingerprints,
+                    session_read=sess.get("roster_fetch_started_at")):
                 if not force_supersedes:
                     reuse_snapshot = dict(existing)
                 else:
@@ -19077,12 +19777,16 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
                               user_elo, user_roster, scoring_format,
                               fairness_threshold, captured_rankings=None,
                               captured_preferences=None, viewer_preferences=None,
-                              captured_config=None, **selection):
+                              captured_config=None, job_draft_picks=None,
+                              job_draft_context=None, **selection):
     """One captured raw-input adapter for organic AND selected entrances.
 
     Clone members: refreshing real boards here must not change a control's
     inputs. Seeded/simulated opponents never become observed personal data.
     Source tags describe actions; their counts never discount willingness.
+    `job_draft_picks` / `job_draft_context`: a trade job's one memoized read of
+    each, the ones its roster stamp is checked against (#486 QA P3-1); other
+    entrances read their own.
     """
     user_id = sess["user_id"]
     config = dict(_trade_service_mod._cfg if captured_config is None else captured_config)
@@ -19120,10 +19824,12 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     if _bakeoff.owner_arm(config) == _bakeoff.ARM_OWNER_BILATERAL:
         # Only positive league draft evidence determines next-year protection
         # or expiry. The original manager, not today's holder, owns that intent.
-        draft = get_league_draft_context(league.league_id) or {}
+        draft = (job_draft_context() if job_draft_context is not None
+                 else get_league_draft_context(league.league_id) or {})
         verified = (draft.get("season") and draft.get("confidence") in {"high", "medium"}
                     and draft.get("status") in {"drafted", "not_drafted"})
-        pick_rows = load_draft_picks(league_id=league.league_id, source=_pick_read_source()) or []
+        pick_rows = (job_draft_picks() if job_draft_picks is not None
+                     else load_draft_picks(league_id=league.league_id, source=_pick_read_source())) or []
         next_year = (int(draft["season"]) + int(draft["status"] == "drafted")) if verified else None
         for uid, prefs in manager_preferences.items():
             prefs["draft_context"] = dict(draft)
@@ -23384,6 +24090,7 @@ def sleeper_link():
         # Claim matches + oracle passed → this session controls the account.
         sess["verified"] = True
         sess["verified_via"] = "sleeper"
+        _attach_presession_feedback(sess)
         try:
             from . import accounts as _accounts
             first_time = _accounts.get_user_verified_via(user_id) is None
@@ -26609,6 +27316,17 @@ def session_init():
         # M0 — the generation these services were built from. A later bump
         # makes the NEXT session_init rebuild once (membership only).
         "pool_generation": current_generation,
+        # S0: when this init's Sleeper read started (None without one), so the
+        # roster-change handler knows which sessions hold the refreshed rosters.
+        # Always set: `update` must not keep an older init's value.
+        "roster_fetch_started_at": _s0_raw.get("fetch_started_at"),
+        # ...and the member rows its daemon writes from that read (user_id and
+        # player_ids only), for the expected fingerprint at kickoff.
+        "roster_read_rows": ([{"user_id": m["user_id"], "player_ids": m["player_ids"]}
+                              for m in _session_member_rows(
+                                  league_user_id, league_display_name,
+                                  user_player_ids, opponent_rosters)]
+                             if _s0_raw.get("fetch_started_at") else None),
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
@@ -26630,6 +27348,15 @@ def session_init():
             session_verified = False
     if existing_sess:
         _sync_persisted_session_after_init(token, existing_sess, user_changed)
+    if user_changed:
+        # Release-lead delta QA E: the notes this token sent while anonymous
+        # were sent as the OLD identity. Attach keys on the token's hash, so
+        # drop the key and they can't follow the token to the new user if it
+        # later verifies. The rows stay, anonymous. Never fails the init.
+        try:
+            detach_session_feedback(_feedback_session_key(token))
+        except Exception as e:
+            log.warning("feedback: detach on re-point failed: %s", e)
 
     # ── Defer DB upserts + push fanout + Sleeper meta to a daemon ────────
     # Everything below this point that isn't required for the response
@@ -26897,38 +27624,8 @@ def session_init():
             # ── Persist full league membership roster ────────────────
             _s0_members_ok, _s0_picks_ok = False, True   # S0 refresh outcome
             try:
-                all_members_for_db = [
-                    {
-                        # Keyed on the LEAGUE identity, not the account:
-                        # `league_members` is league-SHARED (every member's
-                        # session_init writes into it), so a co-owned roster
-                        # must land on the same row no matter which co-owner
-                        # syncs it. Identical to `user_id` for a sole owner.
-                        # The name is the roster owner's for the same reason —
-                        # this row is what every OTHER member sees for that
-                        # team; the caller's own team is marked by `is_you`.
-                        "user_id":      league_user_id,
-                        "username":     league_display_name,
-                        "display_name": league_display_name,
-                        # #151 — store the RAW client-sent ids, matching the
-                        # opponent rows below. `new_user_roster` is filtered
-                        # to the default-format pool, which made the caller's
-                        # own off-pool players (e.g. SF-only QBs) invisible
-                        # to the free-agent exclusion set. Consumers that
-                        # need pool membership already filter on read
-                        # (session init's DB-member merge, compute_free_agents).
-                        "player_ids":   user_player_ids,
-                    }
-                ] + [
-                    {
-                        "user_id":      str(opp.get("user_id", "")),
-                        "username":     opp.get("username", ""),
-                        "display_name": opp.get("username", ""),
-                        "player_ids":   [str(x) for x in opp.get("player_ids", [])],
-                    }
-                    for opp in opponent_rosters
-                    if opp.get("user_id")
-                ]
+                all_members_for_db = _session_member_rows(
+                    league_user_id, league_display_name, user_player_ids, opponent_rosters)
                 if _s0_raw and not _platform_linked:
                     # S0 — the request thread's Sleeper read is the complete,
                     # authoritative membership: replace, so departed managers'
@@ -27180,11 +27877,13 @@ def session_init():
             existing    = _trade_jobs.get(existing_id) if existing_id else None
             # Warm-up preserves an active request's fairness/intent, but
             # obsolete policy/model work must be replaced, not left running.
+            pregen_read = session_payload.get("roster_fetch_started_at")
             should_kickoff = not (existing and (_trade_running_policy_matches(
-                    existing, presentation_capture, pregen_fingerprints)
+                    existing, presentation_capture, pregen_fingerprints, session_read=pregen_read)
                 or _trade_job_is_fresh(existing, pregen_fairness, pregen_outlook,
                     presentation_capture=presentation_capture,
-                    request_signature=pregen_signature, fingerprints=pregen_fingerprints)))
+                    request_signature=pregen_signature, fingerprints=pregen_fingerprints,
+                    session_read=pregen_read)))
         if should_kickoff:
             opp_total = sum(1 for m in members if m.user_id != user_id and m.elo_ratings)
             _kickoff_trade_job(
@@ -28025,7 +28724,8 @@ def _replenish_deck_for(user_id: str, league_id: str,
         if (job and not any(epoch.revoked for epoch in input_epochs)
                 and _trade_job_is_fresh(job, fairness, outlook,
                     presentation_capture=presentation_capture, request_signature=request_signature,
-                    fingerprints=fingerprints)):
+                    fingerprints=fingerprints,
+                    session_read=session.get("roster_fetch_started_at"))):
             # Calibration reads the deck's rows at once, and an undelivered
             # deferred deck has none: build a live deck instead of reusing it.
             ev = job.get("evidence") if source == "grading_refresh" else None
@@ -28061,7 +28761,8 @@ def _replenish_deck_for(user_id: str, league_id: str,
                 return None
             if not _trade_job_is_fresh(job, fairness, outlook,
                     presentation_capture=presentation_capture, request_signature=request_signature,
-                    fingerprints=fingerprints):
+                    fingerprints=fingerprints,
+                    session_read=session.get("roster_fetch_started_at")):
                 return None
             cards = list(job.get("cards") or [])
 
@@ -31742,6 +32443,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             sess["_persisted_at"] = 0  # re-auth refreshes the durable row now
             _persist_session_if_eligible(
                 request.headers.get("X-Session-Token", ""), sess)
@@ -31763,6 +32465,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             out["verified_via"] = provider
             try:
                 _accounts.mark_user_verified(sess["user_id"], provider)
@@ -32172,11 +32875,15 @@ def delete_account_route():
         return gated
     apple_revoked = False
     try:
-        if _accounts.has_apple_identity(user_id,
-                                        account_id=sess.get("account_id")):
+        apple_subjects = _accounts.apple_identity_subjects(
+            user_id, account_id=sess.get("account_id"))
+        if apple_subjects:
             body = request.get_json(silent=True) or {}
+            # Revoked only when the code's own Apple `sub` is one this
+            # account linked (release-lead QA on #446, d).
             apple_revoked = _accounts.revoke_apple_tokens(
-                body.get("apple_authorization_code"))
+                body.get("apple_authorization_code"),
+                expected_subjects=apple_subjects)
             log.info("delete_account: apple revocation %s for %s",
                      "succeeded" if apple_revoked else "not completed", user_id)
     except Exception as revoke_err:
@@ -35982,6 +36689,7 @@ def mfl_auth_link():
     # controller (first-verified-wins, same as the Sleeper path).
     sess["verified"] = True
     sess["verified_via"] = "mfl_login"
+    _attach_presession_feedback(sess)
     try:
         from . import accounts as _accounts
         first_time = _accounts.get_user_verified_via(user_id) is None
