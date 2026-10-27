@@ -1472,13 +1472,24 @@ unless `--allow-local` is passed (local test runs only).
    row sits on any `entry:` id, skipped ones included, (c) no unverified
    entry user was created at or after the cutoff, (d) no removed entry id is
    still named in a `pick_assignment_changed` audit event (other users'
-   events; a skipped, kept entry user may still appear), and (e) the `users`
-   table exists and isn't empty (an empty or wrong database fails).
+   events; a skipped, kept entry user may still appear), (e) the `users`
+   table exists and isn't empty (an empty or wrong database fails), and (f)
+   no league's `pick_assignment_settings.order` still lists a removed entry id
+   (other importers' rows included).
    - If (a) isn't clean, repeat steps 3–7, with a fresh snapshot.
    - A credential on a SKIPPED entry user has its own message: a human looks
      (escalate to head-eng); don't delete it by hand.
    - If (c) fails, the flag or a restart wasn't done: investigate before
      re-running.
+   - **If (e) fails, STOP: this is an empty or wrong database.** Check
+     `DATABASE_URL` in the shell and the identity line against `--expect-db`.
+     Never run `--execute` against it.
+   - **If (d) or (f) fails, re-running won't help:** the dry run will show 0
+     targets. The leftover is an entry id removed by a deletion that ran
+     before these anonymizations existed, or an audit row written afterwards.
+     Record the count only and escalate to head-eng; never hand-edit the rows.
+     The fix is a one-off anonymization through `accounts`, needing its own
+     ruling.
    - The info lines never fail the check: JSON mentions in
      `standing_offers.team_user_ids`, `leagues.opponent_data` and other event
      types' `user_events.props`, and overhaul references (the known general
