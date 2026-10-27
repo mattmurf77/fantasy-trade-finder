@@ -1527,6 +1527,12 @@ rows** (legal R28.17 A1; Product yes).
    dry run) or if a target's deletion would also remove a non-entry alias, such
    as a bound account (escalate to head-eng). It continues past a failing id and
    exits 1 if any failed. Keep the printed summed counts.
+   - **The credential step comes after the purge's summary and fails closed.**
+     - It runs only when every target was deleted cleanly.
+     - It deletes exactly M rows or none.
+     - Otherwise it prints `SKIPPED`, `ROLLED BACK` or `FAILED (<type>)`,
+       exits 1 and changes nothing. Then dry-run again and run the command
+       it prints, which will be `--expect 0` if the targets are gone.
 6. **Restart the Render web service again.** The script deletes the durable
    session rows, but a live in-memory entry session survives in the running
    process until it restarts.
