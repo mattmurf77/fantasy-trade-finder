@@ -919,3 +919,59 @@ def test_the_owner_context_uses_the_job_s_reads(live, monkeypatch):
         job_draft_context=lambda: used.append("draft") or draft)
     assert sorted(used) == ["draft", "picks"]
     assert ctx is not None
+
+
+def _owner_on_and_spied(monkeypatch):
+    """The owner path on, and a record of whether its context capture raised."""
+    monkeypatch.setattr(server, "_owner_enabled", lambda league_id: True)
+    monkeypatch.setitem(server._trade_service_mod._cfg, "owner_bilateral_enabled", 1.0)
+    outcomes = []
+    real = server._owner_generation_context
+
+    def spy(**kw):
+        try:
+            ctx = real(**kw)
+        except Exception as err:
+            outcomes.append(type(err).__name__)
+            raise
+        outcomes.append("built")
+        return ctx
+    monkeypatch.setattr(server, "_owner_generation_context", spy)
+    return outcomes
+
+
+def _fail_in_worker(monkeypatch, name):
+    """`server.<name>` raises, only while the worker (`_run_trade_job`) runs."""
+    real_fn, real_run = getattr(server, name), server._run_trade_job
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, name, MagicMock(side_effect=RuntimeError("db")))
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, name, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+
+
+def _kick_sync():
+    server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                              scoring_format="1qb_ppr", opponents_total=1, synchronous=True)
+
+
+def test_the_owner_context_builds_from_the_job_s_reads(live, monkeypatch):
+    outcomes = _owner_on_and_spied(monkeypatch)
+    _kick_sync()
+    assert outcomes == ["built"]
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_failed_read_still_forfeits_the_owner_arm(live, monkeypatch, read):
+    """#487 models-eng: when the owner path read for itself, a raising picks or
+    draft read failed its context capture and the owner arm forfeited
+    (`owner_context_unavailable`). The shared memos keep that: the owner view
+    re-raises the memoized failure, never serving cards without draft
+    protection. The stamp check still degrades to empty."""
+    outcomes = _owner_on_and_spied(monkeypatch)
+    _fail_in_worker(monkeypatch, read)
+    _kick_sync()
+    assert outcomes == ["RuntimeError"]

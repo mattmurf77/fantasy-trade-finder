@@ -4202,7 +4202,7 @@ DECK_PIPELINE_PINS = {
     1: "38068a074677acaa",
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
-    4: "7ee7abc3baec3f02",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context (same values; no shape change)
+    4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -11665,24 +11665,26 @@ def _run_trade_job(
         # one: 0.0 share, empty opponent shares.
         _picks_memo: list = []
         _picks_loaded = False
+        _picks_failure = None
         _draft_memo: dict = {}
         _draft_loaded = False
+        _draft_failure = None
 
         def _job_draft_context() -> dict:
             # ONE draft-verdict read per job, like the picks: the owner path's
             # draft context and the stamp check share it (#486 QA P3-5).
-            nonlocal _draft_memo, _draft_loaded
+            nonlocal _draft_memo, _draft_loaded, _draft_failure
             if not _draft_loaded:
                 _draft_loaded = True
                 try:
                     _draft_memo = get_league_draft_context(league_id) or {}
                 except Exception as draft_err:
                     log.warning("trade-job: draft context read failed: %s", draft_err)
-                    _draft_memo = {}
+                    _draft_memo, _draft_failure = {}, draft_err
             return _draft_memo
 
         def _job_draft_picks() -> list:
-            nonlocal _picks_memo, _picks_loaded
+            nonlocal _picks_memo, _picks_loaded, _picks_failure
             if not _picks_loaded:
                 _picks_loaded = True
                 try:
@@ -11690,10 +11692,25 @@ def _run_trade_job(
                                                    source=_pick_read_source())
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
-                    _picks_memo = []
+                    _picks_memo, _picks_failure = [], picks_err
                 _note_job_picks_read(job_id, _picks_memo,
                                      _job_draft_context().get("status") == "drafted")
             return _picks_memo
+
+        # The owner path's view of the same two reads: a failed read raises, so
+        # its context capture fails and the owner arm forfeits, as when it read
+        # them itself. Every other reader keeps the degrade-to-empty above.
+        def _owner_job_draft_picks() -> list:
+            picks = _job_draft_picks()
+            if _picks_failure is not None:
+                raise _picks_failure
+            return picks
+
+        def _owner_job_draft_context() -> dict:
+            draft = _job_draft_context()
+            if _draft_failure is not None:
+                raise _draft_failure
+            return draft
 
         # Outlook + positional preferences
         outlook_value        = None
@@ -12055,8 +12072,8 @@ def _run_trade_job(
                     seed_map=seed_map, user_elo=elo_map_rt, user_roster=g_user_roster,
                     scoring_format=active_format, fairness_threshold=fairness_threshold,
                     captured_rankings=real_rankings, captured_preferences=_opp_prefs,
-                    captured_config=owner_config, job_draft_picks=_job_draft_picks,
-                    job_draft_context=_job_draft_context,
+                    captured_config=owner_config, job_draft_picks=_owner_job_draft_picks,
+                    job_draft_context=_owner_job_draft_context,
                     viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
