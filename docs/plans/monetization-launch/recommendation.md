@@ -139,7 +139,7 @@ ranking and Calibration); and the August trial ruling (14 days monthly), now 1 m
 
 | SKU (one subscription group, same level) | Club open (launch → cut-off) | After the cut-off, new subscribers | Intro offer | Net at 15% (SBP) |
 |---|---|---|---|---|
-| `ftf_pro_annual` (**hero**, pre-selected) | **$24.99/yr** ($2.08/mo) | $34.99/yr | 1-month free trial | $21.24 → $29.74 |
+| `ftf_pro_annual` (**hero**, pre-selected) | **$24.99/yr** ($2.09/mo) | $34.99/yr | 1-month free trial | $21.24 → $29.74 |
 | `ftf_pro_monthly` | **$4.99/mo** | $6.99/mo | 1-month free trial | $4.24 → $5.94 |
 
 - **Arithmetic** [computed]: a 28.6% discount on both plans; annual saves 58% vs 12 × monthly. Break-even at the Founder
