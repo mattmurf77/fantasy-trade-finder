@@ -103,6 +103,14 @@ type MintOutcome = 'ok' | 'failed' | 'timeout' | 'rate_limited' | 'disabled' | '
 /** FR-1's mint deadline (assumed; the share-package mint uses 6 s). */
 const MINT_DEADLINE_MS = 2000;
 
+/** ux-lead #364 change 5 (hypothesis): if Share.share never settles, the
+ *  guard is treated as released this long after the sheet was requested,
+ *  so every Invite control is not dead until relaunch. */
+const SHEET_STALE_MS = 10_000;
+/** Which tap owns the guard, so a late settle from a stale tap cannot
+ *  release a newer tap's guard. */
+let _inviteGen = 0;
+
 /** AC-1e in-flight guard for shareInvite, and the busy state every Invite
  *  control renders through useInviteBusy(). One value, so the guard and
  *  what a control shows cannot disagree, and a new Invite surface gets both
@@ -187,6 +195,7 @@ export async function shareInvite(args: ShareInviteArgs): Promise<void> {
   // AC-1e — one share at a time: a tap while a mint (or the sheet it opens)
   // is pending returns at once. Module-level, so all five surfaces get it.
   if (_inviteInFlight) return;
+  const gen = ++_inviteGen;
   setInviteInFlight(true);
   try {
     const props = {
@@ -218,6 +227,7 @@ export async function shareInvite(args: ShareInviteArgs): Promise<void> {
       }
     }
     const url = buildInviteUrl(args.leagueId, args.username, ledgerOn ? { inviteId } : undefined);
+    const stale = setTimeout(() => setInviteInFlight(false), SHEET_STALE_MS);
     try {
       // m3.invite.msg (copy file §6 D): one line on every channel, no league
       // name, so it fits ~140 characters with the URL.
@@ -234,9 +244,11 @@ export async function shareInvite(args: ShareInviteArgs): Promise<void> {
       }
     } catch {
       /* user dismissed the sheet — nothing to do */
+    } finally {
+      clearTimeout(stale);
     }
   } finally {
-    setInviteInFlight(false);
+    if (_inviteGen === gen) setInviteInFlight(false);
   }
 }
 

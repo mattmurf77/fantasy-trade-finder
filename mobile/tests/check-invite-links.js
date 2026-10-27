@@ -155,7 +155,8 @@ function runBanner() {
   const state = {};
   const reset = (o = {}) => Object.assign(state, {
     flags: {}, isDemo: false, log: [], timers: [], shareResult: { action: 'sharedAction' },
-    shareThrows: false, mint: () => Promise.resolve({ outcome: 'ok', invite_id: ID }), lastSignal: null,
+    shareThrows: false, shareHang: false, mint: () => Promise.resolve({ outcome: 'ok', invite_id: ID }),
+    lastSignal: null,
   }, o);
   reset();
   // useInviteBusy's store, captured through the useSyncExternalStore stub.
@@ -170,6 +171,7 @@ function runBanner() {
         state.log.push(['share', message]);
         state.busyAtShare = store.get ? store.get() : null;
         if (state.shareThrows) throw new Error('sheet failed');
+        if (state.shareHang) return new Promise((r) => { state.hung.push(() => r(state.shareResult)); });
         return state.shareResult;
       },
     },
@@ -298,7 +300,10 @@ function runBanner() {
     reset({ flags: { 'growth.referral_ledger': true } });
     await shareInvite(args());
     check('E FR-1 the mint deadline is 2000 ms and is cleared after the mint',
-          state.timers.length === 1 && state.timers[0].ms === 2000 && state.timers[0].cleared,
+          state.timers.filter((t) => t.ms === 2000).length === 1 && state.timers[0].ms === 2000 && state.timers[0].cleared,
+          JSON.stringify(state.timers.map((t) => ({ ms: t.ms, cleared: t.cleared }))));
+    check('E ux-5 one 10 000 ms stale-sheet timer per share, cleared when the sheet settles',
+          state.timers.filter((t) => t.ms === 10000).length === 1 && state.timers.filter((t) => t.ms === 10000)[0].cleared,
           JSON.stringify(state.timers.map((t) => ({ ms: t.ms, cleared: t.cleared }))));
     reset({
       flags: { 'growth.referral_ledger': true },
@@ -351,6 +356,30 @@ function runBanner() {
     await shareInvite(args());
     check('E AC-1e the guard is released after a failed sheet', kinds(state.log).includes('share'),
           'a tap after a throwing Share.share was swallowed');
+    // ux change 5 — a sheet that never settles releases the guard 10 s
+    // after it was requested, and a late settle from that stale tap cannot
+    // release a newer tap's guard.
+    reset({ flags: {}, shareHang: true, hung: [] });
+    const stuck = shareInvite(args());
+    await null;
+    await shareInvite(args());                                  // a tap while the sheet hangs
+    const staleTimer = state.timers.find((t) => t.ms === 10000);
+    check('E ux-5 a hanging sheet holds the guard until the stale release',
+          store.get() === true && kinds(state.log).filter((k) => k === 'share').length === 1 && !!staleTimer,
+          JSON.stringify(kinds(state.log)));
+    staleTimer && staleTimer.fn();                              // 10 s pass
+    check('E ux-5 the stale release frees the guard and the busy state', store.get() === false,
+          'the guard stayed held after SHEET_STALE_MS');
+    const newer = shareInvite(args());                          // a new tap now owns the guard
+    await null;
+    state.hung[0]();                                            // the stale sheet finally settles
+    await stuck;
+    check('E ux-5 a new tap after the release opens a sheet, and the stale settle leaves its guard held',
+          kinds(state.log).filter((k) => k === 'share').length === 2 && store.get() === true,
+          `shares ${kinds(state.log).filter((k) => k === 'share').length}, busy ${store.get()}`);
+    state.hung[1]();
+    await newer;
+    check('E ux-5 the newer tap releases its own guard', store.get() === false, 'guard leaked');
     reset({ flags: { 'growth.referral_ledger': true } });
     await shareInvite(args());
     const keys = state.log.filter((e) => e[0] === 'track').flatMap((e) => Object.keys(e[2] || {}));
