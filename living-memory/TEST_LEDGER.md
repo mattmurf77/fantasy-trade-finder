@@ -33,6 +33,13 @@ Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's
   - **Runbook order:** flag off, restart, dry run, snapshot, execute (the operator), restart, verify, record.
   - **Runs (onboarding-eng, after the worker hit its usage limit):** deletion + account + draft + picks + purge tests, 429 passed (purge alone 36). A manual check confirmed the local refusal, the date-only cutoff and the future cutoff all exit 2, and `--exe` / `--exp` are rejected.
 
+- **2026-10-27, release-lead delta QA NO-GO @ `527031fc` → fixed (onboarding-eng; the worker was at its usage limit):**
+  - **D1 REVERTED** (`60379b82`): keeping a shared `leagues` row as `deleted_user` stranded the remaining member's linker routes, because no upsert re-adopts the row. It also kept the importer's id in `pick_assignment_settings`. Deletion is back to main's behaviour: the row is deleted, and the next member to link re-imports it.
+  - **`b1c73a98`:** deletion anonymizes Fleeced-minted ids in other users' `pick_assignment_changed` events (`old_owner` / `new_owner` / `actor`); Sleeper ids stay. 4 tests; sabotage 2/2.
+  - **`3c94114f`:** `--verify` gains (d), no removed entry id left in the pick audit trail, and (e), a non-empty `users` table. `--expect-db` refuses a different DB in every mode, and the printed execute command carries it. The per-target error is pinned to print only its type. 5 tests; sabotage 4/4.
+  - **`506c9294`, runbook:** the cutoff is the restart time; the STOP response is pre-decided; release-lead owns the snapshot and its deletion; `--expect-db` on every command; step 7 checks identity and (d)/(e).
+  - **Runs:** deletion + account + draft + picks + pick-assignment + purge tests, 503 passed.
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.
