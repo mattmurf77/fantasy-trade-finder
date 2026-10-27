@@ -11,8 +11,14 @@ Gates: models-lead's ruling, D1 (`leads/models-lead-launch.md` addendum D), via 
   - `_f5_past_stored` only for an F5-evicted miss at or past the recorded count;
   - the anomaly line logged once, with the cause kept.
 - **Run:** `test_evidence_cleanup.py` + `test_u4_ruled.py`, 52 passed. On the first cut, the evidence suites (cleanup, deferred, U4 ruled, upgrade-miss cards, pipeline digest) passed 165.
+- **#489 QA (NO-GO, P1-1), option (a), pending models-lead's reading of D1:**
+  - The P1: kept in `_deck_held`, an F5 deck read `other` (a false G7 FAIL) once its evicted entry aged out.
+  - The fix: F5's drop now also pops `_deck_held`, like any eviction, so the late view reads `restart_split`.
+  - New tests: the eviction aging out → `restart_split`; the anomaly on the kept cause; no anomaly on a real F5 row-gone miss; a bool count refused; the jobs → ledger lock order; the guard's `f5=`.
+  - Sabotage (7, each red then restored): no held pop; the anomaly on the local cause; the anomaly on the effective count; a bool count; a reverse lock on the read path; the guard dropping `f5=`; f5 trims counted as held.
+  - Docs: the contract sentence, LLD, and data-dictionary (the ERROR-line note).
 - **Sabotage, each red then restored (5):**
-  - F5 also leaving the held ledger (#457's way);
+  - F5 also leaving the held ledger (#457's way: superseded by option (a) above);
   - F5 not an eviction;
   - the anomaly on any eviction;
   - the anomaly strictly past;

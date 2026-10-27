@@ -6487,13 +6487,16 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
             _revoke_trade_job_locked(job, "evidence_expired")
             # This process removed the deck's evidence: an eviction (C3), so a
             # miss on it past its effective stored count is evicted_split, never
-            # "other" and never restart_split. Noted here, kept >= 24 h from the
-            # drop (C3 (c2)), while the evidence still exists (the later
-            # eviction can't: none left). It replaces #457's removal from
-            # _deck_held, and isn't added to it (models-lead addendum D1).
-            # Order: jobs, then the ledger (leaf), as in _note_deck_evicted.
+            # "other". Noted here, kept >= 24 h from the drop (C3 (c2)), while
+            # the evidence still exists (the later eviction can't: none left).
+            # Like any eviction it also leaves _deck_held (#451 QA P3-1), so once
+            # the eviction record ages out a late view reads restart_split,
+            # never other (#489 QA P1-1). Order: jobs, then the ledger (leaf),
+            # as in _note_deck_evicted (models-lead addendum D1).
             _ledger_add(_deck_evicted_at, job_id)
             _ledger_add(_deck_f5_dropped, job_id)
+            with _deck_ledger_lock:
+                _deck_held.pop(job_id, None)
             dropped += 1
     if dropped:
         log.info("deck-evidence: dropped %d undelivered deck(s) past %d s", dropped,

@@ -90,7 +90,7 @@ def test_a_deck_f5_dropped_reads_evicted_split_once_its_row_goes(
         assert server._drop_stale_deck_evidence() == 1
         assert "evidence" not in server._trade_jobs[job_id]
         assert job_id in server._deck_evicted_at and job_id in server._deck_f5_dropped
-        assert job_id in server._deck_held                  # D1: instead of #457's removal
+        assert job_id not in server._deck_held              # like any eviction (#489 QA P1-1)
         if path == "f5_then_job_evicted":
             with server._trade_jobs_lock:                  # the cleanup loop's eviction lines
                 job = server._trade_jobs.pop(job_id)       # (its tick would also expire sessions)
@@ -109,6 +109,9 @@ def test_a_deck_f5_dropped_reads_evicted_split_once_its_row_goes(
     cause = "restart_split" if path == "control_restart" else "evicted_split"
     assert (run["upgrade_miss_cards"], row_gone(run)) == ({"40": cause}, {"40": 90})
     assert errors(caplog) == []
+    # #489 QA P3-1: a real F5 row-gone miss is under the pack-recorded count:
+    # never the anomaly (keyed on the effective count, it would fire here).
+    assert not [r for r in caplog.records if "f5_past_stored" in r.getMessage()]
 
 
 def test_f5_leaves_a_delivered_deck_held(deferred):
@@ -183,6 +186,19 @@ def test_the_guard_warning_counts_each_ledgers_trims(monkeypatch, caplog):
     assert len(lines) == 2
     assert "trimmed 1 entry younger than 24 h since its last warning (held=1, evicted=0)" in lines[0]
     assert "trimmed 3 entries younger than 24 h since its last warning (held=1, evicted=2)" in lines[1]
+
+
+def test_the_guard_warning_counts_f5_trims_apart(monkeypatch, caplog):
+    """#489 QA P3-1: the F5 ledger's young trims are named f5=, never held."""
+    clock = Clock()
+    monkeypatch.setattr(server, "_ledger_now", clock)
+    monkeypatch.setattr(server, "_deck_f5_dropped", collections.OrderedDict())
+    monkeypatch.setattr(server, "_DECK_LEDGER_GUARD", 2)
+    with caplog.at_level("WARNING"):
+        for i in range(3):
+            server._ledger_add(server._deck_f5_dropped, f"f{i}")    # f2 trims f0
+    [line] = [r.getMessage() for r in caplog.records if "ledger guard" in r.getMessage()]
+    assert "(held=0, evicted=0, f5=1)" in line
 
 
 # ── (C2) the guard's rate-limit state is reset per test (conftest.py) ───────
@@ -465,6 +481,7 @@ def test_f5_past_stored_is_only_an_f5_evicted_miss_past_the_recorded_count(defer
     assert server._f5_past_stored(job_id, 40, "evicted_split", run) is None
     assert server._f5_past_stored(job_id, 95, "other", run) is None
     assert server._f5_past_stored(job_id, 95, "evicted_split", {}) is None
+    assert server._f5_past_stored(job_id, 95, "evicted_split", {"stored_count": True}) is None
     assert server._f5_past_stored("never-dropped", 95, "evicted_split", run) is None
 
 
@@ -491,3 +508,99 @@ def test_an_f5_past_stored_miss_logs_apart_and_keeps_its_cause(deferred, monkeyp
     assert lines == [f"[evidence] f5_past_stored job={job_id} index=40 pack_stored=30: an F5-dropped "
                      "deck's evicted_split miss past its recorded stored pages (a "
                      "delivery-recording gap?)"]
+
+
+
+# ── #489 QA: the eviction record aging out; the kept cause; the lock order ───
+
+def test_an_f5_deck_reads_restart_split_once_its_eviction_ages_out(deferred, monkeypatch):
+    """#489 QA P1-1: F5 leaves _deck_held like any eviction, so when its
+    _deck_evicted_at entry is age-trimmed (by a later add) a late miss reads
+    restart_split, never other."""
+    client, engine, _ = deferred
+    clock = Clock()
+    monkeypatch.setattr(server, "_ledger_now", clock)
+    job_id, *_ = packed_deck(90)
+    _f5_drop(job_id)
+    assert server._upgrade_miss_cause(job_id, 40, 0, True) == "evicted_split"
+    clock.t += server._DECK_LEDGER_RETAIN_S + 60
+    server._ledger_add(server._deck_evicted_at, "a-later-eviction")   # trims the old entry
+    assert job_id not in server._deck_evicted_at and job_id not in server._deck_held
+    assert server._upgrade_miss_cause(job_id, 40, 0, True) == "restart_split"
+
+
+def test_f5_past_stored_keys_on_the_kept_cause(deferred, caplog):
+    """#489 QA P3-1: a deploy overlap's first writer keeps restart_split for
+    card 95; this process F5-dropped the deck, so its local cause is
+    evicted_split past the recorded count, but the kept cause isn't: no
+    anomaly line."""
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(120)
+    for cursor in (0, 30, 60, 90):
+        status(client, job_id, cursor)
+    restart()
+    first = server._load_pack_state(job_id, UID)
+    second = server._load_pack_state(job_id, UID)
+    iid = contract.card_impression_id(job_id, 95)
+    now = datetime.now(timezone.utc).isoformat()
+    with server._deck_evidence_write_lock:
+        assert server._deck_upgrade_from_pack(first, job_id, iid, 95, now)
+    server._ledger_add(server._deck_evicted_at, job_id)     # this process F5-dropped it
+    server._ledger_add(server._deck_f5_dropped, job_id)
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        with server._deck_evidence_write_lock:
+            assert server._deck_upgrade_from_pack(second, job_id, iid, 95, now)
+    [line] = miss_lines(caplog)
+    assert "cause=restart_split" in line and line.endswith(" local_cause=evicted_split")
+    assert not [r for r in caplog.records if "f5_past_stored" in r.getMessage()]
+
+
+class _OrderedLock:
+    """A Lock that records, per thread, which tracked locks are held, and
+    fails the test if the jobs lock is taken under the ledger lock."""
+    held = __import__("threading").local()
+
+    def __init__(self, name, inner, violations):
+        self.name, self.inner, self.violations = name, inner, violations
+
+    def _set(self):
+        if not hasattr(self.held, "names"):
+            self.held.names = []
+        return self.held.names
+
+    def acquire(self, *a, **k):
+        names = self._set()
+        if self.name == "jobs" and "ledger" in names:
+            self.violations.append("jobs under ledger")
+        got = self.inner.acquire(*a, **k)
+        if got:
+            names.append(self.name)
+        return got
+
+    def release(self):
+        self._set().remove(self.name)
+        self.inner.release()
+
+    __enter__ = acquire
+
+    def __exit__(self, *exc):
+        self.release()
+
+
+def test_the_f5_paths_take_the_jobs_lock_then_the_ledger_lock(deferred, monkeypatch):
+    """#489 QA P3-1: the drop, the serve and the late view never take the jobs
+    lock while holding the leaf ledger lock."""
+    violations = []
+    monkeypatch.setattr(server, "_trade_jobs_lock",
+                        _OrderedLock("jobs", server._trade_jobs_lock, violations))
+    monkeypatch.setattr(server, "_deck_ledger_lock",
+                        _OrderedLock("ledger", server._deck_ledger_lock, violations))
+    client, engine, _ = deferred
+    job_id, *_ = packed_deck(90)
+    _f5_drop(job_id)
+    for cursor in (0, 30):
+        client.get(f"/api/trades/status?deck={job_id}&cursor={cursor}", headers=HEADERS)
+    the_row_goes(job_id, "evicted")
+    view(job_id, 40)
+    assert violations == []
