@@ -128,6 +128,23 @@ const LAUNCHED_FLAG_DEFAULTS: FlagMap = {
   // the #115 paint-flip this list exists to prevent. A server `false`
   // still kill-switches on the next successful revalidate.
   'calc.results_push': true,
+  // ── The launched onboarding (Product's pre-launch review B2, 2026-10-27) ──
+  // These decide the FIRST screen a fresh install paints. Absent here, a
+  // first-ever boot (no cached map) and an offline first open painted the
+  // old Apple-first sign-in and settings, and stayed there until a
+  // revalidate. Each carries config/features.json's value (pinned by
+  // mobile/tests/check-onboarding-flag-defaults.js, which compares the two
+  // files); a server `false` still kill-switches on the next revalidate.
+  'onboarding.v2': true,
+  'onboarding.landing': true,
+  // The landing's Sleeper · ESPN · MFL chips. While the server says false
+  // (the 11-0x entry purge window), a fresh install shows them only until
+  // the first revalidate; the server's entry route 404s meanwhile.
+  'landing.platform_options': true,
+  'mfl.link': true,
+  'account.settings_hub': true,
+  // `espn.signin` is baked in only once ask 15 passes and
+  // config/features.json carries it true; the guard holds the two together.
 };
 
 export const useFeatureFlags = create<FlagState>((set, get) => ({
