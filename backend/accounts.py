@@ -36,7 +36,7 @@ from contextlib import contextmanager
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, insert, or_, select, update
 
 from . import database as db
 from . import user_data_lifecycle
@@ -631,6 +631,9 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            they are gone. The row itself stays: other members rely on it.
 #            recorded_picks.picking_team_id → the placeholder where it is a
 #            deleted Fleeced-minted id (entry:*, acct_*; no platform column).
+#            pick_assignment_changed events (OTHER users'): old_owner /
+#            new_owner / actor → the placeholder where they are a deleted
+#            Fleeced-minted id; the audit trail stays readable.
 #   KEEP     player_value_history + model_config (not user-keyed),
 #            draft_picks on Sleeper grids (and legacy rows with no platform)
 #            and recorded_picks.picking_team_id holding a Sleeper id: public
@@ -853,6 +856,33 @@ def _delete_user_data(sleeper_user_id: str,
         res = conn.execute(update(recorded).where(recorded.c.picking_team_id.in_(minted))
                            .values(picking_team_id=DELETED_USER_PLACEHOLDER))
         counts["recorded_picks_picking_team_id_anonymized"] = res.rowcount or 0
+        # pick_assignment_changed is the pick grid's audit trail (contested
+        # derivation and the runbook's grid reconstruction read it). OTHER
+        # users' events can name this user as old_owner / new_owner / actor.
+        # A Fleeced-minted id there names the person, so it becomes the
+        # placeholder, matching the grid rows above; public Sleeper ids stay,
+        # as on Sleeper grids (#452 QA P2).
+        events_tbl = db.user_events_table
+        scrubbed = 0
+        if minted:
+            minted_set = set(minted)
+            rows = conn.execute(select(events_tbl.c.id, events_tbl.c.props).where(
+                events_tbl.c.event_type == "pick_assignment_changed",
+                or_(*[events_tbl.c.props.contains(m, autoescape=True) for m in minted]),
+            )).all()
+            for event_id, raw in rows:
+                try:
+                    props = json.loads(raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                hits = [k for k in ("old_owner", "new_owner", "actor") if props.get(k) in minted_set]
+                if hits:
+                    for k in hits:
+                        props[k] = DELETED_USER_PLACEHOLDER
+                    conn.execute(update(events_tbl).where(events_tbl.c.id == event_id)
+                                 .values(props=json.dumps(props)))
+                    scrubbed += 1
+        counts["pick_assignment_events_anonymized"] = scrubbed
         # Weak roster keys embed the user ID; strong keys are public team slots.
         history = db.league_roster_history_table
         res = conn.execute(delete(history).where(history.c.owner_user_id.in_(user_ids),

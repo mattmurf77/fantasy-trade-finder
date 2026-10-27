@@ -376,3 +376,50 @@ def test_recorded_pick_sleeper_team_ids_stay_and_the_bound_alias_goes(engine):
     counts = accounts.delete_user_data(UID)
     assert _recorded_teams(engine) == {1: UID, 2: accounts.DELETED_USER_PLACEHOLDER, 3: OTHER}
     assert counts["recorded_picks_picking_team_id_anonymized"] == 1
+
+
+# #452 QA P2: OTHER users' pick_assignment_changed events (the pick grid's audit
+# trail) name owners and actors. A deleted Fleeced-minted id there becomes the
+# placeholder; public Sleeper ids stay, as on Sleeper grids.
+def _assignment_event(conn, marker, actor, old_owner, new_owner):
+    seed(conn, db.user_events_table, marker, user_id=actor, event_type="pick_assignment_changed",
+         league_id="espn-league", props=json.dumps({
+             "pick_id": marker, "actor": actor, "old_owner": old_owner, "new_owner": new_owner}))
+
+
+def _assignment_props(engine):
+    return {json.loads(r["props"])["pick_id"]: json.loads(r["props"])
+            for r in rows(engine, db.user_events_table) if r["event_type"] == "pick_assignment_changed"}
+
+
+@pytest.mark.parametrize("deleted", ["entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}",
+                                     "entry:mfl:61408.f0003", "acct_espn-signin"])
+def test_pick_assignment_events_anonymize_a_deleted_fleeced_minted_id(engine, deleted):
+    with engine.begin() as conn:
+        if deleted.startswith(accounts.ACCOUNT_USER_PREFIX):
+            conn.execute(insert(db.accounts_table).values(
+                account_id=deleted[len(accounts.ACCOUNT_USER_PREFIX):], created_at="2026-10-26"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _assignment_event(conn, "new", OTHER, OTHER, deleted)        # OTHER gave the pick to them
+        _assignment_event(conn, "old", OTHER, deleted, OTHER)        # and took it back
+        _assignment_event(conn, "none", OTHER, OTHER, "synthetic-third")
+    counts = accounts.delete_user_data(deleted)
+    props = _assignment_props(engine)
+    placeholder = accounts.DELETED_USER_PLACEHOLDER
+    assert (props["new"]["new_owner"], props["new"]["actor"]) == (placeholder, OTHER)
+    assert (props["old"]["old_owner"], props["old"]["new_owner"]) == (placeholder, OTHER)
+    assert props["none"] == {"pick_id": "none", "actor": OTHER, "old_owner": OTHER,
+                             "new_owner": "synthetic-third"}
+    assert counts["pick_assignment_events_anonymized"] == 2
+    assert deleted not in json.dumps(list(props.values()))
+
+
+def test_pick_assignment_events_keep_a_public_sleeper_id(engine):
+    with engine.begin() as conn:
+        _assignment_event(conn, "sleeper", OTHER, OTHER, UID)    # UID is a public Sleeper-style id
+        _assignment_event(conn, "alias", OTHER, OTHER, ALIAS)    # the bound acct_ alias is minted
+    counts = accounts.delete_user_data(UID)
+    props = _assignment_props(engine)
+    assert props["sleeper"]["new_owner"] == UID
+    assert props["alias"]["new_owner"] == accounts.DELETED_USER_PLACEHOLDER
+    assert counts["pick_assignment_events_anonymized"] == 1
