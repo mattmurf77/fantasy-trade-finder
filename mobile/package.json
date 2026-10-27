@@ -116,6 +116,7 @@
     "test:trade-buffer": "node tests/check-trade-buffer.js",
     "test:trade-inplace-reveal": "node tests/check-trade-inplace-reveal.js",
     "test:no-finding-more": "node tests/check-no-finding-more.js",
+    "test:overhaul-allfail-haptic": "node tests/check-overhaul-allfail-haptic.js",
     "test:withdraw-in-place": "node tests/check-withdraw-in-place.js",
     "test:trade-first-card-events": "node tests/check-trade-first-card-events.js",
     "test:timing-readout": "node tests/check-timing-readout.js",

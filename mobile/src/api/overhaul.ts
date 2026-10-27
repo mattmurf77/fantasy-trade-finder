@@ -271,6 +271,15 @@ export interface SendResult {
   attempts: AttemptView[];
 }
 
+/** `/send` answers 200 even when the provider refused every offer: the refusals ride in
+ *  `attempts[]` as `send_failed`. "All refused" = the batch has attempts and every one is
+ *  `send_failed`. `outcome_unknown` is not a refusal (the offer may be out), and an empty or
+ *  missing list is not classifiable, so neither counts as "all refused". */
+export function sendBatchAllRefused(result: SendResult | null | undefined): boolean {
+  const attempts = result?.attempts ?? [];
+  return attempts.length > 0 && attempts.every((a) => a.state === 'send_failed');
+}
+
 const BASE = '/api/overhauls';
 const enc = encodeURIComponent;
 
