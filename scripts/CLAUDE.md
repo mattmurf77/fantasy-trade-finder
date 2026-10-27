@@ -6,9 +6,10 @@ per-script traps.
 
 **Safety, in one line:** the four seeding/demo scripts (`create_test_league.py`,
 `seed_test_user*.py`, `publish_test_rankings.py`, `demo_matchup.py`) write the local DB —
-never point them at production. Every `outlook_*` analysis script and `deck_eval.py` are
-read-only and safe anywhere; the two `*_capture.py` scripts hit the network (public
-Sleeper / GitHub endpoints only) and write fixtures.
+never point them at production. Every `outlook_*` analysis script is read-only and safe
+anywhere; `deck_eval.py` writes only a temporary scratch SQLite it creates (it refuses any
+other database); the two `*_capture.py` scripts hit the network (public Sleeper / GitHub
+endpoints only) and write fixtures.
 
 ## Seeding / demo
 
@@ -16,7 +17,7 @@ Sleeper / GitHub endpoints only) and write fixtures.
 - `seed_test_user.py`, `seed_test_user_2.py` — seed users with rosters + rankings
 - `publish_test_rankings.py` — push canned rankings into the DB
 - `demo_matchup.py` — exercise the smart matchup generator end-to-end
-- `deck_eval.py` — offline deck-quality + timing eval, the onboarding-conversion GATE (build item 2 of `docs/plans/onboarding-conversion/plan.md`). Fetches rosters/users from the public Sleeper API read-only, then simulates each team's brand-new-user first session. Report: `docs/plans/onboarding-conversion/deck-eval-report.md`
+- `deck_eval.py` — the first-deck quality gate (MOD-M1; D-055 bars: empty-deck < 5%, rule-based insult rate < 3% over every first-5 card, latency). For each team of the connected Sleeper leagues passed in, it runs a brand-new user's first open through the live routes (`/api/session/init` → the pregen job → `/api/trades/generate` page 1; driver and its deliberate differences: `backend/eval/first_deck.py`). Prod's flags and `model_config` go in with `--overrides` (`--no-overrides` is not a gate run). Reads only the public Sleeper API. Output: `feedback-workspace/deck-eval/` (gitignored; it holds league rosters), never a tracked doc.
 
 ## Data jobs
 

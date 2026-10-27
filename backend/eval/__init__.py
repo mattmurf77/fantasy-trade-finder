@@ -25,8 +25,13 @@ Modules:
                 (python3 -m backend.eval.bdk_audit --help)
   synth       — synthetic logged-data generator for demos + the CLI
                 end-to-end check
+  first_deck  — MOD-M1's first-deck gate: a brand-new user's first deck
+                through the live routes (driven by scripts/deck_eval.py)
+  insult_rule — the D-055 insult rule, a pure function
 
 Read-only against product tables: this package never writes to
 deck_impressions/deck_outcomes or any other product table. Its only writes
 are JSON files under the (already gitignored) data/eval_runs/ directory.
+The exception is first_deck, whose jobs write their own rows: it runs only
+on a scratch SQLite file and refuses any other engine (require_scratch_db).
 """
