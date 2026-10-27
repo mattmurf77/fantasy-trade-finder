@@ -217,8 +217,9 @@ const EXEMPT = new Set(['screens/OverhaulReviewScreen.tsx::Finding more ideas'])
   const code = stripComments(read('screens/TradesScreen.tsx'));
   // #393 M2: besides the one P30 mount, at most ONE preview_end mount, which
   // carries exactly minHeight + previewEnd and renders only from the deck's
-  // 402 end (`pagedWithCards && deckGateEnd`).
-  const previewMounts = code.match(/\) : pagedWithCards && deckGateEnd \? \(\s*<DeckEndCard\s+minHeight=\{topCardH\}\s+previewEnd=\{\{[^}]*\}\}\s*\/>/g) || [];
+  // 402 end (`pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard)`,
+  // ahead of P30 so a 402 end never shows P30).
+  const previewMounts = code.match(/\) : pagedWithCards && deckGateEnd && \(!rawTopCard \|\| showDeckEndCard\) \? \(\s*<DeckEndCard\s+minHeight=\{topCardH\}\s+previewEnd=\{\{[^}]*\}\}\s*\/>/g) || [];
   check('4e. the screen mounts it once, with exactly those props (plus at most one preview_end mount, only from the 402 end)',
     previewMounts.length <= 1
       && (code.match(/<DeckEndCard\b/g) || []).length === 1 + previewMounts.length

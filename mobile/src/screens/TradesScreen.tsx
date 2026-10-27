@@ -2375,6 +2375,8 @@ export default function TradesScreen({ navigation, route }: any) {
           autoGenRef.current = 'failed';
           setAutoGenFailed(true);
         }
+        // trades-eng's grant: never an empty pushed deck behind the paywall.
+        if (isResultsPushed && deckRef.current.length === 0) popToLanding();
         return;
       }
       if (vars?.auto) {
@@ -3855,6 +3857,23 @@ export default function TradesScreen({ navigation, route }: any) {
       .then((snapshot) => go(adoptablePage(snapshot)
         ? { request, snapshot, validatedAt: Date.now(), deviceKey }
         : undefined))
+      // #393 M2 (trades-eng's grant): a gate answer (a 402, or a verify 403
+      // the sheet didn't clear) never pushes the deck. api/client already
+      // opened the paywall or the sheet over the landing, which is where the
+      // user stays when it closes; a deck the deadline already pushed is
+      // popped back under it. Every other outcome falls through, unchanged.
+      .catch((e) => {
+        const gate = gateSignalFor(e, '/api/trades/generate');
+        if (!gate || gate.action === 'verify_mismatch') throw e;
+        // go() pushed (the deadline) iff it ran and the push is still pending.
+        const deckPushed = pushed && resultsPushPendingRef.current;
+        clearTimeout(deadline);
+        resultsPushPendingRef.current = false;
+        failFirstCard(fork.searchId, 'error');
+        dropPendingSearch(fork.searchId);
+        if (deckPushed && mountedRef.current) popToLanding();
+        pushed = true;
+      })
       .catch(() => go());
   }
 
@@ -4299,6 +4318,8 @@ export default function TradesScreen({ navigation, route }: any) {
       if (e instanceof ApiError && e.isProRequired) {
         failDeckSearch('error');
         setFairDeck(false);
+        // trades-eng's grant: never an empty pushed deck behind the paywall.
+        if (isResultsPushed && deckRef.current.length === 0) popToLanding();
         return;
       }
       // The existing deck-failure copy, verbatim — a fair sweep that fails is
@@ -5024,6 +5045,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // Once per search_id (the trace dedupes).
   useEffect(() => {
     if (!pagedWithCards || !rawTopCard || !job || unseen > 0 || deckFullyDelivered(job)) return;
+    // #393 M2 (trades-eng): a gated preview's capped end (the 402 is in) is
+    // not the buffer running dry.
+    if (deckGateEndRef.current) return;
     const searchId = deckSearchRef.current?.id ?? job.search_id;
     if (!searchId) return;
     reportDeckBufferEmpty(searchId, { deckId: job.deck_id ?? job.job_id, cardsSeen: deckIdx + 1 });
@@ -9739,6 +9763,16 @@ export default function TradesScreen({ navigation, route }: any) {
               onAccept={() => acceptQuicksetPrompt('prompt')}
               onDismiss={snoozeQuicksetPrompt}
             />
+          ) : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (
+            // #393 M2 (D5, D19) — the server ended this deck's pages with a
+            // 402: the preview end card, past the last held card. One button:
+            // See plans → the paywall, or (unverified) Continue → verify.
+            // AHEAD of P30 (trades-eng): a 402 end never shows "You've seen
+            // every trade"; wherever P30 would show, this shows instead.
+            <DeckEndCard
+              minHeight={topCardH}
+              previewEnd={{ verify: deckGateEnd.verify || sessionUnverified, onPress: handleDeckGateEndPress }}
+            />
           ) : showDeckEndCard ? (
             // P30 — the honest end of a paged deck, in the card slot: only on
             // the server's `pool_exhausted` with nothing in flight or
@@ -10004,14 +10038,6 @@ export default function TradesScreen({ navigation, route }: any) {
                 </Pressable>
               ) : null}
             </>
-          ) : pagedWithCards && deckGateEnd ? (
-            // #393 M2 (D5, D19) — the server ended this deck's pages with a
-            // 402: the preview end card, past the last held card. One button:
-            // See plans → the paywall, or (unverified) Continue → verify.
-            <DeckEndCard
-              minHeight={topCardH}
-              previewEnd={{ verify: deckGateEnd.verify || sessionUnverified, onPress: handleDeckGateEndPress }}
-            />
           ) : pagedWithCards && deckEnd ? (
             // U3 rows 1–3 — past the last held card of a paged deck. The page
             // in flight lands behind/into this slot silently ('pending'

@@ -944,12 +944,43 @@ check('8f. D5 [shape]: DeckEndCard\'s preview_end branch (eyebrow, mon.lock.find
   eq(copy.MON['mon.verify.continue'], 'Continue', 'mon.verify.continue');
   eq(copy.MON['mon.lock.find'], 'Finding trades needs a subscription.', 'mon.lock.find');
   const code = strip(read(TRADES));
-  const endAt = code.indexOf(') : pagedWithCards && deckGateEnd ? (');
+  const GATE_BRANCH = ') : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (';
+  const endAt = code.indexOf(GATE_BRANCH);
   const errAt = code.indexOf(') : pagedWithCards && deckEnd ? (');
   assert(endAt > -1 && errAt > endAt, 'the end card precedes the offline / MoreError branch');
-  assert(/\) : pagedWithCards && deckGateEnd \? \(\s*<DeckEndCard\s+minHeight=\{topCardH\}\s+previewEnd=\{\{ verify: deckGateEnd\.verify \|\| sessionUnverified, onPress: handleDeckGateEndPress \}\}\s*\/>/.test(code),
+  assert(/\) : pagedWithCards && deckGateEnd && \(!rawTopCard \|\| showDeckEndCard\) \? \(\s*<DeckEndCard\s+minHeight=\{topCardH\}\s+previewEnd=\{\{ verify: deckGateEnd\.verify \|\| sessionUnverified, onPress: handleDeckGateEndPress \}\}\s*\/>/.test(code),
     'the mount');
   assert(/void openPaywall\(\{ source: 'preview_end' \}\);/.test(code), 'See plans opens the paywall, source preview_end');
+});
+
+check('8f2. trades-eng follow-up 1 [shape]: a 402 end never shows P30 — the gate branch sits AHEAD of `showDeckEndCard` and takes every slot P30 would (only past the last card otherwise); P30\'s own pinned lines unchanged', () => {
+  const code = strip(read(TRADES));
+  const gateAt = code.indexOf(') : pagedWithCards && deckGateEnd && (!rawTopCard || showDeckEndCard) ? (');
+  const p30At = code.indexOf(') : showDeckEndCard ? (');
+  const quickAt = code.indexOf('<QuickSetPromptCard');
+  assert(quickAt > -1 && gateAt > quickAt && p30At > gateAt, 'QuickSet prompt → the 402 end → P30, in that order');
+  eq((code.match(/\) : showDeckEndCard \? \(/g) || []).length, 1, 'one P30 branch');
+  assert(/const showDeckEndCard = pagedWithCards && \(endLatched \|\| deckEnd === 'end'\);/.test(code), "trades-eng's showDeckEndCard (4f) is untouched");
+});
+
+check('8f3. trades-eng follow-up 2 [shape]: a gate answer at the landing never pushes the deck (a deck the deadline pushed is popped back); an empty pushed deck never sits behind the paywall; every other fork outcome unchanged', () => {
+  const code = strip(read(TRADES));
+  const fork = code.slice(code.indexOf('function pushWithFirstPage('), code.indexOf('function handleInlineFindATrade('));
+  assert(/generateTrades\(request, \{ searchId: fork\.searchId \}\)\s*\.then\(\(snapshot\) => go\(adoptablePage\(snapshot\)\s*\? \{ request, snapshot, validatedAt: Date\.now\(\), deviceKey \}\s*: undefined\)\)\s*\.catch\(\(e\) => \{\s*const gate = gateSignalFor\(e, '\/api\/trades\/generate'\);\s*if \(!gate \|\| gate\.action === 'verify_mismatch'\) throw e;[\s\S]*?\}\)\s*\.catch\(\(\) => go\(\)\);/.test(fork),
+    'the gate catch sits between .then and the verbatim .catch(() => go())');
+  const gateCatch = fork.slice(fork.indexOf(".catch((e) => {"), fork.indexOf('.catch(() => go());'));
+  assert(!/\bgo\(/.test(gateCatch) && !/pushDeck\(/.test(gateCatch), 'the gate path never pushes');
+  assert(/const deckPushed = pushed && resultsPushPendingRef\.current;[\s\S]*if \(deckPushed && mountedRef\.current\) popToLanding\(\);\s*pushed = true;/.test(gateCatch),
+    'a deck the deadline already pushed is popped back; then nothing else pushes');
+  assert(/failFirstCard\(fork\.searchId, 'error'\);/.test(gateCatch), "R2b keeps 'error'");
+  // the pushed deck's own 402 (anchored, offline or deadline pushes) pops an empty deck back
+  eq((code.match(/if \(isResultsPushed && deckRef\.current\.length === 0\) popToLanding\(\);/g) || []).length, 2, 'generate and fair-sweep 402s on an empty pushed deck pop to the landing');
+});
+
+check('8f4. trades-eng follow-up 3 [shape]: deck_buffer_empty does not fire at a gated preview\'s capped end; trades-eng\'s pinned guard line unchanged', () => {
+  const code = strip(read(TRADES));
+  assert(/if \(!pagedWithCards \|\| !rawTopCard \|\| !job \|\| unseen > 0 \|\| deckFullyDelivered\(job\)\) return;\s*if \(deckGateEndRef\.current\) return;\s*const searchId = deckSearchRef\.current\?\.id \?\? job\.search_id;[\s\S]{0,200}reportDeckBufferEmpty\(searchId/.test(code),
+    'the gate end returns before reportDeckBufferEmpty');
 });
 
 check('8g. D16 (a) [executed + shape]: the end card\'s Continue → the VerifySheet, chosen by the server\'s verify answer or session_verified alone, never an entitlement', () => {
@@ -990,7 +1021,7 @@ check('8h. D19 [shape]: a 402 never reaches a deck error variant or the swipe to
   assert(swipeErr.indexOf('return cur - 1') < swipeErr.search(/err\.isProRequired\) return;/), 'the existing swipe-failure recovery restores the card first');
   // the fair sweep
   const fair = code.slice(code.indexOf('await getFairPackages('), code.indexOf('setFairDeck(false);\n    } finally'));
-  before(fair, /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\('error'\);\s*setFairDeck\(false\);\s*return;/, 'setDeckFailure(');
+  before(fair, /if \(e instanceof ApiError && e\.isProRequired\) \{\s*failDeckSearch\('error'\);\s*setFairDeck\(false\);[^}]*return;/, 'setDeckFailure(');
   // the legacy poll: no "Network hiccup" toast, no poll_abandoned card
   assert(/\} catch \(e\) \{\s*if \(cancelled\) return;\s*if \(e instanceof ApiError && e\.isProRequired\) \{\s*setJob\(null\);\s*return;\s*\}\s*failures \+= 1;/.test(code), 'the legacy poll');
   // the page path: the deck's terminal state, never MoreError
