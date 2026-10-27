@@ -181,6 +181,13 @@ The mint's refusal `message`s are the **final 14-row set** from marketing-lead (
   - admission ignoring in-flight → the concurrency test red (`12 == 5`);
   - no subject clear on success → the clear test red.
 
+**Second QA pass (#430 @ `6ffcfb65`).**
+- `test_d7_concurrent_bad_attempts_never_exceed_the_cap` stubs `api_observability._write_event`. The obs sink on the in-memory SQLite `SingletonThreadPool` segfaulted on Python 3.14 (QA: 8 of 40 runs). It now passes 20 of 20 in a loop.
+- **S12:** a window full only because of in-flight attempts answers `Retry-After: 5` (`test_s12_in_flight_saturation_answers_retry_after_5s`).
+- **S16:** the `my_leagues` / `auth_leagues` gates hold their slot on the request's real audit dict (`test_s16_actions_release_their_in_flight_slot`; sabotage with a throwaway `{}` → red, the slot leaks).
+- `_signin_note_failure` / `_signin_retry_after` are removed; the 300-ceiling test drives the live gate and release path.
+- **MFL `year` hardening:** 2000..current season + 1 is enforced before any MFL call or limiter accounting, else 400 `mfl_bad_year`. So an odd year can't turn a wrong guess into an uncounted upstream error (`test_mfl_year_out_of_range_is_400_before_any_mfl_call` ×6, `test_mfl_year_in_range_is_admitted` ×3; sabotage → all 6 red).
+
 **XFF diagnostic.** The temporary line is now `PLATFORM-SIGNIN-XFF hops=N cf=0|1 tci=0|1`. It records only whether `CF-Connecting-IP` / `True-Client-IP` are present, never their values. `test_c4_xff_diagnostic_logs_only_the_hop_count` asserts none of the six test IPs appears in caplog.
 
 **MFL username case (QA P2-3). Documented now; no code change yet.**

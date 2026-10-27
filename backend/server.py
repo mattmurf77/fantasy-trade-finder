@@ -29597,6 +29597,26 @@ _SIGNIN_LIMITER_MAX_KEYS = 50_000
 # Retry-After when a window is full only because of IN-FLIGHT attempts (their
 # outcome isn't known yet, so the failure-window expiry doesn't apply).
 _SIGNIN_INFLIGHT_RETRY_S = 5
+# MFL `year` range at the sessionless entry (QA hardening): checked BEFORE
+# any MFL call, so an odd year can't turn a wrong-password guess into an
+# uncounted upstream error. Upper bound = the current season + 1
+# (_MFL_DEFAULT_YEAR is the app's current-season constant).
+_SIGNIN_MFL_MIN_YEAR = 2000
+
+
+def _mfl_entry_year_refusal(raw_year):
+    """400 mfl_bad_year when a NUMERIC year is outside 2000..season+1, else
+    None (a non-numeric year keeps its existing handling)."""
+    try:
+        year = int(raw_year or _MFL_DEFAULT_YEAR)
+    except (TypeError, ValueError):
+        return None
+    top = _MFL_DEFAULT_YEAR + 1
+    if _SIGNIN_MFL_MIN_YEAR <= year <= top:
+        return None
+    return jsonify({"error": "mfl_bad_year",
+                    "message": f"year must be between {_SIGNIN_MFL_MIN_YEAR} "
+                               f"and {top}."}), 400
 _signin_failures: dict[str, collections.deque] = {}
 _signin_inflight: dict[str, int] = {}
 _signin_failures_lock = threading.Lock()
@@ -29743,20 +29763,6 @@ def _signin_record_failure_locked(keys, now) -> None:
         _signin_failures[key] = q   # re-insert: dict order = recency
     while len(_signin_failures) > _SIGNIN_LIMITER_MAX_KEYS:
         _signin_failures.pop(next(iter(_signin_failures)))
-
-
-def _signin_retry_after(provider: str, subject: str | None):
-    """Read-only check (no admission): see _signin_full_locked."""
-    keys = _signin_limit_keys(provider, subject)
-    with _signin_failures_lock:
-        return _signin_full_locked(keys, time.monotonic())
-
-
-def _signin_note_failure(provider: str, subject: str | None) -> None:
-    """Record one counted failure directly (outside an admitted attempt)."""
-    keys = _signin_limit_keys(provider, subject)
-    with _signin_failures_lock:
-        _signin_record_failure_locked(keys, time.monotonic())
 
 
 def _signin_release(audit: dict) -> None:
@@ -30255,6 +30261,9 @@ def _entry_platform(audit: dict):
         if not username or not password:
             return jsonify({"error": "mfl_missing_credentials",
                             "message": "MFL username and password are required."}), 400
+        bad_year = _mfl_entry_year_refusal(body.get("year"))
+        if bad_year is not None:
+            return bad_year
         limited = _signin_limit_gate(
             audit, "mfl", _accounts.platform_subject("mfl", username))
         if limited is not None:
@@ -30380,6 +30389,11 @@ def _entry_platform(audit: dict):
         if not is_enabled("mfl.link"):
             return jsonify({"error": "feature_disabled"}), 404
         from . import mfl_service as _mfl
+
+        # Year range first: no MFL call, no limiter accounting (QA hardening).
+        bad_year = _mfl_entry_year_refusal(body.get("year"))
+        if bad_year is not None:
+            return bad_year
 
         subject = None
         claim = (body.get("franchise_id") or body.get("team_id")) is not None

@@ -734,6 +734,17 @@ def test_c2_formatting_cannot_dodge_the_d6_conflict(env, stored, claimed):
 
 # ── Rate limits (D7) + condition 4 ──────────────────────────────────────────
 
+def _live_counted_failure(ip, subject, provider="mfl"):
+    """One counted failure through the LIVE limiter path (admission +
+    release), exactly as entry_platform drives it."""
+    with server.app.test_request_context(
+            "/api/entry/platform", headers={"X-Forwarded-For": ip}):
+        audit: dict = {}
+        assert server._signin_limit_gate(audit, provider, subject) is None
+        audit["_counted_failure"] = True
+        server._signin_release(audit)
+
+
 @pytest.fixture()
 def small_ip_ceiling(monkeypatch):
     """Same limiter logic at a ceiling of 30 so the IP tests stay fast; the
@@ -789,13 +800,10 @@ def test_c4_ip_ceiling_is_300_failures_per_10_minutes(env):
     assert server._SIGNIN_IP_MAX_FAILURES == 300
     assert server._SIGNIN_IP_WINDOW_S == 600
     ip = "198.51.100.70"
-    with server.app.test_request_context(headers={"X-Forwarded-For": ip}):
-        for i in range(299):
-            server._signin_note_failure("mfl", f"ceiling{i}")
-        assert server._signin_retry_after("mfl", None) is None
+    for i in range(299):
+        _live_counted_failure(ip, f"ceiling{i}")
     assert _mfl_claim(env, ip=ip).status_code == 200      # 299: admitted
-    with server.app.test_request_context(headers={"X-Forwarded-For": ip}):
-        server._signin_note_failure("mfl", "ceiling-last")  # 300th failure
+    _live_counted_failure(ip, "ceiling-last")              # 300th failure
     r = _mfl_claim(env, ip=ip)
     assert r.status_code == 429
     assert 0 < int(r.headers["Retry-After"]) <= 600
@@ -976,7 +984,11 @@ def test_d7_concurrent_bad_attempts_never_exceed_the_cap(env):
             statuses.append(r.status_code)
 
     threads = [threading.Thread(target=attempt, args=(i,)) for i in range(n)]
-    with patch.object(mfl, "login", slow_bad_login):
+    # The obs.api_events sink writes through the in-memory SQLite engine's
+    # SingletonThreadPool; 12 threads doing that segfaulted on Python 3.14
+    # (QA: 8 of 40 runs). Events aren't what this test is about.
+    with patch.object(mfl, "login", slow_bad_login), \
+         patch.object(api_obs, "_write_event", lambda *a, **kw: None):
         for t in threads:
             t.start()
         for t in threads:
@@ -1854,3 +1866,81 @@ def test_link_routes_and_previews_keep_their_own_copy(env):
                   username="MattM", password="hunter2")
         assert (r.status_code, r.get_json()) == (
             502, {"error": "mfl_unavailable", "message": mfl_down})
+
+
+
+# ── QA pins: in-flight Retry-After (S12), action audit wiring (S16), MFL year ──
+
+def test_s12_in_flight_saturation_answers_retry_after_5s(env):
+    """A window full only because of IN-FLIGHT attempts answers 429 with the
+    short _SIGNIN_INFLIGHT_RETRY_S, not the failure-window expiry."""
+    assert server._SIGNIN_INFLIGHT_RETRY_S == 5
+    held = []
+    for _ in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
+        with server.app.test_request_context(
+                "/api/entry/platform",
+                headers={"X-Forwarded-For": "192.0.2.10"}):
+            audit: dict = {}
+            assert server._signin_limit_gate(audit, "mfl", "mattm") is None
+            held.append(audit)                    # in flight, not released
+    r = _mfl_claim(env, ip="192.0.2.11")
+    assert r.status_code == 429
+    assert r.headers["Retry-After"] == "5"
+    for audit in held:                            # they finish (no failure)
+        server._signin_release(audit)
+    assert server._signin_inflight == {}
+    assert _mfl_claim(env, ip="192.0.2.12").status_code == 200
+
+
+def test_s16_actions_release_their_in_flight_slot(env):
+    """The my_leagues / auth_leagues gates hold a slot on the request's real
+    audit dict, so entry_platform's finally releases it. A throwaway {}
+    would leak the slot and lock the subject for good."""
+    with patch.object(es, "fetch_fan_leagues",
+                      side_effect=es.EspnAuthError("rejected")):
+        r = _post(env, platform="espn", action="my_leagues",
+                  espn_s2=S2_A, swid=SWID_A)
+    assert r.status_code == 403                    # a counted failure
+    assert server._signin_inflight == {}
+    with patch.object(es, "fetch_fan_leagues", lambda *a, **kw: []):
+        assert _post(env, platform="espn", action="my_leagues",
+                     espn_s2=S2_A, swid=SWID_A).status_code == 200
+        assert server._signin_inflight == {}
+        for _ in range(server._SIGNIN_SUBJECT_MAX_FAILURES + 2):
+            assert _post(env, platform="espn", action="my_leagues",
+                         espn_s2=S2_A, swid=SWID_A).status_code == 200
+    assert server._signin_inflight == {}
+    # The same wiring on the MFL action.
+    assert _post(env, platform="mfl", action="auth_leagues",
+                 username="MattM", password="bad").status_code == 403
+    assert _post(env, platform="mfl", action="auth_leagues",
+                 username="MattM", password="hunter2").status_code == 200
+    assert server._signin_inflight == {}
+
+
+@pytest.mark.parametrize("year", [1999, 0.5, -2026, 2028, 3000, "1850"])
+def test_mfl_year_out_of_range_is_400_before_any_mfl_call(env, year):
+    calls: list = []
+    with patch.object(mfl, "resolve_host", _recorder(calls, "resolve_host")), \
+         patch.object(mfl, "fetch_league_bundle", _recorder(calls, "bundle")), \
+         patch.object(mfl, "login", _recorder(calls, "login")), \
+         patch.object(mfl, "fetch_my_leagues", _recorder(calls, "myleagues")):
+        claim = _mfl_claim(env, year=year)
+        preview = _post(env, platform="mfl", mfl_league_id=MFL_LEAGUE,
+                        year=year)
+        action = _post(env, platform="mfl", action="auth_leagues",
+                       username="MattM", password="bad", year=year)
+    top = server._MFL_DEFAULT_YEAR + 1
+    for r in (claim, preview, action):
+        assert r.status_code == 400, r.get_data(as_text=True)
+        assert r.get_json() == {
+            "error": "mfl_bad_year",
+            "message": f"year must be between 2000 and {top}."}
+    assert calls == []                              # no MFL call at all
+    assert server._signin_failures == {}            # uncounted
+    assert server._signin_inflight == {}
+
+
+@pytest.mark.parametrize("year", [2000, 2026, 2027])
+def test_mfl_year_in_range_is_admitted(env, year):
+    assert _mfl_claim(env, year=year).status_code == 200

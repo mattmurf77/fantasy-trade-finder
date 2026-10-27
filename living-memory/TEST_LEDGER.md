@@ -21,6 +21,13 @@ Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_S
   - The MFL username-case decision rule (QA P2-3) is in `scope.md`, TestFlight step 6b and a code comment at `accounts.platform_subject`; no code change.
   - Doc nits fixed (preview 500 comment, 300 per IP, case count 24).
   - Run: `test_platform_sign_in.py` (116) + `test_entry_platform_route.py` (27) = **143 passed**.
+- **Second QA pass (#430 @ `6ffcfb65`):**
+  - **Flake fix:** the concurrency test stubs `api_observability._write_event`; the in-memory SQLite `SingletonThreadPool` segfaulted on Python 3.14. Loop: **20 of 20 passed** (separate processes).
+  - **New pins:** `test_s12_in_flight_saturation_answers_retry_after_5s` (`Retry-After: 5`) and `test_s16_actions_release_their_in_flight_slot`.
+  - **S16 sabotage:** `my_leagues` gated on a throwaway `{}` → red (`{'ip:…': 1, 'sub:…': 1} == {}`, the slot leaks).
+  - **Dead code:** `_signin_note_failure` / `_signin_retry_after` removed; the 300-ceiling test uses the live gate and release path.
+  - **MFL year range** (2000..season+1, 400 `mfl_bad_year` before any MFL call or limiter accounting): `test_mfl_year_out_of_range_is_400_before_any_mfl_call` ×6 (claim, preview and action each) and `test_mfl_year_in_range_is_admitted` ×3. Sabotage (check removed) → all 6 red.
+  - Run: **154 passed** (`test_platform_sign_in.py` 127 + `test_entry_platform_route.py` 27).
 - **Refusal copy (follow-up commit):** marketing's final 14-row set (§6 addendum 8, C) is applied, with rows 7, 8 and 12 approved by legal R28.16, so the set is complete. Apostrophes are U+2019, except row 10, which stays byte-identical. Rows 8, 9 and 11 are sign-in-only constants; the link-route copy is unchanged.
   - New: `test_signin_refusal_copy_is_the_final_set_verbatim` (21 cases, literal expected bodies on the real route) and `test_link_routes_and_previews_keep_their_own_copy`.
   - Sabotage: row-13 constant reworded → `[row13-too-many]` red. Restored.
