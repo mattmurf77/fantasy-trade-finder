@@ -280,9 +280,94 @@ def test_guard_refuses_anything_but_an_entry_id(engine, capsys, monkeypatch):
         return found
     monkeypatch.setattr(purge, "discover", poisoned)
     before = snapshot(engine)
-    code = purge.main(["--cutoff", CUTOFF, "--allow-local", "--execute", "--expect", "4"])
-    assert code == 3 and "ERROR (ValueError)" in capsys.readouterr().err
+    code, out = run(capsys, "--execute", "--expect", "4")
+    assert code == 2 and "REFUSED. A target, or an alias its deletion would also remove" in out
     assert snapshot(engine) == before        # refused before deleting anyone
+
+
+@pytest.mark.parametrize("alias", ["bound-account", "session-working-key"])
+def test_guard_refuses_a_target_whose_deletion_scope_reaches_a_non_entry_id(
+        engine, capsys, alias):
+    """delete_user_data(id) also deletes the aliases _user_data_scope resolves."""
+    with engine.begin() as conn:
+        conn.execute(insert(db.accounts_table).values(
+            account_id="acct-on-entry", sleeper_user_id=MFL, created_at=BEFORE))
+        if alias == "session-working-key":
+            seed(conn, db.sessions_table, "wk", token_hash="tok-wk", user_id=SLEEPER,
+                 account_id="acct-on-entry")
+    before = snapshot(engine)
+    code, out = run(capsys, "--execute", "--expect", "3")
+    assert code == 2 and "REFUSED. A target, or an alias" in out
+    assert snapshot(engine) == before        # refused before deleting anyone
+
+
+def test_the_scope_is_rechecked_right_before_each_deletion(engine, capsys, monkeypatch):
+    real, calls = accounts.delete_user_data, []
+
+    def bind_the_last_target_on_first_call(uid, *a, **kw):
+        if not calls:                         # a bind lands mid-run on a later target
+            with engine.begin() as conn:
+                conn.execute(insert(db.accounts_table).values(
+                    account_id="late-bind", sleeper_user_id=MFL, created_at=AFTER))
+        calls.append(uid)
+        return real(uid, *a, **kw)
+    monkeypatch.setattr(accounts, "delete_user_data", bind_the_last_target_on_first_call)
+    code, out = run(capsys, "--execute", "--expect", "3")
+    assert code == 1 and "targets: 3; deleted: 2; failed: 1" in out
+    assert MFL not in calls and rows_naming(engine, (MFL,))   # never deleted
+
+
+@pytest.mark.parametrize("bad", [
+    "2026-10-26", "2026-W43-1", "2026-W43-1T00:00:00Z", "2026-299T00:00:00Z",
+    "2026-10-26T00:00:00", "2026-10-26T00:00Z", "2026-10-26 00:00:00Z",
+    "2026-10-26T00:00:00+0000", "2026-13-01T00:00:00Z", "2099-01-01T00:00:00Z", "yesterday"])
+def test_cutoff_must_be_a_full_past_datetime_with_a_timezone(engine, capsys, bad):
+    before = snapshot(engine)
+    with pytest.raises(SystemExit) as exit_:
+        purge.main(["--cutoff", bad, "--allow-local", "--execute", "--expect", "3"])
+    assert exit_.value.code == 2 and "--cutoff" in capsys.readouterr().err
+    assert snapshot(engine) == before
+
+
+def test_cutoff_accepts_z_offsets_and_fractions():
+    from datetime import datetime, timezone
+    utc = datetime(2026, 10, 26, 14, 0, tzinfo=timezone.utc)
+    assert purge._parse_cutoff("2026-10-26T14:00:00Z") == utc
+    assert purge._parse_cutoff("2026-10-26T10:00:00-04:00") == utc
+    assert purge._parse_cutoff("2026-10-26T14:00:00.000001+00:00") == utc.replace(microsecond=1)
+
+
+def test_options_are_never_abbreviated(engine, capsys):
+    before = snapshot(engine)
+    for args in (["--exec", "--expect", "3", "--allow-local"],
+                 ["--execute", "--exp", "3", "--allow-local"],
+                 ["--execute", "--expect", "3", "--allow"]):
+        with pytest.raises(SystemExit) as exit_:
+            purge.main(["--cutoff", CUTOFF, *args])
+        assert exit_.value.code == 2
+    assert snapshot(engine) == before
+
+
+def test_created_at_equal_to_the_cutoff_is_after_and_a_microsecond_before_is_a_target(engine):
+    at, just_before = "entry:mfl:9.f0001", "entry:mfl:9.f0002"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=at,
+                                                   created_at="2026-10-26T00:00:00+00:00"))
+        conn.execute(insert(db.users_table).values(sleeper_user_id=just_before,
+                                                   created_at="2026-10-25T23:59:59.999999+00:00"))
+        for uid in (at, just_before):
+            seed(conn, db.member_rankings_table, uid, user_id=uid, league_id="9")
+    found = purge.discover(purge._parse_cutoff(CUTOFF))
+    assert at in found["skipped_after_cutoff"] and at not in found["targets"]
+    assert just_before in found["targets"]
+
+
+def test_the_printed_execute_command_keeps_the_cutoff_microseconds_in_utc(engine, capsys):
+    code = purge.main(["--cutoff", "2026-10-25T20:00:00.000001-04:00", "--allow-local"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert ("  python3 scripts/purge_entry_users.py --cutoff 2026-10-26T00:00:00.000001Z "
+            "--execute --expect 3") in out
 
 
 IDENTITY = "database: sqlite; host: ***; name: purge.db"

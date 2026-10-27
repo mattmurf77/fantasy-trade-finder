@@ -6,9 +6,14 @@ ESPN/MFL league-ID sign-in minted users keyed `entry:espn:<SWID>`,
 `entry:espn:<league>.t<team>` and `entry:mfl:<league>.f<franchise>`. No one can
 delete them (they belong to no account a person can prove), and an ESPN one
 may carry a third person's identifier (the team owner's SWID). Each is removed
-through the FULL deletion path, `accounts.delete_user_data`, one id per call:
-it drains in-flight work, takes the row locks, deletes private rows and
-anonymizes shared ones per privacy §6. Never a bare row delete.
+through the FULL deletion path, `accounts.delete_user_data`, one id per call.
+In one transaction it locks the id's users and accounts rows (FOR UPDATE on
+Postgres), deletes private rows and anonymizes shared ones per privacy §6.
+Never a bare row delete. Its lifecycle "drain" (user_data_lifecycle.hold) is
+process-local: it waits only for user work admitted in THIS process, which
+for a one-off script is none, and afterwards fails that process's queued
+stale work. It cannot see requests running in the web service; that is why
+the runbook turns the entry flag off and restarts the service first.
 
 It must finish BEFORE `landing.platform_options` goes back on: a credential
 left on an entry id would make the proof-based sign-in's
@@ -51,6 +56,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
 from contextlib import contextmanager
@@ -119,6 +125,19 @@ def _guard(uid: str) -> str:
     return uid
 
 
+def _guard_scope(uid: str) -> str:
+    """Guard every id delete_user_data(uid) would delete, not just `uid`: it
+    also removes each alias accounts._user_data_scope resolves (an account
+    bound to uid, that account's acct_ key, the working keys of its
+    sessions). An orphaned entry id has none, so any alias refuses."""
+    _guard(uid)
+    with db.engine.connect() as conn:
+        user_ids, _account_ids = accounts._user_data_scope(conn, uid)
+    for alias in user_ids:
+        _guard(alias)
+    return uid
+
+
 def _present(pairs, existing) -> list:
     out = []
     for attr, col in pairs:
@@ -128,7 +147,23 @@ def _present(pairs, existing) -> list:
     return out
 
 
+_CUTOFF = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})")
+
+
+def _parse_cutoff(text) -> datetime | None:
+    """The operator's --cutoff: a full datetime, seconds included, with an
+    explicit timezone (Z or ±HH:MM). Date-only, ISO week forms and naive
+    datetimes are refused: a cutoff hours off selects different targets."""
+    if not isinstance(text, str) or not _CUTOFF.fullmatch(text):
+        return None
+    try:
+        return datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        return None
+
+
 def _parse_iso(value) -> datetime | None:
+    """A stored users.created_at (DB data, so lenient; naive reads as UTC)."""
     if not value:
         return None
     try:
@@ -263,13 +298,19 @@ def execute(cutoff, expect: int) -> int:
         print(f"purge_entry_users: REFUSED. --expect {expect} but {len(targets)} targets were "
               "discovered now. Dry-run again and pass the fresh count.")
         return 2
-    for uid in targets:
-        _guard(uid)
+    try:
+        for uid in targets:
+            _guard_scope(uid)
+    except ValueError:
+        print("purge_entry_users: REFUSED. A target, or an alias its deletion would also remove "
+              "(a bound account, its acct_ key, a session's working key), is not an entry: id. "
+              "Nothing was deleted; escalate to head-eng.")
+        return 2
     totals: Counter = Counter()
     failed = 0
     for uid in targets:
-        try:
-            totals.update(accounts.delete_user_data(_guard(uid)))
+        try:  # re-checked per id, right before its deletion
+            totals.update(accounts.delete_user_data(_guard_scope(uid)))
         except Exception as e:  # the id is never printed; only the error type
             failed += 1
             print(f"  a target failed ({type(e).__name__}); continuing")
@@ -365,21 +406,27 @@ def _engines(read_only: bool):
 
 
 def _run(argv) -> int:
-    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
     ap.add_argument("--cutoff", required=True,
-                    help="ISO datetime: when the entry chips' flag went off (UTC if no offset)")
+                    help="when landing.platform_options went off: a full datetime with seconds "
+                         "and an explicit timezone, e.g. 2026-10-26T14:00:00Z. An entry user "
+                         "created before it is a target; at or after it, it is not")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--execute", action="store_true",
                       help="delete every target through accounts.delete_user_data")
     mode.add_argument("--verify", action="store_true",
-                      help="exit 0 only if no target and no entry: credential row remains")
+                      help="exit 0 only if no target, no entry: credential row and no unverified "
+                           "entry user created after the cutoff remains")
     ap.add_argument("--expect", type=int, help="with --execute: the dry run's target count")
     ap.add_argument("--allow-local", action="store_true",
                     help="allow a local SQLite database (local test runs only)")
     args = ap.parse_args(argv)
-    cutoff = _parse_iso(args.cutoff)
+    cutoff = _parse_cutoff(args.cutoff)
     if cutoff is None:
-        ap.error("--cutoff must be an ISO datetime, e.g. 2026-10-26T00:00:00Z")
+        ap.error("--cutoff must be a full datetime with seconds and an explicit timezone "
+                 "(Z or +HH:MM), e.g. 2026-10-26T14:00:00Z")
+    if cutoff > datetime.now(timezone.utc):
+        ap.error("--cutoff is in the future; use the UTC time the flag change went live")
     if args.execute and args.expect is None:
         ap.error("--execute needs --expect N (the dry run's target count)")
     if not args.execute and args.expect is not None:
