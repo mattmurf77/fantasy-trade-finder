@@ -1,3 +1,27 @@
+## 2026-10-27 — S0 roster-change follow-ups: stale rebuilds aren't shared; the init's pre-gen is re-stamped (#481 QA P3-1, P3-2, P3-3)
+
+Gates: QA follow-ups to #481, inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). No route, schema, event or flag change; the knob `trade_roster_change_revoke` (from #481) now also stops the re-stamp and the move record. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_trade_freshness_roster.py` is now 32 tests (7 new). The P2-2 repro is parametrized: after a player move the pre-gen is re-stamped and `/generate` reuses it; after a pick move it keeps its old stamp.
+  - The new P3-1 test covers a stale session's rebuild: device 2 neither reuses nor joins it, device 1 reuses it, and the store refuses it before the eligibility check.
+  - The new P3-3 tests cover S6 (a session in another league) and S7 (two sessions, the newer read wins).
+- **Targeted, 582 passed:** the S0, session-init, page-store, deferred and packed evidence, force-supersede and deck-pipeline-digest suites.
+- **Sabotage, each red then restored** (10):
+  - the session-read rule, the store guard, the move record;
+  - the re-stamp, and a re-stamp that ignores picks;
+  - S6 (any league), S7 (oldest wins);
+  - no kickoff picks key, the key taken outside the in-flight window;
+  - `/generate` and kickoff without `session_read`.
+  - The pre-gen and page-serve `session_read` sites are not covered by a test: code walk at `server.py` `_serve_trade_page_for` and session init's `should_kickoff`.
+- **Full suite** on `0beeb67d`: `pytest backend/tests -q` → 9267 passed, 2 skipped, 0 failed (11m50s).
+- **Combined with #470** (a local merge of `0beeb67d` with `5e310b00`): #470's `test_roster_fp_stamp.py` plus the S0 files, 104 passed.
+  - A scratch end-to-end run used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint.
+  - Player move: 1 hook; the pre-gen is kept, carries a picks key and is re-stamped to the stored fp.
+  - No change: no hook. The scratch worktree is ledgered.
+- **Not covered:**
+  - `_roster_moved_reads` is per process. One web worker today (`render.yaml`, pinned by a test); a second worker would see only its own moves.
+  - A stored page row written before a re-stamp keeps its old stamp: its serves take the moved path (the I-1-filtered page) until the next store.
+
 ## 2026-10-27 — S0 roster-change handler: revoke only what a fresher session would rebuild (#470 QA P2-2, P2-1, P3-1, P3-3)
 
 Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). It adds one model_config kill knob (`trade_roster_change_revoke`, default 1) and changes no route, schema or event. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
