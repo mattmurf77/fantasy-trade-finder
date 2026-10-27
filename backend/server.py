@@ -29587,7 +29587,14 @@ def extension_auth():
 #     the PAIR means a griefer who knows a victim's SWID / MFL username can
 #     only lock their OWN IP's bucket, never the victim's;
 #   * per subject across all IPs — 30 / hour: the password-guessing
-#     ceiling. One IP can't reach it (its pair bucket caps it at 20 / hour).
+#     ceiling, MFL ONLY (head-eng ruling, 2026-10-27). One IP can't reach
+#     it (its pair bucket caps it at 20 / hour). An ESPN claim needs an
+#     espn_s2 cookie, which can't be guessed, so for ESPN a ceiling guards
+#     nothing and only adds griefing surface. An IP with a proven MFL
+#     sign-in / good auth-link login for that subject in the last
+#     _SIGNIN_TRUSTED_IP_DAYS is EXEMPT from the ceiling (never from its pair
+#     bucket or the IP window), so the owner's usual network still gets in
+#     while someone guesses from elsewhere.
 # A PROVEN claim (or a good auth-link login) clears that subject's pair
 # bucket for the caller's IP AND the subject-wide counter; never the IP
 # window, and never another IP's pair bucket. Admission counts in-flight
@@ -29602,9 +29609,20 @@ _SIGNIN_TRUSTED_PROXY_HOPS = 1
 # Per (subject, client IP) — the 5-failure lock.
 _SIGNIN_SUBJECT_MAX_FAILURES = 5
 _SIGNIN_SUBJECT_WINDOW_S = 15 * 60
-# Per subject, any IP — the password-guessing ceiling.
+# Per subject, any IP — the password-guessing ceiling, for these
+# providers only (an espn_s2 can't be guessed).
 _SIGNIN_SUBJECT_CEILING_FAILURES = 30
 _SIGNIN_SUBJECT_CEILING_WINDOW_S = 60 * 60
+_SIGNIN_CEILING_PROVIDERS = ("mfl",)
+# Trusted IPs: a (subject, IP) pair with a proven MFL sign-in or a good
+# auth-link login in the last N days skips the subject-wide ceiling. Kept
+# in-process ((subject, IP) hash → last success, bounded: oldest evicted)
+# and therefore cleared on every deploy/restart — no table (no schema grant).
+_SIGNIN_TRUSTED_IP_DAYS = 30
+_SIGNIN_TRUSTED_IP_MAX_KEYS = 50_000
+# Every limiter dict evicts its OLDEST key when full (known, accepted at
+# launch scale: a flood of counted failures on distinct subjects could evict
+# a target's counters — post-launch item in the scope / runbook).
 _SIGNIN_LIMITER_MAX_KEYS = 50_000
 # Retry-After when a window is full only because of IN-FLIGHT attempts (their
 # outcome isn't known yet, so the failure-window expiry doesn't apply).
@@ -29639,7 +29657,11 @@ def _mfl_entry_year_refusal(raw_year):
 
 _signin_failures: dict[str, collections.deque] = {}
 _signin_inflight: dict[str, int] = {}
+# (subject, IP) pair hash → monotonic time of its last proven MFL success.
+_signin_trusted_ips: dict[str, float] = {}
 _signin_failures_lock = threading.Lock()
+# The trusted-IP clock (tests inject a fake one to cross the N-day expiry).
+_signin_trust_clock = time.monotonic
 
 # Sign-in refusal copy: the FINAL 14-row set (marketing-lead-copy.md §6
 # addendum 8, C; rows 7, 8 and 12 approved by legal R28.16). Each string is
@@ -29740,8 +29762,9 @@ def _log_xff_hop_count() -> None:
 
 def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
     """[(key, max_failures, window_s)] for this request: the client IP;
-    with a subject, also the (subject, client IP) pair ("subip:") and the
-    subject across all IPs ("sub:"). Subject keys are hashes, so no
+    with a subject, also the (subject, client IP) pair ("subip:"); and, for
+    a ceiling provider (MFL) from an IP that isn't trusted for the subject,
+    the subject across all IPs ("sub:"). Subject keys are hashes, so no
     SWID/username sits in limiter memory either."""
     ip = _client_ip()
     keys = [("ip:" + ip, _SIGNIN_IP_MAX_FAILURES, _SIGNIN_IP_WINDOW_S)]
@@ -29750,10 +29773,35 @@ def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
             f"{provider}\0{subject}\0{ip}".encode()).hexdigest()
         keys.append(("subip:" + pair, _SIGNIN_SUBJECT_MAX_FAILURES,
                      _SIGNIN_SUBJECT_WINDOW_S))
-        digest = hashlib.sha256(f"{provider}\0{subject}".encode()).hexdigest()
-        keys.append(("sub:" + digest, _SIGNIN_SUBJECT_CEILING_FAILURES,
-                     _SIGNIN_SUBJECT_CEILING_WINDOW_S))
+        if (provider in _SIGNIN_CEILING_PROVIDERS
+                and not _signin_ip_trusted(pair)):
+            digest = hashlib.sha256(
+                f"{provider}\0{subject}".encode()).hexdigest()
+            keys.append(("sub:" + digest, _SIGNIN_SUBJECT_CEILING_FAILURES,
+                         _SIGNIN_SUBJECT_CEILING_WINDOW_S))
     return keys
+
+
+def _signin_ip_trusted(pair: str) -> bool:
+    """True when this (subject, IP) pair had a proven MFL success within
+    _SIGNIN_TRUSTED_IP_DAYS (an expired entry is dropped on read)."""
+    with _signin_failures_lock:
+        seen = _signin_trusted_ips.get(pair)
+        if seen is None:
+            return False
+        if _signin_trust_clock() - seen > _SIGNIN_TRUSTED_IP_DAYS * 86400:
+            _signin_trusted_ips.pop(pair, None)
+            return False
+        return True
+
+
+def _signin_trust_ip_locked(pair: str) -> None:
+    """Caller holds _signin_failures_lock. Mark the pair trusted now;
+    re-insert so dict order = recency, and evict the oldest past the cap."""
+    _signin_trusted_ips.pop(pair, None)
+    _signin_trusted_ips[pair] = _signin_trust_clock()
+    while len(_signin_trusted_ips) > _SIGNIN_TRUSTED_IP_MAX_KEYS:
+        _signin_trusted_ips.pop(next(iter(_signin_trusted_ips)))
 
 
 # The audit / log `reason` each limiter key reports when it refuses.
@@ -29764,8 +29812,8 @@ _SIGNIN_LIMIT_SCOPES = {"ip": "ip_limit", "subip": "subject_limit",
 def _signin_full_locked(keys, now):
     """Caller holds _signin_failures_lock. (retry_after_s, 'ip_limit' |
     'subject_limit' | 'subject_ceiling') when any key's recorded failures
-    PLUS in-flight attempts reach its cap, else None. Sliding window over the newest `cap`
-    failure stamps."""
+    PLUS in-flight attempts reach its cap, else None. Sliding window over
+    the newest `cap` failure stamps."""
     worst = None
     for key, cap, window in keys:
         q = _signin_failures.get(key)
@@ -29802,7 +29850,10 @@ def _signin_release(audit: dict) -> None:
     slot, records a counted credential failure, or — on a PROVEN claim /
     good auth-link login — clears the subject's (subject, this IP) bucket
     and its subject-wide counter (never the IP window, never another IP's
-    pair bucket)."""
+    pair bucket). A proven MFL success also marks its (subject, IP) pair
+    trusted, exempting that IP from the subject-wide ceiling for
+    _SIGNIN_TRUSTED_IP_DAYS."""
+    trust_pair = audit.pop("_trust_pair", None)
     keys = audit.pop("_limiter_keys", None)
     if not keys:
         return
@@ -29820,6 +29871,8 @@ def _signin_release(audit: dict) -> None:
             for key, _cap, _window in keys:
                 if key.startswith(("subip:", "sub:")):
                     _signin_failures.pop(key, None)
+            if trust_pair:
+                _signin_trust_ip_locked(trust_pair)
 
 
 def _reset_signin_limiter() -> None:
@@ -29827,6 +29880,7 @@ def _reset_signin_limiter() -> None:
     with _signin_failures_lock:
         _signin_failures.clear()
         _signin_inflight.clear()
+        _signin_trusted_ips.clear()
 
 
 def _signin_limit_gate(audit: dict, provider: str, subject: str | None):
@@ -29840,6 +29894,11 @@ def _signin_limit_gate(audit: dict, provider: str, subject: str | None):
             for key, _cap, _window in keys:
                 _signin_inflight[key] = _signin_inflight.get(key, 0) + 1
             audit["_limiter_keys"] = keys
+            if provider in _SIGNIN_CEILING_PROVIDERS:
+                # A proven success on this attempt trusts its (subject, IP).
+                audit["_trust_pair"] = next(
+                    (k[len("subip:"):] for k, _c, _w in keys
+                     if k.startswith("subip:")), None)
             return None
     audit.update(outcome="limited", reason=hit[1])
     resp = jsonify({"error": "too_many_attempts",

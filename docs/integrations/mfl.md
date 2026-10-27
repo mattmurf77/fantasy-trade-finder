@@ -128,8 +128,9 @@ succeeded). Disconnecting (`DELETE /api/mfl/auth-link`) removes the stored
 cookie but **keeps** the sign-in identity, so the next MFL sign-in lands in
 the same account; only `DELETE /api/account` releases it. Failed logins here and in the
 `auth_leagues` action count toward the sign-in failure limits (5 per
-username per client IP per 15 min, 30 per username across IPs per hour, 300
-per IP per 10 min → 429 `too_many_attempts`); a `wrong_account` after a good
+username per client IP per 15 min, 30 per username across IPs per hour — an
+IP with a proven MFL success for that username in the last 30 days is exempt
+from this one — and 300 per IP per 10 min → 429 `too_many_attempts`); a `wrong_account` after a good
 login doesn't count, and a proven sign-in clears the username's bucket for
 its IP and the subject-wide counter. The audit line
 (`PLATFORM-SIGNIN`) never carries the username or password. Known limit: if
@@ -141,9 +142,12 @@ identities (username and email).
 call it with unlimited username/password guesses — an MFL password oracle.
 Its login now goes through the same D7 limiter as the sign-in, with the
 same keys and windows: per (username, client IP) 5 bad logins per 15 min,
-per username across IPs 30 per hour, per client IP 300 per 10 min (the
-username trimmed + lower-cased via `accounts.platform_subject("mfl", …)`),
-in-flight attempts counted at admission. The year range
+per username across IPs 30 per hour (a trusted IP — a proven MFL sign-in or
+good auth-link login for that username in the last 30 days, kept in-process
+and cleared on deploy — is exempt from this ceiling only), per client IP 300
+per 10 min (the username trimmed + lower-cased via
+`accounts.platform_subject("mfl", …)`), in-flight attempts counted at
+admission. The year range
 (2000..current season + 1) and the admission check run **before**
 `mfl_service.login`; over the limit the route answers 429
 `too_many_attempts` + `Retry-After` and makes no MFL call. Only an MFL bad

@@ -1,3 +1,27 @@
+## 2026-10-27 — Ceiling ruling: the subject-wide ceiling is MFL-only, with trusted IPs exempt (`feat/mfl-auth-link-throttle`, #477)
+
+Full gates (D7 limit change). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. head-eng passed #477 @ `8a3f5c91` on its security diff check, then ruled on the residual. Code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups → Ceiling ruling).
+
+- **What changed:**
+  - The `sub:` ceiling now applies only to `_SIGNIN_CEILING_PROVIDERS = ("mfl",)`. ESPN keeps `ip:` + `subip:`.
+  - A (username, IP) pair with a proven MFL sign-in or a good auth-link login in the last `_SIGNIN_TRUSTED_IP_DAYS` = 30 skips `sub:`, never `subip:` / `ip:`. The trust map, `_signin_trusted_ips`, is in-process, bounded by `_SIGNIN_TRUSTED_IP_MAX_KEYS` with the oldest evicted, and cleared on deploy. It uses an injectable `_signin_trust_clock`.
+  - No table, no schema.
+- **New tests** (`test_platform_sign_in.py` +6):
+  - `test_espn_has_no_subject_ceiling`;
+  - `test_mfl_ceiling_exempts_an_ip_with_a_recent_proven_success`;
+  - `test_mfl_trusted_ip_still_has_its_own_pair_bucket`;
+  - `test_mfl_auth_link_success_also_trusts_the_ip`;
+  - `test_mfl_trusted_ip_exemption_expires_after_n_days` (injected clock);
+  - `test_mfl_trusted_ip_map_is_bounded_and_evicts_the_oldest`.
+
+  The MFL ceiling still locks fresh IPs (`test_lockout_subject_ceiling_locks_the_subject_on_every_ip`, `test_auth_link_lockout_subject_ceiling_spans_ips_and_routes`).
+- **Sabotage, each red then restored:**
+  - the ceiling applied to ESPN → 1 red (`test_espn_has_no_subject_ceiling`);
+  - the exemption applied to `subip:` too → 1 red (`test_mfl_trusted_ip_still_has_its_own_pair_bucket`);
+  - the exemption ignored → 4 red (exempts, auth-link trusts, expiry, eviction).
+- **Run:** the 15 branch-A suites: **535 passed, 0 failed** (529 + 6). The concurrency pair passes 3 of 3 loops. Full suite: FULLSUITE_A5
+- **Post-launch item logged** (scope + runbook): the limiter maps evict their oldest key when full (`_SIGNIN_LIMITER_MAX_KEYS` 50,000), so a flood of failures on distinct subjects could evict a target's counters. head-eng accepted this at launch scale.
+
 ## 2026-10-27 — Lockout fix: the 5-failure lock keyed on (subject, client IP) + a 30/hour subject-wide ceiling (`feat/mfl-auth-link-throttle`, #477; draft, not yet QA'd)
 
 Full gates (D7 limit changes). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups → Lockout fix).

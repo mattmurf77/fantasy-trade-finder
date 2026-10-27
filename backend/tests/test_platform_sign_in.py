@@ -1003,6 +1003,104 @@ def test_lockout_success_clears_its_pair_bucket_and_the_ceiling_only(env):
     assert _mfl_claim(env, ip="10.8.0.2").status_code == 429
 
 
+# ── head-eng's ruling on the ceiling (2026-10-27): MFL only + trusted IPs ────
+# The subject-wide ceiling applies to MFL only (an espn_s2 can't be guessed).
+# An IP with a proven MFL sign-in / good auth-link login for that subject in
+# the last _SIGNIN_TRUSTED_IP_DAYS is exempt from the ceiling — never from
+# its (subject, IP) bucket or the IP window. In-process, bounded, cleared on
+# deploy.
+
+def _fill_mfl_ceiling(env, prefix="10.6"):
+    """30 bad MFL logins for MattM over 6 fresh IPs (5 each, under the pair
+    cap) — the subject-wide ceiling is then full for untrusted IPs."""
+    for i in range(server._SIGNIN_SUBJECT_CEILING_FAILURES):
+        assert _mfl_claim(env, ip=f"{prefix}.{i // 5}.1",
+                          password="bad").status_code == 403, i
+
+
+def test_espn_has_no_subject_ceiling(env):
+    """35 counted ESPN failures for one SWID over 7 IPs (5 each) lock only
+    those IPs' pair buckets: a fresh IP still signs in, and no subject-wide
+    key exists. Sabotage: apply the ceiling to ESPN → red."""
+    for i in range(35):
+        r = _espn_claim(env, ip=f"10.5.{i // 5}.1", s2="not-issued")
+        assert r.get_json()["error"] == "espn_auth_required", i
+    assert not any(k.startswith("sub:") for k in server._signin_failures)
+    assert _espn_claim(env, ip="10.5.0.1").status_code == 429    # its pair
+    assert _espn_claim(env, ip=VICTIM_IP).status_code == 200     # fresh IP
+
+
+def test_mfl_ceiling_exempts_an_ip_with_a_recent_proven_success(env, caplog):
+    """The owner signed in from VICTIM_IP earlier; then someone fills the
+    ceiling from 6 other IPs. A fresh IP is locked (subject_ceiling), the
+    owner's IP still signs in. Sabotage: ignore the exemption → red."""
+    caplog.set_level(logging.INFO, logger="trade_finder")
+    assert _mfl_claim(env, ip=VICTIM_IP).status_code == 200     # trusts it
+    _fill_mfl_ceiling(env)
+    r = _mfl_claim(env, ip="10.6.99.1")
+    assert r.status_code == 429
+    assert ("PLATFORM-SIGNIN provider=mfl outcome=limited "
+            "reason=subject_ceiling") in caplog.text
+    assert _mfl_claim(env, ip=VICTIM_IP).status_code == 200
+
+
+def test_mfl_trusted_ip_still_has_its_own_pair_bucket(env):
+    """The exemption is from the ceiling only: 5 bad logins from the trusted
+    IP still lock that (subject, IP) pair. Sabotage: apply the exemption to
+    subip: too → red."""
+    assert _mfl_claim(env, ip=VICTIM_IP).status_code == 200     # trusted
+    for _ in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
+        assert _mfl_claim(env, ip=VICTIM_IP, password="bad").status_code == 403
+    assert _mfl_claim(env, ip=VICTIM_IP).status_code == 429
+
+
+def test_mfl_auth_link_success_also_trusts_the_ip(env):
+    """A good auth-link login records the trust too (same keys)."""
+    tok = _mfl_claim(env, ip="10.4.0.1").get_json()["session_token"]
+    server._reset_signin_limiter()               # forget the sign-in's trust
+    r = env.client.post("/api/mfl/auth-link",
+                        json={"username": "MattM", "password": "hunter2",
+                              "year": 2026},
+                        headers={"X-Session-Token": tok,
+                                 "X-Forwarded-For": VICTIM_IP})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    _fill_mfl_ceiling(env)
+    assert _mfl_claim(env, ip="10.6.99.1").status_code == 429
+    assert _mfl_claim(env, ip=VICTIM_IP).status_code == 200
+
+
+def test_mfl_trusted_ip_exemption_expires_after_n_days(env, monkeypatch):
+    """Injected trust clock: 1 s inside the window the trusted IP is still
+    exempt; 1 s past it, the ceiling applies again."""
+    now = [1_000_000.0]
+    monkeypatch.setattr(server, "_signin_trust_clock", lambda: now[0])
+    days = server._SIGNIN_TRUSTED_IP_DAYS
+    assert days == 30
+    assert _mfl_claim(env, ip=VICTIM_IP).status_code == 200     # trusted at t0
+    _fill_mfl_ceiling(env)
+    now[0] += days * 86400 - 1
+    # Probe with a bad password (a 200 would clear the ceiling): admitted.
+    assert _mfl_claim(env, ip=VICTIM_IP, password="bad").status_code == 403
+    now[0] += 2
+    r = _mfl_claim(env, ip=VICTIM_IP)
+    assert r.status_code == 429                                 # expired
+    assert server._signin_trusted_ips == {}                     # dropped
+
+
+def test_mfl_trusted_ip_map_is_bounded_and_evicts_the_oldest(env,
+                                                             monkeypatch):
+    """With the map capped at 3, a 4th trusted IP evicts the oldest: that IP
+    is subject to the ceiling again, the newest stays exempt."""
+    monkeypatch.setattr(server, "_SIGNIN_TRUSTED_IP_MAX_KEYS", 3)
+    ips = [f"10.3.0.{n}" for n in range(1, 5)]
+    for ip in ips:
+        assert _mfl_claim(env, ip=ip).status_code == 200
+    assert len(server._signin_trusted_ips) == 3
+    _fill_mfl_ceiling(env)
+    assert _mfl_claim(env, ip=ips[0], password="bad").status_code == 429
+    assert _mfl_claim(env, ip=ips[-1], password="bad").status_code == 403
+
+
 def test_d7_uncounted_refusals_never_consume_the_budget(env):
     """Facts about the league (public, ownerless), post-proof outcomes
     (wrong_account) and outages don't count: 6 of each, then the owner's

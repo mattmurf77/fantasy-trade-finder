@@ -27,7 +27,7 @@
 
 - New/changed tables or columns: **none (no DDL).** `linked_identities.provider` gains `espn` / `mfl` (subject = canonical SWID braced + upper-cased / MFL username trimmed + lower-cased, both via `accounts.platform_subject`) and `verified_via` (users, sessions) gains `espn` (`mfl_login` already existed). Neither column has a CHECK constraint (design D3). → `docs/data-dictionary.md` updated.
 - New/changed feature flags: **`espn.signin`** (new, ships `true`) — the ESPN sign-in kill switch; see the addendum below. Otherwise gated by the existing `landing.platform_options` + `espn.link` / `mfl.link` (actions also by `espn.league_picker` / `mfl.auth_link`). Rollback levers: `espn.signin` → false (ESPN sign-in only), `landing.platform_options` → false (the whole entry surface); both deploy-free and hot-reloadable.
-- New env vars / `model_config` keys: **none.** The D7 limits are module constants in `backend/server.py` (`_SIGNIN_IP_MAX_FAILURES` = 300 / `_SIGNIN_IP_WINDOW_S` = 600, `_SIGNIN_SUBJECT_MAX_FAILURES` = 5 / `_SIGNIN_SUBJECT_WINDOW_S` = 900 — per (subject, client IP) since the 2026-10-27 lockout fix, `_SIGNIN_SUBJECT_CEILING_FAILURES` = 30 / `_SIGNIN_SUBJECT_CEILING_WINDOW_S` = 3600 — per subject across IPs, added by that fix, `_SIGNIN_TRUSTED_PROXY_HOPS` = 1); state is in-process and resets on deploy (one gunicorn worker × 4 threads, lock-guarded).
+- New env vars / `model_config` keys: **none.** The D7 limits are module constants in `backend/server.py` (`_SIGNIN_IP_MAX_FAILURES` = 300 / `_SIGNIN_IP_WINDOW_S` = 600, `_SIGNIN_SUBJECT_MAX_FAILURES` = 5 / `_SIGNIN_SUBJECT_WINDOW_S` = 900 — per (subject, client IP) since the 2026-10-27 lockout fix, `_SIGNIN_SUBJECT_CEILING_FAILURES` = 30 / `_SIGNIN_SUBJECT_CEILING_WINDOW_S` = 3600 — per subject across IPs, added by that fix, MFL only (`_SIGNIN_CEILING_PROVIDERS`), with `_SIGNIN_TRUSTED_IP_DAYS` = 30 / `_SIGNIN_TRUSTED_IP_MAX_KEYS` = 50,000 for the trusted-IP exemption, `_SIGNIN_TRUSTED_PROXY_HOPS` = 1); state is in-process and resets on deploy (one gunicorn worker × 4 threads, lock-guarded).
 - Code-level vocabulary: `accounts.PLATFORM_PROVIDERS = ("espn", "mfl")`, allowed by `find_or_create_account`; `accounts.PROVIDERS` stays `("apple", "google")` and keeps meaning the `/api/auth/*` issuers. `accounts.VERIFIED_VIA_ESPN` / `VERIFIED_VIA_MFL`. `espn_service.swid_identity` (the one SWID identity form). `prepared_trade_cohort.VERIFIED` gains `"espn"`.
 
 ## 3. Evidence scope
@@ -264,7 +264,7 @@ Full gates. These are D7 limit changes, server-only, with no new copy, flag, sch
 
   The subject keys are still hashes. The sign-in claims, both actions and auth-link all use these keys.
 - **What a single IP can do:** a griefer on one IP locks only their own `subip:` bucket. That bucket also caps one IP at 20 failures an hour, under the ceiling. So a single-IP griefer can no longer lock the victim out.
-- **Residual:** 30 failures within an hour from **two or more** IPs still lock the subject everywhere (`reason=subject_ceiling`) until the hour passes or the subject's next proven sign-in. Any cross-IP ceiling has this property. If head-eng wants it narrower, one option is to exempt a (subject, IP) pair that has recently signed in from the ceiling. Not built.
+- **Residual:** 30 failures within an hour from **two or more** IPs still lock the subject everywhere (`reason=subject_ceiling`) until the hour passes or the subject's next proven sign-in. Any cross-IP ceiling has this property. head-eng ruled on it the same day; it is narrowed below (MFL only, trusted IPs exempt).
 - **Unchanged:**
   - in-flight admission per key (`failures + in_flight >= cap`, now on all three keys);
   - `Retry-After` (the longest wait among the refusing keys; 5 s when only in-flight attempts fill a window);
@@ -273,3 +273,31 @@ Full gates. These are D7 limit changes, server-only, with no new copy, flag, sch
 - **Success clears:** a proven claim or a good auth-link login clears the subject's bucket **for its IP and the subject-wide counter** (my choice, as platforms-eng suggested). It never clears the IP window or another IP's pair bucket, so a griefer's own lock survives the victim's success.
 - **head-eng's #430 nit:** the sign-in's ESPN cookie-read warning now logs `espn fetch failed [<kind>]` only, never the exception message. The link routes' `_espn_error_response` warning is unchanged.
 - **Evidence:** `living-memory/TEST_LEDGER.md` 2026-10-27, "Lockout fix".
+
+#### Ceiling ruling: MFL only, plus trusted IPs (2026-10-27, head-eng passed #477 @ `8a3f5c91` and ruled on the residual)
+
+Full gates; server only; no new copy, flag, schema or event.
+
+- **ESPN: no subject-wide ceiling.** `_SIGNIN_CEILING_PROVIDERS = ("mfl",)`, so ESPN keeps only `ip:` and `subip:`. An `espn_s2` can't be guessed, so for ESPN the ceiling guarded nothing and only added griefing surface.
+- **MFL: the 30 / hour ceiling stays, narrowed by trusted IPs.**
+  - **The exemption:** a (username, IP) pair with a proven MFL sign-in or a good auth-link login in the last `_SIGNIN_TRUSTED_IP_DAYS` = 30 skips the `sub:` key. It never skips `subip:` or `ip:`. The `auth_leagues` action and failures never grant trust.
+  - **Storage:** an in-process map, `_signin_trusted_ips`, from the (subject, IP) pair hash (the same digest as the `subip:` key, so no username or IP in clear) to the monotonic time of the last success. It is bounded by `_SIGNIN_TRUSTED_IP_MAX_KEYS` = 50,000 (oldest evicted; a renewal moves the pair to the newest end), an expired entry is dropped on read, and the map is **cleared on every deploy or restart**.
+  - **No table:** a table would be a schema change without a grant. In-process is adequate for the stated goal: the owner's usual network keeps working during a guessing burst. The gap is that right after a deploy nobody is trusted until they sign in again. Written into the runbook.
+  - **Mechanics:** the gate stores the pair as `audit["_trust_pair"]` for MFL. `_signin_release` records it on `outcome == "proven"` (a proven MFL claim or a good auth-link login), next to the existing clear of `subip:` + `sub:`. The trust clock is `_signin_trust_clock` (`time.monotonic`), injectable in tests.
+- **Evidence** (`test_platform_sign_in.py` +6):
+  - `test_espn_has_no_subject_ceiling`: 35 failures over 7 IPs; a fresh IP gets 200; no `sub:` key exists;
+  - `test_mfl_ceiling_exempts_an_ip_with_a_recent_proven_success`: a fresh IP gets 429 `subject_ceiling`, the trusted IP gets 200;
+  - `test_mfl_trusted_ip_still_has_its_own_pair_bucket`;
+  - `test_mfl_auth_link_success_also_trusts_the_ip`;
+  - `test_mfl_trusted_ip_exemption_expires_after_n_days` (injected clock: exempt 1 s inside 30 days, 429 1 s past, entry dropped);
+  - `test_mfl_trusted_ip_map_is_bounded_and_evicts_the_oldest` (cap 3, 4 IPs: the oldest gets the ceiling again, the newest stays exempt).
+
+  The existing MFL ceiling tests (fresh IPs locked; the ceiling spanning auth-link and the sign-in) still pass.
+- **Sabotage, each red then restored:**
+  - the ceiling applied to ESPN → `test_espn_has_no_subject_ceiling` red;
+  - the exemption applied to `subip:` too → `test_mfl_trusted_ip_still_has_its_own_pair_bucket` red;
+  - the exemption ignored → 4 red (exempts, auth-link trusts, expiry, eviction).
+
+### Post-launch item: limiter maps evict the oldest key when full (head-eng accepted at launch scale)
+
+`_SIGNIN_LIMITER_MAX_KEYS` (50,000) caps the failure map, and `_SIGNIN_TRUSTED_IP_MAX_KEYS` (50,000) caps the trusted-IP map; each evicts its **oldest** key when full. A flood of counted failures on many distinct subjects (or proven successes from many IPs) could therefore evict a target's counters, or a trusted IP. head-eng accepted this at launch scale. Revisit if the limiter moves out of process (for example, to a shared store when Render runs more than one worker). Also noted in the runbook lockout entry.
