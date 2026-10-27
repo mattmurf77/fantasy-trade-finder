@@ -11,6 +11,7 @@ Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms
   - no knob → 1 red;
   - the job's read not stamped → 1 red (the repro);
   - the session's read not set → 1 red (session init).
+- **Full suite** on `8ad40822`: `pytest backend/tests -q` → 9260 passed, 2 skipped, 0 failed (13m10s).
 - **Combined with #470** (a local merge of `8ad40822` with `de8c2af5`): #470's `test_roster_fp_stamp.py` plus the above, 97 passed.
   - A scratch end-to-end repro used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint (release-lead's ordering).
   - With a player move: 1 hook, and the pre-gen was kept. With the old handler, the same run revoked it (P2-2 reproduced).
