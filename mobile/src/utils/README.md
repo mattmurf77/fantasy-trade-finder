@@ -27,6 +27,7 @@ Helpers with **no React**. The annotated map — including which values are cros
 | `sessionRerank.ts` | F4 session re-rank math (flag `deck.session_rerank`) |
 | `shareLinks.ts` | Share-package URLs for a built trade |
 | `sleeperHandoff.ts` | `openInSleeperApp` / `sleeperAppUrl` / `SLEEPER_PROVEN_RUNGS` — Sleeper hand-offs open `sleeper://`, never https (#351) |
+| `supportContact.ts` | `SUPPORT_EMAIL`, the one support address (#354 BL10-R7); every mobile use imports it |
 | `testRouteEntry.ts` | Launch-argument test-route entry (`FTFTestRoute`), used by the operator QA path |
 | `tickerWindow.ts` | #322/#325 — the mock-draft ticker's ascending last-`depth` window |
 | `tierBands.ts` | Elo/value → tier key + label (8-tier pick ladder, #117); holds the server tier-config cache |

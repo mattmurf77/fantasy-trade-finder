@@ -329,3 +329,26 @@ def test_trades_generated_engine_version(vc_stubs):
     assert len(generated) == 1
     props = generated[0].kwargs["props"]
     assert props["engine_version"] == "value_core" and props["count"] == 1
+
+
+@pytest.mark.parametrize("value_core", [True, False])
+def test_s4_calibrations_refresh_is_never_a_trades_deck(vc_stubs, value_core):
+    """ADR-025 S4 and ruling 30, ungated: a "grading_refresh" job emits no
+    trades_generated and writes no trade_impressions (replenishment's "active"
+    eligibility), on either engine; its deck_impressions rows still write for
+    Calibration. A replenish job, the control, does both."""
+    from sqlalchemy import func, select
+    from backend.database import trade_impressions_table
+    counts = {}
+    for source in ("grading_refresh", "replenish"):
+        rec = MagicMock()
+        capture, job, engine = H.run_capture(
+            extra_patches=(_vc_on() if value_core else []) + [patch.object(server, "record_event", rec)],
+            job_source=source)
+        assert job["status"] == "complete" and job["cards"] and capture["impressions"]
+        assert ("value_core" in job) == value_core
+        with engine.connect() as conn:
+            impressions = conn.execute(select(func.count()).select_from(trade_impressions_table)).scalar()
+        generated = [c for c in rec.call_args_list if c.args[1] == "trades_generated"]
+        counts[source] = (len(generated), impressions > 0)
+    assert counts == {"grading_refresh": (0, False), "replenish": (1, True)}

@@ -108,8 +108,11 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Analytics platform P1 — ingestion pipeline + kill-switch latency (2026-07-18)](#analytics-platform-p1-ingestion-pipeline-kill-switch-latency-2026-07-18)
 - [Render ignores render.yaml envVars on the dashboard-created web service (2026-07-19)](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19)
 - [Offline eval harness — replay/IPS on the F1 impression spine (F8, 2026-07-26)](#offline-eval-harness-replayips-on-the-f1-impression-spine-f8-2026-07-26)
+- [200 ms flip: model-side 24 h read (2026-10-26)](#200-ms-flip-model-side-24-h-read-2026-10-26)
+- [B-DK-4..7 production audit (2026-10-26)](#b-dk-47-production-audit-2026-10-26)
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
+- [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
 - [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
 - [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
@@ -182,6 +185,18 @@ from historical decisions/inbound offers, which must retain original terms.
 - **DB:** Postgres via injected `DATABASE_URL`.
 - **Static:** `web/` served by Flask.
 - Set `ANTHROPIC_API_KEY` in Render dashboard if smart matchups should be enabled in prod.
+
+### The gthread switch (E1)
+
+The web service runs one gunicorn worker with **`--threads 4`** (E1). The live start command comes from the
+service settings, **not** `render.yaml` (G-018; confirmed 2026-10-24 by an API read, which showed the dashboard
+command while the blueprint said `plan: free` against a live `standard`). So merging this file changes nothing
+by itself. On the operator's word, set the start command on the service (Render API `PATCH /v1/services/<id>`
+or the dashboard), then deploy and read the live command back. **Rollback:** the same command without
+`--threads 4`, then deploy. Watch the first 13:30 UTC daily tick and the request p95 after the switch.
+
+As of 2026-10-24 the service reports **`autoDeploy: yes`**: every merge to `main` deploys at once. That
+supersedes the 2026-09-20 note above.
 
 ### First-action latency release (2026-09-21)
 
@@ -301,6 +316,7 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - Edit `config/features.json` and commit/deploy, OR
 - `POST /api/feature-flags/reload` to re-read without restart, OR
 - Set `FTF_FLAGS` env var for process-level overrides.
+- Don't roll back `account.settings_hub` after the 11-06 build: the flat Settings fallback deletes without the LEG-S6 Apple code (#446).
 
 ---
 
@@ -471,6 +487,8 @@ python -m backend.eval.blind_grade export --cards A.json --cards B.json [...] --
 python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --key <NEW_DIR>/key.private.json
 ```
 
+`served` reads the latest Trades deck per league served in the last 30 days (`SERVED_LOOKBACK`), skipping Calibration refresh decks and decks whose evidence contradicts itself. It takes the top `--top` cards (30) by displayed position, after removing withdrawn cards nobody saw. Its stdout summary names `leagues_without_deck` (no gradeable deck in 30 days: pick another league or seat) and `leagues_with_no_cards` (a deck was found but gave 0 gradeable cards, every chosen card lacking a full row: also pick another league or seat), and counts `skipped_no_row` (chosen cards with no full row, never back-filled). It also prints `skipped_decks_in_lookback_by_reason` (the CardSet's `skipped_decks_by_reason`): every ungradeable deck in the 30-day lookback, by reason, in every league and older than the graded deck too. A `pack_integrity` or `withdrawal_conflict` count there is also a flip-read G1 / G8 signal.
+
 `export` samples 40 cards per variant, merges identical trades, shuffles, and writes `grade-sheet.csv` plus `key.private.json`. The sheet names no variant, and its reasons column is blank by default (`show_reasons=False`), because engine-specific phrasing would reveal the source. Give graders the CSV only, never the key. Grades are integers 1–5 (blank = ungraded). Tags are `;`-separated from `same_guy_again`, `too_small`, `never_accept`, `wrong_my_window`, `wrong_their_window`, `junk_filler`, `overpay`. `import` rejects anything else and names the card, then writes `summary.json` next to the sheet: per-variant mean, share graded 4 or more, and tag counts. Target: mean ≥ 4.0 and clearly above the incumbent.
 
 **Kill switch.** A value-core failure while building a deck is logged (`value-core: deck build failed … falling back to the legacy engine`) and that job is finished by the legacy engine, so a rising count of that log line is the signal to act.
@@ -478,7 +496,7 @@ python -m backend.eval.blind_grade import --sheet <NEW_DIR>/grade-sheet.csv --ke
 1. **Stop it:** set `trade.value_core` to `false` (a `config/features.json` change, or an `FTF_FLAGS` override), then `POST /api/feature-flags/reload`. The safety signature changes, so the next `/api/trades/generate` runs the legacy engine and no cached value-core deck is reused.
 2. **Narrow it (deploy-free):** `vc_testers_only` → `1` with `scripts/set_knob.py` or `PUT /api/admin/config/vc_testers_only` (`X-Cron-Secret`). Serving returns to the tester allowlist only.
 
-**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. `budget_exhausted=True` means the 8 s core budget stopped enumeration and a partial pool was ranked and served. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
+**Reading the job log.** Each value-core job logs one INFO line: `trade-job <id> value_core: partners=… packages=… checked=… fair=… served=… truncated=… budget_exhausted=… core_ms=… total_ms=…`. The only thing that sets `budget_exhausted` is the 30 s safety ceiling (pathology), always together with `CoreDiagnostics.safety_ceiling_hit`. The core is bounded by its check caps, never by the clock, so this is not load. A ceiling run never reaches this INFO line, because the job refuses the partial pool (head-eng ruling 15). Look instead for two ERROR lines: `value-core: safety ceiling … hit; stopped with N/M partners done, K pairs checked` and `trade-job <id> value_core: safety ceiling hit (…); refusing the partial pool`. The job ends with error `value_core_failed`. Check for a machine stall (a frozen or starved process, a paused instance) or a pathological input (an extreme roster or package count), not traffic. `truncated` counts partners that hit the per-partner keep cap or the check cap. A standings failure logs `value-core: standings unavailable league=…` and the job continues with windows from roster age and picks only.
 
 ### Gate 2 — Calibration (in-app blind grading)
 
@@ -610,17 +628,35 @@ External scheduler (Render cron) must hit:
 
 If these stop firing, queued pushes pile up in `notification_queue` and digests/re-engagement go silent.
 
-**Known outage: `daily-tick` is killed every day (found 2026-10-15, not yet fixed).**
-- **Symptom:** every day from at least 2026-10-01 to 2026-10-14, gunicorn logged `WORKER TIMEOUT` about 13:33 UTC, ~150 s after the 13:30 run, and the tick returned **500**.
-- **Cause:**
-  - The tick does too much work inline on the request thread, past `--timeout 120`.
-  - The Wednesday 2026-10-14 traceback is inside `_run_weekly_replenishment` → `_kickoff_trade_job`, which builds decks synchronously. That pass runs Wed–Sun (`replenish_weekday`).
-  - The Monday and Tuesday kills left no traceback. That points at an earlier inline step, most likely the re-engagement scan.
-- **Consequence:**
-  - Every later step in the tick never runs: value-model refit, the players-cache guard, the rookie class-load monitor, the weekly roster-snapshot sweep, the **Usage Trends store refresh** and receipts grading.
-  - Each kill also restarts the single worker, which clears in-process caches.
-- **Diagnose:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:29–13:40 UTC, text `WORKER TIMEOUT` / `POST /api/cron/daily-tick`.
-- **Until it's fixed,** run the skipped writers by hand. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
+**`daily-tick` runner (S3 fix, 2026-10-22, [scope](plans/daily-tick-fix/scope.md)) — replaces the *Known outage* note.**
+- **What changed:**
+  - **Before:** the tick ran every step inline on the request thread, past gunicorn's `--timeout 120`. From at least 2026-10-01 the worker was killed about 13:33 UTC every day (`WORKER TIMEOUT`, tick **500**): Wed–Sun inside `_run_weekly_replenishment` → `_kickoff_trade_job`, Mon–Tue most likely the re-engagement scan or the eval nightly. Every step after the kill never ran, and each kill restarted the single worker (clearing in-process caches).
+  - **Now:** the handler authenticates, starts ONE single-flight runner thread (`backend/daily_tick.py`) and returns **202 `{"ok": true, "started": <bool>}`** at once. The steps run serially on that thread; each is isolated, so a raise is logged `outcome=error` and the next step still runs. The response no longer carries counters; they moved to the per-step log line.
+  - **Order:** 1 `roster_snapshot` · 2 `usage_trends` · 3 `receipts_grade` · 4 `rookie_monitor` · 5 `players_guard` · 6 `reengagement` · 7 `replenishment` (**deferred**) · 8 `eval_nightly` · 9 `value_model_refit`. Permanent-loss writers first, the CPU-heavy steps last. Each step reads its own gate at run time (gates: [api-reference](api-reference.md) § `daily-tick`).
+  - **Step 7 is deferred (operator, 2026-10-23):** a hard skip that logs `outcome=skipped detail=deferred: C2` every day, until trades-eng's C2 (no evidence for unserved builds) and the replenishment self-renewal fix (`db-capacity.md` latent issue 1) land. It reads no flag, so `deck.replenishment` has no effect through the tick. See § Weekly deck replenishment below.
+- **Reading the log:** Render logs for `srv-d7g37ftckfvc73a32gvg`, 13:30–14:30 UTC, search `daily-tick step=`:
+  ```
+  daily-tick step=<key> ms=<int> outcome=<ok|skipped|error> detail=<short>
+  daily-tick done ms=<int> steps=9 errors=<k>
+  ```
+  - One line per step, in order 1→9, then one `done` line. `ms` is that step's wall time.
+  - `skipped` = its gate was closed; `detail` says which (`flag off`, `weekday_gate=N`, `busy`, `in_flight`, `prod_env=False …`), or `deferred: C2` for step 7.
+  - `error` = it raised (`detail` is the exception class and message; the traceback is the `daily-tick: step <key> raised` line just above it) or it reported a failure (players refresh, usage state read, refit).
+  - `detail` carries what the response used to: the re-engagement counters, the roster sweep stats, the usage summary, the grading summary, the refit status. Replenish `eligible/generated/pushed/skipped_done/errors` come back only once step 7 is re-enabled.
+  - `daily-tick: a run is already in flight (started Ns ago)` = a second POST arrived while a run was still going; it answered `started: false` and started nothing.
+- **Liveness checks** (the first full UTC day after deploy, and again after the first Wednesday):
+  1. Render logs, 13:30–14:30 UTC: `POST /api/cron/daily-tick` returns **202** and there is **no** `WORKER TIMEOUT`; nine `daily-tick step=` lines appear in order 1→9, then `daily-tick done`; note every `ms=` value.
+  2. Roster history (from Tuesday on, the weekday gate): `SELECT source, count(*), max(snapshot_at) FROM league_roster_history GROUP BY 1` shows `weekly` rows with a `snapshot_at` in this ISO week (§ roster-snapshot monitoring below).
+  3. Usage Trends (from the first tick after Sleeper rolls `week`): `SELECT season, week, team_count, fetched_at FROM usage_week_loads ORDER BY season, week` shows the just-finished week with 26–32 teams and today's `fetched_at`, not a hand load.
+  4. Value snapshots (hourly-tick guard, not a daily-tick step, but confirms the worker is no longer restarted daily): `player_value_history` has rows for today's UTC date.
+  5. If `receipts.grading` is on: a `receipts_grade_runs` start/end pair with `trigger = 'daily_tick'` for today.
+  6. Every day, the `replenishment` step logs `outcome=skipped detail=deferred: C2` and no `deck_replenish_log` row is written.
+- **No scheduler of their own:** `POST /api/cron/players-refresh` and `POST /api/cron/receipts-grade` have no Render cron. Day to day they run as tick steps 5 and 3; their routes stay as manual levers.
+- **Known limits:**
+  - A hung step blocks the steps after it, and single-flight then blocks the next day's run too (the "already in flight" warning names its age). Every network call in the steps carries a timeout; restarting the worker clears it.
+  - A worker restart mid-run (a deploy at 13:30, an OOM) loses the rest of that run. Each step is idempotent and the weekday gates are `>=`, so the next day retries.
+  - The run shares the free instance's CPU with request traffic while it runs; the CPU-heavy steps (7 once re-enabled, 8) run last.
+- **Until it is deployed,** the manual workarounds still apply. Usage Trends, weekly once Sleeper's state rolls over: `python3 scripts/refresh_usage_trends.py --remote`. Roster snapshots: `POST /api/cron/roster-snapshot`.
 
 **Sweep scope (2026-09-03).** Both league sweeps are now bounded: the hourly draft-status queue and the weekly roster-snapshot work-list only return leagues whose `leagues.updated_at` is inside `database.ACTIVE_LEAGUE_WINDOW_DAYS` (30 — stamped by `upsert_league` on every `session_init`), so a league nobody opens any more stops costing platform reads. `POST /api/cron/roster-snapshot` passes `active_within_days=None` and still sweeps everything; per-league forcing is `_refresh_league_draft_status(league_id, force=True)`, which skips the cheap-skip entirely.
 
@@ -659,14 +695,16 @@ Same gap rule as value-snapshot: **a missed week stays a gap — never fabricate
 
 ## Weekly deck replenishment (F10, flag `deck.replenishment`, 2026-07-26)
 
-Runs **inside** `POST /api/cron/daily-tick` — no separate schedule. Dark by default; flag off is byte-identical (no work, no pushes, no `replenish` key in the tick response).
+Runs as `POST /api/cron/daily-tick` step 7 (`replenishment`) — no separate schedule.
+
+- **Deferred since 2026-10-23 (operator: ship S3 without it):** step 7 is an unconditional hard skip. Every day it logs `outcome=skipped detail=deferred: C2` and does no work (no deck builds, no pushes, no inbox rows, no marker rows). It reads no flag, so `deck.replenishment` has **no effect through the tick**, on or off. It stays deferred until trades-eng's C2 (no evidence for unserved builds) and the self-renewal fix (`db-capacity.md` latent issue 1) land. **Re-enabling** = restoring the flag-gated call in `_daily_tick_replenishment` (`backend/server.py`; the docstring holds the exact lines). The bullets below describe the pass as it runs once re-enabled.
 
 - **Weekly gate:** the pass unlocks when `now.weekday() >= replenish_weekday` (`model_config`, default `2` = Wednesday, chosen post-waivers). The gate is `>=` on purpose: a missed Wednesday cron run self-heals Thu–Sun. **Tune the day** by setting the `replenish_weekday` model_config key (0 = Monday … 6 = Sunday); no deploy needed.
 - **Idempotency:** one `deck_replenish_log` row per (user, league, ISO week) is written *before* the push; reruns in the same week skip both regeneration and push. The `deck_replenished` dedup key (`{league_id}:{iso_week}`) is a second, independent 1/week/league backstop in `notification_events_log`.
 - **Eligibility:** user-leagues with a trade disposition or deck generation in the trailing 30 days (`load_active_deck_user_leagues`). Everyone else is untouched — no zombie churn.
 - **Generation:** the existing job machinery, run synchronously per pair — a live session is reused when present, otherwise a headless session is rebuilt from `league_members` + replayed swipes. Decks land in the normal 30-min pre-gen cache (`_PREGEN_TTL_SECONDS`), so a push tapped hours later triggers a normal fresh generation rather than serving the cached one — acceptable; the push copy claims inventory, not a frozen deck.
 - **Push policy:** kind `deck_replenished`, **reengagement bucket** — with `notif.reengagement_default_off` on (the shipping default) users must have opted in. Empty decks write the marker but never push; the expired-card count appears in copy only when > 0.
-- **Monitoring:** the tick response's `replenish` object (`eligible / generated / pushed / skipped_done / errors`). `pushed` counts dispatcher *attempts* — preference-gated skips still decrement nothing there; check `notification_events_log` kind `deck_replenished` for actual sends. Sustained `errors` usually means a league whose `league_members` rosters were never persisted.
+- **Monitoring:** once re-enabled, the `daily-tick step=replenishment` log line's `detail` (`eligible / generated / pushed / skipped_done / errors`). `pushed` counts dispatcher *attempts* — preference-gated skips still decrement nothing there; check `notification_events_log` kind `deck_replenished` for actual sends. Sustained `errors` usually means a league whose `league_members` rosters were never persisted.
 
 ---
 
@@ -1019,12 +1057,58 @@ Adding `FTF_TESTER_ALLOWLIST` to `render.yaml` envVars and deploying did NOT set
 
 `backend/eval/` grades candidate deck rankers on logged data before any user sees them (docs/plans/tiktok-discovery/prds/F8-offline-eval.md). Read-only against product tables; only writes are JSON-lines run records under `data/eval_runs/` (gitignored).
 
-- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` / `bad_features` / `scorer_error` — the counts must sum to the loaded total; a printed WARNING means a harness bug, file it.
+- **Grade candidates:** `python3 -m backend.eval.replay --scorer base_score --scorer random` (default DB; `--db path.db` for a copy/snapshot — prefer grading a `sqlite3 .backup` copy on prod). Prints a markdown table (IPS/SNIPS, 95% cluster-bootstrap CI, ESS, verdict vs the `production` baseline) plus exclusion accounting: `null_propensity` / `never_viewed` / `undo_reversed` per card, then whole-deck reasons, each also counted in decks: `calibration_refresh` (a deck Calibration's targeted refresh built, `deck_source='grading_refresh'`; never shown in Trades, so it is out of replay, e(k) and calibration, ahead of every other reason) / `partial_run` (a card from a partial run, `evidence_tier='partial_run'`) / `in_flight` (its pack isn't final yet, unretired and within 25 h of the read's `as_of`, or a deck served at or after `backend/eval/data.PACK_REQUIRED_SINCE` has no pack yet within that window; it may still be live, so this is **not** an error) / `pack_integrity` (its pack fails its checksum, has an unknown version, or holds another run's cards) / `withdrawal_conflict` (a recorded never-delivered withdrawal's row has a `delivered_at`, or a withdrawal index is outside the deck) / `incomplete_deck` (a gap in its card indexes after the pack merge that no never-delivered withdrawal explains, an outcome past its pack's last recorded delivery, or a required pack missing past 25 h) / `no_delivery_evidence` (a paged deck, `page_store` marker or `evidence_tier`, with no pack and no `delivered_at` on any row) / `missing_scorer_inputs` (a card with neither `features_json` nor a compact block, C7 (iv)) / `scorer_error`. The counts must sum to the loaded total; a printed WARNING means a harness bug, file it. Any `pack_integrity`, `incomplete_deck`, `withdrawal_conflict` or `no_delivery_evidence` count is evidence loss: investigate the evidence writer. `withdrawn_removed_cards` is not an exclusion: it counts the never-delivered withdrawn cards (`deck_card_withdrawals`) removed from included decks, whose later cards move up to their displayed positions. `withdrawn_removed_by_reason` splits it by `reason` (`i1_dropped`, `disposition_cut`). `upgrade_misses` sums the packs' cause-coded upgrade misses (U4-R2) over every loaded deck; a line starting `ERROR U4-R2:` means `other` > 0, which must be 0: take it to models-lead. Every report and run record carries the eval-rule version (`replay.EXCLUSION_RULE_VERSION`, now 5: delivered-position exposure, the `as_of` read filter, the `calibration_refresh` exclusion, serve-time withdrawals at displayed positions, paged decks never legacy, and in-flight packs); comparing runs across versions prints `RULE-MISMATCH`. **The read is settled by default:** without `--as-of`, it grades decks served before now minus `--settle-lag-days` (default 7), as of the window's last `served_at` plus the lag. Outcomes acted after `as_of` aren't read, so late views and proposes have time to land. Each record also carries the pinned V-vector and the `model_config` SHA-256 it was graded under (`config`). The rules are in `docs/plans/trade-time-to-suggestion/eng-evidence-contract.md` §8.
 - **Sanity first, always:** `python3 -m backend.eval.replay --self-check` replays the logged policy against its own logs; the observed like/propose rate must fall inside the replayed CI (exit 1 otherwise). Run it before trusting any candidate readout — a self-check failure means the log or the estimator is broken, not the candidate.
 - **`UNRELIABLE` verdict** = ESS below the gate (`EVAL_ESS_MIN`, default 100). That is the harness refusing to bless the number, not a failure — collect more log or narrow the question. The `random` scorer is a permanent canary: it must grade worse than `production`; if it ever grades level on healthy volume, stop and debug the harness.
 - **Trainable scorers (F6):** the harness enforces the time-ordered protocol — `--eval-start` is mandatory for any scorer with `fit()`; fitting sees only pre-split decks, scoring only post-split. There is deliberately no shuffled-CV mode.
-- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d, idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
+- **Nightly re-runs:** `python3 -m backend.eval.nightly` (or `backend.eval.nightly.run_all()`) grades every registered scorer on the trailing 30d (the CLI grades the 30d ending `--settle-lag-days`, default 7, ago, as of its last served deck plus the lag; `run_all()` with no lag, as the daily tick calls it, grades up to now), idempotent per (UTC day, scorer, window) via `runs.jsonl` — safe to re-invoke. Per-scorer failures are recorded as `status:"error"` records and counted, never raised. **The `/api/cron/daily-tick` hook is NOT wired yet** (W4 handoff — F7 owned server.py that wave); until the lead pastes the snippet from `feedback-workspace/tiktok-discovery/build/W4-F8.md`, nightly runs are manual.
 - **The gate (process):** no ranking-affecting change (F5 η's, F6, tweaks) graduates without (a) a replay win with adequate ESS, then (b) an interleaving/experiment win. Cite run records, not vibes.
+
+## 200 ms flip: model-side 24 h read (2026-10-26)
+
+After `trade.packed_evidence` and `trade.first_page_store` go on together, models-eng runs the model-side read over the first 24 h and posts the output; release-lead collects it for models-lead (`docs/plans/trade-time-to-suggestion/eng-evidence-contract.md` §8, "The 24 h flip read").
+
+- **Run it read-only:** `python3 -m backend.eval.flip_read --db "$DATABASE_URL_PROD" --allow-postgres-readonly --since <flip time, ISO UTC> --as-of <flip + 24 h> --weekly` (add `--json` for a pasteable object). Load the URL from `secrets.local.env` without printing it. Without the flag a Postgres URL is refused; with it, every session is set read-only and must report `transaction_read_only = on` before anything reads. A SQLite copy needs no flag (`--db path.db` opens `mode=ro`).
+- **The settle is built in:** `delivered_at` is stamped off the request thread, so a read as of "now" can catch an outcome before its card's stamp and show a live deck as `incomplete_deck` (a transient G2 FAIL). The tool applies the settle itself: its `as_of` is at most now minus 5 min (`STAMP_SETTLE`). That is the default, and an `--as-of` later than that (the command above, run right at flip + 24 h) is clamped to it, with a `flip_read: note:` line on stderr giving both values. Nothing to wait for or add by hand.
+- **Reading it:** G1, G2, G3, G7, G8, G9 and G10 (at `--i1-mode` 0 or 1) are barred (PASS or FAIL). G2 bars `incomplete_deck` over the final packed decks and every pack-less (live-evidence) deck; its 10-deck minimum counts final packed decks only. G3 bars outcomes joining no card and, apart, outcomes on a ghost row (a ghost reached a client). G10 reports withdrawals by reason and is barred on `i1_dropped`: `--i1-mode` (default 1, the launch `trade_i1_mode`) makes any `i1_dropped` a G10 FAIL at 0 or 1, and only reported at 2; pass `--i1-mode 2` only for a window run at mode 2. `OVERALL: INSUFFICIENT` means fewer than 10 final packed decks: rerun with `--as-of` at flip + 48 h.
+- **Exit status:** 0 = PASS; 1 = FAIL, or a `--weekly` ceiling OVER (either wins over INSUFFICIENT); 2 = a refused database or a `ReadOnlyViolation` mid-read (nothing on stdout), or a usage error, a malformed ISO 8601 `--since`, `--until` or `--as-of` included; 3 = INSUFFICIENT (nothing failed, but not a pass); 4 = the tool crashed (its traceback on stderr): not a verdict, take the traceback to models-eng. Exit 1 is only ever a verdict.
+- **G7 (models-lead addendum C4):** `other` = 0 is the only bar.
+  - `restart_split`, `evicted_split` and **row gone** are reported.
+  - **Row gone** is the misses whose pack recorded a stored count above the card while its page row was gone (`upgrade_miss_row_gone`), how many of them are named (`upgrade_miss_cards`), and the C4 (d1) split: **replaced** (the row now holds a newer deck, explained), **no_row** (aged, over budget, or a bug) or unsplit. (d1)'s sub-count is the named one. A rising no_row is a page-store bug for trades-eng. The split needs #454's writer: before it, every entry reads unsplit; with it, an entry is unsplit only when its pack predates the page-store key, the key's read failed, or the deck's own row was back. A pack failing G1 is not read for row gone.
+  - The U4-R4 sum (named misses / viewed cards) over the read window is **indicative only**.
+  - The ceiling, `restart_split + evicted_split` ≤ 1% of viewed cards over any rolling 7 days, reported per cause and with row gone, is read with `--weekly`. Those two causes are named (`U4_R4_CAUSES`): `other` and any cause added later stay out of the sum.
+- **Error output is redacted (exit 2, usage errors included, and exit 4):** every piece of a database URL on the command line after its scheme that is 3+ characters long, split on `: @ / ? & = # ,` and also percent-decoded (`+` read both as itself and as a space), becomes `***`, longest first. That covers:
+  - a driver's connect error, which can echo a password with an unencoded `@` as part of a "host", or split a host list on `,`;
+  - a URL parser's error;
+  - a URL passed by mistake as a stray argument.
+
+  1–2 character pieces aren't redacted, and harmless words in the URL (a username like `postgres`) are redacted along the way. A SQLite path isn't redacted. Percent-encode the password in `DATABASE_URL_PROD` anyway. Tests that build Render-shaped URLs use `.invalid` hosts: Render's wildcard DNS resolves made-up `*.render.com` names.
+- **Stop rule (B3 (f4)):** if G1 fails or G3 has orphans (outcomes joining no card), that window's evidence is being lost. models-lead recommends the kill (`first_page_store_enabled` 0) at once, and the operator decides via release-lead. Any other failure goes to models-lead, an outcome on a ghost row included: that is a serve bug (a ghost reached a client), not lost data.
+- **Weekly:** the `--weekly` lines (U4-R4 named upgrade misses ≤ 1% of viewed cards, B4 disposition cuts ≤ 5% of delivered-range positions) ride the BL-001 monitor through head-bizops for the first 4 weeks. An OVER goes to models-lead.
+
+## B-DK-4..7 production audit (2026-10-26)
+
+`backend/eval/bdk_audit.py` counts served violations of `deck.quality_filters`' four rules against a bar of 0: B-DK-4 breakup, B-DK-5 filler, B-DK-6 redundant TE/QB, B-DK-7 repeat (models-lead-launch.md addendum C §C5). It's a prod read, run only on the operator's word: first on the post-flip window, then weekly with the readout. It isn't flip-gating; it's due before the launch-week freeze.
+
+- **Run it read-only:** `python3 -m backend.eval.bdk_audit --db "$DATABASE_URL_PROD" --allow-postgres-readonly --since <window start, ISO UTC> [--until <end>]` (add `--json` for a pasteable object). Load the URL from `secrets.local.env` without printing it. It uses the flip read's read-only engine, error redaction and `as_of` settle (a `bdk_audit: note:` line on stderr when it clamps).
+- **What it reads:** each Trades deck in the window: its first 30 cards by displayed position, plus every card with a `viewed` outcome. Calibration refresh decks are left out. `pack_integrity` and `withdrawal_conflict` decks are skipped and counted, since their displayed positions can't be trusted. A viewed card with no full row is reported by its pack's `upgrade_miss_cards` cause (U4-R3; no entry reads `other`).
+- **Reading it:** each rule prints violations, audited cards, protected (exempt) cards, not-auditable cards, the bar and a status. `NOT_AUDITABLE` prints `n/a`, never 0.
+  - **B-DK-6 is always `NOT_AUDITABLE`:** rosters and lineup slots aren't recorded at serve time.
+  - **Breakup and filler need `valuation_json`'s per-asset markets,** which are NULL while `trade.valuation_telemetry` and the market policy are off. Where they're present, they're the age-adjusted snapshot values, so a card near a threshold can differ from what the filter saw.
+  - **So today's realistic result is `OVERALL: INCOMPLETE` (exit 3):** no violation among the cards that could be checked. That isn't a pass.
+  - **A violation may be on a fatigue retest card.** That protection isn't recorded at serve time, so check the example's `trade_hash` against `deck_suppressions.retest_trade_hash`.
+  - **A B-DK-7 breach** whose example shows ghost slots or withdrawn cards may come from the serve order, not the filter: the filter ran before those were removed.
+  - **B-DK-7 explains two kinds of breach** (counted in `explained`, not violations; each example carries its `why`):
+    - `protected`: every over-cap card is protected (they hold their positions).
+    - `short_deck`: the deck had fewer than 30 cards the cap could keep, so the cards `_repeat_cap` deferred still sit inside the first 30. The audit re-runs `deck_quality._repeat_cap` itself on the deck's whole displayed order. If the order is unchanged (the filter could do no better), the breach is explained. That needs a full row for every displayed card; without one, the breach stays a violation. It also needs proof the loaded cards are the whole deck, so these breaches stay violations too:
+      - a loader exclusion, except a packed deck that's only `in_flight` (a pack holds every built card). A pack-less `in_flight` deck, or a lost pack's `incomplete_deck`, holds just the first 30 and the viewed rows;
+      - a `partial_run` deck (its delivered rows);
+      - **a pack-less deck of 30 or more cards, never-delivered withdrawals included.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
+
+      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL. Check those examples by hand.
+  - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list, or a market that's missing, null or not a number.
+  - Any FAIL goes to models-lead.
+- **Exit status:** 0 = PASS; 1 = FAIL; 2 = a refused database or a `ReadOnlyViolation` (nothing on stdout), or a usage error; 3 = INCOMPLETE (nothing failed, but a rule couldn't check every card, or a deck was skipped: not a pass); 4 = the tool crashed (its redacted traceback on stderr): not a verdict, take it to models-eng.
 
 ## MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)
 
@@ -1040,6 +1124,33 @@ Operator re-report post-#200: "Picks still not present on the bar chart" (League
 
 - **Fix (2026-08-01):** the daemon step is extracted to `server._sync_sleeper_owned_picks`, which **skips the sync (keeps the prior snapshot)** whenever the rosters or league-meta read is unavailable, and `database.sync_draft_picks` no-ops on empty `roster_ids` (defense in depth for every caller). A skip logs `owned-pick sync skipped … (keeping prior snapshot)` and the next init retries. Tests: `backend/tests/test_owned_picks.py::test_sync_empty_roster_ids_keeps_prior_snapshot`, `::test_daemon_step_skips_when_sleeper_rosters_unavailable`, `::test_daemon_step_skips_when_league_meta_unavailable`.
 - **Operational rule:** any daemon whose write is replace-style must treat "fetch came back empty" as SKIP, never as "the league truly has nothing" — the #200/#220 clobber class is exactly that conflation.
+
+## Sleeper 429 / circuit open (S0, 2026-10-20)
+
+Since S0, every server-side Sleeper **read** goes through one per-process circuit (`backend/sleeper_http.py`; rule
+in `docs/integrations/sleeper.md` §4.1). A Sleeper `429` opens it for at least the `Retry-After` (else 2 s, doubling
+per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
+
+- **Symptom:** Render logs show `sleeper 429: circuit open <s> league=<id> status=429 strikes=<n>`, then
+  `sleeper circuit open: read skipped …` lines. While it's open:
+  - `/api/session/init` for Sleeper leagues returns `503 league_data_unavailable`. The app keeps its token and any
+    live server session, so taps keep working from stored state.
+  - Sleeper sends are blocked with "couldn't confirm rosters" (the live roster check can't run), and the daemon's
+    trade-block, pick and transaction syncs skip.
+  - `league_roster_state` rows go `stale` with `last_error_code = 'rate_limited'`. That's a read,
+    not a fix: no prod writes are needed.
+- **What clears it:** time. The window ends on its own, and the next successful read resets the strike count.
+  There's no manual reset in prod; a deploy or restart also clears it (it's in-process state). Don't restart to
+  "fix" a 429: a fresh process that resumes full fan-out against a throttled IP just trips it again, with a
+  shorter window.
+- **Data safety:** while it's open, the owned-pick sync keeps the prior `draft_picks` snapshot, and the draft-status
+  refresh keeps the cached verdict (both would otherwise act on reads that never happened; the #220 clobber
+  class). No repair is needed afterwards.
+- **If it recurs:** the per-init budget is ≤ 8 Sleeper calls (`test_session_init_sleeper_calls.py`). Check
+  `api_events` for `service = 'sleeper'` with `status = 429` by endpoint class to find the hot path (read-only,
+  through analytics-lead). A sustained ceiling (3,600 s windows) means Sleeper is throttling the IP, not one
+  request: escalate to platforms-eng. Cloudflare 1010 is a separate failure (`blocked`, a 403); it doesn't open
+  the circuit.
 
 ## Player-cache refresh (rookie-draft M0, 2026-08-06)
 

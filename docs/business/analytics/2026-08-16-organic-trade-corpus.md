@@ -130,6 +130,27 @@ corpus predates the app serving suggestions in these leagues. This ratio is the
 going-forward endorsement metric (`GET /api/admin/suggestion-telemetry/ratio`), with
 ghost links as the incrementality control.
 
+## Seam: #424 (was_recommended redefined at the packed-evidence flip)
+
+**What changed** (PR #424, merged 2026-10-26, "Receipts and matcher: viewed-or-first-30 eligibility (U6 / R-U6a…)"):
+`suggestion_trade_links.was_recommended` goes from "a rendered card matched" to "a **viewed-or-first-30** card
+matched", per analytics-lead's U6 condition R-U6a and ADR-025 (`docs/adr/adr-025-packed-unseen-evidence.md`). The
+matcher reads the shared predicate `database._evidence_shown` (`database.py:7156-7160`, used at `:8116` @ `origin/main`).
+Pre-flip rows carry a NULL `evidence_tier` and stay eligible, so the new definition takes effect when
+`trade.packed_evidence` flips on (deferred evidence also needs `trade.first_page_store`, `server.py:4178`).
+
+- **The series break:** the per-league endorsement ratio SUM(`was_recommended`)/COUNT(*) **steps down at the flip**.
+  Unviewed cards past the first 30 no longer count as recommended. **Don't trend the ratio across the flip day.**
+- **Flip day:** the shared constant `database.PACKED_EVIDENCE_FLIP_DAY` (`database.py:7163` @ `origin/main` `823c2371`),
+  `None` until the scribe fills it in at the flip. Both the receipts caveat (`receipts_service.py:1139`) and the
+  ratio caveat (`server.py:14982`) read it, so the two series can't drift (#444).
+- **Readout:** the ratio is comparable across the flip only if pre-flip links are recomputed on the same
+  viewed-or-first-30 basis (from `deck_outcomes` history plus `deck_impressions.card_index`). Until then, report
+  pre-flip and post-flip separately.
+- **In code (#444):** `GET /api/admin/suggestion-telemetry/ratio` returns `caveats` with a `series_break` entry
+  (scope `suggestion_ratio`) once the flip day is set and the links' trades span it (`server.py:14977-14985`,
+  `:15020` @ `origin/main` `823c2371`).
+
 ## Method & caveats
 
 - **Completion-only corpus (proposal bias).** Sleeper exposes completed trades; rejected

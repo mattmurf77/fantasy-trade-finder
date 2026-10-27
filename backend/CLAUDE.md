@@ -27,7 +27,7 @@ inside, `import backend.server` from tests). There is no `setup.py` / install st
 | Command | What it does |
 |---|---|
 | `python3 run.py` (repo root) | Flask dev server on **:5000** (`PORT` overrides; the UI-test harness uses :5001 because macOS AirPlay squats on 5000). Imports `backend.server:app`, warms the Sleeper player cache from disk, syncs players to the DB. Auto-reloader is disabled under `FTF_TEST_MODE`. |
-| `gunicorn run:app --workers 1 --timeout 120` | Production (Render — see `render.yaml`). **One worker on purpose**: `server.py` keeps in-process state. |
+| `gunicorn run:app --workers 1 --threads 4 --timeout 120` | Production (Render — see `render.yaml`). **One worker on purpose**: `server.py` keeps in-process state. Four `gthread` threads since E1 (`docs/plans/e1-concurrency/`). |
 | `python3 -m pytest backend/tests -q` | The suite. See [tests/CLAUDE.md](tests/CLAUDE.md). |
 | `python3 -m backend.eval.replay --db … --scorer …` | Offline deck-eval CLI (`backend/eval/`). |
 | `python3 backend/tests/fixtures/seed_ui_test_db.py --profile <name>` | Seeds the hermetic UI-test world (DB + Sleeper cassettes + player cache + DP values CSV). |
@@ -213,7 +213,9 @@ too. The only dev dependency is `pytest` (`requirements-dev.txt`). CI
   newer minor has produced failures that do not reproduce in CI — see `living-memory/TEST_LEDGER.md`
   (2026-08-13). Check CI before attributing a red test to your change.
 - **One gunicorn worker on purpose.** `server.py` holds in-process state (`_sessions`, the universal
-  player pools, trade-job futures). Scaling workers silently breaks sessions.
+  player pools, trade-job futures). Scaling workers silently breaks sessions. The worker runs **4 threads**
+  (`gthread`, E1): shared state a request touches must be lock-guarded, as `RankingService`, session init and
+  the shared dicts are (`docs/plans/e1-concurrency/`).
 - **`FTF_TEST_MODE=1` startup-aborts** unless `FTF_SLEEPER_FIXTURES_DIR`, `FTF_PLAYERS_CACHE_FILE`,
   `FTF_DP_VALUES_FILE` and `FTF_DP_PICK_VALUES_FILE` are all set. A test-mode backend that can reach
   live Sleeper/DynastyProcess is a rails hole, so it refuses to start.

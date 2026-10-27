@@ -5,7 +5,8 @@
 
 Flask test client + isolated in-memory SQLite, real injected session, real
 encryption key. Mocked: `mfl_write.propose_trade` (the actual MFL import) and
-`mfl_service.fetch_rosters` (the validate pre-flight read) — zero live
+`mfl_service.fetch_rosters` (the validate pre-flight read, and since I-2 the
+propose core's live ownership read, with `fetch_future_draft_picks`) — zero live
 network, mirroring test_sleeper_write_route.py. The flag is forced on via a
 patched `is_enabled`; the crosswalk is a tiny fake with a known
 sleeper↔MFL id map.
@@ -48,6 +49,14 @@ FUTURE_PICKS = [
     {"franchise_id": THEIR_FID, "year": "2028", "round": "2",
      "original_owner": THEIR_FID},
 ]
+# I-2: the propose core re-reads both exports LIVE at send. The fixture
+# serves these (the same ownership as above) so no test touches MFL.
+_FUTURE_PICKS_EXPORT = {"futureDraftPicks": {"franchise": [
+    {"id": MY_FID, "futureDraftPick": [
+        {"year": "2027", "round": "1", "originalPickFor": THEIR_FID}]},
+    {"id": THEIR_FID, "futureDraftPick": [
+        {"year": "2028", "round": "2", "originalPickFor": THEIR_FID}]},
+]}}
 
 
 def _h(token):
@@ -79,10 +88,14 @@ def client(monkeypatch):
     server._mfl_reverse_xwalk_cache = None      # cache is per-crosswalk-object
     c = server.app.test_client()
 
+    import backend.mfl_service as mfl_service
     with patch.object(db_module, "engine", engine), \
          patch.object(server, "is_enabled", lambda k: k == "trade.send_in_mfl"), \
          patch.object(server, "_shared_crosswalk", lambda: _FAKE_XWALK), \
-         patch.object(server, "touch_user_activity", MagicMock()):
+         patch.object(server, "touch_user_activity", MagicMock()), \
+         patch.object(mfl_service, "fetch_rosters", MagicMock(return_value=_ROSTERS_EXPORT)), \
+         patch.object(mfl_service, "fetch_future_draft_picks",
+                      MagicMock(return_value=_FUTURE_PICKS_EXPORT)):
         # Linked MFL league bound to USER, host already resolved.
         db_module.upsert_platform_league(
             league_id=LEAGUE, user_id=USER, name="QA MFL League",
