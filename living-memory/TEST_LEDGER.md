@@ -1,3 +1,18 @@
+## 2026-10-27 — B7: no D-13 policy notice right after agreeing (#380; Product's pre-launch review)
+
+Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b7-d13-fresh-install.md`). Mobile only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:** `useSession.bootstrap` calls `markSeenAtSignedOutBoot()` when it restores no signed-in user: a fresh install, a reinstall or a signed-out user. The sign-in screen's "you agree" line comes next for them, so this release's notice is marked seen in memory and in storage. A signed-in upgrader still sees it once.
+- **Pin 8 in `check-whats-new.js`:**
+  - the mark writes the version and sets the in-memory flag the entry checks;
+  - its only caller is `bootstrap`, once, under `if (!user)`, after the user is restored.
+  - **Sabotage 7/7 red,** restored byte-identical. Pins 1–7 are unchanged.
+- **Runs:** see the PR (tsc, the full `check-*.js` loop, testid-lint).
+- **Operator TestFlight check** (11-06 build, `ux.whats_new` on):
+  1. a fresh install, after sign-in: no tip;
+  2. an install over a signed-in previous build: the tip shows once;
+  3. signed out, then signed in again: no tip.
+
 ## 2026-10-15 — #326 value core v4, #328 live-deck filters, #327 Calibration Yes/No
 
 - #326: CI 4/4 green on `fd805933`. Value-core, grading and fit suites 230 passed; the redundancy test gains the superflex third-QB and QB-for-QB cases.

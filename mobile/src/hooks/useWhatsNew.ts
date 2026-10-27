@@ -47,6 +47,23 @@ const WHATS_NEW: Record<string, WhatsNewEntry> = {
 const SEEN_KEY = 'ftf_whats_new_seen_version';
 const APP_VERSION: string | null = Constants.expoConfig?.version ?? null;
 
+// B7 (Product's pre-launch review, 2026-10-27): no "we've updated" notice for
+// someone who is about to agree. A boot that restores NO signed-in user (a
+// fresh install, a reinstall, a signed-out user) goes through the sign-in
+// screen, which says "By signing in you agree to the Terms of Use and Privacy
+// Policy". So this release's entry is marked seen for them, in memory at once
+// (the storage write may land after the League tab mounts) and in storage.
+// A signed-in user upgrading still sees it once. Called ONLY by
+// useSession.bootstrap when it restored no user (tests/check-whats-new.js 8).
+let seenAtSignedOutBoot: string | null = null;
+export function markSeenAtSignedOutBoot(): void {
+  if (!APP_VERSION) return;
+  seenAtSignedOutBoot = APP_VERSION;
+  AsyncStorage.setItem(SEEN_KEY, APP_VERSION).catch(() => {
+    /* best-effort: the in-memory mark covers this launch */
+  });
+}
+
 /**
  * Returns the current release's what's-new entry (or null when the flag is
  * off, the version has no entry, or this version was already dismissed)
@@ -86,7 +103,8 @@ export function useWhatsNew(): { entry: WhatsNewEntry | null; dismiss: () => voi
     enabled &&
     APP_VERSION != null &&
     seenVersion !== undefined &&
-    seenVersion !== APP_VERSION
+    seenVersion !== APP_VERSION &&
+    seenAtSignedOutBoot !== APP_VERSION
       ? WHATS_NEW[APP_VERSION] ?? null
       : null;
 

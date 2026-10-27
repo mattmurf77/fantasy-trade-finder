@@ -25,6 +25,13 @@
 //   7. The VoiceOver hint tells the truth: CoachMark's default hint is still
 //      "Tap to dismiss" (every other caller), and the what's-new tip, whose tap
 //      also opens Help & about, passes its own hint that doesn't say dismiss.
+//   8. B7 (pre-launch review, 2026-10-27): a boot that restores no signed-in
+//      user marks the release seen, because the sign-in screen's "you agree"
+//      line comes next. markSeenAtSignedOutBoot writes the app version to the
+//      seen key and an in-memory mark the entry also checks, and its ONLY
+//      caller is useSession.bootstrap, under `if (!user)` on the restored
+//      user. Anything wider would silence the notice for signed-in upgraders
+//      (no silent expiry, 6).
 //
 // FTF_MOBILE_TEST_ROOT can point at a copy of mobile/ (sabotage runs).
 // Run: node tests/check-whats-new.js
@@ -45,6 +52,7 @@ try {
 const ROOT = process.env.FTF_MOBILE_TEST_ROOT || path.resolve(__dirname, '..');
 const F = {
   hook:    'src/hooks/useWhatsNew.ts',
+  session: 'src/state/useSession.ts',
   league:  'src/screens/LeagueScreen.tsx',
   rootNav: 'src/navigation/RootNav.tsx',
   coach:   'src/components/CoachMark.tsx',
@@ -265,6 +273,56 @@ check('7. CoachMark keeps its "Tap to dismiss" default; the what\'s-new tip pass
     `the what's-new tip passes no literal accessibilityHint (${hint ? hint.getText(sf) : 'missing'})`);
   expect(!/dismiss/i.test(hint.initializer.text),
     `the what's-new tip's hint says dismiss: ${JSON.stringify(hint.initializer.text)}`);
+});
+
+// ── 8. B7: a signed-out boot marks the release seen ─────────────────────────
+check('8. only a boot that restores no user marks the release seen (B7)', () => {
+  const hook = parse(F.hook);
+  const fn = findAll(hook, (n) => ts.isFunctionDeclaration(n) && n.name
+    && n.name.text === 'markSeenAtSignedOutBoot')[0];
+  expect(fn && fn.modifiers && fn.modifiers.some((m) => m.kind === ts.SyntaxKind.ExportKeyword),
+    'useWhatsNew.ts exports no markSeenAtSignedOutBoot()');
+  const body = fn.body.getText(hook);
+  expect(/seenAtSignedOutBoot\s*=\s*APP_VERSION\s*;/.test(body),
+    'markSeenAtSignedOutBoot() does not set the in-memory mark to APP_VERSION');
+  expect(/AsyncStorage\.setItem\(\s*SEEN_KEY\s*,\s*APP_VERSION\s*\)/.test(body),
+    'markSeenAtSignedOutBoot() does not write APP_VERSION to SEEN_KEY');
+  const entryDecl = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'entry')[0];
+  expect(entryDecl && /seenAtSignedOutBoot\s*!==\s*APP_VERSION/.test(entryDecl.initializer.getText(hook)),
+    'the entry does not check the in-memory signed-out-boot mark');
+
+  const callers = [];
+  (function walk(dir) {
+    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+      const abs = path.join(dir, ent.name);
+      if (ent.isDirectory()) walk(abs);
+      else if (/\.tsx?$/.test(ent.name)) {
+        const rel = path.relative(ROOT, abs).split(path.sep).join('/');
+        if (rel === F.hook) continue;
+        const n = (fs.readFileSync(abs, 'utf8').match(/\bmarkSeenAtSignedOutBoot\s*\(/g) || []).length;
+        if (n) callers.push(`${rel}×${n}`);
+      }
+    }
+  })(path.join(ROOT, 'src'));
+  expect(callers.length === 1 && callers[0] === `${F.session}×1`,
+    `markSeenAtSignedOutBoot() is called from ${JSON.stringify(callers)}, want useSession.ts once`);
+
+  const sf = parse(F.session);
+  const boot = findAll(sf, (n) => ts.isPropertyAssignment(n) && propName(n) === 'bootstrap')[0];
+  expect(boot, 'useSession has no bootstrap');
+  const call = findAll(boot, (n) => isCallTo(n, 'markSeenAtSignedOutBoot'))[0];
+  expect(call, 'bootstrap does not call markSeenAtSignedOutBoot()');
+  let p = call.parent;
+  while (p && !ts.isIfStatement(p) && p !== boot) p = p.parent;
+  expect(p && ts.isIfStatement(p) && p.expression.getText(sf).replace(/\s+/g, '') === '!user',
+    `the call isn't guarded by if (!user): ${p && ts.isIfStatement(p) ? p.expression.getText(sf) : 'no if'}`);
+  const userDecl = findAll(boot, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'user')[0];
+  expect(userDecl && call.pos > userDecl.pos, 'the call comes before bootstrap restores `user`');
+  const restore = findAll(boot, (n) => ts.isBinaryExpression(n)
+    && n.left.getText(sf) === 'user' && n.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    && /JSON\.parse\(\s*userRaw\s*\)/.test(n.right.getText(sf)));
+  expect(restore.length === 1 && call.pos > restore[0].pos,
+    'the call isn\'t after `user = JSON.parse(userRaw)` (the restored signed-in user)');
 });
 
 console.log(failures === 0

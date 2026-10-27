@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { markSeenAtSignedOutBoot } from '../hooks/useWhatsNew';
 import {
   api,
   ApiError,
@@ -282,6 +283,9 @@ export const useSession = create<SessionState>((set, get) => ({
     let league: SavedLeague | null = null;
     let leagues: LeagueSummary[] = [];
     try { if (userRaw)    user    = JSON.parse(userRaw); } catch {}
+    // B7: no signed-in user restored, so the sign-in screen's "you agree"
+    // line comes next; the release's policy notice would repeat it.
+    if (!user) markSeenAtSignedOutBoot();
     try { if (leagueRaw)  league  = JSON.parse(leagueRaw); } catch {}
     try { if (leaguesRaw) {
       const parsed = JSON.parse(leaguesRaw);
