@@ -262,6 +262,7 @@ def hook_db(monkeypatch):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     metadata.create_all(engine)
     monkeypatch.setattr(db_module, "engine", engine)
+    monkeypatch.setattr(server, "_roster_moved_reads", {})
     tokens, job_ids = [], []
 
     def session(token, user_id, league_id, read):
@@ -397,6 +398,7 @@ def test_the_handler_never_raises_and_is_off_in_mode_0_or_knob_0(hook_db, monkey
     monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 0.0)
     server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
     assert "superseded" not in parked
+    assert server._roster_moved_reads == {}                   # no move recorded at 0
     monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 1.0)
     monkeypatch.setattr(server, "_revoke_trade_job_locked",
                         MagicMock(side_effect=RuntimeError("boom")))
@@ -415,27 +417,277 @@ def test_the_revoke_knob_is_seeded_on():
     assert len(seeds) == 1 and seeds[0][1] == 1.0
 
 
-def test_the_init_s_own_deck_survives_its_refresh_stamp(live):
-    """#470 QA P2-2 repro: the deck is stamped from the stored rows before the
-    init's daemon commits the read it was built on (a player move), then the
-    stamp's hook fires. The deck is kept and keeps its old stamp, so it is
-    never reused; a deck from the user's previous read is revoked."""
+def test_only_this_league_s_sessions_count(hook_db):
+    """#481 QA S6: the user's newer read in ANOTHER league doesn't make their
+    deck here revocable."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-6", READ_NOW)
+    session("t-6a", "u-6", "league-6", READ_OLD)
+    session("t-6b", "u-6", "league-other", READ_LATER)
+    parked = job("j-6", "u-6", "league-6", read=READ_OLD)
+    server._invalidate_league_trade_jobs_on_roster_change("league-6", "rfp1:old", "rfp1:new")
+    assert _revoked(parked) == {"j-6": False}
+
+
+def test_the_user_s_newest_session_read_counts(hook_db):
+    """#481 QA S7: with two sessions in the league (two devices), the newer
+    read decides, whichever session was opened first."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-7", READ_NOW)
+    session("t-7a", "u-7", "league-7", READ_NOW)
+    session("t-7b", "u-7", "league-7", READ_OLD)
+    parked = job("j-7", "u-7", "league-7", read=READ_OLD)
+    server._invalidate_league_trade_jobs_on_roster_change("league-7", "rfp1:old", "rfp1:new")
+    assert _revoked(parked) == {"j-7": True}
+
+
+def test_the_handler_records_the_move_s_read(hook_db):
+    """P3-1's input: the newest moved read per league, never rewound."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-r", READ_NOW)
+    server._invalidate_league_trade_jobs_on_roster_change("league-r", "rfp1:a", "rfp1:b")
+    assert server._roster_moved_reads == {"league-r": READ_NOW}
+    server._roster_moved_reads["league-r"] = READ_LATER
+    server._invalidate_league_trade_jobs_on_roster_change("league-r", "rfp1:b", "rfp1:c")
+    assert server._roster_moved_reads == {"league-r": READ_LATER}
+
+
+def _set_pick_owner(engine, owner):
+    with engine.begin() as conn:
+        conn.execute(update(draft_picks_table)
+                     .where(draft_picks_table.c.pick_id == f"{LEAGUE}_2027_1_1")
+                     .values(owner_user_id=owner))
+
+
+def test_a_stale_session_s_rebuild_is_reused_only_by_that_session(live, monkeypatch):
+    """#481 QA P3-1: device 1 holds the user's read from before a roster move,
+    device 2 the read that moved it. Device 1's rebuild is stamped from the
+    moved rows but built on device 1's rosters: device 2 never reuses or joins
+    it, device 1 does, and its pages are never stored."""
     client, engine = live
+    monkeypatch.setattr(server, "_roster_moved_reads", {})
+    with server._sessions_lock:
+        device1 = dict(server._sessions[TOKEN], roster_fetch_started_at=READ_OLD)
+        server._sessions["sess-fp-tok-2"] = device1
+        server._sessions[TOKEN]["roster_fetch_started_at"] = READ_NOW
+    try:
+        _set_roster(engine, OPP, ["r2"])
+        db_module.mark_league_roster_fresh(LEAGUE, READ_NOW)
+        new_fp, _ = server._trade_current_fingerprints(LEAGUE, "1qb_ppr")
+        roster_snapshot.on_roster_change(LEAGUE, "rfp1:before", new_fp)
+        stale_id = server._kickoff_trade_job(sess_token="sess-fp-tok-2", user_id=UID,
+                                             league_id=LEAGUE, scoring_format="1qb_ppr",
+                                             opponents_total=1, synchronous=True)
+        with server._trade_jobs_lock:
+            stale = server._trade_jobs[stale_id]
+        assert (stale["roster_fp"], stale["roster_fetch_started_at"]) == (new_fp, READ_OLD)
+        assert _fresh(stale)                                   # the stamp alone matches
+        with server._trade_jobs_lock:
+            assert server._job_read_predates_move(stale)
+            assert not server._trade_fingerprints_match(
+                stale, (new_fp, stale["values_snapshot_id"]), session_read=READ_NOW)
+            assert server._trade_fingerprints_match(
+                stale, (new_fp, stale["values_snapshot_id"]), session_read=READ_OLD)
+            assert not server._trade_running_policy_matches(
+                dict(stale, status="running", finished_at=None), stale["presentation_capture"],
+                (new_fp, stale["values_snapshot_id"]), session_read=READ_NOW)
+        with patch.object(server, "_start_trade_job_thread", MagicMock()) as start:
+            resp = client.post("/api/trades/generate", json={"league_id": LEAGUE},
+                               headers={"X-Session-Token": "sess-fp-tok-2"})
+        assert (resp.get_json()["job_id"], start.called) == (stale_id, False)   # device 1
+        device2_id, kicked = _generate(client)
+        assert device2_id != stale_id and kicked                               # device 2
+        eligible = MagicMock(return_value=True)
+        with patch.object(server, "_trade_page_store_enabled", lambda: True), \
+             patch.object(server, "_job_page_eligible", eligible):
+            assert server._store_trade_page_row(stale_id) is False
+        assert not eligible.called
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop("sess-fp-tok-2", None)
+
+
+# ── #484 QA: the re-stamp keys on hash equality, the kill switches, the sites ──
+
+MEMBERS_NOW = [{"user_id": UID, "player_ids": ["g1", "g2"]},
+               {"user_id": OPP, "player_ids": ["r2"]}]       # the read being committed
+
+
+def test_a_job_is_restamped_only_when_its_expected_fp_is_the_new_one(hook_db):
+    """#481 QA P3-2 / #484 QA P1-1: the re-stamp is hash equality, not read
+    times. An equal expected fp re-stamps (also on an older read, instead of
+    the revoke); a different or missing one keeps the stamp."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-k", READ_NOW)
+    session("t-k", "u-k", "league-k", READ_NOW)
+    match = job("j-match", "u-k", "league-k", read=READ_NOW)
+    match["roster_fp_expected"] = "rfp1:new"
+    older = job("j-older", "u-k", "league-k", read=READ_OLD)
+    older["roster_fp_expected"] = "rfp1:new"
+    other = job("j-other", "u-k", "league-k", read=READ_NOW)
+    other["roster_fp_expected"] = "rfp1:someone-else-s-rows"
+    bare = job("j-bare", "u-k", "league-k", read=READ_NOW)
+    server._invalidate_league_trade_jobs_on_roster_change("league-k", "rfp1:old", "rfp1:new")
+    stamps = {j["job_id"]: j["roster_fp"] for j in (match, older, other, bare)}
+    assert stamps == {"j-match": "rfp1:new", "j-older": "rfp1:new",
+                      "j-other": "rfp1:old", "j-bare": "rfp1:old"}
+    assert _revoked(match, older, other, bare) == dict.fromkeys(stamps, False)
+
+
+def test_the_expected_fp_is_taken_only_while_the_session_s_refresh_is_in_flight(hook_db,
+                                                                              monkeypatch):
+    db_module.mark_league_roster_fresh("league-q", READ_NOW)
+    rows = [{"user_id": "u-q", "player_ids": ["p1"]}]
+    assert server._roster_fp_expected_pending("league-q", READ_OLD, rows) is None
+    assert server._roster_fp_expected_pending("league-q", READ_NOW, rows) is None
+    assert server._roster_fp_expected_pending("league-q", None, rows) is None
+    assert server._roster_fp_expected_pending("league-q", READ_LATER, None) is None
+    pending = server._roster_fp_expected_pending("league-q", READ_LATER, rows)
+    assert pending and pending.startswith("rfp1:")
+    assert server._roster_fp_expected_pending("league-never", READ_OLD, rows) is not None
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 0.0)
+    assert server._roster_fp_expected_pending("league-q", READ_LATER, rows) is None   # P3-3
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 1.0)
+    monkeypatch.setattr(server, "_trade_i1_mode", lambda: 0)
+    assert server._roster_fp_expected_pending("league-q", READ_LATER, rows) is None
+    monkeypatch.setattr(server, "_trade_i1_mode", lambda: 1)
+    monkeypatch.setattr(db_module, "get_league_roster_state",
+                        MagicMock(side_effect=RuntimeError("db")))
+    assert server._roster_fp_expected_pending("league-q", READ_LATER, rows) is None
+
+
+def test_the_kill_switches_stop_the_move_rule_at_once(hook_db, monkeypatch):
+    """#484 QA P3-3: moves recorded at knob 1 stop refusing reuse and storage
+    the moment the knob (or trade_i1_mode) reads 0, without a restart."""
+    session, job = hook_db
+    server._roster_moved_reads["league-z"] = READ_NOW
+    stale = job("j-z", "u-z", "league-z", read=READ_OLD)
+    with server._trade_jobs_lock:
+        assert server._job_read_predates_move(stale)
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 0.0)
+    with server._trade_jobs_lock:
+        assert not server._job_read_predates_move(stale)
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 1.0)
+    monkeypatch.setattr(server, "_trade_i1_mode", lambda: 0)
+    with server._trade_jobs_lock:
+        assert not server._job_read_predates_move(stale)
+
+
+def _kick(token=TOKEN):
+    job_id = server._kickoff_trade_job(sess_token=token, user_id=UID, league_id=LEAGUE,
+                                       scoring_format="1qb_ppr", opponents_total=1,
+                                       synchronous=True)
+    with server._trade_jobs_lock:
+        return server._trade_jobs[job_id]
+
+
+@pytest.mark.parametrize("change", ["player", "pick"])
+def test_the_init_s_own_deck_survives_its_refresh_stamp(live, monkeypatch, change):
+    """#470 QA P2-2 repro: the deck is stamped from the stored rows before the
+    init's daemon commits the read it was built on, then the stamp's hook
+    fires. The deck is kept and a deck from the user's previous read is
+    revoked. #481 QA P3-2: after a player move its expected fp (its read's
+    members, the picks then stored) is the new stamp, so it is re-stamped and
+    the next tap reuses it; after a pick move it keeps its old stamp."""
+    client, engine = live
+    monkeypatch.setattr(server, "_roster_moved_reads", {})
     with server._sessions_lock:
         server._sessions[TOKEN]["roster_fetch_started_at"] = READ_OLD
-    previous = _complete_job()
+    previous = _kick()
+    read_rows = MEMBERS_NOW if change == "player" else [
+        {"user_id": UID, "player_ids": ["g1", "g2"]}, {"user_id": OPP, "player_ids": ["r1", "r2"]}]
     with server._sessions_lock:
-        server._sessions[TOKEN]["roster_fetch_started_at"] = READ_NOW
+        server._sessions[TOKEN].update(roster_fetch_started_at=READ_NOW, roster_read_rows=read_rows)
     with server._trade_jobs_lock:
         server._trade_jobs_by_key.pop(KEY)                     # the new init kicks its own
-    pregen = _complete_job()
-    assert (previous["roster_fetch_started_at"], pregen["roster_fetch_started_at"]) == \
-        (READ_OLD, READ_NOW)
+    pregen = _kick()
+    assert pregen["roster_fp_expected"]                         # the refresh is in flight
     old_fp = pregen["roster_fp"]
-    _set_roster(engine, OPP, ["r2"])                          # the daemon commits the read
+    if change == "player":
+        _set_roster(engine, OPP, ["r2"])                      # the daemon commits the read
+    else:
+        _set_pick_owner(engine, OPP)
     db_module.mark_league_roster_fresh(LEAGUE, READ_NOW)
     new_fp, _ = server._trade_current_fingerprints(LEAGUE, "1qb_ppr")
     assert new_fp != old_fp
     roster_snapshot.on_roster_change(LEAGUE, old_fp, new_fp)
     assert _revoked(previous, pregen) == {previous["job_id"]: True, pregen["job_id"]: False}
+    if change == "player":
+        assert pregen["roster_fp"] == new_fp and _fresh(pregen)
+        assert _generate(client) == (pregen["job_id"], False)
+    else:
+        assert pregen["roster_fp"] == old_fp and not _fresh(pregen)
+
+
+def test_two_refreshes_in_flight_never_restamp_the_older_read_s_deck(live, monkeypatch):
+    """#484 QA P1-1 (ordering B): dev1's init reads T1 (M1) and kicks its
+    pre-gen; a newer read T2 (another device, a league-mate or a floor kick)
+    writes M2 before T1's daemon marks T1 fresh and stamps the rows as they
+    are, fp(M2). The deck was built on M1, so it keeps its old stamp: never
+    re-stamped, never reused, and T2's own stamp (equal, so no hook) can't
+    correct anything."""
+    client, engine = live
+    monkeypatch.setattr(server, "_roster_moved_reads", {})
+    with server._sessions_lock:
+        server._sessions[TOKEN].update(roster_fetch_started_at=READ_NOW,
+                                       roster_read_rows=MEMBERS_NOW)          # dev1: T1, M1
+    pregen = _kick()
+    old_fp, expected = pregen["roster_fp"], pregen["roster_fp_expected"]
+    _set_roster(engine, OPP, ["r2"])                          # T1's daemon writes M1
+    assert server._trade_current_fingerprints(LEAGUE, "1qb_ppr")[0] == expected
+    _set_roster(engine, OPP, ["r1"])                          # T2 writes M2 over it
+    db_module.mark_league_roster_fresh(LEAGUE, READ_NOW)      # T1 marked fresh...
+    new_fp, _ = server._trade_current_fingerprints(LEAGUE, "1qb_ppr")
+    assert new_fp not in (old_fp, expected)
+    roster_snapshot.on_roster_change(LEAGUE, old_fp, new_fp)  # ...and stamps fp(M2)
+    db_module.mark_league_roster_fresh(LEAGUE, READ_LATER)    # T2: rows unchanged, no hook
+    assert (pregen["roster_fp"], server._trade_job_revoked(pregen)) == (old_fp, False)
     assert not _fresh(pregen)
+    with server._sessions_lock:
+        device2 = dict(server._sessions[TOKEN], roster_fetch_started_at=READ_LATER,
+                       roster_read_rows=None)
+        server._sessions["sess-fp-tok-2"] = device2
+    try:
+        with patch.object(server, "_start_trade_job_thread", MagicMock()) as start:
+            resp = client.post("/api/trades/generate", json={"league_id": LEAGUE},
+                               headers={"X-Session-Token": "sess-fp-tok-2"})
+        assert resp.get_json()["job_id"] != pregen["job_id"] and start.called
+    finally:
+        with server._sessions_lock:
+            server._sessions.pop("sess-fp-tok-2", None)
+
+
+def test_the_page_serve_backing_check_passes_the_session_read(live, monkeypatch):
+    """#484 QA P3-4: `_serve_trade_page_for` hands the session's read to both
+    freshness checks."""
+    seen = []
+    monkeypatch.setattr(server, "_trade_job_is_fresh",
+                        lambda *a, **k: seen.append(("fresh", k.get("session_read"))) or False)
+    monkeypatch.setattr(server, "_trade_running_matches",
+                        lambda *a, **k: seen.append(("running", k.get("session_read"))) or False)
+    monkeypatch.setattr(server, "_serve_trade_page", lambda *a, **k: None)
+    job = _complete_job()
+    with server._sessions_lock:
+        sess = dict(server._sessions[TOKEN], roster_fetch_started_at=READ_NOW)
+    server._serve_trade_page_for(
+        sess, {"deck_job_id": "row"}, None, sess_token=TOKEN, league_id=LEAGUE,
+        scoring_format="1qb_ppr", fairness_threshold=job["fairness_threshold"],
+        prefs_preload=None, outlook_value=None, request_signature=None,
+        input_epochs=(), presentation_capture=job["presentation_capture"], opponents_total=1)
+    assert seen == [("fresh", READ_NOW), ("running", READ_NOW)]
+
+
+def test_replenish_passes_its_live_session_s_read(live, monkeypatch):
+    """#484 QA P3-1: the weekly replenish reuses a cached deck only through
+    the same session-read check as a tap."""
+    seen = []
+    monkeypatch.setattr(server, "_trade_job_is_fresh",
+                        lambda *a, **k: seen.append(k.get("session_read")) or False)
+    job = _complete_job()
+    monkeypatch.setattr(server, "_kickoff_trade_job", lambda **kw: "no-such-job")
+    monkeypatch.setattr(server, "get_league_scoring", lambda league_id: "1qb_ppr")
+    with server._sessions_lock:
+        server._sessions[TOKEN]["roster_fetch_started_at"] = READ_NOW
+    assert server._trade_jobs_by_key.get(KEY) == job["job_id"]
+    assert server._replenish_deck_for(UID, LEAGUE) is None
+    assert seen == [READ_NOW]

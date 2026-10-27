@@ -1,3 +1,57 @@
+## 2026-10-27 — S0 roster-change follow-ups: stale rebuilds aren't shared; the init's pre-gen is re-stamped (#481 QA P3-1, P3-2, P3-3)
+
+**#484 QA round 2 (NO-GO on P1-1, fixed):**
+- **The bug:** with two refreshes in flight (ordering B), the re-stamp keyed on `refreshed_at == the job's read` and a picks key. It re-stamped dev1's M1 deck to fp(M2): `new_fp` hashes whatever members are stored at stamp time.
+- **The fix:** the re-stamp is now hash equality. At kickoff, while the session's refresh is in flight, the job takes `roster_fp_expected`: the rfp1 of the session's `roster_read_rows` (built by `_session_member_rows`, the same builder as the daemon's write) with the stored picks and draft state. The handler re-stamps only when that equals `new_fp`. The picks key is gone.
+- **Folded in:**
+  - P3-1: replenish passes its live session's read.
+  - P3-3: the kill switches stop `_job_read_predates_move` at once, and the kickoff read doesn't run at knob 0.
+  - P3-4: tests for an older-read re-stamp and for the pre-gen, page-backing and replenish `session_read` sites.
+- **Not folded in:** rebase case 2's freshness (flag-dark) is left as a follow-up.
+- **Tests:** freshness 36 and roster refresh state 17; 53 together. The new tests:
+  - ordering B (M1 deck, M2 rows, T1 stamp, no T2 hook): the deck keeps its stamp, isn't fresh, and a T2 device's `/generate` builds its own;
+  - equality vs. read time;
+  - the expected-fp window and its kill;
+  - the kill switches on recorded moves;
+  - the session's read rows hash to the daemon's write;
+  - the pre-gen, page-backing and replenish sites.
+- **Sabotage, each red then restored (15):**
+  - re-stamp by read time (3 red, ordering B among them);
+  - no re-stamp;
+  - `_job_read_predates_move` ignoring the kill;
+  - the expected fp ignoring the knob;
+  - no session read rows;
+  - the pre-gen, page-backing and replenish sites without `session_read`;
+  - the session-read rule, the store guard, the move record;
+  - S6, S7;
+  - the expected fp outside the window, and no kickoff expected fp.
+
+**Round 1 (superseded where it mentions the picks key):**
+
+Gates: QA follow-ups to #481, inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). No route, schema, event or flag change; the knob `trade_roster_change_revoke` (from #481) now also stops the re-stamp and the move record. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_trade_freshness_roster.py` is now 32 tests (7 new). The P2-2 repro is parametrized: after a player move the pre-gen is re-stamped and `/generate` reuses it; after a pick move it keeps its old stamp.
+  - The new P3-1 test covers a stale session's rebuild: device 2 neither reuses nor joins it, device 1 reuses it, and the store refuses it before the eligibility check.
+  - The new P3-3 tests cover S6 (a session in another league) and S7 (two sessions, the newer read wins).
+- **Targeted, 582 passed:** the S0, session-init, page-store, deferred and packed evidence, force-supersede and deck-pipeline-digest suites.
+- **Sabotage, each red then restored** (10):
+  - the session-read rule, the store guard, the move record;
+  - the re-stamp, and a re-stamp that ignores picks;
+  - S6 (any league), S7 (oldest wins);
+  - no kickoff picks key, the key taken outside the in-flight window (the picks key is replaced in round 2);
+  - `/generate` and kickoff without `session_read`.
+  - The pre-gen and page-serve `session_read` sites are not covered by a test: code walk at `server.py` `_serve_trade_page_for` and session init's `should_kickoff`.
+- **Full suite** on `0beeb67d`: `pytest backend/tests -q` → 9267 passed, 2 skipped, 0 failed (11m50s).
+- **Full suite** on `e09327e3` (main merged in, #470 included): 9284 passed, 2 skipped, 0 failed (11m10s).
+- **Full suite, round 2** on `14828f06`: 9298 passed, 2 skipped, 0 failed (11m38s).
+- **Combined with #470** (a local merge of `0beeb67d` with `5e310b00`): #470's `test_roster_fp_stamp.py` plus the S0 files, 104 passed.
+  - A scratch end-to-end run used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint.
+  - Player move: 1 hook; the pre-gen is kept, carries a picks key and is re-stamped to the stored fp.
+  - No change: no hook. The scratch worktree is ledgered.
+- **Not covered:**
+  - `_roster_moved_reads` is per process. One web worker today (`render.yaml`, pinned by a test); a second worker would see only its own moves.
+  - A stored page row written before a re-stamp keeps its old stamp: its serves take the moved path (the I-1-filtered page) until the next store.
+
 ## 2026-10-27 — Owned-pick sync follow-ups: season-only prior-grid read; P3-3 verdict gate tried, then dropped as a recorded limitation (#482 QA nit + P3-3, #483 QA P3-1)
 
 Server only, platforms-eng lead. Stacked on `fix/owned-picks-drafts-flake` as `fix/owned-picks-drafts-flake-followups`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, route, schema or analytics change.
