@@ -22,7 +22,8 @@ docs/runbook.md § "Purge orphaned ESPN/MFL entry users (one-time, 2026-11)".
 
 Usage, from the repo root (`--cutoff` is required in every mode):
     python3 scripts/purge_entry_users.py --cutoff 2026-10-26T00:00:00Z            # dry run
-    python3 scripts/purge_entry_users.py --cutoff … --execute --expect N
+    python3 scripts/purge_entry_users.py --cutoff … --execute --expect N \
+        [--delete-verified-credentials M]
     python3 scripts/purge_entry_users.py --cutoff … --verify
     (add --allow-local only for a local SQLite test run)
 
@@ -35,6 +36,12 @@ touched. But an UNVERIFIED entry id created at or after the cutoff means a
 live entry session minted it after the flag went off (the flip or the
 restart didn't take): the dry run says STOP and prints no execute command,
 and --verify fails on it.
+
+Verified entry users are never deleted, but legal R28.17 A1 removes their
+ESPN/MFL credential rows: `--delete-verified-credentials M` (M = the dry run's
+count, refused if stale) deletes those rows and nothing else of theirs, in the
+same execute. --verify then checks R28.16's two parts: (g) zero entry users
+without verified_via, and (b) zero credential rows on any entry user.
 
 Output is COUNTS ONLY: never an id, SWID, team or league name (legal). The DB
 is whatever `backend.database` points at (DATABASE_URL, default
@@ -67,7 +74,7 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from sqlalchemy import create_engine, func, inspect, select  # noqa: E402
+from sqlalchemy import create_engine, delete, func, inspect, select  # noqa: E402
 
 from backend import accounts, database as db  # noqa: E402
 
@@ -307,67 +314,27 @@ def _info(found) -> list[str]:
     ]
 
 
-# A verified_via value is printed only when it looks like an enum (sleeper,
-# apple, google, mfl_login, …); anything else, which could carry an id, is
-# counted as "other".
-_VIA = re.compile(r"[a-z_]{1,24}")
+def _credentials_on(found, ids) -> dict[str, int]:
+    """ESPN/MFL credential rows held by `ids`, per table.column (non-zero only)."""
+    return _count_naming(_present([(a, "user_id") for a in CREDENTIAL_TABLES], found["existing"]),
+                         ids)
 
 
-def _kind(uid: str) -> str:
-    """entry:espn:… → espn; entry:mfl:… → mfl."""
-    kind = uid[len(ENTRY_PREFIX):].split(":", 1)[0]
-    return kind if kind in ("espn", "mfl") else "other"
-
-
-def _census(found) -> list[str]:
-    """head-eng 2026-10-27, counts only, never a failure: the verified entry
-    users the purge skips (by kind and verified_via), which skipped users hold
-    an ESPN/MFL credential (--verify (b) fails on any), and the target-owned
-    leagues another Fleeced user (a users row, not a target) belongs to."""
-    targets = found["targets"]
-    verified = found["skipped_verified"]
-    others = found["skipped_after_cutoff"] | found["skipped_no_created_at"]
-    users, lg, lm = db.users_table, db.leagues_table, db.league_members_table
-    by_via: Counter = Counter()
-    holders: dict[str, dict[str, int]] = {"verified": {}, "other skipped": {}}
-    owned: set[str] = set()
-    shared: set[str] = set()
-    members = 0
-    with db.engine.connect() as conn:
-        for chunk in _chunks(verified):
-            for r in conn.execute(select(users.c.sleeper_user_id, users.c.verified_via)
-                                  .where(users.c.sleeper_user_id.in_(chunk))):
-                via = r.verified_via if isinstance(r.verified_via, str) and _VIA.fullmatch(
-                    r.verified_via) else "other"
-                by_via[(_kind(r.sleeper_user_id), via)] += 1
-        for label, ids in (("verified", verified), ("other skipped", others)):
-            for tbl, _col in _present([(a, "user_id") for a in CREDENTIAL_TABLES], found["existing"]):
-                holders[label][tbl.name] = sum(
-                    conn.execute(select(func.count(func.distinct(tbl.c.user_id)))
-                                 .where(tbl.c.user_id.in_(chunk))).scalar() or 0
-                    for chunk in _chunks(ids))
-        if {"leagues", "league_members", "users"} <= found["existing"]:
-            for chunk in _chunks(targets):
-                owned.update(conn.execute(select(lg.c.sleeper_league_id)
-                                          .where(lg.c.user_id.in_(chunk))).scalars())
-            for chunk in _chunks(owned):
-                for league, uid in conn.execute(
-                        select(lm.c.league_id, lm.c.user_id)
-                        .join(users, users.c.sleeper_user_id == lm.c.user_id)
-                        .where(lm.c.league_id.in_(chunk))):
-                    if uid not in targets:
-                        shared.add(league)
-                        members += 1
-    fmt = lambda counts: ", ".join(f"{k} {v}" for k, v in counts.items()) or "none"  # noqa: E731
+def _credential_lines(found) -> tuple[list[str], int]:
+    """Legal R28.17 A1: VERIFIED entry users keep their accounts, but their
+    ESPN/MFL credential rows go (--delete-verified-credentials). Credentials on
+    other skipped entry users are never deleted here; --verify (b) fails on
+    them. Counts only."""
+    on_verified = _credentials_on(found, found["skipped_verified"])
+    on_other = _credentials_on(found, found["skipped_after_cutoff"] | found["skipped_no_created_at"])
+    fmt = lambda c: " (" + ", ".join(f"{k} {v}" for k, v in c.items()) + ")" if c else ""  # noqa: E731
+    n = sum(on_verified.values())
     return [
-        "census (head-eng 2026-10-27; counts only, never a failure):",
-        f"  verified entry users (skipped): {len(verified)}; by kind and verified_via: "
-        + (", ".join(f"{k} {v} {n}" for (k, v), n in sorted(by_via.items())) or "none"),
-        "  skipped entry users holding an ESPN/MFL credential row (--verify (b) fails on any): "
-        f"verified: {fmt(holders['verified'])}; other skipped: {fmt(holders['other skipped'])}",
-        f"  leagues owned by a target: {len(owned)}; with another Fleeced member (a users row, "
-        f"not a target): {len(shared)} (members: {members})",
-    ]
+        f"credential rows on verified entry users (--delete-verified-credentials removes them; "
+        f"legal R28.17 A1): {n}{fmt(on_verified)}",
+        f"credential rows on other skipped entry users (never deleted here; --verify (b) fails "
+        f"on any): {sum(on_other.values())}{fmt(on_other)}",
+    ], n
 
 
 def _summary(found) -> list[str]:
@@ -390,7 +357,8 @@ def dry_run(cutoff) -> int:
     lines += [f"  {k}: {v}" for k, v in sorted(counts.items())] or ["  (none)"]
     lines.append(f"  total: {sum(counts.values())}")
     lines += _info(found)
-    lines += _census(found)
+    cred_lines, n_creds = _credential_lines(found)
+    lines += cred_lines
     late = len(found["skipped_after_cutoff"])
     lines.append(f"unverified created after cutoff: {late}")
     if late:
@@ -398,7 +366,7 @@ def dry_run(cutoff) -> int:
         # still minting users. No execute command is printed.
         lines.append("  STOP: unverified entry users were created at or after the cutoff, so the "
                      "flag flip or the restart didn't take. Don't run --execute; ask head-eng.")
-    elif found["targets"]:
+    elif found["targets"] or n_creds:
         # The exact execute command, pre-filled, for the OPERATOR to run after
         # a DB snapshot (runbook). The cutoff is printed in UTC so the copied
         # command selects exactly the targets this dry run counted.
@@ -407,21 +375,34 @@ def dry_run(cutoff) -> int:
         # --expect-db pins the copied command to the database this dry run read.
         lines.append(f"  python3 scripts/purge_entry_users.py --cutoff {stamp} "
                      f"--execute --expect {len(found['targets'])} "
-                     f"--expect-db {_db_name(db.engine.url)}")
+                     f"--expect-db {_db_name(db.engine.url)}"
+                     + (f" --delete-verified-credentials {n_creds}" if n_creds else ""))
     print("\n".join(lines))
     return 0
 
 
-def execute(cutoff, expect: int) -> int:
+def execute(cutoff, expect: int, expect_creds: int = 0) -> int:
     found = discover(cutoff)
     targets = sorted(found["targets"])
     if expect != len(targets):
         print(f"purge_entry_users: REFUSED. --expect {expect} but {len(targets)} targets were "
               "discovered now. Dry-run again and pass the fresh count.")
         return 2
+    # Legal R28.17 A1: the ESPN/MFL credential rows of VERIFIED entry users go
+    # in the same run (their accounts stay), so one execute + verify passes
+    # both parts of R28.16's post-check. The count is pinned like --expect.
+    verified = sorted(found["skipped_verified"])
+    n_creds = sum(_credentials_on(found, verified).values())
+    if expect_creds != n_creds:
+        print(f"purge_entry_users: REFUSED. --delete-verified-credentials {expect_creds} but "
+              f"verified entry users hold {n_creds} ESPN/MFL credential row(s) now. Dry-run "
+              "again and copy the command it prints.")
+        return 2
     try:
         for uid in targets:
             _guard_scope(uid)
+        for uid in verified:
+            _guard(uid)
     except ValueError:
         print("purge_entry_users: REFUSED. A target, or an alias its deletion would also remove "
               "(a bound account, its acct_ key, a session's working key), is not an entry: id. "
@@ -435,10 +416,22 @@ def execute(cutoff, expect: int) -> int:
         except Exception as e:  # the id is never printed; only the error type
             failed += 1
             print(f"  a target failed ({type(e).__name__}); continuing")
+    removed: Counter = Counter()
+    if n_creds:
+        # ONLY the credential rows: users, accounts, sessions, entitlements and
+        # everything else of theirs stays (legal R28.17 A1).
+        with db.engine.begin() as conn:
+            for tbl, col in _present([(a, "user_id") for a in CREDENTIAL_TABLES], found["existing"]):
+                for chunk in _chunks(verified):
+                    res = conn.execute(delete(tbl).where(tbl.c[col].in_([_guard(u) for u in chunk])))
+                    removed[tbl.name] += res.rowcount or 0
     print("\n".join([f"purge_entry_users: EXECUTE. targets: {len(targets)}; "
                      f"deleted: {len(targets) - failed}; failed: {failed}",
                      "summed delete_user_data counts:",
-                     json.dumps({k: v for k, v in sorted(totals.items()) if v}, indent=2)]))
+                     json.dumps({k: v for k, v in sorted(totals.items()) if v}, indent=2),
+                     f"verified entry users' credential rows deleted (accounts kept): "
+                     f"{sum(removed.values())}"
+                     + "".join(f"; {k} {v}" for k, v in sorted(removed.items()) if v)]))
     return 1 if failed else 0
 
 
@@ -467,6 +460,12 @@ def verify(cutoff) -> int:
     # (e) a machine identity check: an empty or wrong database must not pass.
     n_users = _users_count(found)
     ok_e = bool(n_users)
+    # (g) legal R28.16 part 1: zero entry users without verified_via. (a) and
+    # (c) cover targets and late mints; an undated unverified user, which the
+    # purge skips, only fails here.
+    unverified = (found["unverified_before"] + len(found["skipped_after_cutoff"])
+                  + len(found["skipped_no_created_at"]))
+    ok_g = not unverified
     lines = ["purge_entry_users: VERIFY", *(_summary(found)),
              f"(a) target ids remaining in key columns: {len(found['targets'])} "
              f"-> {'OK' if ok_a else 'FAIL'}"]
@@ -478,6 +477,10 @@ def verify(cutoff) -> int:
         lines.append("    of those, on a SKIPPED entry user (verified, after the cutoff or no "
                      f"created_at): {sum(on_skipped.values())}. A human must look; the real "
                      "owner's sign-in would get 409.")
+        on_verified = sum(_credentials_on(found, found["skipped_verified"]).values())
+        if on_verified:
+            lines.append(f"    on a verified entry user: {on_verified}. Dry-run again; its command "
+                         "deletes them with --delete-verified-credentials (legal R28.17 A1).")
     if ok_c:
         lines.append("(c) unverified entry users created after the cutoff: 0 -> OK")
     else:
@@ -490,9 +493,11 @@ def verify(cutoff) -> int:
                  f"{'OK' if ok_e else 'FAIL (empty or wrong database)'}")
     lines.append(f"(f) league pick-assignment orders naming a removed entry id: "
                  f"{len(leftover_orders)} -> {'OK' if ok_f else 'FAIL'}")
+    lines.append(f"(g) entry users without verified_via (legal R28.16 part 1): {unverified} -> "
+                 f"{'OK' if ok_g else 'FAIL'}")
     lines += _info(found)
     print("\n".join(lines))
-    return 0 if ok_a and ok_b and ok_c and ok_d and ok_e and ok_f else 1
+    return 0 if ok_a and ok_b and ok_c and ok_d and ok_e and ok_f and ok_g else 1
 
 
 def _db_name(url) -> str:
@@ -560,9 +565,14 @@ def _run(argv) -> int:
                       help="delete every target through accounts.delete_user_data")
     mode.add_argument("--verify", action="store_true",
                       help="exit 0 only if no target, no entry: credential row, no unverified entry "
-                           "user created after the cutoff and no removed entry id in the pick audit "
-                           "trail or league pick-assignment order remains, on a non-empty users table")
+                           "user (created after the cutoff or at all) and no removed entry id in the "
+                           "pick audit trail or league pick-assignment order remains, on a non-empty "
+                           "users table")
     ap.add_argument("--expect", type=int, help="with --execute: the dry run's target count")
+    ap.add_argument("--delete-verified-credentials", type=int, metavar="M",
+                    help="with --execute: also delete the ESPN/MFL credential rows held by "
+                         "VERIFIED entry users, and nothing else of theirs (legal R28.17 A1); M is "
+                         "the dry run's count of those rows")
     ap.add_argument("--allow-local", action="store_true",
                     help="allow a local SQLite database (local test runs only)")
     ap.add_argument("--expect-db", metavar="NAME",
@@ -579,6 +589,8 @@ def _run(argv) -> int:
         ap.error("--execute needs --expect N (the dry run's target count)")
     if not args.execute and args.expect is not None:
         ap.error("--expect only goes with --execute")
+    if not args.execute and args.delete_verified_credentials is not None:
+        ap.error("--delete-verified-credentials only goes with --execute")
     if args.execute and args.expect_db is None:
         ap.error("--execute needs --expect-db NAME (copy the command the dry run printed)")
     print(_identity(db.engine.url))
@@ -593,7 +605,7 @@ def _run(argv) -> int:
         return 2
     with _engines(read_only=not args.execute):
         if args.execute:
-            return execute(cutoff, args.expect)
+            return execute(cutoff, args.expect, args.delete_verified_credentials or 0)
         return verify(cutoff) if args.verify else dry_run(cutoff)
 
 

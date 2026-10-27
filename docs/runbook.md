@@ -1453,18 +1453,34 @@ first prints the database identity (dialect, the host's first label, the
 database name; never credentials), and it refuses a local SQLite database
 unless `--allow-local` is passed (local test runs only).
 
-**Before step 1: the census** (read-only, on the operator's word; head-eng
-2026-10-27). Run the dry run now with `--cutoff <the current UTC time>`;
-nothing changes. Send head-eng the target count and the `census` lines only:
-- the verified entry users the purge skips, by kind and `verified_via`
-  (`mfl_login` is an MFL auth-link; `apple` / `google` an identity link);
-- the skipped entry users holding an ESPN/MFL credential row. **Any non-zero
-  count fails `--verify` (b) at step 7.** head-eng recommends deleting only
-  those users' credential rows, so they keep their accounts. That waits on
-  Product and legal and isn't part of this procedure yet, so settle it before
-  step 1;
-- the target-owned leagues another Fleeced user belongs to (informational:
-  those members re-link, above).
+**The prod count (counts only; legal R28.17).** analytics-lead ran it
+read-only on 2026-10-27 at 13:04 UTC, against this script's selection at
+`d1d540a4`:
+- **2 entry users:**
+  - 1 unverified `entry:espn` user: a normal target, and its 1
+    `espn_credentials` row goes with it;
+  - 1 verified, MFL-login-only `entry:mfl` user: skipped, and it holds 1
+    `mfl_credentials` row.
+- 0 bound to Apple or Google; 0 credential rows on ids with no users row.
+- **Both are the operator's own test logins,** so no customer (and no Founder)
+  is affected.
+
+**Verified entry users keep their accounts but lose their ESPN/MFL credential
+rows** (legal R28.17 A1; Product yes).
+- `--delete-verified-credentials M` on the execute command deletes those rows
+  and nothing else of theirs: users, accounts, sessions and entitlements all
+  stay. It's part of the operator's step-5 run.
+- That way one execute + verify passes both parts of R28.16's post-check:
+  - **(1)** zero `entry:%` users without `verified_via`: `--verify` (g);
+  - **(2)** zero `espn_credentials` / `mfl_credentials` rows on ANY `entry:%`
+    user, verified or not: `--verify` (b).
+- **The app then degrades readably.** The user's league still loads from the
+  stored snapshot. Settings reports MFL as not connected, and a trade send
+  shows "Sign in with MFL" instead of an error. This is pinned by
+  `backend/tests/test_purge_mfl_reconnect.py` (server) and
+  `mobile/tests/check-send-button-platform.js` (the alert).
+- The SWID-bearing identity links and the MFL-login-only users stay at launch
+  (R28.17 A3, A5). The step-6 restart drops any session-only copy of a cookie.
 
 1. **Flip `landing.platform_options` OFF** (operator ask 12, release-lead's
    session), then **confirm it reads false via `GET /api/feature-flags`**.
@@ -1484,6 +1500,10 @@ nothing changes. Send head-eng the target count and the `census` lines only:
      "skipped (verified or after cutoff)" (e.g. an MFL entry that proved an
      MFL login, `verified_via = 'mfl_login'`) and "skipped (no usable
      created_at)".
+   - Note the "credential rows on verified entry users" count M; the count
+     above says 1. **If "credential rows on other skipped entry users" isn't
+     0, or "skipped (no usable created_at)" isn't 0, STOP and ask head-eng:**
+     `--verify` would fail (b) or (g), and this procedure deletes neither.
    - **If "unverified created after cutoff" is non-zero** (decided in
      advance, so 11-05 isn't at risk): confirm the flag still reads false,
      restart once more, take that restart's completion time as the new cutoff,
@@ -1500,11 +1520,12 @@ nothing changes. Send head-eng the target count and the `census` lines only:
    printed database identity is prod.** Copy the exact command the dry run
    printed under "next (the operator runs this exact command, after a DB
    snapshot)": it is pre-filled with the dry run's cutoff (UTC, microseconds
-   kept), `--expect N` and `--expect-db` naming the database the dry run read, e.g.
-   `python3 scripts/purge_entry_users.py --cutoff 2026-10-26T14:00:00Z --execute --expect N --expect-db <prod db>`.
-   It refuses (exit 2, nothing deleted) if N no longer matches (re-run the dry
-   run) or if a target's deletion would also remove a non-entry alias, such as
-   a bound account (escalate to head-eng). It continues past a failing id and
+   kept), `--expect N`, `--expect-db` naming the database the dry run read
+   and, when M > 0, `--delete-verified-credentials M`, e.g.
+   `python3 scripts/purge_entry_users.py --cutoff 2026-10-26T14:00:00Z --execute --expect N --expect-db <prod db> --delete-verified-credentials M`.
+   It refuses (exit 2, nothing deleted) if N or M no longer matches (re-run the
+   dry run) or if a target's deletion would also remove a non-entry alias, such
+   as a bound account (escalate to head-eng). It continues past a failing id and
    exits 1 if any failed. Keep the printed summed counts.
 6. **Restart the Render web service again.** The script deletes the durable
    session rows, but a live in-memory entry session survives in the running
@@ -1516,12 +1537,17 @@ nothing changes. Send head-eng the target count and the `census` lines only:
    entry user was created at or after the cutoff, (d) no removed entry id is
    still named in a `pick_assignment_changed` audit event (other users'
    events; a skipped, kept entry user may still appear), (e) the `users`
-   table exists and isn't empty (an empty or wrong database fails), and (f)
+   table exists and isn't empty (an empty or wrong database fails), (f)
    no league's `pick_assignment_settings.order` still lists a removed entry id
-   (other importers' rows included).
+   (other importers' rows included), and (g) no `entry:` user without
+   `verified_via` remains. (g) and (b) are R28.16's two parts.
    - If (a) isn't clean, repeat steps 3–7, with a fresh snapshot.
-   - A credential on a SKIPPED entry user has its own message: a human looks
-     (escalate to head-eng); don't delete it by hand.
+   - A credential on a SKIPPED entry user has its own message. On a verified
+     one, re-run the dry run and the command it prints (`--expect 0
+     --delete-verified-credentials M`). On any other, a human looks (escalate
+     to head-eng). Never delete one by hand.
+   - If (g) fails, an unverified entry user is left that the purge skips (no
+     usable `created_at`): STOP and ask head-eng.
    - If (c) fails, the flag or a restart wasn't done: investigate before
      re-running.
    - **If (e) fails, STOP: this is an empty or wrong database.** Check
@@ -1537,7 +1563,8 @@ nothing changes. Send head-eng the target count and the `census` lines only:
      `standing_offers.team_user_ids`, `leagues.opponent_data` and other event
      types' `user_events.props`, and overhaul references (the known general
      deletion gap, privacy §6 "not yet").
-8. **Record counts only**, plus the snapshot's deletion due date (once step 7
+8. **Record counts only** (targets deleted, verified users' credential rows
+   deleted, the verify lines), plus the snapshot's deletion due date (once step 7
    passes, and no later than 7 days after it was taken). **The operator
    deletes the snapshot**; release-lead records the due date here and reminds
    the operator before it. Send the purge date to head-bizops. Support uses
@@ -1547,4 +1574,13 @@ nothing changes. Send head-eng the target count and the `census` lines only:
 Backups roll off within 7 days, so deleted rows can remain in a backup for up
 to 7 days (privacy §5). There is no schema change, so no data-dictionary
 update.
+
+**Post-launch, owner head-eng (logged 2026-10-27, legal R28.17):**
+- **A3:** re-key the SWID-bearing `entry:espn:<SWID>` users to `acct_*`, or
+  delete them once no way in remains. The id can carry another person's
+  member id. The prod count found 0 bound to Apple or Google.
+- **A5:** delete the MFL-login-only verified `entry:mfl` users through
+  `delete_user_data` once every session has ended. Saved sessions end after 90
+  days unused (privacy §5). Until then, ops-support closes any request about
+  such an account with D4.
 

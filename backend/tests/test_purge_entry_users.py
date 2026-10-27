@@ -94,7 +94,6 @@ def engine(monkeypatch, tmp_path):
                                           verified_via="mfl_login"))
         conn.execute(insert(users).values(sleeper_user_id=LATE, created_at=AFTER,
                                           verified_via="espn_login"))
-        conn.execute(insert(users).values(sleeper_user_id=UNDATED, created_at=None))
         conn.execute(insert(users).values(sleeper_user_id=SLEEPER, created_at=BEFORE,
                                           verified_via="sleeper"))
         conn.execute(insert(users).values(sleeper_user_id=ACCT, created_at=BEFORE,
@@ -114,11 +113,21 @@ def engine(monkeypatch, tmp_path):
         seed(conn, db.draft_picks_table, "pk-other", pick_id="61408_2027_1_0004", league_id="61408",
              platform="mfl", owner_user_id="mfl:61408.f0004", original_user_id="mfl:61408.f0004")
         seed(conn, db.member_rankings_table, "orphan", user_id=ORPHAN, league_id="4242")
-        for n, uid in enumerate((VERIFIED, LATE, UNDATED, SLEEPER, ACCT), start=10):
+        for n, uid in enumerate((VERIFIED, LATE, SLEEPER, ACCT), start=10):
             seed(conn, db.member_rankings_table, f"keep{n}", user_id=uid, league_id="keep")
             seed(conn, db.swipe_decisions_table, f"keep{n}", user_id=uid)
     yield engine
     engine.dispose()
+
+
+def add_undated(engine):
+    """An unverified entry user with no usable created_at: the purge skips it,
+    and --verify (g) (legal R28.16 part 1) fails on it. Not in the default
+    fixture, so the other tests' clean verify stays clean."""
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=UNDATED, created_at=None))
+        seed(conn, db.member_rankings_table, "undated", user_id=UNDATED, league_id="keep")
+        seed(conn, db.swipe_decisions_table, "undated", user_id=UNDATED)
 
 
 def snapshot(engine):
@@ -147,6 +156,7 @@ def run(capsys, *args):
 
 
 def test_dry_run_counts_and_changes_nothing(engine, capsys):
+    add_undated(engine)
     before = snapshot(engine)
     code, out = run(capsys)
     assert code == 0
@@ -162,32 +172,70 @@ def test_dry_run_counts_and_changes_nothing(engine, capsys):
     assert snapshot(engine) == before
 
 
-def test_dry_run_census_counts_skipped_users_credentials_and_shared_leagues(engine, capsys):
-    """head-eng 2026-10-27 (i) and (ii), counts only."""
-    odd = "entry:espn:8888.t3"
+def test_dry_run_counts_credential_rows_on_skipped_entry_users(engine, capsys):
+    """Legal R28.17 A1: the verified users' rows are what the flag deletes;
+    rows on other skipped users are never deleted here. Counts only."""
+    add_undated(engine)
     with engine.begin() as conn:
-        # A verified_via that isn't enum-shaped is counted as "other", never printed.
-        conn.execute(insert(db.users_table).values(sleeper_user_id=odd, created_at=BEFORE,
-                                                   verified_via=f"oops {SWID}"))
         seed(conn, db.mfl_credentials_table, "verified", user_id=VERIFIED, mfl_username="a")
         seed(conn, db.espn_credentials_table, "undated", user_id=UNDATED, swid="{UNDATED}")
-        # 10101 (ESPN's) already has SLEEPER; another target there doesn't count.
-        seed(conn, db.league_members_table, "lm-target", league_id="10101", user_id=MFL)
-        # 61408 (MFL's) gains a Fleeced member; its synthetic member doesn't count.
-        seed(conn, db.league_members_table, "lm-acct", league_id="61408", user_id=ACCT)
     before = snapshot(engine)
     code, out = run(capsys)
     assert code == 0
-    assert ("  verified entry users (skipped): 3; by kind and verified_via: "
-            "espn espn_login 1, espn other 1, mfl mfl_login 1") in out
-    assert ("  skipped entry users holding an ESPN/MFL credential row (--verify (b) fails on any): "
-            "verified: espn_credentials 0, mfl_credentials 1; "
-            "other skipped: espn_credentials 1, mfl_credentials 0") in out
-    assert ("  leagues owned by a target: 2; with another Fleeced member (a users row, "
-            "not a target): 2 (members: 2)") in out
-    for secret in (SWID, "oops", odd, "8888", "10101", "61408"):
+    assert ("credential rows on verified entry users (--delete-verified-credentials removes them; "
+            "legal R28.17 A1): 1 (mfl_credentials.user_id 1)") in out
+    assert ("credential rows on other skipped entry users (never deleted here; --verify (b) fails "
+            "on any): 1 (espn_credentials.user_id 1)") in out
+    assert ("--execute --expect 3 --expect-db purge.db --delete-verified-credentials 1") in out
+    for secret in (VERIFIED, UNDATED, "{UNDATED}", "61408", "7777"):
         assert secret not in out, secret
     assert snapshot(engine) == before
+
+
+def test_execute_deletes_verified_users_credential_rows_only_with_the_flag(engine, capsys):
+    """Legal R28.17 A1: only those rows go; the account, its entitlement and
+    everything else stay, so one execute + verify passes R28.16's two parts."""
+    with engine.begin() as conn:
+        seed(conn, db.mfl_credentials_table, "verified", user_id=VERIFIED, mfl_username="a")
+        seed(conn, db.entitlements_table, "verified", user_id=VERIFIED)
+        seed(conn, db.sessions_table, "verified", token_hash="tok-verified", user_id=VERIFIED)
+    kept = sorted(r for r in rows_naming(engine, (VERIFIED,)) if not r[0].endswith("credentials.user_id"))
+    assert ("entitlements.user_id", VERIFIED) in kept and ("users.sleeper_user_id", VERIFIED) in kept
+    before = snapshot(engine)
+    for flag in ((), ("--delete-verified-credentials", "0"), ("--delete-verified-credentials", "2")):
+        code, out = run(capsys, "--execute", "--expect", "3", *flag)
+        assert code == 2 and "REFUSED. --delete-verified-credentials" in out, flag
+        assert snapshot(engine) == before            # refused before anything changed
+    code, out = run(capsys, "--execute", "--expect", "3", "--delete-verified-credentials", "1")
+    assert code == 0, out
+    assert ("verified entry users' credential rows deleted (accounts kept): 1; "
+            "mfl_credentials 1") in out
+    with engine.connect() as conn:
+        assert conn.execute(select(db.mfl_credentials_table)).all() == []
+        assert conn.execute(select(db.espn_credentials_table)).all() == []
+    assert sorted(rows_naming(engine, (VERIFIED,))) == kept
+    code, out = run(capsys, "--verify")
+    assert code == 0, out
+    assert "(g) entry users without verified_via (legal R28.16 part 1): 0 -> OK" in out
+
+
+def test_delete_verified_credentials_only_goes_with_execute(engine, capsys):
+    with pytest.raises(SystemExit):
+        run(capsys, "--delete-verified-credentials", "1")
+    with pytest.raises(SystemExit):
+        run(capsys, "--verify", "--delete-verified-credentials", "1")
+
+
+def test_verify_g_fails_on_an_unverified_entry_user_left(engine, capsys):
+    """Legal R28.16 part 1: zero entry users without verified_via. The purge
+    skips an undated one, so only (g) catches it."""
+    add_undated(engine)
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    code, out = run(capsys, "--verify")
+    assert code == 1
+    assert "(a) target ids remaining in key columns: 0 -> OK" in out
+    assert "(g) entry users without verified_via (legal R28.16 part 1): 1 -> FAIL" in out
+    assert out.count("-> FAIL") == 1
 
 
 def test_execute_refuses_a_stale_expect(engine, capsys):
@@ -198,7 +246,7 @@ def test_execute_refuses_a_stale_expect(engine, capsys):
 
 
 def test_execute_removes_targets_everywhere_and_keeps_everyone_else(engine, capsys):
-    keep_ids = (VERIFIED, LATE, UNDATED, SLEEPER, ACCT)
+    keep_ids = (VERIFIED, LATE, SLEEPER, ACCT)
     kept_before = sorted(rows_naming(engine, keep_ids))
     code, out = run(capsys, "--execute", "--expect", "3")
     assert code == 0, out
@@ -250,6 +298,13 @@ def test_verify_fails_on_a_credential_left_on_a_skipped_entry_user(engine, capsy
     assert "(a) target ids remaining in key columns: 0 -> OK" in out
     assert "espn_credentials.user_id 1" in out and "-> FAIL" in out
     assert "on a SKIPPED entry user (verified, after the cutoff or no created_at): 1" in out
+    # LATE is verified, so the dry run's command removes it (legal R28.17 A1).
+    assert "on a verified entry user: 1. Dry-run again" in out
+    code, out = run(capsys)
+    assert "--execute --expect 0 --expect-db purge.db --delete-verified-credentials 1" in out
+    assert run(capsys, "--execute", "--expect", "0", "--delete-verified-credentials", "1")[0] == 0
+    code, out = run(capsys, "--verify")
+    assert code == 0, out
 
 
 def test_an_id_minted_after_the_cutoff_stops_the_dry_run_and_fails_verify(engine, capsys):
@@ -293,9 +348,13 @@ def test_info_counts_never_fail_verify(engine, capsys):
 
 
 def test_no_id_reaches_stdout_or_the_log(engine, capsys, caplog):
+    add_undated(engine)
+    with engine.begin() as conn:
+        seed(conn, db.mfl_credentials_table, "verified", user_id=VERIFIED, mfl_username="someone2")
     caplog.set_level("DEBUG")
     outputs = []
-    for args in ((), ("--verify",), ("--execute", "--expect", "3"), ("--verify",)):
+    for args in ((), ("--verify",),
+                 ("--execute", "--expect", "3", "--delete-verified-credentials", "1"), ("--verify",)):
         outputs.append(run(capsys, *args)[1])
     text = "\n".join(outputs) + "\n" + caplog.text
     for secret in (*ALL_IDS, SWID, "61408", "10101", "4242", "7777", "someone"):
