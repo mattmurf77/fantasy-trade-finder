@@ -34,10 +34,14 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
     - **No sink through the global object:** `globalThis` / `window` / `global` / `self` `.console` (or `['console']`, or another sink) fails.
     - **New sensitive keywords:** `session_token`, `minted` and `res`.
     - **Zero false positives:** the three `signin_*` `track()` calls and the `track` import stay green. One assertion per rule per file.
-- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **46 assertions**:
+  - **Second QA delta (after `cba58815`):**
+    - **Computed members are normalised before matching:** `console['log']`, `` console[`log`] `` and `console?.['log']` all read as `console.log`.
+    - **Log, storage and crash-report sinks are banned outright.** Variable indirection (`const c = entryMflPassRef.current; console.log(c)`) can't be followed syntactically. So `console`, `AsyncStorage`, `SecureStore`, `Sentry` and `captureException` may not be used at all in the three files; none are today.
+    - `track(` stays allowed, held to the argument rule. One more assertion per file.
+- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **49 assertions**:
   - (a) the `mfl` mint body spreads `{username, password}` only behind `args.username && args.password`, with no bare property, and the ESPN body has neither;
   - (b) `mflEntryPickLeague` passes `username` from `mflUser` and `password` from `entryMflPassRef`, and `pickTeam` passes neither;
-  - (c) the three-file leak guard above: sink arguments, direct-call-only use, and no global-object route, one assertion each per file (9);
+  - (c) the three-file leak guard above: sink arguments, direct-call-only use, no global-object route, and the outright log/storage/crash-report ban, one assertion each per file (12);
   - (d) both sheets type `onEntrySession` with the optional `account_only` / `username`, and every call forwards `minted.account_only` / `minted.username`;
   - (e) the entry sign-in path:
     - order: mint → `mflAuthLink` → `mflAuthImport([lg.league_id])`, each called once, and never `linkPlatformLeague`;
@@ -94,6 +98,13 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
   - **K2:** `console.info(minted)` in the sheet → red.
   - **K3:** `track('signin_succeeded', { …, r: res.user_id })` → red, plus `check-landing-platform-options`' signin-funnel pin.
   - **H1 (extra):** `setTimeout(console.log, 0, pass)` → red.
+- **Sabotage, second QA delta: 6/6 red, then green on restore, byte-identical.**
+  - **M1:** `console['log'](pass)` → red on both the argument rule and the ban.
+  - **M2:** `` console[`log`](pass) `` → red on both.
+  - **M3:** `console?.['log'](pass)` → red on both.
+  - **I1:** indirection, `const c = entryMflPassRef.current; console.log(c)` → red on the ban only. The argument rule can't see it, which is why the ban exists.
+  - **I2:** a benign `console.warn('mint failed')` → red, because the ban is unconditional.
+  - **I3:** `captureException(err)` → red.
 - **Re-pinned in `check-landing-platform-options`:**
   - V2's ESPN `pickTeam` window went from 900 to 1200 chars, because the forwarded fields lengthen the span (874 → 956).
   - V2.1's three `mflEntryPickLeague` pins encoded the old contract. They said the import goes through `linkPlatformLeague`, that `mflAuthImport` is never used, and that the re-store is best-effort with the password dropped first. Per the follow-up, they now pin `mflAuthImport([lg.league_id], yr)` with no `linkPlatformLeague`, no default-ALL import, and a required `mflAuthLink` that drops the password only after it succeeds.

@@ -25,7 +25,11 @@
 //       wholesale (release-lead P2, 2026-10-26). The guard is textual, so
 //       sinks may only be CALLED directly: no alias, destructure, bind or
 //       hand-off of a sink, and no globalThis / window / global / self route
-//       to one (QA delta, 2026-10-26).
+//       to one (QA delta, 2026-10-26). Computed members (console['log'],
+//       console[`log`]) are normalised before matching, and since variable
+//       indirection can't be followed, console / AsyncStorage / SecureStore /
+//       Sentry / captureException are banned outright in these files; only
+//       track( remains, under the argument rule (second QA delta).
 //   (d) EspnLinkSheet.tsx + PlatformLinkSheet.tsx: every onEntrySession(...)
 //       call forwards `account_only` and `username` from the mint response,
 //       and both prop types declare them as optional additions.
@@ -287,6 +291,27 @@ function sinkMisuses(sf) {
       !isDirectSinkCall(n),
   );
 }
+// Variable indirection can't be followed syntactically
+// (`const c = entryMflPassRef.current; console.log(c)` passes every textual
+// argument rule), so the only safe rule is that these three files never use
+// the log / storage / crash-report sinks at all — none do today. `track(`
+// stays allowed: it is the analytics funnel, held to the argument rule.
+const BANNED_ROOTS = new Set(['console', 'AsyncStorage', 'SecureStore', 'Sentry', 'captureException']);
+function bannedSinkUses(sf) {
+  return findAll(
+    sf,
+    (n) => ts.isIdentifier(n) && BANNED_ROOTS.has(n.text) && !isNonUsePosition(n),
+  );
+}
+// Computed members read like dotted ones for SINK_CALLEE:
+// console['log'] / console[`log`] / console?.['log'] → console.log.
+function calleeText(call) {
+  return call.expression
+    .getText()
+    .replace(/\?\.(?=\s*\[)/g, '')
+    .replace(/\[\s*(['"`])(\w+)\1\s*\]/g, '.$2')
+    .replace(/\?\./g, '.');
+}
 // `globalThis.console`, `window.console`, `globalThis['console']`, … — reach
 // a sink through the global object, past the root-identifier rule.
 function globalSinkAccess(sf) {
@@ -324,7 +349,7 @@ assert(
 for (const [rel, sf] of Object.entries(sinkFiles)) {
   const sinks = findAll(
     sf,
-    (n) => ts.isCallExpression(n) && SINK_CALLEE.test(n.expression.getText().replace(/\?\./g, '.')),
+    (n) => ts.isCallExpression(n) && SINK_CALLEE.test(calleeText(n)),
   );
   const leaky = sinks.filter((c) =>
     c.arguments.some((a) => LEAK_TERMS.some((re) => re.test(a.getText()))),
@@ -345,6 +370,12 @@ for (const [rel, sf] of Object.entries(sinkFiles)) {
     globals.length === 0,
     `${path.basename(rel)}: no sink reached through globalThis / window / global / self`,
     globals.map((n) => n.getText().slice(0, 80)).join(' | '),
+  );
+  const banned = bannedSinkUses(sf);
+  assert(
+    banned.length === 0,
+    `${path.basename(rel)}: never uses console / AsyncStorage / SecureStore / Sentry / captureException (indirection can't be followed)`,
+    banned.map((n) => n.parent.getText().slice(0, 80)).join(' | '),
   );
 }
 
