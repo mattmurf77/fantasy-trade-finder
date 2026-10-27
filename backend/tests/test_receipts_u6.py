@@ -12,9 +12,10 @@ addendum), on ADR-025 C3 / R4.2 U6:
     rows are unchanged (receipts skip them; the matcher's incrementality
     read links them).
   * R3: an acted-on card with no full row is reported, never silently
-    dropped: per run, by cause (`restart_split` past the 90 stored cards for
-    a row built from the pack, else `other`): a counter in the receipts
-    metrics response and a log line from the matcher.
+    dropped: per run, by cause (`restart_split`, `evicted_split` or `other`:
+    the writer's own classification, read from its run's pack, the run
+    metadata's `upgrade_miss_cards`; no pack or no entry is `other`): a
+    counter in the receipts metrics response and a log line from the matcher.
   * R-U6b: a `series_break` caveat on /api/admin/receipts/metrics once the
     flip day is set and the graded rows' serve dates span it; none while it
     is None.
@@ -170,12 +171,28 @@ def test_the_outcome_check_is_an_indexed_exists():
 
 # ── R3: acted-on cards with no full row are reported, not dropped ──────────
 
+def pack(job, miss_cards):
+    """The run's pack row; the reader reads only its header's run metadata."""
+    with db.engine.begin() as conn:
+        conn.execute(insert(db.deck_evidence_packs_table).values(
+            run_id=job, user_id=USER, league_id=LEAGUE, served_at=served(3), pack_version=1,
+            header_json=json.dumps({"run": {"upgrade_miss_cards": miss_cards}}),
+            cards_blob=b"", checksum="0" * 64, card_count=120, created_at=served(3)))
+
+
+def miss(iid, index, job, action="viewed"):
+    """A card the writer missed: its row built from the pack ('viewed', no
+    assets), acted on. Its cause is whatever its run's pack says."""
+    card(iid, tier="viewed", index=index, full=False, job=job)
+    outcome(iid, action)
+    return iid
+
+
 def restart_split_miss(iid="miss-95", index=95, job="job-restart"):
     """A card delivered past the 90 stored ones before a restart and viewed
-    after it: its row was built from the pack ('viewed', no assets)."""
-    card(iid, tier="viewed", index=index, full=False, job=job)
-    outcome(iid, "viewed")
-    return iid
+    after it: its row built from the pack, its run's map saying restart_split."""
+    pack(job, {str(index): "restart_split"})
+    return miss(iid, index, job)
 
 
 def test_a_viewed_card_with_no_full_row_is_eligible_and_reported_with_its_cause(engine):
@@ -185,8 +202,40 @@ def test_a_viewed_card_with_no_full_row_is_eligible_and_reported_with_its_cause(
     assert {miss, early} <= eligible_ids()                 # eligible by its outcome
     assert receipts_ids() == matcher_ids() == set()        # but no assets to grade or match
     assert db.load_viewed_without_full_row(league_id=LEAGUE) == {
-        "job-restart": {"restart_split": 1, "other": 0},
-        "job-other": {"restart_split": 0, "other": 1}}
+        "job-restart": {"restart_split": 1, "evicted_split": 0, "other": 0},
+        "job-other": {"restart_split": 0, "evicted_split": 0, "other": 1}}     # no pack
+
+
+def test_each_cause_comes_from_its_runs_miss_map(engine):
+    """The writer's per-card map decides: evicted_split and other as written,
+    a card with no entry (or a cause outside the three) reads other, and a
+    card past 90 with no entry no longer reads restart_split by its index."""
+    pack("job-map", {"91": "restart_split", "95": "evicted_split", "97": "other",
+                     "98": "cross_worker"})
+    for index in (91, 95, 97, 98, 99):                   # 99: no entry
+        miss(f"map-{index}", index, "job-map")
+    pack("job-empty", {})
+    miss("empty-120", 120, "job-empty")            # past 90, no entry
+    assert db.load_viewed_without_full_row() == {
+        "job-map": {"restart_split": 1, "evicted_split": 1, "other": 3},
+        "job-empty": {"restart_split": 0, "evicted_split": 0, "other": 1}}
+
+
+def test_the_reader_reads_the_pack_headers_in_one_query(engine):
+    """However many runs, the headers come back in one query (per 500 runs)."""
+    from sqlalchemy import event
+    for n in range(3):
+        pack(f"job-{n}", {"95": "restart_split"})
+        miss(f"m-{n}", 95, f"job-{n}")
+    seen = []
+    listener = lambda conn, cur, statement, *a: seen.append(statement)   # noqa: E731
+    event.listen(db.engine, "before_cursor_execute", listener)
+    try:
+        runs = db.load_viewed_without_full_row()
+    finally:
+        event.remove(db.engine, "before_cursor_execute", listener)
+    assert {k: v["restart_split"] for k, v in runs.items()} == {"job-0": 1, "job-1": 1, "job-2": 1}
+    assert sum("FROM deck_evidence_packs" in s_ for s_ in seen) == 1
 
 
 def test_an_unacted_row_without_assets_is_not_reported(engine):
@@ -216,7 +265,30 @@ def test_receipts_metrics_report_the_viewed_cards_without_a_full_row(engine, fla
     grade("graded-1", 5)
     with patch.object(rs, "max_grader_version", lambda versions: GRADER):
         out = rs.admin_metrics(window=28)
-    assert out["viewed_without_full_row"] == {"restart_split": 1, "other": 0, "runs": 1}
+    assert out["viewed_without_full_row"] == {"restart_split": 1, "evicted_split": 0, "other": 0,
+                                              "runs": 1}
+
+
+def test_receipts_metrics_carry_evicted_split(engine, flags_on):
+    pack("job-evicted", {"95": "evicted_split", "96": "evicted_split"})
+    miss("ev-95", 95, "job-evicted")
+    miss("ev-96", 96, "job-evicted", action="like")
+    grade("graded-1", 5)
+    with patch.object(rs, "max_grader_version", lambda versions: GRADER):
+        out = rs.admin_metrics(window=28)
+    assert out["viewed_without_full_row"] == {"restart_split": 0, "evicted_split": 2, "other": 0,
+                                              "runs": 1}
+
+
+def test_receipts_metrics_mark_a_failed_read_unavailable(engine, flags_on):
+    grade("graded-1", 5)
+    def boom(**kw):
+        raise RuntimeError("injected: the read fails")
+    with patch.object(rs, "max_grader_version", lambda versions: GRADER), \
+         patch.object(db, "load_viewed_without_full_row", boom):
+        out = rs.admin_metrics(window=28)
+    assert out["viewed_without_full_row"] == {"restart_split": None, "evicted_split": None,
+                                              "other": None, "runs": None, "unavailable": True}
 
 
 def test_the_matcher_logs_the_viewed_cards_without_a_full_row(engine, caplog):
@@ -230,7 +302,7 @@ def test_the_matcher_logs_the_viewed_cards_without_a_full_row(engine, caplog):
     assert [r.getMessage() for r in caplog.records
             if r.getMessage().startswith("[matcher] viewed without full row")] == [
         f"[matcher] viewed without full row league={LEAGUE} run=job-restart "
-        f"restart_split=1 other=0"]
+        f"restart_split=1 evicted_split=0 other=0"]
     assert {r.levelname for r in caplog.records
             if r.getMessage().startswith("[matcher] viewed without full row")} == {"WARNING"}
 
@@ -243,11 +315,12 @@ def test_the_matcher_logs_a_non_zero_other_at_error(engine, caplog):
          patch.object(st, "executed_trade_sides", lambda tr, roster_map: {"x": ["p1"]}), \
          patch.object(st, "save_suggestion_trade_links", lambda links: len(links)), \
          patch.object(st, "load_viewed_without_full_row",
-                      lambda **kw: {"job-x": {"restart_split": 0, "other": 2}}):
+                      lambda **kw: {"job-x": {"restart_split": 0, "evicted_split": 1, "other": 2}}):
         st.match_league_trades(LEAGUE, roster_map={})
     lines = [r for r in caplog.records if r.getMessage().startswith("[matcher] viewed without full row")]
     assert [(r.levelname, r.getMessage()) for r in lines] == [
-        ("ERROR", f"[matcher] viewed without full row league={LEAGUE} run=job-x restart_split=0 other=2")]
+        ("ERROR", f"[matcher] viewed without full row league={LEAGUE} run=job-x restart_split=0 "
+                  f"evicted_split=1 other=2")]
 
 
 # ── R-U6b: the receipts series break at the flip ───────────────────────────
@@ -281,8 +354,60 @@ def test_a_set_flip_day_outside_the_window_adds_none(engine, flags_on, monkeypat
         assert rs.admin_metrics(window=28)["caveats"] == []
 
 
-def test_the_flip_day_ships_unset():
+def _a_utc_day(value) -> bool:
+    """The flip day's one valid form: "YYYY-MM-DD", exactly as isoformat
+    writes it (a str; "2026-11-4", a date or an int are not)."""
+    from datetime import date
+    try:
+        return isinstance(value, str) and date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def test_the_flip_day_is_unset_or_a_utc_day():
     """One shared value (analytics-lead): receipts keeps no flip day of its
-    own, so the scribe sets database.PACKED_EVIDENCE_FLIP_DAY alone."""
-    assert db.PACKED_EVIDENCE_FLIP_DAY is None
+    own, so the scribe sets database.PACKED_EVIDENCE_FLIP_DAY alone. Setting
+    it at the flip passes; a malformed value fails here instead of silently
+    dropping both caveats or 500ing both admin routes (#444 QA P2-1)."""
+    assert db.PACKED_EVIDENCE_FLIP_DAY is None or _a_utc_day(db.PACKED_EVIDENCE_FLIP_DAY), \
+        db.PACKED_EVIDENCE_FLIP_DAY
     assert not hasattr(rs, "RECEIPTS_SERIES_BREAK_DAY")
+
+
+@pytest.mark.parametrize("value, ok", [
+    ("2026-11-04", True), ("2026-11-4", False), ("2026-11-04T00:00:00", False),
+    ("11/04/2026", False), ("", False), (20261104, False),
+    ("20261104", False)])                                  # #448 QA: fromisoformat takes it; no round trip
+def test_the_flip_day_form(value, ok):
+    from datetime import date
+    assert _a_utc_day(value) is ok
+    assert _a_utc_day(date(2026, 11, 4)) is False
+
+
+@pytest.mark.parametrize("edge", ["first", "last"])
+def test_the_receipts_break_is_inclusive_at_both_edges(engine, flags_on, monkeypatch, edge):
+    """#444 QA P3: the flip day equal to the first or last serve day still
+    flags (that day is mixed)."""
+    grade("g-old", 20)
+    grade("g-new", 2)
+    day = served(20 if edge == "first" else 2)[:10]
+    monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", day)
+    with patch.object(rs, "max_grader_version", lambda versions: GRADER):
+        assert [c["day"] for c in rs.admin_metrics(window=28)["caveats"]] == [day]
+
+
+def test_the_receipts_break_reads_utc_days_whatever_the_local_zone(monkeypatch):
+    """#444 QA P3: serve times near midnight UTC keep their UTC day under a
+    non-UTC local zone (CI runs at TZ=UTC, where a local-time bug can't show)."""
+    import time as _time
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    _time.tzset()
+    try:
+        monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-05")
+        rows = [{"served_at": "2026-11-01T00:30:00+00:00"}, {"served_at": "2026-11-04T23:30:00+00:00"}]
+        assert rs._receipts_series_break_caveats(rows) == []      # Tokyo's day would be 11-05
+        monkeypatch.setattr(db, "PACKED_EVIDENCE_FLIP_DAY", "2026-11-04")
+        assert [c["day"] for c in rs._receipts_series_break_caveats(rows)] == ["2026-11-04"]
+    finally:
+        monkeypatch.undo()
+        _time.tzset()

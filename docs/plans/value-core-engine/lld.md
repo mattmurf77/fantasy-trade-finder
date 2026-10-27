@@ -847,7 +847,8 @@ TAGS = ("same_guy_again", "too_small", "never_accept", "wrong_my_window",
 #                           "reasons": [str]}],
 #                "skipped_no_row": int,              # served sets only
 #                "leagues_without_deck": [str],      # served: no gradeable Trades deck in the lookback
-#                "leagues_with_no_cards": [str]}     # served: a deck found, 0 gradeable cards
+#                "leagues_with_no_cards": [str],     # served: a deck found, 0 gradeable cards
+#                "skipped_decks_by_reason": {str: int}}  # served: ungradeable decks in the lookback
 
 def export(card_sets: Sequence[Mapping], *, per_variant: int = 40, seed: int = 7,
            output_dir: Path, show_reasons: bool = False) -> dict
@@ -878,9 +879,9 @@ def main(argv: Sequence[str] | None = None) -> int
 **`served_card_set`** reads prod through the read-only connection (§8.1). For each league:
 - the latest `deck_job_id` for `(user_id, league_id)` in `deck_impressions`;
 - its rows with `card_index < top` and `COALESCE(is_ghost, 0) = 0`, ordered by `card_index`;
-- `assets_json` for the give/receive ids, and per-asset `market` from `valuation_json.assets[*].market` where present (owner and bilateral rows), else null;
+- `assets_json` for the give/receive ids, and per-asset `market` from `valuation_json` where present, else null. It reads either shape through `backend.eval.data.valuation_markets` (shared with `bdk_audit`): `assets[*].market` (owner and bilateral rows) or the personal-market snapshot's `assets.give[*]` / `assets.receive[*]` `.market_value`, a side that isn't a list read as empty;
 - names and positions from `players`.
-- **Selection since models-lead B5 (2026-10-26), replacing the first two bullets:** the deck is the latest by `served_at` within 30 days, through `backend.eval.data.load_decks`, whose `exclusion` is not `CALIBRATION_REFRESH`, `PACK_INTEGRITY` or `WITHDRAWAL_CONFLICT` (the last two contradict their own evidence, and the loader keeps their withdrawn cards; never-delivered withdrawn cards removed otherwise, unpaged `first30` rows kept); the cards are its first `top` non-ghost cards by displayed position (`LoggedCard.position`), and one without a full row is skipped and counted in the CardSet's `skipped_no_row`. A league with no such deck in the lookback is named in `leagues_without_deck`. A league whose deck is found but yields 0 gradeable cards (every chosen card skipped for want of a full row, or none to choose) is named in `leagues_with_no_cards` (#426 QA): the total `skipped_no_row` alone would not say which league came up empty. So neither case is a silent 0 cards, and the CLI's stdout summary prints both lists.
+- **Selection since models-lead B5 (2026-10-26), replacing the first two bullets:** the deck is the latest by `served_at` within 30 days, through `backend.eval.data.load_decks`, whose `exclusion` is not `CALIBRATION_REFRESH`, `PACK_INTEGRITY` or `WITHDRAWAL_CONFLICT` (the last two contradict their own evidence, and the loader keeps their withdrawn cards; never-delivered withdrawn cards removed otherwise, unpaged `first30` rows kept); the cards are its first `top` non-ghost cards by displayed position (`LoggedCard.position`), and one without a full row is skipped and counted in the CardSet's `skipped_no_row`. A league with no such deck in the lookback is named in `leagues_without_deck`. A league whose deck is found but yields 0 gradeable cards (every chosen card skipped for want of a full row, or none to choose) is named in `leagues_with_no_cards` (#426 QA): the total `skipped_no_row` alone would not say which league came up empty. So neither case is a silent 0 cards, and the CLI's stdout summary prints both lists. Every ungradeable deck in the lookback (`calibration_refresh`, `pack_integrity`, `withdrawal_conflict`) is counted by reason in `skipped_decks_by_reason` (models-lead C5), in every league and older than the chosen deck too; the CLI's stdout summary labels it `skipped_decks_in_lookback_by_reason`. A skip is never silent, and the latter two are also G1 / G8 signals.
 
 This lets the operator grade the incumbent alongside the value-core variants.
 

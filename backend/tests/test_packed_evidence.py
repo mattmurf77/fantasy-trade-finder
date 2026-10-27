@@ -6,6 +6,7 @@ models-lead R2.4 addendum §2-§3 and R4.2 (U1-U8).
 Harness: test_deferred_evidence's `deferred` (p1's real worker and routes,
 flag on, evidence writes inline).
 """
+import collections
 import json
 
 import pytest
@@ -681,17 +682,21 @@ def test_interleaved_header_updates_from_two_instances_lose_nothing(deferred):
     b = server._deck_pack_state(job_id, UID)               # instance B, the same stored header
     assert a is not b and a.checksum == b.checksum
     a.run["deliveries"] = first + [[59, "2026-10-27T00:00:59+00:00"], [89, "2026-10-27T00:01:29+00:00"]]
-    a.run["upgrade_misses"] = {"restart_split": 1, "evicted_split": 0, "other": 0}
+    a.run["upgrade_miss_cards"] = {"91": "restart_split"}
+    a.run["upgrade_misses"] = server._upgrade_miss_tally(a.run["upgrade_miss_cards"])
     assert server._deck_pack_commit(job_id, a)
     b.run["deliveries"] = first + [[59, "2026-10-27T00:09:59+00:00"], [74, "2026-10-27T00:01:14+00:00"]]
     b.run.update(retired=True, retired_at="2026-10-27T01:00:00+00:00",
-                 upgrade_misses={"restart_split": 0, "evicted_split": 2, "other": 0})
+                 upgrade_miss_cards={"95": "evicted_split", "96": "evicted_split"})
+    b.run["upgrade_misses"] = server._upgrade_miss_tally(b.run["upgrade_miss_cards"])
     assert server._deck_pack_commit(job_id, b)             # a CAS miss, merged, retried
     run, _cards = unpack(pack_of(engine, job_id))          # the checksum holds
     assert run["deliveries"] == first + [[59, "2026-10-27T00:00:59+00:00"],
                                          [74, "2026-10-27T00:01:14+00:00"],
                                          [89, "2026-10-27T00:01:29+00:00"]]
-    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (    # summed per key
+    assert run["upgrade_miss_cards"] == {"91": "restart_split", "95": "evicted_split",
+                                         "96": "evicted_split"}      # the union
+    assert (run["upgrade_misses"], run["retired"], run["retired_at"]) == (    # the map's tally
         {"restart_split": 1, "evicted_split": 2, "other": 0}, True, "2026-10-27T01:00:00+00:00")
 
 
@@ -1307,8 +1312,8 @@ def test_u4_a_card_past_the_stored_pages_missing_its_snapshot_is_a_cause_coded_m
     - restart, a deploy overlap (the old instance delivered page 4 after this
       process started) and a re-fork (a fresh worker): this process never
       held the deck, so restart_split;
-    - an eviction here: other while _EVICTED_SPLIT_NAMED is off (its default
-      until models-lead rules), evicted_split with it on;
+    - an eviction here: evicted_split with _EVICTED_SPLIT_NAMED on (its
+      default since models-lead's addendum C), other with it off;
     - a deck this process built and still holds: other (a defect), at error."""
     from datetime import datetime, timezone
     client, engine, _ = deferred
@@ -1355,7 +1360,9 @@ def test_u4_the_classification_hook():
         assert cause("elsewhere", 89, 90, True) == "other"             # within the stored pages
         assert cause("elsewhere", 60, 60, True) == "restart_split"     # the deck's own count
         assert cause("held", 95, 90, True) == "other"                  # built here, still here
-        assert cause("gone", 95, 90, True) == "other"                  # evicted: off by default
+        assert cause("gone", 95, 90, True) == "evicted_split"          # evicted: named by default
+        mp.setattr(server, "_EVICTED_SPLIT_NAMED", False)
+        assert cause("gone", 95, 90, True) == "other"                  # off: other
         mp.setattr(server, "_EVICTED_SPLIT_NAMED", True)
         assert cause("gone", 95, 90, True) == "evicted_split"
         assert cause("gone", 95, 90, False) == "other"
@@ -1502,6 +1509,10 @@ def test_u4_importing_the_server_leaves_the_deck_ledgers_empty(tmp_path):
     env = {k: v for k, v in os.environ.items()
            if k not in ("FTF_TEST_MODE", "FTF_SLEEPER_RECORD", "DATABASE_URL")}
     env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
+    # A players cache, as prod's build bakes one (#436 QA): without it the boot
+    # sync stops at "sync deferred" and its sync branch never runs here.
+    env["FTF_PLAYERS_CACHE_FILE"] = str(
+        REPO / "backend/tests/fixtures/draft/players-bulk/players/nfl.json")
     child = subprocess.run(
         [sys.executable, "-c", "import backend.server as s; "
          "s._fetch_sleeper_adp = lambda: {}; import run; "
@@ -1922,16 +1933,18 @@ def test_flip_a_miss_whose_row_save_raises_counts_once_after_the_retry(deferred)
 def test_flip_ledger_adds_at_the_cap_are_thread_safe(monkeypatch):
     """Item 2: kickoffs add to _deck_held concurrently; at the cap the FIFO
     trim raced (KeyError, or the dict changing size). Under the leaf lock no
-    add raises and the ledger never passes the cap."""
+    add raises and the ledger never passes the cap (addendum C: the memory
+    guard; its warning is silenced here, every add trims a young entry)."""
     import sys
     import threading
-    monkeypatch.setattr(server, "_DECK_LEDGER_MAX", 8)
-    ledger, errors = {}, []
+    monkeypatch.setattr(server, "_DECK_LEDGER_GUARD", 8)
+    monkeypatch.setattr(server.log, "warning", lambda *a, **k: None)
+    ledger, errors = collections.OrderedDict(), []
 
     def hammer(t):
         try:
             for i in range(20000):
-                server._ledger_add(ledger, f"{t}-{i}", None)
+                server._ledger_add(ledger, f"{t}-{i}")
         except Exception as exc:                           # noqa: BLE001 (the race's symptom)
             errors.append(repr(exc))
 

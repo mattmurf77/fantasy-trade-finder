@@ -184,13 +184,27 @@ export async function getAccount(): Promise<AccountInfo> {
 // Always available (not flag-gated). Deletes the user's data per the
 // privacy policy; the backend also invalidates every session server-side,
 // so the caller must sign out locally on success.
+//
+// LEG-S6 (#354): `appleAuthorizationCode`, a fresh Sign in with Apple code,
+// goes up as `apple_authorization_code` so the server can revoke Sign in with
+// Apple (accounts.revoke_apple_tokens). Without a code this is the plain,
+// body-less DELETE, and the server deletes either way.
 export interface DeleteAccountResponse {
   ok: boolean;
   deleted: Record<string, number>;
+  /** True only when Apple confirmed the Sign in with Apple revocation. */
+  apple_revoked?: boolean;
 }
 
-export async function deleteAccount(): Promise<DeleteAccountResponse> {
-  return apiRequest<DeleteAccountResponse>('/api/account', { method: 'DELETE' });
+export async function deleteAccount(
+  opts: { appleAuthorizationCode?: string | null } = {},
+): Promise<DeleteAccountResponse> {
+  return apiRequest<DeleteAccountResponse>('/api/account', {
+    method: 'DELETE',
+    ...(opts.appleAuthorizationCode
+      ? { body: { apple_authorization_code: opts.appleAuthorizationCode } }
+      : {}),
+  });
 }
 
 // POST /api/session/init — full app session. Called after the user picks

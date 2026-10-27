@@ -1335,7 +1335,8 @@ Index("ix_deck_evidence_packs_user_league",
 # One row per captured sleeper_trades transaction examined by the matcher
 # (suggestion_telemetry.match_league_trades, hooked after every
 # sync_league_trades pass). was_recommended = 1 iff the trade matched a
-# NON-ghost (actually rendered) logged suggestion under the D-scope-5
+# NON-ghost shown logged suggestion (viewed or first 30; R-U6a,
+# _evidence_shown) under the D-scope-5
 # similarity rule; the best GHOST match is linked separately — the
 # ghost_* columns are the incrementality read (did a withheld suggestion
 # execute anyway?). Multi-team / unresolvable trades get a row with
@@ -1916,6 +1917,12 @@ app_feedback_table = Table("app_feedback", metadata,
     # POST /api/feedback contract byte-identical — see save_feedback).
     Column("status",            String),                  # see FEEDBACK_STATUSES
     Column("status_updated_at", String),                  # ISO, set on status change
+    # #360 QA P2-1 (head-eng): sha256 hex of the X-Session-Token of the
+    # UNVERIFIED session that sent the note (never the raw token). When that
+    # same session verifies in place, attach_session_feedback moves the note
+    # to the now-proven user and clears this. NULL for verified-at-post,
+    # no-token and unknown-token notes, and after attach.
+    Column("session_key",       Text),
     Index("idx_app_feedback_created_at", "created_at"),
     Index("idx_app_feedback_user_id",    "user_id"),
 )
@@ -3162,6 +3169,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
     # ── S0 serve rules (roster fingerprint contract v0.4 §3, §3b) ────────
     ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
+    ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
@@ -3830,7 +3838,9 @@ def _migrate_db() -> None:
     # for any future additive ALTERs. Indexes are declared on the Table
     # definition so create_all() handles them on fresh DBs.
     _app_feedback_migrations: list[tuple[str, str, str]] = [
-        # (table, column, type) — currently none; placeholder for future work
+        # (table, column, type)
+        # #360 QA P2-1: hash of the unverified session that sent the note.
+        ("app_feedback", "session_key", "TEXT"),
     ]
     for table, col, col_type in _app_feedback_migrations:
         try:
@@ -7161,6 +7171,32 @@ def _deck_card_acted():
 # both series' `series_break` caveats read it (receipts_service.admin_metrics,
 # server.suggestion_telemetry_ratio_route), so the two can't drift.
 PACKED_EVIDENCE_FLIP_DAY: str | None = None
+# The caveat code every series-break entry carries (analytics_queries,
+# receipts_service, the ratio route), so a reader can match on one value.
+SERIES_BREAK_CAVEAT = "series_break"
+_flip_day_warned = False
+
+
+def packed_evidence_flip_day() -> str | None:
+    """PACKED_EVIDENCE_FLIP_DAY as both caveats read it (#448 QA): a
+    "YYYY-MM-DD" str that round-trips through date.fromisoformat, else None,
+    with a WARNING once per process for any other value, so a malformed day is
+    never a 500 on either admin route nor a silent miss."""
+    global _flip_day_warned
+    from datetime import date
+    day = PACKED_EVIDENCE_FLIP_DAY
+    if day is None:
+        return None
+    try:
+        if isinstance(day, str) and date.fromisoformat(day).isoformat() == day:
+            return day
+    except ValueError:
+        pass
+    if not _flip_day_warned:
+        _flip_day_warned = True
+        log.warning("PACKED_EVIDENCE_FLIP_DAY %r is not a YYYY-MM-DD day: no series_break "
+                    "caveat on receipts or the endorsement ratio until it is", day)
+    return None
 
 
 def _evidence_shown():
@@ -7172,21 +7208,21 @@ def _evidence_shown():
 
 # R3: a card the user acted on whose row isn't a full row (no assets): neither
 # reader can grade or match it, so each reports it instead of dropping it
-# silently. Its cause is 'restart_split' when it sits past the page store's
-# stored cards (card_index >= 90 at the defaults) and its row was built from
-# the pack ('viewed', no assets: the snapshot-less upgrade, which happens only
-# once the deck's job has left the process, as a deploy's restart does);
-# otherwise 'other'.
-_RESTART_SPLIT_INDEX = 90
+# silently, by cause. The cause is the writer's own classification, read from
+# the card's run: its pack's run metadata `upgrade_miss_cards`
+# ({"<card_index>": cause}, U4-R2). No pack, or no entry for the card: other.
+VIEWED_WITHOUT_FULL_ROW_CAUSES = ("restart_split", "evicted_split", "other")
 
 
 def load_viewed_without_full_row(*, league_id: str | None = None, since_iso: str | None = None,
                                  until_iso: str | None = None) -> dict[str, dict[str, int]]:
     """Per run (deck_job_id), R3's acted-on cards with no full row, by cause:
-    {run_id: {"restart_split": n, "other": m}}. Non-ghost rows of a deferred
-    or packed deck (tier set: a pre-telemetry row has no assets either and
-    isn't counted), optionally in one league and a served_at window."""
-    i = deck_impressions_table
+    {run_id: {"restart_split": n, "evicted_split": n, "other": n}}. Non-ghost
+    rows of a deferred or packed deck (tier set: a pre-telemetry row has no
+    assets either and isn't counted), optionally in one league and a
+    served_at window. The runs' pack headers are read in one query per 500
+    runs; a cause outside the three reads as other."""
+    i, p = deck_impressions_table, deck_evidence_packs_table
     where = [or_(i.c.is_ghost.is_(None), i.c.is_ghost == 0), i.c.evidence_tier.isnot(None),
              i.c.assets_json.is_(None), _deck_card_acted()]
     if league_id is not None:
@@ -7195,14 +7231,23 @@ def load_viewed_without_full_row(*, league_id: str | None = None, since_iso: str
         where.append(i.c.served_at >= since_iso)
     if until_iso is not None:
         where.append(i.c.served_at <= until_iso)
-    runs: dict[str, dict[str, int]] = {}
     with engine.connect() as conn:
-        for r in conn.execute(select(i.c.deck_job_id, i.c.card_index, i.c.evidence_tier)
-                              .where(and_(*where))):
-            cause = ("restart_split" if r.evidence_tier == "viewed"
-                     and (r.card_index or 0) >= _RESTART_SPLIT_INDEX else "other")
-            counts = runs.setdefault(r.deck_job_id, {"restart_split": 0, "other": 0})
-            counts[cause] += 1
+        rows = conn.execute(select(i.c.deck_job_id, i.c.card_index).where(and_(*where))).all()
+        run_ids = sorted({r.deck_job_id for r in rows})
+        miss_cards: dict[str, dict] = {}
+        for start in range(0, len(run_ids), 500):
+            for h in conn.execute(select(p.c.run_id, p.c.header_json).where(
+                    p.c.run_id.in_(run_ids[start:start + 500]))):
+                try:
+                    cards = json.loads(h.header_json)["run"].get("upgrade_miss_cards")
+                except (TypeError, ValueError, KeyError, AttributeError):
+                    cards = None
+                miss_cards[h.run_id] = cards if isinstance(cards, dict) else {}
+    runs: dict[str, dict[str, int]] = {}
+    for r in rows:
+        cause = miss_cards.get(r.deck_job_id, {}).get(str(r.card_index), "other")
+        counts = runs.setdefault(r.deck_job_id, dict.fromkeys(VIEWED_WITHOUT_FULL_ROW_CAUSES, 0))
+        counts[cause if cause in counts else "other"] += 1
     return runs
 
 
@@ -7422,6 +7467,18 @@ def load_trade_page(user_id: str, league_id: str, scoring_format: str,
             t.c.scoring_format == scoring_format,
             t.c.request_scope == request_scope)).mappings().first()
     return dict(row) if row is not None else None
+
+
+def load_trade_page_deck_job_id(user_id: str, league_id: str, scoring_format: str,
+                                request_scope: str) -> str | None:
+    """The deck_job_id whose page row holds one key now (the unique-index read,
+    one column, no blobs), or None when the key has no row."""
+    t = trade_page_store_table
+    with engine.connect() as conn:
+        return conn.execute(select(t.c.deck_job_id).where(
+            t.c.user_id == user_id, t.c.league_id == league_id,
+            t.c.scoring_format == scoring_format,
+            t.c.request_scope == request_scope)).scalar()
 
 
 def load_trade_page_for_job(user_id: str, deck_job_id: str, *,
@@ -8201,12 +8258,17 @@ def suggestion_ratio_by_league(league_id: str | None = None) -> list[dict]:
 
 
 def suggestion_link_day_span(league_id: str | None = None) -> tuple[str | None, str | None]:
-    """The first and last UTC day of the links' trades (traded_at, else
-    computed_at), optionally in one league: (None, None) with no links. The
-    ratio route's series-break caveat reads it."""
-    t = suggestion_trade_links_table
-    day = func.substr(func.coalesce(t.c.traded_at, t.c.computed_at), 1, 10)
-    q = select(func.min(day), func.max(day))
+    """The first and last UTC day of the links' trades, optionally in one
+    league: (None, None) with no links. A trade's day is the one the matcher
+    reads (traded_at, else its sleeper_trades row's synced_at), else the link's
+    computed_at. The ratio route's series-break caveat reads it."""
+    t, s = suggestion_trade_links_table, sleeper_trades_table
+    day = func.substr(func.coalesce(t.c.traded_at, s.c.synced_at, t.c.computed_at), 1, 10)
+    # The league in the ON clause too (#448 QA): the same rows, and Postgres
+    # plans it on the league (23 ms → 1.3 ms).
+    q = select(func.min(day), func.max(day)).select_from(
+        t.outerjoin(s, (s.c.transaction_id == t.c.transaction_id)
+                    & (s.c.league_id == t.c.league_id)))
     if league_id:
         q = q.where(t.c.league_id == league_id)
     with engine.connect() as conn:
@@ -9244,6 +9306,22 @@ def mark_league_roster_failed(league_id: str, error_code: str) -> str:
                   "updated_at": stmt.excluded.updated_at})
         conn.execute(stmt)
     return status
+
+
+def cas_league_roster_fp(league_id: str, old_fp: str | None, new_fp: str) -> bool:
+    """S0 PR-B: set `roster_fp` to `new_fp` only while it still equals `old_fp`.
+
+    One UPDATE … WHERE (`IS NULL` when `old_fp` is None, a league's first
+    stamp), committed before it returns. True when this call won; False when
+    another refresh stamped first, or the league has no row. Touches no
+    other column.
+    """
+    t = league_roster_state_table
+    same = t.c.roster_fp.is_(None) if old_fp is None else t.c.roster_fp == old_fp
+    with engine.begin() as conn:
+        result = conn.execute(update(t).where(t.c.league_id == str(league_id), same)
+                              .values(roster_fp=new_fp))
+    return result.rowcount == 1
 
 
 def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool:
@@ -12433,6 +12511,25 @@ def load_draft_picks(
     return out
 
 
+def load_draft_pick_seasons(league_id: str,
+                            source: str = PICK_SOURCE_PLATFORM) -> set[int]:
+    """The distinct seasons of one league's PLATFORM draft-pick rows, from one
+    `SELECT DISTINCT season` (no full rows). Same predicate as
+    `load_draft_picks`'s default. Platform only: the contested/orphaned
+    exclusion for user rows is a row filter a season set can't carry, so any
+    other `source` raises. Read by `server._sleeper_prior_grid_excludes`
+    (#470 QA P3-2)."""
+    if source != PICK_SOURCE_PLATFORM:
+        raise ValueError(f"load_draft_pick_seasons reads platform rows only, not {source!r}")
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(draft_picks_table.c.season).distinct()
+            .where(draft_picks_table.c.league_id == league_id)
+            .where(_pick_source_predicate(source))
+        ).fetchall()
+    return {int(r[0]) for r in rows}
+
+
 def seed_pick_grid(
     league_id: str,
     member_user_ids: list[str],
@@ -15117,9 +15214,14 @@ def save_feedback(
     device_type: str | None = None,
     os_version: str | None = None,
     client_created_at: str | None = None,
+    session_key: str | None = None,
 ) -> dict:
     """Insert (idempotently on client_id) a feedback row and return
     {server_id, created_at, duplicate}.
+
+    `session_key` is the sha256 hex of an UNVERIFIED session's token (#360
+    QA P2-1), so attach_session_feedback can hand the note to that session's
+    user once it verifies in place. Callers pass None otherwise.
 
     Retries with the same client_id are dropped: we look up the existing
     row and return its ids so the mobile client can move on. SQLite uses
@@ -15137,11 +15239,11 @@ def save_feedback(
                     INSERT INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     ON CONFLICT (client_id) DO NOTHING
                     RETURNING id
                     """
@@ -15159,6 +15261,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             ).fetchone()
             if res:
@@ -15174,11 +15277,11 @@ def save_feedback(
                     INSERT OR IGNORE INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     """
                 ),
                 {
@@ -15194,6 +15297,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             )
             if cur.rowcount == 1 and cur.lastrowid:
@@ -15215,6 +15319,59 @@ def save_feedback(
         # Shouldn't happen — either we just inserted (handled above) or a
         # duplicate exists. Defensive fallback.
         return {"server_id": 0, "created_at": now_iso, "duplicate": True}
+
+
+def find_feedback_by_client_id(client_id: str) -> dict | None:
+    """{server_id, created_at} of the note with this client_id, or None.
+    POST /api/feedback uses it on the throttled path only, so an idempotent
+    retry of a note already held still gets its 200 `duplicate` (#360 QA
+    P2-2: duplicates never count against the throttle)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(app_feedback_table.c.id, app_feedback_table.c.created_at)
+            .where(app_feedback_table.c.client_id == client_id)
+        ).fetchone()
+    return {"server_id": int(row[0]), "created_at": row[1]} if row else None
+
+
+def attach_session_feedback(session_key: str, user_id: str,
+                            username: str | None) -> int:
+    """Hand an unverified session's notes to its user once it verifies in
+    place (#360 QA P2-1, head-eng's ruling). Returns how many rows moved.
+
+    The proof is `session_key`: the sha256 of the bearer token that sent the
+    notes, matched against the token now verifying. Never by username. Only
+    still-anonymous rows (user_id IS NULL) move, and the key is cleared, so a
+    second call for the same session is a no-op.
+    """
+    if not session_key or not user_id:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(user_id=user_id, username=username, session_key=None)
+        )
+        return res.rowcount or 0
+
+
+def detach_session_feedback(session_key: str) -> int:
+    """Drop the session_key from a token's still-anonymous notes, so they can
+    never attach (release-lead delta QA E). Called when /api/session/init
+    re-points that token at a DIFFERENT user: the notes were sent as the old
+    identity and must not follow the token to the new one. The rows stay,
+    anonymous. Returns how many rows changed."""
+    if not session_key:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(session_key=None)
+        )
+        return res.rowcount or 0
 
 
 def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
