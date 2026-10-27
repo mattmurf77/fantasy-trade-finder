@@ -159,6 +159,7 @@ from .database import (
     create_mock_draft, load_mock_draft, load_current_mock_draft,
     update_mock_draft, abandon_completed_mock_drafts,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
+    load_draft_pick_seasons,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
@@ -18374,8 +18375,7 @@ def _sleeper_prior_grid_excludes(league_id: str, season: int) -> bool:
     read → False (the D-089 fail-safe). A season rollover ends it: the new
     current season is in the prior grid."""
     try:
-        seasons = {int(r["season"]) for r in
-                   load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)}
+        seasons = load_draft_pick_seasons(league_id, source=PICK_SOURCE_PLATFORM)
     except Exception:
         log.warning("prior pick-grid read failed for %s", league_id, exc_info=True)
         return False
@@ -18459,6 +18459,12 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     # #470 QA P3-2 — without a cached `drafted`, the league's own prior
     # platform grid corroborates: if it already excludes the current season,
     # keep excluding it (a flake must not flip the grid, and `rfp1`, back).
+    # A cached `not_drafted` does NOT override it: a completed startup draft
+    # with a pending rookie draft reads `not_drafted`/high while the live
+    # read excludes the season (#483 QA P3-1). Accepted limitation (P3-3): a
+    # league whose `/drafts` is ALWAYS empty keeps an excluded season hidden
+    # after its verdict flips to not-drafted, until a non-empty read or the
+    # season rolls over.
     # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = drafts if drafts is not None else _fetch_sleeper_drafts(league_id)
     _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
