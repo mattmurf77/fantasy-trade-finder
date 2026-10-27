@@ -43,6 +43,7 @@ Gates: QA follow-ups to #481, inside the 200 ms programme's S0 scope (`scope-eng
   - The pre-gen and page-serve `session_read` sites are not covered by a test: code walk at `server.py` `_serve_trade_page_for` and session init's `should_kickoff`.
 - **Full suite** on `0beeb67d`: `pytest backend/tests -q` → 9267 passed, 2 skipped, 0 failed (11m50s).
 - **Full suite** on `e09327e3` (main merged in, #470 included): 9284 passed, 2 skipped, 0 failed (11m10s).
+- **Full suite, round 2** on `14828f06`: 9298 passed, 2 skipped, 0 failed (11m38s).
 - **Combined with #470** (a local merge of `0beeb67d` with `5e310b00`): #470's `test_roster_fp_stamp.py` plus the S0 files, 104 passed.
   - A scratch end-to-end run used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint.
   - Player move: 1 hook; the pre-gen is kept, carries a picks key and is re-stamped to the stored fp.
@@ -50,6 +51,27 @@ Gates: QA follow-ups to #481, inside the 200 ms programme's S0 scope (`scope-eng
 - **Not covered:**
   - `_roster_moved_reads` is per process. One web worker today (`render.yaml`, pinned by a test); a second worker would see only its own moves.
   - A stored page row written before a re-stamp keeps its old stamp: its serves take the moved path (the I-1-filtered page) until the next store.
+
+## 2026-10-27 — `deck_i1_check` follow-ups: each card counted once per job, one bounded worker, drained in tests (#468)
+
+Gates: #419's QA follow-ups. No new event, prop, route or schema; the event's counting and its write path change. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_deck_i1_check.py`, 30 tests. Covered:
+  - exact props;
+  - side and asset splits;
+  - repeat polls, replace serves, legacy plus paged serves of one job, and page-store serves each counting a card once;
+  - a full queue dropping with a warning and never blocking;
+  - the drain;
+  - conftest's per-test drain;
+  - QA P2-1 (probe D): cards published before their impression_ids are stamped and then re-published with them count once. The identity is now the trade_id first.
+- **Targeted, 248 passed:** `deck_i1_check`, the I-1 serve filter, the page store, roster freshness, the deck pipeline digest.
+- **Sabotage:** the identity back to impression_id-first → 2 red (probe D and the order test), then restored. release-lead's QA at `568a3993` ran 16 sabotages, all red, and 1007 targeted tests passed.
+- **Not covered (follow-ups, release-lead's P3s):**
+  - the worker isn't restarted after a BaseException;
+  - head-of-line waits behind a deletion's lease;
+  - no atexit drain;
+  - a drop burst's tail count is logged only by a later drop;
+  - test gaps: the fallback identity's partner, LRU eviction of the current job, `move_to_end`, the worker's `except`, the lease.
 
 ## 2026-10-27 — Owned-pick sync: an empty `/drafts` read keeps the prior current-season exclusion (#470 QA P3-2)
 
@@ -96,6 +118,11 @@ Full gates (platforms-eng lead). Server only; no API, schema, flag or analytics 
 - **Targeted:** 15 S0 / trade-serve files → 493 passed.
 - **Full suite:** `python3 -m pytest backend/tests -q` → **9208 passed, 2 skipped, 0 failed**, exit 0, 35m37s (Python 3.14 local; the known `test_ranking_service_threads` flake didn't fire).
 - **Docs:** `docs/data-dictionary.md` (`roster_fp` row + intro), `docs/architecture.md` (new "Roster refresh and fingerprint stamp (S0)" data-flow paragraph), and the scope (§B.1 seam, §B.3 step 7 "As built", §3 evidence, §4 docs rows, §5 item 3).
+- **#470 QA P3 follow-up (branch `feat/s0-stamp-p3s`, stacked):**
+  - New `test_stamp_follows_the_platform_pick_source_when_assign_tradeable_is_off` (the file is now 18 tests). With the flag off, a platform row plus a member-asserted row: the stamp equals the serve's fp and differs from the `'any'` fp.
+  - Sabotage: `roster_refresh._pick_read_source` hard-coded to `'any'` → the new case red. The existing flag-on pin stays green, which was QA's point. Restored byte-identical.
+  - A lost-CAS lag comment in `stamp()`.
+  - Targeted: the 15 S0 files + `test_pick_assignment_tradeable` → 531 passed.
 - **Not in PR-B:** the §B.6 stamps on the other writers (ESPN/MFL imports, the MFL pick normalizer, draft-status refresh, `_refresh_sleeper_members`). The serve recomputes `rfp1` from rows, so only the proactive hook is missing there.
 
 ## 2026-10-27 — S0 roster-change handler: revoke only what a fresher session would rebuild (#470 QA P2-2, P2-1, P3-1, P3-3)

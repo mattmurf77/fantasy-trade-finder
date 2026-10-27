@@ -82,3 +82,30 @@ def _u4_ledger_guard_state():
         server._ledger_guard_young = {"held": 0, "evicted": 0}
         server._ledger_guard_warned_at = float("-inf")
     yield
+
+
+def _drain_deck_i1_checks():
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_drain_deck_i1_checks"):
+        server._drain_deck_i1_checks(5.0)
+
+
+@pytest.hookimpl(hookwrapper=True, trylast=True)
+def pytest_runtest_call(item):
+    """A test's queued `deck_i1_check` writes finish as its call ends, inside
+    the call's output capture (#419 QA P3). They're written on a worker; left
+    to finish later they ran outside any capture window, often against an
+    in-memory DB whose tables the worker's connection can't see, and their
+    swallowed failures printed into the CI log. trylast: the innermost
+    wrapper, so this runs before pytest's capture of the call ends."""
+    yield
+    _drain_deck_i1_checks()
+
+
+@pytest.fixture(autouse=True)
+def _deck_i1_checks_drained():
+    """The same at teardown, for a write a fixture queued after the call. Only
+    once `backend.server` is imported; no `monkeypatch`, for the same
+    teardown-order reason as above."""
+    yield
+    _drain_deck_i1_checks()
