@@ -204,20 +204,26 @@ degrades ESPN/MFL cookie storage too, not just Sleeper.
   `drafts` read falls back to the cached #207 verdict (D-189: a positive
   `drafted` excludes the current season; anything else excludes nothing).
   **The owned-pick sync adds one corroboration (#470 QA P3-2, 2026-10-27):**
-  on an empty read whose cached verdict is absent or `unknown`, if the
-  league's stored platform grid already leaves the current season out (rows
-  for later seasons, none for it), the sync keeps it out
+  on an empty read without a cached `drafted`, if the league's stored
+  platform grid already leaves the current season out (rows for later
+  seasons, none for it), the sync keeps it out
   (`server._sleeper_prior_grid_excludes`, one `SELECT DISTINCT season` via
   `database.load_draft_pick_seasons`). Otherwise a flake re-populated a
   spent class until the next good read, and each flip moved the league's
-  `rfp1` fingerprint. A cached `not_drafted` is trusted and the season is
-  included (P3-3: otherwise a league whose `/drafts` is always empty stayed
-  excluded forever). A first sync (no prior rows), a grid that carries the
-  season, and a failed grid read are unchanged; a season rollover ends it.
-  Propose and validate are unchanged. Known cost: a commissioner reset (the
-  draft back to `pre_draft`) followed only by `/drafts` flakes keeps an
-  undrafted season hidden until the next non-empty `/drafts` read, or until
-  the cached verdict reads `not_drafted`.
+  `rfp1` fingerprint. A cached `not_drafted` does not override the grid: a
+  completed startup draft with a pending rookie draft reads
+  `not_drafted`/high while the live read excludes the season, so trusting it
+  would bring the flip back for that common shape (#483 QA P3-1). A first
+  sync (no prior rows), a grid that carries the season, and a failed grid
+  read are unchanged; a season rollover ends it. Propose and validate are
+  unchanged. Known costs:
+  - a commissioner reset (the draft back to `pre_draft`) followed only by
+    `/drafts` flakes keeps an undrafted season hidden until the next
+    non-empty `/drafts` read;
+  - **accepted limitation (P3-3):** a league whose `/drafts` *always* reads
+    empty keeps a previously excluded current season hidden after its
+    verdict flips to not-drafted, until a non-empty `/drafts` read or the
+    season rollover.
 
 ### 3.3 GraphQL shapes
 - `league_players` rows: `{player_id, settings:{otb: <roster_id>|null,
@@ -366,7 +372,7 @@ else is a fresh live fetch with no shared cache. The outcome is recorded in
 | Shared rosters | `sleeper.trade_block` \| `market.roster_history` \| `picks.owned_sync` | 0 in the daemon: the request thread's `rosters` read is reused by all four consumers below (it self-fetches only if that payload is absent) | `_session_init_background_writes`, `backend/server.py` |
 | Shared league meta | (unconditional for numeric, non-platform-linked ids) | 0 in the daemon: the request thread's `/league/{id}` read is reused by scoring auto-detect, the FB #41 team-count persist and the owned-pick sync | `_league_meta()` in the same daemon |
 | Trade-block import | `sleeper.trade_block` | 1× `league_players` GraphQL (rosters shared) | `sync_league_trade_block`, `backend/trade_block_service.py` |
-| Owned draft-pick sync | `picks.owned_sync` | 1× `traded_picks` + 1× `drafts` (rosters + meta shared); MFL leagues re-derive with no Sleeper reads. Since #428 an empty `drafts` answer costs one leagues-row read (the cached #207 verdict, D-189) and no extra upstream call; since #470 QA P3-2, when that verdict is absent or `unknown`, also one `SELECT DISTINCT season` on the prior platform grid | `_sync_sleeper_owned_picks`, `backend/server.py` |
+| Owned draft-pick sync | `picks.owned_sync` | 1× `traded_picks` + 1× `drafts` (rosters + meta shared); MFL leagues re-derive with no Sleeper reads. Since #428 an empty `drafts` answer costs one leagues-row read (the cached #207 verdict, D-189) and no extra upstream call; since #470 QA P3-2, when that verdict isn't `drafted`, also one `SELECT DISTINCT season` on the prior platform grid | `_sync_sleeper_owned_picks`, `backend/server.py` |
 | Trade-transaction capture | `market.trade_capture` | **≤2 calls** — `transactions/{week}` for the live leg and the one before it. The full `1..18` sweep runs ONCE, as the first-time backfill for a league with no captured rows; in the offseason an already-swept league fetches **1** (leg 1, where Sleeper books every offseason trade) | `sweep_weeks` / `sync_league_trades`, `backend/sleeper_trades_service.py` |
 | Executed-trade matcher | `suggestion.telemetry` | 0 — takes the shared rosters map | `match_league_trades(roster_map=…)`, `backend/suggestion_telemetry.py` |
 | Rookie-draft status refresh | (unflagged) | 0 in steady state; up to 3 (`/league/{id}`, `drafts`, `rosters`) when the per-status TTL has expired — 12 h once a league reads `drafted` | `_refresh_league_draft_status`, `backend/server.py` |

@@ -17,7 +17,7 @@ import backend.trade_service as ts
 from backend.pick_values import (pick_pool_value, market_pick_pool_value,
                                  priced_pool_value,
                                  GENERIC_PICK_SEEDS, YEAR_DISCOUNT)
-from backend.draft_status import PICK_HORIZON_CLASSES
+from backend.draft_status import PICK_HORIZON_CLASSES, sleeper_verdict
 from backend.roster_snapshot import roster_snapshot
 
 # #355 — a league carries PICK_HORIZON_CLASSES (3) rookie classes anchored to
@@ -601,18 +601,53 @@ def _sync_seasons_with_verdict(monkeypatch, status, confidence):
     return _sync_seasons(monkeypatch, [])
 
 
-def test_always_empty_drafts_trusts_a_cached_not_drafted_verdict(
+def test_always_empty_drafts_stays_excluded_after_not_drafted_known_limitation(
         _clean_league, monkeypatch):
-    """P3-3: `/drafts` is always empty. A cached `drafted` excluded 2026; once
-    the verdict flips to `not_drafted` the season comes back. RED before the
-    verdict gate: the prior grid held it excluded forever."""
+    """ACCEPTED LIMITATION (P3-3; #483 QA P3-1, option (b)). `/drafts` always
+    reads empty. A cached `drafted` excluded 2026; after the verdict flips to
+    `not_drafted`, the prior grid still holds 2026 excluded, until a non-empty
+    `/drafts` read or the season rolls over. Trusting `not_drafted` here
+    re-opens the fp flip for startup-complete / rookie-pending leagues (the
+    next test). A change to this pin changes that trade-off: see D-189."""
     db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
                      season="2026", user_player_ids=[], opponent_rosters=[])
     try:
         assert _sync_seasons_with_verdict(monkeypatch, "drafted", "high") == \
             [2027, 2028, 2029]
         assert _sync_seasons_with_verdict(monkeypatch, "not_drafted", "high") == \
-            [2026, 2027, 2028]
+            [2027, 2028, 2029]
+    finally:
+        db.set_league_draft_status(_LEAGUE, None, None)
+
+
+# A completed startup draft and a pending rookie draft, both season 2026.
+_STARTUP_DONE_ROOKIE_PENDING_2026 = [
+    {"draft_id": "s1", "status": "complete", "season": "2026", "type": "snake",
+     "settings": {"rounds": 25}, "last_picked": 1},
+    {"draft_id": "r1", "status": "pre_draft", "season": "2026",
+     "type": "linear", "settings": {"rounds": 4}},
+]
+
+
+def test_startup_complete_rookie_pending_flake_keeps_season_and_fp(
+        _clean_league, monkeypatch):
+    """#483 QA P3-1. #207's detector reads this shape `not_drafted`/high (the
+    rookie-shaped draft is pending), while the shape-blind
+    `completed_draft_seasons` excludes 2026. A flake must keep 2026 excluded
+    and rfp1 stable. RED with the P3-3 verdict gate: each flake re-included
+    2026."""
+    verdict = sleeper_verdict(_STARTUP_DONE_ROOKIE_PENDING_2026, 2026)
+    assert (verdict.status, verdict.confidence) == ("not_drafted", "high")
+    db.upsert_league(league_id=_LEAGUE, user_id="u1", name="Sleeper Test",
+                     season="2026", user_player_ids=[], opponent_rosters=[])
+    try:
+        db.set_league_draft_status(_LEAGUE, verdict.status, verdict.confidence)
+        fps = []
+        for drafts in (_STARTUP_DONE_ROOKIE_PENDING_2026, [],
+                       _STARTUP_DONE_ROOKIE_PENDING_2026, []):
+            assert _sync_seasons(monkeypatch, drafts) == [2027, 2028, 2029]
+            fps.append(_rfp1(_LEAGUE))
+        assert len(set(fps)) == 1, fps
     finally:
         db.set_league_draft_status(_LEAGUE, None, None)
 

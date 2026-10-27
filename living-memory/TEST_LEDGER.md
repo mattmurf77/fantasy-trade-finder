@@ -1,18 +1,20 @@
-## 2026-10-27 — Owned-pick sync follow-ups: season-only prior-grid read; a cached `not_drafted` wins over the sticky rule (#482 QA nit + P3-3)
+## 2026-10-27 — Owned-pick sync follow-ups: season-only prior-grid read; P3-3 verdict gate tried, then dropped as a recorded limitation (#482 QA nit + P3-3, #483 QA P3-1)
 
 Server only, platforms-eng lead. Stacked on `fix/owned-picks-drafts-flake` as `fix/owned-picks-drafts-flake-followups`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, route, schema or analytics change.
 
 - **(a) Nit:** the prior-grid check now reads one `SELECT DISTINCT season` through the new `database.load_draft_pick_seasons(league_id, source='platform')`, which uses `load_draft_picks`'s platform predicate and raises on any other source. The W3 AST guard in `test_pick_assignment.py` now enumerates both readers (`_PICK_READERS`), so `_sleeper_prior_grid_excludes` stays in `_SANCTIONED_SOURCE_CALLERS`.
-- **(b) P3-3:** the sticky rule applies only when the cached verdict is absent or `unknown`. A cached `not_drafted` is trusted and the season is included. Before, a league whose `/drafts` is always empty stayed excluded forever once its verdict flipped to not-drafted.
-- **New tests in `test_owned_picks.py` (3; the file is now 42):**
-  - `test_prior_grid_season_reader_reads_platform_rows_only`: a user row's season is not in the set, and `source='any'` raises;
-  - `test_always_empty_drafts_trusts_a_cached_not_drafted_verdict`: `drafted` excludes, then `not_drafted` re-includes;
-  - `test_always_empty_drafts_keeps_the_exclusion_on_an_unknown_verdict`.
-  - The read-error test now injects into `srv.load_draft_pick_seasons`.
-- **Sabotage, red then restored:** the verdict gate dropped (back to `elif _sleeper_prior_grid_excludes(...)`) → 1 red, the `not_drafted` test (`[2027, 2028, 2029] == [2026, 2027, 2028]`).
-- **Targeted:** `test_owned_picks` + `test_pick_assignment` → 78 passed. The 59 files that grep `owned_pick|draft_status|pick_tradab|roster_refresh|roster_snapshot` → 1845 passed, 0 failed.
+- **(b) P3-3, first attempt (`ffb5b2f1`, superseded):** the sticky rule applied only when the cached verdict was absent or `unknown`, and a cached `not_drafted` was trusted. Tests then: 3 new, the file at 42. Sabotage (gate dropped) turned the `not_drafted` test red. Targeted: 78 passed; the 59 related files: 1845 passed.
+- **(b) revised, #483 QA P3-1, option (b):** the gate undid #482 for a common shape: a completed startup draft plus a pending rookie draft. `sleeper_verdict` reads that `not_drafted`/high, while the shape-blind `completed_draft_seasons` excludes the season, so every flake flipped the fp again (QA: 6 of 7 syncs on #483, 0 on main). The gate is removed: the sticky rule again applies whenever the cached verdict isn't `drafted`, exactly as #482 shipped. P3-3 is now a recorded limitation (D-189 amendment, `docs/integrations/sleeper.md`). The sync condition's diff against main is now only the reader swap (plus comments).
+- **Tests in `test_owned_picks.py` after the revision (the file is now 43):**
+  - `test_prior_grid_season_reader_reads_platform_rows_only` (kept): a user row's season is not in the set, and `source='any'` raises;
+  - `test_always_empty_drafts_stays_excluded_after_not_drafted_known_limitation` (inverted from the `not_drafted` re-includes test): the accepted P3-3 limitation pin;
+  - `test_startup_complete_rookie_pending_flake_keeps_season_and_fp` (new): the cached verdict comes from the real `sleeper_verdict` (asserted `not_drafted`/high); live → flake → live → flake keeps 2026 excluded and one rfp1;
+  - `test_always_empty_drafts_keeps_the_exclusion_on_an_unknown_verdict` (kept);
+  - the read-error test injects into `srv.load_draft_pick_seasons` (kept).
+- **Sabotage, red then restored:** the P3-3 gate re-added → 2 red: the startup-shape test and the limitation pin (`[2026, 2027, 2028] == [2027, 2028, 2029]` each).
+- **Targeted after the revision:** 11 files → 317 passed: owned-picks, pick-assignment (+ tradeable), draft-status (+ wiring), pick-tradability, and the S0 suites (`roster_fp_stamp`, `roster_refresh_state`, `roster_refresh_async`, `trade_freshness_roster`, `roster_snapshot`).
 - **Not run:** the full suite (CI runs it), `tsc` and testid-lint (no mobile change).
-- **Docs:** `docs/integrations/sleeper.md` (the rule and the read-cost row), `docs/data-dictionary.md` (the new reader, in the containment section), and the D-189 amendment.
+- **Docs:** `docs/integrations/sleeper.md` (the rule, the limitation and the read-cost row), `docs/data-dictionary.md` (the new reader, in the containment section), and the D-189 amendment.
 
 ## 2026-10-27 — Owned-pick sync: an empty `/drafts` read keeps the prior current-season exclusion (#470 QA P3-2)
 
