@@ -46,7 +46,7 @@ import urllib.request
 import zlib
 
 from dataclasses import dataclass, replace as _dc_replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from flask import (
     Flask, g, has_request_context, jsonify, make_response, redirect, request, send_from_directory,
@@ -35547,9 +35547,11 @@ def _require_pro(fn):
 def me_entitlements():
     """Client bootstrap: resolved entitlement state + enforcement posture.
 
-    Session-authed. The Chrome extension does NOT call this — its `pro`
-    bool rides in POST /api/extension/auth's payload (pro-subscription LLD;
-    username-only auth can't carry a session token)."""
+    Session-authed. The Chrome extension does NOT call this, and no route
+    gives it a `pro` bool today: POST /api/extension/auth's payload has no
+    `pro` field, and the extension reads no entitlement state anywhere.
+    `pro` is intentionally not in that payload: the unverified sign-in path
+    never reads entitlement state (legal R28.17)."""
     sess = _require_session()
     out = entl.get_entitlements(sess["user_id"])
     out["enforcing"] = is_enabled("monetize.entitlements")
@@ -35572,13 +35574,45 @@ _PAYWALL_PAGES = [
     {"id": "plans", "kind": "purchase"},
 ]
 
+# No `trial_days` (#393, operator 2026-10-25): the trial is Apple's 1-month
+# intro offer, and a day count is the wrong claim ("1 month", never
+# "30 days"). Older clients render "N days free" only when trial_days > 0,
+# so dropping the key drops the claim; newer ones read StoreKit's offer.
 _PAYWALL_PRODUCTS = [
-    {"product_id": "ftf_pro_monthly", "period": "monthly",
-     "display_price": "$4.99", "trial_days": 14, "hero": False},
+    {"product_id": "ftf_pro_monthly", "period": "monthly", "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
-     "display_price": "$34.99", "per_month_equiv": "$2.92",
-     "trial_days": 30, "hero": True, "badge": "best_value"},
+     "hero": True, "badge": "best_value"},
 ]
+
+# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr,
+# rising to $6.99 / $34.99 for NEW subscribers from this date (UTC). It must
+# match the App Store Connect scheduled price change; existing subscribers
+# keep their price through App Store price preservation, which this table
+# does not model. Each entry is (before the rise, from the rise on).
+# per_month_equiv is the annual price / 12 rounded UP to the cent, matching
+# legal's #393 R28.8 #2 copy, "$2.09/month" (24.99 / 12 = 2.0825;
+# 34.99 / 12 = 2.9158): rounding down would understate the annual price.
+_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)
+_PAYWALL_PRICES = {
+    "ftf_pro_monthly": ({"display_price": "$4.99"},
+                        {"display_price": "$6.99"}),
+    "ftf_pro_annual": ({"display_price": "$24.99", "per_month_equiv": "$2.09"},
+                       {"display_price": "$34.99", "per_month_equiv": "$2.92"}),
+}
+
+
+def _paywall_now() -> datetime:
+    """The clock the paywall config reads. Tests monkeypatch this."""
+    return datetime.now(timezone.utc)
+
+
+def _paywall_products(now: datetime) -> list:
+    """`products[]` as served at `now` (timezone-aware). Pure: same `now`,
+    same answer. On or after _PAYWALL_PRICE_RISE_DATE (UTC) → new prices."""
+    risen = now.astimezone(timezone.utc).date() >= _PAYWALL_PRICE_RISE_DATE
+    return [{**p, **_PAYWALL_PRICES[p["product_id"]][1 if risen else 0]}
+            for p in _PAYWALL_PRODUCTS]
+
 
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
@@ -35611,6 +35645,7 @@ def paywall_config():
     StoreKit-localized price from the RevenueCat offering for the matching
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
+    They switch to the new-subscriber prices on _PAYWALL_PRICE_RISE_DATE.
     """
     _require_session()
     if not is_enabled("monetize.paywall"):
@@ -35622,7 +35657,7 @@ def paywall_config():
         "enabled": True,
         "platform": platform,
         "pages": _PAYWALL_PAGES,
-        "products": _PAYWALL_PRODUCTS,
+        "products": _paywall_products(_paywall_now()),
         # Store-managed: the server never mints trials (pro-subscription
         # LLD §6). True until the client reads real per-Apple-ID
         # eligibility off the RevenueCat offering — this field is the

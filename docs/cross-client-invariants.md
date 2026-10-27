@@ -1227,8 +1227,8 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 
 | `product_id` | What it is | Projects to (`entitlement`, `source`) |
 |---|---|---|
-| `ftf_pro_monthly` | Pro, auto-renewing monthly | `pro`, `apple_iap` |
-| `ftf_pro_annual` | Pro, auto-renewing annual (hero SKU) | `pro`, `apple_iap` |
+| `ftf_pro_monthly` | Pro, auto-renewing monthly; $4.99, **$6.99 for new subscribers from 2027-01-01**; Apple 1-month intro trial | `pro`, `apple_iap` |
+| `ftf_pro_annual` | Pro, auto-renewing annual (hero SKU); $24.99, **$34.99 for new subscribers from 2027-01-01**; Apple 1-month intro trial | `pro`, `apple_iap` |
 | `ftf_founder` | Founder Lifetime, non-renewing; `expires_at` NULL = perpetual | `pro`, `founder_iap` |
 | `ftf_season_pass_2026` | Season pass, year-labeled (`ftf_rookie_pass_*` is the rookie-season variant) | `pro`, `season_pass_iap` |
 | `ftf_tip_199` / `ftf_tip_499` / `ftf_tip_999` | Tip jar, consumable ($1.99/$4.99/$9.99) — money with **NO entitlement**: `entitlements.is_tip_product()` stores the webhook event and grants nothing. Served in the config's `tips` array (`{product_id, display_price}` only). A tip SKU **must** keep the `ftf_tip_` prefix — drifting out of it hands the tipper Pro via the default mapping (pinned by `mobile/tests/check-tipjar.js` §9 + `backend/tests/test_paywall_config.py`) | *(none)* |
@@ -1246,6 +1246,8 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 - Feature keys (page 2): `unlimited_leagues`, `portfolio`, `engine_knobs`, `extension_overlays`, `ad_free`.
 - Product `badge`: `best_value` (the only value today). `period`: `monthly` | `annual`. `hero`: exactly one product carries it.
 - `?platform=`: `ios` | `web` | `extension`; echoed back as `platform`. Unknown values degrade to `ios` rather than 400.
+- **Fallback prices are dated (#393, operator 2026-10-25).** Before `_PAYWALL_PRICE_RISE_DATE` (2027-01-01, judged in UTC; it must equal the App Store Connect scheduled price change) the config serves monthly `$4.99` and annual `$24.99` / `per_month_equiv` `$2.09`; on and after it, `$6.99` and `$34.99` / `$2.92`. `per_month_equiv` is the annual price / 12 rounded **up** to the cent. Existing subscribers keep their price through App Store price preservation; the config only describes what a new subscriber pays.
+- **No `trial_days`.** Products carry no trial day count: the trial is Apple's 1-month intro offer (always "1 month", never "30 days"). Older clients render "N days free" only when `trial_days > 0`, so the absent key shows no trial claim; newer clients read the offer from StoreKit.
 - **`display_price` / `per_month_equiv` are FALLBACK COPY.** On iOS the client renders the StoreKit-localized price from the matching RevenueCat offering; the server strings are US-English list prices that know nothing about storefront, currency, or promotional offers. `trial_eligible` is a claim about the SKU, not a per-Apple-ID promise — real eligibility is store-managed.
 
 **Paywall analytics event names** (client-fired; registered in `backend/analytics_taxonomy.py` and all five classified NON_INTENT in `analytics_queries.NON_INTENT_EVENTS`): `paywall_viewed` {`source`, `platform`}, `paywall_purchase_initiated` {`product_id`, `source`}, `paywall_purchase_completed` {`product_id`, `source`}, `paywall_purchase_failed` {`product_id`, `user_cancelled`}, `paywall_restore` {`restored`}. `source` is the 402's `gate` string or a non-gate origin (`settings`, `onboarding`); `platform` is the config **variant** rendered, not the device platform (that is a `user_events` column derived server-side). Conversion truth is the server-fired `entitlement_granted` row, never these echoes.
