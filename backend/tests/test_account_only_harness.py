@@ -37,6 +37,8 @@ import backend.espn_service as es
 import backend.server as server
 from backend.database import metadata
 
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 HARNESS_SUB = "qa-apple-p05"
 HARNESS_TOKEN = f"ftf-test-apple:{HARNESS_SUB}"
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")

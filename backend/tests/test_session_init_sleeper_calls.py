@@ -41,6 +41,8 @@ import backend.suggestion_telemetry as sugg_tel
 import backend.trade_block_service as tb_service
 from backend.database import metadata, record_sleeper_trades
 
+pytestmark = pytest.mark.usefixtures("no_real_network")
+
 LEAGUE_ID = "1338231586314780672"
 NON_SLEEPER_LEAGUE = "mfl:synthetic:1"
 NUMERIC_MFL_LEAGUE = "62846"   # MFL-native ids are numeric (G-030)

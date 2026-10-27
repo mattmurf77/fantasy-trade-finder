@@ -25,6 +25,8 @@ from unittest.mock import MagicMock
 import pytest
 
 import backend.server as server
+import backend.sleeper_trades_service as trades_service
+import backend.trade_block_service as tb_service
 from backend.draft_board_service import _order_from
 from backend.sleeper_roster import (
     canonical_owner_id,
@@ -33,6 +35,10 @@ from backend.sleeper_roster import (
     owns_roster,
 )
 
+
+# The inline session-init daemon below must never reach Sleeper for real; the
+# conftest guard fails any test that tries (the daemon swallows the error).
+pytestmark = pytest.mark.usefixtures("no_real_network")
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "sleeper" / "co-owned-league"
 
@@ -294,6 +300,14 @@ def init_client(monkeypatch, rosters):
                     for r in rosters]
         return {"name": "Bush League"}
     monkeypatch.setattr(server, "_sleeper_get", sleeper_get)
+    # The two Sleeper reads the daemon makes that do NOT go through
+    # `_sleeper_get`: the executed-trade sweep (a league with no captured rows
+    # backfills legs 1..18) and the trade-block GraphQL read. Unmocked, each
+    # init here made 18 + 1 real requests.
+    monkeypatch.setattr(trades_service, "fetch_week_transactions",
+                        lambda lid, week, *, _opener=None, timeout=15: [])
+    monkeypatch.setattr(tb_service, "fetch_league_players",
+                        lambda lid, *, _opener=None, timeout=15: [])
     # Authentication is established before selecting a league. Each test
     # client chooses which proven identity to exercise via the header.
     sessions = {uid: {"user_id": uid, "verified": True, "verified_via": "sleeper"}
