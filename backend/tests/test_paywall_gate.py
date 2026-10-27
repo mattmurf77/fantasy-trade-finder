@@ -16,7 +16,9 @@ Covers:
       ledger, a sandbox trial found through granted_by, a tip never reading
       as paid
   (3) verified sessions: paying + verified passes; the same user_id
-      unverified → verify_required; the demo synthetic session passes;
+      unverified → verify_required, or the route's own 403 where it wears the
+      verified gate (R28.14; every gated rule in
+      test_paywall_gate_unverified.py); the demo synthetic session passes;
       /api/me/entitlements pro tracks verification
   (4) never a 402: unauthenticated, a bad token, the extension endpoints,
       a web request with the web knob 0 (or missing) while mobile enforces
@@ -326,29 +328,44 @@ def test_paying_user_verified_session_passes(eng, client, stubbed):
 def test_same_user_unverified_gets_verify_required(eng, client, stubbed, headers):
     _make_user("active_paid")
     with _enforcing(eng):
-        for path in ("/api/trades/generate", "/api/trades/propose"):
-            r = client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **headers})
-            assert r.status_code == 402
-            assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
-
-
-@pytest.mark.parametrize("path", ["/api/trades/generate", "/api/trades/propose"])
-def test_unverified_never_pro_also_gets_verify_required(eng, client, stubbed, path):
-    """Legal R28.9: every unverified session gets verify_required at a gated
-    action (here with no preview), subscriber or not."""
-    with _enforcing(eng):
-        r = client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
+        r = client.post("/api/trades/propose",
+                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **headers})
+    assert r.status_code == 402
     assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
 
 
-def test_unverified_path_never_reads_entitlements(eng, client, stubbed):
+@pytest.mark.parametrize("headers", [MOBILE, WEB])
+def test_same_user_unverified_on_a_verified_gate_route_gets_its_403(eng, client, headers):
+    """R28.14: /generate wears @_gate_unverified_write, so the hook lets an
+    unverified session through and the route's own 403 answers (real view)."""
+    _make_user("active_paid")
+    with _enforcing(eng):
+        r = client.post("/api/trades/generate",
+                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **headers}, json={})
+    assert r.status_code == 403
+    assert r.get_json() == {"error": "verification_required"}
+
+
+@pytest.mark.parametrize("method,path", [("POST", "/api/trades/propose"),
+                                         ("GET", "/api/overhauls")])
+def test_unverified_never_pro_also_gets_verify_required(eng, client, stubbed, method, path):
+    """Legal R28.9: every unverified session gets verify_required at a gated
+    action whose route doesn't answer it itself, subscriber or not."""
+    with _enforcing(eng):
+        r = client.open(path, method=method,
+                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
+    assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
+
+
+def test_unverified_path_never_reads_entitlements(eng, client):
     _make_user("active_paid")
     ent, hist = _Spy(entl.get_entitlements), _Spy(entl.list_for_user)
+    row = _Spy(pg.preview_row)
     with _enforcing(eng), patch.object(entl, "get_entitlements", ent), \
-            patch.object(entl, "list_for_user", hist):
+            patch.object(entl, "list_for_user", hist), patch.object(pg, "preview_row", row):
         for path in ("/api/trades/generate", "/api/trades/propose"):
-            client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
-    assert (ent.calls, hist.calls) == (0, 0)
+            client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE}, json={})
+    assert (ent.calls, hist.calls, row.calls) == (0, 0, 0)
 
 
 def test_demo_synthetic_session_passes(eng, client, stubbed):

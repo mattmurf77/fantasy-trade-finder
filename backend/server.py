@@ -2776,6 +2776,7 @@ def _gate_unverified_write(fn):
                 if denial is not None:
                     return denial
         return fn(*args, **kwargs)
+    _wrapper._unverified_gates = getattr(fn, "_unverified_gates", frozenset()) | {"write"}
     return _wrapper
 
 
@@ -2815,7 +2816,18 @@ def _gate_unverified_read(fn):
                 if denial is not None:
                     return denial
         return fn(*args, **kwargs)
+    _wrapper._unverified_gates = getattr(fn, "_unverified_gates", frozenset()) | {"read"}
     return _wrapper
+
+
+def _route_answers_unverified(endpoint: str | None, method: str) -> bool:
+    """True when the view wears the verified gate for this method
+    (@_gate_unverified_write for a mutating method, @_gate_unverified_read
+    otherwise), so it answers an unverified session 403 itself. Read off the
+    live view (the decorators mark it; functools.wraps carries the mark up
+    any wrapping), so a removed decorator reads False, never stale."""
+    gates = getattr(app.view_functions.get(endpoint or ""), "_unverified_gates", frozenset())
+    return ("write" if method in _MUTATING_METHODS else "read") in gates
 
 
 def _trade_job_stalled(job, now):
@@ -32973,9 +32985,12 @@ def _paywall_gate_hook():
     """Global paywall gate: 402 pro_required on the rules backend/paywall_gate.py
     marks gated. A rule that isn't gated, or a server that isn't enforcing,
     returns before the session or any entitlement is read. No session → the
-    route's own auth answers. Pro counts only on a verified session. A
-    failed entitlement read fails open. A request allowed under the deck
-    preview leaves g.paywall_preview for _serve_trade_job to cap and record."""
+    route's own auth answers. Pro counts only on a verified session; an
+    unverified one is settled before any preview or entitlement read (the
+    route's own 403 where it wears the verified gate, else 402
+    verify_required). A failed entitlement read fails open. A request allowed
+    under the deck preview leaves g.paywall_preview for _serve_trade_job to
+    cap and record."""
     rule = request.url_rule.rule if request.url_rule is not None else ""
     if not _paywall_gate.applies(rule, request.method):
         return None
@@ -32985,7 +33000,9 @@ def _paywall_gate_hook():
             rule, request.method, sess.get("user_id"),
             _paywall_gate.is_mobile_request(request.headers),
             bool(sess.get("verified") or _synthetic_demo_session(sess)),
-            demo=_synthetic_demo_session(sess), ask=_paywall_deck_ask(sess.get("user_id")))
+            demo=_synthetic_demo_session(sess),
+            route_verifies=_route_answers_unverified(request.endpoint, request.method),
+            ask=_paywall_deck_ask(sess.get("user_id")))
     except Exception:
         log.exception("paywall gate failed open: %s %s", request.method, rule)
         return None
@@ -33014,18 +33031,23 @@ def _paywall_deck_ask(user_id):
         page_trade_ids=lambda job_id, limit: _paywall_page_trade_ids(user_id, job_id, limit))
 
 
-def _paywall_page_trade_ids(user_id, job_id: str, limit: int) -> set:
+def _paywall_page_trade_ids(user_id, job_id: str, limit: int) -> set | None:
     """Trade ids among the deck's first `limit` raw cards (the preview window):
     the live job's, plus the P1 stored page built by that job (a page-served
-    deck may have no job in this process)."""
+    deck may have no job in this process). None when neither exists: the
+    deck is gone from this process, and the swipe check falls back to the
+    window paywall_previews recorded (P3-1)."""
     with _trade_jobs_lock:
-        cards = (_trade_jobs.get(job_id) or {}).get("cards") or []
+        job = _trade_jobs.get(job_id)
+        cards = (job or {}).get("cards") or []
         ids = {c.get("trade_id") for c in cards[:limit] if isinstance(c, dict)}
+    held = job is not None
     if user_id and _trade_page_store_enabled():
         from . import database as _db
         row = _db.load_trade_page_for_job(user_id, job_id)
+        held = held or row is not None
         ids |= _stored_window_ids(row, limit)
-    return ids
+    return ids if held else None
 
 
 def _stored_window_ids(row, limit: int) -> set:
@@ -33049,8 +33071,8 @@ def _serve_stored_trade_page(user_id: str, out: dict, row: dict):
            "cursor": min(out["cursor"], preview.limit),
            "total_ready": min(out["total_ready"], preview.limit)}
     if out["cards"] and not _paywall_gate.record_preview(
-            user_id, out["job_id"], preview.pages_for(out["cursor"])):
-        return jsonify({"error": "pro_required", "gate": preview.gate}), 402
+            user_id, out["job_id"], preview.pages_for(out["cursor"]), window):
+        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
     return jsonify(out)
 
 
@@ -33066,13 +33088,13 @@ def _serve_deck_status(user_id: str, out: dict):
     if preview is None or not out.get("cards"):
         return jsonify(out)
     served = out.get("deck_id") or out["job_id"]
-    window = _paywall_page_trade_ids(user_id, served, preview.limit)
+    window = _paywall_page_trade_ids(user_id, served, preview.limit) or set()
     out = {**out, "cards": [c for c in out["cards"] if c.get("trade_id") in window],
            "cursor": min(out["cursor"], preview.limit),
            "total_ready": min(out["total_ready"], preview.limit)}
     if out["cards"] and not _paywall_gate.record_preview(
-            user_id, served, preview.pages_for(out["cursor"])):
-        return jsonify({"error": "pro_required", "gate": preview.gate}), 402
+            user_id, served, preview.pages_for(out["cursor"]), window):
+        return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
     return jsonify(out)
 
 
@@ -33095,9 +33117,10 @@ def _serve_trade_job(user_id: str, snapshot: dict, paged: bool, cursor: int = 0,
         out = _trade_job_public_view(copy.deepcopy(snapshot))
     if preview is not None and out.get("cards"):
         raw_end = out["cursor"] if paged else len(snapshot["cards"])
+        window = {c.get("trade_id") for c in snapshot["cards"] if isinstance(c, dict)}
         if not _paywall_gate.record_preview(user_id, snapshot["job_id"],
-                                            preview.pages_for(raw_end)):
-            return jsonify({"error": "pro_required", "gate": preview.gate}), 402
+                                            preview.pages_for(raw_end), window):
+            return jsonify({"error": "pro_required", "gate": _paywall_gate.PREVIEW_USED}), 402
     return jsonify(out)
 
 

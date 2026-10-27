@@ -2714,7 +2714,8 @@ subscription_events_table = Table("subscription_events", metadata,
 # Paywall deck preview (backend/paywall_gate.py): one row per never-entitled
 # user once the first page of their first deck has been SERVED to them by
 # /api/trades/generate or /status. Warm-up and cron-built jobs never write it.
-# Created by metadata.create_all on both dialects (no migration_cols row).
+# Created by metadata.create_all on both dialects; window_trade_ids (P3-1,
+# 2026-10-27) is additive, so it also has a migration_cols row.
 # Private: deleted and exported via accounts._ADDITIONAL_PRIVATE_TABLES.
 paywall_previews_table = Table("paywall_previews", metadata,
     Column("user_id",         String,  primary_key=True),  # working key (sleeper id or acct_*),
@@ -2723,6 +2724,9 @@ paywall_previews_table = Table("paywall_previews", metadata,
     Column("pages_served",    Integer, nullable=False),    # highest preview page served (1..paywall_preview_pages)
     Column("first_served_at", String,  nullable=False),
     Column("updated_at",      String,  nullable=False),
+    Column("window_trade_ids", Text),                      # JSON list: the window's trade ids at the last
+                                                            # serve; the swipe check's fallback once the job
+                                                            # is gone (P3-1). NULL on pre-P3-1 rows
 )
 
 # Give-get referral program (foundation §5). Fraud control is structural:
@@ -3682,6 +3686,11 @@ def _migrate_db() -> None:
         # ── team overhaul, all-platform sends (2026-09-07): MFL/ESPN cores
         # report a status word without a transaction id.
         ("overhaul_attempts",  "provider_status",           "VARCHAR"),
+        # Paywall deck preview P3-1 (2026-10-27): the preview window's trade
+        # ids, so a swipe on a held page-1 card survives the job's 4 h
+        # retention and a deploy. NULL on earlier rows (no backfill: the swipe
+        # check reads the live job first, and NULL is an empty window).
+        ("paywall_previews",   "window_trade_ids",          "TEXT"),
     ]
     # Each ALTER TABLE gets its own transaction so a "column already exists"
     # failure doesn't abort the whole block. PostgreSQL (unlike SQLite) marks the
