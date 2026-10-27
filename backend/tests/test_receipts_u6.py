@@ -376,7 +376,8 @@ def test_the_flip_day_is_unset_or_a_utc_day():
 
 @pytest.mark.parametrize("value, ok", [
     ("2026-11-04", True), ("2026-11-4", False), ("2026-11-04T00:00:00", False),
-    ("11/04/2026", False), ("", False), (20261104, False)])
+    ("11/04/2026", False), ("", False), (20261104, False),
+    ("20261104", False)])                                  # #448 QA: fromisoformat takes it; no round trip
 def test_the_flip_day_form(value, ok):
     from datetime import date
     assert _a_utc_day(value) is ok

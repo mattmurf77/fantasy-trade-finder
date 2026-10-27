@@ -7165,6 +7165,29 @@ PACKED_EVIDENCE_FLIP_DAY: str | None = None
 # The caveat code every series-break entry carries (analytics_queries,
 # receipts_service, the ratio route), so a reader can match on one value.
 SERIES_BREAK_CAVEAT = "series_break"
+_flip_day_warned = False
+
+
+def packed_evidence_flip_day() -> str | None:
+    """PACKED_EVIDENCE_FLIP_DAY as both caveats read it (#448 QA): a
+    "YYYY-MM-DD" str that round-trips through date.fromisoformat, else None,
+    with a WARNING once per process for any other value, so a malformed day is
+    never a 500 on either admin route nor a silent miss."""
+    global _flip_day_warned
+    from datetime import date
+    day = PACKED_EVIDENCE_FLIP_DAY
+    if day is None:
+        return None
+    try:
+        if isinstance(day, str) and date.fromisoformat(day).isoformat() == day:
+            return day
+    except ValueError:
+        pass
+    if not _flip_day_warned:
+        _flip_day_warned = True
+        log.warning("PACKED_EVIDENCE_FLIP_DAY %r is not a YYYY-MM-DD day: no series_break "
+                    "caveat on receipts or the endorsement ratio until it is", day)
+    return None
 
 
 def _evidence_shown():
@@ -8232,8 +8255,11 @@ def suggestion_link_day_span(league_id: str | None = None) -> tuple[str | None, 
     computed_at. The ratio route's series-break caveat reads it."""
     t, s = suggestion_trade_links_table, sleeper_trades_table
     day = func.substr(func.coalesce(t.c.traded_at, s.c.synced_at, t.c.computed_at), 1, 10)
+    # The league in the ON clause too (#448 QA): the same rows, and Postgres
+    # plans it on the league (23 ms → 1.3 ms).
     q = select(func.min(day), func.max(day)).select_from(
-        t.outerjoin(s, s.c.transaction_id == t.c.transaction_id))
+        t.outerjoin(s, (s.c.transaction_id == t.c.transaction_id)
+                    & (s.c.league_id == t.c.league_id)))
     if league_id:
         q = q.where(t.c.league_id == league_id)
     with engine.connect() as conn:

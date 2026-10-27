@@ -49,8 +49,7 @@ class Clock:
 def clock(monkeypatch):
     c = Clock()
     monkeypatch.setattr(server, "_ledger_now", c)
-    monkeypatch.setattr(server, "_ledger_guard_young", 0)          # the warning's rate limit
-    monkeypatch.setattr(server, "_ledger_guard_warned_at", float("-inf"))
+    # The guard warning's rate-limit state is reset per test by conftest.py.
     return c
 
 

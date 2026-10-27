@@ -1135,8 +1135,10 @@ RECEIPTS_SERIES_BREAK_DETAIL = ("U6/R-U6a: receipts move to viewed-or-first-30 c
 
 def _receipts_series_break_caveats(rows: list[dict]) -> list[dict]:
     """A `series_break` caveat when the break day is set and the serve dates
-    the metrics read span it (inclusive: the break day itself is mixed)."""
-    day = db.PACKED_EVIDENCE_FLIP_DAY
+    the metrics read span it (inclusive: the break day itself is mixed). The
+    day is read through database.packed_evidence_flip_day (a malformed value:
+    no caveat, one warning)."""
+    day = db.packed_evidence_flip_day()
     days = [str(r["served_at"])[:10] for r in rows if r.get("served_at")]
     if day is None or not days or not min(days) <= day <= max(days):
         return []
