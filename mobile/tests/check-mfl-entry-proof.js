@@ -29,7 +29,13 @@
 //       console[`log`]) are normalised before matching, and since variable
 //       indirection can't be followed, console / AsyncStorage / SecureStore /
 //       Sentry / captureException are banned outright in these files; only
-//       track( remains, under the argument rule (second QA delta).
+//       track( remains, under the argument rule (second QA delta). Round 3:
+//       no import / require / import() of expo-secure-store,
+//       @react-native-async-storage/async-storage or @sentry/react-native;
+//       `track` only as an unrenamed named import from src/api/events (no
+//       alias, default or namespace import of that module); and the
+//       global-object rule sees through `(…)`, `as`, `!`, `satisfies`.
+//       Declared residual: `track(` with a variable that holds a secret.
 //   (d) EspnLinkSheet.tsx + PlatformLinkSheet.tsx: every onEntrySession(...)
 //       call forwards `account_only` and `username` from the mint response,
 //       and both prop types declare them as optional additions.
@@ -312,27 +318,103 @@ function calleeText(call) {
     .replace(/\[\s*(['"`])(\w+)\1\s*\]/g, '.$2')
     .replace(/\?\./g, '.');
 }
+// Strip wrappers that don't change the value: `(x)`, `x as T`, `x!`,
+// `x satisfies T`, `<T>x` — so `(globalThis as any).console`,
+// `(window!).console` and `((globalThis)).console` are seen as global access.
+function unwrapExpr(e) {
+  while (
+    ts.isParenthesizedExpression(e) ||
+    ts.isAsExpression(e) ||
+    ts.isNonNullExpression(e) ||
+    ts.isSatisfiesExpression(e) ||
+    ts.isTypeAssertionExpression(e)
+  ) {
+    e = e.expression;
+  }
+  return e;
+}
 // `globalThis.console`, `window.console`, `globalThis['console']`, … — reach
 // a sink through the global object, past the root-identifier rule.
 function globalSinkAccess(sf) {
   return findAll(sf, (n) => {
-    if (ts.isPropertyAccessExpression(n)) {
-      return (
-        ts.isIdentifier(n.expression) &&
-        GLOBAL_OBJECTS.has(n.expression.text) &&
-        SINK_ROOTS.has(n.name.text)
-      );
-    }
-    if (ts.isElementAccessExpression(n)) {
-      return (
-        ts.isIdentifier(n.expression) &&
-        GLOBAL_OBJECTS.has(n.expression.text) &&
-        ts.isStringLiteralLike(n.argumentExpression) &&
-        SINK_ROOTS.has(n.argumentExpression.text)
-      );
-    }
-    return false;
+    if (!ts.isPropertyAccessExpression(n) && !ts.isElementAccessExpression(n)) return false;
+    const obj = unwrapExpr(n.expression);
+    if (!ts.isIdentifier(obj) || !GLOBAL_OBJECTS.has(obj.text)) return false;
+    if (ts.isPropertyAccessExpression(n)) return SINK_ROOTS.has(n.name.text);
+    return (
+      ts.isStringLiteralLike(n.argumentExpression) &&
+      SINK_ROOTS.has(n.argumentExpression.text)
+    );
   });
+}
+
+// Module-level routes to a sink (round-3 QA, 2026-10-27). The storage and
+// crash-report SDKs (names as in mobile/package.json) may not be imported,
+// required or dynamically imported by these files at all — none need them —
+// and `track` may only arrive as an unrenamed named import from the events
+// module (`src/api/events.ts`): no `track as x`, no `x as track`, no default
+// or namespace import of the events module, no require / import() of it.
+const BANNED_MODULES = [
+  'expo-secure-store',
+  '@react-native-async-storage/async-storage',
+  '@sentry/react-native',
+];
+const EVENTS_MODULE = path.join(__dirname, '..', 'src', 'api', 'events');
+function isBannedModule(spec) {
+  return BANNED_MODULES.some((m) => spec === m || spec.startsWith(`${m}/`));
+}
+function isEventsModule(sf, spec) {
+  if (!spec.startsWith('.')) return false;
+  const resolved = path
+    .resolve(path.dirname(sf.fileName), spec)
+    .replace(/\.(ts|tsx|js|jsx)$/, '')
+    .replace(/\/index$/, '');
+  return resolved === EVENTS_MODULE;
+}
+// Every module specifier in the file, with how it is loaded.
+function moduleRefs(sf) {
+  const out = [];
+  walk(sf, (n) => {
+    if ((ts.isImportDeclaration(n) || ts.isExportDeclaration(n)) && n.moduleSpecifier &&
+        ts.isStringLiteralLike(n.moduleSpecifier)) {
+      out.push({ node: n, spec: n.moduleSpecifier.text, kind: ts.isImportDeclaration(n) ? 'import' : 'export' });
+    } else if (ts.isImportEqualsDeclaration(n) && ts.isExternalModuleReference(n.moduleReference) &&
+        ts.isStringLiteralLike(n.moduleReference.expression)) {
+      out.push({ node: n, spec: n.moduleReference.expression.text, kind: 'import=' });
+    } else if (ts.isCallExpression(n) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0]) &&
+        (n.expression.kind === ts.SyntaxKind.ImportKeyword ||
+          (ts.isIdentifier(n.expression) && n.expression.text === 'require'))) {
+      out.push({ node: n, spec: n.arguments[0].text, kind: 'dynamic' });
+    }
+  });
+  return out;
+}
+function bannedModuleRefs(sf) {
+  return moduleRefs(sf).filter((r) => isBannedModule(r.spec));
+}
+function badTrackImports(sf) {
+  const bad = [];
+  for (const r of moduleRefs(sf)) {
+    const events = isEventsModule(sf, r.spec);
+    if (r.kind !== 'import') {
+      if (events) bad.push(r.node); // require / import() / import= / re-export
+      continue;
+    }
+    const clause = r.node.importClause;
+    if (!clause) continue;
+    if (events && clause.name) bad.push(clause.name); // default import
+    const nb = clause.namedBindings;
+    if (events && nb && ts.isNamespaceImport(nb)) bad.push(nb); // * as ev
+    if (nb && ts.isNamedImports(nb)) {
+      for (const s of nb.elements) {
+        const imported = (s.propertyName || s.name).text;
+        const local = s.name.text;
+        if (imported !== 'track' && local !== 'track') continue;
+        if (!events || s.propertyName) bad.push(s); // wrong module, or renamed
+      }
+    }
+  }
+  return bad;
 }
 
 const sinkFiles = {
@@ -377,7 +459,32 @@ for (const [rel, sf] of Object.entries(sinkFiles)) {
     `${path.basename(rel)}: never uses console / AsyncStorage / SecureStore / Sentry / captureException (indirection can't be followed)`,
     banned.map((n) => n.parent.getText().slice(0, 80)).join(' | '),
   );
+  const mods = bannedModuleRefs(sf);
+  assert(
+    mods.length === 0,
+    `${path.basename(rel)}: never imports / requires expo-secure-store, async-storage or @sentry/react-native`,
+    mods.map((r) => r.node.getText().slice(0, 80)).join(' | '),
+  );
+  const badTrack = badTrackImports(sf);
+  assert(
+    badTrack.length === 0,
+    `${path.basename(rel)}: track only as an unrenamed named import from the events module (no alias, default, namespace or require)`,
+    badTrack.map((n) => n.getText().slice(0, 80)).join(' | '),
+  );
 }
+// platformEntry's track() calls really are the events module's track.
+assert(
+  moduleRefs(entry).some(
+    (r) =>
+      r.kind === 'import' &&
+      isEventsModule(entry, r.spec) &&
+      r.node.importClause &&
+      r.node.importClause.namedBindings &&
+      ts.isNamedImports(r.node.importClause.namedBindings) &&
+      r.node.importClause.namedBindings.elements.some((s) => s.name.text === 'track' && !s.propertyName),
+  ),
+  "platformEntry.ts imports `track` (unrenamed) from './events'",
+);
 
 // ── (b) the sheet passes the login on the sign-in path only ───────────────
 

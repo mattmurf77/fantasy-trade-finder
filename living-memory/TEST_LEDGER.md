@@ -38,10 +38,15 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
     - **Computed members are normalised before matching:** `console['log']`, `` console[`log`] `` and `console?.['log']` all read as `console.log`.
     - **Log, storage and crash-report sinks are banned outright.** Variable indirection (`const c = entryMflPassRef.current; console.log(c)`) can't be followed syntactically. So `console`, `AsyncStorage`, `SecureStore`, `Sentry` and `captureException` may not be used at all in the three files; none are today.
     - `track(` stays allowed, held to the argument rule. One more assertion per file.
-- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **49 assertions**:
+  - **Round-3 QA (2026-10-27, after `03a89ce2`):**
+    - **No storage or crash-report SDK.** `import`, `require`, `import()`, `import =` and re-export of `expo-secure-store`, `@react-native-async-storage/async-storage` or `@sentry/react-native` are banned, using the module names from `mobile/package.json`. None of the three files needs them.
+    - **`track` comes only from the events module, unrenamed.** It may only be an unrenamed named import from `src/api/events`, resolved from each file's own directory. No `track as x`, no `x as track`, no `track` from another module, and no default, namespace, `require` or `import()` of the events module. A positive pin checks that `platformEntry.ts` imports `track` from `./events`.
+    - **The global-object rule sees through wrappers:** `(…)`, `as`, `!`, `satisfies` and `<T>`.
+    - **Declared residual, unchanged:** `track(` with a variable that holds a secret.
+- **Guard `check-mfl-entry-proof.js`** (`npm run test:mfl-entry-proof`), **56 assertions**:
   - (a) the `mfl` mint body spreads `{username, password}` only behind `args.username && args.password`, with no bare property, and the ESPN body has neither;
   - (b) `mflEntryPickLeague` passes `username` from `mflUser` and `password` from `entryMflPassRef`, and `pickTeam` passes neither;
-  - (c) the three-file leak guard above: sink arguments, direct-call-only use, no global-object route, and the outright log/storage/crash-report ban, one assertion each per file (12);
+  - (c) the three-file leak guard above: sink arguments, direct-call-only use, no global-object route, the outright log/storage/crash-report ban, no storage/crash SDK import, and `track` imports, one assertion each per file (18), plus the positive `./events` import pin;
   - (d) both sheets type `onEntrySession` with the optional `account_only` / `username`, and every call forwards `minted.account_only` / `minted.username`;
   - (e) the entry sign-in path:
     - order: mint → `mflAuthLink` → `mflAuthImport([lg.league_id])`, each called once, and never `linkPlatformLeague`;
@@ -105,6 +110,19 @@ Not express. Scope: platforms-eng's ESPN/MFL sign-in design §3 ("Client: the 11
   - **I1:** indirection, `const c = entryMflPassRef.current; console.log(c)` → red on the ban only. The argument rule can't see it, which is why the ban exists.
   - **I2:** a benign `console.warn('mint failed')` → red, because the ban is unconditional.
   - **I3:** `captureException(err)` → red.
+- **Sabotage, round-3 QA (2026-10-27): 11/11 red, then green on restore, byte-identical.** Each sabotage hit only its intended rule.
+  - **B1:** `import * as SecureStore from 'expo-secure-store'` (MFL sheet) → red.
+  - **B2:** `import AsyncStorage from '@react-native-async-storage/async-storage'` (ESPN sheet) → red.
+  - **B3:** `const Sentry = require('@sentry/react-native')` (`platformEntry`) → red.
+  - **T1:** `import { track as t } from './events'` → red.
+  - **T2:** `import ev from './events'` (default) → red.
+  - **T3:** `import * as ev from '../api/events'` (namespace, from `components/`) → red.
+  - **T4:** `import { track } from './client'` (wrong module) → red on the import rule and the positive pin.
+  - **U1:** `(globalThis as any).console.log('x')` → red.
+  - **U2:** `(window!).console.warn('x')` → red.
+  - **U3:** `((globalThis)).console.info('x')` → red.
+  - **U4:** `(globalThis satisfies object)['console']` → red.
+  - U1–U4 fail only the global-object rule, so the unwrapping is what catches them.
 - **Re-pinned in `check-landing-platform-options`:**
   - V2's ESPN `pickTeam` window went from 900 to 1200 chars, because the forwarded fields lengthen the span (874 → 956).
   - V2.1's three `mflEntryPickLeague` pins encoded the old contract. They said the import goes through `linkPlatformLeague`, that `mflAuthImport` is never used, and that the re-store is best-effort with the password dropped first. Per the follow-up, they now pin `mflAuthImport([lg.league_id], yr)` with no `linkPlatformLeague`, no default-ALL import, and a required `mflAuthLink` that drops the password only after it succeeds.
