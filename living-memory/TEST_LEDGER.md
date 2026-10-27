@@ -1,3 +1,18 @@
+## 2026-10-27 — ESPN sign-in co-owners: accept any listed team owner, not only the primary (`feat/espn-signin-coowners`, stacked on #430 @ `d3248d35`)
+
+Full gates. Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the tests below plus the code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups).
+
+- **What changed:** `EspnTeam.owner_swids` (every listed owner, `swid_identity` form; `owner_swid` unchanged). D4 step 5 and row 7's named-team lookup use `owner_swids` membership. The step-4 control code is unchanged (a primary `owner_swid`, never the claimant's own). `/api/espn/link` and the #321 checks are unchanged (pinned).
+- **New tests:**
+  - `test_platform_sign_in.py` (+9): the co-owner is proven into its own account (after the primary imported the league; the same account on re-sign-in; the control is the team's primary); the primary is still proven; a non-owner is still `wrong_account`; row 7 names a co-owned team; the control never uses the claimant's SWID (×3 layouts); ownerless with `owners` missing; and `test_known_gap_coowner_import_at_espn_link_is_still_refused_by_321`, which pins the follow-up gap.
+  - `test_espn_service.py` (+11): the `owner_swids` parse, including missing, empty, null, blank, non-list and non-string `owners`, and a hand-built `EspnTeam`.
+- **Sabotage, each red then restored:**
+  - step 5 back to primary-only matching → 5 red (the co-owner test, row 7, all 3 control layouts);
+  - parse back to the primary only → 8 red (those 5 + 3 parse tests);
+  - control allowed to pick the claimant's own SWID → 43 red (incl. 2 of the 3 control layouts; the third places the claimant on no primary, so that sabotage can't reach it).
+- **Run:** `test_platform_sign_in.py`, `test_entry_platform_route.py`, `test_mfl_auth_link_route.py`, `test_mfl_link_route.py`, `test_espn_link_route.py`, `test_espn_identity_binding.py`, `test_espn_service.py`, `test_mfl_service.py`, `test_espn_my_leagues_route.py`, `test_link_status_routes.py`, `test_mfl_propose_route.py`, `test_prepared_trade_cohort.py`, `test_espn_draft_order.py`, `test_espn_propose_route.py`, `test_i2_espn_ownership.py`, `test_espn_write.py`: **562 passed, 0 failed**. `check-landing-platform-options.js` passes.
+- **Full suite** (`backend/tests`, Python 3.14): **9112 passed, 2 skipped**, 0 failed (36 min).
+
 ## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
 
 Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. This builds on the 2026-10-26 entry below.

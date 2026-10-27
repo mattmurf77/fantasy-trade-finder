@@ -29914,7 +29914,10 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
     #    (from this league's own owners; never echoed or logged) must fail
     #    auth, or ESPN isn't binding espn_s2 to the SWID and a leaguemate's
     #    own espn_s2 + a victim's (league-visible) SWID would pass steps 2,
-    #    3 and 5. No second owner SWID → no control → refuse.
+    #    3 and 5. No second owner SWID → no control → refuse. The control is
+    #    a primary owner_swid exactly as ESPN listed it, and NEVER the
+    #    claimant's own (identity compare). When the claimant is a co-owner,
+    #    the claimed team's primary owner may be the control — that's fine.
     control_swid = next(
         (t.owner_swid for t in league["teams"]
          if _ident(t.owner_swid) and _ident(t.owner_swid) != subject),
@@ -29934,16 +29937,22 @@ def _espn_signin_proof(audit: dict, _espn, league_id: str, season: int,
     if control != "auth":
         return _unavailable()
 
-    # 5. The claimed team must be owned by the proven SWID (#321).
-    if not _ident(team.owner_swid):
+    # 5. The proven SWID must be one of the claimed team's LISTED owners —
+    #    the primary owner or a co-owner (EspnTeam.owner_swids, 2026-10-27).
+    #    The identity stays the claimant's own SWID, so each co-owner signs
+    #    into their own account.
+    def _owners(t):
+        return {_ident(s) for s in t.owner_swids} - {""}
+
+    if not _owners(team):
         return _refuse("proof_unavailable",
                        _SIGNIN_PROOF_UNAVAILABLE_MSG["espn_ownerless_team"],
                        "espn_ownerless_team")
-    if _ident(team.owner_swid) != subject:
+    if subject not in _owners(team):
         # Proof reads all succeeded, so naming the team this login owns in
         # this league tells the caller nothing a member can't already see.
         owned = next((t for t in league["teams"]
-                      if _ident(t.owner_swid) == subject), None)
+                      if subject in _owners(t)), None)
         message = (_SIGNIN_OWNS_OTHER_TEAM_MSG.format(
                        platform="ESPN", team=owned.name)
                    if owned is not None and owned.name
@@ -30078,7 +30087,8 @@ def entry_platform():
           espn_public_league); the same espn_s2 with ANOTHER member's SWID
           must fail auth (else proof_unavailable / espn_unproven_pair +
           WARN ESPN-PAIR-UNBOUND; no other owner SWID → the same refusal);
-          the claimed team's owner_swid must be the pair's SWID (else 403
+          the pair's SWID must be one of the claimed team's listed owners,
+          primary or co-owner (EspnTeam.owner_swids; else 403
           espn_bad_credentials / wrong_account, naming the team this login
           owns in the league when there is one; ownerless →
           proof_unavailable / espn_ownerless_team). Any answer to the

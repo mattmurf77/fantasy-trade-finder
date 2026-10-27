@@ -197,3 +197,33 @@ The mint's refusal `message`s are the **final 14-row set** from marketing-lead (
   - MFL **accepts** the same username in a different case → MFL is case-insensitive, and lower-casing is correct. No change.
   - MFL **rejects** it → MFL is case-sensitive. **Before ask 16**, switch the `mfl` branch of `platform_subject` to trim-only (case-preserving), together with the D6 conflict comparison in `platform_identity_in_use`, which goes through the same normaliser.
 - The same rule is written as a code comment at `accounts.platform_subject`.
+
+---
+
+## Post-launch follow-ups
+
+### ESPN sign-in: accept any listed team owner, co-owners included (2026-10-27, `feat/espn-signin-coowners`, stacked on #430 @ `d3248d35`)
+
+head-eng accepted "a co-owner who isn't the primary owner is refused `wrong_account`" for launch, with a post-launch fix. This is that fix. Full gates (it changes who the sign-in admits).
+
+- **Parse:** `espn_service.EspnTeam` gains `owner_swids: tuple[str, ...]`: every listed owner (`primaryOwner` first, then `owners[]` in ESPN's order), each in the one SWID identity form (`swid_identity`, the normaliser behind `accounts.platform_subject("espn", …)`), de-duplicated, empties and non-strings dropped. A missing, null or non-list `owners` adds nothing; `()` = ownerless. `owner_swid` (`primaryOwner or owners[0]`, as ESPN sent it) is **unchanged** for every existing caller. A team built without the field derives it from `owner_swid` (`__post_init__`).
+- **D4 step 5:** the proof accepts the claim when the claimant's canonical SWID is **in** the claimed team's `owner_swids`. The identity is still the claimant's own SWID, so each co-owner signs into their own account (D6's `platform_identity_in_use` checks the claimant's subject, so a primary owner's stored `espn_credentials.swid` doesn't block a co-owner).
+- **Row 7:** the named-team lookup ("This ESPN login owns {Team}…") uses `owner_swids` membership too, so it names a team the login co-owns.
+- **D4 step 4 (pair-binding control): unchanged code.** It still picks the first primary `owner_swid` whose identity differs from the claimant's, raw as ESPN listed it (an identity-form SWID isn't guaranteed to be ESPN's wire form, and a malformed control could fail auth for the wrong reason). So it is never the claimant's own SWID. When the claimant is a co-owner, the claimed team's primary owner can be the control, which the brief allows.
+- **Ownerless:** a team with no listed owner (`owners` missing, empty or null, no `primaryOwner`) stays `espn_ownerless_team`, uncounted.
+- **Not changed (pinned):** `/api/espn/link`, `/api/espn/import` and the #321 checks still compare the primary `owner_swid`.
+  - **Known gap, the follow-up:** the client's post-mint import is `POST /api/espn/link` with the co-owner's pair and team, and #321's team-binding check refuses it 403 `wrong_account`. So a co-owner can sign in but their league import fails until the link route accepts `owner_swids`. Pinned by `test_known_gap_coowner_import_at_espn_link_is_still_refused_by_321`, to flip with that follow-up.
+  - Separately, the comment above that check says "co-owned … INCONCLUSIVE-ACCEPT", but the code doesn't do that for a non-primary co-owner.
+- **Known limits:** the "a co-owner who is not the primary owner gets `wrong_account` and signs in with Apple" line lived in `docs/integrations/espn.md` §2.5, not in this scope block. It is replaced there by the co-owner paragraph and the known gap above.
+- **Analytics / schema / flags:** none. No new `error_code` or `reason`.
+- **Evidence** (`living-memory/TEST_LEDGER.md` 2026-10-27 "ESPN sign-in co-owners"):
+  - `test_platform_sign_in.py` (+9 cases):
+    - `test_espn_coowner_who_is_not_primary_is_proven_into_its_own_account`: its own account even after the primary imported the league; the same account on the next sign-in; the control is the team's primary, not the claimant;
+    - `test_espn_primary_owner_is_still_proven_on_a_co_owned_team`;
+    - `test_espn_non_owner_of_a_co_owned_team_is_still_wrong_account`;
+    - `test_c8_row7_names_the_team_this_login_co_owns`;
+    - `test_espn_control_never_uses_the_claimants_own_swid` (×3 layouts: the claimant's SWID on several teams, in any format);
+    - `test_espn_ownerless_team_is_still_ownerless_with_owners_missing`;
+    - the known-gap pin.
+  - `test_espn_service.py` (+11 cases): the fixture, co-owners primary-first and de-duplicated, no primary, missing / empty / null / blank / non-list `owners` (×6), non-string entries, the hand-built `EspnTeam`.
+- **Docs:** `docs/integrations/espn.md` §2.5 + §3.2; the `docs/api-reference.md` `/api/entry/platform` row (the owner check, the control wording, the known gap). The design-note line is not this worker's. `living-memory/LLD.md` / `HLD.md` / `docs/architecture.md`: n/a.
