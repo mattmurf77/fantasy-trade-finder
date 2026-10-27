@@ -303,6 +303,38 @@ def run() -> int:
     r.check("HYG-excluded-documented", set(EXCLUDED) <= set(EXCLUDED),
             f"{len(EXCLUDED)} pages excluded with reasons")
 
+    # ── GATE: the web's ESPN/MFL chips stay off (head-eng 2026-10-27) ────
+    # landing.platform_options now means the APP's proof-based ESPN/MFL
+    # sign-in, and the web has none until after launch. So no web script reads
+    # that flag, app.js's gate constant is false, both the chip reveal and the
+    # chip handler go through it, and the markup ships the chips hidden.
+    flag_read = r"FTF_FLAG\(\s*['\"`]landing\.platform_options"
+    reads = [f"js/{p.name}" for p in sorted((WEB / "js").glob("*.js"))
+             if re.search(flag_read, p.read_text(encoding="utf-8"))]
+    reads += [p for p in PAGES if re.search(flag_read, all_sources[p])]
+    consts = re.findall(r"\bconst WEB_PLATFORM_ENTRY\s*=\s*(\w+)\s*;", app_js)
+
+    def fn_body(name: str) -> str:
+        m = re.search(r"\n([ \t]*)function " + name + r"\([^)]*\)\s*\{(.*?)\n\1\}", app_js, flags=re.S)
+        return m.group(2) if m else ""
+
+    via_gate = (re.search(r"\bconst optionsOn\s*=\s*WEB_PLATFORM_ENTRY\s*;",
+                          fn_body("_applyPlatformOptionsFlag")) is not None
+                and re.search(r"!WEB_PLATFORM_ENTRY\b", fn_body("selectEntryPlatform")) is not None)
+    tags = {i: re.search(r'<[a-z]+\b[^>]*\bid="' + i + r'"[^>]*>', idx)
+            for i in ("platform-row", "platform-chip-espn", "platform-chip-mfl")}
+    shown = [i for i, m in tags.items()
+             if not (m and re.search(r'\bclass="[^"]*\bhidden\b', m.group(0)))]
+    ok = not reads and consts == ["false"] and via_gate and not shown
+    r.check("GATE-web-espn-mfl-off[index.html]", ok,
+            (f"reads landing.platform_options: {', '.join(reads)}" if reads else
+             f"app.js WEB_PLATFORM_ENTRY is {consts or 'missing'}; want one const, false"
+             if consts != ["false"] else
+             "the chip reveal or selectEntryPlatform doesn't go through WEB_PLATFORM_ENTRY"
+             if not via_gate else
+             f"not hidden in the markup: {', '.join(shown)}")
+            if not ok else "web ESPN/MFL chips hard-off; landing.platform_options is the app's flag")
+
     return r.report(), r
 
 
