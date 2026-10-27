@@ -1,3 +1,22 @@
+## 2026-10-27 — Owned-pick sync: an empty `/drafts` read keeps the prior current-season exclusion (#470 QA P3-2)
+
+Server only, platforms-eng lead; one commit on `fix/owned-picks-drafts-flake`. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. No flag, schema, route or analytics change.
+
+- **The flip:** init A's live `/drafts` read excluded the current season. Init B's read flaked to `[]` while the cached #207 verdict didn't say `drafted`, so B re-populated the season and the next good read removed it again. Each flip moved `rfp1`. Fix: on an empty read without a cached `drafted`, `server._sleeper_prior_grid_excludes` reads the prior platform grid (`load_draft_picks(league_id, source=PICK_SOURCE_PLATFORM)`) before the replace. If the grid has later seasons but none for the current one, the sync keeps the season excluded and logs it at INFO.
+- **New tests in `test_owned_picks.py` (7; the file is now 45):**
+  - complete, then an empty read with no verdict: the season stays excluded;
+  - complete → flake → complete → flake: `roster_snapshot(...).fp` is the same throughout;
+  - a prior grid that carries the season keeps it on an empty read;
+  - a first sync on an empty read includes it (D-089);
+  - the live read wins both ways (complete → pre_draft re-includes → complete excludes);
+  - a season rollover (meta season 2027) ends the sticky exclusion;
+  - a cached `drafted` still excludes a season the prior grid carries.
+- **`test_pick_assignment.py`:** `_sleeper_prior_grid_excludes` was added to `_SANCTIONED_SOURCE_CALLERS`. It is a literal platform read of the sync's own provenance and never follows `picks.assign_tradeable`.
+- **Sabotage, red then restored:** with the sticky branch disabled (`elif False and …`), 2 tests went red: the row test (2026 came back) and the fp test (the fp alternated `rfp1:2adc…` / `rfp1:8c3f…`).
+- **Targeted:** the 59 files that grep `owned_pick|draft_status|pick_tradab|roster_refresh|roster_snapshot` → 1840 passed. The only red was the AST reader guard above, fixed by registering the new reader.
+- **Full suite:** `pytest backend/tests -q` → 9255 passed, 2 skipped, 0 failed (12m55s, Python 3.14 locally; CI runs 3.12).
+- **Not run:** `tsc --noEmit` and testid-lint (no mobile change).
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.

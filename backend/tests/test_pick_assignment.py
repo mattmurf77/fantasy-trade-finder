@@ -275,6 +275,12 @@ _SANCTIONED_SOURCE_CALLERS = frozenset({
     # moved with it — same call, same literal, one enclosing function.
     "_sleeper_propose_core",     # server.py  — POST /api/trades/propose pick encode (extracted core)
     "trades_validate",           # server.py  — POST /api/trades/validate pick advisories
+    # #470 QA P3-2 — the Sleeper owned-pick sync's corroboration on an empty
+    # `/drafts` read. A LITERAL platform read on purpose: it reads the rows
+    # that sync itself wrote and replaces (its own provenance), so it must
+    # never follow `picks.assign_tradeable`. It prices nothing; it reads
+    # `season` only, to see whether a prior sync excluded the current season.
+    "_sleeper_prior_grid_excludes",  # server.py — owned-pick sync, prior-grid read
 })
 
 #: Everything allowed to name `source=` at all: the seven engine read sites
