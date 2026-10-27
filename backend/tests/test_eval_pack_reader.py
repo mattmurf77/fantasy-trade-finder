@@ -121,8 +121,10 @@ def _row(card: dict, *, ghost: bool = False) -> dict:
 
 
 def write_deck(eng, packs, cards, *, full, packed=None, card_count=None, ghosts=(),
-               viewed=(), served_at=SERVED, deliveries=None, edit=None):
-    """Rows for the indexes in `full` (+ ghost rows copying `ghosts`), a pack
+               viewed=(), served_at=SERVED, deliveries=None, edit=None, tier=None):
+    """Rows for the indexes in `full` (+ ghost rows copying `ghosts`; `tier`
+    set: the full rows carry that evidence_tier and delivered_at = served_at,
+    as a deferred-evidence deck's do), a pack
     holding the indexes in `packed` (None: no pack) with `deliveries`
     (default: the whole deck in one page), and a `viewed` outcome per listed
     index, posted with the card's id. `edit(packed_run) -> packed_run`
@@ -130,7 +132,9 @@ def write_deck(eng, packs, cards, *, full, packed=None, card_count=None, ghosts=
     job = cards[0]["deck_job_id"]
     n = len(cards) if card_count is None else card_count
     with eng.begin() as conn:
-        rows = [_row(c) for c in cards if c["card_index"] in full]
+        rows = [_row(c) if tier is None else
+                {**_row(c), "evidence_tier": tier, "delivered_at": served_at}
+                for c in cards if c["card_index"] in full]
         rows += [_row(cards[i], ghost=True) for i in ghosts]
         if rows:
             conn.execute(insert(deck_impressions_table), rows)
@@ -344,9 +348,9 @@ def test_calibration_excludes_integrity_deck_cards():
 def test_exclusion_rule_version_is_stamped_and_mixed_versions_are_flagged():
     decks = load_decks(engine=_mixed_engine())
     run = evaluate(_Spy(), decks, ess_min=1, bootstrap=20, seed=0)
-    assert EXCLUSION_RULE_VERSION == 4 and run.exclusion_rule_version == 4
+    assert EXCLUSION_RULE_VERSION == 5 and run.exclusion_rule_version == 5
     record = run_record(run, run)
-    assert record["exclusion_rule_version"] == 4 and record_rule_version(record) == 4
+    assert record["exclusion_rule_version"] == 5 and record_rule_version(record) == 5
     assert record_rule_version({"scorer": "production"}) == 1      # written before the field
 
     assert rule_version_note([3, 3]) is None
@@ -356,7 +360,7 @@ def test_exclusion_rule_version_is_stamped_and_mixed_versions_are_flagged():
     old = replace(run, exclusion_rule_version=2)      # before delivered-position exposure
     assert verdict(run, run) != "RULE-MISMATCH"
     assert verdict(run, old) == "RULE-MISMATCH" == verdict(old, run)
-    assert "Exclusion rules: version 4." in render_report([run], run)
+    assert "Exclusion rules: version 5." in render_report([run], run)
     mixed = render_report([run], old)
     assert "WARNING: exclusion rules differ" in mixed and "RULE-MISMATCH" in mixed
 
@@ -493,19 +497,23 @@ def test_pack_required_since_flags_in_flight_and_lost_packs(monkeypatch, require
     served = {"live": "2026-10-23T12:00:00+00:00",     # 2 h before as_of: may be live
               "lost": "2026-10-21T12:00:00+00:00",     # 50 h before: retired, pack lost
               "legacy": "2026-10-19T12:00:00+00:00"}   # before the requirement
-    for job, at in served.items():
+    for job, at in served.items():      # live and lost: deferred-evidence decks (tiered)
         write_deck(eng, packs, _deck_cards(job, 30, served_at=at), full=range(30),
-                   served_at=at, viewed=[0])
+                   served_at=at, viewed=[0], tier=None if job == "legacy" else "first30")
+    # Served after the requirement but never packed by design (no tier: a
+    # flag-off or live-evidence deck): no pack is expected of it.
+    write_deck(eng, packs, _deck_cards("unpacked", 30, served_at=served["lost"]),
+               full=range(30), served_at=served["lost"], viewed=[0])
     write_deck(eng, packs, _deck_cards("packed", 34, served_at=served["lost"]),
                full=range(30), packed=range(30, 34), served_at=served["lost"])
 
     got = {d.deck_job_id: d.exclusion for d in load_decks(engine=eng, as_of=AS_OF)}
     no_clock = {d.deck_job_id: d.exclusion for d in load_decks(engine=eng)}
     if required is None:      # the writer hasn't shipped: no pack is ever expected
-        assert got == no_clock == dict.fromkeys(("live", "lost", "legacy", "packed"))
+        assert got == no_clock == dict.fromkeys(("live", "lost", "legacy", "packed", "unpacked"))
         return
     assert got == {"live": IN_FLIGHT, "lost": INCOMPLETE_DECK, "legacy": None,
-                   "packed": None}
+                   "packed": None, "unpacked": None}
     assert no_clock["live"] == INCOMPLETE_DECK    # without as_of it can't be called live
 
     decks = load_decks(engine=eng, as_of=AS_OF)

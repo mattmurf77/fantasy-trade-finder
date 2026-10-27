@@ -107,7 +107,8 @@ def test_calibration_pairs_inclusion_and_labels():
     assert pairs == [(0.25, 1.0), (0.25, 0.0)]
     assert excluded == {"calibration_refresh": 0,
                         "partial_run": 0, "in_flight": 0, "pack_integrity": 0,
-                        "incomplete_deck": 0, "null_propensity": 1, "never_viewed": 1,
+                        "withdrawal_conflict": 0, "incomplete_deck": 0,
+                        "no_delivery_evidence": 0, "null_propensity": 1, "never_viewed": 1,
                         "undo_reversed": 1, "bad_features": 1,
                         "scorer_error": 0}
 

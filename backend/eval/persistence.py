@@ -51,8 +51,13 @@ def run_record(run, baseline, extra: dict | None = None) -> dict:
         "partial_run_decks": run.partial_run_decks,
         "in_flight_decks": run.in_flight_decks,
         "pack_integrity_decks": run.pack_integrity_decks,
+        "withdrawal_conflict_decks": run.withdrawal_conflict_decks,
         "incomplete_decks": run.incomplete_decks,
+        "no_delivery_evidence_decks": run.no_delivery_evidence_decks,
         "calibration_refresh_decks": run.calibration_refresh_decks,
+        "withdrawn_removed_cards": run.withdrawn_removed_cards,
+        "withdrawn_removed_by_reason": dict(sorted(run.withdrawn_removed_by_reason.items())),
+        "upgrade_misses": dict(sorted(run.upgrade_misses.items())),
         "tilt_clipped": run.tilt_clipped,
         "metrics": {
             name: {

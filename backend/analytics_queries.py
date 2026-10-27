@@ -405,6 +405,10 @@ NON_INTENT_EVENTS = frozenset({
     "trade_first_card_failed",
     # deck_buffer_empty (ruling 30): an AC-L4 system outcome, never a choice.
     "deck_buffer_empty",
+    # deck_i1_check (S0's C-a readout, 2026-10-27, added in the SAME commit as
+    # its emitter): a server-fired outcome of each served page, on background
+    # polls too. The serve's request already reflects the user's intent.
+    "deck_i1_check",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
@@ -599,7 +603,7 @@ SERIES_BREAKS = (
 def _series_break_caveats(start_day, end_day, events):
     """A `series_break` caveat for each known break in `events` whose day is
     inside the window (inclusive: the break day itself is mixed)."""
-    return [{"code": "series_break", "scope": f"event:{event}", "detail": detail, "day": day}
+    return [{"code": db.SERIES_BREAK_CAVEAT, "scope": f"event:{event}", "detail": detail, "day": day}
             for day, event, detail in SERIES_BREAKS
             if event in events and str(start_day) <= day <= str(end_day)]
 
