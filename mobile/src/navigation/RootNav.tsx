@@ -53,6 +53,7 @@ import PushPrimingModal from '../components/PushPrimingModal';
 import FeedbackFAB from '../components/FeedbackFAB';
 import AnalystGuide from '../components/AnalystGuide';
 import VerifyAccountBanner from '../components/VerifyAccountBanner';
+import VerifySheet from '../components/VerifySheet';
 import Toast from '../components/Toast';
 import { usePushNotifications } from '../hooks/usePushNotifications';
 import { useFlag, useFeatureFlags } from '../state/useFeatureFlags';
@@ -206,8 +207,10 @@ type AuthStack = {
   // Registered UNCONDITIONALLY like every other flag-gated route; the screen
   // self-guards on the flag and pops when it is off. `source` names what sent
   // the user here and rides every paywall_* event, so conversion can be read
-  // per entry point; in this build the only source is 'settings'.
-  Paywall: { source: string };
+  // per entry point (`first_opinion | left_deck | gate | settings |
+  // preview_end`). A locked action (#393 M1) also passes the 402's `gate`
+  // and `kind` ('find' | 'send'), which pick the headline.
+  Paywall: { source: string; gate?: string; kind?: 'find' | 'send' };
   // Tip jar (same flag, same dark posture). Money with NO entitlement — see
   // screens/TipJarScreen.tsx.
   TipJar: { source: string };
@@ -1190,6 +1193,10 @@ export default function RootNav({ booted }: { booted: boolean }) {
           not just the authed tabs. Renders null unless a step is active;
           native sheets/alerts still render above it (system modals win). */}
       <AnalystGuide />
+      {/* #393 M1 — the VerifySheet. Container-level so it covers root-stack
+          pushes as well as the tabs; renders nothing until the paywall gate
+          (state/usePaywallGate) opens it. */}
+      <VerifySheet />
       {/* PRD 01-04: unroutable-deep-link fallback toast (v2 router only).
           Renders null while not visible — inert with the flag off. */}
       <Toast
