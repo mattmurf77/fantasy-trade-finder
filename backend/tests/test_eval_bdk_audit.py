@@ -301,6 +301,48 @@ def test_the_short_deck_check_reads_every_displayed_card(monkeypatch):
     assert t["incomplete_decks"] == 1                       # "gap"
 
 
+def _prefix_deck(db, job, tier, x_at=(0, 1, 2, W - 1)):
+    """Rows for only the first W cards of a longer built deck, X at `x_at`:
+    what the loader holds for a pack-less tiered deck (the first 30) or a
+    partial_run one (its delivered rows)."""
+    deck(db, job, W, {i: {**(with_x(job, i) if i in x_at else row(job, i)),
+                          "evidence_tier": tier, "delivered_at": SERVED} for i in range(W)})
+
+
+@pytest.mark.parametrize("tier, hours, exclusion", [
+    ("first30", 2, "in_flight"),           # no pack yet, inside 25 h
+    ("first30", 30, "incomplete_deck"),    # a lost pack
+    ("partial_run", 2, None),              # its delivered rows only
+], ids=["in_flight", "lost_pack", "partial_run"])
+def test_a_deck_whose_cards_are_a_prefix_is_never_a_short_deck(monkeypatch, tier, hours,
+                                                                exclusion):
+    """#469 QA P1-1: these decks' cards are a prefix of what was displayed,
+    so an over-cap card at the prefix's end would look deferred; X's fourth
+    copy at W - 1 is a real breach and must stay one."""
+    monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", SINCE)
+    db = make_db()
+    _prefix_deck(db, "pre", tier)
+    as_of = _after(hours)
+    assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
+                                                      as_of=as_of)] == [exclusion]
+    t = audit(db.eng, since=SINCE, as_of=as_of).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+
+
+def test_ghost_rows_are_not_part_of_the_displayed_order():
+    """#469 QA P3-1: the fixed point is over displayed cards only. A ghost
+    carrying X at index 3 would break it if it were counted."""
+    db = make_db()
+    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))
+    ghost = {**row("short", 3, {"X": HEAD, "short-gh": HEAD}, {"short-rh": HEAD}),
+             "impression_id": card_impression_id("short", 3) + ":ghost", "is_ghost": 1,
+             "served_at": SERVED}
+    with db.eng.begin() as conn:
+        conn.execute(insert(db.imp), [ghost])
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (0, 1)
+
+
 def test_the_rules_never_take_dq_repeat_caps_place():
     """B-DK-7's short-deck check calls deck_quality._repeat_cap itself."""
     assert ba._repeat_cap is dq._repeat_cap
@@ -309,7 +351,9 @@ def test_the_rules_never_take_dq_repeat_caps_place():
 @pytest.mark.parametrize("bad", [
     {"assets_json": json.dumps({"give": 5, "receive": ["d-r0"]})},
     {"assets_json": json.dumps({"give": True, "receive": ["d-r0"]})},
-], ids=["int_side", "bool_side"])
+    {"assets_json": json.dumps({"receive": ["d-r0"]})},
+    {"assets_json": json.dumps({"give": [], "receive": []})},
+], ids=["int_side", "bool_side", "missing_side", "empty_sides"])
 def test_a_malformed_assets_side_is_not_auditable_never_a_crash(bad):
     """#453 QA P3-1: a non-list side made the weekly run exit 4."""
     db = make_db()

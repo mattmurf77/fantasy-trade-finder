@@ -78,8 +78,10 @@ an over-cap card to just after the cards it keeps, so with fewer than
 REPEAT_WINDOW cards to keep the deferred ones still land in the window. A
 breach is explained that way when re-running deck_quality._repeat_cap on
 the deck's whole displayed order leaves it unchanged (the filter could do no
-better); that needs a well-formed full row for every displayed card, else it
-stays a violation. Both are counted in `explained`, split as
+better); that needs a well-formed full row for every displayed card, and a
+deck whose cards are a prefix of what was displayed (any loader exclusion,
+e.g. in_flight or a lost pack's incomplete_deck, or a partial_run deck) never
+qualifies, else it stays a violation. Both are counted in `explained`, split as
 explained_protected / explained_short_deck, with examples (`why`). A window card with no full row is not auditable and
 its deck incomplete (a breach found there still counts). The filter ran on
 the built order, ghost rows and later withdrawals included, so a served
@@ -129,8 +131,8 @@ from backend.deck_quality import (
     REPEAT_WINDOW, _breakup, _filler, _repeat_cap, is_protected,
 )
 from backend.eval.data import (
-    CALIBRATION_REFRESH, PACK_INTEGRITY, PACK_TABLE, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
-    _json_dict, load_decks, valuation_markets,
+    CALIBRATION_REFRESH, PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, UPGRADE_MISS_OTHER,
+    WITHDRAWAL_CONFLICT, _json_dict, load_decks, valuation_markets,
 )
 from backend.eval.flip_read import (
     _PACK_ROWS, FAIL, LIST_CAP, PASS, ReadOnlyViolation, _chunks, _iso, _Parser, _redact,
@@ -283,7 +285,7 @@ def _ids(side) -> list[str] | None:
 def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
     """impression_id -> (give, receive, markets, protected, card) for each
     id with a full row (assets_json), read chunked. give and receive are None
-    when either side isn't a list; markets is {} when none is recorded;
+    when either side is missing, empty or not a list; markets is {} when none is recorded;
     `card` carries the ids and the protection attributes, for
     deck_quality._repeat_cap."""
     imp = deck_impressions_table
@@ -297,8 +299,8 @@ def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
             if assets is None:
                 continue
             features = _json_dict(r.features_json) or {}
-            give, receive = _ids(assets.get("give", [])), _ids(assets.get("receive", []))
-            if give is None or receive is None:
+            give, receive = _ids(assets.get("give")), _ids(assets.get("receive"))
+            if not give or not receive:           # missing, not a list, or empty: unusable
                 give = receive = None
             card = SimpleNamespace(source_like_impression_id=r.source_like_impression_id,
                                    give_player_ids=give or [], receive_player_ids=receive or [],
@@ -327,8 +329,15 @@ def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
 def _short_deck(deck, rows, fetch) -> bool:
     """Whether the deck's whole displayed order is a fixed point of
     deck_quality._repeat_cap (module doc): False when any displayed card has
-    no well-formed full row. Rows the window didn't need are fetched and
-    added to `rows`."""
+    no well-formed full row, and for a deck whose cards are only a prefix of
+    what was displayed: one with a loader exclusion (in_flight, or a lost
+    pack's incomplete_deck: the first REPEAT_WINDOW and viewed rows) or a partial_run
+    deck (its delivered rows), where an over-cap card at the prefix's end
+    would read as deferred (#469 QA P1-1). Rows the window didn't need are
+    fetched and added to `rows`."""
+    if deck.exclusion is not None or any(c.evidence_tier == PARTIAL_RUN_TIER
+                                         for c in deck.cards):
+        return False
     shown = sorted((c for c in deck.cards if not c.is_ghost), key=lambda c: c.position)
     missing = [c.impression_id for c in shown if c.impression_id not in rows]
     if missing:
