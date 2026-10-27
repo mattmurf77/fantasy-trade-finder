@@ -377,8 +377,9 @@ MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same w
 
 S0 (launch §3a, `docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md`). One row per league recording the
 last **Sleeper roster refresh**: the read `/api/session/init` makes at app open and foreground. Written by
-`backend/roster_refresh.py` through `database.mark_league_roster_fresh` / `mark_league_roster_failed`; read
-with `get_league_roster_state`. Every write is a single-row dialect-aware upsert. A failed read **never** touches
+`backend/roster_refresh.py` through `database.mark_league_roster_fresh` / `mark_league_roster_failed` (upserts) and
+`cas_league_roster_fp` (the `roster_fp` stamp, a single-row compare-and-set UPDATE); read with
+`get_league_roster_state`. Every write is single-row. A failed read **never** touches
 `league_members` or `draft_picks`: the last good rows stay and only this row changes. ESPN/MFL/Fleaflicker
 leagues get no row from session init (they're not refreshed from the platform there). League-keyed with no
 `user_id`, so it is outside account deletion/export. Created by `metadata.create_all` (new table; no migration
@@ -387,7 +388,7 @@ row).
 | Column | Type | Notes |
 |---|---|---|
 | `league_id` | str PK | Platform-native league id (same semantics as `leagues.sleeper_league_id`) |
-| `roster_fp` | str, nullable | `rfp1:…` roster fingerprint (trades-eng's `roster_snapshot`), stamped after a committed refresh. NULL until that stamp ships (S0 PR-B). Never changed by a failure |
+| `roster_fp` | str, nullable | `rfp1:…` roster fingerprint, stamped by S0 PR-B (`roster_refresh.stamp`) after each `fresh` refresh, on the refresh's background thread: `roster_snapshot(...).fp` with the engine's pick source (`server._pick_read_source()`), as the serve computes it. Written only by `database.cas_league_roster_fp`, a compare-and-set (`UPDATE … WHERE roster_fp = <the value read>`, `IS NULL` on the first stamp) that touches no other column; a lost CAS writes nothing. A won CAS on a changed value then calls `roster_snapshot.on_roster_change(league_id, old, new)` with no transaction open. NULL = never stamped (no `fresh` refresh since PR-B, or every stamp failed). Never changed by a failure or by a fingerprint error |
 | `refreshed_at` | str, nullable | ISO-8601 UTC (fixed microsecond precision): fetch **start** time of the last refresh whose members **and** owned picks both committed. Only moves forward. NULL = never fully refreshed |
 | `status` | str | `fresh` (the last attempt committed) · `stale` (the last attempt failed; any stored rows are the last good ones). **Only these two values are stored** (fingerprint contract v0.3 §3). "Missing" (no cards) is **derived** by trades-eng's `roster_snapshot` from absent `league_members` rows, never stored here, and no state row (or no table) reads as `unknown`. This describes the last attempt, not an age bound; consumers compute age from `refreshed_at` |
 | `last_error_code` | str, nullable | NULL after a success. Otherwise one of `rate_limited` (429 or the circuit is open) · `blocked` (403, incl. Cloudflare 1010) · `http_4xx` · `http_5xx` · `timeout` · `network` · `invalid_payload` · `picks_unavailable` (owned-pick sync skipped on a throttled read) · `write_failed` |
