@@ -22,6 +22,33 @@ Gates: QA follow-ups to #481, inside the 200 ms programme's S0 scope (`scope-eng
   - `_roster_moved_reads` is per process. One web worker today (`render.yaml`, pinned by a test); a second worker would see only its own moves.
   - A stored page row written before a re-stamp keeps its old stamp: its serves take the moved path (the I-1-filtered page) until the next store.
 
+## 2026-10-27 — S0 PR-B: `rfp1` roster fingerprint stamp after a refresh (CAS) + `on_roster_change`
+
+Full gates (platforms-eng lead). Server only; no API, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. Branch `feat/s0-roster-fp-stamp`.
+
+- **What:** `roster_refresh.record_outcome` → `stamp` after a `fresh` write, so both the session-init daemon and the P41 kick stamp. `stamp` reads the stored `roster_fp` and computes `roster_snapshot(...).fp` with `server._pick_read_source()`. It then compare-and-sets through `database.cas_league_roster_fp`, and on a won, changed stamp calls `on_roster_change(lid, old, new)` with no transaction open and no lock held.
+- **New `backend/tests/test_roster_fp_stamp.py` (17):**
+  - the first stamp is `rfp1` (equal to the serve's `_trade_roster_snapshot`) and calls the hook with `old=None`;
+  - a change calls `(old, new)`; no change makes no CAS and no call;
+  - a lost CAS (rival stamp) makes no call ×2;
+  - no state row writes nothing;
+  - a handler exception and a raising hook are swallowed and logged;
+  - a failed refresh ×2, a failed read and a failed state write, and a failed kick read don't stamp;
+  - an fp or pick-source error leaves the fp as stored, with the outcome still `fresh` ×2;
+  - a linked-platform league is never stamped;
+  - **A3** on a file-backed SQLite: `pool.checkedout()==0`, both module locks acquire non-blocking, and a second connection writes, on `roster-refresh-<id>`;
+  - session init hooks on a real `session-init-bg-writes` thread, never the request thread.
+- **Updated:** `test_roster_refresh_state.py::test_success_marks_fresh_and_never_stores_none_ids` now expects `rfp1:` (was NULL until PR-B).
+- **Sabotage, each red then restored byte-identical:**
+  - (1a) the hook inside the CAS transaction → the A3 test red (`checked_out: 1`, second-connection write `OperationalError`);
+  - (1b) the hook under `_inflight_lock` → the A3 test red;
+  - (2) the CAS `WHERE roster_fp = old` dropped → both lost-CAS cases red (rival overwritten);
+  - (3) the `new == old` early return dropped → the unchanged-roster test red (1 call).
+- **Targeted:** 15 S0 / trade-serve files → 493 passed.
+- **Full suite:** `python3 -m pytest backend/tests -q` → **9208 passed, 2 skipped, 0 failed**, exit 0, 35m37s (Python 3.14 local; the known `test_ranking_service_threads` flake didn't fire).
+- **Docs:** `docs/data-dictionary.md` (`roster_fp` row + intro), `docs/architecture.md` (new "Roster refresh and fingerprint stamp (S0)" data-flow paragraph), and the scope (§B.1 seam, §B.3 step 7 "As built", §3 evidence, §4 docs rows, §5 item 3).
+- **Not in PR-B:** the §B.6 stamps on the other writers (ESPN/MFL imports, the MFL pick normalizer, draft-status refresh, `_refresh_sleeper_members`). The serve recomputes `rfp1` from rows, so only the proactive hook is missing there.
+
 ## 2026-10-27 — S0 roster-change handler: revoke only what a fresher session would rebuild (#470 QA P2-2, P2-1, P3-1, P3-3)
 
 Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). It adds one model_config kill knob (`trade_roster_change_revoke`, default 1) and changes no route, schema or event. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

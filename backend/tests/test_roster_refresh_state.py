@@ -134,7 +134,7 @@ def test_success_marks_fresh_and_never_stores_none_ids(harness):
     state = db_module.get_league_roster_state(LEAGUE_ID)
     assert state["status"] == "fresh"
     assert state["last_error_code"] is None
-    assert state["refreshed_at"] and state["roster_fp"] is None   # PR-B fills the fp
+    assert state["refreshed_at"] and state["roster_fp"].startswith("rfp1:")   # PR-B's stamp
     assert json.loads(_members()[USER_ID]) == ["p1"]               # G-004: no "None", no ""
     # The meta read seeded the trade paths' 15-min meta cache.
     assert server._FA_LEAGUE_META_CACHE[LEAGUE_ID][1] == META
