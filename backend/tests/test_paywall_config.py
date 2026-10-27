@@ -27,6 +27,7 @@ static config and touches no table.
 
 import pathlib
 from datetime import datetime
+from decimal import ROUND_CEILING, Decimal
 
 import pytest
 
@@ -46,7 +47,9 @@ CLOSES_AT = "2027-01-01T00:00:00Z"
 BEFORE = "2026-12-31T23:59:59+00:00"    # the club's last second
 AT = "2027-01-01T00:00:00+00:00"        # closes_at itself: closed
 AFTER = "2027-06-01T12:00:00+00:00"
-DROPPED_FEATURES = ("engine_knobs", "extension_overlays", "ad_free")
+# The undelivered kinds (5c) and the keys that name no gated feature.
+DROPPED_FEATURES = ("engine_knobs", "extension_overlays", "ad_free",
+                    "unlimited_leagues", "portfolio")
 
 
 @pytest.fixture()
@@ -117,7 +120,7 @@ def test_flag_on_returns_full_shape(client, monkeypatch):
     # page 1 tells the client to reuse matches it already has — the route
     # never recomputes trades (LLD §3).
     assert body["pages"][0]["body_ref"] == "matches_preview"
-    assert body["pages"][1]["features"] == ["unlimited_leagues", "portfolio"]
+    assert body["pages"][1]["features"] == []
     assert body["club"]["name"] == "Founding GMs"
     assert body["tips"] == []
 
@@ -136,7 +139,7 @@ def test_products_shape(client, monkeypatch):
 
     assert products[ANNUAL]["period"] == "annual"
     assert products[ANNUAL]["display_price"] == "$24.99"
-    assert products[ANNUAL]["per_month_equiv"] == "$2.08"
+    assert products[ANNUAL]["per_month_equiv"] == "$2.09"
     assert products[ANNUAL]["trial_period"] == "1 month"
     assert products[ANNUAL]["hero"] is True
     assert products[ANNUAL]["badge"] == "best_value"
@@ -159,8 +162,8 @@ def test_paywall_enums_documented():
     """`kind`, `badge` and the feature keys are a client contract."""
     doc = (REPO / "docs" / "cross-client-invariants.md").read_text()
     for token in ("trades_found", "features", "purchase", "best_value",
-                  "unlimited_leagues", "portfolio", "matches_preview",
-                  "`trial_period`", "`club`", "`closes_at`", "Founding GMs"):
+                  "matches_preview", "`trial_period`", "`club`",
+                  "`closes_at`", "Founding GMs"):
         assert token in doc, f"paywall enum {token!r} undocumented"
 
 
@@ -248,7 +251,7 @@ def test_club_open_around_closes_at(client, monkeypatch, now, is_open):
 
 
 @pytest.mark.parametrize("now, monthly, annual, per_month", [
-    (BEFORE, "$4.99", "$24.99", "$2.08"),     # founder prices while open
+    (BEFORE, "$4.99", "$24.99", "$2.09"),     # founder prices while open
     (AT, "$6.99", "$34.99", "$2.92"),         # standard from closes_at on
     (AFTER, "$6.99", "$34.99", "$2.92"),
 ])
@@ -271,6 +274,19 @@ def test_annual_founder_price_is_24_99(client, monkeypatch):
     assert annual[0]["display_price"] == "$24.99"
 
 
+@pytest.mark.parametrize("now, expected", [(BEFORE, "$2.09"), (AFTER, "$2.92")])
+def test_per_month_equiv_rounds_up_to_the_cent(client, monkeypatch, now, expected):
+    """Legal's approved copy says $2.09/month: the annual price / 12, rounded
+    UP (24.99 / 12 = 2.0825 → $2.09; 34.99 / 12 = 2.9158 → $2.92)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    annual = [p for p in _get(client).get_json()["products"]
+              if p["product_id"] == ANNUAL][0]
+    ceil = (Decimal(annual["display_price"].lstrip("$")) / 12).quantize(
+        Decimal("0.01"), rounding=ROUND_CEILING)
+    assert annual["per_month_equiv"] == expected == f"${ceil}"
+
+
 @pytest.mark.parametrize("now", [BEFORE, AFTER])
 def test_trial_period_one_month_and_no_trial_days(client, monkeypatch, now):
     """`trial_days` is gone: a 1.21.x client shows "N days free" only when
@@ -286,13 +302,14 @@ def test_trial_period_one_month_and_no_trial_days(client, monkeypatch, now):
 
 @pytest.mark.parametrize("now", [BEFORE, AFTER])
 def test_feature_grid_is_truthful(client, monkeypatch, now):
-    """5c: the undelivered kinds are dropped from the grid and from the
-    whole response."""
+    """5c: the grid is empty at launch (1.21.x renders it only when the list
+    is non-empty), and no dropped or false key appears anywhere."""
     _flags(monkeypatch, "monetize.paywall")
     _freeze(monkeypatch, now)
     r = _get(client)
     grid = [p for p in r.get_json()["pages"] if p["kind"] == "features"]
-    assert grid[0]["features"] == ["unlimited_leagues", "portfolio"]
+    assert len(grid) == 1 and grid[0]["id"] == "feature_grid"
+    assert grid[0]["features"] == []
     for kind in DROPPED_FEATURES:
         assert kind not in r.get_data(as_text=True), kind
 

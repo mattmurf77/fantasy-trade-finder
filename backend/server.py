@@ -33134,10 +33134,11 @@ _PAYWALL_PAGES = [
     {"id": "value_recap", "kind": "trades_found",
      "title": "Your league has trades waiting",
      "body_ref": "matches_preview"},
-    # The truthful grid (#393 scope §2 item 3, 5c): engine_knobs,
-    # extension_overlays and ad_free are not delivered gated features.
-    {"id": "feature_grid", "kind": "features",
-     "features": ["unlimited_leagues", "portfolio"]},
+    # The truthful grid (#393 scope §2 item 3, 5c): empty at launch. No
+    # earlier key names a delivered gated feature (portfolio is free, there
+    # is no league cap). The value lines come from the client's copy; a
+    # client renders the grid only when the list is non-empty.
+    {"id": "feature_grid", "kind": "features", "features": []},
     {"id": "plans", "kind": "purchase"},
 ]
 
@@ -33160,10 +33161,12 @@ _PAYWALL_PRODUCTS = [
 ]
 
 # Fallback price copy per product: (club open, after closes_at).
+# per_month_equiv is the annual price / 12 rounded UP to the cent (legal's
+# approved copy says $2.09/month).
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
                         {"display_price": "$6.99"}),
-    "ftf_pro_annual": ({"display_price": "$24.99", "per_month_equiv": "$2.08"},
+    "ftf_pro_annual": ({"display_price": "$24.99", "per_month_equiv": "$2.09"},
                        {"display_price": "$34.99", "per_month_equiv": "$2.92"}),
 }
 
