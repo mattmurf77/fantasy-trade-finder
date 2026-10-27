@@ -1,3 +1,12 @@
+## 2026-10-27 — C3 (server half): the App Store smart banner on the /s/* share landings
+
+Full gates (head-eng's ask, from Product's pre-launch review; scope `docs/plans/prelaunch-onboarding/scope-c3-smart-banner.md`). Server only; inert until `IOS_INSTALL_URL` is set at the 11-18 T0.
+
+- **The change:** `_share_html` emits `<meta name="apple-itunes-app" content="app-id=<digits>">` when `IOS_INSTALL_URL` carries an App Store `/id<6–12 digits>`. Otherwise there's no banner; only the digits are emitted.
+- **Tests:** `test_share_package.py`, 3 new tests (5 cases) on a real `/s/p/` landing. **Sabotage 3/3 red,** restored byte-identical.
+- **Runs:** see the PR.
+- **The static `index.html` half** rides #456.
+
 ## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
 
 Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/trade-capture-platform-guard`.

@@ -159,3 +159,39 @@ def test_og_card_404_for_unknown_id(env):
         r = env.get("/og/p/doesnotexist.png")
     assert r.status_code == 404
     assert r.data[:8] == b"\x89PNG\r\n\x1a\n"   # placeholder card, still an image
+
+
+# C3 (Product's pre-launch review, 2026-10-27): the App Store smart banner on
+# the /s/* landings comes from IOS_INSTALL_URL, set at the 11-18 T0.
+def _landing_html(env):
+    with patch.object(server, "is_enabled", _flags("growth.share_landing")):
+        sid = _post(env, GOOD_BODY).get_json()["short_id"]
+        page = env.get(f"/s/p/{sid}")
+        assert page.status_code == 200
+        return page.get_data(as_text=True)
+
+
+def test_no_smart_banner_until_ios_install_url_is_set(env, monkeypatch):
+    monkeypatch.delenv("IOS_INSTALL_URL", raising=False)
+    assert "apple-itunes-app" not in _landing_html(env)
+    monkeypatch.setenv("IOS_INSTALL_URL", "")
+    assert "apple-itunes-app" not in _landing_html(env)
+
+
+def test_smart_banner_carries_the_app_store_id(env, monkeypatch):
+    monkeypatch.setenv("IOS_INSTALL_URL", "https://apps.apple.com/us/app/fleeced/id6740012345")
+    html = _landing_html(env)
+    assert '<meta name="apple-itunes-app" content="app-id=6740012345">' in html
+    assert html.index("apple-itunes-app") < html.index("</head>")
+
+
+@pytest.mark.parametrize("url", [
+    "https://apps.apple.com/us/app/fleeced",            # no id
+    "[APP STORE URL]",                                  # the #456 placeholder
+    'https://apps.apple.com/app/id123"><script>x',      # an id that isn't digits-only up to a boundary
+])
+def test_no_smart_banner_without_a_clean_app_id(env, monkeypatch, url):
+    monkeypatch.setenv("IOS_INSTALL_URL", url)
+    html = _landing_html(env)
+    assert "apple-itunes-app" not in html
+    assert "<script>x" not in html
