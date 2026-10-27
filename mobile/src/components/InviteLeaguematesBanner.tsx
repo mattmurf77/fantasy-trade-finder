@@ -119,6 +119,12 @@ function subscribeInviteBusy(listener: () => void): () => void {
 }
 const getInviteBusy = () => _inviteInFlight;
 
+// copy: pending marketing-lead
+/** What VoiceOver hears on an Invite control while it is busy (ux-lead #364
+ *  change 2). Nothing is announced on failure: the sheet opening is the
+ *  outcome. When busy ends, the control's normal label returns. */
+export const INVITE_BUSY_LABEL = 'Preparing invite link';
+
 /** True from an Invite tap until its share sheet settles. Every Invite
  *  control renders its busy state from this hook. */
 export function useInviteBusy(): boolean {
@@ -267,16 +273,24 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
       </View>
       {/* Composed secondary button: the chalkline Button has no
           accessibilityLabel passthrough. */}
+      {/* Busy (ux-lead #364 changes 2-4): the label speaks the wait; the
+          pressed fill is off, because the guard drops a repeat tap and it
+          must not flash "accepted"; and the "Invite" text stays in layout,
+          invisible, under a centred spinner, so the button keeps its width
+          and the text column does not reflow. */}
       <Pressable
         onPress={handleInvite}
-        style={({ pressed }) => [styles.inviteBtn, pressed && styles.inviteBtnPressed]}
+        style={({ pressed }) => [styles.inviteBtn, pressed && !busy && styles.inviteBtnPressed]}
         accessibilityRole="button"
-        accessibilityLabel="Invite leaguemates"
+        accessibilityLabel={busy ? INVITE_BUSY_LABEL : "Invite leaguemates"}
         accessibilityState={{ busy }}
       >
-        {busy
-          ? <ActivityIndicator size="small" color={chalk.base} />
-          : <Text style={styles.inviteText}>Invite</Text>}
+        <Text style={[styles.inviteText, busy && styles.hidden]}>Invite</Text>
+        {busy ? (
+          <View style={styles.spinner}>
+            <ActivityIndicator size="small" color={chalk.base} />
+          </View>
+        ) : null}
       </Pressable>
     </View>
   );
@@ -321,6 +335,12 @@ const styles = StyleSheet.create({
     borderColor: ink.lineStrong,
   },
   inviteBtnPressed: { backgroundColor: ink.ink3 },
+  hidden: { opacity: 0 },
+  spinner: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   inviteText: {
     fontFamily: fonts.uiSemi,
     fontSize: 14,

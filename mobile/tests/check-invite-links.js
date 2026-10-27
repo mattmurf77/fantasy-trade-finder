@@ -535,6 +535,23 @@ function runStatic() {
   check('L ux-1 the banner renders busy from useInviteBusy(), not local state',
         /const busy = useInviteBusy\(\);/.test(bannerFn) && !/useState|onMintPending/.test(bannerFn),
         'the banner must read the shared guard, not a per-call pending flag');
+  check('L ux-2 INVITE_BUSY_LABEL is "Preparing invite link", one constant, flagged pending marketing-lead',
+        /\/\/ copy: pending marketing-lead\n(?:\/\*\*[\s\S]*?\*\/\n)?export const INVITE_BUSY_LABEL = 'Preparing invite link';/.test(bannerSrc)
+          && (bannerSrc.match(/Preparing invite link/g) || []).length === 1,
+        'the busy label string must live in the one flagged constant');
+  check('L ux-2 busy swaps the a11y label and sets accessibilityState.busy',
+        /accessibilityLabel=\{busy \? INVITE_BUSY_LABEL : "Invite leaguemates"\}/.test(bannerFn)
+          && /accessibilityState=\{\{ busy \}\}/.test(bannerFn),
+        'while busy VoiceOver must hear INVITE_BUSY_LABEL, and the normal label must return after');
+  check('L ux-3 fixed width: the label stays in layout (opacity 0) under an absolute-fill spinner',
+        /<Text style=\{\[styles\.inviteText, busy && styles\.hidden\]\}>Invite<\/Text>/.test(bannerFn)
+          && /\{busy \? \(\s*<View style=\{styles\.spinner\}>\s*<ActivityIndicator/.test(bannerFn)
+          && /hidden: \{ opacity: 0 \}/.test(bannerSrc)
+          && /spinner: \{\s*\.\.\.StyleSheet\.absoluteFillObject,\s*alignItems: 'center',\s*justifyContent: 'center',/.test(bannerSrc),
+        'swapping the label for the spinner narrows the button and reflows the banner');
+  check('L ux-4 no pressed fill while busy',
+        /pressed && !busy && styles\.inviteBtnPressed/.test(bannerFn),
+        'a dropped repeat tap must not flash the pressed fill');
 
   finish();
 }
