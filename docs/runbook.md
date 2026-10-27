@@ -1379,63 +1379,90 @@ valuations or receipts, and a paused policy cannot recover already-expired detai
 can prove), and an ESPN one may carry a third person's identifier. Legal
 (R28.12 row 2, R28.16) requires removing them through the full deletion path.
 `scripts/purge_entry_users.py` does that: `accounts.delete_user_data`, one id
-per call, which also anonymizes shared rows (trade matches, platform pick-grid
-owners) per privacy §6. It is never a bare row delete.
+per call, which also anonymizes shared rows per privacy §6 (trade matches,
+platform pick-grid owners, Fleeced-minted team ids on recorded picks, and a
+league row other Fleeced members still belong to, kept with its importer
+anonymized). It is never a bare row delete.
 
 **Why it must finish first:** ESPN/MFL sign-in is coming back as a proof-based
 sign-in. Its `platform_identity_in_use` check searches every user's
 `espn_credentials` / `mfl_credentials`. A credential left on an entry user
 would answer 409 to the real owner.
 
+**When:** finished by 11-05, and before `landing.platform_options` goes back on
+(operator ask 16).
+
 **The prod run needs the operator's own word in the acting session.** Counts
 only, everywhere: never paste an id, SWID, team or league name into a PR, log,
-chat or this runbook. The script prints counts only.
+chat or this runbook. The script prints counts only; an unexpected error prints
+only its type (exit 3) and the next move is a fresh dry run.
 
 **Who runs what** (release-lead, 2026-10-26). A deletion has no rollback, so
-**the operator runs step 4, `--execute`, themself.** release-lead may run the
-read-only steps (the dry run, `--verify`) and the flag flip / Render restart
+**the operator runs step 5, `--execute`, themself.** release-lead may run the
+read-only steps (the dry run, `--verify`) and the flag flip / Render restarts
 around it on the operator's word. Nobody else runs `--execute`.
 
 Point the script at prod with `DATABASE_URL` set in the acting shell from
-`secrets.local.env` (`DATABASE_URL_PROD`), never typed into chat.
+`secrets.local.env` (`DATABASE_URL_PROD`), never typed into chat. Every mode
+first prints the database identity (dialect, the host's first label, the
+database name; never credentials), and it refuses a local SQLite database
+unless `--allow-local` is passed (local test runs only).
 
-1. **When:** before `landing.platform_options` goes back on (operator ask 16),
-   and finished by 11-05.
-2. **Dry run.** `--cutoff` is when the entry chips' flag went off (UTC):
-   `python3 scripts/purge_entry_users.py --cutoff <ISO datetime>`. Note the
-   target count N. Targets are entry ids with a users row that is unverified
-   (`verified_via` NULL) and created before the cutoff, plus entry ids with no
-   users row at all. It also reports, and never touches:
-   - "skipped (verified or after cutoff)", e.g. an MFL entry that proved an
-     MFL login (`verified_via = 'mfl_login'`);
-   - "skipped (no usable created_at)".
-3. **Snapshot the prod database first** (no rollback without it). Take a
-   Render Postgres backup / snapshot of the prod DB and note its timestamp.
-   Don't run step 4 until the snapshot shows as complete. **Delete this manual
-   snapshot once step 6 passes, and in any case within 7 days**: privacy §5
-   promises deleted data leaves backups within 7 days, and a manual snapshot
-   would otherwise outlive that.
-4. **Execute: the operator runs this, nobody else.** Copy the exact command
-   the dry run printed under "next (the operator runs this exact command,
-   after a DB snapshot)": it is pre-filled with the dry run's cutoff (UTC) and
-   `--expect N`, e.g.
+1. **Flip `landing.platform_options` OFF** (operator ask 12, release-lead's
+   session), then **confirm it reads false via `GET /api/feature-flags`**.
+   Note the UTC time the deploy went live: that is the `--cutoff`. It must be a
+   full datetime with seconds and a timezone, e.g. `2026-10-26T14:00:00Z`.
+   Entry users created before it are targets; at or after it, they are not.
+2. **Restart the Render web service,** so live in-memory entry sessions can't
+   re-create users.
+3. **Dry run against prod:**
+   `python3 scripts/purge_entry_users.py --cutoff <the step-1 time>`.
+   - Check the printed **database identity** is prod.
+   - Note the target count N. Targets are entry ids with a users row that is
+     unverified (`verified_via` NULL) and created before the cutoff, plus entry
+     ids with no users row at all. It also reports, and never touches,
+     "skipped (verified or after cutoff)" (e.g. an MFL entry that proved an
+     MFL login, `verified_via = 'mfl_login'`) and "skipped (no usable
+     created_at)".
+   - **If "unverified created after cutoff" is non-zero, STOP and ask
+     head-eng.** Step 1 or 2 didn't take; the dry run then prints no execute
+     command.
+4. **Snapshot** the prod database (Render Postgres backup) and note its
+   timestamp; don't run step 5 until it shows as complete. **Restoring it is a
+   full restore that loses every write made after it**, every user's, not just
+   the purge's: a last resort. **Delete it once step 7 passes, and in any case
+   within 7 days** (privacy §5 promises deleted data leaves backups within 7
+   days; a manual snapshot would otherwise outlive that).
+5. **Execute. The operator runs it, nobody else, after re-checking that the
+   printed database identity is prod.** Copy the exact command the dry run
+   printed under "next (the operator runs this exact command, after a DB
+   snapshot)": it is pre-filled with the dry run's cutoff (UTC, microseconds
+   kept) and `--expect N`, e.g.
    `python3 scripts/purge_entry_users.py --cutoff 2026-10-26T14:00:00Z --execute --expect N`.
-   It refuses if N no longer matches (re-run the dry run), continues past a
-   failing id and exits non-zero if any failed. Keep the printed summed counts.
-5. **Restart the Render web service.** The script deletes the durable session
-   rows, but a live in-memory entry session survives in the running process
-   until it restarts.
-6. **Verify:** `… --cutoff <same> --verify`. It exits 0 only if (a) no target
-   id remains in any key column and (b) no `espn_credentials` /
-   `mfl_credentials` row sits on any `entry:` id, skipped ones included. If it
-   isn't clean, repeat steps 2–6. A credential on a SKIPPED entry user has its
-   own message: a human looks (escalate to head-eng); don't delete it by hand.
-   The info lines never fail the check: JSON mentions in
-   `standing_offers.team_user_ids` / `leagues.opponent_data`, and overhaul
-   references (the known general deletion gap, privacy §6 "not yet").
-7. **Record counts only**, and send the purge date to head-bizops. Support
-   uses it: "data from ESPN and MFL sign-ins made before <date> was deleted on
-   that date".
+   It refuses (exit 2, nothing deleted) if N no longer matches (re-run the dry
+   run) or if a target's deletion would also remove a non-entry alias, such as
+   a bound account (escalate to head-eng). It continues past a failing id and
+   exits 1 if any failed. Keep the printed summed counts.
+6. **Restart the Render web service again.** The script deletes the durable
+   session rows, but a live in-memory entry session survives in the running
+   process until it restarts.
+7. **Verify:** `… --cutoff <same> --verify`. It exits 0 only if (a) no target
+   id remains in any key column, (b) no `espn_credentials` / `mfl_credentials`
+   row sits on any `entry:` id, skipped ones included, and (c) no unverified
+   entry user was created at or after the cutoff.
+   - If (a) isn't clean, repeat steps 3–7, with a fresh snapshot.
+   - A credential on a SKIPPED entry user has its own message: a human looks
+     (escalate to head-eng); don't delete it by hand.
+   - If (c) fails, the flag or a restart wasn't done: investigate before
+     re-running.
+   - The info lines never fail the check: JSON mentions in
+     `standing_offers.team_user_ids`, `leagues.opponent_data` and
+     `user_events.props` (other users' events, e.g.
+     `pick_assignment_changed.new_owner`), and overhaul references (the known
+     general deletion gap, privacy §6 "not yet").
+8. **Record counts only**, and send the purge date to head-bizops. Support uses
+   it: "data from ESPN and MFL sign-ins made before <date> was deleted on that
+   date".
 
 Backups roll off within 7 days, so deleted rows can remain in a backup for up
 to 7 days (privacy §5). There is no schema change, so no data-dictionary
