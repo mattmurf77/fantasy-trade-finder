@@ -7,8 +7,7 @@
 
 **The gap.** #380 keys the policy notice to the release version, 1.22.0. `useWhatsNew` had no first-install check, so a brand-new install agreed to the policies on the sign-in screen ("By signing in you agree to the…") and was then told "We've updated our Privacy Policy and Terms of Use…".
 
-**The fix.** `useSession.bootstrap` calls `markSeenAtSignedOutBoot()` when it restores **no signed-in user**. That covers a fresh install, a reinstall (AsyncStorage is wiped; the Keychain session token survives, so the token is deliberately NOT the signal) and a signed-out user. Each goes through the sign-in screen and agrees to the current policies.
-- The call marks this release's entry seen in memory at once, and in storage.
+**The fix.** `useSession.bootstrap` records the boot fact `bootSignedIn: !!user`: did this launch restore a signed-in user? That covers a fresh install, a reinstall (AsyncStorage is wiped; the Keychain session token survives, so the token is deliberately NOT the signal) and a signed-out user. Each goes through the sign-in screen and agrees to the current policies. `useWhatsNew` reads `bootSignedIn === false`, hides the entry, and stores it as seen. useSession gains no import, so its harnesses (e.g. `check-win-now-recovery.js`) are untouched; a first cut that imported the hook into useSession broke that harness's import allowlist.
 - A signed-in user upgrading restores a user, so they still see the notice once, as D-13 requires.
 - **Behaviour note for legal and release-lead:** a signed-out existing user also skips the notice, and gets the sign-in screen's "you agree" line with its links instead.
 
@@ -21,20 +20,21 @@
 
 ## 3. Evidence scope
 - [x] **Structural guard:** `mobile/tests/check-whats-new.js` pin 8. It checks that:
-  - `markSeenAtSignedOutBoot` writes the app version to the seen key and sets an in-memory mark, which the entry also checks;
-  - its only caller is `useSession.bootstrap`, once, under `if (!user)`, after `user = JSON.parse(userRaw)`.
+  - `bootSignedIn` is assigned exactly twice in useSession: the initial `null`, and `!!user` in `bootstrap` after the user is restored; sign-out doesn't reset it, and no other file sets it;
+  - `useWhatsNew` reads `bootSignedIn === false`, the entry requires `!agreedThisLaunch`, and `SEEN_KEY` is written only by dismiss and by the B7 effect, whose first statement is `if (!enabled || !agreedThisLaunch || !APP_VERSION) return;`.
 
-  Pins 1–7 are unchanged and pass. **Sabotage 7/7 red,** restored byte-identical:
-  - the entry ignores the mark;
-  - nothing is written to storage;
-  - there's no in-memory mark;
-  - it's marked on every boot;
+  Pins 1–7 are unchanged and pass. **Sabotage 8/8 red,** restored byte-identical:
+  - the entry ignores the boot fact;
+  - it's stored seen on every launch;
+  - an unknown boot counts as agreed;
+  - it's never stored seen;
   - it's keyed on the Keychain token;
-  - it's called before the user is restored;
-  - there's a second caller.
+  - it's always signed out;
+  - sign-out resets the boot fact;
+  - another file sets it.
 - [x] **Code-walk:**
   - `bootstrap` reads `SU_KEY` (`sleeper_user`) from AsyncStorage. Every signed-in state, including account-only, has a user there, and RootNav routes to sign-in without one.
-  - The tip renders only on League (`LeagueScreen`), which needs a signed-in user. So on a signed-out boot the in-memory mark is set before the tip can mount.
+  - The tip renders only on League (`LeagueScreen`), which needs a signed-in user. So `bootSignedIn` is already set when the hook mounts, and a late storage read can't show the entry, because the entry also requires `!agreedThisLaunch`.
 - [x] **Manual TestFlight checklist (operator, 11-06 build, with `ux.whats_new` on):**
   1. Delete the app, reinstall, sign in and open League: no "We've updated…" tip.
   2. On a device signed in on the previous build, install the 11-06 build over it and open League: the tip shows once; tapping it opens Help & about.

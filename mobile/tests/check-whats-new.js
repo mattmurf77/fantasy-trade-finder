@@ -25,13 +25,14 @@
 //   7. The VoiceOver hint tells the truth: CoachMark's default hint is still
 //      "Tap to dismiss" (every other caller), and the what's-new tip, whose tap
 //      also opens Help & about, passes its own hint that doesn't say dismiss.
-//   8. B7 (pre-launch review, 2026-10-27): a boot that restores no signed-in
-//      user marks the release seen, because the sign-in screen's "you agree"
-//      line comes next. markSeenAtSignedOutBoot writes the app version to the
-//      seen key and an in-memory mark the entry also checks, and its ONLY
-//      caller is useSession.bootstrap, under `if (!user)` on the restored
-//      user. Anything wider would silence the notice for signed-in upgraders
-//      (no silent expiry, 6).
+//   8. B7 (pre-launch review, 2026-10-27): a launch whose bootstrap restored
+//      no signed-in user counts the release as seen, because the sign-in
+//      screen's "you agree" line came first. useSession records the boot fact
+//      `bootSignedIn` (null initially, set ONLY by bootstrap to `!!user` after
+//      the user is restored; sign-out doesn't reset it). useWhatsNew reads
+//      `bootSignedIn === false`, hides the entry and stores it seen, and
+//      SEEN_KEY is written nowhere else but dismiss. Anything wider would
+//      silence the notice for signed-in upgraders (no silent expiry, 6).
 //
 // FTF_MOBILE_TEST_ROOT can point at a copy of mobile/ (sabotage runs).
 // Run: node tests/check-whats-new.js
@@ -275,54 +276,57 @@ check('7. CoachMark keeps its "Tap to dismiss" default; the what\'s-new tip pass
     `the what's-new tip's hint says dismiss: ${JSON.stringify(hint.initializer.text)}`);
 });
 
-// ── 8. B7: a signed-out boot marks the release seen ─────────────────────────
-check('8. only a boot that restores no user marks the release seen (B7)', () => {
-  const hook = parse(F.hook);
-  const fn = findAll(hook, (n) => ts.isFunctionDeclaration(n) && n.name
-    && n.name.text === 'markSeenAtSignedOutBoot')[0];
-  expect(fn && fn.modifiers && fn.modifiers.some((m) => m.kind === ts.SyntaxKind.ExportKeyword),
-    'useWhatsNew.ts exports no markSeenAtSignedOutBoot()');
-  const body = fn.body.getText(hook);
-  expect(/seenAtSignedOutBoot\s*=\s*APP_VERSION\s*;/.test(body),
-    'markSeenAtSignedOutBoot() does not set the in-memory mark to APP_VERSION');
-  expect(/AsyncStorage\.setItem\(\s*SEEN_KEY\s*,\s*APP_VERSION\s*\)/.test(body),
-    'markSeenAtSignedOutBoot() does not write APP_VERSION to SEEN_KEY');
-  const entryDecl = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'entry')[0];
-  expect(entryDecl && /seenAtSignedOutBoot\s*!==\s*APP_VERSION/.test(entryDecl.initializer.getText(hook)),
-    'the entry does not check the in-memory signed-out-boot mark');
-
-  const callers = [];
+// ── 8. B7: a signed-out boot counts the release as seen ────────────────────
+check('8. only a launch that booted signed out counts the release as seen (B7)', () => {
+  const sf = parse(F.session);
+  const assigns = findAll(sf, (n) => ts.isPropertyAssignment(n) && propName(n) === 'bootSignedIn');
+  expect(assigns.length === 2, `bootSignedIn is assigned ${assigns.length} times in useSession.ts, want 2`);
+  const boot = findAll(sf, (n) => ts.isPropertyAssignment(n) && propName(n) === 'bootstrap')[0];
+  expect(boot, 'useSession has no bootstrap');
+  const inBoot = assigns.filter((a) => a.pos >= boot.pos && a.end <= boot.end);
+  const outside = assigns.filter((a) => !(a.pos >= boot.pos && a.end <= boot.end));
+  expect(inBoot.length === 1 && inBoot[0].initializer.getText(sf).replace(/\s+/g, '') === '!!user',
+    `bootstrap sets bootSignedIn to ${inBoot.map((a) => a.initializer.getText(sf))}, want !!user`);
+  expect(outside.length === 1 && outside[0].initializer.kind === ts.SyntaxKind.NullKeyword,
+    `outside bootstrap, bootSignedIn is ${outside.map((a) => a.initializer.getText(sf))}, want the initial null only`);
+  const restore = findAll(boot, (n) => ts.isBinaryExpression(n)
+    && n.left.getText(sf) === 'user' && n.operatorToken.kind === ts.SyntaxKind.EqualsToken
+    && /JSON\.parse\(\s*userRaw\s*\)/.test(n.right.getText(sf)));
+  expect(restore.length === 1 && inBoot[0].pos > restore[0].pos,
+    'bootSignedIn is set before `user = JSON.parse(userRaw)` restores the signed-in user');
+  const elsewhere = [];
   (function walk(dir) {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
       const abs = path.join(dir, ent.name);
       if (ent.isDirectory()) walk(abs);
       else if (/\.tsx?$/.test(ent.name)) {
         const rel = path.relative(ROOT, abs).split(path.sep).join('/');
-        if (rel === F.hook) continue;
-        const n = (fs.readFileSync(abs, 'utf8').match(/\bmarkSeenAtSignedOutBoot\s*\(/g) || []).length;
-        if (n) callers.push(`${rel}×${n}`);
+        if (rel !== F.session && /bootSignedIn\s*:/.test(fs.readFileSync(abs, 'utf8'))) elsewhere.push(rel);
       }
     }
   })(path.join(ROOT, 'src'));
-  expect(callers.length === 1 && callers[0] === `${F.session}×1`,
-    `markSeenAtSignedOutBoot() is called from ${JSON.stringify(callers)}, want useSession.ts once`);
+  expect(elsewhere.length === 0, `bootSignedIn is set outside useSession.ts: ${JSON.stringify(elsewhere)}`);
 
-  const sf = parse(F.session);
-  const boot = findAll(sf, (n) => ts.isPropertyAssignment(n) && propName(n) === 'bootstrap')[0];
-  expect(boot, 'useSession has no bootstrap');
-  const call = findAll(boot, (n) => isCallTo(n, 'markSeenAtSignedOutBoot'))[0];
-  expect(call, 'bootstrap does not call markSeenAtSignedOutBoot()');
-  let p = call.parent;
-  while (p && !ts.isIfStatement(p) && p !== boot) p = p.parent;
-  expect(p && ts.isIfStatement(p) && p.expression.getText(sf).replace(/\s+/g, '') === '!user',
-    `the call isn't guarded by if (!user): ${p && ts.isIfStatement(p) ? p.expression.getText(sf) : 'no if'}`);
-  const userDecl = findAll(boot, (n) => ts.isVariableDeclaration(n) && n.name.getText(sf) === 'user')[0];
-  expect(userDecl && call.pos > userDecl.pos, 'the call comes before bootstrap restores `user`');
-  const restore = findAll(boot, (n) => ts.isBinaryExpression(n)
-    && n.left.getText(sf) === 'user' && n.operatorToken.kind === ts.SyntaxKind.EqualsToken
-    && /JSON\.parse\(\s*userRaw\s*\)/.test(n.right.getText(sf)));
-  expect(restore.length === 1 && call.pos > restore[0].pos,
-    'the call isn\'t after `user = JSON.parse(userRaw)` (the restored signed-in user)');
+  const hook = parse(F.hook);
+  const read = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'agreedThisLaunch')[0];
+  expect(read && read.initializer.getText(hook).replace(/\s+/g, '') === 'useSession((s)=>s.bootSignedIn===false)',
+    `agreedThisLaunch is ${read ? read.initializer.getText(hook) : 'missing'}`);
+  const entryDecl = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'entry')[0];
+  expect(entryDecl && /!agreedThisLaunch\b/.test(entryDecl.initializer.getText(hook)),
+    'the entry does not require !agreedThisLaunch');
+  const writes = findAll(hook, (n) => ts.isCallExpression(n)
+    && n.expression.getText(hook) === 'AsyncStorage.setItem'
+    && n.arguments[0] && n.arguments[0].getText(hook) === 'SEEN_KEY');
+  expect(writes.length === 2, `SEEN_KEY is written ${writes.length} times in useWhatsNew.ts, want 2 (dismiss + B7)`);
+  const dismissFn = findAll(hook, (n) => ts.isVariableDeclaration(n) && n.name.getText(hook) === 'dismiss')[0];
+  const b7 = writes.filter((w) => !(dismissFn && w.pos >= dismissFn.pos && w.end <= dismissFn.end));
+  expect(b7.length === 1, 'the B7 write is missing, or a second write sits outside dismiss');
+  let eff = b7[0].parent;
+  while (eff && !(ts.isCallExpression(eff) && eff.expression.getText(hook) === 'useEffect')) eff = eff.parent;
+  expect(eff, 'the B7 write is not inside a useEffect');
+  const firstStmt = eff.arguments[0].body.statements[0].getText(hook).replace(/\s+/g, ' ');
+  expect(firstStmt === 'if (!enabled || !agreedThisLaunch || !APP_VERSION) return;',
+    `the B7 effect's guard is: ${firstStmt}`);
 });
 
 console.log(failures === 0

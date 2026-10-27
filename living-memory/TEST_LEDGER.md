@@ -2,11 +2,12 @@
 
 Full gates (head-eng's ask; scope `docs/plans/prelaunch-onboarding/scope-b7-d13-fresh-install.md`). Mobile only; D-056: `FTF_SKIP_SIM_GATE=1` posture.
 
-- **The change:** `useSession.bootstrap` calls `markSeenAtSignedOutBoot()` when it restores no signed-in user: a fresh install, a reinstall or a signed-out user. The sign-in screen's "you agree" line comes next for them, so this release's notice is marked seen in memory and in storage. A signed-in upgrader still sees it once.
+- **The change:** `useSession.bootstrap` records `bootSignedIn: !!user`. When it's false (a fresh install, a reinstall or a signed-out user), the sign-in screen's "you agree" line came first, so `useWhatsNew` hides this release's notice and stores it as seen. A signed-in upgrader still sees it once.
+  - A first cut imported the hook into useSession, which broke `check-win-now-recovery.js`'s import allowlist. It was rewired to a boot fact in state, with no import.
 - **Pin 8 in `check-whats-new.js`:**
-  - the mark writes the version and sets the in-memory flag the entry checks;
-  - its only caller is `bootstrap`, once, under `if (!user)`, after the user is restored.
-  - **Sabotage 7/7 red,** restored byte-identical. Pins 1–7 are unchanged.
+  - the boot fact is set only by `bootstrap` (`!!user`, after the restore) and never reset by sign-out;
+  - the hook's read, the entry condition, and the guarded effect are SEEN_KEY's only writes besides dismiss.
+  - **Sabotage 8/8 red,** restored byte-identical. Pins 1–7 are unchanged.
 - **Runs:** see the PR (tsc, the full `check-*.js` loop, testid-lint).
 - **Operator TestFlight check** (11-06 build, `ux.whats_new` on):
   1. a fresh install, after sign-in: no tip;
