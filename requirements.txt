@@ -1,5 +1,5 @@
 anthropic>=0.40.0
-flask>=3.0.0
+flask>=3.1
 gunicorn==26.2.0   # matches prod (Render installs 26.2.0); not the fork cause — see DEPENDENCIES.md 2026-10-26
 psycopg2-binary>=2.9.0
 sqlalchemy>=2.0.0,<2.1   # 2.1 makes psycopg (v3) the default postgresql:// driver; we ship psycopg2 (G-073)

@@ -46,6 +46,14 @@
   See `docs/runbook.md` § "DB connections and background threads across fork".
 - **Bumping it later:** no special care is needed for the fork fix. Keep the pin in step with what Render installs.
 
+### Backend: `flask` floor raised to 3.1
+
+| Package | Version | Changed | Why |
+|---|---|---|---|
+| `flask` | `>=3.1` (was `>=3.0.0`) | `feat/354-public-feedback` (#360) | `POST /api/feedback` sets a per-request `request.max_content_length` so an over-cap chunked body is 413, not read and stored (#360 QA P2-2). That attribute is settable per request only from Flask 3.1; on 3.0 the line raises `AttributeError` and every feedback POST would be a 500. Prod already installs 3.1.x (lower-bound only, so `pip` takes the latest); the floor now says so. |
+
+- No version actually changes in prod or CI; this only stops a fresh build from resolving to 3.0.
+
 ## 2026-10-05
 
 ### Backend: `sqlalchemy` capped below 2.1

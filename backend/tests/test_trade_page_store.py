@@ -91,6 +91,11 @@ def p1(live, monkeypatch):
     # leaves its delivery's ids pending forever (#419 QA: the F4 test failed
     # after the page suites).
     monkeypatch.setattr(server, "_deck_evidence_pending", {})
+    monkeypatch.setattr(server, "_deck_evicted_at", collections.OrderedDict())   # U4: evicted here
+    monkeypatch.setattr(server, "_deck_held", collections.OrderedDict())         # U4: built here
+    # Cached pack states, per test: the tests reuse deck ids (deck-0000), and a
+    # state left by an earlier test carries its CAS checksum and counted misses.
+    monkeypatch.setattr(server, "_deck_pack_states", {})
     # The code default (ruling 19: 50), not a model_config row a local DB
     # seeded earlier (seeds are insert-if-absent).
     monkeypatch.delitem(server._trade_service_mod._cfg, "trade_prefetch_remaining", raising=False)

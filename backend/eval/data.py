@@ -73,8 +73,18 @@ them). A served_before=1 index changes nothing: its card keeps its
 position and outcomes, and an absent one is an unexplained gap.
 LoggedCard.position is the displayed position, the card's dense rank among
 the deck's kept non-ghost cards (card_index minus the W0 indexes below it);
-with no withdrawals it is card_index. The reason column is informational
-and never read.
+with no withdrawals it is card_index. The reason column ('i1_dropped',
+'disposition_cut', ...) is read only to count: LoggedDeck.
+withdrawn_removed_by_reason splits the W0 removals by it (models-lead B4).
+No rule gates on it.
+
+Upgrade misses (models-lead U4-R2): a pack's run metadata may carry
+"upgrade_misses", the writer's count of viewed cards that never got a full
+row, as a dict of cause -> int. "other" is the only cause that must be 0;
+every other key is a named cause (restart_split, U4-R1). A legacy int n is
+read as {"other": n} (conservative: it flags), a missing key as {}.
+LoggedDeck.upgrade_misses holds it, sorted ({} without a readable pack).
+Reporting only: no rule reads it.
 
 LoggedDeck.exclusion, per deck, in this precedence: replay excludes the
 deck whole and never sinks it; calibration excludes its cards.
@@ -137,6 +147,7 @@ from __future__ import annotations
 
 import json
 from bisect import bisect_left
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
@@ -178,14 +189,16 @@ _PACKS = table(
 # it through _replenish_deck_for(..., source="grading_refresh")).
 CALIBRATION_REFRESH_SOURCE = "grading_refresh"
 # Serve-time withdrawals (models-lead R2.4 addendum §2; trades-eng writes one
-# row per card ownership rule I-1 withdrew, on the page-store path). Read only
-# when the engine has it, and only these columns: `reason` is informational
-# and eval never gates on it.
+# row per card withdrawn at serve time on the page-store path: I-1's
+# 'i1_dropped', the disposition cut's 'disposition_cut'). Read only when the
+# engine has it, and only these columns: `reason` is only counted (B4), and
+# eval never gates on it.
 WITHDRAWALS_TABLE = "deck_card_withdrawals"
 _WITHDRAWALS = table(
     WITHDRAWALS_TABLE,
     column("deck_job_id", String), column("card_index", Integer),
     column("served_before", Integer), column("first_withdrawn_at", String),
+    column("reason", String),
 )
 # LoggedDeck.exclusion values (also replay's exclusion reasons).
 CALIBRATION_REFRESH = "calibration_refresh"
@@ -216,6 +229,9 @@ PACK_REQUIRED_SINCE: str | None = "2026-10-27T00:00:00+00:00"
 # A deck's pack is written when it retires (superseded, or the 24 h display
 # cap, PRD #339 §5.1); 1 h more for the write.
 IN_FLIGHT_WINDOW = timedelta(hours=25)
+# The one upgrade-miss cause that must be 0 (U4-R2; module doc); every other
+# key of run["upgrade_misses"] is a named cause.
+UPGRADE_MISS_OTHER = "other"
 # The LoggedCard fields a packed card takes from its unpacked dict; every other
 # unpacked key goes into its features_compact.
 _PACKED_LOGGED = (
@@ -273,6 +289,11 @@ class LoggedDeck:
     # served_before=0 withdrawals removed from the deck (module doc): not an
     # exclusion, but counted (replay's EvalRun.withdrawn_removed_cards).
     withdrawn_removed: int = 0
+    # The same removals by deck_card_withdrawals.reason, sorted (B4).
+    withdrawn_removed_by_reason: dict[str, int] = field(default_factory=dict)
+    # The pack's upgrade misses, cause -> count, sorted (U4-R2; module doc);
+    # {} without a readable pack.
+    upgrade_misses: dict[str, int] = field(default_factory=dict)
 
 
 def resolve_engine(engine=None, db_url: str | None = None):
@@ -322,6 +343,25 @@ def _json_dict(raw) -> dict | None:
     except (json.JSONDecodeError, TypeError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def valuation_markets(valuation: dict | None) -> dict:
+    """asset id -> market from a served deck_impressions.valuation_json, in
+    either shape it is written in: the value core's and owner evidence's
+    (assets: [{id, market}]) or trade_policy's personal-market snapshot
+    (assets: {give: [...], receive: [...]}, each row {id, market_value}).
+    {} when it records no per-asset market; a side that is not a list is
+    read as empty. blind_grade and bdk_audit both read markets through it."""
+    assets = (valuation or {}).get("assets")
+    if isinstance(assets, dict):          # the personal-market snapshot
+        rows = [r for side in ("give", "receive") if isinstance(assets.get(side), list)
+                for r in assets[side]]
+        key = "market_value"
+    elif isinstance(assets, list):        # the value core's evidence
+        rows, key = assets, "market"
+    else:
+        return {}
+    return {str(r["id"]): r.get(key) for r in rows if isinstance(r, dict) and "id" in r}
 
 
 def load_decks(
@@ -408,8 +448,10 @@ def load_decks(
                     oq = oq.where(out.c.acted_at <= as_of)
                 for orow in conn.execute(oq).fetchall():
                     outcomes.setdefault(orow.impression_id, []).append(orow)
-        # deck_job_id -> {card_index: served_before}, for the loaded decks only.
+        # deck_job_id -> {card_index: served_before}, for the loaded decks only,
+        # and the same keys -> reason.
         withdrawals: dict[str, dict[int, int]] = {}
+        reasons: dict[str, dict[int, str]] = {}
         if inspect(conn).has_table(WITHDRAWALS_TABLE):
             jobs = list(dict.fromkeys([r.deck_job_id for r in rows] + [p.run_id for p in packs]))
             for i in range(0, len(jobs), 500):   # chunked like the outcomes IN()
@@ -419,6 +461,7 @@ def load_decks(
                 for wrow in conn.execute(wq).fetchall():
                     withdrawals.setdefault(wrow.deck_job_id, {})[int(wrow.card_index)] = (
                         wrow.served_before)
+                    reasons.setdefault(wrow.deck_job_id, {})[int(wrow.card_index)] = wrow.reason
 
     decks: dict[str, LoggedDeck] = {}
     order: list[str] = []
@@ -496,6 +539,7 @@ def load_decks(
             deck.exclusion = PACK_INTEGRITY
             continue
         run, last_delivered, cards = got
+        deck.upgrade_misses = _upgrade_misses(run)
         if run.get(PAGE_STORE_MARKER) == 1:
             marked.add(p.run_id)
         # deck_source is not a pack key (CONTRACT_KEYS): refresh decks are kept
@@ -555,6 +599,8 @@ def load_decks(
         deck.cards = [c for c in deck.cards if c.is_ghost or c.card_index not in removed]
         idx = [c.card_index for c in deck.cards if not c.is_ghost]
         deck.withdrawn_removed = len(w0)
+        reason_of = reasons.get(deck.deck_job_id, {})
+        deck.withdrawn_removed_by_reason = dict(sorted(Counter(reason_of[i] for i in w0).items()))
         for c in deck.cards:
             if not c.is_ghost:
                 c.position = c.card_index - bisect_left(w0, c.card_index)
@@ -622,6 +668,17 @@ def _unpack(p) -> tuple[dict, int, list[dict]] | None:
     except evidence_pack.PackIntegrityError:
         return None
     return run, last_delivered, cards
+
+
+def _upgrade_misses(run: dict) -> dict[str, int]:
+    """A pack's run["upgrade_misses"] as cause -> count, sorted (module doc,
+    U4-R2): a legacy int n is {"other": n}, a missing key {}."""
+    raw = run.get("upgrade_misses")
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return {cause: int(n) for cause, n in sorted(raw.items())}
+    return {UPGRADE_MISS_OTHER: int(raw)}
 
 
 def _pack_state(run: dict, last_delivered: int, served_at: str, as_of: str | None,

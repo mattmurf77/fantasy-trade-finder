@@ -1245,3 +1245,20 @@ def test_flag_off_a_stamped_job_pages_by_its_card_markers(e2, monkeypatch):
     seed_job([card(i, owner=False) for i in range(75)], append_only=True)
     body = e2_status(client, 30).get_json()
     assert body["replace"] is True and len(body["cards"]) == 75
+
+
+@pytest.mark.parametrize("cursor", [90, 93, 120])
+def test_after_a_restart_a_gone_deck_is_never_served_past_its_stored_pages(p1, spawned, cursor):
+    """models-lead U4-R6, the bound on the restart residual: D (95 cards in
+    its job, 90 stored) loses its job to a restart. Past its stored pages
+    `deck=D` rebases onto the scope's current deck and the job_id form
+    returns no cards: neither ever serves D's cards from index 90 on."""
+    client, _, _ = p1
+    deck = build_deck()
+    restart()
+    past = set(p1_ids(90, 95))
+    body = deck_status(client, deck, cursor).get_json()
+    assert body["rebased"] is True and body["deck_id"] != deck
+    assert not past & set(ids(body["cards"]))
+    legacy = status(client, deck, cursor).get_json()
+    assert legacy["job_id"] == deck and legacy["cards"] == []
