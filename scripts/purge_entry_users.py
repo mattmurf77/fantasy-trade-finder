@@ -258,8 +258,32 @@ def _assignment_event_entry_ids(found) -> set[str]:
                 props = json.loads(raw or "{}")
             except (json.JSONDecodeError, TypeError):
                 continue
+            if not isinstance(props, dict):
+                continue
             named.update(v for k in ("old_owner", "new_owner", "actor")
                          if isinstance(v := props.get(k), str) and v.startswith(ENTRY_PREFIX))
+    return named
+
+
+def _assignment_order_entry_ids(found) -> set[str]:
+    """entry: ids still listed in any league's pick_assignment_settings.order
+    (other importers' rows included). delete_user_data anonymizes a deleted
+    Fleeced-minted id there, so after --execute only skipped entry users may
+    remain."""
+    if "leagues" not in found["existing"]:
+        return set()
+    lg = db.leagues_table
+    named: set[str] = set()
+    with db.engine.connect() as conn:
+        for raw in conn.execute(select(lg.c.pick_assignment_settings).where(
+                lg.c.pick_assignment_settings.like("%" + ENTRY_PREFIX + "%"))).scalars():
+            try:
+                settings = json.loads(raw or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            order = settings.get("order") if isinstance(settings, dict) else None
+            if isinstance(order, list):
+                named.update(o for o in order if isinstance(o, str) and o.startswith(ENTRY_PREFIX))
     return named
 
 
@@ -373,6 +397,9 @@ def verify(cutoff) -> int:
     # kept entry user may still appear: they still exist).
     leftover_events = _assignment_event_entry_ids(found) - skipped
     ok_d = not leftover_events
+    # (f) no league's pick-assignment order still lists a removed entry id.
+    leftover_orders = _assignment_order_entry_ids(found) - skipped
+    ok_f = not leftover_orders
     # (e) a machine identity check: an empty or wrong database must not pass.
     n_users = _users_count(found)
     ok_e = bool(n_users)
@@ -397,9 +424,11 @@ def verify(cutoff) -> int:
     lines.append(f"(e) users rows in this database: "
                  f"{'table missing' if n_users is None else n_users} -> "
                  f"{'OK' if ok_e else 'FAIL (empty or wrong database)'}")
+    lines.append(f"(f) league pick-assignment orders naming a removed entry id: "
+                 f"{len(leftover_orders)} -> {'OK' if ok_f else 'FAIL'}")
     lines += _info(found)
     print("\n".join(lines))
-    return 0 if ok_a and ok_b and ok_c and ok_d and ok_e else 1
+    return 0 if ok_a and ok_b and ok_c and ok_d and ok_e and ok_f else 1
 
 
 def _db_name(url) -> str:
@@ -458,7 +487,8 @@ def _engines(read_only: bool):
 def _run(argv) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], allow_abbrev=False)
     ap.add_argument("--cutoff", required=True,
-                    help="when landing.platform_options went off: a full datetime with seconds "
+                    help="when the runbook's step-2 restart completed (after "
+                         "landing.platform_options reads false): a full datetime with seconds "
                          "and an explicit timezone, e.g. 2026-10-26T14:00:00Z. An entry user "
                          "created before it is a target; at or after it, it is not")
     mode = ap.add_mutually_exclusive_group()
@@ -467,7 +497,7 @@ def _run(argv) -> int:
     mode.add_argument("--verify", action="store_true",
                       help="exit 0 only if no target, no entry: credential row, no unverified entry "
                            "user created after the cutoff and no removed entry id in the pick audit "
-                           "trail remains, on a non-empty users table")
+                           "trail or league pick-assignment order remains, on a non-empty users table")
     ap.add_argument("--expect", type=int, help="with --execute: the dry run's target count")
     ap.add_argument("--allow-local", action="store_true",
                     help="allow a local SQLite database (local test runs only)")
@@ -480,11 +510,13 @@ def _run(argv) -> int:
         ap.error("--cutoff must be a full datetime with seconds and an explicit timezone "
                  "(Z or +HH:MM), e.g. 2026-10-26T14:00:00Z")
     if cutoff > datetime.now(timezone.utc):
-        ap.error("--cutoff is in the future; use the UTC time the flag change went live")
+        ap.error("--cutoff is in the future; use the UTC time the step-2 restart completed")
     if args.execute and args.expect is None:
         ap.error("--execute needs --expect N (the dry run's target count)")
     if not args.execute and args.expect is not None:
         ap.error("--expect only goes with --execute")
+    if args.execute and args.expect_db is None:
+        ap.error("--execute needs --expect-db NAME (copy the command the dry run printed)")
     print(_identity(db.engine.url))
     if db.engine.url.get_backend_name() == "sqlite" and not args.allow_local:
         print("purge_entry_users: REFUSED. That is a local SQLite database, not the target. "

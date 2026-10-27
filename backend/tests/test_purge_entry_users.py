@@ -17,6 +17,7 @@ A temporary SQLite file only (synthetic rows). Pinned here:
   - discovery covers every user-id column delete_user_data filters on (its SQL
     is captured; a new column the script doesn't discover fails here).
 """
+import json
 import os
 import re
 import sys
@@ -138,7 +139,10 @@ def rows_naming(engine, ids):
 
 
 def run(capsys, *args):
-    code = purge.main(["--cutoff", CUTOFF, "--allow-local", *args])
+    # The runbook passes --expect-db in every mode (--execute requires it); a
+    # test's own --expect-db comes later and wins.
+    code = purge.main(["--cutoff", CUTOFF, "--allow-local",
+                       "--expect-db", purge._db_name(db.engine.url), *args])
     return code, capsys.readouterr().out
 
 
@@ -383,6 +387,8 @@ def test_every_mode_prints_the_db_identity_first(engine, capsys):
 @pytest.mark.parametrize("args", [(), ("--verify",), ("--execute", "--expect", "3")])
 def test_a_local_sqlite_database_is_refused_without_allow_local(engine, capsys, args):
     before = snapshot(engine)
+    if "--execute" in args:
+        args = (*args, "--expect-db", purge._db_name(engine.url))
     code = purge.main(["--cutoff", CUTOFF, *args])
     out = capsys.readouterr().out
     assert code == 2
@@ -414,7 +420,8 @@ def test_a_db_error_mid_discovery_prints_no_id(engine, capsys, caplog, monkeypat
     monkeypatch.setattr(dialect, "do_execute", failing)
     caplog.set_level("DEBUG")
     before = snapshot(engine)
-    for args in ((), ("--verify",), ("--execute", "--expect", "3")):
+    for args in ((), ("--verify",), ("--execute", "--expect", "3",
+                                     "--expect-db", purge._db_name(engine.url))):
         code = purge.main(["--cutoff", CUTOFF, "--allow-local", *args])
         captured = capsys.readouterr()
         assert code == 3
@@ -571,3 +578,56 @@ def test_a_failing_target_prints_only_the_error_type(engine, capsys, monkeypatch
     assert out.count("a target failed (RuntimeError); continuing") == 3
     for secret in (ESPN, MFL, ORPHAN, SWID, "cannot delete"):
         assert secret not in out + err
+
+
+# ── #452 QA round 3 ────────────────────────────────────────────────────────
+
+def test_execute_anonymizes_a_target_in_another_importers_assignment_order(engine, capsys):
+    with engine.begin() as conn:
+        seed(conn, db.leagues_table, "own", sleeper_league_id="20202", user_id=SLEEPER,
+             pick_assignment_settings=f'{{"order": ["{SLEEPER}", "{ESPN}", "{VERIFIED}"]}}')
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.connect() as conn:
+        raw = conn.execute(select(db.leagues_table.c.pick_assignment_settings).where(
+            db.leagues_table.c.sleeper_league_id == "20202")).scalar()
+    assert json.loads(raw)["order"] == [SLEEPER, accounts.DELETED_USER_PLACEHOLDER, VERIFIED]
+    code, out = run(capsys, "--verify")
+    assert code == 0, out
+    assert "(f) league pick-assignment orders naming a removed entry id: 0 -> OK" in out
+
+
+def test_verify_f_fails_on_a_removed_entry_id_left_in_an_assignment_order(engine, capsys):
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.begin() as conn:
+        seed(conn, db.leagues_table, "stale", sleeper_league_id="30303", user_id=SLEEPER,
+             pick_assignment_settings=f'{{"order": ["{SLEEPER}", "{MFL}"]}}')
+    code, out = run(capsys, "--verify")
+    assert code == 1
+    assert "(f) league pick-assignment orders naming a removed entry id: 1 -> FAIL" in out
+    assert MFL not in out
+
+
+@pytest.mark.parametrize("field", ["old_owner", "actor"])
+def test_verify_d_reads_every_audit_field(engine, capsys, field):
+    assert run(capsys, "--execute", "--expect", "3")[0] == 0
+    with engine.begin() as conn:
+        seed(conn, db.user_events_table, f"ev-{field}", user_id=SLEEPER,
+             event_type="pick_assignment_changed",
+             props=json.dumps({"pick_id": "x", "new_owner": SLEEPER, field: ESPN}))
+    code, out = run(capsys, "--verify")
+    assert code == 1 and "(d) pick_assignment_changed events naming a removed entry id: 1 -> FAIL" in out
+
+
+def test_the_printed_execute_command_carries_expect_db(engine, capsys):
+    code, out = run(capsys)
+    assert code == 0
+    assert f"--execute --expect 3 --expect-db {purge._db_name(db.engine.url)}" in out
+
+
+def test_execute_requires_expect_db(engine, capsys):
+    before = snapshot(engine)
+    with pytest.raises(SystemExit) as exc:
+        purge.main(["--cutoff", CUTOFF, "--allow-local", "--execute", "--expect", "3"])
+    assert exc.value.code == 2
+    assert "--execute needs --expect-db" in capsys.readouterr().err
+    assert snapshot(engine) == before
