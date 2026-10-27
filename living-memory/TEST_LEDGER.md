@@ -9,7 +9,7 @@ Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event,
 - **The fix:**
   - One kickoff read gives the stamp, `roster_picks_key` (`roster_snapshot.picks_key`) and the expected fp.
   - The worker's read checks the key. On a mismatch the stamp goes to None (never reused or stored) and the expected fp is dropped, so no later re-stamp can mark it fresh. A re-stamp that came first is undone.
-- **Backend:** `test_trade_freshness_roster.py` is now 51 tests (7 new):
+- **Backend:** `test_trade_freshness_roster.py` is now 43 tests (7 new):
   - one kickoff read;
   - a matching read keeps the stamp;
   - main's sibling (P0, then P1, then back to P0) is unstamped and never reused;
@@ -18,6 +18,7 @@ Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event,
   - a failed worker read is unstamped;
   - the co-owner keying of `_session_member_rows` (QA P3).
 - `test_deck_pipeline_digest.py`: the v3 pin is added to FROZEN_PINS. 68 passed across the two files plus `test_roster_refresh_state.py`.
+- **models-eng reviewed the v3 bump (OK, 2026-10-27).** An AST diff of every pinned function against main shows only the `_note_job_picks_read` line in `_job_draft_picks`. The pin reproduces, and the IGNORED classification holds: it never mutates the picks, writes only `roster_fp` and `roster_fp_expected`, and no call site holds `_trade_jobs_lock`.
 - **Sabotage, each red then restored (7):**
   - the worker doesn't note (6 red, the digest among them);
   - the note keeps the expected fp;
