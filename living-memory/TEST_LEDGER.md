@@ -49,8 +49,12 @@ Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's
     - `--expect-db` is required with `--execute`;
     - api-reference lists the new count keys.
     - **Pinned:** (d) reads `old_owner` and `actor`, the scrub rewrites `actor`, the scrub skips other event types, and the printed execute command carries `--expect-db`.
-  - **Tests:** 5 deletion + 6 purge, all new. **Sabotage: 8/8 red.**
+  - **Tests:** 3 deletion + 6 purge (9), all new (corrected 2026-10-27; this line first said 5 + 6). **Sabotage: 8/8 red.**
   - **Runs (onboarding-eng):** deletion + account + draft + picks + pick-assignment + purge tests.
+- **2026-10-27, head-eng's pre-prod-run asks (`e844115b`, `39c31ff0`):**
+  - **Pick-grid names:** a platform-grid row anonymized by id also drops the deleted person's `owner_username` / `original_username` for "Team <slot>" (the writers' own fallback; the placeholder when no slot is known). 1 new deletion test; **sabotage 6/6 red.**
+  - **Census:** the dry run prints, counts only, the verified entry users it skips (by kind and `verified_via`), which skipped users hold an ESPN/MFL credential (verify (b) fails on any), and target-owned leagues with another Fleeced member. 1 new purge test; **sabotage 6/6 red.** The runbook's "Before step 1: the census" runs it on the operator's word.
+  - **Runs (onboarding-eng):** purge, `test_account*`, deletion races, lifecycle, persistent sessions, owned picks, recorded picks, pick assignment, module shape: **311 passed** (14 files).
 
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
