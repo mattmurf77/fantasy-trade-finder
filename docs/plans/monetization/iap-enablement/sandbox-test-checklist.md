@@ -121,7 +121,7 @@ that the RevenueCat Offering is marked **Current** and that the product ids matc
 ### 5. Sandbox purchase of the annual plan with trial
 
 1. Select the annual plan (it should already be selected — it is the `hero` SKU).
-2. Tap the CTA. It should read **Start free trial**.
+2. Tap the CTA. It should read **Start 1-month trial**.
 
 **Expect:** the StoreKit sheet appears, marked **[Environment: Sandbox]**, stating the free-trial
 terms. Confirm the purchase with the sandbox Apple ID.
