@@ -346,15 +346,16 @@ def _short_deck(deck, rows, fetch, packed: bool) -> bool:
     in_flight (a pack holds every built card; a pack-less in_flight or lost
     pack's incomplete_deck holds the first REPEAT_WINDOW and viewed rows); a
     partial_run deck (its delivered rows); and a pack-less deck of
-    REPEAT_WINDOW cards or more, which may have stopped after a publication
-    batch with nothing marking it (complete ones read FAIL: the safe side).
+    REPEAT_WINDOW cards or more, never-delivered withdrawals included, which
+    may have stopped after a publication batch with nothing marking it
+    (complete ones read FAIL: the safe side).
     Rows the window didn't need are fetched and added to `rows`."""
     if deck.exclusion is not None and not (packed and deck.exclusion == IN_FLIGHT):
         return False
     if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
         return False
     shown = sorted((c for c in deck.cards if not c.is_ghost), key=lambda c: c.position)
-    if not packed and len(shown) >= REPEAT_WINDOW:
+    if not packed and len(shown) + deck.withdrawn_removed >= REPEAT_WINDOW:   # W0s count
         return False
     missing = [c.impression_id for c in shown if c.impression_id not in rows]
     if missing:

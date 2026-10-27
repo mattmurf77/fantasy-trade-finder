@@ -307,6 +307,34 @@ def test_the_short_deck_check_reads_every_displayed_card(monkeypatch):
     assert t["incomplete_decks"] == 1                       # "gap"
 
 
+def test_a_pack_less_batch_with_a_never_delivered_withdrawal_is_not_a_short_deck():
+    """#469 QA round 3: a pack-less deck stopped after its 30-card first batch,
+    one of them a never-delivered withdrawal the loader drops, shows 29 cards.
+    W0s count toward the 30, so X's fourth copy at the tail stays a breach."""
+    db = make_db()
+    deck(db, "w0", W, {i: with_x("w0", i) for i in (0, 1, 2, W - 1)}, skip={5})
+    withdraw(db, "w0", 5, 0, reason="disposition_cut")
+    (d,) = [d for d in eval_data.load_decks(engine=db.eng, since=SINCE, as_of=AS_OF)]
+    assert (len(d.cards), d.withdrawn_removed) == (W - 1, 1)
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+
+
+def test_a_pack_less_short_deck_in_flight_is_not_explained(monkeypatch):
+    """Only a PACKED in_flight deck is known complete: a pack-less one holds
+    its first 30 and viewed rows, so even a short one stays a violation."""
+    monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", SINCE)
+    db = make_db()
+    deck(db, "nopack", 12, {i: {**(with_x("nopack", i) if i in (0, 1, 2, 9, 10, 11)
+                                   else row("nopack", i)),
+                                "evidence_tier": "first30", "delivered_at": SERVED}
+                            for i in range(12)})
+    assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
+                                                      as_of=AS_OF)] == ["in_flight"]
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+
+
 def test_a_packed_short_deck_in_flight_is_still_explained():
     """#469 QA P3-1: a pack holds every built card, so a packed deck that is
     only in_flight (its pack not retired yet) is complete: explained."""

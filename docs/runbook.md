@@ -1102,8 +1102,8 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
     - `short_deck`: the deck had fewer than 30 cards the cap could keep, so the cards `_repeat_cap` deferred still sit inside the first 30. The audit re-runs `deck_quality._repeat_cap` itself on the deck's whole displayed order. If the order is unchanged (the filter could do no better), the breach is explained. That needs a full row for every displayed card; without one, the breach stays a violation. It also needs proof the loaded cards are the whole deck, so these breaches stay violations too:
       - a loader exclusion, except a packed deck that's only `in_flight` (a pack holds every built card). A pack-less `in_flight` deck, or a lost pack's `incomplete_deck`, holds just the first 30 and the viewed rows;
       - a `partial_run` deck (its delivered rows);
-      - **a pack-less deck of 30 or more cards.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
-      
+      - **a pack-less deck of 30 or more cards, never-delivered withdrawals included.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
+
       Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL. Check those examples by hand.
   - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list, or a market that's missing, null or not a number.
   - Any FAIL goes to models-lead.
