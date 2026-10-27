@@ -140,6 +140,25 @@ def test_success_marks_fresh_and_never_stores_none_ids(harness):
     assert server._FA_LEAGUE_META_CACHE[LEAGUE_ID][1] == META
 
 
+def test_the_session_and_its_pregen_carry_the_read_the_daemon_commits(harness, monkeypatch):
+    """#470 QA P2-2: the session, and the pre-gen's session context, carry this
+    init's Sleeper read start, the `refreshed_at` its daemon writes, so the
+    roster-change handler keeps the deck built on that read. A later init
+    replaces it."""
+    client, _put = harness
+    kicked = []
+    monkeypatch.setattr(server, "_kickoff_trade_job", lambda **kw: kicked.append(kw))
+    reads = []
+    for _ in range(2):
+        assert _init(client).status_code == 200
+        read = db_module.get_league_roster_state(LEAGUE_ID)["refreshed_at"]
+        with server._sessions_lock:
+            assert server._sessions[TOKEN]["roster_fetch_started_at"] == read
+        assert kicked[-1]["session_context"]["roster_fetch_started_at"] == read
+        reads.append(read)
+    assert reads[0] < reads[1]
+
+
 def test_failure_with_no_prior_rows_is_stale_never_missing(harness):
     client, put = harness
     put(f"league/{LEAGUE_ID}/rosters", {"__http_error__": 503})

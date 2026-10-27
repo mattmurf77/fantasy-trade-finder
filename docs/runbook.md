@@ -109,6 +109,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Render ignores render.yaml envVars on the dashboard-created web service (2026-07-19)](#render-ignores-renderyaml-envvars-on-the-dashboard-created-web-service-2026-07-19)
 - [Offline eval harness — replay/IPS on the F1 impression spine (F8, 2026-07-26)](#offline-eval-harness-replayips-on-the-f1-impression-spine-f8-2026-07-26)
 - [200 ms flip: model-side 24 h read (2026-10-26)](#200-ms-flip-model-side-24-h-read-2026-10-26)
+- [B-DK-4..7 production audit (2026-10-26)](#b-dk-47-production-audit-2026-10-26)
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
 - [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
@@ -1083,6 +1084,30 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
   1–2 character pieces aren't redacted, and harmless words in the URL (a username like `postgres`) are redacted along the way. A SQLite path isn't redacted. Percent-encode the password in `DATABASE_URL_PROD` anyway. Tests that build Render-shaped URLs use `.invalid` hosts: Render's wildcard DNS resolves made-up `*.render.com` names.
 - **Stop rule (B3 (f4)):** if G1 fails or G3 has orphans (outcomes joining no card), that window's evidence is being lost. models-lead recommends the kill (`first_page_store_enabled` 0) at once, and the operator decides via release-lead. Any other failure goes to models-lead, an outcome on a ghost row included: that is a serve bug (a ghost reached a client), not lost data.
 - **Weekly:** the `--weekly` lines (U4-R4 named upgrade misses ≤ 1% of viewed cards, B4 disposition cuts ≤ 5% of delivered-range positions) ride the BL-001 monitor through head-bizops for the first 4 weeks. An OVER goes to models-lead.
+
+## B-DK-4..7 production audit (2026-10-26)
+
+`backend/eval/bdk_audit.py` counts served violations of `deck.quality_filters`' four rules against a bar of 0: B-DK-4 breakup, B-DK-5 filler, B-DK-6 redundant TE/QB, B-DK-7 repeat (models-lead-launch.md addendum C §C5). It's a prod read, run only on the operator's word: first on the post-flip window, then weekly with the readout. It isn't flip-gating; it's due before the launch-week freeze.
+
+- **Run it read-only:** `python3 -m backend.eval.bdk_audit --db "$DATABASE_URL_PROD" --allow-postgres-readonly --since <window start, ISO UTC> [--until <end>]` (add `--json` for a pasteable object). Load the URL from `secrets.local.env` without printing it. It uses the flip read's read-only engine, error redaction and `as_of` settle (a `bdk_audit: note:` line on stderr when it clamps).
+- **What it reads:** each Trades deck in the window: its first 30 cards by displayed position, plus every card with a `viewed` outcome. Calibration refresh decks are left out. `pack_integrity` and `withdrawal_conflict` decks are skipped and counted, since their displayed positions can't be trusted. A viewed card with no full row is reported by its pack's `upgrade_miss_cards` cause (U4-R3; no entry reads `other`).
+- **Reading it:** each rule prints violations, audited cards, protected (exempt) cards, not-auditable cards, the bar and a status. `NOT_AUDITABLE` prints `n/a`, never 0.
+  - **B-DK-6 is always `NOT_AUDITABLE`:** rosters and lineup slots aren't recorded at serve time.
+  - **Breakup and filler need `valuation_json`'s per-asset markets,** which are NULL while `trade.valuation_telemetry` and the market policy are off. Where they're present, they're the age-adjusted snapshot values, so a card near a threshold can differ from what the filter saw.
+  - **So today's realistic result is `OVERALL: INCOMPLETE` (exit 3):** no violation among the cards that could be checked. That isn't a pass.
+  - **A violation may be on a fatigue retest card.** That protection isn't recorded at serve time, so check the example's `trade_hash` against `deck_suppressions.retest_trade_hash`.
+  - **A B-DK-7 breach** whose example shows ghost slots or withdrawn cards may come from the serve order, not the filter: the filter ran before those were removed.
+  - **B-DK-7 explains two kinds of breach** (counted in `explained`, not violations; each example carries its `why`):
+    - `protected`: every over-cap card is protected (they hold their positions).
+    - `short_deck`: the deck had fewer than 30 cards the cap could keep, so the cards `_repeat_cap` deferred still sit inside the first 30. The audit re-runs `deck_quality._repeat_cap` itself on the deck's whole displayed order. If the order is unchanged (the filter could do no better), the breach is explained. That needs a full row for every displayed card; without one, the breach stays a violation. It also needs proof the loaded cards are the whole deck, so these breaches stay violations too:
+      - a loader exclusion, except a packed deck that's only `in_flight` (a pack holds every built card). A pack-less `in_flight` deck, or a lost pack's `incomplete_deck`, holds just the first 30 and the viewed rows;
+      - a `partial_run` deck (its delivered rows);
+      - **a pack-less deck of 30 or more cards, never-delivered withdrawals included.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
+
+      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL. Check those examples by hand.
+  - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list, or a market that's missing, null or not a number.
+  - Any FAIL goes to models-lead.
+- **Exit status:** 0 = PASS; 1 = FAIL; 2 = a refused database or a `ReadOnlyViolation` (nothing on stdout), or a usage error; 3 = INCOMPLETE (nothing failed, but a rule couldn't check every card, or a deck was skipped: not a pass); 4 = the tool crashed (its redacted traceback on stderr): not a verdict, take it to models-eng.
 
 ## MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)
 
