@@ -1917,6 +1917,12 @@ app_feedback_table = Table("app_feedback", metadata,
     # POST /api/feedback contract byte-identical — see save_feedback).
     Column("status",            String),                  # see FEEDBACK_STATUSES
     Column("status_updated_at", String),                  # ISO, set on status change
+    # #360 QA P2-1 (head-eng): sha256 hex of the X-Session-Token of the
+    # UNVERIFIED session that sent the note (never the raw token). When that
+    # same session verifies in place, attach_session_feedback moves the note
+    # to the now-proven user and clears this. NULL for verified-at-post,
+    # no-token and unknown-token notes, and after attach.
+    Column("session_key",       Text),
     Index("idx_app_feedback_created_at", "created_at"),
     Index("idx_app_feedback_user_id",    "user_id"),
 )
@@ -3832,7 +3838,9 @@ def _migrate_db() -> None:
     # for any future additive ALTERs. Indexes are declared on the Table
     # definition so create_all() handles them on fresh DBs.
     _app_feedback_migrations: list[tuple[str, str, str]] = [
-        # (table, column, type) — currently none; placeholder for future work
+        # (table, column, type)
+        # #360 QA P2-1: hash of the unverified session that sent the note.
+        ("app_feedback", "session_key", "TEXT"),
     ]
     for table, col, col_type in _app_feedback_migrations:
         try:
@@ -15262,9 +15270,14 @@ def save_feedback(
     device_type: str | None = None,
     os_version: str | None = None,
     client_created_at: str | None = None,
+    session_key: str | None = None,
 ) -> dict:
     """Insert (idempotently on client_id) a feedback row and return
     {server_id, created_at, duplicate}.
+
+    `session_key` is the sha256 hex of an UNVERIFIED session's token (#360
+    QA P2-1), so attach_session_feedback can hand the note to that session's
+    user once it verifies in place. Callers pass None otherwise.
 
     Retries with the same client_id are dropped: we look up the existing
     row and return its ids so the mobile client can move on. SQLite uses
@@ -15282,11 +15295,11 @@ def save_feedback(
                     INSERT INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     ON CONFLICT (client_id) DO NOTHING
                     RETURNING id
                     """
@@ -15304,6 +15317,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             ).fetchone()
             if res:
@@ -15319,11 +15333,11 @@ def save_feedback(
                     INSERT OR IGNORE INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     """
                 ),
                 {
@@ -15339,6 +15353,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             )
             if cur.rowcount == 1 and cur.lastrowid:
@@ -15360,6 +15375,59 @@ def save_feedback(
         # Shouldn't happen — either we just inserted (handled above) or a
         # duplicate exists. Defensive fallback.
         return {"server_id": 0, "created_at": now_iso, "duplicate": True}
+
+
+def find_feedback_by_client_id(client_id: str) -> dict | None:
+    """{server_id, created_at} of the note with this client_id, or None.
+    POST /api/feedback uses it on the throttled path only, so an idempotent
+    retry of a note already held still gets its 200 `duplicate` (#360 QA
+    P2-2: duplicates never count against the throttle)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(app_feedback_table.c.id, app_feedback_table.c.created_at)
+            .where(app_feedback_table.c.client_id == client_id)
+        ).fetchone()
+    return {"server_id": int(row[0]), "created_at": row[1]} if row else None
+
+
+def attach_session_feedback(session_key: str, user_id: str,
+                            username: str | None) -> int:
+    """Hand an unverified session's notes to its user once it verifies in
+    place (#360 QA P2-1, head-eng's ruling). Returns how many rows moved.
+
+    The proof is `session_key`: the sha256 of the bearer token that sent the
+    notes, matched against the token now verifying. Never by username. Only
+    still-anonymous rows (user_id IS NULL) move, and the key is cleared, so a
+    second call for the same session is a no-op.
+    """
+    if not session_key or not user_id:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(user_id=user_id, username=username, session_key=None)
+        )
+        return res.rowcount or 0
+
+
+def detach_session_feedback(session_key: str) -> int:
+    """Drop the session_key from a token's still-anonymous notes, so they can
+    never attach (release-lead delta QA E). Called when /api/session/init
+    re-points that token at a DIFFERENT user: the notes were sent as the old
+    identity and must not follow the token to the new one. The rows stay,
+    anonymous. Returns how many rows changed."""
+    if not session_key:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(session_key=None)
+        )
+        return res.rowcount or 0
 
 
 def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:
