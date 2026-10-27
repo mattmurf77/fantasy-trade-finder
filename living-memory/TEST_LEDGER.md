@@ -18,6 +18,7 @@ Gates: head-eng's assigned bug fix (release-lead's prod log: `UniqueViolation` o
     - and the one-swipe baseline.
   - **On main's code:** 8 of 10 fail. The Postgres cases log the prod error verbatim; only the baseline passes.
   - **With the fix:** 10/10 pass. The taste-adjacent suites (deck taste, frozen taste, exploration, account deletion, age pref, bake-off serving, evidence pack, nightly lean, scorer contract) all pass, 207 tests.
+  - **Full backend suite** at defdc65b (SQLite, no Postgres URL): 9336 passed, 7 skipped, 5 of them this file's Postgres cases.
 - **Sabotage, each red then restored (5):**
   - the merge overwrites instead of adding (6 red);
   - no "still as read" check (4);
