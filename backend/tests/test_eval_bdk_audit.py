@@ -282,29 +282,50 @@ def test_a_short_deck_out_of_the_filters_order_is_a_violation():
 
 
 def test_the_short_deck_check_reads_every_displayed_card(monkeypatch):
-    """A 35-card deck with X in 10: _repeat_cap keeps 28, so 2 of the 7
-    deferred X cards sit at positions 28-29. The check reads the 5 cards past
-    the window too (fetched; they're not in the audit set). A displayed card
-    with no full row means it can't be checked: a violation stands."""
+    """A packed 35-card deck with X in 10 (every card viewed, so every row is
+    full): _repeat_cap keeps 28, so 2 of the 7 deferred X cards sit at
+    positions 28-29. The check reads the 5 cards past the window too
+    (fetched; they're not in the audit set). The same deck with no pack may
+    have stopped after a 30-card batch, so it reads FAIL (the safe side). A
+    displayed card with no full row can't be checked: a violation stands."""
     db = make_db()
-    _x_deck(db, "long", 35, (0, 1, 2, *range(28, 35)))
+    x_at = (0, 1, 2, *range(28, 35))
+    for job in ("long", "packless"):
+        _x_deck(db, job, 35, x_at)
+    put_pack(db, "long", _deck_cards("long", 35), card_count=35, deliveries=[[34, SERVED]])
     deck(db, "gap", 12, {**{i: with_x("gap", i) for i in (0, 1, 2, 9, 10, 11)},
                          5: row("gap", 5, full=False)})       # displayed, no full row
     reads = []
     real = ba._full_rows
     monkeypatch.setattr(ba, "_full_rows", lambda conn, ids: reads.append(list(ids)) or real(conn, ids))
     t = run(db).rules["repeat"]
-    assert t["explained_short_deck"] == 1 and t["violations"] == 1
-    assert [e["deck_job_id"] for e in t["examples"]] == ["gap"]
+    assert t["explained_short_deck"] == 1 and t["violations"] == 2
+    assert [e["deck_job_id"] for e in t["explained_examples"]] == ["long"]
+    assert sorted(e["deck_job_id"] for e in t["examples"]) == ["gap", "packless"]
     past = sorted(card_impression_id("long", i) for i in range(30, 35))
     assert any(sorted(r) == past for r in reads)            # fetched for the check
     assert t["incomplete_decks"] == 1                       # "gap"
 
 
+def test_a_packed_short_deck_in_flight_is_still_explained():
+    """#469 QA P3-1: a pack holds every built card, so a packed deck that is
+    only in_flight (its pack not retired yet) is complete: explained."""
+    db = make_db()
+    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))
+    put_pack(db, "short", _deck_cards("short", 12), card_count=12,
+             deliveries=[[11, SERVED]], retired=False)
+    assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
+                                                      as_of=AS_OF)] == ["in_flight"]
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (0, 1)
+
+
 def _prefix_deck(db, job, tier, x_at=(0, 1, 2, W - 1)):
-    """Rows for only the first W cards of a longer built deck, X at `x_at`:
-    what the loader holds for a pack-less tiered deck (the first 30) or a
-    partial_run one (its delivered rows)."""
+    """Only W rows (the first W cards of what would be a longer built deck;
+    nothing past them is written), X at `x_at`: what the loader holds for a
+    pack-less tiered deck (the first 30), a partial_run one (its delivered
+    rows), or a pack-less untiered one stopped after its first 30-card
+    publication batch."""
     deck(db, job, W, {i: {**(with_x(job, i) if i in x_at else row(job, i)),
                           "evidence_tier": tier, "delivered_at": SERVED} for i in range(W)})
 
@@ -313,7 +334,8 @@ def _prefix_deck(db, job, tier, x_at=(0, 1, 2, W - 1)):
     ("first30", 2, "in_flight"),           # no pack yet, inside 25 h
     ("first30", 30, "incomplete_deck"),    # a lost pack
     ("partial_run", 2, None),              # its delivered rows only
-], ids=["in_flight", "lost_pack", "partial_run"])
+    (None, 2, None),                       # untiered, stopped after batch 1: no marker
+], ids=["in_flight", "lost_pack", "partial_run", "stopped_after_batch_1"])
 def test_a_deck_whose_cards_are_a_prefix_is_never_a_short_deck(monkeypatch, tier, hours,
                                                                 exclusion):
     """#469 QA P1-1: these decks' cards are a prefix of what was displayed,

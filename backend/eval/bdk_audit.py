@@ -79,9 +79,10 @@ REPEAT_WINDOW cards to keep the deferred ones still land in the window. A
 breach is explained that way when re-running deck_quality._repeat_cap on
 the deck's whole displayed order leaves it unchanged (the filter could do no
 better); that needs a well-formed full row for every displayed card, and a
-deck whose cards are a prefix of what was displayed (any loader exclusion,
-e.g. in_flight or a lost pack's incomplete_deck, or a partial_run deck) never
-qualifies, else it stays a violation. Both are counted in `explained`, split as
+deck whose cards may be a prefix of what was built never qualifies: a loader
+exclusion (but a packed deck's in_flight: its pack holds every card), a
+partial_run deck, or a pack-less deck of REPEAT_WINDOW cards or more (it may
+have stopped after a publication batch, unmarked). Those stay violations. Both are counted in `explained`, split as
 explained_protected / explained_short_deck, with examples (`why`). A window card with no full row is not auditable and
 its deck incomplete (a breach found there still counts). The filter ran on
 the built order, ghost rows and later withdrawals included, so a served
@@ -131,8 +132,8 @@ from backend.deck_quality import (
     REPEAT_WINDOW, _breakup, _filler, _repeat_cap, is_protected,
 )
 from backend.eval.data import (
-    CALIBRATION_REFRESH, PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER, UPGRADE_MISS_OTHER,
-    WITHDRAWAL_CONFLICT, _json_dict, load_decks, valuation_markets,
+    CALIBRATION_REFRESH, IN_FLIGHT, PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER,
+    UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, _json_dict, load_decks, valuation_markets,
 )
 from backend.eval.flip_read import (
     _PACK_ROWS, FAIL, LIST_CAP, PASS, ReadOnlyViolation, _chunks, _iso, _Parser, _redact,
@@ -205,7 +206,8 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
         misses = _miss_cards(conn, sorted(
             job for job, cs in cards.items()
             if any(c.viewed and c.impression_id not in rows for c in cs)))
-        repeat = _repeat(trades, sets, rows, lambda ids: _full_rows(conn, ids))
+        repeat = _repeat(trades, sets, rows, lambda ids: _full_rows(conn, ids),
+                         _packed_runs(conn, [d.deck_job_id for d in trades]))
 
     card_rules = {name: _tally() for name in ("breakup", "filler", "redundant")}
     no_row = {"viewed_by_cause": Counter(), "unviewed": 0, "examples": []}
@@ -311,6 +313,15 @@ def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
     return out
 
 
+def _packed_runs(conn, run_ids: list[str]) -> set[str]:
+    """The run_ids with a pack row (a pack holds every built card)."""
+    if not run_ids or not inspect(conn).has_table(PACK_TABLE):
+        return set()
+    return {run_id for chunk in _chunks(run_ids)
+            for (run_id,) in conn.execute(select(_PACK_ROWS.c.run_id)
+                                          .where(_PACK_ROWS.c.run_id.in_(chunk)))}
+
+
 def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
     """run_id -> its pack's run["upgrade_miss_cards"] ({} when absent or
     unreadable), for the runs with a pack row."""
@@ -326,19 +337,25 @@ def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
     return out
 
 
-def _short_deck(deck, rows, fetch) -> bool:
+def _short_deck(deck, rows, fetch, packed: bool) -> bool:
     """Whether the deck's whole displayed order is a fixed point of
-    deck_quality._repeat_cap (module doc): False when any displayed card has
-    no well-formed full row, and for a deck whose cards are only a prefix of
-    what was displayed: one with a loader exclusion (in_flight, or a lost
-    pack's incomplete_deck: the first REPEAT_WINDOW and viewed rows) or a partial_run
-    deck (its delivered rows), where an over-cap card at the prefix's end
-    would read as deferred (#469 QA P1-1). Rows the window didn't need are
-    fetched and added to `rows`."""
-    if deck.exclusion is not None or any(c.evidence_tier == PARTIAL_RUN_TIER
-                                         for c in deck.cards):
+    deck_quality._repeat_cap (module doc). False when any displayed card has
+    no well-formed full row, and for any deck whose cards may be only a prefix
+    of what was built, where an over-cap card at the prefix's end would read
+    as deferred (#469 QA): a loader exclusion other than a packed deck's
+    in_flight (a pack holds every built card; a pack-less in_flight or lost
+    pack's incomplete_deck holds the first REPEAT_WINDOW and viewed rows); a
+    partial_run deck (its delivered rows); and a pack-less deck of
+    REPEAT_WINDOW cards or more, which may have stopped after a publication
+    batch with nothing marking it (complete ones read FAIL: the safe side).
+    Rows the window didn't need are fetched and added to `rows`."""
+    if deck.exclusion is not None and not (packed and deck.exclusion == IN_FLIGHT):
+        return False
+    if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
         return False
     shown = sorted((c for c in deck.cards if not c.is_ghost), key=lambda c: c.position)
+    if not packed and len(shown) >= REPEAT_WINDOW:
+        return False
     missing = [c.impression_id for c in shown if c.impression_id not in rows]
     if missing:
         rows.update(fetch(missing))
@@ -349,9 +366,9 @@ def _short_deck(deck, rows, fetch) -> bool:
     return [id(c) for c in _repeat_cap(cards)[0]] == [id(c) for c in cards]
 
 
-def _repeat(trades, sets, rows, fetch) -> dict:
+def _repeat(trades, sets, rows, fetch, packed: set) -> dict:
     """B-DK-7 per deck over its window (module doc). `fetch(ids)` reads more
-    full rows, for the short-deck check."""
+    full rows, for the short-deck check; `packed` is the run_ids with a pack."""
     t = {"violations": 0, "explained": 0, "explained_protected": 0, "explained_short_deck": 0,
          "audited": 0, "not_auditable": 0, "incomplete_decks": 0, "examples": [],
          "explained_examples": []}
@@ -379,7 +396,8 @@ def _repeat(trades, sets, rows, fetch) -> dict:
         for asset, protected in over.items():
             why = "protected" if all(protected) else None
             if why is None:
-                short = _short_deck(d, rows, fetch) if short is None else short
+                short = (_short_deck(d, rows, fetch, d.deck_job_id in packed)
+                         if short is None else short)
                 why = "short_deck" if short else None
             if why:
                 t["explained"] += 1
