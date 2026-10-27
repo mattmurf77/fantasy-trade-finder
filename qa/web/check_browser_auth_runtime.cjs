@@ -86,6 +86,9 @@ let context;
   assert.equal(calls.filter(c => c.path === '/api/session/init').length, 0);
   // The web's ESPN/MFL chips are hard-off even with landing.platform_options
   // on (head-eng 2026-10-27; check_web_structure.py GATE-web-espn-mfl-off).
+  // Wait for the flag map to settle first, or the checks pass before the
+  // reveal has run (they would pass on main too).
+  await page.waitForFunction(() => window.FTF_FLAGS_READY === true);
   assert.equal(await page.locator('#platform-row').isVisible(), false);
   assert.equal(await page.locator('#platform-chip-espn').isVisible(), false);
   assert.equal(await page.locator('#platform-chip-mfl').isVisible(), false);
