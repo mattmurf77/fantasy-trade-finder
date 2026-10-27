@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import ChalkText from './chalkline/Text';
 import { Icon, TickLabel } from './chalkline';
 import { chalk, flare, ink, radii, space } from '../theme/chalkline';
-import type { PaywallConfig } from '../api/billing';
+import { getPaywallConfig, type PaywallConfig } from '../api/billing';
 import {
   getActivePro,
   hasProEntitlement,
@@ -63,11 +63,25 @@ import {
 /** Apple's own subscription-management page (Manage subscription). */
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
-/** #393 scope §3 item 7: the Settings tip-jar row is hidden at launch
- *  (/api/paywall/config serves `tips: []`: three fewer IAPs on a first
- *  review). The Settings screens gate `settings-tip-row` on this; the
- *  TipJar route stays registered. */
-export const TIP_ROW_AT_LAUNCH = false;
+/** B8 #1 (head-eng): the Settings tip-jar row shows only while the server
+ *  offers tips, i.e. the cached /api/paywall/config `tips` is a non-empty
+ *  array. SUBSCRIBED to the React Query cache, NEVER fetching (`enabled:
+ *  false`, so the hub's rule 1 holds): unknown or empty → hidden. The server
+ *  serves `tips: []` at launch, so the row is hidden and comes back with a
+ *  server change, no binary. The TipJar route stays registered. */
+export function useTipsOffered(): boolean {
+  const { data } = useQuery<PaywallConfig>({
+    queryKey: ['paywall-config', 'ios'],
+    queryFn: () => getPaywallConfig('ios'),
+    enabled: false,
+  });
+  return tipsOffered(data);
+}
+
+/** Pure: the config offers at least one tip. */
+export function tipsOffered(config: PaywallConfig | null | undefined): boolean {
+  return Array.isArray(config?.tips) && config.tips.length > 0;
+}
 
 export default function SubscriptionSection() {
   const paywallOn = useFlag('monetize.paywall');

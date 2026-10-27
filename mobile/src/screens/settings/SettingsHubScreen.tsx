@@ -40,10 +40,10 @@ import { chalk } from '../../theme/chalkline';
 import { Icon, TickLabel } from '../../components/chalkline';
 import { NO_LEAGUE_ID, useSession, type RankMethodPref } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
-import { useEntitlements } from '../../state/useEntitlements';
 import type { AccountInfo } from '../../api/auth';
 import type { NotificationPrefs } from '../../shared/types';
 import FeedbackFAB from '../../components/FeedbackFAB';
+import SubscriptionSection, { useTipsOffered } from '../../components/SubscriptionSection';
 import { hubStyles, styles } from './styles';
 
 // The ranking preview names the flow the SteerSlider names. Values are the
@@ -93,15 +93,13 @@ export default function SettingsHubScreen({ navigation }: any) {
   const stageUsersEnabled = useFlag('testing.stage_users');
   const timingReadoutEnabled = useFlag('testing.timing_readout');
   const helpSurfaceOn = useFlag('ux.help_surface');
-  // Monetization (iap-enablement, flag `monetize.paywall`, dark). The flag
-  // gates this ROW, not the Paywall route — same rule as Testing above.
+  // Monetization (flag `monetize.paywall`, dark). The flag gates the tip
+  // ROW, not the TipJar route — same rule as Testing above. Settings ›
+  // Subscription gates itself (SubscriptionSection, below).
   const paywallOn = useFlag('monetize.paywall');
-  // Entitlements come from the zustand store, already in memory: no query, so
-  // rule 1 (zero network) survives. `loaded` is what keeps rule 2: before any
-  // source has answered we say NOTHING rather than printing "Free", which
-  // would be a guess that happens to be wrong for every paying user.
-  const proLoaded = useEntitlements((s) => s.loaded);
-  const isPro = useEntitlements((s) => s.pro);
+  // B8 #1: the tip row also needs the server to offer tips. A cache
+  // subscription that never fetches (rule 1 holds); unknown → hidden.
+  const tipsOffered = useTipsOffered();
 
   const go = (route: string) => () => navigation?.navigate?.(route);
 
@@ -286,28 +284,20 @@ export default function SettingsHubScreen({ navigation }: any) {
           onPress={go('SettingsNotifications')}
         />
 
-        {/* Monetization entry point (iap-enablement). The ONLY route to the
-            paywall in this build — gate-driven sources land here in a later
-            wave. Hidden entirely while `monetize.paywall` is false, which is
-            everywhere today. */}
-        {paywallOn ? (
-          <>
-            <View style={styles.section}>
-              <TickLabel>Subscription</TickLabel>
-            </View>
-            <NavRow
-              testID="settings-pro-row"
-              title="Fleeced Pro"
-              preview={proLoaded ? (isPro ? 'Pro' : 'Free') : null}
-              onPress={() => navigation?.navigate?.('Paywall', { source: 'settings' })}
-            />
-            <NavRow
-              testID="settings-tip-row"
-              title="Support Fleeced"
-              preview="Tip jar"
-              onPress={() => navigation?.navigate?.('TipJar', { source: 'settings' })}
-            />
-          </>
+        {/* Settings › Subscription (#393 M3): engagement-eng's self-contained
+            section (the TimingReadoutRow precedent). It gates itself on
+            `monetize.paywall`, carries its own "Subscription" banner and fires
+            no request (rule 1), so this screen adds no gate around it. */}
+        <SubscriptionSection />
+        {/* The tip-jar row shows only while the server offers tips (B8 #1;
+            `tips: []` at launch); the TipJar route stays registered. */}
+        {paywallOn && tipsOffered ? (
+          <NavRow
+            testID="settings-tip-row"
+            title="Support Fleeced"
+            preview="Tip jar"
+            onPress={() => navigation?.navigate?.('TipJar', { source: 'settings' })}
+          />
         ) : null}
 
         <View style={styles.section}>

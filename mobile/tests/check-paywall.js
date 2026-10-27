@@ -244,20 +244,26 @@ const flat = strip(read(FLAT));
   }
 }
 
-// 8 — the Settings entry row, flag-gated, on BOTH settings surfaces
+// 8 — Settings › Subscription (#393 M3) on BOTH settings surfaces: the
+//     self-contained SubscriptionSection, mounted ungated (it self-gates on
+//     the flag) and owning the See plans → Paywall {source:'settings'} entry.
+//     The old "Fleeced Pro" row (Pro/Free to every session) is gone.
 {
-  const rowIn = (text) =>
-    /testID="settings-pro-row"/.test(text)
-    && /'Paywall'\s*,\s*\{\s*source:\s*'settings'\s*\}/.test(text)
-    && /useFlag\(\s*'monetize\.paywall'\s*\)/.test(text);
-  const hubOk = rowIn(hub);
-  const flatOk = rowIn(flat);
-  if (hubOk && flatOk) {
-    ok('8. flag-gated "Fleeced Pro" row navigates to Paywall {source:\'settings\'} on both settings surfaces');
+  const subs = strip(read(path.join(ROOT, 'src/components/SubscriptionSection.tsx')));
+  const mountIn = (text) =>
+    /import SubscriptionSection, \{ useTipsOffered \} from '(\.\.\/)+components\/SubscriptionSection';/.test(text)
+    && (text.match(/<SubscriptionSection \/>/g) || []).length === 1;
+  const hubOk = mountIn(hub);
+  const flatOk = mountIn(flat);
+  const owner = /useFlag\('monetize\.paywall'\)/.test(subs)
+    && /openPaywall\(\{ source: 'settings' \}\)/.test(subs);
+  const oldRow = /settings-pro-row/.test(hub + flat);
+  if (hubOk && flatOk && owner && !oldRow) {
+    ok('8. Settings › Subscription (SubscriptionSection) on both settings surfaces; See plans opens Paywall {source:\'settings\'}');
   } else {
-    bad('8. the Settings entry row exists on both settings surfaces',
-      `hub:${hubOk} flat:${flatOk} — \`account.settings_hub\` decides which of ` +
-      'the two mounts (it is TRUE in config/features.json today), so a row on ' +
+    bad('8. Settings › Subscription exists on both settings surfaces',
+      `hub:${hubOk} flat:${flatOk} owner:${owner} oldRow:${oldRow} — \`account.settings_hub\` decides which of ` +
+      'the two mounts (it is TRUE in config/features.json today), so a section on ' +
       'only one of them makes the paywall unreachable in the other state.');
   }
 }

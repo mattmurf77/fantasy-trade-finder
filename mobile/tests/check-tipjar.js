@@ -18,8 +18,11 @@
 //   6. No FeedbackFAB in the modal (#188 exception).
 //   7. purchases.ts stays the ONLY react-native-purchases importer, and the
 //      tip helpers keep the configured-guard before any SDK call.
-//   8. The Settings entry row (settings-tip-row) exists on BOTH settings
-//      surfaces, inside the same `monetize.paywall` gate as the pro row.
+//   8. The Settings entry row (settings-tip-row) is DATA-DRIVEN on BOTH
+//      settings surfaces (B8 #1): behind the `monetize.paywall` gate AND the
+//      server offering tips (the cached config's `tips` non-empty, read by a
+//      cache subscription that never fetches). The server serves `tips: []`
+//      at launch, so it is hidden then.
 //   9. The backend tip guard exists: entitlements.is_tip_product referenced
 //      by the projector, and every served tip SKU is ftf_tip_-prefixed on
 //      the server (cross-checked into backend/server.py so a drifted id
@@ -145,18 +148,26 @@ const beServer = read(BE_SERVER);
   }
 }
 
-// 8 — settings entry on both surfaces, inside the paywall gate
+// 8 — the settings entry, DATA-DRIVEN on both surfaces (B8 #1): the paywall
+//     flag AND the server offering tips. The hook subscribes to the cached
+//     config and never fetches; `tipsOffered` (pure) is executed in
+//     check-paywall-gate §9i.
 {
-  const inHub = hub.includes('settings-tip-row')
-    && hub.indexOf('settings-tip-row') > hub.indexOf('paywallOn ?');
-  const inFlat = flat.includes('settings-tip-row')
-    && flat.indexOf('settings-tip-row') > flat.indexOf('paywallEnabled ?');
+  const subs = strip(read(path.join(ROOT, 'src/components/SubscriptionSection.tsx')));
+  const hook = /export function useTipsOffered\(\): boolean \{\s*const \{ data \} = useQuery<PaywallConfig>\(\{\s*queryKey: \['paywall-config', 'ios'\],\s*queryFn: \(\) => getPaywallConfig\('ios'\),\s*enabled: false,\s*\}\);\s*return tipsOffered\(data\);/.test(subs)
+    && /return Array\.isArray\(config\?\.tips\) && config\.tips\.length > 0;/.test(subs);
+  const gated = (text, flag) => text.includes('settings-tip-row')
+    && /const tipsOffered\s*= useTipsOffered\(\);/.test(text)
+    && text.indexOf(`${flag} && tipsOffered ? (`) > -1
+    && text.indexOf('settings-tip-row') > text.indexOf(`${flag} && tipsOffered ? (`);
+  const inHub = gated(hub, 'paywallOn');
+  const inFlat = gated(flat, 'paywallEnabled');
   const navs = (hub + flat).match(/navigate\?\.\('TipJar', \{ source: 'settings' \}\)/g) || [];
-  if (inHub && inFlat && navs.length === 2) {
-    ok('8. settings-tip-row on both surfaces, flag-gated, navigates to TipJar');
+  if (hook && inHub && inFlat && navs.length === 2) {
+    ok('8. settings-tip-row on both surfaces only with the flag AND the server offering tips (never-fetching cache read)');
   } else {
-    bad('8. settings-tip-row on both surfaces, flag-gated, navigates to TipJar',
-      `hub=${inHub} flat=${inFlat} navs=${navs.length}`);
+    bad('8. settings-tip-row on both surfaces only with the flag AND the server offering tips (never-fetching cache read)',
+      `hook=${hook} hub=${inHub} flat=${inFlat} navs=${navs.length}`);
   }
 }
 

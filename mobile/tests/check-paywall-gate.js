@@ -1494,6 +1494,27 @@ check('9h. not in this build: the Home mark (mon.club.mark_a11y), the kept-price
   for (const k of ['mon.club.kept_home', 'mon.club.mark_a11y', 'mon.club.welcome_tester']) assert(!(k in copy.MON), `${k} in the copy module`);
 });
 
+check('9i. B8 #1 [executed]: the Settings tip row is data-driven — shown only when the cached config offers tips; unknown / empty → hidden; read from the cache, never fetched', () => {
+  const offered = extractFn(SUBS, 'tipsOffered', {});
+  eq(offered(undefined), false, 'unknown config → hidden');
+  eq(offered({ enabled: false }), false, 'paywall off (no tips key) → hidden');
+  eq(offered({ enabled: true, tips: [] }), false, 'tips: [] (launch) → hidden');
+  eq(offered({ enabled: true, tips: null }), false, 'malformed → hidden');
+  eq(offered({ enabled: true, tips: [{ product_id: 'ftf_tip_199', display_price: '$1.99' }] }), true, 'tips offered → shown');
+  let opts = null;
+  let cached;
+  const hook = extractFn(SUBS, 'useTipsOffered', {
+    useQuery: (o) => { opts = o; return { data: cached }; },
+    getPaywallConfig: () => { throw new Error('fetched'); },
+    tipsOffered: offered,
+  });
+  cached = undefined; eq(hook(), false, 'hook: nothing cached → hidden');
+  cached = { tips: [] }; eq(hook(), false, 'hook: tips: [] → hidden');
+  cached = { tips: [{ product_id: 'ftf_tip_499' }] }; eq(hook(), true, 'hook: tips → shown');
+  eq(JSON.stringify(opts.queryKey), JSON.stringify(['paywall-config', 'ios']), 'the paywall config cache key');
+  eq(opts.enabled, false, 'a subscription that never fetches (the hub\'s rule 1)');
+});
+
 function walk(dir, out = []) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
