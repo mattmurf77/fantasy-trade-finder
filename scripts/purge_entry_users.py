@@ -19,6 +19,7 @@ Usage, from the repo root (`--cutoff` is required in every mode):
     python3 scripts/purge_entry_users.py --cutoff 2026-10-26T00:00:00Z            # dry run
     python3 scripts/purge_entry_users.py --cutoff … --execute --expect N
     python3 scripts/purge_entry_users.py --cutoff … --verify
+    (add --allow-local only for a local SQLite test run)
 
 Targets (head-eng's filter): an `entry:` id with a users row whose
 `verified_via` is NULL and `created_at` is before the cutoff, or an `entry:` id
@@ -29,8 +30,19 @@ touched.
 
 Output is COUNTS ONLY: never an id, SWID, team or league name (legal). The DB
 is whatever `backend.database` points at (DATABASE_URL, default
-data/trade_finder.db). The prod run needs the operator's own word in the
-acting session.
+data/trade_finder.db). Every mode prints that DB's identity first (dialect,
+the host's first label, the database name; never credentials) and refuses a
+local SQLite database unless `--allow-local` is passed. The prod run needs the
+operator's own word in the acting session.
+
+The work runs on engines built with `hide_parameters=True`, swapped into
+`backend.database` for the run (`db.engine`, and `db.ro_engine`, which the
+dry run and --verify read through), so `delete_user_data` uses them too and
+no SQL error can print bound ids. Any unexpected error prints only its type.
+
+Exit codes: 0 done / verified; 1 --verify failed or a target failed; 2
+refused (local DB, stale --expect, a non-entry id in a deletion scope, bad
+arguments); 3 an unexpected error.
 """
 from __future__ import annotations
 
@@ -38,6 +50,7 @@ import argparse
 import json
 import sys
 from collections import Counter
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,7 +58,7 @@ REPO = Path(__file__).resolve().parents[1]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from sqlalchemy import func, inspect, select  # noqa: E402
+from sqlalchemy import create_engine, func, inspect, select  # noqa: E402
 
 from backend import accounts, database as db  # noqa: E402
 
@@ -283,7 +296,55 @@ def verify(cutoff) -> int:
     return 0 if ok_a and ok_b else 1
 
 
-def main(argv=None) -> int:
+def _identity(url) -> str:
+    """Which database this is, without credentials: dialect, the host's first
+    label (`***` when there is no name to show) and the database name."""
+    host = url.host or ""
+    label = "***" if not host or host.replace(".", "").isdigit() else host.split(".")[0]
+    name = url.database or "***"
+    if url.get_backend_name() == "sqlite":
+        name = Path(name).name
+    return f"database: {url.get_backend_name()}; host: {label}; name: {name}"
+
+
+def _hidden_engine(source, *, read_only: bool):
+    """A fresh engine on `source`'s URL that never renders bound parameters
+    (ids) into an error message. Read-only on Postgres like db.ro_engine, but
+    without its 5 s report timeout: a one-time full scan may need longer.
+    SQLite's read-only mode rides in db.ro_engine's URL (`mode=ro`)."""
+    url = source.url
+    if url.get_backend_name() == "sqlite":
+        args = {"check_same_thread": False}
+    elif read_only:
+        args = {"options": "-c default_transaction_read_only=on"}
+    else:
+        args = {}
+    return create_engine(url, future=True, hide_parameters=True, connect_args=args)
+
+
+@contextmanager
+def _engines(read_only: bool):
+    """Swap db.engine (and db.ro_engine) for hide_parameters engines for the
+    run. Read modes run on the db.ro_engine database; --execute writes through
+    db.engine, which accounts.delete_user_data reads at call time."""
+    saved = {"engine": db.engine, "ro_engine": getattr(db, "ro_engine", None)}
+    read = _hidden_engine(saved["ro_engine"] or saved["engine"], read_only=True)
+    write = None if read_only else _hidden_engine(saved["engine"], read_only=False)
+    try:
+        db.engine = read if read_only else write
+        if saved["ro_engine"] is not None:
+            db.ro_engine = read
+        yield
+    finally:
+        db.engine = saved["engine"]
+        if saved["ro_engine"] is not None:
+            db.ro_engine = saved["ro_engine"]
+        for engine in (read, write):
+            if engine is not None:
+                engine.dispose()
+
+
+def _run(argv) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--cutoff", required=True,
                     help="ISO datetime: when the entry chips' flag went off (UTC if no offset)")
@@ -293,17 +354,35 @@ def main(argv=None) -> int:
     mode.add_argument("--verify", action="store_true",
                       help="exit 0 only if no target and no entry: credential row remains")
     ap.add_argument("--expect", type=int, help="with --execute: the dry run's target count")
+    ap.add_argument("--allow-local", action="store_true",
+                    help="allow a local SQLite database (local test runs only)")
     args = ap.parse_args(argv)
     cutoff = _parse_iso(args.cutoff)
     if cutoff is None:
         ap.error("--cutoff must be an ISO datetime, e.g. 2026-10-26T00:00:00Z")
-    if args.execute:
-        if args.expect is None:
-            ap.error("--execute needs --expect N (the dry run's target count)")
-        return execute(cutoff, args.expect)
-    if args.expect is not None:
+    if args.execute and args.expect is None:
+        ap.error("--execute needs --expect N (the dry run's target count)")
+    if not args.execute and args.expect is not None:
         ap.error("--expect only goes with --execute")
-    return verify(cutoff) if args.verify else dry_run(cutoff)
+    print(_identity(db.engine.url))
+    if db.engine.url.get_backend_name() == "sqlite" and not args.allow_local:
+        print("purge_entry_users: REFUSED. That is a local SQLite database, not the target. "
+              "Set DATABASE_URL in this shell (runbook), or pass --allow-local for a local "
+              "test run.")
+        return 2
+    with _engines(read_only=not args.execute):
+        if args.execute:
+            return execute(cutoff, args.expect)
+        return verify(cutoff) if args.verify else dry_run(cutoff)
+
+
+def main(argv=None) -> int:
+    try:
+        return _run(argv)
+    except Exception as e:  # never str(e): a DB error can carry the statement's ids
+        print(f"purge_entry_users: ERROR ({type(e).__name__}). Details are withheld because "
+              "they can name ids. Re-run the dry run to see the current state.", file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":

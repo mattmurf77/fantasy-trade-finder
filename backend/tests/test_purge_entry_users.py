@@ -1,7 +1,7 @@
 """scripts/purge_entry_users.py — the one-time purge of orphaned ESPN/MFL entry users.
 
 Legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng 2026-10-26.
-In-memory SQLite only (synthetic rows). Pinned here:
+A temporary SQLite file only (synthetic rows). Pinned here:
   - head-eng's target filter: unverified + created before the cutoff, or no
     users row at all; verified, after-cutoff and no-created_at ids are skipped
     and counted, never touched;
@@ -10,7 +10,10 @@ In-memory SQLite only (synthetic rows). Pinned here:
     the MFL pick-grid owner included) and anonymizes the shared trade match;
   - --verify fails before, passes after, and fails on a credential left on a
     skipped entry user;
-  - no id ever reaches stdout or the log;
+  - no id ever reaches stdout or the log, a DB error included (hide_parameters
+    engines plus a type-only top-level handler);
+  - every mode prints the DB identity first and refuses local SQLite without
+    --allow-local; read modes run on the read-only engine;
   - discovery covers every user-id column delete_user_data filters on (its SQL
     is captured; a new column the script doesn't discover fails here).
 """
@@ -73,10 +76,15 @@ def _import_rows(conn, uid, n, platform, league):
 
 
 @pytest.fixture
-def engine(monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
+def engine(monkeypatch, tmp_path):
+    # A file, not :memory:, because the script opens its own engines on this
+    # database's URL; ro_engine is the read-only (mode=ro) view, as in prod.
+    path = tmp_path / "purge.db"
+    engine = create_engine(f"sqlite:///{path}")
     db.metadata.create_all(engine)
     monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "ro_engine", create_engine(
+        f"sqlite:///file:{path}?mode=ro&uri=true", connect_args={"uri": True}))
     with engine.begin() as conn:
         users = db.users_table
         conn.execute(insert(users).values(sleeper_user_id=ESPN, created_at=BEFORE))
@@ -129,7 +137,7 @@ def rows_naming(engine, ids):
 
 
 def run(capsys, *args):
-    code = purge.main(["--cutoff", CUTOFF, *args])
+    code = purge.main(["--cutoff", CUTOFF, "--allow-local", *args])
     return code, capsys.readouterr().out
 
 
@@ -249,9 +257,106 @@ def test_guard_refuses_anything_but_an_entry_id(engine, capsys, monkeypatch):
         return found
     monkeypatch.setattr(purge, "discover", poisoned)
     before = snapshot(engine)
-    with pytest.raises(ValueError):
-        purge.main(["--cutoff", CUTOFF, "--execute", "--expect", "4"])
+    code = purge.main(["--cutoff", CUTOFF, "--allow-local", "--execute", "--expect", "4"])
+    assert code == 3 and "ERROR (ValueError)" in capsys.readouterr().err
     assert snapshot(engine) == before        # refused before deleting anyone
+
+
+IDENTITY = "database: sqlite; host: ***; name: purge.db"
+
+
+def test_every_mode_prints_the_db_identity_first(engine, capsys):
+    for args in ((), ("--execute", "--expect", "3"), ("--verify",)):
+        assert run(capsys, *args)[1].splitlines()[0] == IDENTITY
+
+
+@pytest.mark.parametrize("args", [(), ("--verify",), ("--execute", "--expect", "3")])
+def test_a_local_sqlite_database_is_refused_without_allow_local(engine, capsys, args):
+    before = snapshot(engine)
+    code = purge.main(["--cutoff", CUTOFF, *args])
+    out = capsys.readouterr().out
+    assert code == 2
+    assert out.splitlines()[0] == IDENTITY
+    assert "REFUSED. That is a local SQLite database" in out
+    assert "targets" not in out              # refused before discovery
+    assert snapshot(engine) == before
+
+
+def test_the_identity_names_the_database_never_its_credentials():
+    from sqlalchemy.engine import make_url
+    url = make_url("postgresql://fleeced_user:s3cret-pw@dpg-abc123-a.oregon-postgres.render.com"
+                   ":5432/ftf_prod")
+    assert purge._identity(url) == "database: postgresql; host: dpg-abc123-a; name: ftf_prod"
+    assert purge._identity(make_url("postgresql://u:p@10.0.0.7/ftf")) == \
+        "database: postgresql; host: ***; name: ftf"
+
+
+def test_a_db_error_mid_discovery_prints_no_id(engine, capsys, caplog, monkeypatch):
+    """The users lookup binds every discovered entry id; the driver fails it."""
+    import sqlite3
+    dialect = type(engine.dialect)
+    real = dialect.do_execute
+
+    def failing(self, cursor, statement, parameters, context=None):
+        if "users.sleeper_user_id IN" in statement:
+            raise sqlite3.OperationalError("database is locked")
+        return real(self, cursor, statement, parameters, context)
+    monkeypatch.setattr(dialect, "do_execute", failing)
+    caplog.set_level("DEBUG")
+    before = snapshot(engine)
+    for args in ((), ("--verify",), ("--execute", "--expect", "3")):
+        code = purge.main(["--cutoff", CUTOFF, "--allow-local", *args])
+        captured = capsys.readouterr()
+        assert code == 3
+        assert "ERROR (OperationalError)" in captured.err
+        for secret in ("entry:", SWID, "61408", "10101", "4242"):
+            assert secret not in captured.out + captured.err + caplog.text, secret
+    assert snapshot(engine) == before
+
+
+def test_read_modes_use_the_read_only_engine_and_every_engine_hides_parameters(
+        engine, capsys, monkeypatch):
+    originals = (db.engine, db.ro_engine)
+    rw_url, ro_url = str(db.engine.url), str(db.ro_engine.url)
+    seen, real = {}, purge.discover
+
+    def spy(cutoff):
+        with db.engine.connect() as conn:
+            try:
+                conn.exec_driver_sql("SELECT ? FROM no_such_table", (ESPN,))
+            except Exception as e:  # noqa: BLE001 - its rendering is the point
+                rendered = str(e)
+            try:
+                conn.exec_driver_sql("DELETE FROM swipe_decisions WHERE 0")
+                writable = True
+            except Exception:  # noqa: BLE001
+                writable = False
+        seen[mode] = (str(db.engine.url), str(db.ro_engine.url), writable,
+                      db.ro_engine.hide_parameters, rendered)
+        return real(cutoff)
+    monkeypatch.setattr(purge, "discover", spy)
+    for mode, args in (("dry", ()), ("execute", ("--execute", "--expect", "3")),
+                       ("verify", ("--verify",))):
+        run(capsys, *args)
+        assert (db.engine, db.ro_engine) == originals          # restored after the run
+    assert seen["dry"][:4] == (ro_url, ro_url, False, True)
+    assert seen["verify"][:4] == (ro_url, ro_url, False, True)
+    assert seen["execute"][:4] == (rw_url, ro_url, True, True)
+    for *_rest, rendered in seen.values():
+        assert ESPN not in rendered and "hide_parameters=True" in rendered
+
+
+def test_postgres_engines_hide_parameters_and_reads_are_read_only(monkeypatch):
+    from types import SimpleNamespace
+    from sqlalchemy.engine import make_url
+    made = []
+    monkeypatch.setattr(purge, "create_engine", lambda url, **kw: made.append(kw))
+    source = SimpleNamespace(url=make_url("postgresql://u:p@dpg-x-a.example/ftf"))
+    purge._hidden_engine(source, read_only=True)
+    purge._hidden_engine(source, read_only=False)
+    assert [kw["hide_parameters"] for kw in made] == [True, True]
+    assert [kw["connect_args"] for kw in made] == [
+        {"options": "-c default_transaction_read_only=on"}, {}]
 
 
 # delete_user_data filters on these columns, but they are not user ids: they
