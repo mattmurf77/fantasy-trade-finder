@@ -119,6 +119,10 @@ def harness(monkeypatch):
         if tail == f"{LEAGUE_ID}/drafts":
             calls.bump("drafts")
             return []
+        # Production code catches and swallows this raise, so it must be
+        # tallied too: a Sleeper read for any other league id would otherwise
+        # vanish and a `calls == {}` assertion would pass for the wrong reason.
+        calls.bump(f"unexpected GET {tail}")
         raise AssertionError(f"unexpected Sleeper GET {url}")
 
     monkeypatch.setattr(server, "_sleeper_get", _fake_sleeper_get)
@@ -268,6 +272,57 @@ def test_sleeper_league_still_captures_trades(harness):
     client, calls = harness
     assert _init(client, LEAGUE_ID).status_code == 200
     assert calls.get("transactions") == len(trades_service.WEEKS), calls
+
+
+def _vanish_leagues_row_before_daemon(monkeypatch, league_id):
+    """The `leagues` row disappears between the request thread's authoritative
+    read and the background daemon (an unlink, an account deletion, a repair
+    script). From then on `is_linked_platform_league` answers False for a
+    league that is not on Sleeper, and the daemon's own `upsert_league`
+    re-creates the row with no platform."""
+    harness_thread = server.threading.Thread   # the harness's inline subclass
+
+    class _VanishThread(harness_thread):
+        def start(self):
+            if self.name == "session-init-bg-writes":
+                with db_module.engine.begin() as conn:
+                    conn.execute(db_module.leagues_table.delete().where(
+                        db_module.leagues_table.c.sleeper_league_id == league_id))
+                # The premise, asserted: the row is gone and reads as Sleeper.
+                assert db_module.is_linked_platform_league(league_id) is False
+            super().start()
+
+    monkeypatch.setattr(server.threading, "Thread", _VanishThread)
+
+
+@pytest.mark.parametrize("league_id", [NUMERIC_MFL_LEAGUE, NUMERIC_ESPN_LEAGUE])
+def test_vanished_leagues_row_still_makes_no_sleeper_calls(harness, monkeypatch, league_id):
+    """The daemon trusts the platform the request thread resolved, not only a
+    second read of the `leagues` row: with the row gone, every Sleeper-bound
+    step (membership refresh, meta, trade block, owned picks, draft status,
+    trade capture) stays off for a non-Sleeper league."""
+    client, calls = harness
+    monkeypatch.setattr(server, "_refresh_league_draft_status",
+                        lambda lid, force=False: calls.bump("draft_status"))
+    _vanish_leagues_row_before_daemon(monkeypatch, league_id)
+
+    assert _init(client, league_id).status_code == 200
+
+    assert calls == {}, calls
+    assert db_module.get_league_roster_state(league_id) is None
+
+
+def test_linked_league_still_refreshes_draft_status(harness, monkeypatch):
+    """The control for the test above: the draft-status refresh is the one
+    daemon step that legitimately runs for a linked league (MFL is
+    authoritative there), and an intact row keeps it running."""
+    client, calls = harness
+    monkeypatch.setattr(server, "_refresh_league_draft_status",
+                        lambda lid, force=False: calls.bump("draft_status"))
+
+    assert _init(client, NUMERIC_MFL_LEAGUE).status_code == 200
+
+    assert calls == {"draft_status": 1}, calls
 
 
 # ---------------------------------------------------------------------------
