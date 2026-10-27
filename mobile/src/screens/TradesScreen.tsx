@@ -5244,8 +5244,9 @@ export default function TradesScreen({ navigation, route }: any) {
   // left_deck — this effect's own listeners (R2b's focus effect is not
   // touched). A tab switch changes the tab navigator's focused route; a
   // root-stack push over Trades doesn't. Back off a pushed deck removes this
-  // screen, so it tries at once rather than wait on state that unmounts; a
-  // reset or replace (sign-out, a deep link) is not the user leaving.
+  // screen, so it tries once, right after the Back applies, rather than wait
+  // on state that unmounts; a reset or replace (sign-out, a deep link) is not
+  // the user leaving.
   useEffect(() => {
     if (!navigation?.addListener) return undefined;
     const tabKey = () => {
@@ -5262,7 +5263,8 @@ export default function TradesScreen({ navigation, route }: any) {
       }),
       navigation.addListener('beforeRemove', (e: any) => {
         const type = e?.data?.action?.type;
-        if (type !== 'RESET' && type !== 'REPLACE') presentPaywallOffer('left_deck');
+        // After the Back has applied: never a navigate inside its dispatch.
+        if (type !== 'RESET' && type !== 'REPLACE') setTimeout(() => presentPaywallOffer('left_deck'), 0);
       }),
     ];
     return () => offs.forEach((off: () => void) => off());

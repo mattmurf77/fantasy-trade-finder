@@ -908,8 +908,8 @@ check('8e. D4 [shape]: first_opinion fires only on the swipe mutation\'s SERVER 
   const code = strip(text);
   eq((code.match(/requestPaywallOffer\('first_opinion'\)/g) || []).length, 1, 'one first_opinion site');
   assert(/navigation\.addListener\('blur', \(\) => \{\s*if \(tabKey\(\) !== ownTab\) requestPaywallOffer\('left_deck'\);/.test(code), 'left_deck on a tab switch');
-  assert(/navigation\.addListener\('beforeRemove', \(e: any\) => \{\s*const type = e\?\.data\?\.action\?\.type;\s*if \(type !== 'RESET' && type !== 'REPLACE'\) presentPaywallOffer\('left_deck'\);/.test(code),
-    'left_deck on Back (never a reset / replace)');
+  assert(/navigation\.addListener\('beforeRemove', \(e: any\) => \{\s*const type = e\?\.data\?\.action\?\.type;\s*if \(type !== 'RESET' && type !== 'REPLACE'\) setTimeout\(\(\) => presentPaywallOffer\('left_deck'\), 0\);/.test(code),
+    'left_deck on Back, after the Back applies (never a reset / replace)');
   eq((code.match(/if \(source === 'left_deck' && !offerCardSeenRef\.current\) return/g) || []).length, 2, 'left_deck only after a card showed');
   assert(/const sessionUnverified = !isDemo && verification\?\.session_verified === false;/.test(code)
     && /const offerEligible = paywallOn && payEnforcing && !payEntitled && !sessionUnverified;/.test(code), 'eligibility');
