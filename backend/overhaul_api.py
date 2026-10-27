@@ -856,7 +856,10 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                                    compat=rm["compat"], summary=rm["summary"])
         return jsonify(roadmap_view(new, by_id, store.list_attempts(row["overhaul_id"])))
 
-    def receipt_for(sess, row, rm, selected, by_id, *, with_legality, caps):
+    def receipt_for(sess, row, rm, selected, by_id, *, with_legality, caps, receipt_copy=False):
+        # `receipt_copy` is True only for /prepare-send, whose receipt reports
+        # before anything is attempted. /send re-runs this and refuses with the
+        # blocker's text, so it keeps the send-time copy ("so nothing was sent").
         snapshot = row.get("snapshot") or {}
         attempts = store.list_attempts(row["overhaul_id"])
         states = {p["package_id"]: service.package_status(p, by_id, attempts) for p in rm["packages"]}
@@ -876,7 +879,7 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             my_roster_ids=snapshot.get("my_roster_ids") or [], my_pick_ids=snapshot.get("my_pick_ids") or [],
             pool=effective_pool(row), rosters=snapshot.get("rosters") or {}, reserved_asset_ids=reserved,
             capacity=capacity, recovery=row.get("recovery") or {}, package_states=states,
-            legality=legality, checked_at=store.db._now(), is_pick=pick_fn)
+            legality=legality, checked_at=store.db._now(), is_pick=pick_fn, receipt_copy=receipt_copy)
         return service.with_blockers(receipt, service.platform_blockers(
             selected=selected, packages=rm["packages"], offers_by_id=by_id, platform=caps["platform"],
             auth_state=caps["auth_state"], picks_sendable=caps["can_propose_picks"], is_pick=pick_fn))
@@ -922,7 +925,8 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
             raise service.ValidationError("bad_request", "offer_ids required")
         selected = [str(o) for o in selected]
         caps = capabilities(sess)
-        receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=True, caps=caps)
+        receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=True, caps=caps,
+                              receipt_copy=True)
         package_of = {oid: p["package_id"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}
         packages = {package_of[o] for o in selected if o in package_of}
         race_rows = []

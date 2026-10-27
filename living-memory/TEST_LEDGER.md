@@ -1,3 +1,20 @@
+## 2026-10-27 — I-2 copy follow-ups: pick/asset-aware unnamed fallback; overhaul prepare-receipt variant (placeholder copy)
+
+Full gates, backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest and a code-walk. One commit on `feat/i2-copy-followups`. The new strings are **placeholders pending marketing** (head-eng → head-bizops → marketing-lead); a copy swap is `backend/ownership_copy.py` plus the strings in the tests.
+
+- **Unnamed fallback is asset-aware:** a refused asset with no name used to read "A player in this trade …" even when it was a draft pick. It now follows the offending assets: one pick → "A pick in this trade", picks only → "{n} picks in this trade", players and picks together → "{n} assets in this trade"; players only is unchanged. `ownership_copy.is_pick_id` matches the same two id shapes as `server._is_ftf_pick_asset` without a league id (the server one can't be imported from there); a test pins the two together on sample ids across five league-id shapes, and the real `database.make_pick_id` output.
+- **Receipt variant:** `refusal_message(..., receipt=True)` is the same sentence minus "so nothing was sent". Only `POST /api/overhauls/{id}/roadmaps/{rid}/prepare-send` builds its receipt with it (`validate_prepare(receipt_copy=True)`). Unchanged and still send-time: the propose cores' 422s, `attempts[].error.message`, `/send`'s re-check 409 (`detail` == `message`, and the `receipt` echoed in it), and `/assemble`'s stored `compat`.
+- **Tests:** the new `test_i2_copy_followups.py` (52) plus additions to `test_i2_overhaul.py` (now 18) and `test_i2_mfl_ownership.py` (now 28). The one existing test that pinned the old wrong wording (`test_unlabeled_moved_pick_is_counted_never_shown_by_id`) now expects "A pick in this trade …"; `test_prepare_receipt_shows_the_readable_blocker` now expects the receipt variant.
+- **Targeted, 307 passed:** `test_i2_copy_followups` (52), `test_i2_sleeper_ownership` (27), `test_i2_mfl_ownership` (28), `test_i2_espn_ownership` (26), `test_i2_overhaul` (18), `test_overhaul_api` (27), `test_overhaul_service` (23), `test_overhaul_store` (4), `test_bilateral_overhaul` (9), `test_sleeper_write_route` (35), `test_mfl_propose_route` (25), `test_espn_propose_route` (17), `test_trade_send_validate` (16).
+- **Sabotage, each red then restored:**
+  - `is_pick_id` always False → 14 red (pick/asset tests, predicate parity ×5, the overhaul receipt pick test, both MFL end-to-end tests);
+  - the prepare route building its receipt with the send-time copy → 3 red;
+  - the `/send` re-check building its receipt with the receipt variant → 3 red;
+  - `_ownership_item` ignoring `receipt_copy` → 5 red.
+- **Client code-walk (no client change):** `OverhaulSummaryScreen` renders a receipt blocker as `${prefix}${item.message}` (`ReceiptLine`, `receiptMessage`), so the variant shows as is. Nothing in `mobile/` or `web/` matches on "so nothing was sent" for these two codes. `OverhaulRoadmapsScreen` reads only the stored `compat` warnings count.
+- **Docs:** `docs/api-reference.md`: the Sleeper, MFL and ESPN propose 422 rows (asset-aware count, placeholder note) and the overhaul `prepare-send` and `send` rows.
+- **Not run:** the full suite (CI runs it); `tsc --noEmit` (no mobile change).
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.
