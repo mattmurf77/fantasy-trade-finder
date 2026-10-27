@@ -14,6 +14,7 @@ Gates: QA follow-ups to #481, inside the 200 ms programme's S0 scope (`scope-eng
   - `/generate` and kickoff without `session_read`.
   - The pre-gen and page-serve `session_read` sites are not covered by a test: code walk at `server.py` `_serve_trade_page_for` and session init's `should_kickoff`.
 - **Full suite** on `0beeb67d`: `pytest backend/tests -q` → 9267 passed, 2 skipped, 0 failed (11m50s).
+- **Full suite** on `e09327e3` (main merged in, #470 included): 9284 passed, 2 skipped, 0 failed (11m10s).
 - **Combined with #470** (a local merge of `0beeb67d` with `5e310b00`): #470's `test_roster_fp_stamp.py` plus the S0 files, 104 passed.
   - A scratch end-to-end run used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint.
   - Player move: 1 hook; the pre-gen is kept, carries a picks key and is re-stamped to the stored fp.
