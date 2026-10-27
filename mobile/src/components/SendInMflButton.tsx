@@ -58,6 +58,9 @@ interface Props {
    *  today this prop is carried, not fired — the moment MFL attempt/failure
    *  events are registered, the dimension is already at hand. */
   surface: SendSurface;
+  /** #393 M2 (D16): the router's Send pre-check (SendInSleeperButton's
+   *  `sendPreCheck`), passed in so this twin's own tap runs it too. */
+  sendPreCheck?: (confirm: () => void) => boolean;
 }
 
 type State = 'idle' | 'checking' | 'sending' | 'sent';
@@ -74,6 +77,7 @@ export default function SendInMflButton({
   // Carried for P0-7 parity (see Props); intentionally unread until MFL
   // attempt/failure events are registered in the taxonomy.
   surface: _surface,
+  sendPreCheck,
 }: Props) {
   const enabled = useFlag('trade.send_in_mfl');
   const navigation = useNavigation<any>();
@@ -222,6 +226,9 @@ export default function SendInMflButton({
 
   const onPress = useCallback(async () => {
     if (state !== 'idle') return;
+    // #393 M2 (D16): the router's Send pre-check. This twin's own tap reaches
+    // its confirm step (the router only renders it), so it runs here too.
+    if (sendPreCheck?.(() => { void confirmSend(); })) return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openMfl();
@@ -257,7 +264,7 @@ export default function SendInMflButton({
         ],
       );
     }
-  }, [state, leagueId, theirUserId, openMfl, confirmSend, openSignIn]);
+  }, [state, leagueId, theirUserId, openMfl, confirmSend, openSignIn, sendPreCheck]);
 
   if (!enabled) return null;
 

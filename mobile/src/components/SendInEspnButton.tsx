@@ -60,6 +60,9 @@ interface Props {
    *  Sleeper-named and ESPN siblings are unregistered in the taxonomy), so
    *  today this prop is carried, not fired. */
   surface: SendSurface;
+  /** #393 M2 (D16): the router's Send pre-check (SendInSleeperButton's
+   *  `sendPreCheck`), passed in so this twin's own tap runs it too. */
+  sendPreCheck?: (confirm: () => void) => boolean;
 }
 
 type State = 'idle' | 'checking' | 'sending' | 'sent';
@@ -76,6 +79,7 @@ export default function SendInEspnButton({
   // Carried for P0-7 parity (see Props); intentionally unread until ESPN
   // attempt/failure events are registered in the taxonomy.
   surface: _surface,
+  sendPreCheck,
 }: Props) {
   const enabled = useFlag('espn.send');
   const navigation = useNavigation<any>();
@@ -261,6 +265,9 @@ export default function SendInEspnButton({
 
   const onPress = useCallback(async () => {
     if (state !== 'idle') return;
+    // #393 M2 (D16): the router's Send pre-check. This twin's own tap reaches
+    // its confirm step (the router only renders it), so it runs here too.
+    if (sendPreCheck?.(() => { void confirmSend(); })) return;
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openEspn();
@@ -296,7 +303,7 @@ export default function SendInEspnButton({
         ],
       );
     }
-  }, [state, leagueId, theirUserId, openEspn, confirmSend, goConnect]);
+  }, [state, leagueId, theirUserId, openEspn, confirmSend, goConnect, sendPreCheck]);
 
   if (!enabled) return null;
 
