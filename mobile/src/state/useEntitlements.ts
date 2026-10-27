@@ -146,6 +146,7 @@ export const useEntitlements = create<EntitlementState>((set, get) => ({
 }));
 
 let _listenerBound = false;
+let _verifyEdgeBound = false;
 
 /** Boot hook (App.tsx): hydrate the cache, ask the server, and subscribe to
  *  RevenueCat's CustomerInfo pushes so a renewal or a purchase made outside
@@ -157,6 +158,19 @@ export function initEntitlements(): void {
     .loadCached()
     .then(() => useEntitlements.getState().refresh())
     .catch(() => {});
+  // #393 M3: a session that turns verified re-reads. While it was unverified
+  // the server blanked every subscription field (R28.9), so the cached answer
+  // is that blank one, and Settings › Subscription would show a member the
+  // non-subscriber rows. Only the unverified → verified edge: boot's first
+  // mirror (null → verified) is the fetch above.
+  if (!_verifyEdgeBound) {
+    _verifyEdgeBound = true;
+    useSession.subscribe((s, prev) => {
+      if (prev.verification?.session_verified === false && s.verification?.session_verified === true) {
+        void useEntitlements.getState().refresh();
+      }
+    });
+  }
   // Attach the CustomerInfo listener the moment purchases become usable —
   // which is when the session working key first reaches `initPurchases`, at
   // boot for a restored session and at sign-in otherwise. Attaching before

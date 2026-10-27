@@ -59,6 +59,8 @@ export const MON = {
   'mon.pay.restore_ok': 'Welcome back. Your subscription is restored.',
   'mon.pay.restore_none':
     'No subscription found for this Apple ID. Questions: fleecedapp@gmail.com',
+  // §9.4 (row §2) Settings › Subscription (M3): Manage opens Apple's page
+  'mon.pay.manage': 'Manage subscription',
   // §9.4 / §9.5 the club block (window only, server-driven)
   'mon.club.join': 'Join the Founding GMs.',
   'mon.pay.founder.price':
@@ -67,6 +69,30 @@ export const MON = {
   'mon.pay.founder.keep': 'Keep this price on your plan while your subscription stays active.',
   'mon.pay.founder.lapse':
     'If you switch plans or your subscription ends, you may lose the Founder price.',
+  // §9.5 the Founding GMs lines (M3): the welcome (club window only) and
+  // Settings › Subscription. `mon.club.welcome_tester` is NOT here: nothing
+  // on the client knows who was a tester, so the welcome ships the
+  // non-tester title. `mon.club.kept_home` and `mon.club.mark_a11y` (the
+  // Home line and mark) are later updates, not this build.
+  'mon.club.welcome_title': 'Welcome, Founding GM.',
+  'mon.club.welcome_body.annual':
+    'Your plan is at the Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.',
+  'mon.club.welcome_body.monthly':
+    'Your plan is at the Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active. From January 1, 2027, new members pay $34.99 a year or $6.99 a month.',
+  'mon.club.since': 'Founding GM since {join date}',
+  'mon.club.back': 'Back to my trades',
+  'mon.club.kept_settings.annual':
+    'Founder price: $24.99 a year. Keep this price on your plan while your subscription stays active.',
+  'mon.club.kept_settings.monthly':
+    'Founder price: $4.99 a month. Keep this price on your plan while your subscription stays active.',
+  'mon.club.lapse':
+    'If you switch plans or your subscription ends, you may lose the Founder price.',
+  // §9.6 the invitee lines (M3): the trigger variant only, invitees only.
+  // `mon.invitee.context` is a template: render it ONLY through
+  // inviteeContext() below, which refuses a missing value.
+  'mon.invitee.context': '{inviter} invited you to {league}.',
+  'mon.invitee.board':
+    "Ranking doesn't need a subscription, and your board shapes the trades your leaguemates see.",
   // §9.11 the VerifySheet
   'mon.verify.title': 'Verify this session first',
   'mon.verify.body':
@@ -207,6 +233,74 @@ export function headlineFor(source: string, kind?: string): string {
 export function offerBodyFor(source: string, eligible: boolean): string | null {
   if (source !== 'first_opinion' && source !== 'left_deck') return null;
   return eligible ? MON['mon.offer.body.eligible'] : MON['mon.offer.body.paid'];
+}
+
+// ── The invitee lines (§9.6; ux §5 B7) ──────────────────────────────────────
+/** `mon.invitee.context` with both values filled, or null when either is
+ *  missing or blank: the eyebrow renders nothing rather than a broken
+ *  template. Never returns a string with a raw `{…}` placeholder. */
+export function inviteeContext(
+  inviter: string | null | undefined,
+  league: string | null | undefined,
+): string | null {
+  const who = (inviter ?? '').trim();
+  const where = (league ?? '').trim();
+  if (!who || !where) return null;
+  return MON['mon.invitee.context'].replace('{inviter}', () => who).replace('{league}', () => where);
+}
+
+// ── The Founding GMs lines (§9.4 sub_status, §9.5; M3) ──────────────────────
+/** The Founder prices the legal lines name (`mon.pay.founder.price`). A
+ *  member's status line uses these, so it can never contradict the
+ *  `kept_settings` line under it once new members pay more. */
+export const FOUNDER_PRICE: Record<PlanPeriod, string> = {
+  annual: '$24.99',
+  monthly: '$4.99',
+};
+
+/** `mon.pay.sub_status`: "Founding GM · Fleeced Pro Annual · $24.99/year"
+ *  for a club member, "Fleeced Pro Annual · $24.99/year" otherwise. No
+ *  trial state and no dates (D10). */
+export function subStatus(period: PlanPeriod, price: string, founder: boolean): string {
+  const line = `${PLAN_TITLE[period]} · ${pricePerPeriod(period, price)}`;
+  return founder ? `Founding GM · ${line}` : line;
+}
+
+/** `mon.club.welcome_body`, the purchased plan's variant. */
+export function welcomeBody(period: PlanPeriod): string {
+  return period === 'monthly' ? MON['mon.club.welcome_body.monthly'] : MON['mon.club.welcome_body.annual'];
+}
+
+/** `mon.club.kept_settings`, the member's plan variant. */
+export function keptSettings(period: PlanPeriod): string {
+  return period === 'monthly' ? MON['mon.club.kept_settings.monthly'] : MON['mon.club.kept_settings.annual'];
+}
+
+const MONTHS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/** `mon.club.since` ("Founding GM since {join date}"), split so the date can
+ *  render in Plex Mono: the lead words and the date ("November 6, 2026",
+ *  the copy's own date style). A JOIN date, never a countdown; null for a
+ *  missing or unreadable date, so the line is left out, never guessed. */
+export function clubSince(iso: string | null | undefined): { lead: string; date: string } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return {
+    lead: MON['mon.club.since'].replace(' {join date}', ''),
+    date: `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`,
+  };
+}
+
+/** StoreKit's ISO 8601 subscription period → the plan ("P1Y" → annual,
+ *  "P1M" → monthly); anything else is unknown. */
+export function periodFromStore(subscriptionPeriod: string | null | undefined): PlanPeriod | null {
+  if (subscriptionPeriod === 'P1Y') return 'annual';
+  if (subscriptionPeriod === 'P1M') return 'monthly';
+  return null;
 }
 
 // ── The VerifySheet ─────────────────────────────────────────────────────────

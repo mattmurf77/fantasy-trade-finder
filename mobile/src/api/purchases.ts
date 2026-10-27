@@ -313,6 +313,52 @@ export function hasProEntitlement(info: CustomerInfo | null | undefined): boolea
   }
 }
 
+/** The active `pro` entitlement's product and JOIN date (its first
+ *  purchase, a trial start included). DISPLAY ONLY (#393 M3: the welcome's
+ *  date, Settings › Subscription's plan line): never a gate input. Null
+ *  without an active `pro`. Deliberately reads no expiry, renewal or trial
+ *  field: nothing in the app shows a trial state or a countdown (D10). */
+export function activeProFrom(
+  info: CustomerInfo | null | undefined,
+): { productId: string; since: string | null } | null {
+  try {
+    const ent = info?.entitlements.active[PRO_ENTITLEMENT_ID];
+    if (!ent?.productIdentifier) return null;
+    return { productId: ent.productIdentifier, since: ent.originalPurchaseDate || null };
+  } catch {
+    return null;
+  }
+}
+
+/** Settings › Subscription's member line (#393 M3), DISPLAY ONLY: the active
+ *  `pro` product, its join date, and StoreKit's period ("P1Y" / "P1M") and
+ *  localized price for that product. Null when purchases are unavailable,
+ *  when RevenueCat's identity isn't confirmed as `sessionUserId` (a
+ *  CustomerInfo for the previous user must never describe this one), or on
+ *  any SDK error. Never throws. */
+export async function getActivePro(sessionUserId: string): Promise<{
+  productId: string;
+  since: string | null;
+  period: string | null;
+  priceString: string | null;
+} | null> {
+  const P = sdk();
+  if (!P || !_configured || !isIdentityReady(sessionUserId)) return null;
+  try {
+    const ent = activeProFrom(await P.getCustomerInfo());
+    if (!ent) return null;
+    let product: PurchasesStoreProduct | null = null;
+    try {
+      product = (await P.getProducts([ent.productId]))?.[0] ?? null;
+    } catch {
+      product = null;
+    }
+    return { ...ent, period: product?.subscriptionPeriod ?? null, priceString: product?.priceString ?? null };
+  } catch {
+    return null;
+  }
+}
+
 /** True when a rejected purchase was the user backing out of the StoreKit
  *  sheet. RevenueCat sets `userCancelled` on the rejection; a cancel is not an
  *  error and must never surface an error message. */
