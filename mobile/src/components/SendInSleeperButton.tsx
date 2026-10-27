@@ -57,22 +57,25 @@ import { GUIDE_RECEIPTS } from './analystScript';
 /** #393 M2 (D16 GRANTED) — the Send pre-check, on the tap and BEFORE any
  *  confirm step. The router calls it for Sleeper, and passes it to the MFL
  *  and ESPN twins, which call it from their own tap handlers (the router
- *  renders them, so their confirm is never reached through its tap). True = it opened the paywall or the
- *  VerifySheet and the tap stops there; the server's 402 stays the
- *  backstop. Dark unless `monetize.paywall` is on AND the server enforces.
+ *  renders them, so their confirm is never reached through its tap). True =
+ *  it opened the paywall or the VerifySheet and the tap stops there; the
+ *  server's 402 stays the backstop. Dark unless `monetize.paywall` is on AND
+ *  the server enforces.
  *  - Unverified: the VerifySheet, on session_verified alone (R28.9). Once
  *    verified, the entitlements are re-read and this runs again: not entitled
- *    → the paywall; entitled → `confirm`, the platform's own confirm step.
- *    Nothing is ever sent without the user's tap on that confirm (D16 a).
+ *    → the paywall; entitled → `resume`, the button's `proceed` (the rest of
+ *    the tap, exactly as a fresh one: hand-off, link check, then its own
+ *    "Send this trade?" confirm). Nothing is ever sent without the user's tap
+ *    on that confirm (D16 a).
  *  - Verified and not entitled: the paywall's send variant. */
-export function sendPreCheck(confirm: () => void): boolean {
+export function sendPreCheck(resume: () => void): boolean {
   if (!useFeatureFlags.getState().flags['monetize.paywall']) return false;
   if (!useEntitlements.getState().enforcing) return false;
   if (isUnverifiedSession()) {
     void openVerify({
       onVerified: () => {
         void useEntitlements.getState().refresh().then(() => {
-          if (!sendPreCheck(confirm)) confirm();
+          if (!sendPreCheck(resume)) resume();
         });
       },
     });
@@ -409,10 +412,10 @@ export default function SendInSleeperButton({
     );
   }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
-  const onPress = useCallback(async () => {
-    if (state !== 'idle') return;
-    // #393 M2 (D16): the paywall / verify pre-check, before anything else.
-    if (sendPreCheck(() => { void confirmSend(); })) return;
+  // The tap past the pre-check, unchanged. A tap resumed after a verify runs
+  // it exactly as a fresh one: the attempt event, the no-target hand-off,
+  // the link-status check, then the "Send this trade?" confirm.
+  const proceed = useCallback(async () => {
     // P0-7 — the ATTEMPT leg. Fired in the HANDLER, never at render:
     // after P0-6 a non-Sleeper mount renders a copy affordance rather
     // than a send button, so a mount-time impression event would conflate
@@ -468,7 +471,15 @@ export default function SendInSleeperButton({
         ],
       );
     }
-  }, [state, leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
+  }, [leagueId, theirUserId, openInSleeper, confirmSend, goConnect]);
+
+  // #393 M2 (D16): the paywall / verify pre-check, before anything else;
+  // after a verify it resumes with `proceed`, the same as a fresh tap.
+  const onPress = useCallback(() => {
+    if (state !== 'idle') return;
+    if (sendPreCheck(() => { void proceed(); })) return;
+    void proceed();
+  }, [state, proceed]);
 
   // Platform routing (see header). An MFL league with `trade.send_in_mfl` ON
   // delegates to the MFL twin — one mount point, so the reconnect/confirm/

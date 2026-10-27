@@ -62,7 +62,7 @@ interface Props {
   surface: SendSurface;
   /** #393 M2 (D16): the router's Send pre-check (SendInSleeperButton's
    *  `sendPreCheck`), passed in so this twin's own tap runs it too. */
-  sendPreCheck?: (confirm: () => void) => boolean;
+  sendPreCheck?: (resume: () => void) => boolean;
 }
 
 type State = 'idle' | 'checking' | 'sending' | 'sent';
@@ -263,11 +263,10 @@ export default function SendInEspnButton({
     );
   }, [leagueId, theirUserId, givePlayerIds, receivePlayerIds, doPropose]);
 
-  const onPress = useCallback(async () => {
-    if (state !== 'idle') return;
-    // #393 M2 (D16): the router's Send pre-check. This twin's own tap reaches
-    // its confirm step (the router only renders it), so it runs here too.
-    if (sendPreCheck?.(() => { void confirmSend(); })) return;
+  // The tap past the pre-check, unchanged. A tap resumed after a verify
+  // runs it exactly as a fresh one: the no-target hand-off, the link-status
+  // check and its sign-in prompt, then the "Send this trade?" confirm.
+  const proceed = useCallback(async () => {
     haptics.pickup();
     if (!leagueId || !theirUserId) {
       openEspn();
@@ -303,7 +302,16 @@ export default function SendInEspnButton({
         ],
       );
     }
-  }, [state, leagueId, theirUserId, openEspn, confirmSend, goConnect, sendPreCheck]);
+  }, [leagueId, theirUserId, openEspn, confirmSend, goConnect]);
+
+  // #393 M2 (D16): the router's Send pre-check runs first. This twin's own
+  // tap reaches its confirm step (the router only renders it), so it runs
+  // here too; after a verify it resumes with `proceed`, not straight to the confirm.
+  const onPress = useCallback(() => {
+    if (state !== 'idle') return;
+    if (sendPreCheck?.(() => { void proceed(); })) return;
+    void proceed();
+  }, [state, sendPreCheck, proceed]);
 
   if (!enabled) return null;
 
