@@ -65,6 +65,7 @@
     "test:matches-league-param": "node tests/check-matches-league-param.js",
     "test:matches-tile-league-param": "node tests/check-matches-tile-league-param.js",
     "test:member-entered-marker": "node tests/check-member-entered-marker.js",
+    "test:mfl-entry-proof": "node tests/check-mfl-entry-proof.js",
     "test:mock-draft-modes": "node tests/check-mock-draft-modes.js",
     "test:mock-g2-ui": "node tests/check-mock-g2-ui.js",
     "test:mock-lifecycle": "node tests/check-mock-lifecycle.js",

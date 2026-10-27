@@ -9,10 +9,14 @@ import type { MflAuthLeague } from './platformLink';
 // door. Two calls against one route, mirroring the link routes' split:
 //   • preview (no team_id): the exact `choose_team` shape /api/{espn,mfl}/link
 //     returns, so EspnLinkSheet / PlatformLinkSheet parse it unchanged.
-//   • mint (team_id): validates the claim and mints a session for a
-//     DETERMINISTIC entry:<platform>:… user id. The mint stores the token
-//     here (like auth.signIn does); the sheet then runs the CANONICAL
-//     /api/{espn,mfl}/link import under it — no import logic is duplicated.
+//   • mint (team_id): validates the claim and mints a session — an acct_*
+//     account once the proof-based server ships (ESPN cookies / MFL login
+//     prove ownership), a legacy entry:<platform>:… id before. The mint stores the token
+//     here (like auth.signIn does); the sheet then runs an existing import
+//     under it — no import logic is duplicated: ESPN → /api/espn/link; MFL
+//     sign-in path → /api/mfl/auth-link (stores the MFL cookie) →
+//     /api/mfl/auth-import (reads private leagues with it); the MFL league-ID
+//     path has no login, so the proof-based server refuses its mint.
 // Route 404s while `landing.platform_options` or the platform flag is off.
 
 export type EntryPlatform = 'espn' | 'mfl';
@@ -21,13 +25,21 @@ export interface EntryMintResponse {
   stage: 'connected';
   session_token: string;
   expires_at: number;
-  user_id: string;          // entry:espn:<SWID> | entry:espn:<lg>.t<n> | entry:mfl:<lg>.f<id>
-  username: string;         // always '' — entry users have no handle
+  // acct_<id> for a proven claim (proof-based sign-in), or the bound Sleeper
+  // user id when that account is already bound to Sleeper. Servers before
+  // the proof change return a legacy entry:<platform>:… id here.
+  user_id: string;
+  username: string;         // '' for an account-only session; the Sleeper handle when bound
   display_name: string;     // the claimed team's name
   avatar: string | null;
   platform: EntryPlatform;
   league_id: string;
   team_id: number | string;
+  // Proof-based sign-in fields. Optional: today's server omits them.
+  verified?: boolean;
+  verified_via?: string;    // 'espn' | 'mfl_login'
+  account_id?: string;
+  account_only?: boolean;
 }
 
 /** Preview an ESPN league with no session. Same wire shape as the link
@@ -127,12 +139,16 @@ function entryErrorCode(err: any): string {
 }
 
 /** Claim a team: mint the entry session and store its token. The caller
- *  (sheet in entry mode) follows this with the canonical link import. */
+ *  (sheet in entry mode) follows this with the import (see the header).
+ *  MFL: `username` + `password` are the proof of ownership (the sheet's
+ *  sign-in path). They are sent only as a pair, the server uses them for one
+ *  MFL login and never stores them, and they never reach `track()`. */
 export async function entryPlatformMint(
   args:
     | { platform: 'espn'; espnLeagueId: string; season?: number;
         teamId: number; espnS2?: string; swid?: string }
-    | { platform: 'mfl'; leagueInput: string; year?: number; teamId: string },
+    | { platform: 'mfl'; leagueInput: string; year?: number; teamId: string;
+        username?: string; password?: string },
 ): Promise<EntryMintResponse> {
   track('signin_attempted', { method: args.platform }, 'SignIn');
   try {
@@ -151,6 +167,9 @@ export async function entryPlatformMint(
             mfl_league_id: args.leagueInput,
             year: args.year,
             franchise_id: args.teamId,
+            ...(args.username && args.password
+              ? { username: args.username, password: args.password }
+              : {}),
           };
     const res = await api.post<EntryMintResponse>('/api/entry/platform', body, {
       skipAuth: true,

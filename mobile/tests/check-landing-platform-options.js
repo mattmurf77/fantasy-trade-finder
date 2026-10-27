@@ -230,7 +230,9 @@ assert(
 );
 
 // V2.3 — sheets: mint BEFORE the canonical import, inside pickTeam.
-const espnPick = espnSheet.match(/async function pickTeam[\s\S]{0,900}?await linkEspnLeague/);
+// 1200, not 900: the mint's onEntrySession call forwards account_only /
+// username since 2026-10-26 (check-mfl-entry-proof.js), which lengthens the span.
+const espnPick = espnSheet.match(/async function pickTeam[\s\S]{0,1200}?await linkEspnLeague/);
 assert(
   !!espnPick && /if \(entry\) \{[\s\S]{0,400}entryPlatformMint\(/.test(espnPick[0]),
   'V2: ESPN pickTeam mints the entry session before the canonical import',
@@ -410,25 +412,32 @@ assert(
     /setStep\('entry-pick'\)/.test(mflSignInFn[0]),
   'V2.1: entry sign-in clears the password from state and opens the entry list',
 );
+// 3200, not 2200: the three-step retry-safe body is ~2190 chars (2026-10-26).
 const mflEntryPick = platformSheet.match(
-  /async function mflEntryPickLeague\([\s\S]{0,2200}?\n  \}/,
+  /async function mflEntryPickLeague\([\s\S]{0,3200}?\n  \}/,
 );
+// 2026-10-26 (proof-based sign-in, private MFL leagues): the minted session
+// is verified, so the tap stores the MFL cookie (mflAuthLink) and imports
+// with it (mflAuthImport), like the non-entry flow; the zero-auth
+// linkPlatformLeague can't read a private league. Full pins in
+// check-mfl-entry-proof.js.
 assert(
   !!mflEntryPick && /entryPlatformMint\(\{/.test(mflEntryPick[0]) &&
     /teamId: franchiseId/.test(mflEntryPick[0]) &&
     /onEntrySession\?\.\(/.test(mflEntryPick[0]) &&
-    /await linkPlatformLeague\(\{/.test(mflEntryPick[0]),
-  'V2.1: an entry league tap mints directly, then runs the canonical import',
+    /await mflAuthImport\(\[lg\.league_id\], yr\)/.test(mflEntryPick[0]) &&
+    !/linkPlatformLeague\(/.test(mflEntryPick[0]),
+  'V2.1: an entry league tap mints directly, then imports with the stored MFL cookie',
 );
 assert(
-  !!mflEntryPick && !/mflAuthImport/.test(mflEntryPick[0]),
-  'V2.1: the entry path never uses the session-scoped bulk auth-import',
+  !!mflEntryPick && !/mflAuthImport\(\s*(\)|undefined)/.test(mflEntryPick[0]),
+  'V2.1: the entry path imports exactly the tapped league, never the default-ALL bulk import',
 );
 assert(
   !!mflEntryPick &&
-    /entryMflPassRef\.current = '';[\s\S]{0,300}await mflAuthLink\(/.test(mflEntryPick[0]) &&
-    /catch \{/.test(mflEntryPick[0]),
-  'V2.1: the credential re-store is best-effort and drops the password first',
+    /await mflAuthLink\([^;]*\);\s*\n\s*entryMflAuthLinkedRef\.current = true;\s*\n\s*entryMflPassRef\.current = '';/.test(mflEntryPick[0]) &&
+    !/catch \{/.test(mflEntryPick[0]),
+  'V2.1: the credential store is required and drops the password only after it succeeds',
 );
 assert(
   !/useState.{0,40}entryMflPass/.test(platformSheet) &&
