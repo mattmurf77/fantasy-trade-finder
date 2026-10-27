@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Sleeper hand-off (#351 PRD §7.1): the subset of S1–S16 that is true on
-// the build/open-external-helper branch.
+// the build/open-external-helper branch, plus league-eng's claim-sheet
+// migration (build/b3-claim-handoff).
 //
 // WHY THIS EXISTS. FTF handed off to Sleeper with
 // `https://sleeper.com/leagues/...` links. sleeper.com's AASA claims no
@@ -10,10 +11,19 @@
 // `sleeper://` scheme instead, through utils/openExternal.ts, and shows the
 // Get Sleeper alert (operator D2, 2026-10-20) when Sleeper isn't installed.
 //
-// Here (S-ids are the PRD's):
+// Here (S-ids are the PRD's; H-ids are the b3 brief's, not the PRD's):
+//   S1  ClaimSheet, FreeAgentsScreen and UsageTrendsScreen: no
+//       `sleeper.com/leagues` literal, no Linking.openURL to a Sleeper host [AST]
 //   S2  SendInSleeperButton imports openInSleeperApp from
 //       ../utils/sleeperHandoff and calls it from openInSleeper (target
-//       'trade'). The ClaimSheet half belongs to league-eng.
+//       'trade'). ClaimSheet half: the same import, and the
+//       fa-claim.open-sleeper CTA's handler calls it with target 'add'     [AST]
+//   S9  the eight NO_ADD_REASON strings verbatim; explainNoAdd and
+//       resolveAddPlatform byte-identical to 04eae95b (AC-10)              [AST]
+//   H1  both ClaimSheet hosts pass `surface` (free_agents / usage_trends)
+//       and a `leagueName` that can only name the claim league             [AST]
+//   H2  FreeAgentsScreen's render chain tests query.isError before
+//       query.isLoading (release-lead QA rule)                             [AST]
 //   S3  scheme opens: one openURL, `sleeper://…`, outcome 'app', no alert  [executed]
 //   S4  scheme rejects: the D2 alert, whose Get Sleeper opens
 //       apps.apple.com/app/id987367543; outcome 'not_installed'; no
@@ -34,14 +44,16 @@
 //
 // Deferred (not true on this branch; each owner adds its S-check with the
 // migration):
-//   S1, S2 (ClaimSheet half), S8, S9 → league-eng (ClaimSheet, Free Agents);
-//       UsageTrendsScreen's S1 / `leagueName` → rankings-eng
+//   S8 → league-eng: the claim sheet's on-sheet steps block +
+//       `clipboardText: row.name` (PRD §4.2), waiting on design-lead /
+//       ux-lead copy
 //   S11, S12, S15 → trades-eng (TradesScreen, useTradeQueue)
 //   S14 → platforms-eng follow-up: the Send-in-Sleeper steps confirm +
 //       clipboard (PRD §4.3), waiting on design-lead / ux-lead copy
 //
-// HONEST LABEL (G-035): S2 and S16 prove wirings are present, not behavior.
-// S3–S7, S10 and S13 execute the real modules.
+// HONEST LABEL (G-035): S1, S2, S9, S16, H1 and H2 prove wirings are
+// present, not behavior: no claim-sheet code is executed here. S3–S7, S10
+// and S13 execute the real modules.
 //
 // Run: node tests/check-sleeper-handoff.js
 
@@ -62,6 +74,9 @@ const ROOT = path.join(__dirname, '..');
 const HANDOFF = 'src/utils/sleeperHandoff.ts';
 const HELPER = 'src/utils/openExternal.ts';
 const BUTTON = 'src/components/SendInSleeperButton.tsx';
+const CLAIM = 'src/components/ClaimSheet.tsx';
+const FREE_AGENTS = 'src/screens/FreeAgentsScreen.tsx';
+const USAGE_TRENDS = 'src/screens/UsageTrendsScreen.tsx';
 const DEVICE_RESULTS = path.join(ROOT, '..', 'docs/plans/sleeper-fa-deeplink/device-results.md');
 const APP_STORE_SLEEPER = 'https://apps.apple.com/app/id987367543';
 
@@ -175,6 +190,224 @@ const flush = () => new Promise((r) => setImmediate(r));
       `S16 ${f} opens nothing`,
     );
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// S1 / S2 (ClaimSheet half) / S9 / H1 / H2 — the claim sheet and its hosts
+// ═══════════════════════════════════════════════════════════════════════
+const unparen = (n) => (ts.isParenthesizedExpression(n) ? unparen(n.expression) : n);
+const squash = (s) => s.replace(/\s+/g, '');
+// name → initializer text, for every `const name = …` in the file.
+function declarations(sf) {
+  const out = {};
+  walk(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
+      out[n.name.text] = n.initializer.getText(sf);
+    }
+  });
+  return out;
+}
+// Attributes (name → initializer text) of each JSX element named `tag`.
+function jsxMounts(sf, tag) {
+  const out = [];
+  walk(sf, (n) => {
+    if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) && n.tagName.getText(sf) === tag) {
+      const attrs = {};
+      for (const a of n.attributes.properties) {
+        if (ts.isJsxAttribute(a)) attrs[a.name.getText(sf)] = a.initializer ? a.initializer.getText(sf) : 'true';
+      }
+      out.push(attrs);
+    }
+  });
+  return out;
+}
+
+// S1 — no https Sleeper hand-off left in the claim path.
+for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
+  const sf = parse(rel);
+  const literals = [];
+  const sleeperOpens = [];
+  walk(sf, (n) => {
+    if (
+      (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ||
+        ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) &&
+      /sleeper\.com\/leagues/.test(n.text)
+    ) literals.push(n.getText(sf));
+    if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+      ts.isIdentifier(n.expression.expression) && n.expression.expression.text === 'Linking' &&
+      n.expression.name.text === 'openURL'
+    ) {
+      const arg = n.arguments[0] ? n.arguments[0].getText(sf) : '';
+      if (/sleeper/i.test(arg)) sleeperOpens.push(arg);
+    }
+  });
+  assert(literals.length === 0, `S1 ${path.basename(rel)} has no sleeper.com/leagues literal`, literals.join('; '));
+  assert(sleeperOpens.length === 0, `S1 ${path.basename(rel)} has no direct Linking.openURL to a Sleeper host`, sleeperOpens.join('; '));
+}
+
+// S2 (ClaimSheet half) — the CTA hands off through openInSleeperApp.
+{
+  const sf = parse(CLAIM);
+  let imported = false;
+  walk(sf, (n) => {
+    if (
+      ts.isImportDeclaration(n) &&
+      n.moduleSpecifier.text === '../utils/sleeperHandoff' &&
+      n.importClause && n.importClause.namedBindings &&
+      ts.isNamedImports(n.importClause.namedBindings) &&
+      n.importClause.namedBindings.elements.some((e) => e.name.text === 'openInSleeperApp')
+    ) imported = true;
+  });
+  const open = declarations(sf).openSleeper || '';
+  const cta = jsxMounts(sf, 'Button').filter((a) => a.testID === '"fa-claim.open-sleeper"');
+  assert(imported, 'S2 ClaimSheet imports openInSleeperApp from ../utils/sleeperHandoff');
+  assert(
+    cta.length === 1 && cta[0].onPress === '{openSleeper}' && cta[0].label === '"Open in Sleeper to claim"',
+    'S2 one fa-claim.open-sleeper CTA, label unchanged, onPress={openSleeper}',
+    JSON.stringify(cta),
+  );
+  assert(
+    /\bopenInSleeperApp\(\s*\{[^}]*target:\s*'add'/.test(open),
+    "S2 openSleeper calls openInSleeperApp({ target: 'add', … })",
+    open.slice(0, 200),
+  );
+  assert(
+    /\bleagueId\b/.test(open) && /\bplayerId:\s*row\.player_id\b/.test(open) && /\bsurface\b/.test(open),
+    'S2 openSleeper passes leagueId, playerId: row.player_id and the host surface',
+    open.slice(0, 200),
+  );
+}
+
+// S9 — the non-Sleeper claim paths are byte-identical to 04eae95b
+// (#351 AC-10). Expected values copied from that commit on purpose.
+{
+  const EXPECTED_REASONS = {
+    espn: {
+      title: "Can't add in ESPN leagues yet",
+      body: 'This league is imported from ESPN with read-only access, so Fantasy Trade Finder can’t make roster moves there. Open the ESPN Fantasy app to add this player.',
+    },
+    mfl: {
+      title: "Can't add in MFL leagues yet",
+      body: 'This league is linked to MyFantasyLeague with read-only access, so Fantasy Trade Finder can’t make roster moves there. Open MFL to add this player.',
+    },
+    fleaflicker: {
+      title: "Can't add in Fleaflicker leagues yet",
+      body: 'This league is linked to Fleaflicker with read-only access, so Fantasy Trade Finder can’t make roster moves there. Open Fleaflicker to add this player.',
+    },
+    local: {
+      title: "Can't add in this league",
+      body: 'This league isn’t connected to a fantasy platform, so there’s no roster to add this player to.',
+    },
+  };
+  const EXPECTED_FUNCTIONS = {
+    explainNoAdd: [
+      "export function explainNoAdd(addPlatform: Exclude<AddPlatform, 'sleeper'>) {",
+      '  const reason = NO_ADD_REASON[addPlatform];',
+      '  Alert.alert(reason.title, reason.body);',
+      '}',
+    ].join('\n'),
+    resolveAddPlatform: [
+      'export function resolveAddPlatform(leagueId: string | undefined, isDemo: boolean): AddPlatform {',
+      "  if (!leagueId || isDemo) return 'local';",
+      "  if (isEspnLeague(leagueId)) return 'espn';",
+      "  if (isMflLeague(leagueId)) return 'mfl';",
+      "  if (isFleaflickerLeague(leagueId)) return 'fleaflicker';",
+      '  // Real Sleeper league ids are numeric; anything else is a local league.',
+      "  return /^\\d+$/.test(leagueId) ? 'sleeper' : 'local';",
+      '}',
+    ].join('\n'),
+  };
+  const sf = parse(CLAIM);
+  // Evaluates a string literal or a `+` chain of them; null for anything else.
+  const str = (n) => {
+    n = unparen(n);
+    if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) return n.text;
+    if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const l = str(n.left), r = str(n.right);
+      return l === null || r === null ? null : l + r;
+    }
+    return null;
+  };
+  const reasons = {};
+  const fns = {};
+  walk(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'NO_ADD_REASON' &&
+        n.initializer && ts.isObjectLiteralExpression(n.initializer)) {
+      for (const p of n.initializer.properties) {
+        if (!ts.isPropertyAssignment(p) || !ts.isObjectLiteralExpression(p.initializer)) continue;
+        reasons[p.name.getText(sf)] = {};
+        for (const q of p.initializer.properties) {
+          if (ts.isPropertyAssignment(q)) reasons[p.name.getText(sf)][q.name.getText(sf)] = str(q.initializer);
+        }
+      }
+    }
+    if (ts.isFunctionDeclaration(n) && n.name && n.name.text in EXPECTED_FUNCTIONS) fns[n.name.text] = n.getText(sf);
+  });
+  assert(
+    JSON.stringify(Object.keys(reasons)) === JSON.stringify(Object.keys(EXPECTED_REASONS)),
+    'S9 NO_ADD_REASON has exactly espn / mfl / fleaflicker / local',
+    JSON.stringify(Object.keys(reasons)),
+  );
+  for (const [platform, want] of Object.entries(EXPECTED_REASONS)) {
+    for (const field of ['title', 'body']) {
+      const got = reasons[platform] && reasons[platform][field];
+      assert(got === want[field], `S9 NO_ADD_REASON.${platform}.${field} verbatim`, JSON.stringify(got));
+    }
+  }
+  for (const [name, want] of Object.entries(EXPECTED_FUNCTIONS)) {
+    assert(fns[name] === want, `S9 ${name} byte-identical`, fns[name] ? fns[name].slice(0, 200) : 'not found');
+  }
+}
+
+// H1 — both hosts name their surface, and the league name can only ever be
+// the claim league's (a wrong name sends the user to the wrong league).
+{
+  const fa = parse(FREE_AGENTS);
+  const faDecl = declarations(fa);
+  const faMounts = jsxMounts(fa, 'ClaimSheet');
+  assert(faMounts.length === 1 && faMounts[0].surface === '"free_agents"',
+    'H1 FreeAgentsScreen mounts ClaimSheet with surface="free_agents"', JSON.stringify(faMounts));
+  assert(
+    faMounts.length === 1 && faMounts[0].leagueName === '{leagueName}' && faMounts[0].leagueId === '{leagueId}' &&
+      squash(faDecl.leagueId || '') === squash('useSession((s) => s.league?.league_id)') &&
+      squash(faDecl.leagueName || '') === squash('useSession((s) => s.league?.league_name ?? null)'),
+    "H1 FreeAgentsScreen's leagueName is the session league's, the same league as its leagueId",
+    JSON.stringify({ mount: faMounts[0], leagueId: faDecl.leagueId, leagueName: faDecl.leagueName }),
+  );
+
+  const ut = parse(USAGE_TRENDS);
+  const utDecl = declarations(ut);
+  const utMounts = jsxMounts(ut, 'ClaimSheet');
+  assert(utMounts.length === 1 && utMounts[0].surface === '"usage_trends"',
+    'H1 UsageTrendsScreen mounts ClaimSheet with surface="usage_trends"', JSON.stringify(utMounts));
+  assert(
+    utMounts.length === 1 && utMounts[0].leagueId === '{claim.leagueId}' &&
+      squash(utMounts[0].leagueName || '') ===
+        squash('{leagueMeta.get(claim.leagueId)?.name ?? (claim.leagueId === leagueId ? (leagueName ?? null) : null)}') &&
+      squash(utDecl.leagueId || '') === squash('useSession((s) => s.league?.league_id)') &&
+      squash(utDecl.leagueName || '') === squash('useSession((s) => s.league?.league_name)'),
+    "H1 UsageTrendsScreen's leagueName: the claim league's own name, else the session name only when the claim league IS the session league, else null",
+    JSON.stringify({ mount: utMounts[0] }),
+  );
+}
+
+// H2 — FreeAgentsScreen: an error renders the error state, never the spinner.
+{
+  const sf = parse(FREE_AGENTS);
+  const conds = [];
+  walk(sf, (n) => {
+    if (ts.isConditionalExpression(n)) conds.push(n);
+  });
+  const test = (want) => conds.filter((c) => unparen(c.condition).getText(sf) === want);
+  const err = test('query.isError');
+  const load = test('query.isLoading');
+  assert(
+    err.length === 1 && load.length === 1 &&
+      load[0].pos >= err[0].whenFalse.pos && load[0].end <= err[0].whenFalse.end,
+    'H2 FreeAgentsScreen tests query.isError before query.isLoading (isLoading sits in the isError=false branch)',
+    `${err.length} isError / ${load.length} isLoading conditionals`,
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════
