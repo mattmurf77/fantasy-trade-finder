@@ -139,9 +139,10 @@ check("FLARE-only-recommended", flare_sel == [".tag-recommended"], f"flare used 
 hexes = re.findall(r"#[0-9a-fA-F]{3,8}\b", style_code + re.sub(r'href="[^"]*"', "", body_code))
 check("HEX-none", not hexes, f"raw hex in the page: {hexes}")
 rec = re.findall(r'class="tag tag-recommended">([^<]+)<', body_code)
+first_other = body_code.find('class="method-name">', body_code.find("Quick set") + 1)
 check("TAG-recommended-on-quickset-only", rec == ["Recommended"] and
-      body_code.index("tag-recommended") < body_code.index("Head-to-heads"),
-      f"Recommended tags: {rec}")
+      0 <= body_code.find("tag-recommended") < first_other,
+      f"Recommended tags: {rec} (want exactly one, on Quick set's row)")
 
 print(f"\n{'all ranking-method page checks passed' if not failures else f'{len(failures)} FAILING'}")
 sys.exit(1 if failures else 0)

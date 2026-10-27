@@ -42,7 +42,7 @@
       color: var(--chalk);
       font-family: var(--font-ui);
       min-height: 100vh;
-      padding: 24px 16px 64px;
+      padding: 24px 16px 48px;
     }
     .page { max-width: 600px; margin: 0 auto; }
 
@@ -76,7 +76,7 @@
       font: 600 11px/14px var(--font-ui);
       text-transform: uppercase; letter-spacing: 0.08em;
       color: var(--chalk-dim);
-      margin: 40px 0 12px;
+      margin: 32px 0 12px;
     }
     .tick-label::before { content: ""; width: 3px; height: 14px; background: var(--ice); flex-shrink: 0; }
     .lead-in { margin-bottom: 8px; }
@@ -85,11 +85,12 @@
     .methods { list-style: none; }
     .method {
       display: flex; align-items: flex-start; gap: 12px;
-      padding: 14px 0;
+      padding: 16px 0;
     }
     .method + .method { border-top: 1px solid var(--line); }
     .icon {
-      width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px;
+      width: 20px; height: 20px; flex-shrink: 0;
+      margin-top: 1px;   /* centres the 20px glyph on the 22px title line */
       stroke: var(--chalk-dim); stroke-width: 1.75; fill: none; stroke-linecap: square;
     }
     .method-body { flex: 1; min-width: 0; }
@@ -104,9 +105,9 @@
     .method-line {                                  /* body-sm */
       font: 400 13px/18px var(--font-ui);
       color: var(--chalk-dim);
-      margin-top: 2px;
+      margin-top: 4px;
     }
-    .method-line + .method-line { margin-top: 6px; }
+    .method-line + .method-line { margin-top: 8px; }
     .then { color: var(--chalk); font-weight: 600; }
 
     /* Body links: chalk + underline (design-lead, #354). None on the page today. */
