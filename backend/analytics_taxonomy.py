@@ -1733,9 +1733,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # discipline of the 2026-08-13 backlog sweep. `surface` is the
     # InterruptSurface enum, identical to `prompt_shown.surface`
     # (quickset_prompt | coach_mark | apple_banner | outlook_banner |
-    # guide_step). `blocked_by` is the refusal reason: the literal 'tour'
-    # for a calc-tour hold, otherwise the InterruptSurface currently
-    # holding the slot. One row per deferral episode, not per retry.
+    # guide_step | paywall_offer). `blocked_by` is the refusal reason: the
+    # literal 'tour' for a calc-tour hold, otherwise the InterruptSurface
+    # currently holding the slot. One row per deferral episode, not per retry.
+    # `paywall_offer` (#393 M2) appears only as `blocked_by`, while the
+    # paywall offer holds the slot: the offer claims it imperatively (as the
+    # guide does), so it never emits prompt_shown and is never itself the
+    # `surface` of a deferral.
     "prompt_deferred":             frozenset({"surface", "blocked_by"}),
     # ── Paywall funnel (IAP enablement, 2026-08-28) ──────────────────────
     # `source` is the paywall ENTRY POINT — the `gate` string of the 402 that
