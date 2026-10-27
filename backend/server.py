@@ -4078,7 +4078,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 4
+DECK_PIPELINE_VERSION = 5
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4150,6 +4150,7 @@ DECK_PIPELINE_IGNORED = {
     "_job_superseded": "job lifecycle: the supersede fence",
     "_revoke_trade_job_locked": "job lifecycle: revocation",
     "_note_job_picks_read": "the job's roster stamp: records which picks it read (#484 QA P2-1); never shapes the deck",
+    "_quality_filter_inputs": "audit provenance: records the quality filter's inputs per run (models-lead addendum D2); never shapes the deck",
     # logging and telemetry
     "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
@@ -4203,6 +4204,7 @@ DECK_PIPELINE_PINS = {
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
+    5: "d4e4206b771dd50b",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -6429,6 +6431,9 @@ def _deck_evidence_job_done(job_id: str) -> None:
             # can tell a replaced row from none (_row_gone_why). Omitted for a
             # deck with no page scope (it never has a page row).
             ev.run_meta.update(scoring_format=job["key"][2], page_scope=job["page_scope"])
+        if job.get("filter_inputs") is not None:
+            # models-lead addendum D2: the quality filter's inputs, per run.
+            ev.run_meta["filter_inputs"] = job["filter_inputs"]
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
 
@@ -8340,6 +8345,42 @@ def _deck_first_session_enabled() -> bool:
 def _deck_quality_filters_enabled() -> bool:
     """deck.quality_filters (operator, 2026-10-14) — backend/deck_quality.py on the served deck."""
     return getattr(FLAGS, "deck_quality_filters", False)
+
+
+def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters,
+                           lineup_slots) -> dict:
+    """models-lead addendum D2: what deck_quality.filter_deck read for this run,
+    frozen once per run in the pack's run header (`run["filter_inputs"]`), so
+    #453's audit re-runs B-DK-4/5/6 on the filter's own inputs. Audit
+    provenance, never a scorer input (not in FROZEN_INPUT_KEYS); eval reads its
+    named fields only. `cards`: the cards the filter returned; `market`,
+    `position`, `rosters` and `lineup_slots`: the very ones it was given.
+    - market / position: every asset on those cards (both sides) and in the
+      qb_te holdings; an unseeded asset is null, a None position null, so an
+      absent asset is one the filter never saw (models-eng).
+    - qb_te: per team the filter keyed (`viewer_team`, as overwritten with the
+      viewer's roster, and each card's counterparty), its QB and TE holdings.
+    - protected: the trade_hashes `is_protected` exempted.
+    A recording failure raises; the caller then records filter_ran True with
+    no inputs (the audit reads that deck as not auditable), and serves the
+    filtered deck."""
+    from . import deck_quality as _dq
+    teams = {viewer_team} | {str(c.target_user_id) for c in cards}
+    qb_te = {team: [a for a in rosters[team] if position(a) in ("QB", "TE")]
+             for team in sorted(teams) if team in rosters}
+    assets = {a for c in cards for a in (*c.give_player_ids, *c.receive_player_ids)}
+    assets.update(a for held in qb_te.values() for a in held)
+    ordered = sorted(assets, key=str)
+    return {
+        "v": 1, "filter_ran": True, "viewer_team": viewer_team,
+        "lineup_slots": None if lineup_slots is None else list(lineup_slots),
+        "market": {str(a): market(a) for a in ordered},
+        "position": {str(a): position(a) for a in ordered},
+        "qb_te": {team: [str(a) for a in held] for team, held in qb_te.items()},
+        "protected": sorted({_deck_trade_hash(c.give_player_ids, c.receive_player_ids,
+                                              c.target_user_id)
+                             for c in cards if _dq.is_protected(c)}),
+    }
 
 
 def _records_in_order(cards, records, survivors) -> list:
@@ -12847,6 +12888,7 @@ def _run_trade_job(
                 job = _trade_jobs.get(job_id)
                 if _job_live(job):
                     job["owner_presentment"] = owner_presentment
+        filter_inputs = {"v": 1, "filter_ran": False}   # models-lead addendum D2
         if _deck_quality_filters_enabled() and final_cards:
             # Operator, 2026-10-14 (Calibration grades of this engine): drop breakup / junk
             # filler / redundant TE-QB cards and cap repeats, before the served/ghost split so a
@@ -12858,11 +12900,21 @@ def _run_trade_job(
                 quality_rosters = {str(m.user_id): list(m.roster or ()) for m in (g_league.members or ())}
                 quality_rosters[viewer_team] = list(g_user_roster)
                 _e2v = _trade_service_mod.elo_to_value
+                quality_market = lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None
+                quality_position = lambda pid: getattr(players_dict.get(pid), "position", None)
+                quality_slots = _league_lineup_slots(league_id)
                 final_cards, quality_counts = _deck_quality.filter_deck(
-                    final_cards, viewer_id=viewer_team,
-                    market=lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None,
-                    position=lambda pid: getattr(players_dict.get(pid), "position", None),
-                    rosters=quality_rosters, lineup_slots=_league_lineup_slots(league_id))
+                    final_cards, viewer_id=viewer_team, market=quality_market,
+                    position=quality_position, rosters=quality_rosters, lineup_slots=quality_slots)
+                try:
+                    filter_inputs = _quality_filter_inputs(
+                        final_cards, viewer_team=viewer_team, market=quality_market,
+                        position=quality_position, rosters=quality_rosters,
+                        lineup_slots=quality_slots)
+                except Exception as inputs_err:   # provenance never unfilters the deck
+                    log.warning("trade-job %s: quality filter inputs not recorded: %s",
+                                job_id, inputs_err)
+                    filter_inputs = {"v": 1, "filter_ran": True}
                 if presentation is not None:
                     presentation["records"] = _records_in_order(
                         before_quality, presentation["records"], final_cards)
@@ -12875,6 +12927,11 @@ def _run_trade_job(
                 log.warning("trade-job %s: deck quality filters failed (serving unfiltered): %s",
                             job_id, quality_err)
                 final_cards = before_quality
+                filter_inputs = {"v": 1, "filter_ran": False}
+        with _trade_jobs_lock:
+            _fi_job = _trade_jobs.get(job_id)
+            if _job_live(_fi_job):
+                _fi_job["filter_inputs"] = filter_inputs
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:

@@ -40,6 +40,7 @@ FROZEN_PINS = {
     2: "9e79b6087f6e1a42",
     3: "97404fc8bab683f2",
     4: "864cf30974da20ea",
+    5: "d4e4206b771dd50b",
 }
 PINNED = server.DECK_PIPELINE_PINS.get(server.DECK_PIPELINE_VERSION)
 
