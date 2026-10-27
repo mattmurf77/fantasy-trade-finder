@@ -293,23 +293,24 @@ function _pathname(path: string): string {
   return path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
 }
 
-/** D3: the send family opens `mon.lock.send`; everything else `mon.lock.find`. */
+/** D3 + ux-lead / copy §9.3: the send family (/propose*, /queue,
+ *  /respond-mfl, a Matches disposition, a standing offer, an overhaul's
+ *  send) opens `mon.lock.send`; everything else `mon.lock.find`. */
 export function gateKindForPath(path: string): GateKind {
   const p = _pathname(path);
   if (/^\/api\/trades\/propose(-espn|-mfl)?$/.test(p)) return 'send';
   if (p === '/api/trades/queue' || p === '/api/trades/respond-mfl') return 'send';
+  if (p === '/api/trades/standing-offer') return 'send';
   if (/^\/api\/trades\/matches\/[^/]+\/disposition$/.test(p)) return 'send';
+  if (/^\/api\/overhauls\/[^/]+\/send$/.test(p)) return 'send';
   return 'find';
 }
 
-/** Calls that put something in front of a leaguemate. After verifying, these
- *  are NEVER re-sent for the user (D18: a Send returns to its confirm step
+/** The send family puts something in front of a leaguemate. After verifying,
+ *  it is NEVER re-sent for the user (D18: a Send returns to its confirm step
  *  and needs a fresh tap); every other gated call is retried once. */
 function _neverAutoRetry(path: string): boolean {
-  const p = _pathname(path);
-  return gateKindForPath(p) === 'send'
-    || p === '/api/trades/standing-offer'
-    || /^\/api\/overhauls\/[^/]+\/send$/.test(p);
+  return gateKindForPath(path) === 'send';
 }
 
 /** The paywall gate's route classes (#395 `paywall_gate.ROUTES`, `gated`).

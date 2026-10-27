@@ -132,11 +132,13 @@ check('1b. a BACKGROUND 402 opens nothing (the caller still gets the 402)', asyn
   assert(e.isProRequired, 'the background caller must still see the 402');
   eq(signals.length, 0, 'background signals');
 });
-check('1c. D3: the send family is kind=send (propose*, queue, respond-mfl, disposition); find otherwise', async () => {
+check('1c. D3 + copy §9.3: the send family is kind=send (propose*, queue, respond-mfl, disposition, standing offer, overhaul send); find otherwise', async () => {
   const send = ['/api/trades/propose', '/api/trades/propose-espn', '/api/trades/propose-mfl', '/api/trades/queue',
-    '/api/trades/respond-mfl', '/api/trades/matches/42/disposition', 'https://api.test/api/trades/propose?x=1'];
+    '/api/trades/respond-mfl', '/api/trades/matches/42/disposition', 'https://api.test/api/trades/propose?x=1',
+    '/api/trades/standing-offer', '/api/overhauls/o1/send'];
   const find = ['/api/trades/generate', '/api/trades/status?job_id=1', '/api/trades/swipe', '/api/trades/fair-packages',
-    '/api/trades/asset-ideas', '/api/win-now/search', '/api/overhauls/o1/generate'];
+    '/api/trades/asset-ideas', '/api/win-now/search', '/api/overhauls/o1/generate', '/api/overhauls/o1/roadmaps/r1/prepare-send',
+    '/api/trades/standing-offer/revoke'];
   for (const p of send) eq(client.gateKindForPath(p), 'send', p);
   for (const p of find) eq(client.gateKindForPath(p), 'find', p);
 });
@@ -197,7 +199,9 @@ check('1j. Cancel (or a new sign-in) rejects with the ORIGINAL error and sends n
     eq(sent.length, 1, `${outcome}: fetches`);
   }
 });
-check('1k. D18: a Send is NEVER re-sent after verifying; its caller is rejected at once (fresh tap needed)', async () => {
+check('1k. D18: a Send is NEVER re-sent after verifying (the send kind decides); its caller is rejected at once', async () => {
+  assert(/function _neverAutoRetry\(path: string\): boolean \{\s*return gateKindForPath\(path\) === 'send';\s*\}/.test(strip(read('api/client.ts'))),
+    '[shape] _neverAutoRetry must reuse the send kind, not keep its own list');
   for (const p of ['/api/trades/propose', '/api/trades/queue', '/api/trades/standing-offer', '/api/overhauls/o1/send']) {
     reset();
     let settled = false;
