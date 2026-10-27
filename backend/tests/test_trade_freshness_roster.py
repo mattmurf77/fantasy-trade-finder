@@ -538,22 +538,21 @@ def test_the_expected_fp_is_taken_only_while_the_session_s_refresh_is_in_flight(
                                                                               monkeypatch):
     db_module.mark_league_roster_fresh("league-q", READ_NOW)
     rows = [{"user_id": "u-q", "player_ids": ["p1"]}]
-    assert server._roster_fp_expected_pending("league-q", READ_OLD, rows) is None
-    assert server._roster_fp_expected_pending("league-q", READ_NOW, rows) is None
-    assert server._roster_fp_expected_pending("league-q", None, rows) is None
-    assert server._roster_fp_expected_pending("league-q", READ_LATER, None) is None
-    pending = server._roster_fp_expected_pending("league-q", READ_LATER, rows)
-    assert pending and pending.startswith("rfp1:")
-    assert server._roster_fp_expected_pending("league-never", READ_OLD, rows) is not None
+    assert not server._roster_read_in_flight("league-q", READ_OLD, rows)
+    assert not server._roster_read_in_flight("league-q", READ_NOW, rows)
+    assert not server._roster_read_in_flight("league-q", None, rows)
+    assert not server._roster_read_in_flight("league-q", READ_LATER, None)
+    assert server._roster_read_in_flight("league-q", READ_LATER, rows)
+    assert server._roster_read_in_flight("league-never", READ_OLD, rows)
     monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 0.0)
-    assert server._roster_fp_expected_pending("league-q", READ_LATER, rows) is None   # P3-3
+    assert not server._roster_read_in_flight("league-q", READ_LATER, rows)   # P3-3
     monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 1.0)
     monkeypatch.setattr(server, "_trade_i1_mode", lambda: 0)
-    assert server._roster_fp_expected_pending("league-q", READ_LATER, rows) is None
+    assert not server._roster_read_in_flight("league-q", READ_LATER, rows)
     monkeypatch.setattr(server, "_trade_i1_mode", lambda: 1)
     monkeypatch.setattr(db_module, "get_league_roster_state",
                         MagicMock(side_effect=RuntimeError("db")))
-    assert server._roster_fp_expected_pending("league-q", READ_LATER, rows) is None
+    assert not server._roster_read_in_flight("league-q", READ_LATER, rows)
 
 
 def test_the_kill_switches_stop_the_move_rule_at_once(hook_db, monkeypatch):
@@ -691,3 +690,116 @@ def test_replenish_passes_its_live_session_s_read(live, monkeypatch):
     assert server._trade_jobs_by_key.get(KEY) == job["job_id"]
     assert server._replenish_deck_for(UID, LEAGUE) is None
     assert seen == [READ_NOW]
+
+
+
+# ── #484 QA P2-1: the stamp hashes the picks the worker actually read ─────────
+
+def _worker_sees_a_pick_move(monkeypatch, engine, owner):
+    """The pick moves between the kickoff's read and the worker's: the move
+    lands as the worker (`_run_trade_job`) starts, after the kickoff's stamp."""
+    real_run = server._run_trade_job
+
+    def run(*a, **k):
+        _set_pick_owner(engine, owner)
+        return real_run(*a, **k)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    return real_run
+
+
+def test_one_kickoff_read_gives_the_stamp_its_picks_key_and_expected_fp(live):
+    client, engine = live
+    parts = {"member_rows": MEMBERS_NOW}
+    fp, _vsn = server._trade_current_fingerprints(LEAGUE, "1qb_ppr", parts=parts)
+    with db_module.engine.connect() as conn:
+        assert parts["expected_fp"] == roster_snapshot.expected_fp(
+            conn, LEAGUE, MEMBERS_NOW, pick_source=server._pick_read_source())
+    picks = db_module.load_draft_picks(league_id=LEAGUE, source=server._pick_read_source())
+    assert parts["picks_key"] == roster_snapshot.picks_key(picks)
+    assert fp == server._trade_current_fingerprints(LEAGUE, "1qb_ppr")[0]
+
+
+def test_a_worker_that_read_the_stamp_s_picks_keeps_its_stamp(live):
+    job = _complete_job()
+    assert job["roster_picks_key"] and job["roster_fp"].startswith("rfp1:")
+    assert _fresh(job)
+
+
+def test_picks_moved_before_the_worker_read_unstamp_the_job(live, monkeypatch):
+    """Main's sibling (no member move): the stamp hashed picks P0, the worker
+    read P1, and the rows later return to P0 (an older refresh writing last).
+    The job must not match P0's stamp: it is unstamped at the worker's read."""
+    client, engine = live
+    real = _worker_sees_a_pick_move(monkeypatch, engine, OPP)
+    job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                                       scoring_format="1qb_ppr", opponents_total=1,
+                                       synchronous=True)
+    monkeypatch.setattr(server, "_run_trade_job", real)
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[job_id]
+    assert job["roster_fp"] is None and "roster_fp_expected" not in job
+    _set_pick_owner(engine, UID)                              # the rows return to P0
+    assert not _fresh(job)
+    assert _generate(client)[0] != job_id
+
+
+def test_a_pick_aba_never_restamps_the_pregen(live, monkeypatch):
+    """#484 QA P2-1 (E1b): the pre-gen's expected fp hashed P0 at kickoff, the
+    worker read P1, an older refresh writes P0 back, then the init's own
+    daemon commits its members and stamps fp(M1, P0) == the old expected fp.
+    No re-stamp: the expected fp went with the worker's read."""
+    client, engine = live
+    monkeypatch.setattr(server, "_roster_moved_reads", {})
+    with server._sessions_lock:
+        server._sessions[TOKEN].update(roster_fetch_started_at=READ_NOW,
+                                       roster_read_rows=MEMBERS_NOW)
+    real = _worker_sees_a_pick_move(monkeypatch, engine, OPP)
+    pregen = _kick()
+    monkeypatch.setattr(server, "_run_trade_job", real)
+    assert pregen["roster_fp"] is None and "roster_fp_expected" not in pregen
+    _set_pick_owner(engine, UID)                              # P0 written back
+    _set_roster(engine, OPP, ["r2"])                          # the daemon commits M1
+    db_module.mark_league_roster_fresh(LEAGUE, READ_NOW)
+    new_fp, _ = server._trade_current_fingerprints(LEAGUE, "1qb_ppr")
+    roster_snapshot.on_roster_change(LEAGUE, "rfp1:before", new_fp)
+    assert pregen["roster_fp"] is None and not _fresh(pregen)
+
+
+def test_a_worker_read_after_a_restamp_unstamps_it(live, monkeypatch):
+    """#484 QA P2-1 (E1c): the handler re-stamped the job before its worker read
+    the picks, and the worker then read other picks: the re-stamp is undone."""
+    job = _complete_job()
+    with server._trade_jobs_lock:
+        job["roster_fp"] = "rfp1:re-stamped"
+        job["roster_fp_expected"] = "rfp1:re-stamped"
+    server._note_job_picks_read(job["job_id"], [{"pick_id": "other", "owner_user_id": OPP}])
+    assert job["roster_fp"] is None and "roster_fp_expected" not in job
+    with server._trade_jobs_lock:
+        job["roster_fp"] = "rfp1:kept"
+    picks = db_module.load_draft_picks(league_id=LEAGUE, source=server._pick_read_source())
+    server._note_job_picks_read(job["job_id"], picks)          # the kickoff's picks: kept
+    assert job["roster_fp"] == "rfp1:kept"
+
+
+def test_a_failed_worker_pick_read_unstamps_a_league_with_picks(live, monkeypatch):
+    monkeypatch.setattr(server, "load_draft_picks",
+                        MagicMock(side_effect=RuntimeError("db")))
+    job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                                       scoring_format="1qb_ppr", opponents_total=1,
+                                       synchronous=True)
+    with server._trade_jobs_lock:
+        assert server._trade_jobs[job_id]["roster_fp"] is None
+
+
+def test_the_session_member_rows_key_a_co_owned_roster_on_the_league_identity():
+    """#484 QA P3: the shared builder keys the caller's row on the roster
+    owner's league identity (a co-owner's account id differs), and stores the
+    raw ids as strings, so the expected fp hashes what the daemon writes."""
+    rows = server._session_member_rows("owner-league-id", "Owner Team", ["101", "102"],
+                                       [{"user_id": 7, "username": "opp", "player_ids": [201, 202]},
+                                        {"user_id": "", "username": "ghost", "player_ids": [9]}])
+    assert rows == [
+        {"user_id": "owner-league-id", "username": "Owner Team", "display_name": "Owner Team",
+         "player_ids": ["101", "102"]},
+        {"user_id": "7", "username": "opp", "display_name": "opp", "player_ids": ["201", "202"]},
+    ]
