@@ -1,3 +1,19 @@
+## 2026-10-27 — `deck_i1_check` worker follow-ups: restart, deletion skip, exit drain, drop tail (#468 QA P3-1…P3-5)
+
+Gates: QA follow-ups to #468 (stacked on it). No new event, prop, route or schema; the event's write path changes. One additive method, `user_data_lifecycle.Lease.deleting()`. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_deck_i1_check.py` is now 39 tests (9 new):
+  - a dead worker restarted (P3-1);
+  - an `Exception` in a write leaves the same worker;
+  - a deleting user's write skipped while another user's lands at once, under a real `user_data_lifecycle.hold` (P3-2);
+  - a refusing lease writes nothing;
+  - the exit drain lands queued writes and force-logs pending drops (P3-3), and is registered with `atexit`;
+  - a burst's tail logged by the idle tick (P3-5);
+  - the fallback identity keeps the partner;
+  - the LRU evicts the least recently served job (`move_to_end`).
+- **Sabotage, each red then restored** (9): no restart; no deletion skip; no worker `except`; the lease ignored; the exit warning not forced; no idle tick; no `atexit`; the fallback without the partner; no `move_to_end`.
+- **Not covered:** a deletion that starts between `deleting()` and `active()` still holds the worker for that deletion's length (a narrow race). A skipped write for a deletion that then aborts is lost (one analytics row).
+
 ## 2026-10-27 — `deck_i1_check` follow-ups: each card counted once per job, one bounded worker, drained in tests (#468)
 
 Gates: #419's QA follow-ups. No new event, prop, route or schema; the event's counting and its write path change. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

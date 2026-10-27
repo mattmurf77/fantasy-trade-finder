@@ -3485,6 +3485,8 @@ _I1_EVENT_QUEUE_MAX = 1000
 _I1_EVENT_DROP_WARN_EVERY_S = 60
 _i1_event_queue: "queue.Queue" = queue.Queue(maxsize=_I1_EVENT_QUEUE_MAX)
 _i1_event_worker_for = None                # the queue the running worker serves
+_i1_event_worker_thread = None             # that worker, restarted once it died
+_I1_EVENT_EXIT_DRAIN_S = 5.0
 _i1_event_dropped = 0
 _i1_event_drop_warned_at = float("-inf")
 
@@ -3581,23 +3583,34 @@ def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, report: dict)
 
 def _i1_event_enqueue(lease, write) -> None:
     """Queue one write for the worker (started for the current queue on first
-    use); a full queue drops it, warned at most once a minute with the count."""
-    global _i1_event_worker_for, _i1_event_dropped, _i1_event_drop_warned_at
+    use, and again if it died: #468 QA P3-1); a full queue drops it, warned at
+    most once a minute with the count."""
+    global _i1_event_worker_for, _i1_event_worker_thread
     q = _i1_event_queue
     with _i1_events_lock:
-        if _i1_event_worker_for is not q:
-            threading.Thread(target=_i1_event_work, args=(q,), name="deck-i1-check",
-                             daemon=True).start()
-            _i1_event_worker_for = q
+        thread = _i1_event_worker_thread
+        if _i1_event_worker_for is not q or thread is None or not thread.is_alive():
+            thread = threading.Thread(target=_i1_event_work, args=(q,), name="deck-i1-check",
+                                      daemon=True)
+            thread.start()
+            _i1_event_worker_for, _i1_event_worker_thread = q, thread
     try:
         q.put_nowait((lease, write))
-        return
     except queue.Full:
-        pass
+        _i1_event_drop_warning(q, 1)
+
+
+def _i1_event_drop_warning(q, dropped: int = 0, *, force: bool = False) -> None:
+    """Count `dropped` emits; warn the count not yet warned at most once a
+    minute (any time with `force`, at exit). The worker calls it after each
+    write and when idle, so a burst's tail is logged once the drops stop
+    (#468 QA P3-5)."""
+    global _i1_event_dropped, _i1_event_drop_warned_at
     now, warn = time.monotonic(), 0
     with _i1_events_lock:
-        _i1_event_dropped += 1
-        if now - _i1_event_drop_warned_at >= _I1_EVENT_DROP_WARN_EVERY_S:
+        _i1_event_dropped += dropped
+        if _i1_event_dropped and (force or now - _i1_event_drop_warned_at
+                                  >= _I1_EVENT_DROP_WARN_EVERY_S):
             warn, _i1_event_dropped, _i1_event_drop_warned_at = _i1_event_dropped, 0, now
     if warn:
         log.warning("deck_i1_check queue full (%d): dropped %d emit%s since the last warning",
@@ -3605,15 +3618,28 @@ def _i1_event_enqueue(lease, write) -> None:
 
 
 def _i1_event_work(q) -> None:
-    """The worker: one write at a time, forever; a write's failure is logged."""
+    """The worker: one write at a time, forever; a write's failure is logged.
+    A BaseException ends it, and the next enqueue starts another."""
     while True:
-        lease, write = q.get()
+        try:
+            lease, write = q.get(timeout=_I1_EVENT_DROP_WARN_EVERY_S)
+        except queue.Empty:
+            _i1_event_drop_warning(q)
+            continue
         try:
             _record_deck_i1_check(lease, write)
         except Exception as err:      # never let the worker die
             log.warning("deck_i1_check worker: %s", err)
         finally:
             q.task_done()
+        _i1_event_drop_warning(q)
+
+
+def _i1_event_exit_drain() -> None:
+    """atexit (gunicorn exits its worker normally on SIGTERM): let the queued
+    writes land, bounded, then log the drops not yet warned (#468 QA P3-3)."""
+    _drain_deck_i1_checks(_I1_EVENT_EXIT_DRAIN_S)
+    _i1_event_drop_warning(_i1_event_queue, force=True)
 
 
 def _drain_deck_i1_checks(timeout: float = 5.0) -> bool:
@@ -3631,12 +3657,22 @@ def _drain_deck_i1_checks(timeout: float = 5.0) -> bool:
 
 
 def _record_deck_i1_check(lease, write) -> None:
+    """One write, inside the viewer's user-data lease. A user whose deletion is
+    in progress is skipped, not waited on: the one worker would hold every
+    other user's write behind it, and a finished deletion refuses the write
+    anyway (#468 QA P3-2)."""
     try:
+        if lease.deleting():
+            log.info("deck_i1_check skipped: the user's deletion is in progress")
+            return
         with lease.active() as active:
             if active:
                 write()
     except Exception as err:
         log.warning("deck_i1_check write failed: %s", err)
+
+
+atexit.register(_i1_event_exit_drain)
 
 
 # S0 admin test hook (the operator's TestFlight step A10): force one gate miss
