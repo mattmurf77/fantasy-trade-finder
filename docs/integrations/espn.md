@@ -69,6 +69,8 @@ etc.) is ever requested — see §1.2.
 | `POST /api/espn/import` → `espn_import` | `backend/server.py:18536-18626` | Manual re-sync of an already-linked league |
 | `_espn_standings_read` | `backend/server.py:10526-10570` | Reads current + prior season, looking for one where standings support a draft-order derivation |
 | CLI spike `_main` | `backend/espn_service.py:626-657` | `python3 -m backend.espn_service <league_id> [season]` — manual debug tool, not reachable from any client |
+| `_espn_propose_core` (`POST /api/trades/propose-espn` + the team-overhaul send) | `backend/server.py`, the pre-flight read | One mTeam+mRoster read per send. It resolves the counterparty team and the lineup slots, and since I-2 (2026-10-26) it is also the **ownership check**: give/receive players must be on the expected team's live roster, or the send is refused with 422 `asset_not_owned` / `counterparty_asset_not_owned`. A failed read (HTTP error, non-JSON or non-UTF-8 body, transport error, `http.client.HTTPException`, no `teams` list, a team without `roster`) → 502 `espn_unavailable` `kind:"network"`, nothing sent. No extra read |
+| `_validate_espn_trade` (`POST /api/trades/validate`, flag `espn.send`) | `backend/server.py` | I-2: one live mTeam+mRoster read per pre-send validate on an ESPN league. It reports advisory `asset_unmapped` / `player_moved` / `roster_not_found`; a failed read → `checked:false`. Never calls Sleeper |
 
 ### 1.4 A second, non-ESPN URL lives in the same module
 

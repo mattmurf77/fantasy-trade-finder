@@ -398,3 +398,54 @@ def test_trade_page_size_is_seeded_at_30():
     assert ("trade_page_size", 30.0) in [row[:2] for row in db._MODEL_CONFIG_DEFAULTS]
     with patch.dict(ts._cfg, {}, clear=True):
         assert server._trade_page_size() == 30
+
+
+# ── Kill switch: trade_paged_responses ───────────────────────────────────────
+
+@pytest.mark.parametrize("off", [0.0, -1.0])
+def test_paged_kill_switch_serves_the_legacy_body(e2, monkeypatch, off):
+    """At 0 the opt-in is ignored: `page` and `cursor` get the legacy body,
+    byte for byte, which the #363 app handles as its pre-paging deck path."""
+    client, _engine, spawned = e2
+    job = seed_job([card(i) for i in range(75)], status="complete")
+    expected = legacy_bytes(job)
+    monkeypatch.setitem(ts._cfg, "trade_paged_responses", off)
+    assert status(client, 0).get_data() == expected
+    assert status(client, 40).get_data() == expected
+    response = generate(client, page=1, search_id="kill-switch-search")
+    assert response.status_code == 200 and response.get_data() == expected
+    assert not spawned
+
+
+
+def test_paged_kill_switch_on_a_fresh_job_returns_the_legacy_shape(e2, monkeypatch):
+    """The fresh-job return (no cached job, a new one is started) also drops the
+    paging fields at knob 0, not only the cache-hit return."""
+    client, _engine, spawned = e2
+    monkeypatch.setitem(ts._cfg, "trade_paged_responses", 0.0)
+    response = generate(client, page=1, search_id="kill-switch-fresh")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body.get("job_id") and len(spawned) == 1
+    assert not {"cursor", "total_ready", "replace", "search_id"} & set(body)
+
+def test_paged_kill_switch_still_validates(e2, monkeypatch):
+    client, *_ = e2
+    seed_job([card(i) for i in range(3)], status="complete")
+    monkeypatch.setitem(ts._cfg, "trade_paged_responses", 0.0)
+    assert generate(client, page=2).status_code == 400
+    assert status(client, "x").status_code == 400
+
+
+@pytest.mark.parametrize("value", [1.0, 2.0, float("nan")])
+def test_paging_stays_on_by_default_and_on_bad_values(e2, monkeypatch, value):
+    client, *_ = e2
+    seed_job([card(i) for i in range(75)], status="complete")
+    monkeypatch.setitem(ts._cfg, "trade_paged_responses", value)
+    assert status(client, 0).get_json()["cursor"] == 30
+    with patch.dict(ts._cfg, {}, clear=True):
+        assert server._trade_paged_responses_on() is True
+
+
+def test_trade_paged_responses_is_seeded_on():
+    assert ("trade_paged_responses", 1.0) in [row[:2] for row in db._MODEL_CONFIG_DEFAULTS]
