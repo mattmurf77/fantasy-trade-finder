@@ -1,3 +1,44 @@
+## 2026-10-27 — B-DK audit reads the quality filter's own inputs (models-lead addendum D2, #492)
+
+Gates: eval-side only (`backend/eval/bdk_audit.py`, its tests, the runbook § B-DK audit and the evidence-contract lines). It's stacked on the display-moves loader PR. No route, schema, event, flag, knob or engine-module change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **What changed** (release-lead's #492 QA notes, all taken):
+  - B-DK-4..6 now read the pack's `run["filter_inputs"]` (v1), with null and NaN markets passed to the rules as the filter saw them.
+  - An asset absent from the record makes its card not auditable.
+  - Protection is the record's trade_hashes.
+  - `position_caps(lineup_slots)` None means the filter skipped B-DK-6: a pass.
+  - B-DK-6 reads the viewer's and the counterparty's (`str(partner_user_id)`) QB/TE holdings; an absent team holds nothing.
+  - `filter_ran: false` decks are skipped (`filter_not_run`).
+  - Decks without a record are counted by state (`record_failed`, `pack_without_record`, `no_pack`), and they're not auditable for 4..6.
+  - `valuation_json` is no longer read, which removes the owner-deck false FAILs (D2 (c)).
+  - B-DK-7 is unchanged except that a recorded deck's protection now comes from the record.
+- **Tests:** `test_eval_bdk_audit.py`, 64 tests:
+  - the value rules on the record;
+  - the record read, never `valuation_json`;
+  - record protection versus a row flag;
+  - row flags still protecting without a record;
+  - B-DK-6 on the viewer's and counterparty's holdings;
+  - B-DK-6 reproducing `filter_deck` on full rosters over a grid;
+  - an unknown lineup as a pass;
+  - nine record states;
+  - filter_not_run skipped;
+  - an unseen asset;
+  - a null or NaN market (the header's NaN token read);
+  - str ids.
+  - Together with `test_eval_display_moves.py`: 90 passed. Flip-read and blind-grade suites: 212 passed.
+- **Sabotage, each red then restored (8):**
+  - protection always from the row;
+  - no counterparty side;
+  - the viewer's holdings for both sides;
+  - an unknown lineup not auditable;
+  - no coverage check;
+  - filter_not_run decks audited;
+  - a bool version accepted;
+  - decks without a record audited anyway (27 red).
+- **Not covered:**
+  - B-DK-7's false FAIL on packed decks whose repeat cap ran short (`_short_deck` needs rows past the window): proposed to trades-eng as a `repeat_deferred` count in the record;
+  - whether live-evidence decks' not-auditable B-DK-4..6 blocks certification is models-lead's call.
+
 ## 2026-10-27 — Eval loader reads serve-time display moves (models-lead addendum D3)
 
 Gates: eval-side only (`backend/eval/data.py`, a doc line in `bdk_audit.py`). It reads the pack header field `run["display_moves"]`, agreed with trades-eng, whose serve side writes it. No route, schema, event, flag, knob or engine-module change; an absent field changes nothing, so this merges before or after the writer. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
