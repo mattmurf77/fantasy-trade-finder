@@ -18,6 +18,7 @@ Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event,
   - a failed worker read is unstamped;
   - the co-owner keying of `_session_member_rows` (QA P3).
 - `test_deck_pipeline_digest.py`: the v3 pin is added to FROZEN_PINS. 68 passed across the two files plus `test_roster_refresh_state.py`.
+- **Full suite** on `922517fb`: `pytest backend/tests -q` → 9322 passed, 2 skipped, 0 failed (11m19s).
 - **models-eng reviewed the v3 bump (OK, 2026-10-27).** An AST diff of every pinned function against main shows only the `_note_job_picks_read` line in `_job_draft_picks`. The pin reproduces, and the IGNORED classification holds: it never mutates the picks, writes only `roster_fp` and `roster_fp_expected`, and no call site holds `_trade_jobs_lock`.
 - **Sabotage, each red then restored (7):**
   - the worker doesn't note (6 red, the digest among them);
