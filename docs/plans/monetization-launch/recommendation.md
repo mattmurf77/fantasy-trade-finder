@@ -212,7 +212,7 @@ non-deck gated entry points open the standard paywall, so no bespoke in-place st
 
 ## (d) Existing TestFlight users
 
-- **How many:** about 8 MAU [M, W3 2026-10-20]; ux-lead counts about 4 testers. No TestFlight signal exists in code.
+- **How many:** about 8 MAU [M, W3 2026-10-20]; ux-lead's count of about 4 testers is **3** (analytics-lead, 2026-10-27; the 4th was the operator's MFL test login). No TestFlight signal exists in code.
 - **No app-managed clock under A:** their month starts with Apple's trial on the App Store build (sandbox history leaves
   production eligibility untouched [interp.; release-lead to confirm]); their preview counts from enforcement start (ux §6).
 - **Founding GMs on the same terms** (tester welcome, ux §4.1). **No comp:** #347's 90-day comp would cost them the founder price.
