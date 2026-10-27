@@ -6,8 +6,11 @@
 // are VERBATIM; change one only from that file. `{Club name}` is "Founding
 // GMs" (operator, 2026-10-25).
 //
-// ZERO RUNTIME IMPORTS, on purpose: tests/check-paywall-gate.js transpiles
-// and executes this module under plain node to pin legal R28.8:
+// ONE RUNTIME IMPORT, on purpose: the support address (utils/supportContact,
+// a constant-only module; check-feedback-public pin 3 keeps it the only
+// literal in mobile/src). tests/check-paywall-gate.js transpiles and executes
+// this module under plain node, stubbing that import with the real module, to
+// pin legal R28.8:
 //   #1 unknown eligibility → the paid copy, no "free" anywhere;
 //   #2 the per-month figure and the savings % come from live StoreKit
 //      prices: per-month rounds UP to the cent, savings rounds DOWN; no SAVE
@@ -19,6 +22,8 @@
 //   #7 nothing implies board-based PRICING (C9: boards drive selection).
 // No countdown, days-left, trial-end date or "ends soon" line exists here
 // (the operator's 2026-10-24 ruling, D10).
+
+import { SUPPORT_EMAIL } from '../utils/supportContact';
 
 export const CLUB_NAME = 'Founding GMs';
 
@@ -54,7 +59,7 @@ export const MON = {
   'mon.pay.pending': 'Waiting for approval. Access starts when it comes through.',
   'mon.pay.restore_ok': 'Welcome back. Your subscription is restored.',
   'mon.pay.restore_none':
-    'No subscription found for this Apple ID. Questions: fleecedapp@gmail.com',
+    `No subscription found for this Apple ID. Questions: ${SUPPORT_EMAIL}`,
   // §9.4 / §9.5 the club block (window only, server-driven)
   'mon.club.join': 'Join the Founding GMs.',
   'mon.pay.founder.price':
