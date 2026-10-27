@@ -18,6 +18,56 @@ Server only, platforms-eng lead; one commit on `fix/owned-picks-drafts-flake`. D
 - **Not run:** `tsc --noEmit` and testid-lint (no mobile change).
 - **QA follow-up (#482 GO-with-notes; tests and docs only, no code change):** QA's sabotage "a prior-grid read error returns True" stayed green on the 7 tests above. New: `test_prior_grid_read_error_falls_back_to_including_the_season`. A complete read excludes 2026; then `srv.load_draft_picks` raises on an empty read with no verdict, and 2026 is included (D-089). That sabotage (`return True` in the `except`) → that 1 test red (`[2027, 2028, 2029] == [2026, 2027, 2028]`), then restored; `test_owned_picks.py` → 39 passed. The commissioner-reset cost is now named in the D-189 amendment and `docs/integrations/sleeper.md`.
 
+## 2026-10-27 — S0 PR-B: `rfp1` roster fingerprint stamp after a refresh (CAS) + `on_roster_change`
+
+Full gates (platforms-eng lead). Server only; no API, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest. Branch `feat/s0-roster-fp-stamp`.
+
+- **What:** `roster_refresh.record_outcome` → `stamp` after a `fresh` write, so both the session-init daemon and the P41 kick stamp. `stamp` reads the stored `roster_fp` and computes `roster_snapshot(...).fp` with `server._pick_read_source()`. It then compare-and-sets through `database.cas_league_roster_fp`, and on a won, changed stamp calls `on_roster_change(lid, old, new)` with no transaction open and no lock held.
+- **New `backend/tests/test_roster_fp_stamp.py` (17):**
+  - the first stamp is `rfp1` (equal to the serve's `_trade_roster_snapshot`) and calls the hook with `old=None`;
+  - a change calls `(old, new)`; no change makes no CAS and no call;
+  - a lost CAS (rival stamp) makes no call ×2;
+  - no state row writes nothing;
+  - a handler exception and a raising hook are swallowed and logged;
+  - a failed refresh ×2, a failed read and a failed state write, and a failed kick read don't stamp;
+  - an fp or pick-source error leaves the fp as stored, with the outcome still `fresh` ×2;
+  - a linked-platform league is never stamped;
+  - **A3** on a file-backed SQLite: `pool.checkedout()==0`, both module locks acquire non-blocking, and a second connection writes, on `roster-refresh-<id>`;
+  - session init hooks on a real `session-init-bg-writes` thread, never the request thread.
+- **Updated:** `test_roster_refresh_state.py::test_success_marks_fresh_and_never_stores_none_ids` now expects `rfp1:` (was NULL until PR-B).
+- **Sabotage, each red then restored byte-identical:**
+  - (1a) the hook inside the CAS transaction → the A3 test red (`checked_out: 1`, second-connection write `OperationalError`);
+  - (1b) the hook under `_inflight_lock` → the A3 test red;
+  - (2) the CAS `WHERE roster_fp = old` dropped → both lost-CAS cases red (rival overwritten);
+  - (3) the `new == old` early return dropped → the unchanged-roster test red (1 call).
+- **Targeted:** 15 S0 / trade-serve files → 493 passed.
+- **Full suite:** `python3 -m pytest backend/tests -q` → **9208 passed, 2 skipped, 0 failed**, exit 0, 35m37s (Python 3.14 local; the known `test_ranking_service_threads` flake didn't fire).
+- **Docs:** `docs/data-dictionary.md` (`roster_fp` row + intro), `docs/architecture.md` (new "Roster refresh and fingerprint stamp (S0)" data-flow paragraph), and the scope (§B.1 seam, §B.3 step 7 "As built", §3 evidence, §4 docs rows, §5 item 3).
+- **Not in PR-B:** the §B.6 stamps on the other writers (ESPN/MFL imports, the MFL pick normalizer, draft-status refresh, `_refresh_sleeper_members`). The serve recomputes `rfp1` from rows, so only the proactive hook is missing there.
+
+## 2026-10-27 — S0 roster-change handler: revoke only what a fresher session would rebuild (#470 QA P2-2, P2-1, P3-1, P3-3)
+
+Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms.md` §6.1). It adds one model_config kill knob (`trade_roster_change_revoke`, default 1) and changes no route, schema or event. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Backend:** `test_trade_freshness_roster.py` (25; the handler tests are rewritten for the new rule, with 7 new) and `test_roster_refresh_state.py` (15; 1 new: session init stamps `roster_fetch_started_at` on the session and on the pre-gen's session context, equal to the `refreshed_at` its daemon writes).
+- **Targeted, 312 passed:** freshness, roster refresh state, roster snapshot, module shape, I-1 serve filter, page store, floor kick, unlocked fingerprint reads, `deck_i1_check`, and session init (single flight, Sleeper calls, guard).
+- **Sabotage, each red then restored:**
+  - no session check → 1 red (the league-mate's deck);
+  - no read compare → 2 red (the P2-2 repro and the kept-read test);
+  - no stamp-key check → 1 red (P3-1);
+  - no knob → 1 red;
+  - the job's read not stamped → 1 red (the repro);
+  - the session's read not set → 1 red (session init).
+- **Full suite** on `8ad40822`: `pytest backend/tests -q` → 9260 passed, 2 skipped, 0 failed (13m10s).
+- **Combined with #470** (a local merge of `8ad40822` with `de8c2af5`): #470's `test_roster_fp_stamp.py` plus the above, 97 passed.
+  - A scratch end-to-end repro used #470's real `stamp`, with the daemon held until the pre-gen had read its fingerprint (release-lead's ordering).
+  - With a player move: 1 hook, and the pre-gen was kept. With the old handler, the same run revoked it (P2-2 reproduced).
+  - With no change: no hook.
+  - The scratch worktree is ledgered in `docs/recovery/2026-10-27-trades-eng-scratch.md`.
+- **Not covered:**
+  - A refreshing user's own deck from before their new read still ends at its next page with "Couldn't load more trades." + Try again. Revoking it is intended, since Try again rebuilds on the newer read. An automatic re-search is a mobile change (offered for the 11-06 binary).
+  - A user with two devices: a newer session on one device makes the other device's older deck revocable (the rule is per user, not per session). That is no worse than #470 as it stands.
+
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
 Full gates (head-eng approved, platforms-eng lead; the enum and `kind` changes are analytics-lead's granted asks). Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Two commits on `fix/validate-gate-espn`.

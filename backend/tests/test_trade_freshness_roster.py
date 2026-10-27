@@ -244,73 +244,198 @@ def test_a_failed_read_keeps_the_running_job(live):
 
 
 # ── on_roster_change → the trades handler ────────────────────────────────────
+#
+# A job is built on its session's own Sleeper read, so the handler revokes only
+# when a rebuild would read newer rosters: the job's read is older than the
+# refreshed rows' (`refreshed_at`) and its user holds a session whose read is
+# at least that new (#470 QA P2-2, P2-1). Stamp-less jobs are unchecked (P3-1).
 
-def test_the_handler_is_debounced_by_fingerprint():
-    """A3: only jobs not built on `new_fp` are revoked, so a double call, or a
-    call landing after a rebuild, changes nothing for the rebuilt job."""
-    def park(job_id, roster_fp):
-        job = {"job_id": job_id, "key": (job_id, "league-d", "1qb_ppr"), "status": "complete",
-               "cards": [], "error": None, "roster_fp": roster_fp, "values_snapshot_id": "vsn1:x"}
+READ_OLD = "2026-10-27T10:00:00.000000+00:00"      # an earlier init's Sleeper read
+READ_NOW = "2026-10-27T11:00:00.000000+00:00"      # the read the refresh committed
+READ_LATER = "2026-10-27T11:05:00.000000+00:00"
+
+
+@pytest.fixture()
+def hook_db(monkeypatch):
+    """In-memory rows for the handler's `league_roster_state` read; parks and
+    removes sessions and jobs."""
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    metadata.create_all(engine)
+    monkeypatch.setattr(db_module, "engine", engine)
+    tokens, job_ids = [], []
+
+    def session(token, user_id, league_id, read):
+        with server._sessions_lock:
+            server._sessions[token] = {"user_id": user_id, "roster_fetch_started_at": read,
+                                       "league": League(league_id=league_id, name="L",
+                                                        platform="sleeper", members=[])}
+        tokens.append(token)
+
+    def job(job_id, user_id, league_id, *, read, roster_fp="rfp1:old", stamped=True):
+        j = {"job_id": job_id, "key": (user_id, league_id, "1qb_ppr"), "status": "complete",
+             "cards": [{"trade_id": "t"}], "error": None, "values_snapshot_id": "vsn1:x",
+             "roster_fetch_started_at": read}
+        if stamped:
+            j["roster_fp"] = roster_fp
         with server._trade_jobs_lock:
-            server._trade_jobs[job_id] = job
-            server._trade_jobs_by_key[job["key"]] = job_id
-        return job
+            server._trade_jobs[job_id] = j
+            server._trade_jobs_by_key[j["key"]] = job_id
+        job_ids.append(job_id)
+        return j
 
-    old, rebuilt = park("j-old", "rfp1:old"), park("j-new", "rfp1:new")
-    try:
-        roster_snapshot.on_roster_change("league-d", "rfp1:old", "rfp1:new")
-        roster_snapshot.on_roster_change("league-d", "rfp1:old", "rfp1:new")   # the double call
-        assert old.get("superseded") is True
-        assert "superseded" not in rebuilt
-        with server._trade_jobs_lock:
-            assert server._trade_jobs_by_key.get(rebuilt["key"]) == "j-new"
-    finally:
-        with server._trade_jobs_lock:
-            for job in (old, rebuilt):
-                server._trade_jobs.pop(job["job_id"], None)
-                server._trade_jobs_by_key.pop(job["key"], None)
-
-
-def test_the_handler_never_raises_and_is_off_in_mode_0(monkeypatch):
-    job = {"job_id": "j-m0", "key": ("u-m0", "league-m", "1qb_ppr"), "status": "complete",
-           "cards": [], "error": None, "roster_fp": "rfp1:old"}
+    yield session, job
+    with server._sessions_lock:
+        for token in tokens:
+            server._sessions.pop(token, None)
     with server._trade_jobs_lock:
-        server._trade_jobs[job["job_id"]] = job
-    try:
-        monkeypatch.setattr(server, "_trade_i1_mode", lambda: 0)
-        server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
-        assert "superseded" not in job
-        monkeypatch.setattr(server, "_trade_i1_mode", lambda: 2)
-        monkeypatch.setattr(server, "_revoke_trade_job_locked",
-                            MagicMock(side_effect=RuntimeError("boom")))
-        server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
-    finally:
-        with server._trade_jobs_lock:
-            server._trade_jobs.pop(job["job_id"], None)
+        for job_id in job_ids:
+            parked = server._trade_jobs.pop(job_id, None)
+            if parked and server._trade_jobs_by_key.get(parked["key"]) == job_id:
+                server._trade_jobs_by_key.pop(parked["key"], None)
 
-def test_on_roster_change_revokes_every_job_in_the_league_only():
-    def park(job_id, user_id, league_id):
-        job = {"job_id": job_id, "key": (user_id, league_id, "1qb_ppr"), "status": "complete",
-               "input_epochs": server._capture_trade_input_epochs(user_id, league_id),
-               "cards": [], "error": None}
-        with server._trade_jobs_lock:
-            server._trade_jobs[job_id] = job
-            server._trade_jobs_by_key[job["key"]] = job_id
-        return job
 
-    jobs = [park("j-a", "u-a", "league-x"), park("j-b", "u-b", "league-x"),
-            park("j-c", "u-a", "league-y")]
-    try:
-        assert server._invalidate_league_trade_jobs_on_roster_change in \
-            roster_snapshot._roster_change_handlers
-        roster_snapshot.on_roster_change("league-x", "rfp1:old", "rfp1:new")
-        with server._trade_jobs_lock:
-            revoked = {j["job_id"]: server._trade_job_revoked(j) for j in jobs}
-            indexed = {j["job_id"]: server._trade_jobs_by_key.get(j["key"]) for j in jobs}
-        assert revoked == {"j-a": True, "j-b": True, "j-c": False}
-        assert indexed == {"j-a": None, "j-b": None, "j-c": "j-c"}
-    finally:
-        with server._trade_jobs_lock:
-            for job in jobs:
-                server._trade_jobs.pop(job["job_id"], None)
-                server._trade_jobs_by_key.pop(job["key"], None)
+def _revoked(*jobs):
+    with server._trade_jobs_lock:
+        return {j["job_id"]: server._trade_job_revoked(j) for j in jobs}
+
+
+def test_the_handler_is_debounced_by_fingerprint(hook_db):
+    """A3: a job already stamped `new_fp` is kept, so a double call, or a call
+    landing after a rebuild, changes nothing for the rebuilt job."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-d", READ_NOW)
+    session("t-d", "u-d", "league-d", READ_NOW)
+    old = job("j-old", "u-d", "league-d", read=READ_OLD)
+    rebuilt = job("j-new", "u-d", "league-d", read=READ_NOW, roster_fp="rfp1:new")
+    with server._trade_jobs_lock:
+        server._trade_jobs_by_key[rebuilt["key"]] = "j-new"
+    roster_snapshot.on_roster_change("league-d", "rfp1:old", "rfp1:new")
+    roster_snapshot.on_roster_change("league-d", "rfp1:old", "rfp1:new")      # the double call
+    assert old.get("superseded") is True
+    assert "superseded" not in rebuilt
+    with server._trade_jobs_lock:
+        assert server._trade_jobs_by_key.get(rebuilt["key"]) == "j-new"
+
+
+def test_on_roster_change_revokes_only_what_a_fresher_session_would_rebuild(hook_db):
+    """The refreshing user's older deck is revoked (Try again reads the new
+    rosters). A league-mate whose session predates the refresh keeps theirs
+    (P2-1: their rebuild would read the same rosters), and another league is
+    untouched."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-x", READ_NOW)
+    session("t-a", "u-a", "league-x", READ_NOW)      # the init that refreshed
+    session("t-b", "u-b", "league-x", READ_OLD)      # a league-mate, opened earlier
+    session("t-a2", "u-a", "league-y", READ_NOW)
+    jobs = [job("j-a", "u-a", "league-x", read=READ_OLD),
+            job("j-b", "u-b", "league-x", read=READ_OLD),
+            job("j-c", "u-a", "league-y", read=READ_OLD)]
+    assert server._invalidate_league_trade_jobs_on_roster_change in \
+        roster_snapshot._roster_change_handlers
+    roster_snapshot.on_roster_change("league-x", "rfp1:old", "rfp1:new")
+    assert _revoked(*jobs) == {"j-a": True, "j-b": False, "j-c": False}
+    with server._trade_jobs_lock:
+        indexed = {j["job_id"]: server._trade_jobs_by_key.get(j["key"]) for j in jobs}
+    assert indexed == {"j-a": None, "j-b": "j-b", "j-c": "j-c"}
+
+
+def test_a_job_built_on_the_refreshed_read_is_kept(hook_db):
+    """P2-2: the init's own pre-gen (or a tap before the daemon commits) is
+    stamped from the old rows but built on the read being committed, or a
+    later one. A job with no read, or a failed stamp (None), on an older
+    session is revoked."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-p", READ_NOW)
+    session("t-p", "u-p", "league-p", READ_LATER)
+    kept = [job("j-same", "u-p", "league-p", read=READ_NOW),
+            job("j-later", "u-p", "league-p", read=READ_LATER)]
+    gone = [job("j-none", "u-p", "league-p", read=None),
+            job("j-failed", "u-p", "league-p", read=READ_OLD, roster_fp=None)]
+    server._invalidate_league_trade_jobs_on_roster_change("league-p", "rfp1:old", "rfp1:new")
+    assert _revoked(*kept, *gone) == {"j-same": False, "j-later": False,
+                                      "j-none": True, "j-failed": True}
+
+
+def test_a_stampless_job_is_never_revoked(hook_db):
+    """P3-1: a job with no `roster_fp` key (prepared inventory, hand-built) is
+    unchecked, as in `_trade_fingerprints_match`, including at a league's first
+    stamp (old None)."""
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-s", READ_NOW)
+    session("t-s", "u-s", "league-s", READ_NOW)
+    prepared = job("j-prep", "u-s", "league-s", read=None, stamped=False)
+    server._invalidate_league_trade_jobs_on_roster_change("league-s", None, "rfp1:first")
+    assert _revoked(prepared) == {"j-prep": False}
+    assert server._trade_fingerprints_match(prepared, ("rfp1:first", "vsn1:x"))
+
+
+@pytest.mark.parametrize("state", ["no_row", "no_refreshed_at", "read_fails"])
+def test_no_refreshed_read_revokes_nothing(hook_db, monkeypatch, state):
+    """Nothing to compare against: keep every job (the pre-#470 behaviour),
+    and never raise into platforms-eng's refresh."""
+    session, job = hook_db
+    session("t-n", "u-n", "league-n", READ_NOW)
+    parked = job("j-n", "u-n", "league-n", read=READ_OLD)
+    if state == "no_refreshed_at":
+        db_module.mark_league_roster_failed("league-n", "write_failed")
+    elif state == "read_fails":
+        monkeypatch.setattr(db_module, "get_league_roster_state",
+                            MagicMock(side_effect=RuntimeError("db")))
+    server._invalidate_league_trade_jobs_on_roster_change("league-n", "rfp1:old", "rfp1:new")
+    assert _revoked(parked) == {"j-n": False}
+
+
+def test_the_handler_never_raises_and_is_off_in_mode_0_or_knob_0(hook_db, monkeypatch):
+    session, job = hook_db
+    db_module.mark_league_roster_fresh("league-m", READ_NOW)
+    session("t-m", "u-m0", "league-m", READ_NOW)
+    parked = job("j-m0", "u-m0", "league-m", read=READ_OLD)
+    monkeypatch.setattr(server, "_trade_i1_mode", lambda: 0)
+    server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
+    assert "superseded" not in parked
+    monkeypatch.setattr(server, "_trade_i1_mode", lambda: 1)
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 0.0)
+    server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
+    assert "superseded" not in parked
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", 1.0)
+    monkeypatch.setattr(server, "_revoke_trade_job_locked",
+                        MagicMock(side_effect=RuntimeError("boom")))
+    server._invalidate_league_trade_jobs_on_roster_change("league-m", "rfp1:old", "rfp1:new")
+
+
+@pytest.mark.parametrize("value", [float("nan"), 7.0, -1.0, "off please"])
+def test_the_revoke_knob_reads_on_for_anything_but_0(monkeypatch, value):
+    monkeypatch.setitem(server._trade_service_mod._cfg, "trade_roster_change_revoke", value)
+    assert server._roster_change_revoke_on()
+
+
+def test_the_revoke_knob_is_seeded_on():
+    seeds = [row for row in db_module._MODEL_CONFIG_DEFAULTS
+             if row[0] == "trade_roster_change_revoke"]
+    assert len(seeds) == 1 and seeds[0][1] == 1.0
+
+
+def test_the_init_s_own_deck_survives_its_refresh_stamp(live):
+    """#470 QA P2-2 repro: the deck is stamped from the stored rows before the
+    init's daemon commits the read it was built on (a player move), then the
+    stamp's hook fires. The deck is kept and keeps its old stamp, so it is
+    never reused; a deck from the user's previous read is revoked."""
+    client, engine = live
+    with server._sessions_lock:
+        server._sessions[TOKEN]["roster_fetch_started_at"] = READ_OLD
+    previous = _complete_job()
+    with server._sessions_lock:
+        server._sessions[TOKEN]["roster_fetch_started_at"] = READ_NOW
+    with server._trade_jobs_lock:
+        server._trade_jobs_by_key.pop(KEY)                     # the new init kicks its own
+    pregen = _complete_job()
+    assert (previous["roster_fetch_started_at"], pregen["roster_fetch_started_at"]) == \
+        (READ_OLD, READ_NOW)
+    old_fp = pregen["roster_fp"]
+    _set_roster(engine, OPP, ["r2"])                          # the daemon commits the read
+    db_module.mark_league_roster_fresh(LEAGUE, READ_NOW)
+    new_fp, _ = server._trade_current_fingerprints(LEAGUE, "1qb_ppr")
+    assert new_fp != old_fp
+    roster_snapshot.on_roster_change(LEAGUE, old_fp, new_fp)
+    assert _revoked(previous, pregen) == {previous["job_id"]: True, pregen["job_id"]: False}
+    assert not _fresh(pregen)

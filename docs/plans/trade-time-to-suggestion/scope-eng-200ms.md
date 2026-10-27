@@ -260,6 +260,10 @@ needs a grant, or onboarding-eng adds the row reading trades-eng's value.
   filter and the freshness compare share that snapshot.
 - platforms-eng commits the rows, then computes the fp, then calls `on_roster_change(league, old, new)`.
   trades-eng invalidates jobs and enqueues debounced pre-builds.
+  - **As built (2026-10-27, #470 QA P2-1/P2-2):** there are no pre-builds. The handler revokes only a job built on an older
+    Sleeper read than the refreshed rows, and only when its user already holds a session with the newer read. A job is
+    built on its session's rosters, so any other revoke would rebuild the same rosters. Details are in `living-memory/LLD.md`
+    (S0 serve rules) and in `trade_roster_change_revoke` in `docs/config-reference.md`.
 - **`vsn1` (final, models-eng's):** `"vsn1:" + sha256({v:1, fmt, seed: sorted [pid, seed_elo, age], picks: sorted
   [pick_id, pool_value]})[:32]`, as `values_snapshot_id(conn, fmt, league_id, pool, *, generation=None)`.
   - The seed part is memoized on `(fmt, pool_generation())`.
