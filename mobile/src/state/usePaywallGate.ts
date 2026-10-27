@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 import {
@@ -31,6 +32,8 @@ import { useSession, type SavedUser } from './useSession';
 //     original call on that promise and re-sends it once on `verified`, so
 //     the SERVER decides what happens next (D18: the free page, a 402 → the
 //     paywall, or entitled → the call just succeeds).
+//   openOfferTrigger(source, userId) (M2) → the trigger variant, at most
+//     once per user (the memory below).
 
 export type { GateKind, PaywallSource, VerifyPath };
 
@@ -127,7 +130,9 @@ export function settleVerify(outcome: GateOutcome): void {
   p.resolve(outcome);
 }
 
-/** Open the paywall for a locked action (or a trigger, in M2). */
+/** Open the paywall for a locked action, the end card's See plans, or a
+ *  Send / Win Now pre-check. The offer trigger opens through
+ *  openOfferTrigger below instead. */
 export function openPaywall(params: PaywallParams): Promise<GateOutcome> | void {
   if (isUnverifiedSession()) return openVerify();
   const nav = _nav;
@@ -138,6 +143,75 @@ export function openPaywall(params: PaywallParams): Promise<GateOutcome> | void 
     source: params.source,
     ...(params.gate ? { gate: params.gate } : {}),
     ...(params.kind ? { kind: params.kind } : {}),
+  });
+}
+
+// ── The offer trigger (#393 M2; D4, ux-lead §1) ─────────────────────────────
+// The trigger variant (`first_opinion` | `left_deck`) shows AT MOST ONCE PER
+// USER, ever: "No spontaneous re-offer. After a decline the paywall appears
+// only in response to the user's own gated action." The memory is a per-user
+// AsyncStorage key (the useTradeQueue / outlookStrip shape), so two accounts
+// on one device never share it. TradesScreen decides WHEN (the server's ack
+// of the first opinion, or leaving the deck; the interrupt slot); this
+// module only remembers and opens. It never opens the VerifySheet: an
+// unverified session doesn't get the trigger at all (ux addendum §3.2).
+export type OfferTriggerSource = 'first_opinion' | 'left_deck';
+
+const OFFER_SHOWN_KEY_PREFIX = 'ftf_paywall_offer_shown_';
+const _offerShown = new Map<string, boolean>();
+
+/** Read the user's once-only memory. Until it resolves (or if storage is
+ *  unreadable) the trigger stays shut, so a slow read never shows it twice. */
+export function hydrateOfferShown(userId: string): Promise<void> {
+  if (_offerShown.has(userId)) return Promise.resolve();
+  return AsyncStorage.getItem(`${OFFER_SHOWN_KEY_PREFIX}${userId}`)
+    .then((v) => {
+      if (!_offerShown.has(userId)) _offerShown.set(userId, v === '1');
+    })
+    .catch(() => {
+      /* unreadable: stays unknown, so the trigger never fires */
+    });
+}
+
+/** True only when the memory is known and the offer hasn't shown yet. */
+export function offerTriggerOpen(userId: string | null | undefined): boolean {
+  return !!userId && _offerShown.get(userId) === false;
+}
+
+/** Open the trigger variant once for this user. Remembers it BEFORE opening.
+ *  Resolves when the paywall is gone again (the caller holds its interrupt
+ *  slot until then); null when nothing opened. */
+export function openOfferTrigger(
+  source: OfferTriggerSource,
+  userId: string,
+): Promise<void> | null {
+  if (!offerTriggerOpen(userId) || isUnverifiedSession()) return null;
+  const nav = _nav;
+  if (!nav || !nav.isReady() || nav.getCurrentRoute()?.name === 'Paywall') return null;
+  _offerShown.set(userId, true);
+  AsyncStorage.setItem(`${OFFER_SHOWN_KEY_PREFIX}${userId}`, '1').catch(() => {});
+  nav.navigate('Paywall', { source });
+  return new Promise<void>((resolve) => {
+    const onPaywall = () => nav.getCurrentRoute()?.name === 'Paywall';
+    let sawPaywall = onPaywall();
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      off();
+      clearTimeout(settle);
+      resolve();
+    };
+    const off = nav.addListener('state', () => {
+      if (onPaywall()) sawPaywall = true;
+      else if (sawPaywall) finish();
+    });
+    // A paywall that never presented (the screen's own flag guard) frees
+    // the slot rather than holding it forever.
+    const settle = setTimeout(() => {
+      if (onPaywall()) sawPaywall = true;
+      else finish();
+    }, 3000);
   });
 }
 
