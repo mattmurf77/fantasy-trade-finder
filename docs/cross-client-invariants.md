@@ -1227,11 +1227,11 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 
 | `product_id` | What it is | Projects to (`entitlement`, `source`) |
 |---|---|---|
-| `ftf_pro_monthly` | Pro, auto-renewing monthly | `pro`, `apple_iap` |
-| `ftf_pro_annual` | Pro, auto-renewing annual (hero SKU) | `pro`, `apple_iap` |
+| `ftf_pro_monthly` | Pro, auto-renewing monthly. **$4.99** (Founding GM price) while the club is open → **$6.99** standard for new subscribers from `closes_at`. Intro offer: a 1-month free trial (`trial_period` `"1 month"`) | `pro`, `apple_iap` |
+| `ftf_pro_annual` | Pro, auto-renewing annual (hero SKU). **$24.99** (Founding GM price, `per_month_equiv` $2.08) while the club is open → **$34.99** standard (`per_month_equiv` $2.92) from `closes_at`. Intro offer: a 1-month free trial | `pro`, `apple_iap` |
 | `ftf_founder` | Founder Lifetime, non-renewing; `expires_at` NULL = perpetual | `pro`, `founder_iap` |
 | `ftf_season_pass_2026` | Season pass, year-labeled (`ftf_rookie_pass_*` is the rookie-season variant) | `pro`, `season_pass_iap` |
-| `ftf_tip_199` / `ftf_tip_499` / `ftf_tip_999` | Tip jar, consumable ($1.99/$4.99/$9.99) — money with **NO entitlement**: `entitlements.is_tip_product()` stores the webhook event and grants nothing. Served in the config's `tips` array (`{product_id, display_price}` only). A tip SKU **must** keep the `ftf_tip_` prefix — drifting out of it hands the tipper Pro via the default mapping (pinned by `mobile/tests/check-tipjar.js` §9 + `backend/tests/test_paywall_config.py`) | *(none)* |
+| `ftf_tip_199` / `ftf_tip_499` / `ftf_tip_999` | Tip jar, consumable ($1.99/$4.99/$9.99) — money with **NO entitlement**: `entitlements.is_tip_product()` stores the webhook event and grants nothing. **Not served at launch:** the config's `tips` array is `[]` (#393: three fewer IAPs on a first review); the kept list (`server._PAYWALL_TIPS`, `{product_id, display_price}` only) returns only with a reviewed change. A tip SKU **must** keep the `ftf_tip_` prefix — drifting out of it hands the tipper Pro via the default mapping (pinned by `mobile/tests/check-tipjar.js` §9 + `backend/tests/test_paywall_config.py`) | *(none)* |
 
 **Tolerated aliases.** The 2026-08-27 IAP runbook named divergent App Store Connect ids. The canonical names above win (foundation doc), but `backend/entitlements._product_mapping` additionally accepts `founder_lifetime*` → `founder_iap` and `season_pass_*` → `season_pass_iap` so either ASC choice reconciles without a deploy. `pro_monthly_499` / `pro_annual_3499` need no alias — they fall through to the `apple_iap` default like any unrecognised subscription SKU. Aliases are a **reconciliation safety net, not a second vocabulary**: the paywall config, the client, and the docs use the `ftf_*` ids only. Conflict record: [iap-enablement/scope.md](plans/monetization/iap-enablement/scope.md) § "Surfaced conflict".
 
@@ -1243,8 +1243,11 @@ Plan of record: [00-platform-foundation.md](plans/monetization/00-platform-found
 
 - Page `id` / `kind` pairs, rendered in array order: `value_recap`/`trades_found`, `feature_grid`/`features`, `plans`/`purchase`.
 - `body_ref`: `matches_preview` — the client substitutes 2–3 matches it has **already fetched**; the config route never recomputes trades.
-- Feature keys (page 2): `unlimited_leagues`, `portfolio`, `engine_knobs`, `extension_overlays`, `ad_free`.
+- Feature keys (page 2): `unlimited_leagues`, `portfolio`. The grid lists delivered features only (#393 scope §2 item 3, "5c"); the earlier `engine_knobs`, `extension_overlays` and `ad_free` are no longer served (a client skips an unknown key, so it may keep their copy).
 - Product `badge`: `best_value` (the only value today). `period`: `monthly` | `annual`. `hero`: exactly one product carries it.
+- Product `trial_period`: `"1 month"` on both SKUs (Apple has no 30-day duration). **`trial_days` is removed** (2026-10-27): a 1.21.x client renders "N days free" only when `trial_days > 0`, so its absence means no trial line. A client shows "free" copy only from StoreKit intro eligibility, never from a server duration.
+- **`club`** `{name, closes_at, open}`: `name` is `"Founding GMs"`; `closes_at` is `"2027-01-01T00:00:00Z"`, one server constant (`server._PAYWALL_CLUB_CLOSES_AT`, not a knob or config) that **must equal App Store Connect's scheduled price-change date**, so it moves only with a reviewed deploy; `open` is `now < closes_at`. While `open`, `display_price` / `per_month_equiv` are the Founding GM prices above; from `closes_at` on, the standard prices. The offer is the one place the trial terms and `closes_at` are shown. `GET /api/me/entitlements` `founder` (bool) reads the same constant: pro through a subscription whose ledger `INITIAL_PURCHASE` (first purchase or intro-trial start) predates `closes_at`; false on an unverified session.
+- `tips`: `[]` at launch. `dismissible`: always `true` (no non-dismissible mode).
 - `?platform=`: `ios` | `web` | `extension`; echoed back as `platform`. Unknown values degrade to `ios` rather than 400.
 - **`display_price` / `per_month_equiv` are FALLBACK COPY.** On iOS the client renders the StoreKit-localized price from the matching RevenueCat offering; the server strings are US-English list prices that know nothing about storefront, currency, or promotional offers. `trial_eligible` is a claim about the SKU, not a per-Apple-ID promise — real eligibility is store-managed.
 

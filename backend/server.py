@@ -33110,11 +33110,14 @@ def me_entitlements():
     username-only auth can't carry a session token).
 
     An unverified session gets the empty entitlement view (every field
-    blank/false), as the paywall gate treats it: an unverified username-only
-    session shares the subscriber's user_id. `enforcing` is server state."""
+    blank/false, `founder` included), as the paywall gate treats it: an
+    unverified username-only session shares the subscriber's user_id.
+    `enforcing` is server state. `founder`: pro from a subscription that
+    started before the club's closes_at (entitlements.is_founder)."""
     sess = _require_session()
     if sess.get("verified") or _synthetic_demo_session(sess):
         out = entl.get_entitlements(sess["user_id"])
+        out["founder"] = entl.is_founder(sess["user_id"], _PAYWALL_CLUB_CLOSES_AT)
     else:
         out = entl.empty_entitlements()
     out["enforcing"] = entl.is_enforcing()
@@ -33131,19 +33134,38 @@ _PAYWALL_PAGES = [
     {"id": "value_recap", "kind": "trades_found",
      "title": "Your league has trades waiting",
      "body_ref": "matches_preview"},
+    # The truthful grid (#393 scope §2 item 3, 5c): engine_knobs,
+    # extension_overlays and ad_free are not delivered gated features.
     {"id": "feature_grid", "kind": "features",
-     "features": ["unlimited_leagues", "portfolio", "engine_knobs",
-                  "extension_overlays", "ad_free"]},
+     "features": ["unlimited_leagues", "portfolio"]},
     {"id": "plans", "kind": "purchase"},
 ]
 
+# The Founding GMs club window (#393 recommendation §(b)). ONE server
+# constant, not a knob or config: it must equal the App Store Connect
+# scheduled price-change date, so it moves only with a reviewed deploy.
+# Before it the config serves the founder prices and `club.open`; from it
+# on, the standard prices (App Store price preservation keeps founders on
+# theirs). /api/me/entitlements' `founder` reads the same constant.
+_PAYWALL_CLUB_NAME = "Founding GMs"
+_PAYWALL_CLUB_CLOSES_AT = "2027-01-01T00:00:00Z"
+
+# `trial_period` replaces `trial_days` (Apple has no 30-day duration; a
+# client keys "free" copy off StoreKit intro eligibility, never a day count).
 _PAYWALL_PRODUCTS = [
     {"product_id": "ftf_pro_monthly", "period": "monthly",
-     "display_price": "$4.99", "trial_days": 14, "hero": False},
+     "trial_period": "1 month", "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
-     "display_price": "$34.99", "per_month_equiv": "$2.92",
-     "trial_days": 30, "hero": True, "badge": "best_value"},
+     "trial_period": "1 month", "hero": True, "badge": "best_value"},
 ]
+
+# Fallback price copy per product: (club open, after closes_at).
+_PAYWALL_PRICES = {
+    "ftf_pro_monthly": ({"display_price": "$4.99"},
+                        {"display_price": "$6.99"}),
+    "ftf_pro_annual": ({"display_price": "$24.99", "per_month_equiv": "$2.08"},
+                       {"display_price": "$34.99", "per_month_equiv": "$2.92"}),
+}
 
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
@@ -33176,6 +33198,8 @@ def paywall_config():
     StoreKit-localized price from the RevenueCat offering for the matching
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
+    They are the founder prices while `club.open` (now < closes_at), the
+    standard prices after.
     """
     _require_session()
     if not is_enabled("monetize.paywall"):
@@ -33183,23 +33207,27 @@ def paywall_config():
     platform = request.args.get("platform", "ios")
     if platform not in _PAYWALL_PLATFORMS:
         platform = "ios"
+    club_open = datetime.now(timezone.utc) < datetime.fromisoformat(_PAYWALL_CLUB_CLOSES_AT)
+    window = 0 if club_open else 1
     return jsonify({
         "enabled": True,
         "platform": platform,
+        "club": {"name": _PAYWALL_CLUB_NAME, "closes_at": _PAYWALL_CLUB_CLOSES_AT,
+                 "open": club_open},
         "pages": _PAYWALL_PAGES,
-        "products": _PAYWALL_PRODUCTS,
+        "products": [{**p, **_PAYWALL_PRICES[p["product_id"]][window]}
+                     for p in _PAYWALL_PRODUCTS],
         # Store-managed: the server never mints trials (pro-subscription
         # LLD §6). True until the client reads real per-Apple-ID
         # eligibility off the RevenueCat offering — this field is the
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
+        # Always true: there is no non-dismissible mode (#393 scope §2).
         "dismissible": True,
-        # Tip-jar consumables — display metadata only; purchases run through
-        # StoreKit and the webhook ledger like everything else, but grant
-        # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
-        # are purchase UI, and the flag's contract is "no purchase UI anywhere"
-        # when off.
-        "tips": _PAYWALL_TIPS,
+        # Tips are not served at launch (#393 recommendation §(b): three
+        # fewer IAPs on a first review). _PAYWALL_TIPS stays the list to
+        # restore; nothing else changes when it comes back.
+        "tips": [],
     })
 
 
