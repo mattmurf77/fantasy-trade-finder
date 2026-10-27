@@ -5590,6 +5590,13 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     ev = job.get("evidence")
     if ev is None or not ev.packed or ev.pack is None:
         return
+    _note_deck_evicted_id(job_id)
+
+
+def _note_deck_evicted_id(job_id: str) -> None:
+    """Under _trade_jobs_lock: this process removed the deck's job or its
+    evidence (the cleanup loop's eviction, F5's drop), so a later miss on it
+    reads evicted_split. Then the ledger lock (leaf)."""
     _ledger_add(_deck_evicted_at, job_id)
     # #451 QA P3-1: the two ledgers trim independently, so an evicted deck
     # leaves the held one. Once its eviction record ages out, a late view reads
@@ -6438,9 +6445,10 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
     builds a new deck. Its in-process evidence is dropped and its job revoked,
     so no response serves it from this process (P2's live-job pages past the
     stored ones included); its stored pages, if any, serve and write through
-    the page store's evidence_blob, as after a restart: it leaves _deck_held
-    too, so an upgrade miss on it reads as a restart's (release-lead's #451 QA
-    P2). Delivered decks keep theirs (written, and freed, at their first
+    the page store's evidence_blob, as after a restart. The drop is noted as
+    this process's eviction (_deck_evicted_at, which also leaves _deck_held),
+    so an upgrade miss on it reads evicted_split (models-lead's ruling).
+    Delivered decks keep theirs (written, and freed, at their first
     delivery). Returns the count."""
     now = time.monotonic() if now is None else now
     dropped = 0
@@ -6458,14 +6466,12 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                 ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
-            # The deck's snapshots left this process: a miss on it is
-            # restart_split, as after a restart, never "other" (a held deck).
-            # The later eviction can't record it (no evidence left). Pending
-            # models-lead's ruling via head-eng: evicted_split would mean noting
-            # it in _deck_evicted_at here instead. Order: jobs, then the ledger
-            # (leaf), as in _note_deck_evicted.
-            with _deck_ledger_lock:
-                _deck_held.pop(job_id, None)
+            # The deck's snapshots left this process because this process
+            # removed them: a miss on it is evicted_split, never "other" (a held
+            # deck), noted here while the evidence still exists (the later
+            # eviction can't: none left). models-lead's ruling via head-eng.
+            # Order: jobs, then the ledger (leaf), as in _note_deck_evicted.
+            _note_deck_evicted_id(job_id)
             dropped += 1
     if dropped:
         log.info("deck-evidence: dropped %d undelivered deck(s) past %d s", dropped,

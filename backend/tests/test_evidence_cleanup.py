@@ -1,9 +1,10 @@
 """Evidence cleanup before the packed-evidence flip.
 
 - (A) F5 (_drop_stale_deck_evidence) drops an undelivered pre-built deck's
-  evidence; the deck leaves _deck_held too, so a later miss on it (its stored
-  pages served, then its row gone) reads restart_split, as after a restart,
-  never other (release-lead's #451 QA P2).
+  evidence and notes the drop as this process's eviction (_deck_evicted_at,
+  which also leaves _deck_held), so a later miss on it (its stored pages
+  served, then its row gone) reads evicted_split, never other (models-lead's
+  ruling via head-eng; release-lead's #451 QA P2 was restart_split).
 - (B) A deploy overlap's second writer logs the cause the CAS merge kept,
   with its own as local_cause, at WARNING (#439/#445 QA P3-1).
 - (C) The ledger guard warning per ledger; its rate-limit state reset per
@@ -62,18 +63,19 @@ def counting_reads(monkeypatch):
     return calls
 
 
-# ── (A) F5's drop leaves the held ledger ────────────────────────────────────
+# ── (A) F5's drop is this process's eviction ────────────────────────────────
 
 @pytest.mark.parametrize("how", ["replaced", "evicted"])
 @pytest.mark.parametrize("path", ["f5_only", "f5_then_job_evicted", "control_restart"])
-def test_a_deck_f5_dropped_reads_restart_split_once_its_row_goes(
+def test_a_deck_f5_dropped_reads_evicted_split_once_its_row_goes(
         deferred, monkeypatch, caplog, how, path):
     """release-lead's #451 QA repro: a pre-built 90-card deck nobody opened in
-    the fresh window. F5 drops its evidence and revokes its job (then, 4 h
-    on, the loop evicts the job, which records nothing: no evidence). Its
-    stored pages are served from the page store, its row goes (replaced or
-    evicted), and card 40, delivered, is viewed in the same process: a
-    restart_split, no ERROR line. The control is a real restart."""
+    the fresh window. F5 drops its evidence and revokes its job, noting the
+    drop in _deck_evicted_at (then, 4 h on, the loop evicts the job, which
+    adds nothing: no evidence). Its stored pages are served from the page
+    store, its row goes (replaced or evicted), and card 40, delivered, is
+    viewed in the same process: evicted_split, never other, no ERROR line.
+    The control is a real restart: restart_split."""
     client, engine, _ = deferred
     job_id, *_ = packed_deck(90)
     assert pack_of(engine, job_id) is None and job_id in server._deck_held
@@ -85,14 +87,14 @@ def test_a_deck_f5_dropped_reads_restart_split_once_its_row_goes(
                 time.monotonic() - server._PREGEN_TTL_SECONDS - 60)
         assert server._drop_stale_deck_evidence() == 1
         assert "evidence" not in server._trade_jobs[job_id]
-        assert job_id not in server._deck_held
+        assert job_id not in server._deck_held and job_id in server._deck_evicted_at
         if path == "f5_then_job_evicted":
             with server._trade_jobs_lock:                  # the cleanup loop's eviction lines
                 job = server._trade_jobs.pop(job_id)       # (its tick would also expire sessions)
                 server._note_deck_evicted(job_id, job)
                 if server._trade_jobs_by_key.get(job.get("key")) == job_id:
                     server._trade_jobs_by_key.pop(job["key"], None)
-            assert job_id not in server._deck_evicted_at          # no evidence: nothing to note
+            assert job_id in server._deck_evicted_at              # F5's note; the eviction adds none
     for cursor in (0, 30):
         page = client.get(f"/api/trades/status?deck={job_id}&cursor={cursor}", headers=HEADERS)
         assert page.status_code == 200 and deck_ids(page.get_json())
@@ -101,7 +103,8 @@ def test_a_deck_f5_dropped_reads_restart_split_once_its_row_goes(
     with caplog.at_level("WARNING"):
         view(job_id, 40)
     run = run_of(engine, job_id)
-    assert (run["upgrade_miss_cards"], row_gone(run)) == ({"40": "restart_split"}, {"40": 90})
+    cause = "restart_split" if path == "control_restart" else "evicted_split"
+    assert (run["upgrade_miss_cards"], row_gone(run)) == ({"40": cause}, {"40": 90})
     assert errors(caplog) == []
 
 
