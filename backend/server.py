@@ -29605,18 +29605,23 @@ _SIGNIN_MFL_MIN_YEAR = 2000
 
 
 def _mfl_entry_year_refusal(raw_year):
-    """400 mfl_bad_year when a NUMERIC year is outside 2000..season+1, else
-    None (a non-numeric year keeps its existing handling)."""
+    """400 mfl_bad_year when a NUMERIC year is outside 2000..season+1 or
+    can't be an integer at all (JSON Infinity / -Infinity / 1e400 overflow
+    int()), else None (a non-numeric year keeps its existing handling). The
+    message reuses the existing mfl_bad_year copy — no new user copy."""
     try:
         year = int(raw_year or _MFL_DEFAULT_YEAR)
+    except OverflowError:
+        year = None
     except (TypeError, ValueError):
         return None
-    top = _MFL_DEFAULT_YEAR + 1
-    if _SIGNIN_MFL_MIN_YEAR <= year <= top:
+    if year is not None and \
+            _SIGNIN_MFL_MIN_YEAR <= year <= _MFL_DEFAULT_YEAR + 1:
         return None
     return jsonify({"error": "mfl_bad_year",
-                    "message": f"year must be between {_SIGNIN_MFL_MIN_YEAR} "
-                               f"and {top}."}), 400
+                    "message": "year must be numeric"}), 400
+
+
 _signin_failures: dict[str, collections.deque] = {}
 _signin_inflight: dict[str, int] = {}
 _signin_failures_lock = threading.Lock()
@@ -30255,12 +30260,13 @@ def _entry_platform(audit: dict):
         password = body.get("password") or ""
         try:
             year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return jsonify({"error": "mfl_bad_year",
                             "message": "year must be numeric"}), 400
         if not username or not password:
             return jsonify({"error": "mfl_missing_credentials",
                             "message": "MFL username and password are required."}), 400
+        # Range check BEFORE the limiter gate: no slot, no accounting.
         bad_year = _mfl_entry_year_refusal(body.get("year"))
         if bad_year is not None:
             return bad_year

@@ -28,6 +28,12 @@ Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_S
   - **Dead code:** `_signin_note_failure` / `_signin_retry_after` removed; the 300-ceiling test uses the live gate and release path.
   - **MFL year range** (2000..season+1, 400 `mfl_bad_year` before any MFL call or limiter accounting): `test_mfl_year_out_of_range_is_400_before_any_mfl_call` ×6 (claim, preview and action each) and `test_mfl_year_in_range_is_admitted` ×3. Sabotage (check removed) → all 6 red.
   - Run: **154 passed** (`test_platform_sign_in.py` 127 + `test_entry_platform_route.py` 27).
+- **Round-3 QA (#430 @ `d3248d35`, optional P3s):**
+  - **Year overflow:** JSON `Infinity` / `-Infinity` / `1e400` (int() raises OverflowError) now returns 400 `mfl_bad_year`, not 500, on the claim, the preview and `auth_leagues`, with no MFL call. Fixed in `_mfl_entry_year_refusal` and the entry route's own `auth_leagues` parse. The same gap is LEFT in code #430 doesn't own: `_mfl_resolve` (shared with the pinned `/api/mfl/link`), `/api/mfl/auth-link` and `/api/mfl/auth-import`.
+  - **Copy:** the range case reuses the existing `mfl_bad_year` message, "year must be numeric"; no new copy.
+  - **Tests:** the out-of-range test is parametrized on `_MFL_DEFAULT_YEAR + 2` and the in-range test on `+ 1`. New: `test_mfl_year_overflow_is_400_not_500` ×3 and `test_auth_leagues_year_check_runs_before_the_limiter_gate` (gate spy never called; no slot or count; a locked subject still gets the 400, not a 429).
+  - **Sabotage:** check moved after the gate → ordering test red (`['mfl'] == []`); OverflowError uncaught → all 3 overflow cases red (`500 == 400`). Both restored.
+  - Run: **158 passed** (131 + 27); with the link/cohort/accounts suites, **293 passed**.
 - **Refusal copy (follow-up commit):** marketing's final 14-row set (§6 addendum 8, C) is applied, with rows 7, 8 and 12 approved by legal R28.16, so the set is complete. Apostrophes are U+2019, except row 10, which stays byte-identical. Rows 8, 9 and 11 are sign-in-only constants; the link-route copy is unchanged.
   - New: `test_signin_refusal_copy_is_the_final_set_verbatim` (21 cases, literal expected bodies on the real route) and `test_link_routes_and_previews_keep_their_own_copy`.
   - Sabotage: row-13 constant reworded → `[row13-too-many]` red. Restored.
