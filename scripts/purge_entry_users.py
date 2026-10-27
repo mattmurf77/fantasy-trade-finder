@@ -79,6 +79,7 @@ CHUNK = 500
 # tests/test_purge_entry_users.py captures delete_user_data's SQL and fails if
 # it filters a user id on a column this module doesn't discover.
 DELETION_ONLY_KEYS = (
+    ("accounts_table", "sleeper_user_id"),
     ("sessions_table", "user_id"),
     ("entitlements_table", "user_id"),
     ("subscription_events_table", "user_id"),

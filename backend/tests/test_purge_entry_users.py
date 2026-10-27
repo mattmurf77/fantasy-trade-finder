@@ -481,6 +481,9 @@ NOT_USER_KEYS = {
     ("suggestion_trade_links", "ghost_impression_id"),
     ("rank_set_entries", "rank_set_id"), ("rank_set_adoptions", "rank_set_id"),
     ("rank_sets", "id"), ("prepared_trade_manifests_v2", "inventory_id"),
+    # = comparisons against fixed enum values, not ids.
+    ("rank_sets", "visibility"), ("league_roster_history", "team_key_quality"),
+    ("prepared_trade_participants", "subject_kind"),
 }
 
 
@@ -490,8 +493,10 @@ def test_discovery_covers_every_user_column_delete_user_data_filters_on(engine):
     event.listen(engine, "before_cursor_execute",
                  lambda conn, cur, stmt, params, ctx, many: statements.append(stmt))
     accounts.delete_user_data(ESPN)
+    # IN lists and = comparisons (e.g. accounts.sleeper_user_id = ?): both
+    # can filter on a user id.
     filtered = {(t, c) for s in statements
-                for t, c in re.findall(r"\b([a-z_0-9]+)\.([a-z_0-9]+) IN \(", s)}
+                for t, c in re.findall(r"\b([a-z_0-9]+)\.([a-z_0-9]+) (?:IN \(|= )", s)}
     assert filtered, "captured no SQL"
     discovered = {(getattr(db, attr).name, col) for attr, col in purge.key_columns()}
     missing = sorted(filtered - discovered - NOT_USER_KEYS)
