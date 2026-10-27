@@ -46,7 +46,7 @@ import urllib.request
 import zlib
 
 from dataclasses import dataclass, replace as _dc_replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import (
     Flask, g, has_request_context, jsonify, make_response, redirect, request, send_from_directory,
@@ -35631,14 +35631,25 @@ _PAYWALL_PRODUCTS = [
 ]
 
 # Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr,
-# rising to $6.99 / $34.99 for NEW subscribers from this date (UTC). It must
-# match the App Store Connect scheduled price change; existing subscribers
-# keep their price through App Store price preservation, which this table
-# does not model. Each entry is (before the rise, from the rise on).
-# per_month_equiv is the annual price / 12 rounded UP to the cent, matching
-# legal's #393 R28.8 #2 copy, "$2.09/month" (24.99 / 12 = 2.0825;
-# 34.99 / 12 = 2.9158): rounding down would understate the annual price.
-_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)
+# rising to $6.99 / $34.99 for NEW subscribers at _PAYWALL_PRICE_RISE_AT.
+# Existing subscribers keep their price through App Store price
+# preservation, which this table does not model. Each entry is (before the
+# rise, from the rise on). per_month_equiv is the annual price / 12 rounded
+# UP to the cent, matching legal's #393 R28.8 #2 copy, "$2.09/month"
+# (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
+# understate the annual price.
+#
+# The rise is an INSTANT, not a UTC date: 2027-01-01 00:00
+# America/Los_Angeles (PST, UTC-8) = 08:00 UTC. Terms §14.8 promises the
+# Founder price to anyone subscribing "by December 31, 2026", and a UTC
+# date flipped at 7 pm ET on Dec 31. LA midnight keeps the founder price
+# through the whole of Dec 31 in every contiguous-US time zone (Alaska and
+# Hawaii end Dec 31 one and two hours later still).
+# FALLBACK ONLY: StoreKit's localized price is authoritative, and this
+# instant only decides which strings the server shows when StoreKit is
+# unavailable. monetization-pm checks it against the App Store Connect
+# scheduled price change; if the two differ, move this constant to match.
+_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
                         {"display_price": "$6.99"}),
@@ -35653,9 +35664,10 @@ def _paywall_now() -> datetime:
 
 
 def _paywall_products(now: datetime) -> list:
-    """`products[]` as served at `now` (timezone-aware). Pure: same `now`,
-    same answer. On or after _PAYWALL_PRICE_RISE_DATE (UTC) → new prices."""
-    risen = now.astimezone(timezone.utc).date() >= _PAYWALL_PRICE_RISE_DATE
+    """`products[]` as served at `now` (timezone-aware; a naive datetime
+    raises). Pure: same `now`, same answer. At or after
+    _PAYWALL_PRICE_RISE_AT → the new-subscriber prices."""
+    risen = now >= _PAYWALL_PRICE_RISE_AT
     return [{**p, **_PAYWALL_PRICES[p["product_id"]][1 if risen else 0]}
             for p in _PAYWALL_PRODUCTS]
 
@@ -35663,7 +35675,9 @@ def _paywall_products(now: datetime) -> list:
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
 # circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
-# in-app tips to the developer must be IAP.
+# in-app tips to the developer must be IAP. NOT SERVED at launch (#393, as
+# #465 does): the tip SKUs are not being submitted to App Store Connect, so
+# the route sends `tips: []`. This list is what to restore if they are.
 _PAYWALL_TIPS = [
     {"product_id": "ftf_tip_199", "display_price": "$1.99"},
     {"product_id": "ftf_tip_499", "display_price": "$4.99"},
@@ -35691,7 +35705,7 @@ def paywall_config():
     StoreKit-localized price from the RevenueCat offering for the matching
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
-    They switch to the new-subscriber prices on _PAYWALL_PRICE_RISE_DATE.
+    They switch to the new-subscriber prices at _PAYWALL_PRICE_RISE_AT.
     """
     _require_session()
     if not is_enabled("monetize.paywall"):
@@ -35710,12 +35724,12 @@ def paywall_config():
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
         "dismissible": True,
-        # Tip-jar consumables — display metadata only; purchases run through
-        # StoreKit and the webhook ledger like everything else, but grant
+        # Tip-jar consumables: none at launch (the SKUs are not submitted to
+        # App Store Connect; see _PAYWALL_TIPS). A tip would still grant
         # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
         # are purchase UI, and the flag's contract is "no purchase UI anywhere"
         # when off.
-        "tips": _PAYWALL_TIPS,
+        "tips": [],
     })
 
 

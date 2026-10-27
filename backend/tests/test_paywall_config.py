@@ -11,9 +11,11 @@ Covers:
       the ids have to match the RevenueCat offering the client purchases)
   (d) session auth — no token → 401 (same layer as /api/me/entitlements)
   (e) ?platform=ios|web|extension accepted; unknown value degrades to ios
-  (f) tip jar
+  (f) tip jar — `tips: []` at launch (the SKUs are not submitted to App
+      Store Connect); the restorable list still holds only tip products
   (g) fallback prices (#393, operator 2026-10-25): $4.99 / $24.99 before
-      _PAYWALL_PRICE_RISE_DATE (2027-01-01 UTC), $6.99 / $34.99 from it on,
+      _PAYWALL_PRICE_RISE_AT (2027-01-01 00:00 America/Los_Angeles =
+      08:00 UTC, an instant, not a UTC date), $6.99 / $34.99 from it on,
       through an injected clock; no `trial_days` key on either side (an
       older client renders "N days free" only when trial_days > 0)
 
@@ -41,8 +43,10 @@ MONTHLY = "ftf_pro_monthly"
 ANNUAL = "ftf_pro_annual"
 
 UTC = timezone.utc
-BEFORE = datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC)   # last second of old prices
-AT = datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC)            # the rise itself
+# The rise is 2027-01-01 00:00 America/Los_Angeles (PST, UTC-8) = 08:00 UTC.
+BEFORE = datetime(2027, 1, 1, 7, 59, 59, tzinfo=UTC)      # last second of old prices
+AT = datetime(2027, 1, 1, 8, 0, 0, tzinfo=UTC)            # the rise itself
+UTC_MIDNIGHT = datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC)  # still Dec 31 in the US
 AFTER = datetime(2027, 6, 1, 12, 0, 0, tzinfo=UTC)
 TODAY = datetime(2026, 10, 27, 12, 0, 0, tzinfo=UTC)
 
@@ -193,23 +197,26 @@ def test_unknown_platform_degrades_to_ios(client, monkeypatch):
 
 # ── (f) tip jar ────────────────────────────────────────────────────────────
 
-def test_tips_served_when_on(client, monkeypatch):
+def test_tips_empty_at_launch(client, monkeypatch):
+    """The tip SKUs are not submitted to App Store Connect, so the config
+    serves `tips: []` (as #465 does) and no tip id or price leaks."""
     _flags(monkeypatch, "monetize.paywall")
-    tips = _get(client).get_json()["tips"]
-    assert [t["product_id"] for t in tips] == [
-        "ftf_tip_199", "ftf_tip_499", "ftf_tip_999"]
-    assert all(t["display_price"].startswith("$") for t in tips)
-    # tips never claim entitlement fields — they buy nothing
-    assert all("trial_days" not in t and "period" not in t for t in tips)
+    r = _get(client)
+    assert r.get_json()["tips"] == []
+    assert "ftf_tip" not in r.get_data(as_text=True)
 
 
-def test_tip_skus_are_tip_products(client, monkeypatch):
-    """Every served tip SKU must hit the projector's no-entitlement guard —
-    a tip id drifting out of the ftf_tip_ prefix would grant Pro."""
+def test_restorable_tip_skus_are_tip_products():
+    """`_PAYWALL_TIPS` is the list to restore if tips come back. Every SKU in
+    it must hit the projector's no-entitlement guard — a tip id drifting out
+    of the ftf_tip_ prefix would grant Pro — and none claims entitlement
+    fields: a tip buys nothing."""
     from backend import entitlements as entl
-    _flags(monkeypatch, "monetize.paywall")
-    for t in _get(client).get_json()["tips"]:
+    assert [t["product_id"] for t in server._PAYWALL_TIPS] == [
+        "ftf_tip_199", "ftf_tip_499", "ftf_tip_999"]
+    for t in server._PAYWALL_TIPS:
         assert entl.is_tip_product(t["product_id"])
+        assert "trial_days" not in t and "period" not in t
 
 
 def test_flag_off_leaks_no_tips(client, monkeypatch):
@@ -217,16 +224,17 @@ def test_flag_off_leaks_no_tips(client, monkeypatch):
     assert "ftf_tip" not in _get(client).get_data(as_text=True)
 
 
-# ── (g) fallback prices: dated switch, no trial_days ─────────────────────
+# ── (g) fallback prices: the rise instant, no trial_days ─────────────────
 
 @pytest.mark.parametrize("now, monthly, annual, per_month", [
     (TODAY, "$4.99", "$24.99", "$2.09"),
-    (BEFORE, "$4.99", "$24.99", "$2.09"),     # last second before the rise
-    (AT, "$6.99", "$34.99", "$2.92"),         # the rise date itself: new prices
+    (UTC_MIDNIGHT, "$4.99", "$24.99", "$2.09"),  # 4 pm Dec 31 in LA: old prices
+    (BEFORE, "$4.99", "$24.99", "$2.09"),     # 07:59:59Z, last second before the rise
+    (AT, "$6.99", "$34.99", "$2.92"),         # 08:00:00Z, the rise itself: new prices
     (AFTER, "$6.99", "$34.99", "$2.92"),
 ])
-def test_route_prices_switch_on_rise_date(client, monkeypatch, now, monthly,
-                                          annual, per_month):
+def test_route_prices_switch_at_rise_instant(client, monkeypatch, now, monthly,
+                                             annual, per_month):
     _flags(monkeypatch, "monetize.paywall")
     _freeze(monkeypatch, now)
     products = _products(client)
@@ -236,7 +244,7 @@ def test_route_prices_switch_on_rise_date(client, monkeypatch, now, monthly,
     assert "per_month_equiv" not in products[MONTHLY]
 
 
-@pytest.mark.parametrize("now", [TODAY, BEFORE, AT, AFTER])
+@pytest.mark.parametrize("now", [TODAY, UTC_MIDNIGHT, BEFORE, AT, AFTER])
 def test_no_trial_days_anywhere(client, monkeypatch, now):
     """An older client renders `${trial_days} days free, then …` whenever
     trial_days > 0. The trial is Apple's 1-month intro offer, never a day
@@ -250,19 +258,47 @@ def test_no_trial_days_anywhere(client, monkeypatch, now):
         assert "trial_days" not in p
 
 
-def test_rise_date_is_2027_01_01_utc():
-    assert server._PAYWALL_PRICE_RISE_DATE.isoformat() == "2027-01-01"
+def test_rise_is_la_midnight_2027_01_01():
+    """Terms §14.8: the Founder price for anyone subscribing "by December 31,
+    2026". The rise is LA midnight, held as an aware UTC instant."""
+    rise = server._PAYWALL_PRICE_RISE_AT
+    assert rise == datetime(2027, 1, 1, 8, 0, 0, tzinfo=UTC)
+    assert rise.utcoffset() == timedelta(0)
+    try:
+        from zoneinfo import ZoneInfo
+        la = ZoneInfo("America/Los_Angeles")
+    except Exception:   # no tz database on this host; the UTC pin stands
+        return
+    assert rise == datetime(2027, 1, 1, 0, 0, 0, tzinfo=la)
+
+
+ET = timezone(timedelta(hours=-5))
+PT = timezone(timedelta(hours=-8))
 
 
 @pytest.mark.parametrize("now, risen", [
-    # 20:00 on Dec 31 in New York is 01:00 UTC on Jan 1: new prices.
-    (datetime(2026, 12, 31, 20, 0, tzinfo=timezone(timedelta(hours=-5))), True),
+    # 20:00 on Dec 31 in New York is 01:00 UTC on Jan 1, but still Dec 31
+    # for the subscriber: old prices (a UTC date flipped here).
+    (datetime(2026, 12, 31, 20, 0, tzinfo=ET), False),
+    # The last second of Dec 31 in LA: old prices.
+    (datetime(2026, 12, 31, 23, 59, 59, tzinfo=PT), False),
+    # Midnight in LA: new prices.
+    (datetime(2027, 1, 1, 0, 0, 0, tzinfo=PT), True),
+    # 03:00 on Jan 1 in New York is the same instant: new prices.
+    (datetime(2027, 1, 1, 3, 0, 0, tzinfo=ET), True),
     # 00:30 on Jan 1 in Paris is 23:30 UTC on Dec 31: old prices.
     (datetime(2027, 1, 1, 0, 30, tzinfo=timezone(timedelta(hours=1))), False),
 ])
-def test_switch_is_judged_in_utc(now, risen):
+def test_switch_is_an_instant_not_a_date(now, risen):
     annual = {p["product_id"]: p for p in server._paywall_products(now)}[ANNUAL]
     assert annual["display_price"] == ("$34.99" if risen else "$24.99")
+
+
+def test_naive_now_raises():
+    """A naive datetime names no instant; comparing it must fail loudly
+    rather than silently pick a timezone."""
+    with pytest.raises(TypeError):
+        server._paywall_products(datetime(2027, 1, 1, 12, 0))
 
 
 def test_paywall_products_is_pure():
