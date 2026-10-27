@@ -32615,11 +32615,15 @@ def delete_account_route():
         return gated
     apple_revoked = False
     try:
-        if _accounts.has_apple_identity(user_id,
-                                        account_id=sess.get("account_id")):
+        apple_subjects = _accounts.apple_identity_subjects(
+            user_id, account_id=sess.get("account_id"))
+        if apple_subjects:
             body = request.get_json(silent=True) or {}
+            # Revoked only when the code's own Apple `sub` is one this
+            # account linked (release-lead QA on #446, d).
             apple_revoked = _accounts.revoke_apple_tokens(
-                body.get("apple_authorization_code"))
+                body.get("apple_authorization_code"),
+                expected_subjects=apple_subjects)
             log.info("delete_account: apple revocation %s for %s",
                      "succeeded" if apple_revoked else "not completed", user_id)
     except Exception as revoke_err:
