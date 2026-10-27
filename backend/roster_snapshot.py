@@ -276,17 +276,18 @@ def snapshot_ids(conn, fmt: str, league_id: str, pool: Mapping, *,
     drafted = _read_drafted(conn, lid)
     fp, _owners = _roster_fp(_read_members(conn, lid), picks, drafted)
     if parts is not None:
-        parts["picks_key"] = picks_key(picks)
+        parts["picks_key"] = picks_key(picks, drafted)
         if parts.get("member_rows"):
             parts["expected_fp"] = _roster_fp(_stored_member_rows(parts["member_rows"]),
                                               picks, drafted)[0]
     return fp, _values_snapshot_id(fmt, pool, picks, generation)
 
 
-def picks_key(picks) -> str:
-    """rfp1's pick part: the rfp1 of no members with these pick rows. Two equal
-    keys mean the same picks, as the stamp hashes them."""
-    return _roster_fp((), picks, False)[0]
+def picks_key(picks, drafted: bool = False) -> str:
+    """rfp1's pick and draft-state part: the rfp1 of no members with these pick
+    rows and this draft verdict. Two equal keys mean the same picks and draft
+    state, as the stamp hashes them (#486 QA P3-5)."""
+    return _roster_fp((), picks, drafted)[0]
 
 
 def _stored_member_rows(member_rows) -> list:
