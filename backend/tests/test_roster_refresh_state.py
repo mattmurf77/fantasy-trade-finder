@@ -330,3 +330,43 @@ def test_platform_league_rows_are_not_replaced_by_session_init(harness, monkeypa
     assert resp.status_code == 200
     assert called == []
     assert len(db_module.load_league_members(mfl)) == 3
+
+
+def test_the_session_s_read_rows_hash_to_what_its_daemon_wrote(harness):
+    """#484 QA P1-1: `roster_read_rows` comes from the same builder as the
+    daemon's members write, so its expected fp is the stored rows' rfp1."""
+    client, _put = harness
+    assert _init(client).status_code == 200
+    with server._sessions_lock:
+        rows = server._sessions[TOKEN]["roster_read_rows"]
+    from backend import roster_snapshot
+    with db_module.engine.connect() as conn:
+        expected = roster_snapshot.expected_fp(conn, LEAGUE_ID, rows,
+                                               pick_source=server._pick_read_source())
+    assert expected == server._trade_current_fingerprints(LEAGUE_ID, "1qb_ppr")[0]
+
+
+def test_the_pregen_passes_the_session_read_to_its_freshness_checks(harness, monkeypatch):
+    """#484 QA P3-4: session init's pre-gen check hands the new read to both
+    freshness checks (an existing job under the key makes it ask)."""
+    client, _put = harness
+    assert _init(client).status_code == 200
+    key = server._trade_job_key(USER_ID, LEAGUE_ID, "1qb_ppr")
+    parked = {"job_id": "j-pregen-site", "key": key, "status": "complete"}
+    seen = []
+    monkeypatch.setattr(server, "_trade_running_policy_matches",
+                        lambda *a, **k: seen.append(("running", k.get("session_read"))) or False)
+    monkeypatch.setattr(server, "_trade_job_is_fresh",
+                        lambda *a, **k: seen.append(("fresh", k.get("session_read"))) or False)
+    with server._trade_jobs_lock:
+        server._trade_jobs[parked["job_id"]] = parked
+        server._trade_jobs_by_key[key] = parked["job_id"]
+    try:
+        assert _init(client).status_code == 200
+        with server._sessions_lock:
+            read = server._sessions[TOKEN]["roster_fetch_started_at"]
+        assert read and seen == [("running", read), ("fresh", read)]
+    finally:
+        with server._trade_jobs_lock:
+            server._trade_jobs.pop(parked["job_id"], None)
+            server._trade_jobs_by_key.pop(key, None)

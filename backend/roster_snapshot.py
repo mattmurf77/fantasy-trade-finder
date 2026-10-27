@@ -273,6 +273,18 @@ def snapshot_ids(conn, fmt: str, league_id: str, pool: Mapping, *,
     return fp, _values_snapshot_id(fmt, pool, picks, generation)
 
 
+def expected_fp(conn, league_id: str, member_rows, *, pick_source: str) -> str:
+    """The rfp1 the league's stored rows will have once ``member_rows`` replace
+    its members (``[{user_id, player_ids}]``, the rows session init writes,
+    stored as ``replace_espn_league_members`` stores them), with its pick rows
+    and draft state as they are now. Equal to a stamp only when that stamp
+    hashes exactly these members and these picks (#484 QA P1-1)."""
+    lid = str(league_id)
+    members = [(str(m["user_id"]), json.dumps(m.get("player_ids", [])), None)
+               for m in member_rows if m.get("user_id")]
+    return _roster_fp(members, _read_picks(conn, lid, pick_source), _read_drafted(conn, lid))[0]
+
+
 # ── on_roster_change: platforms-eng notifies, trades-eng reacts ───────────────
 _roster_change_handlers: list[Callable[[str, str | None, str], None]] = []
 
