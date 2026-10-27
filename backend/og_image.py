@@ -168,7 +168,7 @@ def _new_canvas() -> "Image.Image":
 
 
 def _draw_footer(draw, font_small) -> None:
-    footer = "Fantasy Trade Finder · fantasy-trade-finder.onrender.com"
+    footer = "Fleeced: Dynasty Trade Finder · fantasy-trade-finder.onrender.com"
     draw.line([(60, CARD_H - 70), (CARD_W - 60, CARD_H - 70)], fill=DIVIDER, width=2)
     draw.text((60, CARD_H - 50), footer, font=font_small, fill=TEXT_MUTED)
 
