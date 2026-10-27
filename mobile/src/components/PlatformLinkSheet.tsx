@@ -60,6 +60,14 @@ interface Props {
 
 const LABEL: Record<LinkPlatform, string> = { mfl: 'MFL', fleaflicker: 'Fleaflicker' };
 
+// Legal R27.5 — Fleaflicker has no send path, so the shared "unless you sign in
+// and send a trade you approve" line would promise something the app can't do.
+// The intro is the first and last sentences of the done-step text. Verbatim.
+const FLEAFLICKER_INTRO =
+  'Fleaflicker leagues import team names and rosters. Trades can’t be sent to Fleaflicker from the app, so nothing is posted there.';
+const FLEAFLICKER_DONE =
+  'Fleaflicker leagues import team names and rosters. Rankings, tiers, trios and trade ideas all work. Trades can’t be sent to Fleaflicker from the app, so nothing is posted there.';
+
 // Zero-auth (no cookie paste) platform link flow for MFL + Fleaflicker,
 // mirroring EspnLinkSheet's three steps:
 //   1. input — league URL/ID (MFL adds a season year; Fleaflicker adds an
@@ -537,11 +545,15 @@ export default function PlatformLinkSheet({
 
           {step === 'input' ? (
             <>
-              <Text style={[type.bodySm, styles.sub]}>
-                Imports team names and rosters. Nothing is posted
-                to {LABEL[platform]} unless you sign in and send a trade you
-                approve.
-              </Text>
+              {platform === 'fleaflicker' ? (
+                <Text style={[type.bodySm, styles.sub]}>{FLEAFLICKER_INTRO}</Text>
+              ) : (
+                <Text style={[type.bodySm, styles.sub]}>
+                  Imports team names and rosters. Nothing is posted
+                  to {LABEL[platform]} unless you sign in and send a trade you
+                  approve.
+                </Text>
+              )}
               {/* v2.1 — entry mode only: signing in is a first-class option
                   ABOVE the league-id field, mirroring the ESPN sheet. */}
               {entry && mflAuthBlock ? (
@@ -713,15 +725,19 @@ export default function PlatformLinkSheet({
                   {report.unmatched.map((u) => u.name).join(', ')}
                 </Text>
               ) : null}
-              <Text style={[type.bodySm, styles.readOnlyNote]}>
-                {LABEL[platform]} leagues import team names and rosters. Rankings,
-                tiers, trios and trade ideas all work. Nothing is posted
-                to {LABEL[platform]} unless you sign in and send a trade you
-                approve.
-                {platform === 'mfl' && summary.future_picks_stored
-                  ? ' Future draft picks were saved, so trades can include them.'
-                  : ''}
-              </Text>
+              {platform === 'fleaflicker' ? (
+                <Text style={[type.bodySm, styles.readOnlyNote]}>{FLEAFLICKER_DONE}</Text>
+              ) : (
+                <Text style={[type.bodySm, styles.readOnlyNote]}>
+                  {LABEL[platform]} leagues import team names and rosters. Rankings,
+                  tiers, trios and trade ideas all work. Nothing is posted
+                  to {LABEL[platform]} unless you sign in and send a trade you
+                  approve.
+                  {platform === 'mfl' && summary.future_picks_stored
+                    ? ' Future draft picks were saved, so trades can include them.'
+                    : ''}
+                </Text>
+              )}
               <Button
                 testID="platform-link.open"
                 label="Open league"

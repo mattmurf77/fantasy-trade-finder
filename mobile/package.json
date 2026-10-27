@@ -44,6 +44,7 @@
     "test:feedback-badge": "node tests/check-feedback-badge.js",
     "test:feedback-capture": "node tests/check-feedback-capture.js",
     "test:finder-conditions": "node tests/check-finder-conditions-reachable.js",
+    "test:fleaflicker-sheet-copy": "node tests/check-fleaflicker-sheet-copy.js",
     "test:guide-script": "node tests/check-guide-script.js",
     "test:guide-spotlight-tracking": "node tests/check-guide-spotlight-tracking.js",
     "test:home-destinations": "node tests/check-home-destinations.js",
