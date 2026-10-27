@@ -201,7 +201,9 @@ def test_decline_succeeds_and_persists(harness):
     assert body["ok"] is True
     assert body["both_decided"] is True
     assert body["outcome"] == "declined"
-    assert save_swipes.call_count == 2
+    # the partner's accept (one signal) + my decline, one per (give, receive)
+    # pair (BL-004): 1 + 2 x 2
+    assert save_swipes.call_count == 5
 
 
 # ---------------------------------------------------------------------------

@@ -60,7 +60,8 @@ _DEFAULT_CFG: dict[str, float] = {
     "trade_k_like":               8.0,
     "trade_k_pass":               4.0,
     "trade_k_accept":            20.0,
-    "trade_k_decline_correction": 20.0,
+    "trade_k_decline_correction": 20.0,   # unused since BL-004
+    "trade_k_decline_net":       12.0,
     # Tier engine
     "tier_engine_enabled":        1.0,
     "smart_matchup_enabled":      1.0,
@@ -386,7 +387,7 @@ class RankingService:
     # ELO K-factors are now loaded from model_config via _c() at call time.
     # Default values live in _DEFAULT_CFG at module level.
     # Keys: elo_k, trade_k_like, trade_k_pass, trade_k_accept,
-    #       trade_k_decline_correction
+    #       trade_k_decline_net (a decline's K is built in database.py)
 
     def __init__(
         self,
@@ -764,8 +765,10 @@ class RankingService:
 
         Called when both parties have confirmed (or declined) a matched trade:
           Accept  → winner=receive_ids, loser=give_ids, k=TRADE_K_ACCEPT (20)
-          Decline → winner=give_ids, loser=receive_ids, k=TRADE_K_DECLINE_CORRECTION (20)
-                    (net ≈ −12 after the original +8 Interested swipe)
+          Decline → winner=give_ids, loser=receive_ids, per pair, at
+                    k = trade_k_decline_net (12) + the K that pair's like was
+                    stored with, so the net is −12 at any like K (BL-004;
+                    built by database._decline_signals)
 
         Uses the same _trade_swipes list as record_trade_signal so it is
         automatically included in _compute_elo and replayed from the DB.

@@ -3142,7 +3142,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_k_pass",          4.0,    "K-factor for a trade 'Pass' swipe (~12% of elo_k)"),
     ("trade_k_accept",       20.0,    "K-factor when both parties accept a trade match"),
     ("trade_k_decline_correction", 20.0,
-                                     "K-factor for reversal when a user declines after 'Interested' swipe"),
+                                     "UNUSED since BL-004 (trade_k_decline_net); kept so existing rows stay readable"),
+    ("trade_k_decline_net",  12.0,
+                                     "Net K of a declined match: the decline applies this plus the K its like was stored with"),
     # ── Tier Engine ──────────────────────────────────────────────────────
     ("tier_engine_enabled",    1.0,    "Feature flag: 1=tier-based trio filtering, 0=legacy (full pool)"),
     ("smart_matchup_enabled",  1.0,    "Feature flag: 1=Claude-powered matchup selection, 0=algorithmic only"),
@@ -11041,7 +11043,39 @@ def retract_awaiting_likes(
 # These local lambdas fall back to the hardcoded defaults if the table
 # isn't available yet (e.g. during the very first init_db() call).
 _K_ACCEPT             = lambda: get_config().get("trade_k_accept",             20.0)
-_K_DECLINE_CORRECTION = lambda: get_config().get("trade_k_decline_correction", 20.0)
+_K_DECLINE_NET        = lambda: get_config().get("trade_k_decline_net",        12.0)
+
+
+def _decline_signals(conn, user_id: str, give: list, receive: list) -> list[dict]:
+    """A decliner's correction, one signal per (give, receive) pair (BL-004):
+    winner=give, loser=receive at K = trade_k_decline_net + the K the user's
+    'Interested' swipe on that pair was stored with (swipe_decisions: winner
+    = the receive id, loser = the give id, decision_type 'trade'; the latest
+    such row, 0 when there is none). So a decline nets -trade_k_decline_net
+    at any like K: frozen (0), half K or full K, and whatever fit_mult did."""
+    sd = swipe_decisions_table
+    net = _K_DECLINE_NET()
+    signals = []
+    for give_id in give:
+        for receive_id in receive:
+            if give_id == receive_id:
+                continue
+            liked = conn.execute(
+                select(sd.c.k_factor).where(
+                    sd.c.user_id == user_id,
+                    sd.c.winner_player_id == receive_id,
+                    sd.c.loser_player_id == give_id,
+                    sd.c.decision_type == "trade",
+                ).order_by(sd.c.created_at.desc(), sd.c.id.desc()).limit(1)
+            ).scalar()
+            signals.append({
+                "user_id":       user_id,
+                "winner_ids":    [give_id],
+                "loser_ids":     [receive_id],
+                "k_factor":      net + float(liked or 0.0),
+                "decision_type": "disposition",
+            })
+    return signals
 
 
 def dismiss_match(match_id: int, user_id: str) -> dict:
@@ -11111,8 +11145,10 @@ def record_match_disposition(
     ELO signal semantics
     ────────────────────
     Both accept   → for each user: winner=receive, loser=give, K=20
-    Any decline   → for each decliner: winner=give, loser=receive, K=20
-                    (net effect ≈ −12 after the original +8 like nudge)
+    Any decline   → for each decliner, per (give, receive) pair:
+                    winner=give, loser=receive, K = 12 + the K the like on
+                    that pair was stored with, so the net is −12 at any like
+                    K (BL-004, _decline_signals)
     """
     now = _now()
 
@@ -11204,13 +11240,7 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.append({
-                    "user_id":       row.user_a_id,
-                    "winner_ids":    a_give,
-                    "loser_ids":     a_receive,
-                    "k_factor":      _K_DECLINE_CORRECTION(),
-                    "decision_type": "disposition",
-                })
+                elo_signals.extend(_decline_signals(conn, row.user_a_id, a_give, a_receive))
 
             # Build ELO signal for user_b
             if b_dec == "accept":
@@ -11222,13 +11252,7 @@ def record_match_disposition(
                     "decision_type": "disposition",
                 })
             else:
-                elo_signals.append({
-                    "user_id":       row.user_b_id,
-                    "winner_ids":    b_give,
-                    "loser_ids":     b_receive,
-                    "k_factor":      _K_DECLINE_CORRECTION(),
-                    "decision_type": "disposition",
-                })
+                elo_signals.extend(_decline_signals(conn, row.user_b_id, b_give, b_receive))
 
     # F3 (deck.fatigue) — additive context for the decline-suppression hook:
     # the package from the CALLER's perspective plus the partner's current
