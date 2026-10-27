@@ -634,6 +634,9 @@ def migrate_board_data(from_uid: str, to_uid: str) -> dict[str, int]:
 #            pick_assignment_changed events (OTHER users'): old_owner /
 #            new_owner / actor → the placeholder where they are a deleted
 #            Fleeced-minted id; the audit trail stays readable.
+#            leagues.pick_assignment_settings.order (any row, incl. other
+#            importers'): a deleted Fleeced-minted id → the placeholder in
+#            place, so other owners' slot positions don't shift.
 #   KEEP     player_value_history + model_config (not user-keyed),
 #            draft_picks on Sleeper grids (and legacy rows with no platform)
 #            and recorded_picks.picking_team_id holding a Sleeper id: public
@@ -863,9 +866,9 @@ def _delete_user_data(sleeper_user_id: str,
         # placeholder, matching the grid rows above; public Sleeper ids stay,
         # as on Sleeper grids (#452 QA P2).
         events_tbl = db.user_events_table
+        minted_set = set(minted)
         scrubbed = 0
         if minted:
-            minted_set = set(minted)
             rows = conn.execute(select(events_tbl.c.id, events_tbl.c.props).where(
                 events_tbl.c.event_type == "pick_assignment_changed",
                 or_(*[events_tbl.c.props.contains(m, autoescape=True) for m in minted]),
@@ -875,6 +878,8 @@ def _delete_user_data(sleeper_user_id: str,
                     props = json.loads(raw or "{}")
                 except (json.JSONDecodeError, TypeError):
                     continue
+                if not isinstance(props, dict):   # a malformed row must not abort the deletion
+                    continue
                 hits = [k for k in ("old_owner", "new_owner", "actor") if props.get(k) in minted_set]
                 if hits:
                     for k in hits:
@@ -883,6 +888,35 @@ def _delete_user_data(sleeper_user_id: str,
                                  .values(props=json.dumps(props)))
                     scrubbed += 1
         counts["pick_assignment_events_anonymized"] = scrubbed
+        # leagues.pick_assignment_settings.order lists every member's id in
+        # slot order (seed_pick_grid), including on rows OTHER users imported.
+        # A Fleeced-minted id there names the person (an entry:espn:{SWID}
+        # carries a third party's SWID, R28.16). It becomes the placeholder in
+        # place, so the other owners' slot positions don't shift; public
+        # Sleeper ids stay, as on Sleeper grids (#452 QA round 3).
+        leagues_tbl = db.leagues_table
+        orders = 0
+        if minted:
+            rows = conn.execute(select(leagues_tbl.c.sleeper_league_id,
+                                       leagues_tbl.c.pick_assignment_settings).where(
+                or_(*[leagues_tbl.c.pick_assignment_settings.contains(m, autoescape=True)
+                      for m in minted]))).all()
+            for league_id, raw in rows:
+                try:
+                    settings = json.loads(raw or "{}")
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                order = settings.get("order") if isinstance(settings, dict) else None
+                if not isinstance(order, list):
+                    continue
+                anonymized = [DELETED_USER_PLACEHOLDER if o in minted_set else o for o in order]
+                if anonymized != order:
+                    settings["order"] = anonymized
+                    conn.execute(update(leagues_tbl)
+                                 .where(leagues_tbl.c.sleeper_league_id == league_id)
+                                 .values(pick_assignment_settings=json.dumps(settings)))
+                    orders += 1
+        counts["pick_assignment_order_anonymized"] = orders
         # Weak roster keys embed the user ID; strong keys are public team slots.
         history = db.league_roster_history_table
         res = conn.execute(delete(history).where(history.c.owner_user_id.in_(user_ids),

@@ -423,3 +423,64 @@ def test_pick_assignment_events_keep_a_public_sleeper_id(engine):
     assert props["sleeper"]["new_owner"] == UID
     assert props["alias"]["new_owner"] == accounts.DELETED_USER_PLACEHOLDER
     assert counts["pick_assignment_events_anonymized"] == 1
+
+
+def test_pick_assignment_scrub_rewrites_an_actor_and_skips_other_event_types(engine):
+    deleted = "entry:mfl:61408.f0003"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        # OTHER's event in which the deleted user is the recorded actor
+        seed(conn, db.user_events_table, "actor", user_id=OTHER, event_type="pick_assignment_changed",
+             props=json.dumps({"pick_id": "actor", "actor": deleted, "new_owner": OTHER}))
+        # another event type that happens to name them: not the audit trail, untouched
+        seed(conn, db.user_events_table, "other", user_id=OTHER, event_type="trade_proposed",
+             props=json.dumps({"new_owner": deleted}))
+        # a malformed audit row must not abort the deletion
+        seed(conn, db.user_events_table, "bad", user_id=OTHER, event_type="pick_assignment_changed",
+             props=json.dumps([deleted]))
+    counts = accounts.delete_user_data(deleted)
+    by_type = {}
+    for r in rows(engine, db.user_events_table):
+        by_type.setdefault(r["event_type"], []).append(json.loads(r["props"]))
+    assert {"pick_id": "actor", "actor": accounts.DELETED_USER_PLACEHOLDER,
+            "new_owner": OTHER} in by_type["pick_assignment_changed"]
+    assert [deleted] in by_type["pick_assignment_changed"]          # malformed: left alone
+    assert by_type["trade_proposed"] == [{"new_owner": deleted}]
+    assert counts["pick_assignment_events_anonymized"] == 1
+
+
+# #452 QA round 3: leagues.pick_assignment_settings.order lists every member,
+# including on a row ANOTHER user imported. A deleted Fleeced-minted id there
+# becomes the placeholder in place; public Sleeper ids stay.
+def _assignment_league(conn, league_id, importer, settings):
+    seed(conn, db.leagues_table, league_id, sleeper_league_id=league_id, user_id=importer,
+         pick_assignment_settings=json.dumps(settings) if not isinstance(settings, str) else settings)
+
+
+def _orders(engine):
+    return {r["sleeper_league_id"]: r["pick_assignment_settings"] for r in rows(engine, db.leagues_table)}
+
+
+def test_pick_assignment_order_on_another_importers_row_is_anonymized_in_place(engine):
+    deleted = "entry:espn:{5EED0000-AAAA-BBBB-CCCC-DDDDEEEEFFFF}"
+    with engine.begin() as conn:
+        conn.execute(insert(db.users_table).values(sleeper_user_id=deleted))
+        _assignment_league(conn, "shared", OTHER, {"rounds": 4, "order": [OTHER, deleted, "third"]})
+        _assignment_league(conn, "sleeper", OTHER, {"order": [OTHER, UID]})
+        _assignment_league(conn, "list", OTHER, f'["{deleted}"]')            # not a dict
+        _assignment_league(conn, "noorder", OTHER, {"order": f"{deleted}"})  # order not a list
+    counts = accounts.delete_user_data(deleted)
+    orders = _orders(engine)
+    assert json.loads(orders["shared"]) == {
+        "rounds": 4, "order": [OTHER, accounts.DELETED_USER_PLACEHOLDER, "third"]}
+    assert json.loads(orders["sleeper"]) == {"order": [OTHER, UID]}
+    assert orders["list"] == f'["{deleted}"]' and json.loads(orders["noorder"]) == {"order": deleted}
+    assert counts["pick_assignment_order_anonymized"] == 1
+
+
+def test_pick_assignment_order_keeps_a_public_sleeper_id_and_anonymizes_the_alias(engine):
+    with engine.begin() as conn:
+        _assignment_league(conn, "lg", OTHER, {"order": [UID, ALIAS, OTHER]})
+    counts = accounts.delete_user_data(UID)
+    assert json.loads(_orders(engine)["lg"])["order"] == [UID, accounts.DELETED_USER_PLACEHOLDER, OTHER]
+    assert counts["pick_assignment_order_anonymized"] == 1
