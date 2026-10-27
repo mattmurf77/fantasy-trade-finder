@@ -27426,7 +27426,7 @@ def session_init():
 
         try:
             # Platform-link state is a DB fact that nothing in this daemon
-            # writes, so the three guards below read it once.
+            # writes, so every guard below reads it once.
             _platform_linked = is_linked_platform_league(league_id)
 
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
@@ -27750,8 +27750,15 @@ def session_init():
             # scoring, no UI. Sleeper league ids only (numeric); idempotent
             # on transaction_id, so a flake just misses one pass and the
             # next sync self-heals. Best-effort, off the request path.
+            # ESPN/MFL/Fleaflicker native ids are numeric too (G-030), so
+            # isdigit() alone sent a linked league's id to Sleeper — up to
+            # 18 `transactions` reads per init, since a league with no
+            # captured rows is re-backfilled every time. _platform_linked
+            # (read once above) is the same discriminator the siblings use.
             try:
-                if is_enabled("market.trade_capture") and str(league_id).isdigit():
+                if (is_enabled("market.trade_capture")
+                        and str(league_id).isdigit()
+                        and not _platform_linked):
                     from .sleeper_trades_service import sync_league_trades
                     _n_tr = sync_league_trades(league_id)
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
