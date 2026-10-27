@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useSyncExternalStore } from 'react';
 import { View, Text, Pressable, Share, StyleSheet, ActivityIndicator } from 'react-native';
 
 import { ink, chalk, ice, space, radii, type, fonts } from '../theme/chalkline';
@@ -103,8 +103,27 @@ type MintOutcome = 'ok' | 'failed' | 'timeout' | 'rate_limited' | 'disabled' | '
 /** FR-1's mint deadline (assumed; the share-package mint uses 6 s). */
 const MINT_DEADLINE_MS = 2000;
 
-/** AC-1e in-flight guard for shareInvite. */
+/** AC-1e in-flight guard for shareInvite, and the busy state every Invite
+ *  control renders through useInviteBusy(). One value, so the guard and
+ *  what a control shows cannot disagree, and a new Invite surface gets both
+ *  for free (ux-lead #364 change 1). */
 let _inviteInFlight = false;
+const _busyListeners = new Set<() => void>();
+function setInviteInFlight(v: boolean): void {
+  _inviteInFlight = v;
+  _busyListeners.forEach((l) => l());
+}
+function subscribeInviteBusy(listener: () => void): () => void {
+  _busyListeners.add(listener);
+  return () => { _busyListeners.delete(listener); };
+}
+const getInviteBusy = () => _inviteInFlight;
+
+/** True from an Invite tap until its share sheet settles. Every Invite
+ *  control renders its busy state from this hook. */
+export function useInviteBusy(): boolean {
+  return useSyncExternalStore(subscribeInviteBusy, getInviteBusy);
+}
 
 export interface ShareInviteArgs {
   leagueId:   string;
@@ -122,8 +141,8 @@ export interface ShareInviteArgs {
   platform:   string;
   /** track()'s third argument: the route name. */
   screen:     string;
-  /** Optional: told true/false around the mint, so a surface can show a
-   *  pending state. Never called when no mint runs. */
+  /** Optional: told true/false around the mint. Never called when no mint
+   *  runs. Kept for compatibility; Invite controls render useInviteBusy(). */
   onMintPending?: (pending: boolean) => void;
 }
 
@@ -162,7 +181,7 @@ export async function shareInvite(args: ShareInviteArgs): Promise<void> {
   // AC-1e — one share at a time: a tap while a mint (or the sheet it opens)
   // is pending returns at once. Module-level, so all five surfaces get it.
   if (_inviteInFlight) return;
-  _inviteInFlight = true;
+  setInviteInFlight(true);
   try {
     const props = {
       surface:     args.surface,
@@ -211,13 +230,14 @@ export async function shareInvite(args: ShareInviteArgs): Promise<void> {
       /* user dismissed the sheet — nothing to do */
     }
   } finally {
-    _inviteInFlight = false;
+    setInviteInFlight(false);
   }
 }
 
 export default function InviteLeaguematesBanner({ leagueId, leagueName, username, total }: Props) {
-  // FR-1 pending state, only while a mint is in flight.
-  const [minting, setMinting] = useState(false);
+  // The busy state is shareInvite's own guard (ux change 1), so it also
+  // covers the sheet being open and taps from any other Invite surface.
+  const busy = useInviteBusy();
   async function handleInvite() {
     // notJoined/totalMates are null, not 0: this banner's props carry the
     // league-mate TOTAL but no join counts, and 0 would be a lie.
@@ -230,7 +250,6 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
       totalMates: null,
       platform:   'unknown',   // no league platform is in scope at this mount
       screen:     'Trades',
-      onMintPending: setMinting,
     });
   }
 
@@ -253,9 +272,9 @@ export default function InviteLeaguematesBanner({ leagueId, leagueName, username
         style={({ pressed }) => [styles.inviteBtn, pressed && styles.inviteBtnPressed]}
         accessibilityRole="button"
         accessibilityLabel="Invite leaguemates"
-        accessibilityState={{ busy: minting }}
+        accessibilityState={{ busy }}
       >
-        {minting
+        {busy
           ? <ActivityIndicator size="small" color={chalk.base} />
           : <Text style={styles.inviteText}>Invite</Text>}
       </Pressable>

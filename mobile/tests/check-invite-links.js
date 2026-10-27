@@ -158,6 +158,8 @@ function runBanner() {
     shareThrows: false, mint: () => Promise.resolve({ outcome: 'ok', invite_id: ID }), lastSignal: null,
   }, o);
   reset();
+  // useInviteBusy's store, captured through the useSyncExternalStore stub.
+  const store = { subscribe: null, get: null };
   const anything = new Proxy({}, { get: () => anything });
   const RN = {
     View: 'View', Text: 'Text', Pressable: 'Pressable', ActivityIndicator: 'ActivityIndicator',
@@ -166,13 +168,17 @@ function runBanner() {
       sharedAction: 'sharedAction', dismissedAction: 'dismissedAction',
       share: async ({ message }) => {
         state.log.push(['share', message]);
+        state.busyAtShare = store.get ? store.get() : null;
         if (state.shareThrows) throw new Error('sheet failed');
         return state.shareResult;
       },
     },
   };
   const banner = load('components/InviteLeaguematesBanner.tsx', {
-    react: { default: { createElement: () => null }, useState: () => [false, () => {}] },
+    react: {
+      default: { createElement: () => null },
+      useSyncExternalStore: (subscribe, get) => { store.subscribe = subscribe; store.get = get; return get(); },
+    },
     'react-native': RN,
     '../theme/chalkline': { ink: anything, chalk: anything, ice: anything, space: anything,
                             radii: anything, type: anything, fonts: anything },
@@ -187,7 +193,7 @@ function runBanner() {
     setTimeout: (fn, ms) => { state.timers.push({ fn, ms, cleared: false }); return state.timers.length; },
     clearTimeout: (id) => { if (state.timers[id - 1]) state.timers[id - 1].cleared = true; },
   });
-  const { shareInvite, buildInviteUrl } = banner;
+  const { shareInvite, buildInviteUrl, useInviteBusy } = banner;
   const args = (o = {}) => ({
     leagueId: LEAGUE, leagueName: 'Dynasty Dorks', username: USER, surface: 'trades_banner',
     notJoined: null, totalMates: null, platform: 'sleeper', screen: 'Trades', ...o,
@@ -309,12 +315,17 @@ function runBanner() {
 
     const releases = [];
     reset({ flags: { 'growth.referral_ledger': true }, mint: () => new Promise((r) => { releases.push(r); }) });
+    eq('E ux-1 useInviteBusy is false at rest', useInviteBusy(), false);
+    const busySeen = [];
+    const unsubscribe = store.subscribe(() => busySeen.push(store.get()));
     const pend = [];
     const first = shareInvite(args({ onMintPending: (v) => pend.push(v) }));
     const second = shareInvite(args());                        // a second tap mid-mint
     const third = shareInvite(args({ surface: 'league_home' })); // another surface, same guard
     await null;
     const during = kinds(state.log);
+    check('E ux-1 busy is true while the guard holds (taps are being dropped)', store.get() === true,
+          'useInviteBusy must read the same value as the AC-1e guard');
     releases.forEach((r) => r({ outcome: 'ok', invite_id: ID }));
     await Promise.all([first, second, third]);
     check('E AC-1e taps while the mint is pending return at once (one tap, one mint)',
@@ -324,6 +335,12 @@ function runBanner() {
     check('E AC-1e one share sheet', kinds(state.log).filter((k) => k === 'share').length === 1,
           JSON.stringify(kinds(state.log)));
     eq('E pending state: true then false around the mint', pend, [true, false]);
+    eq('E ux-1 subscribers see busy true then false, once each (one tap)', busySeen, [true, false]);
+    unsubscribe();
+    reset({ flags: {} });
+    await shareInvite(args());
+    check('E ux-1 busy also holds while the sheet is open with no mint (flag off)',
+          state.busyAtShare === true && store.get() === false, `busyAtShare ${state.busyAtShare}`);
     reset({ flags: { 'growth.referral_ledger': true } });
     await shareInvite(args());
     check('E AC-1e the guard is released after a share', kinds(state.log).includes('share'),
@@ -510,6 +527,14 @@ function runStatic() {
   eq('J AC-3b no "league-mates" in any banner string or a11y label', hyphenated, []);
   check('J AC-3b the a11y label reads "Invite leaguemates"',
         rendered.includes('"Invite leaguemates"'), 'accessibilityLabel changed beyond the respelling');
+
+  // L. ux-lead #364 busy state + design F2 (AC-4b) on the Trades banner's
+  //    Invite control. STATIC: the JSX is not rendered here (no RN renderer).
+  const bannerSrc = read('components/InviteLeaguematesBanner.tsx');
+  const bannerFn = bannerSrc.slice(bannerSrc.indexOf('export default function InviteLeaguematesBanner'));
+  check('L ux-1 the banner renders busy from useInviteBusy(), not local state',
+        /const busy = useInviteBusy\(\);/.test(bannerFn) && !/useState|onMintPending/.test(bannerFn),
+        'the banner must read the shared guard, not a per-call pending flag');
 
   finish();
 }
