@@ -28,6 +28,7 @@ import logging
 import math
 import os
 import pathlib
+import queue
 import random
 import re
 import secrets
@@ -158,6 +159,7 @@ from .database import (
     create_mock_draft, load_mock_draft, load_current_mock_draft,
     update_mock_draft, abandon_completed_mock_drafts,
     sync_draft_picks, load_draft_picks, replace_draft_picks, compute_pick_value,
+    load_draft_pick_seasons,
     # draft-extensions W3 M-A — user-asserted pick ownership (ADR-010)
     make_pick_id, seed_pick_grid, assign_draft_pick,
     contested_pick_ids, orphaned_pick_ids, invalidate_pick_assignment_cache,
@@ -2572,6 +2574,46 @@ def _restore_persisted_session(token: str) -> dict | None:
     return payload
 
 
+def _session_member_rows(league_user_id, league_display_name, user_player_ids,
+                         opponent_rosters) -> list[dict]:
+    """The `league_members` rows session init writes from its roster inputs.
+    One builder for the daemon's write and the session's `roster_read_rows`,
+    so the roster-change handler's expected fingerprint hashes exactly what
+    is written (#484 QA P1-1)."""
+    return [
+        {
+            # Keyed on the LEAGUE identity, not the account:
+            # `league_members` is league-SHARED (every member's
+            # session_init writes into it), so a co-owned roster
+            # must land on the same row no matter which co-owner
+            # syncs it. Identical to `user_id` for a sole owner.
+            # The name is the roster owner's for the same reason —
+            # this row is what every OTHER member sees for that
+            # team; the caller's own team is marked by `is_you`.
+            "user_id":      league_user_id,
+            "username":     league_display_name,
+            "display_name": league_display_name,
+            # #151 — store the RAW client-sent ids, matching the
+            # opponent rows below. `new_user_roster` is filtered
+            # to the default-format pool, which made the caller's
+            # own off-pool players (e.g. SF-only QBs) invisible
+            # to the free-agent exclusion set. Consumers that
+            # need pool membership already filter on read
+            # (session init's DB-member merge, compute_free_agents).
+            "player_ids":   user_player_ids,
+        }
+    ] + [
+        {
+            "user_id":      str(opp.get("user_id", "")),
+            "username":     opp.get("username", ""),
+            "display_name": opp.get("username", ""),
+            "player_ids":   [str(x) for x in opp.get("player_ids", [])],
+        }
+        for opp in opponent_rosters
+        if opp.get("user_id")
+    ]
+
+
 def _sync_persisted_session_after_init(token: str, sess: dict,
                                        user_changed: bool) -> None:
     """Durable-row hygiene after /api/session/init reuses a token.
@@ -3217,10 +3259,11 @@ def _trade_request_signature(prefs_preload):
 
 def _trade_running_matches(job, fairness_threshold, outlook_value,
                            trade_intent=None, presentation_capture=None,
-                           request_signature=None, fingerprints=None):
+                           request_signature=None, fingerprints=None, session_read=None):
     if presentation_capture is None:
         presentation_capture = _capture_trade_presentation()
-    return bool(_trade_running_policy_matches(job, presentation_capture, fingerprints)
+    return bool(_trade_running_policy_matches(job, presentation_capture, fingerprints,
+                                              session_read=session_read)
         and job.get("fairness_threshold") == fairness_threshold
         and (job.get("outlook_value") or None) == (outlook_value or None)
         and (job.get("trade_intent") or None) == (trade_intent or None)
@@ -3228,9 +3271,11 @@ def _trade_running_matches(job, fairness_threshold, outlook_value,
              or job["request_signature"] == request_signature))
 
 
-def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
+def _trade_running_policy_matches(job, presentation_capture, fingerprints=None,
+                                  session_read=None):
     """Preserve user intent/fairness, never work under an obsolete policy.
-    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
+    `fingerprints`: _trade_current_fingerprints(), read before the lock.
+    `session_read`: the caller's session read (_trade_fingerprints_match)."""
     if not (_job_live(job) and _trade_presentation_matches(job, presentation_capture)
             and _trade_owner_model_matches(job) and _trade_significance_matches(job)
             and _prepared_job_matches(job)):
@@ -3242,7 +3287,8 @@ def _trade_running_policy_matches(job, presentation_capture, fingerprints=None):
     # The worker stamps this after preparation; queued jobs already carry
     # the admission-time model/presentation/significance captures above.
     return (("safety_policy" not in job or job["safety_policy"] == expected_safety)
-            and _trade_fingerprints_match(job, fingerprints, running=True))
+            and _trade_fingerprints_match(job, fingerprints, running=True,
+                                          session_read=session_read))
 
 
 def _start_trade_job_thread(*, target, args, kwargs):
@@ -3323,8 +3369,8 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
     with a copied snapshot: one current history projection owns every card.
     `page_start`: the served slice's start index for a paged serve
-    (_trade_job_page_view), None for the legacy cumulative body; it keys the
-    `deck_i1_check` dedupe."""
+    (_trade_job_page_view), None for the legacy cumulative body, which
+    `deck_i1_check` counts only once the job is complete."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3443,10 +3489,12 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
                                       out["cards"], withdrawn, cut)
     if kick_floor:
         _kick_roster_floor(kick_floor)        # after the response is built, no lock held
-    # One event per page; a legacy cumulative body re-serves the whole deck on
-    # every poll, so it counts once, when the job is complete.
+    # Each card counted once per job (_emit_deck_i1_check): a page serve, a
+    # replace serve included, counts its new cards; a legacy cumulative body
+    # re-serves the whole deck on every poll, so it counts only once the job
+    # is complete, and then only the cards no page counted.
     if i1_report and (page_start is not None or job.get("status") == "complete"):
-        _emit_deck_i1_check(user_id, league_id, job["job_id"], page_start, i1_report)
+        _emit_deck_i1_check(user_id, league_id, job["job_id"], i1_report)
     return out
 
 
@@ -3462,12 +3510,30 @@ def _kick_roster_floor(league_id: str) -> None:
 
 
 # deck_i1_check: the C-a readout's data path (analytics-lead's pre-grant,
-# 2026-10-26). One server-fired NON_INTENT row per job serve page, recorded
-# off the request thread after the response is built.
+# 2026-10-26). One server-fired NON_INTENT row per serve with newly served
+# cards, each card counted once per job (#419 QA P3: a replace serve's cards
+# past page 0, and a job served both legacy and paged, were miscounted by the
+# old (job, page) key), recorded off the request thread after the response.
 _I1_AGE_BUCKETS = ((300, "under_5m"), (3600, "5m_to_1h"), (86400, "1h_to_24h"))
+# The cards counted per job, an LRU of at most _I1_EVENT_DEDUPE_MAX jobs and
+# _I1_EVENT_DEDUPE_CARDS card identities in all (the bound that holds memory:
+# ~130 B an identity once its job has left, so ~26 MB at most).
 _I1_EVENT_DEDUPE_MAX = 20000
-_i1_events_seen: "collections.OrderedDict[tuple, None]" = collections.OrderedDict()
+_I1_EVENT_DEDUPE_CARDS = 200_000
+_i1_events_seen: "collections.OrderedDict[str, set]" = collections.OrderedDict()
+_i1_events_counted = 0                     # identities held across _i1_events_seen
 _i1_events_lock = threading.Lock()
+# One worker, a bounded queue (#419 QA P3: a thread per emit peaked at 188 in a
+# 500-emit burst). A full queue drops the emit, warned at most once a minute
+# with the count; a serve never blocks or fails on it.
+_I1_EVENT_QUEUE_MAX = 1000
+_I1_EVENT_DROP_WARN_EVERY_S = 60
+_i1_event_queue: "queue.Queue" = queue.Queue(maxsize=_I1_EVENT_QUEUE_MAX)
+_i1_event_worker_for = None                # the queue the running worker serves
+_i1_event_worker_thread = None             # that worker, restarted once it died
+_I1_EVENT_EXIT_DRAIN_S = 5.0
+_i1_event_dropped = 0
+_i1_event_drop_warned_at = float("-inf")
 
 
 def _i1_age_bucket(age_s) -> str:
@@ -3479,48 +3545,179 @@ def _i1_age_bucket(age_s) -> str:
     return next((label for limit, label in _I1_AGE_BUCKETS if age_s < limit), "over_24h")
 
 
-def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, page, report: dict) -> None:
-    """Record `deck_i1_check` for one serve page, at most once per (job, page)
-    in this process; repeat polls of the same page are dropped. `page` is the
-    served slice's start index, or None for a legacy cumulative serve (which
-    the caller sends only once the job is complete). Never raises, never
-    blocks: the row is written on a daemon thread, non-touching
+def _i1_card_identity(card):
+    """A card's identity for deck_i1_check's once-per-job count: its trade_id,
+    else its impression_id, else its assets and partner (a card built without
+    either). trade_id first: it is stable across every publish, the page store
+    and a re-sorted (replace) serve, while the non-owner path publishes cards
+    before their impression_ids are stamped (#468 QA P2-1)."""
+    if isinstance(card, dict):
+        ident = card.get("trade_id") or card.get("impression_id")
+        if ident:
+            return ident
+        return ("assets", tuple(str(p["id"]) for p in card.get("give", [])),
+                tuple(str(p["id"]) for p in card.get("receive", [])),
+                str(card.get("target_user_id")))
+    ident = getattr(card, "trade_id", None) or getattr(card, "impression_id", None)
+    return ident or ("assets", tuple(map(str, card.give_player_ids)),
+                     tuple(map(str, card.receive_player_ids)), str(card.target_user_id))
+
+
+def _i1_new_cards(job_id: str, report: dict) -> dict | None:
+    """The serve's props over the cards not yet counted for this job, which
+    are now counted; None when there are none (a repeat poll). The serve-level
+    fields (mode, status, outcome, age_bucket) are the serve's; the counts sum
+    only the new cards."""
+    global _i1_events_counted
+    per_card = report.get("_cards") or ()
+    with _i1_events_lock:
+        seen = _i1_events_seen.get(job_id)
+        if seen is None:
+            seen = _i1_events_seen[job_id] = set()
+        _i1_events_seen.move_to_end(job_id)
+        new = []
+        for ident, counts in per_card:
+            if ident not in seen:
+                seen.add(ident)
+                new.append(counts)
+        _i1_events_counted += len(new)
+        while _i1_events_seen and (len(_i1_events_seen) > _I1_EVENT_DEDUPE_MAX
+                                   or _i1_events_counted > _I1_EVENT_DEDUPE_CARDS):
+            _old, gone = _i1_events_seen.popitem(last=False)
+            _i1_events_counted -= len(gone)
+            if _old == job_id:            # this job alone is over the budget
+                break
+    if not new:
+        return None
+    props = {k: v for k, v in report.items() if not k.startswith("_")}
+    for name in new[0]:
+        props[name] = sum(counts[name] for counts in new)
+    return props
+
+
+def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, report: dict) -> None:
+    """Record `deck_i1_check` for one serve's newly served cards: each card is
+    counted once per job in this process (by _i1_card_identity), so a repeat
+    poll records nothing, a replace serve records its cards not yet counted,
+    and a legacy body (sent only once the job is complete) its cards no page
+    counted. Never raises, never blocks: the row goes on a bounded queue to
+    one daemon worker (_i1_event_enqueue), written non-touching
     (`touch_user=False`), owned by the viewer, with the league in the row's
     `league_id` column and only a hashed job key in the props. A serve is an
     HTTP response: a view built outside a request records nothing."""
     if not has_request_context():
         return
     try:
-        key = (job_id, page)
-        with _i1_events_lock:
-            if key in _i1_events_seen:
-                return
-            _i1_events_seen[key] = None
-            if len(_i1_events_seen) > _I1_EVENT_DEDUPE_MAX:
-                _i1_events_seen.popitem(last=False)
-        props = dict(report, job_key=hashlib.sha256(str(job_id).encode()).hexdigest()[:12])
+        props = _i1_new_cards(job_id, report)
+        if props is None:
+            return
+        props["job_key"] = hashlib.sha256(str(job_id).encode()).hexdigest()[:12]
         device = dict(getattr(g, "device_info", {}) or {})
         # Like the trade worker: a write after an account deletion must not land.
         lease = _user_data_lifecycle.capture(user_id, started=g.get("_user_data_started"))
-        # The writer and engine in effect for this serve, so a late thread
-        # can't write through a different one.
+        # The writer and engine in effect for this serve, so a late write can't
+        # go through a different one.
         from . import database as _database
         write = functools.partial(record_event, user_id, "deck_i1_check", league_id=league_id,
                                   source="api", props=props, touch_user=False,
                                   bind=_database.engine, **device)
-        threading.Thread(target=_record_deck_i1_check, name="deck-i1-check", daemon=True,
-                         args=(lease, write)).start()
+        _i1_event_enqueue(lease, write)
     except Exception as err:          # analytics must never fail a serve
         log.warning("deck_i1_check not recorded job=%s: %s", job_id, err)
 
 
-def _record_deck_i1_check(lease, write) -> None:
+def _i1_event_enqueue(lease, write) -> None:
+    """Queue one write for the worker (started for the current queue on first
+    use, and again if it died: #468 QA P3-1); a full queue drops it, warned at
+    most once a minute with the count."""
+    global _i1_event_worker_for, _i1_event_worker_thread
+    q = _i1_event_queue
+    with _i1_events_lock:
+        thread = _i1_event_worker_thread
+        if _i1_event_worker_for is not q or thread is None or not thread.is_alive():
+            thread = threading.Thread(target=_i1_event_work, args=(q,), name="deck-i1-check",
+                                      daemon=True)
+            thread.start()
+            _i1_event_worker_for, _i1_event_worker_thread = q, thread
     try:
+        q.put_nowait((lease, write))
+    except queue.Full:
+        _i1_event_drop_warning(q, 1)
+
+
+def _i1_event_drop_warning(q, dropped: int = 0, *, force: bool = False) -> None:
+    """Count `dropped` emits; warn the count not yet warned at most once a
+    minute (any time with `force`, at exit). The worker calls it after each
+    write and when idle, so a burst's tail is logged once the drops stop
+    (#468 QA P3-5)."""
+    global _i1_event_dropped, _i1_event_drop_warned_at
+    now, warn = time.monotonic(), 0
+    with _i1_events_lock:
+        _i1_event_dropped += dropped
+        if _i1_event_dropped and (force or now - _i1_event_drop_warned_at
+                                  >= _I1_EVENT_DROP_WARN_EVERY_S):
+            warn, _i1_event_dropped, _i1_event_drop_warned_at = _i1_event_dropped, 0, now
+    if warn:
+        log.warning("deck_i1_check queue full (%d): dropped %d emit%s since the last warning",
+                    q.maxsize, warn, "" if warn == 1 else "s")
+
+
+def _i1_event_work(q) -> None:
+    """The worker: one write at a time, forever; a write's failure is logged.
+    A BaseException ends it, and the next enqueue starts another."""
+    while True:
+        try:
+            lease, write = q.get(timeout=_I1_EVENT_DROP_WARN_EVERY_S)
+        except queue.Empty:
+            _i1_event_drop_warning(q)
+            continue
+        try:
+            _record_deck_i1_check(lease, write)
+        except Exception as err:      # never let the worker die
+            log.warning("deck_i1_check worker: %s", err)
+        finally:
+            q.task_done()
+        _i1_event_drop_warning(q)
+
+
+def _i1_event_exit_drain() -> None:
+    """atexit (gunicorn exits its worker normally on SIGTERM): let the queued
+    writes land, bounded, then log the drops not yet warned (#468 QA P3-3)."""
+    _drain_deck_i1_checks(_I1_EVENT_EXIT_DRAIN_S)
+    _i1_event_drop_warning(_i1_event_queue, force=True)
+
+
+def _drain_deck_i1_checks(timeout: float = 5.0) -> bool:
+    """Wait up to `timeout` s for the queued and in-flight deck_i1_check writes
+    (tests, at teardown); True when none is left."""
+    q = _i1_event_queue
+    deadline = time.monotonic() + timeout
+    with q.all_tasks_done:
+        while q.unfinished_tasks:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            q.all_tasks_done.wait(remaining)
+    return True
+
+
+def _record_deck_i1_check(lease, write) -> None:
+    """One write, inside the viewer's user-data lease. A user whose deletion is
+    in progress is skipped, not waited on: the one worker would hold every
+    other user's write behind it, and a finished deletion refuses the write
+    anyway (#468 QA P3-2)."""
+    try:
+        if lease.deleting():
+            log.info("deck_i1_check skipped: the user's deletion is in progress")
+            return
         with lease.active() as active:
             if active:
                 write()
     except Exception as err:
         log.warning("deck_i1_check write failed: %s", err)
+
+
+atexit.register(_i1_event_exit_drain)
 
 
 # S0 admin test hook (the operator's TestFlight step A10): force one gate miss
@@ -3712,7 +3909,7 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
                 picks, players = (picks + 1, players) if pick else (picks, players + 1)
         return players, picks, generic, unknown
 
-    kept, unchecked = [], {}
+    kept, unchecked, card_split = [], {}, {}
     for card in (cards if snap.status != "missing" else ()):   # no rows: nothing to check
         if isinstance(card, dict):
             give = [p["id"] for p in card.get("give", [])]
@@ -3728,11 +3925,14 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
         counts["dropped_give"] += bool(give_moved)
         counts["dropped_receive"] += bool(receive_moved)
         # deck_i1_check: the side x asset-type split, and distinct cards.
-        split["dropped_give_player"] += bool(give_players)
-        split["dropped_give_pick"] += bool(give_picks)
-        split["dropped_receive_player"] += bool(receive_players)
-        split["dropped_receive_pick"] += bool(receive_picks)
-        split["dropped_cards"] += bool(give_moved or receive_moved)
+        card_split[id(card)] = {
+            "dropped_give_player": int(bool(give_players)),
+            "dropped_give_pick": int(bool(give_picks)),
+            "dropped_receive_player": int(bool(receive_players)),
+            "dropped_receive_pick": int(bool(receive_picks)),
+            "dropped_cards": int(bool(give_moved or receive_moved))}
+        for name, value in card_split[id(card)].items():
+            split[name] += value
         unchecked[id(card)] = [a + b for a, b in zip(give_unchecked, receive_unchecked)]
         if not (give_moved or receive_moved):
             kept.append(card)
@@ -3769,6 +3969,17 @@ def _roster_serve_check(cards, league_id: str, viewer_id: str, mode: int, gates:
                       cards=len(cards), kept=len(served),
                       unchecked_generic=counts["unchecked_generic"],
                       unchecked_pick_owner=counts["unchecked_pick_owner"], **split)
+        # Each checked card's share of those counts, so the event can count a
+        # card once per job (_emit_deck_i1_check sums the cards not yet counted).
+        served_ids = {id(c) for c in served}
+        report["_cards"] = [
+            (_i1_card_identity(card), {
+                "cards": 1, "kept": int(id(card) in served_ids),
+                **card_split.get(id(card), dict.fromkeys(split, 0)),
+                **dict(zip(("unchecked_generic", "unchecked_pick_owner"),
+                           unchecked.get(id(card), (0, 0)) if id(card) in served_ids
+                           else (0, 0)))})
+            for card in cards]
     return served, (block if gates else None), past_bound
 
 
@@ -3867,7 +4078,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 2
+DECK_PIPELINE_VERSION = 3
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -3938,6 +4149,7 @@ DECK_PIPELINE_IGNORED = {
     "_job_live": "job lifecycle: whether a job may still publish",
     "_job_superseded": "job lifecycle: the supersede fence",
     "_revoke_trade_job_locked": "job lifecycle: revocation",
+    "_note_job_picks_read": "the job's roster stamp: records which picks it read (#484 QA P2-1); never shapes the deck",
     # logging and telemetry
     "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
@@ -3989,6 +4201,7 @@ DECK_PIPELINE_IGNORED = {
 DECK_PIPELINE_PINS = {
     1: "38068a074677acaa",
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
+    3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4304,8 +4517,9 @@ def _deck_store_missed(job_id: str) -> None:
     """U4 (#434 QA P2-1): the store wrote no page row for this deck (the store
     was off, the job revoked, the deck not page-eligible, the save raised, or
     the supersede guard refused it), so none of its cards has a stored
-    snapshot: its stored count is 0, on the deck and in its pack's header (a
-    later flush retries a failed header write). Never raises."""
+    snapshot: its stored count is 0, on the deck and in its pack's header when
+    the header has none (models-lead addendum C (d3): a recorded count is never
+    rewritten; a later flush retries a failed header write). Never raises."""
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         ev = job.get("evidence") if job is not None else None
@@ -4314,8 +4528,8 @@ def _deck_store_missed(job_id: str) -> None:
     try:
         with _deck_evidence_write_lock:
             with ev.lock:
-                ev.stored_count = 0           # overwrites a refused store's len(cards)
-                dirty = ev.pack is not None and ev.pack.run.get("stored_count") != 0
+                ev.stored_count = 0           # a store that returned before its save, too
+                dirty = ev.pack is not None and ev.pack.run.get("stored_count") is None
                 if dirty:
                     ev.pack.run["stored_count"] = 0
                     ev.pack_dirty = True
@@ -4331,7 +4545,9 @@ def _store_trade_page_row(job_id: str) -> bool:
         return False
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
-        if job is None or _trade_job_revoked(job):
+        # #481 QA P3-1: pages from rosters the league has since replaced are
+        # never shared through the store, whatever the stamp says.
+        if job is None or _trade_job_revoked(job) or _job_read_predates_move(job):
             return False
         job = dict(job)   # published card lists are replaced, never mutated
     if not _job_page_eligible(job):
@@ -4353,24 +4569,45 @@ def _store_trade_page_row(job_id: str) -> bool:
             if ev is not None:
                 with ev.lock:
                     ev.stored_ids = {c.get("impression_id") for c in cards} - {None}
-                    ev.stored_count = len(cards)
                     ev.truncated = len(job.get("cards") or []) > len(cards)
                     ev.pages_bytes = len(blob)
-                    evidence = ev.blob()
-            written = _db.save_trade_page({
-                "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
-                "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
-                "values_snapshot_id": job["values_snapshot_id"],
-                "engine_version": _trade_page_engine_version(
-                    _trade_engine_name(bool(job.get("value_core"))), job.get("safety_policy", []),
-                    job.get("presentation_capture")),
-                "config_signature": job["request_signature"],
-                "experiment_digest": job["experiment_digest"], "deck_job_id": job_id,
-                "built_at": _db.page_store_iso(built),
-                "expires_at": _db.page_store_iso(min(expiries, default=built + _TRADE_CARD_TTL_S)),
-                "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
-                "stored_bytes": len(blob) + len(evidence or b""), "state": "ready",
-            })
+                    evidence = ev.blob(stored_count=len(cards))
+            written = False
+            try:
+                written = _db.save_trade_page({
+                    "user_id": user_id, "league_id": league_id, "scoring_format": scoring_format,
+                    "request_scope": job["page_scope"], "roster_fp": job["roster_fp"],
+                    "values_snapshot_id": job["values_snapshot_id"],
+                    "engine_version": _trade_page_engine_version(
+                        _trade_engine_name(bool(job.get("value_core"))),
+                        job.get("safety_policy", []), job.get("presentation_capture")),
+                    "config_signature": job["request_signature"],
+                    "experiment_digest": job["experiment_digest"], "deck_job_id": job_id,
+                    "built_at": _db.page_store_iso(built),
+                    "expires_at": _db.page_store_iso(min(expiries,
+                                                         default=built + _TRADE_CARD_TTL_S)),
+                    "card_count": len(cards), "pages_blob": blob, "evidence_blob": evidence,
+                    "stored_bytes": len(blob) + len(evidence or b""), "state": "ready",
+                })
+            except Exception:
+                # #445 QA P3-4, the double fault: a save that committed and then
+                # raised left its row. Re-read it by deck_job_id to settle
+                # `written`; no row, or a failed re-read, re-raises as before.
+                try:
+                    written = _db.load_trade_page_for_job(user_id, job_id) is not None
+                except Exception:
+                    written = False
+                if not written:
+                    raise
+                log.warning("trade-page %s: the save raised, but its row is stored", job_id,
+                            exc_info=True)
+            finally:
+                if ev is not None:
+                    # #438 QA P3-2: the deck's stored count is set only here, once
+                    # the save is known, under the write lock a delivery takes: a
+                    # first delivery never packs a count a refused store set.
+                    with ev.lock:
+                        ev.stored_count = len(cards) if written else 0
             # U4 (#428 QA item 4): a delivery while the job ran writes the pack at
             # _deck_evidence_job_done, before this store, so it lacks the deck's
             # stored count. Record it in the header now (a later flush retries).
@@ -4731,11 +4968,14 @@ class _DeckEvidence:
             self.diagnostics.pop(snapshot["snapshot_id"], None)
         self.marked.update(upgrades)
 
-    def blob(self) -> bytes | None:
+    def blob(self, stored_count: int | None = None) -> bytes | None:
         """Under `lock`: the page store's evidence_blob (CompressedJSON): the not
         yet written snapshots of the stored cards, every not yet written ghost
         row, the diagnostic snapshots and the candidate set; None once nothing
-        is left."""
+        is left. `stored_count`: the store's count, before its row is written
+        (else the deck's)."""
+        if stored_count is None:
+            stored_count = self.stored_count
         rows = [_unpack_row(packed) for iid, (_, packed) in self.rows.items()
                 if self.stored_ids is None or iid in self.stored_ids]
         held = self.trade_impressions or self.generated or self.bakeoff_slim
@@ -4744,7 +4984,7 @@ class _DeckEvidence:
         impressions = None
         if self.trade_impressions is not None:   # the stored cards' only
             impressions = _unpack_row(self.trade_impressions)
-            impressions["cards"] = impressions["cards"][:self.stored_count]
+            impressions["cards"] = impressions["cards"][:stored_count]
         from .database import CompressedJSON
         return CompressedJSON.encode({
             "v": _EVIDENCE_BLOB_FORMAT, "deck_job_id": self.job_id,
@@ -4776,6 +5016,9 @@ class _DeckEvidence:
             ev.diagnostics = {d["snapshot_id"]: _pack_row(d) for d in blob.get("diagnostics") or []}
             ev.candidate_set = blob.get("candidate_set")
             ev.pages_bytes = blob.get("pages_bytes")
+            # #438 QA P2-1: the deck's stored count is its row's, so a pack first
+            # written on the stored path records it too.
+            ev.stored_count = (row or {}).get("card_count")
             if blob.get("trade_impressions") is not None:
                 ev.trade_impressions = _pack_row(blob["trade_impressions"])
             if blob.get("bakeoff_run") is not None:   # S5: always written at first delivery
@@ -4838,10 +5081,6 @@ class _PackState:
                                       separators=(",", ":")) + ',"header":').encode("utf-8"))
         self.checksum = checksum                  # the stored row's: the CAS predicate
         self.base_run = copy.deepcopy(header.get("run"))   # the run as last stored
-        # Indexes whose upgrade miss a header commit counted (U4): a retried
-        # outcome never counts the same card twice. _deck_upgrade_from_pack's
-        # callers all hold _deck_evidence_write_lock, so it needs no lock of its own.
-        self.miss_counted: set = set()
 
     @property
     def run(self) -> dict:
@@ -4891,7 +5130,8 @@ def _deck_pack_input(ev: _DeckEvidence):
     rows = None if ev.pack_cards is not None else ev.pack_rows
     run = {**ev.run_meta, "built_at": ev.built_at, "deliveries": [list(d) for d in ev.deliveries],
            "page_store": 1 if ev.page_store else 0, "retired": False,
-           "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)}
+           "upgrade_misses": dict.fromkeys(_UPGRADE_MISS_CAUSES, 0), "upgrade_miss_cards": {},
+           "upgrade_miss_row_gone": {}, "upgrade_miss_row_gone_why": {}}
     if ev.stored_count is not None:       # U4: the deck's own stored count (#428 QA (c))
         run["stored_count"] = ev.stored_count
     if ev.deck_source:                    # §6: eval reads deck_source off the run metadata
@@ -5005,8 +5245,11 @@ def _merge_deliveries(a, b) -> list:
 def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
     """Another instance updated the header first: keep both. Deliveries are
     the union (earliest time per index); retired stays true once true (the
-    earliest retired_at); each upgrade_misses cause is the stored count plus
-    ours since our base."""
+    earliest retired_at); upgrade_miss_cards is the union, a card both
+    missed keeping the stored cause (it landed first), and upgrade_misses is
+    that map's tally, so a card two instances missed counts once;
+    upgrade_miss_row_gone and upgrade_miss_row_gone_why are unions the same
+    way, each kept to its parent's keys."""
     merged = {**ours, **stored}
     merged["deliveries"] = _merge_deliveries(stored.get("deliveries"), ours.get("deliveries"))
     if stored.get("retired") or ours.get("retired"):
@@ -5014,10 +5257,15 @@ def _merge_pack_runs(stored: dict, ours: dict, base: dict | None) -> dict:
         stamps = [t for t in (stored.get("retired_at"), ours.get("retired_at")) if t]
         if stamps:
             merged["retired_at"] = min(stamps)
-    merged["upgrade_misses"] = {
-        cause: _upgrade_misses(stored)[cause] + max(
-            0, _upgrade_misses(ours)[cause] - _upgrade_misses(base or {})[cause])
-        for cause in _UPGRADE_MISS_CAUSES}
+    cards = {**_upgrade_miss_cards(ours), **_upgrade_miss_cards(stored)}
+    merged["upgrade_miss_cards"] = cards
+    merged["upgrade_misses"] = _upgrade_miss_tally(cards)
+    gone = {**_upgrade_miss_row_gone(ours), **_upgrade_miss_row_gone(stored)}
+    # The union, the stored entry winning; a row-gone key is always a miss-map
+    # key (flip_read joins them), so one without its card is dropped.
+    merged["upgrade_miss_row_gone"] = gone = {k: v for k, v in gone.items() if k in cards}
+    why = {**_upgrade_miss_row_gone_why(ours), **_upgrade_miss_row_gone_why(stored)}
+    merged["upgrade_miss_row_gone_why"] = {k: v for k, v in why.items() if k in gone}
     return merged
 
 
@@ -5202,13 +5450,47 @@ def _deck_upgrade_stored_locked(state, deck_job_id: str, impression_id: str, ind
     stored = _DeckEvidence.from_row(user_id, deck_job_id, page, None) if page else None
     held = stored.rows.get(impression_id) if stored is not None else None
     if held is None:
+        # The deck's page row gone (a newer deck's row replaced it, or eviction
+        # deleted it) while its pack recorded stored pages above this card:
+        # recorded either way (head-eng's condition 1); option A decides the cause.
+        recorded = state.run.get("stored_count")
+        row_gone = (recorded if page is None and isinstance(recorded, int)
+                    and not isinstance(recorded, bool) and recorded > index else None)
+        known = page["card_count"] if page else (0 if _STORED_COUNT_FROM_ROW_NOW else None)
+        why = (_row_gone_why(state, deck_job_id, index)
+               if row_gone is not None and str(index) not in _upgrade_miss_cards(state.run)
+               else None)
         return _deck_upgrade_from_pack(state, deck_job_id, impression_id, index, now,
-                                       stored_count=page["card_count"] if page else None)
+                                       stored_count=known, row_gone=row_gone,
+                                       stored_from="row" if page else "no_row", row_gone_why=why)
     card = _deck_pack_card(state, index)
     row = {**_unpack_row(held[1]), "evidence_tier": "viewed", "served_at": card["served_at"],
            "delivered_at": state.delivered_at(index) or now}
     _db.save_deck_evidence([row], diagnostics=stored.closure([row]), deck_job_id=deck_job_id)
     return True
+
+
+def _row_gone_why(state, deck_job_id: str, index: int) -> str | None:
+    """models-lead (d1): why a row-gone miss's page row is gone, from one indexed
+    read of the deck's page-store key (scoring_format and page_scope from its
+    run, the league from its packed card): "replaced" when the key's row now
+    holds another deck, "no_row" when the key has none (aged, over budget, or a
+    bug). None, unsplit, for a pack written before the key was recorded, or
+    when the read fails (it's a report field: the miss never waits on it)."""
+    from . import database as _db
+    scoring_format, scope = state.run.get("scoring_format"), state.run.get("page_scope")
+    if not (scoring_format and scope):
+        return None
+    try:
+        holder = _db.load_trade_page_deck_job_id(
+            state.user_id, _deck_pack_card(state, index)["league_id"], scoring_format, scope)
+    except Exception:
+        log.warning("[evidence] row-gone why job=%s index=%d: the page-store read failed",
+                    deck_job_id, index, exc_info=True)
+        return None
+    if holder is None:
+        return "no_row"
+    return "replaced" if holder != deck_job_id else None    # its own row is back: unsplit
 
 
 def _deck_pack_card(state, index: int) -> dict:
@@ -5218,41 +5500,88 @@ def _deck_pack_card(state, index: int) -> dict:
     return by_index[index]
 
 
-# U4 (models-lead addendum A, R1/R2): a display past snapshot retention is
-# impossible, with one named exception, restart_split: a card past the deck's
-# stored pages, delivered before a process restart and viewed after it. It is
-# counted per run in the pack's run metadata (upgrade_misses, an object with
-# every cause, always present); its outcome joins the packed card by
-# impression_id and it scores normally. Any other miss is a defect: "other",
-# logged at error level. The cause comes from provenance, never a clock
-# (#428 QA (d): an import-time stamp called a deploy overlap's or a re-fork's
-# misses "other"): which decks this process built (_deck_held) and which it
-# evicted (_deck_evicted_at).
-# evicted_split (trades-eng 2026-10-26): the same card when its job left this
-# process by the cleanup loop's eviction (4 h). Off until models-lead rules:
-# while _EVICTED_SPLIT_NAMED is False those misses are "other". Eval reads any
-# key but "other" as a named cause.
+# U4 (models-lead addendum C (c4), R1; R2): a display past snapshot retention
+# is impossible, with two named exceptions, both for a card at or past the
+# deck's effective stored count (its current page-row count, else 0):
+# restart_split, when this process never held the deck's job, and
+# evicted_split, when this process evicted it. Each is counted per run in the
+# pack's run metadata (upgrade_misses, an object with every cause, always
+# present); its outcome joins the packed card by impression_id and it scores
+# normally. Any other miss is a defect: "other", logged at error level. The
+# cause comes from provenance, never a clock (#428 QA (d): an import-time stamp
+# called a deploy overlap's or a re-fork's misses "other"): which decks this
+# process built (_deck_held) and which it evicted (_deck_evicted_at). Eval
+# reads any key but "other" as a named cause.
 _UPGRADE_MISS_CAUSES = ("restart_split", "evicted_split", "other")
-_EVICTED_SPLIT_NAMED = False
-_DECK_LEDGER_MAX = 16384
-_deck_held: dict = {}                      # deck_job_id -> None: decks this process built
-_deck_evicted_at: dict = {}                # deck_job_id -> when the cleanup loop evicted its job
+# evicted_split named: models-lead ruled, addendum C, 2026-10-26 (C1). Off,
+# those misses would count as "other".
+_EVICTED_SPLIT_NAMED = True
+# Option A: models-lead ruled, addendum C, 2026-10-26 (C4). A deck's stored
+# pages are what the page store holds now: on the stored path the count is the
+# deck's current page row's card_count, and 0 when it has none (a newer deck's
+# row replaced it, or evict_trade_pages deleted it), instead of the count its
+# pack recorded (which is never rewritten, (d3)). Off, the pack's count. A
+# one-line switch; either way the writer records such misses in
+# run["upgrade_miss_row_gone"].
+_STORED_COUNT_FROM_ROW_NOW = True
+# models-lead addendum C (c2): a ledger entry lives at least the 24 h display
+# cap, so a late view of an evicted (or held) deck keeps its cause. Entries are
+# trimmed by age; the count cap is a memory guard only, far above a day's adds
+# (131,072 entries ≈ 23 MiB per ledger as OrderedDicts, ~180 B an entry with its
+# id; it normally holds one day of adds), and a guard trim of an entry younger
+# than 24 h logs a warning.
+_DECK_LEDGER_RETAIN_S = 24 * 3600          # _DECK_DISPLAY_CAP_S
+_DECK_LEDGER_GUARD = 131072
+# OrderedDicts (#451 QA P2-1): peeking at and popping the oldest entry are O(1).
+# A plain dict's next(iter()) rescans the deleted slots at its front, so a mass
+# age trim (a ledger idle for 24 h, then one add) was O(n²): 11.9 s at the guard,
+# under the leaf lock and, for evictions, under _trade_jobs_lock.
+_deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> built here (epoch s)
+_deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
+_ledger_now = time.time                    # the ledgers' clock (tests replace it)
+_DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
+# Young entries the guard trimmed since its last warning, per ledger (#451 QA:
+# the warning names which). Reset per test by backend/tests/conftest.py.
+_ledger_guard_young = {"held": 0, "evicted": 0}
+_ledger_guard_warned_at = float("-inf")
 # A leaf lock for the ledgers' writes (#428 QA item 2: kickoffs add concurrently,
-# and the FIFO trim at the cap raced). Never take another lock while holding it.
-# Readers stay lock-free: membership and .get are atomic.
+# and the trim raced). Never take another lock while holding it (the guard's
+# warning is logged after it's released). Readers stay lock-free: membership
+# and .get are atomic.
 _deck_ledger_lock = threading.Lock()
 
 
-def _ledger_add(ledger: dict, key: str, value) -> None:
+def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None:
+    """Note `key` now. Entries stay in time order (a re-add moves to the end),
+    so the trims take the oldest first, each in O(1): every entry older than
+    the retention, then, at the guard, the oldest young ones (warned at most
+    once a minute, with the counts since the last warning, per ledger)."""
+    global _ledger_guard_young, _ledger_guard_warned_at
+    now = _ledger_now()
+    which = "evicted" if ledger is _deck_evicted_at else "held"
+    warn = None
     with _deck_ledger_lock:
-        while len(ledger) >= _DECK_LEDGER_MAX:
-            ledger.pop(next(iter(ledger)))
-        ledger[key] = value
+        ledger.pop(key, None)
+        while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
+            ledger.popitem(last=False)
+        while len(ledger) >= _DECK_LEDGER_GUARD:
+            _ledger_guard_young[which] += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
+        ledger[key] = now
+        if (any(_ledger_guard_young.values())
+                and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S):
+            warn, _ledger_guard_young = _ledger_guard_young, {"held": 0, "evicted": 0}
+            _ledger_guard_warned_at = now
+    if warn:
+        total = sum(warn.values())
+        log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
+                    "24 h since its last warning (held=%d, evicted=%d): a late view of such "
+                    "a deck reads restart_split", _DECK_LEDGER_GUARD, total,
+                    "y" if total == 1 else "ies", warn["held"], warn["evicted"])
 
 
 def _note_deck_held(job_id: str) -> None:
     """A flag-on deck this process built (its job's evidence admitted here)."""
-    _ledger_add(_deck_held, job_id, None)
+    _ledger_add(_deck_held, job_id)
 
 
 def _note_deck_evicted(job_id: str, job: Mapping) -> None:
@@ -5261,14 +5590,46 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     ev = job.get("evidence")
     if ev is None or not ev.packed or ev.pack is None:
         return
-    _ledger_add(_deck_evicted_at, job_id, datetime.now(timezone.utc).isoformat())
+    _ledger_add(_deck_evicted_at, job_id)
+    # #451 QA P3-1: the two ledgers trim independently, so an evicted deck
+    # leaves the held one. Once its eviction record ages out, a late view reads
+    # restart_split (C (c2)'s assumption), never other.
+    with _deck_ledger_lock:
+        _deck_held.pop(job_id, None)
 
 
-def _upgrade_misses(run: Mapping) -> dict:
-    """A run's upgrade_misses, every cause present (0 when absent)."""
-    misses = run.get("upgrade_misses")
-    misses = misses if isinstance(misses, Mapping) else {}
-    return {cause: int(misses.get(cause) or 0) for cause in _UPGRADE_MISS_CAUSES}
+def _upgrade_miss_cards(run: Mapping) -> dict:
+    """A run's upgrade_miss_cards, {"<card_index>": cause} (models-eng's per-card
+    miss map): which cards missed, each once, with its cause. {} when absent."""
+    cards = run.get("upgrade_miss_cards")
+    return {str(k): v for k, v in cards.items()} if isinstance(cards, Mapping) else {}
+
+
+def _upgrade_miss_row_gone(run: Mapping) -> dict:
+    """A run's upgrade_miss_row_gone, {"<card_index>": the pack's recorded
+    stored_count} (head-eng's condition 1): the misses where the deck's page
+    row was gone and its recorded count was above the card, i.e. where option
+    A decides (or, off, explains) the cause. {} when absent."""
+    gone = run.get("upgrade_miss_row_gone")
+    return {str(k): v for k, v in gone.items()} if isinstance(gone, Mapping) else {}
+
+
+def _upgrade_miss_row_gone_why(run: Mapping) -> dict:
+    """A run's upgrade_miss_row_gone_why, {"<card_index>": "replaced" | "no_row"}
+    (models-lead (d1), _row_gone_why): a row-gone entry's split, when its pack
+    records the deck's page-store key. {} when absent."""
+    why = run.get("upgrade_miss_row_gone_why")
+    return {str(k): v for k, v in why.items()} if isinstance(why, Mapping) else {}
+
+
+def _upgrade_miss_tally(cards: Mapping) -> dict:
+    """upgrade_misses as the per-card map's tally: every cause present, and
+    any other cause the map carries counted under its own key. The writer
+    keeps this invariant: upgrade_misses always equals its map's tally."""
+    tally = dict.fromkeys(_UPGRADE_MISS_CAUSES, 0)
+    for cause in cards.values():
+        tally[cause] = tally.get(cause, 0) + 1
+    return tally
 
 
 def _deck_stored_count(known, run: Mapping) -> int:
@@ -5280,10 +5641,17 @@ def _deck_stored_count(known, run: Mapping) -> int:
     whose store didn't write, and one whose process died between its pack's
     first write and its store. The knobs are never read: changing them can't
     turn a restart split into other."""
-    for value in (known, run.get("stored_count")):
+    return _deck_stored_count_from(known, run)[0]
+
+
+def _deck_stored_count_from(known, run: Mapping, known_from: str = "job") -> tuple[int, str]:
+    """_deck_stored_count, with where the count came from (#438 QA P3-1, the
+    miss log's stored_from): `known_from` (the job; the page row; with option
+    A, no_row: the row is gone, so 0), else "pack", else "fallback"."""
+    for value, source in ((known, known_from), (run.get("stored_count"), "pack")):
         if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
-            return value
-    return 0
+            return value, source
+    return 0, "fallback"
 
 
 def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, delivered: bool) -> str:
@@ -5306,15 +5674,21 @@ def _upgrade_miss_cause(deck_job_id: str, index: int, stored_count: int, deliver
 
 
 def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: int, now: str,
-                            ev_for_header=None, stored_count: int | None = None) -> bool:
+                            ev_for_header=None, stored_count: int | None = None,
+                            row_gone: int | None = None, stored_from: str = "job",
+                            row_gone_why: str | None = None) -> bool:
     """The upgrade miss (U4's fallback): the card's row built from its packed
     card (its columns, and every other packed key as its features; no assets,
     no valuation), so the outcome still joins it, and the miss counted by
     cause. `stored_count`: the deck's stored-page count, when the caller
-    knows it (_deck_stored_count)."""
+    knows it (_deck_stored_count), and `stored_from` where it came from.
+    `row_gone`: the pack's recorded stored count when the deck's page row is
+    gone and that count was above the card (recorded in
+    run["upgrade_miss_row_gone"] with the miss), and `row_gone_why` its split
+    (run["upgrade_miss_row_gone_why"], only with a row-gone entry)."""
     from . import database as _db
     card = _deck_pack_card(state, index)
-    stored = _deck_stored_count(stored_count, state.run)
+    stored, stored_from = _deck_stored_count_from(stored_count, state.run, stored_from)
     cause = _upgrade_miss_cause(deck_job_id, index, stored, state.delivered_at(index) is not None)
     # The packed card is the row's features plus its columns (_pack_card): the
     # inverse keeps every packed key the columns don't hold, so eval reads this
@@ -5327,42 +5701,84 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
     row.update(impression_id=impression_id, served_at=card["served_at"], is_ghost=0,
                features_json=json.dumps(features), assets_json=None, valuation_json=None,
                evidence_tier="viewed", delivered_at=state.delivered_at(index) or now)
-    def count(delta: int) -> None:
-        misses = _upgrade_misses(state.run)
-        misses[cause] += delta
-        state.run["upgrade_misses"] = misses
+    key = str(index)
 
-    # Once per card (#428 QA item 1): a commit that raises takes its increment
-    # back (the outcome's retry counts again); a commit that returns, even False
-    # (the CAS gave up: the count stays in state.run for a later flush), marks
-    # the index counted, so a retry after the row save below raised doesn't.
-    if index not in state.miss_counted:
+    def record(add: bool) -> None:
+        """The card in (or out of) the run's miss map, upgrade_misses its tally,
+        and its row-gone entry when it has one."""
+        cards = _upgrade_miss_cards(state.run)
+        gone = _upgrade_miss_row_gone(state.run)
+        why = _upgrade_miss_row_gone_why(state.run)
+        base = state.base_run or {}
+        if add:
+            cards[key] = cause
+            if row_gone is not None:
+                gone[key] = row_gone
+                if row_gone_why is not None:
+                    why[key] = row_gone_why
+        else:                         # ours only: an entry another writer stored stays
+            if key not in _upgrade_miss_cards(base):
+                cards.pop(key, None)
+            if key not in cards or key not in _upgrade_miss_row_gone(base):
+                gone.pop(key, None)   # with its card: a row-gone key is always a map key
+            if key not in gone or key not in _upgrade_miss_row_gone_why(base):
+                why.pop(key, None)    # with its row-gone entry: a why key is always one
+        state.run["upgrade_miss_cards"] = cards
+        state.run["upgrade_misses"] = _upgrade_miss_tally(cards)
+        state.run["upgrade_miss_row_gone"] = gone
+        state.run["upgrade_miss_row_gone_why"] = why
+
+    # Once per card, by the persisted map (models-eng): a card already in it
+    # is never counted again, by this process or one that reloaded the header
+    # after a deploy or an eviction (#434 QA P3-1). A commit that raises takes
+    # the entry back and re-raises (the outcome's retry counts it then); a
+    # commit that returns, even False (the CAS gave up: the entry waits in
+    # state.run for a later flush), keeps it.
+    if key not in _upgrade_miss_cards(state.run):
         if ev_for_header is not None:
             with ev_for_header.lock:
-                count(1)
+                record(True)
                 ev_for_header.pack_dirty = True
             try:
                 _deck_pack_flush_header(ev_for_header)
             except Exception:
                 with ev_for_header.lock:
-                    count(-1)
+                    record(False)
                 raise
         else:
-            count(1)
+            record(True)
             try:
                 _deck_pack_commit(deck_job_id, state)
             except Exception:
-                count(-1)
+                record(False)
                 raise
-        state.miss_counted.add(index)
-        line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d held_here=%s "
-                "evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
-        args = (cause, deck_job_id, index, stored, deck_job_id in _deck_held,
-                _deck_evicted_at.get(deck_job_id), state.delivered_at(index), now)
-        if cause == "other":              # U4-R2: must be zero; it goes back to models-lead
+        # The cause the commit kept: a deploy overlap's CAS merge keeps the
+        # stored one (#439/#445 QA P3-1), and the line logs that, with ours as
+        # local_cause when they differ (then at WARNING: the writer whose cause
+        # stood logged its own line).
+        if ev_for_header is not None:
+            with ev_for_header.lock:
+                kept = _upgrade_miss_cards(state.run).get(key, cause)
+        else:
+            kept = _upgrade_miss_cards(state.run).get(key, cause)
+        line = ("[evidence] upgrade miss cause=%s job=%s index=%d stored=%d stored_from=%s "
+                "held_here=%s evicted_here=%s delivered_at=%s outcome_at=%s: row from the pack")
+        evicted_at = _deck_evicted_at.get(deck_job_id)
+        args = (kept, deck_job_id, index, stored, stored_from, deck_job_id in _deck_held,
+                None if evicted_at is None
+                else datetime.fromtimestamp(evicted_at, timezone.utc).isoformat(),
+                state.delivered_at(index), now)
+        if kept != cause:
+            log.warning(line + " local_cause=%s", *args, cause)
+        elif cause == "other":            # U4-R2: must be zero; it goes back to models-lead
             log.error(line, *args)
         else:
             log.warning(line, *args)
+        if stored_from == "fallback" and state.run.get("page_store"):
+            # #438 QA P3-1: never silent. Not other: the process dying between
+            # the deck's job_done and its store is the legitimate case.
+            log.warning("[evidence] stored count fallback job=%s index=%d: a page-scoped "
+                        "deck with no recorded stored count reads 0", deck_job_id, index)
     _db.save_deck_evidence([row], deck_job_id=deck_job_id)
     return True
 
@@ -6007,6 +6423,11 @@ def _deck_evidence_job_done(job_id: str) -> None:
         ev.complete = True
         ev.run_meta = {"values_snapshot_id": job.get("values_snapshot_id"),
                        "config_ref": job.get("request_signature")}
+        if job.get("page_scope"):
+            # models-lead (d1): the deck's page-store key, so a row-gone miss
+            # can tell a replaced row from none (_row_gone_why). Omitted for a
+            # deck with no page scope (it never has a page row).
+            ev.run_meta.update(scoring_format=job["key"][2], page_scope=job["page_scope"])
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
 
@@ -6017,12 +6438,14 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
     builds a new deck. Its in-process evidence is dropped and its job revoked,
     so no response serves it from this process (P2's live-job pages past the
     stored ones included); its stored pages, if any, serve and write through
-    the page store's evidence_blob, as after a restart. Delivered decks keep
-    theirs (written, and freed, at their first delivery). Returns the count."""
+    the page store's evidence_blob, as after a restart: it leaves _deck_held
+    too, so an upgrade miss on it reads as a restart's (release-lead's #451 QA
+    P2). Delivered decks keep theirs (written, and freed, at their first
+    delivery). Returns the count."""
     now = time.monotonic() if now is None else now
     dropped = 0
     with _trade_jobs_lock:
-        for job in _trade_jobs.values():
+        for job_id, job in _trade_jobs.items():
             ev = job.get("evidence")
             if (ev is None or job.get("status") == "running" or not job.get("finished_at")
                     or now - job["finished_at"] <= _PREGEN_TTL_SECONDS):
@@ -6035,6 +6458,14 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                 ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
+            # The deck's snapshots left this process: a miss on it is
+            # restart_split, as after a restart, never "other" (a held deck).
+            # The later eviction can't record it (no evidence left). Pending
+            # models-lead's ruling via head-eng: evicted_split would mean noting
+            # it in _deck_evicted_at here instead. Order: jobs, then the ledger
+            # (leaf), as in _note_deck_evicted.
+            with _deck_ledger_lock:
+                _deck_held.pop(job_id, None)
             dropped += 1
     if dropped:
         log.info("deck-evidence: dropped %d undelivered deck(s) past %d s", dropped,
@@ -6148,8 +6579,8 @@ def _trade_page_view(row: dict, cursor: int, *, user_id: str, viewer_id: str, sn
         out.update(status="running", wait_reason="roster_check", cursor=cursor, total_ready=0)
     if search_id is not None:
         out["search_id"] = search_id
-    if i1_report:                         # off-thread, once per (deck, page)
-        _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], cursor, i1_report)
+    if i1_report:                         # off-thread, each card once per deck
+        _emit_deck_i1_check(user_id, league_id, row["deck_job_id"], i1_report)
     return out, past_bound
 
 
@@ -6343,11 +6774,14 @@ def _serve_trade_page_for(sess: Mapping, row: dict, current, *, sess_token: str,
         current_job = _trade_jobs.get(_trade_jobs_by_key.get(key))
         backing = None
         if current_job is not None and not any(token.revoked for token in input_epochs):
+            session_read = sess.get("roster_fetch_started_at")
             if _trade_job_is_fresh(current_job, fairness_threshold, outlook_value, None,
-                                   presentation_capture, request_signature, fingerprints):
+                                   presentation_capture, request_signature, fingerprints,
+                                   session_read=session_read):
                 backing = "complete"
             elif _trade_running_matches(current_job, fairness_threshold, outlook_value, None,
-                                        presentation_capture, request_signature, fingerprints):
+                                        presentation_capture, request_signature, fingerprints,
+                                        session_read=session_read):
                 backing = "running"
     return _serve_trade_page(
         row, current, user_id=user_id, league_id=league_id,
@@ -6858,10 +7292,12 @@ def _trade_presentation_matches(job, captured):
 
 def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
                         trade_intent: str | None = None, presentation_capture=None,
-                        request_signature=None, fingerprints=None) -> bool:
+                        request_signature=None, fingerprints=None,
+                        session_read=None) -> bool:
     """True iff this job's result can be returned as-is to a new caller —
     i.e. it's complete, recent, and was generated for the same parameters.
-    `fingerprints`: _trade_current_fingerprints(), read before the lock."""
+    `fingerprints`: _trade_current_fingerprints(), read before the lock.
+    `session_read`: the caller's session read (_trade_fingerprints_match)."""
     if job.get("status") != "complete" or _trade_job_revoked(job):
         return False
     if not _prepared_job_matches(job):
@@ -6894,7 +7330,7 @@ def _trade_job_is_fresh(job: dict, fairness_threshold: float, outlook_value,
     # deck filtered for a different (or no) shape.
     if (job.get("trade_intent") or None) != (trade_intent or None):
         return False
-    return _trade_fingerprints_match(job, fingerprints)
+    return _trade_fingerprints_match(job, fingerprints, session_read=session_read)
 
 
 def _trade_i1_mode() -> int:
@@ -6924,10 +7360,12 @@ def _s0_seconds_knob(key: str, default: float) -> float:
     return value if 0 <= value < float("inf") else float(default)
 
 
-def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[str, str] | None:
+def _trade_current_fingerprints(league_id: str, scoring_format: str, *,
+                                parts: dict | None = None) -> tuple[str, str] | None:
     """S0 (contract v0.4 §2, §6): (rfp1, vsn1) from stored rows and the current
     pool, read now. Three indexed reads plus the hashes; no network, no pool
     build. None when the read failed, or when `trade_i1_mode` is 0 (no read).
+    `parts` (kickoff only): filled from the same read (roster_snapshot.snapshot_ids).
 
     Callers read this BEFORE taking _trade_jobs_lock and pass it to the
     freshness and join checks, which only compare.
@@ -6936,17 +7374,19 @@ def _trade_current_fingerprints(league_id: str, scoring_format: str) -> tuple[st
         return None
     from . import roster_snapshot
     from .database import engine as _engine
+    extra = {"parts": parts} if parts is not None else {}
     try:
         with _engine.connect() as conn:
             return roster_snapshot.snapshot_ids(
                 conn, scoring_format, league_id, g_universal_by_format.get(scoring_format) or {},
-                pick_source=_pick_read_source(), generation=pool_generation())
+                pick_source=_pick_read_source(), generation=pool_generation(), **extra)
     except Exception as err:
         log.warning("trade fingerprints unavailable for league %s: %s", league_id, err)
         return None
 
 
-def _trade_fingerprints_match(job: dict, current, *, running: bool = False) -> bool:
+def _trade_fingerprints_match(job: dict, current, *, running: bool = False,
+                              session_read=None) -> bool:
     """A job built on rosters or values that have since moved is never reused.
 
     `current` is the caller's _trade_current_fingerprints() for the job's
@@ -6956,9 +7396,18 @@ def _trade_fingerprints_match(job: dict, current, *, running: bool = False) -> b
     (`running=True`) and never makes a completed job fresh. Hand-built jobs
     without the stamp are not checked, like `request_signature`; with
     `trade_i1_mode` 0 nothing is.
+
+    `session_read`: the requesting session's `roster_fetch_started_at`. A job
+    built on a read older than both it and the league's last roster move
+    (`_job_read_predates_move`) was built on rosters that session has
+    replaced, whatever its stamp says, so it never matches (#481 QA P3-1). The
+    stale session itself still reuses it. None skips this check.
     """
     if "roster_fp" not in job or _trade_i1_mode() == 0:
         return True
+    if (session_read and (job.get("roster_fetch_started_at") or "") < session_read
+            and _job_read_predates_move(job)):
+        return False
     if current is None:
         return running
     return current == (job["roster_fp"], job.get("values_snapshot_id"))
@@ -11224,6 +11673,7 @@ def _run_trade_job(
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
                     _picks_memo = []
+                _note_job_picks_read(job_id, _picks_memo)
             return _picks_memo
 
         # Outlook + positional preferences
@@ -12824,32 +13274,149 @@ def _publish_member_rankings_for_trade_refresh(*, user_id, **kwargs):
             _mark_trade_pages_stale(marked_at, league_id=kwargs["league_id"])
 
 
+def _roster_change_revoke_on() -> bool:
+    """model_config `trade_roster_change_revoke` (default 1), read per call. 0
+    makes the `on_roster_change` handler a no-op (no revoke, no re-stamp, no
+    move recorded) and leaves the rest of S0 (I-1, the fingerprint checks, the
+    floor kick) as `trade_i1_mode` says. NaN or any other value reads as 1."""
+    return _deck_cfg("trade_roster_change_revoke", 1.0) != 0.0
+
+
+# {league_id: the Sleeper read (`refreshed_at`) behind the league's last rfp1
+# move in this process}, written by the roster-change handler under
+# _trade_jobs_lock. One web worker (render.yaml), so it sees every move.
+_roster_moved_reads: dict = {}
+
+
+def _job_read_predates_move(job) -> bool:
+    """Under _trade_jobs_lock: was this job built on a Sleeper read older than
+    its league's last roster move? Its stamp may still match: a stale session's
+    rebuild is stamped from the moved rows (#481 QA P3-1)."""
+    if _trade_i1_mode() == 0 or not _roster_change_revoke_on():
+        return False                      # the kill switches stop it at once (#484 QA P3-3)
+    key = job.get("key") or ()
+    moved = _roster_moved_reads.get(key[1]) if len(key) == 3 else None
+    return bool(moved) and (job.get("roster_fetch_started_at") or "") < moved
+
+
+def _league_session_reads(league_id) -> dict:
+    """{user_id: newest `roster_fetch_started_at`} over the live sessions that
+    hold `league_id`: the Sleeper read a rebuild from that user's session uses."""
+    newest = {}
+    with _sessions_lock:
+        for sess in _sessions.values():
+            read = sess.get("roster_fetch_started_at")
+            if read and getattr(sess.get("league"), "league_id", None) == league_id:
+                uid = sess.get("user_id")
+                if read > newest.get(uid, ""):
+                    newest[uid] = read
+    return newest
+
+
+def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
+    """At kickoff: is the job's session read newer than the league's refreshed
+    rows (its refresh still in flight)? Then the kickoff's fingerprint read
+    also takes `expected_fp`: the rfp1 the stored rows will have once that read
+    lands (`read_rows`, the member rows session init writes from it, with the
+    picks and draft state of the same read). The handler re-stamps the job
+    when it equals `new_fp` (#481 QA P3-2, #484 QA P1-1). Never raises."""
+    if (not roster_read or not read_rows or _trade_i1_mode() == 0
+            or not _roster_change_revoke_on()):
+        return False
+    try:
+        from .database import get_league_roster_state
+        refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
+        return not (refreshed_at and refreshed_at >= roster_read)
+    except Exception as err:
+        log.warning("roster refresh state unavailable for league %s: %s", league_id, err)
+        return False
+
+
+def _note_job_picks_read(job_id, picks) -> None:
+    """The worker read its picks (once per job, `_job_draft_picks`). The kickoff
+    stamp (and `roster_fp_expected`) hashed the picks stored at kickoff; when
+    the worker read different ones (a pick move, or an older refresh writing
+    back, between the two reads), the stamp doesn't describe the job: it is
+    dropped to None (never reused, never stored) with the expected fp, so no
+    later re-stamp can mark it fresh (#484 QA P2-1). Never raises."""
+    try:
+        from . import roster_snapshot
+        key = roster_snapshot.picks_key(picks)
+    except Exception as err:
+        log.warning("trade-job %s: picks key unavailable: %s", job_id, err)
+        return
+    with _trade_jobs_lock:
+        job = _trade_jobs.get(job_id)
+        if job is None or job.get("roster_picks_key") in (None, key):
+            return
+        job["roster_fp"] = None
+        job.pop("roster_fp_expected", None)
+    log.info("trade-job %s: its picks moved between kickoff and the worker's read; unstamped",
+             job_id)
+
+
 def _invalidate_league_trade_jobs_on_roster_change(league_id, old_fp, new_fp):
     """S0's `on_roster_change` handler (contract v0.4 §4.3, A3). platforms-eng's
     refresh calls it, through roster_snapshot.on_roster_change, after
-    committing rows whose rfp1 moved.
+    committing rows whose rfp1 moved and marking the league fresh.
 
-    Revokes the league's jobs that weren't built on `new_fp`, so the next
-    request rebuilds from the new rows. Debounced by construction: a job
-    already stamped `new_fp` is kept, so a double call (two concurrent inits),
-    or one landing after a rebuild, changes nothing. An admission that stamped
-    the old rows before the commit misses at its next freshness or join check.
+    A job is built on its session's rosters (`_capture_trade_execution` reads
+    `sess["league"]`, that session's own Sleeper read), not on the stored rows
+    its `roster_fp` stamps, so a revoke helps only when a rebuild would read
+    newer rosters. It revokes a league job not stamped `new_fp` only when the
+    job's read (`roster_fetch_started_at`) is older than the refreshed rows'
+    (`league_roster_state.refreshed_at`, which only moves forward) and its user
+    holds a session in the league whose read is at least that new (#470 QA):
+    - P2-2: the refreshing init's own pre-gen, or a tap in that window, is
+      built on the very read being committed, so it is kept.
+    - P2-1: a league-mate's rebuild would read their own, no newer, session,
+      so their open deck is kept.
+    A kept job keeps its stamp, so it is never reused once the rows moved, and
+    the I-1 serve filter checks what it serves. A job without a `roster_fp`
+    key (prepared inventory, hand-built) is unchecked, as in
+    `_trade_fingerprints_match` (P3-1). Debounced by construction: a job
+    already stamped `new_fp` is kept, so a double call changes nothing.
 
-    Never raises. Takes only `_trade_jobs_lock`, briefly, with no I/O under it.
-    No proactive rebuild in S0: a live session holds its own last init's
-    rosters, so a warm-up from it would rebuild the old rosters. P1's page
-    store doesn't either: its next serve sees the roster_fp move, serves the
-    I-1-filtered page and kicks the rebuild then. `trade_i1_mode` 0 makes it
+    #481 QA follow-ups:
+    - P3-1: it records the move's read in `_roster_moved_reads`. A job built on
+      an older read is then reused only by a session no newer than the job,
+      and never stored as pages (`_job_read_predates_move`).
+    - P3-2: a job whose kickoff `roster_fp_expected` (the rfp1 of its own
+      session read's member rows with the picks then stored) equals `new_fp`
+      was built on exactly the rows now stamped, so it is re-stamped `new_fp`
+      and the next tap reuses it. Hash equality, not read times (#484 QA
+      P1-1): when another refresh's rows landed first (two refreshes in
+      flight), `new_fp` hashes those and the job keeps its stamp.
+
+    Never raises. The state-row read and the pass over the sessions (under
+    `_sessions_lock`) run outside `_trade_jobs_lock`, which is held briefly
+    with no I/O under it. No
+    proactive rebuild in S0. P1's page store doesn't either: its next serve
+    sees the roster_fp move, serves the I-1-filtered page and kicks the
+    rebuild then. `trade_i1_mode` 0 or `trade_roster_change_revoke` 0 makes it
     a no-op.
     """
     try:
-        if _trade_i1_mode() == 0:
+        if _trade_i1_mode() == 0 or not _roster_change_revoke_on():
             return
+        from .database import get_league_roster_state
+        refreshed_at = (get_league_roster_state(league_id) or {}).get("refreshed_at")
+        if not refreshed_at:
+            return
+        fresh_users = {uid for uid, read in _league_session_reads(league_id).items()
+                       if read >= refreshed_at}
         with _trade_jobs_lock:
+            if refreshed_at > _roster_moved_reads.get(league_id, ""):
+                _roster_moved_reads[league_id] = refreshed_at
             for job in _trade_jobs.values():
                 key = job.get("key") or ()
-                if (len(key) == 3 and key[1] == league_id
-                        and job.get("roster_fp") != new_fp and not job.get("superseded")):
+                if (len(key) != 3 or key[1] != league_id or "roster_fp" not in job
+                        or job["roster_fp"] == new_fp or job.get("superseded")):
+                    continue
+                if job.get("roster_fp_expected") == new_fp:
+                    job["roster_fp"] = new_fp     # built on exactly the rows now stamped
+                elif ((job.get("roster_fetch_started_at") or "") < refreshed_at
+                        and key[0] in fresh_users):
                     _revoke_trade_job_locked(job)
                     if _trade_jobs_by_key.get(key) == job.get("job_id"):
                         _trade_jobs_by_key.pop(key)
@@ -12961,10 +13528,14 @@ def _kickoff_trade_job(
     # pregen supplies the freshly built payload; headless cron resolves here.
     execution_context = None
     capture_error = None
+    roster_read = None          # the Sleeper read the captured rosters came from
+    read_rows = None            # the member rows session init writes from that read
     try:
         with _sessions_lock:
             base_session = session_context if session_context is not None else _sessions.get(sess_token)
             base_session = dict(base_session) if base_session is not None else None
+        roster_read = (base_session or {}).get("roster_fetch_started_at")
+        read_rows = (base_session or {}).get("roster_read_rows")
         execution_context = _capture_trade_execution(base_session, user_id, league_id, scoring_format)
         # The worker reads member rankings/outlooks for this captured league.
         # Keep original viewer epochs: recapturing after a racing viewer edit
@@ -12994,8 +13565,14 @@ def _kickoff_trade_job(
     # S0: the stored rosters and values this job is built against, stamped
     # before the worker starts. The same read, taken outside the lock, is what
     # the dedupe checks below compare with. None on a failed read never matches.
-    fingerprints = _trade_current_fingerprints(league_id, scoring_format)
+    # One read for the stamp, its picks key and, while the session's refresh is
+    # in flight, the expected fp (#484 QA P2-1).
+    parts = ({"member_rows": read_rows}
+             if _roster_read_in_flight(league_id, roster_read, read_rows) else {})
+    fingerprints = _trade_current_fingerprints(league_id, scoring_format, parts=parts)
     roster_fp, values_snapshot_id = fingerprints or (None, None)
+    picks_key = parts.get("picks_key") if roster_fp else None
+    fp_expected = parts.get("expected_fp") if roster_fp else None
     force_supersedes = force_fresh and _force_supersede_enabled()
     job_id = uuid.uuid4().hex
     # Pinned flows (give OR receive) and single-opponent scope (#156 Specific
@@ -13021,6 +13598,8 @@ def _kickoff_trade_job(
         "request_signature":  request_signature,
         "roster_fp":          roster_fp,
         "values_snapshot_id": values_snapshot_id,
+        # The roster-change handler compares it with the refreshed rows' read.
+        "roster_fetch_started_at": roster_read,
         # The viewer's league identity (a co-owner's differs from user_id):
         # the I-1 serve filter checks give-side ownership against it.
         "league_user_id":     (execution_context.league_user_id
@@ -13028,6 +13607,10 @@ def _kickoff_trade_job(
     }
     if source:
         job["source"] = source
+    if fp_expected is not None:
+        job["roster_fp_expected"] = fp_expected   # #481 QA P3-2: the handler may re-stamp it
+    if picks_key is not None:
+        job["roster_picks_key"] = picks_key       # #484 QA P2-1: checked at the worker's read
     # P1: the organic scope this job's completion may store pages under. A
     # forced organic job stores too: it is the newest deck for the scope.
     organic = (not is_pinned and not trade_intent and not presentation_exempt
@@ -13087,15 +13670,17 @@ def _kickoff_trade_job(
         if existing is not None:
             if (not force_fresh and request_signature is not None
                     and _trade_job_is_fresh(existing, fairness_threshold, outlook_value,
-                        trade_intent, presentation_capture, request_signature, fingerprints)):
+                        trade_intent, presentation_capture, request_signature, fingerprints,
+                        session_read=roster_read)):
                 return existing["job_id"]
             if _job_live(existing):
                 if preserve_running and _trade_running_policy_matches(
-                        existing, presentation_capture, fingerprints):
+                        existing, presentation_capture, fingerprints, session_read=roster_read):
                     return existing["job_id"]
                 if (request_signature is not None and not force_supersedes
                         and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                            trade_intent, presentation_capture, request_signature, fingerprints)):
+                            trade_intent, presentation_capture, request_signature, fingerprints,
+                            session_read=roster_read)):
                     return existing["job_id"]
                 _revoke_trade_job_locked(existing, "superseded")
         _trade_jobs[job_id] = job
@@ -14976,13 +15561,15 @@ _RATIO_SERIES_BREAK_DETAIL = ("U6/R-U6a: from the packed-evidence flip, `recomme
 
 def _ratio_series_break_caveats(first_day: str | None, last_day: str | None) -> list[dict]:
     """A `series_break` caveat when the packed-evidence flip day is set
-    (database.PACKED_EVIDENCE_FLIP_DAY, shared with receipts) and the links'
-    trade days span it (inclusive: the flip day itself is mixed)."""
+    (database.PACKED_EVIDENCE_FLIP_DAY, shared with receipts, read through
+    database.packed_evidence_flip_day: a malformed value is no caveat and one
+    warning) and the links' trade days span it (inclusive: the flip day itself
+    is mixed)."""
     from . import database as _db
-    day = _db.PACKED_EVIDENCE_FLIP_DAY
+    day = _db.packed_evidence_flip_day()
     if day is None or first_day is None or last_day is None or not first_day <= day <= last_day:
         return []
-    return [{"code": "series_break", "scope": "suggestion_ratio",
+    return [{"code": _db.SERIES_BREAK_CAVEAT, "scope": "suggestion_ratio",
              "detail": _RATIO_SERIES_BREAK_DETAIL, "day": day}]
 
 
@@ -17933,6 +18520,23 @@ def _sleeper_cached_draft_verdict(league_id: str):
                                          ctx.get("confidence") or _draft_status_mod.LOW)
 
 
+def _sleeper_prior_grid_excludes(league_id: str, season: int) -> bool:
+    """True when the league's stored PLATFORM pick grid (the rows the owned-pick
+    sync replaces) carries a later season but none of `season`: a prior sync
+    excluded it on a positive read. #470 QA P3-2: the corroboration the sync
+    consults ONLY when `/drafts` is empty and the cached verdict doesn't say
+    `drafted`, so one flake can't re-populate a spent class and flip `rfp1`.
+    No prior rows (a first sync), a grid that carries `season`, or a failed
+    read → False (the D-089 fail-safe). A season rollover ends it: the new
+    current season is in the prior grid."""
+    try:
+        seasons = load_draft_pick_seasons(league_id, source=PICK_SOURCE_PLATFORM)
+    except Exception:
+        log.warning("prior pick-grid read failed for %s", league_id, exc_info=True)
+        return False
+    return season not in seasons and any(s > season for s in seasons)
+
+
 def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
                               scoring_format: str, *,
                               rosters: list | None = None,
@@ -17954,7 +18558,8 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     #228 — leagues whose CURRENT-season rookie draft is already complete
     must not carry that season's picks (they no longer exist as assets).
     The drafts read is best-effort: a flake excludes nothing — unless the
-    cached #207 verdict corroborates `drafted` (#428 / D-189, below); future
+    cached #207 verdict corroborates `drafted` (#428 / D-189, below) or the
+    prior platform grid already excludes the season (#470 QA P3-2); future
     seasons are always included. The replace-sync cleans previously synced
     stale rows for the excluded season automatically.
 
@@ -18006,6 +18611,15 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
     # cached #207 verdict is consulted: a positive `drafted` excludes the
     # current season, so one flaked read can no longer re-populate a spent
     # class for the whole league (the replace-sync made that league-wide).
+    # #470 QA P3-2 — without a cached `drafted`, the league's own prior
+    # platform grid corroborates: if it already excludes the current season,
+    # keep excluding it (a flake must not flip the grid, and `rfp1`, back).
+    # A cached `not_drafted` does NOT override it: a completed startup draft
+    # with a pending rookie draft reads `not_drafted`/high while the live
+    # read excludes the season (#483 QA P3-1). Accepted limitation (P3-3): a
+    # league whose `/drafts` is ALWAYS empty keeps an excluded season hidden
+    # after its verdict flips to not-drafted, until a non-empty read or the
+    # season rolls over.
     # A flake with no corroboration keeps the D-089 fail-safe: exclude nothing.
     _drafts = drafts if drafts is not None else _fetch_sleeper_drafts(league_id)
     _exclude: set[int] = _draft_status_mod.completed_draft_seasons(_drafts, _cur_season)
@@ -18016,6 +18630,11 @@ def _sync_sleeper_owned_picks(league_id: str, uid_to_name: dict[str, str],
             log.info("  owned-pick sync for %s: drafts read empty — excluding "
                      "%s on the cached %s/%s verdict (D-189)", league_id,
                      _cur_season, _cached.status, _cached.confidence)
+        elif _sleeper_prior_grid_excludes(league_id, _cur_season):
+            _exclude.add(_cur_season)
+            log.info("  owned-pick sync for %s: drafts read empty — keeping %s "
+                     "excluded, as the prior platform grid has it excluded "
+                     "(#470 QA P3-2)", league_id, _cur_season)
     elif _exclude:
         log.info("  owned-pick sync for %s: excluding %s — Sleeper reports the "
                  "draft complete", league_id, sorted(_exclude))
@@ -18474,7 +19093,8 @@ def generate_trades():
             if request_signature is not None and not force_fresh and _trade_job_is_fresh(existing, fairness_threshold, outlook_value, trade_intent,
                                                       presentation_capture=presentation_capture,
                                                       request_signature=request_signature,
-                                                      fingerprints=fingerprints):
+                                                      fingerprints=fingerprints,
+                                                      session_read=sess.get("roster_fetch_started_at")):
                 reuse_snapshot = dict(existing)
             # Share in-flight work only for matching fairness and shape.
             # A warm-up must never answer a differently configured search.
@@ -18489,7 +19109,8 @@ def generate_trades():
             # (e.g. an override released by a newer vote) could be invisible.
             # Supersede the running job and fall through to spawn a fresh one.
             elif request_signature is not None and _trade_running_matches(existing, fairness_threshold, outlook_value,
-                    trade_intent, presentation_capture, request_signature, fingerprints):
+                    trade_intent, presentation_capture, request_signature, fingerprints,
+                    session_read=sess.get("roster_fetch_started_at")):
                 if not force_supersedes:
                     reuse_snapshot = dict(existing)
                 else:
@@ -26391,6 +27012,17 @@ def session_init():
         # M0 — the generation these services were built from. A later bump
         # makes the NEXT session_init rebuild once (membership only).
         "pool_generation": current_generation,
+        # S0: when this init's Sleeper read started (None without one), so the
+        # roster-change handler knows which sessions hold the refreshed rosters.
+        # Always set: `update` must not keep an older init's value.
+        "roster_fetch_started_at": _s0_raw.get("fetch_started_at"),
+        # ...and the member rows its daemon writes from that read (user_id and
+        # player_ids only), for the expected fingerprint at kickoff.
+        "roster_read_rows": ([{"user_id": m["user_id"], "player_ids": m["player_ids"]}
+                              for m in _session_member_rows(
+                                  league_user_id, league_display_name,
+                                  user_player_ids, opponent_rosters)]
+                             if _s0_raw.get("fetch_started_at") else None),
     }
     user_changed = bool(existing_sess
                         and existing_sess.get("user_id") != user_id)
@@ -26670,38 +27302,8 @@ def session_init():
             # ── Persist full league membership roster ────────────────
             _s0_members_ok, _s0_picks_ok = False, True   # S0 refresh outcome
             try:
-                all_members_for_db = [
-                    {
-                        # Keyed on the LEAGUE identity, not the account:
-                        # `league_members` is league-SHARED (every member's
-                        # session_init writes into it), so a co-owned roster
-                        # must land on the same row no matter which co-owner
-                        # syncs it. Identical to `user_id` for a sole owner.
-                        # The name is the roster owner's for the same reason —
-                        # this row is what every OTHER member sees for that
-                        # team; the caller's own team is marked by `is_you`.
-                        "user_id":      league_user_id,
-                        "username":     league_display_name,
-                        "display_name": league_display_name,
-                        # #151 — store the RAW client-sent ids, matching the
-                        # opponent rows below. `new_user_roster` is filtered
-                        # to the default-format pool, which made the caller's
-                        # own off-pool players (e.g. SF-only QBs) invisible
-                        # to the free-agent exclusion set. Consumers that
-                        # need pool membership already filter on read
-                        # (session init's DB-member merge, compute_free_agents).
-                        "player_ids":   user_player_ids,
-                    }
-                ] + [
-                    {
-                        "user_id":      str(opp.get("user_id", "")),
-                        "username":     opp.get("username", ""),
-                        "display_name": opp.get("username", ""),
-                        "player_ids":   [str(x) for x in opp.get("player_ids", [])],
-                    }
-                    for opp in opponent_rosters
-                    if opp.get("user_id")
-                ]
+                all_members_for_db = _session_member_rows(
+                    league_user_id, league_display_name, user_player_ids, opponent_rosters)
                 if _s0_raw and not _platform_linked:
                     # S0 — the request thread's Sleeper read is the complete,
                     # authoritative membership: replace, so departed managers'
@@ -26941,11 +27543,13 @@ def session_init():
             existing    = _trade_jobs.get(existing_id) if existing_id else None
             # Warm-up preserves an active request's fairness/intent, but
             # obsolete policy/model work must be replaced, not left running.
+            pregen_read = session_payload.get("roster_fetch_started_at")
             should_kickoff = not (existing and (_trade_running_policy_matches(
-                    existing, presentation_capture, pregen_fingerprints)
+                    existing, presentation_capture, pregen_fingerprints, session_read=pregen_read)
                 or _trade_job_is_fresh(existing, pregen_fairness, pregen_outlook,
                     presentation_capture=presentation_capture,
-                    request_signature=pregen_signature, fingerprints=pregen_fingerprints)))
+                    request_signature=pregen_signature, fingerprints=pregen_fingerprints,
+                    session_read=pregen_read)))
         if should_kickoff:
             opp_total = sum(1 for m in members if m.user_id != user_id and m.elo_ratings)
             _kickoff_trade_job(
@@ -27786,7 +28390,8 @@ def _replenish_deck_for(user_id: str, league_id: str,
         if (job and not any(epoch.revoked for epoch in input_epochs)
                 and _trade_job_is_fresh(job, fairness, outlook,
                     presentation_capture=presentation_capture, request_signature=request_signature,
-                    fingerprints=fingerprints)):
+                    fingerprints=fingerprints,
+                    session_read=session.get("roster_fetch_started_at"))):
             # Calibration reads the deck's rows at once, and an undelivered
             # deferred deck has none: build a live deck instead of reusing it.
             ev = job.get("evidence") if source == "grading_refresh" else None
@@ -27822,7 +28427,8 @@ def _replenish_deck_for(user_id: str, league_id: str,
                 return None
             if not _trade_job_is_fresh(job, fairness, outlook,
                     presentation_capture=presentation_capture, request_signature=request_signature,
-                    fingerprints=fingerprints):
+                    fingerprints=fingerprints,
+                    session_read=session.get("roster_fetch_started_at")):
                 return None
             cards = list(job.get("cards") or [])
 

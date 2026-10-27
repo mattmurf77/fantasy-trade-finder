@@ -50,6 +50,9 @@ env seam. `test_ktc_blend` pins its own KTC data explicitly.
 
 import os
 import pathlib
+import sys
+
+import pytest
 
 _FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
 _PICK_SNAPSHOT = _FIXTURES / "dp_values_picks_2026-08-06.csv"
@@ -63,3 +66,46 @@ os.environ.setdefault("FTF_DP_VALUES_FILE", str(_PLAYER_SNAPSHOT))
 # flakes on long runs. The server skips the thread when this is "1"; prod never
 # sets it.
 os.environ.setdefault("FTF_DISABLE_CLEANUP_LOOP", "1")
+
+
+@pytest.fixture(autouse=True)
+def _u4_ledger_guard_state():
+    """Every test starts with the U4 ledger guard's rate-limit state clean (its
+    young-trim counts per ledger and its last warning), whatever an earlier
+    test left (the ledger thread-safety test trims thousands). The server is
+    only touched once a test module has imported it; nothing is imported here.
+    A plain reset, not `monkeypatch`: an autouse fixture that requested it
+    would move every test's monkeypatch undo after its other fixtures'
+    teardowns, and a fixture restoring by hand would then be overwritten."""
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_ledger_guard_young"):
+        server._ledger_guard_young = {"held": 0, "evicted": 0}
+        server._ledger_guard_warned_at = float("-inf")
+    yield
+
+
+def _drain_deck_i1_checks():
+    server = sys.modules.get("backend.server")
+    if server is not None and hasattr(server, "_drain_deck_i1_checks"):
+        server._drain_deck_i1_checks(5.0)
+
+
+@pytest.hookimpl(hookwrapper=True, trylast=True)
+def pytest_runtest_call(item):
+    """A test's queued `deck_i1_check` writes finish as its call ends, inside
+    the call's output capture (#419 QA P3). They're written on a worker; left
+    to finish later they ran outside any capture window, often against an
+    in-memory DB whose tables the worker's connection can't see, and their
+    swallowed failures printed into the CI log. trylast: the innermost
+    wrapper, so this runs before pytest's capture of the call ends."""
+    yield
+    _drain_deck_i1_checks()
+
+
+@pytest.fixture(autouse=True)
+def _deck_i1_checks_drained():
+    """The same at teardown, for a write a fixture queued after the call. Only
+    once `backend.server` is imported; no `monkeypatch`, for the same
+    teardown-order reason as above."""
+    yield
+    _drain_deck_i1_checks()
