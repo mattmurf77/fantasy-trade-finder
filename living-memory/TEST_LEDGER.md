@@ -23,7 +23,12 @@ Full gates (a new 429 on an API route). Server only. D-056: `FTF_SKIP_SIM_GATE=1
   - `OverflowError` dropped from auth-link's year parse → all 3 non-finite cases red (500 `internal_error`); dropped from auth-import's → all 3 red at the auth-import step.
 - **#430's gate pin:** `test_c7_the_279_gate_is_byte_identical_…` hashes only the four gate functions and checks the wrapper, so no hash changed (a comment names this branch). Still green.
 - **Run:** `test_platform_sign_in.py`, `test_entry_platform_route.py`, `test_mfl_auth_link_route.py`, `test_mfl_link_route.py`, `test_espn_link_route.py`, `test_espn_identity_binding.py`, `test_espn_service.py`, `test_mfl_service.py`, `test_espn_my_leagues_route.py`, `test_link_status_routes.py`, `test_mfl_propose_route.py`, `test_prepared_trade_cohort.py`, `test_mfl_write.py`, `test_mfl_trade_lifecycle.py`, `test_i2_mfl_ownership.py`: **510 passed, 0 failed**.
-- **Full suite:** FULLSUITE_A
+- **Full suite** (first commit, `1272bb38`, on #430 @ `d3248d35`): **9104 passed, 2 skipped**, 0 failed (36 min, Python 3.14).
+- **#430 round-3 P3s (separate commit, after merging #430's frozen head `7e52912d` into this branch):**
+  - `test_mfl_claim_and_preview_year_checks_run_before_the_limiter_gate` (×2: `1999`, `"abc"`): the gate spy is never called; no slot or count; a locked subject still gets the 400. Sabotage: the check moved below the claim's gate → both red (`['mfl'] == []`).
+  - `test_mfl_non_numeric_year_is_bad_year_on_claim_preview_and_action` (×5: `"NaN"`, JSON `NaN`, `"abc"`, `[2026]`, an object): 400 `mfl_bad_year` / "year must be numeric" on the claim, preview and `auth_leagues`; no MFL call; no limiter state. Before the fix, the claim and preview read `mfl_bad_league_id`. Sabotage: the old `ValueError → None` fall-through → 6 red (all 5 + the `"abc"` ordering case).
+  - `test_mfl_empty_year_is_the_default_season_on_claim_preview_and_action`: `""` = the default season everywhere, as `auth_leagues` always read it.
+  - Run on the merged tree: the same 15 suites **522 passed, 0 failed** (510 + `7e52912d`'s 4 + these 8); `test_platform_sign_in.py` + `test_entry_platform_route.py` alone **166 passed**; `check-landing-platform-options.js` passes. Full suite on the final tree: **9116 passed, 2 skipped**, 0 failed (27 min).
 
 ## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
 

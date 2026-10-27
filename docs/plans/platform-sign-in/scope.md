@@ -231,3 +231,19 @@ Full gates (it changes an API contract: a new 429 on a route).
   - `test_auth_link_and_auth_import_non_finite_year_is_400_not_500` (×3);
   - the two verify-block pins.
 - **Docs:** `docs/api-reference.md` (the auth-link POST row: the 429, the year range, the re-stamp; the auth-import row's 400; the entry row's counted list), `docs/integrations/mfl.md` §2, `docs/runbook.md` (the lockout entry now covers auth-link). `living-memory/LLD.md` / `HLD.md` / `docs/architecture.md`: n/a (no convention or wiring change).
+
+#### #430 round-3 P3s carried here (2026-10-27, after release-lead froze #430 at `7e52912d`)
+
+`7e52912d` is **merged** into this branch (a merge, not a rebase), and these land in a separate commit on top. They change no copy, flag, schema or event. `/api/mfl/auth-link` and `/api/mfl/auth-import` are fixed above. #430's round-3 note that they still 500 on an overflowing year doesn't apply on this branch.
+
+1. **Ordering pin (claim + preview):** the MFL entry branch's year check already runs before the claim's `_signin_limit_gate`; it is now pinned. `test_mfl_claim_and_preview_year_checks_run_before_the_limiter_gate` (×2: `1999`, `"abc"`) asserts:
+   - a gate spy is never called;
+   - no failure or in-flight state is created;
+   - a locked subject still gets the 400, not a 429.
+
+   Sabotage: the check moved below the gate → both red (`['mfl'] == []`).
+2. **Non-numeric year → `mfl_bad_year`:** `_mfl_entry_year_refusal` now refuses a year that `int()` rejects with `TypeError` / `ValueError` too, not only `OverflowError` or out of range. That covers `NaN` (JSON's literal, which Python's parser accepts), `"NaN"`, `"abc"`, an array and an object.
+   - The answer is 400 `mfl_bad_year`, "year must be numeric", the same as `auth_leagues`. The claim and preview used to fall through to `_mfl_resolve` and read 400 `mfl_bad_league_id`.
+   - `test_mfl_non_numeric_year_is_bad_year_on_claim_preview_and_action` (×5) covers the claim, the preview and `auth_leagues`, with no MFL call and no limiter state.
+   - Sabotage: the old `ValueError → None` fall-through → all 5 red, plus the `"abc"` ordering case.
+   - **`""` is not a bad year.** Like a missing year it means the default season, which is how `auth_leagues`' own parse has always read it. Pinned by `test_mfl_empty_year_is_the_default_season_on_claim_preview_and_action`.

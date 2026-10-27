@@ -29605,16 +29605,19 @@ _SIGNIN_MFL_MIN_YEAR = 2000
 
 
 def _mfl_entry_year_refusal(raw_year):
-    """400 mfl_bad_year when a NUMERIC year is outside 2000..season+1 or
-    can't be an integer at all (JSON Infinity / -Infinity / 1e400 overflow
-    int()), else None (a non-numeric year keeps its existing handling). The
-    message reuses the existing mfl_bad_year copy — no new user copy."""
+    """400 mfl_bad_year unless the year is an integer in 2000..season+1: a
+    year outside the range, one that can't be an integer at all (JSON
+    Infinity / -Infinity / 1e400 overflow int()), and a non-numeric one
+    (NaN, "NaN", "abc", an array or object) are all refused — the same code
+    and existing "year must be numeric" copy auth_leagues' own parse
+    answers (no new user copy). A non-numeric year used to fall through to
+    _mfl_resolve and read 400 mfl_bad_league_id (#430 round-3 P3, on
+    feat/mfl-auth-link-throttle). A missing / empty year is the default
+    season, as everywhere else."""
     try:
         year = int(raw_year or _MFL_DEFAULT_YEAR)
-    except OverflowError:
+    except (TypeError, ValueError, OverflowError):
         year = None
-    except (TypeError, ValueError):
-        return None
     if year is not None and \
             _SIGNIN_MFL_MIN_YEAR <= year <= _MFL_DEFAULT_YEAR + 1:
         return None

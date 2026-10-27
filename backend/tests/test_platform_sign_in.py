@@ -2002,6 +2002,94 @@ def test_auth_leagues_year_check_runs_before_the_limiter_gate(env):
     assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
 
 
+# #430 round-3 P3s, carried on feat/mfl-auth-link-throttle (release-lead froze
+# #430 at 7e52912d): the claim/preview year check is pinned BEFORE the gate,
+# and a non-numeric year is mfl_bad_year there too, not mfl_bad_league_id.
+
+def _gate_spy(calls):
+    real_gate = server._signin_limit_gate
+
+    def spy(audit, provider, subject):
+        calls.append(provider)
+        return real_gate(audit, provider, subject)
+    return patch.object(server, "_signin_limit_gate", spy)
+
+
+@pytest.mark.parametrize("year", [1999, "abc"])
+def test_mfl_claim_and_preview_year_checks_run_before_the_limiter_gate(
+        env, year):
+    """A bad year on the claim (and the preview) is refused BEFORE
+    admission: the gate is never consulted, no slot is taken and nothing is
+    counted — even for a subject that is currently locked."""
+    gate_calls: list = []
+    with _gate_spy(gate_calls):
+        claim = _mfl_claim(env, year=year)
+        preview = _post(env, platform="mfl", mfl_league_id=MFL_LEAGUE,
+                        year=year)
+    for r in (claim, preview):
+        assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
+    assert gate_calls == []
+    assert server._signin_failures == {} and server._signin_inflight == {}
+    # Lock the subject, then: still the input error, not a 429.
+    for i in range(server._SIGNIN_SUBJECT_MAX_FAILURES):
+        assert _mfl_claim(env, ip=f"192.0.2.{i}",
+                          password="bad").status_code == 403
+    assert _mfl_claim(env, ip="192.0.2.99").status_code == 429
+    r = _mfl_claim(env, ip="192.0.2.99", year=year)
+    assert (r.status_code, r.get_json()) == (400, _BAD_YEAR)
+
+
+@pytest.mark.parametrize("literal", ['"NaN"', "NaN", '"abc"', "[2026]",
+                                     '{"y": 2026}'])
+def test_mfl_non_numeric_year_is_bad_year_on_claim_preview_and_action(
+        env, literal):
+    """NaN (JSON's literal, which Python's parser accepts, and the string),
+    "abc", an array or an object: 400 mfl_bad_year with the existing copy on
+    the claim and the preview — the same answer auth_leagues gives — not
+    mfl_bad_league_id. No MFL call, no limiter state."""
+    calls: list = []
+    bodies = [
+        '{"platform": "mfl", "mfl_league_id": "%s", "franchise_id": "0001", '
+        '"username": "MattM", "password": "hunter2", "year": %s}',
+        '{"platform": "mfl", "mfl_league_id": "%s", "year": %s}',
+        '{"platform": "mfl", "action": "auth_leagues", "username": "MattM", '
+        '"password": "hunter2", "mfl_league_id": "%s", "year": %s}',
+    ]
+    a, b, c, d = _no_mfl_calls(calls)
+    with a, b, c, d:
+        for body in bodies:
+            r = env.client.post("/api/entry/platform",
+                                data=body % (MFL_LEAGUE, literal),
+                                content_type="application/json")
+            assert (r.status_code, r.get_json()) == (400, _BAD_YEAR), body
+    assert calls == []
+    assert server._signin_failures == {} and server._signin_inflight == {}
+
+
+def test_mfl_empty_year_is_the_default_season_on_claim_preview_and_action(
+        env):
+    """`""` is not a bad year: like a missing year it means the default
+    season — on the claim, the preview and auth_leagues alike (auth_leagues'
+    own parse has always read it that way)."""
+    body = ('{"platform": "mfl", "mfl_league_id": "%s", %s"year": ""}')
+    claim = env.client.post(
+        "/api/entry/platform", content_type="application/json",
+        data=body % (MFL_LEAGUE, '"franchise_id": "0001", "username": '
+                                 '"MattM", "password": "hunter2", '))
+    preview = env.client.post("/api/entry/platform",
+                              content_type="application/json",
+                              data=body % (MFL_LEAGUE, ""))
+    action = env.client.post(
+        "/api/entry/platform", content_type="application/json",
+        data=body % (MFL_LEAGUE, '"action": "auth_leagues", "username": '
+                                 '"MattM", "password": "hunter2", '))
+    assert claim.status_code == 200 and claim.get_json()["stage"] == "connected"
+    assert preview.status_code == 200
+    assert preview.get_json()["league"]["season"] == server._MFL_DEFAULT_YEAR
+    assert action.status_code == 200
+    assert action.get_json()["year"] == server._MFL_DEFAULT_YEAR
+
+
 @pytest.mark.parametrize("year", [
     2000, server._MFL_DEFAULT_YEAR, server._MFL_DEFAULT_YEAR + 1])
 def test_mfl_year_in_range_is_admitted(env, year):
