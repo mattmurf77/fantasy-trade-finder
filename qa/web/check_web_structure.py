@@ -799,12 +799,29 @@ def run() -> int:
             if not (q3 and len(q3_paras) == len(Q3_RELEASE) and not q3_bad)
             else "faq.q3.release verbatim (3 paragraphs)")
 
-    # The deliberate blocker: no served page may carry the placeholder.
-    holders = sorted(name for name, src in all_sources.items() if "[APP STORE URL]" in src)
+    # C3 (Product's pre-launch review, 2026-10-27): Safari's App Store smart
+    # banner on the landing, once in <head>, with the [APP STORE ID]
+    # placeholder or the digits of the App Store URL the page links to.
+    head = re.search(r"<head\b.*?</head>", strip_comments(all_sources["index.html"]), flags=re.S | re.I)
+    banners = re.findall(r'<meta\b[^>]*\bname="apple-itunes-app"[^>]*>', head.group(0) if head else "")
+    in_body = "apple-itunes-app" in strip_comments(body_of(all_sources["index.html"]))
+    content = re.search(r'\bcontent="app-id=(\[APP STORE ID\]|\d{6,12})"', banners[0]) if len(banners) == 1 else None
+    url_ids = set(re.findall(r'href="https://apps\.apple\.com/[^"]*?/id(\d{6,12})', strip_comments(all_sources["index.html"])))
+    id_ok = bool(content) and (content.group(1) == "[APP STORE ID]" or url_ids == {content.group(1)})
+    r.check("RELFLIP-smart-banner[index.html]", len(banners) == 1 and not in_body and id_ok,
+            (f"{len(banners)} apple-itunes-app meta(s) in <head>, want 1" if len(banners) != 1 else
+             "an apple-itunes-app meta outside <head>" if in_body else
+             "content isn't app-id=[APP STORE ID] or app-id=<the App Store URL's digits>")
+            if not (len(banners) == 1 and not in_body and id_ok)
+            else "C3 smart banner in <head> (placeholder, or the listing's id)")
+
+    # The deliberate blocker: no served page may carry the placeholders.
+    holders = sorted(f"{name} {ph}" for name, src in all_sources.items()
+                     for ph in ("[APP STORE URL]", "[APP STORE ID]") if ph in src)
     r.check("RELFLIP-no-app-store-placeholder", not holders,
-            "[APP STORE URL] still in " + ", ".join(holders)
-            + " — release-lead fills the real apps.apple.com URL at the 11-18 flip"
-            if holders else "no [APP STORE URL] in any served page")
+            "still in " + ", ".join(holders)
+            + " — release-lead fills the real apps.apple.com URL and its app id at the 11-18 flip"
+            if holders else "no [APP STORE URL] / [APP STORE ID] in any served page")
 
     return r.report(), r
 
