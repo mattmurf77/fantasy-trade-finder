@@ -4084,7 +4084,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 4
+DECK_PIPELINE_VERSION = 5
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4156,6 +4156,7 @@ DECK_PIPELINE_IGNORED = {
     "_job_superseded": "job lifecycle: the supersede fence",
     "_revoke_trade_job_locked": "job lifecycle: revocation",
     "_note_job_picks_read": "the job's roster stamp: records which picks it read (#484 QA P2-1); never shapes the deck",
+    "_quality_filter_inputs": "audit provenance: records the quality filter's inputs per run (models-lead addendum D2); never shapes the deck",
     # logging and telemetry
     "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
@@ -4209,6 +4210,7 @@ DECK_PIPELINE_PINS = {
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
+    5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4802,6 +4804,7 @@ class _DeckEvidence:
         self.league_id = None
         self.built_at = None          # the build time (the logger's served_at)
         self.run_meta: dict = {}      # values_snapshot_id, config_ref (the job's stamps)
+        self.filter_inputs: dict | None = None   # the quality filter's inputs (addendum D2)
         self.deliveries: list = []    # [[last_card_index, delivered_at]], card_index space (U1)
         self.written: set = set()     # ids whose deck_impressions row is written
         self.pack = None              # its _PackState once the pack row is written
@@ -5545,6 +5548,9 @@ _DECK_LEDGER_GUARD = 131072
 # under the leaf lock and, for evictions, under _trade_jobs_lock.
 _deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> built here (epoch s)
 _deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
+# The subset of _deck_evicted_at that F5 dropped (models-lead addendum D1), for
+# the f5_past_stored anomaly only; the cause never reads it.
+_deck_f5_dropped: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> dropped here
 _ledger_now = time.time                    # the ledgers' clock (tests replace it)
 _DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
 # Young entries the guard trimmed since its last warning, per ledger (#451 QA:
@@ -5565,14 +5571,16 @@ def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None
     once a minute, with the counts since the last warning, per ledger)."""
     global _ledger_guard_young, _ledger_guard_warned_at
     now = _ledger_now()
-    which = "evicted" if ledger is _deck_evicted_at else "held"
+    which = ("evicted" if ledger is _deck_evicted_at
+             else "f5" if ledger is _deck_f5_dropped else "held")
     warn = None
     with _deck_ledger_lock:
         ledger.pop(key, None)
         while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
             ledger.popitem(last=False)
         while len(ledger) >= _DECK_LEDGER_GUARD:
-            _ledger_guard_young[which] += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
+            _ledger_guard_young[which] = (_ledger_guard_young.get(which, 0)
+                                          + (now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S))
         ledger[key] = now
         if (any(_ledger_guard_young.values())
                 and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S):
@@ -5581,9 +5589,10 @@ def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None
     if warn:
         total = sum(warn.values())
         log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
-                    "24 h since its last warning (held=%d, evicted=%d): a late view of such "
+                    "24 h since its last warning (held=%d, evicted=%d%s): a late view of such "
                     "a deck reads restart_split", _DECK_LEDGER_GUARD, total,
-                    "y" if total == 1 else "ies", warn["held"], warn["evicted"])
+                    "y" if total == 1 else "ies", warn.get("held", 0), warn.get("evicted", 0),
+                    f", f5={warn['f5']}" if warn.get("f5") else "")
 
 
 def _note_deck_held(job_id: str) -> None:
@@ -5603,6 +5612,19 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     # restart_split (C (c2)'s assumption), never other.
     with _deck_ledger_lock:
         _deck_held.pop(job_id, None)
+
+
+def _f5_past_stored(deck_job_id: str, index: int, cause: str, run: Mapping) -> int | None:
+    """models-lead addendum D1's anomaly: an F5-dropped deck's evicted_split miss
+    on a card at or past the pack-recorded stored count. Should be impossible
+    (only the stored pages of a deck F5 found undelivered can be delivered), so
+    it would mean a delivery-recording gap. Returns that count when it is one."""
+    recorded = run.get("stored_count")
+    if (cause == "evicted_split" and deck_job_id in _deck_f5_dropped
+            and isinstance(recorded, int) and not isinstance(recorded, bool)
+            and index >= recorded):
+        return recorded
+    return None
 
 
 def _upgrade_miss_cards(run: Mapping) -> dict:
@@ -5781,6 +5803,11 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
             log.error(line, *args)
         else:
             log.warning(line, *args)
+        past = _f5_past_stored(deck_job_id, index, kept, state.run)
+        if past is not None:              # addendum D1: reported apart; it goes to models-lead
+            log.error("[evidence] f5_past_stored job=%s index=%d pack_stored=%d: an F5-dropped "
+                      "deck's evicted_split miss past its recorded stored pages (a "
+                      "delivery-recording gap?)", deck_job_id, index, past)
         if stored_from == "fallback" and state.run.get("page_store"):
             # #438 QA P3-1: never silent. Not other: the process dying between
             # the deck's job_done and its store is the legitimate case.
@@ -6435,6 +6462,9 @@ def _deck_evidence_job_done(job_id: str) -> None:
             # can tell a replaced row from none (_row_gone_why). Omitted for a
             # deck with no page scope (it never has a page row).
             ev.run_meta.update(scoring_format=job["key"][2], page_scope=job["page_scope"])
+        if ev.filter_inputs is not None:
+            # models-lead addendum D2: the quality filter's inputs, per run.
+            ev.run_meta["filter_inputs"] = ev.filter_inputs
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
 
@@ -6445,9 +6475,11 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
     builds a new deck. Its in-process evidence is dropped and its job revoked,
     so no response serves it from this process (P2's live-job pages past the
     stored ones included); its stored pages, if any, serve and write through
-    the page store's evidence_blob, as after a restart: it leaves _deck_held
-    too, so an upgrade miss on it reads as a restart's (release-lead's #451 QA
-    P2). Delivered decks keep theirs (written, and freed, at their first
+    the page store's evidence_blob, as after a restart. The drop is noted as
+    this process's eviction (_deck_evicted_at, and _deck_f5_dropped for the
+    f5_past_stored anomaly), so an upgrade miss on it past its effective
+    stored count reads evicted_split (models-lead addendum D1).
+    Delivered decks keep theirs (written, and freed, at their first
     delivery). Returns the count."""
     now = time.monotonic() if now is None else now
     dropped = 0
@@ -6465,12 +6497,16 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                 ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
-            # The deck's snapshots left this process: a miss on it is
-            # restart_split, as after a restart, never "other" (a held deck).
-            # The later eviction can't record it (no evidence left). Pending
-            # models-lead's ruling via head-eng: evicted_split would mean noting
-            # it in _deck_evicted_at here instead. Order: jobs, then the ledger
-            # (leaf), as in _note_deck_evicted.
+            # This process removed the deck's evidence: an eviction (C3), so a
+            # miss on it past its effective stored count is evicted_split, never
+            # "other". Noted here, kept >= 24 h from the drop (C3 (c2)), while
+            # the evidence still exists (the later eviction can't: none left).
+            # Like any eviction it also leaves _deck_held (#451 QA P3-1), so once
+            # the eviction record ages out a late view reads restart_split,
+            # never other (#489 QA P1-1). Order: jobs, then the ledger (leaf),
+            # as in _note_deck_evicted (models-lead addendum D1).
+            _ledger_add(_deck_evicted_at, job_id)
+            _ledger_add(_deck_f5_dropped, job_id)
             with _deck_ledger_lock:
                 _deck_held.pop(job_id, None)
             dropped += 1
@@ -8346,6 +8382,43 @@ def _deck_first_session_enabled() -> bool:
 def _deck_quality_filters_enabled() -> bool:
     """deck.quality_filters (operator, 2026-10-14) — backend/deck_quality.py on the served deck."""
     return getattr(FLAGS, "deck_quality_filters", False)
+
+
+def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters,
+                           lineup_slots) -> dict:
+    """models-lead addendum D2: what deck_quality.filter_deck read for this run,
+    frozen once per run in the pack's run header (`run["filter_inputs"]`), so
+    #453's audit re-runs B-DK-4/5/6 on the filter's own inputs. Audit
+    provenance, never a scorer input (not in FROZEN_INPUT_KEYS); eval reads its
+    named fields only. Kept on the deck's evidence (`ev.filter_inputs`), never
+    on the job. `cards`: the cards the filter returned; `market`,
+    `position`, `rosters` and `lineup_slots`: the very ones it was given.
+    - market / position: every asset on those cards (both sides) and in the
+      qb_te holdings; an unseeded asset is null, a None position null, so an
+      absent asset is one the filter never saw (models-eng).
+    - qb_te: per team the filter keyed (`viewer_team`, as overwritten with the
+      viewer's roster, and each card's counterparty), its QB and TE holdings.
+    - protected: the trade_hashes `is_protected` exempted.
+    A recording failure raises; the caller then records filter_ran True with
+    no inputs (the audit reads that deck as not auditable), and serves the
+    filtered deck."""
+    from . import deck_quality as _dq
+    teams = {viewer_team} | {str(c.target_user_id) for c in cards}
+    qb_te = {team: [a for a in rosters[team] if position(a) in ("QB", "TE")]
+             for team in sorted(teams) if team in rosters}
+    assets = {a for c in cards for a in (*c.give_player_ids, *c.receive_player_ids)}
+    assets.update(a for held in qb_te.values() for a in held)
+    ordered = sorted(assets, key=str)
+    return {
+        "v": 1, "filter_ran": True, "viewer_team": viewer_team,
+        "lineup_slots": None if lineup_slots is None else list(lineup_slots),
+        "market": {str(a): market(a) for a in ordered},
+        "position": {str(a): position(a) for a in ordered},
+        "qb_te": {team: [str(a) for a in held] for team, held in qb_te.items()},
+        "protected": sorted({_deck_trade_hash(c.give_player_ids, c.receive_player_ids,
+                                              c.target_user_id)
+                             for c in cards if _dq.is_protected(c)}),
+    }
 
 
 def _records_in_order(cards, records, survivors) -> list:
@@ -12853,6 +12926,7 @@ def _run_trade_job(
                 job = _trade_jobs.get(job_id)
                 if _job_live(job):
                     job["owner_presentment"] = owner_presentment
+        filter_inputs = {"v": 1, "filter_ran": False}   # models-lead addendum D2
         if _deck_quality_filters_enabled() and final_cards:
             # Operator, 2026-10-14 (Calibration grades of this engine): drop breakup / junk
             # filler / redundant TE-QB cards and cap repeats, before the served/ghost split so a
@@ -12864,11 +12938,21 @@ def _run_trade_job(
                 quality_rosters = {str(m.user_id): list(m.roster or ()) for m in (g_league.members or ())}
                 quality_rosters[viewer_team] = list(g_user_roster)
                 _e2v = _trade_service_mod.elo_to_value
+                quality_market = lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None
+                quality_position = lambda pid: getattr(players_dict.get(pid), "position", None)
+                quality_slots = _league_lineup_slots(league_id)
                 final_cards, quality_counts = _deck_quality.filter_deck(
-                    final_cards, viewer_id=viewer_team,
-                    market=lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None,
-                    position=lambda pid: getattr(players_dict.get(pid), "position", None),
-                    rosters=quality_rosters, lineup_slots=_league_lineup_slots(league_id))
+                    final_cards, viewer_id=viewer_team, market=quality_market,
+                    position=quality_position, rosters=quality_rosters, lineup_slots=quality_slots)
+                try:
+                    filter_inputs = _quality_filter_inputs(
+                        final_cards, viewer_team=viewer_team, market=quality_market,
+                        position=quality_position, rosters=quality_rosters,
+                        lineup_slots=quality_slots)
+                except Exception as inputs_err:   # provenance never unfilters the deck
+                    log.warning("trade-job %s: quality filter inputs not recorded: %s",
+                                job_id, inputs_err)
+                    filter_inputs = {"v": 1, "filter_ran": True}
                 if presentation is not None:
                     presentation["records"] = _records_in_order(
                         before_quality, presentation["records"], final_cards)
@@ -12881,6 +12965,15 @@ def _run_trade_job(
                 log.warning("trade-job %s: deck quality filters failed (serving unfiltered): %s",
                             job_id, quality_err)
                 final_cards = before_quality
+                filter_inputs = {"v": 1, "filter_ran": False}
+        # models-lead addendum D2: on the deck's evidence, never on the job (its
+        # shape stays as it was); job done carries it into the pack's run header.
+        with _trade_jobs_lock:
+            _fi_job = _trade_jobs.get(job_id)
+            _fi_ev = _fi_job.get("evidence") if _job_live(_fi_job) else None
+        if _fi_ev is not None:
+            with _fi_ev.lock:
+                _fi_ev.filter_inputs = filter_inputs
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
