@@ -35283,17 +35283,32 @@ def league_outlook_route():
                 p = players_meta.get(pid)
                 player_pos[pid] = getattr(p, "position", None) or "?"
 
-        payload = outlook_pkg.run_outlook(
-            state,
-            player_value=player_value,
-            player_pos=player_pos,
-            model_cfg=get_config(),
-            basis=basis,
-            scoring_format=fmt,
-            you_user_id=g_user_id,
-            playoff_seed_type=_outlook_captured.get("playoff_seed_type"),
-        )
-        return jsonify(payload)
+        # Result cache (backend/outlook_result_cache.py): keyed on a hash of
+        # every input run_outlook reads, so any roster/record/schedule change
+        # misses. Computed caller-independent (you_user_id=""); `for_caller`
+        # stamps `is_you` per request.
+        from . import outlook_result_cache as _outlook_results
+        from .outlook import config as _outlook_cfg
+        model_cfg = get_config()
+        seed_type = _outlook_captured.get("playoff_seed_type")
+        key = _outlook_results.make_key(
+            league_id=league_id, basis=basis, scoring_format=fmt,
+            user_id=g_user_id, state=state, player_value=player_value,
+            player_pos=player_pos, model_cfg=model_cfg,
+            playoff_seed_type=seed_type,
+            strength_source=_outlook_cfg.get_strength_source(None))
+        shared = _outlook_results.OUTLOOK_RESULTS.get_or_compute(
+            key, lambda: outlook_pkg.run_outlook(
+                state,
+                player_value=player_value,
+                player_pos=player_pos,
+                model_cfg=model_cfg,
+                basis=basis,
+                scoring_format=fmt,
+                you_user_id="",
+                playoff_seed_type=seed_type,
+            ))
+        return jsonify(_outlook_results.for_caller(shared, g_user_id))
     except NotImplementedError as e:
         return jsonify({"error": "not_supported", "message": str(e)}), 501
     except Exception as e:
