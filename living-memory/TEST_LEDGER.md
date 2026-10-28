@@ -17,8 +17,12 @@ Gates: release-lead's #489 delta QA, P3-1 to P3-3. Tests and docs only: no serve
   - **The exit drain:** it now starts a worker first when the current one died with writes queued behind it (`_i1_event_ensure_worker`, split from the enqueue), so those writes land instead of being lost.
   - **A test pins the after-write drop flush:** by the call on the test's own queue, since the drop counter is module-wide and another test's idle worker may log it.
   - **The death backoff:** informational; none added. The worker dies only on a BaseException, and each restart waits for the next enqueue or the exit drain.
-- **Evidence:** `test_trade_freshness_roster.py`, `test_deck_i1_check.py` (41), `test_evidence_cleanup.py` and the digest all passed.
-- **Sabotage, each red then restored (4):**
+  - **Shutdown guard (release-lead's #519 question):** CPython 3.12 may refuse a new thread during interpreter shutdown ("can't create new thread at interpreter shutdown", gh-104690). If it does, the exit drain logs the stranded writes with their count and returns at once. It never raises, and never waits on a queue nothing serves.
+    - On 3.14 (local) the restart works at exit: the stranded write lands.
+    - 3.12 isn't installed locally, so a child-interpreter test runs the real exit, normally and via a SIGTERM-to-exit handler (gunicorn's shape), on CI's 3.12. It asserts exit 0, no traceback, and the write either landed or logged.
+- **Evidence:** `test_trade_freshness_roster.py`, `test_deck_i1_check.py` (44, with the refused-thread test and the child-interpreter exit ×2), `test_evidence_cleanup.py` and the digest all passed.
+- **Sabotage, each red then restored (5):**
+  - the exit drain's start unguarded (the refused-thread test raises);
   - a separate kickoff picks read;
   - a second worker draft read;
   - the exit drain without a restart;
