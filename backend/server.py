@@ -5548,6 +5548,9 @@ _DECK_LEDGER_GUARD = 131072
 # under the leaf lock and, for evictions, under _trade_jobs_lock.
 _deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> built here (epoch s)
 _deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
+# The subset of _deck_evicted_at that F5 dropped (models-lead addendum D1), for
+# the f5_past_stored anomaly only; the cause never reads it.
+_deck_f5_dropped: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> dropped here
 _ledger_now = time.time                    # the ledgers' clock (tests replace it)
 _DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
 # Young entries the guard trimmed since its last warning, per ledger (#451 QA:
@@ -5568,14 +5571,16 @@ def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None
     once a minute, with the counts since the last warning, per ledger)."""
     global _ledger_guard_young, _ledger_guard_warned_at
     now = _ledger_now()
-    which = "evicted" if ledger is _deck_evicted_at else "held"
+    which = ("evicted" if ledger is _deck_evicted_at
+             else "f5" if ledger is _deck_f5_dropped else "held")
     warn = None
     with _deck_ledger_lock:
         ledger.pop(key, None)
         while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
             ledger.popitem(last=False)
         while len(ledger) >= _DECK_LEDGER_GUARD:
-            _ledger_guard_young[which] += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
+            _ledger_guard_young[which] = (_ledger_guard_young.get(which, 0)
+                                          + (now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S))
         ledger[key] = now
         if (any(_ledger_guard_young.values())
                 and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S):
@@ -5584,9 +5589,10 @@ def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None
     if warn:
         total = sum(warn.values())
         log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
-                    "24 h since its last warning (held=%d, evicted=%d): a late view of such "
+                    "24 h since its last warning (held=%d, evicted=%d%s): a late view of such "
                     "a deck reads restart_split", _DECK_LEDGER_GUARD, total,
-                    "y" if total == 1 else "ies", warn["held"], warn["evicted"])
+                    "y" if total == 1 else "ies", warn.get("held", 0), warn.get("evicted", 0),
+                    f", f5={warn['f5']}" if warn.get("f5") else "")
 
 
 def _note_deck_held(job_id: str) -> None:
@@ -5606,6 +5612,19 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     # restart_split (C (c2)'s assumption), never other.
     with _deck_ledger_lock:
         _deck_held.pop(job_id, None)
+
+
+def _f5_past_stored(deck_job_id: str, index: int, cause: str, run: Mapping) -> int | None:
+    """models-lead addendum D1's anomaly: an F5-dropped deck's evicted_split miss
+    on a card at or past the pack-recorded stored count. Should be impossible
+    (only the stored pages of a deck F5 found undelivered can be delivered), so
+    it would mean a delivery-recording gap. Returns that count when it is one."""
+    recorded = run.get("stored_count")
+    if (cause == "evicted_split" and deck_job_id in _deck_f5_dropped
+            and isinstance(recorded, int) and not isinstance(recorded, bool)
+            and index >= recorded):
+        return recorded
+    return None
 
 
 def _upgrade_miss_cards(run: Mapping) -> dict:
@@ -5784,6 +5803,11 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
             log.error(line, *args)
         else:
             log.warning(line, *args)
+        past = _f5_past_stored(deck_job_id, index, kept, state.run)
+        if past is not None:              # addendum D1: reported apart; it goes to models-lead
+            log.error("[evidence] f5_past_stored job=%s index=%d pack_stored=%d: an F5-dropped "
+                      "deck's evicted_split miss past its recorded stored pages (a "
+                      "delivery-recording gap?)", deck_job_id, index, past)
         if stored_from == "fallback" and state.run.get("page_store"):
             # #438 QA P3-1: never silent. Not other: the process dying between
             # the deck's job_done and its store is the legitimate case.
@@ -6451,9 +6475,11 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
     builds a new deck. Its in-process evidence is dropped and its job revoked,
     so no response serves it from this process (P2's live-job pages past the
     stored ones included); its stored pages, if any, serve and write through
-    the page store's evidence_blob, as after a restart: it leaves _deck_held
-    too, so an upgrade miss on it reads as a restart's (release-lead's #451 QA
-    P2). Delivered decks keep theirs (written, and freed, at their first
+    the page store's evidence_blob, as after a restart. The drop is noted as
+    this process's eviction (_deck_evicted_at, and _deck_f5_dropped for the
+    f5_past_stored anomaly), so an upgrade miss on it past its effective
+    stored count reads evicted_split (models-lead addendum D1).
+    Delivered decks keep theirs (written, and freed, at their first
     delivery). Returns the count."""
     now = time.monotonic() if now is None else now
     dropped = 0
@@ -6471,12 +6497,16 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                 ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
-            # The deck's snapshots left this process: a miss on it is
-            # restart_split, as after a restart, never "other" (a held deck).
-            # The later eviction can't record it (no evidence left). Pending
-            # models-lead's ruling via head-eng: evicted_split would mean noting
-            # it in _deck_evicted_at here instead. Order: jobs, then the ledger
-            # (leaf), as in _note_deck_evicted.
+            # This process removed the deck's evidence: an eviction (C3), so a
+            # miss on it past its effective stored count is evicted_split, never
+            # "other". Noted here, kept >= 24 h from the drop (C3 (c2)), while
+            # the evidence still exists (the later eviction can't: none left).
+            # Like any eviction it also leaves _deck_held (#451 QA P3-1), so once
+            # the eviction record ages out a late view reads restart_split,
+            # never other (#489 QA P1-1). Order: jobs, then the ledger (leaf),
+            # as in _note_deck_evicted (models-lead addendum D1).
+            _ledger_add(_deck_evicted_at, job_id)
+            _ledger_add(_deck_f5_dropped, job_id)
             with _deck_ledger_lock:
                 _deck_held.pop(job_id, None)
             dropped += 1
