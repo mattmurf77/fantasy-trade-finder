@@ -32990,7 +32990,8 @@ def _paywall_gate_hook():
     route's own 403 where it wears the verified gate, else 402
     verify_required). A failed entitlement read fails open. A request allowed
     under the deck preview leaves g.paywall_preview for _serve_trade_job to
-    cap and record."""
+    cap and record. Each 402 also records paywall_gate_hit (C8 §B, analytics
+    only)."""
     rule = request.url_rule.rule if request.url_rule is not None else ""
     if not _paywall_gate.applies(rule, request.method):
         return None
@@ -33009,7 +33010,23 @@ def _paywall_gate_hook():
     if isinstance(result, _paywall_gate.Preview):
         g.paywall_preview = result
         return None
-    return None if result is None else (jsonify(result[1]), result[0])
+    if result is None:
+        return None
+    _emit_paywall_gate_hit(sess.get("user_id"), rule, result[1])
+    return jsonify(result[1]), result[0]
+
+
+def _emit_paywall_gate_hit(user_id: str | None, rule: str, body: dict) -> None:
+    """C8 §B: record paywall_gate_hit for the 402 the hook is sending
+    (paywall_gate.record_gate_hit). Analytics only: a failure is logged by
+    exception type and swallowed, never blocking or changing the 402."""
+    try:
+        _paywall_gate.record_gate_hit(
+            user_id, body["gate"], rule,
+            is_mobile=_paywall_gate.is_mobile_request(request.headers),
+            **_device_info_from_request())
+    except Exception as e:
+        log.warning("paywall_gate_hit not recorded: %s", type(e).__name__)
 
 
 def _paywall_deck_ask(user_id):
