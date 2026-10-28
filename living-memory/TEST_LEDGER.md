@@ -1,3 +1,27 @@
+## 2026-10-28 — The automatic re-search on `inputs_changed` (analytics-lead's option (a); for the 11-06 binary)
+
+Gates: release-lead's #470 QA P2-1 follow-up; analytics-lead's grant of option (a) with conditions (2026-10-28, cc head-eng and head-product); head-eng: build once that answer came. The scope block is `docs/plans/trade-time-to-suggestion/scope-auto-research.md`. Mobile only; no event, value, flag, route or schema change. D-056: the evidence is the structural check, a code-walk and a TestFlight checklist.
+
+- **The change:** a deck the server revoked for an input change (`status: 'error'`, `error: 'inputs_changed'`) re-searches once, by itself, when the user has no card left, instead of "Couldn't load more trades."
+  - No R1, and no new search_id: the open trace's id, else none.
+  - No R2b: no deckFailure.
+  - At most once per search.
+  - The error card is hidden at render while it recovers.
+- **`check-trade-first-card-events.js` §10** (10a–10k, all pass):
+  - analytics-lead's four cases, executed against `utils/tradePages.ts` and the real `state/tradeSearchTrace.ts`;
+  - the TradesScreen wiring, by shape.
+- **Census counts updated for the 8th dispatch site:** `check-canvas-results` 12a, `check-inline-home` 7f, `check-results-push` 4f, `check-offer-prefill-330` S-2 and `check-trade-pages` 5a (its shape).
+  - All five passed on main and failed after the change until updated: they caught the new dispatch site, as designed.
+  - Every `mobile/tests/check-*.js` passes. `tsc --noEmit` is clean; testid-lint is OK.
+- **Sabotage, each red then restored (6):**
+  - the recovery removed (10g);
+  - a minted id for the re-search (4a, 10i);
+  - the id sent when the trace has settled (10a);
+  - a second re-search allowed (10f);
+  - the error card not hidden (10j);
+  - the re-search through a tap path (10h).
+- **TestFlight:** the scope's §3 checklist (6 steps, two devices), for the operator on the 11-06 build. Not yet run.
+
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
 Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).

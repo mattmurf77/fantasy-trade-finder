@@ -193,8 +193,8 @@ console.log('check-trade-first-card-events:');
 
 // ── 4. The request carries the tap's id ───────────────────────────────────
 {
-  check('4a. dispatchGenerate sends the claimed tap id as /generate\'s search_id (else a fresh one for untapped dispatches), and the deck now answers that search',
-    /const claimed = claimPendingSearch\(\);\s*deckSearchRef\.current = claimed \? \{ id: claimed, keys: new Set\(\) \} : null;\s*generateMutation\.mutate\(\{ \.\.\.vars, searchId: claimed \?\? uuidv4\(\) \}, mutateOpts\);/.test(trades));
+  check('4a. dispatchGenerate sends the claimed tap id as /generate\'s search_id (else a fresh one for untapped dispatches; the automatic re-search its open id or none, section 10), and the deck now answers that search',
+    /const claimed = research \? research\.searchId : claimPendingSearch\(\);\s*if \(!research\) autoResearchRef\.current = 'idle';\s*deckSearchRef\.current = claimed \? \{ id: claimed, keys: new Set\(\) \} : null;\s*generateMutation\.mutate\(\s*\{ \.\.\.vars, searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\) \},\s*mutateOpts\);/.test(trades));
   check('4b. the landing\'s page-1 request uses the canvas tap\'s id; the adopting deck claims it; a cancelled push drops it',
     /generateTrades\(request, \{ searchId: fork\.searchId \}\)/.test(trades)
       && /claimSearch\(adopted\?\.snapshot\.search_id\);/.test(trades)
@@ -392,6 +392,88 @@ function freshTraceWithTimers() {
   check('9b. the prune never touches an unsettled trace and drops its deck_buffer_empty mark with it',
     /function pruneSettledTraces\(\): void \{[\s\S]*?if \(!t\.settled\) continue;\s*traces\.delete\(id\);\s*bufferEmptyReported\.delete\(id\);/.test(traceCode)
       && /\}\): string \{\s*pruneSettledTraces\(\);/.test(traceCode));
+}
+
+// ── 10. The automatic re-search on inputs_changed (analytics-lead, option (a), 2026-10-28) ──
+// A deck the server revoked for an input change re-searches once by itself:
+// no R1, no new search_id (the open trace's, else none), no R2b, at most once.
+{
+  const pages = load('utils/tradePages.ts', {});
+  const R = (evs, type) => evs.filter((e) => e.type === type);
+  const begin = (h, source) => h.mod.beginTradeSearch({ source, mode: 'deck', searchType: 'organic', screen: 'Trades' });
+
+  // (i) inputs_changed AFTER R2: the trace is settled.
+  {
+    const h = freshTraceWithTimers();
+    const id = begin(h);
+    h.mod.claimPendingSearch();
+    h.mod.reportFirstCardShown(id, { cardIndex: 0 });
+    const before = h.events.length;
+    let state = 'idle';
+    state = pages.autoResearchOnJobError(state, 'inputs_changed');
+    const sent = pages.autoResearchSearchId(id, h.mod.isSearchOpen);
+    check('10a. EXECUTED (i): after R2, an inputs_changed is recovered (no deckFailure) and the re-search carries no search_id',
+      state === 'pending' && sent === null);
+    check('10b. EXECUTED (i): the re-search fires no R1 and no R2/R2b',
+      h.events.length === before && R(h.events, 'find_trades_tapped').length === 1
+        && R(h.events, 'trade_first_card_shown').length === 1 && R(h.events, 'trade_first_card_failed').length === 0);
+  }
+
+  // (ii) inputs_changed BEFORE the first card: the trace is still open.
+  {
+    const h = freshTraceWithTimers();
+    const id = begin(h);
+    h.mod.claimPendingSearch();
+    const state = pages.autoResearchOnJobError('idle', 'inputs_changed');
+    const sent = pages.autoResearchSearchId(id, h.mod.isSearchOpen);
+    h.tick(1500);                                     // the rebuild
+    h.mod.reportFirstCardShown(sent, { cardIndex: 0 });  // the rebuilt deck's first card
+    const r2 = R(h.events, 'trade_first_card_shown');
+    check('10c. EXECUTED (ii): before the first card, the re-search reuses the open search_id',
+      state === 'pending' && sent === id);
+    check('10d. EXECUTED (ii): no R2b, and exactly one R2 with the original search_id, timed from the original tap',
+      R(h.events, 'trade_first_card_failed').length === 0 && r2.length === 1
+        && r2[0].props.search_id === id && r2[0].props.ms_from_tap >= 1500
+        && R(h.events, 'find_trades_tapped').length === 1);
+  }
+
+  // (iii) a failed re-search: the error card, then Try again (a real tap) is one R1.
+  {
+    const h = freshTraceWithTimers();
+    const outcome = pages.autoResearchOnJobError('used', 'job_failed');
+    const shows = !pages.autoResearchHidesError('used', 'job_failed', false);
+    begin(h, 'deck_error_retry');
+    const r1 = R(h.events, 'find_trades_tapped');
+    check('10e. EXECUTED (iii): a failed re-search is today\'s failure, the error card shows, and Try again is one R1 deck_error_retry',
+      outcome === 'fail' && shows && r1.length === 1 && r1[0].props.source === 'deck_error_retry');
+  }
+
+  // (iv) at most one: a second inputs_changed in the same search fails.
+  check('10f. EXECUTED (iv): no second automatic re-search; once used, an inputs_changed shows the error card',
+    pages.autoResearchOnJobError('used', 'inputs_changed') === 'fail'
+      && !pages.autoResearchHidesError('used', 'inputs_changed', false)
+      && pages.autoResearchHidesError('used', 'inputs_changed', true)       // only while it's in flight
+      && pages.autoResearchHidesError('pending', 'inputs_changed', false)
+      && pages.autoResearchOnJobError('idle', 'job_failed') === 'fail');
+
+  // The screen calls them where the rules say (by shape).
+  const effect = trades.slice(trades.indexOf("if (job?.status !== 'error') return;"), trades.indexOf("if (job?.status !== 'error') return;") + 600);
+  check('10g. the job-error mirror returns before deckFailure when the inputs_changed is recovered (no R2b)',
+    /if \(autoResearchOnJobError\(autoResearchRef\.current, job\.error\) === 'pending'\) \{\s*autoResearchRef\.current = 'pending';\s*return;\s*\}/.test(effect)
+      && effect.indexOf("autoResearchRef.current = 'pending'") < effect.indexOf('setDeckFailure('));
+  const auto = trades.slice(trades.indexOf("if (autoResearchRef.current !== 'pending' || rawTopCard"), trades.indexOf("if (autoResearchRef.current !== 'pending' || rawTopCard") + 500);
+  check('10h. the re-search runs once no card is left, through dispatchGenerate with the open id or none, never a tap path',
+    auto.length > 0 && /autoResearchRef\.current = 'used';/.test(auto)
+      && /dispatchGenerate\(\{ repeat: true \}, undefined,\s*\{ searchId: autoResearchSearchId\(deckSearchRef\.current\?\.id, isSearchOpen\) \}\);/.test(auto)
+      && !/beginTradeSearch|handleFindTrades|track\(/.test(auto));
+  check('10i. dispatchGenerate mints no search_id for the re-search and resets the budget for every other dispatch',
+    /const claimed = research \? research\.searchId : claimPendingSearch\(\);\s*if \(!research\) autoResearchRef\.current = 'idle';/.test(trades)
+      && /searchId: research \? research\.searchId \?\? undefined : claimed \?\? uuidv4\(\)/.test(trades)
+      && /autoResearchRef\.current = 'idle';\s*let claimedFair = claimPendingSearch\(\);/.test(trades));
+  check('10j. the deck end hides the error card while it is recovered (decided at render)',
+    /const deckEnd = deckEndRaw === 'error' && autoResearchHidesError\(\s*autoResearchRef\.current, job\?\.error, generateMutation\.isPending\)\s*\? 'pending'\s*: deckEndRaw;/.test(trades));
+  check('10k. Try again stays a real tap: R1 deck_error_retry through handleFindTrades',
+    /if \(jobRef\.current\?\.status === 'error'\) \{\s*handleFindTrades\('deck_error_retry'\);/.test(trades));
 }
 
 console.log(failures ? `check-trade-first-card-events: ${failures} FAILED` : 'check-trade-first-card-events: all passed');
