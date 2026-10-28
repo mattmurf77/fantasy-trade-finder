@@ -97,7 +97,7 @@ Extend `delete_user_data()` (delete matrix, accounts.py ~537):
 
 ## 3. `GET /api/paywall/config` — contract
 
-> **2026-10-27:** prices and trial corrected to the operator's 2026-10-25 decisions (PR #393) and PR #494: no `trial_days` (StoreKit's "Free, 1 Month" intro offer on each plan is authoritative); fallback prices $4.99/mo and $24.99/yr ($2.09/mo), switching at 2027-01-02 04:00 UTC (Jan 1, 11 pm ET; `_PAYWALL_PRICE_RISE_AT`), the instant App Store Connect starts the US price change scheduled for 2027-01-02, to the new-subscriber price, $6.99 / $34.99 ($2.92/mo); existing subscribers keep theirs via App Store Connect. `tips` is `[]` at launch: the `ftf_tip_*` SKUs are not submitted. **2026-10-28:** first written as a 2027-01-01 UTC date, then as 2027-01-01 00:00 America/Los_Angeles (#494 @ `061ec1ff`). Apple's start-times table puts a US price change at 04:00 UTC on its scheduled date, so a 2027-01-01 change would end the Founder price at 11 pm ET on Dec 31, against terms §14.8 ("by December 31, 2026"). The operator moved both changes to 2027-01-02 ("Yes, Jan 2"), and #494's constant follows.
+> **2026-10-27:** prices and trial corrected to the operator's 2026-10-25 decisions (PR #393) and PR #494: no `trial_days` (StoreKit's "Free, 1 Month" intro offer on each plan is authoritative); fallback prices $4.99/mo and $24.99/yr ($2.09/mo), switching at 2027-01-02 04:00 UTC (Jan 1, 11 pm ET; `_PAYWALL_PRICE_RISE_AT`), the instant App Store Connect starts the US price change scheduled for 2027-01-02, to the new-subscriber price, $6.99 / $34.99 ($2.92/mo); existing subscribers keep theirs via App Store Connect. `tips` is `[]` at launch: the `ftf_tip_*` SKUs are not submitted. **2026-10-28:** first written as a 2027-01-01 UTC date, then as 2027-01-01 00:00 America/Los_Angeles (#494 @ `061ec1ff`). Apple's start-times table puts a US price change at 04:00 UTC on its scheduled date, so a 2027-01-01 change would end the Founder price at 11 pm ET on Dec 31, against terms §14.8 ("by December 31, 2026"). The operator moved both changes to 2027-01-02 ("Yes, Jan 2"). #494 merged first with 2027-01-01 08:00Z; **#522** moves `_PAYWALL_PRICE_RISE_AT` to 2027-01-02 04:00Z, and main serves the old instant until it merges.
 
 Query: `?platform=ios|web|extension` (display filtering only). Session-authed (same layer
 as `/api/me/entitlements`). Flag-aware: `monetize.paywall` OFF → `{"enabled": false}`.
@@ -114,7 +114,7 @@ as `/api/me/entitlements`). Flag-aware: `monetize.paywall` OFF → `{"enabled": 
                   "extension_overlays", "ad_free"]},
     {"id": "plans",        "kind": "purchase"}
   ],
-  "products": [   // ← fallback copy before 2027-01-02 04:00Z (Jan 1, 11 pm ET); from then $6.99 and $34.99 / $2.92 (#494)
+  "products": [   // ← fallback copy before 2027-01-02 04:00Z (Jan 1, 11 pm ET); from then $6.99 and $34.99 / $2.92 (#494, instant per #522)
     {"product_id": "ftf_pro_monthly", "period": "monthly",
      "display_price": "$4.99", "hero": false},
     {"product_id": "ftf_pro_annual",  "period": "annual",
