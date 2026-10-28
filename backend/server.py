@@ -254,6 +254,7 @@ from .database import (
 )
 from . import sleeper_write as _sleeper_write
 from . import ownership_copy as _ownership_copy   # I-2 send-time refusal copy
+from . import write_outcome as _write_outcome     # C10 send outcome-unknown kind
 from . import taste_service as _taste_service   # F5 (deck.taste_vectors)
 from . import value_model as _value_model       # F6 (deck.value_model — dark)
 from . import daily_tick as _daily_tick         # POST /api/cron/daily-tick step runner (S3)
@@ -23963,6 +23964,57 @@ def _roster_read_failed_copy(platform: str) -> str:
     return _ownership_copy.roster_read_failed(platform)
 
 
+# C10 (head-eng pre-launch triage): plain copy for an ESPN/MFL trade-send
+# write that failed. PLACEHOLDER copy, pending marketing via head-eng; a swap
+# is a change here and nowhere else. The provider's raw body goes to the log
+# (`_provider_body_for_log`), never into `detail` / `message`.
+_SEND_REJECTED_COPY = ("{platform} didn’t accept this trade, so nothing was sent. "
+                       "Check the trade on {platform} and try again.")
+_SEND_OUTCOME_UNKNOWN_COPY = ("Couldn’t confirm whether this trade reached {platform}. "
+                              "Check {platform} before sending it again.")
+
+
+def _send_write_failed(code_prefix: str, platform: str, kind) -> tuple[dict, int]:
+    """C10: a propose core's response for a failed, non-auth provider write.
+
+    `kind` 'outcome_unknown' (the provider may have the trade, see
+    backend/write_outcome.py) → 502 `{code_prefix}_outcome_unknown`, so the
+    client never invites a blind retry that could send it twice. Every other
+    kind keeps 502 `{code_prefix}_write_failed`. Both carry `kind` and
+    `detail` == `message` == plain copy, never provider text."""
+    if kind == _write_outcome.OUTCOME_UNKNOWN:
+        msg = _SEND_OUTCOME_UNKNOWN_COPY.format(platform=platform)
+        return {"error": f"{code_prefix}_outcome_unknown", "kind": kind,
+                "detail": msg, "message": msg}, 502
+    msg = _SEND_REJECTED_COPY.format(platform=platform)
+    return {"error": f"{code_prefix}_write_failed", "kind": kind,
+            "detail": msg, "message": msg}, 502
+
+
+# Masks for provider text before it is logged (docs/integrations/espn.md §6,
+# mfl.md §6): SWID-shaped GUIDs (credential half AND member id), cookie
+# name=value pairs, then any long opaque blob (espn_s2's percent-encoded shape).
+_PROVIDER_LOG_REDACTIONS = (
+    (re.compile(r"\{?[0-9A-Fa-f]{8}-(?:[0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}\}?"), "[redacted]"),
+    (re.compile(r"(?i)\b(espn_s2|swid|mfl_user_id)(\"?\s*[=:]\s*\"?)[^;\s\"&,}]+"),
+     r"\1\2[redacted]"),
+    (re.compile(r"[A-Za-z0-9%+/=_-]{80,}"), "[redacted]"),
+)
+_PROVIDER_LOG_LIMIT = 300
+
+
+def _provider_body_for_log(text) -> str:
+    """C10: a provider error body (or transport text) made fit for a WARNING
+    log line: whitespace flattened, cookies / SWIDs / long blobs masked, then
+    truncated to `_PROVIDER_LOG_LIMIT` characters. Never a response field."""
+    s = " ".join(str(text or "").split())
+    for rx, sub in _PROVIDER_LOG_REDACTIONS:
+        s = rx.sub(sub, s)
+    if len(s) > _PROVIDER_LOG_LIMIT:
+        s = f"{s[:_PROVIDER_LOG_LIMIT]}…[+{len(s) - _PROVIDER_LOG_LIMIT} chars]"
+    return s
+
+
 def _ownership_refusal(side: str, assets, names, counterparty_name=None) -> tuple[dict, int]:
     """I-2 (trade-time-to-suggestion PRD §5.3, platforms-pm R4): the one
     send-time refusal for an asset that a live roster read shows has moved.
@@ -37467,6 +37519,7 @@ def propose_trade_to_mfl():
       404 feature_disabled | 403 verification_required | 404 mfl_not_linked
       409 mfl_franchise_unknown | 409 mfl_not_connected | 409 mfl_auth_expired
       422 mfl_asset_unmapped (+ unmapped[]) | 502 mfl_write_failed
+      502 mfl_outcome_unknown (C10: the import may have landed — no retry)
       400 bad_request
       422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
 
@@ -37646,20 +37699,18 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         return {"error": "mfl_unavailable", "kind": "network",
                 "detail": _msg, "message": _msg}, 502
 
-    def _auth_expired(detail):
+    def _auth_expired():
         # Dead/rejected cookie — drop the stored credential so the client
         # re-prompts MFL sign-in (same treatment as mfl_auth_import). Shared
         # by the I-2 ownership reads (a 401/403 export) and the write itself.
+        # C10: the provider's text is logged by the caller, never returned.
         try:
             delete_mfl_credential(user_id)
         except Exception:
             log.exception("mfl propose: credential delete failed")
         sess.pop("mfl_cookie", None)
-        return {
-            "error": "mfl_auth_expired",
-            "message": "Your MFL sign-in expired — sign in again.",
-            "detail": (str(detail or ""))[:200],
-        }, 409
+        _msg = "Your MFL sign-in expired — sign in again."
+        return {"error": "mfl_auth_expired", "message": _msg, "detail": _msg}, 409
 
     norm = _mfl_write.normalize_franchise_id
     my_n, their_n = norm(my_fid), norm(their_fid)
@@ -37671,7 +37722,7 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
             raw = _mfl.fetch_rosters(league_id, year, host, cookie=cookie, raise_auth=True)
         except _mfl.MflAuthError as e:
             log.warning("mfl propose: ownership read auth-rejected: %s", e)
-            return _auth_expired(str(e))
+            return _auth_expired()
         except Exception as e:  # P2-1: rosters transport
             # `_fetch_one` wraps only HTTPError / URLError / bad JSON. A read
             # timeout, connection reset, IncompleteRead or BadStatusLine would
@@ -37702,7 +37753,7 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
                                                 raise_auth=True)
         except _mfl.MflAuthError as e:
             log.warning("mfl propose: ownership read auth-rejected: %s", e)
-            return _auth_expired(str(e))
+            return _auth_expired()
         except Exception as e:  # P2-1: futureDraftPicks transport
             log.warning("mfl propose: futureDraftPicks read failed: %s", type(e).__name__)
             return _read_failed()
@@ -37749,16 +37800,16 @@ def _mfl_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
     try:
         result = _mfl_write.propose_trade(cookie, host, year, req)
     except _mfl_write.MflWriteAuthError as e:
-        log.warning("mfl propose auth-rejected: %s", getattr(e, "detail", None))
-        return _auth_expired(getattr(e, "detail", ""))
+        log.warning("mfl propose auth-rejected: %s",
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        return _auth_expired()
     except _mfl_write.MflWriteError as e:
-        log.warning("mfl propose write-failed [%s]: %s", e.kind,
-                    getattr(e, "detail", None))
-        return {
-            "error": "mfl_write_failed",
-            "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 502
+        # C10: MFL's raw body is for this log line only. A timeout or reset
+        # after the import went out is `mfl_outcome_unknown`, never a plain
+        # failure the user would retry into a second send.
+        log.warning("mfl propose write-failed [%s] %s: %s", e.kind, e,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        return _send_write_failed("mfl", "MFL", e.kind)
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper
     # route; additive/optional, only reached on a successful MFL import.
@@ -38068,6 +38119,7 @@ def propose_trade_to_espn():
       409 espn_team_unknown | 409 espn_not_connected | 409 espn_auth_expired
       (stored credential dropped) | 422 espn_pick_unsupported (+ picks[])
       | 422 espn_asset_unmapped (+ unmapped[]) | 502 espn_write_failed
+      | 502 espn_outcome_unknown (C10: the proposal may exist — no retry)
       | 400 bad_request
       | 422 asset_not_owned | 422 counterparty_asset_not_owned (I-2)
       | 502 espn_unavailable (`kind: "network"`; I-2 R3, live read failed)
@@ -38334,24 +38386,21 @@ def _espn_propose_core(sess, *, league_id, their_user_id, give_ids, receive_ids,
         # TODO(live-verify): until the auth probe clears, a 401/403 here may
         # mean cookies alone never authorize a server-side write — either
         # way: structured error, credential drop, client re-prompts connect.
-        log.warning("espn propose auth-rejected: %s", getattr(e, "detail", None))
+        log.warning("espn propose auth-rejected: %s",
+                    _provider_body_for_log(getattr(e, "detail", None)))
         try:
             delete_espn_credential(user_id)
         except Exception:
             log.exception("espn propose: credential delete failed")
-        return {
-            "error": "espn_auth_expired",
-            "message": "ESPN rejected the sign-in — connect ESPN again.",
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 409
+        _msg = "ESPN rejected the sign-in — connect ESPN again."
+        return {"error": "espn_auth_expired", "message": _msg, "detail": _msg}, 409
     except _espn_write.EspnWriteError as e:
-        log.warning("espn propose write-failed [%s]: %s", e.kind,
-                    getattr(e, "detail", None))
-        return {
-            "error": "espn_write_failed",
-            "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }, 502
+        # C10: ESPN's raw body is for this log line only. A timeout or reset
+        # after the POST went out is `espn_outcome_unknown`, never a plain
+        # failure the user would retry into a second send.
+        log.warning("espn propose write-failed [%s] %s: %s", e.kind, e,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        return _send_write_failed("espn", "ESPN", e.kind)
 
     # F1 (deck.signal_v2) — same proposal-sent outcome hook as the Sleeper/MFL
     # routes; additive/optional, only reached on a successful ESPN write.
