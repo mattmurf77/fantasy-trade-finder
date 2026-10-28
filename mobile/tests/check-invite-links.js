@@ -586,6 +586,41 @@ function runStatic() {
           && /inviteBtn: \{\s*minHeight: 36,\s*minWidth: 44,/.test(bannerSrc),
         'the banner Invite button fell under the 44pt touch floor');
 
+  // N. ux-lead #364 change 1 — EVERY Invite control renders busy from
+  //    useInviteBusy() (the banner is §L). Each control is found by its
+  //    testID; its busy attributes must read the file's useInviteBusy() value.
+  const inviteControls = [
+    ['components/InviteLeaguematesCard.tsx', 'league.invite-cta', 1, 'button'],      // League Home card
+    ['components/LeagueProgressModule.tsx', 'league.progress-invite', 2, 'link'],     // League Home links
+    ['screens/LeagueScreen.tsx', 'league.members-invite', 1, 'button'],               // members overlay
+    ['screens/MatchesScreen.tsx', 'matches.invite-cta', 1, 'button'],                 // Matches empty
+    ['components/TopBar.tsx', 'topbar.notif-empty-invite', 1, 'button'],              // bell empty state
+  ];
+  for (const [rel, testID, count, kind] of inviteControls) {
+    const sf = sourceOf(rel);
+    let hook = false;
+    const found = [];
+    walk(sf, (n) => {
+      if (ts.isVariableDeclaration(n) && n.name.getText(sf) === 'inviteBusy'
+          && n.initializer && n.initializer.getText(sf) === 'useInviteBusy()') hook = true;
+      if ((ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n))
+          && n.attributes.properties.some((a) => !ts.isJsxSpreadAttribute(a) && a.name.getText(sf) === 'testID'
+            && a.initializer && a.initializer.getText(sf) === `"${testID}"`)) {
+        const at = {};
+        for (const a of n.attributes.properties) {
+          if (!ts.isJsxSpreadAttribute(a)) at[a.name.getText(sf)] = a.initializer ? a.initializer.getText(sf) : 'true';
+        }
+        found.push(at);
+      }
+    });
+    const ok = found.length === count && found.every((at) => (kind === 'button'
+      ? at.loading === '{inviteBusy}' && at.accessibilityLabel === '{inviteBusy ? INVITE_BUSY_LABEL : undefined}'
+      : at.accessibilityLabel === '{inviteBusy ? INVITE_BUSY_LABEL : "Invite leaguemates"}'
+        && at.accessibilityState === '{{ busy: inviteBusy }}'));
+    check(`N ux-1 ${rel} ${testID}: busy from useInviteBusy()${kind === 'button' ? ' via Button loading' : ' (a11y; inline text link)'}`,
+          hook && ok, JSON.stringify({ hook, found }));
+  }
+
   runButtonLoading();
   finish();
 }

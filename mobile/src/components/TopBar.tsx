@@ -23,7 +23,7 @@ import {
 import { getLeagueSummary } from '../api/league';
 import { track } from '../api/events';
 import { inviteSocialProof, INVITE_RATIONALE } from '../utils/inviteSocialProof';
-import { shareInvite } from './InviteLeaguematesBanner';
+import { shareInvite, useInviteBusy, INVITE_BUSY_LABEL } from './InviteLeaguematesBanner';
 import { relativeTime } from '../utils/relativeTime';
 // Circular at module-load (TopBar ← TabNav ← RootNav), but `navigationRef`
 // is a top-level const created at RootNav import time and only *read*
@@ -290,6 +290,8 @@ export default function TopBar() {
   }, [open, items.length, summaryQuery.isFetching, totalMates, joinedMates,
       inviteOffered, platform]);
 
+  // ux-lead #364 change 1: the Invite button renders busy from shareInvite's guard.
+  const inviteBusy = useInviteBusy();
   const onInviteFromInbox = () => {
     setOpen(false);
     void shareInvite({
@@ -486,6 +488,8 @@ export default function TopBar() {
                     label="Invite leaguemates"
                     variant="primary"
                     onPress={onInviteFromInbox}
+                    loading={inviteBusy}
+                    accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : undefined}
                   />
                 </>
               ) : null}

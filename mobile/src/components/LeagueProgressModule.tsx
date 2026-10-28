@@ -5,6 +5,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { ink, chalk, ice, space, type, fonts } from '../theme/chalkline';
 import { Button, Card, Text } from './chalkline';
 import { contrarianFoldLine, matchesUnlockRemaining } from '../utils/leagueUnlocks';
+import { useInviteBusy, INVITE_BUSY_LABEL } from './InviteLeaguematesBanner';
 
 // League progress module (#229/#230/#234 — approved mock
 // mockups/polish-lab-2026-08/empty-states-progress-v3.html). ONE card owns
@@ -118,6 +119,9 @@ export default function LeagueProgressModule({
   testID,
   style,
 }: Props) {
+  // ux-lead #364 change 1: the Invite link's busy state is shareInvite's
+  // guard. Read before the early return (rules of hooks).
+  const inviteBusy = useInviteBusy();
   if (totalTeams <= 1) return null; // solo/unknown league — nothing to count
 
   // You occupy one slot (labeled "(you)"); ranked leaguemates fill the rest.
@@ -137,7 +141,8 @@ export default function LeagueProgressModule({
         style={styles.inviteLink}
         onPress={onInvite}
         accessibilityRole="link"
-        accessibilityLabel="Invite leaguemates"
+        accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : "Invite leaguemates"}
+        accessibilityState={{ busy: inviteBusy }}
         suppressHighlighting
       >
         Invite them
@@ -212,7 +217,8 @@ export default function LeagueProgressModule({
               style={styles.inviteLink}
               onPress={onInvite}
               accessibilityRole="link"
-              accessibilityLabel="Invite leaguemates"
+              accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : "Invite leaguemates"}
+              accessibilityState={{ busy: inviteBusy }}
               suppressHighlighting
             >
               Invite leaguemates
