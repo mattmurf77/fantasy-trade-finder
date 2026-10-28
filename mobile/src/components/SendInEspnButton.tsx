@@ -8,6 +8,8 @@ import { useFlag } from '../state/useFeatureFlags';
 import { getEspnLinkStatus, proposeTradeToEspn } from '../api/sendInEspn';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
+import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import { SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownMessage } from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
 // "Send in ESPN" — the ESPN twin of SendInSleeperButton/SendInMflButton,
@@ -162,7 +164,14 @@ export default function SendInEspnButton({
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
 
-      if (code === 'espn_not_connected' || code === 'espn_auth_expired') {
+      if (isSendOutcomeUnknown(err)) {
+        // Timed out, no answer, or the server's espn_outcome_unknown: the
+        // trade may be in ESPN. Never "try again" (api/sendOutcome.ts).
+        Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownMessage('ESPN'), [
+          { text: 'OK', style: 'cancel' },
+          { text: 'Open ESPN', onPress: openEspn },
+        ]);
+      } else if (code === 'espn_not_connected' || code === 'espn_auth_expired') {
         // Credential vanished/expired between the status check and the send
         // (the server drops a dead pair on a rejected pre-flight) — send
         // them to the in-flow sign-in; the focus handler reports the result

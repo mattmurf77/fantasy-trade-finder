@@ -9,6 +9,8 @@ import { useFlag } from '../state/useFeatureFlags';
 import { getMflLinkStatus, proposeTradeToMfl } from '../api/sendInMfl';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
+import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import { SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownMessage } from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
 // "Send in MFL" — the MFL twin of SendInSleeperButton, mounted FOR MFL
@@ -121,7 +123,14 @@ export default function SendInMflButton({
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
 
-      if (code === 'mfl_not_connected' || code === 'mfl_auth_expired') {
+      if (isSendOutcomeUnknown(err)) {
+        // Timed out, no answer, or the server's mfl_outcome_unknown: the
+        // trade may be in MFL. Never "try again" (api/sendOutcome.ts).
+        Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownMessage('MFL'), [
+          { text: 'OK', style: 'cancel' },
+          { text: 'Open MFL', onPress: openMfl },
+        ]);
+      } else if (code === 'mfl_not_connected' || code === 'mfl_auth_expired') {
         // Credential vanished/expired between the status check and the send
         // — open the in-flow sign-in sheet; a successful sign-in resumes
         // the send. Never a cross-surface punt to the league list.
