@@ -244,8 +244,42 @@ def get_entitlements(user_id: str) -> dict:
 def empty_entitlements() -> dict:
     """The view of a user with no rows: every field blank/false. Served to an
     unverified session, which may carry a subscriber's user_id. Built by the
-    same shaping as get_entitlements, so a new field is blank here too."""
-    return _view([])
+    same shaping as get_entitlements, so a new field is blank here too; plus
+    `founder`, which /api/me/entitlements adds for a verified session."""
+    return {**_view([]), "founder": False}
+
+
+def is_founder(user_id: str, closes_at: str) -> bool:
+    """`founder` on /api/me/entitlements (#393 scope §2 item 2): the user
+    holds pro through a subscription that started before `closes_at` (the
+    club's cut-off, an ISO-8601 UTC string). The start is the subscription's
+    INITIAL_PURCHASE in the subscription_events ledger, which RevenueCat
+    sends for a first purchase and an intro-trial start alike, under the
+    active pro row's user and product. Its time is the payload's
+    `purchased_at_ms`, else the row's occurred_at; an event whose time
+    can't be read is skipped. Not read by the gate."""
+    t = db.subscription_events_table
+    with db.engine.begin() as conn:
+        rows = [r for r in _active_rows(conn, user_id)
+                if r.entitlement == "pro" and r.product_id]
+        if not rows:
+            return False
+        events = conn.execute(
+            select(t.c.payload, t.c.occurred_at)
+            .where(t.c.event_type == "INITIAL_PURCHASE")
+            .where(t.c.user_id.in_({r.user_id for r in rows}))
+            .where(t.c.product_id.in_({r.product_id for r in rows}))
+        ).fetchall()
+    cut = datetime.fromisoformat(closes_at)
+    for payload, occurred_at in events:
+        try:
+            started = (_ms_to_iso((json.loads(payload) or {}).get("purchased_at_ms"))
+                       or occurred_at)
+            if datetime.fromisoformat(started) < cut:
+                return True
+        except (ValueError, TypeError, AttributeError, OverflowError, OSError):
+            continue
+    return False
 
 
 def _view(rows) -> dict:
