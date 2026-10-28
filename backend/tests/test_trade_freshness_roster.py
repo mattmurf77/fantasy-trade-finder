@@ -953,6 +953,28 @@ def _fail_in_worker(monkeypatch, name):
     monkeypatch.setattr(server, "_run_trade_job", run)
 
 
+def _blip_in_worker(monkeypatch, name, fails=1):
+    """`server.<name>` raises its first `fails` calls in the worker, then reads
+    for real: a transient DB error. Returns the worker's call count."""
+    real_fn, real_run = getattr(server, name), server._run_trade_job
+    calls = []
+
+    def flaky(*a, **k):
+        calls.append(1)
+        if len(calls) <= fails:
+            raise RuntimeError("db blip")
+        return real_fn(*a, **k)
+
+    def run(*a, **k):
+        monkeypatch.setattr(server, name, flaky)
+        try:
+            return real_run(*a, **k)
+        finally:
+            monkeypatch.setattr(server, name, real_fn)
+    monkeypatch.setattr(server, "_run_trade_job", run)
+    return calls
+
+
 def _kick_sync():
     server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
                               scoring_format="1qb_ppr", opponents_total=1, synchronous=True)
@@ -975,3 +997,32 @@ def test_a_failed_read_still_forfeits_the_owner_arm(live, monkeypatch, read):
     _fail_in_worker(monkeypatch, read)
     _kick_sync()
     assert outcomes == ["RuntimeError"]
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_transient_read_failure_is_retried_once_and_the_owner_arm_builds(live, monkeypatch,
+                                                                          read):
+    """models-eng (v7): a read that fails once and then succeeds is retried at
+    once inside its memo, so the owner context builds as main's would. It's
+    still one memoized read: two calls in all, one note, and the stamp kept."""
+    outcomes = _owner_on_and_spied(monkeypatch)
+    calls = _blip_in_worker(monkeypatch, read, fails=1)
+    notes = []
+    real_note = server._note_job_picks_read
+    monkeypatch.setattr(server, "_note_job_picks_read",
+                        lambda *a, **k: (notes.append(a[0]), real_note(*a, **k)))
+    _kick_sync()
+    assert outcomes == ["built"] and len(calls) == 2 and len(notes) == 1
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[server._trade_jobs_by_key[server._trade_job_key(UID, LEAGUE,
+                                                                                  "1qb_ppr")]]
+    assert job["roster_fp"] is not None
+
+
+@pytest.mark.parametrize("read", ["load_draft_picks", "get_league_draft_context"])
+def test_a_read_that_fails_twice_forfeits_the_owner_arm(live, monkeypatch, read):
+    """Both attempts raise: the memo marks the read failed, as before v7."""
+    outcomes = _owner_on_and_spied(monkeypatch)
+    calls = _blip_in_worker(monkeypatch, read, fails=2)
+    _kick_sync()
+    assert outcomes == ["RuntimeError"] and len(calls) == 2
