@@ -30269,6 +30269,9 @@ def _png_response(data: bytes, status: int = 200) -> "Response":
     resp.headers["Content-Type"]  = "image/png"
     resp.headers["Cache-Control"] = "public, max-age=300"
     resp.headers["Content-Length"] = str(len(data))
+    # Crawlable on purpose (robots.txt) so link unfurlers can fetch the
+    # card, but kept out of search indexes.
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
@@ -30317,6 +30320,20 @@ def og_trade_card(match_id):
     return _png_response(png, status=status)
 
 
+def _absolute_url(path: str) -> str:
+    """Absolutise a root-relative path ("/og/...") against this request's host.
+
+    Link unfurlers (iMessage, Slack, X, Discord) need an absolute og:image.
+    Render terminates TLS and there is no ProxyFix, so `request.scheme`
+    reads "http" there — deployed envs are forced to https. X-Forwarded-*
+    headers are deliberately not consulted.
+    """
+    if not path.startswith("/"):
+        return path
+    scheme = "https" if _IS_PROD_ENV else request.scheme
+    return f"{scheme}://{request.host}{path}"
+
+
 def _share_html(
     *,
     title: str,
@@ -30332,23 +30349,27 @@ def _share_html(
         return (s or "").replace("&", "&amp;").replace("<", "&lt;") \
                          .replace(">", "&gt;").replace('"', "&quot;")
 
+    # Unfurlers need an absolute image URL; the visible <img> stays relative.
+    og_image_url = _absolute_url(image_url)
+
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{esc(title)} · Fantasy Trade Finder</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex">
   <meta name="description" content="{esc(description)}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{esc(title)}">
   <meta property="og:description" content="{esc(description)}">
-  <meta property="og:image" content="{esc(image_url)}">
+  <meta property="og:image" content="{esc(og_image_url)}">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{esc(title)}">
   <meta name="twitter:description" content="{esc(description)}">
-  <meta name="twitter:image" content="{esc(image_url)}">
+  <meta name="twitter:image" content="{esc(og_image_url)}">
   <style>
     body{{margin:0;background:#0f1322;color:#f5f7fc;font-family:-apple-system,Segoe UI,Roboto,sans-serif;
          min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;}}
@@ -30376,6 +30397,7 @@ def _share_html(
     resp = make_response(html)
     resp.headers["Content-Type"] = "text/html; charset=utf-8"
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["X-Robots-Tag"] = "noindex"
     return resp
 
 
