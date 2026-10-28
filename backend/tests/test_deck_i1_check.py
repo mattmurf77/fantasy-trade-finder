@@ -595,6 +595,48 @@ def test_a_burst_s_tail_is_logged_once_the_drops_stop(fresh_queue, monkeypatch, 
         ["deck_i1_check queue full (10): dropped 2 emits since the last warning"]
 
 
+def test_the_exit_drain_restarts_a_dead_worker_with_writes_behind_it(fresh_queue, monkeypatch):
+    """#485 QA P3: the worker dies (a BaseException) with a write queued
+    behind it; the exit drain starts a worker, so that write lands."""
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)   # the death is expected
+    monkeypatch.setattr(server, "_I1_EVENT_EXIT_DRAIN_S", 2.0)
+    go, written = threading.Event(), []
+
+    def die():
+        go.wait(5)
+        raise _Die()
+    server._i1_event_enqueue(_lease(), die)
+    first = server._i1_event_worker_thread
+    server._i1_event_enqueue(_lease(), lambda: written.append("stranded"))
+    go.set()
+    first.join(5)
+    assert not first.is_alive() and written == []           # stranded behind the dead worker
+    server._i1_event_exit_drain()
+    assert written == ["stranded"] and server._i1_event_worker_thread is not first
+
+
+def test_the_drops_are_flushed_right_after_a_write(fresh_queue, monkeypatch):
+    """#485 QA P3: the worker serving this queue calls the drop warning right
+    after each write, so drops past the minute are logged then, not on the
+    idle tick a minute later. Pinned by the call on this test's own queue:
+    the drop counter is module-wide, and another test's idle worker may log
+    it."""
+    calls = []
+    real = server._i1_event_drop_warning
+
+    def spy(q, dropped=0, **kw):
+        calls.append((q, dropped))
+        return real(q, dropped, **kw)
+    monkeypatch.setattr(server, "_i1_event_drop_warning", spy)
+    written = []
+    server._i1_event_enqueue(_lease(), lambda: written.append("w"))
+    assert _landed(written, "w")
+    deadline = time.monotonic() + 2
+    while (fresh_queue, 0) not in calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert (fresh_queue, 0) in calls          # the idle tick is a minute away
+
+
 def test_the_fallback_identity_keeps_the_partner():
     """A card with neither id is its assets AND its partner: the same trade
     with two opponents is two cards."""

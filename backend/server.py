@@ -3632,12 +3632,11 @@ def _emit_deck_i1_check(user_id: str, league_id: str, job_id: str, report: dict)
         log.warning("deck_i1_check not recorded job=%s: %s", job_id, err)
 
 
-def _i1_event_enqueue(lease, write) -> None:
-    """Queue one write for the worker (started for the current queue on first
-    use, and again if it died: #468 QA P3-1); a full queue drops it, warned at
-    most once a minute with the count."""
+def _i1_event_ensure_worker(q) -> None:
+    """A live worker for `q`: started on first use, and again if it died
+    (#468 QA P3-1). It dies only on a BaseException, so there's no backoff:
+    each restart waits for the next enqueue or the exit drain (#485 QA P3)."""
     global _i1_event_worker_for, _i1_event_worker_thread
-    q = _i1_event_queue
     with _i1_events_lock:
         thread = _i1_event_worker_thread
         if _i1_event_worker_for is not q or thread is None or not thread.is_alive():
@@ -3645,6 +3644,13 @@ def _i1_event_enqueue(lease, write) -> None:
                                       daemon=True)
             thread.start()
             _i1_event_worker_for, _i1_event_worker_thread = q, thread
+
+
+def _i1_event_enqueue(lease, write) -> None:
+    """Queue one write for the worker (_i1_event_ensure_worker); a full queue
+    drops it, warned at most once a minute with the count."""
+    q = _i1_event_queue
+    _i1_event_ensure_worker(q)
     try:
         q.put_nowait((lease, write))
     except queue.Full:
@@ -3688,7 +3694,11 @@ def _i1_event_work(q) -> None:
 
 def _i1_event_exit_drain() -> None:
     """atexit (gunicorn exits its worker normally on SIGTERM): let the queued
-    writes land, bounded, then log the drops not yet warned (#468 QA P3-3)."""
+    writes land, bounded, then log the drops not yet warned (#468 QA P3-3). A
+    worker that died with writes queued behind it is started again first, or
+    those writes would be lost (#485 QA P3)."""
+    if _i1_event_queue.unfinished_tasks:
+        _i1_event_ensure_worker(_i1_event_queue)
     _drain_deck_i1_checks(_I1_EVENT_EXIT_DRAIN_S)
     _i1_event_drop_warning(_i1_event_queue, force=True)
 
@@ -7434,8 +7444,9 @@ def _trade_fingerprints_match(job: dict, current, *, running: bool = False,
 
     `current` is the caller's _trade_current_fingerprints() for the job's
     league and format. Compare only: this runs under _trade_jobs_lock. A None
-    stamp (a failed kickoff read, or a worker that read other picks:
-    `_note_job_picks_read`) never matches a read. A None `current` (a failed
+    stamp never matches a read: a failed kickoff read, or a worker whose own
+    reads disagree with the stamp (`_note_job_picks_read`: other picks, a
+    flipped draft verdict, or a failed picks or draft read, #487 QA P3-5). A None `current` (a failed
     read) can't prove staleness (contract §4.4, A2): it keeps a RUNNING job
     (`running=True`), whatever its stamp, None included, and never makes a
     completed job fresh. Hand-built jobs

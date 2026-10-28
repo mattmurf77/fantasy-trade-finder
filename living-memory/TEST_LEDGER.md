@@ -1,4 +1,4 @@
-## 2026-10-28 — #489 QA P3s: the ledger's docs claim, LLD's guard counts, a deadlock-safe lock-order test
+## 2026-10-28 — QA P3 follow-ups: #489 (docs claim, LLD guard counts, deadlock-safe lock test), #487 (read pins, docstring), #485 (exit-drain restart, after-write flush)
 
 Gates: release-lead's #489 delta QA, P3-1 to P3-3. Tests and docs only: no server code, route, schema, flag or knob change.
 - **P3-1:** #489's ledger entry said its docs included the data dictionary (the ERROR-line note). They didn't: the note from `85286cf7` already held. The entry is corrected in place, dated. Commit `7d5d0edb`'s message keeps the wrong claim; it can't be rewritten (no force-push).
@@ -7,6 +7,22 @@ Gates: release-lead's #489 delta QA, P3-1 to P3-3. Tests and docs only: no serve
 - **Evidence:**
   - `test_evidence_cleanup.py`: 38 passed.
   - **Sabotage:** the F5 drop's ledger lock nested inside itself. Before: the test hung (QA's Y1, caught only by the runner's timeout). Now: it's red in 17 s, then restored.
+- **#487 QA (release-lead, 2026-10-27):**
+  - **P3-1:** a kickoff test attributes every `draft_picks` and `leagues` statement to the one fingerprint read (`snapshot_ids`: one picks read, one drafted read) or to the preferences' pick share. An expected fp taken from a separate read fails it; the old spy counted only `snapshot_ids` calls.
+  - **P3-2:** the worker spy now also asserts exactly one `get_league_draft_context` per job.
+  - **P3-5:** `_trade_fingerprints_match`'s docstring now lists every None-stamp source: a failed kickoff read, other picks, a flipped verdict, a failed picks or draft read.
+  - **P3-3, for models-eng:** owner-exclusive forfeits on a transient first picks-read failure (0 owner cards; main re-read and served). It's conservative and consistent; models-eng was told.
+  - **P3-4, accepted:** a failed draft read unstamps drafted-league jobs on non-owner paths. It needs a DB error, and serving is unaffected. The +1 leagues lookup per non-owner job is the verdict the stamp's key holds since #487.
+- **#485 QA (release-lead, 2026-10-27):**
+  - **The exit drain:** it now starts a worker first when the current one died with writes queued behind it (`_i1_event_ensure_worker`, split from the enqueue), so those writes land instead of being lost.
+  - **A test pins the after-write drop flush:** by the call on the test's own queue, since the drop counter is module-wide and another test's idle worker may log it.
+  - **The death backoff:** informational; none added. The worker dies only on a BaseException, and each restart waits for the next enqueue or the exit drain.
+- **Evidence:** `test_trade_freshness_roster.py`, `test_deck_i1_check.py` (41), `test_evidence_cleanup.py` and the digest all passed.
+- **Sabotage, each red then restored (4):**
+  - a separate kickoff picks read;
+  - a second worker draft read;
+  - the exit drain without a restart;
+  - no after-write flush. Its first form, a log assertion, stayed green in the full file because another test's idle worker logged the shared counter; it's now pinned by the call on the test's own queue.
 
 ## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
 
