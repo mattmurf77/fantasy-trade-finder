@@ -2,9 +2,9 @@
 
 `founder` is true when the user holds pro through a subscription that
 started before the Founding GMs club's closes_at, which is the price rise
-(server._PAYWALL_PRICE_RISE_AT, 2027-01-01 00:00 America/Los_Angeles =
-08:00 UTC; the one instant head-eng ruled on 2026-10-27): the
-subscription's INITIAL_PURCHASE in the
+(server._PAYWALL_PRICE_RISE_AT, 2027-01-02 04:00 UTC, App Store Connect's
+US start for the Jan-2 change; the one instant head-eng ruled on
+2026-10-27): the subscription's INITIAL_PURCHASE in the
 subscription_events ledger (a first purchase or an intro-trial start), timed
 by the payload's purchased_at_ms, else the row's occurred_at.
 
@@ -41,11 +41,17 @@ USER = "founder_user_1"
 TOKEN = "founder-verified-token"
 UNVERIFIED_TOKEN = "founder-unverified-token"
 
-# The cut is the price rise: 2027-01-01 00:00 America/Los_Angeles = 08:00 UTC.
-BEFORE_CUT = datetime(2027, 1, 1, 7, 59, 59, tzinfo=timezone.utc)
-AT_CUT = datetime(2027, 1, 1, 8, tzinfo=timezone.utc)
+# The cut is the price rise, read from the one constant so these pins
+# follow it when it moves.
+AT_CUT = server._PAYWALL_PRICE_RISE_AT
+BEFORE_CUT = AT_CUT - timedelta(seconds=1)
+AFTER_CUT = AT_CUT + timedelta(days=1)
 UTC_MIDNIGHT = datetime(2027, 1, 1, tzinfo=timezone.utc)   # 4 pm Dec 31 in LA
-AFTER_CUT = datetime(2027, 1, 2, tzinfo=timezone.utc)
+
+
+def _z(dt: datetime) -> str:
+    """An aware UTC instant as served in `club.closes_at`."""
+    return dt.isoformat().replace("+00:00", "Z")
 
 
 def _ms(dt: datetime) -> float:
@@ -227,8 +233,7 @@ def test_unverified_session_never_reads_the_ledger(client):
 def test_route_reads_the_server_constant(client, monkeypatch):
     _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)
     assert _get(client)["founder"] is True
-    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_AT",
-                        datetime(2026, 12, 1, 8, tzinfo=timezone.utc))
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_AT", BEFORE_CUT - timedelta(days=1))
     assert _get(client)["founder"] is False
 
 
@@ -237,10 +242,11 @@ def test_one_date_moves_founder_with_the_club_and_the_prices(client, monkeypatch
     _PAYWALL_PRICE_RISE_AT and `founder`, `club.closes_at`, `club.open`
     and the prices all move together. A second literal date anywhere would
     leave one of them behind."""
-    _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)   # Dec 31 23:59:59 in LA
+    _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)   # the club's last second
+    moved = AT_CUT - timedelta(days=32)        # a month earlier, same time of day
     monkeypatch.setattr(server, "is_enabled", lambda k: k == "monetize.paywall")
     monkeypatch.setattr(server, "_paywall_now",
-                        lambda: datetime(2026, 12, 15, tzinfo=timezone.utc))
+                        lambda: AT_CUT - timedelta(days=18))   # between the two
 
     def config():
         r = client.get("/api/paywall/config", headers={"X-Session-Token": TOKEN})
@@ -249,15 +255,12 @@ def test_one_date_moves_founder_with_the_club_and_the_prices(client, monkeypatch
                               for p in body["products"]}
 
     club, prices = config()
-    assert club == {"name": "Founding GMs", "closes_at": "2027-01-01T08:00:00Z",
-                    "open": True}
+    assert club == {"name": "Founding GMs", "closes_at": _z(AT_CUT), "open": True}
     assert prices == {"ftf_pro_monthly": "$4.99", "ftf_pro_annual": "$24.99"}
     assert _get(client)["founder"] is True
 
-    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_AT",
-                        datetime(2026, 12, 1, 8, tzinfo=timezone.utc))
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_AT", moved)
     club, prices = config()
-    assert club == {"name": "Founding GMs", "closes_at": "2026-12-01T08:00:00Z",
-                    "open": False}
+    assert club == {"name": "Founding GMs", "closes_at": _z(moved), "open": False}
     assert prices == {"ftf_pro_monthly": "$6.99", "ftf_pro_annual": "$34.99"}
     assert _get(client)["founder"] is False
