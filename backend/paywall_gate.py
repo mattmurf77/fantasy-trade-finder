@@ -62,8 +62,8 @@ PREVIEW_KNOB = "paywall_preview_pages"
 MOBILE_DEVICES = frozenset({"iphone", "ipad", "macos", "android"})
 
 # Reasons, the `gate` value of the 402 body.
-PREVIEW_USED = "preview_used"      # never held pro; a deck route (the preview is spent)
-NEVER_TRIALED = "never_trialed"    # never held pro; any other gated route
+PREVIEW_USED = "preview_used"      # never held pro; a deck route, preview spent (a row exists)
+NEVER_TRIALED = "never_trialed"    # never held pro; any other gated route, or a deck route before any card was served
 TRIAL_EXPIRED = "trial_expired"    # held pro only through an intro trial
 LAPSED = "lapsed"                  # held pro any other way (paid, comp, promo)
 VERIFY_REQUIRED = "verify_required"  # an unverified session, whatever the user_id holds
@@ -447,8 +447,12 @@ def decide(rule: str, method: str, user_id: str | None, is_mobile: bool,
 
 
 def gate_reason(user_id: str, *, deck: bool) -> str:
-    """The 402 reason for a user without pro (a spent preview on a deck route)."""
-    return _reason(_held_pro(user_id), deck)
+    """The 402 reason for a user without pro. `preview_used` only when the
+    preview was actually spent (a paywall_previews row exists, K0)."""
+    held = _held_pro(user_id)
+    if held is None and deck and preview_row(user_id) is None:
+        return NEVER_TRIALED
+    return _reason(held, deck)
 
 
 def _reason(held: str | None, deck: bool) -> str:
@@ -474,14 +478,18 @@ def _preview(rule: str, user_id: str, ask: DeckAsk | None) -> tuple[int, dict] |
     records the deck it serves); after, only that deck's /status inside the
     window, and swipes or pass reasons on its window's cards. GET /api/trades
     (the pending-cards view) is not the preview deck. Outside it: 402
-    `preview_used`. Reads only the knob and the paywall_previews row, never
+    `preview_used` once the preview was spent (the user's paywall_previews
+    row exists), else 402 `never_trialed` (K0: a user never served a card,
+    e.g. with the knob at 0 or on GET /api/trades, never reads as having
+    used a preview). Reads only the knob and the paywall_previews row, never
     entitlements."""
-    blocked = 402, {"error": "pro_required", "gate": PREVIEW_USED}
     pages = preview_pages()
+    row = preview_row(user_id)
+    blocked = 402, {"error": "pro_required",
+                    "gate": PREVIEW_USED if row is not None else NEVER_TRIALED}
     if pages == 0 or ask is None:
         return blocked
     allowance = Preview(pages=pages, page_size=ask.page_size)
-    row = preview_row(user_id)
     if rule == "/api/trades/generate":
         ok = row is None
     elif rule == "/api/trades/status":

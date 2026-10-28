@@ -37,6 +37,13 @@
   stored and rebased-row paths.
 - **(d) P3-4.** A direct test that, with enforcement dark, the gated deck routes write nothing
   to `paywall_previews` (no statement at all on it) and make no other paywall or billing write.
+- **(e) K0 (head-eng, 2026-10-28; analytics-lead's K0 alarm).** `_preview()` answered 402
+  `preview_used` to a user never served a card (knob 0, `GET /api/trades`, a swipe or a
+  page-2 cursor before page 1), so K0 ("any 402 `preview_used` to a user never served a
+  card") would fire for every new non-entitled user on day 1. Now `preview_used` only when
+  the user's `paywall_previews` row exists; with no row the 402 is `never_trialed`.
+  `gate_reason` follows the same rule. The serve-time claim failures in `server.py` already
+  imply a row (another deck holds the preview), so they keep `preview_used`.
 
 ## 1. Analytics scope
 
@@ -67,6 +74,7 @@ tests use in-memory SQLite, with no network.
 | (a) | `test_paywall_gate_unverified.py`: every gated rule in `ROUTES` (32) × mobile and web (web knob 1) × four account states (no history, a `paywall_previews` row, active pro, lapsed pro). It compares status, body bytes and headers (Date excluded), pins which rules answer 403 and which 402, and asserts zero `preview_row` / `get_entitlements` / `list_for_user` calls and no `paywall_previews` write. Also: the pure decision on every deck route with the route gate on and off; no SQL statement on `paywall_previews`, `entitlements` or `subscription_events`; the demo exemption. `test_paywall_preview.py` and `test_paywall_gate.py`'s R28.9 tests are restated for the new answer | S1, the entitlement read moved above the verified check: 75 red, all 64 byte-identical cases among them (active pro gets the route's own answer). S2, the unverified `_preview` path restored: 5 red |
 | (b) | `test_paywall_preview.py::test_p31_*`: the window persists across the job's disappearance (swipe and pass-reason); a stored-window card is allowed and one outside gets 402; the live window decides while the job is held; a pre-column row fails closed; `record_preview` rewrites the window for the same deck only; `_migrate_db` adds the column to an old table, idempotently; export includes it | `_window_ids` ignores the stored window: 7 red. The `migration_cols` row is dropped: the migration test goes red |
 | (c) | `test_p33_*`, parametrized over `DECK_PATHS`: with a 4-page window each path is capped, recorded against the served deck with its window, and swipes hold to it before and after the deck leaves the process; at the default knob, stored and live are 402 with no row, and the rebases record the newer deck | n/a (coverage) |
+| (e) | `test_paywall_preview.py::test_get_trades_pending_view_is_not_the_preview` (no row → `never_trialed`; after page 1 → `preview_used`) and `::test_knob_zero_blocks_the_first_request` (knob 0, no row → `never_trialed`; a spent row → `preview_used`); `test_paywall_gate.py::test_never_entitled_reason_is_preview_used_only_once_spent`. The gate matrix, `test_other_gated_routes_block_never_entitled`, `test_decide_pure_matches_hook`, the swipe/pass-reason, R28.9-after-verifying and P3-3 default-knob tests are restated (no row → `never_trialed`) | `_preview` answers `preview_used` regardless of the row: both K0 tests red |
 | (d) | `test_p34_*`, flags off and flags on with knob 0: every deck route (including page 2, the unpaged body, `GET /api/trades`, swipes and passes outside the window), plus P1 stored-page and P2 deck-id serves. Full decks, no 402, zero `paywall_previews` statements, no billing write, `record_preview` never called | The hook keys on `classify()` instead of `applies()` (ignores enforcement): 4 red |
 
 Pre-ship gate: `FTF_SKIP_SIM_GATE=1` (D-056). The evidence is logged in

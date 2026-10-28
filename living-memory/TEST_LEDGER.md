@@ -1,3 +1,13 @@
+## 2026-10-28 — #473 K0: `preview_used` only once the preview was spent (else `never_trialed`)
+
+Full gates (scope addendum `docs/plans/monetization-launch/scope-addendum-paywall-hardening.md` item (e)). Branch `feat/paywall-hardening`, a fast-forward on `e23abecd` (no re-sync of the held stack). D-056: `FTF_SKIP_SIM_GATE=1` posture. Dark: `paywall_enforce_enabled` is 0.
+
+- **Change:** `paywall_gate._preview()` answers 402 `preview_used` only when the user's `paywall_previews` row exists; with no row (knob 0, `GET /api/trades`, a swipe or a page-2 cursor before page 1) it is `never_trialed`. `gate_reason` follows the same rule. head-eng 2026-10-28, from analytics-lead's K0 alarm ("any 402 `preview_used` to a user never served a card" would have fired for every new non-entitled user on day 1).
+- **Pinned both ways:** `test_get_trades_pending_view_is_not_the_preview` and `test_knob_zero_blocks_the_first_request` (no row → `never_trialed`; a spent row → `preview_used`); `test_never_entitled_reason_is_preview_used_only_once_spent` (new, `gate_reason`).
+- **Sabotage:** `_preview` answers `preview_used` regardless of the row → both K0 tests red (2 failed, 2 passed); restored.
+- **Restated (11 tests that encoded the old reason, no row → `never_trialed`):** the gate matrix's `never` deck cells (2), `test_other_gated_routes_block_never_entitled[GET-/api/trades/status]`, `test_decide_pure_matches_hook`, the swipe/pass-reason "nothing served yet" probe (2), the pending-view and knob-0 tests, `test_r289_after_verifying_resolves_normally` (NEW), and the P3-3 default-knob stored/live cells (2).
+- **Runs:** both files in full with the fix applied: 363 passed, 11 failed (exactly the restated set). After restating: `test_paywall_gate` matrix/decide/other-gated/reason subset 294 passed; the restated `test_paywall_preview` subset 11 passed. The full suite runs in CI on the push.
+
 ## 2026-10-27 — Paywall hardening: R28.14 unverified settle, durable preview window (P3-1), every deck path (P3-3), no write while dark (P3-4) (dark)
 
 Full gates (scope addendum `docs/plans/monetization-launch/scope-addendum-paywall-hardening.md`). Branch `feat/paywall-hardening`, stacked on #397 @ `83e5eb4b`. It merges dark: `paywall_enforce_enabled` is 0. D-056: `FTF_SKIP_SIM_GATE=1` posture. Schema: one nullable column, `paywall_previews.window_trade_ids` (head-eng's grant, `migration_cols`).

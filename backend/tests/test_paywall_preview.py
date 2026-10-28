@@ -78,6 +78,7 @@ def ids(r):
 
 
 PREVIEW_USED = {"error": "pro_required", "gate": "preview_used"}
+NEVER_TRIALED = {"error": "pro_required", "gate": "never_trialed"}
 
 
 def test_first_page_passes_page_two_blocked(gate):
@@ -124,7 +125,7 @@ def swipe_ok(monkeypatch):
 def test_swipe_and_pass_reason_on_window_cards_only(gate, swipe_ok, path):
     client, *_ = gate
     body = lambda i: {"trade_id": f"e2-trade-{i:05d}", "decision": "pass", "reason": "value"}
-    assert client.post(path, headers=MOBILE, json=body(0)).get_json() == PREVIEW_USED  # nothing served yet
+    assert client.post(path, headers=MOBILE, json=body(0)).get_json() == NEVER_TRIALED  # nothing served yet
     status(client, 0)
     assert client.post(path, headers=MOBILE, json=body(0)).status_code == 200
     assert client.post(path, headers=MOBILE, json=body(PAGE - 1)).status_code == 200
@@ -142,17 +143,30 @@ def test_entitled_user_unaffected(gate):
 
 
 def test_get_trades_pending_view_is_not_the_preview(gate):
+    """K0: GET /api/trades is outside the preview. Before any card was
+    served the 402 is never_trialed (no preview was used); once page 1 was
+    served, preview_used. Sabotage: answer preview_used without a row → red."""
     client, *_ = gate
+    r = client.get(f"/api/trades?league_id={LEAGUE}", headers=MOBILE)
+    assert r.status_code == 402 and r.get_json() == NEVER_TRIALED
+    assert pg.preview_row(ME) is None
+    assert status(client, 0).status_code == 200                   # spends the preview
     r = client.get(f"/api/trades?league_id={LEAGUE}", headers=MOBILE)
     assert r.status_code == 402 and r.get_json() == PREVIEW_USED
 
 
 def test_knob_zero_blocks_the_first_request(gate):
+    """K0: with the knob at 0 a user never served a card answers
+    never_trialed; one whose preview was spent before the knob went to 0
+    answers preview_used. Sabotage: answer preview_used without a row → red."""
     client, engine, _ = gate
     _config(engine, paywall_preview_pages=0.0)
+    assert status(client, 0).get_json() == NEVER_TRIALED
+    assert generate(client, page=1).get_json() == NEVER_TRIALED
+    assert pg.preview_row(ME) is None
+    pg.record_preview(ME, JOB_ID, 1, ["e2-trade-00000"])
     assert status(client, 0).get_json() == PREVIEW_USED
     assert generate(client, page=1).get_json() == PREVIEW_USED
-    assert pg.preview_row(ME) is None
 
 
 def test_knob_two_serves_two_pages(gate):
@@ -366,7 +380,7 @@ def test_r289_after_verifying_resolves_normally(unverified_deck):
     assert gate(GRANTED).status_code == 200
     assert gate(FREE, 0).status_code == 200 and len(ids(gate(FREE, 0))) == PAGE
     assert gate(FREE).get_json() == PREVIEW_USED
-    assert gate(NEW).get_json() == PREVIEW_USED
+    assert gate(NEW).get_json() == NEVER_TRIALED                 # nothing served (K0)
     assert gate(TRIAL).get_json() == {"error": "pro_required", "gate": "trial_expired"}
     assert gate(LAPSED).get_json() == {"error": "pro_required", "gate": "lapsed"}
     r = client.post("/api/trades/propose", headers=_as(FREE), json={})
@@ -693,7 +707,7 @@ def test_p33_every_deck_path_at_its_own_cursor_with_the_default_knob(p1, p1_enfo
     target, cursor = p2mod._deck_path(engine, path)
     r = _deck(client, target, cursor)
     if cursor >= server._trade_page_size():
-        assert r.status_code == 402 and r.get_json() == PREVIEW_USED
+        assert r.status_code == 402 and r.get_json() == NEVER_TRIALED   # nothing served (K0)
         assert pg.preview_row(p1mod.UID) is None
         return
     body = r.get_json()
