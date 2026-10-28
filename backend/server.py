@@ -23972,21 +23972,30 @@ _SEND_REJECTED_COPY = ("{platform} didn’t accept this trade, so nothing was se
                        "Check the trade on {platform} and try again.")
 _SEND_OUTCOME_UNKNOWN_COPY = ("Couldn’t confirm whether this trade reached {platform}. "
                               "Check {platform} before sending it again.")
+# POST /api/trades/respond-mfl answers an existing trade (accept / reject /
+# revoke), so "this trade … nothing was sent" would be wrong there.
+_RESPOND_REJECTED_COPY = ("{platform} didn’t accept this response, so nothing changed. "
+                          "Check the trade on {platform} and try again.")
+_RESPOND_OUTCOME_UNKNOWN_COPY = ("Couldn’t confirm whether this response reached {platform}. "
+                                 "Check the trade on {platform} before trying again.")
 
 
-def _send_write_failed(code_prefix: str, platform: str, kind) -> tuple[dict, int]:
-    """C10: a propose core's response for a failed, non-auth provider write.
+def _send_write_failed(code_prefix: str, platform: str, kind, *,
+                       rejected_copy: str = _SEND_REJECTED_COPY,
+                       unknown_copy: str = _SEND_OUTCOME_UNKNOWN_COPY) -> tuple[dict, int]:
+    """C10: a propose (or respond) route's response for a failed, non-auth
+    provider write.
 
-    `kind` 'outcome_unknown' (the provider may have the trade, see
+    `kind` 'outcome_unknown' (the provider may have the write, see
     backend/write_outcome.py) → 502 `{code_prefix}_outcome_unknown`, so the
     client never invites a blind retry that could send it twice. Every other
     kind keeps 502 `{code_prefix}_write_failed`. Both carry `kind` and
     `detail` == `message` == plain copy, never provider text."""
     if kind == _write_outcome.OUTCOME_UNKNOWN:
-        msg = _SEND_OUTCOME_UNKNOWN_COPY.format(platform=platform)
+        msg = unknown_copy.format(platform=platform)
         return {"error": f"{code_prefix}_outcome_unknown", "kind": kind,
                 "detail": msg, "message": msg}, 502
-    msg = _SEND_REJECTED_COPY.format(platform=platform)
+    msg = rejected_copy.format(platform=platform)
     return {"error": f"{code_prefix}_write_failed", "kind": kind,
             "detail": msg, "message": msg}, 502
 
@@ -37867,6 +37876,7 @@ def respond_trade_in_mfl():
     SAME flag as propose, one send surface, one knob) | 403
     verification_required | 404 mfl_not_linked | 409 mfl_not_connected |
     409 mfl_auth_expired (credential dropped) | 502 mfl_write_failed |
+    502 mfl_outcome_unknown (C10: the response may have landed — no retry) |
     400 bad_request.
     """
     if _TEST_MODE:
@@ -37929,25 +37939,23 @@ def respond_trade_in_mfl():
             cookie, host, year, league_id, trade_id, response,
             comments=(str(body.get("comments") or "").strip() or None))
     except _mfl_write.MflWriteAuthError as e:
-        log.warning("mfl respond auth-rejected: %s", getattr(e, "detail", None))
+        log.warning("mfl respond auth-rejected: %s",
+                    _provider_body_for_log(getattr(e, "detail", None)))
         try:
             delete_mfl_credential(user_id)
         except Exception:
             log.exception("mfl respond: credential delete failed")
         sess.pop("mfl_cookie", None)
-        return jsonify({
-            "error": "mfl_auth_expired",
-            "message": "Your MFL sign-in expired — sign in again.",
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 409
+        _msg = "Your MFL sign-in expired — sign in again."
+        return jsonify({"error": "mfl_auth_expired", "message": _msg, "detail": _msg}), 409
     except _mfl_write.MflWriteError as e:
-        log.warning("mfl respond write-failed [%s]: %s", e.kind,
-                    getattr(e, "detail", None))
-        return jsonify({
-            "error": "mfl_write_failed",
-            "kind": e.kind,
-            "detail": (str(getattr(e, "detail", "") or ""))[:200],
-        }), 502
+        # C10: same rule as propose — MFL's raw body is for this log line only.
+        log.warning("mfl respond write-failed [%s] %s: %s", e.kind, e,
+                    _provider_body_for_log(getattr(e, "detail", None)))
+        payload, status = _send_write_failed(
+            "mfl", "MFL", e.kind, rejected_copy=_RESPOND_REJECTED_COPY,
+            unknown_copy=_RESPOND_OUTCOME_UNKNOWN_COPY)
+        return jsonify(payload), status
 
     # trade_responded (server-fired, taxonomy 2026-08-11) — confirmed-success
     # only; every failure branch returned before this. Same discipline as

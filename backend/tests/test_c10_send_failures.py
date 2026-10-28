@@ -12,6 +12,8 @@ head-eng's pre-launch triage, C10. Covered here:
     `espn_outcome_unknown` / `mfl_outcome_unknown` with "check before sending
     again" copy. A failure before the send (DNS, connect refused) keeps the
     ordinary failure. The rules live in backend/write_outcome.py.
+  * POST /api/trades/respond-mfl shares the MFL adapter and gets the same
+    treatment, with its own "this response … nothing changed" copy.
   * Team overhaul: an outcome-unknown core result is an `outcome_unknown`
     attempt (reservation held), with the copy in `error.message`; a rejection
     is `send_failed` with the plain copy.
@@ -36,6 +38,7 @@ from backend.tests import test_espn_propose_route as espn_t
 from backend.tests import test_i2_espn_ownership as i2_espn
 from backend.tests import test_i2_mfl_ownership as i2_mfl
 from backend.tests import test_mfl_propose_route as mfl_t
+from backend.tests import test_mfl_trade_lifecycle as mfl_life_t
 from backend.tests import test_overhaul_api as ovh_t
 
 ESPN_REJECTED = ("ESPN didn’t accept this trade, so nothing was sent. "
@@ -344,6 +347,71 @@ def test_mfl_auth_rejection_body_is_not_returned(mfl_client, monkeypatch, caplog
     assert MARKER not in r.get_data(as_text=True)
     assert r.get_json()["detail"] == r.get_json()["message"]
     _assert_logged_masked_and_truncated(caplog, "mfl propose auth-rejected")
+
+
+# ---------------------------------------------------------------------------
+# POST /api/trades/respond-mfl: the same adapter, the same rule
+# ---------------------------------------------------------------------------
+
+RESPOND_REJECTED = ("MFL didn’t accept this response, so nothing changed. "
+                    "Check the trade on MFL and try again.")
+RESPOND_UNKNOWN = ("Couldn’t confirm whether this response reached MFL. "
+                   "Check the trade on MFL before trying again.")
+RAW_MFL_ERROR = (f"<error>{MARKER} Trades are disabled for member {SWID_ECHO} "
+                 f"MFL_USER_ID={COOKIE_SECRET} {'x ' * 250}</error>")
+REAL_MFL_RESPOND = mfl_write.respond_trade
+
+
+@pytest.fixture()
+def respond_client(monkeypatch):
+    yield from mfl_life_t.client.__wrapped__(monkeypatch)
+
+
+def _post_respond(client, monkeypatch, opener):
+    c, token = client
+    monkeypatch.setattr(
+        mfl_write, "respond_trade",
+        lambda cookie, host, year, league_id, trade_id, response, comments=None:
+            REAL_MFL_RESPOND(cookie, host, year, league_id, trade_id, response,
+                             comments=comments, _opener=opener))
+    return c.post("/api/trades/respond-mfl", headers=mfl_life_t._h(token),
+                  data=mfl_life_t._respond_body())
+
+
+@pytest.mark.parametrize("opener", [_http_error(400, RAW_HTML), _returns(RAW_MFL_ERROR.encode())],
+                         ids=["http_400_html", "error_body_200"])
+def test_respond_mfl_rejection_raw_body_goes_to_log_only(respond_client, monkeypatch, caplog, opener):
+    caplog.set_level(logging.WARNING, logger="trade_finder")
+    r = _post_respond(respond_client, monkeypatch, opener)
+    assert r.status_code == 502
+    assert r.get_json() == {"error": "mfl_write_failed", "kind": "error",
+                            "detail": RESPOND_REJECTED, "message": RESPOND_REJECTED}
+    assert MARKER not in r.get_data(as_text=True)
+    _assert_logged_masked_and_truncated(caplog, "mfl respond write-failed [error]")
+
+
+@pytest.mark.parametrize("case", ["read_timeout", "reset", "http_504"])
+def test_respond_mfl_timeout_after_send_is_outcome_unknown(respond_client, monkeypatch, case):
+    r = _post_respond(respond_client, monkeypatch, AFTER_SEND[case])
+    assert r.status_code == 502
+    assert r.get_json() == {"error": "mfl_outcome_unknown", "kind": "outcome_unknown",
+                            "detail": RESPOND_UNKNOWN, "message": RESPOND_UNKNOWN}
+
+
+def test_respond_mfl_refused_connection_is_an_ordinary_failure(respond_client, monkeypatch):
+    r = _post_respond(respond_client, monkeypatch, NOT_SENT["refused"])
+    assert r.status_code == 502
+    assert r.get_json() == {"error": "mfl_write_failed", "kind": "network",
+                            "detail": RESPOND_REJECTED, "message": RESPOND_REJECTED}
+
+
+def test_respond_mfl_auth_rejection_body_is_not_returned(respond_client, monkeypatch, caplog):
+    caplog.set_level(logging.WARNING, logger="trade_finder")
+    r = _post_respond(respond_client, monkeypatch, _http_error(401, RAW_HTML))
+    assert r.status_code == 409 and r.get_json()["error"] == "mfl_auth_expired"
+    assert MARKER not in r.get_data(as_text=True)
+    assert r.get_json()["detail"] == r.get_json()["message"]
+    _assert_logged_masked_and_truncated(caplog, "mfl respond auth-rejected")
 
 
 # ---------------------------------------------------------------------------

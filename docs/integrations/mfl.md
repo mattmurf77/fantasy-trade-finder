@@ -504,16 +504,17 @@ write), or a 200 body that is empty or neither success nor `<error>` (the
 body shape is still TODO(live-verify)) is `kind: "outcome_unknown"` →
 `mfl_outcome_unknown`: the import may have landed, so the user is told to
 check MFL and nothing retries. `POST /api/trades/respond-mfl` shares the
-adapter, so its `mfl_write_failed` can carry `kind: "outcome_unknown"` too;
-its route mapping was not changed.
+adapter and the same mapping (`mfl_write_failed` / `mfl_outcome_unknown`),
+with "this response … nothing changed" copy instead of "this trade … nothing
+was sent".
 
 **Logging (C10).** MFL's raw body (`MflWriteError.detail`, ≤500 chars) is
 written to ONE `WARNING` line on the `trade_finder` logger
-(`mfl propose write-failed [<kind>] <message>: <body>` or
-`mfl propose auth-rejected: <body>`) after `_provider_body_for_log` flattens
+(`mfl propose|respond write-failed [<kind>] <message>: <body>` or
+`mfl propose|respond auth-rejected: <body>`) after `_provider_body_for_log` flattens
 whitespace, masks `MFL_USER_ID=` values, SWID-shaped GUIDs and long opaque
 blobs, and truncates to 300 characters. It is never a response field on the
-propose route: `detail` and `message` are plain copy. This is the one place
+propose or respond route: `detail` and `message` are plain copy. This is the one place
 the §6 "no raw bodies in a persistent sink" caution is relaxed, deliberately:
 an error body is the only evidence of why MFL refused a send, and it is
 masked and capped first.
