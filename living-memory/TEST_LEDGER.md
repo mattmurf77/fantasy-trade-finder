@@ -17,6 +17,73 @@ Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item
 - **Targeted (after merging `origin/main` @ `052c9746`):** 530 passed in 22 files. They are the C10 file, `test_espn_propose_route`, `test_mfl_propose_route`, `test_espn_write`, `test_mfl_write`, `test_i2_espn_ownership`, `test_i2_mfl_ownership`, `test_i2_overhaul`, `test_i2_sleeper_ownership`, `test_overhaul_api`, `test_overhaul_service`, `test_overhaul_store`, `test_bilateral_overhaul`, `test_mfl_trade_lifecycle` (respond-mfl), `test_api_observability` and `test_sleeper_write_route`, plus six other suites that import the changed modules. The same 22 files were 523/523 before the respond-mfl follow-up. On the base commit before C10, the 10 propose / write / I-2 / overhaul-api / lifecycle files ran 235 passed.
 - **Not run:** the full backend suite (CI runs it; the local machine is overloaded); live ESPN/MFL writes (all mocked); `tsc` and testid-lint (no mobile change).
 
+## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
+
+Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).
+
+- **The rise is an instant, not a UTC date (`backend/server.py`):**
+  - `_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)` compared on the UTC date, so the fallback flipped to $6.99 / $34.99 at 7 pm ET on Dec 31. Terms §14.8 promises the Founder price to anyone subscribing "by December 31, 2026".
+  - It is now `_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)`, which is 2027-01-01 00:00 America/Los_Angeles (PST, UTC-8). `_paywall_products` compares `now >= _PAYWALL_PRICE_RISE_AT`, and a naive `now` raises `TypeError`.
+  - The comment says it is fallback-only (StoreKit is authoritative) and that monetization-pm checks it against the App Store Connect scheduled change; if the two differ, the constant moves.
+  - The now-unused `date` import is reverted.
+- **Tips:** the route serves `tips: []`, as #465 does, because the tip SKUs are not submitted to App Store Connect. `_PAYWALL_TIPS` stays as the list to restore. A tip still grants no entitlement (`entitlements.is_tip_product`, unchanged).
+- **TipJarScreen with an empty list (code walk, `mobile/src/screens/TipJarScreen.tsx`):**
+  - `:80` gives `tips = []`;
+  - `:85` disables the StoreKit product fetch (`tips.length > 0`);
+  - `options` is empty, so `:193-195` render "Tips aren’t available right now." No crash and no purchase row.
+  - Hiding the Settings tip row is engagement-eng's client work, routed separately.
+- **Backend:** `test_paywall_config.py` is now 36 tests (was 30):
+  - both sides of the instant: `2027-01-01T07:59:59Z` old, `08:00:00Z` new; `2027-01-01T00:00Z` (4 pm Dec 31 in LA) is pinned old;
+  - the constant equals 08:00 UTC and LA midnight via `zoneinfo`;
+  - the UTC-date tests are replaced with instant tests. New York 20:00 Dec 31 now gets the **old** prices, and so does LA 23:59:59. LA 00:00 Jan 1 and New York 03:00 Jan 1 get the new ones. Paris 00:30 Jan 1 is old;
+  - a naive `now` raises;
+  - `tips == []` with no `ftf_tip` in the payload;
+  - the restorable `_PAYWALL_TIPS` SKUs are all `is_tip_product` and claim no entitlement fields.
+- **Targeted, with its own log:** `test_paywall_config.py`, `test_entitlements.py`, `test_analytics_p0.py`, `test_api_observability.py` → 136 passed, exit 0. `node mobile/tests/check-paywall.js` 11/11 and `check-tipjar.js` 9/9. check-tipjar is structural, so the empty list doesn't touch it.
+- **Sabotage, each red then restored byte-identical (5):**
+  - back to the UTC-date comparison (6 red);
+  - the rise at UTC midnight (6 red);
+  - `>` for `>=`, off by one second (3 red);
+  - tips non-empty again (1 red);
+  - `trial_days` back on annual (6 red).
+- **Docs:** `docs/api-reference.md`, the `/api/paywall/config` row (the rise instant, empty tips). `docs/cross-client-invariants.md` § Monetization SKU ids: the SKU rows, the tip row and the fallback-prices bullet.
+
+## 2026-10-27 — Paywall config fallback prices: $4.99 / $24.99 (→ $6.99 / $34.99 for new subs from 2027-01-01), no `trial_days`
+
+Gates: a values fix to `GET /api/paywall/config` (flag `monetize.paywall`, still dark) flagged by marketing-lead via head-eng. The response loses the `trial_days` key and its prices follow #393's approved plan (operator 2026-10-25). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of the old client.
+
+- **The fix (`backend/server.py`):**
+  - `_PAYWALL_PRODUCTS` drops `trial_days` (was 14 monthly, 30 annual) and carries no prices.
+  - `_PAYWALL_PRICES` holds (before, from) pairs, switched by `_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)`, judged in UTC: monthly $4.99 → $6.99, annual $24.99 / $2.09 → $34.99 / $2.92.
+  - `_paywall_products(now)` is pure; the route passes it `_paywall_now()`, the clock tests patch.
+  - `per_month_equiv` is the annual price / 12 rounded **up**: $2.09, matching legal's #393 R28.8 #2 copy, not the $2.08 a round-to-nearest gives.
+- **Old-client render (code walk, main `mobile/src/screens/PaywallScreen.tsx:172-176`):**
+  - the trial line is `trialEligible && p.trial_days > 0 ? … : null`, and `undefined > 0` is false, so it is null;
+  - with no trial line, :360 renders nothing, the CTA at :383 reads "Continue", and the a11y label at :333 adds nothing;
+  - the plans render "$4.99/month" and "$24.99/year" plus "$2.09/month, billed yearly" when StoreKit is unavailable (otherwise StoreKit's `priceString` wins).
+  - A node emulation of that logic against the new payload printed exactly that.
+- **Backend:** `test_paywall_config.py` is now 30 tests (was 15):
+  - `test_products_shape` pins the exact key sets (no `trial_days`) at a frozen 2026-10-27;
+  - the route on both sides of the rise (today, 2026-12-31T23:59:59Z, 2027-01-01T00:00:00Z, 2027-06-01);
+  - no `trial_days` anywhere in the response, at all four instants;
+  - the switch is judged in UTC (New York Dec 31 20:00 is risen; Paris Jan 1 00:30 is not);
+  - the function is pure and leaves the module tables untouched;
+  - `per_month_equiv` equals the ceil of price / 12 on both sides;
+  - the default clock is the real aware UTC now.
+- **Targeted:** `test_paywall_config.py`, `test_entitlements.py`, `test_analytics_p0.py`, `test_api_observability.py`, `test_account_deletion_coverage.py` → 166 passed. `node mobile/tests/check-paywall.js` 11/11 and `check-tipjar.js` 9/9 (mobile untouched).
+- **Full suite** on the branch's working tree (`7b085e2d` plus this diff): `pytest backend/tests -q` → 9346 passed, 2 skipped, 0 failed, exit 0 (21m46s). Its own log, with junit confirming 9348 tests, 0 failures, 0 errors. A first run was discarded: another agent's suite wrote to the same scratch log.
+- **Sabotage, each red then restored byte-identical (6):**
+  - `trial_days: 30` back on annual (5 red);
+  - the switch never fires (4 red);
+  - `>` for `>=`, off by one day (2 red);
+  - the date judged in the caller's tz, not UTC (2 red);
+  - the route ignores the clock (2 red);
+  - `per_month_equiv` rounded down to $2.08 (4 red).
+- **Docs:** `docs/api-reference.md` (the `/api/paywall/config` row; plus the `/api/me/entitlements` row's drift fix: `/api/extension/auth` never carried `pro`, intentionally, legal R28.17); `docs/cross-client-invariants.md` § Monetization SKU ids (prices, the rise date, no `trial_days`). `docs/config-reference.md` n/a: the date is a code constant, not config.
+- **Not covered:**
+  - tsc not run here (no `mobile/` change; `billing.ts` still types `trial_days: number`, harmless at runtime, and the #393 M1 branch drops it);
+  - `docs/plans/monetization/pro-subscription/lld.md` §3 JSON and `iap-enablement/sandbox-test-checklist.md` P2 still carry the old prices and trial lengths (history and ASC setup, left for the #393 owners).
+
 ## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
 
 Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -67,6 +134,32 @@ Full gates, not express (scope: platforms-eng's ESPN/MFL sign-in, the onboarding
   3. Apple and Google sign-ins are unchanged: "Signed in with Apple" / "Signed in with Google", and "Apple" / "Google" on the hub.
 - **release-lead QA fixes (`63603e47`, `d10046a0`):** the hub maps `mfl_login` → "MFL" only on an account-only session; `/api/mfl/auth-link` also writes `mfl_login` for a Sleeper user who connects MFL, who stays "Sleeper" (P2). `espn` stays unguarded. Pin 4 gains release-lead's case (a Sleeper user verified by MFL auth-link → "Sleeper"); it fails on `40da9bc0`. **Sabotage 3/3 red.** `AccountInfo.verified_via` admits `mfl_login` / `espn` (P3). Runs: tsc clean; testid-lint OK; 118/118 `check-*.js`. Operator step 4: a Sleeper user who connected MFL by password still reads "Signed in with Sleeper" on the hub.
 
+## 2026-10-27 — F5's drop is an eviction: `evicted_split`, and the `f5_past_stored` anomaly (models-lead addendum D1)
+
+Gates: models-lead's ruling, D1 (`leads/models-lead-launch.md` addendum D), via head-eng. It changes one evidence cause (`restart_split` → `evicted_split` for an F5-dropped deck) and adds one ERROR log line. No route, schema, flag or knob change. It's not flip-gating; it must land before the first weekly ceiling read. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The change:**
+  - At F5's drop, the deck goes into `_deck_evicted_at` (kept ≥ 24 h, C3 (c2)) and a new `_deck_f5_dropped` ledger. This replaces #457's removal from `_deck_held`; it isn't added to it.
+  - C3 (c1) is unchanged: below the effective stored count, a miss is `other`.
+  - The anomaly (`_f5_past_stored`): an F5-evicted miss at or past the pack-recorded stored count logs `[evidence] f5_past_stored …` at ERROR, apart. The cause stays `evicted_split`.
+- **Backend:** `test_evidence_cleanup.py`. The F5 repro is now `…_reads_evicted_split_…` (×6: both row-gone ways × F5 only, F5 then the job evicted, a real restart = `restart_split`), with the held entry kept. 3 new tests:
+  - below / past the effective stored count;
+  - `_f5_past_stored` only for an F5-evicted miss at or past the recorded count;
+  - the anomaly line logged once, with the cause kept.
+- **Run:** `test_evidence_cleanup.py` + `test_u4_ruled.py`, 52 passed. On the first cut, the evidence suites (cleanup, deferred, U4 ruled, upgrade-miss cards, pipeline digest) passed 165.
+- **#489 QA (NO-GO, P1-1), option (a), pending models-lead's reading of D1:**
+  - The P1: kept in `_deck_held`, an F5 deck read `other` (a false G7 FAIL) once its evicted entry aged out.
+  - The fix: F5's drop now also pops `_deck_held`, like any eviction, so the late view reads `restart_split`.
+  - New tests: the eviction aging out → `restart_split`; the anomaly on the kept cause; no anomaly on a real F5 row-gone miss; a bool count refused; the jobs → ledger lock order; the guard's `f5=`.
+  - Sabotage (7, each red then restored): no held pop; the anomaly on the local cause; the anomaly on the effective count; a bool count; a reverse lock on the read path; the guard dropping `f5=`; f5 trims counted as held.
+  - Docs: the contract sentence, LLD, and data-dictionary (the ERROR-line note).
+- **Sabotage, each red then restored (5):**
+  - F5 also leaving the held ledger (#457's way: superseded by option (a) above);
+  - F5 not an eviction;
+  - the anomaly on any eviction;
+  - the anomaly strictly past;
+  - the anomaly not logged.
+
 ## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
 
 Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/trade-capture-platform-guard`.
@@ -80,6 +173,39 @@ Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or s
 - **Sabotage, red then restored:** the `and not _platform_linked` line removed → the MFL and ESPN tests red (`assert {'transactions': 18} == {}`); the other 5 stay green.
 - **Targeted:** `test_session_init_sleeper_calls`, `test_session_init_single_flight`, `test_market_data_readiness`, `test_co_owner_rosters`, `test_roster_refresh_state`, `test_players_refresh`, `test_account_only_harness`, `test_verified_sessions`, `test_trade_fingerprint_reads_unlocked`, `test_prepared_trade_runtime` → 162 passed.
 - **Not run:** the full suite (CI runs it); no live Sleeper calls (every fetch is mocked).
+
+## 2026-10-27 — Eval loader reads serve-time display moves (models-lead addendum D3)
+
+Gates: eval-side only (`backend/eval/data.py`, a doc line in `bdk_audit.py`). It reads the pack header field `run["display_moves"]`, agreed with trades-eng, whose serve side writes it. No route, schema, event, flag, knob or engine-module change; an absent field changes nothing, so this merges before or after the writer. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Why:**
+  - D3's fix re-applies the repeat cap at serve time.
+  - When a never-delivered withdrawal pulls a deferred card into the first 30, the server shows that card later in the same response.
+  - The loader's position was card_index less the W0s below it, so it put the card back inside the window: a false B-DK-7 FAIL and a shifted e(k).
+- **The rule:**
+  - The kept non-ghost cards' positions are handed out in display order, `(anchor, 1, card_index)` for a moved card and `(card_index, 0, card_index)` otherwise.
+  - A move counts once its response is delivered as of the read, so a re-read at the same as_of is stable.
+  - A record breaking the writer's contract makes the deck `pack_integrity` (ahead of `withdrawal_conflict`): a malformed key or value, an anchor that is itself moved, a self-anchor, a ghost, missing or W0 card, or a move spanning two responses.
+- **Tests:** `test_eval_display_moves.py`, 26 tests:
+  - no moves;
+  - one move; two behind one anchor;
+  - moves after a W0;
+  - as_of stability;
+  - 16 malformed records;
+  - a valid later-response move;
+  - precedence;
+  - B-DK-7 end to end (the moved deck passes; without the record the same deck is the false FAIL).
+- **Sabotage, 8 of 9 red then restored:**
+  - moves ignored (6 red);
+  - no as_of guard (1);
+  - moved card before its anchor (6);
+  - no same-response check (1);
+  - chained anchors allowed (1);
+  - W0 allowed (2);
+  - lenient keys (1);
+  - integrity after the conflict check (1).
+  - The ninth, a plain dense rank in place of the W0-adjusted slots, stays green as expected: the two are equal on every deck the loader doesn't exclude (an unexplained gap is `incomplete_deck`).
+- **Eval, value-model and evidence suites:** `test_eval_*`, `test_value_model*`, `test_packed_evidence`, `test_deferred_evidence`: 578 passed.
 
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
@@ -390,6 +516,116 @@ Full gates, not express (scope: #354 LEG-S6; split out when #372, the M11 claim-
   - **Sabotage: 2/2 + 3/3 + 7/7 + 5/5 red.**
   - Runs: pytest 128 passed (account / Apple / deletion set); tsc clean; testid-lint OK; 118/118 `check-*.js`.
   - Operator step 5: with a different Apple ID signed in on the device than the account's, delete. The account is deleted, and the account's own Fleeced entry stays under Sign in with Apple (it isn't revoked).
+
+## 2026-10-26 — Entry purge: platform pick-grid owner anonymization + `scripts/purge_entry_users.py`
+
+Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's ruling of 2026-10-26, option (a) scoped, as owner of the deletion path). Backend and script only. **No prod access:** local and in-memory SQLite only. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
+
+- **Commit 1 (`09c0c3d3`), `accounts._delete_user_data`:**
+  - on platform pick grids (`draft_picks.platform` set and not `sleeper`), `owner_user_id` / `original_user_id` naming a deleted id become `DELETED_USER_PLACEHOLDER`, in the same transaction; new count key `draft_picks_owner_anonymized`;
+  - Sleeper grids and legacy NULL-platform rows are untouched.
+  - Found while scoping the purge: an MFL import writes the importer's Fleeced id (`entry:*`, `acct_*`) as the owner of their picks, and deletion kept it.
+  - 4 new tests in `test_account_deletion_coverage.py` (40 pass); **sabotage 7/7 red,** each restored byte-identical.
+- **Commit 2 (`c200415c`), `scripts/purge_entry_users.py`:**
+  - discovery from `_EXPORT_TABLES` + `_ADDITIONAL_PRIVATE_TABLES` + an explicit deletion-only list;
+  - head-eng's cutoff/verified filter (NULL `created_at` is its own skipped count);
+  - dry run by default; `--execute --expect N` through `delete_user_data`; `--verify` (a) key columns, (b) entry credentials;
+  - info counts for JSON mentions and the overhaul gap; counts only, never an id.
+  - `test_purge_entry_users.py`: 9 pass, including a drift test that captures `delete_user_data`'s SQL. **Sabotage 14/14 red,** each restored byte-identical.
+- **Local runs:**
+  - `pytest` on the purge test plus `test_account*`, `test_deletion_session_races`, `test_user_data_lifecycle`: 116 passed;
+  - the other deletion-touching suites plus `test_owned_picks` / `test_mock_pick_ownership`: 359 passed;
+  - the script's `--help`, and a dry run and `--verify` on an empty dev DB (0 found, exit 0).
+- **Not run here:** the prod purge. It needs the operator's own word in the acting session; steps in `docs/runbook.md` § "Purge orphaned ESPN/MFL entry users".
+
+- **2026-10-27, release-lead's QA round (`16c2c3bb`..`e2a35031`):**
+  - **Deletion fixes, for every user:**
+    - **D1, shared leagues:** a `leagues` row is kept with the importer anonymized while another live Fleeced user still belongs to it; otherwise it's deleted, as before;
+    - **D2:** `recorded_picks.picking_team_id` is anonymized for Fleeced-minted ids.
+  - **Script fixes:**
+    - it prints the DB identity first and refuses local SQLite without `--allow-local` (exit 2);
+    - verify fails on any unverified entry user created after the cutoff, and the dry run stops and asks;
+    - `hide_parameters` engines plus a redacting top-level handler, so no ids reach stderr on a DB error;
+    - read-only reads;
+    - strict CLI: no abbreviations, and a tz-aware, non-future cutoff;
+    - the drift test also captures `=` filters.
+  - **Runbook order:** flag off, restart, dry run, snapshot, execute (the operator), restart, verify, record.
+  - **Runs (onboarding-eng, after the worker hit its usage limit):** deletion + account + draft + picks + purge tests, 429 passed (purge alone 36). A manual check confirmed the local refusal, the date-only cutoff and the future cutoff all exit 2, and `--exe` / `--exp` are rejected.
+
+- **2026-10-27, release-lead delta QA NO-GO @ `527031fc` → fixed (onboarding-eng; the worker was at its usage limit):**
+  - **D1 REVERTED** (`60379b82`): keeping a shared `leagues` row as `deleted_user` stranded the remaining member's linker routes, because no upsert re-adopts the row. It also kept the importer's id in `pick_assignment_settings`. Deletion is back to main's behaviour: the row is deleted, and the next member to link re-imports it.
+  - **`b1c73a98`:** deletion anonymizes Fleeced-minted ids in other users' `pick_assignment_changed` events (`old_owner` / `new_owner` / `actor`); Sleeper ids stay. 4 tests; sabotage 2/2.
+  - **`3c94114f`:** `--verify` gains (d), no removed entry id left in the pick audit trail, and (e), a non-empty `users` table. `--expect-db` refuses a different DB in every mode, and the printed execute command carries it. The per-target error is pinned to print only its type. 5 tests; sabotage 4/4.
+  - **`506c9294`, runbook:** the cutoff is the restart time; the STOP response is pre-decided; release-lead takes the snapshot and **the operator deletes it** (corrected in `630b5084`; release-lead records the due date and reminds); `--expect-db` on every command; step 7 checks identity and (d)/(e).
+  - **Runs:** deletion + account + draft + picks + pick-assignment + purge tests, 503 passed.
+
+- **2026-10-27, release-lead round 3 @ `630b5084`: GO-with-notes (no P1) → the P2 and P3s are fixed:**
+  - **P2:** deletion anonymizes a deleted Fleeced-minted id in **any** league's `pick_assignment_settings.order`, other importers' rows included, in place, so slot positions don't shift. That's the R28.16 SWID case, and it's the same on main, so it closes for every future deletion. Verify gains (f).
+  - **P3:**
+    - malformed (non-dict) audit props or settings can't abort a deletion;
+    - the runbook gives (d)/(e)/(f) FAIL responses;
+    - the cutoff help and error text name the step-2 restart;
+    - `--expect-db` is required with `--execute`;
+    - api-reference lists the new count keys.
+    - **Pinned:** (d) reads `old_owner` and `actor`, the scrub rewrites `actor`, the scrub skips other event types, and the printed execute command carries `--expect-db`.
+  - **Tests:** 3 deletion + 6 purge (9), all new (corrected 2026-10-27; this line first said 5 + 6). **Sabotage: 8/8 red.**
+  - **Runs (onboarding-eng):** deletion + account + draft + picks + pick-assignment + purge tests.
+- **2026-10-27, head-eng's pre-prod-run asks (`e844115b`, `39c31ff0`):**
+  - **Pick-grid names:** a platform-grid row anonymized by id also drops the deleted person's `owner_username` / `original_username` for "Team <slot>" (the writers' own fallback; the placeholder when no slot is known). 1 new deletion test; **sabotage 6/6 red.**
+  - **Census:** the dry run printed, counts only, the verified entry users it skips (by kind and `verified_via`), which skipped users hold an ESPN/MFL credential, and target-owned leagues with another Fleeced member. 1 new purge test; **sabotage 6/6 red.** Superseded by `ad3aa954`: analytics-lead ran the prod count, so the dry run keeps only the credential counts.
+  - **Runs (onboarding-eng):**
+    - purge, `test_account*`, deletion races, lifecycle, persistent sessions, owned picks, recorded picks, pick assignment, module shape: **311 passed** (14 files);
+    - after the main merge `8024f16a`, the same plus `deck_i1_check` and the S0 roster tests: **440 passed** (18 files).
+- **2026-10-27, legal R28.17 A1 (`ad3aa954`).** The count found 2 entry users, both the operator's test logins: 1 unverified `entry:espn` and 1 verified MFL-only `entry:mfl` with 1 `mfl_credentials` row.
+  - **The new flag.** `--delete-verified-credentials M` deletes only the verified entry users' ESPN/MFL credential rows in the same execute. M is pinned like `--expect`.
+  - **Verify (g)** is R28.16 part 1: zero entry users without `verified_via`.
+  - **Tests:** 3 new purge tests (the flag and its refusals, which keep entitlements and everything else; the CLI rule; (g)), plus the extended credential-left test (the rerun path). Purge sabotage **7/7 red**.
+  - **The pin for legal's degrade condition** is `test_purge_mfl_reconnect.py`. With the row gone:
+    - the status reads `connected: false`;
+    - the league still lists;
+    - the send is 409 `mfl_not_connected` "Sign in with MFL first.", never a 500.
+    - Sabotage on the server routes: **3/3 red.**
+  - **Runs (onboarding-eng):**
+    - purge + reconnect, 52 passed;
+    - before the push, purge, reconnect, `test_account*`, deletion races, lifecycle, MFL propose, I-2 MFL, link status, auth-link and module shape: **283 passed** (15 files).
+- **2026-10-27, release-lead round 5 @ `b2c49ec6`: NO-GO on P1-1 → fixed in `f16c5c38`:**
+  - **P1-1, the credential step fails closed:**
+    - it's skipped after a failed target;
+    - the purge summary prints first;
+    - an error shows its type only;
+    - one transaction rolls back unless exactly M rows are deleted, which also closes P2-2.
+  - **P2-1:** pinned. The flag deletes only verified entry users' rows, not an unverified entry user's or a non-entry user's.
+  - **P3s:**
+    - batched pick-grid UPDATEs;
+    - the owner of an own pick uses its own slot;
+    - the two-slot and alias-slot tests;
+    - (b) is case-sensitive on SQLite;
+    - a blank `verified_via` isn't verified.
+  - **Tests:** 6 new purge tests and 2 cases in the names test.
+  - **Sabotage, 11 red,** each restored byte-identical:
+    - **purge 7/7:**
+      - the credential step runs after a failed target;
+      - a credential-step error isn't caught;
+      - no exact-M check at the write;
+      - the delete has no filter;
+      - the delete hits every `entry:` row;
+      - (b) is case-insensitive again;
+      - a blank `verified_via` counts.
+    - **pick-grid 4/4:**
+      - the owner of an own pick uses the league slot;
+      - the two-slot rule is dropped;
+      - own slots are read from the requested id only;
+      - batches are keyed on the owner's values only.
+  - **Runs (onboarding-eng):** purge, reconnect, `test_account*`, deletion races, lifecycle, owned picks, recorded picks, pick assignment, MFL propose, I-2 MFL, link status and module shape: **405 passed** (17 files).
+- **2026-10-27, release-lead round 6 @ `18a5347e`: GO-with-notes (no P1, no P2):**
+  - **Fail closed:** the fail-closed matrix passes on SQLite and PG, and multi-chunk M = 1,500 runs in one transaction.
+  - **Prod shape:** it gives N = 1 / M = 1.
+  - **Batching:** the batched UPDATEs take 106 statements vs 603.
+  - **Sleeper and legacy rows:** byte-identical to main.
+  - **Sabotage:** 37/37 red.
+  - **Tests:** 1,660 passed on head and 1,670 on the trial merge; CI green.
+  - **Then:** a docs-only main merge (the api-reference `DELETE /api/account` row keeps both #446's text and this PR's; this ledger).
+  - **P3-1 → follow-up A:** a pick moved between the person's own two slots is named after its original slot.
 
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 
