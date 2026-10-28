@@ -585,6 +585,16 @@ function runStatic() {
         /hitSlop=\{\{ top: 4, bottom: 4 \}\}/.test(bannerFn)
           && /inviteBtn: \{\s*minHeight: 36,\s*minWidth: 44,/.test(bannerSrc),
         'the banner Invite button fell under the 44pt touch floor');
+  // AC-4b border (design-lead #364 F2): ≥3:1 on the banner's ink-2 needs the
+  // raised line token, defined in lockstep on mobile and web.
+  const inviteBtnStyle = (/inviteBtn: \{([\s\S]*?)\n {2}\},/.exec(bannerSrc) || [])[1] || '';
+  const theme = read('theme/chalkline.ts');
+  const webTokens = fs.readFileSync(path.join(__dirname, '..', '..', 'web', 'css', 'tokens.css'), 'utf8');
+  check('L AC-4b border: the banner Invite button uses ink.lineStrongRaised (#6B7587, 3.60:1 on ink-2)',
+        /borderColor: ink\.lineStrongRaised,/.test(inviteBtnStyle)
+          && /lineStrongRaised: '#6B7587',/.test(theme)
+          && /--line-strong-raised: #6B7587;/.test(webTokens),
+        `inviteBtn style: ${inviteBtnStyle.replace(/\s+/g, ' ')}`);
 
   // N. ux-lead #364 change 1 — EVERY Invite control renders busy from
   //    useInviteBusy() (the banner is §L). Each control is found by its

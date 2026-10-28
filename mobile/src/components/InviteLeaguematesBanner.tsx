@@ -345,7 +345,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: ink.lineStrong,
+    // design F2: ≥3:1 against the banner's ink-2 (3.60:1; 3.18:1 pressed).
+    borderColor: ink.lineStrongRaised,
   },
   inviteBtnPressed: { backgroundColor: ink.ink3 },
   hidden: { opacity: 0 },
