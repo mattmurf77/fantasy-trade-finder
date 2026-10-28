@@ -586,7 +586,59 @@ function runStatic() {
           && /inviteBtn: \{\s*minHeight: 36,\s*minWidth: 44,/.test(bannerSrc),
         'the banner Invite button fell under the 44pt touch floor');
 
+  runButtonLoading();
   finish();
+}
+
+// ── M. chalkline Button `loading` (design-lead #364), EXECUTED ───────────
+// The four Button-based Invite controls show busy through `loading`. It must
+// keep the label in layout (invisible) under a centred spinner in the label
+// colour, stay inactive (so no pressed fill) and set accessibilityState.busy;
+// without `loading` the render is the plain label, as before.
+function runButtonLoading() {
+  const h = (type, props, ...children) => ({ type, props: props || {}, children });
+  const tok = new Proxy({}, { get: (_, k) => new Proxy({}, { get: (_, j) => `${String(k)}.${String(j)}` }) });
+  const { default: Button } = load('components/chalkline/Button.tsx', {
+    react: { default: { createElement: h, Fragment: 'Fragment' } },
+    'react-native': {
+      ActivityIndicator: 'ActivityIndicator', Pressable: 'Pressable', View: 'View',
+      StyleSheet: { create: (o) => o, absoluteFillObject: { position: 'absolute', left: 0, right: 0, top: 0, bottom: 0 } },
+    },
+    '../../theme/chalkline': tok,
+    '../../state/useFeatureFlags': { useFlag: () => false },
+    './Text': { default: 'Text' },
+    './Icon': { default: 'Icon' },
+  });
+  const flat = (s) => (Array.isArray(s) ? Object.assign({}, ...s.filter(Boolean).map(flat)) : (s || {}));
+  for (const variant of ['primary', 'secondary']) {
+    const el = Button({ label: 'Invite leaguemates', variant, loading: true, accessibilityLabel: 'Preparing invite link' });
+    const kids = el.children[0]({ pressed: false });
+    const parts = kids.type === 'Fragment' ? kids.children : [kids];
+    const content = parts.find((p) => p && p.type === 'View' && p.children.some((c) => c && c.type === 'Text'));
+    const label = content && content.children.find((c) => c && c.type === 'Text');
+    const overlay = parts.find((p) => p && p.type === 'View' && p.children.some((c) => c && c.type === 'ActivityIndicator'));
+    const spinner = overlay && overlay.children.find((c) => c && c.type === 'ActivityIndicator');
+    const labelColour = label && flat(label.props.style).color;
+    check(`M loading (${variant}): the label stays in layout at opacity 0`,
+          !!label && label.children.includes('Invite leaguemates') && flat(content.props.style).opacity === 0,
+          'the spinner must not replace the label (width jump)');
+    const o = overlay ? flat(overlay.props.style) : {};
+    check(`M loading (${variant}): a small spinner in the label colour, centred over the label`,
+          !!spinner && spinner.props.size === 'small' && spinner.props.color === labelColour
+            && o.position === 'absolute' && o.alignItems === 'center' && o.justifyContent === 'center',
+          JSON.stringify({ spinner: spinner && spinner.props, labelColour, overlay: o }));
+    check(`M loading (${variant}): inactive (no pressed fill), accessibilityState.busy, label passthrough`,
+          el.props.disabled === true && el.props.accessibilityState.busy === true
+            && el.props.accessibilityLabel === 'Preparing invite link',
+          JSON.stringify({ disabled: el.props.disabled, state: el.props.accessibilityState }));
+  }
+  const idle = Button({ label: 'Invite leaguemates', variant: 'secondary' });
+  const idleKids = idle.children[0]({ pressed: false });
+  check('M not loading: the plain label, no spinner, no hidden style, busy false',
+        idleKids.type === 'View' && flat(idleKids.props.style).opacity === undefined
+          && !JSON.stringify(idleKids).includes('ActivityIndicator')
+          && idle.props.accessibilityState.busy === false && idle.props.disabled === false,
+        JSON.stringify(idleKids).slice(0, 200));
 }
 
 // A stalled harness (an awaited promise that never settles) would let node
