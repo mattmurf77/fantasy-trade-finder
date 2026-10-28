@@ -377,8 +377,9 @@ MFL (`mfl.link`) and Fleaflicker (`fleaflicker.link`) leagues reuse the **same w
 
 S0 (launch §3a, `docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md`). One row per league recording the
 last **Sleeper roster refresh**: the read `/api/session/init` makes at app open and foreground. Written by
-`backend/roster_refresh.py` through `database.mark_league_roster_fresh` / `mark_league_roster_failed`; read
-with `get_league_roster_state`. Every write is a single-row dialect-aware upsert. A failed read **never** touches
+`backend/roster_refresh.py` through `database.mark_league_roster_fresh` / `mark_league_roster_failed` (upserts) and
+`cas_league_roster_fp` (the `roster_fp` stamp, a single-row compare-and-set UPDATE); read with
+`get_league_roster_state`. Every write is single-row. A failed read **never** touches
 `league_members` or `draft_picks`: the last good rows stay and only this row changes. ESPN/MFL/Fleaflicker
 leagues get no row from session init (they're not refreshed from the platform there). League-keyed with no
 `user_id`, so it is outside account deletion/export. Created by `metadata.create_all` (new table; no migration
@@ -387,7 +388,7 @@ row).
 | Column | Type | Notes |
 |---|---|---|
 | `league_id` | str PK | Platform-native league id (same semantics as `leagues.sleeper_league_id`) |
-| `roster_fp` | str, nullable | `rfp1:…` roster fingerprint (trades-eng's `roster_snapshot`), stamped after a committed refresh. NULL until that stamp ships (S0 PR-B). Never changed by a failure |
+| `roster_fp` | str, nullable | `rfp1:…` roster fingerprint, stamped by S0 PR-B (`roster_refresh.stamp`) after each `fresh` refresh, on the refresh's background thread: `roster_snapshot(...).fp` with the engine's pick source (`server._pick_read_source()`), as the serve computes it. Written only by `database.cas_league_roster_fp`, a compare-and-set (`UPDATE … WHERE roster_fp = <the value read>`, `IS NULL` on the first stamp) that touches no other column; a lost CAS writes nothing. A won CAS on a changed value then calls `roster_snapshot.on_roster_change(league_id, old, new)` with no transaction open. NULL = never stamped (no `fresh` refresh since PR-B, or every stamp failed). Never changed by a failure or by a fingerprint error |
 | `refreshed_at` | str, nullable | ISO-8601 UTC (fixed microsecond precision): fetch **start** time of the last refresh whose members **and** owned picks both committed. Only moves forward. NULL = never fully refreshed |
 | `status` | str | `fresh` (the last attempt committed) · `stale` (the last attempt failed; any stored rows are the last good ones). **Only these two values are stored** (fingerprint contract v0.3 §3). "Missing" (no cards) is **derived** by trades-eng's `roster_snapshot` from absent `league_members` rows, never stored here, and no state row (or no table) reads as `unknown`. This describes the last attempt, not an age bound; consumers compute age from `refreshed_at` |
 | `last_error_code` | str, nullable | NULL after a success. Otherwise one of `rate_limited` (429 or the circuit is open) · `blocked` (403, incl. Cloudflare 1010) · `http_4xx` · `http_5xx` · `timeout` · `network` · `invalid_payload` · `picks_unavailable` (owned-pick sync skipped on a throttled read) · `write_failed` |
@@ -1246,6 +1247,8 @@ The original seven engine read sites were `_roster_eveners`, `_user_pick_share`,
 
 **W3 M-C (2026-08-08, flag `picks.assign_tradeable`)** opted all seven in together. Each now passes `source=server._pick_read_source()`, which is `'platform'` with the flag off (the shipped default, so the paragraph above still describes the shipped state) and `'any'` with it on. A read site passing a **literal** `PICK_SOURCE_ANY` would ignore the kill switch and is failed by its own AST test. Only the assignment surface (`seed_pick_grid`, `_assignment_slots`, `_assignment_grid`, `pick_assignment_put_route`) may name a literal provenance. `database.has_assigned_picks(league_id)` is the memoised "does this league hold any asserted row" probe behind M-C's engine guard and `picks_supported`; it is invalidated by the same hook as the contested cache and **fails closed**.
 
+`load_draft_pick_seasons(league_id, source='platform')` is the season-only reader: one `SELECT DISTINCT season` under the same platform predicate. It is platform-only; any other `source` raises `ValueError`, because the contested/orphaned exclusion is a row filter that a season set can't carry. Its one caller is `server._sleeper_prior_grid_excludes` (#470 QA P3-2), which the AST guard in `test_pick_assignment.py` sanctions.
+
 `replace_draft_picks(league_id, rows, preserve_source=None)` scopes its DELETE to one provenance: a writer only ever deletes rows it could have written. Platform callers keep the default; only W3's assignment projection passes `'user'`.
 
 `pick_id` has exactly one constructor — `database.make_pick_id()`. Round is unpadded, so a `pick_id` is **not** lexicographically sortable. Its unique key has no provenance dimension, so one slot cannot hold both a platform row and an asserted one; the seeder skips such a slot (the platform wins).
@@ -1798,6 +1801,7 @@ In-app feedback notes captured via the mobile FeedbackSheet and POSTed to `/api/
 | `created_at` | str, not null | ISO timestamp from server (canonical) |
 | `status` | str, nullable | operator-set lifecycle status; NULL reads as `'new'`. Vocabulary `new/planned/in_progress/fixed/shipped/declined` — see cross-client-invariants.md |
 | `status_updated_at` | str, nullable | ISO timestamp of the last status change |
+| `session_key` | text, nullable | sha256 hex of the `X-Session-Token` of the **unverified** session that sent the note (never the raw token; #360 QA P2-1). Set only for an existing, unverified session; NULL for verified-at-post, no-token and unknown-token notes. When that same session verifies in place (today only the Sleeper link; the MFL login and provider re-auth hooks are defensive, see `api-reference.md`), `attach_session_feedback` sets `user_id`/`username` on its still-anonymous notes and clears this column. If `/api/session/init` re-points the token at a different user, `detach_session_feedback` clears it on those notes instead, so they never attach (release-lead delta QA E). Omitted from account export |
 
 Indexes: `idx_app_feedback_created_at`, `idx_app_feedback_user_id`.
 

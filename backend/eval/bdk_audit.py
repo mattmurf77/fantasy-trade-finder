@@ -11,7 +11,8 @@ the readout.
   B-DK-5  filler      deck_quality._filler, per card
   B-DK-6  redundant   deck_quality._redundant_side: not auditable (below)
   B-DK-7  repeat      per deck: an asset in more than REPEAT_CAP of the first
-                      REPEAT_WINDOW displayed cards
+                      REPEAT_WINDOW displayed cards; a breach on a short deck
+                      is checked with deck_quality._repeat_cap itself
 
 Every threshold is deck_quality's own, imported, never restated (a test pins
 it).
@@ -72,7 +73,17 @@ violate more than one rule; each counts. Repeat counts breaches, one per
 (deck, asset): its over-cap appearances are those past the REPEAT_CAP-th in
 displayed order, and a breach whose over-cap appearances are all protected
 cards is explained (_repeat_cap lets them hold their positions), counted
-apart, not a violation. A window card with no full row is not auditable and
+apart, not a violation. So is a breach on a short deck: _repeat_cap defers
+an over-cap card to just after the cards it keeps, so with fewer than
+REPEAT_WINDOW cards to keep the deferred ones still land in the window. A
+breach is explained that way when re-running deck_quality._repeat_cap on
+the deck's whole displayed order leaves it unchanged (the filter could do no
+better); that needs a well-formed full row for every displayed card, and a
+deck whose cards may be a prefix of what was built never qualifies: a loader
+exclusion (but a packed deck's in_flight: its pack holds every card), a
+partial_run deck, or a pack-less deck of REPEAT_WINDOW cards or more (it may
+have stopped after a publication batch, unmarked). Those stay violations. Both are counted in `explained`, split as
+explained_protected / explained_short_deck, with examples (`why`). A window card with no full row is not auditable and
 its deck incomplete (a breach found there still counts). The filter ran on
 the built order, ghost rows and later withdrawals included, so a served
 breach can come from the serve order: each example gives the deck's ghost
@@ -106,6 +117,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import traceback
 from collections import Counter
@@ -117,11 +129,11 @@ from sqlalchemy import inspect, select
 from backend.database import deck_impressions_table
 from backend.deck_quality import (
     BREAKUP_MIN_RATIO, FILLER_FLOOR, FILLER_FRAC, PROTECTED_ATTRS, REDUNDANT_MIN_RATIO, REPEAT_CAP,
-    REPEAT_WINDOW, _breakup, _filler, is_protected,
+    REPEAT_WINDOW, _breakup, _filler, _repeat_cap, is_protected,
 )
 from backend.eval.data import (
-    CALIBRATION_REFRESH, PACK_INTEGRITY, PACK_TABLE, UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT,
-    _json_dict, load_decks, valuation_markets,
+    CALIBRATION_REFRESH, IN_FLIGHT, PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER,
+    UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, _json_dict, load_decks, valuation_markets,
 )
 from backend.eval.flip_read import (
     _PACK_ROWS, FAIL, LIST_CAP, PASS, ReadOnlyViolation, _chunks, _iso, _Parser, _redact,
@@ -194,6 +206,8 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
         misses = _miss_cards(conn, sorted(
             job for job, cs in cards.items()
             if any(c.viewed and c.impression_id not in rows for c in cs)))
+        repeat = _repeat(trades, sets, rows, lambda ids: _full_rows(conn, ids),
+                         _packed_runs(conn, [d.deck_job_id for d in trades]))
 
     card_rules = {name: _tally() for name in ("breakup", "filler", "redundant")}
     no_row = {"viewed_by_cause": Counter(), "unviewed": 0, "examples": []}
@@ -211,13 +225,13 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
                 else:
                     no_row["unviewed"] += 1
                 continue
-            give, receive, markets, protected = row
+            give, receive, markets, protected, _ = row
             if protected:
                 for t in card_rules.values():
                     t["protected"] += 1
                 continue
             card_rules["redundant"]["not_auditable"] += 1   # no served-time rosters / lineup
-            if markets is None or any(a not in markets for a in (*give, *receive)):
+            if give is None or not all(_is_market(markets.get(a)) for a in (*give, *receive)):
                 card_rules["breakup"]["not_auditable"] += 1
                 card_rules["filler"]["not_auditable"] += 1
                 continue
@@ -228,7 +242,7 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
                     t["violations"] += 1
                     _example(t["examples"], _where(c))
 
-    rules = {**card_rules, "repeat": _repeat(trades, sets, rows)}
+    rules = {**card_rules, "repeat": repeat}
     for name, t in rules.items():
         t["bdk"], t["rule"] = RULES[name]
         t["status"] = _status(t)
@@ -257,9 +271,25 @@ def _audit_set(deck) -> tuple[list, list]:
     return shown[:REPEAT_WINDOW], [c for c in shown[REPEAT_WINDOW:] if c.viewed]
 
 
+def _is_market(value) -> bool:
+    """A usable served market: a finite number (a missing, null or string
+    market makes its card not auditable for the value rules, never a pass)."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def _ids(side) -> list[str] | None:
+    """An assets_json side as str ids; None when it isn't a list (the card
+    is then not auditable, never a crash)."""
+    return [str(a) for a in side] if isinstance(side, list) else None
+
+
 def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
-    """impression_id -> (give, receive, markets or None, protected) for each
-    id with a full row (assets_json), read chunked."""
+    """impression_id -> (give, receive, markets, protected, card) for each
+    id with a full row (assets_json), read chunked. give and receive are None
+    when either side is missing, empty or not a list; markets is {} when none is recorded;
+    `card` carries the ids and the protection attributes, for
+    deck_quality._repeat_cap."""
     imp = deck_impressions_table
     out: dict[str, tuple] = {}
     for chunk in _chunks(ids):
@@ -271,13 +301,25 @@ def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
             if assets is None:
                 continue
             features = _json_dict(r.features_json) or {}
+            give, receive = _ids(assets.get("give")), _ids(assets.get("receive"))
+            if not give or not receive:           # missing, not a list, or empty: unusable
+                give = receive = None
             card = SimpleNamespace(source_like_impression_id=r.source_like_impression_id,
+                                   give_player_ids=give or [], receive_player_ids=receive or [],
                                    **{a: features.get(k) for a, k in _RECORDED_FEATURES.items()})
-            out[r.impression_id] = ([str(a) for a in assets.get("give") or []],
-                                    [str(a) for a in assets.get("receive") or []],
-                                    valuation_markets(_json_dict(r.valuation_json)) or None,
-                                    is_protected(card))
+            out[r.impression_id] = (give, receive,
+                                    valuation_markets(_json_dict(r.valuation_json)),
+                                    is_protected(card), card)
     return out
+
+
+def _packed_runs(conn, run_ids: list[str]) -> set[str]:
+    """The run_ids with a pack row (a pack holds every built card)."""
+    if not run_ids or not inspect(conn).has_table(PACK_TABLE):
+        return set()
+    return {run_id for chunk in _chunks(run_ids)
+            for (run_id,) in conn.execute(select(_PACK_ROWS.c.run_id)
+                                          .where(_PACK_ROWS.c.run_id.in_(chunk)))}
 
 
 def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
@@ -295,10 +337,42 @@ def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
     return out
 
 
-def _repeat(trades, sets, rows) -> dict:
-    """B-DK-7 per deck over its window (module doc)."""
-    t = {"violations": 0, "explained": 0, "audited": 0, "not_auditable": 0,
-         "incomplete_decks": 0, "examples": [], "explained_examples": []}
+def _short_deck(deck, rows, fetch, packed: bool) -> bool:
+    """Whether the deck's whole displayed order is a fixed point of
+    deck_quality._repeat_cap (module doc). False when any displayed card has
+    no well-formed full row, and for any deck whose cards may be only a prefix
+    of what was built, where an over-cap card at the prefix's end would read
+    as deferred (#469 QA): a loader exclusion other than a packed deck's
+    in_flight (a pack holds every built card; a pack-less in_flight or lost
+    pack's incomplete_deck holds the first REPEAT_WINDOW and viewed rows); a
+    partial_run deck (its delivered rows); and a pack-less deck of
+    REPEAT_WINDOW cards or more, never-delivered withdrawals included, which
+    may have stopped after a publication batch with nothing marking it
+    (complete ones read FAIL: the safe side).
+    Rows the window didn't need are fetched and added to `rows`."""
+    if deck.exclusion is not None and not (packed and deck.exclusion == IN_FLIGHT):
+        return False
+    if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
+        return False
+    shown = sorted((c for c in deck.cards if not c.is_ghost), key=lambda c: c.position)
+    if not packed and len(shown) + deck.withdrawn_removed >= REPEAT_WINDOW:   # W0s count
+        return False
+    missing = [c.impression_id for c in shown if c.impression_id not in rows]
+    if missing:
+        rows.update(fetch(missing))
+    served = [rows.get(c.impression_id) for c in shown]
+    if any(row is None or row[0] is None for row in served):
+        return False
+    cards = [row[4] for row in served]
+    return [id(c) for c in _repeat_cap(cards)[0]] == [id(c) for c in cards]
+
+
+def _repeat(trades, sets, rows, fetch, packed: set) -> dict:
+    """B-DK-7 per deck over its window (module doc). `fetch(ids)` reads more
+    full rows, for the short-deck check; `packed` is the run_ids with a pack."""
+    t = {"violations": 0, "explained": 0, "explained_protected": 0, "explained_short_deck": 0,
+         "audited": 0, "not_auditable": 0, "incomplete_decks": 0, "examples": [],
+         "explained_examples": []}
     for d in trades:
         window = sets[d.deck_job_id][0]
         seen: Counter = Counter()
@@ -306,24 +380,34 @@ def _repeat(trades, sets, rows) -> dict:
         over: dict[str, list[bool]] = {}   # asset -> protected, per over-cap appearance
         for c in window:
             row = rows.get(c.impression_id)
-            if row is None:
+            if row is None or row[0] is None:
                 t["not_auditable"] += 1
                 continue
             t["audited"] += 1
-            give, receive, _, protected = row
+            give, receive, _, protected, _ = row
             assets = (*give, *receive)
             for a in assets:
                 if seen[a] >= REPEAT_CAP:
                     over.setdefault(a, []).append(protected)
                 at.setdefault(a, []).append(c.card_index)
             seen.update(assets)
-        t["incomplete_decks"] += any(c.impression_id not in rows for c in window)
+        t["incomplete_decks"] += any((rows.get(c.impression_id) or (None,))[0] is None
+                                     for c in window)
+        short = None                       # checked once per deck, only on a breach
         for asset, protected in over.items():
-            explained = all(protected)
-            t["explained" if explained else "violations"] += 1
-            _example(t["explained_examples" if explained else "examples"], {
+            why = "protected" if all(protected) else None
+            if why is None:
+                short = (_short_deck(d, rows, fetch, d.deck_job_id in packed)
+                         if short is None else short)
+                why = "short_deck" if short else None
+            if why:
+                t["explained"] += 1
+                t[f"explained_{why}"] += 1
+            else:
+                t["violations"] += 1
+            _example(t["explained_examples" if why else "examples"], {
                 "deck_job_id": d.deck_job_id, "asset": asset, "card_indexes": at[asset],
-                "over_cap_protected": protected,
+                "why": why, "over_cap_protected": protected,
                 "ghost_slots": sum(1 for c in d.cards
                                    if c.is_ghost and c.card_index < REPEAT_WINDOW),
                 "withdrawn_removed": d.withdrawn_removed})
@@ -376,7 +460,8 @@ def render(r: BdkAudit) -> str:
     for name, t in r.rules.items():
         violations = "n/a" if t["violations"] is None else t["violations"]
         if name == "repeat":
-            violations = f"{violations} (explained by protected cards: {t['explained']})"
+            violations = (f"{violations} (explained: {t['explained_protected']} by protected "
+                          f"cards, {t['explained_short_deck']} by a short deck)")
         lines.append(f"| {t['bdk']} | {name}: {t['rule']} | {violations} | {t['audited']} | "
                      f"{t.get('protected', '-')} | {t['not_auditable']} | 0 | {t['status']} |")
     lines.append("")
@@ -405,7 +490,8 @@ def render(r: BdkAudit) -> str:
         if rp[key]:
             lines.append(f"B-DK-7 repeat {label}: " + "; ".join(
                 f"{e['deck_job_id']} asset {e['asset']} at card_index "
-                f"{', '.join(map(str, e['card_indexes']))} (over-cap protected "
+                f"{', '.join(map(str, e['card_indexes']))} ("
+                + (f"{e['why']}, " if e["why"] else "") + "over-cap protected "
                 f"{e['over_cap_protected']}, ghost slots {e['ghost_slots']}, withdrawn "
                 f"{e['withdrawn_removed']})" for e in rp[key]))
     lines.append("Evidence (rule input: where it is recorded):")

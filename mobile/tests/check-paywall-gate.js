@@ -389,7 +389,8 @@ check('3f. D18 FINAL: Sleeper sessions verify with Sleeper; every other session 
 });
 
 // ═══ 4. copy/monetization.ts — verbatim strings and R28.8, executed ═══════
-const copy = load('copy/monetization.ts', {});
+// Its one import, the support address, is the real constant-only module.
+const copy = load('copy/monetization.ts', { '../utils/supportContact': load('utils/supportContact.ts', {}) });
 const SLEEPER_TITLE = 'Verify this session first';
 const SLEEPER_BODY = 'To use or start a subscription, verify this session first. Signing in confirms the account is yours.';
 const APPLE_TITLE = 'A new sign-in is needed';
