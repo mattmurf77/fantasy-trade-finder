@@ -1,3 +1,13 @@
+## 2026-10-28 — #489 QA P3s: the ledger's docs claim, LLD's guard counts, a deadlock-safe lock-order test
+
+Gates: release-lead's #489 delta QA, P3-1 to P3-3. Tests and docs only: no server code, route, schema, flag or knob change.
+- **P3-1:** #489's ledger entry said its docs included the data dictionary (the ERROR-line note). They didn't: the note from `85286cf7` already held. The entry is corrected in place, dated. Commit `7d5d0edb`'s message keeps the wrong claim; it can't be rewritten (no force-push).
+- **P3-2:** LLD's guard-count list now includes `f5=` (printed when nonzero), beside `held=` and `evicted=`.
+- **P3-3:** `test_evidence_cleanup`'s `_OrderedLock` takes a blocking lock with a 5 s timeout. A self-deadlock now fails the test with "lock not acquired" instead of hanging until the runner's timeout.
+- **Evidence:**
+  - `test_evidence_cleanup.py`: 38 passed.
+  - **Sabotage:** the F5 drop's ledger lock nested inside itself. Before: the test hung (QA's Y1, caught only by the runner's timeout). Now: it's red in 17 s, then restored.
+
 ## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
 
 Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -66,7 +76,7 @@ Gates: models-lead's ruling, D1 (`leads/models-lead-launch.md` addendum D), via 
   - The fix: F5's drop now also pops `_deck_held`, like any eviction, so the late view reads `restart_split`.
   - New tests: the eviction aging out → `restart_split`; the anomaly on the kept cause; no anomaly on a real F5 row-gone miss; a bool count refused; the jobs → ledger lock order; the guard's `f5=`.
   - Sabotage (7, each red then restored): no held pop; the anomaly on the local cause; the anomaly on the effective count; a bool count; a reverse lock on the read path; the guard dropping `f5=`; f5 trims counted as held.
-  - Docs: the contract sentence, LLD, and data-dictionary (the ERROR-line note).
+  - Docs: the contract sentence and LLD. (Corrected 2026-10-28, #489 QA P3-1: the data dictionary wasn't changed. Its ERROR-line note from `85286cf7` already held. Commit `7d5d0edb`'s message says otherwise.)
 - **Sabotage, each red then restored (5):**
   - F5 also leaving the held ledger (#457's way: superseded by option (a) above);
   - F5 not an eviction;
