@@ -163,8 +163,8 @@ No existing visible copy changed; "Send in Sleeper" is still true. New copy, to 
 
 | PRD check / work | Owner | Why not here |
 |---|---|---|
-| S1, S2 (ClaimSheet half), S8, S9; `ClaimSheet` → `openInSleeperApp({ target: 'add', … })`, the steps block, `leagueName` from Free Agents | league-eng | `ClaimSheet.tsx`, `FreeAgentsScreen.tsx` not ours |
-| S1 for `UsageTrendsScreen.tsx`; its `leagueName` prop | rankings-eng | not ours |
+| S1, S2 (ClaimSheet half), S8, S9; `ClaimSheet` → `openInSleeperApp({ target: 'add', … })`, the steps block, `leagueName` from Free Agents | league-eng | `ClaimSheet.tsx`, `FreeAgentsScreen.tsx` not ours. **Built in #509 (B3), stacked on this PR** (adds H1/H2 for the hosts) |
+| S1 for `UsageTrendsScreen.tsx`; its `leagueName` prop | rankings-eng | not ours. **Built in #509 (B3), stacked on this PR** |
 | S11, S12, S15; `useTradeQueue.sendAll` one hand-off; `buildSleeperUrl` removal | trades-eng | `TradesScreen.tsx`, `useTradeQueue.ts` not ours |
 | S14 / AC-16; the steps confirm + `clipboardText: formatTradeForClipboard(…)` on `openInSleeper` | platforms-eng follow-up | needs design-lead / ux-lead copy first; silent copying without the disclosure is out |
 | `DraftRoomScreen.tsx:827` → `openPlatform` | draft-eng | not ours |
