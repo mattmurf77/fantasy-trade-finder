@@ -47,6 +47,7 @@ Palette v2 ("ice/flare", ADR-005) — graphite ink, ice-cyan primary, flare-pink
 | `--ink-3` | `#232833` | Hover fill, wells, pressed |
 | `--line` | `#262C35` | Hairline rules, default borders |
 | `--line-strong` | `#59647A` | Interactive borders (inputs, secondary buttons). Raised from `#3D4654` (2.03:1) on 2026-07-19 for the ≥3:1 non-text floor — 3.25:1 on ink-0, 3.05:1 on ink-1 (2.81:1 on ink-2, where the input fill also separates the control). Mobile rollout: `ink.lineStrongA11y` behind flag `visual.chalkline_cleanup`; the old value remains as `ink.lineStrong` until flag cleanup |
+| `--line-strong-raised` | `#6B7587` | Interactive borders on `--ink-2` raised surfaces (sheets, banners, menus) where no fill separates the control: 3.60:1 on ink-2, 3.18:1 over the ink-3 pressed fill (4.16 / 3.90 on ink-0 / ink-1). Same slate family as `--line-strong`, so not a new hue. First use: the Trades invite banner's Invite button (#364 F2). Mirrors: `ink.lineStrongRaised` (`mobile/src/theme/chalkline.ts`), `--line-strong-raised` (`web/css/tokens.css`) |
 
 ### Chalk (text)
 
@@ -154,7 +155,7 @@ Exception: the `👀 They're interested` pill copy is a verbatim cross-client st
 ## Accessibility floors
 
 - Text contrast ≥ 4.5:1 on its surface (computed 2026-07-19: chalk on ink-0 ≈ 16.8:1; chalk-dim ≈ 7.4:1 on ink-0 / 6.9:1 on ink-1 / 5.6:1 on ink-3). Chalk-faint is 3.4:1 on ink-1 — placeholders/disabled ONLY, never content-carrying text (timestamps, hints, labels use chalk-dim).
-- Non-text contrast ≥ 3:1 for interactive boundaries: `--line-strong` `#59647A` is 3.25:1 on ink-0 / 3.05:1 on ink-1 (`--line` is decorative-only at 1.38:1).
+- Non-text contrast ≥ 3:1 for interactive boundaries: `--line-strong` `#59647A` is 3.25:1 on ink-0 / 3.05:1 on ink-1; on `--ink-2` surfaces without a separating fill, use `--line-strong-raised` `#6B7587` (3.60:1) (`--line` is decorative-only at 1.38:1).
 - Focus: 2px ice ring, 2px offset, on every interactive element.
 - Hit targets ≥ 44px on touch clients.
 - Position/tier color is never the only encoding — always paired with the text label (QB/RB/WR/TE, tier name).
