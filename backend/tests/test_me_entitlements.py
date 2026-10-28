@@ -1,8 +1,9 @@
 """GET /api/me/entitlements `founder` (#393 scope §2 item 2, S1).
 
 `founder` is true when the user holds pro through a subscription that
-started before the Founding GMs club's closes_at (server._PAYWALL_CLUB_
-CLOSES_AT, 2027-01-01): the subscription's INITIAL_PURCHASE in the
+started before the Founding GMs club's closes_at, which is the price rise
+(server._PAYWALL_PRICE_RISE_DATE, 2027-01-01, midnight UTC; the one date
+head-eng ruled on 2026-10-27): the subscription's INITIAL_PURCHASE in the
 subscription_events ledger (a first purchase or an intro-trial start), timed
 by the payload's purchased_at_ms, else the row's occurred_at.
 
@@ -15,7 +16,8 @@ Covers:
   (3) the verified-only rule (platforms-eng's #395): an unverified session
       holding a founder's user_id gets founder false with every other field
       blank, and the same key set as the verified view
-  (4) the route reads the one server constant
+  (4) the route reads the one server constant, and moving it moves
+      `founder` together with /api/paywall/config's club and prices
 
 `enforcing` (5b) is platforms-eng's and is covered in
 test_entitlements_billing_safety.py. In-memory SQLite, the ledger written
@@ -23,7 +25,7 @@ through the real webhook projector (entitlements.ingest_billing_event).
 """
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -216,5 +218,35 @@ def test_unverified_session_never_reads_the_ledger(client):
 def test_route_reads_the_server_constant(client, monkeypatch):
     _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)
     assert _get(client)["founder"] is True
-    monkeypatch.setattr(server, "_PAYWALL_CLUB_CLOSES_AT", "2026-12-01T00:00:00Z")
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_DATE", date(2026, 12, 1))
+    assert _get(client)["founder"] is False
+
+
+def test_one_date_moves_founder_with_the_club_and_the_prices(client, monkeypatch):
+    """The pin on the single source (head-eng 2026-10-27): move
+    _PAYWALL_PRICE_RISE_DATE and `founder`, `club.closes_at`, `club.open`
+    and the prices all move together. A second literal date anywhere would
+    leave one of them behind."""
+    _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)   # Dec 31 23:59:59
+    monkeypatch.setattr(server, "is_enabled", lambda k: k == "monetize.paywall")
+    monkeypatch.setattr(server, "_paywall_now",
+                        lambda: datetime(2026, 12, 15, tzinfo=timezone.utc))
+
+    def config():
+        r = client.get("/api/paywall/config", headers={"X-Session-Token": TOKEN})
+        body = r.get_json()
+        return body["club"], {p["product_id"]: p["display_price"]
+                              for p in body["products"]}
+
+    club, prices = config()
+    assert club == {"name": "Founding GMs", "closes_at": "2027-01-01T00:00:00Z",
+                    "open": True}
+    assert prices == {"ftf_pro_monthly": "$4.99", "ftf_pro_annual": "$24.99"}
+    assert _get(client)["founder"] is True
+
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_DATE", date(2026, 12, 1))
+    club, prices = config()
+    assert club == {"name": "Founding GMs", "closes_at": "2026-12-01T00:00:00Z",
+                    "open": False}
+    assert prices == {"ftf_pro_monthly": "$6.99", "ftf_pro_annual": "$34.99"}
     assert _get(client)["founder"] is False

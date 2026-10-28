@@ -17,16 +17,24 @@ Covers:
       frozen on both sides; founder vs standard `display_price`;
       `trial_period` "1 month" and no `trial_days`; the truthful grid;
       `dismissible` always true
+  (h) fallback prices (#393, operator 2026-10-25; #494): $4.99 / $24.99
+      before _PAYWALL_PRICE_RISE_DATE (2027-01-01 UTC), $6.99 / $34.99 from
+      it on; judged in UTC; _paywall_products is pure; no `trial_days` key on
+      either side (an older client renders "N days free" only when
+      trial_days > 0); per_month_equiv rounded up
+  (i) one date (head-eng 2026-10-27): `club.closes_at` is the rise date's
+      midnight UTC, `club.open` and the prices flip at the same instant
+      from one clock read, and moving the date moves both
 
 Flask client + injected session, flags forced via a patched
 server.is_enabled — the two harness patterns from backend/tests/CLAUDE.md.
-The clock is frozen by patching server.datetime (as in
-test_trade_disposition_replay.py). No DB rows are needed: the route is
-static config and touches no table.
+The clock is frozen by patching server._paywall_now, the one clock the
+route reads. No DB rows are needed: the route is static config and
+touches no table.
 """
 
 import pathlib
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_CEILING, Decimal
 
 import pytest
@@ -43,10 +51,15 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 MONTHLY = "ftf_pro_monthly"
 ANNUAL = "ftf_pro_annual"
 
+UTC = timezone.utc
 CLOSES_AT = "2027-01-01T00:00:00Z"
-BEFORE = "2026-12-31T23:59:59+00:00"    # the club's last second
-AT = "2027-01-01T00:00:00+00:00"        # closes_at itself: closed
-AFTER = "2027-06-01T12:00:00+00:00"
+BEFORE = datetime(2026, 12, 31, 23, 59, 59, tzinfo=UTC)   # last second of old prices, club open
+AT = datetime(2027, 1, 1, 0, 0, 0, tzinfo=UTC)            # the rise itself: club closed
+AFTER = datetime(2027, 6, 1, 12, 0, 0, tzinfo=UTC)
+TODAY = datetime(2026, 10, 27, 12, 0, 0, tzinfo=UTC)
+TICK = timedelta(microseconds=1)
+FOUNDER_PRICES = {MONTHLY: "$4.99", ANNUAL: "$24.99"}
+STANDARD_PRICES = {MONTHLY: "$6.99", ANNUAL: "$34.99"}
 # The undelivered kinds (5c) and the keys that name no gated feature.
 DROPPED_FEATURES = ("engine_knobs", "extension_overlays", "ad_free",
                     "unlimited_leagues", "portfolio")
@@ -69,21 +82,17 @@ def _flags(monkeypatch, *on):
     monkeypatch.setattr(server, "is_enabled", lambda k: k in on)
 
 
+def _freeze(monkeypatch, now):
+    monkeypatch.setattr(server, "_paywall_now", lambda: now)
+
+
+def _products(client):
+    return {p["product_id"]: p for p in _get(client).get_json()["products"]}
+
+
 def _get(client, query=""):
     return client.get(f"/api/paywall/config{query}",
                       headers={"X-Session-Token": TOKEN})
-
-
-def _freeze(monkeypatch, iso):
-    """server.datetime.now() returns `iso` (aware, UTC) for this test."""
-    fixed = datetime.fromisoformat(iso)
-
-    class Clock(datetime):
-        @classmethod
-        def now(cls, tz=None):
-            return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
-
-    monkeypatch.setattr(server, "datetime", Clock)
 
 
 # ── (a) flag gate ──────────────────────────────────────────────────────────
@@ -127,15 +136,16 @@ def test_flag_on_returns_full_shape(client, monkeypatch):
 
 def test_products_shape(client, monkeypatch):
     _flags(monkeypatch, "monetize.paywall")
-    _freeze(monkeypatch, BEFORE)
-    products = {p["product_id"]: p for p in _get(client).get_json()["products"]}
+    _freeze(monkeypatch, TODAY)
+    products = _products(client)
     assert list(products) == [MONTHLY, ANNUAL]
 
     assert products[MONTHLY]["period"] == "monthly"
     assert products[MONTHLY]["display_price"] == "$4.99"
     assert products[MONTHLY]["trial_period"] == "1 month"
     assert products[MONTHLY]["hero"] is False
-    assert "per_month_equiv" not in products[MONTHLY]
+    assert set(products[MONTHLY]) == {
+        "product_id", "period", "display_price", "trial_period", "hero"}
 
     assert products[ANNUAL]["period"] == "annual"
     assert products[ANNUAL]["display_price"] == "$24.99"
@@ -143,6 +153,9 @@ def test_products_shape(client, monkeypatch):
     assert products[ANNUAL]["trial_period"] == "1 month"
     assert products[ANNUAL]["hero"] is True
     assert products[ANNUAL]["badge"] == "best_value"
+    assert set(products[ANNUAL]) == {
+        "product_id", "period", "display_price", "per_month_equiv",
+        "trial_period", "hero", "badge"}
     # exactly one hero — two would give the client no default selection
     assert sum(1 for p in products.values() if p["hero"]) == 1
 
@@ -231,14 +244,8 @@ def test_flag_off_leaks_no_tips(client, monkeypatch):
 
 # ── (g) the Founding GMs club ──────────────────────────────────────────────
 
-def test_closes_at_is_the_one_constant():
-    """2027-01-01, the App Store Connect scheduled price change. One server
-    constant: a change here is a reviewed deploy, never a knob."""
-    assert server._PAYWALL_CLUB_CLOSES_AT == CLOSES_AT
-
-
 @pytest.mark.parametrize("now, is_open", [
-    ("2026-10-27T09:00:00+00:00", True),
+    (TODAY, True),
     (BEFORE, True),
     (AT, False),
     (AFTER, False),
@@ -326,3 +333,141 @@ def test_flag_off_leaks_no_club(client, monkeypatch):
     _freeze(monkeypatch, BEFORE)
     payload = _get(client).get_data(as_text=True)
     assert "club" not in payload and "Founding" not in payload
+
+
+# ── (h) fallback prices: dated switch, no trial_days ─────────────────────
+
+@pytest.mark.parametrize("now, monthly, annual, per_month", [
+    (TODAY, "$4.99", "$24.99", "$2.09"),
+    (BEFORE, "$4.99", "$24.99", "$2.09"),     # last second before the rise
+    (AT, "$6.99", "$34.99", "$2.92"),         # the rise date itself: new prices
+    (AFTER, "$6.99", "$34.99", "$2.92"),
+])
+def test_route_prices_switch_on_rise_date(client, monkeypatch, now, monthly,
+                                          annual, per_month):
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    products = _products(client)
+    assert products[MONTHLY]["display_price"] == monthly
+    assert products[ANNUAL]["display_price"] == annual
+    assert products[ANNUAL]["per_month_equiv"] == per_month
+    assert "per_month_equiv" not in products[MONTHLY]
+
+
+@pytest.mark.parametrize("now", [TODAY, BEFORE, AT, AFTER])
+def test_no_trial_days_anywhere(client, monkeypatch, now):
+    """An older client renders `${trial_days} days free, then …` whenever
+    trial_days > 0. The trial is Apple's 1-month intro offer, never a day
+    count, so the key must be absent from the whole response on both sides
+    of the rise."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    r = _get(client)
+    assert "trial_days" not in r.get_data(as_text=True)
+    for p in r.get_json()["products"]:
+        assert "trial_days" not in p
+
+
+def test_rise_date_is_2027_01_01_utc():
+    assert server._PAYWALL_PRICE_RISE_DATE.isoformat() == "2027-01-01"
+
+
+@pytest.mark.parametrize("now, risen", [
+    # 20:00 on Dec 31 in New York is 01:00 UTC on Jan 1: new prices.
+    (datetime(2026, 12, 31, 20, 0, tzinfo=timezone(timedelta(hours=-5))), True),
+    # 00:30 on Jan 1 in Paris is 23:30 UTC on Dec 31: old prices.
+    (datetime(2027, 1, 1, 0, 30, tzinfo=timezone(timedelta(hours=1))), False),
+])
+def test_switch_is_judged_in_utc(now, risen):
+    annual = {p["product_id"]: p for p in server._paywall_products(now)}[ANNUAL]
+    assert annual["display_price"] == ("$34.99" if risen else "$24.99")
+
+
+def test_paywall_products_is_pure():
+    """Same `now`, same answer, and the module-level tables are untouched
+    (the route must not mutate shared config per request)."""
+    before_tables = repr((server._PAYWALL_PRODUCTS, server._PAYWALL_PRICES))
+    assert server._paywall_products(BEFORE) == server._paywall_products(BEFORE)
+    assert server._paywall_products(AFTER) == server._paywall_products(AFTER)
+    assert server._paywall_products(BEFORE) != server._paywall_products(AFTER)
+    assert repr((server._PAYWALL_PRODUCTS, server._PAYWALL_PRICES)) == before_tables
+    assert all("display_price" not in p for p in server._PAYWALL_PRODUCTS)
+
+
+@pytest.mark.parametrize("now", [BEFORE, AFTER])
+def test_per_month_equiv_is_annual_over_12_rounded_up(now):
+    """Rounded UP to the cent: 24.99 / 12 = 2.0825 → $2.09 (legal's #393
+    R28.8 #2 copy); 34.99 / 12 = 2.9158 → $2.92. Rounding down would
+    understate what a year costs."""
+    annual = {p["product_id"]: p for p in server._paywall_products(now)}[ANNUAL]
+    ceil = (Decimal(annual["display_price"].lstrip("$")) / 12).quantize(
+        Decimal("0.01"), rounding=ROUND_CEILING)
+    assert annual["per_month_equiv"] == f"${ceil}"
+
+
+def test_route_reads_the_real_clock_by_default():
+    """Unfrozen, the clock is the real UTC now (aware), so the switch fires
+    on the day without a deploy."""
+    now = server._paywall_now()
+    assert now.tzinfo is not None
+    assert abs((now - datetime.now(timezone.utc)).total_seconds()) < 5
+
+
+# ── (i) one date: the club closes at the price rise ────────────────────────
+
+def test_closes_at_is_the_rise_date(client, monkeypatch):
+    """`club.closes_at` is _PAYWALL_PRICE_RISE_DATE's midnight UTC, served
+    as the same ISO string as before (the API shape is unchanged)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, TODAY)
+    closes_at = _get(client).get_json()["club"]["closes_at"]
+    assert closes_at == CLOSES_AT == server._paywall_club_closes_at()
+    assert datetime.fromisoformat(closes_at) == server._paywall_rise_at() == AT
+    assert datetime.fromisoformat(closes_at).date() == server._PAYWALL_PRICE_RISE_DATE
+
+
+@pytest.mark.parametrize("now", [TODAY, BEFORE, AT - TICK, AT, AT + TICK, AFTER])
+def test_club_open_flips_with_the_prices(client, monkeypatch, now):
+    """`club.open` and the price window flip at exactly the same instant:
+    open ⇔ founder prices, closed ⇔ standard prices, down to the
+    microsecond either side of the rise."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, now)
+    body = _get(client).get_json()
+    prices = {p["product_id"]: p["display_price"] for p in body["products"]}
+    assert body["club"]["open"] is (now < AT)
+    assert prices == (FOUNDER_PRICES if body["club"]["open"] else STANDARD_PRICES)
+
+
+def test_one_clock_read_per_request(client, monkeypatch):
+    """The route reads _paywall_now() once. A second read here would land
+    past the rise, splitting `club.open` from the prices."""
+    _flags(monkeypatch, "monetize.paywall")
+    reads = iter([AT - TICK, AT])
+    calls = []
+
+    def clock():
+        calls.append(1)
+        return next(reads)
+
+    monkeypatch.setattr(server, "_paywall_now", clock)
+    body = _get(client).get_json()
+    assert len(calls) == 1
+    assert body["club"]["open"] is True
+    assert {p["product_id"]: p["display_price"]
+            for p in body["products"]} == FOUNDER_PRICES
+
+
+def test_moving_the_rise_date_moves_the_club_and_the_prices(client, monkeypatch):
+    """Nothing holds a second copy of the date: move the one constant and
+    `club.closes_at`, `club.open` and the prices all move with it (founder
+    on /api/me/entitlements is pinned the same way in
+    test_me_entitlements.py)."""
+    _flags(monkeypatch, "monetize.paywall")
+    _freeze(monkeypatch, datetime(2026, 12, 15, tzinfo=UTC))
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_DATE", date(2026, 12, 1))
+    body = _get(client).get_json()
+    assert body["club"]["closes_at"] == "2026-12-01T00:00:00Z"
+    assert body["club"]["open"] is False
+    assert {p["product_id"]: p["display_price"]
+            for p in body["products"]} == STANDARD_PRICES
