@@ -32,6 +32,7 @@ import { appleSignIn, deleteAccount, getAccount } from '../api/auth';
 // (its surface is this inline card, not a modal); the picker mounts the
 // sheet. The 409 two-boards Alert lives in that component.
 import { LinkSleeperForm } from '../components/LinkSleeperSheet';
+import { identityLabel } from './settings/identityLabels';
 import { ApiError } from '../api/client';
 import { setRankingMethod } from '../api/rankings';
 import { getSleeperLinkStatus, unlinkSleeper } from '../api/sendInSleeper';
@@ -1226,16 +1227,20 @@ export default function SettingsScreen({ navigation }: any) {
       ) : null}
       {accountsEnabled && !isDemo ? (
         <>
-          {identities.map((ident) => (
-            <View key={ident.provider} style={styles.kvRow}>
-              <Text style={styles.rowKey}>
-                {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
-              </Text>
-              <Text style={styles.kvValue}>
-                {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
-              </Text>
-            </View>
-          ))}
+          {identities.map((ident) => {
+            // Shared label map (./settings/identityLabels). An unknown provider gets
+            // no row: a wrong label is worse than none.
+            const label = identityLabel(ident.provider);
+            if (!label) return null;
+            return (
+              <View key={ident.provider} style={styles.kvRow}>
+                <Text style={styles.rowKey}>{label}</Text>
+                <Text style={styles.kvValue}>
+                  {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                </Text>
+              </View>
+            );
+          })}
           {/* Link Apple — shown for any session with no Apple identity
               (Sleeper sessions included). Official HIG component, white
               variant on dark, same construction as SignInScreen. Gated on
