@@ -276,6 +276,7 @@ def restart():
     server._deck_live_stamped.clear()
     server._deck_held.clear()                              # U4: a new process held none of them
     server._deck_evicted_at.clear()
+    server._deck_f5_dropped.clear()
 
 
 def test_s8_the_first_delivery_writes_the_first_30_the_ghosts_and_one_pack_of_every_card(deferred):

@@ -23,7 +23,8 @@ not Trades decks. pack_integrity and withdrawal_conflict decks are skipped and
 counted by reason: the loader stops before removing their never-delivered
 withdrawals, so their displayed positions can't be trusted (as blind_grade's
 served set, B5). Per deck: the first REPEAT_WINDOW non-ghost cards by
-displayed position (LoggedCard.position), plus every viewed card, "viewed"
+displayed position (LoggedCard.position, serve-time display moves included:
+data.py, D3), plus every viewed card, "viewed"
 being a `viewed` outcome joined by impression_id (LoggedCard.viewed), never a
 row's existence (U4-R3). assets_json, valuation_json, features_json and
 source_like_impression_id are read for those impression_ids, chunked.
