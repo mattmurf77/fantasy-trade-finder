@@ -16,7 +16,7 @@ interface Props {
   /** Optional leading Chalkline icon (16px, label-colored). */
   icon?: IconName;
   /** A centred spinner over the label, which stays in layout invisible so
-   *  the button keeps its size; implies disabled. */
+   *  the button keeps its size; inactive but not dimmed. */
   loading?: boolean;
   style?: ViewStyle;
   testID?: string;   // UI-test harness id (registry: mobile/src/components/CLAUDE.md)
@@ -71,7 +71,9 @@ export default function Button({
           backgroundColor: pressed ? v.bgPressed : v.bg,
           borderColor,
         },
-        inactive && styles.disabled,
+        // Only `disabled` dims; `loading` stays inactive but undimmed
+        // (design-lead #364).
+        disabled && styles.disabled,
         style,
       ]}
     >

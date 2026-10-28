@@ -626,8 +626,10 @@ function runStatic() {
     const ok = found.length === count && found.every((at) => (kind === 'button'
       ? at.loading === '{inviteBusy}' && at.accessibilityLabel === '{inviteBusy ? INVITE_BUSY_LABEL : undefined}'
       : at.accessibilityLabel === '{inviteBusy ? INVITE_BUSY_LABEL : "Invite leaguemates"}'
-        && at.accessibilityState === '{{ busy: inviteBusy }}'));
-    check(`N ux-1 ${rel} ${testID}: busy from useInviteBusy()${kind === 'button' ? ' via Button loading' : ' (a11y; inline text link)'}`,
+        && at.accessibilityState === '{{ busy: inviteBusy }}'
+        // round 3: the link text turns chalk.dim while busy (colour only)
+        && at.style === '{inviteBusy ? [styles.inviteLink, { color: chalk.dim }] : styles.inviteLink}'));
+    check(`N ux-1 ${rel} ${testID}: busy from useInviteBusy()${kind === 'button' ? ' via Button loading' : ' (a11y + chalk.dim text; inline link)'}`,
           hook && ok, JSON.stringify({ hook, found }));
   }
 
@@ -677,6 +679,16 @@ function runButtonLoading() {
             && el.props.accessibilityLabel === 'Preparing invite link',
           JSON.stringify({ disabled: el.props.disabled, state: el.props.accessibilityState }));
   }
+  // design-lead #364 round 3: only `disabled` dims; `loading` alone does not.
+  const opacityOf = (props) => flat(Button(props).props.style({ pressed: false })).opacity;
+  check('M loading without disabled is not dimmed',
+        opacityOf({ label: 'Invite', loading: true }) === undefined
+          && opacityOf({ label: 'Invite', loading: true, disabled: false }) === undefined,
+        `opacity ${opacityOf({ label: 'Invite', loading: true })}`);
+  check('M disabled dims (alone, and with loading)',
+        opacityOf({ label: 'Invite', disabled: true }) === 0.45
+          && opacityOf({ label: 'Invite', disabled: true, loading: true }) === 0.45,
+        `opacity ${opacityOf({ label: 'Invite', disabled: true })} / ${opacityOf({ label: 'Invite', disabled: true, loading: true })}`);
   const idle = Button({ label: 'Invite leaguemates', variant: 'secondary' });
   const idleKids = idle.children[0]({ pressed: false });
   check('M not loading: the plain label, no spinner, no hidden style, busy false',

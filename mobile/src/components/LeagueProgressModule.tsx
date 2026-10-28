@@ -138,7 +138,7 @@ export default function LeagueProgressModule({
       <Text
         testID="league.progress-invite"
         scale="dense"
-        style={styles.inviteLink}
+        style={inviteBusy ? [styles.inviteLink, { color: chalk.dim }] : styles.inviteLink}
         onPress={onInvite}
         accessibilityRole="link"
         accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : "Invite leaguemates"}
@@ -214,7 +214,7 @@ export default function LeagueProgressModule({
             <Text
               testID="league.progress-invite"
               scale="dense"
-              style={styles.inviteLink}
+              style={inviteBusy ? [styles.inviteLink, { color: chalk.dim }] : styles.inviteLink}
               onPress={onInvite}
               accessibilityRole="link"
               accessibilityLabel={inviteBusy ? INVITE_BUSY_LABEL : "Invite leaguemates"}
