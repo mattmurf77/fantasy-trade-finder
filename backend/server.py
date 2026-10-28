@@ -230,6 +230,12 @@ from .database import (
     load_leaderboard, get_self_leaderboard_row,
     # In-app feedback (TestFlight helper) — POST /api/feedback writes here
     save_feedback,
+    # #360 QA P2-1: an unverified session's notes follow it when it verifies
+    attach_session_feedback,
+    # release-lead delta QA E: a re-pointed token's notes never attach
+    detach_session_feedback,
+    # #360 QA P2-2: a throttled retry of a held note still answers `duplicate`
+    find_feedback_by_client_id,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
     list_feedback,
     # Bad-trade flags (FB #85) — POST /api/trades/flag + admin readback
@@ -4087,7 +4093,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 4
+DECK_PIPELINE_VERSION = 5
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4159,6 +4165,7 @@ DECK_PIPELINE_IGNORED = {
     "_job_superseded": "job lifecycle: the supersede fence",
     "_revoke_trade_job_locked": "job lifecycle: revocation",
     "_note_job_picks_read": "the job's roster stamp: records which picks it read (#484 QA P2-1); never shapes the deck",
+    "_quality_filter_inputs": "audit provenance: records the quality filter's inputs per run (models-lead addendum D2); never shapes the deck",
     # logging and telemetry
     "_log_deck_signal_impressions": "evidence logging (#370 owns its shape)",
     "_deck_evidence_live": "evidence mode switch (#370: deferred to live for the value core and prepared adoption); never shapes the deck",
@@ -4212,6 +4219,7 @@ DECK_PIPELINE_PINS = {
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
+    5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -4809,6 +4817,7 @@ class _DeckEvidence:
         self.league_id = None
         self.built_at = None          # the build time (the logger's served_at)
         self.run_meta: dict = {}      # values_snapshot_id, config_ref (the job's stamps)
+        self.filter_inputs: dict | None = None   # the quality filter's inputs (addendum D2)
         self.deliveries: list = []    # [[last_card_index, delivered_at]], card_index space (U1)
         self.written: set = set()     # ids whose deck_impressions row is written
         self.pack = None              # its _PackState once the pack row is written
@@ -5570,6 +5579,9 @@ _DECK_LEDGER_GUARD = 131072
 # under the leaf lock and, for evictions, under _trade_jobs_lock.
 _deck_held: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> built here (epoch s)
 _deck_evicted_at: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> evicted here
+# The subset of _deck_evicted_at that F5 dropped (models-lead addendum D1), for
+# the f5_past_stored anomaly only; the cause never reads it.
+_deck_f5_dropped: "collections.OrderedDict[str, float]" = collections.OrderedDict()   # -> dropped here
 _ledger_now = time.time                    # the ledgers' clock (tests replace it)
 _DECK_LEDGER_WARN_EVERY_S = 60             # the guard's warning, at most once a minute (#451 QA P3-2)
 # Young entries the guard trimmed since its last warning, per ledger (#451 QA:
@@ -5590,14 +5602,16 @@ def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None
     once a minute, with the counts since the last warning, per ledger)."""
     global _ledger_guard_young, _ledger_guard_warned_at
     now = _ledger_now()
-    which = "evicted" if ledger is _deck_evicted_at else "held"
+    which = ("evicted" if ledger is _deck_evicted_at
+             else "f5" if ledger is _deck_f5_dropped else "held")
     warn = None
     with _deck_ledger_lock:
         ledger.pop(key, None)
         while ledger and now - next(iter(ledger.values())) >= _DECK_LEDGER_RETAIN_S:
             ledger.popitem(last=False)
         while len(ledger) >= _DECK_LEDGER_GUARD:
-            _ledger_guard_young[which] += now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S
+            _ledger_guard_young[which] = (_ledger_guard_young.get(which, 0)
+                                          + (now - ledger.popitem(last=False)[1] < _DECK_LEDGER_RETAIN_S))
         ledger[key] = now
         if (any(_ledger_guard_young.values())
                 and now - _ledger_guard_warned_at >= _DECK_LEDGER_WARN_EVERY_S):
@@ -5606,9 +5620,10 @@ def _ledger_add(ledger: "collections.OrderedDict[str, float]", key: str) -> None
     if warn:
         total = sum(warn.values())
         log.warning("[evidence] U4 ledger guard (%d entries) trimmed %d entr%s younger than "
-                    "24 h since its last warning (held=%d, evicted=%d): a late view of such "
+                    "24 h since its last warning (held=%d, evicted=%d%s): a late view of such "
                     "a deck reads restart_split", _DECK_LEDGER_GUARD, total,
-                    "y" if total == 1 else "ies", warn["held"], warn["evicted"])
+                    "y" if total == 1 else "ies", warn.get("held", 0), warn.get("evicted", 0),
+                    f", f5={warn['f5']}" if warn.get("f5") else "")
 
 
 def _note_deck_held(job_id: str) -> None:
@@ -5628,6 +5643,19 @@ def _note_deck_evicted(job_id: str, job: Mapping) -> None:
     # restart_split (C (c2)'s assumption), never other.
     with _deck_ledger_lock:
         _deck_held.pop(job_id, None)
+
+
+def _f5_past_stored(deck_job_id: str, index: int, cause: str, run: Mapping) -> int | None:
+    """models-lead addendum D1's anomaly: an F5-dropped deck's evicted_split miss
+    on a card at or past the pack-recorded stored count. Should be impossible
+    (only the stored pages of a deck F5 found undelivered can be delivered), so
+    it would mean a delivery-recording gap. Returns that count when it is one."""
+    recorded = run.get("stored_count")
+    if (cause == "evicted_split" and deck_job_id in _deck_f5_dropped
+            and isinstance(recorded, int) and not isinstance(recorded, bool)
+            and index >= recorded):
+        return recorded
+    return None
 
 
 def _upgrade_miss_cards(run: Mapping) -> dict:
@@ -5806,6 +5834,11 @@ def _deck_upgrade_from_pack(state, deck_job_id: str, impression_id: str, index: 
             log.error(line, *args)
         else:
             log.warning(line, *args)
+        past = _f5_past_stored(deck_job_id, index, kept, state.run)
+        if past is not None:              # addendum D1: reported apart; it goes to models-lead
+            log.error("[evidence] f5_past_stored job=%s index=%d pack_stored=%d: an F5-dropped "
+                      "deck's evicted_split miss past its recorded stored pages (a "
+                      "delivery-recording gap?)", deck_job_id, index, past)
         if stored_from == "fallback" and state.run.get("page_store"):
             # #438 QA P3-1: never silent. Not other: the process dying between
             # the deck's job_done and its store is the legitimate case.
@@ -6608,6 +6641,9 @@ def _deck_evidence_job_done(job_id: str) -> None:
             # can tell a replaced row from none (_row_gone_why). Omitted for a
             # deck with no page scope (it never has a page row).
             ev.run_meta.update(scoring_format=job["key"][2], page_scope=job["page_scope"])
+        if ev.filter_inputs is not None:
+            # models-lead addendum D2: the quality filter's inputs, per run.
+            ev.run_meta["filter_inputs"] = ev.filter_inputs
     with _deck_evidence_write_lock:
         _deck_evidence_flush(ev)
 
@@ -6618,9 +6654,11 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
     builds a new deck. Its in-process evidence is dropped and its job revoked,
     so no response serves it from this process (P2's live-job pages past the
     stored ones included); its stored pages, if any, serve and write through
-    the page store's evidence_blob, as after a restart: it leaves _deck_held
-    too, so an upgrade miss on it reads as a restart's (release-lead's #451 QA
-    P2). Delivered decks keep theirs (written, and freed, at their first
+    the page store's evidence_blob, as after a restart. The drop is noted as
+    this process's eviction (_deck_evicted_at, and _deck_f5_dropped for the
+    f5_past_stored anomaly), so an upgrade miss on it past its effective
+    stored count reads evicted_split (models-lead addendum D1).
+    Delivered decks keep theirs (written, and freed, at their first
     delivery). Returns the count."""
     now = time.monotonic() if now is None else now
     dropped = 0
@@ -6638,12 +6676,16 @@ def _drop_stale_deck_evidence(now: float | None = None) -> int:
                 ev.trade_impressions = ev.bakeoff_run = ev.bakeoff_slim = ev.generated = None
             job.pop("evidence")
             _revoke_trade_job_locked(job, "evidence_expired")
-            # The deck's snapshots left this process: a miss on it is
-            # restart_split, as after a restart, never "other" (a held deck).
-            # The later eviction can't record it (no evidence left). Pending
-            # models-lead's ruling via head-eng: evicted_split would mean noting
-            # it in _deck_evicted_at here instead. Order: jobs, then the ledger
-            # (leaf), as in _note_deck_evicted.
+            # This process removed the deck's evidence: an eviction (C3), so a
+            # miss on it past its effective stored count is evicted_split, never
+            # "other". Noted here, kept >= 24 h from the drop (C3 (c2)), while
+            # the evidence still exists (the later eviction can't: none left).
+            # Like any eviction it also leaves _deck_held (#451 QA P3-1), so once
+            # the eviction record ages out a late view reads restart_split,
+            # never other (#489 QA P1-1). Order: jobs, then the ledger (leaf),
+            # as in _note_deck_evicted (models-lead addendum D1).
+            _ledger_add(_deck_evicted_at, job_id)
+            _ledger_add(_deck_f5_dropped, job_id)
             with _deck_ledger_lock:
                 _deck_held.pop(job_id, None)
             dropped += 1
@@ -8523,6 +8565,43 @@ def _deck_first_session_enabled() -> bool:
 def _deck_quality_filters_enabled() -> bool:
     """deck.quality_filters (operator, 2026-10-14) — backend/deck_quality.py on the served deck."""
     return getattr(FLAGS, "deck_quality_filters", False)
+
+
+def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters,
+                           lineup_slots) -> dict:
+    """models-lead addendum D2: what deck_quality.filter_deck read for this run,
+    frozen once per run in the pack's run header (`run["filter_inputs"]`), so
+    #453's audit re-runs B-DK-4/5/6 on the filter's own inputs. Audit
+    provenance, never a scorer input (not in FROZEN_INPUT_KEYS); eval reads its
+    named fields only. Kept on the deck's evidence (`ev.filter_inputs`), never
+    on the job. `cards`: the cards the filter returned; `market`,
+    `position`, `rosters` and `lineup_slots`: the very ones it was given.
+    - market / position: every asset on those cards (both sides) and in the
+      qb_te holdings; an unseeded asset is null, a None position null, so an
+      absent asset is one the filter never saw (models-eng).
+    - qb_te: per team the filter keyed (`viewer_team`, as overwritten with the
+      viewer's roster, and each card's counterparty), its QB and TE holdings.
+    - protected: the trade_hashes `is_protected` exempted.
+    A recording failure raises; the caller then records filter_ran True with
+    no inputs (the audit reads that deck as not auditable), and serves the
+    filtered deck."""
+    from . import deck_quality as _dq
+    teams = {viewer_team} | {str(c.target_user_id) for c in cards}
+    qb_te = {team: [a for a in rosters[team] if position(a) in ("QB", "TE")]
+             for team in sorted(teams) if team in rosters}
+    assets = {a for c in cards for a in (*c.give_player_ids, *c.receive_player_ids)}
+    assets.update(a for held in qb_te.values() for a in held)
+    ordered = sorted(assets, key=str)
+    return {
+        "v": 1, "filter_ran": True, "viewer_team": viewer_team,
+        "lineup_slots": None if lineup_slots is None else list(lineup_slots),
+        "market": {str(a): market(a) for a in ordered},
+        "position": {str(a): position(a) for a in ordered},
+        "qb_te": {team: [str(a) for a in held] for team, held in qb_te.items()},
+        "protected": sorted({_deck_trade_hash(c.give_player_ids, c.receive_player_ids,
+                                              c.target_user_id)
+                             for c in cards if _dq.is_protected(c)}),
+    }
 
 
 def _records_in_order(cards, records, survivors) -> list:
@@ -13030,6 +13109,7 @@ def _run_trade_job(
                 job = _trade_jobs.get(job_id)
                 if _job_live(job):
                     job["owner_presentment"] = owner_presentment
+        filter_inputs = {"v": 1, "filter_ran": False}   # models-lead addendum D2
         if _deck_quality_filters_enabled() and final_cards:
             # Operator, 2026-10-14 (Calibration grades of this engine): drop breakup / junk
             # filler / redundant TE-QB cards and cap repeats, before the served/ghost split so a
@@ -13041,11 +13121,21 @@ def _run_trade_job(
                 quality_rosters = {str(m.user_id): list(m.roster or ()) for m in (g_league.members or ())}
                 quality_rosters[viewer_team] = list(g_user_roster)
                 _e2v = _trade_service_mod.elo_to_value
+                quality_market = lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None
+                quality_position = lambda pid: getattr(players_dict.get(pid), "position", None)
+                quality_slots = _league_lineup_slots(league_id)
                 final_cards, quality_counts = _deck_quality.filter_deck(
-                    final_cards, viewer_id=viewer_team,
-                    market=lambda pid: _e2v(seed_map[pid]) if pid in seed_map else None,
-                    position=lambda pid: getattr(players_dict.get(pid), "position", None),
-                    rosters=quality_rosters, lineup_slots=_league_lineup_slots(league_id))
+                    final_cards, viewer_id=viewer_team, market=quality_market,
+                    position=quality_position, rosters=quality_rosters, lineup_slots=quality_slots)
+                try:
+                    filter_inputs = _quality_filter_inputs(
+                        final_cards, viewer_team=viewer_team, market=quality_market,
+                        position=quality_position, rosters=quality_rosters,
+                        lineup_slots=quality_slots)
+                except Exception as inputs_err:   # provenance never unfilters the deck
+                    log.warning("trade-job %s: quality filter inputs not recorded: %s",
+                                job_id, inputs_err)
+                    filter_inputs = {"v": 1, "filter_ran": True}
                 if presentation is not None:
                     presentation["records"] = _records_in_order(
                         before_quality, presentation["records"], final_cards)
@@ -13058,6 +13148,15 @@ def _run_trade_job(
                 log.warning("trade-job %s: deck quality filters failed (serving unfiltered): %s",
                             job_id, quality_err)
                 final_cards = before_quality
+                filter_inputs = {"v": 1, "filter_ran": False}
+        # models-lead addendum D2: on the deck's evidence, never on the job (its
+        # shape stays as it was); job done carries it into the pack's run header.
+        with _trade_jobs_lock:
+            _fi_job = _trade_jobs.get(job_id)
+            _fi_ev = _fi_job.get("evidence") if _job_live(_fi_job) else None
+        if _fi_ev is not None:
+            with _fi_ev.lock:
+                _fi_ev.filter_inputs = filter_inputs
         served_final = final_cards
         ghost_cards: list = []   # [(would_be_pos, card)]
         if ghost_on:
@@ -15515,8 +15614,175 @@ def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> d
 FEEDBACK_TEXT_MAX = 8000
 
 
+# #360 QA P2-2: the public POST's body cap and throttle. The cap is checked
+# against Content-Length BEFORE the body is read (the analytics_ingest idiom;
+# never Flask's app-global MAX_CONTENT_LENGTH). The throttle is in-process:
+# a per-key deque of accepted-note times over a rolling hour, so it resets
+# on deploy, like the analytics limiter. It is a brake on runaway or abusive
+# volume, not authentication: the device id and X-Forwarded-For are
+# client-supplied, so only a verified user_id is a key a caller can't pick.
+# An unverified session is keyed by its token's hash, so users behind one
+# carrier NAT don't share the IP's budget (the mobile POST and the web form
+# send no X-Device-Id); a token must resolve to a live session to count, so
+# an unknown one falls through to device / IP rather than minting budgets.
+FEEDBACK_MAX_BODY_BYTES = 64 * 1024
+FEEDBACK_RATE_LIMIT = 20             # accepted notes per rolling hour per key
+FEEDBACK_RATE_WINDOW_S = 3600
+FEEDBACK_RATE_MAX_KEYS = 10_000      # memory bound: attacker-chosen keys
+# Release-lead delta QA B (P2-1): one shared ceiling across every ANONYMOUS
+# note (neither a verified user nor a resolvable session, i.e. the device and
+# IP tiers). Those keys are client-chosen (X-Device-Id) or may be a rotating
+# Render-internal peer, so per-key budgets alone can't stop deliberate abuse.
+# A separate deque, never in _feedback_rate: flooding new keys there evicts
+# old keys, and must not be able to evict this one. Bounded by the limit.
+FEEDBACK_ANON_GLOBAL_LIMIT = 300     # accepted anonymous notes per rolling hour, all callers
+_feedback_rate_lock = threading.Lock()
+_feedback_rate: dict[str, collections.deque] = {}
+_feedback_anon_global: collections.deque = collections.deque()
+
+
+# _SIGNIN_TRUSTED_PROXY_HOPS, _xff_hops and _client_ip below are copied byte
+# for byte from #430 (feat/platform-sign-in, server.py). Whichever PR merges
+# second deletes its own three definitions; two would shadow each other
+# (test_server_module_shape).
+_SIGNIN_TRUSTED_PROXY_HOPS = 1
+
+
+def _xff_hops() -> list[str]:
+    return [h.strip() for h in
+            (request.headers.get("X-Forwarded-For") or "").split(",")
+            if h.strip()]
+
+
+def _client_ip() -> str:
+    """The caller's IP for the D7 limiter: the X-Forwarded-For hop
+    _SIGNIN_TRUSTED_PROXY_HOPS from the right (1 = rightmost), else
+    remote_addr when the header has fewer hops than that. Every hop left of
+    the ones our proxies append is client-supplied (a client can send any
+    XFF it likes), so the leftmost value is attacker-chosen and would let one
+    client rotate through unlimited buckets."""
+    hops = _xff_hops()
+    n = _SIGNIN_TRUSTED_PROXY_HOPS
+    if n >= 1 and len(hops) >= n:
+        return hops[-n]
+    return request.remote_addr or "unknown"
+
+
+def _feedback_rate_key(user_id, session_key=None) -> str:
+    """Verified user, else an unverified session (by `session_key`, the
+    sha256 hex _feedback_session_key gives, never the raw token), else
+    X-Device-Id, else the client IP."""
+    if user_id:
+        return f"user:{user_id}"
+    if session_key:
+        return f"session:{session_key}"
+    device = (request.headers.get("X-Device-Id") or "").strip()
+    if device:
+        return f"device:{device[:200]}"
+    return f"ip:{_client_ip()}"
+
+
+def _feedback_rate_reserve(key: str, now: float) -> bool:
+    """Reserve one accepted-note slot for `key`. False when the rolling hour
+    is full. A reservation the save doesn't use (a duplicate, a failure) is
+    given back with _feedback_rate_release, so duplicates never count."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times is None:
+            if len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                # Prune keys with nothing in the window, then the oldest.
+                for k in [k for k, d in _feedback_rate.items() if not d or d[-1] <= cutoff]:
+                    del _feedback_rate[k]
+                while len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                    _feedback_rate.pop(next(iter(_feedback_rate)))
+            times = _feedback_rate[key] = collections.deque()
+        while times and times[0] <= cutoff:
+            times.popleft()
+        if len(times) >= FEEDBACK_RATE_LIMIT:
+            return False
+        times.append(now)
+        return True
+
+
+def _feedback_rate_release(key: str, now: float) -> None:
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times:
+            try:
+                times.remove(now)
+            except ValueError:
+                pass
+
+
+def _feedback_anon_global_reserve(now: float) -> bool:
+    """Reserve one slot under FEEDBACK_ANON_GLOBAL_LIMIT (anonymous notes
+    only). False when the shared rolling hour is full; given back with
+    _feedback_anon_global_release like a per-key slot."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        while _feedback_anon_global and _feedback_anon_global[0] <= cutoff:
+            _feedback_anon_global.popleft()
+        if len(_feedback_anon_global) >= FEEDBACK_ANON_GLOBAL_LIMIT:
+            return False
+        _feedback_anon_global.append(now)
+        return True
+
+
+def _feedback_anon_global_release(now: float) -> None:
+    with _feedback_rate_lock:
+        try:
+            _feedback_anon_global.remove(now)
+        except ValueError:
+            pass
+
+
+def _feedback_session_key(token: str) -> str:
+    """sha256 hex of a session token: the proof that links an unverified
+    session's notes to that same session later (#360 QA P2-1). The token is
+    a bearer secret, so only its hash is ever stored."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _attach_presession_feedback(sess) -> None:
+    """Hand the notes this session sent while unverified to its user, now
+    that it has verified in place (#360 QA P2-1, head-eng's ruling).
+
+    Call right after an in-place `sess["verified"] = True`. The key is the
+    hash of THIS request's X-Session-Token, the session being verified, so
+    another session that verifies as the same user gets nothing (the proof
+    is the bearer token, never the username). It never raises: a failure
+    here must not fail the verification itself. No analytics event (the
+    BL-10 waiver allows no new events).
+
+    What attaches TODAY (release-lead delta QA D): only an in-place verify
+    that actually runs for an unverified session, i.e. POST
+    /api/sleeper/link with a proven token. The other two hooks are
+    defensive and reach no unverified session today:
+      - POST /api/mfl/auth-link sits behind @_gate_unverified_write, which
+        403s every unverified session before the verify;
+      - provider re-auth (/api/auth/<provider>) from an unverified session
+        drops that session and mints a new one with a new token.
+    So pre-verify notes from ESPN/MFL-entry and Apple/Google sessions stay
+    anonymous. The hooks stay, harmless, in case either path changes.
+    """
+    try:
+        token = request.headers.get("X-Session-Token", "")
+        user_id = sess.get("user_id") if sess is not None else None
+        if not token or not user_id:
+            return
+        moved = attach_session_feedback(
+            _feedback_session_key(token), user_id,
+            sess.get("display_name") or sess.get("username"))
+        if moved:
+            log.info("feedback: attached %d pre-verify note(s) to user_id=%s",
+                     moved, user_id)
+    except Exception as e:
+        log.warning("feedback: attach on verify failed (verification "
+                    "unaffected): %s", e)
+
+
 @app.route("/api/feedback", methods=["POST"])
-@_gate_unverified_write
 def submit_feedback_route():
     """POST /api/feedback — in-app feedback capture from mobile.
 
@@ -15527,14 +15793,61 @@ def submit_feedback_route():
       text                required, non-empty, ≤ FEEDBACK_TEXT_MAX chars
       client_created_at   required, ISO timestamp from the client
 
-    Auth is best-effort: if X-Session-Token resolves to a session we
-    attribute the note to that user, otherwise we accept anonymously.
-    External testers' submissions land regardless of sign-in state.
+    Auth is best-effort: if X-Session-Token resolves to a VERIFIED session
+    we attribute the note to that user; every other request (unverified,
+    no token, expired or unknown token) is accepted anonymously.
+
+    Deliberately NOT behind @_gate_unverified_write (#354 D-2(a)): the
+    route takes anonymous notes anyway, so the gate protected nothing and
+    only 403'd an unverified user's note on every retry. An unverified
+    session's user_id is a claim anyone can make by naming a username
+    (D-183), so it never attributes a note. Its note stores the sha256 of
+    the session token instead (session_key), and moves to the user if that
+    same session later verifies in place (#360 QA P2-1).
 
     Idempotent on client_id — retries return 200 with `duplicate: true`.
 
+    Public-write limits (#360 QA P2-2): a body over FEEDBACK_MAX_BODY_BYTES
+    is 413 `too_large`, before it is read when it has a Content-Length, and
+    capped as it is read when chunked (exactly the cap is accepted); past FEEDBACK_RATE_LIMIT accepted
+    notes in a rolling hour per key (verified user, else an unverified
+    session's token hash, else X-Device-Id, else client IP) a NEW note is
+    429 `rate_limited`. Anonymous notes (no verified user and no resolvable
+    session: the device and IP tiers) also share one ceiling,
+    FEEDBACK_ANON_GLOBAL_LIMIT per rolling hour across ALL callers; past it a
+    new anonymous note is 429 `rate_limited` too, while verified users and
+    unverified sessions are neither counted nor blocked by it. Duplicates
+    never count, and a duplicate is still answered 200 when its key is
+    throttled.
+
     Contract spec: docs/plans/feedback-backend-sync.md
     """
+    # Size cap, pre-read (#360 QA P2-2). Clients keep a rejected note and
+    # retry it later (useFeedback._syncOne treats any error as unsynced).
+    # A body is too large when it is MORE than FEEDBACK_MAX_BODY_BYTES:
+    # exactly the cap is accepted, cap + 1 is 413.
+    if (request.content_length or 0) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
+    # A chunked body has no Content-Length, so the pre-check can't see it
+    # (release-lead delta QA C, P2-2). Cap the read itself with a
+    # per-request max_content_length. Werkzeug's limited stream returns the
+    # first `limit` bytes and only raises RequestEntityTooLarge on a read
+    # PAST the limit, so with limit == cap an over-cap body would come back
+    # silently truncated (and a 400) and a body of exactly the cap couldn't
+    # be told from a bigger one. So the limit is cap + 1 and the length is
+    # checked: at most cap + 1 bytes are ever read. get_data surfaces the
+    # error get_json(silent=True) would swallow; get_json then parses the
+    # cached bytes.
+    from werkzeug.exceptions import RequestEntityTooLarge
+    request.max_content_length = FEEDBACK_MAX_BODY_BYTES + 1
+    try:
+        raw_body = request.get_data(cache=True)
+    except RequestEntityTooLarge:
+        raw_body = None
+    if raw_body is None or len(raw_body) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
     body = request.get_json(force=True, silent=True) or {}
 
     client_id_raw = body.get("client_id")
@@ -15561,22 +15874,55 @@ def submit_feedback_route():
         return jsonify({"error": "text_too_long",
                         "limit": FEEDBACK_TEXT_MAX}), 400
 
-    # ── Best-effort session lookup; anonymous on miss ──────────────────
+    # ── Best-effort session lookup; attribute verified sessions only ───
+    # An UNVERIFIED session's note stays anonymous but carries the hash of
+    # its token (#360 QA P2-1), so the note follows the session if it
+    # verifies in place (_attach_presession_feedback). Never the raw token.
     user_id = None
     username = None
+    session_key = None
     token = request.headers.get("X-Session-Token", "")
     if token:
         with _sessions_lock:
             sess = _sessions.get(token)
-        if sess:
+        if sess and sess.get("verified"):
             user_id  = sess.get("user_id")
             username = sess.get("display_name") or sess.get("username")
+        elif sess:
+            session_key = _feedback_session_key(token)
 
     # Device snapshot — same headers client.ts already attaches.
     platform_label = "ios" if (request.headers.get("X-Device") or "").lower() in ("iphone", "ipad", "macos") else None
     device_type    = request.headers.get("X-Device")
     os_version     = request.headers.get("X-OS-Version")
     app_version    = request.headers.get("X-App-Version")
+
+    # Throttle (#360 QA P2-2): reserve an accepted-note slot; a duplicate or
+    # a failed save gives it back below, so only new notes count. An
+    # unverified session is keyed by its token hash (session_key above).
+    rate_key = _feedback_rate_key(user_id, session_key)
+    rate_at = time.time()
+    # Anonymous = neither a verified user nor a resolvable session (the
+    # device and IP tiers): those also spend FEEDBACK_ANON_GLOBAL_LIMIT.
+    anonymous = not user_id and not session_key
+    limited_by = None
+    if not _feedback_rate_reserve(rate_key, rate_at):
+        limited_by = rate_key.split(":", 1)[0]
+    elif anonymous and not _feedback_anon_global_reserve(rate_at):
+        _feedback_rate_release(rate_key, rate_at)
+        limited_by = "anon_global"
+    if limited_by:
+        held = find_feedback_by_client_id(client_id)
+        if held:
+            return jsonify({"ok": True, "server_id": held["server_id"],
+                            "created_at": held["created_at"], "duplicate": True}), 200
+        log.warning("feedback: rate_limited key=%s", limited_by)
+        return jsonify({"error": "rate_limited"}), 429
+
+    def _release_reservations():
+        _feedback_rate_release(rate_key, rate_at)
+        if anonymous:
+            _feedback_anon_global_release(rate_at)
 
     try:
         result = save_feedback(
@@ -15590,11 +15936,15 @@ def submit_feedback_route():
             platform=platform_label,
             device_type=device_type,
             os_version=os_version,
-            client_created_at=client_created_at if isinstance(client_created_at, str) else None,
+            client_created_at=client_created_at[:40] if isinstance(client_created_at, str) else None,
+            session_key=session_key,
         )
     except Exception as e:
+        _release_reservations()
         log.exception("save_feedback failed: %s", e)
         return jsonify({"error": "internal"}), 500
+    if result.get("duplicate"):
+        _release_reservations()
 
     # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
     # anonymous submissions (no session) have no user to attribute to, and
@@ -24016,6 +24366,7 @@ def sleeper_link():
         # Claim matches + oracle passed → this session controls the account.
         sess["verified"] = True
         sess["verified_via"] = "sleeper"
+        _attach_presession_feedback(sess)
         try:
             from . import accounts as _accounts
             first_time = _accounts.get_user_verified_via(user_id) is None
@@ -27273,6 +27624,15 @@ def session_init():
             session_verified = False
     if existing_sess:
         _sync_persisted_session_after_init(token, existing_sess, user_changed)
+    if user_changed:
+        # Release-lead delta QA E: the notes this token sent while anonymous
+        # were sent as the OLD identity. Attach keys on the token's hash, so
+        # drop the key and they can't follow the token to the new user if it
+        # later verifies. The rows stay, anonymous. Never fails the init.
+        try:
+            detach_session_feedback(_feedback_session_key(token))
+        except Exception as e:
+            log.warning("feedback: detach on re-point failed: %s", e)
 
     # ── Defer DB upserts + push fanout + Sleeper meta to a daemon ────────
     # Everything below this point that isn't required for the response
@@ -27342,7 +27702,7 @@ def session_init():
 
         try:
             # Platform-link state is a DB fact that nothing in this daemon
-            # writes, so the three guards below read it once.
+            # writes, so every guard below reads it once.
             _platform_linked = is_linked_platform_league(league_id)
 
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
@@ -27666,8 +28026,15 @@ def session_init():
             # scoring, no UI. Sleeper league ids only (numeric); idempotent
             # on transaction_id, so a flake just misses one pass and the
             # next sync self-heals. Best-effort, off the request path.
+            # ESPN/MFL/Fleaflicker native ids are numeric too (G-030), so
+            # isdigit() alone sent a linked league's id to Sleeper — up to
+            # 18 `transactions` reads per init, since a league with no
+            # captured rows is re-backfilled every time. _platform_linked
+            # (read once above) is the same discriminator the siblings use.
             try:
-                if is_enabled("market.trade_capture") and str(league_id).isdigit():
+                if (is_enabled("market.trade_capture")
+                        and str(league_id).isdigit()
+                        and not _platform_linked):
                     from .sleeper_trades_service import sync_league_trades
                     _n_tr = sync_league_trades(league_id)
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
@@ -32338,6 +32705,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             sess["_persisted_at"] = 0  # re-auth refreshes the durable row now
             _persist_session_if_eligible(
                 request.headers.get("X-Session-Token", ""), sess)
@@ -32359,6 +32727,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             out["verified_via"] = provider
             try:
                 _accounts.mark_user_verified(sess["user_id"], provider)
@@ -36582,6 +36951,7 @@ def mfl_auth_link():
     # controller (first-verified-wins, same as the Sleeper path).
     sess["verified"] = True
     sess["verified_via"] = "mfl_login"
+    _attach_presession_feedback(sess)
     try:
         from . import accounts as _accounts
         first_time = _accounts.get_user_verified_via(user_id) is None

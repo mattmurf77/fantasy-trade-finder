@@ -18,8 +18,8 @@ import type { FeedbackStatus } from '../api/feedback';
 import { relativeTime } from '../utils/relativeTime';
 
 const SEV_LABEL: Record<FeedbackItem['severity'], string> = {
-  bug:    'Bug',
-  polish: 'Polish',
+  bug:    'Broken',
+  polish: 'Tweak',
   idea:   'Idea',
 };
 
@@ -42,7 +42,7 @@ const STATUS_COLOR: Record<FeedbackStatus, string> = {
   declined:    chalk.faint,
 };
 
-// Settings → Test feedback → this screen.
+// Settings → Help & about → Your feedback → this screen.
 // Lists every captured feedback note in newest-first order. The header
 // has two destructive-ish actions:
 //   • Share — opens the iOS share sheet with the inbox formatted as
@@ -85,7 +85,7 @@ export default function FeedbackInboxScreen() {
   }
 
   async function onShare() {
-    const md = formatFeedbackAsMarkdown(visibleItems);
+    const md = formatFeedbackAsMarkdown(visibleItems, (s) => STATUS_LABEL[s]);
     try {
       await Share.share({ message: md });
     } catch {
@@ -96,8 +96,8 @@ export default function FeedbackInboxScreen() {
   function onClear() {
     if (items.length === 0) return;
     Alert.alert(
-      'Clear all feedback?',
-      `This will delete ${items.length} note${items.length === 1 ? '' : 's'}. Cannot be undone.`,
+      'Clear notes from this device?',
+      `Removes ${items.length} note${items.length === 1 ? '' : 's'} from this device. It can't be undone. Notes already sent stay on file.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Clear', style: 'destructive', onPress: () => void clear() },
@@ -120,7 +120,7 @@ export default function FeedbackInboxScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <View style={styles.headerRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.title} accessibilityRole="header">Test feedback</Text>
+          <Text style={styles.title} accessibilityRole="header">Your feedback</Text>
           <Text style={styles.sub}>
             <Text style={styles.subCount}>{visibleItems.length}</Text>
             {` note${visibleItems.length === 1 ? '' : 's'} saved on this device`}
@@ -132,7 +132,7 @@ export default function FeedbackInboxScreen() {
               <ActivityIndicator size="small" color={chalk.dim} />
             </View>
           ) : (
-            <Button label="Retry sync" variant="ghost" onPress={onRetry} />
+            <Button label="Send now" variant="ghost" onPress={onRetry} />
           ))}
         <Button
           label="Share"
@@ -152,7 +152,7 @@ export default function FeedbackInboxScreen() {
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>No feedback yet</Text>
           <Text style={styles.emptySub}>
-            Tap the floating button on any screen to capture a note.
+            Tap the flag button on any screen to send a note.
           </Text>
         </View>
       ) : (
@@ -169,9 +169,9 @@ export default function FeedbackInboxScreen() {
               failed    ? styles.syncFailed :
                           styles.syncPending;
             const syncText =
-              it.synced ? 'Synced' :
-              failed    ? `Sync failed: ${it.last_sync_error}` :
-                          'Pending sync';
+              it.synced ? 'Sent' :
+              failed    ? 'Not sent yet' :
+                          'Waiting to send';
             // "Unread" analog for this inbox: the operator responded —
             // a lifecycle status beyond the automatic "new" receipt.
             const responded = !!it.status && it.status !== 'new';
@@ -185,7 +185,6 @@ export default function FeedbackInboxScreen() {
                 accessibilityLabel={[
                   responded ? 'Responded' : null,
                   SEV_LABEL[it.severity],
-                  it.screen,
                   it.text,
                   relativeTime(it.created_at),
                   syncText,
@@ -223,7 +222,6 @@ export default function FeedbackInboxScreen() {
                     </Pressable>
                   ) : null}
                 </View>
-                <Text style={styles.rowScreen}>{it.screen}</Text>
                 <Text style={styles.rowText}>{it.text}</Text>
                 {it.status ? (
                   <Text style={[styles.statusLine, { color: STATUS_COLOR[it.status] }]}>
@@ -306,7 +304,6 @@ const styles = StyleSheet.create({
   },
   deleteBtnPressed: { backgroundColor: ink.ink3 },
   rowWhen:   { ...type.data, color: chalk.faint },
-  rowScreen: { ...type.label, marginBottom: space.xs },
   rowText:   { ...type.body },
   // Operator-set lifecycle status — the "what happened to my note" line.
   // Sits above the sync badge; color carries the state (see STATUS_COLOR).
