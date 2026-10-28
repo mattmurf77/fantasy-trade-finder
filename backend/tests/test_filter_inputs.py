@@ -79,8 +79,9 @@ def test_repeat_head_is_the_kept_cards_only_when_the_cap_ran_short(n, deferred, 
 
 
 def test_a_market_value_is_a_finite_float_or_null():
-    """#492 QA P3-4: NaN, inf and a bool are null; a numpy float is a plain
-    float, so the header stays strict JSON."""
+    """#492 QA P3-4: NaN and inf are null; a bool is the 1.0 the filter
+    compared; a numpy float is a plain float, so the header stays strict
+    JSON."""
     import json
     np = pytest.importorskip("numpy")
     values = {"nan": float("nan"), "inf": float("inf"), "ninf": float("-inf"), "bool": True,
@@ -89,7 +90,26 @@ def test_a_market_value_is_a_finite_float_or_null():
     got = server._quality_filter_inputs(cards, viewer_team="me", market=values.get,
                                         position=lambda a: None, rosters={},
                                         lineup_slots=None)["market"]
-    assert got == {"nan": None, "inf": None, "ninf": None, "bool": None, "np": 1.5,
+    assert got == {"nan": None, "inf": None, "ninf": None, "bool": 1.0, "np": 1.5,
                    "int": 7.0, "none": None, "r1": None}
     assert type(got["np"]) is float
     json.dumps(got, allow_nan=False)
+
+
+def test_a_coerced_null_is_named_apart_from_an_unseeded_asset():
+    """#503 QA P2: the audit can't tell a NaN's null from an unseeded asset's,
+    and the filter read them differently, so the non-finite ones are listed
+    (sorted); a bool is its float, never listed."""
+    values = {"nan": float("nan"), "inf": float("inf"), "ninf": float("-inf"), "bool": True,
+              "ok": 900.0, "none": None}
+    cards = [_card(list(values), ["r1"], "opp")]
+    got = server._quality_filter_inputs(cards, viewer_team="me", market=values.get,
+                                        position=lambda a: None, rosters={},
+                                        lineup_slots=None)
+    assert got["market_coerced"] == ["inf", "nan", "ninf"]
+    assert got["market"]["nan"] is None and got["market"]["bool"] == 1.0
+    clean = server._quality_filter_inputs([_card(["ok", "none"], ["r1"], "opp")],
+                                          viewer_team="me", market=values.get,
+                                          position=lambda a: None, rosters={},
+                                          lineup_slots=None)
+    assert "market_coerced" not in clean

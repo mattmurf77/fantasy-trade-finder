@@ -8376,7 +8376,11 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
       kept, in order; else null.
     A market value is recorded as a plain float, or null when it isn't a
     finite number (#492 QA P3-4: a NaN or inf made the header non-strict
-    JSON; a numpy float wouldn't serialize at all). A non-finite value is a
+    JSON; a numpy float wouldn't serialize at all); a bool is the 1.0 or 0.0
+    the filter compared. A non-finite one's null is listed in
+    `market_coerced` (sorted ids, absent when none), so the audit never reads
+    it as an unseeded asset: the filter's NaN behavior is order-dependent, so
+    such a card is not auditable for breakup and filler (#503 QA P2). A non-finite value is a
     data bug, and its null can read differently from what the filter did
     (a NaN first on a card drops the filter's filler bar to the floor; the
     audit skips the null and uses the real max). A recording failure raises; the caller then records filter_ran True with
@@ -8390,15 +8394,19 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
     assets.update(a for held in qb_te.values() for a in held)
     ordered = sorted(assets, key=str)
     head = len(cards) - deferred
+    coerced = set()
 
     def value(a):
         v = market(a)
-        if v is None or isinstance(v, bool):
+        if v is None:
             return None
-        v = float(v)
-        return v if math.isfinite(v) else None
+        v = float(v)                  # a bool is the 1 or 0 the filter compared
+        if math.isfinite(v):
+            return v
+        coerced.add(str(a))
+        return None
 
-    return {
+    record = {
         "v": 1, "filter_ran": True, "viewer_team": viewer_team,
         "lineup_slots": None if lineup_slots is None else list(lineup_slots),
         "market": {str(a): value(a) for a in ordered},
@@ -8411,6 +8419,9 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
                                           c.target_user_id) for c in cards[:head]]
                         if head < _dq.REPEAT_WINDOW else None),
     }
+    if coerced:   # #503 QA P2: a null the filter saw as a value, never an unseeded asset
+        record["market_coerced"] = sorted(coerced)
+    return record
 
 
 def _records_in_order(cards, records, survivors) -> list:
