@@ -656,6 +656,7 @@ _ADDITIONAL_PRIVATE_TABLES = (
     "rank_set_adoptions", "accuracy_scores", "mock_drafts", "receipts_grades",
     "trade_proposals", "trade_policy_shadow", "deck_diagnostic_snapshots",
     "grading_sessions", "grading_cards", "trade_page_store", "trade_deck_lineage",
+    "deck_card_withdrawals", "deck_evidence_packs",
 )
 
 
@@ -965,7 +966,9 @@ _EXPORT_TABLES: tuple = (
     ("leagues",                 "leagues_table",                 "user_id",         ("espn_auth", "platform_auth")),
     ("bad_trade_flags",         "bad_trade_flags_table",         "user_id",         ()),
     ("trade_impressions",       "trade_impressions_table",       "user_id",         ()),
-    ("app_feedback",            "app_feedback_table",            "user_id",         ()),
+    # session_key is NULL on every user-linked row (attach clears it); omitted
+    # anyway so a token hash can never leave in an export.
+    ("app_feedback",            "app_feedback_table",            "user_id",         ("session_key",)),
     ("espn_credentials", "espn_credentials_table", "user_id", ("espn_s2_encrypted",)),
     ("mfl_credentials", "mfl_credentials_table", "user_id", ("cookie_encrypted",)),
     ("deck_impressions", "deck_impressions_table", "user_id", ()),
@@ -997,6 +1000,36 @@ def _rows_as_dicts(rows, omit: tuple = ()) -> list[dict]:
         {k: v for k, v in r._mapping.items() if k not in omit}
         for r in rows
     ]
+
+
+def _export_candidate_set(row: dict) -> None:
+    """A packed deck_candidate_sets row (S8, eng-evidence-contract §9) exports
+    the reader's unpacked JSON in candidates_json, not the bytes; a pack that
+    can't be read exports candidates_json None and its error."""
+    packed = row.pop("candidates_packed", None)
+    if packed is None:
+        return
+    from .eval import evidence_pack
+    try:
+        _run, members = evidence_pack.unpack_candidates(evidence_pack.PackedCandidates(
+            row.get("cand_pack_version"), bytes(packed)))
+    except evidence_pack.PackIntegrityError as e:
+        row.update(candidates_json=None, candidates_pack_error=str(e))
+    else:
+        row["candidates_json"] = json.dumps(members)
+
+
+def _export_evidence_pack(row: dict) -> None:
+    """A deck_evidence_packs row exports its unpacked run metadata and cards
+    (`run`, `cards`), not cards_blob; an unreadable pack exports its error."""
+    from .eval import evidence_pack
+    blob = row.pop("cards_blob", None)
+    try:
+        row["run"], row["cards"] = evidence_pack.unpack_run(evidence_pack.PackedRun(
+            row["pack_version"], row["header_json"], bytes(blob or b""), row["checksum"],
+            row["card_count"]))
+    except evidence_pack.PackIntegrityError as e:
+        row["pack_error"] = str(e)
 
 
 def _export_deck_features(raw):
@@ -1036,6 +1069,12 @@ def export_user_data(sleeper_user_id: str,
             if key == "deck_impressions":
                 for row in tables[key]:
                     row["features_json"] = _export_deck_features(row["features_json"])
+            elif key == "deck_candidate_sets":
+                for row in tables[key]:
+                    _export_candidate_set(row)
+            elif key == "deck_evidence_packs":
+                for row in tables[key]:
+                    _export_evidence_pack(row)
 
         for name, predicate, omit in (
             ("trade_matches", db.trade_matches_table.c.user_a_id.in_(user_ids)
@@ -1097,6 +1136,12 @@ def export_user_data(sleeper_user_id: str,
 
 APPLE_TOKEN_URL = "https://appleid.apple.com/auth/token"
 APPLE_REVOKE_URL = "https://appleid.apple.com/auth/revoke"
+# Per Apple HTTP call. Deletion makes up to two (/auth/token, /auth/revoke)
+# before it deletes, and the app's DELETE /api/account gives up at 15 s
+# (mobile api/client DEFAULT_TIMEOUT_MS): 2 x 5 s leaves room for the
+# deletion itself, so a slow Apple can't make the user see "took too
+# long" while the server still deletes (release-lead QA on #446).
+APPLE_HTTP_TIMEOUT_S = 5
 
 
 def _b64url_encode(data: bytes) -> str:
@@ -1161,7 +1206,7 @@ def _apple_form_post(url: str, fields: dict) -> tuple[int, dict]:
                            or "token")
     with _api_obs.observe_call("apple", _endpoint, method="POST") as _ob:
         with urllib.request.urlopen(
-            req, timeout=10, context=ssl.create_default_context()
+            req, timeout=APPLE_HTTP_TIMEOUT_S, context=ssl.create_default_context()
         ) as resp:
             raw = resp.read().decode("utf-8", "replace")
         _ob.ok(status=getattr(resp, "status", 200), response_bytes=len(raw))
@@ -1171,10 +1216,27 @@ def _apple_form_post(url: str, fields: dict) -> tuple[int, dict]:
         return resp.status, {}
 
 
-def revoke_apple_tokens(authorization_code: str | None = None) -> bool:
+def _id_token_sub(id_token) -> str | None:
+    """`sub` from an Apple id_token's payload, or None."""
+    try:
+        claims = json.loads(_b64url_decode(str(id_token).split(".")[1]))
+        sub = claims.get("sub")
+        return sub if isinstance(sub, str) and sub else None
+    except Exception:
+        return None
+
+
+def revoke_apple_tokens(authorization_code: str | None = None,
+                        expected_subjects=None) -> bool:
     """Best-effort SIWA revocation. True only when Apple confirmed the
     revoke; never raises. See the section comment for why a fresh
-    `authorization_code` is required."""
+    `authorization_code` is required.
+
+    `expected_subjects`: the Apple `sub`(s) this Fleeced account linked.
+    The code is revoked only when ITS Apple account is one of them: if a
+    different Apple ID is signed in on the device, the code belongs to that
+    Apple ID, and revoking would cut ITS grant (release-lead QA on #446, d).
+    No expected subject, no id_token, or a mismatch → nothing is revoked."""
     try:
         client_secret = _apple_client_secret()
         if not client_secret:
@@ -1196,6 +1258,19 @@ def revoke_apple_tokens(authorization_code: str | None = None) -> bool:
             print(f"[apple_revoke] token exchange failed: status={status} "
                   f"error={body.get('error')}")
             return False
+        # Whose code is this? Decoding the id_token without verifying its
+        # signature is fine here: it came straight from Apple's /auth/token,
+        # over TLS, in reply to our own client_secret-signed request, so the
+        # app can't have forged it.
+        sub = _id_token_sub(body.get("id_token"))
+        if not sub:
+            print("[apple_revoke] skipped: Apple's token response carried no "
+                  "usable id_token, so the code's Apple account is unknown")
+            return False
+        if not expected_subjects or sub not in set(expected_subjects):
+            print("[apple_revoke] WARNING skipped: the code belongs to a "
+                  "different Apple account than the one this account linked")
+            return False
         hint = "refresh_token" if body.get("refresh_token") else "access_token"
         status, _ = _apple_form_post(APPLE_REVOKE_URL, {
             "client_id":       APPLE_AUDIENCE,
@@ -1213,10 +1288,11 @@ def revoke_apple_tokens(authorization_code: str | None = None) -> bool:
         return False
 
 
-def has_apple_identity(sleeper_user_id: str,
-                       account_id: str | None = None) -> bool:
-    """True if the user's bound account (or the session-attached one) has a
-    linked Apple identity. Never raises."""
+def apple_identity_subjects(sleeper_user_id: str,
+                            account_id: str | None = None) -> set[str]:
+    """The Apple `sub`s linked to the user's bound account (or the
+    session-attached one). Empty when none. Never raises."""
+    subjects: set[str] = set()
     try:
         with db.engine.connect() as conn:
             acct_ids = {
@@ -1228,17 +1304,20 @@ def has_apple_identity(sleeper_user_id: str,
             }
             if account_id:
                 acct_ids.add(account_id)
-            if not acct_ids:
-                return False
-            for aid in acct_ids:
-                row = conn.execute(
-                    select(db.linked_identities_table.c.id).where(
-                        (db.linked_identities_table.c.account_id == aid)
+            if acct_ids:
+                subjects.update(conn.execute(
+                    select(db.linked_identities_table.c.provider_subject).where(
+                        db.linked_identities_table.c.account_id.in_(acct_ids)
                         & (db.linked_identities_table.c.provider == "apple")
-                    ).limit(1)
-                ).fetchone()
-                if row is not None:
-                    return True
+                    )
+                ).scalars())
     except Exception as e:
         print(f"[apple_revoke] identity lookup failed: {e}")
-    return False
+    return subjects
+
+
+def has_apple_identity(sleeper_user_id: str,
+                       account_id: str | None = None) -> bool:
+    """True if the user's bound account (or the session-attached one) has a
+    linked Apple identity. Never raises."""
+    return bool(apple_identity_subjects(sleeper_user_id, account_id))

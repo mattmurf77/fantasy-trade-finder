@@ -1190,12 +1190,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Matches non-match send row, NOT 'suggested').
     "sleeper_send_attempted":  frozenset({"surface", "give_n", "receive_n",
                                           "from_deck", "has_target"}),
-    # `error_code` is a CLOSED enum: the 15 server codes of
+    # `error_code` is a CLOSED enum: the 17 server codes of
     # /api/trades/propose (incl. #413's sleeper_pick_unmapped |
     # sleeper_pick_not_owned and #428's sleeper_pick_untradable) plus
-    # network | timeout | unknown. 18 values, forever (17 → 18 on
-    # 2026-09-08). `kind` is SleeperWriteError.kind, present only on
-    # sleeper_rejected / sleeper_write_failed.
+    # network | timeout | unknown. 20 values, forever (18 → 20 on
+    # 2026-10-26, I-2 #411 asset_not_owned | counterparty_asset_not_owned).
+    # `kind` is SleeperWriteError.kind, present only on
+    # sleeper_rejected / sleeper_write_failed — or `roster_read` (I-2 R3):
+    # the live rosters read failed, so nothing was sent; not a write failure.
     "sleeper_send_failed":     frozenset({"surface", "error_code", "status",
                                           "kind", "give_n", "receive_n",
                                           "from_deck"}),
