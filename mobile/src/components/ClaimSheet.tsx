@@ -18,11 +18,12 @@ import {
   semantic,
   space,
   radii,
+  fonts,
   scrim,
   shadowSheet,
   type,
 } from '../theme/chalkline';
-import { Button, TickLabel } from './chalkline';
+import { Button, TickLabel, Text as ChalkText } from './chalkline';
 import PositionChip from './PositionChip';
 import TierBadge from './TierBadge';
 import type {
@@ -111,6 +112,7 @@ export function explainNoAdd(addPlatform: Exclude<AddPlatform, 'sleeper'>) {
 export default function ClaimSheet({
   row,
   leagueId,
+  leagueName,
   surface = 'unspecified',
   capacity,
   waivers,
@@ -119,7 +121,7 @@ export default function ClaimSheet({
 }: {
   row: ClaimTarget;
   leagueId: string;
-  /** The claim league's name. Not rendered yet: the #351 §4.2 steps block (next commit) names the league with it. */
+  /** The claim league's name; the steps block names it (#351 PRD §4.2). Null/absent: the step is left out. */
   leagueName?: string | null;
   /** Which host opened the sheet, for the hand-off's ExternalTarget.surface. */
   surface?: ExternalSurface;
@@ -142,13 +144,21 @@ export default function ClaimSheet({
   // Open slots known and > 0 ⇒ no drop needed; 0 (or unknown, when we have
   // candidates) ⇒ show the least-valuable-first drop list.
   const showDropList = openSlots !== null ? openSlots === 0 : candidates.length > 0;
+  const dropName = candidates.find((c) => c.id === dropId)?.name ?? null;
 
   const openSleeper = () => {
-    // Opens the Sleeper app (`sleeper://`, the deepest proven rung; today
-    // `bare`, so Sleeper's last-viewed screen). Not installed → the Get
-    // Sleeper alert, never silent. Sleeper has no public write API, so the
-    // claim itself happens in Sleeper.
-    void openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface });
+    // Copies the player's name (the steps block says so), then opens the
+    // Sleeper app (`sleeper://`, the deepest proven rung; today `bare`, so
+    // Sleeper's last-viewed screen). Not installed → the Get Sleeper alert,
+    // never silent. Sleeper has no public write API, so the claim itself
+    // happens in Sleeper.
+    void openInSleeperApp({
+      target: 'add',
+      leagueId,
+      playerId: row.player_id,
+      clipboardText: row.name,
+      surface,
+    });
   };
 
   return (
@@ -311,6 +321,37 @@ export default function ClaimSheet({
               )}
             </View>
 
+            {/* #351 PRD §4.2 steps: what to do once Sleeper opens. Re-renders
+                with the drop selection. Only the `bare` rung is proven, and
+                bare reopens Sleeper's last-viewed league, so the steps name
+                the league whenever the host knows it. */}
+            <View style={sheetStyles.section} testID="fa-claim.steps">
+              {/* COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2) */}
+              <ChalkText variant="body">
+                {'In Sleeper: '}
+                {leagueName ? (
+                  <>
+                    {'open '}
+                    <ChalkText style={sheetStyles.stepsEm}>{leagueName}</ChalkText>
+                    {' → '}
+                  </>
+                ) : null}
+                {'Players → search '}
+                <ChalkText style={sheetStyles.stepsEm}>{row.name}</ChalkText>
+                {' → Add'}
+                {dropName ? (
+                  <>
+                    {' → drop '}
+                    <ChalkText style={sheetStyles.stepsEm}>{dropName}</ChalkText>
+                  </>
+                ) : null}
+              </ChalkText>
+              {/* COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2) */}
+              <ChalkText style={sheetStyles.sectionHint}>
+                {`We'll copy ${row.name} so you can paste it into search.`}
+              </ChalkText>
+            </View>
+
             <Button
               testID="fa-claim.open-sleeper"
               label="Open in Sleeper to claim"
@@ -377,6 +418,9 @@ const sheetStyles = StyleSheet.create({
 
   section: { gap: space.sm },
   sectionHint: { ...type.bodySm, color: chalk.dim },
+  // Steps block emphasis (league / player / drop): the `title` weight at
+  // the surrounding body size.
+  stepsEm: { fontFamily: fonts.uiSemi, color: chalk.base },
 
   bidRow: {
     flexDirection: 'row',

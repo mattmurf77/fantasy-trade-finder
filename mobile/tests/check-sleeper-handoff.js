@@ -18,6 +18,10 @@
 //       ../utils/sleeperHandoff and calls it from openInSleeper (target
 //       'trade'). ClaimSheet half: the same import, and the
 //       fa-claim.open-sleeper CTA's handler calls it with target 'add'     [AST]
+//   S8  ClaimSheet renders fa-claim.steps between the drop section and the
+//       CTA; its text names row.name, the selected drop (dropId +
+//       candidates) and leagueName, and discloses the copy; the CTA passes
+//       clipboardText: row.name                                            [AST]
 //   S9  the eight NO_ADD_REASON strings verbatim; explainNoAdd and
 //       resolveAddPlatform byte-identical to 04eae95b (AC-10)              [AST]
 //   H1  both ClaimSheet hosts pass `surface` (free_agents / usage_trends)
@@ -44,14 +48,11 @@
 //
 // Deferred (not true on this branch; each owner adds its S-check with the
 // migration):
-//   S8 → league-eng: the claim sheet's on-sheet steps block +
-//       `clipboardText: row.name` (PRD §4.2), waiting on design-lead /
-//       ux-lead copy
 //   S11, S12, S15 → trades-eng (TradesScreen, useTradeQueue)
 //   S14 → platforms-eng follow-up: the Send-in-Sleeper steps confirm +
 //       clipboard (PRD §4.3), waiting on design-lead / ux-lead copy
 //
-// HONEST LABEL (G-035): S1, S2, S9, S16, H1 and H2 prove wirings are
+// HONEST LABEL (G-035): S1, S2, S8, S9, S16, H1 and H2 prove wirings are
 // present, not behavior: no claim-sheet code is executed here. S3–S7, S10
 // and S13 execute the real modules.
 //
@@ -193,7 +194,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// S1 / S2 (ClaimSheet half) / S9 / H1 / H2 — the claim sheet and its hosts
+// S1 / S2 (ClaimSheet half) / S8 / S9 / H1 / H2 — the claim sheet and its hosts
 // ═══════════════════════════════════════════════════════════════════════
 const unparen = (n) => (ts.isParenthesizedExpression(n) ? unparen(n.expression) : n);
 const squash = (s) => s.replace(/\s+/g, '');
@@ -277,6 +278,50 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
     'S2 openSleeper passes leagueId, playerId: row.player_id and the host surface',
     open.slice(0, 200),
   );
+}
+
+// S8 — the on-sheet steps block (PRD §4.2). The bare rung reopens
+// Sleeper's last-viewed league, so the sheet is the only thing telling the
+// user which league, player and drop; and nothing is copied silently.
+{
+  const sf = parse(CLAIM);
+  const decl = declarations(sf);
+  const steps = [];
+  walk(sf, (n) => {
+    if (ts.isJsxElement(n) && n.openingElement.attributes.properties.some((a) =>
+      ts.isJsxAttribute(a) && a.name.getText(sf) === 'testID' &&
+      a.initializer && ts.isStringLiteral(a.initializer) && a.initializer.text === 'fa-claim.steps')) steps.push(n);
+  });
+  const text = steps.length === 1 ? steps[0].getText(sf) : '';
+  // What the block RENDERS: `{x}` children and `${x}` in a `{`…`}` child.
+  // A mention in a condition (`{dropName ? … : null}`) doesn't count.
+  const rendered = [];
+  if (steps.length === 1) {
+    walk(steps[0], (n) => {
+      if (!ts.isJsxExpression(n) || !n.expression || !(ts.isJsxElement(n.parent) || ts.isJsxFragment(n.parent))) return;
+      const e = unparen(n.expression);
+      if (ts.isTemplateExpression(e)) rendered.push(...e.templateSpans.map((s) => s.expression.getText(sf)));
+      else rendered.push(e.getText(sf));
+    });
+  }
+  // The drop name, inline or through a const that looks dropId up in candidates.
+  const dropConsts = Object.keys(decl).filter((k) =>
+    /\bcandidates\b/.test(decl[k]) && /\bdropId\b/.test(decl[k]) && /\.name\b/.test(decl[k]));
+  const namesDrop = rendered.some((r) => dropConsts.includes(r) || (/\bcandidates\b/.test(r) && /\bdropId\b/.test(r)));
+  assert(steps.length === 1, 'S8 ClaimSheet renders one testID="fa-claim.steps"', `${steps.length} found`);
+  assert(rendered.includes('row.name'), 'S8 the steps render the free agent (row.name)', JSON.stringify(rendered));
+  assert(namesDrop, 'S8 the steps render the selected drop (dropId looked up in candidates)',
+    `drop consts: ${dropConsts.join(', ') || 'none'}; rendered: ${JSON.stringify(rendered)}`);
+  assert(rendered.includes('leagueName'), 'S8 the steps render the league (leagueName)', JSON.stringify(rendered));
+  assert(/paste it into search/.test(text), 'S8 the steps disclose the copy ("…so you can paste it into search.")');
+  assert(
+    /\bopenInSleeperApp\(\s*\{[^}]*clipboardText:\s*row\.name\b/.test(decl.openSleeper || ''),
+    'S8 the CTA passes clipboardText: row.name',
+    (decl.openSleeper || '').slice(0, 240),
+  );
+  const src = read(CLAIM);
+  const [drop, stepsAt, cta] = ['SELECT A PLAYER TO DROP', 'testID="fa-claim.steps"', 'testID="fa-claim.open-sleeper"'].map((s) => src.indexOf(s));
+  assert(drop !== -1 && drop < stepsAt && stepsAt < cta, 'S8 the steps sit between the drop section and the CTA');
 }
 
 // S9 — the non-Sleeper claim paths are byte-identical to 04eae95b

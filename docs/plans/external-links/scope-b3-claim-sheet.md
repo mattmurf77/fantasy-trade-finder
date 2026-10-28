@@ -13,6 +13,7 @@
 - [3. Evidence scope](#3-evidence-scope)
 - [4. Docs scope](#4-docs-scope-mandatory--hld--lld--api)
 - [5. Ship gate declaration](#5-ship-gate-declaration)
+- [Copy for design-lead](#copy-for-design-lead)
 - [Known risk](#known-risk)
 
 ---
@@ -28,6 +29,8 @@ Two commits. The second is droppable on its own.
 | 1 | `mobile/src/screens/UsageTrendsScreen.tsx` | The `<ClaimSheet>` mount only (granted by rankings-eng): `leagueName={leagueMeta.get(claim.leagueId)?.name ?? (claim.leagueId === leagueId ? (leagueName ?? null) : null)}` and `surface="usage_trends"`. |
 | 1 | `mobile/tests/check-external-links.js` | The league-eng LEGACY entry for `ClaimSheet.tsx` is deleted (the ratchet requires it). |
 | 1 | `mobile/tests/check-sleeper-handoff.js` | S1, S2 (ClaimSheet half), S9, H1, H2. See §3. |
+| 2 | `mobile/src/components/ClaimSheet.tsx` | The PRD §4.2 steps block (testID `fa-claim.steps`) between the drop section and the CTA, live with the drop selection, in the `bare` rung's draft copy (the only rung proven). The CTA now also passes `clipboardText: row.name`, which the block discloses. Copy is marked `COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2)`. See [Copy for design-lead](#copy-for-design-lead). **Droppable:** it waits on design-lead / ux-lead copy approval. |
+| 2 | `mobile/tests/check-sleeper-handoff.js` | S8. |
 
 No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag, no route, no event, no backend change.
 
@@ -53,6 +56,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
     - **S9:** the eight `NO_ADD_REASON` strings, evaluated from the AST, equal the `04eae95b` strings copied into the guard. `explainNoAdd` and `resolveAddPlatform` are byte-identical to `04eae95b`.
     - **H1** (the b3 brief's, not a PRD id): Free Agents mounts `ClaimSheet` with `surface="free_agents"` and `leagueName={leagueName}`, where `leagueId` and `leagueName` both read `useSession` → `s.league`. Usage Trends mounts it with `surface="usage_trends"` and the exact `leagueName` expression above, so the session name is used only when the claim league is the session league.
     - **H2** (the b3 brief's): in `FreeAgentsScreen`, the `query.isLoading` conditional sits inside the `query.isError` conditional's false branch.
+    - **S8** (commit 2): `ClaimSheet.tsx` renders exactly one `fa-claim.steps` element, after the drop section and before the CTA. It **renders** (as `{…}` children, so a mention inside a condition doesn't count) `row.name`, the selected drop (a const that looks `dropId` up in `candidates`) and `leagueName`, and carries the "…so you can paste it into search." disclosure. `openSleeper` passes `clipboardText: row.name`.
   - `check-external-links.js`: the ClaimSheet LEGACY entry is gone, and a1 now covers `ClaimSheet.tsx` like any other file.
   - **Sabotage run** (applied, guard run, restored byte-for-byte; all green after):
 
@@ -68,26 +72,32 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
     | 8 | Usage Trends drops `leagueName` | H1 |
     | 9 | the ClaimSheet LEGACY entry re-added | external-links a2 ("matches none") |
     | 10 | Free Agents' `isLoading` branch moved back above `isError` | H2 |
+    | 11 | commit 2: the drop-name interpolation removed (the PRD's named S8 sabotage) | S8 |
+    | 12 | commit 2: the `leagueName` step removed | S8 |
+    | 13 | commit 2: `clipboardText: row.name` dropped from the CTA | S8 |
+    | 14 | commit 2: the copy disclosure line removed (a silent copy) | S8 |
+    | 15 | commit 2: the steps block moved below the CTA | S8 |
 - [x] **Unit tests:** no backend pytest; nothing in `backend/` changed.
-- [x] **Code-walk proof** (file:line at commit 1; #351 PRD §7.2 A and B):
+- [x] **Code-walk proof** (file:line at the branch tip, commit 2; #351 PRD §7.2 A and B). Commit 1 differs only in `ClaimSheet.tsx`: no steps block, no `clipboardText`, so step A5 and the copy in A9 don't exist there.
 
   **A. Free Agents → Add → claim sheet → CTA**
   1. `FreeAgentsScreen.tsx:53` `leagueId` = the session league's id; `:56` `leagueName` = the same session league's `league_name` (or `null`).
   2. Row **Add** (`:271-275`, testID `free-agents.add.<id>`) → `onAdd` `:84-91`: `:87` a Sleeper league → `setClaimTarget(row)`; `:88` anything else → `explainNoAdd` (unchanged, S9).
   3. `:212-223` mounts `<ClaimSheet … leagueId={leagueId} leagueName={leagueName} surface="free_agents" />` (`:216-218`).
-  4. `ClaimSheet.tsx:114` takes `surface`; `:123` declares `leagueName` (unrendered in commit 1).
-  5. CTA `:314-320` (`fa-claim.open-sleeper`, disabled while the bid is over budget) → `openSleeper` `:146-152` → `:151` `openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface })`.
-  6. `sleeperHandoff.ts:95-106` → `:100` `sleeperAppUrl(t)` `:79-91`: `:83` keeps L only if numeric, `:84` keeps P for `add`; `:85-89` walks `SLEEPER_PROVEN_RUNGS.add` = `['bare']` (`:39`) → `rungUrl('bare')` `:71-72` → `sleeper://`. `:102` `surface: 'free_agents'`; `:103` `appMissing: 'alert'`.
-  7. `openExternal.ts:70-81` `openPlatform`: `:71` no open in flight → `:72` `attempt`; `:78` 2 s lock release; `:79` release on settle.
-  8. `attempt` `:83-96`: `:84` no `clipboardText`, so nothing is copied; `:86` `opened('sleeper://')` → `:100-107` → `:102` `await Linking.openURL`.
-  9. RN 0.81.5 `RCTLinkingManager.mm:90-99`: Sleeper handles the scheme → `resolve(@YES)` → `'app'` → `openInSleeperApp` returns `'app'` (`sleeperHandoff.ts:105`). Sleeper opens on its last-viewed screen (bare rung). No Safari.
-  10. Not installed: `RCTLinkingManager.mm:111` rejects "Unable to open URL" → `opened` returns `false` (`openExternal.ts:104-105`) → `:87-90` the D2 alert (`showAppMissing` `:110-126`: "Sleeper isn’t installed" / **Cancel** · **Get Sleeper**) → `'fallback'` → `'not_installed'`. https is never tried. **Get Sleeper** (`:118-121`) opens `https://apps.apple.com/app/id987367543`; if that rejects too, "Couldn’t open that link".
+  4. `ClaimSheet.tsx:115-116` takes `leagueName` and `surface` (default `'unspecified'`); `:147` `dropName` = the selected drop candidate's name, or `null`.
+  5. Steps block `:324-353` (`fa-claim.steps` `:328`), between the drop section and the CTA. `:330-348` renders "In Sleeper: open **{League}** → Players → search **{Name}** → Add → drop **{Drop}**": the league step only when `leagueName` is set (`:332`), the drop step only when `dropName` is (`:342`). `:350-352` renders "We'll copy {Name} so you can paste it into search." A drop-row tap calls `setDropId`, so the block re-renders with the new drop.
+  6. CTA `:355-361` (`fa-claim.open-sleeper`, disabled while the bid is over budget) → `openSleeper` `:149-162` → `:155-161` `openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, clipboardText: row.name, surface })`.
+  7. `sleeperHandoff.ts:95-106` → `:100` `sleeperAppUrl(t)` `:79-91`: `:83` keeps L only if numeric, `:84` keeps P for `add`; `:85-89` walks `SLEEPER_PROVEN_RUNGS.add` = `['bare']` (`:39`) → `rungUrl('bare')` `:71-72` → `sleeper://`. `:102` `surface: 'free_agents'`; `:103` `appMissing: 'alert'`.
+  8. `openExternal.ts:70-81` `openPlatform`: `:71` no open in flight → `:72` `attempt`; `:78` 2 s lock release; `:79` release on settle.
+  9. `attempt` `:83-96`: `:84` `copyText(row.name)` **before** any open (commit 1: no `clipboardText`, nothing copied); `:86` `opened('sleeper://')` → `:100-107` → `:102` `await Linking.openURL`.
+  10. RN 0.81.5 `RCTLinkingManager.mm:90-99`: Sleeper handles the scheme → `resolve(@YES)` → `'app'` → `openInSleeperApp` returns `'app'` (`sleeperHandoff.ts:105`). Sleeper opens on its last-viewed screen (bare rung). No Safari.
+  11. Not installed: `RCTLinkingManager.mm:111` rejects "Unable to open URL" → `opened` returns `false` (`openExternal.ts:104-105`) → `:87-90` the D2 alert (`showAppMissing` `:110-126`: "Sleeper isn’t installed" / **Cancel** · **Get Sleeper**) → `'fallback'` → `'not_installed'`. https is never tried. **Get Sleeper** (`:118-121`) opens `https://apps.apple.com/app/id987367543`; if that rejects too, "Couldn’t open that link".
 
   **B. Usage Trends → Add → claim sheet → CTA**
   1. Entry: a card/row Add (`UsageTrendsScreen.tsx:382`, `:407`, the focused league) or the availability sheet's per-league Add (`:674`, any league) → `doAdd` `:285-295`.
   2. `:286` `trackAction('add')` (unchanged) → `:287` `resolveAddPlatform(lgId)` → `:290` non-Sleeper `explainNoAdd` (unchanged, S9) → `:293` `switchTo(lgId)` (`:228-242`; a non-focused league goes through `switchLeague` at `:236`, so the session league becomes the claim league) → `:294` `setClaim({ target, leagueId: lgId })`.
   3. Mount `:679-692`: `leagueId={claim.leagueId}`; `:684` `leagueName` = the claim league's own name from `leagueMeta` (`:151`, the session's league list), else the session `league_name` (`:95`) only when `claim.leagueId === leagueId` (`:94`), else `null`; `:685` `surface="usage_trends"`. `faQuery` (`:135-141`) loads that league's capacity, waivers and drop candidates.
-  4. Then A4–A10, with `surface: 'usage_trends'`.
+  4. Then A4–A11, with `surface: 'usage_trends'`. The steps block names the claim league, which for a non-focused league is the one FTF just switched to.
 
   **C. Non-Sleeper invariance.** `ClaimSheet.tsx` `resolveAddPlatform`, `NO_ADD_REASON` and `explainNoAdd` (`:59-104`): no content change (S9). Free Agents' `onAdd` and Usage Trends' `doAdd` are unchanged.
 
@@ -100,21 +110,25 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   | 3 | **not installed** (Settings → General → iPhone Storage → Sleeper → Offload App) | Free agents → Add → CTA | Alert "Sleeper isn’t installed" with **Cancel** / **Get Sleeper**. **Get Sleeper** opens the **App Store app** on Sleeper's listing, with no Safari. **Cancel** returns to the sheet and opens nothing. Never a silent no-op. |
   | 4 | installed | Free agents → Add → **double-tap** the CTA fast | Exactly one app switch. |
   | 5 | — | An ESPN or MFL league → Free agents → **Add** | Unchanged: the "Can't add in ESPN leagues yet" / "Can't add in MFL leagues yet" alert. No sheet, no link. |
+  | 6 | installed, signed in | **Commit-2 variant.** As 1, on a league with open slots | Before the CTA, the sheet reads "In Sleeper: open **{L's name}** → Players → search **{player}** → Add" and "We'll copy {player} so you can paste it into search." After the CTA: switch to L in Sleeper if it opened M → Players → long-press the search field → **Paste** gives the player's name. |
+  | 7 | installed, **full roster** | **Commit-2 variant.** Free agents → Add → tap a drop, tap a different drop, then tap it again to clear it | The steps line gains "→ drop **{first drop}**", switches to the second drop's name, and loses the drop segment when cleared. Nothing else on the sheet moves. |
+  | 8 | installed | **Commit-2 variant.** As 2 (Usage Trends, a non-focused league) | The steps name **the league the Add targeted** (the one FTF switched to), not the previously focused league. |
 
 - [ ] **WAIVED because:** n/a, not waived.
-- `testID`s added/renamed: **none** (`fa-claim.open-sleeper` kept). `bash scripts/testid-lint.sh` → `testid-lint OK`.
+- `testID`s added/renamed: commit 1 none (`fa-claim.open-sleeper` kept); commit 2 adds `fa-claim.steps`. `bash scripts/testid-lint.sh` → `testid-lint OK` at both.
 
 **Commands run** (from `mobile/`; this worktree has no `node_modules` (G-022), so the guards ran with `NODE_PATH` pointed at another checkout's `mobile/node_modules`, at the same `package-lock.json`):
 
 | Command | Result |
 |---|---|
-| `node tests/check-sleeper-handoff.js` | 68 PASS, 0 FAIL |
+| `node tests/check-sleeper-handoff.js` | 68 PASS, 0 FAIL at commit 1; 75 PASS, 0 FAIL at commit 2 (+7 S8) |
 | `node tests/check-external-links.js` | 46 PASS, **4 FAIL, all pre-existing at `04eae95b`** (main's #360 added a `FeedbackSheet` mailto and removed three `SettingsScreen` links; the merge didn't update the LEGACY list). Not in this change's files. Before this change: 47 PASS, the same 4 FAIL. |
 | `node tests/check-usage-trends.js` | 76 PASS (§2i/2j, the shared ClaimSheet) |
 | `node tests/check-home-destinations.js`, `check-league-drill-in.js`, `check-picker-pick-filter.js` (the other guards that read `FreeAgentsScreen`) | all pass |
 | `node tests/check-send-button-platform.js`, `check-trade-text.js` | all pass |
+| every `tests/check-*.js` (121), at commit 2 | 119 pass in the worktree. The two others: `check-external-links.js` (the 4 pre-existing failures above) and `check-offer-prefill-330-unit.js`, which requires `mobile/node_modules/zustand` by absolute path, so it can't run here; on the scratch copy with `node_modules` linked it passes 14/14 |
 | `bash scripts/testid-lint.sh` | `testid-lint OK` |
-| `tsc --noEmit` | exit 0, run on a scratch copy of `mobile/` with a borrowed `node_modules` (same lock file). CI is the gate. |
+| `tsc --noEmit` | exit 0 at commit 1 and at commit 2, run on a scratch copy of `mobile/` with a borrowed `node_modules` (same lock file). CI is the gate. |
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
@@ -127,7 +141,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
 | `docs/cross-client-invariants.md` | n/a | No shared constant or enum. |
 | `docs/glossary.md` | n/a | No new UI term. |
 | ADR or `DECISIONS.md` | n/a | No new non-obvious choice. The `leagueName` precedence follows the brief; the hand-off design is #379's. |
-| `docs/integrations/sleeper.md` | **updated** | §1.3: the ClaimSheet row (was "Deep link (legacy, league-eng)", https) now describes the `openInSleeperApp({ target: 'add' })` call, its two hosts and surfaces, and the last-viewed-league risk. |
+| `docs/integrations/sleeper.md` | **updated** | §1.3: the ClaimSheet row (was "Deep link (legacy, league-eng)", https) now describes the `openInSleeperApp({ target: 'add' })` call, its two hosts and surfaces, and the last-viewed-league risk. Commit 2 adds the clipboard copy and the steps block to that row. |
 
 ## 5. Ship gate declaration
 
@@ -136,6 +150,23 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
 - **TestFlight verification:** checklist in §3; the operator runs it, and the outcome goes in TEST_LEDGER.
 - **Merge gate (from #379):** #351 device tests R0, 1–12 and T1–T4 recorded in `docs/plans/sleeper-fa-deeplink/device-results.md`. Test 3 (`sleeper://` registered) is go/no-go.
 - Express lane declared by the operator? **No.** Full gates.
+
+## Copy for design-lead
+
+Commit 2 only. Every string is the #351 PRD §4.2 draft for the `bare` rung, marked `COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2)` in `ClaimSheet.tsx`. Bold = the semibold emphasis (`fonts.uiSemi`, `chalk.base`) inside `type.body`; the copy line is the file's existing `sectionHint` (`type.bodySm`, `chalk.dim`). No new colours, no icons. As rendered (checked by a scratch render of the component under node):
+
+| State | Steps line | Copy line |
+|---|---|---|
+| league + drop | In Sleeper: open **{League}** → Players → search **{Name}** → Add → drop **{Drop}** | We'll copy {Name} so you can paste it into search. |
+| league, no drop | In Sleeper: open **{League}** → Players → search **{Name}** → Add | same |
+| no league name, drop | In Sleeper: Players → search **{Name}** → Add → drop **{Drop}** | same |
+| no league name, no drop | In Sleeper: Players → search **{Name}** → Add | same |
+
+Open for design-lead / ux-lead:
+- With no league name, "In Sleeper: Players → …" drops the league step entirely (per the brief), but at the bare rung the user still has to pick a league. PRD §4.3's degrade wording ("open your league → …") may read better.
+- "Add" vs "Claim" should match Sleeper's real labels, captured in the #351 device session (§7.3).
+- The bid isn't shown (PRD §4.2 lists it as optional).
+- VoiceOver reads "→" as "right arrow".
 
 ## Known risk
 
