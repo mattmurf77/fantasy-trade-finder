@@ -1,3 +1,101 @@
+## 2026-10-26 — Settings labels ESPN/MFL sign-in identities (the onboarding-eng side of platforms-eng's ESPN/MFL sign-in)
+
+Full gates, not express (scope: platforms-eng's ESPN/MFL sign-in, the onboarding-eng side; MUST 2 of onboarding-eng's design review). Mobile only; D-056: no simulator, `FTF_SKIP_SIM_GATE=1` posture. Frozen values (platforms-eng, 2026-10-26): identity provider `espn` / `mfl`, `verified_via` `espn` / `mfl_login`.
+
+- **Change (`87011998`):**
+  - a new shared map, `screens/settings/identityLabels.ts`: apple/google/espn/mfl → "Signed in with Apple/Google/ESPN/MFL"; `identityLabel()` returns null for any other provider;
+  - `AccountIdentitySection` and the flag-off flat `SettingsScreen` render `identityLabel(ident.provider)` and **no row** for an unknown provider. Before this, every non-Apple identity read "Signed in with Google";
+  - `SettingsHubScreen`: the provider type gains `espn` / `mfl`; the `verified_via` fallback maps `espn` and `mfl_login`; the labels are "ESPN" / "MFL". The Sleeper and demo branches are unchanged;
+  - `AccountInfo` identities' provider type gains `'espn' | 'mfl'`.
+  - Not touched: `SignInScreen.tsx`, the link sheets and `platformEntry.ts`. The `handleEntrySession` pass-through is platforms-eng's, on #443.
+- **New guard `check-signin-identity-labels.js`** (`npm run test:signin-identity-labels`), 4 pins:
+  1. the map labels `apple`, `google`, `espn` and `mfl` exactly, and an unknown provider gets null (executed);
+  2. no `: 'Signed in with …'` fallback anywhere in `mobile/src`, and no "Signed in with …" literal outside the map;
+  3. both row renderers take the label from `identityLabel()` and return null without one;
+  4. the hub's own `verifiedVia` / `provider` / `signInLabel` declarations, executed: espn/mfl identities and `verified_via` `espn` / `mfl_login` give "ESPN" / "MFL"; Apple, Google, Sleeper and demo are unchanged.
+- **Changed pin:** `check-settings-ia.js`'s identity-row marker moves from the literal `Signed in with Apple` to the `identityLabel(ident.provider)` call that renders it.
+- **Sabotage: 21/21 red,** each restored byte-identical. That includes the moved settings-ia marker and the whole change reverted to `origin/main`.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; 118/118 `check-*.js`.
+- **Operator TestFlight check,** once a build has the ESPN/MFL sign-in (platforms-eng's #443):
+  1. Sign in with ESPN. Settings › Account shows "Signed in with ESPN", and the hub's account row reads "Signed in with ESPN" ("ESPN" in its preview).
+  2. Sign in with MFL. The same rows read "Signed in with MFL" / "MFL".
+  3. Apple and Google sign-ins are unchanged: "Signed in with Apple" / "Signed in with Google", and "Apple" / "Google" on the hub.
+- **release-lead QA fixes (`63603e47`, `d10046a0`):** the hub maps `mfl_login` → "MFL" only on an account-only session; `/api/mfl/auth-link` also writes `mfl_login` for a Sleeper user who connects MFL, who stays "Sleeper" (P2). `espn` stays unguarded. Pin 4 gains release-lead's case (a Sleeper user verified by MFL auth-link → "Sleeper"); it fails on `40da9bc0`. **Sabotage 3/3 red.** `AccountInfo.verified_via` admits `mfl_login` / `espn` (P3). Runs: tsc clean; testid-lint OK; 118/118 `check-*.js`. Operator step 4: a Sleeper user who connected MFL by password still reads "Signed in with Sleeper" on the hub.
+
+## 2026-10-27 — Session-init trade capture skips linked-platform leagues (G-030)
+
+Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or schema change; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/trade-capture-platform-guard`.
+
+- **Defect:** the `market.trade_capture` block in `session_init`'s background daemon gated on `str(league_id).isdigit()` alone. ESPN, MFL and Fleaflicker native ids are numeric, so every init on a linked league sent Sleeper `GET /league/<id>/transactions/<week>` reads with a platform-native id. A league with no captured rows is re-backfilled each time (`sweep_weeks` returns 1..18 until `has_sleeper_trades`), and a linked league never captures any, so that was 18 reads per init.
+- **Fix (`backend/server.py`, the `market.trade_capture` block):** added `and not _platform_linked`, the `is_linked_platform_league(league_id)` result the daemon already reads once at its top (the same guard the roster-history snapshot beside it uses). Sleeper leagues are unchanged.
+- **Tests (`test_session_init_sleeper_calls.py`, 7 tests):**
+  - The old MFL test tolerated `transactions` as a "known, pre-existing" Sleeper call. It is now `test_numeric_mfl_league_makes_no_sleeper_calls` and asserts `calls == {}`.
+  - New `test_numeric_espn_league_makes_no_sleeper_calls` (a numeric ESPN-linked league, same assertion).
+  - New `test_sleeper_league_still_captures_trades` (a Sleeper league with no captured rows makes exactly 18 `transactions` reads).
+- **Sabotage, red then restored:** the `and not _platform_linked` line removed → the MFL and ESPN tests red (`assert {'transactions': 18} == {}`); the other 5 stay green.
+- **Targeted:** `test_session_init_sleeper_calls`, `test_session_init_single_flight`, `test_market_data_readiness`, `test_co_owner_rosters`, `test_roster_refresh_state`, `test_players_refresh`, `test_account_only_harness`, `test_verified_sessions`, `test_trade_fingerprint_reads_unlocked`, `test_prepared_trade_runtime` → 162 passed.
+- **Not run:** the full suite (CI runs it); no live Sleeper calls (every fetch is mocked).
+
+## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
+
+Gates: QA follow-ups to #486 (stacked on it). No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 3 → 4:
+- `_run_trade_job` gains `_job_draft_context` (one memoized draft-verdict read);
+- `_job_draft_picks` notes the picks with that verdict;
+- the worker hands both reads to `_owner_generation_context` (new `job_draft_picks` / `job_draft_context` params; other entrances read their own).
+
+The values are the same, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Covered:**
+  - P3-1: the owner path's second picks read is gone for trade jobs.
+  - P3-2: the match docstring states the A2 rule for None stamps.
+  - P3-3: spy tests for "one kickoff read" and "every worker picks read is noted", with the owner path on.
+  - P3-4: a key that can't be computed unstamps.
+  - P3-5: the picks key covers the draft verdict (kickoff and worker).
+- **Backend:** `test_trade_freshness_roster.py` is now 49 tests (6 new):
+  - a draft-verdict flip unstamps;
+  - an unchanged verdict keeps the stamp;
+  - a failed key unstamps;
+  - one kickoff read;
+  - every worker picks read noted;
+  - the owner context uses the job's reads.
+- `test_deck_pipeline_digest.py` (v4 in FROZEN_PINS) and `test_pick_assignment.py` pass, 44 together.
+- **Sabotage, each red then restored (10):**
+  - the owner path reading its own picks (QA's T5);
+  - the inject path reading its own (`picks=None`);
+  - the opponent shares reading their own;
+  - the owner path ignoring the job's picks, or its draft;
+  - the kickoff key without the verdict;
+  - the note without the verdict;
+  - a failed key keeping the stamp;
+  - the kickoff reading twice.
+  - Green by design: the seeded-outlook site (`_infer_user_outlook(..., _job_draft_picks())`) runs only without `prefs_preload`, which a kickoff always supplies.
+- **models-eng's review: OK on the success path, one objection, fixed.**
+  - **The objection:** the shared memos turned a failed read into an owner arm serving cards with no draft protection. Before, the owner path's own read raised, its context capture failed and the arm forfeited.
+  - **The fix:** the memos remember the failure, and the owner path gets views that re-raise it. The stamp check keeps its degrade-to-empty.
+  - **v4 is re-pinned in place** (`864cf30974da20ea`, in DECK_PIPELINE_PINS and FROZEN_PINS), since v4 was never on main.
+  - **Tests (3 new):** the owner context builds from the job's reads; a raising picks read forfeits the owner arm; a raising draft read forfeits it.
+  - **Sabotage, each red then restored (4):** the owner path given each degrading memo; each view never raising. QA's T5 is still red on the new call site.
+  - **Full suite** on `54e42967`: 9340 passed, 2 skipped, 0 failed (12m12s). An earlier run on `56d395d0` is discarded: its 15 failures were source-reading tests that saw `server.py` mid-edit, and they pass on this head.
+  - **models-eng OK at `54e42967` (2026-10-27).** The objection is resolved and the pin reproduces. Their stricter-edge note: an earlier failed read in the same job now forfeits the owner arm, where its own re-read might have succeeded. That fails closed, by design.
+
+## 2026-10-27 — Web gate: the web's ESPN/MFL chips are hard-off (before ask 16)
+
+Full gates (head-eng's ask, item 3; scope: [scope-web-gate.md](../docs/plans/landing-platform-options/scope-web-gate.md)). Web only; D-056: `FTF_SKIP_SIM_GATE=1` posture, no mobile change.
+
+- **Change:** `web/js/app.js` `const WEB_PLATFORM_ENTRY = false` replaces both reads of `landing.platform_options` (the chip reveal and `selectEntryPlatform`). It's declared above `_applyLandingFlags()`, which runs the reveal at once (no TDZ).
+- **Pin `GATE-web-espn-mfl-off[index.html]`** (`qa/web/check_web_structure.py`):
+  - no web script or page reads the flag;
+  - exactly one `const WEB_PLATFORM_ENTRY = false;`;
+  - the reveal and the handler both go through it;
+  - the row and both chips ship `hidden`.
+  - **Sabotage 8/8 red,** each restored byte-identical.
+- **Runtime (local static serve):** every flag forced on and `ftf:flags-ready` fired leaves the row and chips hidden, and `selectEntryPlatform('espn')` is a no-op. The same script on the pre-change code shows them and selects ESPN (the control). The console shows only the static server's `/api/feature-flags` 404.
+- **Runs:** `python3 qa/web/check_web_structure.py` 196/196 (CI's `web-structure` job); `node --check` OK on both changed JS files.
+- **`qa/web/check_browser_auth_runtime.cjs`** (local Playwright harness, not in CI): its ESPN-chip click now asserts the row and both chips are hidden, with no `/api/entry/platform` call.
+  - **Not run:** no Playwright install here.
+  - The replaced lines were already stale on main: they waited for an ESPN/MyFantasyLeague sentence that's gone from `web/`.
+- **Not covered:** no JS unit harness on web; the operator's optional post-deploy look (signed out, flag ON: Sleeper door only) is in the scope block.
+
 ## 2026-10-27 — S0 stamp hashes the picks the worker read (#484 QA P2-1); deck pipeline v3
 
 Gates: a QA fix inside the 200 ms programme's S0 scope. No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 2 → 3: `_run_trade_job`'s `_job_draft_picks` now calls `_note_job_picks_read`, so the deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -217,6 +315,37 @@ Gates: this is a QA fix inside the 200 ms programme's S0 scope (`scope-eng-200ms
   - A refreshing user's own deck from before their new read still ends at its next page with "Couldn't load more trades." + Try again. Revoking it is intended, since Try again rebuilds on the newer read. An automatic re-search is a mobile change (offered for the 11-06 binary).
   - A user with two devices: a newer session on one device makes the other device's older deck revocable (the rule is per user, not per session). That is no worse than #470 as it stands.
 
+## 2026-10-26 — LEG-S6: a fresh Apple code on the verified delete, so Sign in with Apple is revoked (split from #372)
+
+Full gates, not express (scope: #354 LEG-S6; split out when #372, the M11 claim-only delete, was closed on 2026-10-26). D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `deleteAccount` sends `apple_authorization_code` only when a code exists; otherwise it sends the old body-less DELETE. `AccountDataSection` asks an Apple-linked account on iOS for a fresh Apple credential right before the verified DELETE. Cancelling or any failure sends no code, and the deletion proceeds. The server half has been on main since #354 (`accounts.revoke_apple_tokens`, `DELETE /api/account` at `server.py:31916-31925`). No route change.
+- **New guard `check-apple-revoke-on-delete.js`** (`npm run test:apple-revoke-on-delete`), 5 pins, the first three executed with stubs:
+  1. the code is sent only as `apple_authorization_code`, otherwise `{method:'DELETE'}` exactly;
+  2. the prompt appears only when Apple-linked, on iOS and available, with `requestedScopes: []`;
+  3. cancel, failure, a null code, Android or not-linked return null and the DELETE still goes out once;
+  4. `setSessionToken` / `appleSignIn` are never touched on this path;
+  5. the verified delete is the only caller.
+- **Sabotage: 22/22 red,** each restored byte-identical; 1 of them reverts the whole change to `origin/main`.
+- **Local runs:** `tsc --noEmit` clean; testid-lint OK; 118/118 `check-*.js`; `pytest backend/tests/test_account_data_rights.py` 12 passed (it includes `test_delete_attempts_revocation_and_never_blocks`).
+- **Known gaps:**
+  - The flat `SettingsScreen` fallback, used only with `account.settings_hub` off, still deletes without a code. The hub is on, so this is an optional follow-up.
+  - An Apple-linked account on an unverified session would see the Apple sheet before the existing 403. Apple sign-in sessions are always verified.
+- **Operator TestFlight check, 11-10 to 11-11,** once Render has `APPLE_TEAM_ID`, `APPLE_KEY_ID` and `APPLE_PRIVATE_KEY`:
+  1. An Apple account deletes: the Apple prompt appears, then the account is deleted.
+  2. Afterwards, Fleeced is gone from iOS Settings → Apple ID → Sign in with Apple.
+  3. Cancelling the prompt still deletes.
+  4. A Sleeper-only account sees no prompt.
+- **release-lead QA fixes (`4ce9d44a`, `7964bc6d`, `13e5d445`, `c0e934ce`):**
+  - (a) each Apple HTTP call times out at 5 s (`APPLE_HTTP_TIMEOUT_S`; 2 × 5 s is under the client's 15 s). The client half isn't done: `apiRequest` has no per-call timeout (`deadlineAt` only shortens);
+  - (b) pin 6: no `console.*` on the Apple-code path;
+  - (d) the code is revoked only when its id_token `sub` is the account's linked Apple identity; a mismatch or no id_token deletes without revoking (`apple_revoked: false`);
+  - no Apple sheet on a known-unverified session;
+  - the runbook warns off rolling back `account.settings_hub`.
+  - **Sabotage: 2/2 + 3/3 + 7/7 + 5/5 red.**
+  - Runs: pytest 128 passed (account / Apple / deletion set); tsc clean; testid-lint OK; 118/118 `check-*.js`.
+  - Operator step 5: with a different Apple ID signed in on the device than the account's, delete. The account is deleted, and the account's own Fleeced entry stays under Sign in with Apple (it isn't revoked).
+
 ## 2026-10-26 — Entry purge: platform pick-grid owner anonymization + `scripts/purge_entry_users.py`
 
 Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's ruling of 2026-10-26, option (a) scoped, as owner of the deletion path). Backend and script only. **No prod access:** local and in-memory SQLite only. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
@@ -273,6 +402,9 @@ Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's
 - **2026-10-27, head-eng's pre-prod-run asks (`e844115b`, `39c31ff0`):**
   - **Pick-grid names:** a platform-grid row anonymized by id also drops the deleted person's `owner_username` / `original_username` for "Team <slot>" (the writers' own fallback; the placeholder when no slot is known). 1 new deletion test; **sabotage 6/6 red.**
   - **Census:** the dry run printed, counts only, the verified entry users it skips (by kind and `verified_via`), which skipped users hold an ESPN/MFL credential, and target-owned leagues with another Fleeced member. 1 new purge test; **sabotage 6/6 red.** Superseded by `ad3aa954`: analytics-lead ran the prod count, so the dry run keeps only the credential counts.
+  - **Runs (onboarding-eng):**
+    - purge, `test_account*`, deletion races, lifecycle, persistent sessions, owned picks, recorded picks, pick assignment, module shape: **311 passed** (14 files);
+    - after the main merge `8024f16a`, the same plus `deck_i1_check` and the S0 roster tests: **440 passed** (18 files).
 - **2026-10-27, legal R28.17 A1 (`ad3aa954`).** The count found 2 entry users, both the operator's test logins: 1 unverified `entry:espn` and 1 verified MFL-only `entry:mfl` with 1 `mfl_credentials` row.
   - **The new flag.** `--delete-verified-credentials M` deletes only the verified entry users' ESPN/MFL credential rows in the same execute. M is pinned like `--expect`.
   - **Verify (g)** is R28.16 part 1: zero entry users without `verified_via`.
@@ -282,7 +414,9 @@ Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's
     - the league still lists;
     - the send is 409 `mfl_not_connected` "Sign in with MFL first.", never a 500.
     - Sabotage on the server routes: **3/3 red.**
-  - **Run:** purge + reconnect, 52 passed.
+  - **Runs (onboarding-eng):**
+    - purge + reconnect, 52 passed;
+    - before the push, purge, reconnect, `test_account*`, deletion races, lifecycle, MFL propose, I-2 MFL, link status, auth-link and module shape: **283 passed** (15 files).
 - **2026-10-27, release-lead round 5 @ `b2c49ec6`: NO-GO on P1-1 → fixed in `f16c5c38`:**
   - **P1-1, the credential step fails closed:**
     - it's skipped after a failed target;
@@ -296,8 +430,31 @@ Full gates (legal R28.12 row 2 and R28.16; head-eng 2026-10-26; onboarding-eng's
     - the two-slot and alias-slot tests;
     - (b) is case-sensitive on SQLite;
     - a blank `verified_via` isn't verified.
-  - **Tests:** 6 new purge tests and 2 cases in the names test. **Sabotage: purge 7/7, pick-grid 4/4 red.**
-  - **Runs (onboarding-eng):** purge, `test_account*`, deletion races, lifecycle, persistent sessions, owned picks, recorded picks, pick assignment, module shape: **311 passed** (14 files).
+  - **Tests:** 6 new purge tests and 2 cases in the names test.
+  - **Sabotage, 11 red,** each restored byte-identical:
+    - **purge 7/7:**
+      - the credential step runs after a failed target;
+      - a credential-step error isn't caught;
+      - no exact-M check at the write;
+      - the delete has no filter;
+      - the delete hits every `entry:` row;
+      - (b) is case-insensitive again;
+      - a blank `verified_via` counts.
+    - **pick-grid 4/4:**
+      - the owner of an own pick uses the league slot;
+      - the two-slot rule is dropped;
+      - own slots are read from the requested id only;
+      - batches are keyed on the owner's values only.
+  - **Runs (onboarding-eng):** purge, reconnect, `test_account*`, deletion races, lifecycle, owned picks, recorded picks, pick assignment, MFL propose, I-2 MFL, link status and module shape: **405 passed** (17 files).
+- **2026-10-27, release-lead round 6 @ `18a5347e`: GO-with-notes (no P1, no P2):**
+  - **Fail closed:** the fail-closed matrix passes on SQLite and PG, and multi-chunk M = 1,500 runs in one transaction.
+  - **Prod shape:** it gives N = 1 / M = 1.
+  - **Batching:** the batched UPDATEs take 106 statements vs 603.
+  - **Sleeper and legacy rows:** byte-identical to main.
+  - **Sabotage:** 37/37 red.
+  - **Tests:** 1,660 passed on head and 1,670 on the trial merge; CI green.
+  - **Then:** a docs-only main merge (the api-reference `DELETE /api/account` row keeps both #446's text and this PR's; this ledger).
+  - **P3-1 → follow-up A:** a pick moved between the person's own two slots is named after its original slot.
 
 ## 2026-10-26 — I-2 follow-ups: validate gate includes `espn.send`; `sleeper_send_failed.error_code` is 20 values; R3 reports `kind: roster_read`
 

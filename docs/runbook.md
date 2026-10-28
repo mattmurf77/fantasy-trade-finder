@@ -317,6 +317,7 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - Edit `config/features.json` and commit/deploy, OR
 - `POST /api/feature-flags/reload` to re-read without restart, OR
 - Set `FTF_FLAGS` env var for process-level overrides.
+- Don't roll back `account.settings_hub` after the 11-06 build: the flat Settings fallback deletes without the LEG-S6 Apple code (#446).
 
 ---
 
@@ -1116,7 +1117,7 @@ Operator report: "Draft picks are missing from league summary" (League Rankings,
 
 - **Fix (2026-07-27):** the daemon now discriminates with `is_linked_platform_league(league_id)`: platform-linked numeric ids skip the Sleeper grid sync and re-run `_sync_mfl_owned_picks` instead (no network — reads `leagues.platform_future_picks`). This also **self-heals** previously clobbered leagues on their next session init; no manual data repair needed. Tests: `backend/tests/test_owned_picks.py::test_numeric_mfl_id_detected_as_platform_league`, `::test_mfl_renormalization_restores_clobbered_picks`.
 - **Diagnosis pattern for "X missing from league summary":** check `draft_picks` rows for the ACTIVE league id first (`SELECT league_id, COUNT(*) FROM draft_picks GROUP BY league_id`) — the League Summary client renders picks only when the payload carries non-zero `teams[].picks`, and it degrades silently (no pill, no bar segment, no Draft capital section) when the league has no pick rows. The client had no bug here.
-- **Watch item:** other Sleeper-only session-init daemons still gate on `isdigit()` alone (scoring auto-detect meta fetch, trade capture, lineup-slot fetch). They fail soft for MFL ids (no writes to shared stores) but waste a Sleeper call; if one ever gains a replace-style write, it needs the same `is_linked_platform_league` guard.
+- **Watch item (updated 2026-10-27):** every Sleeper-only session-init daemon step now checks `is_linked_platform_league`, so a numeric MFL/ESPN/Fleaflicker id makes no Sleeper call. The scoring auto-detect meta fetch (`_fetch_sleeper_league_meta`) checks it itself, and the lineup-slot fetch (`_sleeper_lineup_slots`) reaches Sleeper only through that meta fetch. The last gap was trade capture: its `market.trade_capture` block gated on `isdigit()` alone, so a numeric MFL/ESPN id cost up to 18 Sleeper `transactions` reads per init; it now also checks `_platform_linked`. When adding a daemon step that calls Sleeper, give it the same guard: a step that gains a replace-style write without it would clobber a linked league's data, as in #200.
 
 ## Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)
 

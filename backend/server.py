@@ -230,6 +230,12 @@ from .database import (
     load_leaderboard, get_self_leaderboard_row,
     # In-app feedback (TestFlight helper) — POST /api/feedback writes here
     save_feedback,
+    # #360 QA P2-1: an unverified session's notes follow it when it verifies
+    attach_session_feedback,
+    # release-lead delta QA E: a re-pointed token's notes never attach
+    detach_session_feedback,
+    # #360 QA P2-2: a throttled retry of a held note still answers `duplicate`
+    find_feedback_by_client_id,
     # GET /api/feedback/admin — operator readback, CRON_SECRET-protected
     list_feedback,
     # Bad-trade flags (FB #85) — POST /api/trades/flag + admin readback
@@ -4078,7 +4084,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 3
+DECK_PIPELINE_VERSION = 4
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4202,6 +4208,7 @@ DECK_PIPELINE_PINS = {
     1: "38068a074677acaa",
     2: "9e79b6087f6e1a42",   # #370: deferred-evidence plumbing in _run_trade_job / _run_value_core_job (no shape change; models-eng 10-26)
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
+    4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -7391,9 +7398,11 @@ def _trade_fingerprints_match(job: dict, current, *, running: bool = False,
 
     `current` is the caller's _trade_current_fingerprints() for the job's
     league and format. Compare only: this runs under _trade_jobs_lock. A None
-    stamp from a failed kickoff read never matches. A None `current` (a failed
+    stamp (a failed kickoff read, or a worker that read other picks:
+    `_note_job_picks_read`) never matches a read. A None `current` (a failed
     read) can't prove staleness (contract §4.4, A2): it keeps a RUNNING job
-    (`running=True`) and never makes a completed job fresh. Hand-built jobs
+    (`running=True`), whatever its stamp, None included, and never makes a
+    completed job fresh. Hand-built jobs
     without the stamp are not checked, like `request_signature`; with
     `trade_i1_mode` 0 nothing is.
 
@@ -11662,9 +11671,26 @@ def _run_trade_job(
         # one: 0.0 share, empty opponent shares.
         _picks_memo: list = []
         _picks_loaded = False
+        _picks_failure = None
+        _draft_memo: dict = {}
+        _draft_loaded = False
+        _draft_failure = None
+
+        def _job_draft_context() -> dict:
+            # ONE draft-verdict read per job, like the picks: the owner path's
+            # draft context and the stamp check share it (#486 QA P3-5).
+            nonlocal _draft_memo, _draft_loaded, _draft_failure
+            if not _draft_loaded:
+                _draft_loaded = True
+                try:
+                    _draft_memo = get_league_draft_context(league_id) or {}
+                except Exception as draft_err:
+                    log.warning("trade-job: draft context read failed: %s", draft_err)
+                    _draft_memo, _draft_failure = {}, draft_err
+            return _draft_memo
 
         def _job_draft_picks() -> list:
-            nonlocal _picks_memo, _picks_loaded
+            nonlocal _picks_memo, _picks_loaded, _picks_failure
             if not _picks_loaded:
                 _picks_loaded = True
                 try:
@@ -11672,9 +11698,25 @@ def _run_trade_job(
                                                    source=_pick_read_source())
                 except Exception as picks_err:
                     log.warning("trade-job: draft picks read failed: %s", picks_err)
-                    _picks_memo = []
-                _note_job_picks_read(job_id, _picks_memo)
+                    _picks_memo, _picks_failure = [], picks_err
+                _note_job_picks_read(job_id, _picks_memo,
+                                     _job_draft_context().get("status") == "drafted")
             return _picks_memo
+
+        # The owner path's view of the same two reads: a failed read raises, so
+        # its context capture fails and the owner arm forfeits, as when it read
+        # them itself. Every other reader keeps the degrade-to-empty above.
+        def _owner_job_draft_picks() -> list:
+            picks = _job_draft_picks()
+            if _picks_failure is not None:
+                raise _picks_failure
+            return picks
+
+        def _owner_job_draft_context() -> dict:
+            draft = _job_draft_context()
+            if _draft_failure is not None:
+                raise _draft_failure
+            return draft
 
         # Outlook + positional preferences
         outlook_value        = None
@@ -12036,7 +12078,8 @@ def _run_trade_job(
                     seed_map=seed_map, user_elo=elo_map_rt, user_roster=g_user_roster,
                     scoring_format=active_format, fairness_threshold=fairness_threshold,
                     captured_rankings=real_rankings, captured_preferences=_opp_prefs,
-                    captured_config=owner_config,
+                    captured_config=owner_config, job_draft_picks=_owner_job_draft_picks,
+                    job_draft_context=_owner_job_draft_context,
                     viewer_preferences={**(prefs or {}), "team_outlook": explicit_outlook,
                         "inferred_outlook": outlook_value if explicit_outlook is None else None,
                         "acquire_positions": acquire_positions, "trade_away_positions": trade_away_positions,
@@ -13332,19 +13375,22 @@ def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
         return False
 
 
-def _note_job_picks_read(job_id, picks) -> None:
-    """The worker read its picks (once per job, `_job_draft_picks`). The kickoff
-    stamp (and `roster_fp_expected`) hashed the picks stored at kickoff; when
-    the worker read different ones (a pick move, or an older refresh writing
-    back, between the two reads), the stamp doesn't describe the job: it is
-    dropped to None (never reused, never stored) with the expected fp, so no
-    later re-stamp can mark it fresh (#484 QA P2-1). Never raises."""
+def _note_job_picks_read(job_id, picks, drafted: bool = False) -> None:
+    """The worker read its picks and draft state (once per job,
+    `_job_draft_picks` and `_job_draft_context`). The kickoff stamp (and
+    `roster_fp_expected`) hashed the picks and draft verdict stored at kickoff;
+    when the worker read different ones (a pick move, an older refresh writing
+    back, or a draft verdict flip, between the two reads), the stamp doesn't
+    describe the job: it is dropped to None (never reused, never stored) with
+    the expected fp, so no later re-stamp can mark it fresh (#484 QA P2-1,
+    #486 QA P3-5). A key that can't be computed unstamps too (#486 QA P3-4).
+    Never raises."""
     try:
         from . import roster_snapshot
-        key = roster_snapshot.picks_key(picks)
+        key = roster_snapshot.picks_key(picks, drafted)
     except Exception as err:
         log.warning("trade-job %s: picks key unavailable: %s", job_id, err)
-        return
+        key = None
     with _trade_jobs_lock:
         job = _trade_jobs.get(job_id)
         if job is None or job.get("roster_picks_key") in (None, key):
@@ -15292,8 +15338,175 @@ def _derive_board_from_format(source_elo: dict[str, float], to_format: str) -> d
 FEEDBACK_TEXT_MAX = 8000
 
 
+# #360 QA P2-2: the public POST's body cap and throttle. The cap is checked
+# against Content-Length BEFORE the body is read (the analytics_ingest idiom;
+# never Flask's app-global MAX_CONTENT_LENGTH). The throttle is in-process:
+# a per-key deque of accepted-note times over a rolling hour, so it resets
+# on deploy, like the analytics limiter. It is a brake on runaway or abusive
+# volume, not authentication: the device id and X-Forwarded-For are
+# client-supplied, so only a verified user_id is a key a caller can't pick.
+# An unverified session is keyed by its token's hash, so users behind one
+# carrier NAT don't share the IP's budget (the mobile POST and the web form
+# send no X-Device-Id); a token must resolve to a live session to count, so
+# an unknown one falls through to device / IP rather than minting budgets.
+FEEDBACK_MAX_BODY_BYTES = 64 * 1024
+FEEDBACK_RATE_LIMIT = 20             # accepted notes per rolling hour per key
+FEEDBACK_RATE_WINDOW_S = 3600
+FEEDBACK_RATE_MAX_KEYS = 10_000      # memory bound: attacker-chosen keys
+# Release-lead delta QA B (P2-1): one shared ceiling across every ANONYMOUS
+# note (neither a verified user nor a resolvable session, i.e. the device and
+# IP tiers). Those keys are client-chosen (X-Device-Id) or may be a rotating
+# Render-internal peer, so per-key budgets alone can't stop deliberate abuse.
+# A separate deque, never in _feedback_rate: flooding new keys there evicts
+# old keys, and must not be able to evict this one. Bounded by the limit.
+FEEDBACK_ANON_GLOBAL_LIMIT = 300     # accepted anonymous notes per rolling hour, all callers
+_feedback_rate_lock = threading.Lock()
+_feedback_rate: dict[str, collections.deque] = {}
+_feedback_anon_global: collections.deque = collections.deque()
+
+
+# _SIGNIN_TRUSTED_PROXY_HOPS, _xff_hops and _client_ip below are copied byte
+# for byte from #430 (feat/platform-sign-in, server.py). Whichever PR merges
+# second deletes its own three definitions; two would shadow each other
+# (test_server_module_shape).
+_SIGNIN_TRUSTED_PROXY_HOPS = 1
+
+
+def _xff_hops() -> list[str]:
+    return [h.strip() for h in
+            (request.headers.get("X-Forwarded-For") or "").split(",")
+            if h.strip()]
+
+
+def _client_ip() -> str:
+    """The caller's IP for the D7 limiter: the X-Forwarded-For hop
+    _SIGNIN_TRUSTED_PROXY_HOPS from the right (1 = rightmost), else
+    remote_addr when the header has fewer hops than that. Every hop left of
+    the ones our proxies append is client-supplied (a client can send any
+    XFF it likes), so the leftmost value is attacker-chosen and would let one
+    client rotate through unlimited buckets."""
+    hops = _xff_hops()
+    n = _SIGNIN_TRUSTED_PROXY_HOPS
+    if n >= 1 and len(hops) >= n:
+        return hops[-n]
+    return request.remote_addr or "unknown"
+
+
+def _feedback_rate_key(user_id, session_key=None) -> str:
+    """Verified user, else an unverified session (by `session_key`, the
+    sha256 hex _feedback_session_key gives, never the raw token), else
+    X-Device-Id, else the client IP."""
+    if user_id:
+        return f"user:{user_id}"
+    if session_key:
+        return f"session:{session_key}"
+    device = (request.headers.get("X-Device-Id") or "").strip()
+    if device:
+        return f"device:{device[:200]}"
+    return f"ip:{_client_ip()}"
+
+
+def _feedback_rate_reserve(key: str, now: float) -> bool:
+    """Reserve one accepted-note slot for `key`. False when the rolling hour
+    is full. A reservation the save doesn't use (a duplicate, a failure) is
+    given back with _feedback_rate_release, so duplicates never count."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times is None:
+            if len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                # Prune keys with nothing in the window, then the oldest.
+                for k in [k for k, d in _feedback_rate.items() if not d or d[-1] <= cutoff]:
+                    del _feedback_rate[k]
+                while len(_feedback_rate) >= FEEDBACK_RATE_MAX_KEYS:
+                    _feedback_rate.pop(next(iter(_feedback_rate)))
+            times = _feedback_rate[key] = collections.deque()
+        while times and times[0] <= cutoff:
+            times.popleft()
+        if len(times) >= FEEDBACK_RATE_LIMIT:
+            return False
+        times.append(now)
+        return True
+
+
+def _feedback_rate_release(key: str, now: float) -> None:
+    with _feedback_rate_lock:
+        times = _feedback_rate.get(key)
+        if times:
+            try:
+                times.remove(now)
+            except ValueError:
+                pass
+
+
+def _feedback_anon_global_reserve(now: float) -> bool:
+    """Reserve one slot under FEEDBACK_ANON_GLOBAL_LIMIT (anonymous notes
+    only). False when the shared rolling hour is full; given back with
+    _feedback_anon_global_release like a per-key slot."""
+    cutoff = now - FEEDBACK_RATE_WINDOW_S
+    with _feedback_rate_lock:
+        while _feedback_anon_global and _feedback_anon_global[0] <= cutoff:
+            _feedback_anon_global.popleft()
+        if len(_feedback_anon_global) >= FEEDBACK_ANON_GLOBAL_LIMIT:
+            return False
+        _feedback_anon_global.append(now)
+        return True
+
+
+def _feedback_anon_global_release(now: float) -> None:
+    with _feedback_rate_lock:
+        try:
+            _feedback_anon_global.remove(now)
+        except ValueError:
+            pass
+
+
+def _feedback_session_key(token: str) -> str:
+    """sha256 hex of a session token: the proof that links an unverified
+    session's notes to that same session later (#360 QA P2-1). The token is
+    a bearer secret, so only its hash is ever stored."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _attach_presession_feedback(sess) -> None:
+    """Hand the notes this session sent while unverified to its user, now
+    that it has verified in place (#360 QA P2-1, head-eng's ruling).
+
+    Call right after an in-place `sess["verified"] = True`. The key is the
+    hash of THIS request's X-Session-Token, the session being verified, so
+    another session that verifies as the same user gets nothing (the proof
+    is the bearer token, never the username). It never raises: a failure
+    here must not fail the verification itself. No analytics event (the
+    BL-10 waiver allows no new events).
+
+    What attaches TODAY (release-lead delta QA D): only an in-place verify
+    that actually runs for an unverified session, i.e. POST
+    /api/sleeper/link with a proven token. The other two hooks are
+    defensive and reach no unverified session today:
+      - POST /api/mfl/auth-link sits behind @_gate_unverified_write, which
+        403s every unverified session before the verify;
+      - provider re-auth (/api/auth/<provider>) from an unverified session
+        drops that session and mints a new one with a new token.
+    So pre-verify notes from ESPN/MFL-entry and Apple/Google sessions stay
+    anonymous. The hooks stay, harmless, in case either path changes.
+    """
+    try:
+        token = request.headers.get("X-Session-Token", "")
+        user_id = sess.get("user_id") if sess is not None else None
+        if not token or not user_id:
+            return
+        moved = attach_session_feedback(
+            _feedback_session_key(token), user_id,
+            sess.get("display_name") or sess.get("username"))
+        if moved:
+            log.info("feedback: attached %d pre-verify note(s) to user_id=%s",
+                     moved, user_id)
+    except Exception as e:
+        log.warning("feedback: attach on verify failed (verification "
+                    "unaffected): %s", e)
+
+
 @app.route("/api/feedback", methods=["POST"])
-@_gate_unverified_write
 def submit_feedback_route():
     """POST /api/feedback — in-app feedback capture from mobile.
 
@@ -15304,14 +15517,61 @@ def submit_feedback_route():
       text                required, non-empty, ≤ FEEDBACK_TEXT_MAX chars
       client_created_at   required, ISO timestamp from the client
 
-    Auth is best-effort: if X-Session-Token resolves to a session we
-    attribute the note to that user, otherwise we accept anonymously.
-    External testers' submissions land regardless of sign-in state.
+    Auth is best-effort: if X-Session-Token resolves to a VERIFIED session
+    we attribute the note to that user; every other request (unverified,
+    no token, expired or unknown token) is accepted anonymously.
+
+    Deliberately NOT behind @_gate_unverified_write (#354 D-2(a)): the
+    route takes anonymous notes anyway, so the gate protected nothing and
+    only 403'd an unverified user's note on every retry. An unverified
+    session's user_id is a claim anyone can make by naming a username
+    (D-183), so it never attributes a note. Its note stores the sha256 of
+    the session token instead (session_key), and moves to the user if that
+    same session later verifies in place (#360 QA P2-1).
 
     Idempotent on client_id — retries return 200 with `duplicate: true`.
 
+    Public-write limits (#360 QA P2-2): a body over FEEDBACK_MAX_BODY_BYTES
+    is 413 `too_large`, before it is read when it has a Content-Length, and
+    capped as it is read when chunked (exactly the cap is accepted); past FEEDBACK_RATE_LIMIT accepted
+    notes in a rolling hour per key (verified user, else an unverified
+    session's token hash, else X-Device-Id, else client IP) a NEW note is
+    429 `rate_limited`. Anonymous notes (no verified user and no resolvable
+    session: the device and IP tiers) also share one ceiling,
+    FEEDBACK_ANON_GLOBAL_LIMIT per rolling hour across ALL callers; past it a
+    new anonymous note is 429 `rate_limited` too, while verified users and
+    unverified sessions are neither counted nor blocked by it. Duplicates
+    never count, and a duplicate is still answered 200 when its key is
+    throttled.
+
     Contract spec: docs/plans/feedback-backend-sync.md
     """
+    # Size cap, pre-read (#360 QA P2-2). Clients keep a rejected note and
+    # retry it later (useFeedback._syncOne treats any error as unsynced).
+    # A body is too large when it is MORE than FEEDBACK_MAX_BODY_BYTES:
+    # exactly the cap is accepted, cap + 1 is 413.
+    if (request.content_length or 0) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
+    # A chunked body has no Content-Length, so the pre-check can't see it
+    # (release-lead delta QA C, P2-2). Cap the read itself with a
+    # per-request max_content_length. Werkzeug's limited stream returns the
+    # first `limit` bytes and only raises RequestEntityTooLarge on a read
+    # PAST the limit, so with limit == cap an over-cap body would come back
+    # silently truncated (and a 400) and a body of exactly the cap couldn't
+    # be told from a bigger one. So the limit is cap + 1 and the length is
+    # checked: at most cap + 1 bytes are ever read. get_data surfaces the
+    # error get_json(silent=True) would swallow; get_json then parses the
+    # cached bytes.
+    from werkzeug.exceptions import RequestEntityTooLarge
+    request.max_content_length = FEEDBACK_MAX_BODY_BYTES + 1
+    try:
+        raw_body = request.get_data(cache=True)
+    except RequestEntityTooLarge:
+        raw_body = None
+    if raw_body is None or len(raw_body) > FEEDBACK_MAX_BODY_BYTES:
+        return jsonify({"error": "too_large",
+                        "limit": FEEDBACK_MAX_BODY_BYTES}), 413
     body = request.get_json(force=True, silent=True) or {}
 
     client_id_raw = body.get("client_id")
@@ -15338,22 +15598,55 @@ def submit_feedback_route():
         return jsonify({"error": "text_too_long",
                         "limit": FEEDBACK_TEXT_MAX}), 400
 
-    # ── Best-effort session lookup; anonymous on miss ──────────────────
+    # ── Best-effort session lookup; attribute verified sessions only ───
+    # An UNVERIFIED session's note stays anonymous but carries the hash of
+    # its token (#360 QA P2-1), so the note follows the session if it
+    # verifies in place (_attach_presession_feedback). Never the raw token.
     user_id = None
     username = None
+    session_key = None
     token = request.headers.get("X-Session-Token", "")
     if token:
         with _sessions_lock:
             sess = _sessions.get(token)
-        if sess:
+        if sess and sess.get("verified"):
             user_id  = sess.get("user_id")
             username = sess.get("display_name") or sess.get("username")
+        elif sess:
+            session_key = _feedback_session_key(token)
 
     # Device snapshot — same headers client.ts already attaches.
     platform_label = "ios" if (request.headers.get("X-Device") or "").lower() in ("iphone", "ipad", "macos") else None
     device_type    = request.headers.get("X-Device")
     os_version     = request.headers.get("X-OS-Version")
     app_version    = request.headers.get("X-App-Version")
+
+    # Throttle (#360 QA P2-2): reserve an accepted-note slot; a duplicate or
+    # a failed save gives it back below, so only new notes count. An
+    # unverified session is keyed by its token hash (session_key above).
+    rate_key = _feedback_rate_key(user_id, session_key)
+    rate_at = time.time()
+    # Anonymous = neither a verified user nor a resolvable session (the
+    # device and IP tiers): those also spend FEEDBACK_ANON_GLOBAL_LIMIT.
+    anonymous = not user_id and not session_key
+    limited_by = None
+    if not _feedback_rate_reserve(rate_key, rate_at):
+        limited_by = rate_key.split(":", 1)[0]
+    elif anonymous and not _feedback_anon_global_reserve(rate_at):
+        _feedback_rate_release(rate_key, rate_at)
+        limited_by = "anon_global"
+    if limited_by:
+        held = find_feedback_by_client_id(client_id)
+        if held:
+            return jsonify({"ok": True, "server_id": held["server_id"],
+                            "created_at": held["created_at"], "duplicate": True}), 200
+        log.warning("feedback: rate_limited key=%s", limited_by)
+        return jsonify({"error": "rate_limited"}), 429
+
+    def _release_reservations():
+        _feedback_rate_release(rate_key, rate_at)
+        if anonymous:
+            _feedback_anon_global_release(rate_at)
 
     try:
         result = save_feedback(
@@ -15367,11 +15660,15 @@ def submit_feedback_route():
             platform=platform_label,
             device_type=device_type,
             os_version=os_version,
-            client_created_at=client_created_at if isinstance(client_created_at, str) else None,
+            client_created_at=client_created_at[:40] if isinstance(client_created_at, str) else None,
+            session_key=session_key,
         )
     except Exception as e:
+        _release_reservations()
         log.exception("save_feedback failed: %s", e)
         return jsonify({"error": "internal"}), 500
+    if result.get("duplicate"):
+        _release_reservations()
 
     # Tracking plan v2 §S3 — feedback_submitted. NEVER the note text (§S4);
     # anonymous submissions (no session) have no user to attribute to, and
@@ -19480,12 +19777,16 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
                               user_elo, user_roster, scoring_format,
                               fairness_threshold, captured_rankings=None,
                               captured_preferences=None, viewer_preferences=None,
-                              captured_config=None, **selection):
+                              captured_config=None, job_draft_picks=None,
+                              job_draft_context=None, **selection):
     """One captured raw-input adapter for organic AND selected entrances.
 
     Clone members: refreshing real boards here must not change a control's
     inputs. Seeded/simulated opponents never become observed personal data.
     Source tags describe actions; their counts never discount willingness.
+    `job_draft_picks` / `job_draft_context`: a trade job's one memoized read of
+    each, the ones its roster stamp is checked against (#486 QA P3-1); other
+    entrances read their own.
     """
     user_id = sess["user_id"]
     config = dict(_trade_service_mod._cfg if captured_config is None else captured_config)
@@ -19523,10 +19824,12 @@ def _owner_generation_context(*, sess, service, league, players, seed_map,
     if _bakeoff.owner_arm(config) == _bakeoff.ARM_OWNER_BILATERAL:
         # Only positive league draft evidence determines next-year protection
         # or expiry. The original manager, not today's holder, owns that intent.
-        draft = get_league_draft_context(league.league_id) or {}
+        draft = (job_draft_context() if job_draft_context is not None
+                 else get_league_draft_context(league.league_id) or {})
         verified = (draft.get("season") and draft.get("confidence") in {"high", "medium"}
                     and draft.get("status") in {"drafted", "not_drafted"})
-        pick_rows = load_draft_picks(league_id=league.league_id, source=_pick_read_source()) or []
+        pick_rows = (job_draft_picks() if job_draft_picks is not None
+                     else load_draft_picks(league_id=league.league_id, source=_pick_read_source())) or []
         next_year = (int(draft["season"]) + int(draft["status"] == "drafted")) if verified else None
         for uid, prefs in manager_preferences.items():
             prefs["draft_context"] = dict(draft)
@@ -23787,6 +24090,7 @@ def sleeper_link():
         # Claim matches + oracle passed → this session controls the account.
         sess["verified"] = True
         sess["verified_via"] = "sleeper"
+        _attach_presession_feedback(sess)
         try:
             from . import accounts as _accounts
             first_time = _accounts.get_user_verified_via(user_id) is None
@@ -27044,6 +27348,15 @@ def session_init():
             session_verified = False
     if existing_sess:
         _sync_persisted_session_after_init(token, existing_sess, user_changed)
+    if user_changed:
+        # Release-lead delta QA E: the notes this token sent while anonymous
+        # were sent as the OLD identity. Attach keys on the token's hash, so
+        # drop the key and they can't follow the token to the new user if it
+        # later verifies. The rows stay, anonymous. Never fails the init.
+        try:
+            detach_session_feedback(_feedback_session_key(token))
+        except Exception as e:
+            log.warning("feedback: detach on re-point failed: %s", e)
 
     # ── Defer DB upserts + push fanout + Sleeper meta to a daemon ────────
     # Everything below this point that isn't required for the response
@@ -27113,7 +27426,7 @@ def session_init():
 
         try:
             # Platform-link state is a DB fact that nothing in this daemon
-            # writes, so the three guards below read it once.
+            # writes, so every guard below reads it once.
             _platform_linked = is_linked_platform_league(league_id)
 
             # Agent 4 addition: capture INSERT-vs-UPDATE state BEFORE
@@ -27437,8 +27750,15 @@ def session_init():
             # scoring, no UI. Sleeper league ids only (numeric); idempotent
             # on transaction_id, so a flake just misses one pass and the
             # next sync self-heals. Best-effort, off the request path.
+            # ESPN/MFL/Fleaflicker native ids are numeric too (G-030), so
+            # isdigit() alone sent a linked league's id to Sleeper — up to
+            # 18 `transactions` reads per init, since a league with no
+            # captured rows is re-backfilled every time. _platform_linked
+            # (read once above) is the same discriminator the siblings use.
             try:
-                if is_enabled("market.trade_capture") and str(league_id).isdigit():
+                if (is_enabled("market.trade_capture")
+                        and str(league_id).isdigit()
+                        and not _platform_linked):
                     from .sleeper_trades_service import sync_league_trades
                     _n_tr = sync_league_trades(league_id)
                     log.info("  ✅ league trades captured (%d new)", _n_tr)
@@ -32109,6 +32429,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             sess["_persisted_at"] = 0  # re-auth refreshes the durable row now
             _persist_session_if_eligible(
                 request.headers.get("X-Session-Token", ""), sess)
@@ -32130,6 +32451,7 @@ def _provider_auth_response(provider: str, claims: dict):
             sess["verified"] = True
             sess["verified_via"] = provider
             sess["account_id"] = acct["account_id"]
+            _attach_presession_feedback(sess)
             out["verified_via"] = provider
             try:
                 _accounts.mark_user_verified(sess["user_id"], provider)
@@ -32539,11 +32861,15 @@ def delete_account_route():
         return gated
     apple_revoked = False
     try:
-        if _accounts.has_apple_identity(user_id,
-                                        account_id=sess.get("account_id")):
+        apple_subjects = _accounts.apple_identity_subjects(
+            user_id, account_id=sess.get("account_id"))
+        if apple_subjects:
             body = request.get_json(silent=True) or {}
+            # Revoked only when the code's own Apple `sub` is one this
+            # account linked (release-lead QA on #446, d).
             apple_revoked = _accounts.revoke_apple_tokens(
-                body.get("apple_authorization_code"))
+                body.get("apple_authorization_code"),
+                expected_subjects=apple_subjects)
             log.info("delete_account: apple revocation %s for %s",
                      "succeeded" if apple_revoked else "not completed", user_id)
     except Exception as revoke_err:
@@ -36349,6 +36675,7 @@ def mfl_auth_link():
     # controller (first-verified-wins, same as the Sleeper path).
     sess["verified"] = True
     sess["verified_via"] = "mfl_login"
+    _attach_presession_feedback(sess)
     try:
         from . import accounts as _accounts
         first_time = _accounts.get_user_verified_via(user_id) is None

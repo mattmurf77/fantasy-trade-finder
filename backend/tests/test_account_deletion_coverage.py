@@ -206,7 +206,7 @@ def test_route_evicts_bound_alias_and_account_sessions(engine, monkeypatch):
         "synthetic-other-token": {"user_id": OTHER},
     }
     monkeypatch.setattr(server, "touch_user_activity", lambda *a, **kw: None)
-    monkeypatch.setattr(accounts, "has_apple_identity", lambda *a, **kw: False)
+    monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *a, **kw: set())
     with server._sessions_lock:
         server._sessions.update(sessions)
     try:

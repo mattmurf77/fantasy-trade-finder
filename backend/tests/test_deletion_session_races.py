@@ -19,7 +19,7 @@ def env(tmp_path, monkeypatch):
     db.metadata.create_all(engine)
     monkeypatch.setattr(db, "engine", engine)
     monkeypatch.setattr(server, "is_enabled", lambda key: key == "auth.persistent_sessions")
-    monkeypatch.setattr(accounts, "has_apple_identity", lambda *args, **kw: False)
+    monkeypatch.setattr(accounts, "apple_identity_subjects", lambda *args, **kw: set())
     sess = {"user_id": UID, "verified": True, "verified_via": "sleeper",
             "last_active": 0.0}
     with server._sessions_lock:

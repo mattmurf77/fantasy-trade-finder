@@ -1,10 +1,10 @@
 // Settings § Account — the IDENTITY half.
 //
 // Renders (in shipped order): the demo-session row, the linked-identity rows
-// (Apple/Google), the "Link Apple" card, the "Linked sign-in — None" fallback
-// row, the Sleeper identity row, the account-only LinkSleeperForm card, the
-// Verification value row + its settings-v2 explainer footnote, and the
-// "Verify account" push row.
+// (Apple/Google/ESPN/MFL, labels from ../identityLabels), the "Link Apple"
+// card, the "Linked sign-in — None" fallback row, the Sleeper identity row,
+// the account-only LinkSleeperForm card, the Verification value row + its
+// settings-v2 explainer footnote, and the "Verify account" push row.
 //
 // Lifted from SettingsScreen.tsx (origin/main) — the `accountSection` block at
 // :1255-1412, plus the state/handlers it depends on:
@@ -46,6 +46,7 @@ import { LinkSleeperForm } from '../../../components/LinkSleeperSheet';
 import { useSession } from '../../../state/useSession';
 import { useFlag } from '../../../state/useFeatureFlags';
 import { styles } from '../styles';
+import { identityLabel } from '../identityLabels';
 import type { SettingsSectionProps } from './types';
 
 export interface AccountIdentitySectionProps extends SettingsSectionProps {
@@ -177,16 +178,20 @@ export default function AccountIdentitySection({
       ) : null}
       {accountsEnabled && !isDemo ? (
         <>
-          {identities.map((ident) => (
-            <View key={ident.provider} style={styles.kvRow}>
-              <Text style={styles.rowKey}>
-                {ident.provider === 'apple' ? 'Signed in with Apple' : 'Signed in with Google'}
-              </Text>
-              <Text style={styles.kvValue}>
-                {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
-              </Text>
-            </View>
-          ))}
+          {identities.map((ident) => {
+            // Shared label map (../identityLabels). An unknown provider gets
+            // no row: a wrong label is worse than none.
+            const label = identityLabel(ident.provider);
+            if (!label) return null;
+            return (
+              <View key={ident.provider} style={styles.kvRow}>
+                <Text style={styles.rowKey}>{label}</Text>
+                <Text style={styles.kvValue}>
+                  {ident.linked_at ? new Date(ident.linked_at).toLocaleDateString() : 'Linked'}
+                </Text>
+              </View>
+            );
+          })}
           {/* Link Apple — shown for any session with no Apple identity
               (Sleeper sessions included). Official HIG component, white
               variant on dark, same construction as SignInScreen. Gated on
