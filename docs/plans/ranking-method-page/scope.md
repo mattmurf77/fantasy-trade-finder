@@ -15,6 +15,7 @@
 **What changed.** `web/ranking-method.html` is rebuilt:
 - Copy is exactly the draft: title and meta, H1, subtitle, Section 1's pricing prose, Section 2's lead-in, the three primary methods, and "More ways to rank". Trends is left out.
 - The layout is design-lead's spec: one plain hairline list on the page surface, nothing that looks clickable, TickLabel headers, and the `FLEECED.` logotype.
+- After design-lead's #505 review, the page also has the standard site footer (Home · FAQ · Privacy · Terms), copied from `web/contact.html`.
 
 ---
 
@@ -35,8 +36,9 @@
   - **APP:** every [app] string is verbatim with its app source, read from the source at run time (14 chooser strings + the help body + the lead-in), and Trends is absent;
   - **OLD:** the Journey / three-option copy is gone;
   - **FLAT:** no raised `--ink-1..3` fill, no border except the `--line` top hairline, and no radius, shadow, `cursor:pointer` or `:hover`;
-  - **TAP:** no `button`, `input`, `select`, `details`, `tabindex` or `onclick`, and links only inside body copy (none today);
-  - **ICE:** ice only on the tick, the logotype period and the focus ring;
+  - **TAP:** no `button`, `input`, `select`, `details`, `tabindex` or `onclick`; links only inside body copy (none today) or the site footer; no link or control in the header or either methods list; the logotype stays plain text;
+  - **FOOT:** the footer is `web/contact.html`'s `.foot` verbatim: the same four links (href + text) and the same `.foot` / `.foot a` rules;
+  - **ICE:** ice only on the tick, the logotype period and the focus ring (which the footer links now use);
   - **FLARE:** flare only on the "Recommended" text tag;
   - **HEX:** no raw hex;
   - **TAG:** "Recommended" appears once, on Quick set's row.
@@ -54,13 +56,15 @@
   | `.method { background: var(--ink-2); border-radius: 8px }` | FLAT-no-cards |
   | `.method { cursor: pointer }` | FLAT-no-cards |
   | `<button>` around "Quick set" | TAP-no-controls |
-  | the logotype made an `<a href="/">` | TAP-links-only-in-body |
+  | the logotype made an `<a href="/">` | TAP-links-only-in-body-or-footer, TAP-header-and-methods-inert, TAP-logotype-plain-text |
+  | a link inside a method row (`<a>` around "Tiers board") | TAP-links-only-in-body-or-footer, TAP-header-and-methods-inert |
+  | a footer link dropped (Privacy) | FOOT-links-match-contact |
   | `.method-name { color: var(--ice) }` | ICE-only-tick-logo-focus |
   | `.then { color: var(--flare) }` | FLARE-only-recommended |
   | `.then { color: #ECEFF4 }` | HEX-none |
   | "Recommended" tag removed | TAG-recommended-on-quickset-only |
 
-  `qa/web/check_web_structure.py` (the CI suite, which covers this page's SEO/a11y/DS rows): **196/196 pass**.
+  The page check is green at **31/31**. `qa/web/check_web_structure.py` (the CI suite, which covers this page's SEO/a11y/DS rows): **196/196 pass**.
 - [ ] **Unit tests:** none. This is a static page with no script.
 - [x] **Static review: [app] strings verbatim.** Each was diffed against its source by the guard at run time and matches exactly:
 
@@ -76,7 +80,11 @@
   | Overall ranks · body | `rankChooserModel.ts:94-95` |
 
   The [new] lines are verbatim from the draft: `<title>`/`og:title`, `meta description`/`og:description`, the subtitle, the "Ways to rank" lead-in, and the section labels "Ways to rank" and "More ways to rank". "Recommended" mirrors `recommended: true`.
-- [x] **Static review: interactive elements.** **None.** There are no `<a>`, `<button>`, `<input>`, `<select>`, `<textarea>`, `<details>`/`<summary>`, `<label>`, `tabindex`, `role="button"` or `onclick`, and no `cursor` or `:hover` rules. The logotype is plain text, not a link (see "Judgment calls"). The `a` rule (chalk + underline, the #354 reading-link rule) is in place only for any future body link.
+- [x] **Static review: interactive elements.** Exactly **four**, all in the standard site footer added on design-lead's #505 review: **Home** `/`, **FAQ** `/faq.html`, **Privacy** `/privacy`, **Terms** `/terms`.
+  - The markup and the chalk-dim `.foot a` style are copied verbatim from `web/contact.html`. The page is in the sitemap, so search visitors don't dead-end.
+  - Everything else is inert: no `<button>`, `<input>`, `<select>`, `<textarea>`, `<details>`/`<summary>`, `<label>`, `tabindex`, `role="button"` or `onclick`, no `cursor` or `:hover` rules, and no link in the header or the methods lists. The logotype is plain text (see "Judgment calls").
+  - The body-link rule (chalk + underline, #354) is scoped to `.prose a, .method-line a` so the footer keeps contact's styling. The copy has no body links today.
+  - **Footer source:** the ask was to match `web/faq.html` / `web/contact.html`, but on main only `contact.html` carries the Home · FAQ · Privacy · Terms `.foot`. `faq.html` (main, and the pending `feat/m7-p28-web-pages`) still has its older `.faq-footer` ("Head back to the app" / email + Privacy Policy · Terms of Use). So the check compares against `contact.html`.
 - [x] **Manual check list for release-lead** (no runtime screenshot was taken, and the page was not opened in a browser for this build):
   1. Open `/ranking-method.html` at **phone width (375 px)**.
      - **Expected:** a 16 px side gutter and no horizontal scroll.
@@ -85,7 +93,8 @@
   2. Open it at **desktop width**.
      - **Expected:** one ~600 px column, with the same rows and no cards, fills, borders or icon wells.
   3. Hover and click across every row, name, tag and icon, and Tab through the page.
-     - **Expected:** nothing changes on hover, the cursor stays an arrow, nothing takes focus, and nothing looks tappable.
+     - **Expected:** nothing in the header, pricing prose or method lists changes on hover or takes focus, and none of it looks tappable.
+     - The only focus stops are the four footer links (Home · FAQ · Privacy · Terms). They look and act as they do on `/contact.html` and go to `/`, `/faq.html`, `/privacy` and `/terms`.
   4. Check against design-lead's spec:
      - ice appears only on the two TickLabel ticks and the logotype period;
      - "Recommended" is flare text with no border or pill;
@@ -122,6 +131,6 @@
 
 - **Role tags.** The draft lists each method's role (Fastest / Most precise / Most control). The spec's row didn't mention them, so they render as chalk-dim `label` tags beside the name, the same treatment as "Recommended" but not flare.
 - **Section 1 has no TickLabel.** Its draft name, "How trades are priced", is the H1, so the pricing prose sits under the subtitle as the lede. TickLabels head "Ways to rank" and "More ways to rank".
-- **The logotype is not a link,** to keep "nothing clickable except body links". `web/index.html`'s `.lp-wordmark` is a home link.
+- **The logotype is not a link,** to keep "nothing clickable except body links". `web/index.html`'s `.lp-wordmark` is a home link. The footer's **Home** link now covers the way back.
 - **Ice.** Spec 4 makes the tick the page's only ice, and spec 6 makes the logotype period ice. Both hold, plus the standard `:focus-visible` ring (nothing on the page is focusable).
 - **No values outside the token set.** The 1 px icon nudge (it centres the 20 px glyph on the 22 px title line), the 600 px column, and the 28 px logotype (copied from `.lp-wordmark`, not a type-scale size) are layout values. Everything else uses tokens, the type scale or the 4-pt spacing scale.

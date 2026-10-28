@@ -19,7 +19,8 @@
   <!--
     C7 (2026-10-27): the read-more for the app's "How trades are priced" help
     sheet (TradesScreen.tsx). Informational only: the web cannot open app
-    screens, so nothing here may look tappable except body links (design-lead).
+    screens, so nothing here may look tappable except body links and the
+    standard site footer (design-lead).
     One plain hairline list on the page surface, no cards, no icon wells.
     Copy is DRAFT pending marketing approval (docs/plans/ranking-method-page/scope.md);
     lines marked [app] in that draft must stay verbatim with the app.
@@ -110,8 +111,12 @@
     .method-line + .method-line { margin-top: 8px; }
     .then { color: var(--chalk); font-weight: 600; }
 
-    /* Body links: chalk + underline (design-lead, #354). None on the page today. */
-    a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
+    /* Body links: chalk + underline (design-lead, #354). None in the copy today. */
+    .prose a, .method-line a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
+
+    /* Site footer: verbatim from web/contact.html (design-lead, #505). */
+    .foot { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; }
+    .foot a { color: var(--chalk-dim); margin-right: 16px; }
   </style>
 </head>
 <body>
@@ -185,6 +190,13 @@
           </li>
         </ul>
       </section>
+
+      <div class="foot">
+        <a href="/">Home</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </div>
     </main>
   </div>
 </body>

@@ -14,7 +14,10 @@ screen. This pins:
   OLD    the old Journey / three-option copy is gone.
   FLAT   no card construction: no raised fills, borders other than the
          hairline separator, radius, shadow, cursor:pointer or :hover.
-  TAP    nothing interactive except body links (today: none at all).
+  TAP    nothing interactive except body links (none today) and the standard
+         site footer; no link or control in the header or the methods lists.
+  FOOT   the footer is web/contact.html's `.foot` verbatim: the same links
+         (Home · FAQ · Privacy · Terms) and the same two CSS rules.
   ICE    ice only on the TickLabel tick, the logotype period and the focus
          ring; flare only on the "Recommended" text tag; no raw hex.
 
@@ -115,18 +118,46 @@ if any("var(--line)" not in t for t in tops):
     flat_bad.append(f"border-top not a --line hairline: {tops}")
 check("FLAT-no-cards", not flat_bad, f"card construction in the page CSS: {flat_bad}")
 
-# ── TAP: nothing interactive except body links ──────────────────────────────
+# ── TAP: nothing interactive except body links and the site footer ─────────
 interactive = re.findall(r"<(a|button|input|select|textarea|details|summary|label)\b[^>]*>", body_code, flags=re.I)
 attrs = re.findall(r"\b(onclick|onkeydown|tabindex|role=\"button\"|contenteditable)\b", body_code, flags=re.I)
-all_links = len(re.findall(r"<a\b", body_code, flags=re.I))
-prose_links = sum(len(re.findall(r"<a\b", para, flags=re.I)) for para in
-                  re.findall(r'<p class="(?:prose|method-line|subtitle)[^"]*">(.*?)</p>', body_code, flags=re.S))
-links_outside_prose = all_links - prose_links
 non_link = [t for t in interactive if t.lower() != "a"]
 check("TAP-no-controls", not non_link and not attrs,
       f"interactive elements: tags={non_link} attrs={attrs}")
-check("TAP-links-only-in-body", links_outside_prose == 0,
-      f"{links_outside_prose} link(s) outside body copy (header, list chrome)")
+
+
+def foot_links(markup: str) -> list[tuple[str, str]]:
+    m = re.search(r'<div class="foot">(.*?)</div>', markup, flags=re.S)
+    return re.findall(r'<a href="([^"]*)">([^<]*)</a>', m.group(1)) if m else []
+
+
+all_links = len(re.findall(r"<a\b", body_code, flags=re.I))
+prose_links = sum(len(re.findall(r"<a\b", para, flags=re.I)) for para in
+                  re.findall(r'<p class="(?:prose|method-line|subtitle)[^"]*">(.*?)</p>', body_code, flags=re.S))
+footer = foot_links(body_code)
+stray = all_links - prose_links - len(footer)
+check("TAP-links-only-in-body-or-footer", stray == 0,
+      f"{stray} link(s) outside body copy and the site footer")
+header = re.search(r"<header\b.*?</header>", body_code, flags=re.S | re.I)
+lists = re.findall(r'<ul class="methods".*?</ul>', body_code, flags=re.S)
+chrome = [frag for frag in ([header.group(0)] if header else []) + lists
+          if re.search(r"<(a|button|input|select|textarea)\b", frag, flags=re.I)]
+check("TAP-header-and-methods-inert", bool(header) and len(lists) == 2 and not chrome,
+      f"a link or control inside the header or a methods list ({len(chrome)} fragment(s))")
+check("TAP-logotype-plain-text",
+      bool(re.search(r'<div class="wordmark">FLEECED<span>\.</span></div>', body_code)),
+      "the FLEECED. logotype is not the plain-text <div class=\"wordmark\">")
+
+# ── FOOT: verbatim web/contact.html site footer ─────────────────────────────
+contact = (ROOT / "web" / "contact.html").read_text(encoding="utf-8")
+want = foot_links(contact)
+check("FOOT-links-match-contact", footer == want and len(want) == 4,
+      f"footer links {footer} != contact.html's {want}")
+rule = lambda text, sel: re.findall(rf"^\s*{re.escape(sel)}\s*\{{([^}}]*)\}}", text, flags=re.M)
+check("FOOT-style-matches-contact",
+      rule(style, ".foot") == rule(contact, ".foot") != [] and
+      rule(style, ".foot a") == rule(contact, ".foot a") != [],
+      "the .foot / .foot a rules differ from web/contact.html's")
 
 # ── ICE / FLARE / HEX ───────────────────────────────────────────────────────
 rules = re.findall(r"([^{}]+)\{([^{}]*)\}", style_code)
