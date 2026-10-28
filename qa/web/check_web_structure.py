@@ -604,6 +604,26 @@ def run() -> int:
             if R28_17_SECTION5 not in rendered("privacy.html")
             else "§5 fourth removal trigger verbatim, inside the list")
 
+    # head-eng 2026-10-27 (#360 follow-up b): a rate-limited (429) or any other
+    # failed send must still leave a way to send a data request, so the
+    # contact form's ONE error path is c7 (marketing-lead-copy §1, approved
+    # R22.1), which names the support email as a mailto link. Every non-2xx
+    # throws into that catch; no status-specific branch may bypass it.
+    contact_js = "\n".join(re.findall(r"<script\b[^>]*>(.*?)</script>",
+                                      strip_comments(all_sources["contact.html"]), flags=re.S | re.I))
+    then = re.search(r"fetch\('/api/feedback', \{.*?\}\)\s*\.then\(function \(res\) \{(.*?)\n\s*\}\)\s*\.catch\(function \(\) \{(.*?)\n\s*\}\);",
+                     contact_js, flags=re.S)
+    c7_ok = bool(then) and (
+        re.match(r"\s*if \(!res\.ok\) throw new Error\(", then.group(1)) is not None
+        and "res.status ===" not in then.group(1) and "429" not in contact_js
+        and re.search(r"""setStatus\('err', "Couldn't send\. Try again in a minute, or email ", '\.'\);""",
+                      then.group(2)) is not None
+        and re.search(r"var SUPPORT_EMAIL = 'fleecedapp@gmail\.com';", contact_js) is not None
+        and re.search(r"a\.href = 'mailto:' \+ SUPPORT_EMAIL;", contact_js) is not None)
+    r.check("POL-contact-c7[contact.html]", c7_ok,
+            "the send path isn't: every non-2xx (429 included) → the c7 line with the support email link"
+            if not c7_ok else "every failed send (429 included) shows c7 with the support email link")
+
     # R28.12 row 1: "Fleeced" is the Service, so the operator is "the developer
     # of Fleeced", and "we"/"us" attach to the operator, not the definition.
     OPERATOR = {
