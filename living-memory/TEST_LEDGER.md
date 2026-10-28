@@ -88,6 +88,39 @@ Full gates, platforms-eng lead (platforms-pm audit F5). Server only, no API or s
 - **Targeted:** `test_session_init_sleeper_calls`, `test_session_init_single_flight`, `test_market_data_readiness`, `test_co_owner_rosters`, `test_roster_refresh_state`, `test_players_refresh`, `test_account_only_harness`, `test_verified_sessions`, `test_trade_fingerprint_reads_unlocked`, `test_prepared_trade_runtime` → 162 passed.
 - **Not run:** the full suite (CI runs it); no live Sleeper calls (every fetch is mocked).
 
+## 2026-10-27 — Eval loader reads serve-time display moves (models-lead addendum D3)
+
+Gates: eval-side only (`backend/eval/data.py`, a doc line in `bdk_audit.py`). It reads the pack header field `run["display_moves"]`, agreed with trades-eng, whose serve side writes it. No route, schema, event, flag, knob or engine-module change; an absent field changes nothing, so this merges before or after the writer. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **Why:**
+  - D3's fix re-applies the repeat cap at serve time.
+  - When a never-delivered withdrawal pulls a deferred card into the first 30, the server shows that card later in the same response.
+  - The loader's position was card_index less the W0s below it, so it put the card back inside the window: a false B-DK-7 FAIL and a shifted e(k).
+- **The rule:**
+  - The kept non-ghost cards' positions are handed out in display order, `(anchor, 1, card_index)` for a moved card and `(card_index, 0, card_index)` otherwise.
+  - A move counts once its response is delivered as of the read, so a re-read at the same as_of is stable.
+  - A record breaking the writer's contract makes the deck `pack_integrity` (ahead of `withdrawal_conflict`): a malformed key or value, an anchor that is itself moved, a self-anchor, a ghost, missing or W0 card, or a move spanning two responses.
+- **Tests:** `test_eval_display_moves.py`, 26 tests:
+  - no moves;
+  - one move; two behind one anchor;
+  - moves after a W0;
+  - as_of stability;
+  - 16 malformed records;
+  - a valid later-response move;
+  - precedence;
+  - B-DK-7 end to end (the moved deck passes; without the record the same deck is the false FAIL).
+- **Sabotage, 8 of 9 red then restored:**
+  - moves ignored (6 red);
+  - no as_of guard (1);
+  - moved card before its anchor (6);
+  - no same-response check (1);
+  - chained anchors allowed (1);
+  - W0 allowed (2);
+  - lenient keys (1);
+  - integrity after the conflict check (1).
+  - The ninth, a plain dense rank in place of the W0-adjusted slots, stays green as expected: the two are equal on every deck the loader doesn't exclude (an unexplained gap is `incomplete_deck`).
+- **Eval, value-model and evidence suites:** `test_eval_*`, `test_value_model*`, `test_packed_evidence`, `test_deferred_evidence`: 578 passed.
+
 ## 2026-10-27 — S0 picks-read follow-ups: draft verdict in the key, owner path on the job's reads (#486 QA P3s); deck pipeline v4
 
 Gates: QA follow-ups to #486 (stacked on it). No route, schema, event, flag or knob change. `DECK_PIPELINE_VERSION` 3 → 4:
