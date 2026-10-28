@@ -19,8 +19,12 @@
 //       'trade'). ClaimSheet half: the same import, and the
 //       fa-claim.open-sleeper CTA's handler calls it with target 'add'     [AST]
 //   S8  ClaimSheet renders fa-claim.steps between the drop section and the
-//       CTA; its text names row.name, the selected drop (dropId +
-//       candidates) and leagueName, and discloses the copy; the CTA passes
+//       CTA, as design-lead's numbered list (2026-10-28): a TickLabel
+//       "IN SLEEPER"; an always-rendered league row (leagueName, else the
+//       fallback); search (row.name); add; a drop row (the selected drop,
+//       else "pick a player above", only for a pick or openSlots === 0); a
+//       bid row gated on faab and a bid; rows numbered with no gap; then
+//       the copy disclosure as the last line. The CTA passes
 //       clipboardText: row.name                                            [AST]
 //   S9  the eight NO_ADD_REASON strings verbatim; explainNoAdd and
 //       resolveAddPlatform byte-identical to 04eae95b (AC-10)              [AST]
@@ -280,40 +284,175 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
   );
 }
 
-// S8 — the on-sheet steps block (PRD §4.2). The bare rung reopens
-// Sleeper's last-viewed league, so the sheet is the only thing telling the
-// user which league, player and drop; and nothing is copied silently.
+// S8 — the on-sheet steps block (PRD §4.2), as design-lead's numbered list
+// (review 2026-10-28). The bare rung reopens Sleeper's last-viewed league,
+// so the sheet is the only thing telling the user which league, player,
+// drop and bid; and nothing is copied silently.
 {
   const sf = parse(CLAIM);
   const decl = declarations(sf);
-  const steps = [];
-  walk(sf, (n) => {
-    if (ts.isJsxElement(n) && n.openingElement.attributes.properties.some((a) =>
-      ts.isJsxAttribute(a) && a.name.getText(sf) === 'testID' &&
-      a.initializer && ts.isStringLiteral(a.initializer) && a.initializer.text === 'fa-claim.steps')) steps.push(n);
-  });
-  const text = steps.length === 1 ? steps[0].getText(sf) : '';
-  // What the block RENDERS: `{x}` children and `${x}` in a `{`…`}` child.
+  const LEAGUE_FALLBACK = "Open the league you're claiming in";
+  const testIdOf = (el) => {
+    const a = el.openingElement.attributes.properties.find((p) =>
+      ts.isJsxAttribute(p) && p.name.getText(sf) === 'testID');
+    return a && a.initializer && ts.isStringLiteral(a.initializer) ? a.initializer.text : null;
+  };
+  const attrText = (el, name) => {
+    const a = el.openingElement.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === name);
+    return a && a.initializer ? a.initializer.getText(sf) : null;
+  };
+  const elementsById = (root, id) => {
+    const out = [];
+    walk(root, (n) => { if (ts.isJsxElement(n) && testIdOf(n) === id) out.push(n); });
+    return out;
+  };
+  // What a node RENDERS: `{x}` children and `${x}` in a `{`…`}` child.
   // A mention in a condition (`{dropName ? … : null}`) doesn't count.
-  const rendered = [];
-  if (steps.length === 1) {
-    walk(steps[0], (n) => {
+  const renderedIn = (root) => {
+    const out = [];
+    walk(root, (n) => {
       if (!ts.isJsxExpression(n) || !n.expression || !(ts.isJsxElement(n.parent) || ts.isJsxFragment(n.parent))) return;
       const e = unparen(n.expression);
-      if (ts.isTemplateExpression(e)) rendered.push(...e.templateSpans.map((s) => s.expression.getText(sf)));
-      else rendered.push(e.getText(sf));
+      if (ts.isTemplateExpression(e)) out.push(...e.templateSpans.map((s) => s.expression.getText(sf)));
+      else out.push(e.getText(sf));
+    });
+    return out;
+  };
+  // The conditions a row renders under, between it and the steps block:
+  // `c ? <row/> : …` and `c && <row/>`. `raw` as written; `expanded` adds
+  // the initializer of every const the conditions name, one level deep.
+  const gateOf = (row, block) => {
+    const raw = [];
+    for (let child = row, n = row.parent; n && n !== block; child = n, n = n.parent) {
+      if (ts.isConditionalExpression(n) && child !== n.condition) raw.push(n.condition.getText(sf));
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && child === n.right) {
+        raw.push(n.left.getText(sf));
+      }
+    }
+    const ids = raw.join(' ').match(/\b[A-Za-z_]\w*\b/g) || [];
+    return { raw, expanded: [...raw, ...ids.filter((id) => id in decl).map((id) => decl[id])].join(' ') };
+  };
+  const unconditional = (row, block) => {
+    for (let n = row.parent; n && n !== block; n = n.parent) {
+      if (!ts.isJsxElement(n) && !ts.isJsxFragment(n)) return false;
+    }
+    return true;
+  };
+  const conditionals = (root) => {
+    const out = [];
+    walk(root, (n) => { if (ts.isConditionalExpression(n)) out.push(n); });
+    return out;
+  };
+  const strLit = (n) => {
+    n = unparen(n);
+    return ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) ? n.text : null;
+  };
+
+  const steps = elementsById(sf, 'fa-claim.steps');
+  assert(steps.length === 1, 'S8 ClaimSheet renders one testID="fa-claim.steps"', `${steps.length} found`);
+  const block = steps[0];
+
+  // The heading: a TickLabel "IN SLEEPER", imported from ./chalkline.
+  let tickImported = false;
+  walk(sf, (n) => {
+    if (
+      ts.isImportDeclaration(n) && n.moduleSpecifier.text === './chalkline' &&
+      n.importClause && n.importClause.namedBindings && ts.isNamedImports(n.importClause.namedBindings) &&
+      n.importClause.namedBindings.elements.some((e) => e.name.text === 'TickLabel' && !e.propertyName)
+    ) tickImported = true;
+  });
+  const ticks = [];
+  if (block) {
+    walk(block, (n) => {
+      if (ts.isJsxElement(n) && n.openingElement.tagName.getText(sf) === 'TickLabel') {
+        ticks.push(n.children.map((c) => c.getText(sf)).join('').trim());
+      }
     });
   }
-  // The drop name, inline or through a const that looks dropId up in candidates.
-  const dropConsts = Object.keys(decl).filter((k) =>
-    /\bcandidates\b/.test(decl[k]) && /\bdropId\b/.test(decl[k]) && /\.name\b/.test(decl[k]));
-  const namesDrop = rendered.some((r) => dropConsts.includes(r) || (/\bcandidates\b/.test(r) && /\bdropId\b/.test(r)));
-  assert(steps.length === 1, 'S8 ClaimSheet renders one testID="fa-claim.steps"', `${steps.length} found`);
-  assert(rendered.includes('row.name'), 'S8 the steps render the free agent (row.name)', JSON.stringify(rendered));
-  assert(namesDrop, 'S8 the steps render the selected drop (dropId looked up in candidates)',
-    `drop consts: ${dropConsts.join(', ') || 'none'}; rendered: ${JSON.stringify(rendered)}`);
-  assert(rendered.includes('leagueName'), 'S8 the steps render the league (leagueName)', JSON.stringify(rendered));
-  assert(/paste it into search/.test(text), 'S8 the steps disclose the copy ("…so you can paste it into search.")');
+  assert(tickImported && ticks.length === 1 && ticks[0] === 'IN SLEEPER',
+    'S8 the block is headed by one TickLabel "IN SLEEPER" (imported from ./chalkline)',
+    `imported: ${tickImported}; TickLabels: ${JSON.stringify(ticks)}`);
+
+  // One row per step, inside the block.
+  const row = {};
+  for (const id of ['league', 'search', 'add', 'drop', 'bid']) {
+    const found = block ? elementsById(block, `fa-claim.step.${id}`) : [];
+    assert(found.length === 1, `S8 the block holds one testID="fa-claim.step.${id}" row`, `${found.length} found`);
+    row[id] = found[0];
+  }
+
+  // 1. League: always rendered (bare reopens the last-viewed league), the
+  //    league's name when known, else the fallback.
+  if (row.league) {
+    assert(unconditional(row.league, block), 'S8 the league row always renders (no condition gates it)',
+      gateOf(row.league, block).raw.join(' / '));
+    const pick = conditionals(row.league).find((c) => /\bleagueName\b/.test(c.condition.getText(sf)));
+    assert(
+      !!pick && renderedIn(pick.whenTrue).includes('leagueName') && strLit(pick.whenFalse) === LEAGUE_FALLBACK,
+      `S8 the league row renders leagueName, or "${LEAGUE_FALLBACK}" when it is null`,
+      pick ? pick.getText(sf).slice(0, 200) : 'no conditional on leagueName in the row',
+    );
+  }
+  // 2. Search: the free agent.
+  if (row.search) {
+    assert(renderedIn(row.search).includes('row.name'), 'S8 the search row renders the free agent (row.name)',
+      JSON.stringify(renderedIn(row.search)));
+  }
+  // 4. Drop: the selected drop's name; "pick a player above" when the
+  //    roster is full and none is picked.
+  if (row.drop) {
+    // The drop name, inline or through a const that looks dropId up in candidates.
+    const dropConsts = Object.keys(decl).filter((k) =>
+      /\bcandidates\b/.test(decl[k]) && /\bdropId\b/.test(decl[k]) && /\.name\b/.test(decl[k]));
+    const isDrop = (t) => dropConsts.some((k) => new RegExp(`\\b${k}\\b`).test(t)) || (/\bcandidates\b/.test(t) && /\bdropId\b/.test(t));
+    const rendered = renderedIn(row.drop);
+    assert(
+      rendered.some((r) => dropConsts.includes(r) || (/\bcandidates\b/.test(r) && /\bdropId\b/.test(r))),
+      'S8 the drop row renders the selected drop (dropId looked up in candidates)',
+      `drop consts: ${dropConsts.join(', ') || 'none'}; rendered: ${JSON.stringify(rendered)}`,
+    );
+    const pick = conditionals(row.drop).find((c) => isDrop(c.condition.getText(sf)) && /pick a player above/.test(strLit(c.whenFalse) || ''));
+    assert(
+      !!pick && /\bopenSlots\s*===\s*0\b/.test(gateOf(row.drop, block).expanded),
+      'S8 the drop row shows "pick a player above" when no drop is picked, and renders only for a pick or openSlots === 0',
+      `gate: ${gateOf(row.drop, block).expanded}`,
+    );
+  }
+  // 5. Bid: FAAB leagues, once a bid is entered.
+  if (row.bid) {
+    const gate = gateOf(row.bid, block).expanded;
+    assert(/\bfaab\b/.test(gate) && /\bbid(Num)?\b/.test(gate) && renderedIn(row.bid).some((r) => /\bbid(Num)?\b/.test(r)),
+      'S8 the bid row renders the bid, gated on faab and an entered bid', `gate: ${gate}`);
+  }
+  // Numbering: 1, 2, 3, then 4 / 5 with no gap (the bid is 5 only when the
+  // drop row renders, under the drop row's own condition).
+  if (row.league && row.search && row.add && row.drop && row.bid) {
+    const dropGate = gateOf(row.drop, block).raw;
+    const bidN = attrText(row.bid, 'n') || '';
+    const bidNExpr = row.bid.openingElement.attributes.properties.find((p) => ts.isJsxAttribute(p) && p.name.getText(sf) === 'n');
+    const e = bidNExpr && bidNExpr.initializer && ts.isJsxExpression(bidNExpr.initializer) ? unparen(bidNExpr.initializer.expression) : null;
+    assert(
+      attrText(row.league, 'n') === '{1}' && attrText(row.search, 'n') === '{2}' && attrText(row.add, 'n') === '{3}' &&
+        attrText(row.drop, 'n') === '{4}' && dropGate.length === 1 &&
+        !!e && ts.isConditionalExpression(e) && e.condition.getText(sf) === dropGate[0] &&
+        e.whenTrue.getText(sf) === '5' && e.whenFalse.getText(sf) === '4',
+      'S8 rows are numbered 1, 2, 3, then drop 4 and bid 5, or bid 4 without the drop row',
+      `drop gate: ${JSON.stringify(dropGate)}; bid n: ${bidN}`,
+    );
+  }
+  // The clipboard disclosure: the block's last line, after every row and
+  // directly above the CTA.
+  if (block) {
+    const kids = block.children.filter((c) => ts.isJsxElement(c) || ts.isJsxSelfClosingElement(c));
+    const last = kids[kids.length - 1];
+    const rowsEnd = Math.max(...Object.values(row).filter(Boolean).map((r) => r.end));
+    const ctaAt = read(CLAIM).indexOf('testID="fa-claim.open-sleeper"');
+    assert(
+      !!last && /paste it into search/.test(last.getText(sf)) && last.pos >= rowsEnd && block.end < ctaAt,
+      'S8 the copy disclosure ("…so you can paste it into search.") is the block\'s last line: after the rows, before the CTA',
+      last ? last.getText(sf).slice(0, 120) : 'no children',
+    );
+  }
   assert(
     /\bopenInSleeperApp\(\s*\{[^}]*clipboardText:\s*row\.name\b/.test(decl.openSleeper || ''),
     'S8 the CTA passes clipboardText: row.name',

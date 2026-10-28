@@ -2,7 +2,7 @@
 
 **Date:** 2026-10-27
 **Entry point:** direct ask. The league-eng row of `docs/plans/external-links/scope.md` § "Deferred to other leads", building on PR #379 (`build/open-external-helper` @ `04eae95b`). The spec is the #351 PRD (`origin/plan/sleeper-fa-deeplink:docs/plans/sleeper-fa-deeplink/prd.md`) §3.2, §4.1, §4.2, §4.4, AC-1/2/9/10, guards S1/S2/S8/S9, §7.2 code-walks A and B, TestFlight rows 13/14.
-**Builder:** eng-mobile worker for league-eng (task `b3-eng-mobile-1`), branch `build/b3-claim-handoff`
+**Builder:** eng-mobile worker for league-eng (task `b3-eng-mobile-1`; commit 3: task `b3-eng-mobile-3`), branch `build/b3-claim-handoff`
 **Operator sign-off on waivers:** pending. Waiver to surface: §1 analytics (c), the same waiver #379 carries.
 
 ## Contents
@@ -13,6 +13,7 @@
 - [3. Evidence scope](#3-evidence-scope)
 - [4. Docs scope](#4-docs-scope-mandatory--hld--lld--api)
 - [5. Ship gate declaration](#5-ship-gate-declaration)
+- [2026-10-28 — design-lead review](#2026-10-28--design-lead-review)
 - [Copy for design-lead](#copy-for-design-lead)
 - [Known risk](#known-risk)
 
@@ -20,7 +21,7 @@
 
 ## What ships
 
-Two commits. The second is droppable on its own.
+Three commits. Commits 2 and 3 are droppable together: commit 3 reworks commit 2's steps block to design-lead's review ([2026-10-28 — design-lead review](#2026-10-28--design-lead-review)).
 
 | Commit | File | Change |
 |---|---|---|
@@ -31,6 +32,8 @@ Two commits. The second is droppable on its own.
 | 1 | `mobile/tests/check-sleeper-handoff.js` | S1, S2 (ClaimSheet half), S9, H1, H2. See §3. |
 | 2 | `mobile/src/components/ClaimSheet.tsx` | The PRD §4.2 steps block (testID `fa-claim.steps`) between the drop section and the CTA, live with the drop selection, in the `bare` rung's draft copy (the only rung proven). The CTA now also passes `clipboardText: row.name`, which the block discloses. Copy is marked `COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2)`. See [Copy for design-lead](#copy-for-design-lead). **Droppable:** it waits on design-lead / ux-lead copy approval. |
 | 2 | `mobile/tests/check-sleeper-handoff.js` | S8. |
+| 3 | `mobile/src/components/ClaimSheet.tsx` | design-lead's 4 changes: the steps block becomes a `TickLabel` "IN SLEEPER" over numbered rows (a local `ClaimStep`: Plex Mono `data` chalk-dim numeral + `body-sm` chalk-dim text, `space.xs` apart, no hairlines, no card), testIDs `fa-claim.step.league` / `.search` / `.add` / `.drop` / `.bid`. Step 1 always renders, with a null-league fallback. The drop row covers a picked drop and the full-roster "pick a player above" case; a FAAB bid row is new. The clipboard line and `clipboardText: row.name` are unchanged. Copy marker now `COPY: draft, pending marketing + Sleeper label capture (#351 §7.3)`. |
+| 3 | `mobile/tests/check-sleeper-handoff.js` | S8 rewritten to the numbered structure (17 checks, was 7). |
 
 No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag, no route, no event, no backend change.
 
@@ -57,6 +60,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
     - **H1** (the b3 brief's, not a PRD id): Free Agents mounts `ClaimSheet` with `surface="free_agents"` and `leagueName={leagueName}`, where `leagueId` and `leagueName` both read `useSession` → `s.league`. Usage Trends mounts it with `surface="usage_trends"` and the exact `leagueName` expression above, so the session name is used only when the claim league is the session league.
     - **H2** (the b3 brief's): in `FreeAgentsScreen`, the `query.isLoading` conditional sits inside the `query.isError` conditional's false branch.
     - **S8** (commit 2): `ClaimSheet.tsx` renders exactly one `fa-claim.steps` element, after the drop section and before the CTA. It **renders** (as `{…}` children, so a mention inside a condition doesn't count) `row.name`, the selected drop (a const that looks `dropId` up in `candidates`) and `leagueName`, and carries the "…so you can paste it into search." disclosure. `openSleeper` passes `clipboardText: row.name`.
+    - **S8, rewritten in commit 3** (design-lead's numbered list): exactly one `fa-claim.steps` element, after the drop section and before the CTA, headed by one `TickLabel` "IN SLEEPER" imported from `./chalkline`, holding exactly one row each of `fa-claim.step.league` / `.search` / `.add` / `.drop` / `.bid`. The league row sits under no condition (no `?:` or `&&` between it and the block) and renders `leagueName` or, when that is null, the string "Open the league you're claiming in". The search row renders `row.name`. The drop row renders the selected drop (a const that looks `dropId` up in `candidates`), shows "Drop: pick a player above" in the no-drop branch, and is gated by a condition that (one const deep) includes `openSlots === 0`. The bid row renders the bid and is gated on `faab` and the bid. Rows carry `n` 1, 2, 3, drop 4, and bid `{<the drop row's condition> ? 5 : 4}`, so the numbering has no gap. The copy disclosure is the block's last element, after every row, and the block ends before the CTA. `openSleeper` passes `clipboardText: row.name`.
   - `check-external-links.js`: the ClaimSheet LEGACY entry is gone, and a1 now covers `ClaimSheet.tsx` like any other file.
   - **Sabotage run** (applied, guard run, restored byte-for-byte; all green after):
 
@@ -77,16 +81,20 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
     | 13 | commit 2: `clipboardText: row.name` dropped from the CTA | S8 |
     | 14 | commit 2: the copy disclosure line removed (a silent copy) | S8 |
     | 15 | commit 2: the steps block moved below the CTA | S8 |
+    | 16 | commit 3: the league row wrapped in `{leagueName ? ( … ) : null}`, so it is omitted when null | S8 "the league row always renders" (only) |
+    | 17 | commit 3: the drop-name interpolation (`<ChalkText …>{dropName}</ChalkText>`) removed | S8 "the drop row renders the selected drop" (only) |
+    | 18 | commit 3: the bid row's condition `faab && bidNum != null` → `bidNum != null` | S8 "gated on faab and an entered bid" (only) |
+    | 19 | commit 3: the clipboard line moved above the rows | S8 "the copy disclosure … is the block's last line" (only) |
 - [x] **Unit tests:** no backend pytest; nothing in `backend/` changed.
-- [x] **Code-walk proof** (file:line at the branch tip, commit 2; #351 PRD §7.2 A and B). Commit 1 differs only in `ClaimSheet.tsx`: no steps block, no `clipboardText`, so step A5 and the copy in A9 don't exist there.
+- [x] **Code-walk proof** (file:line at the branch tip, commit 3; #351 PRD §7.2 A and B). Commit 1 differs only in `ClaimSheet.tsx`: no steps block, no `clipboardText`, so step A5 and the copy in A9 don't exist there. Commit 2 renders A5 as one arrow-chain line instead of numbered rows.
 
   **A. Free Agents → Add → claim sheet → CTA**
   1. `FreeAgentsScreen.tsx:53` `leagueId` = the session league's id; `:56` `leagueName` = the same session league's `league_name` (or `null`).
   2. Row **Add** (`:271-275`, testID `free-agents.add.<id>`) → `onAdd` `:84-91`: `:87` a Sleeper league → `setClaimTarget(row)`; `:88` anything else → `explainNoAdd` (unchanged, S9).
   3. `:212-223` mounts `<ClaimSheet … leagueId={leagueId} leagueName={leagueName} surface="free_agents" />` (`:216-218`).
-  4. `ClaimSheet.tsx:115-116` takes `leagueName` and `surface` (default `'unspecified'`); `:147` `dropName` = the selected drop candidate's name, or `null`.
-  5. Steps block `:324-353` (`fa-claim.steps` `:328`), between the drop section and the CTA. `:330-348` renders "In Sleeper: open **{League}** → Players → search **{Name}** → Add → drop **{Drop}**": the league step only when `leagueName` is set (`:332`), the drop step only when `dropName` is (`:342`). `:350-352` renders "We'll copy {Name} so you can paste it into search." A drop-row tap calls `setDropId`, so the block re-renders with the new drop.
-  6. CTA `:355-361` (`fa-claim.open-sleeper`, disabled while the bid is over budget) → `openSleeper` `:149-162` → `:155-161` `openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, clipboardText: row.name, surface })`.
+  4. `ClaimSheet.tsx:115-116` takes `leagueName` and `surface` (default `'unspecified'`); `:147` `dropName` = the selected drop candidate's name, or `null`; `:150` `dropStep` = a drop is picked or `openSlots === 0`; `:136-138` `faab` / `bidNum`.
+  5. Steps block `:327-380` (`fa-claim.steps` `:332`), between the drop section and the CTA: `TickLabel` "IN SLEEPER" `:334`, then `ClaimStep` rows (`:399-417`: Plex Mono numeral + `body-sm` text, one VoiceOver element per row). `:336-346` **1** "Open **{League}**", or "Open the league you're claiming in" when `leagueName` is null; never omitted. `:347-350` **2** "Players, then search **{Name}**". `:351-353` **3** "Add". `:354-365` **4** only when `dropStep`: "Drop **{Drop}**", or "Drop: pick a player above" with a full roster and no pick. `:368-375` the bid row, only in a FAAB league with a bid entered: "Bid **${bid}**", numbered 5 after a drop row, else 4. `:377-379` "We'll copy {Name} so you can paste it into search.", the block's last line. A drop-row tap (`setDropId`) or a bid edit (`setBid`) re-renders the block.
+  6. CTA `:382-388` (`fa-claim.open-sleeper`, disabled while the bid is over budget) → `openSleeper` `:152-165` → `:158-164` `openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, clipboardText: row.name, surface })`.
   7. `sleeperHandoff.ts:95-106` → `:100` `sleeperAppUrl(t)` `:79-91`: `:83` keeps L only if numeric, `:84` keeps P for `add`; `:85-89` walks `SLEEPER_PROVEN_RUNGS.add` = `['bare']` (`:39`) → `rungUrl('bare')` `:71-72` → `sleeper://`. `:102` `surface: 'free_agents'`; `:103` `appMissing: 'alert'`.
   8. `openExternal.ts:70-81` `openPlatform`: `:71` no open in flight → `:72` `attempt`; `:78` 2 s lock release; `:79` release on settle.
   9. `attempt` `:83-96`: `:84` `copyText(row.name)` **before** any open (commit 1: no `clipboardText`, nothing copied); `:86` `opened('sleeper://')` → `:100-107` → `:102` `await Linking.openURL`.
@@ -101,7 +109,7 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
 
   **C. Non-Sleeper invariance.** `ClaimSheet.tsx` `resolveAddPlatform`, `NO_ADD_REASON` and `explainNoAdd` (`:59-104`): no content change (S9). Free Agents' `onAdd` and Usage Trends' `doAdd` are unchanged.
 
-- [x] **Manual TestFlight checklist** (for the operator, on the build that carries this branch; adapted from #351 PRD rows 13, 14 and 16). Run the commit-1 variant if commit 2 is dropped, the commit-2 variant if it ships.
+- [x] **Manual TestFlight checklist** (for the operator, on the build that carries this branch; adapted from #351 PRD rows 13, 14 and 16). Run the commit-1 variant if commits 2 and 3 are dropped, the steps variant if they ship. Rows 6–9 are the steps variant at commit 3 (numbered rows; adapted from PRD rows 13/14).
 
   | # | Sleeper app | Steps | Expected |
   |---|---|---|---|
@@ -110,25 +118,26 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
   | 3 | **not installed** (Settings → General → iPhone Storage → Sleeper → Offload App) | Free agents → Add → CTA | Alert "Sleeper isn’t installed" with **Cancel** / **Get Sleeper**. **Get Sleeper** opens the **App Store app** on Sleeper's listing, with no Safari. **Cancel** returns to the sheet and opens nothing. Never a silent no-op. |
   | 4 | installed | Free agents → Add → **double-tap** the CTA fast | Exactly one app switch. |
   | 5 | — | An ESPN or MFL league → Free agents → **Add** | Unchanged: the "Can't add in ESPN leagues yet" / "Can't add in MFL leagues yet" alert. No sheet, no link. |
-  | 6 | installed, signed in | **Commit-2 variant.** As 1, on a league with open slots | Before the CTA, the sheet reads "In Sleeper: open **{L's name}** → Players → search **{player}** → Add" and "We'll copy {player} so you can paste it into search." After the CTA: switch to L in Sleeper if it opened M → Players → long-press the search field → **Paste** gives the player's name. |
-  | 7 | installed, **full roster** | **Commit-2 variant.** Free agents → Add → tap a drop, tap a different drop, then tap it again to clear it | The steps line gains "→ drop **{first drop}**", switches to the second drop's name, and loses the drop segment when cleared. Nothing else on the sheet moves. |
-  | 8 | installed | **Commit-2 variant.** As 2 (Usage Trends, a non-focused league) | The steps name **the league the Add targeted** (the one FTF switched to), not the previously focused league. |
+  | 6 | installed, signed in | **Steps variant.** As 1, on a league with open slots (a priority-waiver league, or FAAB with the bid left empty) | Before the CTA, under an **IN SLEEPER** heading, the sheet shows exactly three numbered rows: "1 Open **{L's name}**", "2 Players, then search **{player}**", "3 Add"; then "We'll copy {player} so you can paste it into search." directly above the CTA. No drop row, no bid row. After the CTA: switch to L in Sleeper if it opened M → Players → long-press the search field → **Paste** gives the player's name. |
+  | 7 | installed, **full roster** | **Steps variant.** Free agents → Add → look at the steps before tapping a drop; then tap a drop, tap a different drop, then tap it again to clear it | Before any tap, row 4 reads "Drop: pick a player above" in the same dim grey as the other rows (not amber, not red). After the first tap it reads "4 Drop **{first drop}**", then switches to the second drop's name, and returns to "Drop: pick a player above" when cleared. Rows 1–3 and the copy line don't move. |
+  | 8 | installed | **Steps variant.** As 2 (Usage Trends, a non-focused league) | Row 1 names **the league the Add targeted** (the one FTF switched to), not the previously focused league. |
+  | 9 | installed, a **FAAB** league | **Steps variant.** Free agents → Add → type a bid of 5, then clear it; repeat on a full roster with a drop picked | With room: a 4th row "4 Bid **$5**" appears as you type and disappears when the bid is cleared. Full roster with a drop picked: "4 Drop **{drop}**" then "5 Bid **$5**". The numbers never skip. |
 
 - [ ] **WAIVED because:** n/a, not waived.
-- `testID`s added/renamed: commit 1 none (`fa-claim.open-sleeper` kept); commit 2 adds `fa-claim.steps`. `bash scripts/testid-lint.sh` → `testid-lint OK` at both.
+- `testID`s added/renamed: commit 1 none (`fa-claim.open-sleeper` kept); commit 2 adds `fa-claim.steps`; commit 3 adds `fa-claim.step.league` / `.search` / `.add` / `.drop` / `.bid`. `bash scripts/testid-lint.sh` → `testid-lint OK` at all three.
 
 **Commands run** (from `mobile/`; this worktree has no `node_modules` (G-022), so the guards ran with `NODE_PATH` pointed at another checkout's `mobile/node_modules`, at the same `package-lock.json`):
 
 | Command | Result |
 |---|---|
-| `node tests/check-sleeper-handoff.js` | 68 PASS, 0 FAIL at commit 1; 75 PASS, 0 FAIL at commit 2 (+7 S8) |
-| `node tests/check-external-links.js` | 46 PASS, **4 FAIL, all pre-existing at `04eae95b`** (main's #360 added a `FeedbackSheet` mailto and removed three `SettingsScreen` links; the merge didn't update the LEGACY list). Not in this change's files. Before this change: 47 PASS, the same 4 FAIL. |
-| `node tests/check-usage-trends.js` | 76 PASS (§2i/2j, the shared ClaimSheet) |
+| `node tests/check-sleeper-handoff.js` | 68 PASS, 0 FAIL at commit 1; 75 PASS, 0 FAIL at commit 2 (+7 S8); 85 PASS, 0 FAIL at commit 3 (S8 rewritten, 17 checks) |
+| `node tests/check-external-links.js` | 46 PASS, **4 FAIL, all pre-existing at `04eae95b`** (main's #360 added a `FeedbackSheet` mailto and removed three `SettingsScreen` links; the merge didn't update the LEGACY list). Not in this change's files. Before this change: 47 PASS, the same 4 FAIL. At commit 3, after the #379 ratchet-fix merge (`a935304e`): 48 PASS, 0 FAIL. |
+| `node tests/check-usage-trends.js` | 76 PASS (§2i/2j, the shared ClaimSheet), at commits 2 and 3 |
 | `node tests/check-home-destinations.js`, `check-league-drill-in.js`, `check-picker-pick-filter.js` (the other guards that read `FreeAgentsScreen`) | all pass |
-| `node tests/check-send-button-platform.js`, `check-trade-text.js` | all pass |
+| `node tests/check-send-button-platform.js`, `check-trade-text.js` | all pass (`check-send-button-platform.js` 32 PASS at commit 3) |
 | every `tests/check-*.js` (121), at commit 2 | 119 pass in the worktree. The two others: `check-external-links.js` (the 4 pre-existing failures above) and `check-offer-prefill-330-unit.js`, which requires `mobile/node_modules/zustand` by absolute path, so it can't run here; on the scratch copy with `node_modules` linked it passes 14/14 |
 | `bash scripts/testid-lint.sh` | `testid-lint OK` |
-| `tsc --noEmit` | exit 0 at commit 1 and at commit 2, run on a scratch copy of `mobile/` with a borrowed `node_modules` (same lock file). CI is the gate. |
+| `tsc --noEmit` | exit 0 at commits 1, 2 and 3, run on a scratch copy of `mobile/` with a borrowed `node_modules` (same lock file). CI is the gate. |
 
 ## 4. Docs scope (MANDATORY — HLD / LLD / API)
 
@@ -141,33 +150,57 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
 | `docs/cross-client-invariants.md` | n/a | No shared constant or enum. |
 | `docs/glossary.md` | n/a | No new UI term. |
 | ADR or `DECISIONS.md` | n/a | No new non-obvious choice. The `leagueName` precedence follows the brief; the hand-off design is #379's. |
-| `docs/integrations/sleeper.md` | **updated** | §1.3: the ClaimSheet row (was "Deep link (legacy, league-eng)", https) now describes the `openInSleeperApp({ target: 'add' })` call, its two hosts and surfaces, and the last-viewed-league risk. Commit 2 adds the clipboard copy and the steps block to that row. |
+| `docs/integrations/sleeper.md` | **updated** | §1.3: the ClaimSheet row (was "Deep link (legacy, league-eng)", https) now describes the `openInSleeperApp({ target: 'add' })` call, its two hosts and surfaces, and the last-viewed-league risk. Commit 2 adds the clipboard copy and the steps block to that row. Commit 3 updates its line refs and describes the numbered steps. |
 
 ## 5. Ship gate declaration
 
-- **CI green:** local equivalents above, except `check-external-links.js`'s 4 pre-existing failures, which make the `mobile-typecheck` job red on #379's tip as well. Someone has to fix them before either branch merges (owner: platforms-eng, #379's builder, or the LEGACY owners). Not pushed; CI hasn't run.
+- **CI green:** local equivalents above, except `check-external-links.js`'s 4 pre-existing failures, which make the `mobile-typecheck` job red on #379's tip as well. Someone has to fix them before either branch merges (owner: platforms-eng, #379's builder, or the LEGACY owners). Not pushed; CI hasn't run. Update 2026-10-28 (commit 3): the `a935304e` merge brought #379's ratchet fix, and `check-external-links.js` is 48 PASS, 0 FAIL on this branch.
 - **Evidence recorded:** this file. A `living-memory/TEST_LEDGER.md` entry is **pending for the coordinator** (shared doc, G-022) and required before merge.
 - **TestFlight verification:** checklist in §3; the operator runs it, and the outcome goes in TEST_LEDGER.
 - **Merge gate (from #379):** #351 device tests R0, 1–12 and T1–T4 recorded in `docs/plans/sleeper-fa-deeplink/device-results.md`. Test 3 (`sleeper://` registered) is go/no-go.
 - Express lane declared by the operator? **No.** Full gates.
 
+## 2026-10-28 — design-lead review
+
+design-lead reviewed commit 2: **approve with 4 changes**. Commit 3 implements them as stated, with no new tokens and no other visual change (one ice primary).
+
+1. **A numbered list, not an arrow chain.** A `TickLabel` heading "IN SLEEPER" (from `./chalkline`), then one row per step: the number in Plex Mono `data` chalk-dim, then `body-sm` chalk-dim text. Names (league, player, drop) keep `stepsEm` (Archivo 600, chalk). `space.xs` between rows; no hairlines, no card.
+2. **Rows at the `bare` rung**, in order, numbered without gaps: (1) "Open **{leagueName}**", always first and never omitted, because bare reopens the last-viewed league, with a fallback when the name is null; (2) "Players, then search **{row.name}**"; (3) "Add"; (4) "Drop **{dropName}**" when a drop is picked, "Drop: pick a player above" (chalk-dim, not a warn colour) on a full roster with no pick, omitted when the roster has room; (5) "Bid **${bid}**" in FAAB leagues once a bid is entered, because the bid doesn't carry over to Sleeper. testIDs `fa-claim.step.league` / `.search` / `.add` / `.drop` / `.bid`; the block keeps `fa-claim.steps`.
+3. **The clipboard line** ("We'll copy {Name} so you can paste it into search.") stays the block's last line, directly above the CTA, in `sectionHint`. Unchanged.
+4. **Copy:** step verbs must eventually match Sleeper's real button labels from the #351 device label capture (§7.3, not recorded yet), and the words are marketing's. The block carries `COPY: draft, pending marketing + Sleeper label capture (#351 §7.3)`; the null-league fallback carries its own pending-marketing marker. `clipboardText: row.name` stays on the CTA.
+
 ## Copy for design-lead
 
-Commit 2 only. Every string is the #351 PRD §4.2 draft for the `bare` rung, marked `COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2)` in `ClaimSheet.tsx`. Bold = the semibold emphasis (`fonts.uiSemi`, `chalk.base`) inside `type.body`; the copy line is the file's existing `sectionHint` (`type.bodySm`, `chalk.dim`). No new colours, no icons. As rendered (checked by a scratch render of the component under node):
+Commit 3. Every string is a draft for the `bare` rung, pending **marketing** (the words) and the #351 §7.3 Sleeper label capture (the verbs). Bold = `stepsEm` (`fonts.uiSemi`, `chalk.base`) inside the row's `body-sm` chalk-dim text; numerals are `data` chalk-dim. Exact draft strings for marketing:
 
-| State | Steps line | Copy line |
+| Row | Shown when | Draft string |
 |---|---|---|
-| league + drop | In Sleeper: open **{League}** → Players → search **{Name}** → Add → drop **{Drop}** | We'll copy {Name} so you can paste it into search. |
-| league, no drop | In Sleeper: open **{League}** → Players → search **{Name}** → Add | same |
-| no league name, drop | In Sleeper: Players → search **{Name}** → Add → drop **{Drop}** | same |
-| no league name, no drop | In Sleeper: Players → search **{Name}** → Add | same |
+| heading | always | IN SLEEPER |
+| 1 | `leagueName` known | Open **{League}** |
+| 1 (fallback) | `leagueName` null or empty | Open the league you're claiming in |
+| 2 | always | Players, then search **{Name}** |
+| 3 | always | Add |
+| 4 | a drop is picked | Drop **{Drop}** |
+| 4 | full roster (`openSlots === 0`), nothing picked | Drop: pick a player above |
+| 4 or 5 | FAAB league, a bid entered (5 after a drop row, else 4) | Bid **${bid}** |
+| copy line | always, last, above the CTA | We'll copy {Name} so you can paste it into search. |
 
-Open for design-lead / ux-lead:
-- With no league name, "In Sleeper: Players → …" drops the league step entirely (per the brief), but at the bare rung the user still has to pick a league. PRD §4.3's degrade wording ("open your league → …") may read better.
-- "Add" vs "Claim" should match Sleeper's real labels, captured in the #351 device session (§7.3).
-- The bid isn't shown (PRD §4.2 lists it as optional).
-- VoiceOver reads "→" as "right arrow".
+As rendered (a scratch render of the component under node, at commit 3):
+
+| Case | Rows |
+|---|---|
+| league known, full roster, drop picked, FAAB bid 5 | 1 Open **Dynasty Degenerates** · 2 Players, then search **Jalen Tolbert** · 3 Add · 4 Drop **Tyler Boyd** · 5 Bid **$5** |
+| league null, roster has room | 1 Open the league you're claiming in · 2 Players, then search **Jalen Tolbert** · 3 Add |
+| league known, full roster, no drop picked | 1 Open **Dynasty Degenerates** · 2 Players, then search **Jalen Tolbert** · 3 Add · 4 Drop: pick a player above |
+| league known, room, FAAB bid 12 | 1 Open **Dynasty Degenerates** · 2 Players, then search **Jalen Tolbert** · 3 Add · 4 Bid **$12** |
+
+Every case ends with the copy line. The bid renders with the budget line's `toLocaleString('en-US')` formatting (a typed "05" shows as "$5").
+
+Still open:
+- "Add" (and "Players", "search") must match Sleeper's real labels, from the #351 device label capture (§7.3).
+- A full roster whose drop list is empty (every player untouchable or none droppable) still shows "Drop: pick a player above", though the sheet lists no one to pick. Rare; marketing or design-lead may want different words there.
+- Closed by commit 3: the missing-league degrade (now the fallback row), the bid (now a row), and VoiceOver reading "→" as "right arrow" (no arrows left; each row reads as one element).
 
 ## Known risk
 
-At the `bare` rung Sleeper reopens its **last-viewed league** (PRD C2), not the claim league. A user with several Sleeper leagues can land in the wrong one and add the player there. The old https link had the same end state on iPhone (Safari → Sleeper's home, #351 F3), so this is not a regression, but it is not fixed either. **Without commit 2, nothing on the sheet tells the user which league to pick.** Commit 2's steps block names the league. A deeper rung (`players_tab` or `league`) fixes it only once a device test proves Sleeper honours the league path.
+At the `bare` rung Sleeper reopens its **last-viewed league** (PRD C2), not the claim league. A user with several Sleeper leagues can land in the wrong one and add the player there. The old https link had the same end state on iPhone (Safari → Sleeper's home, #351 F3), so this is not a regression, but it is not fixed either. **Without commits 2 and 3, nothing on the sheet tells the user which league to pick.** The steps block's row 1 names the league, or tells the user to open the league they're claiming in when the name is unknown. A deeper rung (`players_tab` or `league`) fixes it only once a device test proves Sleeper honours the league path.

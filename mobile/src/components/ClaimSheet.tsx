@@ -121,7 +121,7 @@ export default function ClaimSheet({
 }: {
   row: ClaimTarget;
   leagueId: string;
-  /** The claim league's name; the steps block names it (#351 PRD §4.2). Null/absent: the step is left out. */
+  /** The claim league's name; step 1 of the steps block names it (#351 PRD §4.2). Null/absent: step 1 reads a generic fallback. */
   leagueName?: string | null;
   /** Which host opened the sheet, for the hand-off's ExternalTarget.surface. */
   surface?: ExternalSurface;
@@ -145,6 +145,9 @@ export default function ClaimSheet({
   // candidates) ⇒ show the least-valuable-first drop list.
   const showDropList = openSlots !== null ? openSlots === 0 : candidates.length > 0;
   const dropName = candidates.find((c) => c.id === dropId)?.name ?? null;
+  // Steps block: a drop step when a drop is picked, or when the roster is
+  // full and one still has to be; none when the roster has room.
+  const dropStep = dropName != null || openSlots === 0;
 
   const openSleeper = () => {
     // Copies the player's name (the steps block says so), then opens the
@@ -321,32 +324,56 @@ export default function ClaimSheet({
               )}
             </View>
 
-            {/* #351 PRD §4.2 steps: what to do once Sleeper opens. Re-renders
-                with the drop selection. Only the `bare` rung is proven, and
-                bare reopens Sleeper's last-viewed league, so the steps name
-                the league whenever the host knows it. */}
+            {/* #351 PRD §4.2 steps: what to do once Sleeper opens, as a
+                numbered list (design-lead review 2026-10-28). Re-renders with
+                the drop selection and the bid. Only the `bare` rung is proven,
+                and bare reopens Sleeper's last-viewed league, so step 1 always
+                names the league, generically when the host doesn't know it. */}
             <View style={sheetStyles.section} testID="fa-claim.steps">
-              {/* COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2) */}
-              <ChalkText variant="body">
-                {'In Sleeper: '}
-                {leagueName ? (
-                  <>
-                    {'open '}
-                    <ChalkText style={sheetStyles.stepsEm}>{leagueName}</ChalkText>
-                    {' → '}
-                  </>
+              {/* COPY: draft, pending marketing + Sleeper label capture (#351 §7.3) */}
+              <TickLabel>IN SLEEPER</TickLabel>
+              <View style={sheetStyles.stepList}>
+                <ClaimStep n={1} testID="fa-claim.step.league">
+                  {leagueName ? (
+                    <>
+                      {'Open '}
+                      <ChalkText style={sheetStyles.stepsEm}>{leagueName}</ChalkText>
+                    </>
+                  ) : (
+                    // COPY: null-league fallback, pending marketing.
+                    "Open the league you're claiming in"
+                  )}
+                </ClaimStep>
+                <ClaimStep n={2} testID="fa-claim.step.search">
+                  {'Players, then search '}
+                  <ChalkText style={sheetStyles.stepsEm}>{row.name}</ChalkText>
+                </ClaimStep>
+                <ClaimStep n={3} testID="fa-claim.step.add">
+                  Add
+                </ClaimStep>
+                {dropStep ? (
+                  <ClaimStep n={4} testID="fa-claim.step.drop">
+                    {dropName ? (
+                      <>
+                        {'Drop '}
+                        <ChalkText style={sheetStyles.stepsEm}>{dropName}</ChalkText>
+                      </>
+                    ) : (
+                      'Drop: pick a player above'
+                    )}
+                  </ClaimStep>
                 ) : null}
-                {'Players → search '}
-                <ChalkText style={sheetStyles.stepsEm}>{row.name}</ChalkText>
-                {' → Add'}
-                {dropName ? (
-                  <>
-                    {' → drop '}
-                    <ChalkText style={sheetStyles.stepsEm}>{dropName}</ChalkText>
-                  </>
+                {/* The bid doesn't carry over to Sleeper, so FAAB leagues
+                    restate it once one is entered. */}
+                {faab && bidNum != null ? (
+                  <ClaimStep n={dropStep ? 5 : 4} testID="fa-claim.step.bid">
+                    {'Bid '}
+                    <ChalkText style={sheetStyles.stepsEm}>
+                      ${bidNum.toLocaleString('en-US')}
+                    </ChalkText>
+                  </ClaimStep>
                 ) : null}
-              </ChalkText>
-              {/* COPY: draft, pending design-lead/ux-lead (#351 PRD §4.2) */}
+              </View>
               <ChalkText style={sheetStyles.sectionHint}>
                 {`We'll copy ${row.name} so you can paste it into search.`}
               </ChalkText>
@@ -366,6 +393,26 @@ export default function ClaimSheet({
         </SafeAreaView>
       </View>
     </Modal>
+  );
+}
+
+// One numbered row of the steps block: the step number in `data` (Plex Mono)
+// chalk-dim, then `body-sm` chalk-dim text. `accessible` makes VoiceOver read
+// the number and the text as one step.
+function ClaimStep({
+  n,
+  testID,
+  children,
+}: {
+  n: number;
+  testID: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={sheetStyles.stepRow} testID={testID} accessible>
+      <ChalkText style={sheetStyles.stepNum}>{n}</ChalkText>
+      <ChalkText style={sheetStyles.stepText}>{children}</ChalkText>
+    </View>
   );
 }
 
@@ -418,9 +465,14 @@ const sheetStyles = StyleSheet.create({
 
   section: { gap: space.sm },
   sectionHint: { ...type.bodySm, color: chalk.dim },
-  // Steps block emphasis (league / player / drop): the `title` weight at
-  // the surrounding body size.
+  // Steps block emphasis (league / player / drop / bid): the `title` weight
+  // at the surrounding body-sm size.
   stepsEm: { fontFamily: fonts.uiSemi, color: chalk.base },
+  // Steps block rows: space.xs apart, no hairlines, no card.
+  stepList: { gap: space.xs },
+  stepRow: { flexDirection: 'row', gap: space.sm },
+  stepNum: { ...type.data, color: chalk.dim },
+  stepText: { ...type.bodySm, color: chalk.dim, flex: 1 },
 
   bidRow: {
     flexDirection: 'row',
