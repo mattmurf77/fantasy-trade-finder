@@ -28027,17 +28027,40 @@ def session_init():
 # Session Ping — lightweight liveness check
 # ---------------------------------------------------------------------------
 
+def _session_verification(sess: dict) -> dict:
+    """The additive `verification` object, as session/init returns it (same
+    four fields, same sources): this session's own `verified` stamp, and the
+    user_id's stored verified_via."""
+    verified_via = None
+    try:
+        from . import accounts as _accounts
+        verified_via = _accounts.get_user_verified_via(sess.get("user_id"))
+    except Exception as verif_err:
+        log.warning("session/ping: verified_via lookup failed: %s", verif_err)
+    return {
+        "session_verified": bool(sess.get("verified")),
+        "user_verified":    bool(verified_via),
+        "verified_via":     verified_via,
+        "enforced":         is_enabled("auth.enforce_verified_writes"),
+    }
+
+
 @app.route("/api/session/ping", methods=["GET"])
 def session_ping():
-    """GET /api/session/ping — check whether the current session is alive."""
+    """GET /api/session/ping — check whether the current session is alive.
+
+    Also returns `verification` (head-eng 2026-10-28): an account-only
+    session (Apple-first, no league) never reaches session/init, the other
+    source of that field, so its client asks here instead."""
     sess = _get_session(request.headers.get("X-Session-Token", ""))
     if not sess:
         return jsonify({"ok": False}), 401
     sess["last_active"] = time.time()
     return jsonify({
-        "ok":      True,
-        "user_id": sess["user_id"],
-        "league":  sess.get("league", {}).name if sess.get("league") else "",
+        "ok":           True,
+        "user_id":      sess["user_id"],
+        "league":       sess.get("league", {}).name if sess.get("league") else "",
+        "verification": _session_verification(sess),
     })
 
 

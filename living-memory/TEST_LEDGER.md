@@ -1,3 +1,16 @@
+## 2026-10-28 — Account-only sessions get `verification` (head-eng; for the 11-06 binary)
+
+Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verification.md`). Server and mobile; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:**
+  - `GET /api/session/ping` returns session/init's additive `verification` object, via `_session_verification(sess)`.
+  - Mobile `refreshVerification()` pings and records it only for the same, still-signed-in user.
+  - It's called from `revalidateSession`'s `NO_LEAGUE_ID` branch and after the account-only Apple sign-in.
+  - The result: an Apple-first account with no league now reads `session_verified: true`.
+- **Backend:** `test_session_ping_verification.py`, 6 tests. With `test_persistent_sessions.py`: 21 passed. **Sabotage 4/4 red.**
+- **Mobile:** `check-account-only-verification.js`, 4 AST pins. **Sabotage 7/7 red.** tsc clean; `check-win-now-recovery` passes.
+- **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
+
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
 Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).

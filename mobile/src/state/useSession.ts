@@ -12,7 +12,11 @@ import {
   setOnSessionExpired,
   setOnVerificationRequired,
 } from '../api/client';
-import { initLeagueSession, startDemoSession as apiStartDemoSession } from '../api/auth';
+import {
+  initLeagueSession,
+  refreshVerification,
+  startDemoSession as apiStartDemoSession,
+} from '../api/auth';
 import type { LeagueLite } from '../api/auth';
 import { getSeasonProjections } from '../api/winNow';
 import { createLeagueSessionLifecycle, LEAGUE_ATTEMPT_MS } from './leagueSession';
@@ -359,8 +363,13 @@ export const useSession = create<SessionState>((set, get) => ({
     const { user, league, isDemo } = get();
     if (!user || !league || isDemo) return;
     // The sentinel has no league to initialize. Account-only identities may
-    // still own a real imported ESPN/MFL/Fleaflicker league.
-    if (league.league_id === NO_LEAGUE_ID) return;
+    // still own a real imported ESPN/MFL/Fleaflicker league. Session init is
+    // where every other session gets `verification`, so the sentinel asks
+    // the server for it directly (head-eng 2026-10-28).
+    if (league.league_id === NO_LEAGUE_ID) {
+      await refreshVerification();
+      return;
+    }
     try {
       // Reuses the verified token. Consumers join this exact in-flight work;
       // a lost server context can force reconciliation past this throttle.
