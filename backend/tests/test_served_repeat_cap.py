@@ -12,13 +12,14 @@ Covers: _served_repeat_cap as a pure function (and differentially against
 deck_quality._repeat_cap); the legacy body, a later page (stored and job view,
 and after the job left the process), a replace serve, each with a disposition
 cut and with I-1 at mode 2; what never moves (flag off, an unpacked deck, no
-withdrawal); the header (written, merged, first delivery wins); the loader's
-positions; and the audit reading a moved deck as clean.
+withdrawal); and the header (written, merged, first delivery wins, each
+move's anchor a card its response sent first).
 
 Harness: test_deferred_evidence's `deferred` (p1's real worker and routes,
 flag on, evidence writes inline), with the synthetic deck giving asset mine0
 on cards 0-2 (the filter's three in the window) and 30-31 (the two it
-deferred past it).
+deferred past it). eval's reading of the header is models-eng's #501; the
+tests here check the header against that order rule (_display_key).
 """
 import json
 import random
@@ -30,7 +31,6 @@ import backend.server as server
 import backend.tests.test_deferred_evidence as de
 from backend import deck_quality as dq
 from backend.eval import contract
-from backend.eval import data as eval_data
 from backend.tests.test_i1_serve_filter import live  # noqa: F401  (fixture)
 from backend.tests.test_trade_page_store import p1, run_job, status  # noqa: F401  (fixture)
 from backend.tests.test_deferred_evidence import HEADERS, deferred  # noqa: F401  (fixture)
@@ -115,9 +115,22 @@ def test_recorded_moves_are_re_applied_and_not_recorded_again():
     assert (indexes(out), moves) == ([*range(29), 32, 30, 31, 33], {})
 
 
-def test_an_order_evals_key_cannot_reproduce_is_never_served():
-    """The window's last card is itself a recorded move (35 behind 40): a card
-    deferred behind it would read, by eval's key, ahead of it. Nothing moves."""
+@pytest.mark.parametrize("last", ["delivered", "withheld"])
+def test_the_anchor_is_always_a_card_this_response_sends_first(last):
+    """eval reads a move only with its card and anchor in one delivery (#501):
+    when the window's last card went out earlier, nothing moves."""
+    deck = window_deck()                                  # 0..28, 30, 31, 32, 33
+    kw = ({"delivered": {"d:32"}} if last == "delivered"
+          else {"delivered": {"d:32"}, "withheld": [deck.pop(31)]})   # card 32, unsent
+    out, moves = server._served_repeat_cap(deck, "d", **kw)
+    assert moves == {}
+    assert indexes(out) == [*range(29), 30, 31, *([32] if last == "delivered" else []), 33]
+
+
+def test_a_recorded_move_is_never_an_anchor():
+    """The window's last card is itself a recorded move (35 behind 40),
+    delivered earlier: a card deferred behind it would read, by eval's key,
+    ahead of it. Nothing moves."""
     deck = [*(card(i, "X") if i in X_AT else card(i) for i in range(29)),
             card(33, "X"), card(35), card(41)]
     out, moves = server._served_repeat_cap(deck, "d", delivered={"d:35"}, recorded={35: 40})
@@ -183,18 +196,23 @@ def header_moves(engine, job_id):
     return run.get("display_moves")
 
 
-def positions(engine, job_id):
-    [deck] = [d for d in eval_data.load_decks(engine=engine) if d.deck_job_id == job_id]
-    return {c.card_index: c.position for c in deck.cards if not c.is_ghost}
+def displayed(engine, job_id):
+    """The order eval reads from the evidence alone (models-eng's #501): the
+    pack's cards less the never-delivered withdrawals, each moved card right
+    after its anchor."""
+    run, cards = unpack(pack_of(engine, job_id))
+    moves = {int(k): a for k, a in (run.get("display_moves") or {}).items()}
+    w0 = {i for i, r in withdrawals(engine).items() if r["served_before"] == 0}
+    kept = [c["card_index"] for c in cards if c["card_index"] not in w0]
+    return sorted(kept, key=lambda i: server._display_key(i, moves))
 
 
 def assert_moved(engine, job_id):
     assert header_moves(engine, job_id) == {"30": 32, "31": 32}
-    got = positions(engine, job_id)
-    assert 5 not in got                                   # W0: removed for eval
-    assert (got[29], got[32], got[30], got[31], got[33]) == (28, 29, 30, 31, 32)
-    shown = sorted(got, key=got.get)[:W]
-    assert sum(1 for i in shown if i in X_AT) == CAP      # B-DK-7: X in 3 of the first 30
+    shown = displayed(engine, job_id)
+    assert 5 not in shown                                 # W0: removed for eval
+    assert shown[28:33] == [29, 32, 30, 31, 33]
+    assert sum(1 for i in shown[:W] if i in X_AT) == CAP  # B-DK-7: X in 3 of the first 30
 
 
 @pytest.mark.parametrize("how", ["cut", "i1"])
@@ -280,70 +298,3 @@ def test_the_header_keeps_a_cards_first_move():
     assert merged["display_moves"] == {"30": 32, "31": 33}
     assert "display_moves" not in server._merge_pack_runs({"deliveries": []}, {"deliveries": []},
                                                           None)
-
-
-# ── the loader and the audit ─────────────────────────────────────────────────
-
-from backend.tests.test_eval_bdk_audit import AS_OF, SINCE, _x_deck, run  # noqa: E402
-from backend.tests.test_eval_pack_reader import SERVED, _deck_cards  # noqa: E402
-from backend.tests.test_eval_withdrawals_and_paging import make_db, put_pack, withdraw  # noqa: E402
-
-
-def moved_deck(db, job="mv", moves=None, deliveries=None):
-    """X on 10-12 and W (the filter deferred W), card 2 a never-delivered cut
-    that pulls W into the window; the serve moved W behind W + 1."""
-    _x_deck(db, job, W + 3, (10, 11, 12, W), skip={2})
-    withdraw(db, job, 2, 0, reason="disposition_cut")
-    put_pack(db, job, _deck_cards(job, W + 3), card_count=W + 3,
-             deliveries=deliveries or [[W + 2, SERVED]], retired=True, retired_at=SERVED,
-             **({"display_moves": moves} if moves is not None else {}))
-
-
-def loaded(db, job="mv"):
-    [deck] = [d for d in eval_data.load_decks(engine=db.eng, since=SINCE, as_of=AS_OF)
-              if d.deck_job_id == job]
-    return {c.card_index: c.position for c in deck.cards if not c.is_ghost}
-
-
-def test_the_loader_places_a_moved_card_behind_its_anchor():
-    db = make_db()
-    moved_deck(db, moves={str(W): W + 1})
-    got = loaded(db)
-    assert (got[W - 1], got[W + 1], got[W], got[W + 2]) == (W - 2, W - 1, W, W + 1)
-    assert sorted(got.values()) == list(range(W + 2))     # dense
-
-
-def test_with_no_moves_the_loader_reads_as_before():
-    db = make_db()
-    moved_deck(db)
-    got = loaded(db)
-    assert {i: p for i, p in got.items()} == {i: i - (i > 2) for i in range(W + 3) if i != 2}
-
-
-def test_a_move_counts_only_once_its_card_is_delivered_as_of_the_read():
-    """In flight (not retired): as of a read before the page holding W, the
-    move isn't applied (re-reads at one as_of stay the same)."""
-    db = make_db()
-    _x_deck(db, "mv", W + 3, (10, 11, 12, W), skip={2})
-    withdraw(db, "mv", 2, 0, reason="disposition_cut")
-    later = eval_data.datetime.fromisoformat(AS_OF) + eval_data.timedelta(hours=1)
-    put_pack(db, "mv", _deck_cards("mv", W + 3), card_count=W + 3, retired=False,
-             deliveries=[[W - 1, SERVED], [W + 2, later.isoformat()]],
-             display_moves={str(W): W + 1})
-    got = loaded(db)
-    assert (got[W], got[W + 1]) == (W - 1, W)
-
-
-@pytest.mark.parametrize("bad", [{"x": 31}, {"30": "31"}, {"30": True}, {"30": 29}, {"30": 30},
-                                 ["30", 31]])
-def test_a_malformed_move_is_ignored(bad):
-    assert eval_data._display_moves({"display_moves": bad}) == {}
-
-
-def test_the_audit_reads_a_moved_deck_as_clean_and_the_unmoved_one_as_a_breach():
-    db = make_db()
-    moved_deck(db, "mv", moves={str(W): W + 1})
-    moved_deck(db, "still")
-    t = run(db).rules["repeat"]
-    assert t["violations"] == 1
-    assert [e["deck_job_id"] for e in t["examples"]] == ["still"]

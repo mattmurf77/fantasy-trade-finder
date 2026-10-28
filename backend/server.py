@@ -6338,8 +6338,9 @@ def _served_repeat_cap(cards: list, deck_job_id: str, *, prior=(), delivered=fro
     moves to just after the last card the window takes, never out of this
     response, so its delivery boundary holds. Returns (the cards in displayed
     order, the new moves). Nothing moves unless every card has a contract id,
-    in build order, and eval's display key (_display_key) reproduces the
-    order exactly."""
+    in build order, and that last card is one this response sends first (eval
+    reads a move only with its card and anchor in one delivery, #501); so a
+    move's anchor is above its card and never itself moved."""
     from .deck_quality import REPEAT_CAP, REPEAT_WINDOW
     recorded = recorded or {}
     indexes = [_deck_card_index(deck_job_id, c.get("impression_id")) for c in cards]
@@ -6382,14 +6383,14 @@ def _served_repeat_cap(cards: list, deck_job_id: str, *, prior=(), delivered=fro
         taken.append(c)
     if not deferred or not taken:
         return sent(shown), {}
-    anchor = key(taken[-1], recorded)
-    moves = {index_of[id(d)]: anchor[0] for d in deferred if key(d, recorded) < anchor}
-    out = taken + deferred + tail
-    every = {**moves, **recorded}
-    if not moves or [id(c) for c in sorted(every_card, key=lambda c: key(c, every))] != [
-            id(c) for c in out]:
+    last = taken[-1]
+    if id(last) in unsent or last.get("impression_id") in delivered:
         return sent(shown), {}
-    return sent(out), moves
+    anchor = index_of[id(last)]
+    moves = {index_of[id(d)]: anchor for d in deferred if index_of[id(d)] < anchor}
+    if not moves:
+        return sent(shown), {}
+    return sent(taken + deferred + tail), moves
 
 
 def _served_cap(job: dict, cards: list, earlier=None, before=()) -> tuple[list, dict]:
