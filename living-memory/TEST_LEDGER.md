@@ -65,6 +65,32 @@ Gates: a values fix to `GET /api/paywall/config` (flag `monetize.paywall`, still
   - tsc not run here (no `mobile/` change; `billing.ts` still types `trial_days: number`, harmless at runtime, and the #393 M1 branch drops it);
   - `docs/plans/monetization/pro-subscription/lld.md` §3 JSON and `iap-enablement/sandbox-test-checklist.md` P2 still carry the old prices and trial lengths (history and ASC setup, left for the #393 owners).
 
+## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
+
+Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **CI fix (`backend-tests` at `c2253799`):** recording on the job broke `test_bakeoff_serving`'s flag-off golden, which pins the job's keys. The record now lives on the deck's evidence (`ev.filter_inputs`), and v5 is re-pinned in place (`99d62fcaf7ad01ef`).
+- **Backend:** `test_filter_inputs.py` (5, unit) and `test_filter_inputs_pack.py` (6, real organic jobs with deferred evidence, and a real packed job for the header):
+  - the record holds what the filter read (nulls, coverage, `qb_te` for the viewer and counterparties only, `protected`);
+  - the lineup recorded as read (null / empty / list);
+  - not a frozen input;
+  - the real worker's record reproduces the filter: every kept card passes breakup and filler on it;
+  - flag off, or a failed filter → `filter_ran` false;
+  - a failed record never unfilters the deck;
+  - the pack's run header carries it; a deck with no record has none.
+- `test_deck_pipeline_digest.py`: v5 added to FROZEN_PINS.
+- **Sabotage, each red then restored (8):**
+  - job done dropping it;
+  - the worker never setting it;
+  - recording it on the job too (the golden goes red);
+  - a record failure unfiltering the deck;
+  - an unseeded asset absent instead of null;
+  - `qb_te` for every team;
+  - no record with the flag off;
+  - no `protected`.
+- **Size:** about 8.4 KB of JSON for a synthetic 120-card, 12-team deck (190 market entries; up to 121 QB/TE holdings with random positions, about 72 with real ones). It sits in the run header, which is rewritten on every header update. U8's re-measure takes the real number.
+- **Full suite:** `pytest backend/tests`, 9,351 passed at `63638007` (merged with main at `0fa614d5`). After resyncing onto `190ce568` (#460; a ledger-only conflict), the targeted suites passed.
+
 ## 2026-10-26 — Settings labels ESPN/MFL sign-in identities (the onboarding-eng side of platforms-eng's ESPN/MFL sign-in)
 
 Full gates, not express (scope: platforms-eng's ESPN/MFL sign-in, the onboarding-eng side; MUST 2 of onboarding-eng's design review). Mobile only; D-056: no simulator, `FTF_SKIP_SIM_GATE=1` posture. Frozen values (platforms-eng, 2026-10-26): identity provider `espn` / `mfl`, `verified_via` `espn` / `mfl_login`.
