@@ -12542,6 +12542,7 @@ def seed_pick_grid(
     scoring_format: str = "1qb_ppr",
     platform: str = "espn",
     reseed: bool = False,
+    first_season: int | None = None,
 ) -> dict:
     """Write the PRISTINE grid: every team owns its own picks, every season.
 
@@ -12558,6 +12559,14 @@ def seed_pick_grid(
     str(i+1)` off the passed member list; that silently re-points every
     `pick_id`'s "original team" the moment the roster changes, so this
     preserves the established mapping instead.)
+
+    `first_season` (C5) is the first class generated; `None` means
+    `current_season`, which is byte-identical to the behavior before it
+    existed. Prices stay relative to `current_season`, so a pick seeded one
+    class later is still priced by its real years out. Existing rows of the
+    skipped classes `[current_season, first_season)` are carried verbatim and
+    never deleted: the grid only hides them, so they come back if the
+    verdict flips.
     """
     from . import draft_status
 
@@ -12603,7 +12612,8 @@ def seed_pick_grid(
         used.add(str(next_slot))
 
     now = _now()
-    seasons = list(range(int(current_season), int(current_season) + seasons_ahead + 1))
+    first = int(current_season) if first_season is None else int(first_season)
+    seasons = list(range(first, first + seasons_ahead + 1))
     rows: list[dict] = []
     seeded = reseeded_over = skipped = 0
     generated: set[str] = set()
@@ -12652,6 +12662,8 @@ def seed_pick_grid(
     # the season horizon is an explicit user action rather than a silent drop.
     carried = 0
     season_set = set(seasons)
+    # C5 — the skipped classes are hidden, never deleted: carry them too.
+    season_set |= set(range(int(current_season), first))
     for pick_id, prior in existing.items():
         if pick_id in generated:
             continue
@@ -12665,6 +12677,10 @@ def seed_pick_grid(
         rows.append(prior)
         carried += 1
 
+    # Kept rows carry their surrogate `id` and generated rows have none, but
+    # one bulk INSERT needs one key set ("a value is required for bind
+    # parameter 'id'"). The DELETE frees every id, so drop it from all rows.
+    rows = [{k: v for k, v in r.items() if k != "id"} for r in rows]
     replace_draft_picks(league_id, rows, preserve_source=PICK_SOURCE_USER)
     _invalidate_contested(league_id)
     return {"seeded": seeded, "reseeded_over": reseeded_over,
