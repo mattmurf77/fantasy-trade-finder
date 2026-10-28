@@ -1,3 +1,11 @@
+## 2026-10-28 — #494: the price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule)
+
+Gates: a value change to #494 (`fix/paywall-fallback-prices`) requested by monetization-pm (head-product authorized; the operator approved scheduling both App Store price changes for 2027-01-02 on 2026-10-28). Re-opens release-lead's QA (GO-with-notes @ `061ec1ff`) for this delta only. Still dark (`monetize.paywall`). D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `_PAYWALL_PRICE_RISE_AT` = `datetime(2027, 1, 2, 4, 0, tzinfo=utc)` (was 2027-01-01 08:00Z, LA midnight). Per monetization-pm, citing Apple's start-times table, a change scheduled for 2027-01-01 starts in the US at 2027-01-01 04:00Z (11 pm ET on Dec 31), which breaks Terms §14.8; a 2027-01-02 schedule starts at 2027-01-02 04:00Z (11 pm ET / 8 pm PT on Jan 1). Apple's table renders its times client-side, so the 04:00Z figure is not independently checked here; monetization-pm's setup §3d records the time App Store Connect shows, and the constant moves if it differs. The comment block, api-reference row and cross-client-invariants SKU rows + fallback bullet say the same.
+- **Tests (`test_paywall_config.py`, 43):** both sides of the new instant (`2027-01-02T03:59:59Z` old, `04:00:00Z` new); the Jan-1 schedule's US start (`2027-01-01T04:00Z`) and the previous LA-midnight instant (`2027-01-01T08:00Z`) now serve the old prices; the constant equals 23:00 Jan 1 New York and 20:00 Jan 1 Los Angeles via `zoneinfo`, and the last second of Dec 31 in Honolulu is before it; time-zone instants (NY 23:00 Dec 31 old, LA midnight Jan 1 old, NY 22:59:59 Jan 1 old, NY 23:00 Jan 1 new, LA 20:00 Jan 1 new, Paris 00:30 Jan 1 old). 43 passed.
+- **Sabotage, each red then restored:** the old 2027-01-01 08:00Z instant → 6 red; a Jan-1 schedule's 2027-01-01 04:00Z → 9 red.
+
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
 Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).
