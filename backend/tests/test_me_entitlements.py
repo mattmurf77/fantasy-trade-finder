@@ -2,8 +2,9 @@
 
 `founder` is true when the user holds pro through a subscription that
 started before the Founding GMs club's closes_at, which is the price rise
-(server._PAYWALL_PRICE_RISE_DATE, 2027-01-01, midnight UTC; the one date
-head-eng ruled on 2026-10-27): the subscription's INITIAL_PURCHASE in the
+(server._PAYWALL_PRICE_RISE_AT, 2027-01-01 00:00 America/Los_Angeles =
+08:00 UTC; the one instant head-eng ruled on 2026-10-27): the
+subscription's INITIAL_PURCHASE in the
 subscription_events ledger (a first purchase or an intro-trial start), timed
 by the payload's purchased_at_ms, else the row's occurred_at.
 
@@ -25,7 +26,7 @@ through the real webhook projector (entitlements.ingest_billing_event).
 """
 
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -40,8 +41,10 @@ USER = "founder_user_1"
 TOKEN = "founder-verified-token"
 UNVERIFIED_TOKEN = "founder-unverified-token"
 
-BEFORE_CUT = datetime(2026, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
-AT_CUT = datetime(2027, 1, 1, tzinfo=timezone.utc)
+# The cut is the price rise: 2027-01-01 00:00 America/Los_Angeles = 08:00 UTC.
+BEFORE_CUT = datetime(2027, 1, 1, 7, 59, 59, tzinfo=timezone.utc)
+AT_CUT = datetime(2027, 1, 1, 8, tzinfo=timezone.utc)
+UTC_MIDNIGHT = datetime(2027, 1, 1, tzinfo=timezone.utc)   # 4 pm Dec 31 in LA
 AFTER_CUT = datetime(2027, 1, 2, tzinfo=timezone.utc)
 
 
@@ -112,6 +115,12 @@ def test_started_before_cut_is_founder(client, period):
     body = _get(client)
     assert body["pro"] is True
     assert body["founder"] is True
+
+
+def test_started_at_utc_midnight_is_founder(client):
+    """Jan 1 00:00 UTC is still Dec 31 across the US: a founder start."""
+    _ingest("ip-1", "INITIAL_PURCHASE", purchased=UTC_MIDNIGHT)
+    assert _get(client)["founder"] is True
 
 
 @pytest.mark.parametrize("started", [AT_CUT, AFTER_CUT])
@@ -218,16 +227,17 @@ def test_unverified_session_never_reads_the_ledger(client):
 def test_route_reads_the_server_constant(client, monkeypatch):
     _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)
     assert _get(client)["founder"] is True
-    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_DATE", date(2026, 12, 1))
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_AT",
+                        datetime(2026, 12, 1, 8, tzinfo=timezone.utc))
     assert _get(client)["founder"] is False
 
 
 def test_one_date_moves_founder_with_the_club_and_the_prices(client, monkeypatch):
     """The pin on the single source (head-eng 2026-10-27): move
-    _PAYWALL_PRICE_RISE_DATE and `founder`, `club.closes_at`, `club.open`
+    _PAYWALL_PRICE_RISE_AT and `founder`, `club.closes_at`, `club.open`
     and the prices all move together. A second literal date anywhere would
     leave one of them behind."""
-    _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)   # Dec 31 23:59:59
+    _ingest("ip-1", "INITIAL_PURCHASE", purchased=BEFORE_CUT)   # Dec 31 23:59:59 in LA
     monkeypatch.setattr(server, "is_enabled", lambda k: k == "monetize.paywall")
     monkeypatch.setattr(server, "_paywall_now",
                         lambda: datetime(2026, 12, 15, tzinfo=timezone.utc))
@@ -239,14 +249,15 @@ def test_one_date_moves_founder_with_the_club_and_the_prices(client, monkeypatch
                               for p in body["products"]}
 
     club, prices = config()
-    assert club == {"name": "Founding GMs", "closes_at": "2027-01-01T00:00:00Z",
+    assert club == {"name": "Founding GMs", "closes_at": "2027-01-01T08:00:00Z",
                     "open": True}
     assert prices == {"ftf_pro_monthly": "$4.99", "ftf_pro_annual": "$24.99"}
     assert _get(client)["founder"] is True
 
-    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_DATE", date(2026, 12, 1))
+    monkeypatch.setattr(server, "_PAYWALL_PRICE_RISE_AT",
+                        datetime(2026, 12, 1, 8, tzinfo=timezone.utc))
     club, prices = config()
-    assert club == {"name": "Founding GMs", "closes_at": "2026-12-01T00:00:00Z",
+    assert club == {"name": "Founding GMs", "closes_at": "2026-12-01T08:00:00Z",
                     "open": False}
     assert prices == {"ftf_pro_monthly": "$6.99", "ftf_pro_annual": "$34.99"}
     assert _get(client)["founder"] is False

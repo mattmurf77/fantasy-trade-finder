@@ -43,7 +43,7 @@ import urllib.parse
 import urllib.request
 
 from dataclasses import dataclass, replace as _dc_replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import (
     Flask, g, has_request_context, jsonify, make_response, redirect, request, send_from_directory,
@@ -33116,7 +33116,8 @@ def me_entitlements():
     unverified username-only session shares the subscriber's user_id.
     `enforcing` is server state. `founder`: pro from a subscription that
     started before the club closes, i.e. before the price rise
-    (_paywall_club_closes_at(); entitlements.is_founder)."""
+    (_PAYWALL_PRICE_RISE_AT via _paywall_club_closes_at();
+    entitlements.is_founder)."""
     sess = _require_session()
     if sess.get("verified") or _synthetic_demo_session(sess):
         out = entl.get_entitlements(sess["user_id"])
@@ -33163,20 +33164,31 @@ _PAYWALL_PRODUCTS = [
 ]
 
 # Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr
-# (the Founding GM prices), rising to $6.99 / $34.99 for NEW subscribers
-# from this date (midnight UTC). Existing subscribers keep their price
-# through App Store price preservation, which this table does not model.
-# Each entry is (before the rise, from the rise on). per_month_equiv is the
-# annual price / 12 rounded UP to the cent, matching legal's #393 R28.8 #2
-# copy, "$2.09/month" (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding
-# down would understate the annual price.
+# (the Founding GM prices), rising to $6.99 / $34.99 for NEW subscribers at
+# _PAYWALL_PRICE_RISE_AT. Existing subscribers keep their price through App
+# Store price preservation, which this table does not model. Each entry is
+# (before the rise, from the rise on). per_month_equiv is the annual price
+# / 12 rounded UP to the cent, matching legal's #393 R28.8 #2 copy,
+# "$2.09/month" (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down
+# would understate the annual price.
 #
-# THE ONE DATE (head-eng, 2026-10-27): it must equal the App Store Connect
-# scheduled price change, so it moves only with a reviewed deploy, never a
-# knob or config. Everything else derives from it through _paywall_rise_at():
-# the price window, `club.closes_at` and `club.open` on /api/paywall/config,
-# and `founder` on /api/me/entitlements. Hold no second copy of it.
-_PAYWALL_PRICE_RISE_DATE = date(2027, 1, 1)
+# The rise is an INSTANT, not a UTC date: 2027-01-01 00:00
+# America/Los_Angeles (PST, UTC-8) = 08:00 UTC. Terms §14.8 promises the
+# Founder price to anyone subscribing "by December 31, 2026", and a UTC
+# date flipped at 7 pm ET on Dec 31. LA midnight keeps the founder price
+# through the whole of Dec 31 in every contiguous-US time zone (Alaska and
+# Hawaii end Dec 31 one and two hours later still).
+# FALLBACK ONLY: StoreKit's localized price is authoritative, and this
+# instant only decides which strings the server shows when StoreKit is
+# unavailable. It must equal the App Store Connect scheduled price change:
+# monetization-pm checks the two, and if they differ, moves this constant
+# to match (a reviewed deploy, never a knob or config).
+#
+# THE ONE INSTANT (head-eng, 2026-10-27): the Founding GMs club closes at
+# the price rise. Everything else derives from this constant: the price
+# window, `club.closes_at` and `club.open` on /api/paywall/config, and
+# `founder` on /api/me/entitlements. Hold no second copy of it.
+_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)
 _PAYWALL_PRICES = {
     "ftf_pro_monthly": ({"display_price": "$4.99"},
                         {"display_price": "$6.99"}),
@@ -33190,23 +33202,17 @@ def _paywall_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _paywall_rise_at() -> datetime:
-    """_PAYWALL_PRICE_RISE_DATE's midnight UTC (aware): the instant the
-    prices rise and the Founding GMs club closes."""
-    d = _PAYWALL_PRICE_RISE_DATE
-    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
-
-
 def _paywall_club_closes_at() -> str:
-    """`club.closes_at` and is_founder's cut-off: the rise instant as the
-    ISO-8601 UTC string the config has always served ("…T00:00:00Z")."""
-    return _paywall_rise_at().strftime("%Y-%m-%dT%H:%M:%SZ")
+    """`club.closes_at` and is_founder's cut-off: _PAYWALL_PRICE_RISE_AT as
+    an ISO-8601 UTC string with a Z suffix, the shape the config serves."""
+    return _PAYWALL_PRICE_RISE_AT.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _paywall_products(now: datetime) -> list:
-    """`products[]` as served at `now` (timezone-aware). Pure: same `now`,
-    same answer. At or after _paywall_rise_at() → new prices."""
-    risen = now >= _paywall_rise_at()
+    """`products[]` as served at `now` (timezone-aware; a naive datetime
+    raises). Pure: same `now`, same answer. At or after
+    _PAYWALL_PRICE_RISE_AT → the new-subscriber prices."""
+    risen = now >= _PAYWALL_PRICE_RISE_AT
     return [{**p, **_PAYWALL_PRICES[p["product_id"]][1 if risen else 0]}
             for p in _PAYWALL_PRODUCTS]
 
@@ -33214,7 +33220,9 @@ def _paywall_products(now: datetime) -> list:
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
 # circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
-# in-app tips to the developer must be IAP.
+# in-app tips to the developer must be IAP. NOT SERVED at launch (#393, as
+# #465 does): the tip SKUs are not being submitted to App Store Connect, so
+# the route sends `tips: []`. This list is what to restore if they are.
 _PAYWALL_TIPS = [
     {"product_id": "ftf_tip_199", "display_price": "$1.99"},
     {"product_id": "ftf_tip_499", "display_price": "$4.99"},
@@ -33243,7 +33251,7 @@ def paywall_config():
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
     They are the founder prices while `club.open` and switch to the
-    new-subscriber prices at _paywall_rise_at(), the same instant
+    new-subscriber prices at _PAYWALL_PRICE_RISE_AT, the same instant
     `club.open` turns false: both come from one _paywall_now() read.
     """
     _require_session()
@@ -33257,7 +33265,7 @@ def paywall_config():
         "enabled": True,
         "platform": platform,
         "club": {"name": _PAYWALL_CLUB_NAME, "closes_at": _paywall_club_closes_at(),
-                 "open": now < _paywall_rise_at()},
+                 "open": now < _PAYWALL_PRICE_RISE_AT},
         "pages": _PAYWALL_PAGES,
         "products": _paywall_products(now),
         # Store-managed: the server never mints trials (pro-subscription
@@ -33267,9 +33275,12 @@ def paywall_config():
         "trial_eligible": True,
         # Always true: there is no non-dismissible mode (#393 scope §2).
         "dismissible": True,
-        # Tips are not served at launch (#393 recommendation §(b): three
-        # fewer IAPs on a first review). _PAYWALL_TIPS stays the list to
-        # restore; nothing else changes when it comes back.
+        # Tip-jar consumables: none at launch (#393 recommendation §(b):
+        # the SKUs are not submitted to App Store Connect, three fewer IAPs
+        # on a first review; _PAYWALL_TIPS stays the list to restore). A tip
+        # would still grant nothing (entitlements.is_tip_product). Rides
+        # monetize.paywall: tips are purchase UI, and the flag's contract is
+        # "no purchase UI anywhere" when off.
         "tips": [],
     })
 
