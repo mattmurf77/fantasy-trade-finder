@@ -1111,7 +1111,7 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
       - a `partial_run` deck (its delivered rows);
       - **a pack-less deck of 30 or more cards, never-delivered withdrawals included.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
 
-      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL. Check those examples by hand.
+      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL, unless the record carries `repeat_head`. That's trades-eng's v6: the trade_hashes of the cards the cap kept, written only when it kept fewer than 30. Then the breach is explained when every unprotected over-cap card is one the cap deferred (not in `repeat_head`), and a `repeat_head` naming one is a violation. Without the field, check those examples by hand.
   - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list.
   - Any FAIL goes to models-lead.
 - **Exit status:** 0 = PASS; 1 = FAIL; 2 = a refused database or a `ReadOnlyViolation` (nothing on stdout), or a usage error; 3 = INCOMPLETE (nothing failed, but a rule couldn't check every card, or a deck was skipped: not a pass); 4 = the tool crashed (its redacted traceback on stderr): not a verdict, take it to models-eng.

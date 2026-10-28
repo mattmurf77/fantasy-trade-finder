@@ -344,6 +344,7 @@ Condition R2.2 (c), in `backend/eval/evidence_pack.py`:
   - Only a recorded deck is audited for them. `valuation_json`'s approximate markets are never read (D2 (c)).
   - A deck with `filter_ran: false` is skipped (`filter_not_run`).
   - Decks without a record are counted by state: `record_failed`, `pack_without_record`, `no_pack` (live evidence).
+- **B-DK-7 short caps:** the record's optional `repeat_head` (v6) holds the trade_hashes of the cards the repeat cap kept, written only when it kept fewer than `REPEAT_WINDOW`. A breach is explained when every unprotected over-cap card was deferred (not in it), with no rows past the window needed.
 - **B-DK-7 protection** on a deck without a record comes from the row's flags (`features_json`: `likes_you`, `standing_offer`, `wildcard`; the `source_like_impression_id` column), where `fatigue_retest` isn't recorded. Such a deck is read assuming the flag was on since 2026-10-15 01:18 UTC.
 
 A rule that can't check every card reads `INCOMPLETE` or `NOT_AUDITABLE` (violations `None`), never 0. Tests: `backend/tests/test_eval_bdk_audit.py`.

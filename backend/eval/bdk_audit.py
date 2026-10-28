@@ -57,6 +57,9 @@ run in its pack's run["filter_inputs"] (#492), v FILTER_INPUTS_VERSION:
                    filter time; owner_published is set after the filter).
                    A recorded deck's protection, for all four rules, is its
                    card's trade_hash being in it.
+  repeat_head      optional (trades-eng's v6): the trade_hashes of the cards
+                   the repeat cap kept, written only when it kept fewer than
+                   REPEAT_WINDOW (it ran short), else null. B-DK-7 below.
   give / receive   assets_json: served-time, str ids.
 The deck's record state is counted in `filter_inputs`: recorded (the shape
 above), record_failed (filter_ran true but no usable inputs: the writer's
@@ -93,7 +96,11 @@ better); that needs a well-formed full row for every displayed card, and a
 deck whose cards may be a prefix of what was built never qualifies: a loader
 exclusion (but a packed deck's in_flight: its pack holds every card), a
 partial_run deck, or a pack-less deck of REPEAT_WINDOW cards or more (it may
-have stopped after a publication batch, unmarked). Those stay violations. Both are counted in `explained`, split as
+have stopped after a publication batch, unmarked). Those stay violations.
+A recorded deck whose record carries repeat_head (below) needs no rows past
+the window: its breach is explained as short_deck when every unprotected
+over-cap appearance is a card the cap deferred (its trade_hash not in
+repeat_head); a list naming one of them is a violation. Both are counted in `explained`, split as
 explained_protected / explained_short_deck, with examples (`why`). A window card with no full row is not auditable and
 its deck incomplete (a breach found there still counts). The filter ran on
 the built order, ghost rows and later withdrawals included, so a served
@@ -232,8 +239,14 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
             *_ids_and_partner, own = row
             return card.trade_hash in fi["protected"] if fi is not None else own
 
+        def head_of(deck) -> set | None:
+            """A recorded deck's repeat_head as a set (module doc), else None."""
+            fi = records[deck.deck_job_id][1]
+            head = fi.get("repeat_head") if fi is not None else None
+            return set(head) if isinstance(head, list) else None
+
         repeat = _repeat(trades, sets, rows, lambda ids: _full_rows(conn, ids), set(headers),
-                         protected_of)
+                         protected_of, head_of)
 
     card_rules = {name: _tally() for name in ("breakup", "filler", "redundant")}
     no_row = {"viewed_by_cause": Counter(), "unviewed": 0, "examples": []}
@@ -419,10 +432,12 @@ def _short_deck(deck, rows, fetch, packed: bool, protected_of) -> bool:
     return [id(c) for c in _repeat_cap(cards)[0]] == [id(c) for c in cards]
 
 
-def _repeat(trades, sets, rows, fetch, packed: set, protected_of) -> dict:
+def _repeat(trades, sets, rows, fetch, packed: set, protected_of, head_of) -> dict:
     """B-DK-7 per deck over its window (module doc). `fetch(ids)` reads more
     full rows, for the short-deck check; `packed` is the run_ids with a pack;
-    `protected_of(deck, card, row)` is a card's protection."""
+    `protected_of(deck, card, row)` is a card's protection; `head_of(deck)`
+    the trade_hashes of the cap's head when it ran short (repeat_head), else
+    None."""
     t = {"violations": 0, "explained": 0, "explained_protected": 0, "explained_short_deck": 0,
          "audited": 0, "not_auditable": 0, "incomplete_decks": 0, "examples": [],
          "explained_examples": []}
@@ -431,6 +446,7 @@ def _repeat(trades, sets, rows, fetch, packed: set, protected_of) -> dict:
         seen: Counter = Counter()
         at: dict[str, list[int]] = {}
         over: dict[str, list[bool]] = {}   # asset -> protected, per over-cap appearance
+        over_hash: dict[str, list] = {}    # asset -> trade_hash, per over-cap appearance
         for c in window:
             row = rows.get(c.impression_id)
             if row is None or row[0] is None:
@@ -442,14 +458,20 @@ def _repeat(trades, sets, rows, fetch, packed: set, protected_of) -> dict:
             for a in assets:
                 if seen[a] >= REPEAT_CAP:
                     over.setdefault(a, []).append(protected)
+                    over_hash.setdefault(a, []).append(c.trade_hash)
                 at.setdefault(a, []).append(c.card_index)
             seen.update(assets)
         t["incomplete_decks"] += any((rows.get(c.impression_id) or (None,))[0] is None
                                      for c in window)
+        head = head_of(d)                  # the cap's short head (repeat_head), else None
         short = None                       # checked once per deck, only on a breach
         for asset, protected in over.items():
             why = "protected" if all(protected) else None
-            if why is None:
+            if why is None and head is not None:   # every unprotected one was deferred
+                deferred = all(h not in head for h, p in zip(over_hash[asset], protected)
+                               if not p)
+                why = "short_deck" if deferred else None
+            elif why is None:
                 short = (_short_deck(d, rows, fetch, d.deck_job_id in packed, protected_of)
                          if short is None else short)
                 why = "short_deck" if short else None

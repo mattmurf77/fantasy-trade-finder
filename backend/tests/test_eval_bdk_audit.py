@@ -501,6 +501,53 @@ def test_a_packed_short_deck_in_flight_is_still_explained():
     assert (t["violations"], t["explained_short_deck"]) == (0, 1)
 
 
+@pytest.mark.parametrize("head, why", [
+    ("deferred", "short_deck"),        # the cap kept 0..4 and deferred 5 onward
+    ("kept", None),                    # the record says it kept card 5: a violation
+    (None, None),                      # no repeat_head: the re-run needs rows past the window
+], ids=["deferred", "kept", "absent"])
+def test_repeat_head_explains_a_short_cap_without_rows_past_the_window(head, why):
+    """release-lead's #492 QA: a packed deck whose cap ran short (473 deferred)
+    read a false FAIL, since re-running _repeat_cap needs every displayed
+    card's row and packed-only cards have none. With repeat_head (v6) the
+    record says which cards the cap kept: X's fourth appearance at 5 is on a
+    deferred card, so the breach is explained."""
+    db = make_db()
+    heads = {"deferred": [th(i) for i in range(5)], "kept": [th(i) for i in range(6)],
+             None: None}
+    deck(db, "s", W + 10, {i: with_x("s", i) for i in (0, 1, 2, 5)}, skip=range(W, W + 10),
+         record={"repeat_head": heads[head]})
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (int(why is None), int(why is not None))
+    assert [e["why"] for e in t["explained_examples"] + t["examples"]] == [why]
+
+
+def test_a_repeat_head_naming_the_over_cap_card_is_a_violation_even_where_a_re_run_explains():
+    """A 4-card deck, X on all four: re-running _repeat_cap leaves it unchanged
+    (the fourth is deferred to the end it already sits at), so without the
+    field it reads short_deck. A record saying the cap kept that card is the
+    filter's own word: the over-cap appearance wasn't deferred, a violation."""
+    db = make_db()
+    _x_deck(db, "k", 4, range(4))
+    assert run(db).rules["repeat"]["explained_short_deck"] == 1
+    db = make_db()
+    deck(db, "k", 4, {i: with_x("k", i) for i in range(4)},
+         record={"repeat_head": [th(i) for i in range(4)]})
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained"]) == (1, 0)
+
+
+def test_repeat_head_ignores_protected_over_cap_cards_it_kept():
+    """A protected card holds its place in the cap's head; only the
+    unprotected over-cap appearances need to have been deferred."""
+    db = make_db()
+    deck(db, "s", W + 10, {i: with_x("s", i) for i in (0, 1, 2, 4, 5)}, skip=range(W, W + 10),
+         record={"repeat_head": [th(i) for i in range(5)], "protected": [th(4)]})
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (0, 1)
+    assert t["explained_examples"][0]["over_cap_protected"] == [True, False]
+
+
 def _prefix_deck(db, job, tier, x_at=(0, 1, 2, W - 1)):
     """Only W rows (the first W cards of what would be a longer built deck;
     nothing past them is written), X at `x_at`: what the loader holds for a

@@ -12,7 +12,7 @@ Gates: eval-side only (`backend/eval/bdk_audit.py`, its tests, the runbook § B-
   - Decks without a record are counted by state (`record_failed`, `pack_without_record`, `no_pack`), and they're not auditable for 4..6.
   - `valuation_json` is no longer read, which removes the owner-deck false FAILs (D2 (c)).
   - B-DK-7 is unchanged except that a recorded deck's protection now comes from the record.
-- **Tests:** `test_eval_bdk_audit.py`, 64 tests:
+- **Tests:** `test_eval_bdk_audit.py`, 69 tests:
   - the value rules on the record;
   - the record read, never `valuation_json`;
   - record protection versus a row flag;
@@ -35,8 +35,17 @@ Gates: eval-side only (`backend/eval/bdk_audit.py`, its tests, the runbook § B-
   - filter_not_run decks audited;
   - a bool version accepted;
   - decks without a record audited anyway (27 red).
+- **B-DK-7 short caps (agreed with trades-eng; their v6 writes it):**
+  - The record's `repeat_head` holds the trade_hashes of the cards the cap kept, only when it kept fewer than W.
+  - A breach is explained when every unprotected over-cap card is outside it, so no rows past the window are needed.
+  - A list naming one of them is a violation, even where a re-run would explain it.
+  - Without the field, the re-run applies as before.
+  - Tests: 5 (deferred / kept / absent; protected cards in the head; the record outranks a re-run).
+  - Sabotage, 3 red: the head ignored; protected not skipped; a fall-back to the re-run.
+- **Checked on trades-eng's D3 writer packs** (`feat/trades-serve-repeat-cap` @ `1cb381b6`, `test_a_later_page_moves_the_pulled_card_and_records_it`, all 6 cut/i1 × stored/job_view/left_process cases):
+  - #501's loader order equals their `displayed()` ([29, 32, 30, 31, 33] around the move), with dense positions;
+  - their suite passes with #501's `data.py` (80).
 - **Not covered:**
-  - B-DK-7's false FAIL on packed decks whose repeat cap ran short (`_short_deck` needs rows past the window): proposed to trades-eng as a `repeat_deferred` count in the record;
   - whether live-evidence decks' not-auditable B-DK-4..6 blocks certification is models-lead's call.
 
 ## 2026-10-27 — Eval loader reads serve-time display moves (models-lead addendum D3)
