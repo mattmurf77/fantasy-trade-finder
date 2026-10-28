@@ -1,3 +1,24 @@
+## 2026-10-28 — #492 QA follow-ups and `repeat_head` (models-eng #503); deck pipeline v6
+
+Gates: release-lead's #492 QA P3s, and models-eng's short-deck ask (`repeat_head`, agreed 10-28; #503 reads it). No route, schema, flag, knob or event change. `DECK_PIPELINE_VERSION` 5 → 6 (`d5176ae18c66d208`): `_run_trade_job` gates the record and passes the filter's `deferred` count. The deck's shape doesn't change; models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1:** the record is built only when the job holds deferred evidence. Before, it was computed and thrown away on every other deck, at 0.1–5 ms each.
+- **P3-4:** a market value is a plain float, or null when it isn't a finite number. A bool is null and a numpy float becomes a float, so the header stays strict JSON.
+- **P3-3:** QA's probes, ported to the real-worker harness. Its markets are all unseeded, so the probe asserts identity instead: the record gets the filter's returned cards (in order), its very callables and rosters, its viewer and its `deferred` count. It also asserts coverage equality and value equality. A cap-1 variant makes the filter reorder, so a record from the pre-filter cards fails here.
+- **`repeat_head`:** the cap's kept trade_hashes when its head is shorter than 30, else null.
+- **P3-5:** the data dictionary's "absent" now also covers a run revoked or timed out before the record was set. #492's PR body counts are stale; it's merged, so this note records it.
+- **P3-2 (size):** no code change. For U8: the header is +9 to +12 KB per deck and rewritten 5–11 times per deck, and `evidence_blob` carries the record (+4 to +5 KB against the 250 MB cap). `repeat_head` adds at most 29 hashes (under 600 B) and only on a short cap. Release-lead's option (keep the record out of `base_run`'s deepcopy) is held for U8's numbers.
+- **Backend:** `test_filter_inputs.py` (11: plus 5 `repeat_head` cases and the value coercion) and `test_filter_inputs_pack.py` (11: plus the no-deferred-evidence skip, the identity probe ×2 and `repeat_head` on the real cap ×2). 22 + the digest test passed.
+- **Regression:** `test_bakeoff_serving` (the flag-off golden that pins the job's keys), `test_deck_quality`, `test_deck_pipeline_digest`, `test_packed_evidence`, `test_deferred_evidence` and both filter-inputs files: 304 passed.
+- **Sabotage, each red then restored (7):**
+  - the record built without deferred evidence;
+  - no value coercion;
+  - NaN kept as a float;
+  - `repeat_head` always written;
+  - the worker passing no deferred count;
+  - the record from the pre-filter cards;
+  - another market callable.
+
 ## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
 
 Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

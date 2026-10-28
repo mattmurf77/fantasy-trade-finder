@@ -4084,7 +4084,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 5
+DECK_PIPELINE_VERSION = 6
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4211,6 +4211,7 @@ DECK_PIPELINE_PINS = {
     3: "97404fc8bab683f2",   # #484 QA P2-1: _job_draft_picks records the picks it read (_note_job_picks_read; no shape change)
     4: "864cf30974da20ea",   # #486 QA P3s: one draft-context read per job, noted with the picks; both threaded into _owner_generation_context, a failed read still forfeiting the owner arm (same values; no shape change)
     5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
+    6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -8355,7 +8356,7 @@ def _deck_quality_filters_enabled() -> bool:
 
 
 def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters,
-                           lineup_slots) -> dict:
+                           lineup_slots, deferred: int = 0) -> dict:
     """models-lead addendum D2: what deck_quality.filter_deck read for this run,
     frozen once per run in the pack's run header (`run["filter_inputs"]`), so
     #453's audit re-runs B-DK-4/5/6 on the filter's own inputs. Audit
@@ -8369,7 +8370,14 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
     - qb_te: per team the filter keyed (`viewer_team`, as overwritten with the
       viewer's roster, and each card's counterparty), its QB and TE holdings.
     - protected: the trade_hashes `is_protected` exempted.
-    A recording failure raises; the caller then records filter_ran True with
+    - repeat_head (models-eng, #503): when the repeat cap ran short (it kept
+      fewer than REPEAT_WINDOW cards ahead of the `deferred` ones, so every
+      card past them is one it deferred), the trade_hashes of the cards it
+      kept, in order; else null.
+    A market value is recorded as a plain float, or null when it isn't a
+    finite number (#492 QA P3-4: a NaN or inf made the header non-strict
+    JSON; a numpy float wouldn't serialize at all); the filter's own
+    comparisons can't trigger on one either. A recording failure raises; the caller then records filter_ran True with
     no inputs (the audit reads that deck as not auditable), and serves the
     filtered deck."""
     from . import deck_quality as _dq
@@ -8379,15 +8387,27 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
     assets = {a for c in cards for a in (*c.give_player_ids, *c.receive_player_ids)}
     assets.update(a for held in qb_te.values() for a in held)
     ordered = sorted(assets, key=str)
+    head = len(cards) - deferred
+
+    def value(a):
+        v = market(a)
+        if v is None or isinstance(v, bool):
+            return None
+        v = float(v)
+        return v if math.isfinite(v) else None
+
     return {
         "v": 1, "filter_ran": True, "viewer_team": viewer_team,
         "lineup_slots": None if lineup_slots is None else list(lineup_slots),
-        "market": {str(a): market(a) for a in ordered},
+        "market": {str(a): value(a) for a in ordered},
         "position": {str(a): position(a) for a in ordered},
         "qb_te": {team: [str(a) for a in held] for team, held in qb_te.items()},
         "protected": sorted({_deck_trade_hash(c.give_player_ids, c.receive_player_ids,
                                               c.target_user_id)
                              for c in cards if _dq.is_protected(c)}),
+        "repeat_head": ([_deck_trade_hash(c.give_player_ids, c.receive_player_ids,
+                                          c.target_user_id) for c in cards[:head]]
+                        if head < _dq.REPEAT_WINDOW else None),
     }
 
 
@@ -12897,6 +12917,9 @@ def _run_trade_job(
                 if _job_live(job):
                     job["owner_presentment"] = owner_presentment
         filter_inputs = {"v": 1, "filter_ran": False}   # models-lead addendum D2
+        with _trade_jobs_lock:   # #492 QA P3-1: only a deck with deferred evidence keeps it
+            _fi_job = _trade_jobs.get(job_id)
+            _fi_record = _job_live(_fi_job) and _fi_job.get("evidence") is not None
         if _deck_quality_filters_enabled() and final_cards:
             # Operator, 2026-10-14 (Calibration grades of this engine): drop breakup / junk
             # filler / redundant TE-QB cards and cap repeats, before the served/ghost split so a
@@ -12914,11 +12937,13 @@ def _run_trade_job(
                 final_cards, quality_counts = _deck_quality.filter_deck(
                     final_cards, viewer_id=viewer_team, market=quality_market,
                     position=quality_position, rosters=quality_rosters, lineup_slots=quality_slots)
+                filter_inputs = {"v": 1, "filter_ran": True}
                 try:
-                    filter_inputs = _quality_filter_inputs(
-                        final_cards, viewer_team=viewer_team, market=quality_market,
-                        position=quality_position, rosters=quality_rosters,
-                        lineup_slots=quality_slots)
+                    if _fi_record:
+                        filter_inputs = _quality_filter_inputs(
+                            final_cards, viewer_team=viewer_team, market=quality_market,
+                            position=quality_position, rosters=quality_rosters,
+                            lineup_slots=quality_slots, deferred=quality_counts["deferred"])
                 except Exception as inputs_err:   # provenance never unfilters the deck
                     log.warning("trade-job %s: quality filter inputs not recorded: %s",
                                 job_id, inputs_err)
