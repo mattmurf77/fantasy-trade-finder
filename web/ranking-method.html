@@ -3,22 +3,31 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>How to set your rankings — Fleeced: Dynasty Trade Finder</title>
-  <meta name="description" content="Three ways to build your dynasty board in Fleeced: guided 3-player matchups, a manual drag-and-drop list, or positional tiers.">
+  <title>How trades are priced — Fleeced: Dynasty Trade Finder</title>
+  <meta name="description" content="Fleeced prices every trade on your board and your leaguemate's. See how, and the ways to rank: Quick set, Head-to-heads, Tiers board and more.">
   <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/ranking-method.html">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
-  <meta property="og:title" content="How to set your rankings — Fleeced: Dynasty Trade Finder">
-  <meta property="og:description" content="Three ways to build your dynasty board in Fleeced: guided 3-player matchups, a manual drag-and-drop list, or positional tiers.">
+  <meta property="og:title" content="How trades are priced — Fleeced: Dynasty Trade Finder">
+  <meta property="og:description" content="Fleeced prices every trade on your board and your leaguemate's. See how, and the ways to rank: Quick set, Head-to-heads, Tiers board and more.">
   <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/ranking-method.html">
   <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/tokens.css">
+  <!--
+    C7 (2026-10-27): the read-more for the app's "How trades are priced" help
+    sheet (TradesScreen.tsx). Informational only: the web cannot open app
+    screens, so nothing here may look tappable except body links and the
+    standard site footer (design-lead).
+    One plain hairline list on the page surface, no cards, no icon wells.
+    Copy is DRAFT pending marketing approval (docs/plans/ranking-method-page/scope.md);
+    lines marked [app] in that draft must stay verbatim with the app.
+  -->
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
+    html, body { max-width: 100vw; overflow-x: hidden; }
     :focus-visible { outline: 2px solid var(--ice); outline-offset: 2px; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -28,184 +37,167 @@
         scroll-behavior: auto !important;
       }
     }
-    .icon {
-      width: 20px; height: 20px;
-      stroke: currentColor; stroke-width: 1.75; fill: none;
-      stroke-linecap: square; flex-shrink: 0;
-    }
 
     body {
-      background: var(--bg);
-      color: var(--text);
+      background: var(--ink-0);
+      color: var(--chalk);
       font-family: var(--font-ui);
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
+      padding: 24px 16px 48px;
     }
+    .page { max-width: 600px; margin: 0 auto; }
 
-    /* ── Page header ── */
-    .page-header {
-      text-align: center;
-      margin-bottom: 36px;
-    }
-
-    .page-logo {
-      font-family: var(--font-display);
-      font-size: 24px;
-      font-weight: 700;
-      text-transform: uppercase;
+    /* FLEECED. logotype (D-057), as web/index.html's .lp-wordmark; not a link. */
+    .wordmark {
+      font: 700 28px/1 var(--font-display);
       letter-spacing: 0.04em;
-      margin-bottom: 10px;
+      color: var(--chalk);
+      margin-bottom: 32px;
     }
-    .page-logo span { color: var(--ice); }
+    .wordmark span { color: var(--ice); }
 
-    .page-title {
-      margin-top: 0;   /* promoted to <h1>; drop the UA default */
-      font-size: 20px;
-      font-weight: 700;
+    /* Type — docs/design/design-system.md */
+    h1 {               /* display */
+      font: 700 32px/34px var(--font-display);
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      color: var(--chalk);
       margin-bottom: 8px;
     }
-
-    .page-subtitle {
-      font-size: 14px;
-      color: var(--muted);
-      line-height: 1.5;
-      max-width: 440px;
-    }
-
-    /* ── Tile wrapper ── */
-    .tile-wrapper {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--r-md);
-      padding: 28px;
-      width: 100%;
-      max-width: 560px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    /* ── Individual tiles ── */
-    .tile {
-      background: var(--ink-2);
-      border: 1px solid var(--border);
-      border-radius: var(--r-md);
-      padding: 22px 24px;
-      display: flex;
-      align-items: flex-start;
-      gap: 18px;
-      text-decoration: none;
-      color: inherit;
-    }
-
-
-    .tile-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: var(--r-md);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      background: var(--ink-3);
+    .subtitle, .prose {          /* body, chalk-dim */
+      font: 400 14px/21px var(--font-ui);
       color: var(--chalk-dim);
     }
+    .subtitle { margin-bottom: 24px; }
+    .prose + .prose { margin-top: 12px; }
 
-    .tile-content {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      flex: 1;
-      min-width: 0;
+    /* TickLabel: 3×14 ice tick + caps label. The only ice besides the logotype's period. */
+    .tick-label {
+      display: flex; align-items: center; gap: 8px;
+      font: 600 11px/14px var(--font-ui);
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--chalk-dim);
+      margin: 32px 0 12px;
     }
+    .tick-label::before { content: ""; width: 3px; height: 14px; background: var(--ice); flex-shrink: 0; }
+    .lead-in { margin-bottom: 8px; }
 
-    .tile-label {
-      font-size: 16px;
-      font-weight: 600;
-      line-height: 1.3;
+    /* One plain list on the page surface: hairline separators only. */
+    .methods { list-style: none; }
+    .method {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 16px 0;
     }
+    .method + .method { border-top: 1px solid var(--line); }
+    .icon {
+      width: 20px; height: 20px; flex-shrink: 0;
+      margin-top: 1px;   /* centres the 20px glyph on the 22px title line */
+      stroke: var(--chalk-dim); stroke-width: 1.75; fill: none; stroke-linecap: square;
+    }
+    .method-body { flex: 1; min-width: 0; }
+    .method-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+    .method-name { font: 600 16px/22px var(--font-ui); color: var(--chalk); }   /* title */
+    .tag {                                                                        /* label */
+      font: 600 11px/14px var(--font-ui);
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--chalk-dim);
+    }
+    .tag-recommended { color: var(--flare); }      /* flare = informational, text only */
+    .method-line {                                  /* body-sm */
+      font: 400 13px/18px var(--font-ui);
+      color: var(--chalk-dim);
+      margin-top: 4px;
+    }
+    .method-line + .method-line { margin-top: 8px; }
+    .then { color: var(--chalk); font-weight: 600; }
 
-    .tile-desc {
-      font-size: 13px;
-      color: var(--muted);
-      line-height: 1.5;
-    }
+    /* Body links: chalk + underline (design-lead, #354). None in the copy today. */
+    .prose a, .method-line a { color: var(--chalk); text-decoration: underline; text-underline-offset: 2px; }
 
-    /* ── Recommended badge ── */
-    .tile-badge {
-      display: inline-block;
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--flare, #F0508C);
-      border: 1px solid var(--flare, #F0508C);
-      border-radius: var(--r-xs);
-      padding: 3px 8px;
-      margin-left: 8px;
-      vertical-align: middle;
-    }
-
-    /* ── Footer note ── */
-    .footer-note {
-      margin-top: 20px;
-      font-size: 12px;
-      color: var(--muted);
-      text-align: center;
-      line-height: 1.5;
-    }
+    /* Site footer: verbatim from web/contact.html (design-lead, #505). */
+    .foot { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; }
+    .foot a { color: var(--chalk-dim); margin-right: 16px; }
   </style>
 </head>
 <body>
+  <div class="page">
+    <header>
+      <div class="wordmark">FLEECED<span>.</span></div>
+    </header>
 
-  <div class="page-header">
-    <div class="page-logo">Dynasty <span>Trade Finder</span></div>
-    <h1 class="page-title">How do you want to set your rankings?</h1>
-    <div class="page-subtitle">Your rankings power every trade suggestion. Pick the method that works best for you.</div>
-  </div>
+    <main>
+      <h1>How trades are priced</h1>
+      <p class="subtitle">Your rankings set the prices. Here's how it works, and the ways to rank.</p>
 
-  <div class="tile-wrapper">
+      <section aria-label="How trades are priced">
+        <p class="prose">Every trade is priced on two boards — yours and your leaguemate's. A trade surfaces when each side gives up less value on their own board than they get back; the fairness meter compares the two packages by value.</p>
+        <p class="prose">Rank more players and trades get priced off your board instead of consensus.</p>
+      </section>
 
-    <!-- Option 1: Guided Journey -->
-    <div class="tile">
-      <div class="tile-icon guided"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg></div>
-      <div class="tile-content">
-        <div class="tile-label">
-          Guide me through the Journey
-          <span class="tile-badge">Recommended</span>
-        </div>
-        <div class="tile-desc">Rank players through quick 3-player matchups. We'll walk you through it position by position — no dynasty knowledge required.</div>
+      <section aria-labelledby="ways-to-rank">
+        <h2 class="tick-label" id="ways-to-rank">Ways to rank</h2>
+        <p class="prose lead-in">Pick whichever fits. You can switch any time from the Rank tab in the app.</p>
+        <ul class="methods">
+          <li class="method">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 11l4 4 8-9"/></svg>
+            <div class="method-body">
+              <div class="method-head">
+                <h3 class="method-name">Quick set</h3>
+                <span class="tag">Fastest</span>
+                <span class="tag tag-recommended">Recommended</span>
+              </div>
+              <p class="method-line">Tap players into value tiers, one tier at a time. A usable board in a few minutes per position.</p>
+              <p class="method-line"><span class="then">Then, if you want:</span> Quick rank — a follow-on pass that fine-tunes the order inside each tier. Offered when you finish.</p>
+            </div>
+          </li>
+          <li class="method">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 17V9M10 17V3M17 17v-6"/></svg>
+            <div class="method-body">
+              <div class="method-head">
+                <h3 class="method-name">Head-to-heads</h3>
+                <span class="tag">Most precise</span>
+              </div>
+              <p class="method-line">Put three players in order at a time — a few seconds each, and your board sharpens with every answer.</p>
+            </div>
+          </li>
+          <li class="method">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16l2-9 4 3 1-6 1 6 4-3 2 9z"/></svg>
+            <div class="method-body">
+              <div class="method-head">
+                <h3 class="method-name">Tiers board</h3>
+                <span class="tag">Most control</span>
+              </div>
+              <p class="method-line">Your whole board as drag-and-drop value tiers — every placement is your call, from 4+ 1sts down to FA.</p>
+            </div>
+          </li>
+        </ul>
+
+        <h2 class="tick-label" id="more-ways-to-rank">More ways to rank</h2>
+        <ul class="methods" aria-labelledby="more-ways-to-rank">
+          <li class="method">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 7h12M13 4l3 3-3 3M16 13H4M7 10l-3 3 3 3"/></svg>
+            <div class="method-body">
+              <div class="method-head"><h3 class="method-name">Pick Anchors</h3></div>
+              <p class="method-line">Price players in draft picks, one at a time</p>
+            </div>
+          </li>
+          <li class="method">
+            <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 14l4-5 3 3 4-6 3 4"/></svg>
+            <div class="method-body">
+              <div class="method-head"><h3 class="method-name">Overall ranks</h3></div>
+              <p class="method-line">Order every player 1-to-N yourself — drag rows or tap a rank number</p>
+            </div>
+          </li>
+        </ul>
+      </section>
+
+      <div class="foot">
+        <a href="/">Home</a>
+        <a href="/faq.html">FAQ</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
       </div>
-    </div>
-
-    <!-- Option 2: Manual Rankings -->
-    <div class="tile">
-      <div class="tile-icon manual"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 5h10M7 10h10M7 15h10M3 5h.01M3 10h.01M3 15h.01"/></svg></div>
-      <div class="tile-content">
-        <div class="tile-label">Let me set the rankings myself</div>
-        <div class="tile-desc">Jump straight into the full rankings list and drag players into your preferred order. Best if you already know your valuations.</div>
-      </div>
-    </div>
-
-    <!-- Option 3: Positional Tiers -->
-    <div class="tile">
-      <div class="tile-icon tiers"><svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6l7-3 7 3-7 3-7-3z"/><path d="M3 10l7 3 7-3M3 14l7 3 7-3"/></svg></div>
-      <div class="tile-content">
-        <div class="tile-label">Let me set positional tiers</div>
-        <div class="tile-desc">Group players into tiers within each position — worth 4+ 1sts, 2 1sts, a 1st, etc. A fast way to express your rankings at a high level.</div>
-      </div>
-    </div>
-
+    </main>
   </div>
-
-  <div class="footer-note">
-    You can pick or change your method any time from the Rank tab in the app.
-  </div>
-
-
 </body>
 </html>
