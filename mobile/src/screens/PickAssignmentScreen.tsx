@@ -655,11 +655,13 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
   const activeSeasonKey = season ? String(season.season) : '';
   const seasonConfirmedAt = confirmed[activeSeasonKey];
   const visibleTraded = showAllTraded ? tradedSlots : tradedSlots.slice(0, TRADED_SUMMARY_PREVIEW);
-  // #273 — `seasons` is always current+3 ascending (the payload's own
-  // contract; see `pickAssignment.ts`), so the FIRST season is current. A
-  // future tab has no real draft order: no drag-order/linear-snake control
-  // and no slot numbers, just "round + original team" to reassign.
-  const currentSeason = data.seasons[0]?.season ?? null;
+  // #273 — a future tab has no real draft order: no drag-order/linear-snake
+  // control and no slot numbers, just "round + original team" to reassign.
+  // C5 — the league season comes from the payload: once the league's rookie
+  // draft is past, the grid starts at current_season + 1, so every visible
+  // class is a future one and labels stay round ordinals, never positions.
+  // `seasons[0]` is the fallback for a server that predates the field.
+  const currentSeason = data.current_season ?? data.seasons[0]?.season ?? null;
   const isFutureSeasonTab = !!season && currentSeason != null && season.season > currentSeason;
 
   return (
@@ -692,12 +694,13 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
               {' — priced as unknown until someone settles them.'}
             </Text>
           ) : null}
-          {/* #273 — the order/rounds setter is ONE global setting for the
-              whole board (no season it can be scoped to), so its entry
-              point only appears on the current-season tab; offering it
-              from a future tab would read as "set THIS year's order" when
-              there is no such thing to set. */}
-          {!isFutureSeasonTab ? (
+          {/* #273 / C5 — the order/rounds setter is ONE global setting for
+              the whole board (no season it can be scoped to), so its entry
+              point sits on the FIRST VISIBLE tab only: the current season
+              before the rookie draft, the next class after it (C5). It is
+              also the only way back into setup once the board is seeded,
+              which is how a drafted grid seeds its 4th class. */}
+          {season?.season === data.seasons[0]?.season ? (
             <Pressable
               testID="pick-assignment.edit-order"
               onPress={() => setSetupOpen(true)}
