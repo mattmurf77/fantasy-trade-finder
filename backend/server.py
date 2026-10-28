@@ -36050,9 +36050,11 @@ def _require_pro(fn):
 def me_entitlements():
     """Client bootstrap: resolved entitlement state + enforcement posture.
 
-    Session-authed. The Chrome extension does NOT call this — its `pro`
-    bool rides in POST /api/extension/auth's payload (pro-subscription LLD;
-    username-only auth can't carry a session token)."""
+    Session-authed. The Chrome extension does NOT call this, and no route
+    gives it a `pro` bool today: POST /api/extension/auth's payload has no
+    `pro` field, and the extension reads no entitlement state anywhere.
+    `pro` is intentionally not in that payload: the unverified sign-in path
+    never reads entitlement state (legal R28.17)."""
     sess = _require_session()
     out = entl.get_entitlements(sess["user_id"])
     out["enforcing"] = is_enabled("monetize.entitlements")
@@ -36075,18 +36077,64 @@ _PAYWALL_PAGES = [
     {"id": "plans", "kind": "purchase"},
 ]
 
+# No `trial_days` (#393, operator 2026-10-25): the trial is Apple's 1-month
+# intro offer, and a day count is the wrong claim ("1 month", never
+# "30 days"). Older clients render "N days free" only when trial_days > 0,
+# so dropping the key drops the claim; newer ones read StoreKit's offer.
 _PAYWALL_PRODUCTS = [
-    {"product_id": "ftf_pro_monthly", "period": "monthly",
-     "display_price": "$4.99", "trial_days": 14, "hero": False},
+    {"product_id": "ftf_pro_monthly", "period": "monthly", "hero": False},
     {"product_id": "ftf_pro_annual", "period": "annual",
-     "display_price": "$34.99", "per_month_equiv": "$2.92",
-     "trial_days": 30, "hero": True, "badge": "best_value"},
+     "hero": True, "badge": "best_value"},
 ]
+
+# Fallback price copy (#393, operator 2026-10-25): $4.99/mo and $24.99/yr,
+# rising to $6.99 / $34.99 for NEW subscribers at _PAYWALL_PRICE_RISE_AT.
+# Existing subscribers keep their price through App Store price
+# preservation, which this table does not model. Each entry is (before the
+# rise, from the rise on). per_month_equiv is the annual price / 12 rounded
+# UP to the cent, matching legal's #393 R28.8 #2 copy, "$2.09/month"
+# (24.99 / 12 = 2.0825; 34.99 / 12 = 2.9158): rounding down would
+# understate the annual price.
+#
+# The rise is an INSTANT, not a UTC date: 2027-01-01 00:00
+# America/Los_Angeles (PST, UTC-8) = 08:00 UTC. Terms §14.8 promises the
+# Founder price to anyone subscribing "by December 31, 2026", and a UTC
+# date flipped at 7 pm ET on Dec 31. LA midnight keeps the founder price
+# through the whole of Dec 31 in every contiguous-US time zone (Alaska and
+# Hawaii end Dec 31 one and two hours later still).
+# FALLBACK ONLY: StoreKit's localized price is authoritative, and this
+# instant only decides which strings the server shows when StoreKit is
+# unavailable. monetization-pm checks it against the App Store Connect
+# scheduled price change; if the two differ, move this constant to match.
+_PAYWALL_PRICE_RISE_AT = datetime(2027, 1, 1, 8, 0, tzinfo=timezone.utc)
+_PAYWALL_PRICES = {
+    "ftf_pro_monthly": ({"display_price": "$4.99"},
+                        {"display_price": "$6.99"}),
+    "ftf_pro_annual": ({"display_price": "$24.99", "per_month_equiv": "$2.09"},
+                       {"display_price": "$34.99", "per_month_equiv": "$2.92"}),
+}
+
+
+def _paywall_now() -> datetime:
+    """The clock the paywall config reads. Tests monkeypatch this."""
+    return datetime.now(timezone.utc)
+
+
+def _paywall_products(now: datetime) -> list:
+    """`products[]` as served at `now` (timezone-aware; a naive datetime
+    raises). Pure: same `now`, same answer. At or after
+    _PAYWALL_PRICE_RISE_AT → the new-subscriber prices."""
+    risen = now >= _PAYWALL_PRICE_RISE_AT
+    return [{**p, **_PAYWALL_PRICES[p["product_id"]][1 if risen else 0]}
+            for p in _PAYWALL_PRODUCTS]
+
 
 # Tip jar (operator request 2026-08-28): consumable "support the platform"
 # SKUs. Money with NO entitlement — entitlements.is_tip_product() short-
 # circuits the projector, so a tip can never grant `pro`. Guideline 3.1.1:
-# in-app tips to the developer must be IAP.
+# in-app tips to the developer must be IAP. NOT SERVED at launch (#393, as
+# #465 does): the tip SKUs are not being submitted to App Store Connect, so
+# the route sends `tips: []`. This list is what to restore if they are.
 _PAYWALL_TIPS = [
     {"product_id": "ftf_tip_199", "display_price": "$1.99"},
     {"product_id": "ftf_tip_499", "display_price": "$4.99"},
@@ -36114,6 +36162,7 @@ def paywall_config():
     StoreKit-localized price from the RevenueCat offering for the matching
     `product_id`; these strings are US-English list prices and know nothing
     about the user's storefront, currency, or an active promotional offer.
+    They switch to the new-subscriber prices at _PAYWALL_PRICE_RISE_AT.
     """
     _require_session()
     if not is_enabled("monetize.paywall"):
@@ -36125,19 +36174,19 @@ def paywall_config():
         "enabled": True,
         "platform": platform,
         "pages": _PAYWALL_PAGES,
-        "products": _PAYWALL_PRODUCTS,
+        "products": _paywall_products(_paywall_now()),
         # Store-managed: the server never mints trials (pro-subscription
         # LLD §6). True until the client reads real per-Apple-ID
         # eligibility off the RevenueCat offering — this field is the
         # "we offer a trial on this SKU" claim, not a per-user promise.
         "trial_eligible": True,
         "dismissible": True,
-        # Tip-jar consumables — display metadata only; purchases run through
-        # StoreKit and the webhook ledger like everything else, but grant
+        # Tip-jar consumables: none at launch (the SKUs are not submitted to
+        # App Store Connect; see _PAYWALL_TIPS). A tip would still grant
         # nothing (entitlements.is_tip_product). Rides monetize.paywall: tips
         # are purchase UI, and the flag's contract is "no purchase UI anywhere"
         # when off.
-        "tips": _PAYWALL_TIPS,
+        "tips": [],
     })
 
 
