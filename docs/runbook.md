@@ -1102,6 +1102,7 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
     - Only `recorded` decks are audited for B-DK-4..6; on the rest those rules are not auditable, so the read is `INCOMPLETE`, not a pass.
     - A deck whose record says `filter_ran: false` went out unfiltered. It's skipped for every rule and counted as `filter_not_run`.
     - An asset the record never saw makes its card not auditable. A recorded null (or NaN) market goes to the rules as the filter saw it. An unknown lineup means the filter skipped B-DK-6, which reads as a pass.
+    - **A filler FAIL on a card with a null-market asset: check it by hand.** From v6 (#515) a non-finite value is recorded as null. If a NaN seed came first on its card, the filter's bar was 450, while the audit drops the null and uses the real top value, so the audit can be stricter there.
   - **Protection:** on a recorded deck it's the filter's own protected trade_hashes, so a fatigue retest card is handled correctly. On a deck without a record (B-DK-7 only), it comes from the row's flags. A fatigue retest isn't recorded there, so check a violation's `trade_hash` against `deck_suppressions.retest_trade_hash`.
   - **A B-DK-7 breach** whose example shows ghost slots or withdrawn cards may come from the serve order, not the filter: the filter ran before those were removed.
   - **B-DK-7 explains two kinds of breach** (counted in `explained`, not violations; each example carries its `why`):
