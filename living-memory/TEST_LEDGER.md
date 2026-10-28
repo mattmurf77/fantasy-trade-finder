@@ -1,3 +1,101 @@
+## 2026-10-27 — Ceiling ruling: the subject-wide ceiling is MFL-only, with trusted IPs exempt (`feat/mfl-auth-link-throttle`, #477)
+
+Full gates (D7 limit change). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. head-eng passed #477 @ `8a3f5c91` on its security diff check, then ruled on the residual. Code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups → Ceiling ruling).
+
+- **What changed:**
+  - The `sub:` ceiling now applies only to `_SIGNIN_CEILING_PROVIDERS = ("mfl",)`. ESPN keeps `ip:` + `subip:`.
+  - A (username, IP) pair with a proven MFL sign-in or a good auth-link login in the last `_SIGNIN_TRUSTED_IP_DAYS` = 30 skips `sub:`, never `subip:` / `ip:`. The trust map, `_signin_trusted_ips`, is in-process, bounded by `_SIGNIN_TRUSTED_IP_MAX_KEYS` with the oldest evicted, and cleared on deploy. It uses an injectable `_signin_trust_clock`.
+  - No table, no schema.
+- **New tests** (`test_platform_sign_in.py` +6):
+  - `test_espn_has_no_subject_ceiling`;
+  - `test_mfl_ceiling_exempts_an_ip_with_a_recent_proven_success`;
+  - `test_mfl_trusted_ip_still_has_its_own_pair_bucket`;
+  - `test_mfl_auth_link_success_also_trusts_the_ip`;
+  - `test_mfl_trusted_ip_exemption_expires_after_n_days` (injected clock);
+  - `test_mfl_trusted_ip_map_is_bounded_and_evicts_the_oldest`.
+
+  The MFL ceiling still locks fresh IPs (`test_lockout_subject_ceiling_locks_the_subject_on_every_ip`, `test_auth_link_lockout_subject_ceiling_spans_ips_and_routes`).
+- **Sabotage, each red then restored:**
+  - the ceiling applied to ESPN → 1 red (`test_espn_has_no_subject_ceiling`);
+  - the exemption applied to `subip:` too → 1 red (`test_mfl_trusted_ip_still_has_its_own_pair_bucket`);
+  - the exemption ignored → 4 red (exempts, auth-link trusts, expiry, eviction).
+- **Run:** the 15 branch-A suites: **535 passed, 0 failed** (529 + 6). The concurrency pair passes 3 of 3 loops. Full suite: **9127 passed, 2 skipped, 2 failed**. The two failures were outside the sign-in code and caused by machine load: the run took 3 h 22 min at load ~36, `test_fairness_gate_golden.py::test_one_for_one_gate_knife_edge` failed with "fixture broken: base 1-for-1 should surface", and `test_notif_teardown.py::test_honest_winback_resumes_after_user_returns` failed with "daily-tick run did not finish". Re-running both files in isolation on the same tree: **27 passed**.
+- **Post-launch item logged** (scope + runbook): the limiter maps evict their oldest key when full (`_SIGNIN_LIMITER_MAX_KEYS` 50,000), so a flood of failures on distinct subjects could evict a target's counters. head-eng accepted this at launch scale.
+
+## 2026-10-27 — Lockout fix: the 5-failure lock keyed on (subject, client IP) + a 30/hour subject-wide ceiling (`feat/mfl-auth-link-throttle`, #477; draft, not yet QA'd)
+
+Full gates (D7 limit changes). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups → Lockout fix).
+
+- **What changed:** `_signin_limit_keys` now returns three windows for each attempt:
+  - `ip:` 300 / 10 min (unchanged);
+  - `subip:` (subject, client IP) 5 / 15 min;
+  - `sub:` subject across IPs 30 / hour (`_SIGNIN_SUBJECT_CEILING_*`, new).
+
+  A new `reason=subject_ceiling` joins `subject_limit` and `ip_limit`. A success clears its pair bucket and the subject-wide counter. In-flight admission and `Retry-After` are unchanged, and the sign-in and auth-link share the keys. head-eng's nit: the sign-in ESPN cookie-read warning logs the kind only.
+- **New tests:**
+  - `test_platform_sign_in.py` +6:
+    - `test_lockout_griefer_ip_cannot_lock_the_victims_ip`: MFL + ESPN, 3 renewal rounds; the victim's IP gets 200, the griefer's bucket stays locked;
+    - `test_lockout_subject_ceiling_locks_the_subject_on_every_ip`: 30 failures over 6 IPs → 429 on old and fresh IPs, `reason=subject_ceiling`, `Retry-After` ≤ 3600; other subjects are fine;
+    - `test_lockout_one_ip_cannot_reach_the_subject_ceiling`;
+    - `test_lockout_success_clears_its_pair_bucket_and_the_ceiling_only`;
+    - `test_d7_concurrent_bad_attempts_across_ips_never_exceed_the_ceiling` (ceiling patched to 6, 12 threads on distinct IPs → exactly 6 admitted);
+    - `test_espn_signin_cookie_read_warning_logs_only_the_kind`.
+  - `test_mfl_auth_link_route.py` +2: `test_auth_link_lockout_griefer_ip_cannot_lock_the_victims_ip` (also checks the sign-in from the griefer's IP is locked) and `test_auth_link_lockout_subject_ceiling_spans_ips_and_routes` (30 failures split across auth-link and the sign-in).
+  - **Updated, because they encoded the subject-only key** (each now locks and checks from ONE IP):
+    - `test_c7_too_many_attempts_subject_limit`, which also asserts another IP still gets 200;
+    - `test_espn_subject_limit_covers_the_claimed_swid`;
+    - `test_d7_unproven_pair_counts`;
+    - `test_d7_concurrent_bad_attempts_never_exceed_the_cap` (12 threads, one IP → exactly 5);
+    - `test_audit_log_marks_limited`;
+    - `test_s12_in_flight_saturation_answers_retry_after_5s`;
+    - `_lock_mfl_subject` (row 13);
+    - the two year-ordering tests;
+    - `test_auth_link_d7_sixth_attempt_…` and `test_auth_link_d7_shares_the_subject_window_…`.
+  - The concurrency pair is stable over 5 loops on a loaded machine.
+- **Sabotage, each red then restored:**
+  - the 5-failure lock keyed on the subject only → 7 red, incl. both griefer tests (`429 == 200`);
+  - the subject-wide key dropped → 5 red, incl. both ceiling tests (a fresh IP: `200 == 429`);
+  - the log line back to `: %s`, e → the log-kind test red.
+- **Run:** the 15 branch-A suites: **529 passed, 0 failed** (521 + 8); `check-landing-platform-options.js` passes. Full suite: **9123 passed, 2 skipped**, 0 failed (76 min on a machine at load ~36).
+
+## 2026-10-27 — MFL auth-link: D7 limiter on the password login; non-finite year 400 (`feat/mfl-auth-link-throttle`, stacked on #430 @ `d3248d35`)
+
+Full gates (a new 429 on an API route). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture; evidence is the tests below plus the code-walk in the [scope addendum](../docs/plans/platform-sign-in/scope.md) (§ Post-launch follow-ups).
+
+- **What changed:** `POST /api/mfl/auth-link`'s MFL login now goes through #430's D7 limiter (`_signin_limit_gate` / `_signin_release`, in-flight bound), with the same keys as the sign-in: subject = `accounts.platform_subject("mfl", username)`, plus the client IP. Only an MFL bad login counts; a good login clears the subject. The year range and admission run before the MFL call. Over the limit → 429 `too_many_attempts` + `Retry-After` + the row-13 constant. A JSON `Infinity` / `-Infinity` / `1e400` year on auth-link and auth-import → 400 `mfl_bad_year` (was a 500 `OverflowError`).
+- **Verify-block finding:** the `mfl_login` block is not dead. It re-stamps a verified session's `verified_via` (session + `users`) to `mfl_login` and runs for unverified synthetic demo sessions (#279 demo exemption). Behaviour kept; the comment is rewritten; two pins added.
+- **New tests** (`test_mfl_auth_link_route.py`, +12 cases):
+  - `test_auth_link_d7_sixth_attempt_after_five_bad_logins_is_429_no_mfl_call` (the right password on the 6th: 429, 5 MFL calls in all);
+  - `test_auth_link_d7_shares_the_subject_window_with_platform_sign_in`;
+  - `test_auth_link_d7_per_ip_window`;
+  - `test_auth_link_d7_good_login_clears_the_subject_not_the_ip`;
+  - `test_auth_link_d7_uncounted_outcomes_never_consume_the_budget`;
+  - `test_auth_link_d7_in_flight_slot_is_released_on_an_exception`;
+  - `test_auth_link_year_out_of_range_is_400_before_any_mfl_call`;
+  - `test_auth_link_and_auth_import_non_finite_year_is_400_not_500` (×3);
+  - `test_auth_link_verify_block_restamps_a_verified_sessions_verified_via`, `test_auth_link_verify_block_runs_for_an_unverified_demo_session`.
+  - The suite's fixture now resets the limiter before and after each test.
+- **Sabotage, each red then restored:**
+  - gate call removed → 4 red (6th-attempt, shared-window, per-IP, clear);
+  - the bad-login `_counted_failure` dropped → the same 4 red;
+  - `finally` release replaced by explicit releases on the normal paths → `…_in_flight_slot_is_released_on_an_exception` red;
+  - no `outcome = "proven"` on a good login → `…_good_login_clears_the_subject_not_the_ip` red;
+  - `OverflowError` dropped from auth-link's year parse → all 3 non-finite cases red (500 `internal_error`); dropped from auth-import's → all 3 red at the auth-import step.
+- **#430's gate pin:** `test_c7_the_279_gate_is_byte_identical_…` hashes only the four gate functions and checks the wrapper, so no hash changed (a comment names this branch). Still green.
+- **Run:** `test_platform_sign_in.py`, `test_entry_platform_route.py`, `test_mfl_auth_link_route.py`, `test_mfl_link_route.py`, `test_espn_link_route.py`, `test_espn_identity_binding.py`, `test_espn_service.py`, `test_mfl_service.py`, `test_espn_my_leagues_route.py`, `test_link_status_routes.py`, `test_mfl_propose_route.py`, `test_prepared_trade_cohort.py`, `test_mfl_write.py`, `test_mfl_trade_lifecycle.py`, `test_i2_mfl_ownership.py`: **510 passed, 0 failed**.
+- **Full suite** (first commit, `1272bb38`, on #430 @ `d3248d35`): **9104 passed, 2 skipped**, 0 failed (36 min, Python 3.14).
+- **Verify-block guard (follow-up commit; platforms-eng + onboarding-eng, which owns the accounts seam):**
+  - `mfl_auth_link`'s `mfl_login` marker block now runs only for a session that isn't verified yet. `verified_via` / `verified_at` record the FIRST verification. In practice only a synthetic demo session reaches it, and demo behaviour is unchanged.
+  - New tests: `test_auth_link_keeps_a_verified_sleeper_sessions_verified_via` (session, `users` verified_via + verified_at, and the durable session row unchanged; MFL credential stored) and `test_auth_link_keeps_a_verified_apple_account_sessions_verified_via` (an `acct_*` account-only Apple session, same assertions). The demo pin stays.
+  - Removed, because they pinned the old re-stamp: `test_auth_link_verify_block_restamps_a_verified_sessions_verified_via` and the 2026-08-11 tests `test_auth_link_verified_owner_persists_platform_marker` and `test_auth_link_verification_grants_long_expiry_durable_row` (its durable-row check now lives in the Sleeper test).
+  - Sabotage: only this guard removed → both new tests red (`'mfl_login' == 'sleeper'`, `'mfl_login' == 'apple'`). Restored.
+  - Run: the same 15 suites **521 passed, 0 failed** (522 − 3 removed + 2 new). Full suite on the final tree: **9115 passed, 2 skipped**, 0 failed (18 min).
+- **#430 round-3 P3s (separate commit, after merging #430's frozen head `7e52912d` into this branch):**
+  - `test_mfl_claim_and_preview_year_checks_run_before_the_limiter_gate` (×2: `1999`, `"abc"`): the gate spy is never called; no slot or count; a locked subject still gets the 400. Sabotage: the check moved below the claim's gate → both red (`['mfl'] == []`).
+  - `test_mfl_non_numeric_year_is_bad_year_on_claim_preview_and_action` (×5: `"NaN"`, JSON `NaN`, `"abc"`, `[2026]`, an object): 400 `mfl_bad_year` / "year must be numeric" on the claim, preview and `auth_leagues`; no MFL call; no limiter state. Before the fix, the claim and preview read `mfl_bad_league_id`. Sabotage: the old `ValueError → None` fall-through → 6 red (all 5 + the `"abc"` ordering case).
+  - `test_mfl_empty_year_is_the_default_season_on_claim_preview_and_action`: `""` = the default season everywhere, as `auth_leagues` always read it.
+  - Run on the merged tree: the same 15 suites **522 passed, 0 failed** (510 + `7e52912d`'s 4 + these 8); `test_platform_sign_in.py` + `test_entry_platform_route.py` alone **166 passed**; `check-landing-platform-options.js` passes. Full suite on the final tree: **9116 passed, 2 skipped**, 0 failed (27 min).
+
 ## 2026-10-27 — Platform sign-in: head-eng diff-check fixes — C4 trusted-proxy hops, `espn.signin` kill switch (#430, dark)
 
 Full gates (`espn.signin` is a feature-flag surface). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture. This builds on the 2026-10-26 entry below.

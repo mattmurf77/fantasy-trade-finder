@@ -29579,11 +29579,26 @@ def extension_auth():
 # league or post-proof outcomes (espn_public_league, espn_ownerless_team,
 # wrong_account), upstream outages and input errors never count, and
 # successes never count, because carrier NAT puts many honest users behind
-# one IP. A PROVEN claim clears its subject's count (not the IP window).
-# Admission counts in-flight attempts too, so concurrent requests can't
-# overshoot a cap. The per-IP ceiling is deliberately loose (head-eng, C4): a
-# wrong proxy-hop count must never 429 real users at launch; the
-# per-subject limit is the real guard.
+# one IP. Three windows per attempt (lockout fix, head-eng re-open,
+# 2026-10-27, feat/mfl-auth-link-throttle):
+#   * per client IP — 300 / 10 min (loose on purpose, head-eng C4: a wrong
+#     proxy-hop count must never 429 real users);
+#   * per (subject, client IP) — 5 / 15 min. Keying the 5-failure lock on
+#     the PAIR means a griefer who knows a victim's SWID / MFL username can
+#     only lock their OWN IP's bucket, never the victim's;
+#   * per subject across all IPs — 30 / hour: the password-guessing
+#     ceiling, MFL ONLY (head-eng ruling, 2026-10-27). One IP can't reach
+#     it (its pair bucket caps it at 20 / hour). An ESPN claim needs an
+#     espn_s2 cookie, which can't be guessed, so for ESPN a ceiling guards
+#     nothing and only adds griefing surface. An IP with a proven MFL
+#     sign-in / good auth-link login for that subject in the last
+#     _SIGNIN_TRUSTED_IP_DAYS is EXEMPT from the ceiling (never from its pair
+#     bucket or the IP window), so the owner's usual network still gets in
+#     while someone guesses from elsewhere.
+# A PROVEN claim (or a good auth-link login) clears that subject's pair
+# bucket for the caller's IP AND the subject-wide counter; never the IP
+# window, and never another IP's pair bucket. Admission counts in-flight
+# attempts on every key, so concurrent requests can't overshoot any cap.
 _SIGNIN_IP_MAX_FAILURES = 300
 _SIGNIN_IP_WINDOW_S = 10 * 60
 # How many X-Forwarded-For hops, counted from the RIGHT, our own proxies
@@ -29591,8 +29606,23 @@ _SIGNIN_IP_WINDOW_S = 10 * 60
 # 2 = second from the right, and so on. Pending release-lead's confirmation
 # of Render's layout (see PLATFORM-SIGNIN-XFF below).
 _SIGNIN_TRUSTED_PROXY_HOPS = 1
+# Per (subject, client IP) — the 5-failure lock.
 _SIGNIN_SUBJECT_MAX_FAILURES = 5
 _SIGNIN_SUBJECT_WINDOW_S = 15 * 60
+# Per subject, any IP — the password-guessing ceiling, for these
+# providers only (an espn_s2 can't be guessed).
+_SIGNIN_SUBJECT_CEILING_FAILURES = 30
+_SIGNIN_SUBJECT_CEILING_WINDOW_S = 60 * 60
+_SIGNIN_CEILING_PROVIDERS = ("mfl",)
+# Trusted IPs: a (subject, IP) pair with a proven MFL sign-in or a good
+# auth-link login in the last N days skips the subject-wide ceiling. Kept
+# in-process ((subject, IP) hash → last success, bounded: oldest evicted)
+# and therefore cleared on every deploy/restart — no table (no schema grant).
+_SIGNIN_TRUSTED_IP_DAYS = 30
+_SIGNIN_TRUSTED_IP_MAX_KEYS = 50_000
+# Every limiter dict evicts its OLDEST key when full (known, accepted at
+# launch scale: a flood of counted failures on distinct subjects could evict
+# a target's counters — post-launch item in the scope / runbook).
 _SIGNIN_LIMITER_MAX_KEYS = 50_000
 # Retry-After when a window is full only because of IN-FLIGHT attempts (their
 # outcome isn't known yet, so the failure-window expiry doesn't apply).
@@ -29605,16 +29635,19 @@ _SIGNIN_MFL_MIN_YEAR = 2000
 
 
 def _mfl_entry_year_refusal(raw_year):
-    """400 mfl_bad_year when a NUMERIC year is outside 2000..season+1 or
-    can't be an integer at all (JSON Infinity / -Infinity / 1e400 overflow
-    int()), else None (a non-numeric year keeps its existing handling). The
-    message reuses the existing mfl_bad_year copy — no new user copy."""
+    """400 mfl_bad_year unless the year is an integer in 2000..season+1: a
+    year outside the range, one that can't be an integer at all (JSON
+    Infinity / -Infinity / 1e400 overflow int()), and a non-numeric one
+    (NaN, "NaN", "abc", an array or object) are all refused — the same code
+    and existing "year must be numeric" copy auth_leagues' own parse
+    answers (no new user copy). A non-numeric year used to fall through to
+    _mfl_resolve and read 400 mfl_bad_league_id (#430 round-3 P3, on
+    feat/mfl-auth-link-throttle). A missing / empty year is the default
+    season, as everywhere else."""
     try:
         year = int(raw_year or _MFL_DEFAULT_YEAR)
-    except OverflowError:
+    except (TypeError, ValueError, OverflowError):
         year = None
-    except (TypeError, ValueError):
-        return None
     if year is not None and \
             _SIGNIN_MFL_MIN_YEAR <= year <= _MFL_DEFAULT_YEAR + 1:
         return None
@@ -29624,7 +29657,11 @@ def _mfl_entry_year_refusal(raw_year):
 
 _signin_failures: dict[str, collections.deque] = {}
 _signin_inflight: dict[str, int] = {}
+# (subject, IP) pair hash → monotonic time of its last proven MFL success.
+_signin_trusted_ips: dict[str, float] = {}
 _signin_failures_lock = threading.Lock()
+# The trusted-IP clock (tests inject a fake one to cross the N-day expiry).
+_signin_trust_clock = time.monotonic
 
 # Sign-in refusal copy: the FINAL 14-row set (marketing-lead-copy.md §6
 # addendum 8, C; rows 7, 8 and 12 approved by legal R28.16). Each string is
@@ -29724,22 +29761,59 @@ def _log_xff_hop_count() -> None:
 
 
 def _signin_limit_keys(provider: str, subject: str | None) -> list[tuple]:
-    """[(key, max_failures, window_s)] for this request. The subject key is
-    a hash, so no SWID/username sits in limiter memory either."""
-    keys = [("ip:" + _client_ip(), _SIGNIN_IP_MAX_FAILURES,
-             _SIGNIN_IP_WINDOW_S)]
+    """[(key, max_failures, window_s)] for this request: the client IP;
+    with a subject, also the (subject, client IP) pair ("subip:"); and, for
+    a ceiling provider (MFL) from an IP that isn't trusted for the subject,
+    the subject across all IPs ("sub:"). Subject keys are hashes, so no
+    SWID/username sits in limiter memory either."""
+    ip = _client_ip()
+    keys = [("ip:" + ip, _SIGNIN_IP_MAX_FAILURES, _SIGNIN_IP_WINDOW_S)]
     if subject:
-        digest = hashlib.sha256(f"{provider}\0{subject}".encode()).hexdigest()
-        keys.append(("sub:" + digest, _SIGNIN_SUBJECT_MAX_FAILURES,
+        pair = hashlib.sha256(
+            f"{provider}\0{subject}\0{ip}".encode()).hexdigest()
+        keys.append(("subip:" + pair, _SIGNIN_SUBJECT_MAX_FAILURES,
                      _SIGNIN_SUBJECT_WINDOW_S))
+        if (provider in _SIGNIN_CEILING_PROVIDERS
+                and not _signin_ip_trusted(pair)):
+            digest = hashlib.sha256(
+                f"{provider}\0{subject}".encode()).hexdigest()
+            keys.append(("sub:" + digest, _SIGNIN_SUBJECT_CEILING_FAILURES,
+                         _SIGNIN_SUBJECT_CEILING_WINDOW_S))
     return keys
+
+
+def _signin_ip_trusted(pair: str) -> bool:
+    """True when this (subject, IP) pair had a proven MFL success within
+    _SIGNIN_TRUSTED_IP_DAYS (an expired entry is dropped on read)."""
+    with _signin_failures_lock:
+        seen = _signin_trusted_ips.get(pair)
+        if seen is None:
+            return False
+        if _signin_trust_clock() - seen > _SIGNIN_TRUSTED_IP_DAYS * 86400:
+            _signin_trusted_ips.pop(pair, None)
+            return False
+        return True
+
+
+def _signin_trust_ip_locked(pair: str) -> None:
+    """Caller holds _signin_failures_lock. Mark the pair trusted now;
+    re-insert so dict order = recency, and evict the oldest past the cap."""
+    _signin_trusted_ips.pop(pair, None)
+    _signin_trusted_ips[pair] = _signin_trust_clock()
+    while len(_signin_trusted_ips) > _SIGNIN_TRUSTED_IP_MAX_KEYS:
+        _signin_trusted_ips.pop(next(iter(_signin_trusted_ips)))
+
+
+# The audit / log `reason` each limiter key reports when it refuses.
+_SIGNIN_LIMIT_SCOPES = {"ip": "ip_limit", "subip": "subject_limit",
+                        "sub": "subject_ceiling"}
 
 
 def _signin_full_locked(keys, now):
     """Caller holds _signin_failures_lock. (retry_after_s, 'ip_limit' |
-    'subject_limit') when any key's recorded failures PLUS in-flight
-    attempts reach its cap, else None. Sliding window over the newest `cap`
-    failure stamps."""
+    'subject_limit' | 'subject_ceiling') when any key's recorded failures
+    PLUS in-flight attempts reach its cap, else None. Sliding window over
+    the newest `cap` failure stamps."""
     worst = None
     for key, cap, window in keys:
         q = _signin_failures.get(key)
@@ -29753,7 +29827,7 @@ def _signin_full_locked(keys, now):
         if failures + _signin_inflight.get(key, 0) >= cap:
             wait = (max(1, math.ceil(q[0] + window - now)) if failures >= cap
                     else _SIGNIN_INFLIGHT_RETRY_S)
-            scope = "ip_limit" if key.startswith("ip:") else "subject_limit"
+            scope = _SIGNIN_LIMIT_SCOPES[key.split(":", 1)[0]]
             if worst is None or wait > worst[0]:
                 worst = (wait, scope)
     return worst
@@ -29773,8 +29847,13 @@ def _signin_record_failure_locked(keys, now) -> None:
 def _signin_release(audit: dict) -> None:
     """Finish an admitted attempt — always called from entry_platform's
     `finally`, so an exception can never leak an in-flight slot. Frees the
-    slot, records a counted credential failure, or — on a PROVEN claim —
-    clears the subject's failure count (never the IP window)."""
+    slot, records a counted credential failure, or — on a PROVEN claim /
+    good auth-link login — clears the subject's (subject, this IP) bucket
+    and its subject-wide counter (never the IP window, never another IP's
+    pair bucket). A proven MFL success also marks its (subject, IP) pair
+    trusted, exempting that IP from the subject-wide ceiling for
+    _SIGNIN_TRUSTED_IP_DAYS."""
+    trust_pair = audit.pop("_trust_pair", None)
     keys = audit.pop("_limiter_keys", None)
     if not keys:
         return
@@ -29790,8 +29869,10 @@ def _signin_release(audit: dict) -> None:
             _signin_record_failure_locked(keys, now)
         elif audit.get("outcome") == "proven":
             for key, _cap, _window in keys:
-                if key.startswith("sub:"):
+                if key.startswith(("subip:", "sub:")):
                     _signin_failures.pop(key, None)
+            if trust_pair:
+                _signin_trust_ip_locked(trust_pair)
 
 
 def _reset_signin_limiter() -> None:
@@ -29799,6 +29880,7 @@ def _reset_signin_limiter() -> None:
     with _signin_failures_lock:
         _signin_failures.clear()
         _signin_inflight.clear()
+        _signin_trusted_ips.clear()
 
 
 def _signin_limit_gate(audit: dict, provider: str, subject: str | None):
@@ -29812,6 +29894,11 @@ def _signin_limit_gate(audit: dict, provider: str, subject: str | None):
             for key, _cap, _window in keys:
                 _signin_inflight[key] = _signin_inflight.get(key, 0) + 1
             audit["_limiter_keys"] = keys
+            if provider in _SIGNIN_CEILING_PROVIDERS:
+                # A proven success on this attempt trusts its (subject, IP).
+                audit["_trust_pair"] = next(
+                    (k[len("subip:"):] for k, _c, _w in keys
+                     if k.startswith("subip:")), None)
             return None
     audit.update(outcome="limited", reason=hit[1])
     resp = jsonify({"error": "too_many_attempts",
@@ -30336,8 +30423,10 @@ def _entry_platform(audit: dict):
                                        failed_proof=True)
             if subject and kind not in ("not_found", "input"):
                 # ESPN not answering during the proof (5xx / parse): the
-                # same 502 espn_unavailable, with row 6's sign-in copy.
-                log.warning("espn fetch failed [%s]: %s", kind, e)
+                # same 502 espn_unavailable, with row 6's sign-in copy. Only
+                # the error KIND is logged — never the exception message
+                # (head-eng's #430 nit, carried here).
+                log.warning("espn fetch failed [%s]", kind)
                 return _signin_refusal(audit, 502, "espn_unavailable",
                                        _SIGNIN_ESPN_UNAVAILABLE_MSG)
             return _espn_error_response(e)
@@ -36097,6 +36186,10 @@ def _mfl_import_league_authed(user_id: str, league_id: str, year: int,
 def mfl_auth_link():
     """Sign in with MFL and list the user's leagues (no import yet).
 
+    POST's MFL login shares the platform sign-in's D7 failure limits (per
+    client IP, per (MFL username, IP), per MFL username across IPs; 429
+    too_many_attempts + Retry-After).
+
     GET → sign-in status, mirroring GET /api/sleeper/link (send-auth lazy
     flow, 2026-08-11): {connected, mfl_username, year}. Never returns the
     cookie. `connected` is true when an encrypted credential row exists OR
@@ -36149,22 +36242,47 @@ def mfl_auth_link():
     password = body.get("password") or ""
     try:
         year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):   # JSON Infinity / 1e400
         return jsonify({"error": "mfl_bad_year",
                         "message": "year must be numeric"}), 400
     if not username or not password:
         return jsonify({"error": "mfl_missing_credentials",
                         "message": "MFL username and password are required."}), 400
 
+    # D7 limiter on this password login (feat/mfl-auth-link-throttle): the
+    # same in-process windows and keys the platform sign-in uses (the client
+    # IP, the (MFL subject, IP) pair and the MFL subject across IPs; subject
+    # = lower-cased username), so a verified session can't use this route as
+    # an unthrottled MFL password oracle. Year range and admission run
+    # BEFORE any MFL call. Only an MFL bad login counts; a good login clears
+    # the pair bucket and the subject-wide counter; outages and input errors
+    # don't count.
+    # _signin_release runs in the `finally`, so an exception never leaks the
+    # in-flight slot.
+    bad_year = _mfl_entry_year_refusal(body.get("year"))
+    if bad_year is not None:
+        return bad_year
+    from . import accounts as _accounts
+    audit: dict = {}
+    limited = _signin_limit_gate(
+        audit, "mfl", _accounts.platform_subject("mfl", username))
+    if limited is not None:
+        log.info("MFL-AUTH-LINK outcome=limited reason=%s",
+                 audit.get("reason"))
+        return limited
     try:
         auth = _mfl.login(username, password, year)
         del password  # transient use only — never persisted, never logged
         leagues = _mfl.fetch_my_leagues(auth["cookie"], year)
+        audit["outcome"] = "proven"   # good login → the subject's count clears
     except _mfl.MflAuthError:
+        audit["_counted_failure"] = True
         return jsonify({"error": "mfl_bad_credentials",
                         "message": "MFL didn't accept that username and password."}), 403
     except _mfl.MflError as e:
         return _platform_error_response(e, "mfl")
+    finally:
+        _signin_release(audit)
 
     # Store ONLY the returned cookie — encrypted at rest when the key exists,
     # otherwise session-only (fail closed: plaintext never reaches the DB).
@@ -36182,43 +36300,47 @@ def mfl_auth_link():
     if storage == "session":
         sess["mfl_cookie"] = auth["cookie"]
 
-    # ── A successful MFL login counts as session verification ────────────
-    # Operator decision (2026-08-11, Send-in-MFL follow-ups): MFL accepting
-    # the username/password THIS request carried is proof-of-person — the
-    # MFL analogue of the Sleeper-JWT oracle — so an MFL-only user (no
-    # Sleeper/Apple/Google sign-in) can pass the hard verified gate on
-    # POST /api/trades/propose-mfl. Mirrors sleeper_link's proven-live
-    # block exactly: session marked verified, users.verified_via persisted,
-    # durable row upserted. D-018 (unverified sessions keep the short
-    # expiry) is honored by construction: the 90-day rolling expiry is
-    # granted by _session_persist_eligible reading sess["verified"], so
-    # verifying here IS what flips this session from the 4h posture to the
-    # long one — nothing else to set. Squatter safety is unchanged:
-    # @_gate_unverified_write already 403s an unverified session whenever a
-    # verified controller exists, so this path can only mint the FIRST
-    # controller (first-verified-wins, same as the Sleeper path).
-    sess["verified"] = True
-    sess["verified_via"] = "mfl_login"
-    try:
-        from . import accounts as _accounts
-        first_time = _accounts.get_user_verified_via(user_id) is None
-        if not user_exists(user_id):
-            # Login can beat session_init's background user upsert; make
-            # sure the row exists so the marker isn't dropped.
-            upsert_user(sleeper_user_id=user_id)
-        _accounts.mark_user_verified(user_id, "mfl_login")
-        if first_time:
-            log.info("AUTH-VERIFIED first verified controller user_id=%s "
-                     "via=mfl_login", user_id)
-    except Exception:
-        log.exception("persisting verified marker failed (session still "
-                      "verified in memory)")
-    # Durable session (flag auth.persistent_sessions): the session just
-    # became verified — persist it so it survives deploys/idle sweeps and
-    # picks up the verified 90d rolling expiry.
-    sess["_persisted_at"] = 0  # force the upsert past the throttle
-    _persist_session_if_eligible(
-        request.headers.get("X-Session-Token", ""), sess)
+    # ── The mfl_login marker: ONLY for a session that isn't verified yet ──
+    # verified_via records how the account was FIRST verified, not the latest
+    # platform connected (platforms-eng + onboarding-eng, 2026-10-27,
+    # feat/mfl-auth-link-throttle). Since #279, @_gate_unverified_write 403s
+    # every unverified session before this route runs, so an
+    # already-verified session (sleeper / apple / google / espn / mfl_login)
+    # keeps its sess["verified_via"], users.verified_via + verified_at and
+    # durable session row untouched here — connecting MFL only stores the
+    # MFL credential above. (Until this guard, the block re-stamped all of
+    # them to 'mfl_login'.)
+    # The one unverified caller that still reaches this point is a synthetic
+    # demo session (is_demo + demo_user_*, exempt from the #279 gate;
+    # /api/session/demo 404s while landing.try_before_sync is off). It keeps
+    # the original behaviour: verified via mfl_login in memory and on its
+    # users row (demo sessions are never persisted).
+    # Pinned by test_auth_link_keeps_a_verified_sleeper_sessions_verified_via,
+    # test_auth_link_keeps_a_verified_apple_account_sessions_verified_via and
+    # test_auth_link_verify_block_runs_for_an_unverified_demo_session.
+    if not sess.get("verified"):
+        sess["verified"] = True
+        sess["verified_via"] = "mfl_login"
+        try:
+            from . import accounts as _accounts
+            first_time = _accounts.get_user_verified_via(user_id) is None
+            if not user_exists(user_id):
+                # Login can beat session_init's background user upsert; make
+                # sure the row exists so the marker isn't dropped.
+                upsert_user(sleeper_user_id=user_id)
+            _accounts.mark_user_verified(user_id, "mfl_login")
+            if first_time:
+                log.info("AUTH-VERIFIED first verified controller user_id=%s "
+                         "via=mfl_login", user_id)
+        except Exception:
+            log.exception("persisting verified marker failed (session still "
+                          "verified in memory)")
+        # Durable session (flag auth.persistent_sessions): force the upsert
+        # (a demo session is never persist-eligible, so this is a no-op for
+        # the only caller that reaches it today).
+        sess["_persisted_at"] = 0  # force the upsert past the throttle
+        _persist_session_if_eligible(
+            request.headers.get("X-Session-Token", ""), sess)
 
     log.info("mfl_auth_link: user=%s year=%s leagues=%d storage=%s",
              user_id, year, len(leagues), storage)
@@ -36249,7 +36371,7 @@ def mfl_auth_import():
     body = request.get_json(force=True) or {}
     try:
         year = int(body.get("year") or _MFL_DEFAULT_YEAR)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):   # JSON Infinity / 1e400
         return jsonify({"error": "mfl_bad_year",
                         "message": "year must be numeric"}), 400
 
