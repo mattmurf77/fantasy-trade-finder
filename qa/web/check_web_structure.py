@@ -604,6 +604,29 @@ def run() -> int:
             if R28_17_SECTION5 not in rendered("privacy.html")
             else "§5 fourth removal trigger verbatim, inside the list")
 
+    # Legal R28.19's floor (2026-10-27): shipped instead of R28.20's text if
+    # the 365-day prune or the deletion redaction isn't live at deploy
+    # (head-eng confirms). §5 is unchanged. Pinned as rendered runs, so each
+    # line stays in its list and position.
+    R28_19 = (
+        ("§6 anonymized: sent proposals",
+         "trade matches keep the other side's record, with your identifier replaced by a deleted-user "
+         "placeholder; references to you in other users' sent trade proposals and \"bad trade\" flags "
+         "are cleared; feedback you sent"),
+        ("§6 may remain: suggestions already shown",
+         "Email us and we'll delete them; trade suggestions already shown to other users, which stay in "
+         "their records and can include your platform user ID, the players you held and the values the "
+         "suggestion used. They're deleted when that user deletes their account; public league records "
+         "on Sleeper, ESPN or MFL"),
+    )
+    priv = rendered("privacy.html")
+    missing19 = [label for label, s in R28_19 if " ".join(s.split()) not in priv]
+    stale19 = "on other users' trade decks" in priv
+    r.check("POL-r28-19[privacy.html]", not missing19 and not stale19,
+            ("not verbatim (legal R28.19): " + "; ".join(missing19)) if missing19 else
+            "the false \"references to you on other users' trade decks… are cleared\" line is still there"
+            if stale19 else f"{len(R28_19)} R28.19 runs verbatim; the false trade-decks line gone")
+
     # head-eng 2026-10-27 (#360 follow-up b): a rate-limited (429) or any other
     # failed send must still leave a way to send a data request, so the
     # contact form's ONE error path is c7 (marketing-lead-copy §1, approved
