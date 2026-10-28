@@ -8376,8 +8376,10 @@ def _quality_filter_inputs(cards, *, viewer_team: str, market, position, rosters
       kept, in order; else null.
     A market value is recorded as a plain float, or null when it isn't a
     finite number (#492 QA P3-4: a NaN or inf made the header non-strict
-    JSON; a numpy float wouldn't serialize at all); the filter's own
-    comparisons can't trigger on one either. A recording failure raises; the caller then records filter_ran True with
+    JSON; a numpy float wouldn't serialize at all). A non-finite value is a
+    data bug, and its null can read differently from what the filter did
+    (a NaN first on a card drops the filter's filler bar to the floor; the
+    audit skips the null and uses the real max). A recording failure raises; the caller then records filter_ran True with
     no inputs (the audit reads that deck as not auditable), and serves the
     filtered deck."""
     from . import deck_quality as _dq
