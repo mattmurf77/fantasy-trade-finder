@@ -113,6 +113,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [MFL numeric league ids wiped draft picks on session init (#200, 2026-07-27)](#mfl-numeric-league-ids-wiped-draft-picks-on-session-init-200-2026-07-27)
 - [Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)](#sleeper-flake-still-wiped-draft-picks-after-the-200-fix-220-2026-08-01)
 - [Sleeper 429 / circuit open (S0, 2026-10-20)](#sleeper-429--circuit-open-s0-2026-10-20)
+- [Outlook result cache (2026-10-27)](#outlook-result-cache-2026-10-27)
 - [Player-cache refresh (rookie-draft M0, 2026-08-06)](#player-cache-refresh-rookie-draft-m0-2026-08-06)
 - [Rookie-scope board restore (rookie-draft M2, 2026-08-06)](#rookie-scope-board-restore-rookie-draft-m2-2026-08-06)
 - [Draft Room polling budget (rookie-draft M4, 2026-08-06)](#draft-room-polling-budget-rookie-draft-m4-2026-08-06)
@@ -1151,6 +1152,25 @@ per consecutive 429, with jitter; soft cap 600 s, hard ceiling 3,600 s).
   through analytics-lead). A sustained ceiling (3,600 s windows) means Sleeper is throttling the IP, not one
   request: escalate to platforms-eng. Cloudflare 1010 is a separate failure (`blocked`, a 403); it doesn't open
   the circuit.
+
+## Outlook result cache (2026-10-27)
+
+`GET /api/league/outlook` keeps each computed sim result in process memory (`backend/outlook_result_cache.py`,
+[scope](plans/outlook-result-cache/scope.md)). The response contract is unchanged.
+
+- **It resets on every deploy or restart.** Nothing is persisted, and there's nothing to flush by hand. The key
+  hashes every input the engine reads, so a roster, record, schedule, value-board or `model_config` change is a new
+  entry, and old entries age out (6 h TTL, 256 entries).
+- **Cold sims are expected.** The first League tab open per league after a restart, and the first after any input
+  change (a week scores, a trade or waiver, a value refresh), runs the full sim: 0.3–3.5 s on an M1, likely more on
+  Render. It holds the GIL against the other 3 request threads while it runs. Other opens of the same league during
+  that run wait for it instead of starting their own.
+- **Hits vs misses:** every lookup writes a debug line from logger `backend.outlook_result_cache`, e.g.
+  `outlook result cache hit {'hits': 12, 'misses': 3, 'coalesced': 1, 'errors': 0}` (counts since process start).
+  The lines reach stdout and the Render logs because `server.py` sets the root logger to DEBUG. They are not in
+  `/api/debug/log`, whose ring buffer holds only the `trade_finder` logger, and never in an API response.
+- **A result that looks stale** can't come from the cache unless an input the engine reads is missing from the key
+  (the list is in the module docstring). Check that before restarting to clear it.
 
 ## Player-cache refresh (rookie-draft M0, 2026-08-06)
 
