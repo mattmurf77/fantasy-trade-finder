@@ -93,6 +93,7 @@ def p1(live, monkeypatch):
     monkeypatch.setattr(server, "_deck_evidence_pending", {})
     monkeypatch.setattr(server, "_deck_evicted_at", collections.OrderedDict())   # U4: evicted here
     monkeypatch.setattr(server, "_deck_held", collections.OrderedDict())         # U4: built here
+    monkeypatch.setattr(server, "_deck_f5_dropped", collections.OrderedDict())   # D1: F5 dropped here
     # Cached pack states, per test: the tests reuse deck ids (deck-0000), and a
     # state left by an earlier test carries its CAS checksum and counted misses.
     monkeypatch.setattr(server, "_deck_pack_states", {})

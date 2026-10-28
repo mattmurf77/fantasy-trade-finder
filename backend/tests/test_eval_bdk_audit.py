@@ -33,6 +33,7 @@ from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval.bdk_audit import (
     FAIL, INCOMPLETE, NOT_AUDITABLE, PASS, ReadOnlyViolation, audit, main, render,
 )
+from backend.eval.contract import card_impression_id
 from backend.tests.test_eval_pack_reader import SERVED, _card, _deck_cards, _row, pack_table
 from backend.tests.test_eval_withdrawals_and_paging import (
     DB, _after, act, make_db, put_pack, withdraw, withdrawals_table,
@@ -210,7 +211,7 @@ def test_repeat_counts_an_asset_over_the_cap_in_the_window():
     t = run(db).rules["repeat"]
     assert (t["violations"], t["explained"], t["audited"], t["status"]) == (1, 0, 2 * W, FAIL)
     assert t["examples"] == [{"deck_job_id": "rep", "asset": "X",
-                              "card_indexes": list(range(CAP + 1)),
+                              "card_indexes": list(range(CAP + 1)), "why": None,
                               "over_cap_protected": [False], "ghost_slots": 0,
                               "withdrawn_removed": 0}]
 
@@ -231,20 +232,211 @@ def test_a_repeat_breach_of_protected_cards_only_is_explained():
         ("ok", [True])]
     assert [(e["deck_job_id"], e["over_cap_protected"]) for e in t["examples"]] == [
         ("bad", [False])]
-    assert "(explained by protected cards: 1)" in render(r)
+    assert (t["explained_protected"], t["explained_short_deck"]) == (1, 0)
+    assert "1 (explained: 1 by protected cards, 0 by a short deck)" in render(r)
 
 
 def test_the_repeat_window_is_by_displayed_position():
     """A never-delivered withdrawal at index 2 moves card W up to displayed
-    position W - 1, inside the window: X there is a fourth appearance."""
+    position W - 1, inside the window: X there is a fourth appearance. (The
+    deck has a card past it, so it isn't a short deck.)"""
     db = make_db()
-    deck(db, "w", W + 1, {**{i: with_x("w", i) for i in (10, 11, 12)}, W: with_x("w", W)},
+    deck(db, "w", W + 2, {**{i: with_x("w", i) for i in (10, 11, 12)}, W: with_x("w", W)},
          skip={2})
     withdraw(db, "w", 2, 0, reason="disposition_cut")
     t = run(db).rules["repeat"]
     assert t["violations"] == 1 and t["audited"] == W
     assert t["examples"][0]["card_indexes"] == [10, 11, 12, W]
     assert t["examples"][0]["withdrawn_removed"] == 1
+
+
+def _x_deck(db, job, n, x_at, **kw):
+    deck(db, job, n, {i: with_x(job, i) for i in x_at}, **kw)
+
+
+def test_a_short_deck_served_as_the_filter_ordered_it_is_explained():
+    """#453 QA P2-1: _repeat_cap defers an over-cap card to just after the
+    cards it keeps; with fewer than W cards to keep, the deferred ones still
+    land in the window. A 12-card deck with X in 6 cards, served in the
+    order filter_deck gave it, is _repeat_cap's own fixed point: explained."""
+    db = make_db()
+    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))      # 3 kept, 6 clean, 3 deferred after
+    r = run(db)
+    t = r.rules["repeat"]
+    assert (t["violations"], t["explained"], t["explained_short_deck"]) == (0, 1, 1)
+    assert t["status"] == PASS
+    assert [(e["deck_job_id"], e["why"]) for e in t["explained_examples"]] == [
+        ("short", "short_deck")]
+    text = render(r)
+    assert "0 (explained: 0 by protected cards, 1 by a short deck)" in text
+    assert "short asset X at card_index 0, 1, 2, 9, 10, 11 (short_deck, over-cap" in text
+
+
+def test_a_short_deck_out_of_the_filters_order_is_a_violation():
+    """The same assets, but an over-cap card served ahead of cards the
+    filter would have kept: re-running _repeat_cap moves it, so it's real."""
+    db = make_db()
+    _x_deck(db, "bad", 12, (0, 1, 2, 3, 10, 11))
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+
+
+def test_the_short_deck_check_reads_every_displayed_card(monkeypatch):
+    """A packed 35-card deck with X in 10 (every card viewed, so every row is
+    full): _repeat_cap keeps 28, so 2 of the 7 deferred X cards sit at
+    positions 28-29. The check reads the 5 cards past the window too
+    (fetched; they're not in the audit set). The same deck with no pack may
+    have stopped after a 30-card batch, so it reads FAIL (the safe side). A
+    displayed card with no full row can't be checked: a violation stands."""
+    db = make_db()
+    x_at = (0, 1, 2, *range(28, 35))
+    for job in ("long", "packless"):
+        _x_deck(db, job, 35, x_at)
+    put_pack(db, "long", _deck_cards("long", 35), card_count=35, deliveries=[[34, SERVED]])
+    deck(db, "gap", 12, {**{i: with_x("gap", i) for i in (0, 1, 2, 9, 10, 11)},
+                         5: row("gap", 5, full=False)})       # displayed, no full row
+    reads = []
+    real = ba._full_rows
+    monkeypatch.setattr(ba, "_full_rows", lambda conn, ids: reads.append(list(ids)) or real(conn, ids))
+    t = run(db).rules["repeat"]
+    assert t["explained_short_deck"] == 1 and t["violations"] == 2
+    assert [e["deck_job_id"] for e in t["explained_examples"]] == ["long"]
+    assert sorted(e["deck_job_id"] for e in t["examples"]) == ["gap", "packless"]
+    past = sorted(card_impression_id("long", i) for i in range(30, 35))
+    assert any(sorted(r) == past for r in reads)            # fetched for the check
+    assert t["incomplete_decks"] == 1                       # "gap"
+
+
+def test_a_pack_less_batch_with_a_never_delivered_withdrawal_is_not_a_short_deck():
+    """#469 QA round 3: a pack-less deck stopped after its 30-card first batch,
+    one of them a never-delivered withdrawal the loader drops, shows 29 cards.
+    W0s count toward the 30, so X's fourth copy at the tail stays a breach."""
+    db = make_db()
+    deck(db, "w0", W, {i: with_x("w0", i) for i in (0, 1, 2, W - 1)}, skip={5})
+    withdraw(db, "w0", 5, 0, reason="disposition_cut")
+    (d,) = [d for d in eval_data.load_decks(engine=db.eng, since=SINCE, as_of=AS_OF)]
+    assert (len(d.cards), d.withdrawn_removed) == (W - 1, 1)
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+
+
+def test_a_pack_less_short_deck_in_flight_is_not_explained(monkeypatch):
+    """Only a PACKED in_flight deck is known complete: a pack-less one holds
+    its first 30 and viewed rows, so even a short one stays a violation."""
+    monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", SINCE)
+    db = make_db()
+    deck(db, "nopack", 12, {i: {**(with_x("nopack", i) if i in (0, 1, 2, 9, 10, 11)
+                                   else row("nopack", i)),
+                                "evidence_tier": "first30", "delivered_at": SERVED}
+                            for i in range(12)})
+    assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
+                                                      as_of=AS_OF)] == ["in_flight"]
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+
+
+def test_a_packed_short_deck_in_flight_is_still_explained():
+    """#469 QA P3-1: a pack holds every built card, so a packed deck that is
+    only in_flight (its pack not retired yet) is complete: explained."""
+    db = make_db()
+    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))
+    put_pack(db, "short", _deck_cards("short", 12), card_count=12,
+             deliveries=[[11, SERVED]], retired=False)
+    assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
+                                                      as_of=AS_OF)] == ["in_flight"]
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (0, 1)
+
+
+def _prefix_deck(db, job, tier, x_at=(0, 1, 2, W - 1)):
+    """Only W rows (the first W cards of what would be a longer built deck;
+    nothing past them is written), X at `x_at`: what the loader holds for a
+    pack-less tiered deck (the first 30), a partial_run one (its delivered
+    rows), or a pack-less untiered one stopped after its first 30-card
+    publication batch."""
+    deck(db, job, W, {i: {**(with_x(job, i) if i in x_at else row(job, i)),
+                          "evidence_tier": tier, "delivered_at": SERVED} for i in range(W)})
+
+
+@pytest.mark.parametrize("tier, hours, exclusion", [
+    ("first30", 2, "in_flight"),           # no pack yet, inside 25 h
+    ("first30", 30, "incomplete_deck"),    # a lost pack
+    ("partial_run", 2, None),              # its delivered rows only
+    (None, 2, None),                       # untiered, stopped after batch 1: no marker
+], ids=["in_flight", "lost_pack", "partial_run", "stopped_after_batch_1"])
+def test_a_deck_whose_cards_are_a_prefix_is_never_a_short_deck(monkeypatch, tier, hours,
+                                                                exclusion):
+    """#469 QA P1-1: these decks' cards are a prefix of what was displayed,
+    so an over-cap card at the prefix's end would look deferred; X's fourth
+    copy at W - 1 is a real breach and must stay one."""
+    monkeypatch.setattr(eval_data, "PACK_REQUIRED_SINCE", SINCE)
+    db = make_db()
+    _prefix_deck(db, "pre", tier)
+    as_of = _after(hours)
+    assert [d.exclusion for d in eval_data.load_decks(engine=db.eng, since=SINCE,
+                                                      as_of=as_of)] == [exclusion]
+    t = audit(db.eng, since=SINCE, as_of=as_of).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (1, 0)
+
+
+def test_ghost_rows_are_not_part_of_the_displayed_order():
+    """#469 QA P3-1: the fixed point is over displayed cards only. A ghost
+    carrying X at index 3 would break it if it were counted."""
+    db = make_db()
+    _x_deck(db, "short", 12, (0, 1, 2, 9, 10, 11))
+    ghost = {**row("short", 3, {"X": HEAD, "short-gh": HEAD}, {"short-rh": HEAD}),
+             "impression_id": card_impression_id("short", 3) + ":ghost", "is_ghost": 1,
+             "served_at": SERVED}
+    with db.eng.begin() as conn:
+        conn.execute(insert(db.imp), [ghost])
+    t = run(db).rules["repeat"]
+    assert (t["violations"], t["explained_short_deck"]) == (0, 1)
+
+
+def test_the_rules_never_take_dq_repeat_caps_place():
+    """B-DK-7's short-deck check calls deck_quality._repeat_cap itself."""
+    assert ba._repeat_cap is dq._repeat_cap
+
+
+@pytest.mark.parametrize("bad", [
+    {"assets_json": json.dumps({"give": 5, "receive": ["d-r0"]})},
+    {"assets_json": json.dumps({"give": True, "receive": ["d-r0"]})},
+    {"assets_json": json.dumps({"receive": ["d-r0"]})},
+    {"assets_json": json.dumps({"give": [], "receive": []})},
+], ids=["int_side", "bool_side", "missing_side", "empty_sides"])
+def test_a_malformed_assets_side_is_not_auditable_never_a_crash(bad):
+    """#453 QA P3-1: a non-list side made the weekly run exit 4."""
+    db = make_db()
+    deck(db, "d", W, {0: {**row("d", 0, *shape("breakup", "d", 0)), **bad}})
+    r = run(db)
+    for name in ("breakup", "filler"):
+        assert r.rules[name]["not_auditable"] == 1
+    assert r.rules["repeat"]["not_auditable"] == 1 and r.rules["repeat"]["incomplete_decks"] == 1
+
+
+@pytest.mark.parametrize("market", ["2000", None, float("nan"), True],
+                         ids=["string", "null", "nan", "bool"])
+def test_a_market_that_isnt_a_number_is_not_auditable(market):
+    """#453 QA P3-1 / P3-2: a string market crashed; a null one counted as
+    audited while _breakup silently returned False."""
+    db = make_db()
+    give, receive = shape("breakup", "d", 0)
+    val = {"assets": {"give": [{"id": a, "market_value": market} for a in give],
+                      "receive": [{"id": a, "market_value": v} for a, v in receive.items()]}}
+    deck(db, "d", W, {0: {**row("d", 0, give, receive), "valuation_json": json.dumps(val)}})
+    r = run(db)
+    assert r.rules["breakup"]["not_auditable"] == 1 and r.rules["breakup"]["audited"] == W - 1
+
+
+def test_ids_are_read_as_strings():
+    """#453 QA P3-3: integer ids in assets_json match the valuation's ids."""
+    db = make_db()
+    val = {"assets": {"give": [{"id": "101", "market_value": HEAD}],
+                      "receive": [{"id": "202", "market_value": LOW}]}}
+    deck(db, "d", W, {0: {**row("d", 0), "assets_json": json.dumps({"give": [101], "receive": [202]}),
+                          "valuation_json": json.dumps(val)}})
+    t = run(db).rules["breakup"]
+    assert t["audited"] == W and t["violations"] == 1
 
 
 # ---------------------------------------------------------------------------

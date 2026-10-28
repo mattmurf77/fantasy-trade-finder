@@ -124,6 +124,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
 - [Retiring the onboarding experiment overlay — open-access Phase A (2026-08-15)](#retiring-the-onboarding-experiment-overlay--open-access-phase-a-2026-08-15)
 - [Organic trade backfill (2026-08-16)](#organic-trade-backfill-2026-08-16)
 - [ESPN identity binding — one-time cohort re-sign-in (#321, 2026-08-16)](#espn-identity-binding--one-time-cohort-re-sign-in-321-2026-08-16)
+- [Purge orphaned ESPN/MFL entry users (one-time, 2026-11)](#purge-orphaned-espnmfl-entry-users-one-time-2026-11)
 
 ---
 
@@ -316,6 +317,7 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - Edit `config/features.json` and commit/deploy, OR
 - `POST /api/feature-flags/reload` to re-read without restart, OR
 - Set `FTF_FLAGS` env var for process-level overrides.
+- Don't roll back `account.settings_hub` after the 11-06 build: the flat Settings fallback deletes without the LEG-S6 Apple code (#446).
 
 ---
 
@@ -1097,6 +1099,15 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
   - **So today's realistic result is `OVERALL: INCOMPLETE` (exit 3):** no violation among the cards that could be checked. That isn't a pass.
   - **A violation may be on a fatigue retest card.** That protection isn't recorded at serve time, so check the example's `trade_hash` against `deck_suppressions.retest_trade_hash`.
   - **A B-DK-7 breach** whose example shows ghost slots or withdrawn cards may come from the serve order, not the filter: the filter ran before those were removed.
+  - **B-DK-7 explains two kinds of breach** (counted in `explained`, not violations; each example carries its `why`):
+    - `protected`: every over-cap card is protected (they hold their positions).
+    - `short_deck`: the deck had fewer than 30 cards the cap could keep, so the cards `_repeat_cap` deferred still sit inside the first 30. The audit re-runs `deck_quality._repeat_cap` itself on the deck's whole displayed order. If the order is unchanged (the filter could do no better), the breach is explained. That needs a full row for every displayed card; without one, the breach stays a violation. It also needs proof the loaded cards are the whole deck, so these breaches stay violations too:
+      - a loader exclusion, except a packed deck that's only `in_flight` (a pack holds every built card). A pack-less `in_flight` deck, or a lost pack's `incomplete_deck`, holds just the first 30 and the viewed rows;
+      - a `partial_run` deck (its delivered rows);
+      - **a pack-less deck of 30 or more cards, never-delivered withdrawals included.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
+
+      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL. Check those examples by hand.
+  - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list, or a market that's missing, null or not a number.
   - Any FAIL goes to models-lead.
 - **Exit status:** 0 = PASS; 1 = FAIL; 2 = a refused database or a `ReadOnlyViolation` (nothing on stdout), or a usage error; 3 = INCOMPLETE (nothing failed, but a rule couldn't check every card, or a deck was skipped: not a pass); 4 = the tool crashed (its redacted traceback on stderr): not a verdict, take it to models-eng.
 
@@ -1106,7 +1117,7 @@ Operator report: "Draft picks are missing from league summary" (League Rankings,
 
 - **Fix (2026-07-27):** the daemon now discriminates with `is_linked_platform_league(league_id)`: platform-linked numeric ids skip the Sleeper grid sync and re-run `_sync_mfl_owned_picks` instead (no network — reads `leagues.platform_future_picks`). This also **self-heals** previously clobbered leagues on their next session init; no manual data repair needed. Tests: `backend/tests/test_owned_picks.py::test_numeric_mfl_id_detected_as_platform_league`, `::test_mfl_renormalization_restores_clobbered_picks`.
 - **Diagnosis pattern for "X missing from league summary":** check `draft_picks` rows for the ACTIVE league id first (`SELECT league_id, COUNT(*) FROM draft_picks GROUP BY league_id`) — the League Summary client renders picks only when the payload carries non-zero `teams[].picks`, and it degrades silently (no pill, no bar segment, no Draft capital section) when the league has no pick rows. The client had no bug here.
-- **Watch item:** other Sleeper-only session-init daemons still gate on `isdigit()` alone (scoring auto-detect meta fetch, trade capture, lineup-slot fetch). They fail soft for MFL ids (no writes to shared stores) but waste a Sleeper call; if one ever gains a replace-style write, it needs the same `is_linked_platform_league` guard.
+- **Watch item (updated 2026-10-27):** every Sleeper-only session-init daemon step now checks `is_linked_platform_league`, so a numeric MFL/ESPN/Fleaflicker id makes no Sleeper call. The scoring auto-detect meta fetch (`_fetch_sleeper_league_meta`) checks it itself, and the lineup-slot fetch (`_sleeper_lineup_slots`) reaches Sleeper only through that meta fetch. The last gap was trade capture: its `market.trade_capture` block gated on `isdigit()` alone, so a numeric MFL/ESPN id cost up to 18 Sleeper `transactions` reads per init; it now also checks `_platform_linked`. When adding a daemon step that calls Sleeper, give it the same guard: a step that gains a replace-style write without it would clobber a linked league's data, as in #200.
 
 ## Sleeper-flake still wiped draft picks after the #200 fix (#220, 2026-08-01)
 
@@ -1390,3 +1401,193 @@ code, reconstruct diagnostics from retained snapshot nodes (or the verified
 backup); pause expiry with FTF_DECK_DIAGNOSTIC_RETENTION_DAYS=0. Never wipe the
 snapshot table as a rollback. Expiry does not delete impressions, labels,
 valuations or receipts, and a paused policy cannot recover already-expired detail.
+
+## Purge orphaned ESPN/MFL entry users (one-time, 2026-11)
+
+**What:** the old unverified ESPN/MFL league-ID sign-in minted users keyed
+`entry:espn:<SWID>`, `entry:espn:<league>.t<team>` and
+`entry:mfl:<league>.f<franchise>`. Nobody can delete them (no account a person
+can prove), and an ESPN one may carry a third person's identifier. Legal
+(R28.12 row 2, R28.16) requires removing them through the full deletion path.
+`scripts/purge_entry_users.py` does that: `accounts.delete_user_data`, one id
+per call, which also anonymizes shared rows per privacy §6 (trade matches,
+platform pick-grid owners, Fleeced-minted team ids on recorded picks, and
+Fleeced-minted owners/actors in other users' `pick_assignment_changed` audit
+events). It is never a bare row delete.
+
+**What other members see:** a `leagues` row a purged entry user imported is
+deleted, shared or not (main's behaviour). Another Fleeced member of that ESPN
+or MFL league re-links it in Settings → Leagues and then owns the new row; a
+Sleeper league is re-created by any member's next session start. (Keeping the
+row with the importer anonymized was tried and reverted, #452: it stranded the
+remaining member's linker routes and kept the importer's id in the league's
+pick-assignment order.) Support line, if asked: "Re-link the league in
+Settings → Leagues".
+
+**Why it must finish first:** ESPN/MFL sign-in is coming back as a proof-based
+sign-in. Its `platform_identity_in_use` check searches every user's
+`espn_credentials` / `mfl_credentials`. A credential left on an entry user
+would answer 409 to the real owner.
+
+**When:** finished by 11-05, and before `landing.platform_options` goes back on
+(operator ask 16).
+
+**The prod run needs the operator's own word in the acting session.** Counts
+only, everywhere: never paste an id, SWID, team or league name into a PR, log,
+chat or this runbook. The script prints counts only; an unexpected error prints
+only its type (exit 3) and the next move is a fresh dry run.
+
+**Who runs what** (release-lead, 2026-10-26). A deletion has no rollback, so
+**the operator runs step 5, `--execute`, themself.** release-lead may run the
+read-only steps (the dry run, `--verify`), the flag flip, the Render restarts
+and **takes the snapshot (step 4)** on the operator's word. Deleting a backup
+destroys data permanently, the same class as `--execute`, so **the operator
+deletes the snapshot, not release-lead**: release-lead records its deletion
+due date in the step-8 record and reminds the operator before it. Nobody else
+runs `--execute`. Pass **`--expect-db <the prod database's name>`** in every
+command: the script refuses (exit 2) when the connected database's name
+differs.
+
+Point the script at prod with `DATABASE_URL` set in the acting shell from
+`secrets.local.env` (`DATABASE_URL_PROD`), never typed into chat. Every mode
+first prints the database identity (dialect, the host's first label, the
+database name; never credentials), and it refuses a local SQLite database
+unless `--allow-local` is passed (local test runs only).
+
+**The prod count (counts only; legal R28.17).** analytics-lead ran it
+read-only on 2026-10-27 at 13:04 UTC, against this script's selection at
+`d1d540a4`:
+- **2 entry users:**
+  - 1 unverified `entry:espn` user: a normal target, and its 1
+    `espn_credentials` row goes with it;
+  - 1 verified, MFL-login-only `entry:mfl` user: skipped, and it holds 1
+    `mfl_credentials` row.
+- 0 bound to Apple or Google; 0 credential rows on ids with no users row.
+- **Both are the operator's own test logins,** so no customer (and no Founder)
+  is affected.
+
+**Verified entry users keep their accounts but lose their ESPN/MFL credential
+rows** (legal R28.17 A1; Product yes).
+- `--delete-verified-credentials M` on the execute command deletes those rows
+  and nothing else of theirs: users, accounts, sessions and entitlements all
+  stay. It's part of the operator's step-5 run.
+- That way one execute + verify passes both parts of R28.16's post-check:
+  - **(1)** zero `entry:%` users without `verified_via`: `--verify` (g);
+  - **(2)** zero `espn_credentials` / `mfl_credentials` rows on ANY `entry:%`
+    user, verified or not: `--verify` (b).
+- **The app then degrades readably.** The user's league still loads from the
+  stored snapshot. Settings reports MFL as not connected, and a trade send
+  shows "Sign in with MFL" instead of an error. This is pinned by
+  `backend/tests/test_purge_mfl_reconnect.py` (server) and
+  `mobile/tests/check-send-button-platform.js` (the alert).
+- The SWID-bearing identity links and the MFL-login-only users stay at launch
+  (R28.17 A3, A5). The step-6 restart drops any session-only copy of a cookie.
+
+1. **Flip `landing.platform_options` OFF** (operator ask 12, release-lead's
+   session), then **confirm it reads false via `GET /api/feature-flags`**.
+2. **Restart the Render web service,** so live in-memory entry sessions can't
+   re-create users. **Note the UTC time the restart completed: that is the
+   `--cutoff`** (a full datetime with seconds and a timezone, e.g.
+   `2026-10-26T14:00:00Z`). Using the restart, not the flag flip, puts any
+   entry user minted in between among the targets, so the dry run doesn't stop
+   for it. Entry users created before the cutoff are targets; at or after it,
+   they are not.
+3. **Dry run against prod:**
+   `python3 scripts/purge_entry_users.py --cutoff <the step-2 time> --expect-db <prod db>`.
+   - Check the printed **database identity** is prod.
+   - Note the target count N. Targets are entry ids with a users row that is
+     unverified (`verified_via` NULL) and created before the cutoff, plus entry
+     ids with no users row at all. It also reports, and never touches,
+     "skipped (verified or after cutoff)" (e.g. an MFL entry that proved an
+     MFL login, `verified_via = 'mfl_login'`) and "skipped (no usable
+     created_at)".
+   - Note the "credential rows on verified entry users" count M; the count
+     above says 1. **If "credential rows on other skipped entry users" isn't
+     0, or "skipped (no usable created_at)" isn't 0, STOP and ask head-eng:**
+     `--verify` would fail (b) or (g), and this procedure deletes neither.
+   - **If "unverified created after cutoff" is non-zero** (decided in
+     advance, so 11-05 isn't at risk): confirm the flag still reads false,
+     restart once more, take that restart's completion time as the new cutoff,
+     and repeat the dry run. If it's still non-zero, STOP and ask head-eng;
+     the dry run prints no execute command until it's zero.
+4. **Snapshot** the prod database (Render Postgres backup) and note its
+   timestamp; don't run step 5 until it shows as complete. **Restoring it is a
+   full restore that loses every write made after it**, every user's, not just
+   the purge's: a last resort. **Delete it once step 7 passes, and in any case
+   within 7 days** (privacy §5 promises deleted data leaves backups within 7
+   days; a manual snapshot would otherwise outlive that). **The operator
+   deletes it**; release-lead reminds them before the due date.
+5. **Execute. The operator runs it, nobody else, after re-checking that the
+   printed database identity is prod.** Copy the exact command the dry run
+   printed under "next (the operator runs this exact command, after a DB
+   snapshot)": it is pre-filled with the dry run's cutoff (UTC, microseconds
+   kept), `--expect N`, `--expect-db` naming the database the dry run read
+   and, when M > 0, `--delete-verified-credentials M`, e.g.
+   `python3 scripts/purge_entry_users.py --cutoff 2026-10-26T14:00:00Z --execute --expect N --expect-db <prod db> --delete-verified-credentials M`.
+   It refuses (exit 2, nothing deleted) if N or M no longer matches (re-run the
+   dry run) or if a target's deletion would also remove a non-entry alias, such
+   as a bound account (escalate to head-eng). It continues past a failing id and
+   exits 1 if any failed. Keep the printed summed counts.
+   - **The credential step comes after the purge's summary and fails closed.**
+     - It runs only when every target was deleted cleanly.
+     - It deletes exactly M rows or none.
+     - Otherwise it prints `SKIPPED`, `ROLLED BACK` or `FAILED (<type>)`,
+       exits 1 and changes nothing. Then dry-run again and run the command
+       it prints, which will be `--expect 0` if the targets are gone.
+6. **Restart the Render web service again.** The script deletes the durable
+   session rows, but a live in-memory entry session survives in the running
+   process until it restarts.
+7. **Verify:** `… --cutoff <same> --verify --expect-db <prod db>`. **Check the
+   printed database identity is prod first.** It exits 0 only if (a) no target
+   id remains in any key column, (b) no `espn_credentials` / `mfl_credentials`
+   row sits on any `entry:` id, skipped ones included, (c) no unverified
+   entry user was created at or after the cutoff, (d) no removed entry id is
+   still named in a `pick_assignment_changed` audit event (other users'
+   events; a skipped, kept entry user may still appear), (e) the `users`
+   table exists and isn't empty (an empty or wrong database fails), (f)
+   no league's `pick_assignment_settings.order` still lists a removed entry id
+   (other importers' rows included), and (g) no `entry:` user without
+   `verified_via` remains. (g) and (b) are R28.16's two parts.
+   - If (a) isn't clean, repeat steps 3–7, with a fresh snapshot.
+   - A credential on a SKIPPED entry user has its own message. On a verified
+     one, re-run the dry run and the command it prints (`--expect 0
+     --delete-verified-credentials M`). On any other, a human looks (escalate
+     to head-eng). Never delete one by hand.
+   - If (g) fails, an unverified entry user is left that the purge skips (no
+     usable `created_at`): STOP and ask head-eng.
+   - If (c) fails, the flag or a restart wasn't done: investigate before
+     re-running.
+   - **If (e) fails, STOP: this is an empty or wrong database.** Check
+     `DATABASE_URL` in the shell and the identity line against `--expect-db`.
+     Never run `--execute` against it.
+   - **If (d) or (f) fails, re-running won't help:** the dry run will show 0
+     targets. The leftover is an entry id removed by a deletion that ran
+     before these anonymizations existed, or an audit row written afterwards.
+     Record the count only and escalate to head-eng; never hand-edit the rows.
+     The fix is a one-off anonymization through `accounts`, needing its own
+     ruling.
+   - The info lines never fail the check: JSON mentions in
+     `standing_offers.team_user_ids`, `leagues.opponent_data` and other event
+     types' `user_events.props`, and overhaul references (the known general
+     deletion gap, privacy §6 "not yet").
+8. **Record counts only** (targets deleted, verified users' credential rows
+   deleted, the verify lines), plus the snapshot's deletion due date (once step 7
+   passes, and no later than 7 days after it was taken). **The operator
+   deletes the snapshot**; release-lead records the due date here and reminds
+   the operator before it. Send the purge date to head-bizops. Support uses
+   it: "data from ESPN and MFL sign-ins made before <date> was deleted on that
+   date".
+
+Backups roll off within 7 days, so deleted rows can remain in a backup for up
+to 7 days (privacy §5). There is no schema change, so no data-dictionary
+update.
+
+**Post-launch, owner head-eng (logged 2026-10-27, legal R28.17):**
+- **A3:** re-key the SWID-bearing `entry:espn:<SWID>` users to `acct_*`, or
+  delete them once no way in remains. The id can carry another person's
+  member id. The prod count found 0 bound to Apple or Google.
+- **A5:** delete the MFL-login-only verified `entry:mfl` users through
+  `delete_user_data` once every session has ended. Saved sessions end after 90
+  days unused (privacy §5). Until then, ops-support closes any request about
+  such an account with D4.
+
