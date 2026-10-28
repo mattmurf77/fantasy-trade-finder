@@ -704,6 +704,7 @@ export default function PickAssignmentScreen({ route, navigation }: any = {}) {
             <Pressable
               testID="pick-assignment.edit-order"
               onPress={() => setSetupOpen(true)}
+              hitSlop={{ top: 6, bottom: 6 }}
               accessibilityRole="button"
               accessibilityLabel="Edit draft order and rounds"
               style={({ pressed }) => [styles.inlineLink, pressed && { opacity: 0.6 }]}
