@@ -251,7 +251,7 @@ const flat = strip(read(FLAT));
 {
   const subs = strip(read(path.join(ROOT, 'src/components/SubscriptionSection.tsx')));
   const mountIn = (text) =>
-    /import SubscriptionSection, \{ useTipsOffered \} from '(\.\.\/)+components\/SubscriptionSection';/.test(text)
+    /import SubscriptionSection from '(\.\.\/)+components\/SubscriptionSection';/.test(text)
     && (text.match(/<SubscriptionSection \/>/g) || []).length === 1;
   const hubOk = mountIn(hub);
   const flatOk = mountIn(flat);

@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 
 import ChalkText from './chalkline/Text';
 import { Icon, TickLabel } from './chalkline';
 import { chalk, flare, ink, radii, space } from '../theme/chalkline';
-import { getPaywallConfig, type PaywallConfig } from '../api/billing';
+import type { PaywallConfig } from '../api/billing';
 import {
   getActivePro,
   hasProEntitlement,
@@ -16,8 +16,8 @@ import {
 import { track } from '../api/events';
 import { useEntitlements } from '../state/useEntitlements';
 import { useFlag } from '../state/useFeatureFlags';
-import { isUnverifiedSession, openPaywall, openVerify } from '../state/usePaywallGate';
-import { useSession } from '../state/useSession';
+import { openPaywall, openVerify } from '../state/usePaywallGate';
+import { useSession, type SavedUser, type SessionVerification } from '../state/useSession';
 import {
   FOUNDER_PRICE,
   FOUNDER_TAG,
@@ -42,11 +42,17 @@ import {
 // here as soon as the flag is on, so Restore and Manage must be too;
 // `enforcing` gates the LOCK UI only (D7), never this section.
 //
-// WHAT IT SHOWS, decided by the SESSION first (legal R28.9, D15, D16 a):
+// WHAT IT SHOWS, decided by the SESSION first (legal R28.9, D15, D16 a; head-
+// eng's 2026-10-28 ruling), through ONE predicate, subscriptionSessionState:
+//   - unknown (verification still null after a cold start, and not a session
+//     that proves itself): NOTHING, not even the banner. Never a guess.
 //   - unverified: ONE row, "Verify this session first" (mon.verify.title),
 //     opening the VerifySheet. No See plans, no Restore, no status, the same
 //     for every unverified session. That branch is a separate component that
 //     reads no subscription field, so it can't vary by what the account has.
+//   - verified (a demo; session_verified === true; or an Apple/Google-first
+//     account-only session, proven by its own fields): the rows below.
+//     Restore shows only once RevenueCat's identity is this user.
 //   - verified member: Manage subscription (Apple's page) and Restore. The
 //     STATUS block (the plan line mon.pay.sub_status; for a Founding GM
 //     "Founding GM since {date}" with the FounderTag, the kept-price and
@@ -71,36 +77,45 @@ const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
  *  doesn't render and getActivePro (RevenueCat) is never called. */
 export const STATUS_ROWS_AT_LAUNCH: boolean = false;
 
-/** B8 #1 (head-eng): the Settings tip-jar row shows only while the server
- *  offers tips, i.e. the cached /api/paywall/config `tips` is a non-empty
- *  array. SUBSCRIBED to the React Query cache, NEVER fetching (`enabled:
- *  false`, so the hub's rule 1 holds): unknown or empty → hidden. The server
- *  serves `tips: []` at launch, so the row is hidden and comes back with a
- *  server change, no binary. The TipJar route stays registered. */
-export function useTipsOffered(): boolean {
-  const { data } = useQuery<PaywallConfig>({
-    queryKey: ['paywall-config', 'ios'],
-    queryFn: () => getPaywallConfig('ios'),
-    enabled: false,
-  });
-  return tipsOffered(data);
-}
-
-/** Pure: the config offers at least one tip. */
-export function tipsOffered(config: PaywallConfig | null | undefined): boolean {
-  return Array.isArray(config?.tips) && config.tips.length > 0;
+/** Where the session stands for this section. ONE predicate, read by the
+ *  render and by Restore's tap (head-eng, 2026-10-28):
+ *   - 'verified': a demo; or the server said `session_verified === true`; or
+ *     an Apple/Google-first account with no Sleeper source, recognised from
+ *     the session's OWN user fields: `account_only` AND the `acct_` working
+ *     key. That key is minted only by a provider (Apple/Google) sign-in, which
+ *     the server verifies at mint (backend accounts.ACCOUNT_USER_PREFIX;
+ *     server.py's account-only mint sets verified_via = provider). An ESPN /
+ *     MFL entry session is also `account_only` but keyed `entry:…`, so it
+ *     does NOT qualify. Correct with or without session-init ever filling
+ *     `verification` for these accounts.
+ *   - 'unverified': the server said `session_verified === false` (wins over
+ *     the account-only rule).
+ *   - 'unknown': anything else, notably `verification` still null right after
+ *     a cold start. The section renders NOTHING then. */
+export type SubscriptionSessionState = 'verified' | 'unverified' | 'unknown';
+export function subscriptionSessionState(s: {
+  isDemo: boolean;
+  verification: Pick<SessionVerification, 'session_verified'> | null;
+  user: Pick<SavedUser, 'user_id' | 'account_only'> | null;
+}): SubscriptionSessionState {
+  if (s.isDemo) return 'verified';
+  if (s.verification?.session_verified === true) return 'verified';
+  if (s.verification?.session_verified === false) return 'unverified';
+  if (s.user?.account_only === true && s.user.user_id.startsWith('acct_')) return 'verified';
+  return 'unknown';
 }
 
 export default function SubscriptionSection() {
   const paywallOn = useFlag('monetize.paywall');
-  const unverified = useSession((s) => !s.isDemo && s.verification?.session_verified === false);
-  if (!paywallOn) return null;
+  const state = useSession(subscriptionSessionState);
+  // Unknown renders nothing at all, banner included (never a guess).
+  if (!paywallOn || state === 'unknown') return null;
   return (
     <View testID="settings-subscription-row">
       <View style={styles.banner}>
         <TickLabel>Subscription</TickLabel>
       </View>
-      {unverified ? <UnverifiedRow /> : <VerifiedRows />}
+      {state === 'unverified' ? <UnverifiedRow /> : <VerifiedRows />}
     </View>
   );
 }
@@ -124,9 +139,9 @@ function VerifiedRows() {
   const noteCustomerInfo = useEntitlements((s) => s.noteCustomerInfo);
   const refreshEntitlements = useEntitlements((s) => s.refresh);
 
-  // RevenueCat's view of THIS user's plan, for the status block only, so
-  // never asked while that block is off (B8). Asked only once its identity is
-  // confirmed as the session user.
+  // RevenueCat's identity for THIS user: Restore waits for it, and so does
+  // the status block's plan read (which, while that block is off for B8, is
+  // never asked at all).
   const [idReady, setIdReady] = useState(() => isIdentityReady(userId));
   useEffect(() => {
     setIdReady(isIdentityReady(userId));
@@ -150,10 +165,12 @@ function VerifiedRows() {
   const [busy, setBusy] = useState(false);
   const [restoreLine, setRestoreLine] = useState<string | null>(null);
   const onRestore = async () => {
-    // D9 / R28.9 3f: Restore waits for verification. (This branch renders
-    // only for a verified session; this covers a session that changed since.)
-    if (isUnverifiedSession()) {
-      void openVerify();
+    // D9 / R28.9 3f: Restore runs only for a verified session, by the SAME
+    // predicate the render uses. (This branch renders only when verified;
+    // this covers a session that changed since.)
+    const state = subscriptionSessionState(useSession.getState());
+    if (state !== 'verified') {
+      if (state === 'unverified') void openVerify();
       return;
     }
     if (busy || !userId) return;
@@ -174,7 +191,9 @@ function VerifiedRows() {
     }
   };
 
-  const restoreRows = (
+  // Restore only once RevenueCat's identity is THIS verified user (head-eng,
+  // 2026-10-28): before that there is no Restore row.
+  const restoreRows = idReady ? (
     <>
       <LinkRow
         testID="settings-subscription-restore"
@@ -193,7 +212,7 @@ function VerifiedRows() {
         </ChalkText>
       ) : null}
     </>
-  );
+  ) : null;
 
   // Never guess before an answer: only Restore until the entitlements load.
   if (!loaded) return restoreRows;

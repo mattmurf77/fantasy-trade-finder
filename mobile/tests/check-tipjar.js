@@ -153,10 +153,11 @@ const beServer = read(BE_SERVER);
 //     config and never fetches; `tipsOffered` (pure) is executed in
 //     check-paywall-gate §9i.
 {
-  const subs = strip(read(path.join(ROOT, 'src/components/SubscriptionSection.tsx')));
+  const subs = strip(read(path.join(ROOT, 'src/state/useTipsOffered.ts')));
   const hook = /export function useTipsOffered\(\): boolean \{\s*const \{ data \} = useQuery<PaywallConfig>\(\{\s*queryKey: \['paywall-config', 'ios'\],\s*queryFn: \(\) => getPaywallConfig\('ios'\),\s*enabled: false,\s*\}\);\s*return tipsOffered\(data\);/.test(subs)
     && /return Array\.isArray\(config\?\.tips\) && config\.tips\.length > 0;/.test(subs);
   const gated = (text, flag) => text.includes('settings-tip-row')
+    && /import \{ useTipsOffered \} from '(\.\.\/)+state\/useTipsOffered';/.test(text)
     && /const tipsOffered\s*= useTipsOffered\(\);/.test(text)
     && text.indexOf(`${flag} && tipsOffered ? (`) > -1
     && text.indexOf('settings-tip-row') > text.indexOf(`${flag} && tipsOffered ? (`);

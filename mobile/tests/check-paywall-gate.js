@@ -1384,11 +1384,11 @@ check('9d. D10 / design §4.1 [shape + executed]: only a SUCCESSFUL purchase ope
 check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription — flag-gated, NOT enforcing-gated; unverified → ONE row (Verify this session first → the sheet), decided with no subscription read; member / Founding GM / non-member rows and their testIDs; no trial state, no date but the join date', async () => {
   const sub = strip(read(SUBS));
   const main = fnText(SUBS, 'SubscriptionSection');
-  assert(/const paywallOn = useFlag\('monetize\.paywall'\);/.test(main) && /if \(!paywallOn\) return null;/.test(main), 'self-gated on monetize.paywall');
+  assert(/const paywallOn = useFlag\('monetize\.paywall'\);/.test(main) && /if \(!paywallOn \|\| state === 'unknown'\) return null;/.test(main), 'self-gated on monetize.paywall; unknown renders nothing');
   assert(!/enforcing/.test(sub), 'never gated on enforcing (Restore stays reachable once the flag is on)');
-  assert(/const unverified = useSession\(\(s\) => !s\.isDemo && s\.verification\?\.session_verified === false\);/.test(main), 'the session decides');
-  assert(/<View testID="settings-subscription-row">[\s\S]*\{unverified \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), 'the container, then the branch');
-  for (const [name, t] of [['SubscriptionSection', main], ['UnverifiedRow', fnText(SUBS, 'UnverifiedRow')]]) {
+  assert(/const state = useSession\(subscriptionSessionState\);/.test(main), 'the session decides, through the one predicate');
+  assert(/<View testID="settings-subscription-row">[\s\S]*\{state === 'unverified' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), 'the container, then the branch');
+  for (const [name, t] of [['SubscriptionSection', main], ['UnverifiedRow', fnText(SUBS, 'UnverifiedRow')], ['subscriptionSessionState', fnText(SUBS, 'subscriptionSessionState')]]) {
     assert(!NO_ENTITLEMENT.test(t), `${name} reads a subscription field`);
   }
   const un = fnText(SUBS, 'UnverifiedRow');
@@ -1411,8 +1411,9 @@ check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription �
   assert(/testID = 'settings-subscription-manage'/.test(sub) && /'https:\/\/apps\.apple\.com\/account\/subscriptions'/.test(sub), 'Manage subscription → Apple\'s page');
   assert(/testID="settings-subscription-restore"/.test(sub), 'Restore');
   const restore = ver.slice(ver.indexOf('const onRestore'), ver.indexOf('const restoreRows'));
-  assert(/if \(isUnverifiedSession\(\)\) \{\s*void openVerify\(\);\s*return;\s*\}/.test(restore) && restore.indexOf('isUnverifiedSession') < restore.indexOf('restorePurchases('),
-    'Restore checks the session before restoring');
+  assert(/const state = subscriptionSessionState\(useSession\.getState\(\)\);\s*if \(state !== 'verified'\) \{\s*if \(state === 'unverified'\) void openVerify\(\);\s*return;\s*\}/.test(restore)
+    && restore.indexOf('subscriptionSessionState') < restore.indexOf('restorePurchases('),
+    'Restore checks the session (the render\'s own predicate) before restoring');
   assert(/track\('paywall_restore', \{ restored \}\)/.test(restore), 'Restore tracks the registered event');
   assert(/useSession\.subscribe\(\(s, prev\) => \{\s*if \(prev\.verification\?\.session_verified === false && s\.verification\?\.session_verified === true\) \{\s*void useEntitlements\.getState\(\)\.refresh\(\);/.test(strip(read('state/useEntitlements.ts'))),
     'a session that turns verified re-reads its (no longer blanked) entitlements');
@@ -1498,7 +1499,8 @@ check('9h. not in this build: the Home mark (mon.club.mark_a11y), the kept-price
 });
 
 check('9i. B8 #1 [executed]: the Settings tip row is data-driven — shown only when the cached config offers tips; unknown / empty → hidden; read from the cache, never fetched', () => {
-  const offered = extractFn(SUBS, 'tipsOffered', {});
+  const TIPS = 'state/useTipsOffered.ts';
+  const offered = extractFn(TIPS, 'tipsOffered', {});
   eq(offered(undefined), false, 'unknown config → hidden');
   eq(offered({ enabled: false }), false, 'paywall off (no tips key) → hidden');
   eq(offered({ enabled: true, tips: [] }), false, 'tips: [] (launch) → hidden');
@@ -1506,7 +1508,10 @@ check('9i. B8 #1 [executed]: the Settings tip row is data-driven — shown only 
   eq(offered({ enabled: true, tips: [{ product_id: 'ftf_tip_199', display_price: '$1.99' }] }), true, 'tips offered → shown');
   let opts = null;
   let cached;
-  const hook = extractFn(SUBS, 'useTipsOffered', {
+  eq(offered(null), false, 'null config → hidden');
+  eq(offered({}), false, '{} → hidden');
+  assert(!/useTipsOffered|tipsOffered/.test(strip(read(SUBS))), 'the hook left SubscriptionSection');
+  const hook = extractFn(TIPS, 'useTipsOffered', {
     useQuery: (o) => { opts = o; return { data: cached }; },
     getPaywallConfig: () => { throw new Error('fetched'); },
     tipsOffered: offered,
@@ -1531,15 +1536,40 @@ check('9j. B8 [shape]: the 11-06 binary ships Settings › Subscription WITHOUT 
   eq((sub.match(/getActivePro\(/g) || []).length, 1, 'one RevenueCat display read');
   assert(/useEffect\(\(\) => \{\s*if \(!STATUS_ROWS_AT_LAUNCH \|\| !pro \|\| !userId \|\| !idReady\) \{\s*setActive\(null\);\s*return;\s*\}\s*let alive = true;\s*void getActivePro\(userId\)/.test(ver),
     'getActivePro is never called while the switch is off');
-  // Restore on every verified path: still loading, non-member, member.
+  // Restore on every verified path (once identity is ready, §9k): still
+  // loading, non-member, member.
   assert(/if \(!loaded\) return restoreRows;/.test(ver), 'loading → Restore');
   assert(/if \(!pro\) \{\s*return \(\s*<>[\s\S]*?\{restoreRows\}\s*<\/>\s*\);\s*\}/.test(ver), 'non-member → See plans + Restore');
   assert(/<ManageSubscriptionLink \/>\s*\{restoreRows\}\s*<\/>\s*\);\s*\}$/.test(ver), 'member → Manage + Restore');
   assert(/testID="settings-subscription-restore"/.test(ver.slice(ver.indexOf('const restoreRows'), ver.indexOf('if (!loaded)'))), 'restoreRows is the Restore row');
-  // A session whose verification isn't known yet (null) is NOT unverified:
-  // it gets the verified rows, so Restore stays reachable (B8 #3).
-  assert(/const unverified = useSession\(\(s\) => !s\.isDemo && s\.verification\?\.session_verified === false\);/.test(fnText(SUBS, 'SubscriptionSection')),
-    'null verification reads as not-unverified (Restore reachable)');
+});
+
+check('9k. head-eng 2026-10-28 [executed + shape]: unknown verification renders NOTHING (no Restore, ever); session_verified false → only the Verify row; an Apple/Google-first account-only session proves itself from its own fields; Restore only once RevenueCat\'s identity is this verified user', () => {
+  const st = extractFn(SUBS, 'subscriptionSessionState', {});
+  const S = (verification, user, isDemo = false) => st({ isDemo, verification, user });
+  // a cold start: verification null, a username session → nothing
+  eq(S(null, { user_id: '123456789' }), 'unknown', 'cold-start username session → unknown');
+  eq(S(null, null), 'unknown', 'no user yet → unknown');
+  eq(S(null, { user_id: 'entry:espn:{SWID}', account_only: true }), 'unknown', 'an ESPN/MFL entry session is account_only but NOT provider-proven → unknown');
+  eq(S(null, { user_id: 'acct_9' }), 'unknown', 'an acct_ key without account_only → unknown');
+  eq(S(null, { user_id: '123', account_only: true }), 'unknown', 'account_only without the acct_ key → unknown');
+  // the server said
+  eq(S({ session_verified: false }, { user_id: '123' }), 'unverified', 'session_verified false → the Verify row');
+  eq(S({ session_verified: false }, { user_id: 'acct_9', account_only: true }), 'unverified', 'the server wins over the account-only rule');
+  eq(S({ session_verified: true }, { user_id: '123' }), 'verified', 'session_verified true → verified');
+  // proven by its own fields
+  eq(S(null, { user_id: 'acct_9', account_only: true }), 'verified', 'Apple-first, no league, verification null → verified');
+  eq(S(null, { user_id: 'demo_user_ab12' }, true), 'verified', 'a demo → verified');
+  const main = fnText(SUBS, 'SubscriptionSection');
+  assert(/if \(!paywallOn \|\| state === 'unknown'\) return null;\s*return \(\s*<View testID="settings-subscription-row">/.test(main), 'unknown → NOTHING (no banner, no rows): the return precedes the container');
+  assert(/\{state === 'unverified' \? <UnverifiedRow \/> : <VerifiedRows \/>\}/.test(main), "'unverified' → only the Verify row; 'verified' → the verified rows");
+  const ver = fnText(SUBS, 'VerifiedRows');
+  assert(/const restoreRows = idReady \? \(\s*<>\s*<LinkRow\s*testID="settings-subscription-restore"/.test(ver) && /\) : null;\s*if \(!loaded\) return restoreRows;/.test(ver),
+    'Restore renders only once identity is ready (no row before that)');
+  assert(/const \[idReady, setIdReady\] = useState\(\(\) => isIdentityReady\(userId\)\);/.test(ver) && /return onIdentityChange\(\(\) => setIdReady\(isIdentityReady\(userId\)\)\);/.test(ver),
+    'idReady tracks RevenueCat\'s identity for THIS user');
+  eq((strip(read(SUBS)).match(/subscriptionSessionState\(/g) || []).length, 2, 'one predicate, used by the render (via useSession) and by the tap');
+  assert(!/isUnverifiedSession|session_verified/.test(main + ver), 'no second copy of the rule in the render or the tap');
 });
 
 function walk(dir, out = []) {

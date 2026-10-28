@@ -44,7 +44,8 @@ import type { AccountInfo } from '../../api/auth';
 import type { NotificationPrefs } from '../../shared/types';
 import FeedbackFAB from '../../components/FeedbackFAB';
 import { useTesterSurface } from './useTesterSurface';
-import SubscriptionSection, { useTipsOffered } from '../../components/SubscriptionSection';
+import SubscriptionSection from '../../components/SubscriptionSection';
+import { useTipsOffered } from '../../state/useTipsOffered';
 import { hubStyles, styles } from './styles';
 
 // The ranking preview names the flow the SteerSlider names. Values are the
