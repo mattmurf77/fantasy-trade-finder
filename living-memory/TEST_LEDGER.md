@@ -19,7 +19,7 @@ Full gates (D7 limit change). Server only. D-056: `FTF_SKIP_SIM_GATE=1` posture.
   - the ceiling applied to ESPN → 1 red (`test_espn_has_no_subject_ceiling`);
   - the exemption applied to `subip:` too → 1 red (`test_mfl_trusted_ip_still_has_its_own_pair_bucket`);
   - the exemption ignored → 4 red (exempts, auth-link trusts, expiry, eviction).
-- **Run:** the 15 branch-A suites: **535 passed, 0 failed** (529 + 6). The concurrency pair passes 3 of 3 loops. Full suite: FULLSUITE_A5
+- **Run:** the 15 branch-A suites: **535 passed, 0 failed** (529 + 6). The concurrency pair passes 3 of 3 loops. Full suite: **9127 passed, 2 skipped, 2 failed**. The two failures were outside the sign-in code and caused by machine load: the run took 3 h 22 min at load ~36, `test_fairness_gate_golden.py::test_one_for_one_gate_knife_edge` failed with "fixture broken: base 1-for-1 should surface", and `test_notif_teardown.py::test_honest_winback_resumes_after_user_returns` failed with "daily-tick run did not finish". Re-running both files in isolation on the same tree: **27 passed**.
 - **Post-launch item logged** (scope + runbook): the limiter maps evict their oldest key when full (`_SIGNIN_LIMITER_MAX_KEYS` 50,000), so a flood of failures on distinct subjects could evict a target's counters. head-eng accepted this at launch scale.
 
 ## 2026-10-27 — Lockout fix: the 5-failure lock keyed on (subject, client IP) + a 30/hour subject-wide ceiling (`feat/mfl-auth-link-throttle`, #477; draft, not yet QA'd)
