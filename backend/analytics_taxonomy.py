@@ -913,6 +913,18 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # type), unchecked_generic, unchecked_pick_owner. No league id, no raw job
     # id, no player ids.
     "deck_i1_check",
+    # ── C8, 2026-10-28 (analytics-lead's C8 spec §A) ──────────────────────
+    # entitlement_granted — written by entitlements.grant() since the
+    # monetization foundation but never registered here, so every
+    # taxonomy-driven read missed it. Fired for webhook projections AND for
+    # manual / comp / bulk / Founders / referral / group-unlock grants, none
+    # of which is the recipient acting in a session: NON_INTENT (classified
+    # in analytics_queries in this same commit) and written non-touching
+    # (touch_user=False). A renewal on an existing row never calls grant(),
+    # so this is the first grant per (user, product) plus manual and promo
+    # grants. Props, exactly: entitlement (pro | ad_free), source
+    # (entitlements.VALID_SOURCES), expires_at.
+    "entitlement_granted",
 })
 
 # ---------------------------------------------------------------------------

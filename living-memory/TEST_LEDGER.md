@@ -1,3 +1,12 @@
+## 2026-10-28 — C8 §A: `entitlement_granted` registered server-fired + NON_INTENT, written non-touching
+
+Full gates, not express (scope: `docs/plans/c8-paywall-analytics/scope.md`; analytics-lead's C8 spec, 2026-10-27). Backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture. Branch `feat/c8-entitlement-granted` off `main` @ `44619b73`.
+
+- **Change:** `entitlement_granted` joins `analytics_taxonomy.SERVER_FIRED_EVENTS` and `analytics_queries.NON_INTENT_EVENTS` in one commit (the import-time disjointness assert holds); `entitlements.grant()` writes it with `touch_user=False`. Props unchanged.
+- **New `test_entitlement_granted_event.py` (3):** both memberships and not client-registered; exact props (`entitlement`, `source`, `expires_at`); `users.last_active_at` and `events_count` unchanged after `grant()`.
+- **Sabotage:** drop `touch_user=False` → `test_grant_does_not_touch_the_recipient` red (1 failed, 2 passed); restored.
+- **Targeted:** every backend test file matching analytics / entitle / event / taxonomy / intent / metric / funnel / DAU / retention / founder / referral / monetization / paywall / subscription: 287 passed, 0 failed. The full suite runs in CI (`backend-tests`).
+
 ## 2026-10-26 — Settings labels ESPN/MFL sign-in identities (the onboarding-eng side of platforms-eng's ESPN/MFL sign-in)
 
 Full gates, not express (scope: platforms-eng's ESPN/MFL sign-in, the onboarding-eng side; MUST 2 of onboarding-eng's design review). Mobile only; D-056: no simulator, `FTF_SKIP_SIM_GATE=1` posture. Frozen values (platforms-eng, 2026-10-26): identity provider `espn` / `mfl`, `verified_via` `espn` / `mfl_login`.

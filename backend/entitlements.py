@@ -299,9 +299,12 @@ def grant(user_id: str, entitlement: str, *,
             created_at=now, updated_at=now,
         ))
         row_id = result.inserted_primary_key[0]
+    # NON_INTENT and non-touching (C8): most grants aren't the recipient
+    # acting, so this must not move last_active_at or events_count.
     db.record_event(user_id, "entitlement_granted",
                     props={"entitlement": entitlement, "source": source,
-                           "expires_at": expires_at})
+                           "expires_at": expires_at},
+                    touch_user=False)
     return {"id": row_id, "user_id": user_id, "account_id": account_id,
             "entitlement": entitlement, "source": source,
             "product_id": product_id, "status": "active",

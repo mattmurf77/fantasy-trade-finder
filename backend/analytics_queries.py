@@ -360,8 +360,8 @@ NON_INTENT_EVENTS = frozenset({
     #   paywall_purchase_initiated / _completed / _failed — the purchase
     #     itself is a real decision, but it is NOT OURS TO COUNT: the
     #     authoritative row is the server-fired `entitlement_granted` the
-    #     RevenueCat webhook writes (INTENT, and it cannot be spoofed by a
-    #     client). These three are the UI echo used to reconcile against it
+    #     RevenueCat webhook writes (it cannot be spoofed by a client; NON_INTENT
+    #     since C8, below). These three are the UI echo used to reconcile against it
     #     — admitting them would double-count every purchaser's user-day
     #     and, worse, let a client mint one for a purchase that never
     #     cleared the store. `_failed` is a defect signal, not a decision.
@@ -409,6 +409,11 @@ NON_INTENT_EVENTS = frozenset({
     # its emitter): a server-fired outcome of each served page, on background
     # polls too. The serve's request already reflects the user's intent.
     "deck_i1_check",
+    # entitlement_granted (C8, 2026-10-28, registered in the SAME commit):
+    # grant() also fires for manual, comp, bulk, Founders, referral and
+    # group-unlock grants, none of them the recipient acting. INTENT would
+    # mint a user-day for every recipient of a bulk grant.
+    "entitlement_granted",
 })
 # INTENT is a deny-list in SQL so taxonomy growth is intent-by-default.
 INTENT_EVENTS = (SERVER_FIRED_EVENTS | ALLOWED_CLIENT_EVENTS) - NON_INTENT_EVENTS
