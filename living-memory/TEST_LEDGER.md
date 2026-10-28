@@ -1,3 +1,31 @@
+## 2026-10-28 — #473 K0: `preview_used` only once the preview was spent (else `never_trialed`)
+
+Full gates (scope addendum `docs/plans/monetization-launch/scope-addendum-paywall-hardening.md` item (e)). Branch `feat/paywall-hardening`, a fast-forward on `e23abecd` (no re-sync of the held stack). D-056: `FTF_SKIP_SIM_GATE=1` posture. Dark: `paywall_enforce_enabled` is 0.
+
+- **Change:** `paywall_gate._preview()` answers 402 `preview_used` only when the user's `paywall_previews` row exists; with no row (knob 0, `GET /api/trades`, a swipe or a page-2 cursor before page 1) it is `never_trialed`. `gate_reason` follows the same rule. head-eng 2026-10-28, from analytics-lead's K0 alarm ("any 402 `preview_used` to a user never served a card" would have fired for every new non-entitled user on day 1).
+- **Pinned both ways:** `test_get_trades_pending_view_is_not_the_preview` and `test_knob_zero_blocks_the_first_request` (no row → `never_trialed`; a spent row → `preview_used`); `test_never_entitled_reason_is_preview_used_only_once_spent` (new, `gate_reason`).
+- **Sabotage:** `_preview` answers `preview_used` regardless of the row → both K0 tests red (2 failed, 2 passed); restored.
+- **Restated (11 tests that encoded the old reason, no row → `never_trialed`):** the gate matrix's `never` deck cells (2), `test_other_gated_routes_block_never_entitled[GET-/api/trades/status]`, `test_decide_pure_matches_hook`, the swipe/pass-reason "nothing served yet" probe (2), the pending-view and knob-0 tests, `test_r289_after_verifying_resolves_normally` (NEW), and the P3-3 default-knob stored/live cells (2).
+- **Runs:** both files in full with the fix applied: 363 passed, 11 failed (exactly the restated set). After restating: `test_paywall_gate` matrix/decide/other-gated/reason subset 294 passed; the restated `test_paywall_preview` subset 11 passed. The full suite runs in CI on the push.
+
+## 2026-10-27 — Paywall hardening: R28.14 unverified settle, durable preview window (P3-1), every deck path (P3-3), no write while dark (P3-4) (dark)
+
+Full gates (scope addendum `docs/plans/monetization-launch/scope-addendum-paywall-hardening.md`). Branch `feat/paywall-hardening`, stacked on #397 @ `83e5eb4b`. It merges dark: `paywall_enforce_enabled` is 0. D-056: `FTF_SKIP_SIM_GATE=1` posture. Schema: one nullable column, `paywall_previews.window_trade_ids` (head-eng's grant, `migration_cols`).
+
+- **Backend:** 1038 targeted tests pass (every `*paywall*` / `*entitlement*` / `*gate*` file, the gate completeness test included, plus `test_account_deletion_coverage`, `test_verified_sessions`, `test_verified_reads`, `test_trade_pages_p2`, `test_trade_page_store`, `test_trade_page_flag_off`, `test_trade_responses_small`, `test_trade_status_lock`).
+  - `test_paywall_gate_unverified` (110, new), `test_paywall_gate` (328), `test_paywall_gate_allowlist` (7), `test_paywall_preview` (46), `test_paywall_config` (15);
+  - `test_entitlements` (52), `test_entitlements_billing_safety` (75), `test_account_deletion_coverage` (35).
+  - Full suite (`python3 -m pytest backend/tests -q`): 9130 passed, 2 skipped, 0 failed (9132 collected), 34:13. The `test_ranking_service_threads` flake didn't fire.
+- **(a) R28.14 CI proof (legal condition b):** every gated rule in `ROUTES` (32) × mobile and web (knob 1) × four account states (no history, a `paywall_previews` row, active pro, lapsed pro) = 64 cases, 256 responses. Status, body bytes and headers (Date excluded) are identical within each case. 10 rules answer the route's own 403 `verification_required` and 22 answer 402 `verify_required` (pinned). Zero preview, entitlement or ledger reads (spies plus SQL capture), and no `paywall_previews` write.
+- **Sabotage, each red then restored:**
+  - (a) S1: the entitlement read moved above the verified check → 75 red, all 64 byte-identical cases among them;
+  - (a) S2: the unverified `_preview` path restored → 5 red;
+  - (b) the swipe check ignores the stored window → 7 red; the `migration_cols` row dropped → the migration test red;
+  - (d) the hook keys on `classify()` instead of `applies()` → 4 red.
+- **(b) P3-1:** a window persists across the job's eviction. A stored-window card is allowed and one outside gets 402, the live window decides while the job is held, and a pre-column row fails closed. `_migrate_db` adds the column to an old table (idempotent). The export carries the column.
+- **(c) P3-3:** the preview runs on every `DECK_PATHS` entry (stored, live, rebased_row, rebased_job), with a 4-page window and with the default knob.
+- **(d) P3-4:** flags off, and flags on with knob 0. Every deck route plus the P1 and P2 serves produce zero `paywall_previews` statements and no billing write, and `record_preview` is never called.
+
 ## 2026-10-26 — Paywall one-page deck preview + uniform verify_required (legal R28.9) + first-page-store leak fix (#397) (dark)
 
 Full gates. It merges dark: `paywall_enforce_enabled` is 0, and `paywall_preview_pages` defaults to 1 (code fallback 1, G-064). D-056: `FTF_SKIP_SIM_GATE=1` posture.

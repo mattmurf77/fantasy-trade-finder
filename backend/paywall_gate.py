@@ -19,10 +19,15 @@ overridden by head-eng (2026-10-24):
     and cron-built jobs never consume it.
   * A blocked request gets exactly 402 {"error": "pro_required", "gate": <reason>}.
   * Pro counts only on a verified session (head-eng security ruling,
-    2026-10-24). Legal R28.9 (2026-10-25): an unverified, non-demo session is
-    decided from verified-ness and its paywall_previews record only, never
-    from entitlements. It gets the preview like a brand-new account, then
-    `verify_required` at every gated action, subscriber or not.
+    2026-10-24). An unverified, non-demo session is settled from verified-ness
+    alone, before any paywall_previews or entitlement read (legal R28.9 as
+    amended by R28.14, 2026-10-27): on a gated rule whose route wears the
+    account-auth verified gate for its method (@_gate_unverified_read /
+    _write) the hook lets it through and that route's own 403
+    `verification_required` answers; on any other gated rule it is 402
+    `verify_required`. It never gets the deck preview and never writes
+    paywall_previews, so its answer can't depend on subscriber status or
+    Fleeced history.
   * The server-made demo session (try-before-sync) is exempt on deck routes.
 
 One before_request hook in server.py reads ROUTES, a per-route table keyed by
@@ -57,11 +62,11 @@ PREVIEW_KNOB = "paywall_preview_pages"
 MOBILE_DEVICES = frozenset({"iphone", "ipad", "macos", "android"})
 
 # Reasons, the `gate` value of the 402 body.
-PREVIEW_USED = "preview_used"      # never held pro; a deck route (the preview is spent)
-NEVER_TRIALED = "never_trialed"    # never held pro; any other gated route
+PREVIEW_USED = "preview_used"      # never held pro; a deck route, preview spent (a row exists)
+NEVER_TRIALED = "never_trialed"    # never held pro; any other gated route, or a deck route before any card was served
 TRIAL_EXPIRED = "trial_expired"    # held pro only through an intro trial
 LAPSED = "lapsed"                  # held pro any other way (paid, comp, promo)
-VERIFY_REQUIRED = "verify_required"  # the user_id holds pro; the session is unverified
+VERIFY_REQUIRED = "verify_required"  # an unverified session, whatever the user_id holds
 
 # The deck: Find a trade, its job poll and its swipes. Today's Trade
 # (trades.presentation_v2) is client-only and rides these same routes.
@@ -368,22 +373,22 @@ def applies(rule: str, method: str) -> bool:
 class DeckAsk:
     """What the hook knows about a deck request, for the preview decision.
     `page_trade_ids(job_id, limit)` returns the trade ids among a job's first
-    `limit` raw cards (server.py owns the job registry)."""
+    `limit` raw cards (server.py owns the job registry), or None when this
+    process no longer holds the deck at all (no live job, no stored page)."""
     page_size: int
     job_id: str | None = None
     cursor: int | None = None
     trade_id: str | None = None
-    page_trade_ids: Callable[[str, int], set] = lambda _job_id, _limit: set()
+    page_trade_ids: Callable[[str, int], set | None] = lambda _job_id, _limit: set()
 
 
 @dataclass(frozen=True)
 class Preview:
     """Allowed under the preview: serve at most `limit` raw cards (`pages`
-    pages of `page_size`) of the preview deck. `gate` is the 402 reason if the
-    serve-time claim fails (verify_required for an unverified session, R28.9)."""
+    pages of `page_size`) of the preview deck. A failed serve-time claim is
+    402 `preview_used`."""
     pages: int
     page_size: int
-    gate: str = PREVIEW_USED
 
     @property
     def limit(self) -> int:
@@ -395,7 +400,7 @@ class Preview:
 
 
 def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
-            verified: bool, *, demo: bool = False,
+            verified: bool, *, demo: bool = False, route_verifies: bool = False,
             ask: DeckAsk | None = None) -> tuple[int, dict] | Preview | None:
     """The decision for a request that applies(): None (through), a Preview
     (through, capped to the preview window), or (402, body). No user → None:
@@ -405,11 +410,13 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
     entitlements resolve by user_id, and an unverified username-only session
     carries the same user_id as the subscriber it names.
 
-    An unverified session (legal R28.9) is decided from verified-ness and the
-    `paywall_previews` record ONLY, never from entitlements: it gets the deck
-    preview exactly as a brand-new account would, and after that every gated
-    action is `verify_required`, whatever the user_id's subscription. Its
-    answer therefore never reveals subscriber status."""
+    An unverified session (legal R28.9 as amended by R28.14) is settled here,
+    before any paywall_previews or entitlement read: None when the route
+    itself answers unverified sessions for this method (`route_verifies`:
+    it wears @_gate_unverified_read / _write, whose 403
+    `verification_required` then answers), else 402 `verify_required`. Both
+    are the same for every user_id, so the answer never reveals subscriber
+    status or Fleeced history, and it never touches the deck preview."""
     if not user_id:
         return None
     deck = (("GET" if method == "HEAD" else method), rule) in DECK_ROUTES
@@ -418,8 +425,8 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
     if not is_mobile and not _web_knob_on():
         return None
     if not verified:
-        if deck:
-            return _preview(rule, user_id, ask, gate=VERIFY_REQUIRED)
+        if route_verifies:
+            return None
         return 402, {"error": "pro_required", "gate": VERIFY_REQUIRED}
     if entitlements.get_entitlements(user_id)["pro"]:
         return None
@@ -430,17 +437,22 @@ def verdict(rule: str, method: str, user_id: str | None, is_mobile: bool,
 
 
 def decide(rule: str, method: str, user_id: str | None, is_mobile: bool,
-           verified: bool, *, demo: bool = False,
+           verified: bool, *, demo: bool = False, route_verifies: bool = False,
            ask: DeckAsk | None = None) -> tuple[int, dict] | Preview | None:
     """None or a Preview = let the request through; (402, body) = block it."""
     if not applies(rule, method):
         return None
-    return verdict(rule, method, user_id, is_mobile, verified, demo=demo, ask=ask)
+    return verdict(rule, method, user_id, is_mobile, verified, demo=demo,
+                   route_verifies=route_verifies, ask=ask)
 
 
 def gate_reason(user_id: str, *, deck: bool) -> str:
-    """The 402 reason for a user without pro (a spent preview on a deck route)."""
-    return _reason(_held_pro(user_id), deck)
+    """The 402 reason for a user without pro. `preview_used` only when the
+    preview was actually spent (a paywall_previews row exists, K0)."""
+    held = _held_pro(user_id)
+    if held is None and deck and preview_row(user_id) is None:
+        return NEVER_TRIALED
+    return _reason(held, deck)
 
 
 def _reason(held: str | None, deck: bool) -> str:
@@ -460,20 +472,24 @@ def preview_pages() -> int:
         return 1
 
 
-def _preview(rule: str, user_id: str, ask: DeckAsk | None,
-             gate: str = PREVIEW_USED) -> tuple[int, dict] | Preview:
-    """A never-entitled user (or any unverified session) on a deck route.
+def _preview(rule: str, user_id: str, ask: DeckAsk | None) -> tuple[int, dict] | Preview:
+    """A never-entitled user on a verified session, on a deck route.
     Before anything is served, a /generate or /status is allowed (the handler
     records the deck it serves); after, only that deck's /status inside the
     window, and swipes or pass reasons on its window's cards. GET /api/trades
-    (the pending-cards view) is not the preview deck. Outside it: 402 `gate`.
-    Reads only the knob and the paywall_previews row, never entitlements."""
-    blocked = 402, {"error": "pro_required", "gate": gate}
+    (the pending-cards view) is not the preview deck. Outside it: 402
+    `preview_used` once the preview was spent (the user's paywall_previews
+    row exists), else 402 `never_trialed` (K0: a user never served a card,
+    e.g. with the knob at 0 or on GET /api/trades, never reads as having
+    used a preview). Reads only the knob and the paywall_previews row, never
+    entitlements."""
     pages = preview_pages()
+    row = preview_row(user_id)
+    blocked = 402, {"error": "pro_required",
+                    "gate": PREVIEW_USED if row is not None else NEVER_TRIALED}
     if pages == 0 or ask is None:
         return blocked
-    allowance = Preview(pages=pages, page_size=ask.page_size, gate=gate)
-    row = preview_row(user_id)
+    allowance = Preview(pages=pages, page_size=ask.page_size)
     if rule == "/api/trades/generate":
         ok = row is None
     elif rule == "/api/trades/status":
@@ -481,10 +497,35 @@ def _preview(rule: str, user_id: str, ask: DeckAsk | None,
               and (ask.cursor is None or ask.cursor < allowance.limit))
     elif rule in ("/api/trades/swipe", "/api/trades/pass-reason"):
         ok = (row is not None and ask.trade_id is not None
-              and ask.trade_id in ask.page_trade_ids(row["deck_key"], allowance.limit))
+              and ask.trade_id in _window_ids(row, ask, allowance.limit))
     else:
         ok = False
     return allowance if ok else blocked
+
+
+def _window_ids(row: dict, ask: DeckAsk, limit: int) -> set:
+    """The preview deck's window for a swipe or pass reason: the live deck's
+    first `limit` raw cards (its job, or its P1 stored page) while this
+    process holds it; once it doesn't (4 h job retention, a deploy, with
+    trade.first_page_store off), the window recorded at its last serve
+    (P3-1), so swipes on held page-1 cards don't fail closed.
+
+    Known limitation (P3-2, documented, not fixed): while a deck is running
+    and re-sorting, its first `limit` raw cards can change between polls, so
+    a client can be shown more than `limit` distinct cards, and a swipe on a
+    card re-sorted out of the live window answers 402."""
+    live = ask.page_trade_ids(row["deck_key"], limit)
+    return live if live is not None else stored_window(row)
+
+
+def stored_window(row: dict | None) -> set:
+    """The trade ids recorded in a paywall_previews row's window_trade_ids
+    (JSON list; NULL on rows written before P3-1 → empty)."""
+    try:
+        ids = json.loads((row or {}).get("window_trade_ids") or "[]")
+    except (TypeError, ValueError):
+        return set()
+    return {i for i in ids if isinstance(i, str)} if isinstance(ids, list) else set()
 
 
 def preview_row(user_id: str) -> dict | None:
@@ -494,20 +535,25 @@ def preview_row(user_id: str) -> dict | None:
     return dict(row._mapping) if row is not None else None
 
 
-def record_preview(user_id: str, deck_key: str, pages: int) -> bool:
-    """Record that `pages` preview pages of `deck_key` were served. Called by
-    the /generate and /status handlers only, after a page with cards is built.
-    False when the preview already belongs to another deck (a concurrent
-    serve of a second job), in which case the caller answers 402."""
+def record_preview(user_id: str, deck_key: str, pages: int, window=None) -> bool:
+    """Record that `pages` preview pages of `deck_key` were served, and the
+    trade ids of its window (`window`: the deck's first `limit` raw cards as
+    this serve saw them; stored as a sorted JSON list, rewritten when it
+    changes). Called by the /generate and /status handlers only, after a page
+    with cards is built. False when the preview already belongs to another
+    deck (a concurrent serve of a second job), in which case the caller
+    answers 402."""
     t = db.paywall_previews_table
     now = datetime.now(timezone.utc).isoformat()
+    ids = sorted({i for i in (window or ()) if isinstance(i, str)})
+    window_json = json.dumps(ids) if window is not None else None
     row = preview_row(user_id)
     if row is None:
         try:
             with db.engine.begin() as conn:
                 conn.execute(insert(t).values(
                     user_id=user_id, deck_key=deck_key, pages_served=pages,
-                    first_served_at=now, updated_at=now))
+                    window_trade_ids=window_json, first_served_at=now, updated_at=now))
             return True
         except IntegrityError:
             row = preview_row(user_id)
@@ -515,11 +561,18 @@ def record_preview(user_id: str, deck_key: str, pages: int) -> bool:
                 return False
     if row["deck_key"] != deck_key:
         return False
-    if pages > row["pages_served"]:
+    grew = pages > row["pages_served"]
+    moved = window_json is not None and window_json != row.get("window_trade_ids")
+    if grew or moved:
         with db.engine.begin() as conn:
-            conn.execute(update(t).where(t.c.user_id == user_id)
-                         .where(t.c.pages_served < pages)
-                         .values(pages_served=pages, updated_at=now))
+            if grew:
+                conn.execute(update(t).where(t.c.user_id == user_id)
+                             .where(t.c.pages_served < pages)
+                             .values(pages_served=pages, updated_at=now))
+            if moved:
+                conn.execute(update(t).where(t.c.user_id == user_id)
+                             .where(t.c.deck_key == deck_key)
+                             .values(window_trade_ids=window_json, updated_at=now))
     return True
 
 

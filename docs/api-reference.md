@@ -1401,14 +1401,19 @@ One `before_request` hook (`backend/server.py`, `_paywall_gate_hook`) reads the 
 4. that user is not entitled: the session is unverified (pro requires `sess.verified` or the server-made demo session; an unverified session is never checked for pro, R28.9), **or** `pro` is false;
 5. it is not a deck route on the server-made demo session (try-before-sync, `_synthetic_demo_session`), which is exempt there, and not inside the deck preview below.
 
-**Deck preview (2026-10-25).** A user who never held pro (on a verified session), or any unverified non-demo session (R28.9, whatever the user_id's subscription), gets the first model_config `paywall_preview_pages` pages (default **1**) of their **first deck** free. Outside the preview the reason is `preview_used` for the former and `verify_required` for the latter. (Today every deck route also wears the account-auth verified gate, so an unverified session gets that route's 403 `verification_required` before any card is served.)
+**Unverified sessions (legal R28.9 as amended by R28.14, 2026-10-27).** An unverified, non-demo session is settled from verified-ness alone, **before any `paywall_previews` or entitlement read**:
+- on a gated rule whose route wears the account-auth verified gate for the request's method (`@_gate_unverified_read` on a read, `@_gate_unverified_write` on a write: today the five deck routes, `/api/trades/queue`, `/asset-ideas`, `/fair-packages`, `/standing-offer` and `/matches/<id>/disposition`), the hook lets the request through and **that route's own 403 `{"error": "verification_required"}`** answers;
+- on every other gated rule (the four propose/respond send routes, every `/api/overhauls*` and `/api/win-now/*` rule), **402 `verify_required`**;
+- either way there is **no deck preview and no `paywall_previews` write**, so the answer is byte-identical whatever the user_id's subscription or Fleeced history (CI: `test_paywall_gate_unverified.py`, every gated rule × four account states). The hook reads the route's gate off the live view function (the decorators mark it), so removing a decorator turns that rule's answer into the 402, never into a pass.
+
+**Deck preview (2026-10-25).** A user who never held pro, **on a verified session**, gets the first model_config `paywall_preview_pages` pages (default **1**) of their **first deck** free. Outside the preview the reason is `preview_used` **once the preview was spent** (the user has a `paywall_previews` row); a user never served a card gets `never_trialed` instead, so a 402 `preview_used` always means a preview was actually used (K0). Unverified sessions never get it (above).
 - a **deck** is one trade job (`job_id`); a **page** is E2's window of `trade_page_size` raw cards, so the preview window is the job's raw cards `[0, paywall_preview_pages × trade_page_size)`;
 - before anything has been served, `POST /api/trades/generate` and `GET /api/trades/status` are allowed. The response's cards are capped to the window: the paged `cards`/`cursor`/`total_ready`, and the legacy unpaged body too (it carries at most the window's cards);
-- the preview is **consumed when a `/generate` or `/status` response actually serves cards** (recorded in `paywall_previews`: the deck's `job_id` and the pages served). Job kickoff, session-init warm-up jobs and cron-built decks never consume it. Cards served from #368's stored first page (`trade.first_page_store`; `serve_source: "page"`) are capped to the window and consumed the same way, keyed on the stored page's `deck_job_id`. So are #369's next pages by deck id (`/status?deck=D&cursor=K`): the gate reads `deck` as the deck, cursors at or past the window → 402, and a P2 rebase onto another deck after the preview is spent → 402 (it's a different deck);
+- the preview is **consumed when a `/generate` or `/status` response actually serves cards** (recorded in `paywall_previews`: the deck's `job_id`, the pages served, and the window's trade ids as that serve saw them). Job kickoff, session-init warm-up jobs and cron-built decks never consume it. Cards served from #368's stored first page (`trade.first_page_store`; `serve_source: "page"`) are capped to the window and consumed the same way, keyed on the stored page's `deck_job_id`. So are #369's next pages by deck id (`/status?deck=D&cursor=K`): the gate reads `deck` as the deck, cursors at or past the window → 402, and a P2 rebase onto another deck after the preview is spent → 402 (it's a different deck);
 - after that: `/status` on that deck inside the window still serves (the client finishes polling page 1). `/status` with a `cursor` at or past the window, `/status` on any other job, and any new `/generate` → 402 `preview_used`;
-- `POST /api/trades/swipe` and `/pass-reason` are allowed only for a `trade_id` inside the served deck's window;
-- `GET /api/trades` (the pending-cards view) is not the preview deck: 402 `preview_used`;
-- `paywall_preview_pages` = 0 → 402 `preview_used` at the first deck request. Users whose trial expired or who lapsed get no preview.
+- `POST /api/trades/swipe` and `/pass-reason` are allowed only for a `trade_id` inside the served deck's window. While this process holds the deck (its job, or its #368 stored page) that is the live window; once it doesn't (the 4 h job retention, a deploy, with `trade.first_page_store` off), it is the window recorded at the deck's last serve (`paywall_previews.window_trade_ids`, P3-1). Known limitation (P3-2): a running deck that re-sorts can show more than the window's card count across polls, and a swipe on a card re-sorted out of the live window → 402;
+- `GET /api/trades` (the pending-cards view) is not the preview deck: 402 (`never_trialed` before any card was served, `preview_used` after);
+- `paywall_preview_pages` = 0 → 402 at the first deck request (`never_trialed`, or `preview_used` for a user whose preview was spent before the knob went to 0). Users whose trial expired or who lapsed get no preview.
 
 The body is exactly:
 
@@ -1418,11 +1423,11 @@ The body is exactly:
 
 | `gate` | When |
 |---|---|
-| `preview_used` | Never held pro; a deck request outside the deck preview (page 2+, a later deck, `paywall_preview_pages` = 0) |
-| `never_trialed` | Never held pro; any other gated route |
+| `preview_used` | Never held pro, and the deck preview **was spent** (a `paywall_previews` row exists); a deck request outside it (page 2+, a later deck, `GET /api/trades`, `paywall_preview_pages` = 0) |
+| `never_trialed` | Never held pro; any other gated route, or a deck request outside the preview before any card was served (no `paywall_previews` row, e.g. knob 0 or `GET /api/trades` on day 1) |
 | `trial_expired` | Held pro only through an App Store intro trial (every ledger event for the row has RevenueCat `period_type` `TRIAL`) |
 | `lapsed` | Held pro any other way: a paid period, a comp or promo grant, founder, season pass, or a store row whose ledger can't prove a trial |
-| `verify_required` | **`verify_required` is returned for every unverified session at a gated action, regardless of subscription (legal R28.9); it never reveals subscriber status.** An unverified, non-demo session is decided from verified-ness and its `paywall_previews` row only (no entitlement read): it gets the deck preview exactly as a brand-new account does, then `verify_required` everywhere ("sign in to use your subscription") |
+| `verify_required` | **Returned for every unverified, non-demo session at a gated action whose route doesn't answer it itself, regardless of subscription (legal R28.9 / R28.14); it never reveals subscriber status.** Decided from verified-ness alone: no entitlement or `paywall_previews` read, no deck preview ("sign in to use your subscription"). Where the route wears the verified gate, the answer is that route's 403 `verification_required` instead (see Unverified sessions above) |
 
 | Class | Rules |
 |---|---|

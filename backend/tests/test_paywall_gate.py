@@ -16,7 +16,9 @@ Covers:
       ledger, a sandbox trial found through granted_by, a tip never reading
       as paid
   (3) verified sessions: paying + verified passes; the same user_id
-      unverified → verify_required; the demo synthetic session passes;
+      unverified → verify_required, or the route's own 403 where it wears the
+      verified gate (R28.14; every gated rule in
+      test_paywall_gate_unverified.py); the demo synthetic session passes;
       /api/me/entitlements pro tracks verification
   (4) never a 402: unauthenticated, a bad token, the extension endpoints,
       a web request with the web knob 0 (or missing) while mobile enforces
@@ -52,7 +54,8 @@ DEMO_TOKEN = "gate-demo-token"
 ENFORCE_KNOB = "paywall_enforce_enabled"
 WEB_KNOB = "paywall_web_enforce_enabled"
 # The deck preview has its own file (test_paywall_preview.py). Here it is off,
-# so a never-entitled user's deck request is the knob-0 case: 402 preview_used.
+# so a never-entitled user's deck request is the knob-0 case. Nothing was ever
+# served (no paywall_previews row), so it answers 402 never_trialed (K0).
 NO_PREVIEW = {"paywall_preview_pages": 0.0}
 BOTH_FLAGS = ("monetize.entitlements", "monetize.paywall")
 
@@ -194,7 +197,7 @@ def _expected(route_cls, enforce, client_name, user_state):
         return 200, None
     if client_name == "web_knob0" or user_state in ACTIVE:
         return 200, None
-    gate = {"never": "preview_used" if route_cls == "deck" else "never_trialed",
+    gate = {"never": "never_trialed",
             "trial_expired": "trial_expired", "lapsed": "lapsed"}[user_state]
     return 402, {"error": "pro_required", "gate": gate}
 
@@ -231,10 +234,8 @@ def test_other_gated_routes_block_never_entitled(eng, client, stubbed, method, p
     _set_config(eng, **{ENFORCE_KNOB: 1.0, **NO_PREVIEW})
     with patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS)):
         r = client.open(path, method=method, headers={"X-Session-Token": TOKEN, **MOBILE})
-    deck = ("GET", "/api/trades/status") == (method, path)
     assert r.status_code == 402
-    assert r.get_json() == {"error": "pro_required",
-                            "gate": "preview_used" if deck else "never_trialed"}
+    assert r.get_json() == {"error": "pro_required", "gate": "never_trialed"}
 
 
 def test_knob_kill_is_live(eng, client, stubbed):
@@ -248,6 +249,15 @@ def test_knob_kill_is_live(eng, client, stubbed):
 
 
 # ── (2) reason derivation ──────────────────────────────────────────────────
+
+def test_never_entitled_reason_is_preview_used_only_once_spent(eng):
+    """K0: a never-entitled user reads never_trialed on a deck route until a
+    preview row exists, then preview_used; never_trialed off the deck."""
+    assert pg.gate_reason(USER, deck=True) == "never_trialed"
+    pg.record_preview(USER, "job-k0", 1, ["t-1"])
+    assert pg.gate_reason(USER, deck=True) == "preview_used"
+    assert pg.gate_reason(USER, deck=False) == "never_trialed"
+
 
 def test_expired_comp_reads_lapsed(eng):
     entl.grant(USER, "pro", source="manual_grant", expires_at=_iso(PAST))
@@ -301,7 +311,7 @@ def test_decide_pure_matches_hook(eng):
     _set_config(eng, **{ENFORCE_KNOB: 1.0, **NO_PREVIEW})
     with patch.object(entl, "is_enabled", _flags(*BOTH_FLAGS)):
         assert pg.decide("/api/trades/generate", "POST", USER, True, True) == (
-            402, {"error": "pro_required", "gate": "preview_used"})
+            402, {"error": "pro_required", "gate": "never_trialed"})
         assert pg.decide("/api/trade/evaluate", "POST", USER, True, True) is None
         assert pg.decide("/api/trades/generate", "POST", None, True, True) is None
         assert pg.decide("/api/trades/generate", "HEAD", USER, True, True) is None  # HEAD only maps for GET rules
@@ -326,29 +336,44 @@ def test_paying_user_verified_session_passes(eng, client, stubbed):
 def test_same_user_unverified_gets_verify_required(eng, client, stubbed, headers):
     _make_user("active_paid")
     with _enforcing(eng):
-        for path in ("/api/trades/generate", "/api/trades/propose"):
-            r = client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **headers})
-            assert r.status_code == 402
-            assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
-
-
-@pytest.mark.parametrize("path", ["/api/trades/generate", "/api/trades/propose"])
-def test_unverified_never_pro_also_gets_verify_required(eng, client, stubbed, path):
-    """Legal R28.9: every unverified session gets verify_required at a gated
-    action (here with no preview), subscriber or not."""
-    with _enforcing(eng):
-        r = client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
+        r = client.post("/api/trades/propose",
+                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **headers})
+    assert r.status_code == 402
     assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
 
 
-def test_unverified_path_never_reads_entitlements(eng, client, stubbed):
+@pytest.mark.parametrize("headers", [MOBILE, WEB])
+def test_same_user_unverified_on_a_verified_gate_route_gets_its_403(eng, client, headers):
+    """R28.14: /generate wears @_gate_unverified_write, so the hook lets an
+    unverified session through and the route's own 403 answers (real view)."""
+    _make_user("active_paid")
+    with _enforcing(eng):
+        r = client.post("/api/trades/generate",
+                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **headers}, json={})
+    assert r.status_code == 403
+    assert r.get_json() == {"error": "verification_required"}
+
+
+@pytest.mark.parametrize("method,path", [("POST", "/api/trades/propose"),
+                                         ("GET", "/api/overhauls")])
+def test_unverified_never_pro_also_gets_verify_required(eng, client, stubbed, method, path):
+    """Legal R28.9: every unverified session gets verify_required at a gated
+    action whose route doesn't answer it itself, subscriber or not."""
+    with _enforcing(eng):
+        r = client.open(path, method=method,
+                        headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
+    assert r.get_json() == {"error": "pro_required", "gate": "verify_required"}
+
+
+def test_unverified_path_never_reads_entitlements(eng, client):
     _make_user("active_paid")
     ent, hist = _Spy(entl.get_entitlements), _Spy(entl.list_for_user)
+    row = _Spy(pg.preview_row)
     with _enforcing(eng), patch.object(entl, "get_entitlements", ent), \
-            patch.object(entl, "list_for_user", hist):
+            patch.object(entl, "list_for_user", hist), patch.object(pg, "preview_row", row):
         for path in ("/api/trades/generate", "/api/trades/propose"):
-            client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE})
-    assert (ent.calls, hist.calls) == (0, 0)
+            client.post(path, headers={"X-Session-Token": UNVERIFIED_TOKEN, **MOBILE}, json={})
+    assert (ent.calls, hist.calls, row.calls) == (0, 0, 0)
 
 
 def test_demo_synthetic_session_passes(eng, client, stubbed):

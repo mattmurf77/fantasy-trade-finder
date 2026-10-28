@@ -1796,14 +1796,14 @@ Single source of truth for paid access. Writers: billing webhook projector, refe
 | `product_id` | str | Store SKU (`ftf_pro_annual`, `ftf_season_pass_2026`, `ftf_founder`, …) |
 | `status` | str, not null | `active` (default) \| `expired` \| `revoked` \| `refunded` — revoke/refund flip status, never delete |
 | `starts_at` / `expires_at` | str | ISO UTC; `expires_at` NULL = perpetual (founder, manual perpetual) |
-| `granted_by` | str | `'operator'` on manual grants; webhook event id otherwise |
+| `granted_by` | str | `'operator'` on manual grants; webhook event id otherwise. A `sandbox:` prefix (`sandbox:<event_id>`) marks a sandbox-lane row: production billing events never touch such rows, and sandbox events touch only them |
 | `note` | str | Operator note on manual grants |
 | `metadata` | JSON text | Store payloads (original_transaction_id, stripe sub id, referral id) |
 | `created_at` / `updated_at` | str | ISO UTC |
 
 ## `paywall_previews`
 
-The deck preview's consumption record (`backend/paywall_gate.py`, 2026-10-25). One row per never-entitled user once a `/api/trades/generate` or `/status` response has served cards from their first deck while the paywall gate enforces. Warm-up and cron-built jobs never write it. Created by `metadata.create_all` (both dialects). **Private:** deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`, every alias).
+The deck preview's consumption record (`backend/paywall_gate.py`, 2026-10-25). One row per never-entitled user, on a verified session, once a `/api/trades/generate` or `/status` response has served cards from their first deck while the paywall gate enforces. Warm-up and cron-built jobs never write it, and unverified sessions never do (R28.14). Created by `metadata.create_all` (both dialects); `window_trade_ids` also has a `_migrate_db` `migration_cols` row (additive, 2026-10-27). **Private:** deleted and exported with the account (`accounts._ADDITIONAL_PRIVATE_TABLES`, every alias; the export carries every column, `window_trade_ids` included).
 
 | Column | Type | Notes |
 |---|---|---|
@@ -1811,6 +1811,7 @@ The deck preview's consumption record (`backend/paywall_gate.py`, 2026-10-25). O
 | `deck_key` | str, not null | The trade job's `job_id` whose preview page(s) were served: "the first deck" |
 | `pages_served` | int, not null | Highest preview page served (1..`paywall_preview_pages`); only grows |
 | `first_served_at` / `updated_at` | str, not null | ISO UTC |
+| `window_trade_ids` | text (JSON list), nullable | P3-1 (2026-10-27): the trade ids of the deck's preview window (its first `paywall_preview_pages` × `trade_page_size` raw cards) at the last serve, sorted; rewritten when a later serve of the same deck sees a different window. The swipe / pass-reason check reads it only once the process no longer holds the deck (job evicted after 4 h, or a deploy). NULL on rows written before the column (read as an empty window); trade ids, not credentials |
 
 ## `subscription_events`
 
