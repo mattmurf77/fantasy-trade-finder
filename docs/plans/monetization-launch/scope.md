@@ -342,7 +342,7 @@ the T-3 items are superseded.
 | `docs/config-reference.md` | **updated** | `paywall_enforce_enabled`, `paywall_web_enforce_enabled`, `paywall_preview_pages`; the `monetize.*` semantics (`:438-448`), with `monetize.pro` marked retired; the `FTF_FLAGS` note |
 | `docs/integrations/revenuecat.md` | **new** | RevenueCat is an external service with no file today: the intro-eligibility check, the webhook, the sandbox cap, and the safe-to-log / must-redact split |
 | `docs/runbook.md` | **updated** | The kill: `paywall_enforce_enabled` → 0, on the operator's word, and how to verify it |
-| Terms alignment (`web/terms.html`, #373 @ `d866706b`; P50) | **aligned** (checked by the lead) | §14.8 matches this scope: $4.99/$24.99 for subscribing by 2026-12-31; $6.99/$34.99 for new subscribers from 2027-01-01; "won't go up for as long as your subscription stays active on that plan" = keep-current-price; legal's lapse wording; §14.3's "1-month" trial. It also matches `docs/plans/org-bringup/leads/app-manager-monetization-setup.md` steps 2d, 2e and 3a–3c. **Dependency:** "Starting a free trial counts as subscribing" holds only if both increases start exactly 2027-01-01. §14.8 names no plans. **ASC step 2g display names:** `Fleeced Pro Monthly` (`ftf_pro_monthly`), `Fleeced Pro Annual` (`ftf_pro_annual`), plain space, no dash (marketing §9.4 `mon.pay.plan.*`, D-h, legal R28.8 "match exactly"); proposed group `Fleeced Pro`; marketing-lead writes the descriptions via head-bizops |
+| Terms alignment (`web/terms.html`, #373 @ `d866706b`; P50) | **aligned** (checked by the lead) | §14.8 matches this scope: $4.99/$24.99 for subscribing by 2026-12-31; $6.99/$34.99 for new subscribers from 2027-01-01; "won't go up for as long as your subscription stays active on that plan" = keep-current-price; legal's lapse wording; §14.3's "1-month" trial. It also matches `docs/plans/org-bringup/leads/app-manager-monetization-setup.md` steps 2d, 2e and 3a–3c. **Dependency:** "Starting a free trial counts as subscribing" holds only if both increases start after Dec 31 has ended in every US zone: **scheduled 2027-01-02, starting 04:00 UTC = Jan 1, 11 pm ET** (operator 2026-10-28, "Yes, Jan 2"; Apple's start-times table puts a 2027-01-01 change at Dec 31, 11 pm ET). Legal-lead is rewording §14.8's "From January 1, 2027" to match. §14.8 names no plans. **ASC step 2g display names:** `Fleeced Pro Monthly` (`ftf_pro_monthly`), `Fleeced Pro Annual` (`ftf_pro_annual`), plain space, no dash (marketing §9.4 `mon.pay.plan.*`, D-h, legal R28.8 "match exactly"); proposed group `Fleeced Pro`; marketing-lead writes the descriptions via head-bizops |
 
 ## 5. Ship gate declaration
 
@@ -374,7 +374,7 @@ the T-3 items are superseded.
     grants before the update-1 build.
   - **Risk:** none for the 11-06 binary.
 - **W-MON-2: price preservation at the cut-off can't be exercised before launch.**
-  - **What's waived:** sandbox can't run a scheduled App Store Connect price change, and the 2027-01-01 change happens
+  - **What's waived:** sandbox can't run a scheduled App Store Connect price change, and the 2027-01-02 change happens
     after launch. So runtime proof that trialists and subscribers keep the founder price is waived.
   - **Mitigation:**
     - the operator verifies the scheduled change, with "keep current price", in App Store Connect at setup (noted in

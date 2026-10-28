@@ -35,7 +35,7 @@ Eng slot is approved (engagement-eng from 10-28, weekends, the 11-03 checkpoint;
   day 30 items". Trial terms (duration, what happens at the end, price) and the cut-off are stated **once, at the start,
   on the offer** (3.1.2). When access ends, a gated action opens the **standard paywall**; free surfaces stay free.
 - **Prices (decided): the Founding GMs price, $4.99/mo and $24.99/yr,** each with a 1-month free trial. From
-  **2027-01-01** (last club day 2026-12-31) new subscribers pay $6.99/$34.99; existing ones keep their price (Apple's
+  **2027-01-02 04:00 UTC** (Jan 1, 11 pm ET; last club day 2026-12-31, kept whole in every US zone) new subscribers pay $6.99/$34.99; existing ones keep their price (Apple's
   price preservation). **No Founder SKU, no lifetime, no Season Pass; tips stay dark.**
 - **TestFlight users:** no app clock, no comp, the tester welcome. **Web:** the same rule behind its own knob, ungated
   until 11-18, then the first web deck and "continue on iPhone"; no web trial. The extension's routes are all free.
@@ -52,7 +52,7 @@ Eng slot is approved (engagement-eng from 10-28, weekends, the 11-03 checkpoint;
 |---|---|---|---|---|
 | 1 | Trial mechanism | **A-preview:** StoreKit 1-month trial, offered after the first opinion ("rest of PR #393") | B, an app-managed 30 days | B: a likely 3.1.2(a) rejection with 8 days to launch; A at sign-in: invitees can't activate |
 | 2 | What's gated | **C2:** gated = makes or sends a trade; everything else free. A gated action opens the standard paywall ("trade features only locked (C2)") | C1: everything but group A gated | C1 freezes boards and empties free surfaces, so lapsed users vanish from the network |
-| 3 | Prices | **$4.99 / $24.99 at launch** with 1-month trials; **$6.99 / $34.99** for new subscribers from 2027-01-01 | Launch at $6.99/$34.99, discount by code | A later cut passes through to everyone; a founder price set too low is locked for the cohort |
+| 3 | Prices | **$4.99 / $24.99 at launch** with 1-month trials; **$6.99 / $34.99** for new subscribers from 2027-01-02 04:00 UTC (scheduled 2027-01-02) | Launch at $6.99/$34.99, discount by code | A later cut passes through to everyone; a founder price set too low is locked for the cohort |
 | 4 | Founder mechanism | **Apple price preservation**, one SKU per plan | A separate Founder SKU; offer codes; $119 lifetime | A separate SKU either stops founders' renewals or leaks the price to everyone |
 | 5 | Name, cut-off, commitment | **"Founding GMs";** last day **2026-12-31**; **commit** to keeping the price while subscribed | Another name; a later cut-off | An uncommitted line reads as bait; a cut-off that slips is a false-urgency claim (5.6) |
 | 6 | Lifetime, Season Pass, tips | **Drop / defer / keep dark** | Ship tips as built | More IAPs to review on the first submission, and a perpetual grant with storage liability |
@@ -170,7 +170,9 @@ ranking and Calibration); and the August trial ruling (14 days monthly), now 1 m
   offer … as marketed". **The raise needs no notice** to existing subscribers, whose price doesn't change.
 - **2.3.14:** no discounted price in App Store creative. **Reference-price framing** (legal-lead): "Founder price
   $24.99/yr; new members pay $34.99 from Jan 1", never "was $34.99". **Once announced, the raise must happen** (5.6).
-  Schedule the 2027-01-01 increase in App Store Connect at setup so the cut-off executes itself.
+  Schedule the increase in App Store Connect at setup so the cut-off executes itself, **for 2027-01-02**: Apple starts a US
+  price change at 04:00 UTC on its date, so 2027-01-02 lands Jan 1 at 11 pm ET and 2027-01-01 would cut Dec 31 short
+  (operator 2026-10-28, "Yes, Jan 2"). The "from Jan 1" line is legal-lead's to align with the reworded §14.8.
 - **Dropped at launch:** the lifetime; the Season Pass (already deferred to 2027); tips (dark: three fewer IAPs on a
   first review, plus one binary line to hide the Settings tip row, `SettingsHubScreen.tsx:300-305`); #347's league cap
   (5g; moot when free users get no trades).
@@ -340,7 +342,7 @@ the Eng slots). Review buffer **confirmed** (0.5 d plus 1–2 calendar days). **
 is ≈ 7.65 eng-days, so the slack is **about 0.35 working days, ~2.35 calendar days**. With the 4th slot approved, R1
 still needs head-eng's rows 11–17 confirmed, design-lead's visuals by 10-28, the `mz.*` copy by ~11-02, and **the
 operator lane:** Paid Applications Agreement, banking, tax, SBP; the subscription group with both SKUs at $4.99/$24.99, a
-1-month intro on each, and the 2027-01-01 increase scheduled with "keep current price"; multiseat and Family Sharing
+1-month intro on each, and the increase scheduled for 2027-01-02 with "keep current price"; multiseat and Family Sharing
 off; tips not submitted; RevenueCat (`pro`, offering, webhook); `REVENUECAT_WEBHOOK_SECRET` on Render;
 `EXPO_PUBLIC_REVENUECAT_IOS_KEY` in EAS production by ~11-07; two App Review demo accounts (both gated); Gate 0. **Checkpoint 11-03:** if the
 client gate PR isn't CI-green, pull it from the binary and run R3; a half-built gate in the review binary is the worst outcome.
@@ -375,7 +377,7 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 - **Terms alignment (P50; the lead checked #373 @ `d866706b`):** §14.8 matches this memo ($4.99/$24.99 by 2026-12-31;
   $6.99/$34.99 for new subscribers from 2027-01-01; "won't go up … active on that plan" = keep-current-price; legal's lapse
   wording; §14.3's "1-month" trial) and `org/leads/app-manager-monetization-setup.md` steps 2d, 2e, 3a–3c. **Dependency:**
-  "starting a free trial counts as subscribing" holds only if both increases start exactly 2027-01-01. §14.8 names no
+  "starting a free trial counts as subscribing" holds only if both increases start after Dec 31 has ended in every US zone: **scheduled 2027-01-02, starting 04:00 UTC = Jan 1, 11 pm ET** (operator 2026-10-28, "Yes, Jan 2"; Apple's start-times table puts a 2027-01-01 change at Dec 31, 11 pm ET). Legal-lead is rewording §14.8's "From January 1, 2027" to match. §14.8 names no
   plans. **ASC step 2g display names:** `Fleeced Pro Monthly` (`ftf_pro_monthly`), `Fleeced Pro Annual`
   (`ftf_pro_annual`), plain space, no dash; group `Fleeced Pro` (proposed); marketing-lead writes the descriptions.
 
@@ -383,7 +385,7 @@ client gate PR isn't CI-green, pull it from the binary and run R3; a half-built 
 
 1. **Mechanism:** A-preview (Apple's 1-month trial at ux §1's trigger; one free deck page). **DECIDED.**
 2. **Gate scope:** C2, with the four calls (calculator value check, viewing Matches, Draft Room, Calibration free). **DECIDED.**
-3. **Prices:** $4.99/$24.99 with 1-month trials; $6.99/$34.99 for new subscribers from 2027-01-01. **DECIDED.**
+3. **Prices:** $4.99/$24.99 with 1-month trials; $6.99/$34.99 for new subscribers from 2027-01-02 04:00 UTC (scheduled 2027-01-02; operator 2026-10-28). **DECIDED.**
 4. **Founder mechanism:** price preservation; no Founder SKU or lifetime; Season Pass deferred; tips dark. **DECIDED.**
 5. **Name:** "Founding GMs". 6. **Cut-off:** last day 2026-12-31. 7. **Keep the founder price while subscribed on your
    plan,** with legal's lapse wording. **All three DECIDED.**
