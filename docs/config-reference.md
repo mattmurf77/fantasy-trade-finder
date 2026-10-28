@@ -1788,6 +1788,15 @@ outcomes, frozen valuations, assets and core learning features are retained.
 Setting `0` pauses future expiry; it does not recover already-expired data.
 There is no generation/card-limit or analytics sampling change.
 
+### Deck-evidence retention — `backend/database.py` `purge_deck_evidence`, DB-seeded (ships dark)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `deck_evidence_retention_days` | 0.0 | **Off at 0.** Each five-minute cleanup tick deletes up to 200 decks whose first delivery (`served_at`) is more than this many days ago, each in its own transaction. It deletes their `deck_evidence_packs` row, `deck_impressions` rows, `deck_card_withdrawals` and `deck_candidate_sets` row, and never their `deck_outcomes`. Under 56 (receipts' window) it is refused with a warning and nothing is deleted. The bound itself is legal's and head-product's (analytics-lead recommends 90; models-lead's §3 asks for any cap ≥ 365). **Rollback: set 0.** Deploy-free |
+| `deck_evidence_keep_until_epoch` | 1798761600.0 | The date floor, unix seconds UTC: nothing is deleted before this instant, whatever the bound, so launch-period decks are kept until 2026-12-31. The default is 2027-01-01T00:00:00Z. Deploy-free |
+
+Before the bound goes above 0, build `ix_deck_impressions_served` with `scripts/create_evidence_retention_index.py` (`CONCURRENTLY`, off the boot path). Until then pack-less decks are skipped, logged once.
+
 ### Shared recommendation significance (default off)
 
 Independent of arm selection and fairness. The final generated recommendation

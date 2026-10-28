@@ -1,3 +1,31 @@
+## 2026-10-28 — Deck-evidence retention prune, dark (head-eng's ruling on (b))
+
+Gates: head-eng's ruling (2026-10-28, "build (b) NOW, dark") on trades-eng's scrub/prune sizing. Full gates: the scope block is `docs/plans/trade-time-to-suggestion/scope-evidence-retention.md`. Two new `model_config` keys and one index; no route, flag, event or column change. Backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The prune:** `database.purge_deck_evidence`, run by the cleanup loop's `_prune_deck_evidence` once per five-minute tick.
+  - It takes up to 200 decks first delivered more than `deck_evidence_retention_days` ago. Each goes in its own transaction: its pack, rows, withdrawals and candidate set. Outcomes stay.
+  - **Off at 0** (the default). A bound under 56 days is refused and logged. Nothing is deleted before `deck_evidence_keep_until_epoch` (2027-01-01).
+- **The index:** `ix_deck_impressions_served` is declared (fresh DBs get it), but on prod it's built off the boot path by `scripts/create_evidence_retention_index.py` (`CONCURRENTLY`, a 5 s `lock_timeout`, rebuilds an INVALID leftover).
+  - Until it exists, the prune skips pack-less decks and logs once. Packed decks use `ix_deck_evidence_packs_served`.
+  - My first cut built it in `init_db`, against the data dictionary's rule (a plain index on prod's `deck_impressions` can outlast the 120 s boot timeout); caught before push.
+- **Backend:** `test_deck_evidence_retention.py`, 16 tests:
+  - off; the floor; the date floor;
+  - packed and pack-less decks gone from every evidence table, while recent decks and outcomes stay;
+  - the bound is the first delivery;
+  - the batch bound; a failing deck left whole;
+  - the loop step's knobs, its defaults and that it never raises; the loop runs it;
+  - pack-less decks wait for the index (logged once);
+  - the index is declared and never built by `init_db` on an existing table;
+  - the script builds it, is idempotent, and `--check` writes nothing.
+- **Regression:** the retention file, `test_model_config_log`, `test_bakeoff_arm_a_golden`, `test_daily_tick_runner`, `test_deferred_evidence`, `test_packed_evidence`, `test_trade_page_store`, both account-deletion files and the digest: 469 of 470 passed. The one failure, `test_f4_the_wait_is_bounded`, has a wall-clock bound (< 1.0 s) and tripped while a parallel typecheck loaded the CPU. It passes alone; the cleanup loop (the prune's only caller) is disabled in tests.
+- **Sabotage, each red then restored (11):**
+  - no floor; no date floor;
+  - candidate sets kept; withdrawals kept; outcomes deleted;
+  - no batch bound; the loop skipping the step;
+  - no index guard; a boot-time build; a no-op script;
+  - plus the first cut's boot-index check.
+  - The boot-build sabotage was green against a source check (the migration list is in `_migrate_db`); that's now a behavioral `init_db` test.
+
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
 Gates: head-eng's two additions to #494 (`fix/paywall-fallback-prices`), values confirmed by monetization-pm. Same route, still dark (`monetize.paywall`). No route, schema, event, flag or knob change. Server and docs only; mobile untouched. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest, a sabotage pass and a code walk of TipJarScreen. Full suite not re-run (CI runs it).

@@ -1128,6 +1128,14 @@ Index(
     "ix_deck_impressions_job",
     deck_impressions_table.c.deck_job_id,
 )
+# The evidence retention prune finds pack-less decks past the bound by their
+# first delivery (purge_deck_evidence). On prod it is built off the boot path
+# (scripts/create_evidence_retention_index.py, CONCURRENTLY), never in init_db:
+# a plain CREATE INDEX on prod's deck_impressions blocks writes for a full scan.
+Index(
+    "ix_deck_impressions_served",
+    deck_impressions_table.c.served_at,
+)
 # C8 retention (ADR-025) has no index yet: the archive partial index arrives
 # with stage-2 packing, which restores the purge (models-lead R2.6 S2). Build it
 # then with CREATE INDEX CONCURRENTLY off the boot path (an operator one-off or
@@ -3171,6 +3179,9 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
     ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
+    # ── Deck-evidence retention (head-eng 2026-10-28; dark until a bound is set) ──
+    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention: the cleanup loop deletes, a bounded batch per tick, the evidence of decks first delivered more than this many days ago (the pack, the full rows, the withdrawals, the candidate set; never outcomes). 0 = off (the default, until legal and head-product set the bound). A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
+    ("deck_evidence_keep_until_epoch", 1798761600.0, "Deck-evidence retention's date floor (unix seconds, UTC): nothing is deleted before this instant, whatever deck_evidence_retention_days says, so launch-period decks are kept until 2026-12-31 (analytics-lead). Default 1798761600 = 2027-01-01T00:00:00Z. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
     # ── First-page store (P1, flag trade.first_page_store; read only while it is on) ──
@@ -7114,6 +7125,92 @@ def load_deck_diagnostics(impression_id: str, user_id: str) -> dict | None:
                 snapshots[sid] = payload
                 pending.update(references(json.loads(payload)) - visited)
     return expand_features(features, snapshots)
+
+
+# Receipts read deck evidence up to 56 days back (analytics-lead, R28.20): the
+# shortest bound the evidence prune accepts.
+DECK_EVIDENCE_RETENTION_FLOOR_DAYS = 56
+_EVIDENCE_PRUNE_ROWS_PER_DECK = 150   # rows read per wanted deck (a deck has ~35-130)
+_served_index_ready = False            # ix_deck_impressions_served seen (then never re-read)
+_served_index_warned = False
+
+
+def _deck_impressions_served_index_ready() -> bool:
+    """Whether ix_deck_impressions_served exists: without it the pack-less
+    scan would read the whole table, so the prune skips it (logged once)."""
+    global _served_index_ready, _served_index_warned
+    if not _served_index_ready:
+        from sqlalchemy import inspect as _inspect
+        names = {ix.get("name") for ix in _inspect(engine).get_indexes("deck_impressions")}
+        _served_index_ready = "ix_deck_impressions_served" in names
+        if not _served_index_ready and not _served_index_warned:
+            _served_index_warned = True
+            log.warning("deck-evidence retention: pack-less decks wait for "
+                        "ix_deck_impressions_served (scripts/create_evidence_retention_index.py)")
+    return _served_index_ready
+
+
+def purge_deck_evidence(*, days: float, keep_until_epoch: float = 0.0, batch_decks: int = 200,
+                        now: datetime | None = None) -> dict[str, int]:
+    """Deck-evidence retention (head-eng 2026-10-28; dark until a bound is set):
+    one bounded batch of decks whose first delivery (`served_at`) is more than
+    `days` ago, each deleted in its own transaction across the evidence tables:
+    its pack, its deck_impressions rows (full and ghost), its withdrawals and
+    its candidate set. Outcomes are the user's own actions and stay; the page
+    store and the diagnostic snapshots age out on their own. Nothing runs at
+    `days` 0 (off), under DECK_EVIDENCE_RETENTION_FLOOR_DAYS (refused, logged),
+    or before `keep_until_epoch` (the date floor). Decks come from the packs'
+    `served_at` and, for a deck with no pack, its rows' through
+    ix_deck_impressions_served, only once that index exists (built off the
+    boot path; until then those decks wait, logged once).
+    Returns rows deleted per table ({} when nothing ran)."""
+    if not days or days <= 0:
+        return {}
+    if days < DECK_EVIDENCE_RETENTION_FLOOR_DAYS:
+        log.warning("deck-evidence retention: %s days is under the %d-day floor; nothing "
+                    "deleted", days, DECK_EVIDENCE_RETENTION_FLOOR_DAYS)
+        return {}
+    now = now or datetime.now(timezone.utc)
+    if now.timestamp() < keep_until_epoch:
+        return {}
+    cutoff = (now - timedelta(days=days)).isoformat()
+    limit = max(1, min(batch_decks, 1000))
+    p, i = deck_evidence_packs_table, deck_impressions_table
+    w, c = deck_card_withdrawals_table, deck_candidate_sets_table
+    with engine.connect() as conn:
+        decks = {r.run_id: (r.user_id, r.league_id) for r in conn.execute(
+            select(p.c.run_id, p.c.user_id, p.c.league_id).where(p.c.served_at < cutoff)
+            .order_by(p.c.served_at, p.c.run_id).limit(limit))}
+        if len(decks) < limit and _deck_impressions_served_index_ready():
+            # In served_at order through the index, a bounded number of rows (a
+            # deck has at most about 130), never a DISTINCT over the backlog.
+            for r in conn.execute(
+                    select(i.c.deck_job_id, i.c.user_id, i.c.league_id)
+                    .where(i.c.served_at < cutoff).order_by(i.c.served_at)
+                    .limit((limit - len(decks)) * _EVIDENCE_PRUNE_ROWS_PER_DECK)):
+                if len(decks) >= limit:
+                    break
+                decks.setdefault(r.deck_job_id, (r.user_id, r.league_id))
+    counts: dict[str, int] = {}
+    for deck_job_id, (user_id, league_id) in decks.items():
+        try:
+            with engine.begin() as conn:
+                for name, stmt in (
+                        ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
+                        ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
+                        ("deck_candidate_sets", delete(c).where(
+                            c.c.user_id == user_id, c.c.league_id == league_id,
+                            c.c.deck_job_id == deck_job_id)),
+                        ("deck_evidence_packs", delete(p).where(p.c.run_id == deck_job_id))):
+                    n = conn.execute(stmt).rowcount or 0
+                    if n:
+                        counts[name] = counts.get(name, 0) + n
+        except Exception:
+            log.warning("deck-evidence retention: deck %s not deleted; retried next tick",
+                        deck_job_id, exc_info=True)
+    if decks:
+        counts["decks"] = len(decks)
+    return counts
 
 
 def purge_deck_diagnostics(*, days: int = 14, batch_size: int = 500) -> int:
