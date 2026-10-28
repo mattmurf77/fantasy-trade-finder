@@ -1437,6 +1437,8 @@ The body is exactly:
 
 A failed entitlement read fails open (logged). Set `paywall_enforce_enabled` = 0 to stop every 402 without a deploy; `paywall_web_enforce_enabled` = 0 to stop web 402s only.
 
+Each 402 the hook sends also records a `paywall_gate_hit` server event (props `gate`, `route_family`, `enforced`; C8 §B), capped to one per user, gate and route family per UTC day; it is analytics only and never changes the answer.
+
 ## Test support (`FTF_TEST_MODE=1` only — never mounted in normal operation)
 
 UI-test harness blueprint (`backend/test_support.py`, spec: `docs/plans/mobile-testing/lld.md` §4.3c). These routes 404 unless the backend was started in test mode, which itself startup-aborts without `FTF_SLEEPER_FIXTURES_DIR` + `FTF_PLAYERS_CACHE_FILE`. Under test mode, `POST /api/trades/propose` unconditionally fails closed with 599.

@@ -874,6 +874,17 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # for an impression. NON-INTENT (impression class) — classified in
     # analytics_queries.NON_INTENT_EVENTS in this same commit.
     "standing_offer_card_shown",
+    # paywall_gate_hit (C8 §B, analytics-lead 2026-10-27; registered in the
+    # SAME commit as its emitter, server._emit_paywall_gate_hit): one per 402
+    # the paywall gate's before_request hook sends, capped in-process to the
+    # first per (user_id, gate, route_family) per UTC day; owner = the
+    # session's user, written non-touching. NON_INTENT (system outcome).
+    # Props, closed sets only: gate (the 402 body's: preview_used |
+    # never_trialed | trial_expired | lapsed | verify_required), route_family
+    # (paywall_gate.route_family: deck | send | matches | calculator | shop |
+    # overhaul | win_now | other), enforced (bool, always true: nothing is
+    # written while dark). No path params, ids or prices.
+    "paywall_gate_hit",
     # ── Receipts grading job, 2026-08-21 (docs/plans/receipts/, PRD DR-9) ──
     # Registered in the SAME commit as its emitter
     # (`receipts_service._emit_run_event`), the house rule this file's

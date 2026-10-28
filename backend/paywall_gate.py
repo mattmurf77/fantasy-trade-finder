@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
@@ -337,6 +338,34 @@ ROUTES = {
     ("GET", "/u/<path:username>"): FREE,
 }
 
+# The `route_family` prop of paywall_gate_hit (C8 §B), by the matched rule,
+# never the raw path. A closed set: `other` is a gated rule not mapped here
+# (test_paywall_gate_hit.py keeps every gated rule in ROUTES off it).
+ROUTE_FAMILIES = frozenset({"deck", "send", "matches", "calculator", "shop",
+                            "overhaul", "win_now", "other"})
+_FAMILY_BY_RULE = {
+    **{rule: "deck" for _method, rule in DECK_ROUTES},
+    "/api/trades/propose": "send",
+    "/api/trades/propose-espn": "send",
+    "/api/trades/propose-mfl": "send",
+    "/api/trades/queue": "send",
+    "/api/trades/respond-mfl": "send",
+    "/api/trades/standing-offer": "send",
+    "/api/trades/matches/<int:match_id>/disposition": "matches",
+    "/api/trades/fair-packages": "calculator",
+    "/api/trades/asset-ideas": "shop",
+}
+
+
+def route_family(rule: str) -> str:
+    if rule in _FAMILY_BY_RULE:
+        return _FAMILY_BY_RULE[rule]
+    if rule.startswith("/api/overhauls"):
+        return "overhaul"
+    if rule.startswith("/api/win-now/"):
+        return "win_now"
+    return "other"
+
 
 def classify(method: str, rule: str) -> str:
     """The table's class for one request. HEAD is GET (Flask serves it from
@@ -627,3 +656,56 @@ def _period_types(rows: list[dict]) -> set[str]:
         if period:
             out.add(str(period).upper())
     return out
+
+
+# ── paywall_gate_hit (C8 §B) ───────────────────────────────────────────────
+
+GATE_HIT_EVENT = "paywall_gate_hit"
+GATE_HIT_MAX_KEYS = 10_000
+
+_gate_hits_lock = threading.Lock()   # gunicorn gthread: the hook runs on many threads
+_gate_hits_day: str | None = None
+_gate_hits: dict[tuple, None] = {}   # (user_id, gate, route_family), oldest first
+
+
+def _utc_day() -> str:
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _first_hit_today(key: tuple) -> bool:
+    """True the first time `key` is seen this UTC day in this process. Bounded:
+    the keys are cleared when the UTC date changes, and past GATE_HIT_MAX_KEYS
+    the oldest is evicted (an evicted key can write a second row that day, an
+    over-count rather than unbounded memory). Per process, so a restart can
+    also write a second row for a key that day."""
+    global _gate_hits_day
+    with _gate_hits_lock:
+        day = _utc_day()
+        if day != _gate_hits_day:
+            _gate_hits.clear()
+            _gate_hits_day = day
+        if key in _gate_hits:
+            return False
+        if len(_gate_hits) >= GATE_HIT_MAX_KEYS:
+            del _gate_hits[next(iter(_gate_hits))]
+        _gate_hits[key] = None
+        return True
+
+
+def record_gate_hit(user_id: str, gate: str, rule: str, *, is_mobile: bool,
+                    device_type: str | None = None, os_version: str | None = None,
+                    app_version: str | None = None) -> None:
+    """The paywall_gate_hit row for a 402 the hook sends, at most one per
+    (user_id, gate, route_family) per UTC day. Non-touching: the user's
+    last_active_at and events_count stay put. Props are closed sets only.
+    `enforced` is always true: while dark the hook returns before any verdict
+    and writes nothing (P3-4), so there are no observe-mode rows."""
+    family = route_family(rule)
+    if not _first_hit_today((user_id, gate, family)):
+        return
+    db.record_event(
+        user_id, GATE_HIT_EVENT,
+        device_type=device_type, os_version=os_version, app_version=app_version,
+        source="mobile" if is_mobile else "web",
+        props={"gate": gate, "route_family": family, "enforced": True},
+        touch_user=False)
