@@ -1,3 +1,14 @@
+## 2026-10-28 — #530 QA P3s: the failed-read path's signature, "missing" read and running None stamp pinned; docstring
+
+Gates: release-lead's #530 QA (GO-with-notes), three P3 test gaps and a docstring nit. Follows #530. Tests and one docstring; no behaviour, route, schema, flag or knob change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **(b) the "missing" read:** the failed-read tests are parametrized over a failed read (no snapshot) and a real "missing" one (the league's member rows deleted; the test asserts that status). Before, all six used `current=None`.
+- **(a) the request signature:** a job for another request signature, complete or running, is never followed on either read.
+- **(c) a running None-stamp job:** never followed on either read. The refusal is asserted by its kick, because a running job's kick may join that same job, so its `deck_id` alone proves nothing.
+- **Docstring:** `_trade_rebase_job_current` no longer says P1 rejects a None stamp "on any read". The head is stricter than P1: `_trade_fingerprints_match` keeps a running None-stamp job on a failed read, and at mode 0. Here it kicks.
+- **Sabotages:** QA's Q1 (None guard on complete jobs only), Q5 (signature dropped on the failed path), Q6 (missing keeps the old shortcut) and Q7 (missing compared as an ok read) are now red in the suite (2, 4, 6 and 4 tests). The original four (TE1–TE4) are still red.
+- **Evidence:** `test_trade_pages_p2.py` (128), `test_trade_page_store.py`, `test_trade_freshness_roster.py` and the digest: 314 passed.
+
 ## 2026-10-28 — #519 QA P3s: the in-flight kickoff attribution, the burst test's race, docs
 
 Gates: release-lead's #519 QA (GO-with-notes at `8af4189a`), P3-1 to P3-3. Follows #519. Tests and docs, and one docstring; no behaviour, route, schema, flag or knob change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is pytest.
