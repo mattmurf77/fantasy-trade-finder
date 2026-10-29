@@ -7095,14 +7095,24 @@ def _trade_rebase_job_current(sess: Mapping, job: dict, fairness_threshold, inpu
     running one, against the same snapshot (`current`, P1's serve read) and
     the session's read. With no snapshot (a failed read, or trade_i1_mode 0),
     or one with no stored rows (status "missing": its fp says nothing about the
-    job's rosters), nothing proves it stale (A2): it's followed, as before, and
-    the page view's own checks (revocation, policy, S0's serve rules, which
-    gate-miss a missing read) still decide what it sends."""
+    job's rosters), the read can't prove the job stale (A2), so only the
+    fingerprint compare is skipped: the job's own stamp stands in for the
+    read, and every other check P1's backing makes still runs (the policy, the
+    TTL, the request signature, the session's read). A None stamp (a failed
+    kickoff read, or a worker whose reads disagreed) is never followed then
+    (#520 QA P3-1): stricter than P1, whose `_trade_fingerprints_match` keeps
+    a running None-stamp job on a failed read, and at trade_i1_mode 0. Here it
+    kicks a rebuild instead (#530 QA). The page view's checks (revocation,
+    policy, S0's serve rules, which gate-miss a missing read) still decide
+    what it sends."""
     if any(token.revoked for token in inputs["input_epochs"]):
         return False
     if current is None or current[0].status == "missing":
-        return True
-    fingerprints = (current[0].fp, current[1])
+        if "roster_fp" in job and job["roster_fp"] is None:
+            return False
+        fingerprints = (job.get("roster_fp"), job.get("values_snapshot_id"))
+    else:
+        fingerprints = (current[0].fp, current[1])
     session_read = sess.get("roster_fetch_started_at")
     args = (job, fairness_threshold, inputs["outlook_value"], None,
             inputs["presentation_capture"], inputs["request_signature"], fingerprints)
