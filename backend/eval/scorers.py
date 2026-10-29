@@ -77,13 +77,14 @@ def registered_names() -> list[str]:
 
 @register
 class LoggedOrderScorer:
-    """The logged policy itself: reproduces the exact served order
-    (score = -card_index). This is the --self-check scorer — replaying it
-    must reproduce observed rates within CI."""
+    """The logged policy itself: reproduces the exact displayed order
+    (score = -position, the loader's displayed position: withdrawals and
+    serve-time display moves included, models-lead F2). This is the
+    --self-check scorer — replaying it must reproduce observed rates within CI."""
     name = "logged"
 
     def score(self, card: dict) -> float:
-        return -float(card.get("card_index", 0))
+        return -float(card.get("position", 0))
 
 
 @register
