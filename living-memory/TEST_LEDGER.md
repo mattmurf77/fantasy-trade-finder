@@ -17,6 +17,14 @@ Full gates, backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is 
 - **Docs:** `docs/api-reference.md`: the Sleeper, MFL and ESPN propose 422 rows (asset-aware count, final copy) and the overhaul `prepare-send` and `send` rows.
 - **Not run:** the full suite (CI runs it); `tsc --noEmit` (no mobile change).
 
+## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
+
+Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`fix/paywall-rise-jan2`), requested by monetization-pm (head-product authorized; the operator approved scheduling both App Store price changes for 2027-01-02 on 2026-10-28). release-lead delta-QAs it. Still dark (`monetize.paywall`). D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `_PAYWALL_PRICE_RISE_AT` = `datetime(2027, 1, 2, 4, 0, tzinfo=utc)` (was 2027-01-01 08:00Z, LA midnight). Per monetization-pm, citing Apple's start-times table, a change scheduled for 2027-01-01 starts in the US at 2027-01-01 04:00Z (11 pm ET on Dec 31), which breaks Terms §14.8; a 2027-01-02 schedule starts at 2027-01-02 04:00Z (11 pm ET / 8 pm PT on Jan 1). Apple's table renders its times client-side, so the 04:00Z figure is not independently checked here; monetization-pm's setup §3d records the time App Store Connect shows, and the constant moves if it differs. The comment block, api-reference row and cross-client-invariants SKU rows + fallback bullet say the same.
+- **Tests (`test_paywall_config.py`, 43):** both sides of the new instant (`2027-01-02T03:59:59Z` old, `04:00:00Z` new); the Jan-1 schedule's US start (`2027-01-01T04:00Z`) and the previous LA-midnight instant (`2027-01-01T08:00Z`) now serve the old prices; the constant equals 23:00 Jan 1 New York and 20:00 Jan 1 Los Angeles via `zoneinfo`, and the last second of Dec 31 in Honolulu is before it; time-zone instants (NY 23:00 Dec 31 old, LA midnight Jan 1 old, NY 22:59:59 Jan 1 old, NY 23:00 Jan 1 new, LA 20:00 Jan 1 new, Paris 00:30 Jan 1 old). 43 passed.
+- **Sabotage, each red then restored:** the old 2027-01-01 08:00Z instant → 6 red; a Jan-1 schedule's 2027-01-01 04:00Z → 9 red.
+
 ## 2026-10-28 — A live stamp on a deck with no evidence is logged (#517 QA P3-2, models-eng)
 
 Gates: #517 QA P3-2 and models-eng's ask for a server-side count of decks eval can't see. A diagnostic log line only; no route, schema, flag, event or behaviour change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -164,6 +172,23 @@ Gates: release-lead's #520 QA, P3-1 to P3-3, on main after #520 merged (flag-dar
   - a failed read kicking (2 red);
   - no None-stamp guard;
   - the epoch check after the shortcut (4 red; one of QA's two green probes).
+## 2026-10-28 — One retry inside the job's picks and draft-context reads (#487 QA P3-3, models-eng); deck pipeline v7
+
+Gates: release-lead's #487 QA P3-3 (owner-exclusive forfeits on a transient first picks-read failure: 0 owner cards, where main re-read and served 348), and models-eng's ruling and v7 shape. Stacked on #515 (v6). No route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 6 → 7 (`facf9a9f34b7529a`): only `_run_trade_job`'s two memos changed. models-eng reviews. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The change:** inside `_job_draft_picks` and `_job_draft_context`, a raising read is retried once, immediately, with no lock held.
+  - Either attempt's success is memoized. The read is marked failed only when both raise.
+  - `_note_job_picks_read` runs after the retry, so the stamp check and the owner path see one, and the same, read.
+  - A persistent failure behaves as before: the owner arm forfeits, and other readers degrade to empty. The success path is unchanged.
+- **Backend:** `test_trade_freshness_roster.py`, 4 new tests (2 reads × 2):
+  - a read that fails once is retried (2 calls in all, 1 note, the stamp kept) and the owner context builds;
+  - a read that fails twice forfeits, as before.
+  - The existing persistent-failure tests (`test_a_failed_read_still_forfeits_the_owner_arm`) still pass.
+- **Regression:** the digest, `test_trade_freshness_roster`, both filter-inputs files and `test_bakeoff_serving`: 128 passed.
+- **Sabotage, each red then restored (3):**
+  - no picks retry;
+  - no draft retry;
+  - a second retry (the fails-twice test catches it).
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
