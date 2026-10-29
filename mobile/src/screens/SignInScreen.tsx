@@ -571,7 +571,8 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
   }
 
   async function handleTryDemo() {
-    if (demoBusy || busy) return;
+    // Not while an Apple sign-in is in flight either (release-lead #507 QA P3).
+    if (demoBusy || busy || appleBusy) return;
     setDemoBusy(true);
     setError(null);
     setErrorKind(null);
@@ -808,7 +809,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 testID="signin.error-demo-escape"
                 accessibilityRole="button"
                 onPress={handleTryDemo}
-                disabled={busy || demoBusy}
+                disabled={busy || demoBusy || appleBusy}
                 hitSlop={8}
                 style={styles.errorEscape}
               >
@@ -880,7 +881,7 @@ export default function SignInScreen({ onSignedIn, onDemoStarted, onAccountSigne
                 testID="signin.demo-link"
                 accessibilityRole="button"
                 onPress={handleTryDemo}
-                disabled={busy || demoBusy}
+                disabled={busy || demoBusy || appleBusy}
                 style={styles.tryDemoBtn}
                 hitSlop={8}
               >

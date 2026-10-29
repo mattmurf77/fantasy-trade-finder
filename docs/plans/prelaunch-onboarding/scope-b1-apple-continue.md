@@ -2,9 +2,7 @@
 
 **Date:** 2026-10-27
 **Entry point:** direct ask (head-eng → onboarding-eng 2026-10-27, from Product's pre-launch review B1, score 12; onboarding-pm Top 1). Due in release-lead's queue by 11-03, for the 11-06 binary.
-- **Stacked on #443** (`feat/espn-signin-flag-client`, the same `SignInScreen.tsx`).
-  - If #443 merges first, a merge of main leaves only B1's diff.
-  - If #443 isn't merged by ~11-02, B1 merges together with it (head-eng).
+- **#443 is folded in** (release-lead's delta QA, 2026-10-29). #443 (`feat/espn-signin-flag-client`, the same `SignInScreen.tsx`) conflicted with main, so main is merged into this branch, which already carries #443's commits, and the PR now targets main. If #443 merges first, main's merge into this PR leaves only B1's diff. Otherwise this PR lands #443's changes with B1 (head-eng's "merge together").
 - **ADR-006 decision 1 is amended in this PR** with ux-lead's text (head-product's ruling, 2026-10-28; ux-lead and design-lead agree).
 
 **Builder:** onboarding-eng
@@ -37,12 +35,12 @@
   3. its height equals `styles.button.height` (at least 44), and its style carries only alignSelf / height / marginBottom (no margin, position or transform push);
   4. the old text and testID are gone: no element's rendered text says "Already have an account" (JSX text and string children, joined), and no `signin.apple-link` (comment-stripped);
   5. the flags-off SIGN_IN / WHITE button stays, and there are exactly 2 Apple buttons in the screen;
-  6. `handleAppleSignIn` returns while busy, and `handleSubmit` returns while an Apple sign-in is in flight;
+  6. `handleAppleSignIn` returns while busy; `handleSubmit` and `handleTryDemo` return while an Apple sign-in is in flight, and both demo buttons are disabled then too;
   7. nothing else can hide it: `appleShown` is exactly `appleAvailable || TEST_APPLE_SUB !== null`, and the availability effect's early return is exactly `!accountsEnabled || Platform.OS !== 'ios'`;
-  8. the body scrolls: exactly one `ScrollView`, the KeyboardAvoidingView's only child, holding the whole form; `contentContainerStyle` `styles.body` with flexGrow 1, justifyContent center and no `flex`; `keyboardShouldPersistTaps` "handled"; `onScroll` is `notifyGuideTargetsMoved`, with a throttle;
+  8. the body scrolls: exactly one `ScrollView`, the KeyboardAvoidingView's only child, holding the whole form. Its props are exactly `style` (`styles.flex` = `{flex: 1}`), `contentContainerStyle` (`styles.body`, whose keys are exactly flexGrow 1, justifyContent center, paddingHorizontal and alignItems), `keyboardShouldPersistTaps` "handled", `alwaysBounceVertical`, and `notifyGuideTargetsMoved` on `onScroll` (with `scrollEventThrottle`), `onLayout` and `onContentSizeChange`;
   9. the "or" and the legal line are chalk-dim, and `landingOrDivider` carries only `marginTop: space.md`.
 
-  **Sabotage 35/35 red,** restored byte-identical.
+  **Sabotage 44/44 red,** restored byte-identical.
 
   Round 1 (10):
   - SIGN_IN type;
@@ -73,6 +71,8 @@
   - pin 9 (3): the divider chalk-faint; a margin push on the landing divider; the legal line chalk-faint.
   - Cross-check: with the scroll notifier removed, `check-guide-spotlight-tracking` also goes red (9b).
 
+  Round 4, after release-lead's delta QA (9): the onLayout notifier dropped; the onContentSizeChange notifier dropped; `scrollEnabled={false}`; `horizontal`; a `maxHeight` on the body; a `maxHeight` on the ScrollView's style; `handleTryDemo` ignoring Apple; the demo link enabled during Apple; the error demo escape enabled during Apple. All red.
+
   A comment-only edit, which isn't a real mutation, correctly stays green (rounds 1 and 3).
 - [x] **Code-walk:** with `onboarding.landing` and `landing.platform_options` on, the form renders:
   1. the reauth / invited notes;
@@ -84,18 +84,19 @@
 
   All of it sits inside the ScrollView, which centers it when it fits. A tap with the keyboard up reaches its target, because the ScrollView passes taps to children that handle them ("handled"), and every one of those targets is a `Pressable` or Apple's native button.
 - [x] **Manual TestFlight checklist (operator, 11-06 build, iPhone signed in to an Apple ID):**
-  1. Fresh install: below "See trades for your team →" is a small "or", then a solid white "Continue with Apple" button, the same height. The username field and "See trades" sit above it, under the Sleeper · ESPN · MFL chips.
+  1. Fresh install: below "See trades for your team →" is a small "or", then a solid white "Continue with Apple" button, the same height. The username field and "See trades" sit above it, under the platform chips (Sleeper · MFL while `espn.signin` is off; Sleeper · ESPN · MFL once it's on).
   2. Tap it: Apple's sheet appears, and sign-in completes.
-  3. Select the ESPN chip, then tap Continue with Apple: after sign-in, the ESPN link sheet opens.
+  3. Select the MFL chip, then tap Continue with Apple: after sign-in, the MFL link sheet opens. (Use MFL: ESPN's chip is dark at launch behind `espn.signin`. Once that's on, repeat with ESPN.)
   4. With VoiceOver on, it reads "Continue with Apple, button".
   5. The text "Already have an account? Sign in with Apple" appears nowhere.
-  6. Tap Continue with Apple, then (while Apple's sheet is up or the sign-in is finishing) tap the username Continue: nothing happens, and only the Apple sign-in completes.
+  6. Type a username first, so the username Continue is enabled. Then tap Continue with Apple and, while Apple's sheet is up or the sign-in is finishing, tap the username Continue: nothing happens, and only the Apple sign-in completes.
   7. On the smallest supported iPhone (SE 3rd gen, or 13 mini), keyboard closed:
      - fresh install: everything from the headline to the legal line shows on one screen, including the whole Apple button, and nothing needs scrolling;
-     - returning user (the "Continue as @x" row) and session expired (the reauth note): the Apple button is fully visible or reachable by scrolling, and nothing is cut off.
-  8. Select ESPN: the order is the chip, then the ESPN explainer and "Link your ESPN league →", then "or", then Continue with Apple.
+     - returning user (the "Continue as @x" row) and session expired (the reauth note): the Apple button is fully visible or reachable by scrolling, and nothing is cut off;
+     - on a 320 pt-wide screen (SE 1st gen, or any iPhone with Display Zoom on), a returning user's Apple button sits about 21 pt below the fold: scroll, and it comes fully into view.
+  8. Select MFL: the order is the chip, then the MFL explainer and "Link your MFL league →", then "or", then Continue with Apple. (ESPN is the same once `espn.signin` is on.)
   9. With VoiceOver on, swipe through the landing: the chips, the username field, "See trades for your team", "or", then "Continue with Apple, button".
-  10. Type a username and, with the keyboard still up, tap "See trades for your team →" once: it submits on that tap. Repeat with Continue with Apple: Apple's sheet opens on the first tap.
+  10. Type a username and, with the keyboard still up, tap "See trades for your team →" once: it submits on that tap. Repeat with Continue with Apple: Apple's sheet opens on the first tap. On an SE, the keyboard can cover the Apple button: scroll it into view first, with the keyboard still up, then tap it once.
 - `testID`s: `signin.apple-continue-btn` added; `signin.apple-link` removed (only `SignInScreen.tsx` referenced it).
 
 ## 3b. App Review notes (the four sign-in doors)

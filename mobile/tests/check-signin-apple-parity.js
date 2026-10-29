@@ -29,7 +29,8 @@
 //   5. The flags-off layout keeps its own SIGN_IN / WHITE button under
 //      `!landingOn && appleShown`.
 //   6. handleAppleSignIn's first statement returns while any sign-in is busy,
-//      and handleSubmit's returns while an Apple sign-in is in flight.
+//      and handleSubmit's and handleTryDemo's return while an Apple sign-in is
+//      in flight (both demo buttons are disabled then too).
 //   7. Nothing else can hide it: `appleShown` is exactly `appleAvailable ||
 //      TEST_APPLE_SUB !== null`, and the availability effect's early return is
 //      exactly `!accountsEnabled || Platform.OS !== 'ios'`.
@@ -38,7 +39,10 @@
 //      the KeyboardAvoidingView's only child, holding the whole form, with
 //      contentContainerStyle styles.body (flexGrow 1, centered, no `flex`),
 //      keyboardShouldPersistTaps "handled" (one tap acts with the keyboard up),
-//      and the guide notifier on onScroll with a throttle.
+//      the guide notifier on onScroll (with a throttle), onLayout and
+//      onContentSizeChange, exactly those props (no scrollEnabled/horizontal),
+//      `style` styles.flex = { flex: 1 }, and styles.body's keys exactly
+//      flexGrow / justifyContent / paddingHorizontal / alignItems.
 //   9. The "or" and the legal line are chalk-dim, never chalk-faint (that is
 //      for placeholders and disabled text); the landing's "or" adds only
 //      marginTop space.md.
@@ -238,6 +242,13 @@ check('6. a tap while any sign-in is busy does nothing', () => {
   const sub = findAll(sf, (n) => ts.isFunctionDeclaration(n) && n.name && n.name.text === 'handleSubmit')[0];
   const subFirst = sub && sub.body.statements[0].getText(sf).replace(/\s+/g, ' ');
   expect(subFirst === 'if (busy || appleBusy) return;', `handleSubmit's first statement is: ${subFirst}`);
+  // The demo paths wait on Apple too (release-lead #507 QA P3).
+  const demo = findAll(sf, (n) => ts.isFunctionDeclaration(n) && n.name && n.name.text === 'handleTryDemo')[0];
+  const demoFirst = demo && demo.body.statements[0].getText(sf).replace(/\s+/g, ' ');
+  expect(demoFirst === 'if (demoBusy || busy || appleBusy) return;', `handleTryDemo's first statement is: ${demoFirst}`);
+  const demoButtons = findAll(sf, (n) => tagName(n) === 'Pressable' && attrText(n, 'onPress') === 'handleTryDemo');
+  expect(demoButtons.length === 2 && demoButtons.every((b) => /\bappleBusy\b/.test(attrText(b, 'disabled') || '')),
+    `the demo buttons' disabled: ${demoButtons.map((b) => attrText(b, 'disabled'))}`);
 });
 
 check('7. nothing else can hide it: appleShown and the availability effect are as shipped', () => {
@@ -279,9 +290,22 @@ check('8. the landing body scrolls (centered when it fits), one tap acts with th
     `keyboardShouldPersistTaps is ${attrText(sv, 'keyboardShouldPersistTaps')}`);
   expect(attrText(sv, 'onScroll') === 'notifyGuideTargetsMoved' && attr(sv, 'scrollEventThrottle'),
     'onScroll does not announce to the guide, or has no throttle');
+  for (const cb of ['onLayout', 'onContentSizeChange']) {
+    expect(attrText(sv, cb) === 'notifyGuideTargetsMoved', `${cb} is ${attrText(sv, cb)}, want notifyGuideTargetsMoved`);
+  }
+  // Exactly these props: a scrollEnabled={false}, horizontal or the like would
+  // undo reachability (release-lead #507 QA P3).
+  const props = sv.attributes.properties.map((a) => a.name && a.name.getText(sf)).sort();
+  const want = ['alwaysBounceVertical', 'contentContainerStyle', 'keyboardShouldPersistTaps', 'onContentSizeChange',
+    'onLayout', 'onScroll', 'scrollEventThrottle', 'style'];
+  expect(JSON.stringify(props) === JSON.stringify(want), `the ScrollView's props are ${JSON.stringify(props)}`);
+  expect(attrText(sv, 'style') === 'styles.flex' && JSON.stringify(styleProps('flex')) === JSON.stringify({ flex: '1' }),
+    `the ScrollView's style is ${attrText(sv, 'style')} ${JSON.stringify(styleProps('flex'))}, want styles.flex = { flex: 1 }`);
   const body = styleProps('body');
-  expect(body && body.flexGrow === '1' && body.justifyContent === "'center'" && !('flex' in body),
-    `styles.body is ${JSON.stringify(body)}, want flexGrow 1, justifyContent center, no flex`);
+  expect(body && JSON.stringify(Object.keys(body).sort())
+    === JSON.stringify(['alignItems', 'flexGrow', 'justifyContent', 'paddingHorizontal'])
+    && body.flexGrow === '1' && body.justifyContent === "'center'",
+    `styles.body is ${JSON.stringify(body)}, want flexGrow 1, justifyContent center, padding and alignItems only (no flex, height or maxHeight)`);
 });
 
 check('9. the "or" and the legal line are chalk-dim', () => {
