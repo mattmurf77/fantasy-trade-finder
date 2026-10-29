@@ -85,6 +85,13 @@ export function isIdentityReady(userId: string | null | undefined): boolean {
   return _configured && !!userId && _identityUserId === userId;
 }
 
+/** The identity RevenueCat has COMPLETED (configure, or the latest `logIn`
+ *  landed), else null. `state/subscriptionSession.customerInfoApplies` reads
+ *  it before any CustomerInfo is believed. */
+export function currentIdentityUserId(): string | null {
+  return _configured ? _identityUserId : null;
+}
+
 /** Re-render hook for the pending CTA. Returns an unsubscribe. */
 export function onIdentityChange(cb: () => void): () => void {
   _identityListeners.add(cb);

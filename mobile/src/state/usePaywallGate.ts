@@ -12,6 +12,7 @@ import type { PaywallSource, VerifyPath } from '../copy/monetization';
 import { gateFailureReason } from '../utils/firstCardEvent';
 import { failFirstCard, openSearchId } from './tradeSearchTrace';
 import { useFeatureFlags } from './useFeatureFlags';
+import { subscriptionSessionState, type SubscriptionSessionInput } from './subscriptionSession';
 import { useSession, type SavedUser } from './useSession';
 
 // The paywall router (#393 M1; D1, D3, D9, D15–D18).
@@ -74,11 +75,13 @@ export function verifyPathFor(
   return 'sleeper';
 }
 
-/** The server reported this session unverified. Unknown (`verification`
- *  null, an older server) is not "unverified": the 402/403 still decides. */
-export function isUnverifiedSession(): boolean {
-  const { verification, isDemo } = useSession.getState();
-  return !isDemo && verification?.session_verified === false;
+/** The server reported this session unverified, or it is a demo: demo shows
+ *  no purchase flow and counts as unverified on every subscription surface,
+ *  matching the server (head-eng 2026-10-29). Unknown (`verification` null,
+ *  an older server) is not "unverified": the 402/403 still decides. */
+export function isUnverifiedSession(s: SubscriptionSessionInput = useSession.getState()): boolean {
+  const state = subscriptionSessionState(s);
+  return state === 'unverified' || state === 'demo';
 }
 
 interface GateState {
