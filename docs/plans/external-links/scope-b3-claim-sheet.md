@@ -2,8 +2,8 @@
 
 **Date:** 2026-10-27
 **Entry point:** direct ask. The league-eng row of `docs/plans/external-links/scope.md` § "Deferred to other leads", building on PR #379 (`build/open-external-helper` @ `04eae95b`). The spec is the #351 PRD (`origin/plan/sleeper-fa-deeplink:docs/plans/sleeper-fa-deeplink/prd.md`) §3.2, §4.1, §4.2, §4.4, AC-1/2/9/10, guards S1/S2/S8/S9, §7.2 code-walks A and B, TestFlight rows 13/14.
-**Builder:** eng-mobile worker for league-eng (task `b3-eng-mobile-1`; commit 3: task `b3-eng-mobile-3`; commit 4: task `b3-eng-mobile-4`), branch `build/b3-claim-handoff`
-**Operator sign-off on waivers:** pending. Waiver to surface: §1 analytics (c), the same waiver #379 carries.
+**Builder:** eng-mobile worker for league-eng (task `b3-eng-mobile-1`; commit 3: task `b3-eng-mobile-3`; commit 4: task `b3-eng-mobile-4`), branch `build/b3-claim-handoff`; `hasDrop`: task `b3-eng-mobile-5`, branch `build/b3-hasdrop`
+**Operator sign-off on waivers:** none left to surface. §1 analytics (c) was this doc's only waiver, and it was stale; on 2026-10-28 it became (b), `sleeper_handoff_resolved` (#528).
 
 ## Contents
 
@@ -14,6 +14,7 @@
 - [4. Docs scope](#4-docs-scope-mandatory--hld--lld--api)
 - [5. Ship gate declaration](#5-ship-gate-declaration)
 - [2026-10-28 — design-lead review](#2026-10-28--design-lead-review)
+- [2026-10-28 — hasDrop (#528)](#2026-10-28--hasdrop-528)
 - [Copy for design-lead](#copy-for-design-lead)
 - [2026-11-01 — pinned CTA footer](#2026-11-01--pinned-cta-footer)
 - [Known risk](#known-risk)
@@ -23,7 +24,7 @@
 
 ## What ships
 
-Four commits. Commits 2, 3 and 4 are droppable together: commit 3 reworks commit 2's steps block to design-lead's review ([2026-10-28 — design-lead review](#2026-10-28--design-lead-review)), and commit 4 adds one drop-row string from the same review.
+Four commits. Commits 2, 3 and 4 are droppable together: commit 3 reworks commit 2's steps block to design-lead's review ([2026-10-28 — design-lead review](#2026-10-28--design-lead-review)), and commit 4 adds one drop-row string from the same review. A fifth change, `hasDrop` on the CTA's hand-off, needs #528 and ships on its own branch: [2026-10-28 — hasDrop (#528)](#2026-10-28--hasdrop-528).
 
 | Commit | File | Change |
 |---|---|---|
@@ -46,9 +47,8 @@ No native change, no `Info.plist` key, no `app.json`/`eas.json` change, no flag,
 
 ## 1. Analytics scope
 
-- [ ] **(a) New events specced:** none.
-- [x] **(b) Existing events cover part of it:** Usage Trends' `usage_trends_action {action: 'add'}` still fires on the Add tap (`UsageTrendsScreen.tsx:286`), before the sheet opens. Nothing fires on the claim sheet's CTA, before or after this change.
-- [x] **(c) WAIVED, pending analytics-lead's grant.** `surface` feeds no event. `ExternalTarget.surface` is carried into `openPlatform` so that, once analytics-lead grants `external_link_opened` (or #351's `sleeper_handoff_resolved`) and registers it in `backend/analytics_taxonomy.py` + `analytics_queries.NON_INTENT_EVENTS`, the emitter goes inside `openPlatform` with no call-site change. Not granted, so nothing fires. The PRD's `hasDrop` property exists only for that event, so it isn't passed.
+- [ ] **(a) New events specced:** none. #509 registers no event and makes no taxonomy change: `backend/analytics_taxonomy.py` and `analytics_queries.NON_INTENT_EVENTS` are untouched.
+- [x] **(b) Existing event covers it: `sleeper_handoff_resolved` (#528); this PR passes `hasDrop`.** analytics-lead granted the event as INTENT on 2026-10-20, so it has no `NON_INTENT_EVENTS` row. #528 emits it inside `openInSleeperApp` (`trackHandoff`), so the claim sheet's CTA fires it once per hand-off, with `surface` (`free_agents` / `usage_trends`, from the hosts' `surface` prop, H1), `target: 'add'`, `rung` and `outcome`, and no emitter at the call site. The CTA passes `hasDrop: dropId != null`, which the event sends as `has_drop`: whether the user picked a drop on the sheet. See [2026-10-28 — hasDrop (#528)](#2026-10-28--hasdrop-528). Usage Trends' `usage_trends_action {action: 'add'}` still fires on the Add tap (`UsageTrendsScreen.tsx:286`), before the sheet opens (unchanged).
 
 ## 2. Schema & flag scope
 
@@ -178,6 +178,39 @@ design-lead reviewed commit 2: **approve with 4 changes**. Commit 3 implements t
 4. **Copy:** step verbs must eventually match Sleeper's real button labels from the #351 device label capture (§7.3, not recorded yet), and the words are marketing's. The block carries `COPY: draft, pending marketing + Sleeper label capture (#351 §7.3)`; the null-league fallback carries its own pending-marketing marker. `clipboardText: row.name` stays on the CTA.
 
 A later SHOULD from the same review, the empty drop list, is commit 4: see [Copy for design-lead](#copy-for-design-lead). The strings quoted above are the review-time drafts; the final ones are marketing addendum 12 (commit 5).
+
+## 2026-10-28 — hasDrop (#528)
+
+**What it does.** `openSleeper` (`ClaimSheet.tsx:152-166`) now passes `hasDrop: dropId != null` in its `openInSleeperApp({ … })` call (`:164`). Nothing else in the call or the file changes: no copy, no testID, no new event. #528 (`feat/sleeper-handoff-resolved` @ `b2e50fac`, platforms-eng) adds the optional `hasDrop?: boolean` to `openInSleeperApp` (`sleeperHandoff.ts:108-109`) and emits `sleeper_handoff_resolved` from its settle seam (`:119` → `trackHandoff` `:132-149`). `has_drop` is attached only on a `target: 'add'` hand-off whose surface isn't `send_button`, and only when a boolean is passed (`:145-146`). A claim-sheet hand-off from Free Agents or Usage Trends now carries `has_drop: true` when a drop is selected on the sheet, else `has_drop: false` (room on the roster, or a full roster with no pick). head-eng's ruling: the sheet's drop selection (`dropId`, `useState<string | null>`, `:134`) is the source, not `dropName` or `dropStep`.
+
+**Why it's on its own branch.** `hasDrop` exists only in #528's signature, and #528 is a draft, stacked on #379 like #509. #509 must not depend on it. Without #528's `hasDrop?: boolean`, `tsc` rejects the prop (below). So `build/b3-hasdrop` is cut from #509's head `02d867d7`, merges #528 at `b2e50fac` (merge `0655d6a1`), and adds one commit: this change, H3 and this section.
+
+**How it ships.** As the one commit, never the merge, once both #509 and #528 are in. It rides with whichever lands second:
+- **#528 lands first:** cherry-pick the commit onto #509.
+- **#509 lands first:** a follow-up PR after #509, carrying the commit on a base that has #528.
+
+**Guard: H3** (`check-sleeper-handoff.js`, an AST check next to S2's ClaimSheet half; it proves the wiring, not behaviour, G-035). `openSleeper` holds exactly one `openInSleeperApp(…)` call. Its object argument has exactly one `hasDrop` property assignment, and its value is `dropId != null`, whitespace-insensitive. `dropId !== null` is accepted only while `dropId`'s `useState` type argument is `string | null`, so it can't be undefined. `check-sleeper-handoff-event.js` (#528) executes the `has_drop` rules themselves (E1, E8). Sabotage, continuing §3's table (applied, guard run, restored byte-identical with `cmp`, green after):
+
+| # | Sabotage | Red |
+|---|---|---|
+| 23 | `hasDrop` removed from the call | H3 (only) |
+| 24 | `hasDrop: true` | H3 (only) |
+| 25 | `hasDrop: dropName != null` | H3 (only) |
+| 26 | `hasDrop: dropId !== null` (equivalent while the type is `string \| null`) | none: green, as intended |
+| 27 | 26, plus `dropId` widened to `useState<string \| null \| undefined>` | H3 (only) |
+
+**Commands run** (from `mobile/`, with `NODE_PATH` at another checkout's `node_modules`, same `package-lock.json`, G-022):
+
+| Command | Result |
+|---|---|
+| `node tests/check-sleeper-handoff.js` | 88 PASS, 0 FAIL (87 + H3) |
+| `node tests/check-sleeper-handoff-event.js` | 60 PASS, 0 FAIL |
+| `node tests/check-external-links.js` | 48 PASS, 0 FAIL |
+| `node tests/check-usage-trends.js` | 76 PASS, 0 FAIL |
+| `node tests/check-send-button-platform.js` | 32 PASS, 0 FAIL |
+| `bash scripts/testid-lint.sh` | `testid-lint OK` |
+| `tsc --noEmit`, a scratch copy of `mobile/` with a borrowed `node_modules` | exit 0 |
+| the same, with `hasDrop?: boolean` removed from `openInSleeperApp`'s parameter type | exit 2: one error, `ClaimSheet.tsx(164,7)` TS2353, `'hasDrop' does not exist in type …`. So this branch needs #528. |
 
 ## Copy for design-lead
 

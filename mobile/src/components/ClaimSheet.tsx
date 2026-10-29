@@ -143,7 +143,8 @@ export default function ClaimSheet({
     // `bare`, so Sleeper's last-viewed screen). Not installed → the Get
     // Sleeper alert, never silent. Sleeper has no public write API, so the
     // claim itself happens in Sleeper.
-    void openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface });
+    // `hasDrop` feeds #528's sleeper_handoff_resolved `has_drop` (a drop picked).
+    void openInSleeperApp({ target: 'add', leagueId, playerId: row.player_id, surface, hasDrop: dropId != null });
   };
 
   return (
