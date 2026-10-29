@@ -87,7 +87,9 @@ the anchor; an absent key means no moves. A move counts once its response
 is delivered as of the read (the moved card is within the pack's
 deliveries), and only those moves are checked (models-lead F1), so a re-read
 at the same as_of is stable; flip_read's G1 checks the whole header
-(display_moves_problem), so a malformed later move still fails at once.
+(display_moves_problem), so a malformed later move still fails at once. A
+record that isn't a dict of canonical card_index strings can't be split by
+delivery, so it fails every read, an earlier one included.
 The anchor comes after its card in the same response. The kept non-ghost
 cards' positions above are then handed out in display order,
 (anchor, 1, card_index) for a moved card and (card_index, 0, card_index)
@@ -776,18 +778,22 @@ def _display_moves(raw, deliveries: list, kept: set[int], w0: set[int],
     return moves
 
 
-def display_moves_problem(run: dict, card_count: int) -> str | None:
+def display_moves_problem(run: dict, card_count: int, w0=frozenset()) -> str | None:
     """G1's structural check of a pack's WHOLE run["display_moves"], past as_of
     too (models-lead F1: a malformed move fails G1 at once, though the loader
     only reads delivered ones): None when it is well-formed, else what's
-    wrong. `run` is the pack's run metadata, with valid deliveries."""
+    wrong. `run` is the pack's run metadata, with valid deliveries; `w0` the
+    deck's served_before=0 indexes, which no move may name (the loader's
+    rule, so G1 sees a later one too)."""
     moves = _move_keys(run.get(DISPLAY_MOVES))
     if moves is None:
         return "not a dict of card_index strings"
     lasts = [d[0] for d in run["deliveries"]]
     for i, anchor in moves.items():
         problem = (_move_problem(i, anchor, moves, lasts)
-                   or (None if 0 <= i < anchor < card_count else "a move outside the deck"))
+                   or (None if 0 <= i < anchor < card_count else "a move outside the deck")
+                   or ("a never-delivered withdrawn card in a move" if {i, anchor} & w0
+                       else None))
         if problem:
             return f"card {i}: {problem}"
     return None
