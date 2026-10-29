@@ -599,12 +599,15 @@ export default function RankScreen() {
             position={position}
             flush
           />
-        ) : trioQuery.isError && !trio ? (
+        ) : trioQuery.isError ? (
           /* B6 — the error branch must come BEFORE the skeleton: a failed
              /api/trio leaves `trio` undefined, so `isLoading || !trio` used to
-             catch it first and show the skeleton forever, with no Retry. A
-             failed background refetch that still holds a trio keeps showing
-             the cards. Fixed copy, never the raw error.message. */
+             catch it first and show the skeleton forever, with no Retry.
+             Plain isError, with no `!trio` (P2-1): every Trios refetch replaces
+             the trio, so a failed one after a submit must not hand back the
+             just-ranked trio as rankable (a re-rank double-counts on the
+             server). While a refetch is pending the held trio stays disabled
+             (isRefetchingTrio). Fixed copy, never the raw error text. */
           <View style={styles.centered}>
             <Text style={styles.errorText}>Could not load next trio</Text>
             <Button
