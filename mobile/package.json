@@ -60,6 +60,7 @@
     "test:keychain-accessible": "node tests/check-keychain-accessible.js",
     "test:landing-platform-options": "node tests/check-landing-platform-options.js",
     "test:league-candidates-300": "node tests/check-league-candidates-300.js",
+    "test:onboarding-flag-defaults": "node tests/check-onboarding-flag-defaults.js",
     "test:league-drill-in": "node tests/check-league-drill-in.js",
     "test:league-picker-recovery": "node tests/check-league-picker-recovery.js",
     "test:league-unlocks": "node tests/check-league-unlocks.js",
