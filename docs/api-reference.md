@@ -739,7 +739,10 @@ For an organic `D`, the server resolves, in order:
    would serve on `page: 1` (the same engine/config, expiry and staleness
    rules and backing job; at a live `D`'s end, only if it is the scope's
    newest job's row, so two decks never alternate); else the scope's newest
-   job in this process; else a backing job is started and its first page
+   job in this process, while it would back a `page: 1` serve (fresh, or a
+   matching running job, against the same roster snapshot and the session's
+   read; a stale one is never followed, #484 QA P3-2); else a backing job is
+   started and its first page
    returned, often `cards: []` while it runs. A start that joins a job outside
    the scope (another fairness, an intent search) is no deck to move to: the
    response stays on `D` with no cards, and the client asks again.
