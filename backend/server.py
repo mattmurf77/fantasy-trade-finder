@@ -2883,6 +2883,7 @@ def _trade_job_stalled(job, now):
 # Diagnostics expiry per cleanup tick: up to 20 x 500 rows (10,000 a tick,
 # 2.88M a day); one 500-row batch a tick fell behind the write rate.
 _DIAG_PURGE_MAX_BATCHES = 20
+_DIAG_PURGE_BATCH = 500
 
 
 def _cleanup_loop() -> None:
@@ -2928,11 +2929,14 @@ def _cleanup_loop() -> None:
         try:
             from .database import purge_deck_diagnostics
             days = int(os.environ.get("FTF_DECK_DIAGNOSTIC_RETENTION_DAYS", "14"))
-            purged = purge_deck_diagnostics(days=days, max_batches=_DIAG_PURGE_MAX_BATCHES)
+            purged = purge_deck_diagnostics(days=days, batch_size=_DIAG_PURGE_BATCH,
+                                            max_batches=_DIAG_PURGE_MAX_BATCHES)
             if purged:
+                # At the ceiling the tick can't tell whether rows are left
+                # (exactly 10,000 may have been all of them); the next says.
                 log.info("Purged %d expired deck diagnostic snapshots%s", purged,
-                         " (the tick's ceiling: a backlog remains)"
-                         if purged >= _DIAG_PURGE_MAX_BATCHES * 500 else "")
+                         " (the tick's ceiling: more may remain)"
+                         if purged >= _DIAG_PURGE_MAX_BATCHES * _DIAG_PURGE_BATCH else "")
         except Exception:
             log.exception("deck-diagnostic retention failed")
 

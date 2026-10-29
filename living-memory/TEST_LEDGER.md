@@ -1,3 +1,27 @@
+## 2026-10-29 — #537 QA P3s: the doc count, QA's drain tests ported, the ceiling line honest, a failed batch's count logged
+
+Gates: release-lead's #537 QA (GO, SQLite + PG 18 in 3 collations), P3-1 to P3-3, taken on #537 before the operator's go. P3-4 (verify `ix_deck_diagnostic_snapshots_created_at` on prod) is release-lead's read-only check. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **P3-1:** `docs/config-reference.md` § Deck diagnostic retention said "Up to 500 nodes … per tick". It now says 10,000 (20 batches of 500, each its own transaction, oldest first, stopping at a short batch) and quotes the ceiling line.
+- **P3-3, the ceiling line:** `server.py` multiplied by a hard-coded 500, and "a backlog remains" was wrong when exactly 10,000 were all there was. Now:
+  - `_DIAG_PURGE_BATCH = 500` is passed as `batch_size`;
+  - the line says "(the tick's ceiling: more may remain)". A tick can't tell; the next one says.
+- **P3-3, a mid-tick failure:** `purge_deck_diagnostics` logs "deck diagnostics purge: N expired snapshots deleted before a batch failed" (the earlier batches stay committed), then re-raises to the loop's handler.
+- **P3-2, QA's tests ported:** `backend/tests/test_deck_diagnostics_drain.py`, 10 tests (SQLite; QA ran the correctness half on PG):
+  - exact deletion at the cutoff (18 stamp shapes);
+  - NULL `created_at` rejected by the schema;
+  - the 20 × 500 ceiling oldest-first with fresh rows untouched (20 reads, 20 deletes, 20 commits; then 6/5; then 1/0);
+  - a short batch stops the call;
+  - one transaction per batch, and the failure's count log;
+  - the one-batch default; degenerate args;
+  - one real `_cleanup_loop` tick (10,000 + the ceiling line, then 2,500, then nothing);
+  - exactly 10,000 says "more may remain";
+  - a failing purge never stops the loop.
+- **Sabotages, 12/12 red:**
+  - QA's S1–S7 (S7 on the new wording), including the four that survived the first 13 tests: one transaction for all batches; stop only on an empty batch; the cutoff via `str()` / `isoformat(sep='t')`; the ceiling log dropped;
+  - new: no failure-count log; "a backlog remains"; `>` for `>=`; a failure swallowed.
+- **Suites:** every test touching the cleanup loop or the purge: 344 passed.
+
 ## 2026-10-29 — Diagnostics expiry drains up to 20 batches a tick (head-eng check 3)
 
 Gates: head-eng's check 3, from release-lead's prod sweep: "Purged 500 expired deck diagnostic snapshots" every 5 minutes, always at the 500 cap, so expired rows may be backing up past the 30 days the c3 list promises. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

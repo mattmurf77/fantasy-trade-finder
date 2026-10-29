@@ -243,5 +243,6 @@ def test_the_cleanup_loop_drains_up_to_its_ceiling():
     import inspect
     import backend.server as server
     src = inspect.getsource(server._cleanup_loop)
-    assert "purge_deck_diagnostics(days=days, max_batches=_DIAG_PURGE_MAX_BATCHES)" in src
-    assert server._DIAG_PURGE_MAX_BATCHES == 20
+    assert ("purge_deck_diagnostics(days=days, batch_size=_DIAG_PURGE_BATCH,\n"
+            "                                            max_batches=_DIAG_PURGE_MAX_BATCHES)") in src
+    assert (server._DIAG_PURGE_MAX_BATCHES, server._DIAG_PURGE_BATCH) == (20, 500)

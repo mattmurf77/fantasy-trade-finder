@@ -1783,7 +1783,9 @@ Known unused K/DEF coefficients are normalized only for absent slots; active K/D
 `FTF_DECK_DIAGNOSTIC_RETENTION_DAYS` defaults to `14`; `0` disables expiry.
 It governs only `deck_diagnostic_snapshots`, using original serve time, and is
 read on every five-minute cleanup tick. Invalid values log a cleanup failure
-and retry next tick. Up to 500 nodes are removed per tick. Impression rows,
+and retry next tick. Up to 10,000 nodes are removed per tick: 20 batches of 500,
+each its own transaction, oldest first, stopping at the first short batch. A tick
+that reaches the ceiling logs "(the tick's ceiling: more may remain)". Impression rows,
 outcomes, frozen valuations, assets and core learning features are retained.
 Setting `0` pauses future expiry; it does not recover already-expired data.
 There is no generation/card-limit or analytics sampling change.
