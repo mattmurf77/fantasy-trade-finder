@@ -365,9 +365,11 @@ export const useSession = create<SessionState>((set, get) => ({
     // The sentinel has no league to initialize. Account-only identities may
     // still own a real imported ESPN/MFL/Fleaflicker league. Session init is
     // where every other session gets `verification`, so the sentinel asks
-    // the server for it directly (head-eng 2026-10-28).
+    // the server for it directly (head-eng 2026-10-28). Not awaited: callers
+    // chain foreground work on this (TradesScreen's device-page refresh), and
+    // the answer lands in the store on its own.
     if (league.league_id === NO_LEAGUE_ID) {
-      await refreshVerification();
+      void refreshVerification();
       return;
     }
     try {
@@ -397,7 +399,12 @@ export const useSession = create<SessionState>((set, get) => ({
     // sign-out between) drops the previous account's device-held trade pages.
     const previous = get().user;
     if (previous && previous.user_id !== u?.user_id) void clearDevicePages();
-    set({user: u, switching: false});
+    // A different user_id (an expiry then someone else's sign-in, or the
+    // link-Sleeper re-key) starts from unknown verification: the previous
+    // user's answer never carries over. Every writer runs after this.
+    set(previous?.user_id === u?.user_id
+      ? {user: u, switching: false}
+      : {user: u, switching: false, verification: null});
     if (u) await AsyncStorage.setItem(SU_KEY, JSON.stringify(u));
     else   await AsyncStorage.removeItem(SU_KEY);
     if (generation !== leagueSessions.currentGeneration() || get().user !== u) return;

@@ -28030,7 +28030,20 @@ def session_init():
 def _session_verification(sess: dict) -> dict:
     """The additive `verification` object, as session/init returns it (same
     four fields, same sources): this session's own `verified` stamp, and the
-    user_id's stored verified_via."""
+    user_id's stored verified_via.
+
+    An unverified or demo session (the ones session/init refuses, 403) gets
+    the constant unverified answer before any lookup. Reading the claimed
+    user_id's verified_via for it would tell anyone who can name a user_id
+    whether that account exists and which provider proved it (legal R28.9
+    row 4 / R28.14; release-lead #524 QA P1)."""
+    if not sess.get("verified") or sess.get("is_demo"):
+        return {
+            "session_verified": False,
+            "user_verified":    False,
+            "verified_via":     None,
+            "enforced":         is_enabled("auth.enforce_verified_writes"),
+        }
     verified_via = None
     try:
         from . import accounts as _accounts

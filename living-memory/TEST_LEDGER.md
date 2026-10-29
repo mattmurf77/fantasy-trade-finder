@@ -7,8 +7,17 @@ Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verificati
   - Mobile `refreshVerification()` pings and records it only for the same, still-signed-in user.
   - It's called from `revalidateSession`'s `NO_LEAGUE_ID` branch and after the account-only Apple sign-in.
   - The result: an Apple-first account with no league now reads `session_verified: true`.
-- **Backend:** `test_session_ping_verification.py`, 6 tests. With `test_persistent_sessions.py`: 21 passed. **Sabotage 4/4 red.**
-- **Mobile:** `check-account-only-verification.js`, 4 AST pins. **Sabotage 7/7 red.** tsc clean; `check-win-now-recovery` passes.
+- **Release-lead #524 QA (NO-GO, P1), fixed:** an unverified or demo session (session/init's 403 cases) now gets the constant unverified answer, with no lookup. Before the fix, ping told anyone who could name a user_id whether that account existed and which provider proved it (legal R28.9 row 4 / R28.14).
+  - Also from QA: the sentinel ping is no longer awaited (P3-2).
+  - `setUser` resets `verification` to null on any user_id change (an expiry then another user's sign-in).
+- **Backend:** `test_session_ping_verification.py`, 24 tests:
+  - the squatter test flipped to the constant;
+  - the exact key sets for 7 session types;
+  - 0 SQL for anonymous, unknown-token and unverified pings, with a positive control;
+  - a foreign `user_id` / `X-User-Id` ignored;
+  - a verified session reads the user row, not its own stamp.
+  - **Sabotage 11/11 red:** QA's P1 reverted, demo looked up, an extra top-level key, an extra key in the unverified answer, the query user_id answered, X-User-Id looked up, a 401-path probe, plus round 1's 4 re-run.
+- **Mobile:** `check-account-only-verification.js`, 5 AST pins (pin 3 is now unawaited; pin 5 is the `setUser` reset). **Sabotage:** 7/7 red in round 1, and 5/5 on the new and changed pins. tsc clean; `check-win-now-recovery` passes.
 - **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)

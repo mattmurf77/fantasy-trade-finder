@@ -13,10 +13,16 @@
 //      records res.verification only when the answer's user_id is the user it
 //      asked for AND that user is still signed in; a failure is swallowed.
 //   2. sessionPing()'s declared result carries `verification`.
-//   3. useSession.revalidateSession's NO_LEAGUE_ID branch awaits
-//      refreshVerification() before returning (never initLeagueSession).
+//   3. useSession.revalidateSession's NO_LEAGUE_ID branch fires
+//      refreshVerification() without awaiting it, then returns (never
+//      initLeagueSession): callers chain foreground work on revalidateSession
+//      (release-lead #524 QA P3-2).
 //   4. SignInScreen's account-only Apple branch calls refreshVerification()
 //      after it pins the sentinel league.
+//   5. useSession.setUser resets `verification` to null whenever the user_id
+//      changes, in the same set() that stores the new user, so the previous
+//      user's answer never carries over (release-lead #524 QA, an expiry then
+//      a different user's sign-in).
 //
 // Run: node tests/check-account-only-verification.js
 
@@ -90,15 +96,15 @@ check('2. sessionPing declares `verification` in its result', () => {
     `sessionPing's result type is ${fn && fn.type ? flat(fn.type, auth) : 'missing'}`);
 });
 
-check('3. revalidateSession\'s sentinel branch awaits refreshVerification, then returns', () => {
+check('3. revalidateSession\'s sentinel branch fires refreshVerification unawaited, then returns', () => {
   const prop = findAll(session, (n) => ts.isPropertyAssignment(n) && n.name.getText(session) === 'revalidateSession')[0];
   expect(prop, 'no revalidateSession');
   const ifs = findAll(prop, (n) => ts.isIfStatement(n)
     && flat(n.expression, session) === 'league.league_id === NO_LEAGUE_ID');
   expect(ifs.length === 1, `${ifs.length} NO_LEAGUE_ID branch(es) in revalidateSession, want 1`);
   const then = ifs[0].thenStatement;
-  expect(ts.isBlock(then) && then.statements.length === 2, 'the sentinel branch is not { await refreshVerification(); return; }');
-  expect(flat(then.statements[0], session) === 'await refreshVerification();', `its first statement is: ${flat(then.statements[0], session)}`);
+  expect(ts.isBlock(then) && then.statements.length === 2, 'the sentinel branch is not { void refreshVerification(); return; }');
+  expect(flat(then.statements[0], session) === 'void refreshVerification();', `its first statement is: ${flat(then.statements[0], session)}`);
   expect(ts.isReturnStatement(then.statements[1]), 'it does not return after refreshing');
   const init = findAll(prop, (n) => isCallTo(n, 'initializeLeagueSession'))[0];
   expect(init && init.pos > ifs[0].end, 'initializeLeagueSession runs before the sentinel branch');
@@ -113,6 +119,25 @@ check('4. the account-only Apple sign-in asks for verification after pinning the
   const refresh = findAll(block, (n) => isCallTo(n, 'refreshVerification'));
   expect(refresh.length === 1, `${refresh.length} refreshVerification() call(s) in the branch, want 1`);
   expect(pin && refresh[0].pos > pin.end, 'refreshVerification() runs before the sentinel league is pinned');
+});
+
+check('5. setUser resets verification when the user_id changes', () => {
+  const prop = findAll(session, (n) => ts.isPropertyAssignment(n) && n.name.getText(session) === 'setUser')[0];
+  expect(prop, 'no setUser');
+  const conds = findAll(prop, (n) => ts.isConditionalExpression(n)
+    && flat(n.condition, session) === 'previous?.user_id === u?.user_id');
+  expect(conds.length === 1, `${conds.length} \`previous?.user_id === u?.user_id\` choice(s) in setUser, want 1`);
+  const sets = findAll(prop, (n) => isCallTo(n, 'set'));
+  expect(sets.length === 1 && sets[0].arguments[0] === conds[0],
+    'the user is not stored by exactly one set() whose argument is that choice');
+  const same = flat(conds[0].whenTrue, session);
+  const changed = flat(conds[0].whenFalse, session);
+  expect(!/verification/.test(same), `the same-user branch touches verification: ${same}`);
+  expect(/^\{user: u, switching: false, verification: null\}$/.test(changed),
+    `the changed-user branch is ${changed}, want {user: u, switching: false, verification: null}`);
+  const getUser = findAll(prop, (n) => ts.isVariableDeclaration(n) && n.name.getText(session) === 'previous')[0];
+  expect(getUser && flat(getUser.initializer, session) === 'get().user' && getUser.end < sets[0].pos,
+    '`previous` is not get().user read before the set()');
 });
 
 console.log(failures === 0
