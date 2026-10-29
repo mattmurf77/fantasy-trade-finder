@@ -805,10 +805,13 @@ def _delete_user_data(sleeper_user_id: str,
         for col in ("matched_impression_id", "ghost_impression_id"):
             res = conn.execute(update(links).where(links.c[col].in_(impressions))
                                .values({col: None}))
-            counts["suggestion_trade_links_" + col + "_anonymized"] = (res.rowcount or 0) + sum(
+            # Contract ids are only ever non-ghost cards' (a ghost keeps its
+            # uuid4), so only the matched column can hold one; neither column
+            # is indexed, so the ghost pass would scan for nothing.
+            counts["suggestion_trade_links_" + col + "_anonymized"] = (res.rowcount or 0) + (sum(
                 conn.execute(update(links).where(links.c[col].in_(chunk))
                              .values({col: None})).rowcount or 0
-                for chunk in chunks)
+                for chunk in chunks) if col == "matched_impression_id" else 0)
         _del("deck_impressions", db.deck_impressions_table)
         for name in _ADDITIONAL_PRIVATE_TABLES:
             _del(name, getattr(db, name + "_table"))
