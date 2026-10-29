@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { View, ScrollView, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ScrollView, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigation, useRoute } from '@react-navigation/native';
 
@@ -12,6 +12,8 @@ import { ink, chalk, flare, semantic, space, radii, type } from '../theme/chalkl
 import { useSession } from '../state/useSession';
 import { track } from '../api/events';
 import { ApiError } from '../api/client';
+import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import { SEND_OUTCOME_UNKNOWN_TITLE, overhaulSendOutcomeUnknownMessage } from '../utils/sendOutcomeCopy';
 import { uuidv4 } from '../api/_queue';
 import {
   getOverhaul,
@@ -176,14 +178,22 @@ export default function OverhaulSummaryScreen() {
         summary_hash: pv.summary_hash,
         version: roadmap.version,
         idempotency_key: prepared.idempotencyKey,
-      });
+      }, pv.counts.offers);
       haptics.success();
       invalidate();
       navigation.replace('OverhaulPlan', { overhaulId });
     } catch (e) {
       haptics.warning();
       const code = errorCode(e);
-      if (code === 'prepare_expired') {
+      if (isSendOutcomeUnknown(e)) {
+        // No batch result (timeout, dropped connection, a 5xx). The server
+        // stores every attempt before its first provider call, so some
+        // offers may be out. Re-read the overhaul and show each attempt's
+        // own state on the plan: never "nothing went out", no resend here.
+        invalidate();
+        navigation.replace('OverhaulPlan', { overhaulId });
+        Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, overhaulSendOutcomeUnknownMessage(platformName(view?.platform)));
+      } else if (code === 'prepare_expired') {
         setToast({ msg: 'Offers re-checked — review and send again', tone: 'warn' });
         preparedForRef.current = null; // force a fresh prepare + a new key
         await prepare();

@@ -653,3 +653,30 @@ ESPN display data — not logged by `observe_call` (which only ever sees the
 raw HTTP call, never the parsed return value), and no call site should start
 logging it either; a league/team NAME is exactly the same class of
 low-sensitivity-but-unnecessary data §6.1 already excludes for `fetch_league`.
+
+### 6.8 Trade-send write (`espn_write.propose_trade`, C10 2026-10-27)
+
+The write rides `lm-api-writes` (`POST .../transactions/`) from
+`_espn_propose_core` (`POST /api/trades/propose-espn` and the team-overhaul
+send). Same credential rules as §6.1: the `Cookie` header and the SWID in the
+body's `memberId` are never logged.
+
+**Provider error bodies are for logs only.** When the write fails, ESPN's
+body (HTML or JSON, kept on `EspnWriteError.detail`, ≤500 chars) is written to
+ONE `WARNING` line on the `trade_finder` logger
+(`espn propose write-failed [<kind>] <message>: <body>` or
+`espn propose auth-rejected: <body>`) after `_provider_body_for_log`
+flattens whitespace, masks SWID-shaped GUIDs, `espn_s2=` / `SWID=` values and
+any 80+ character opaque blob, and truncates to 300 characters
+(`…[+N chars]`). The body is **never** a response field: `detail` and
+`message` are plain copy (`docs/api-reference.md` § Send in ESPN).
+
+**Before vs. after the send** (`backend/write_outcome.py`). urllib wraps only
+the connect and the request write in `URLError`. A `URLError` whose reason is
+a DNS failure, a refused connection or no route is **not sent** →
+`kind: "network"` → 502 `espn_write_failed`. Anything raised after the request
+went out (read timeout, reset, `RemoteDisconnected`, `IncompleteRead`), any
+5xx, a `URLError` timeout or reset (conservative), or a 2xx body that isn't
+JSON / UTF-8 is `kind: "outcome_unknown"` → 502 `espn_outcome_unknown`, never
+retried. `observe_call`'s `api_call` events carry the same value as
+`error_kind`, so post-send ambiguity is countable without logging any content.
