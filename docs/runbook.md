@@ -1094,10 +1094,17 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
 - **Run it read-only:** `python3 -m backend.eval.bdk_audit --db "$DATABASE_URL_PROD" --allow-postgres-readonly --since <window start, ISO UTC> [--until <end>]` (add `--json` for a pasteable object). Load the URL from `secrets.local.env` without printing it. It uses the flip read's read-only engine, error redaction and `as_of` settle (a `bdk_audit: note:` line on stderr when it clamps).
 - **What it reads:** each Trades deck in the window: its first 30 cards by displayed position, plus every card with a `viewed` outcome. Calibration refresh decks are left out. `pack_integrity` and `withdrawal_conflict` decks are skipped and counted, since their displayed positions can't be trusted. A viewed card with no full row is reported by its pack's `upgrade_miss_cards` cause (U4-R3; no entry reads `other`).
 - **Reading it:** each rule prints violations, audited cards, protected (exempt) cards, not-auditable cards, the bar and a status. `NOT_AUDITABLE` prints `n/a`, never 0.
-  - **B-DK-6 is always `NOT_AUDITABLE`:** rosters and lineup slots aren't recorded at serve time.
-  - **Breakup and filler need `valuation_json`'s per-asset markets,** which are NULL while `trade.valuation_telemetry` and the market policy are off. Where they're present, they're the age-adjusted snapshot values, so a card near a threshold can differ from what the filter saw.
-  - **So today's realistic result is `OVERALL: INCOMPLETE` (exit 3):** no violation among the cards that could be checked. That isn't a pass.
-  - **A violation may be on a fatigue retest card.** That protection isn't recorded at serve time, so check the example's `trade_hash` against `deck_suppressions.retest_trade_hash`.
+  - **B-DK-4, B-DK-5 and B-DK-6 read the filter's own inputs (models-lead D2, #492).** The pack's `run["filter_inputs"]` records the market, positions, lineup slots, the viewer's and counterparties' QB/TE holdings, and the trade_hashes it protected. `valuation_json` is never read: approximate values can't certify a zero bar.
+    - The `Filter inputs` line counts the audited decks by record state:
+      - `recorded`;
+      - `record_failed`: recording failed or the record is malformed;
+      - `pack_without_record`: packed before #492;
+      - `no_pack`: live evidence, meaning pinned, opponent, intent, presentation-exempt and demo decks, and any deck without a pack.
+    - Only `recorded` decks are audited for B-DK-4..6; on the rest those rules are not auditable, so the read is `INCOMPLETE`, not a pass.
+    - A deck whose record says `filter_ran: false` went out unfiltered. It's skipped for every rule and counted as `filter_not_run`.
+    - An asset the record never saw makes its card not auditable. A recorded null (or NaN) market goes to the rules as the filter saw it. An unknown lineup means the filter skipped B-DK-6, which reads as a pass.
+    - **A filler FAIL on a card with a null-market asset: check it by hand.** From v6 (#515) a non-finite value is recorded as null. If a NaN seed came first on its card, the filter's bar was 450, while the audit drops the null and uses the real top value, so the audit can be stricter there.
+  - **Protection:** on a recorded deck it's the filter's own protected trade_hashes, so a fatigue retest card is handled correctly. On a deck without a record (B-DK-7 only), it comes from the row's flags. A fatigue retest isn't recorded there, so check a violation's `trade_hash` against `deck_suppressions.retest_trade_hash`.
   - **A B-DK-7 breach** whose example shows ghost slots or withdrawn cards may come from the serve order, not the filter: the filter ran before those were removed.
   - **B-DK-7 explains two kinds of breach** (counted in `explained`, not violations; each example carries its `why`):
     - `protected`: every over-cap card is protected (they hold their positions).
@@ -1106,8 +1113,8 @@ After `trade.packed_evidence` and `trade.first_page_store` go on together, model
       - a `partial_run` deck (its delivered rows);
       - **a pack-less deck of 30 or more cards, never-delivered withdrawals included.** Owner and prepared decks publish in batches of 30 then 100, and one stopped after its first batch carries no marker. So a complete pack-less deck of 30 or more reads FAIL: the safe side.
 
-      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL. Check those examples by hand.
-  - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list, or a market that's missing, null or not a number.
+      Also conservative: a packed deck has no rows for its unviewed cards past the first 30, so after the flip a short-deck-style breach on a deck of more than 30 cards reads FAIL, unless the record carries `repeat_head`. That's trades-eng's v6: the trade_hashes of the cards the cap kept, written only when it kept fewer than 30. Then the breach is explained when every unprotected over-cap card is one the cap deferred (not in `repeat_head`), and a `repeat_head` naming one is a violation. Without the field, check those examples by hand.
+  - **A malformed row is not auditable, never a crash:** an `assets_json` side that's missing, empty or not a list.
   - Any FAIL goes to models-lead.
 - **Exit status:** 0 = PASS; 1 = FAIL; 2 = a refused database or a `ReadOnlyViolation` (nothing on stdout), or a usage error; 3 = INCOMPLETE (nothing failed, but a rule couldn't check every card, or a deck was skipped: not a pass); 4 = the tool crashed (its redacted traceback on stderr): not a verdict, take it to models-eng.
 
