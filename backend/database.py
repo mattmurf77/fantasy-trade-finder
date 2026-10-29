@@ -1917,6 +1917,12 @@ app_feedback_table = Table("app_feedback", metadata,
     # POST /api/feedback contract byte-identical — see save_feedback).
     Column("status",            String),                  # see FEEDBACK_STATUSES
     Column("status_updated_at", String),                  # ISO, set on status change
+    # #360 QA P2-1 (head-eng): sha256 hex of the X-Session-Token of the
+    # UNVERIFIED session that sent the note (never the raw token). When that
+    # same session verifies in place, attach_session_feedback moves the note
+    # to the now-proven user and clears this. NULL for verified-at-post,
+    # no-token and unknown-token notes, and after attach.
+    Column("session_key",       Text),
     Index("idx_app_feedback_created_at", "created_at"),
     Index("idx_app_feedback_user_id",    "user_id"),
 )
@@ -3163,6 +3169,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_paged_responses", 1.0, "Kill switch for opt-in paging (E2): 1 = honor `page`/`cursor`; 0 = ignore them and serve the legacy cumulative body, which the #363 app handles as its pre-paging deck path. Deploy-free"),
     # ── S0 serve rules (roster fingerprint contract v0.4 §3, §3b) ────────
     ("trade_i1_mode", 1.0, "S0 live-path switch, read per request (default 1 until C-b, models-lead option B): 2 = strict (I-1 drops cards with moved assets; the no-card gate misses follow trade_gate_miss_mode); 1 = lenient (check and log, serve every card, never withhold); 0 = off (the pre-S0 path: no I-1, no fingerprint read or compare, no withhold, no floor kick). NaN or any other value reads as 1. Deploy-free"),
+    ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
@@ -3518,6 +3525,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
+    # Served as the top-level int `app_min_version` on GET /api/feature-flags
+    # (server._app_min_version). Encoding major*10000 + minor*100 + patch
+    # (1.22.0 = 12200); 0 = OFF. Seeded 0 and insert-if-absent like every
+    # row here, so a deploy never gates anyone and never resets a raised
+    # value. release-lead's deploy-free kill switch:
+    # PUT /api/admin/config/app_min_version (docs/config-reference.md).
+    ("app_min_version",           0,    "min-version gate: builds whose version int (major*10000+minor*100+patch) is below this get a blocking Update required screen; 0 = off. Served on GET /api/feature-flags; a missing, non-integral, NaN or negative value serves 0. Writes are checked by backend/app_version_policy.py"),
+    # Where the gate's Update button goes: 1 = App Store, 0 = TestFlight,
+    # -1 = unset (the client's compiled UTC instant decides). Served as the
+    # top-level int `app_store_live` on GET /api/feature-flags; anything but
+    # exactly 0 or 1 serves -1.
+    ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
 ]
 
 
@@ -3831,7 +3851,9 @@ def _migrate_db() -> None:
     # for any future additive ALTERs. Indexes are declared on the Table
     # definition so create_all() handles them on fresh DBs.
     _app_feedback_migrations: list[tuple[str, str, str]] = [
-        # (table, column, type) — currently none; placeholder for future work
+        # (table, column, type)
+        # #360 QA P2-1: hash of the unverified session that sent the note.
+        ("app_feedback", "session_key", "TEXT"),
     ]
     for table, col, col_type in _app_feedback_migrations:
         try:
@@ -7510,7 +7532,7 @@ def record_deck_withdrawals(rows: list[dict]) -> int:
 
 
 def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
-                          at: str, withdrawn=None) -> None:
+                          at: str, withdrawn=None) -> bool:
     """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
     (the value core, prepared adoption), one transaction. Its rows were
     written at build (tier NULL, the page_store marker), so the delivery
@@ -7519,7 +7541,9 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
     first delivery wins) and never a ghost's. The serve's withdrawals land in
     the same transaction, each card_index from its row and served_before from
     its delivered_at before this stamp: both are recorded or neither.
-    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut")."""
+    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut").
+    Returns False when it delivered cards of a deck with no row at all: their
+    evidence is nowhere (no rows, no pack), so eval can't see them."""
     i = deck_impressions_table
     withdrawn = dict(withdrawn or {})
     delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
@@ -7539,6 +7563,8 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
              "impression_id": iid,
              "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
             for iid in withdrawn_ids if iid in found])
+        return not delivered_ids or conn.execute(
+            select(literal(1)).where(i.c.deck_job_id == deck_job_id).limit(1)).first() is not None
 
 
 def load_delivered_impression_ids(impression_ids) -> set:
@@ -9297,6 +9323,22 @@ def mark_league_roster_failed(league_id: str, error_code: str) -> str:
                   "updated_at": stmt.excluded.updated_at})
         conn.execute(stmt)
     return status
+
+
+def cas_league_roster_fp(league_id: str, old_fp: str | None, new_fp: str) -> bool:
+    """S0 PR-B: set `roster_fp` to `new_fp` only while it still equals `old_fp`.
+
+    One UPDATE … WHERE (`IS NULL` when `old_fp` is None, a league's first
+    stamp), committed before it returns. True when this call won; False when
+    another refresh stamped first, or the league has no row. Touches no
+    other column.
+    """
+    t = league_roster_state_table
+    same = t.c.roster_fp.is_(None) if old_fp is None else t.c.roster_fp == old_fp
+    with engine.begin() as conn:
+        result = conn.execute(update(t).where(t.c.league_id == str(league_id), same)
+                              .values(roster_fp=new_fp))
+    return result.rowcount == 1
 
 
 def replace_league_members_snapshot(league_id: str, members: list[dict]) -> bool:
@@ -12486,6 +12528,25 @@ def load_draft_picks(
     return out
 
 
+def load_draft_pick_seasons(league_id: str,
+                            source: str = PICK_SOURCE_PLATFORM) -> set[int]:
+    """The distinct seasons of one league's PLATFORM draft-pick rows, from one
+    `SELECT DISTINCT season` (no full rows). Same predicate as
+    `load_draft_picks`'s default. Platform only: the contested/orphaned
+    exclusion for user rows is a row filter a season set can't carry, so any
+    other `source` raises. Read by `server._sleeper_prior_grid_excludes`
+    (#470 QA P3-2)."""
+    if source != PICK_SOURCE_PLATFORM:
+        raise ValueError(f"load_draft_pick_seasons reads platform rows only, not {source!r}")
+    with engine.connect() as conn:
+        rows = conn.execute(
+            select(draft_picks_table.c.season).distinct()
+            .where(draft_picks_table.c.league_id == league_id)
+            .where(_pick_source_predicate(source))
+        ).fetchall()
+    return {int(r[0]) for r in rows}
+
+
 def seed_pick_grid(
     league_id: str,
     member_user_ids: list[str],
@@ -15170,9 +15231,14 @@ def save_feedback(
     device_type: str | None = None,
     os_version: str | None = None,
     client_created_at: str | None = None,
+    session_key: str | None = None,
 ) -> dict:
     """Insert (idempotently on client_id) a feedback row and return
     {server_id, created_at, duplicate}.
+
+    `session_key` is the sha256 hex of an UNVERIFIED session's token (#360
+    QA P2-1), so attach_session_feedback can hand the note to that session's
+    user once it verifies in place. Callers pass None otherwise.
 
     Retries with the same client_id are dropped: we look up the existing
     row and return its ids so the mobile client can move on. SQLite uses
@@ -15190,11 +15256,11 @@ def save_feedback(
                     INSERT INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     ON CONFLICT (client_id) DO NOTHING
                     RETURNING id
                     """
@@ -15212,6 +15278,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             ).fetchone()
             if res:
@@ -15227,11 +15294,11 @@ def save_feedback(
                     INSERT OR IGNORE INTO app_feedback
                         (client_id, user_id, username, screen, severity, text,
                          app_version, platform, device_type, os_version,
-                         client_created_at, created_at)
+                         client_created_at, created_at, session_key)
                     VALUES
                         (:client_id, :user_id, :username, :screen, :severity, :text,
                          :app_version, :platform, :device_type, :os_version,
-                         :client_created_at, :created_at)
+                         :client_created_at, :created_at, :session_key)
                     """
                 ),
                 {
@@ -15247,6 +15314,7 @@ def save_feedback(
                     "os_version": os_version,
                     "client_created_at": client_created_at,
                     "created_at": now_iso,
+                    "session_key": session_key,
                 },
             )
             if cur.rowcount == 1 and cur.lastrowid:
@@ -15268,6 +15336,59 @@ def save_feedback(
         # Shouldn't happen — either we just inserted (handled above) or a
         # duplicate exists. Defensive fallback.
         return {"server_id": 0, "created_at": now_iso, "duplicate": True}
+
+
+def find_feedback_by_client_id(client_id: str) -> dict | None:
+    """{server_id, created_at} of the note with this client_id, or None.
+    POST /api/feedback uses it on the throttled path only, so an idempotent
+    retry of a note already held still gets its 200 `duplicate` (#360 QA
+    P2-2: duplicates never count against the throttle)."""
+    with engine.connect() as conn:
+        row = conn.execute(
+            select(app_feedback_table.c.id, app_feedback_table.c.created_at)
+            .where(app_feedback_table.c.client_id == client_id)
+        ).fetchone()
+    return {"server_id": int(row[0]), "created_at": row[1]} if row else None
+
+
+def attach_session_feedback(session_key: str, user_id: str,
+                            username: str | None) -> int:
+    """Hand an unverified session's notes to its user once it verifies in
+    place (#360 QA P2-1, head-eng's ruling). Returns how many rows moved.
+
+    The proof is `session_key`: the sha256 of the bearer token that sent the
+    notes, matched against the token now verifying. Never by username. Only
+    still-anonymous rows (user_id IS NULL) move, and the key is cleared, so a
+    second call for the same session is a no-op.
+    """
+    if not session_key or not user_id:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(user_id=user_id, username=username, session_key=None)
+        )
+        return res.rowcount or 0
+
+
+def detach_session_feedback(session_key: str) -> int:
+    """Drop the session_key from a token's still-anonymous notes, so they can
+    never attach (release-lead delta QA E). Called when /api/session/init
+    re-points that token at a DIFFERENT user: the notes were sent as the old
+    identity and must not follow the token to the new one. The rows stay,
+    anonymous. Returns how many rows changed."""
+    if not session_key:
+        return 0
+    with engine.begin() as conn:
+        res = conn.execute(
+            update(app_feedback_table)
+            .where(app_feedback_table.c.session_key == session_key)
+            .where(app_feedback_table.c.user_id.is_(None))
+            .values(session_key=None)
+        )
+        return res.rowcount or 0
 
 
 def list_feedback(*, since_id: int = 0, limit: int = 100) -> list[dict]:

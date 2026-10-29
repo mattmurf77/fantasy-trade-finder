@@ -71,6 +71,16 @@ def main() -> None:
         sys.exit(f"refusing: VALUE {args.value!r} is not a float — "
                  "model_config values are Float-only")
 
+    # Refusal 6 — app_min_version (B8) must pass the shared write policy
+    # BEFORE either write path runs: a typo there locks every gate-aware build
+    # out of the app. The remote path also meets the same check in the PUT.
+    if args.key == "app_min_version":
+        sys.path.insert(0, str(REPO))
+        from backend.app_version_policy import validate_app_min_version  # noqa: PLC0415
+        refusal = validate_app_min_version(value)
+        if refusal:
+            sys.exit(f"refusing: {refusal}")
+
     now = datetime.now(timezone.utc).isoformat()
 
     if args.local:

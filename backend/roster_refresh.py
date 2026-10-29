@@ -9,8 +9,10 @@ bound. Scope: docs/plans/trade-time-to-suggestion/scope-eng-s0-fetch.md §B.1,
 §B.3.
 
 Never raises: a bookkeeping failure must never block session init or the tap.
-PR-B adds the fingerprint stamp (roster_snapshot → CAS → on_roster_change)
-to `_refresh_league`, the one internal refresh both entry points share.
+PR-B: a `fresh` outcome then stamps the fingerprint (`stamp`: roster_snapshot
+→ CAS → on_roster_change). `record_outcome` is the one place both refreshes
+(the session-init daemon and `_refresh_league`) record success, so both
+stamp, on their own background threads.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ import time
 from datetime import datetime, timezone
 
 from . import database as db
+from . import roster_snapshot
 from . import sleeper_http
 
 log = logging.getLogger(__name__)
@@ -57,11 +60,14 @@ def record_failure(league_id: str, exc_or_code) -> str | None:
 
 def record_outcome(league_id: str, refreshed_at: str | None, *,
                    members_ok: bool, picks_ok: bool) -> str | None:
-    """The session-init daemon finished its Sleeper roster writes.
+    """A background refresh (the session-init daemon, or `_refresh_league`)
+    finished its Sleeper roster writes.
 
     'fresh' needs both the members write and the owned-pick sync to have
     committed; otherwise the league is marked stale with the reason and
-    `refreshed_at` does not move. Returns the status written, or None.
+    `refreshed_at` does not move. A 'fresh' write then stamps the fingerprint
+    (`stamp`), which never changes the status returned. Returns the status
+    written, or None.
     """
     if not members_ok:
         return record_failure(league_id, WRITE_FAILED)
@@ -74,7 +80,60 @@ def record_outcome(league_id: str, refreshed_at: str | None, *,
     except Exception as err:
         log.warning("roster refresh state write failed league=%s: %s", league_id, err)
         return None
+    stamp(league_id)
     return db.ROSTER_STATE_FRESH
+
+
+def _pick_read_source() -> str:
+    """The engine's pick row set (`server._pick_read_source()`), so the stamp
+    hashes exactly what the serve hashes. Lazy, as in `_refresh_league`:
+    server imports this module."""
+    from . import server
+    return server._pick_read_source()
+
+
+def stamp(league_id: str) -> bool:
+    """S0 PR-B (fingerprint contract v0.4 §4): stamp `rfp1` on committed rows,
+    then tell trades-eng if it moved. Never raises.
+
+    1. Read the stored `roster_fp` (`old`), then compute `new` with
+       trades-eng's `roster_snapshot`, as the serve does.
+    2. `new == old`: nothing to write, no hook.
+    3. Compare-and-set (`database.cas_league_roster_fp`): one UPDATE … WHERE
+       `roster_fp` still equals `old`. A lost CAS (another refresh stamped
+       first) gets no hook call.
+    4. Won: `on_roster_change(league_id, old, new)`; `old` is None on the
+       first stamp. A3: the CAS transaction is committed and its connection
+       returned, and this module holds no lock here, so the call runs with no
+       open transaction and no lock, on the caller's background thread.
+
+    A failed read or fingerprint leaves `roster_fp` as stored and makes no
+    call. Returns True only when the hook was called.
+    """
+    lid = str(league_id)
+    try:
+        state = db.get_league_roster_state(lid) or {}
+        old = state.get("roster_fp")
+        with db.engine.connect() as conn:
+            new = roster_snapshot.roster_snapshot(conn, lid, pick_source=_pick_read_source()).fp
+        if new == old:
+            return False
+        won = db.cas_league_roster_fp(lid, old, new)
+    except Exception as exc:
+        log.warning("roster fp stamp failed league=%s error=%s", lid, type(exc).__name__)
+        return False
+    if not won:
+        # No retry: the stored fp can lag one roster change (the winner may
+        # have hashed older rows) until the next refresh stamps again. That
+        # self-heals and is safe, because the serve recomputes rfp1 from rows
+        # rather than trusting this column.
+        log.info("roster fp stamp lost the CAS league=%s", lid)
+        return False
+    try:
+        roster_snapshot.on_roster_change(lid, old, new)
+    except Exception:
+        log.exception("on_roster_change failed league=%s", lid)
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -183,8 +242,8 @@ def _refresh_league(league_id: str, started: str) -> str | None:
     Reads rosters and users (circuit-guarded `_sleeper_get`), replace-syncs
     `league_members` in session init's row shape, syncs owned picks (meta from
     the 15-min cache when younger than its TTL, else one read that re-warms
-    it), then records the outcome. PR-B extends
-    this function with the fingerprint stamp and `on_roster_change`.
+    it), then records the outcome; a 'fresh' outcome stamps the fingerprint
+    and may call `on_roster_change` (`record_outcome` → `stamp`).
     """
     from . import server                  # lazy: server imports this module's siblings
     from .feature_flags import is_enabled

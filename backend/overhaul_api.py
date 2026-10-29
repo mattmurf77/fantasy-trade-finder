@@ -44,6 +44,9 @@ _PREPARE_TTL_S = 120.0
 _REFRESH_MIN_INTERVAL_S = 15.0
 
 _400 = frozenset(("bad_request", "asset_not_owned", "generic_pick_not_allowed"))
+# C10: a core's "the provider may have it" codes. The attempt goes
+# `outcome_unknown`, not `send_failed`.
+_OUTCOME_UNKNOWN_CODES = frozenset(("espn_outcome_unknown", "mfl_outcome_unknown"))
 
 
 class _Conflict(Exception):
@@ -1051,6 +1054,14 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
                                          provider_status=payload.get("mfl_status") or payload.get("espn_status"),
                                          observed=True)
                 counts["sent"] += 1
+            elif payload.get("error") in _OUTCOME_UNKNOWN_CODES:
+                # C10: the provider may have the offer. Live like a transport
+                # error, so the reservation stays held and nothing re-sends it
+                # until refresh or the user settles it.
+                store.transition_attempt(a["attempt_id"], "sending", "outcome_unknown", source="server",
+                                         error={"code": payload["error"],
+                                                "message": payload.get("detail") or payload.get("message")})
+                counts["unknown"] += 1
             else:
                 store.transition_attempt(a["attempt_id"], "sending", "send_failed", source="provider",
                                          error={"code": payload.get("error") or "send_failed",

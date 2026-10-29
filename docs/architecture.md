@@ -577,6 +577,21 @@ Contested and orphaned slots are withheld from priced reads by a **row filter** 
 **M-C (flag `picks.assign_tradeable`, 2026-08-08 — [build-w3-mc.md](plans/draft-extensions/build-w3-mc.md))** opts all seven read sites in at once through one helper, `server._pick_read_source()`, and collapses the two duplicated **three-clause** engine literals into `server._owned_picks_available()` — whose ESPN clause is now a DATA test (`has_assigned_picks`) rather than a platform test. `picks_supported` follows the same rule. Every payload that prices a pick carries `source: "platform" | "user"` (+ `season`); the flag off restores the platform-only default and removes the fields, byte for byte.
 
 
+**Roster refresh and fingerprint stamp (S0, [scope](plans/trade-time-to-suggestion/scope-eng-s0-fetch.md) §B.3).** Session init's authoritative Sleeper read (rosters, users, league meta; `session_input.resolve_session_input`) is the league's roster refresh. Its rosters and meta are handed to the background daemon (no second read), and the meta seeds `_FA_LEAGUE_META_CACHE`. The daemon replace-syncs Sleeper `league_members`, syncs owned picks and draft state, then `roster_refresh.record_outcome` writes `league_roster_state` (`fresh`). A failed read writes `stale` + `last_error_code` and never touches the rows. `roster_refresh.maybe_refresh_async` re-runs the same Sleeper segment as a single-flight background kick when a league is past the roster bound (P41). Every server-side Sleeper read passes one per-process 429 circuit (`backend/sleeper_http.py`). **After a `fresh` write, both refreshes stamp the fingerprint on their own background thread** (PR-B, `roster_refresh.stamp`):
+
+```
+rows committed -> record_outcome: mark_league_roster_fresh
+  -> stamp: old = league_roster_state.roster_fp
+            new = roster_snapshot(conn, league, pick_source=server._pick_read_source()).fp   (trades-eng's rfp1)
+            new == old                    -> done (no write, no hook)
+            cas_league_roster_fp(old,new) -> UPDATE ... WHERE roster_fp = old (IS NULL on the first stamp)
+            lost (another refresh won)    -> done (no hook)
+  -> after commit, no lock held: roster_snapshot.on_roster_change(league, old, new)
+       -> trades-eng's handler (server._invalidate_league_trade_jobs_on_roster_change)
+```
+
+The stamp never raises and never changes the recorded outcome. A fingerprint error leaves `roster_fp` as stored. ESPN/MFL/Fleaflicker leagues are not refreshed here, so they are never stamped. Their imports, the user pick-assignment routes and `_refresh_sleeper_members` write fingerprint inputs without firing the hook, and the serve recomputes `rfp1` from rows either way (scope §B.6).
+
 ## Components
 
 ### Backend (`backend/`)

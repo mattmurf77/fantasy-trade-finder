@@ -352,6 +352,10 @@ export function runWithDeadline<T>(
 function timeoutForRequest(path: string, method: string): number {
   const pathname = path.replace(/^https?:\/\/[^/]+/, '').split(/[?#]/)[0];
   if (method === 'GET' && pathname === '/api/league/season-projections') return SLOW_TIMEOUT_MS;
+  // LEG-S6 (#446): the server may spend up to 2 x APPLE_HTTP_TIMEOUT_S on the
+  // Sign in with Apple revoke before it deletes; the slow cap keeps a slow
+  // Apple from showing "took too long" while the deletion still completes.
+  if (method === 'DELETE' && pathname === '/api/account') return SLOW_TIMEOUT_MS;
   if (method === 'POST' && SLOW_POST_PATHS.some((p) => path.includes(p))) {
     return SLOW_TIMEOUT_MS;
   }

@@ -141,13 +141,15 @@ Pre-flip rows carry a NULL `evidence_tier` and stay eligible, so the new definit
 
 - **The series break:** the per-league endorsement ratio SUM(`was_recommended`)/COUNT(*) **steps down at the flip**.
   Unviewed cards past the first 30 no longer count as recommended. **Don't trend the ratio across the flip day.**
-- **Flip day:** the receipts break's constant, `RECEIPTS_SERIES_BREAK_DAY` (`receipts_service.py:1126-1133` @ `origin/main`),
-  `None` until the scribe fills it in at the flip. One flip day for both series, so they can't drift.
+- **Flip day:** the shared constant `database.PACKED_EVIDENCE_FLIP_DAY` (`database.py:7163` @ `origin/main` `823c2371`),
+  `None` until the scribe fills it in at the flip. Both the receipts caveat (`receipts_service.py:1139`) and the
+  ratio caveat (`server.py:14982`) read it, so the two series can't drift (#444).
 - **Readout:** the ratio is comparable across the flip only if pre-flip links are recomputed on the same
   viewed-or-first-30 basis (from `deck_outcomes` history plus `deck_impressions.card_index`). Until then, report
   pre-flip and post-flip separately.
-- **Not yet in code:** the ratio endpoint (`server.py:14936` @ `origin/main`) returns no `series_break` caveat today.
-  analytics-lead has asked head-eng to add one keyed to the same constant (the #418 `SERIES_BREAKS` / R-U6b pattern).
+- **In code (#444):** `GET /api/admin/suggestion-telemetry/ratio` returns `caveats` with a `series_break` entry
+  (scope `suggestion_ratio`) once the flip day is set and the links' trades span it (`server.py:14977-14985`,
+  `:15020` @ `origin/main` `823c2371`).
 
 ## Method & caveats
 
