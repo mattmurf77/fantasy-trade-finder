@@ -4246,7 +4246,7 @@ DECK_PIPELINE_PINS = {
     5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
     6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
     7: "facf9a9f34b7529a",   # #487 QA P3-3 (models-eng): one immediate retry inside the picks and draft-context memos; a transient failure no longer forfeits the owner arm
-    8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout is never retried at once (_is_pool_timeout); the same reads, values and shape
+    8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout isn't retried at once (_is_pool_timeout): it forfeits the owner arm, as before v7; other failures as v7
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
