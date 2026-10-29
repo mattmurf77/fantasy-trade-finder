@@ -104,6 +104,14 @@ cover, so those with a never-delivered withdrawal inside their first
 REPEAT_WINDOW cards are counted as after_cut_not_checked and printed
 "B-DK-7 after-cut: not checked (n)" (models-lead F4); n > 0 goes to head-eng.
 
+A card whose partner is a redaction token (contract.REDACTED_PARTNER_PREFIX,
+the account-deletion scrub's) is not auditable for all four rules, as a card
+with no full row is (its deck incomplete for B-DK-7): the scrub drops its
+trade_hash from filter_inputs.protected and its partner's qb_te entry, and
+may clear its row's likes_you, so neither its protection nor the partner's
+holdings are known (head-eng, 2026-10-29). Counted as redacted_cards and
+printed. Only the token marks it, never a hash (the partner-hash rule).
+
 Per rule: violations, audited cards (the rule ran on them), protected cards
 (exempt), not auditable cards, the bar 0, a status, and up to LIST_CAP
 examples (deck id, card_index, displayed position, trade_hash). A card can
@@ -125,7 +133,7 @@ A recorded deck whose record carries repeat_head (below) needs no rows past
 the window: its breach is explained as short_deck when every unprotected
 over-cap appearance is a card the cap deferred (its trade_hash not in
 repeat_head); a list naming one of them is a violation. Both are counted in `explained`, split as
-explained_protected / explained_short_deck, with examples (`why`). A window card with no full row is not auditable and
+explained_protected / explained_short_deck, with examples (`why`). A window card with no full row (or a redacted partner) is not auditable and
 its deck incomplete (a breach found there still counts). The filter ran on
 the built order, ghost rows and later withdrawals included, so a served
 breach can come from the serve order: each example gives the deck's ghost
@@ -168,6 +176,7 @@ from types import SimpleNamespace
 from sqlalchemy import Integer, String, column, inspect, select, table
 
 from backend.database import deck_impressions_table
+from backend.eval.contract import REDACTED_PARTNER_PREFIX
 from backend.deck_quality import (
     BREAKUP_MIN_RATIO, FILLER_FLOOR, FILLER_FRAC, PROTECTED_ATTRS, REDUNDANT_MIN_RATIO, REPEAT_CAP,
     REPEAT_WINDOW, _breakup, _filler, _redundant_side, _repeat_cap, is_protected, position_caps,
@@ -242,6 +251,7 @@ class BdkAudit:
     evidence: dict             # rule input -> where the evidence records it
     notes: list
     overall: str
+    redacted_cards: int = 0    # audit-set cards of a redacted partner (module doc)
 
 
 def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAudit:
@@ -279,6 +289,7 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
 
     card_rules = {name: _tally() for name in ("breakup", "filler", "redundant")}
     no_row = {"viewed_by_cause": Counter(), "unviewed": 0, "examples": []}
+    redacted = 0
     for d in trades:
         fi = records[d.deck_job_id][1]
         for c in cards[d.deck_job_id]:
@@ -295,6 +306,11 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
                     no_row["unviewed"] += 1
                 continue
             give, receive, partner, _ = row
+            if _scrubbed(row):                    # protection and holdings unknown
+                redacted += 1
+                for t in card_rules.values():
+                    t["not_auditable"] += 1
+                continue
             if protected_of(d, c, row):
                 for t in card_rules.values():
                     t["protected"] += 1
@@ -348,7 +364,8 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
         filter_inputs=dict(sorted(Counter(records[d.deck_job_id][0] for d in trades).items())),
         audit_cards=sum(len(cs) for cs in cards.values()),
         viewed_past_window=sum(len(p) for _w, p in sets.values()),
-        no_full_row=no_row, rules=rules, evidence=EVIDENCE, notes=notes, overall=overall)
+        no_full_row=no_row, rules=rules, evidence=EVIDENCE, notes=notes, overall=overall,
+        redacted_cards=redacted)
 
 
 def _audit_set(deck) -> tuple[list, list]:
@@ -362,6 +379,17 @@ def _ids(side) -> list[str] | None:
     """An assets_json side as str ids; None when it isn't a list (the card
     is then not auditable, never a crash)."""
     return [str(a) for a in side] if isinstance(side, list) else None
+
+
+def _scrubbed(row) -> bool:
+    """Whether a full row's partner is a redaction token (module doc)."""
+    return row[2].startswith(REDACTED_PARTNER_PREFIX)
+
+
+def _checkable(row) -> bool:
+    """Whether B-DK-7 can check a card from its full row: well-formed, its
+    partner not redacted (module doc)."""
+    return row is not None and row[0] is not None and not _scrubbed(row)
 
 
 def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
@@ -468,7 +496,10 @@ def _short_deck(deck, rows, fetch, packed: bool, protected_of) -> bool:
     may have stopped after a publication batch with nothing marking it
     (complete ones read FAIL: the safe side).
     Rows the window didn't need are fetched and added to `rows`;
-    `protected_of(deck, card, row)` is each card's protection (module doc)."""
+    `protected_of(deck, card, row)` is each card's protection (module doc).
+    A redacted partner's card may read unprotected (the scrub may have
+    removed its protection, never added one). That can only break the fixed
+    point, never make one, so it needs no exclusion here."""
     if deck.exclusion is not None and not (packed and deck.exclusion == IN_FLIGHT):
         return False
     if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
@@ -506,7 +537,7 @@ def _repeat(trades, sets, rows, fetch, packed: set, protected_of, head_of) -> di
         over_hash: dict[str, list] = {}    # asset -> trade_hash, per over-cap appearance
         for c in window:
             row = rows.get(c.impression_id)
-            if row is None or row[0] is None:
+            if not _checkable(row):
                 t["not_auditable"] += 1
                 continue
             t["audited"] += 1
@@ -518,8 +549,7 @@ def _repeat(trades, sets, rows, fetch, packed: set, protected_of, head_of) -> di
                     over_hash.setdefault(a, []).append(c.trade_hash)
                 at.setdefault(a, []).append(c.card_index)
             seen.update(assets)
-        t["incomplete_decks"] += any((rows.get(c.impression_id) or (None,))[0] is None
-                                     for c in window)
+        t["incomplete_decks"] += not all(_checkable(rows.get(c.impression_id)) for c in window)
         head = head_of(d)                  # the cap's short head (repeat_head), else None
         short = None                       # checked once per deck, only on a breach
         for asset, protected in over.items():
@@ -604,11 +634,15 @@ def render(r: BdkAudit) -> str:
                          f"{t['not_auditable']} cards couldn't be checked.")
     if rp["incomplete_decks"]:
         lines.append(f"B-DK-7 repeat: {rp['incomplete_decks']} decks have a window card with "
-                     "no full row.")
+                     "no full row or a redacted partner.")
     lines.append(f"B-DK-7 after-cut: not checked ({rp['after_cut_not_checked']}): live-evidence "
                  f"(no-pack) decks with a never-delivered withdrawal in their first "
                  f"{REPEAT_WINDOW} cards; D3's serve-time re-cap doesn't cover them, so B-DK-7 "
                  "certifies packed decks only (models-lead F4: n > 0 goes to head-eng).")
+    if r.redacted_cards:
+        lines.append(f"Redacted partners (account deletion): {r.redacted_cards} audit-set cards "
+                     "not auditable for B-DK-4..7: their protection and the partner's holdings "
+                     "were scrubbed.")
     pd = r.rules["breakup"]["protected_by_deck"]
     lines.append(f"B-DK-4..6 exempt (protected) cards by deck (F3): recorded {pd['recorded']}, "
                  f"no record {pd['no_record']}.")

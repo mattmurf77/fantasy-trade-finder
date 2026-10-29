@@ -15,6 +15,14 @@ Gates: eval code only (`backend/eval/{data,replay,scorers,contract,persistence,f
   - It rewrites every value-model record's `partner_rates` keys naming a deleted user, as viewer or as partner, to that user's token. Rates are kept.
   - The write is atomic; a re-run with the same map is a no-op; the serve cache reloads.
   - If the store keeps changing under it, it raises so the scrub retries.
+  - **Added 2026-10-29 (head-eng's check, (a) and (b)):**
+    - A torn line that may hold a deleted id is dropped and counted; that covers a whole id and a line cut off mid-id. The loader skips such lines, so serving is unchanged.
+    - The window is documented: no lock exists to share, so the scrub must call the hook before `nightly_refit` in the daily tick.
+- **Redacted partners in the B-DK audit (head-eng, 2026-10-29):** a card whose partner is a `redacted:` token is not auditable for B-DK-4..7, because the scrub removes its protection and the partner's `qb_te`. Its deck counts as incomplete for B-DK-7. The count is `redacted_cards`, printed.
+  - `_short_deck` is unchanged: a scrubbed protection can only break the fixed point, never make one.
+  - Tests: +2 audit tests (3 cases), +4 model-store cases.
+  - Sabotage, each red then restored (6): the card loop's redaction check; the repeat check; never dropping a torn line; no mid-id tail match; no render line; a substring match on the prefix.
+  - All `test_eval_*` plus `test_deck_value_model.py`: 415 passed.
 - **#501 QA P3s:**
   - An anchor not after its card is rejected.
   - Ghost and null cases are pinned (QA's probes).

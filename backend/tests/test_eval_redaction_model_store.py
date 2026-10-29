@@ -82,3 +82,31 @@ def test_a_store_that_keeps_changing_raises_for_the_scrub_to_retry(store, monkey
     with pytest.raises(RuntimeError, match="kept changing"):
         redaction.redact_model_store({"gone": TOKEN})
     assert open(store, encoding="utf-8").read() == before
+
+
+@pytest.mark.parametrize("torn, dropped", [
+    ('{"model": {"partner_rates": {"gone|p1": 0.7, "u1|p', True),     # a whole deleted id
+    ('{"model": {"partner_rates": {"u1|p2": 0.5, "u1|go', True),      # torn inside it
+    ('{"model": {"partner_rates": {"u1|p2": 0.5, "u1|p3": 0.', False),  # no deleted id
+], ids=["whole_id", "torn_mid_id", "no_id"])
+def test_a_torn_line_that_may_hold_a_deleted_id_is_dropped(store, torn, dropped):
+    """head-eng's #529 check (a): the loader skips an unparseable line, so
+    dropping one costs nothing, and one holding a deleted id, whole or cut
+    off mid-id, must not survive. It counts as one change; others are kept."""
+    with open(store, "a", encoding="utf-8") as fh:
+        fh.write(torn + "\n")
+    served = vm.load_latest_model(use_cache=False).partner_rates
+    assert redaction.redact_model_store({"gone": TOKEN}) == 3 + dropped
+    text = open(store, encoding="utf-8").read()
+    assert (torn in text) is not dropped and "{torn" in text
+    assert "gone" not in text and "|go\n" not in text
+    assert vm.load_latest_model(use_cache=False).partner_rates == {
+        k.replace("gone", TOKEN): v for k, v in served.items()}
+    assert redaction.redact_model_store({"gone": TOKEN}) == 0
+
+
+def test_a_store_whose_only_change_is_a_torn_line_is_rewritten(tmp_path):
+    path = tmp_path / "models.jsonl"
+    path.write_text('{"model": {"partner_rates": {"gone|\n', encoding="utf-8")
+    assert redaction.redact_model_store({"gone": TOKEN}, path=str(path)) == 1
+    assert path.read_text(encoding="utf-8") == ""

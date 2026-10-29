@@ -36,7 +36,7 @@ from backend.database import deck_impressions_table, deck_outcomes_table
 from backend.eval.bdk_audit import (
     FAIL, INCOMPLETE, NOT_AUDITABLE, PASS, ReadOnlyViolation, audit, main, render,
 )
-from backend.eval.contract import card_impression_id
+from backend.eval.contract import REDACTED_PARTNER_PREFIX, card_impression_id
 from backend.tests.test_eval_pack_reader import SERVED, _card, _deck_cards, _row, pack_table
 from backend.tests.test_eval_withdrawals_and_paging import (
     DB, _after, act, make_db, put_pack, withdraw, withdrawals_table,
@@ -954,3 +954,43 @@ def test_live_evidence_decks_cut_inside_the_window_are_counted_not_checked():
     r = run(db)
     assert r.rules["repeat"]["after_cut_not_checked"] == 1
     assert "B-DK-7 after-cut: not checked (1): live-evidence (no-pack) decks" in render(r)
+
+
+REDACTED = f"{REDACTED_PARTNER_PREFIX}9f0c"
+
+
+@pytest.mark.parametrize("record", [{}, None], ids=["recorded", "no_record"])
+def test_a_redacted_partner_s_cards_are_not_auditable(record):
+    """head-eng 2026-10-29: the deletion scrub drops a redacted partner's
+    hashes from filter_inputs.protected and its qb_te entry (and may clear
+    its rows' likes_you), so its cards' protection and holdings are unknown:
+    not auditable for all four rules, never a violation and never a pass.
+    Card 1 trips breakup and card 3 is X's fourth copy, so each would read as
+    a violation."""
+    db = make_db()
+    deck(db, "r", W, {1: row("r", 1, *shape("breakup", "r", 1), partner_user_id=REDACTED),
+                      **{i: with_x("r", i) for i in (0, 2)},
+                      3: with_x("r", 3, partner_user_id=REDACTED), 4: with_x("r", 4)},
+         record=record)
+    r = run(db)
+    for name in ("breakup", "filler", "redundant"):
+        assert (r.rules[name]["violations"] or 0, r.rules[name]["protected"]) == (0, 0), name
+    assert r.rules["breakup"]["not_auditable"] == (2 if record is not None else W)
+    t = r.rules["repeat"]
+    assert (t["violations"], t["not_auditable"], t["incomplete_decks"]) == (0, 2, 1)
+    assert t["status"] == INCOMPLETE and r.overall == INCOMPLETE and r.redacted_cards == 2
+    out = render(r)
+    assert ("Redacted partners (account deletion): 2 audit-set cards not auditable for "
+            "B-DK-4..7") in out
+    assert "1 decks have a window card with no full row or a redacted partner." in out
+
+
+def test_only_the_token_marks_a_redacted_partner():
+    """A partner id that merely contains the prefix is audited as usual, and
+    a deck without redacted cards prints no redaction line."""
+    db = make_db()
+    deck(db, "p", 2, {1: row("p", 1, *shape("breakup", "p", 1),
+                             partner_user_id=f"x{REDACTED_PARTNER_PREFIX}1")}, record={})
+    r = run(db)
+    assert (r.rules["breakup"]["violations"], r.redacted_cards) == (1, 0)
+    assert "Redacted partners" not in render(r)
