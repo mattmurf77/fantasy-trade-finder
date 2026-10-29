@@ -10,7 +10,12 @@ import { getMflLinkStatus, proposeTradeToMfl } from '../api/sendInMfl';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
 import { isSendOutcomeUnknown } from '../api/sendOutcome';
-import { SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownMessage } from '../utils/sendOutcomeCopy';
+import {
+  SEND_NOT_SENT_TITLE,
+  SEND_OUTCOME_UNKNOWN_TITLE,
+  sendNotSentFallback,
+  sendOutcomeUnknownBody,
+} from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
 // "Send in MFL" — the MFL twin of SendInSleeperButton, mounted FOR MFL
@@ -125,8 +130,8 @@ export default function SendInMflButton({
 
       if (isSendOutcomeUnknown(err)) {
         // Timed out, no answer, or the server's mfl_outcome_unknown: the
-        // trade may be in MFL. Never "try again" (api/sendOutcome.ts).
-        Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownMessage('MFL'), [
+        // trade may be in MFL. No Retry or Send-again here (api/sendOutcome.ts).
+        Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownBody('MFL', code, detail), [
           { text: 'OK', style: 'cancel' },
           { text: 'Open MFL', onPress: openMfl },
         ]);
@@ -166,10 +171,8 @@ export default function SendInMflButton({
         Alert.alert('Send in MFL', 'Sending isn’t available right now.');
       } else if (code === 'mfl_write_failed') {
         Alert.alert(
-          'MFL wouldn’t accept the send',
-          detail
-            ? `MFL rejected the request:\n\n${detail}`
-            : 'MFL rejected the request. You can still propose it on the MFL site.',
+          SEND_NOT_SENT_TITLE,
+          detail || sendNotSentFallback('MFL'),
           [
             { text: 'OK', style: 'cancel' },
             { text: 'Open MFL', onPress: openMfl },

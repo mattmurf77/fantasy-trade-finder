@@ -440,23 +440,79 @@ function firstCatchIf(sf, tryStmt) {
   });
 
   const copy = load('src/utils/sendOutcomeCopy.ts', (n) => { throw new Error(`unexpected copy import ${n}`); }, clock());
-  await check('C4. the copy: per-platform "couldn’t confirm" (curly apostrophe), a neutral title, never "try again"', () => {
-    expect(copy.SEND_OUTCOME_UNKNOWN_TITLE === 'Check before resending', `title: ${copy.SEND_OUTCOME_UNKNOWN_TITLE}`);
-    expect(!/couldn.t send|failed|try again/i.test(copy.SEND_OUTCOME_UNKNOWN_TITLE), 'the title undercuts "couldn’t confirm"');
-    const want = {
-      ESPN: 'Couldn’t confirm whether this trade reached ESPN. Check ESPN before sending it again.',
-      MFL: 'Couldn’t confirm whether this trade reached MFL. Check MFL before sending it again.',
-    };
-    for (const [p, text] of Object.entries(want)) {
-      expect(copy.sendOutcomeUnknownMessage(p) === text, `${p}: ${copy.sendOutcomeUnknownMessage(p)}`);
+  // Marketing's final copy, addendum 10 items 8a/8b/8e/8f/8i, word for word
+  // with STRAIGHT apostrophes (docs/plans/org-bringup/leads/marketing-lead-copy.md).
+  const FINAL = {
+    unknownTitle: 'Check before resending',
+    notSentTitle: 'Not sent',
+    unknown: {
+      ESPN: "Couldn't confirm whether this trade reached ESPN. Check your league's pending trades on ESPN before you send it again.",
+      MFL: "Couldn't confirm whether this trade reached MFL. Check your league's pending trades on MFL before you send it again.",
+    },
+    notSent: {
+      ESPN: "ESPN didn't accept this trade, so nothing was sent. You can still propose it on ESPN.",
+      MFL: "MFL didn't accept this trade, so nothing was sent. You can still propose it on MFL.",
+    },
+  };
+  await check('C4. the copy, word for word: titles "Check before resending" / "Not sent", 8e/8f client bodies, 8a/8b fallbacks, straight apostrophes', () => {
+    const bad = [];
+    if (copy.SEND_OUTCOME_UNKNOWN_TITLE !== FINAL.unknownTitle) bad.push(`unknown title: ${copy.SEND_OUTCOME_UNKNOWN_TITLE}`);
+    if (copy.SEND_NOT_SENT_TITLE !== FINAL.notSentTitle) bad.push(`not-sent title: ${copy.SEND_NOT_SENT_TITLE}`);
+    for (const p of ['ESPN', 'MFL']) {
+      if (copy.sendOutcomeUnknownMessage(p) !== FINAL.unknown[p]) bad.push(`${p} unknown: ${copy.sendOutcomeUnknownMessage(p)}`);
+      if (copy.sendNotSentFallback(p) !== FINAL.notSent[p]) bad.push(`${p} not-sent fallback: ${copy.sendNotSentFallback(p)}`);
     }
+    const finals = [FINAL.unknownTitle, FINAL.notSentTitle, ...Object.values(FINAL.unknown), ...Object.values(FINAL.notSent)];
+    if (finals.some((s) => s.includes('’'))) bad.push('a final string carries a curly apostrophe');
+    expect(!bad.length, bad.join('; '));
+  });
+
+  await check('C5. outcome-unknown body: the server\'s own detail for <platform>_outcome_unknown, else the client line; never another code\'s text', () => {
+    const bad = [];
+    const cases = [
+      ['ESPN', 'espn_outcome_unknown', 'Server line.', 'Server line.'],
+      ['MFL', 'mfl_outcome_unknown', 'Server line.', 'Server line.'],
+      ['ESPN', undefined, undefined, FINAL.unknown.ESPN],             // our timeout / network drop
+      ['MFL', undefined, undefined, FINAL.unknown.MFL],
+      ['ESPN', 'internal_error', 'Unexpected server error.', FINAL.unknown.ESPN],
+      ['ESPN', 'mfl_outcome_unknown', 'Wrong platform.', FINAL.unknown.ESPN],
+      ['MFL', 'mfl_outcome_unknown', '  ', FINAL.unknown.MFL],
+      ['ESPN', undefined, '<html>Gateway Timeout</html>', FINAL.unknown.ESPN],
+    ];
+    for (const [p, code, detail, want] of cases) {
+      const got = copy.sendOutcomeUnknownBody(p, code, detail);
+      if (got !== want) bad.push(`${p}/${code}/${JSON.stringify(detail)} → ${got}`);
+    }
+    expect(!bad.length, bad.join('; '));
+  });
+
+  await check('C6. sweep of the copy module: no "failed" / "error" anywhere; no "nothing was sent" / "try again" in outcome-unknown copy; overhaul line marked pending marketing', () => {
+    const bad = [];
+    const sf = parse('src/utils/sendOutcomeCopy.ts');
+    const lits = findAll(sf, (n) => ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n));
+    expect(lits.length >= 6, `only ${lits.length} literals found in the copy module`);
+    for (const n of lits) {
+      if (/\bfail(ed|ure|s)?\b|\berrors?\b/i.test(n.getText(sf))) bad.push(`literal: ${n.getText(sf)}`);
+    }
+    const outputs = [];
+    for (const [name, v] of Object.entries(copy)) {
+      if (typeof v === 'string') outputs.push([name, v]);
+      else if (typeof v === 'function') for (const p of ['ESPN', 'MFL', 'Sleeper']) outputs.push([`${name}(${p})`, v(p)]);
+    }
+    expect(outputs.length >= 14, `only ${outputs.length} copy outputs swept`);
+    for (const [name, s] of outputs) {
+      if (/\bfail(ed|ure|s)?\b|\berrors?\b/i.test(s)) bad.push(`${name}: ${s}`);
+      const unknown = /UNKNOWN|Unknown/.test(name);
+      if (unknown && /nothing (was|went) (sent|out)|try again|retry/i.test(s)) bad.push(`${name}: ${s}`);
+    }
+    const src = read('src/utils/sendOutcomeCopy.ts');
+    const ovh = src.indexOf('export function overhaulSendOutcomeUnknownMessage');
+    if (!/PENDING MARKETING/.test(src.slice(Math.max(0, ovh - 200), ovh))) bad.push('overhaul line not marked PENDING MARKETING');
     for (const p of ['ESPN', 'MFL', 'Sleeper']) {
       const msg = copy.overhaulSendOutcomeUnknownMessage(p);
-      expect(msg.startsWith(`Couldn’t confirm whether these offers reached ${p}.`), `overhaul ${p}: ${msg}`);
-      expect(msg.includes(`Check ${p} before sending`), `overhaul ${p}: no "check before sending"`);
+      if (!msg.startsWith(`Couldn’t confirm whether these offers reached ${p}.`)) bad.push(`overhaul ${p}: ${msg}`);
     }
-    const all = [copy.SEND_OUTCOME_UNKNOWN_TITLE, copy.sendOutcomeUnknownMessage('ESPN'), copy.sendOutcomeUnknownMessage('MFL'), copy.overhaulSendOutcomeUnknownMessage('ESPN')];
-    expect(!all.some((s) => /try again|nothing (was sent|went out)/i.test(s)), 'outcome-unknown copy offers a retry or claims nothing was sent');
+    expect(!bad.length, bad.join('; '));
   });
 
   // ════ D. The UI branches on it first ═════════════════════════════════════
@@ -464,7 +520,7 @@ function firstCatchIf(sf, tryStmt) {
     ['src/components/SendInEspnButton.tsx', 'ESPN', 'openEspn', 'proposeTradeToEspn'],
     ['src/components/SendInMflButton.tsx', 'MFL', 'openMfl', 'proposeTradeToMfl'],
   ]) {
-    await check(`D. ${path.basename(file)}: the catch's FIRST branch is isSendOutcomeUnknown(err) → the ${platform} copy, OK / Open ${platform}, no resend`, () => {
+    await check(`D. ${path.basename(file)}: the catch's FIRST branch is isSendOutcomeUnknown(err) (so "Couldn’t send" never shows for it) → "Check before resending", buttons exactly OK + Open ${platform}, no Retry / resend`, () => {
       const sf = parse(file);
       const doPropose = callbackBody(sf, 'doPropose');
       const tryStmt = catchOf(sf, doPropose);
@@ -472,15 +528,41 @@ function firstCatchIf(sf, tryStmt) {
         `${sender}(...) is not called in doPropose's try block`);
       const first = firstCatchIf(sf, tryStmt);
       expect(first.expression.getText(sf) === 'isSendOutcomeUnknown(err)', `first catch branch is \`if (${first.expression.getText(sf)})\``);
-      const then = first.thenStatement.getText(sf);
-      expect(then.includes(`Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownMessage('${platform}')`), `branch does not alert the shared copy: ${then.slice(0, 120)}`);
-      expect(then.includes(`onPress: ${opener}`), `no Open ${platform} button`);
-      const resend = findAll(first.thenStatement, (n) => ts.isIdentifier(n) && /^(doPropose|confirmSend|onPress|setState|propose\w*)$/.test(n.text) && !(ts.isPropertyAssignment(n.parent) && n.parent.name === n));
+      const alerts = findAll(first.thenStatement, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'Alert.alert');
+      expect(alerts.length === 1, `${alerts.length} Alert.alert calls in the unknown branch`);
+      const [title, body, actions] = alerts[0].arguments;
+      expect(title && title.getText(sf) === 'SEND_OUTCOME_UNKNOWN_TITLE', `title: ${title && title.getText(sf)}`);
+      expect(body && body.getText(sf) === `sendOutcomeUnknownBody('${platform}', code, detail)`, `body: ${body && body.getText(sf)}`);
+      expect(actions && ts.isArrayLiteralExpression(actions), 'no actions array');
+      const texts = actions.elements.map((el) => {
+        const t = ts.isObjectLiteralExpression(el) && el.properties.find((p) => p.name && p.name.getText(sf) === 'text');
+        return t ? t.initializer.getText(sf) : el.getText(sf);
+      });
+      expect(JSON.stringify(texts) === JSON.stringify(["'OK'", `'Open ${platform}'`]), `buttons: ${texts.join(', ')} — want exactly OK + Open ${platform}`);
+      expect(first.thenStatement.getText(sf).includes(`onPress: ${opener}`), `Open ${platform} does not call ${opener}`);
+      const resend = findAll(first.thenStatement, (n) => ts.isIdentifier(n) && /^(doPropose|confirmSend|setState|propose\w*)$/.test(n.text));
       expect(!resend.length, `the unknown branch can resend: ${resend.map((n) => n.text).join(', ')}`);
-      expect(!/try again/i.test(literals(first.thenStatement)), 'the unknown branch says "try again"');
+      expect(!/try again|retry|send again/i.test(literals(first.thenStatement)), 'the unknown branch offers a retry');
       const imports = sf.statements.filter(ts.isImportDeclaration).map((d) => d.getText(sf)).join('\n');
       expect(/import \{ isSendOutcomeUnknown \} from '\.\.\/api\/sendOutcome'/.test(imports), 'isSendOutcomeUnknown not imported from api/sendOutcome');
       expect(/from '\.\.\/utils\/sendOutcomeCopy'/.test(imports), 'copy not imported from utils/sendOutcomeCopy');
+    });
+
+    await check(`D. ${path.basename(file)}: ${platform.toLowerCase()}_write_failed → "Not sent", body = detail alone (no "rejected the request" prefix), fallback 8${platform === 'ESPN' ? 'a' : 'b'}`, () => {
+      const sf = parse(file);
+      const tryStmt = catchOf(sf, callbackBody(sf, 'doPropose'));
+      let branch = firstCatchIf(sf, tryStmt);
+      while (branch && branch.expression.getText(sf) !== `code === '${platform.toLowerCase()}_write_failed'`) {
+        branch = branch.elseStatement && ts.isIfStatement(branch.elseStatement) ? branch.elseStatement : null;
+      }
+      expect(branch, `no \`code === '${platform.toLowerCase()}_write_failed'\` branch in the catch chain`);
+      const alert = findAll(branch.thenStatement, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'Alert.alert')[0];
+      expect(alert, 'no Alert.alert in the write_failed branch');
+      const [title, body] = alert.arguments;
+      expect(title.getText(sf) === 'SEND_NOT_SENT_TITLE', `title: ${title.getText(sf)}`);
+      expect(body.getText(sf).replace(/\s+/g, ' ') === `detail || sendNotSentFallback('${platform}')`, `body: ${body.getText(sf)}`);
+      const lits = literals(sf);
+      expect(!/rejected the request|wouldn.t accept the send/i.test(lits), `the old write_failed copy is still in ${path.basename(file)}`);
     });
   }
 
