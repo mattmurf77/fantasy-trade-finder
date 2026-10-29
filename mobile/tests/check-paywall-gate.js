@@ -1506,21 +1506,58 @@ check('9i. B8 #1 [executed]: the Settings tip row is data-driven — shown only 
   eq(offered({ enabled: true, tips: [] }), false, 'tips: [] (launch) → hidden');
   eq(offered({ enabled: true, tips: null }), false, 'malformed → hidden');
   eq(offered({ enabled: true, tips: [{ product_id: 'ftf_tip_199', display_price: '$1.99' }] }), true, 'tips offered → shown');
-  let opts = null;
-  let cached;
   eq(offered(null), false, 'null config → hidden');
   eq(offered({}), false, '{} → hidden');
   assert(!/useTipsOffered|tipsOffered/.test(strip(read(SUBS))), 'the hook left SubscriptionSection');
-  const hook = extractFn(TIPS, 'useTipsOffered', {
-    useQuery: (o) => { opts = o; return { data: cached }; },
-    getPaywallConfig: () => { throw new Error('fetched'); },
-    tipsOffered: offered,
-  });
-  cached = undefined; eq(hook(), false, 'hook: nothing cached → hidden');
-  cached = { tips: [] }; eq(hook(), false, 'hook: tips: [] → hidden');
-  cached = { tips: [{ product_id: 'ftf_tip_499' }] }; eq(hook(), true, 'hook: tips → shown');
-  eq(JSON.stringify(opts.queryKey), JSON.stringify(['paywall-config', 'ios']), 'the paywall config cache key');
-  eq(opts.enabled, false, 'a subscription that never fetches (the hub\'s rule 1)');
+  // The HOOK itself, run against a stubbed useQuery (release-lead's #526 QA
+  // P2-1): every hidden case, not just the shown one, so a hook that returns
+  // true for an unknown config or `!!data` fails here. P3-3: a crash in the
+  // hook (or in loading it) is a NAMED failure, never a throw past the check.
+  let opts = null;
+  let cached;
+  let hook;
+  try {
+    hook = extractFn(TIPS, 'useTipsOffered', {
+      useQuery: (o) => { opts = o; return { data: cached }; },
+      getPaywallConfig: () => { throw new Error('the hook fetched the paywall config'); },
+      tipsOffered: offered,
+    });
+  } catch (e) {
+    throw new Error(`useTipsOffered could not be loaded: ${e && e.message}`);
+  }
+  const run = (data) => {
+    cached = data;
+    opts = null;
+    let out;
+    try {
+      out = hook();
+    } catch (e) {
+      throw new Error(`useTipsOffered crashed on cached data ${JSON.stringify(data)}: ${e && e.message}`);
+    }
+    assert(opts, `useTipsOffered did not call useQuery (cached data ${JSON.stringify(data)})`);
+    eq(opts.enabled, false, `useQuery got enabled: false (cached data ${JSON.stringify(data)}): a cache subscription that never fetches`);
+    eq(JSON.stringify(opts.queryKey), JSON.stringify(['paywall-config', 'ios']), 'the paywall config cache key');
+    return out;
+  };
+  eq(run(undefined), false, 'hook: data undefined (nothing cached) → hidden');
+  eq(run(null), false, 'hook: data null → hidden');
+  eq(run({}), false, 'hook: data {} → hidden');
+  eq(run({ tips: [] }), false, 'hook: data {tips: []} (launch) → hidden');
+  eq(run({ enabled: false }), false, 'hook: paywall off → hidden');
+  eq(run({ tips: [{ product_id: 'ftf_tip_499' }] }), true, 'hook: tips offered → shown');
+});
+
+check('9i2. the hub\'s zero-network rule (release-lead\'s #526 QA P3-1) [shape]: neither Settings screen fetches the paywall config — no useQuery / prefetchQuery / fetchQuery for it, no getPaywallConfig — and its only access is the `enabled: false` hook', () => {
+  for (const rel of ['screens/settings/SettingsHubScreen.tsx', 'screens/SettingsScreen.tsx']) {
+    const t = strip(read(rel));
+    const hit = t.match(/paywall-config|getPaywallConfig|(prefetchQuery|fetchQuery|ensureQueryData)\s*\([^)]*paywall/);
+    assert(!hit, `${rel}: reads the paywall config itself ("${hit && hit[0]}")`);
+    eq((t.match(/useTipsOffered\(\)/g) || []).length, 1, `${rel}: one useTipsOffered() call, its only access`);
+    assert(/import \{ useTipsOffered \} from '(\.\.\/)+state\/useTipsOffered';/.test(t), `${rel}: the hook comes from state/useTipsOffered`);
+  }
+  const hookSrc = strip(read('state/useTipsOffered.ts'));
+  eq((hookSrc.match(/useQuery</g) || []).length, 1, 'the hook has one query');
+  assert(/enabled: false,/.test(hookSrc) && !/prefetchQuery|fetchQuery|ensureQueryData|refetch/.test(hookSrc), 'the hook only subscribes (enabled: false), never fetches');
 });
 
 check('9j. B8 [shape]: the 11-06 binary ships Settings › Subscription WITHOUT the member status block (STATUS_ROWS_AT_LAUNCH = false), never reads RevenueCat for it, and keeps Restore reachable for every verified session (member, non-member, entitlements still loading)', () => {
