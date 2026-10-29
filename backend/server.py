@@ -2929,6 +2929,10 @@ def _cleanup_loop() -> None:
         except Exception:
             log.exception("deck-diagnostic retention failed")
 
+        # Deck-evidence retention (legal R28.20 (iii)): dark until
+        # deck_evidence_retention_days is set; one bounded pass per tick.
+        _prune_deck_evidence()
+
         # S8: retire the packed decks that can't be delivered again here
         # (superseded, revoked, at the 24 h cap, or about to be evicted below).
         # A DB error on a retirement never stops this loop: it is logged, the
@@ -2981,6 +2985,25 @@ def _cleanup_loop() -> None:
             prepared_trade_runtime.tick(sys.modules[__name__])
         except Exception:
             log.warning("prepared inventory maintenance unavailable", exc_info=True)
+
+
+def _prune_deck_evidence() -> dict:
+    """The cleanup loop's deck-evidence retention step (database.
+    purge_deck_evidence) with its two deploy-free knobs: the cap
+    (`deck_evidence_retention_days`, 0 = off) and the packed decks' full-row
+    bound (`deck_evidence_full_row_days`). Logs the counts it deleted (never
+    an id); never raises."""
+    try:
+        from .database import purge_deck_evidence
+        pruned = purge_deck_evidence(
+            days=_deck_cfg("deck_evidence_retention_days", 0.0),
+            full_row_days=_deck_cfg("deck_evidence_full_row_days", 90.0))
+        if pruned:
+            log.info("[evidence] retention pruned %s", pruned)
+        return pruned
+    except Exception:
+        log.exception("deck-evidence retention failed")
+        return {}
 
 
 if os.environ.get("FTF_DISABLE_CLEANUP_LOOP") != "1":  # tests set it (conftest); prod never does
