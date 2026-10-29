@@ -212,3 +212,36 @@ def test_repeated_parent_is_not_walked_again(monkeypatch):
     assert all(codec.expand_features(json.loads(row['features_json']), mapping)
                == {'owner_generation': shared} for row in compact)
     assert len(visits) <= 2  # independent of the forty identical parent occurrences
+
+
+def test_one_call_drains_up_to_max_batches_and_stops_at_a_short_one(engine):
+    """head-eng 2026-10-29: one 500-row batch per tick fell behind. A call
+    now takes up to `max_batches` batches, each its own transaction, and
+    stops at the first short batch."""
+    old = rows(job='old', days=20)
+    db.save_deck_impressions(old)
+    with engine.connect() as c:
+        expired = c.scalar(select(func.count()).select_from(db.deck_diagnostic_snapshots_table))
+    assert expired > 3
+    assert db.purge_deck_diagnostics(days=14, batch_size=1, max_batches=3) == 3   # the ceiling
+    assert db.purge_deck_diagnostics(days=14, batch_size=1000, max_batches=5) == expired - 3
+    assert db.purge_deck_diagnostics(days=14, batch_size=1, max_batches=5) == 0
+    # a short batch ends the call: one read, not max_batches of them
+    from sqlalchemy import event
+    reads = []
+    listener = lambda conn, cur, stmt, *a: reads.append(stmt) if (
+        stmt.lstrip().upper().startswith("SELECT") and "deck_diagnostic_snapshots" in stmt) else None
+    event.listen(db.engine, "before_cursor_execute", listener)
+    try:
+        db.purge_deck_diagnostics(days=14, batch_size=10, max_batches=5)
+    finally:
+        event.remove(db.engine, "before_cursor_execute", listener)
+    assert len(reads) == 1
+
+
+def test_the_cleanup_loop_drains_up_to_its_ceiling():
+    import inspect
+    import backend.server as server
+    src = inspect.getsource(server._cleanup_loop)
+    assert "purge_deck_diagnostics(days=days, max_batches=_DIAG_PURGE_MAX_BATCHES)" in src
+    assert server._DIAG_PURGE_MAX_BATCHES == 20

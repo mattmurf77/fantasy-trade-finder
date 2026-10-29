@@ -1,3 +1,15 @@
+## 2026-10-29 — Diagnostics expiry drains up to 20 batches a tick (head-eng check 3)
+
+Gates: head-eng's check 3, from release-lead's prod sweep: "Purged 500 expired deck diagnostic snapshots" every 5 minutes, always at the 500 cap, so expired rows may be backing up past the 30 days the c3 list promises. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **`purge_deck_diagnostics(days, batch_size, max_batches=1)`:** up to `max_batches` bounded batches of the oldest. Each is its own transaction: the ids are read through the `created_at` index, then deleted by primary key. It stops at the first short batch.
+  - The default of 1 keeps the old one-batch call.
+  - The cleanup loop passes `_DIAG_PURGE_MAX_BATCHES` = 20: 10,000 rows a tick, 2.88M a day, against 144k before.
+  - It logs "(the tick's ceiling: a backlog remains)" when it hits the ceiling, so the prod read shows whether it caught up.
+- **The backlog's size and age** need a read-only prod query (release-lead): the oldest `created_at`, the count past 14 and past 30 days, and rows written a day.
+- **Tests:** `test_deck_diagnostics.py`. A call drains up to `max_batches` and stops at a short batch (one read, counted); the loop passes the ceiling.
+- **Sabotages:** 3/3 red (one batch only, no short-batch stop, the loop without the ceiling).
+
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
 
 Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`fix/paywall-rise-jan2`), requested by monetization-pm (head-product authorized; the operator approved scheduling both App Store price changes for 2027-01-02 on 2026-10-28). release-lead delta-QAs it. Still dark (`monetize.paywall`). D-056: `FTF_SKIP_SIM_GATE=1` posture.
