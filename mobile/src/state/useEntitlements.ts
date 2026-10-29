@@ -157,6 +157,17 @@ export function initEntitlements(): void {
     .loadCached()
     .then(() => useEntitlements.getState().refresh())
     .catch(() => {});
+  // A different user (sign-out, a switch) never keeps the last user's answer
+  // (release-lead QA P3): the not-entitled defaults, the device cache dropped,
+  // the server asked again. Boot's null → user hydrate isn't a change, so the
+  // offline grace cache still applies there.
+  useSession.subscribe((s, prev) => {
+    const was = prev.user?.user_id;
+    if (!was || s.user?.user_id === was) return;
+    useEntitlements.setState({ pro: false, expiresAt: null, founder: false, enforcing: false, optimistic: false });
+    AsyncStorage.removeItem(CACHE_KEY).catch(() => {});
+    void useEntitlements.getState().refresh();
+  });
   // Attach the CustomerInfo listener the moment purchases become usable —
   // which is when the session working key first reaches `initPurchases`, at
   // boot for a restored session and at sign-in otherwise. Attaching before

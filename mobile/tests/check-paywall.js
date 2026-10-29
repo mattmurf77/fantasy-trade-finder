@@ -317,6 +317,41 @@ const flat = strip(read(FLAT));
   }
 }
 
+// 12 — 3.1.2: the disclosure is shown whenever a plan is selected, keyed on
+// `selected` ALONE (release-lead QA S5a/S5b). Never on a config field (the
+// club window), a fetch state, or anything else: a paywall that can render
+// a plan and a buy button without its auto-renew disclosure is a 3.1.2
+// rejection that looks like working code.
+{
+  const disc = /\{selected \? \(\s*<ChalkText variant="bodySm" style=\{styles\.disclosure\} testID="paywall-disclosure">\s*\{disclosure\(selected\.period, selected\.price, eligible\)\}/.test(s);
+  const once = (s.match(/testID="paywall-disclosure"/g) || []).length === 1;
+  if (disc && once) {
+    ok('12. the 3.1.2 disclosure renders whenever a plan is selected, gated on `selected` alone');
+  } else {
+    bad('12. the disclosure is keyed on `selected` alone',
+      `keyedOnSelected:${disc} rendersOnce:${once} — gating it on config, the club ` +
+      'window or a fetch state can show a plan and a buy button with no disclosure.');
+  }
+}
+
+// 13 — 3.1.2: Terms and Privacy always open (release-lead QA S5d). Their
+// taps call openLegal with nothing in front of it, and openLegal reads only
+// the API origin: never the paywall config, which can fail to load.
+{
+  const terms = /onPress=\{\(\) => openLegal\('\/terms'\)\}/.test(s);
+  const privacy = /onPress=\{\(\) => openLegal\('\/privacy'\)\}/.test(s);
+  const at = s.indexOf('const openLegal = useCallback(');
+  const body = at > -1 ? s.slice(at, s.indexOf('}, []);', at)) : '';
+  const pure = /void Linking\.openURL\(`\$\{getBaseUrl\(\)\}\$\{path\}`\);/.test(body) && !/config/.test(body);
+  if (terms && privacy && pure) {
+    ok('13. Terms and Privacy open unconditionally (no config dependency)');
+  } else {
+    bad('13. Terms and Privacy always open',
+      `terms:${terms} privacy:${privacy} openLegalReadsOnlyTheOrigin:${pure} — a legal ` +
+      'link that waits on the paywall config is dead whenever the config fails.');
+  }
+}
+
 // ── Report ────────────────────────────────────────────────────────────────
 for (const p of pass) console.log(`PASS  ${p}`);
 for (const f of fail) console.error(`FAIL  ${f}`);
