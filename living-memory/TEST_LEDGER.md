@@ -1,3 +1,28 @@
+## 2026-10-29 — #525 QA (NO-GO at `05fee1fa`), fixed: no endless empty slot; the re-search paged; the offline card; checklist
+
+Gates: release-lead's #525 QA, P1-1, P2-1 to P2-3 and P3s. Same PR (11-06 binary). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the check suites, tsc, and the TestFlight checklist in the scope block.
+
+- **P1-1, the endless empty slot:**
+  - **Before:** Try again reset the re-search budget at dispatch. When its request failed, the revoked job stayed, `('idle', 'inputs_changed')` hid the error, and nothing re-ran.
+  - **Now:** only a new search's *answer* resets it (`autoResearchAfterAnswer` in `onSuccess`), and the hide holds only while the re-search itself is in flight (`generateMutation.variables.research`).
+  - **Check:** executed case 11l (c2).
+- **P2-1, the un-paged re-search:** `generateTrades(request, { searchId: vars.searchId })`. Every dispatch sends `page: 1`, plus `search_id` only when it has one, so the re-search after R2 is paged. `check-trade-pages` 5a pins it (its regex used to pin the un-paged line).
+- **P2-2, with #488:**
+  - the re-search carries `research: true` on the mutation's variables, so #488's D2 can treat it as background, like `vars.auto`;
+  - the after-402 end state is agreed with engagement-eng (whoever merges second wires it);
+  - this section is now §11, ahead of #488's §10, which ends in an async exit.
+- **P2-3:** the TestFlight checklist is rewritten:
+  - a pinned cold search, with the change made while the deck builds;
+  - "the end card means it didn't trigger: redo";
+  - safety notes (the board edit, never Send/Propose, no Sleeper roster move);
+  - which decks pass the error through after the flip;
+  - `testing.timing_readout`.
+- **P3s:**
+  - offline while recovering shows the Offline card, not an empty slot;
+  - `trades_generated` carries no search_id (the scope's wording fixed);
+  - the R2 `serve_source` skew is flagged to analytics-lead.
+- **Checks:** `check-trade-first-card-events` (all, with 11a–11l) and `check-trade-pages` pass, and `tsc --noEmit` is clean.
+
 ## 2026-10-28 — The automatic re-search on `inputs_changed` (analytics-lead's option (a); for the 11-06 binary)
 
 Gates: release-lead's #470 QA P2-1 follow-up; analytics-lead's grant of option (a) with conditions (2026-10-28, cc head-eng and head-product); head-eng: build once that answer came. The scope block is `docs/plans/trade-time-to-suggestion/scope-auto-research.md`. Mobile only; no event, value, flag, route or schema change. D-056: the evidence is the structural check, a code-walk and a TestFlight checklist.

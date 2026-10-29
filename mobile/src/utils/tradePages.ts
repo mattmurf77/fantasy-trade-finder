@@ -271,10 +271,23 @@ export function deckEndState(s: PageEnvelope & {
  *  `source`), it mints no search_id, and it is not a failure (no deckFailure,
  *  so no R2b `error`). One per search: a second `inputs_changed`, or a failed
  *  re-search, falls to today's error card, whose Try again is a real tap.
- *  - 'idle': no re-search yet in this search (a new search resets it);
+ *  - 'idle': no re-search yet in this search (a new search's answer resets
+ *    it: autoResearchAfterAnswer);
  *  - 'pending': an `inputs_changed` waits for the user's last card;
  *  - 'used': the one re-search ran. */
 export type AutoResearchState = 'idle' | 'pending' | 'used';
+
+/** The state once a generate answer lands: any search but the re-search
+ *  itself starts a new budget. Only the ANSWER resets it, never the
+ *  dispatch: a Try again whose request fails leaves the revoked job on
+ *  screen, and an 'idle' there would hide its error card for good (#525 QA
+ *  P1-1). */
+export function autoResearchAfterAnswer(
+  state: AutoResearchState,
+  research: boolean,
+): AutoResearchState {
+  return research ? state : 'idle';
+}
 
 /** A job error's next state: `inputs_changed` with none used is recovered
  *  ('pending'); anything else is today's failure ('fail'). */
@@ -287,8 +300,9 @@ export function autoResearchOnJobError(
 
 /** Whether the deck's error state is being recovered, so the deck end shows
  *  nothing (never the error card) while it is: an `inputs_changed` not yet
- *  re-searched, or the re-search in flight. Read at render time, so the error
- *  card never flashes for a frame before the state moves. */
+ *  re-searched, or the re-search in flight (`researchInFlight`: the re-search
+ *  itself, never another dispatch). Read at render time, so the error card
+ *  never flashes for a frame before the state moves. */
 export function autoResearchHidesError(
   state: AutoResearchState,
   error: string | null | undefined,

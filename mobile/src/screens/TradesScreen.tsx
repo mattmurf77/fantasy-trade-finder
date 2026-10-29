@@ -127,6 +127,7 @@ import {
 // Pure, zero runtime imports (tests/check-trade-pages.js runs them).
 import {
   deckCardKey,
+  autoResearchAfterAnswer,
   autoResearchHidesError,
   autoResearchOnJobError,
   autoResearchSearchId,
@@ -2247,7 +2248,9 @@ export default function TradesScreen({ navigation, route }: any) {
     // `force` (item 7) skips the
     // server's complete-fresh job cache — used by the post-Quick-Set
     // regeneration, whose board change doesn't alter the cache key.
-    mutationFn: (vars: { auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string }) => {
+    mutationFn: (vars: {
+      auto?: boolean; force?: boolean; repeat?: boolean; searchId?: string; research?: boolean;
+    }) => {
       // Pins are read from the store (not the render closure) so a
       // pin-then-generate in the same tick (#186 keep-side) always sends
       // the fresh lists.
@@ -2285,8 +2288,10 @@ export default function TradesScreen({ navigation, route }: any) {
       canvasSelectionRef.current = null;
       // 200 ms path (E2): page 1 under the dispatch's client search id
       // (minted in dispatchGenerate, never saved into the request above, so
-      // a repeat is a new search).
-      return generateTrades(request, vars.searchId ? { searchId: vars.searchId } : undefined);
+      // a repeat is a new search). Always paged: the automatic re-search,
+      // which carries no search id once its trace settled, gets page 1 too
+      // (#525 QA P2-1), never the legacy body.
+      return generateTrades(request, { searchId: vars.searchId });
     },
     // #330 R-10 — stamp the dispatch-time epoch; onSuccess/onError compare
     // it against the current one and drop stale results entirely.
@@ -2294,12 +2299,15 @@ export default function TradesScreen({ navigation, route }: any) {
     // epoch, so an answer from before it must bind ITS key, not the newer
     // dispatch's (the save effect then writes nothing under the new key).
     onMutate: () => ({ epoch: deckEpochRef.current, deviceKey }),
-    onSuccess: (snapshot, _vars, ctx) => {
+    onSuccess: (snapshot, vars, ctx) => {
       if (
         applyJobResult(snapshot, ctx?.epoch ?? deckEpochRef.current, deckEpochRef.current) === null
       ) {
         return; // stale epoch — a reset intervened; nothing is applied
       }
+      // A new search's answer starts a new re-search budget (only the answer:
+      // see autoResearchAfterAnswer).
+      autoResearchRef.current = autoResearchAfterAnswer(autoResearchRef.current, !!vars.research);
       setJob(snapshot);
       setDeckFailure(null); // P0-2 — covers the auto + force + inline callers
       // C — the answer is the server's: its scope and validation time feed
@@ -2432,12 +2440,16 @@ export default function TradesScreen({ navigation, route }: any) {
     // one (R1), else a fresh one (a regeneration, the first-run auto-start).
     // The automatic re-search (`research`) claims nothing and mints nothing:
     // it carries its search's open trace id, else none. Every other dispatch
-    // is a new search, so its re-search budget starts again.
+    // is a new search: its re-search budget starts again when its answer
+    // lands (onSuccess), never here.
     const claimed = research ? research.searchId : claimPendingSearch();
-    if (!research) autoResearchRef.current = 'idle';
     deckSearchRef.current = claimed ? { id: claimed, keys: new Set() } : null;
     generateMutation.mutate(
-      { ...vars, searchId: research ? research.searchId ?? undefined : claimed ?? uuidv4() },
+      {
+        ...vars,
+        searchId: research ? research.searchId ?? undefined : claimed ?? uuidv4(),
+        research: !!research,
+      },
       mutateOpts);
   }
 
@@ -4805,10 +4817,13 @@ export default function TradesScreen({ navigation, route }: any) {
     ? deckEndState({ ...job, phase: endPhase, online })
     : null;
   // An `inputs_changed` being recovered shows nothing, never the error card
-  // (decided at render, so the card never flashes before the effect below).
+  // (decided at render, so the card never flashes before the effect below);
+  // offline, the Offline card, as the re-search waits for the network
+  // (#525 QA P3).
   const deckEnd = deckEndRaw === 'error' && autoResearchHidesError(
-    autoResearchRef.current, job?.error, generateMutation.isPending)
-    ? 'pending'
+    autoResearchRef.current, job?.error,
+    generateMutation.isPending && !!generateMutation.variables?.research)
+    ? (online ? 'pending' : 'offline')
     : deckEndRaw;
   // The automatic re-search: once the user has no card left to see, the one
   // pending `inputs_changed` re-runs the search in place, as Try again would,

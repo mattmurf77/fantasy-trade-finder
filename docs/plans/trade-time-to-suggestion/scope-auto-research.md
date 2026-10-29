@@ -14,7 +14,7 @@
   - **no new search_id:** the open trace's while the first card hasn't shown (R2 then fires once, on the rebuilt deck's first card, timed from the original tap); otherwise none, so there's no orphan R2 or R2b;
   - **no R2b `error`:** a recovered `inputs_changed` never sets deckFailure;
   - **at most one per search;** a failed re-search or a second `inputs_changed` shows the error card, and Try again stays R1 `deck_error_retry`.
-  - Server side, unchanged: `trades_generated` fires once for the rebuilt deck, echoing the id sent, if any.
+  - Server side, unchanged: `trades_generated` fires once for the rebuilt deck. It carries no search_id; the /generate response echoes the id sent, if any, for the client's trace.
   - A future auto re-search rate would be its own NON_INTENT event; it isn't needed for 11-06.
 
 ## 2. Schema & flag scope
@@ -36,21 +36,30 @@
 - [x] **Unit tests:** none (mobile only; the rules are executed in the check above).
 - [x] **Code-walk proof** (`mobile/src/screens/TradesScreen.tsx` on this branch):
   1. A paged or legacy response for a revoked deck lands with `status: 'error'`, `error: 'inputs_changed'`. The job-error mirror (`useEffect` on `job?.status, job?.error`) reads `autoResearchOnJobError('idle', 'inputs_changed') === 'pending'`, sets the ref and returns before `setDeckFailure`. So the R2b effect (`if (deckFailure) failDeckSearch('error')`) never runs.
-  2. At render, `deckEnd` is `'pending'`, not `'error'`, while `autoResearchHidesError` holds. The slot renders nothing, never `DeckMoreErrorCard`.
+  2. At render, `deckEnd` is `'pending'` (offline: `'offline'`), never `'error'`, while `autoResearchHidesError` holds: an `inputs_changed` not yet re-searched, or the re-search itself in flight (`generateMutation.variables.research`, not any dispatch). The slot renders nothing, or the Offline card, never `DeckMoreErrorCard`.
   3. Once `rawTopCard` is null (no card left), the effect beside `deckEnd` sets `'used'` and calls `dispatchGenerate({repeat: true}, undefined, {searchId})`. `searchId` is `autoResearchSearchId(deckSearchRef.current?.id, isSearchOpen)`: the open trace's id, or null.
   4. `dispatchGenerate` with `research`:
-     - skips `claimPendingSearch` and keeps the ref at `'used'`;
+     - skips `claimPendingSearch` and leaves the ref at `'used'`; no dispatch resets it any more;
      - sets `deckSearchRef` to that id or null;
-     - mutates with `searchId: research.searchId ?? undefined`, so `generateTrades` sends no `search_id` when it's null.
+     - mutates with `searchId: research.searchId ?? undefined, research: true`. `generateTrades(request, { searchId })` always sends `page: 1`, plus `search_id` only when there is one, so the rebuilt deck is paged (#525 QA P2-1).
+     - **The budget resets only when a non-research dispatch's answer lands** (`onSuccess`: `autoResearchAfterAnswer`). A Try again whose request fails leaves the revoked job and `'used'`, so the error card stays: no endless empty slot (#525 QA P1-1).
   5. The new job's first card: `checkFirstCardShown` reports R2 for `deckSearchRef.current?.id`. That's the open id (one R2), or nothing when the trace had settled.
   6. If the re-search's POST fails, `onError` sets deckFailure as today. If its job errors again, the mirror reads `'fail'` (state `'used'`) and sets deckFailure, so the error card and its Try again (a real tap, R1 `deck_error_retry`) return.
-- [x] **Manual TestFlight checklist** (two devices on one account, or one device plus web; the timing readout on):
-  1. Device A: Trades → Find a Trade. Wait for the first card; swipe until about 5 cards are left.
-  2. Device B: change one ranking (Rankings tab: move a player), so the input change revokes A's deck.
-  3. Device A: keep swiping to the last held card. **Expect:** no "Couldn't load more trades." card. A fresh deck appears in place within a few seconds, and Like/Pass work on its first card. The timing readout shows **no new tap** (its last tap is still step 1's).
-  4. Repeat step 2 on device B while A swipes the rebuilt deck to its end. **Expect:** this time the "Couldn't load more trades." card shows (one auto re-search per search), and its Try again starts a new search (a new tap in the readout).
-  5. Device A: Find a Trade, then **immediately** (before the first card) repeat step 2 on device B. **Expect:** the first card still appears, with no error card. The readout's time for that search covers the whole wait from the tap.
-  6. Device A offline at step 3 (airplane mode as the last card is reached). **Expect:** no error card while offline (the slot stays empty while the re-search waits for the network); back online, the fresh deck appears, or the error card shows if the re-search fails.
+- [x] **Manual TestFlight checklist** (two devices on one account, or one device plus web).
+  - **Setup:** the timing readout needs `testing.timing_readout`, which ships dark, so ask release-lead to enable it for the test account.
+  - **Safety:**
+    - the ranking edit changes only the operator's own FTF board, so put the player back afterwards (or use a test account);
+    - never tap Send or Propose;
+    - don't use a Sleeper roster move: it changes a real league, and since #481 it revokes only the refresher's own deck.
+  - **Which decks:** after the page-store flip, only pinned, Specific Team and intent decks pass the error through. So use a pinned-player search.
+  - **How the path triggers:** device A requests pages only while fewer than 50 cards are unseen, so a deck is fully paged within seconds of its first card. The input change must therefore land while A's deck is still building.
+  1. Device A: Trades → pin a player (the give side) → Find a Trade, on a cold search (one not run recently). As soon as the first card shows, go to step 2.
+  2. Device B, right away: Rankings → move one player, so the input change revokes A's deck while it's still building.
+  3. Device A: swipe to the last held card. **Expect:** no "Couldn't load more trades." card. A fresh deck appears in place within a few seconds, and Like/Pass work on its first card. The readout shows **no new tap** (its last tap is still step 1's). **If you see the end card ("That's every trade…"), the change landed after the deck was complete and it didn't trigger: redo from step 1.**
+  4. Repeat steps 1–2, then on device B make a second ranking move while A swipes the rebuilt deck. **Expect:** at its end, "Couldn't load more trades." shows (one automatic re-search per search). Its Try again starts a new search (a new tap in the readout), and the rebuilt deck pages normally (more cards load as you swipe).
+  5. Device A: Find a Trade (pinned, cold), then **immediately**, before the first card, do step 2. **Expect:** the first card still appears with no error card, and the readout's time for that search covers the whole wait from the tap.
+  6. Device A: as in steps 1–2, but turn on airplane mode just before the last held card. **Expect:** the Offline card (never "Couldn't load more trades.") while offline. Back online, the fresh deck appears, or the error card shows if the re-search fails.
+  7. Put the moved players back on device B (the safety note above).
 - `testID`s: none added (testid-lint OK).
 
 ## 4. Docs scope
