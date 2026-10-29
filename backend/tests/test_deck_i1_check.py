@@ -726,6 +726,132 @@ def test_the_drops_are_flushed_right_after_a_write(fresh_queue, monkeypatch):
     assert (fresh_queue, 0) in calls          # the idle tick is a minute away
 
 
+def test_the_exit_drain_restarts_a_dead_worker_with_writes_behind_it(fresh_queue, monkeypatch):
+    """#485 QA P3: the worker dies (a BaseException) with a write queued
+    behind it; the exit drain starts a worker, so that write lands."""
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)   # the death is expected
+    monkeypatch.setattr(server, "_I1_EVENT_EXIT_DRAIN_S", 2.0)
+    go, written = threading.Event(), []
+
+    def die():
+        go.wait(5)
+        raise _Die()
+    server._i1_event_enqueue(_lease(), die)
+    first = server._i1_event_worker_thread
+    server._i1_event_enqueue(_lease(), lambda: written.append("stranded"))
+    go.set()
+    first.join(5)
+    assert not first.is_alive() and written == []           # stranded behind the dead worker
+    server._i1_event_exit_drain()
+    assert written == ["stranded"] and server._i1_event_worker_thread is not first
+
+
+def _strand_a_write(written):
+    """The worker dies (a BaseException) with a write queued behind it."""
+    go = threading.Event()
+
+    def die():
+        go.wait(5)
+        raise _Die()
+    server._i1_event_enqueue(_lease(), die)
+    first = server._i1_event_worker_thread
+    server._i1_event_enqueue(_lease(), lambda: written.append("stranded"))
+    go.set()
+    first.join(5)
+    assert not first.is_alive() and written == []
+    return first
+
+
+def test_the_exit_drain_never_raises_when_a_thread_is_refused(fresh_queue, monkeypatch, caplog):
+    """#519 QA: CPython 3.12 may refuse a new thread at interpreter shutdown.
+    The exit drain then logs the stranded writes and returns at once, never
+    raising and never waiting on a queue nothing serves."""
+    monkeypatch.setattr(threading, "excepthook", lambda args: None)
+    written = []
+    _strand_a_write(written)
+
+    def refuse(self):
+        raise RuntimeError("can't create new thread at interpreter shutdown")
+    monkeypatch.setattr(threading.Thread, "start", refuse)
+    started = time.monotonic()
+    with caplog.at_level("WARNING"):
+        server._i1_event_exit_drain()
+    assert time.monotonic() - started < 1 and written == []
+    assert any("no worker at exit" in r.getMessage() and "1 queued writes" in r.getMessage()
+               for r in caplog.records)
+
+
+@pytest.mark.parametrize("how", ["normal", "sigterm"])
+def test_a_real_exit_with_a_dead_worker_never_raises(tmp_path, how):
+    """#519 QA, in a fresh interpreter (the CI's, 3.12): the worker dies with
+    a write stranded behind it, then the process exits, normally or through a
+    SIGTERM handler that exits, as gunicorn's worker does. atexit runs the
+    drain: it exits 0 with no traceback, and the write either lands (a thread
+    may start at shutdown) or is logged as not recorded (it may not)."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    repo = Path(__file__).resolve().parents[2]
+    out = tmp_path / "landed.txt"
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("FTF_TEST_MODE", "FTF_SLEEPER_RECORD", "DATABASE_URL")}
+    env["DATABASE_URL"] = f"sqlite:///{tmp_path / 'scratch.db'}"
+    script = f"""
+import contextlib, os, signal, sys, threading, time, types
+import backend.server as s
+threading.excepthook = lambda args: None
+class Die(BaseException):
+    pass
+@contextlib.contextmanager
+def active():
+    yield True
+lease = types.SimpleNamespace(active=active, deleting=lambda: False)
+go = threading.Event()
+def die():
+    go.wait(5)
+    raise Die()
+s._i1_event_enqueue(lease, die)
+first = s._i1_event_worker_thread
+s._i1_event_enqueue(lease, lambda: open({str(out)!r}, "a").write("landed"))
+go.set()
+first.join(5)
+assert not first.is_alive()
+if {how!r} == "sigterm":
+    signal.signal(signal.SIGTERM, lambda *a: sys.exit(0))
+    os.kill(os.getpid(), signal.SIGTERM)
+    time.sleep(5)
+"""
+    child = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
+                           cwd=repo, env=env, timeout=180)
+    assert child.returncode == 0, child.stderr[-2000:]
+    assert "Traceback" not in child.stderr, child.stderr[-2000:]
+    landed = out.exists() and out.read_text() == "landed"
+    assert landed or "no worker at exit" in child.stderr, child.stderr[-2000:]
+
+
+def test_the_drops_are_flushed_right_after_a_write(fresh_queue, monkeypatch):
+    """#485 QA P3: the worker serving this queue calls the drop warning right
+    after each write, so drops past the minute are logged then, not on the
+    idle tick a minute later. Pinned by the call on this test's own queue:
+    the drop counter is module-wide, and another test's idle worker may log
+    it."""
+    calls = []
+    real = server._i1_event_drop_warning
+
+    def spy(q, dropped=0, **kw):
+        calls.append((q, dropped))
+        return real(q, dropped, **kw)
+    monkeypatch.setattr(server, "_i1_event_drop_warning", spy)
+    written = []
+    server._i1_event_enqueue(_lease(), lambda: written.append("w"))
+    assert _landed(written, "w")
+    deadline = time.monotonic() + 2
+    while (fresh_queue, 0) not in calls and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert (fresh_queue, 0) in calls          # the idle tick is a minute away
+
+
 def test_the_fallback_identity_keeps_the_partner():
     """A card with neither id is its assets AND its partner: the same trade
     with two opponents is two cards."""
