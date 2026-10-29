@@ -5,8 +5,10 @@ An outcome then stays reachable however its deck's evidence is stored or
 pruned, so these tests build outcomes that neither the user's rows nor their
 packs reach (an impression id with no row and no pack).
 """
+import importlib.util
 import inspect
 import re
+from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
@@ -106,11 +108,12 @@ def test_export_has_each_owned_outcome_once_in_id_order(store):
     assert [r["user_id"] for r in exported] == [UID, UID, None, ALIAS]
 
 
-def test_migration_adds_the_column_and_index_without_backfill(tmp_path, monkeypatch, capsys):
+def _pre_g3e(tmp_path):
+    """A database whose deck_outcomes is the table as it was before G3-e."""
     url = f"sqlite:///{tmp_path / 'g3e.db'}"
     eng = create_engine(url)
     db.metadata.create_all(eng)
-    with eng.begin() as conn:                     # the table as it was before G3-e
+    with eng.begin() as conn:
         conn.execute(text("DROP TABLE deck_outcomes"))
         conn.execute(text(
             "CREATE TABLE deck_outcomes (id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -120,38 +123,70 @@ def test_migration_adds_the_column_and_index_without_backfill(tmp_path, monkeypa
             "CREATE INDEX ix_deck_outcomes_impression ON deck_outcomes (impression_id)"))
         conn.execute(text("INSERT INTO deck_outcomes (impression_id, action, acted_at) "
                           "VALUES ('old', 'like', '2026-10-01T00:00:00+00:00')"))
+    return url, eng
+
+
+def _indexes(eng):
+    return {i["name"]: i["column_names"] for i in sa_inspect(eng).get_indexes("deck_outcomes")}
+
+
+def test_boot_adds_the_column_never_the_index_and_no_backfill(tmp_path, monkeypatch):
+    """init_db adds the column to an existing table and never builds the index
+    there: a plain CREATE INDEX holds a SHARE lock that blocks every outcome
+    write for its scan (release-lead, #541). A fresh DB gets it from the
+    declaration."""
+    url, eng = _pre_g3e(tmp_path)
     monkeypatch.setattr(db, "engine", eng)
     monkeypatch.setattr(db, "DATABASE_URL", url)
-    for _ in range(2):                            # the second run changes nothing
-        db._migrate_db()
-        insp = sa_inspect(eng)
-        assert "user_id" in {c["name"] for c in insp.get_columns("deck_outcomes")}
-        indexes = {i["name"]: i["column_names"] for i in insp.get_indexes("deck_outcomes")}
-        assert indexes["ix_deck_outcomes_user"] == ["user_id"]
+    for _ in range(2):                            # the second boot changes nothing
+        db.init_db()
+        assert "user_id" in {c["name"] for c in sa_inspect(eng).get_columns("deck_outcomes")}
+        assert "ix_deck_outcomes_user" not in _indexes(eng)
         with eng.connect() as conn:
             assert conn.execute(text(
                 "SELECT impression_id, user_id FROM deck_outcomes")).all() == [("old", None)]
-    assert "ix_deck_outcomes_user not built" not in capsys.readouterr().out
     eng.dispose()
-    # A fresh database (create_all) gets the index from the metadata.
     assert {i.name for i in db.deck_outcomes_table.indexes} >= {"ix_deck_outcomes_user"}
+    fresh = create_engine("sqlite://")
+    db.metadata.create_all(fresh)
+    assert _indexes(fresh)["ix_deck_outcomes_user"] == ["user_id"]
+    fresh.dispose()
 
 
-def test_the_index_build_is_bounded_on_postgres():
-    """A plain CREATE INDEX holds off outcome writes for its scan: on Postgres
-    it waits at most 5 s for its lock and runs at most 60 s, in the same
-    transaction as the build (SET LOCAL), and a failure is caught."""
-    src = inspect.getsource(db._migrate_db)
+def _script():
+    path = Path(__file__).resolve().parents[2] / "scripts/create_outcome_owner_index.py"
+    spec = importlib.util.spec_from_file_location("create_outcome_owner_index", path)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    return script
+
+
+def test_the_script_builds_it_on_an_existing_table_and_check_writes_nothing(tmp_path, monkeypatch):
+    script = _script()
+    url, eng = _pre_g3e(tmp_path)
+    monkeypatch.setattr(db, "engine", eng)
+    monkeypatch.setattr(db, "DATABASE_URL", url)
+    db.init_db()
+    assert script.main(["--check"]) == 0 and script.state(eng) == "missing"
+    assert script.main([]) == 0 and script.state(eng) == "valid"
+    assert _indexes(eng)["ix_deck_outcomes_user"] == ["user_id"]
+    assert script.build(eng) == "valid"           # idempotent
+    eng.dispose()
+
+
+def test_the_scripts_postgres_build_is_concurrent():
+    """Postgres: CONCURRENTLY (no write lock) in autocommit (it can't run in a
+    transaction), a lock_timeout on its brief locks, and an INVALID leftover of
+    a failed build dropped concurrently before the rebuild."""
+    src = inspect.getsource(_script().build)
     assert re.search(
-        r"    try:\n"
-        r"        with engine\.begin\(\) as conn:\n"
-        r"            if conn\.dialect\.name == \"postgresql\":\n"
-        r"                conn\.execute\(text\(\"SET LOCAL lock_timeout = '5s'\"\)\)\n"
-        r"                conn\.execute\(text\(\"SET LOCAL statement_timeout = '60s'\"\)\)\n"
-        r"            conn\.execute\(text\(\n"
-        r"                \"CREATE INDEX IF NOT EXISTS ix_deck_outcomes_user ON deck_outcomes \(user_id\)\"\)\)\n"
-        r"    except Exception as e:\n", src)
-    # After the column's ALTER TABLE, which the index needs.
-    assert (src.index('("deck_outcomes",      "user_id",                   "VARCHAR")')
-            < src.index("ALTER TABLE {table} ADD COLUMN")
-            < src.index("CREATE INDEX IF NOT EXISTS ix_deck_outcomes_user"))
+        r'if engine\.dialect\.name == "postgresql":\n'
+        r'        with engine\.connect\(\)\.execution_options\(isolation_level="AUTOCOMMIT"\) as conn:\n'
+        r"            conn\.execute\(text\(f\"SET lock_timeout = '\{LOCK_TIMEOUT\}'\"\)\)\n"
+        r'            if current == "invalid":\n'
+        r'                conn\.execute\(text\(f"DROP INDEX CONCURRENTLY IF EXISTS \{INDEX\}"\)\)\n'
+        r'            conn\.execute\(text\(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS \{INDEX\} "\n'
+        r'                              "ON deck_outcomes \(user_id\)"\)\)\n', src)
+    assert _script().LOCK_TIMEOUT == "5s"
+    # And the boot path never builds it.
+    assert "ix_deck_outcomes_user" not in inspect.getsource(db._migrate_db)

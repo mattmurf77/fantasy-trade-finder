@@ -1459,6 +1459,10 @@ Index(
     "ix_deck_outcomes_impression",
     deck_outcomes_table.c.impression_id,
 )
+# G3-e. A fresh DB gets it from this declaration. On an existing table it is
+# built off the boot path (scripts/create_outcome_owner_index.py, CONCURRENTLY),
+# never in init_db: a plain CREATE INDEX holds a SHARE lock that blocks every
+# outcome write for its whole scan. Deletion and export work without it (a scan).
 Index(
     "ix_deck_outcomes_user",
     deck_outcomes_table.c.user_id,
@@ -3810,21 +3814,6 @@ def _migrate_db() -> None:
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
         except Exception:
             pass   # column already exists — safe to ignore
-
-    # G3-e: deck_outcomes.user_id's index. The table's rows are small, but a
-    # plain CREATE INDEX holds off outcome writes for its scan, so on Postgres
-    # it waits at most 5 s for its lock and runs at most 60 s; past either it's
-    # skipped and the next boot tries again (deletion and export still work,
-    # by a scan).
-    try:
-        with engine.begin() as conn:
-            if conn.dialect.name == "postgresql":
-                conn.execute(text("SET LOCAL lock_timeout = '5s'"))
-                conn.execute(text("SET LOCAL statement_timeout = '60s'"))
-            conn.execute(text(
-                "CREATE INDEX IF NOT EXISTS ix_deck_outcomes_user ON deck_outcomes (user_id)"))
-    except Exception as e:
-        print(f"[migrate] ix_deck_outcomes_user not built (the next boot retries): {e}")
 
     # Backfill: tag existing rows with '1qb_ppr' format since that was the only one
     _backfill_dual_format()

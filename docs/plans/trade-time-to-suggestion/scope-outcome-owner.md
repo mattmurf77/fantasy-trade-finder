@@ -26,12 +26,18 @@
 
 **Deletion counts:** the owner-column delete runs **after** today's path (`backend/accounts.py:807`), under its own key, `deck_outcomes_by_owner_deleted`. So that count is exactly the outcomes only the new column reached: the measured size of the gap, 0 while it stays latent. `deck_outcomes_deleted` keeps its meaning.
 
-**The index on prod:**
-- `_migrate_db` adds the column (an `ALTER TABLE … ADD COLUMN`, catalog-only on Postgres for a nullable column with no default).
-- It then builds the index with `CREATE INDEX IF NOT EXISTS` (`backend/database.py:3802-3827`).
-- `deck_outcomes` rows are small (~200k rows at #424's QA). But a plain build holds off outcome writes for its scan, so on Postgres it runs under `SET LOCAL lock_timeout = '5s'` and `statement_timeout = '60s'`. Past either limit it's skipped and logged, and the next boot retries.
-- Deletion and export work without the index, by a scan.
-- This is the boot path, unlike #523's `ix_deck_impressions_served`. `deck_impressions` holds blobs and is far larger; the table here is the size of the other tables `_migrate_db` indexes at boot (`user_events`, `trade_decisions`).
+**The index on prod (revised after release-lead's question, 2026-10-29):**
+- `ix_deck_outcomes_user` is **never built at boot.** A plain `CREATE INDEX` on prod's `deck_outcomes` holds a SHARE lock that blocks every outcome write (likes, passes, views) for its whole scan.
+- A fresh DB gets the index from the `Index` declaration (`create_all`). On an existing table, `scripts/create_outcome_owner_index.py` builds it off the boot path, the same pattern as #523's `ix_deck_impressions_served`:
+  - Postgres: `CREATE INDEX CONCURRENTLY` with a 5 s `lock_timeout`, in autocommit;
+  - an INVALID leftover of a failed build is dropped concurrently and rebuilt;
+  - idempotent; `--check` reports without writing.
+- It's run once after the deploy, by release-lead on the operator's word, since it's a prod write.
+- **Until it runs, nothing breaks:** deletion's `DELETE … WHERE user_id IN (…)` and export's `SELECT` find the rows by a scan, inside the deletion transaction. It's slower, but only for the rare deletion or export.
+- **The column itself** is added at boot by `_migrate_db`'s generic `migration_cols` loop, like every additive column before it (~20 on `deck_impressions`).
+  - On Postgres, `ADD COLUMN` with no default and nullable is catalog-only: no rewrite and no scan. Its ACCESS EXCLUSIVE lock is held for milliseconds once granted.
+  - The residual risk is the usual one: the `ALTER` waits behind a long open transaction on the table, and writes queue behind it meanwhile.
+  - It isn't bounded with a `lock_timeout`, because a timed-out `ALTER` would leave the column missing. Then the outcome insert, which names `user_id`, would fail on every write until the next boot. Waiting is the lesser harm.
 
 ---
 
@@ -42,7 +48,7 @@
 ## 2. Schema & flag scope
 
 - **Columns:** `deck_outcomes.user_id` (nullable `VARCHAR`), with index `ix_deck_outcomes_user`.
-  - Added by `_migrate_db`'s `migration_cols` and its own index block. On fresh databases it comes from the `Table` and `Index` metadata.
+  - The column is added by `_migrate_db`'s `migration_cols`. The index is never built at boot: it comes from the `Index` declaration on a fresh DB, and from `scripts/create_outcome_owner_index.py` on an existing one.
   - Documented in `docs/data-dictionary.md` § `deck_outcomes`.
 - **Flags:** none. The column is written whenever an outcome is (flag `deck.signal_v2` gates outcomes as before), and the deletion and export match is unconditional. Like #523's account-rights fix (legal R28.22 d1), it goes live on merge, behind no switch.
 - **Env vars / `model_config` keys:** none.
@@ -50,20 +56,21 @@
 
 ## 3. Evidence scope
 
-- [x] **Unit tests:** `backend/tests/test_deck_outcome_owner.py`, 6 tests.
+- [x] **Unit tests:** `backend/tests/test_deck_outcome_owner.py`, 7 tests.
   1. The write stamps the acting user, and the unchanged owner check refuses a foreign writer.
   2. The same through `_save_deck_outcome_safe` under a verified session.
   3. Deletion: it reaches an outcome that only the column names (no row, no pack), including an account alias's. It keeps another user's outcomes and NULL legacy rows. Each count is right: `deck_outcomes_deleted` for today's path, `deck_outcomes_by_owner_deleted` for the outcomes only the column reached.
   4. Export: each owned outcome once (one reached both ways is not duplicated), in id order, with legacy NULL rows through the row path and nothing of another user's.
-  5. Migration on a pre-G3-e table: adds the column and the index, leaves the old row NULL (no backfill), runs twice without changing anything, and logs no failure. A fresh database gets the index from the metadata.
-  6. The Postgres bounds, pinned in source: `SET LOCAL lock_timeout` and `statement_timeout` sit in the index build's own transaction, after the column's `ALTER TABLE`, and a failure is caught.
+  5. Boot on a pre-G3-e table (`init_db`, twice): adds the column, **never the index**, and leaves the old row NULL (no backfill). A fresh DB gets the index from the declaration.
+  6. The script on an existing table: `--check` reports `missing` and writes nothing; a run builds it on `user_id`; a second run leaves it valid.
+  7. The script's Postgres build, pinned in source: `CONCURRENTLY`, autocommit, the 5 s `lock_timeout`, and the INVALID leftover dropped first. `_migrate_db` never names the index.
 - [x] **Existing guard:** `test_purge_entry_users.py::test_discovery_covers_every_user_column_delete_user_data_filters_on` covers the new filter column.
-- [x] **Sabotages: 13 of 13 mutations turn the suite red.** The suite is the new file plus `test_purge_entry_users.py` and `test_account_deletion_coverage.py`. The mutations:
+- [x] **Sabotages: 16 of 16 mutations turn the suite red.** The suite is the new file plus `test_purge_entry_users.py` and `test_account_deletion_coverage.py`. The mutations:
   - a NULL owner written;
   - the deletion: no owner delete; the owner delete moved before the row path (the counts change);
   - the export: no owner match; no dedupe; no sort;
-  - the migration: no column; no index; no `lock_timeout`; no `statement_timeout`; an uncaught index failure;
-  - no metadata index;
+  - the migration: no column; the index built at boot; no metadata index;
+  - the script: not `CONCURRENTLY`; not autocommit; no `lock_timeout`; the INVALID leftover not dropped; `--check` builds; the wrong column;
   - the purge key missing.
 - [x] **Code-walk proof:** above ("Why, and the gap it closes").
 - [x] **Manual TestFlight checklist:** not applicable. It's backend-only, with no client or user-visible change. The deletion and export routes' responses gain one count key and one column, additively.
@@ -81,6 +88,7 @@
 | `docs/glossary.md` | n/a | no new term |
 | ADR / `DECISIONS.md` | n/a | head-eng's ruling (the routing note, G3-e), recorded there and in legal R28.22 |
 | `docs/config-reference.md` | n/a | no flag, env var or `model_config` key |
+| `scripts/README.md` | updated | § One-time index build (`create_outcome_owner_index.py`) |
 
 ## 5. Ship gate declaration
 
@@ -88,4 +96,5 @@
 - **Evidence recorded:** the `living-memory/TEST_LEDGER.md` entry.
 - **TestFlight verification:** none (backend-only).
 - **Express lane:** no; full gates (an additive schema change).
-- **Before the flip** (head-eng's target), so every post-flip outcome carries its owner. After merge, the first boot of the deploy logs `[migrate] ix_deck_outcomes_user not built …` only if the index build hit a limit. Otherwise it is silent.
+- **Before the flip** (head-eng's target), so every post-flip outcome carries its owner.
+- **After the deploy (release-lead, on the operator's word: a prod write):** run `python3 scripts/create_outcome_owner_index.py --check`, then `python3 scripts/create_outcome_owner_index.py` (expect `ix_deck_outcomes_user: valid`). It isn't a correctness gate, since deletion and export work by a scan until then.
