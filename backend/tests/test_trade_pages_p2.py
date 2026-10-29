@@ -367,6 +367,72 @@ def test_the_rebase_check_passes_the_session_read(p1, spawned, monkeypatch):
     assert ("fresh", job_id, read) in seen
 
 
+# ── #520 QA P3-1/P3-3: on a failed read only the fingerprint compare is skipped ──
+
+def _failed_read(monkeypatch):
+    monkeypatch.setattr(server, "_trade_current_snapshot", lambda *a, **k: None)
+
+
+def _kicks(monkeypatch):
+    kicks = []
+    real_kick = server._trade_page_kick
+    monkeypatch.setattr(server, "_trade_page_kick",
+                        lambda *a, **k: kicks.append(1) or real_kick(*a, **k))
+    return kicks
+
+
+@pytest.mark.parametrize("status", ["complete", "running"])
+def test_a_failed_read_still_follows_a_current_newer_job(p1, spawned, monkeypatch, status):
+    """A2: a failed read can't prove the newer job stale, so it is followed,
+    complete or running, with no kick."""
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    if status == "running":
+        with server._trade_jobs_lock:
+            server._trade_jobs[job_id].update(status="running", finished_at=None)
+    _failed_read(monkeypatch)
+    kicks = _kicks(monkeypatch)
+    body = deck_status(client, deck, 0).get_json()
+    assert body["rebased"] is True and body["deck_id"] == job_id and not kicks
+
+
+def test_a_failed_read_never_follows_once_an_input_changed(p1, spawned, monkeypatch):
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    _failed_read(monkeypatch)
+    real = server._trade_page_request_inputs
+
+    def changed(*a, **k):
+        inputs = real(*a, **k)
+        return {**inputs, "input_epochs": (*inputs["input_epochs"],
+                                           __import__("types").SimpleNamespace(revoked=True))}
+    monkeypatch.setattr(server, "_trade_page_request_inputs", changed)
+    assert deck_status(client, deck, 0).get_json()["deck_id"] != job_id
+
+
+@pytest.mark.parametrize("why", ["none_stamp", "past_ttl", "superseded_read"])
+def test_a_failed_read_still_runs_every_other_check(p1, spawned, monkeypatch, why):
+    """#520 QA P3-1: only the fingerprint compare is skipped. A None stamp, a
+    job past the reuse TTL, or one built on a read the session has replaced
+    is never followed, as P1's own check rejects them."""
+    client, engine, _ = p1
+    deck, job_id = revoked_deck_newer_job(engine)
+    with server._trade_jobs_lock:
+        job = server._trade_jobs[job_id]
+        if why == "none_stamp":
+            job["roster_fp"] = None
+        elif why == "past_ttl":
+            job["finished_at"] = __import__("time").monotonic() - server._PREGEN_TTL_SECONDS - 60
+        else:
+            job["roster_fetch_started_at"] = "2026-10-01T00:00:00.000000+00:00"
+    if why == "superseded_read":
+        with server._sessions_lock:
+            server._sessions[TOKEN]["roster_fetch_started_at"] = "2026-10-28T11:00:00.000000+00:00"
+        monkeypatch.setattr(server, "_job_read_predates_move", lambda job: True)
+    _failed_read(monkeypatch)
+    assert deck_status(client, deck, 0).get_json()["deck_id"] != job_id
+
+
 @pytest.mark.parametrize("mode", [0.0, 1.0])
 def test_a_rebase_onto_a_job_goes_through_s0_like_the_job_id_form(p1, spawned, monkeypatch, mode):
     client, engine, _ = p1
