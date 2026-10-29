@@ -4116,7 +4116,7 @@ _TRADE_CARD_TTL_S = 7 * 86400    # TradeCard.expires_at default, for a card with
 # publication, the F-layers). After 11-10 a bump is also a MOD-M1 re-run
 # trigger. Stored pages carry it in their engine_version, so a bump makes every
 # older page fall through.
-DECK_PIPELINE_VERSION = 7
+DECK_PIPELINE_VERSION = 8
 
 # The CI guard for that manual bump (models-eng's classification, 2026-10-26).
 # - DECK_PIPELINE_FUNCTIONS: the server.py functions that shape a deck (what
@@ -4163,6 +4163,7 @@ DECK_PIPELINE_FUNCTIONS = (
     "_league_lineup_slots", "_league_slot_order", "_sleeper_lineup_slots",
     "_sleeper_roster_limit", "_value_core_standings", "_build_trade_roster_context",
     "_assigned_slot_order", "_load_trade_disposition_keys", "_ranking_confidence",
+    "_is_pool_timeout",   # whether a failed read is retried, so whether the owner arm forfeits
     # the flag gates that switch layers on
     "_deck_diversity_enabled", "_deck_exploration_enabled", "_deck_fatigue_enabled",
     "_deck_first_session_enabled", "_deck_quality_filters_enabled", "_deck_signal_v2_enabled",
@@ -4245,6 +4246,7 @@ DECK_PIPELINE_PINS = {
     5: "99d62fcaf7ad01ef",   # models-lead addendum D2: the quality filter's inputs recorded per run (_quality_filter_inputs; the same callables; no shape change)
     6: "d5176ae18c66d208",   # #492 QA P3-1: the record only for a deck with deferred evidence; repeat_head (models-eng #503) from the filter's counts; no shape change
     7: "facf9a9f34b7529a",   # #487 QA P3-3 (models-eng): one immediate retry inside the picks and draft-context memos; a transient failure no longer forfeits the owner arm
+    8: "f7ed33e6ab94af03",   # #521 QA P3-3: a pool timeout is never retried at once (_is_pool_timeout); the same reads, values and shape
 }
 
 # The modules whose code decides what cards a deck holds or their order. Their
@@ -12103,7 +12105,11 @@ def _run_trade_job(
                         _draft_memo = get_league_draft_context(league_id) or {}
                     except Exception as first_err:
                         # One immediate retry (models-eng, v7): a DB blip must not
-                        # forfeit the owner arm. Failed only when both raise.
+                        # forfeit the owner arm. Failed only when both raise. A
+                        # pool timeout isn't retried: the pool is exhausted, and a
+                        # retry would only wait again and add to it (v8).
+                        if _is_pool_timeout(first_err):
+                            raise
                         log.info("trade-job: draft context read failed, retrying: %s", first_err)
                         _draft_memo = get_league_draft_context(league_id) or {}
                 except Exception as draft_err:
@@ -12120,7 +12126,10 @@ def _run_trade_job(
                         _picks_memo = load_draft_picks(league_id=league_id,
                                                        source=_pick_read_source())
                     except Exception as first_err:
-                        # One immediate retry, as the draft context's (v7).
+                        # One immediate retry, as the draft context's (v7); never
+                        # after a pool timeout (v8).
+                        if _is_pool_timeout(first_err):
+                            raise
                         log.info("trade-job: draft picks read failed, retrying: %s", first_err)
                         _picks_memo = load_draft_picks(league_id=league_id,
                                                        source=_pick_read_source())
@@ -13827,6 +13836,13 @@ def _roster_read_in_flight(league_id, roster_read, read_rows) -> bool:
     except Exception as err:
         log.warning("roster refresh state unavailable for league %s: %s", league_id, err)
         return False
+
+
+def _is_pool_timeout(err: BaseException) -> bool:
+    """A connection-pool checkout timeout (QueuePool exhausted): the job's
+    memoized reads never retry it at once (#521 QA P3-3)."""
+    from sqlalchemy.exc import TimeoutError as _PoolTimeout
+    return isinstance(err, _PoolTimeout)
 
 
 def _note_job_picks_read(job_id, picks, drafted: bool = False) -> None:
