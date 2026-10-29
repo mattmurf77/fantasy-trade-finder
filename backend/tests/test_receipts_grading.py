@@ -30,7 +30,8 @@ about honesty and an unproved honesty claim is worse than no claim.
        dedup-by-earliest, min-n gating, the all-windows payload, flag-off
        404s, `n == len(rows used)`, and the Wilson triple 3/5 →
        [0.231, 0.882].
-  T-10 append-only — no UPDATE/DELETE path exists for `receipts_` tables.
+  T-10 append-only — no UPDATE/DELETE path exists for `receipts_` tables
+       (static half: test_receipts_append_only.py, AST over backend/ + scripts/).
 
 Harness: isolated in-memory SQLite (`backend/tests/CLAUDE.md` pattern 1) plus
 the Flask client + injected session (pattern 2). No network, no dev DB.
@@ -40,7 +41,6 @@ from __future__ import annotations
 
 import importlib
 import json
-import re
 import subprocess
 import sys
 import uuid
@@ -1140,52 +1140,8 @@ def test_t9_admin_route_404s_while_grading_is_dark(client, monkeypatch):
 # T-10 — append-only. Proves HLD D-3 mechanically.
 # ---------------------------------------------------------------------------
 
-RECEIPTS_TABLES = ("receipts_grades", "receipts_grade_runs")
-
-
-def test_t10_no_update_or_delete_path_exists_for_receipts_tables():
-    """Forbidden operation 4, enforced by grep rather than by intention.
-
-    "We can't move the goalposts" has to be MECHANICAL. If an UPDATE or
-    DELETE against a receipts table ever compiles, the append-only claim is
-    marketing. Both the service and the database helpers are scanned.
-
-    One sanctioned exception, and it isn't a correction: legal's retention
-    cap (R28.20 (iii), head-eng 2026-10-29) deletes a deck's grades with the
-    deck, at 365 days, in `_delete_deck`. A grade is never edited or deleted
-    for any other reason. An alias of a receipts table counts too, so the
-    exception can't be widened by renaming."""
-    offenders = []
-    for name in ("receipts_service.py", "database.py"):
-        source = (REPO / "backend" / name).read_text()
-        aliases = set(re.findall(r"\b(\w+)\s*=\s*receipts_grades_table\b", source))
-        aliases |= {a for names, tables in re.findall(
-            r"^\s*([\w ,]+)=\s*([\w ,]+)$", source, re.M)
-            for a, t in zip([n.strip() for n in names.split(",")], [x.strip() for x in tables.split(",")])
-            if t in ("receipts_grades_table", "receipts_grade_runs_table")}
-        in_retention = False
-        for i, line in enumerate(source.splitlines(), 1):
-            stripped = line.strip()
-            if line.startswith("def "):
-                in_retention = line.startswith("def _delete_deck(")
-            if stripped.startswith("#"):
-                continue
-            for table in RECEIPTS_TABLES:
-                token = f"{table}_table"
-                if token in line and (".update(" in line or ".delete(" in line):
-                    offenders.append(f"{name}:{i}: {stripped}")
-            if not in_retention and any(re.search(rf"\b(delete|update)\({a}\b", line)
-                                        for a in aliases):
-                offenders.append(f"{name}:{i}: {stripped}")
-            if ("receipts" in line.lower()
-                    and ("UPDATE receipts" in line or "DELETE FROM receipts" in line)):
-                offenders.append(f"{name}:{i}: {stripped}")
-    assert offenders == [], (
-        "an UPDATE/DELETE path against a receipts table exists:\n"
-        + "\n".join(offenders)
-        + "\nCorrections are a grader_version bump plus a regrade, with the "
-          "old rows retained. Editing a grade destroys the audit trail that "
-          "makes the preregistration claim checkable.")
+# The static half lives in test_receipts_append_only.py: it parses every
+# backend/ and scripts/ file (AST-based since #544's QA, release-lead P1-1).
 
 
 def test_t10_regrading_never_mutates_an_existing_row(engine):

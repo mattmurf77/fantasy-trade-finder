@@ -2991,10 +2991,12 @@ mock_drafts_table = Table("mock_drafts", metadata,
 #
 # receipts_grades — APPEND-ONLY. One row per
 # (impression_id, window_days, grader_version) that reaches a TERMINAL
-# status ('graded' or 'ungradeable'). Never UPDATEd, never DELETEd:
-# corrections are a new `grader_version` with the old rows retained
-# (HLD D-3), which is what makes "we can't move the goalposts" mechanical
-# rather than aspirational. Rows whose window endpoint is not yet resolvable
+# status ('graded' or 'ungradeable'). Never UPDATEd, and never DELETEd to
+# correct a grade: corrections are a new `grader_version` with the old rows
+# retained (HLD D-3), which is what makes "we can't move the goalposts"
+# mechanical rather than aspirational. The one delete is legal's 365-day
+# retention cap (R28.20 (iii)): `_delete_deck` takes a deck's grades with the
+# deck, and account deletion takes the user's (T-10 pins both). Rows whose window endpoint is not yet resolvable
 # are simply absent — the queue is defined by that absence (LLD §4.1), so
 # idempotency is structural rather than bookkept.
 receipts_grades_table = Table("receipts_grades", metadata,
@@ -7257,11 +7259,14 @@ def _delete_deck(conn, deck_job_id: str, user_id: str, league_id: str,
     counts: dict[str, int] = {}
     for name, stmt in (
             *((name, delete(t).where(t.c.impression_id.in_(contract_ids[k:k + 500])))
-              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r),
-                              ("receipts_grades", g))
+              for name, t in (("deck_outcomes", o), ("trade_pass_reasons", r))
               for k in range(0, len(contract_ids), 500)),
             ("deck_outcomes", delete(o).where(o.c.impression_id.in_(row_ids))),
             ("trade_pass_reasons", delete(r).where(r.c.impression_id.in_(row_ids))),
+            # The receipts grades: the one sanctioned delete of an append-only
+            # table, these two statements exactly (T-10 pins them).
+            *(("receipts_grades", delete(g).where(g.c.impression_id.in_(contract_ids[k:k + 500])))
+              for k in range(0, len(contract_ids), 500)),
             ("receipts_grades", delete(g).where(g.c.impression_id.in_(row_ids))),
             ("deck_impressions", delete(i).where(i.c.deck_job_id == deck_job_id)),
             ("deck_card_withdrawals", delete(w).where(w.c.deck_job_id == deck_job_id)),
@@ -7305,8 +7310,13 @@ def _delete_old_grading_sessions(cutoff: str, limit: int) -> int:
                                 .order_by(gs.c.created_at, gs.c.session_id).limit(limit)).scalars())
         if not ids:
             return 0
+        # Sessions first: fold_grading_cards starts by updating its session
+        # row, so a fold racing this either waits and finds the session gone,
+        # or commits first and its cards are seen by the card delete below.
+        # Cards first would let a fold land cards for a session about to go.
+        n = conn.execute(delete(gs).where(gs.c.session_id.in_(ids))).rowcount or 0
         conn.execute(delete(gc).where(gc.c.session_id.in_(ids)))
-        return conn.execute(delete(gs).where(gs.c.session_id.in_(ids))).rowcount or 0
+        return n
 
 
 def _delete_old_page_store(cutoff: str, limit: int) -> int:
@@ -16246,8 +16256,10 @@ def update_mock_draft(mock_id: int, user_id: str, *, picks_json: str | None = No
 # INSERT + SELECT ONLY, deliberately. `receipts_grades` and
 # `receipts_grade_runs` are append-only (HLD D-3): a wrong grade is corrected
 # by bumping `grader_version` and regrading, never by editing a row. There is
-# no UPDATE or DELETE helper for either table anywhere in the codebase, and
-# `backend/tests/test_receipts_grading.py` (T-10) fails if one appears.
+# no UPDATE helper for either table, and no DELETE but legal's retention cap
+# (`_delete_deck`, a deck's grades at 365 days) and account deletion;
+# `backend/tests/test_receipts_append_only.py` (T-10) parses every backend/
+# and scripts/ file and fails if any other write appears.
 
 def _receipts_serve_date_expr():
     """`substr(served_at, 1, 10)` — the UTC serve DATE of an impression.

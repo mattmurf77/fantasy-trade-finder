@@ -165,8 +165,9 @@ Additive tables in `backend/database.py` (house style: soft references, no FKs �
 
 ```python
 # receipts_grades — APPEND-ONLY. One row per (impression, window, grader_version)
-# reaching a terminal status. Never UPDATEd/DELETEd; corrections = new grader_version
-# (D-3). The impression row is the preregistered prediction; this table records only
+# reaching a terminal status. Never UPDATEd, never DELETEd to correct a grade;
+# corrections = new grader_version (D-3). The one delete is legal's 365-day retention
+# cap (`_delete_deck`, 2026-10-29) and account deletion (T-10 pins both). The impression row is the preregistered prediction; this table records only
 # how consensus moved afterward.
 receipts_grades_table = Table("receipts_grades", metadata,
     Column("id",              Integer, primary_key=True, autoincrement=True),
@@ -441,7 +442,7 @@ flags off; tables inert. Mobile ships in the normal EAS cadence; server can depl
   filter stands as defense in depth), dedup-by-earliest, min-n
   gating, all-windows payload, flag-off 404s; `n == len(rows used)` (post-dedup,
   post-coverage) asserted; Wilson implementation against 3/5 → [0.231, 0.882].
-- **T-10 append-only:** module exposes no UPDATE/DELETE for `receipts_` tables.
+- **T-10 append-only:** no UPDATE/DELETE of a `receipts_` table anywhere in `backend/` or `scripts/` but the retention cap's two statements in `_delete_deck` and account deletion (`backend/tests/test_receipts_append_only.py`, AST-based since #544's QA).
 - **Structural (`mobile/tests/check-receipts.js` + npm script):** ReceiptsScreen
   registered as root-stack push; `FeedbackFAB activeScreen="Receipts"` exactly once; all
   three window chips bound to one payload; no bare `Receipt` component name (collision
