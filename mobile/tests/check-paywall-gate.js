@@ -1448,19 +1448,51 @@ check('9e. design §5 / R28.9 3f [shape + executed]: Settings › Subscription �
   sdk.products = {};
 });
 
-check('9f. legal privacy §6 [shape]: the Delete line verbatim, body-sm chalk-dim, ABOVE the Delete account row; Manage subscription beside it; nothing else in AccountDataSection', () => {
-  const a = read(ACCOUNT_DATA);
-  eq(a.split(DELETE_LINE).length - 1, 1, 'the line, verbatim, once');
-  const lineAt = a.indexOf(DELETE_LINE);
-  const deleteAt = a.indexOf('accessibilityLabel="Delete account"');
-  assert(lineAt > a.indexOf('{exportRow}') && lineAt < deleteAt, 'directly above the Delete account row (after Download my data)');
-  assert(/<Text style=\{styles\.rowSub\} testID="settings\.delete-subscription-note">\s*\{"Deleting your account/.test(a), 'in the body-sm row-sub style');
-  assert(/rowSub: \{\s*\.\.\.type\.bodySm,/.test(read('screens/settings/styles.ts')) && /bodySm: \{[^}]*color: chalk\.dim,/.test(read('theme/chalkline.ts')), 'row-sub is body-sm chalk-dim');
-  const manageAt = a.indexOf('<ManageSubscriptionLink testID="settings.delete-manage-subscription" />');
-  assert(manageAt > lineAt && manageAt < deleteAt, 'Manage subscription between the line and Delete account');
-  const m = fnText(SUBS, 'ManageSubscriptionLink');
-  assert(/const paywallOn = useFlag\('monetize\.paywall'\);\s*if \(!paywallOn\) return null;/.test(m) && !NO_ENTITLEMENT.test(m), 'the link self-gates on the flag and is the same for every session');
-  eq((a.match(/SubscriptionSection|ManageSubscriptionLink|#393/g) || []).length, 4, 'the M3 hunk in AccountDataSection is the import, the comment and the mount');
+check('9f. legal R28.21 5a–5d [executed + shape]: the delete-account dialog in BOTH Settings screens — legal\'s body + sub-note from ONE module, Cancel → Manage subscription (Apple\'s page, nothing else) → Continue (the unchanged confirm); no flag, demo, verification or subscription read; the old section line is gone', () => {
+  const BODY = 'This permanently deletes your rankings, comparison history, trade activity, notifications, push tokens, and any stored Sleeper, ESPN or MFL sign-in or connection from our servers. Trade matches shared with leaguemates are anonymized on your side. This cannot be undone.';
+  const del = load('copy/deleteAccount.ts', {});
+  eq(del.DELETE_ACCOUNT_BODY, BODY, 'the body, verbatim');
+  eq(del.DELETE_ACCOUNT_SUB_NOTE, DELETE_LINE, 'the sub-note (legal\'s mz.delete.sub_note), verbatim');
+  assert(!/\b(import|require)\b/.test(strip(read('copy/deleteAccount.ts'))), 'the copy module has zero imports');
+  for (const rel of [ACCOUNT_DATA, 'screens/SettingsScreen.tsx']) {
+    const { sf } = astOf(rel);
+    const fn = findNodes(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === 'confirmDeleteAccount')[0];
+    assert(fn, `${rel}: confirmDeleteAccount`);
+    const call = findNodes(fn, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'Alert.alert')[0];
+    const [title, message, buttons] = call.arguments;
+    eq(title.getText(sf), "'Delete account?'", `${rel}: the title, a literal`);
+    eq(message.getText(sf), "DELETE_ACCOUNT_BODY + '\\n\\n' + DELETE_ACCOUNT_SUB_NOTE", `${rel}: body, a blank line, the sub-note`);
+    assert(ts.isArrayLiteralExpression(buttons) && buttons.elements.length === 3, `${rel}: three buttons`);
+    const [cancel, manage, cont] = buttons.elements.map((e) => strip(e.getText(sf)).replace(/\s+/g, ' ').trim());
+    eq(cancel, "{ text: 'Cancel', style: 'cancel' }", `${rel}: 1. Cancel`);
+    eq(manage, "{ text: MON['mon.pay.manage'], onPress: () => openAppleSubscriptions() }", `${rel}: 2. Manage subscription (default style; only Apple\'s page)`);
+    assert(/^\{ text: 'Continue', style: 'destructive', onPress: \(\) => Alert\.alert\( 'Are you absolutely sure\?',/.test(cont)
+      && /text: 'Delete everything', style: 'destructive', onPress: \(\) => void performDeleteAccount\(\)/.test(cont),
+    `${rel}: 3. Continue (destructive) → the unchanged "Are you absolutely sure?" confirm`);
+    const body = strip(fn.getText(sf));
+    const hit = body.match(/useFlag|paywallOn|paywallEnabled|monetize|useEntitlements|entitlement|getActivePro|purchases|restorePurchases|paywall-config|isDemo|verification|isUnverified|\.pro\b|founder/i);
+    assert(!hit, `${rel}: confirmDeleteAccount reads "${hit && hit[0]}" (legal 5c: no flag or subscription condition)`);
+    const t = strip(read(rel));
+    assert(/import \{ DELETE_ACCOUNT_BODY, DELETE_ACCOUNT_SUB_NOTE \} from '(\.\.\/)+copy\/deleteAccount';/.test(t), `${rel}: the strings come from copy/deleteAccount`);
+    assert(/import (SubscriptionSection, )?\{ openAppleSubscriptions \} from '(\.\.\/)+components\/SubscriptionSection';/.test(t), `${rel}: the one opener`);
+    assert(!t.includes(DELETE_LINE) && !t.includes('any stored Sleeper connection'), `${rel}: no inline copy of the line, no old body`);
+  }
+  eq(copy.MON['mon.pay.manage'], 'Manage subscription', 'the button label');
+  const a = strip(read(ACCOUNT_DATA));
+  assert(!/settings\.delete-subscription-note|ManageSubscriptionLink|settings\.delete-manage-subscription/.test(a), 'the section-level note and link are gone (the dialog replaces them)');
+  eq((a.match(/SubscriptionSection|openAppleSubscriptions|deleteAccount'|#393/g) || []).length, 4, 'the M3 hunk in AccountDataSection: the opener\'s import (2), the copy import, and the dialog\'s one opener call');
+  // the opener: executed, and the Settings row uses it
+  const url = (read(SUBS).match(/const APPLE_SUBSCRIPTIONS_URL = '([^']+)';/) || [])[1];
+  eq(url, 'https://apps.apple.com/account/subscriptions', "Apple's subscription page");
+  const opened = [];
+  const open = extractFn(SUBS, 'openAppleSubscriptions', {
+    Linking: { openURL: (u) => { opened.push(u); return Promise.resolve(); } },
+    APPLE_SUBSCRIPTIONS_URL: url,
+  });
+  open();
+  eq(JSON.stringify(opened), JSON.stringify([url]), 'openAppleSubscriptions opens that page, once, and nothing else');
+  assert(/onPress=\{openAppleSubscriptions\}/.test(fnText(SUBS, 'ManageSubscriptionLink')), 'ManageSubscriptionLink uses the same opener');
+  eq((strip(read(SUBS)).match(/Linking\.openURL\(/g) || []).length, 1, 'one place opens Apple\'s page');
 });
 
 check('9g. copy §9.6 [executed + shape]: the invitee eyebrow and board line — trigger variant only, only with BOTH values; never a raw {inviter} / {league}', () => {

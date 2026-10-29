@@ -71,6 +71,13 @@ import {
 /** Apple's own subscription-management page (Manage subscription). */
 const APPLE_SUBSCRIPTIONS_URL = 'https://apps.apple.com/account/subscriptions';
 
+/** Opens Apple's subscription page and does nothing else. The one opener for
+ *  Manage subscription: this section's row and both delete-account dialogs
+ *  (legal R28.21 5c: never a required step). */
+export function openAppleSubscriptions(): void {
+  void Linking.openURL(APPLE_SUBSCRIPTIONS_URL).catch(() => {});
+}
+
 /** B8 (head-eng, 2026-10-27): the 11-06 binary ships Settings › Subscription
  *  WITHOUT the member status block (plan line, "Founding GM since" + the
  *  FounderTag, kept-price, lapse). Update 1 flips this. While false the block
@@ -316,7 +323,7 @@ export function ManageSubscriptionLink({
     <LinkRow
       testID={testID}
       title={MON['mon.pay.manage']}
-      onPress={() => void Linking.openURL(APPLE_SUBSCRIPTIONS_URL)}
+      onPress={openAppleSubscriptions}
       accessibilityRole="link"
     />
   );
