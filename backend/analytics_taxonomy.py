@@ -738,6 +738,18 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     #                                       over a payload already in memory)
     "usage_trends_action", "usage_trends_availability_opened",
     "usage_trends_view_changed",
+    # ── Sleeper app hand-off, 2026-10-28 (#351 / #379) ───────────────────
+    # Grant: analytics-lead, 2026-10-20, G1–G7 (widened @ 8b63ef10).
+    # Addendum: docs/business/analytics/2026-10-28-sleeper-handoff-events.md.
+    # Registered in the SAME commit as the emitter
+    # (mobile/src/utils/sleeperHandoff.ts, trackHandoff). INTENT, so NO
+    # analytics_queries.NON_INTENT_EVENTS row: every firing follows a
+    # deliberate CTA tap, on the Free Agents claim sheet it is the only
+    # record of that tap, and the outcome of a deliberate act stays INTENT,
+    # failure included (the sleeper_send_* precedent). NOT a WAT event: an
+    # FA add is not a trade opinion, and send_button's trade intent is
+    # already counted by sleeper_send_attempted.
+    "sleeper_handoff_resolved",
 })
 
 # ---------------------------------------------------------------------------
@@ -1787,6 +1799,22 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Projected is the only path that runs the outlook simulation, so this
     # row is also the denominator for that request's cost.
     "standings_segment_changed":   frozenset({"segment"}),
+    # ── Sleeper app hand-off (2026-10-28; grant G1–G7, widened @ 8b63ef10) ─
+    # Every value set is CLOSED. This registry constrains keys only, so the
+    # enums ride here and in the addendum:
+    #   surface  ∈ free_agents | usage_trends | send_button | trade_queue
+    #   target   ∈ add | trade
+    #   rung     ∈ add | player | players_tab | league | bare | trade |
+    #              trades_tab — the rung actually opened (#351 PRD §4.1)
+    #   outcome  ∈ app | not_installed. not_installed means `openURL`
+    #              REJECTED; the client never calls canOpenURL (G4)
+    #   has_drop   bool, only on a target=add row off send_button. ABSENT,
+    #              never null, on send_button and every target=trade row (G2)
+    # One row per hand-off: a Send All of N queued trades is one. No player
+    # id, name or league id (G5). No device `platform`: that is a
+    # user_events COLUMN, never a prop.
+    "sleeper_handoff_resolved":    frozenset({"surface", "target", "rung",
+                                              "outcome", "has_drop"}),
 }
 
 
