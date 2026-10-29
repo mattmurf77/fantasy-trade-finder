@@ -33,6 +33,8 @@
 //       and a `leagueName` that can only name the claim league             [AST]
 //   H2  FreeAgentsScreen's render chain tests query.isError before
 //       query.isLoading (release-lead QA rule)                             [AST]
+//   H3  ClaimSheet's openSleeper passes `hasDrop: dropId != null` to
+//       openInSleeperApp, the source of #528's has_drop (head-eng ruling) [AST]
 //   S3  scheme opens: one openURL, `sleeper://…`, outcome 'app', no alert  [executed]
 //   S4  scheme rejects: the D2 alert, whose Get Sleeper opens
 //       apps.apple.com/app/id987367543; outcome 'not_installed'; no
@@ -57,7 +59,7 @@
 //   S14 → platforms-eng follow-up: the Send-in-Sleeper steps confirm +
 //       clipboard (PRD §4.3), waiting on design-lead / ux-lead copy
 //
-// HONEST LABEL (G-035): S1, S2, S8, S9, S16, H1 and H2 prove wirings are
+// HONEST LABEL (G-035): S1, S2, S8, S9, S16, H1, H2 and H3 prove wirings are
 // present, not behavior: no claim-sheet code is executed here. S3–S7, S10
 // and S13 execute the real modules.
 //
@@ -201,7 +203,7 @@ const flush = () => new Promise((r) => setImmediate(r));
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// S1 / S2 (ClaimSheet half) / S8 / S9 / H1 / H2 — the claim sheet and its hosts
+// S1 / S2 (ClaimSheet half) / H3 / S8 / S9 / H1 / H2 — the claim sheet and its hosts
 // ═══════════════════════════════════════════════════════════════════════
 const unparen = (n) => (ts.isParenthesizedExpression(n) ? unparen(n.expression) : n);
 const squash = (s) => s.replace(/\s+/g, '');
@@ -284,6 +286,42 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
     /\bleagueId\b/.test(open) && /\bplayerId:\s*row\.player_id\b/.test(open) && /\bsurface\b/.test(open),
     'S2 openSleeper passes leagueId, playerId: row.player_id and the host surface',
     open.slice(0, 200),
+  );
+}
+
+// H3 — the CTA passes `hasDrop: dropId != null`, which #528's
+// sleeper_handoff_resolved sends as has_drop (head-eng ruling). "Picked a
+// drop" is dropId set, not a name found or a full roster. `dropId !== null`
+// is accepted only while dropId's state type is `string | null`, so it can't
+// be undefined.
+{
+  const sf = parse(CLAIM);
+  let openFn = null;
+  let dropType = null;
+  walk(sf, (n) => {
+    if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'openSleeper') openFn = n.initializer;
+    if (
+      ts.isVariableDeclaration(n) && ts.isArrayBindingPattern(n.name) && n.initializer &&
+      ts.isCallExpression(n.initializer) && n.initializer.expression.getText(sf) === 'useState' &&
+      n.name.elements[0] && ts.isBindingElement(n.name.elements[0]) && n.name.elements[0].name.getText(sf) === 'dropId'
+    ) dropType = n.initializer.typeArguments && n.initializer.typeArguments.length === 1
+      ? squash(n.initializer.typeArguments[0].getText(sf)) : null;
+  });
+  const calls = [];
+  if (openFn) {
+    walk(openFn, (n) => {
+      if (ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === 'openInSleeperApp') calls.push(n);
+    });
+  }
+  const arg = calls.length === 1 && calls[0].arguments[0] && ts.isObjectLiteralExpression(calls[0].arguments[0])
+    ? calls[0].arguments[0] : null;
+  const props = arg ? arg.properties.filter((p) => p.name && p.name.getText(sf) === 'hasDrop') : [];
+  const value = props.length === 1 && ts.isPropertyAssignment(props[0]) ? squash(props[0].initializer.getText(sf)) : null;
+  const accepted = ['dropId!=null', ...(dropType === 'string|null' ? ['dropId!==null'] : [])];
+  assert(
+    accepted.includes(value),
+    'H3 openSleeper passes hasDrop: dropId != null to openInSleeperApp (once)',
+    `openInSleeperApp calls in openSleeper: ${calls.length}; hasDrop props: ${props.length}; value: ${value}; dropId state type: ${dropType}`,
   );
 }
 

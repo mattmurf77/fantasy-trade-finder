@@ -161,6 +161,7 @@ export default function ClaimSheet({
       playerId: row.player_id,
       clipboardText: row.name,
       surface,
+      hasDrop: dropId != null,
     });
   };
 
