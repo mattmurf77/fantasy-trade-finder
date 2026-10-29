@@ -3180,7 +3180,7 @@ _MODEL_CONFIG_DEFAULTS = [
     ("trade_roster_change_revoke", 1.0, "S0 kill for the on_roster_change handler alone, read per call: 0 = the handler does nothing: no revoke, no re-stamp, no move recorded (the rest of S0 follows trade_i1_mode); 1 = it revokes a league job built on an older Sleeper read than the refreshed rows, only for a user whose session already holds the newer read (#470 QA), re-stamps a job whose rosters (its read's members, the picks then stored) hash to the new stamp, and records the move (#481 QA, #484 QA). NaN or any other value reads as 1. Deploy-free"),
     ("trade_gate_miss_mode", 0.0, "S0's no-card gate misses: 1 = serve them (roster_check_unavailable when the roster check can't run; the §3b withhold with wait_reason 'roster_check'); 0 = hold them for binaries before 1.22.0, which show them as 'Search failed' (a check that can't run serves the cards unchecked, loudly logged; a past-bound stale roster serves its I-1-filtered cards, logged roster_gate_miss_held). Flip to 1 once 1.22.0 is distributed. NaN or any other value reads as 0. Deploy-free"),
     # ── Deck-evidence retention (head-eng 2026-10-28; dark until a bound is set) ──
-    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention cap (legal R28.20 (iii): 365). The cleanup loop deletes, a bounded batch per tick, every store of a deck first delivered more than this many days ago, all at once: its outcomes, pass reasons, deck_impressions rows, withdrawals, candidate set, bakeoff_runs row, policy shadow rows and pack; and legacy trade_impressions past it. 0 = off: the whole prune, full rows included, stays dark. A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
+    ("deck_evidence_retention_days", 0.0, "Deck-evidence retention cap (legal R28.20 (iii): 365). The cleanup loop deletes, a bounded batch per tick, every store of a deck first delivered more than this many days ago, all at once: its outcomes, pass reasons, deck_impressions rows, withdrawals, candidate set, bakeoff_runs row, policy shadow rows and pack; and legacy trade_impressions and trade_page_store rows past it. 0 = off: the whole prune, full rows included, stays dark. A value under 56 (receipts' window) is refused: nothing is deleted and a warning is logged. Deploy-free"),
     ("deck_evidence_full_row_days", 90.0, "Deck-evidence retention, full rows (legal R28.20 (iii): 90): a PACKED deck's deck_impressions rows (full and ghost) are deleted this many days after its first delivery; the pack keeps every card until deck_evidence_retention_days. A deck with no pack keeps its rows until the cap. Acts only while deck_evidence_retention_days is on; 0 or a value at or past the cap = rows go with the deck at the cap; under 56 = refused and logged. Deploy-free"),
     ("trade_roster_bound_s", 300.0, "S0 §3b: a Sleeper roster whose last refresh is older than this many seconds is past the bound. Past the bound, the serve kicks one background roster refresh (P41); past it with the last attempt failed (league_roster_state 'stale'), cached cards are withheld (wait_reason 'roster_check'). Deploy-free"),
     ("trade_import_roster_fresh_s", 86400.0, "S0 §3: an ESPN/MFL/Fleaflicker league's stored rosters read 'fresh' while their newest league_members.updated_at is younger than this many seconds, else 'stale'. Logged only: never withholds, never rebuilds (ruling 29). Deploy-free"),
@@ -7244,6 +7244,17 @@ def _delete_old_trade_impressions(cutoff: str, limit: int) -> int:
                             ).rowcount or 0
 
 
+def _delete_old_page_store(cutoff: str, limit: int) -> int:
+    """trade_page_store rows built before the cap: a backstop for the store's
+    own eviction (trade_page_store_evict_days, 30 by default), which runs only
+    while the store is on and could be set past the cap. One row per scope,
+    so the table stays small and a scan is cheap."""
+    t = trade_page_store_table
+    with engine.begin() as conn:
+        ids = select(t.c.id).where(t.c.built_at < cutoff).order_by(t.c.id).limit(limit)
+        return conn.execute(delete(t).where(t.c.id.in_(ids.scalar_subquery()))).rowcount or 0
+
+
 def _delete_packed_full_rows(cutoff: str, floor: str, chunks: int) -> int:
     """The full-row bound (E-c1): the deck_impressions rows of packed decks
     first delivered before `cutoff` (and not before `floor`, the cap, whose
@@ -7288,7 +7299,8 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
       own transaction, lose every store at once (E-a1): outcomes (every kind)
       and pass reasons, deck_impressions rows, withdrawals, the candidate set,
       the bakeoff_runs row, the trade_policy_shadow rows and the pack; and
-      legacy trade_impressions past it go too;
+      legacy trade_impressions and trade_page_store rows past it go too (the
+      page store's own eviction runs only while the store is on);
     - `full_row_days` (90): a packed deck's deck_impressions rows (full and
       ghost) past it go, and the pack keeps every card until the cap. A deck
       with no pack keeps its rows until the cap (E-a3, E-c1).
@@ -7316,14 +7328,18 @@ def purge_deck_evidence(*, days: float, full_row_days: float = 0.0, batch_decks:
                         deck_job_id, exc_info=True)
     if decks:
         counts["decks"] = len(decks)
-    try:
-        legacy = _delete_old_trade_impressions(cap, limit * _EVIDENCE_PRUNE_ROWS_PER_DECK)
-    except Exception:
-        legacy = 0
-        log.warning("deck-evidence retention: trade_impressions not deleted; retried next "
-                    "tick", exc_info=True)
-    if legacy:
-        counts["trade_impressions"] = legacy
+    for name, step, batch in (
+            ("trade_impressions", _delete_old_trade_impressions,
+             limit * _EVIDENCE_PRUNE_ROWS_PER_DECK),
+            ("trade_page_store", _delete_old_page_store, limit)):
+        try:
+            n = step(cap, batch)
+        except Exception:
+            n = 0
+            log.warning("deck-evidence retention: %s not deleted; retried next tick", name,
+                        exc_info=True)
+        if n:
+            counts[name] = n
     if full_row_days and full_row_days < days and _bound_ok("deck_evidence_full_row_days",
                                                             full_row_days):
         rows = _delete_packed_full_rows((now - timedelta(days=full_row_days)).isoformat(),

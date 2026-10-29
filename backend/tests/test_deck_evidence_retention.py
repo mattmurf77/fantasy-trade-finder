@@ -30,7 +30,8 @@ import backend.server as server
 from backend.database import (
     bakeoff_runs_table, deck_candidate_sets_table, deck_card_withdrawals_table,
     deck_evidence_packs_table, deck_impressions_table, deck_outcomes_table, metadata,
-    trade_impressions_table, trade_pass_reasons_table, trade_policy_shadow_table)
+    trade_impressions_table, trade_page_store_table, trade_pass_reasons_table,
+    trade_policy_shadow_table)
 from backend.tests.test_eval_pack_reader import _card, _row
 
 NOW = datetime(2028, 3, 1, tzinfo=timezone.utc)
@@ -305,6 +306,7 @@ def test_full_rows_go_in_bounded_chunks_resuming_where_the_last_call_stopped(db,
 def test_a_failed_full_row_chunk_keeps_the_cursor(db, monkeypatch, caplog):
     deck(db, "p0", 120)
     monkeypatch.setattr(db_module, "_delete_old_trade_impressions", lambda *a: 0)
+    monkeypatch.setattr(db_module, "_delete_old_page_store", lambda *a: 0)
     real_begin = db.begin
     state = {"fail": True}
 
@@ -332,16 +334,35 @@ def test_legacy_trade_impressions_go_at_the_cap(db):
             == [iso(30)]
 
 
-def test_a_failed_trade_impressions_step_never_stops_the_full_rows(db, monkeypatch, caplog):
+@pytest.mark.parametrize("step,name", [("_delete_old_trade_impressions", "trade_impressions"),
+                                       ("_delete_old_page_store", "trade_page_store")])
+def test_a_failed_side_step_never_stops_the_others(db, monkeypatch, caplog, step, name):
     deck(db, "p0", 120)
 
     def boom(*a):
         raise RuntimeError("db down")
-    monkeypatch.setattr(db_module, "_delete_old_trade_impressions", boom)
+    monkeypatch.setattr(db_module, step, boom)
     with caplog.at_level("WARNING"):
         assert purge() == {"full_rows": 4}
-    assert any("trade_impressions not deleted; retried next tick" in r.getMessage()
+    assert any(f"{name} not deleted; retried next tick" in r.getMessage()
                for r in caplog.records)
+
+
+def test_page_store_rows_past_the_cap_go_whatever_the_stores_flag(db, monkeypatch):
+    """A backstop: the store's own eviction runs only while it's on."""
+    monkeypatch.setattr(server, "_trade_page_store_enabled", lambda: False)
+    t = trade_page_store_table
+    with db.begin() as conn:
+        conn.execute(insert(t), [
+            {"user_id": "u1", "league_id": "lg", "scoring_format": "sf", "request_scope": scope,
+             "roster_fp": "rfp", "values_snapshot_id": "vsn", "engine_version": "e",
+             "config_signature": "c", "experiment_digest": "x", "deck_job_id": f"j{d}",
+             "built_at": iso(d), "expires_at": iso(d - 7), "card_count": 1,
+             "pages_blob": {"cards": []}, "stored_bytes": 1, "state": "ready"}
+            for scope, d in (("organic:f=0.50", 366), ("organic:f=0.75", 364))])
+    assert purge() == {"trade_page_store": 1}
+    with db.connect() as conn:
+        assert list(conn.execute(select(t.c.deck_job_id)).scalars()) == ["j364"]
 
 
 def test_the_loop_step_reads_both_knobs(monkeypatch):

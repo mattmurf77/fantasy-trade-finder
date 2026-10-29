@@ -59,13 +59,15 @@
   - its `bakeoff_runs` row;
   - its `trade_policy_shadow` rows (the treatment's rejected candidates, `ix_trade_policy_shadow_job`);
   - its `deck_evidence_packs` row.
-- **Also at the cap:** legacy `trade_impressions` rows past it, taken by oldest id.
+- **Also at the cap:**
+  - legacy `trade_impressions` rows past it, taken by oldest id;
+  - `trade_page_store` rows built before it. This is a backstop: the store's own eviction (`trade_page_store_evict_days`, 30 by default) runs only while the store is on, and could be set past the cap. There's one row per scope, so it's a small table.
 - **At the full-row bound:** a packed deck's `deck_impressions` rows, full and ghost. The pack, its outcomes and the rest stay until the cap.
   - It works in chunks of 500 packs, at most 20 chunks per tick, resuming from an in-memory cursor. A restart walks again from the cap.
   - A failed chunk keeps the cursor, so it's retried next tick.
 
 **Kept on their own clocks:**
-- `trade_page_store` (`evidence_blob`): its own 7-day TTL and byte budget;
+- `trade_page_store` (`evidence_blob`): its own eviction (30 days unserved by default, plus the byte budget) while the store is on, with the cap's backstop above;
 - `deck_diagnostic_snapshots`: 14 days;
 - `trade_deck_lineage`: 24 h;
 - `prepared_trade_*`: their `expires_at`.
@@ -82,7 +84,7 @@ Whether the cap covers them is head-eng's call before the flip. Legal: "if eng l
 
 ## 3. Evidence scope
 
-- [x] **Unit tests:** `backend/tests/test_deck_evidence_retention.py`, 27 tests.
+- [x] **Unit tests:** `backend/tests/test_deck_evidence_retention.py`, 29 tests.
   - **What never deletes:** off at 0, full rows included; both 56-day floors, refused and logged.
   - **The cap:**
     - every store of a packed and of a pack-less deck goes at once, including a like and a pass reason on a packed card with no row;
@@ -96,12 +98,12 @@ Whether the cap covers them is head-eng's call before the flip. Legal: "if eng l
     - chunks resume from the cursor, and a deck crossing later is still found;
     - a failed chunk keeps the cursor.
   - **Bounds:** both are measured from the first delivery, at and one day past each.
-  - **Batching and failure:** one bounded batch per call; a failing deck is left whole; a failing `trade_impressions` step never stops the full-row pass.
-  - **`trade_impressions`:** rows past the cap go, and newer rows stay.
+  - **Batching and failure:** one bounded batch per call; a failing deck is left whole; a failing `trade_impressions` or page-store step never stops the others.
+  - **`trade_impressions` and `trade_page_store`:** rows past the cap go, and newer rows stay; page-store rows go with the store's flag off.
   - **The loop step:** reads both knobs, its defaults match `model_config`'s, never raises, and is wired into `_cleanup_loop`.
   - **The index:** pack-less decks wait for it (logged once); it's declared and never built by `init_db`.
   - **The script:** builds the index, is idempotent, and `--check` writes nothing.
-- [x] **Sabotages:** all 21 mutations turn the suite red (TEST_LEDGER).
+- [x] **Sabotages:** all 24 mutations turn the suite red (TEST_LEDGER).
 - [x] **WAIVED, the structural guard, code-walk and TestFlight checklist:** backend-only, no user-visible surface, and dark by default.
 - `testID`s: none.
 

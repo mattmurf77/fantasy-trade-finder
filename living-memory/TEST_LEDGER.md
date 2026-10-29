@@ -7,7 +7,7 @@
 - **Evidence:** backend only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
 
 **The prune:** `database.purge_deck_evidence`, run by the cleanup loop's `_prune_deck_evidence` once per five-minute tick, measured from first delivery.
-- **The cap (`deck_evidence_retention_days`, 365):** up to 200 decks per tick, each in one transaction. Every store goes at once: outcomes and pass reasons (a packed card's by exact contract ids from the pack's `card_count`, a row's by its id), rows, withdrawals, the candidate set, `bakeoff_runs`, `trade_policy_shadow` and the pack. Legacy `trade_impressions` past the cap go too.
+- **The cap (`deck_evidence_retention_days`, 365):** up to 200 decks per tick, each in one transaction. Every store goes at once: outcomes and pass reasons (a packed card's by exact contract ids from the pack's `card_count`, a row's by its id), rows, withdrawals, the candidate set, `bakeoff_runs`, `trade_policy_shadow` and the pack. Legacy `trade_impressions` and `trade_page_store` rows past the cap go too (the page store's own eviction runs only while it's on).
 - **Full rows (`deck_evidence_full_row_days`, 90):** a packed deck's rows go, in 500-pack chunks resumed from an in-memory cursor. Pack-less decks keep their rows until the cap.
 - **Off at a cap of 0** (the default). Either bound under 56 days is refused and logged.
 - **Replaced from the first cut:** the 2027-01-01 date floor is gone (with 90/365 final it never binds). Outcomes and `bakeoff_runs` used to be kept; they now go with the deck.
@@ -17,7 +17,7 @@
 - My first cut built it in `init_db`, against the data dictionary's rule (a plain index on prod's `deck_impressions` can outlast the 120 s boot timeout); caught before push.
 - **Outcome matching** is by exact ids, never a LIKE or a string range. Under prod's default collation, punctuation sorts at a lower collation level, so neither is a plain index range.
 
-**Backend:** `test_deck_evidence_retention.py`, 27 tests:
+**Backend:** `test_deck_evidence_retention.py`, 29 tests:
 - **Off:** off at 0, full rows included; both 56-day floors.
 - **The cap:**
   - every store of a packed and of a pack-less deck goes at once, including a like and a pass reason on a packed card with no row;
@@ -30,18 +30,18 @@
   - rows follow the cap with the bound at 0, 365 or 400;
   - chunks resume from the cursor;
   - a failed chunk keeps the cursor.
-- **Bounds and batching:** both bounds are measured from the first delivery; one bounded batch per call; a failing deck is left whole; a failing `trade_impressions` step never stops the full-row pass; `trade_impressions` past the cap go.
+- **Bounds and batching:** both bounds are measured from the first delivery; one bounded batch per call; a failing deck is left whole; a failing `trade_impressions` or page-store step never stops the others; `trade_impressions` and page-store rows past the cap go (page rows with the store's flag off).
 - **The loop step:** reads both knobs, its defaults match `model_config`'s, never raises, and the loop runs it.
 - **The index and script:** pack-less decks wait for the index (logged once); the index is never built by `init_db`; the script builds it, is idempotent, and `--check` writes nothing.
 
-**Sabotages:** 21 of 21 mutations turn the suite red:
+**Sabotages:** 24 of 24 mutations turn the suite red:
 - the floor;
 - each store kept: contract outcomes, row outcomes, contract pass reasons, row pass reasons, `bakeoff_runs`, `trade_policy_shadow`, withdrawals, candidate sets;
 - only the first 500 contract ids;
 - the pack-less scan taking a packed deck;
 - full rows deleted for any deck;
 - no cursor advance; the cursor advancing on a failed chunk;
-- `trade_impressions` with no cutoff, skipped, or not isolated;
+- `trade_impressions` with no cutoff, skipped, or not isolated; the page store with no cutoff or skipped;
 - no batch bound;
 - the loop skipping the step, or ignoring the full-row knob.
 
