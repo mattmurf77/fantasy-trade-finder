@@ -1792,10 +1792,10 @@ There is no generation/card-limit or analytics sampling change.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `deck_evidence_retention_days` | 0.0 | **Off at 0.** Each five-minute cleanup tick deletes up to 200 decks whose first delivery (`served_at`) is more than this many days ago, each in its own transaction. It deletes their `deck_evidence_packs` row, `deck_impressions` rows, `deck_card_withdrawals` and `deck_candidate_sets` row, and never their `deck_outcomes`. Under 56 (receipts' window) it is refused with a warning and nothing is deleted. The bound itself is legal's and head-product's (analytics-lead recommends 90; models-lead's §3 asks for any cap ≥ 365). **Rollback: set 0.** Deploy-free |
-| `deck_evidence_keep_until_epoch` | 1798761600.0 | The date floor, unix seconds UTC: nothing is deleted before this instant, whatever the bound, so launch-period decks are kept until 2026-12-31. The default is 2027-01-01T00:00:00Z. Deploy-free |
+| `deck_evidence_retention_days` | 0.0 | **The cap: legal R28.20 (iii) sets it at 365. Off at 0, the whole prune included.** Each five-minute cleanup tick takes up to 200 decks whose first delivery (`served_at`) is more than this many days ago and deletes every store of each in one transaction (models-lead E-a1): its `deck_outcomes` (every kind; a packed card's by contract id, with or without a row), `deck_impressions` rows, `deck_card_withdrawals`, `deck_candidate_sets` row, `bakeoff_runs` row and `deck_evidence_packs` row. Legacy `trade_impressions` past it go too. Under 56 (receipts' window) it is refused with a warning and nothing is deleted. Changing 365 changes the privacy page's §5/§6 number too. **Rollback: set 0.** Deploy-free |
+| `deck_evidence_full_row_days` | 90.0 | **Full rows: legal R28.20 (iii) sets 90.** A **packed** deck's `deck_impressions` rows (full and ghost, E-c2) go this many days after its first delivery; the pack, its outcomes and everything else stay until the cap. A deck with no pack keeps its rows until the cap (E-a3, E-c1). Acts only while the cap is on. 0, or a value at or past the cap: rows go with the deck at the cap. Under 56: refused with a warning. Deploy-free |
 
-Before the bound goes above 0, build `ix_deck_impressions_served` with `scripts/create_evidence_retention_index.py` (`CONCURRENTLY`, off the boot path). Until then pack-less decks are skipped, logged once.
+Before the cap goes above 0, build `ix_deck_impressions_served` with `scripts/create_evidence_retention_index.py` (`CONCURRENTLY`, off the boot path). Until then pack-less decks are skipped, logged once.
 
 ### Shared recommendation significance (default off)
 

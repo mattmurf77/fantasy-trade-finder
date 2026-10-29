@@ -2,7 +2,7 @@
 """create_evidence_retention_index.py — build ix_deck_impressions_served off the boot path.
 
 The deck-evidence retention prune (backend.database.purge_deck_evidence) finds
-pack-less decks past its bound by their rows' first delivery, through this
+pack-less decks past its 365-day cap by their rows' first delivery, through this
 index on deck_impressions (served_at). Prod's deck_impressions is the largest
 table: a plain CREATE INDEX blocks writes for a full scan and can outlast
 gunicorn's 120 s boot timeout (docs/data-dictionary.md, deck_impressions'

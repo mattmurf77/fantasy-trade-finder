@@ -1,11 +1,18 @@
-# Feature Scope — Deck-evidence retention prune (dark)
+# Feature Scope — Deck-evidence retention prune (legal R28.20 (iii), dark until the cap is set)
 
-**Date:** 2026-10-28
-**Entry point:** direct ask (head-eng's ruling on trades-eng's scrub/prune sizing, 2026-10-28: "build (b) NOW, dark")
+**Date:** 2026-10-28 (reworked the same day to the final rules)
+**Entry point:** direct ask. head-eng ruled on trades-eng's scrub/prune sizing on 2026-10-28: "build (b) NOW, dark". head-eng then relayed legal's final R28.20 the same day.
 **Builder:** trades-eng
-**Operator sign-off on waivers:** not needed (no waivers; analytics and evidence answered below)
+**Operator sign-off on waivers:** not needed. There are no waivers; analytics and evidence are answered below.
 
-Sizing and options: the shared note `trades-eng-scrub-prune-sizing.md` (head-eng's folder). Retention bound inputs: analytics-lead R28.20, via head-eng. A minimum of 45 days from first delivery; launch-period decks kept until 2026-12-31; a 90-day recommendation for packs and full rows. models-lead's §3 rule (deck lifetime, any cap ≥ 365 days) is still to be reconciled by head-product. So the bound ships as a knob, off.
+**The rules, final:**
+- **Legal R28.20 (iii)** (`leads/legal-lead.md`): "365 days from first delivery for packs and every deck-evidence store, and 90 days for full rows". The prune must be scheduled and automatic and log counts. It covers every store of built or shown cards: `deck_evidence_packs`, `evidence_blob`, every `deck_impressions` row, and legacy `trade_impressions` if still written.
+- **models-lead's addendum E** (`leads/models-lead-launch.md`):
+  - E-a1: expiry is deck-atomic;
+  - E-c1: the 90-day bound applies to decks that have a pack;
+  - E-c2: ghost rows are in the 90-day class;
+  - E-a3: a pack-less deck keeps its rows under the 365-day cap.
+- **E-a3's backfill** was sized at over ½ day, so it isn't built (head-eng was told on 10-28).
 
 ---
 
@@ -13,49 +20,87 @@ Sizing and options: the shared note `trades-eng-scrub-prune-sizing.md` (head-eng
 
 - [x] **(c) WAIVED. No analytics needed.**
   - It emits no event and changes no event; it is a storage-retention job.
-  - Its only observable is a server log line, `[evidence] retention pruned {table: rows, decks: n}`, per cleanup tick that deleted something.
-  - **What it deletes:** past the bound, the evidence the readouts read. Inside the bound, every reader is untouched. Their windows: the flip read 24–48 h plus weekly reruns; the matcher 14 days; receipts ≤ 56 days; blind grading 14 days; C3 until ~12-09.
+  - Its only observable is a server log line per cleanup tick that deleted something: `[evidence] retention pruned {table: rows, decks: n, full_rows: n}`. It logs counts, never ids.
+  - **Every reader fits inside the bounds:**
+    - the flip read, 24–48 h plus weekly reruns;
+    - the matcher, 14 days;
+    - receipts, ≤ 56 days;
+    - blind grading, 14 days;
+    - `bakeoff_readout` and the B-DK audit, weekly (models-lead E3).
+  - Replay and refits read packs, which keep every built card's compact inputs until the cap.
   - **The 56-day floor:** a bound under it is refused, so receipts can never lose a row.
 
 ## 2. Schema & flag scope
 
 - **New/changed tables or columns:** none.
-- **New index:** `ix_deck_impressions_served` on `deck_impressions (served_at)`.
+- **New index:** `ix_deck_impressions_served` on `deck_impressions (served_at)`, used by the cap's pack-less decks.
   - It's declared on the table, so a fresh DB gets it from `create_all`.
   - **On prod it is built off the boot path,** never in `init_db`. The data dictionary's rule: a plain `CREATE INDEX` on prod's `deck_impressions` blocks writes for a full scan and can outlast gunicorn's 120 s boot timeout.
   - **The script:** `scripts/create_evidence_retention_index.py` runs `CREATE INDEX CONCURRENTLY` with a 5 s `lock_timeout` in autocommit. It drops an INVALID leftover and rebuilds it; `--check` only reports.
-  - **The prune's guard:** until the index exists, it skips pack-less decks and logs once why. Packed decks go through their own index, `ix_deck_impressions_served`'s sibling `ix_deck_evidence_packs_served`.
-  - **Order:** release-lead or the operator runs the script before `deck_evidence_retention_days` goes above 0. trades-eng makes no prod writes.
-  - → `docs/data-dictionary.md` (the `deck_impressions` index list and the retention note).
-- **New/changed feature flags:** none. The knob is the rollback lever.
+  - **The prune's guard:** until the index exists, the cap skips pack-less decks and logs why once. Packed decks go through `ix_deck_evidence_packs_served`.
+  - **Order:** release-lead or the operator runs the script before the cap goes above 0. trades-eng makes no prod writes.
+  - → `docs/data-dictionary.md`: the `deck_impressions` index list and the retention note.
+- **New/changed feature flags:** none. The cap knob is the rollback lever.
 - **New `model_config` keys** → `docs/config-reference.md`:
-  - `deck_evidence_retention_days`, **default 0 = off**. The bound in days from a deck's first delivery. Under 56 it is refused with a warning, and nothing is deleted. **Rollback lever:** set it to 0 (deploy-free, `PUT /api/admin/config`).
-  - `deck_evidence_keep_until_epoch`, default `1798761600` (2027-01-01T00:00:00Z). The date floor: nothing is deleted before it, whatever the bound says, so launch-period decks are kept until 2026-12-31.
+  - `deck_evidence_retention_days`, the cap. **Default 0 = off, the whole prune included.** Legal's value is 365.
+    - It's measured in days from a deck's first delivery.
+    - Under 56 it's refused with a warning, and nothing is deleted.
+    - **Rollback lever:** set it to 0 (deploy-free, `PUT /api/admin/config`).
+  - `deck_evidence_full_row_days`, the full-row bound, default **90** (legal's value).
+    - It acts only while the cap is on.
+    - At 0, or at or past the cap, rows go with the deck at the cap. Under 56 it's refused.
 
-**What a pruned deck loses** (each deck in its own transaction; a failure leaves it whole for the next tick):
-- its `deck_evidence_packs` row;
-- its `deck_impressions` rows (full and ghost);
-- its `deck_card_withdrawals`;
-- its `deck_candidate_sets` row.
+**What goes, measured from first delivery:**
+- **At the cap,** up to 200 decks per tick. Each deck is deleted in one transaction, so a failure leaves it whole for the next tick. A deck loses:
+  - its `deck_outcomes`, every kind. A packed card's outcomes are matched by its exact contract ids (`<deck_job_id>:<k>` for the pack's `card_count` cards, with or without a row); a row's by its `impression_id`;
+  - its `deck_impressions` rows;
+  - its `deck_card_withdrawals`;
+  - its `deck_candidate_sets` row;
+  - its `bakeoff_runs` row;
+  - its `deck_evidence_packs` row.
+- **Also at the cap:** legacy `trade_impressions` rows past it, taken by oldest id.
+- **At the full-row bound:** a packed deck's `deck_impressions` rows, full and ghost. The pack, its outcomes and the rest stay until the cap.
+  - It works in chunks of 500 packs, at most 20 chunks per tick, resuming from an in-memory cursor. A restart walks again from the cap.
+  - A failed chunk keeps the cursor, so it's retried next tick.
 
-**Kept:**
-- `deck_outcomes`: the user's own actions. They carry no counterparty id, and legal named packs and full rows only.
-- `trade_page_store`: its own 7-day TTL and byte budget.
-- `deck_diagnostic_snapshots`: their own 14-day expiry.
-- `trade_impressions`: out of scope.
+**Kept on their own clocks:**
+- `trade_page_store` (`evidence_blob`): its own 7-day TTL and byte budget;
+- `deck_diagnostic_snapshots`: 14 days;
+- `trade_deck_lineage`: 24 h;
+- `prepared_trade_*`: their `expires_at`.
 
-**Batch:** up to 200 decks per 5-minute tick, found by the pack's `served_at` (`ix_deck_evidence_packs_served`), then pack-less decks by their rows' `served_at` (the new index), read in index order with a bounded LIMIT, never a DISTINCT over the backlog.
+**Found, outside this prune, for head-eng and legal's store list (c3):**
+- `receipts_grades`: one append-only grade per graded impression, with assets and `trade_hash`;
+- `grading_cards`: Calibration's shown trades.
+Whether the cap covers them is head-eng's call before the flip. Legal: "if eng leaves any store out, tell legal before the flip".
+
+**How decks are found:** through indexes only, in `served_at` order.
+- First the packs (`ix_deck_evidence_packs_served`).
+- Then pack-less decks through `ix_deck_impressions_served`, read in index order with a bounded LIMIT, never a DISTINCT over the backlog.
+- A packed deck is only ever taken through its pack, so it always goes whole.
 
 ## 3. Evidence scope
 
-- [x] **Unit tests:** `backend/tests/test_deck_evidence_retention.py`, 14 tests.
-  - **What never deletes:** off by default; the 56-day floor (refused and logged); the date floor.
-  - **What it deletes:** packed and pack-less decks go from every evidence table, while a recent deck and every outcome stay; the bound is the first delivery.
-  - **Batching:** one bounded batch per call; a deck whose delete fails is left whole, and the others proceed.
-  - **The loop step:** reads both knobs (defaults: off, and the 2027-01-01 floor); never raises; is wired into `_cleanup_loop`.
-  - **The index:** it's declared on the table, and pack-less decks wait for it with a logged reason.
-  - **The script:** builds it on an existing DB, leaves a valid one alone, and `--check` writes nothing.
-- [x] **Sabotages:** each mutation of the above turns the suite red (TEST_LEDGER).
+- [x] **Unit tests:** `backend/tests/test_deck_evidence_retention.py`, 27 tests.
+  - **What never deletes:** off at 0, full rows included; both 56-day floors, refused and logged.
+  - **The cap:**
+    - every store of a packed and of a pack-less deck goes at once, including a like on a packed card with no row;
+    - no other deck's outcomes go (`d1` against `d10`);
+    - a pack with 1,200 cards loses every outcome (chunked IN lists);
+    - a pack-less scan never takes a deck whose pack is inside the cap.
+  - **Full rows:**
+    - a packed deck's rows go at 90 and everything else stays, so the outcome count is unchanged;
+    - a pack-less deck keeps its rows;
+    - with the bound at 0, 365 or 400, rows follow the cap;
+    - chunks resume from the cursor, and a deck crossing later is still found;
+    - a failed chunk keeps the cursor.
+  - **Bounds:** both are measured from the first delivery, at and one day past each.
+  - **Batching and failure:** one bounded batch per call; a failing deck is left whole; a failing `trade_impressions` step never stops the full-row pass.
+  - **`trade_impressions`:** rows past the cap go, and newer rows stay.
+  - **The loop step:** reads both knobs, its defaults match `model_config`'s, never raises, and is wired into `_cleanup_loop`.
+  - **The index:** pack-less decks wait for it (logged once); it's declared and never built by `init_db`.
+  - **The script:** builds the index, is idempotent, and `--check` writes nothing.
+- [x] **Sabotages:** all 17 mutations turn the suite red (TEST_LEDGER).
 - [x] **WAIVED, the structural guard, code-walk and TestFlight checklist:** backend-only, no user-visible surface, and dark by default.
 - `testID`s: none.
 
@@ -64,13 +109,13 @@ Sizing and options: the shared note `trades-eng-scrub-prune-sizing.md` (head-eng
 | Doc | Updated? | Section / reason n/a |
 |---|---|---|
 | `docs/api-reference.md` | n/a | no route added or changed |
-| `living-memory/LLD.md` | updated | the deck-evidence conventions: the retention prune and what it never deletes |
+| `living-memory/LLD.md` | updated | the deck-evidence conventions: the cap, full rows, outcome matching by contract id |
 | `docs/architecture.md` | n/a | no module wiring change: one more cleanup-loop step, like the diagnostics expiry |
 | `living-memory/HLD.md` | n/a | no architecture shift |
 | `docs/cross-client-invariants.md` | n/a | no shared constant |
 | `docs/glossary.md` | n/a | no new domain term |
-| ADR or `DECISIONS.md` entry | n/a | head-eng's ruling (2026-10-28) is the decision; the bound itself is legal's and head-product's, set later through the knob |
-| `docs/data-dictionary.md` | updated | `deck_impressions` index and retention |
+| ADR or `DECISIONS.md` entry | n/a | the bounds are legal's R28.20 (iii) and models-lead's addendum E, both recorded in their ledgers |
+| `docs/data-dictionary.md` | updated | the `deck_impressions` index and retention |
 | `docs/config-reference.md` | updated | the two keys |
 
 ## 5. Ship gate declaration
@@ -79,4 +124,7 @@ Sizing and options: the shared note `trades-eng-scrub-prune-sizing.md` (head-eng
 - **Evidence recorded:** the `living-memory/TEST_LEDGER.md` entry.
 - **TestFlight verification:** none (backend-only, dark).
 - **Express lane:** no; full gates.
-- **Turning it on** is a later operator or head-eng step, once legal and head-product set the bound. It's one `PUT /api/admin/config` of `deck_evidence_retention_days`, and before 2027-01-01 the date floor still holds everything.
+- **Turning it on** is head-eng's call. The steps:
+  1. Run the index script.
+  2. `PUT /api/admin/config` `deck_evidence_retention_days` = 365.
+  3. The privacy page's §5 365-day line ships in the same deploy window (onboarding-eng's #373, legal R28.20 (v)).

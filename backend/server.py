@@ -2928,8 +2928,8 @@ def _cleanup_loop() -> None:
         except Exception:
             log.exception("deck-diagnostic retention failed")
 
-        # Deck-evidence retention (head-eng 2026-10-28): dark until
-        # deck_evidence_retention_days is set; one bounded batch per tick.
+        # Deck-evidence retention (legal R28.20 (iii)): dark until
+        # deck_evidence_retention_days is set; one bounded pass per tick.
         _prune_deck_evidence()
 
         # S8: retire the packed decks that can't be delivered again here
@@ -2988,14 +2988,15 @@ def _cleanup_loop() -> None:
 
 def _prune_deck_evidence() -> dict:
     """The cleanup loop's deck-evidence retention step (database.
-    purge_deck_evidence) with its two deploy-free knobs: the bound
-    (`deck_evidence_retention_days`, 0 = off) and the date floor
-    (`deck_evidence_keep_until_epoch`). Logs what it deleted; never raises."""
+    purge_deck_evidence) with its two deploy-free knobs: the cap
+    (`deck_evidence_retention_days`, 0 = off) and the packed decks' full-row
+    bound (`deck_evidence_full_row_days`). Logs the counts it deleted (never
+    an id); never raises."""
     try:
         from .database import purge_deck_evidence
         pruned = purge_deck_evidence(
             days=_deck_cfg("deck_evidence_retention_days", 0.0),
-            keep_until_epoch=_deck_cfg("deck_evidence_keep_until_epoch", 1798761600.0))
+            full_row_days=_deck_cfg("deck_evidence_full_row_days", 90.0))
         if pruned:
             log.info("[evidence] retention pruned %s", pruned)
         return pruned

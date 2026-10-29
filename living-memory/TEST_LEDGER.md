@@ -1,30 +1,49 @@
-## 2026-10-28 — Deck-evidence retention prune, dark (head-eng's ruling on (b))
+## 2026-10-28 — Deck-evidence retention prune, legal R28.20 (iii) final, dark until the cap is set
 
-Gates: head-eng's ruling (2026-10-28, "build (b) NOW, dark") on trades-eng's scrub/prune sizing. Full gates: the scope block is `docs/plans/trade-time-to-suggestion/scope-evidence-retention.md`. Two new `model_config` keys and one index; no route, flag, event or column change. Backend only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+**Gates:**
+- **The rules:** legal's R28.20 (iii) bounds (365 days for every deck-evidence store, 90 for full rows) and models-lead's addendum E (E-a1 deck-atomic, E-c1/E-c2 full rows of packed decks, ghosts included; E-a3 pack-less decks keep their rows under the cap), relayed by head-eng.
+- **Full gates:** the scope block is `docs/plans/trade-time-to-suggestion/scope-evidence-retention.md`.
+- **What changes:** two new `model_config` keys and one index. No route, flag, event or column change.
+- **Evidence:** backend only. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
 
-- **The prune:** `database.purge_deck_evidence`, run by the cleanup loop's `_prune_deck_evidence` once per five-minute tick.
-  - It takes up to 200 decks first delivered more than `deck_evidence_retention_days` ago. Each goes in its own transaction: its pack, rows, withdrawals and candidate set. Outcomes stay.
-  - **Off at 0** (the default). A bound under 56 days is refused and logged. Nothing is deleted before `deck_evidence_keep_until_epoch` (2027-01-01).
-- **The index:** `ix_deck_impressions_served` is declared (fresh DBs get it), but on prod it's built off the boot path by `scripts/create_evidence_retention_index.py` (`CONCURRENTLY`, a 5 s `lock_timeout`, rebuilds an INVALID leftover).
-  - Until it exists, the prune skips pack-less decks and logs once. Packed decks use `ix_deck_evidence_packs_served`.
-  - My first cut built it in `init_db`, against the data dictionary's rule (a plain index on prod's `deck_impressions` can outlast the 120 s boot timeout); caught before push.
-- **Backend:** `test_deck_evidence_retention.py`, 16 tests:
-  - off; the floor; the date floor;
-  - packed and pack-less decks gone from every evidence table, while recent decks and outcomes stay;
-  - the bound is the first delivery;
-  - the batch bound; a failing deck left whole;
-  - the loop step's knobs, its defaults and that it never raises; the loop runs it;
-  - pack-less decks wait for the index (logged once);
-  - the index is declared and never built by `init_db` on an existing table;
-  - the script builds it, is idempotent, and `--check` writes nothing.
-- **Regression:** the retention file, `test_model_config_log`, `test_bakeoff_arm_a_golden`, `test_daily_tick_runner`, `test_deferred_evidence`, `test_packed_evidence`, `test_trade_page_store`, both account-deletion files and the digest: 469 of 470 passed. The one failure, `test_f4_the_wait_is_bounded`, has a wall-clock bound (< 1.0 s) and tripped while a parallel typecheck loaded the CPU. It passes alone; the cleanup loop (the prune's only caller) is disabled in tests.
-- **Sabotage, each red then restored (11):**
-  - no floor; no date floor;
-  - candidate sets kept; withdrawals kept; outcomes deleted;
-  - no batch bound; the loop skipping the step;
-  - no index guard; a boot-time build; a no-op script;
-  - plus the first cut's boot-index check.
-  - The boot-build sabotage was green against a source check (the migration list is in `_migrate_db`); that's now a behavioral `init_db` test.
+**The prune:** `database.purge_deck_evidence`, run by the cleanup loop's `_prune_deck_evidence` once per five-minute tick, measured from first delivery.
+- **The cap (`deck_evidence_retention_days`, 365):** up to 200 decks per tick, each in one transaction. Every store goes at once: outcomes (a packed card's by exact contract ids from the pack's `card_count`, a row's by its id), rows, withdrawals, the candidate set, `bakeoff_runs` and the pack. Legacy `trade_impressions` past the cap go too.
+- **Full rows (`deck_evidence_full_row_days`, 90):** a packed deck's rows go, in 500-pack chunks resumed from an in-memory cursor. Pack-less decks keep their rows until the cap.
+- **Off at a cap of 0** (the default). Either bound under 56 days is refused and logged.
+- **Replaced from the first cut:** the 2027-01-01 date floor is gone (with 90/365 final it never binds). Outcomes and `bakeoff_runs` used to be kept; they now go with the deck.
+
+**The index:** `ix_deck_impressions_served` is declared (fresh DBs get it), but on prod it's built off the boot path by `scripts/create_evidence_retention_index.py` (`CONCURRENTLY`, a 5 s `lock_timeout`, rebuilds an INVALID leftover).
+- Until it exists, the cap skips pack-less decks and logs once. Packed decks use `ix_deck_evidence_packs_served`.
+- My first cut built it in `init_db`, against the data dictionary's rule (a plain index on prod's `deck_impressions` can outlast the 120 s boot timeout); caught before push.
+- **Outcome matching** is by exact ids, never a LIKE or a string range. Under prod's default collation, punctuation sorts at a lower collation level, so neither is a plain index range.
+
+**Backend:** `test_deck_evidence_retention.py`, 27 tests:
+- **Off:** off at 0, full rows included; both 56-day floors.
+- **The cap:**
+  - every store of a packed and of a pack-less deck goes at once, including a like on a packed card with no row;
+  - no other deck's outcomes go;
+  - a 1,200-card pack loses every outcome;
+  - the pack-less scan never takes a deck whose pack is inside the cap.
+- **Full rows:**
+  - they go at 90 and everything else stays (the outcome count is unchanged);
+  - pack-less decks keep their rows;
+  - rows follow the cap with the bound at 0, 365 or 400;
+  - chunks resume from the cursor;
+  - a failed chunk keeps the cursor.
+- **Bounds and batching:** both bounds are measured from the first delivery; one bounded batch per call; a failing deck is left whole; a failing `trade_impressions` step never stops the full-row pass; `trade_impressions` past the cap go.
+- **The loop step:** reads both knobs, its defaults match `model_config`'s, never raises, and the loop runs it.
+- **The index and script:** pack-less decks wait for the index (logged once); the index is never built by `init_db`; the script builds it, is idempotent, and `--check` writes nothing.
+
+**Sabotages:** 17 of 17 mutations turn the suite red:
+- the floor;
+- each store kept: contract outcomes, row outcomes, `bakeoff_runs`, withdrawals, candidate sets;
+- only the first 500 contract ids;
+- the pack-less scan taking a packed deck;
+- full rows deleted for any deck;
+- no cursor advance; the cursor advancing on a failed chunk;
+- `trade_impressions` with no cutoff, skipped, or not isolated;
+- no batch bound;
+- the loop skipping the step, or ignoring the full-row knob.
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
