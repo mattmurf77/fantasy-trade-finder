@@ -51,21 +51,42 @@ Exclusions (counted per reason and printed — never silently dropped):
   never_viewed     no `viewed` outcome — served ≠ seen; the label would be
                    fabricated (the F2 cascade rule: unseen is not a negative)
   undo_reversed    an `undo` outcome exists — the disposition was retracted
+  calibration_refresh
+                   Calibration's targeted refresh built the deck (a card's
+                   deck_source is 'grading_refresh', ADR-025 S4): it was
+                   never shown in Trades — whole deck out, ahead of every
+                   other deck reason; decks in
+                   EvalRun.calibration_refresh_decks
   partial_run      any card in the deck has evidence_tier 'partial_run' (a
                    partial run's delivered rows, head-eng ruling 21) — the
                    deck isn't a complete ranking, so it's out whole; decks
                    in EvalRun.partial_run_decks
-  in_flight        the deck has no pack yet and may still be live (served
-                   at/after data.PACK_REQUIRED_SINCE, within
-                   IN_FLIGHT_WINDOW of as_of) — whole deck out, not an
-                   error; decks in EvalRun.in_flight_decks
+  in_flight        the deck's pack is not final yet (unretired, within
+                   IN_FLIGHT_WINDOW of as_of), or it has no pack yet and
+                   may still be live (served at/after
+                   data.PACK_REQUIRED_SINCE, within IN_FLIGHT_WINDOW of
+                   as_of) — whole deck out, not an error; decks in
+                   EvalRun.in_flight_decks
   pack_integrity   the deck's pack fails its checksum, has an unknown
                    pack_version, or holds another run's cards (C7 (iv)) —
                    whole deck out; decks in EvalRun.pack_integrity_decks
-  incomplete_deck  the deck's non-ghost card indexes aren't exactly 0..N-1
-                   after the pack merge (N = the pack's card_count, or
-                   max+1 without a pack), or its required pack is lost —
-                   whole deck out; decks in EvalRun.incomplete_decks
+  withdrawal_conflict
+                   a recorded never-delivered withdrawal's row has a
+                   delivered_at, or a withdrawal's index is outside the deck
+                   (data module doc) — whole deck out; decks in
+                   EvalRun.withdrawal_conflict_decks
+  incomplete_deck  the deck's non-ghost card indexes ∪ its never-delivered
+                   withdrawal indexes aren't exactly 0..N-1 after the pack
+                   merge (N = the pack's card_count, or max+1 without a
+                   pack), a packed deck has an outcome past its last
+                   delivered index (under-recorded deliveries), or its
+                   required pack is lost — whole deck out; decks in
+                   EvalRun.incomplete_decks
+  no_delivery_evidence
+                   a paged deck (page_store marker or evidence_tier) without
+                   a pack has no delivered_at on any row, so nothing says
+                   which cards were served — whole deck out; decks in
+                   EvalRun.no_delivery_evidence_decks
   missing_scorer_inputs
                    any card in the deck has neither features_json nor a
                    compact block (C7 (iv)) — whole deck out, counted by
@@ -79,12 +100,28 @@ silently shifted the counterfactual ranks of the viewed cards above them;
 their deck is now excluded instead. That retired the per-card
 `bad_features` reason: a card without features either has a compact block
 (scored normally) or takes its whole deck out under missing_scorer_inputs.
-An in_flight, pack_integrity or incomplete_deck deck is also left out of
-the exposure curve: the cards present in it (first 30, viewed rows) are a
-selected subset, so their view rates would bias e(k). Under paging the
-curve's served set is the DELIVERED positions (R4.2 U1, LoggedCard.
-delivered): a generated card that was never sent to a client was not
-served at its position.
+A deck with any loader exclusion is also left out of the exposure curve:
+the cards present in an in_flight, pack_integrity, withdrawal_conflict,
+incomplete_deck or no_delivery_evidence deck (first 30, viewed rows) are a
+selected subset, so their view rates would bias e(k), and a
+calibration_refresh deck's cards were never at a Trades position. Under
+paging the curve's served set is the DELIVERED positions (R4.2 U1,
+LoggedCard.delivered): a generated card that was never sent to a client
+was not served at its position. Positions are DISPLAYED positions
+(LoggedCard.position, models-lead R2.4 addendum §2): a recorded
+never-delivered withdrawal is removed from its deck, its card dropped when
+present (never scored, exposed or ranked; EvalRun.withdrawn_removed_cards
+counts them, not an exclusion, and EvalRun.withdrawn_removed_by_reason splits
+them by deck_card_withdrawals.reason, models-lead B4),
+and the cards after it move up, so e(k) and the logged-position term of
+the IPS weight read the slot the user was shown.
+
+Upgrade misses (models-lead U4-R2): EvalRun.upgrade_misses sums the packs'
+cause-coded counts (LoggedDeck.upgrade_misses) per cause over every deck
+loaded, whatever its exclusion: it is a data-quality count. render_report
+prints a line starting "ERROR U4-R2:" when `other` (the one cause that must
+be 0) is above 0. Reporting only: no rule reads it, so it leaves
+EXCLUSION_RULE_VERSION alone.
 
 EXCLUSION_RULE_VERSION is stamped on every EvalRun and persisted record;
 verdict() and render_report() say so when runs graded under different rules
@@ -107,10 +144,14 @@ from datetime import datetime, timedelta, timezone
 
 from backend import value_model as _value_model
 from backend.eval.data import (
+    CALIBRATION_REFRESH,
     IN_FLIGHT,
     INCOMPLETE_DECK,
+    NO_DELIVERY_EVIDENCE,
     PACK_INTEGRITY,
     PARTIAL_RUN_TIER,
+    UPGRADE_MISS_OTHER,
+    WITHDRAWAL_CONFLICT,
     LoggedDeck,
     card_dict,
     last_served_at,
@@ -129,7 +170,8 @@ METRICS = ("like", "propose")
 
 EXCLUSION_REASONS = (
     "null_propensity", "never_viewed", "undo_reversed",
-    "partial_run", "in_flight", "pack_integrity", "incomplete_deck",
+    "calibration_refresh", "partial_run", "in_flight", "pack_integrity",
+    "withdrawal_conflict", "incomplete_deck", "no_delivery_evidence",
     "missing_scorer_inputs", "scorer_error",
 )
 
@@ -143,8 +185,21 @@ EXCLUSION_REASONS = (
 #      paging delivered every served card) and the read filters outcomes by
 #      acted_at <= as_of and decks by served_at <= as_of. e(k) rises where
 #      undelivered tails used to pull it down.
+#   4  3, plus decks built by Calibration's targeted refresh (features_json
+#      deck_source 'grading_refresh', ADR-025 S4) are excluded whole as
+#      calibration_refresh, from replay, e(k) and calibration. Refresh decks
+#      from before the relabel carry 'replenish' and stay in.
+#   5  4, plus recorded serve-time withdrawals (deck_card_withdrawals): a
+#      never-delivered withdrawn card is removed (not scored, not exposed,
+#      not ranked) and explains its gap; a delivered one keeps its position;
+#      positions are displayed positions (dense among kept cards);
+#      withdrawal_conflict; paged decks (page_store marker or evidence_tier)
+#      take delivered from evidence, never the legacy rule, with
+#      no_delivery_evidence when they have none; in-flight packs
+#      (retired=false within the window, deliveries read as of as_of) are
+#      in_flight; outcome beyond recorded deliveries → incomplete_deck.
 # Estimates graded under different versions are not comparable.
-EXCLUSION_RULE_VERSION = 3
+EXCLUSION_RULE_VERSION = 5
 # R5.2 (b): a read whose labels must be complete settles them this long
 # after the window's last served deck (late views, proposes days later).
 DEFAULT_SETTLE_LAG_DAYS = 7.0
@@ -172,10 +227,16 @@ class EvalRun:
     excluded: dict = field(default_factory=dict)   # reason -> count
     tilt_clipped: int = 0            # propensity tilts hit TILT_MIN/TILT_MAX
     missing_inputs_decks: int = 0    # decks excluded as missing_scorer_inputs
+    calibration_refresh_decks: int = 0   # decks excluded as calibration_refresh
     partial_run_decks: int = 0       # decks excluded as partial_run
     in_flight_decks: int = 0         # decks excluded as in_flight (not an error)
     pack_integrity_decks: int = 0    # decks excluded as pack_integrity
+    withdrawal_conflict_decks: int = 0   # decks excluded as withdrawal_conflict
     incomplete_decks: int = 0        # decks excluded as incomplete_deck
+    no_delivery_evidence_decks: int = 0  # decks excluded as no_delivery_evidence
+    withdrawn_removed_cards: int = 0 # never-delivered withdrawals removed from included decks
+    withdrawn_removed_by_reason: dict = field(default_factory=dict)  # the same by reason, sorted
+    upgrade_misses: dict = field(default_factory=dict)  # cause -> count, every loaded pack (U4-R2)
     exposure_positions: int = 0      # positions with an estimated e(k)
     metrics: dict = field(default_factory=dict)    # metric -> MetricEstimate
     eval_start: str | None = None
@@ -193,12 +254,13 @@ class EvalRun:
 # ---------------------------------------------------------------------------
 
 def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
-    """e(k) = P(viewed | served at position k), Laplace(+1/+2)-smoothed,
-    floored at EXPOSURE_FLOOR. Positions never observed fall back to the
-    floor at lookup time (exposure_at). Only delivered cards count as
-    served (R4.2 U1). Decks with a loader exclusion (in_flight,
-    pack_integrity, incomplete_deck) are skipped: their present cards are
-    a selected subset."""
+    """e(k) = P(viewed | served at displayed position k), Laplace(+1/+2)-
+    smoothed, floored at EXPOSURE_FLOOR. Positions never observed fall back
+    to the floor at lookup time (exposure_at). Only delivered cards count
+    as served (R4.2 U1), each at its displayed position (LoggedCard.position:
+    never-delivered withdrawals removed). Decks with a loader exclusion are
+    skipped: a calibration_refresh deck was never shown in Trades, and any
+    other excluded deck's present cards are a selected subset."""
     served: dict[int, int] = {}
     viewed: dict[int, int] = {}
     for deck in decks:
@@ -207,9 +269,9 @@ def exposure_curve(decks: list[LoggedDeck]) -> dict[int, float]:
         for c in deck.cards:
             if not c.delivered:
                 continue
-            served[c.card_index] = served.get(c.card_index, 0) + 1
+            served[c.position] = served.get(c.position, 0) + 1
             if c.viewed:
-                viewed[c.card_index] = viewed.get(c.card_index, 0) + 1
+                viewed[c.position] = viewed.get(c.position, 0) + 1
     return {
         k: max((viewed.get(k, 0) + 1) / (served[k] + 2), EXPOSURE_FLOOR)
         for k in served
@@ -252,6 +314,9 @@ def _reward(card, metric: str) -> float:
 
 
 def _fit_rows(decks: list[LoggedDeck]) -> list[dict]:
+    """A trainable scorer's rows: every card of every train deck but a
+    calibration_refresh deck's (never shown in Trades; the loader already
+    removed never-delivered withdrawals)."""
     return [
         {
             "card": card_dict(c),
@@ -260,7 +325,7 @@ def _fit_rows(decks: list[LoggedDeck]) -> list[dict]:
             "proposed": c.proposed,
             "dwell_ms": c.dwell_ms,
         }
-        for d in decks for c in d.cards
+        for d in decks if d.exclusion != CALIBRATION_REFRESH for c in d.cards
     ]
 
 
@@ -309,9 +374,21 @@ def evaluate(
         config=getattr(scorer, "config", None),
     )
 
+    # A data-quality count: every deck loaded (both sides of a split), any exclusion.
+    misses: dict[str, int] = {}
+    for deck in decks:
+        for cause, n in deck.upgrade_misses.items():
+            misses[cause] = misses.get(cause, 0) + n
+    run.upgrade_misses = dict(sorted(misses.items()))
+
     # weights/rewards per deck (bootstrap clusters)
     clusters: list[dict] = []   # {"w": [...], "r_like": [...], "r_propose": [...]}
+    removed_by_reason: dict[str, int] = {}
     for deck in eval_decks:
+        if deck.exclusion == CALIBRATION_REFRESH:
+            run.excluded["calibration_refresh"] += len(deck.cards)
+            run.calibration_refresh_decks += 1
+            continue
         if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
             run.excluded["partial_run"] += len(deck.cards)
             run.partial_run_decks += 1
@@ -324,9 +401,17 @@ def evaluate(
             run.excluded["pack_integrity"] += len(deck.cards)
             run.pack_integrity_decks += 1
             continue
+        if deck.exclusion == WITHDRAWAL_CONFLICT:
+            run.excluded["withdrawal_conflict"] += len(deck.cards)
+            run.withdrawal_conflict_decks += 1
+            continue
         if deck.exclusion == INCOMPLETE_DECK:
             run.excluded["incomplete_deck"] += len(deck.cards)
             run.incomplete_decks += 1
+            continue
+        if deck.exclusion == NO_DELIVERY_EVIDENCE:
+            run.excluded["no_delivery_evidence"] += len(deck.cards)
+            run.no_delivery_evidence_decks += 1
             continue
         if any(c.features is None and c.features_compact is None
                for c in deck.cards):
@@ -338,6 +423,9 @@ def evaluate(
         except Exception:
             run.excluded["scorer_error"] += len(deck.cards)
             continue
+        run.withdrawn_removed_cards += deck.withdrawn_removed
+        for reason, n in deck.withdrawn_removed_by_reason.items():
+            removed_by_reason[reason] = removed_by_reason.get(reason, 0) + n
         valid_p = [c.propensity for c in deck.cards
                    if c.propensity is not None and c.propensity > 0
                    and math.isfinite(c.propensity)]
@@ -359,13 +447,14 @@ def evaluate(
                 run.tilt_clipped += 1
                 tilt = min(max(tilt, TILT_MIN), TILT_MAX)
             w = (exposure_at(curve, ranks[c.impression_id])
-                 / exposure_at(curve, c.card_index)) * tilt
+                 / exposure_at(curve, c.position)) * tilt
             cluster["w"].append(w)
             cluster["r_like"].append(_reward(c, "like"))
             cluster["r_propose"].append(_reward(c, "propose"))
         if cluster["w"]:
             clusters.append(cluster)
 
+    run.withdrawn_removed_by_reason = dict(sorted(removed_by_reason.items()))
     weights = [w for cl in clusters for w in cl["w"]]
     run.n_included = len(weights)
 
@@ -522,10 +611,16 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             f"- {run.scorer}: total={run.n_total} included={run.n_included} "
             f"excluded[{excl or 'none'}] "
             f"missing_inputs_decks={run.missing_inputs_decks} "
+            f"calibration_refresh_decks={run.calibration_refresh_decks} "
             f"partial_run_decks={run.partial_run_decks} "
             f"in_flight_decks={run.in_flight_decks} "
             f"pack_integrity_decks={run.pack_integrity_decks} "
+            f"withdrawal_conflict_decks={run.withdrawal_conflict_decks} "
             f"incomplete_decks={run.incomplete_decks} "
+            f"no_delivery_evidence_decks={run.no_delivery_evidence_decks} "
+            f"withdrawn_removed_cards={run.withdrawn_removed_cards} "
+            f"withdrawn_removed_by_reason={json.dumps(run.withdrawn_removed_by_reason, sort_keys=True)} "
+            f"upgrade_misses={json.dumps(run.upgrade_misses, sort_keys=True)} "
             f"tilt_clipped={run.tilt_clipped} "
             f"(bounds [{TILT_MIN}, {TILT_MAX}])"
         )
@@ -534,6 +629,12 @@ def render_report(runs: list[EvalRun], baseline: EvalRun) -> str:
             lines.append(
                 f"  WARNING: accounting mismatch — {total_accounted} accounted "
                 f"vs {run.n_total} loaded")
+        other = run.upgrade_misses.get(UPGRADE_MISS_OTHER, 0)
+        if other > 0:
+            lines.append(
+                f"ERROR U4-R2: {run.scorer}: {other} upgrade miss(es) with cause "
+                f"'{UPGRADE_MISS_OTHER}' (other must be 0): a viewed card never got its "
+                "full row for no named cause; log it and take it to models-lead")
     lines.append("")
     lines.append(
         f"ESS gate: {baseline.ess_min:.0f} (verdicts below it are UNRELIABLE; "

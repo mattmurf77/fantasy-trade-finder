@@ -29,6 +29,7 @@ shipped (G-031); the emitters ship in #363.
 | `trade_first_card_shown` (**new**, R2) | **NON_INTENT** | `search_id`; `ms_from_tap` (int, a **monotonic** client clock: `performance.now()` deltas, as `api/client.ts` `_clockMs()` uses); `entry_point`; `search_type` (`organic` \| `pinned` \| `fair_sweep`); `launch_state` (`cold_launch` \| `first_tap` \| `repeat_tap`); **`network_type`** (`wifi` \| `cellular` \| `offline` \| `unknown`); `serve_source` (`device` \| `page` \| `cached` \| `joined` \| `fresh`); `freshness_state` (`fresh` \| `updating`); `job_id`; `card_index` | **Exactly at AC-L1's frame (T1):** the first frame where a real card is ≥ 50% visible with Like and Pass enabled. Once per `search_id` | mobile |
 | `trade_first_card_failed` (**new**, R2b) | **NON_INTENT** | `search_id`, `ms_from_tap`, `reason` (`empty` \| `error` \| `abandoned` \| `timeout`), plus R2's `entry_point`, `search_type`, `launch_state`, `network_type`, `serve_source` | Instead of R2: **exactly one of R2/R2b per `search_id`**. `abandoned` fires on unmount or blur, or when the app leaves `active`, before a card (T4). **`timeout` = 10,000 ms** from the tap with no card. §3 of the readout checks that threshold against the observed tail (ruling 30) | mobile |
 | `deck_buffer_empty` (**new**, granted in ruling 30) | **NON_INTENT** | `search_id`, `deck_id`, `cards_seen`, `ms_since_first_card`, `network_type` | The user reaches the last ready card while the deck is still building and no next page is local. That's an AC-L4 failure. At most once per `search_id` | mobile |
+| `deck_i1_check` (**new**, S0's C-a readout; analytics-lead's pre-grant, 2026-10-26, with models-lead's R2.4 addendum (ii)) | **NON_INTENT** | `job_key` (sha256 of the job id, first 12 hex: the readout de-duplicates by it); `mode` (`strict` \| `lenient`); `status` (`fresh` \| `stale` \| `unknown` \| `missing`); `outcome` (the `[i1] serve` line's: `served`, `served_lenient`, `unchecked_c_e`, or a gate miss, `_held` when held); `age_bucket` (the roster snapshot's age: `under_5m` (inside the 300 s roster bound) \| `5m_to_1h` \| `1h_to_24h` (inside the 24 h import bound) \| `over_24h` \| `none`); `cards`, `kept`; `dropped_cards` (distinct cards with a moved asset); `dropped_give_player`, `dropped_give_pick`, `dropped_receive_player`, `dropped_receive_pick` (cards per side × asset type: a card that moved on both sides counts once in `dropped_cards` and once per side here); `unchecked_generic`, `unchecked_pick_owner`. **No league id, no raw job id, no player ids**: the league rides the row's `league_id` column | Each serve that ran the I-1 check (the `[i1] serve` log point: the job views, legacy and paged, and the page-store serve) **with newly served cards: one row per such serve, each card counted once per job** in the process (by `impression_id`, else `trade_id`), its counts over those new cards only. A repeat poll records nothing; a replace (re-sorted) serve records its cards not yet counted; a legacy cumulative body counts only once the job is complete, and then only the cards no page counted (#419 QA P3). None at `trade_i1_mode` 0, under the admin gate-miss hook, or when the roster read fails. Owner = the viewer; written non-touching (`touch_user=False`) off the request thread after the response | server |
 | `trades_generated` (**widened**, R3) | as today | existing (`count`, `gen_ms`, `engine_version`, `lanes`, `deck_source`), plus **`first_publish_ms`**, **`serve_source`** (`page` \| `cached` \| `joined` \| `fresh` \| `prepared`), **`oldest_input_age_s`** (seconds since the oldest of: the roster refresh and the value snapshot; null if unknown), and the echoed **`search_id`** | **Binding (analytics-lead's condition): exactly one per user-visible deck, whatever `serve_source`.** A page serve emits it at serve. **A pre-build that is never served emits none** (a job log line only). **Calibration's `grading_refresh` decks emit none** (Calibration has its own events; ruling 30), so R3 stays "exactly one per user-visible trade deck" and the funnel and PFO queries need no exclusion. `deck_source` keeps its meaning; `serve_source` is a separate dimension | server |
 
 ## R1 `source` values (exact; analytics-lead ruling 30, before the emitter ships)
@@ -59,14 +60,38 @@ shipped (G-031); the emitters ship in #363.
 and Target, and Usage Trends) is recorded as `league_offer` (`TradesScreen.tsx:3330-3336`). After the seam,
 `league_offer` means the Offer hand-off alone. Its counts aren't comparable across the seam.
 
+## Seam: #370 (Calibration refresh decks stop emitting)
+
+**What changes at #370's merge** (PR #370, "Trades packed-evidence stage 1"; this change is ungated, with no knob).
+Source: release-lead #370 QA, 2026-10-26.
+- `_pregenerate_grading_targets` (`server.py:27525` on `origin/main`) passes `source="grading_refresh"`
+  (`server.py:29608` @ #370 `50360031`).
+- Those jobs **emit no `trades_generated`** (`server.py:11275`, `:9615` @ #370 `50360031`) and **write no
+  `trade_impressions`** (`server.py:10994`, `:9575` @ #370 `50360031`). Receipts skip them.
+- Their `deck_source` reads `grading_refresh` instead of `replenish`.
+
+**The series break:** the daily `trades_generated` count drops by about one per Calibration target pair on
+pregenerate days. Affected readers: funnel stage 6 (`analytics_queries.py:422`), the deck count (`:699`), and TTFV
+reach and the empty-deck rate (`:967-1029`). **Don't trend these across #370's merge date.** Before the merge,
+Calibration refresh decks counted as `replenish` (the refresh calls `_replenish_deck_for`, `server.py:27545`, which
+sets `source = "replenish"` at `:24142`), so they **can't be separated from real replenish decks in history.**
+
+- **Break date:** `#370 merge date: 2026-10-26 (merged 11:22 UTC; analytics_queries.SERIES_BREAKS @ origin/main records the break day "2026-10-26")`
+- **The binding rule still holds:** exactly one `trades_generated` per user-visible deck. A grading deck actually
+  served in Trades still emits, per release-lead's P2-2 fix, which lands before the merge. Calibration-only decks
+  aren't user-visible trade decks, so they correctly emit none (the R3 row above).
+- **No reader filter change is needed** going forward: after the merge no grading-only deck emits, so the readers are
+  correct as written. Pre-merge history can't be corrected; the relabel isn't retroactive.
+
 ## Classes and funnel
 
 - **R1 stays INTENT:** a hand-off tap is a user action.
 - **R2 and R2b are NON_INTENT:** a system outcome echoing the R1 tap, which already counts the user. They are
   registered in `backend/analytics_taxonomy.py` and listed in `analytics_queries.NON_INTENT_EVENTS` **in the same
   commit** as their emitters.
-- **`trades_generated` is funnel-v2 stage 6** (`analytics_queries.py:414`). The exactly-one rule keeps stage 6 and
-  the PFO guardrail's `props.count` unchanged in meaning.
+- **`deck_i1_check` is NON_INTENT:** a server-fired outcome of each served page, background polls included; the serve's request already counts the user. Registered and classified in the same commit as its emitter. **Readout:** the would-drop rate is Σ`dropped_cards` / Σ`cards` over `mode=lenient` rows. Not Σ(`cards` − `kept`): at `trade_i1_mode` 1 nothing is dropped, so `kept` = `cards` and that reads 0%; the drop columns carry what strict mode would drop. Sum a deck's rows by `job_key`: one row per serve with newly served cards, each card counted once per job, so the sums are the deck's distinct served cards (#419 QA P3; an emit dropped by the full write queue is lost, logged as a warning). The per-type columns overlap within a side: a card whose give side moved both a player and a pick counts once in `dropped_give_player` and once in `dropped_give_pick`, so `dropped_give_player` + `dropped_give_pick` can exceed the cards with a give-side drop. Use `dropped_cards` for the rate and the per-type columns for the split.
+- **`trades_generated` is funnel-v2 stage 6** (`analytics_queries.py:422` @ `origin/main` `25e1f838`). The exactly-one
+  rule keeps stage 6 and the PFO guardrail's `props.count` unchanged in meaning.
 
 ## Readout conditions (from analytics-lead; T1–T7)
 

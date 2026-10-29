@@ -118,7 +118,8 @@ def test_link_rejects_expired_and_malformed(client):
 def test_propose_happy_path_resolves_my_roster(client):
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
-    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "other", "roster_id": 2}]
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1, "players": ["100"]},
+               {"owner_id": "other", "roster_id": 2, "players": ["200"]}]
     fake = MagicMock(return_value={"transaction_id": "TX1", "status": "proposed", "raw": {}})
     with patch.object(server, "_sleeper_get", return_value=rosters), \
          patch.object(server._sleeper_write, "propose_trade", fake):
@@ -136,7 +137,8 @@ def test_propose_happy_path_resolves_my_roster(client):
 def test_propose_resolves_their_roster_from_user_id(client):
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
-    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp_uid", "roster_id": 7}]
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1, "players": ["100"]},
+               {"owner_id": "opp_uid", "roster_id": 7, "players": ["200"]}]
     fake = MagicMock(return_value={"transaction_id": "TX2", "status": "proposed", "raw": {}})
     with patch.object(server, "_sleeper_get", return_value=rosters), \
          patch.object(server._sleeper_write, "propose_trade", fake):
@@ -172,7 +174,8 @@ def test_propose_not_linked_returns_409(client):
 def test_propose_auth_error_drops_credential(client):
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
-    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}]
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1, "players": ["1"]},
+               {"owner_id": "opp", "roster_id": 2, "players": ["2"]}]
     with patch.object(server, "_sleeper_get", return_value=rosters), \
          patch.object(server._sleeper_write, "propose_trade",
                       MagicMock(side_effect=SleeperAuthError("dead", detail="HTTP 403"))):
@@ -254,7 +257,8 @@ def test_propose_write_failure_returns_502(client):
     from backend.sleeper_write import SleeperWriteError
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
-    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1, "players": ["1"]},
+               {"owner_id": "opp", "roster_id": 2, "players": ["2"]}]
     with patch.object(server, "_sleeper_get", return_value=rosters), \
          patch.object(server._sleeper_write, "propose_trade",
                       MagicMock(side_effect=SleeperWriteError("boom", kind="network"))):
@@ -291,9 +295,12 @@ def _send_succeeded_rows():
 # Fixture shapes per docs/feedback/items/413-sleeper-send-draft-picks/lld-delta.md
 # §7.2: rosters 1 = me, 2 = them; the grid holds my 2027 2nd (orig 1), roster
 # 7's 2027 1st, and their 2026 1st (orig 2); traded_picks says roster 7's
-# 2027 1st is now held by roster 1 (me).
+# 2027 1st is now held by roster 1 (me). Since I-2 each roster's `players`
+# must hold the players the bodies trade, or the send 422s before any pick
+# check (test_i2_sleeper_ownership.py).
 
-ROSTERS_1V2 = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
+ROSTERS_1V2 =[{"owner_id": SLEEPER_UID, "roster_id": 1, "players": ["100", "101"]},
+               {"owner_id": "opp", "roster_id": 2, "players": ["200"]}]
 GRID = [  # load_draft_picks rows — only the keys the encoder reads
     {"pick_id": f"{LEAGUE}_2027_2_1", "season": 2027, "round": 2, "original_roster_id": "1"},
     {"pick_id": f"{LEAGUE}_2027_1_7", "season": 2027, "round": 1, "original_roster_id": "7"},
@@ -666,7 +673,8 @@ def test_propose_failure_fires_no_trade_sent(client):
     from backend.sleeper_write import SleeperWriteError
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
-    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1}, {"owner_id": "opp", "roster_id": 2}]
+    rosters = [{"owner_id": SLEEPER_UID, "roster_id": 1, "players": ["1"]},
+               {"owner_id": "opp", "roster_id": 2, "players": ["2"]}]
     with patch.object(server, "_sleeper_get", return_value=rosters), \
          patch.object(server._sleeper_write, "propose_trade",
                       MagicMock(side_effect=SleeperWriteError("boom", kind="network"))):
@@ -679,14 +687,19 @@ def test_propose_failure_fires_no_trade_sent(client):
 
 def test_propose_roster_fetch_failure_degrades_gracefully(client):
     """A transient rosters-fetch failure must not 500 — it degrades to a
-    structured 400 (client → deep-link fallback), never an unhandled crash."""
+    structured refusal, never an unhandled crash. Since I-2 (platforms-pm R3)
+    that refusal is the readable 502 `sleeper_write_failed`, `kind: "roster_read"`
+    (nothing sent), no longer the misleading 400 `roster_not_found`; the full
+    matrix is in test_i2_sleeper_ownership.py."""
     c, token = client
     c.post("/api/sleeper/link", headers=_h(token), data=json.dumps({"token": _token()}))
     with patch.object(server, "_sleeper_get", side_effect=Exception("network")):
         r = c.post("/api/trades/propose", headers=_h(token), data=json.dumps({
             "league_id": LEAGUE, "their_roster_id": 2,
             "give_player_ids": ["1"], "receive_player_ids": ["2"]}))
-    assert r.status_code == 400 and r.get_json()["error"] == "roster_not_found"
+    body = r.get_json()
+    assert r.status_code == 502 and body["error"] == "sleeper_write_failed"
+    assert body["kind"] == "roster_read" and body["detail"] == body["message"]
 
 
 def test_link_get_reports_expired_flag(client):

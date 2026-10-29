@@ -249,9 +249,9 @@ export default function SendInSleeperButton({
       // place that sees network errors, timeouts, and the pre-identity
       // refusals (feature_disabled / no_user / test_mode_propose_disabled)
       // the server cannot attribute to a user — and the only place that
-      // knows `surface`. Closed enum: 15 server codes ∪ network | timeout
-      // | unknown = 18 values, forever (17 → 18 on 2026-09-08, #428
-      // sleeper_pick_untradable).
+      // knows `surface`. Closed enum: 17 server codes ∪ network | timeout
+      // | unknown = 20 values, forever (18 → 20 on 2026-10-26, I-2 #411
+      // asset_not_owned | counterparty_asset_not_owned).
       track('sleeper_send_failed', {
         surface,
         error_code: err instanceof ApiError

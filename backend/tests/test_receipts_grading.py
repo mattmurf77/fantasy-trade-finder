@@ -836,6 +836,35 @@ def test_t9_ghost_rows_are_excluded_at_the_QUEUE_layer(engine):
     assert _grade_for(served, window) is not None
 
 
+def _set_features(iid: str, features_json) -> None:
+    i = db_module.deck_impressions_table
+    with db_module.engine.begin() as conn:
+        conn.execute(i.update().where(i.c.impression_id == iid).values(features_json=features_json))
+
+
+def test_s4_calibrations_refresh_decks_never_enter_the_queue(engine):
+    """ADR-025 S4: a "grading_refresh" deck (Calibration's targeted refresh)
+    was never shown in Trades, so it is never a receipt, in either JSON form;
+    other deck sources, and a NULL features_json, stay gradeable."""
+    serve_date, window = _days_ago(30), 28
+    _pool([serve_date, rs._shift(serve_date, window)],
+          {"p1": 1000.0, "p2": 1200.0})
+    refresh = _impression(served_days_ago=30, features={"deck_source": "grading_refresh"})
+    compact = _impression(served_days_ago=30)
+    _set_features(compact, '{"deck_source":"grading_refresh","basis":"consensus"}')
+    replenish = _impression(served_days_ago=30, features={"deck_source": "replenish"})
+    pull = _impression(served_days_ago=30)
+    bare = _impression(served_days_ago=30)
+    _set_features(bare, None)
+    queued = {r["impression_id"] for r in db_module.load_receipts_queue(
+        window, rs.GRADER_VERSION, [serve_date], 100)}
+    assert queued == {replenish, pull, bare}
+    assert db_module.count_receipts_queue(window, rs.GRADER_VERSION, [serve_date]) == 3
+    rs.run_grading(trigger="cron")
+    assert _grade_for(refresh, window) is None and _grade_for(compact, window) is None
+    assert _grade_for(replenish, window) is not None
+
+
 def test_t9_ghost_rows_are_excluded_at_the_ROUTE_layer_too(engine):
     """Layer two, defence in depth. Even if a ghost grade somehow existed —
     an older grader version, a hand-inserted row — the read filters it."""
