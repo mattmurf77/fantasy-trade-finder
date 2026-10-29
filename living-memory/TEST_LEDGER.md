@@ -65,6 +65,31 @@ Gates: a values fix to `GET /api/paywall/config` (flag `monetize.paywall`, still
   - tsc not run here (no `mobile/` change; `billing.ts` still types `trial_days: number`, harmless at runtime, and the #393 M1 branch drops it);
   - `docs/plans/monetization/pro-subscription/lld.md` §3 JSON and `iap-enablement/sandbox-test-checklist.md` P2 still carry the old prices and trial lengths (history and ASC setup, left for the #393 owners).
 
+## 2026-10-28 — Rebase case 2 follows the scope's newer job only while it's current (#484 QA P3-2)
+
+Gates: release-lead's #484 QA P3-2, open since 10-27. It's flag-dark behind `trade.first_page_store` and must land before the ~11-04 flip. No route, schema, flag or knob change; the API reference's rebase case 3 wording is updated. No pipeline change: only serve-path code changed. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The fix:** `_trade_deck_rebase`'s case 2 (the scope's newest job in this process) now uses P1's backing check (`_trade_rebase_job_current`), the one `_serve_trade_page_for` applies.
+  - No input epoch may be revoked since the request.
+  - The job must be fresh (`_trade_job_is_fresh`) or a matching running one (`_trade_running_matches`), against the same roster snapshot and the session's read.
+  - A stale job falls through to the end or the kick, so the rebuild starts, as a fresh tap would.
+- **Unchanged cases:** with no snapshot (a failed read, or `trade_i1_mode` 0), or one with no stored rows (`status` "missing", whose fp says nothing about the job's rosters), nothing proves the job stale (A2). It's followed as before, and the page view's own checks and S0's rules still decide what it sends.
+- **One snapshot per poll is kept:** the rebase reads P1's serve snapshot once (lazily, shared by cases 1 and 2), and the job page view takes it (`_trade_job_page_view` / `_trade_job_public_view` `snap=`) for S0's serve rules. `test_each_deck_serve_reads_one_roster_snapshot` holds.
+- **One test changed by design:** the C-e deck-path test edits the stored rows after building the newer job. On the rebased-job path it now re-stamps that job to the edited rows, so it still tests the C-e serve rule.
+- **Backend:** `test_trade_pages_p2.py` (110):
+  - a newer job whose rosters moved isn't followed, and the rebuild is kicked;
+  - a matching running job is followed with no kick;
+  - an input change means no follow;
+  - both checks get the session's read.
+- **Regression:** `test_trade_pages_p2`, `test_trade_page_store`, `test_trade_freshness_roster`, `test_i1_serve_filter`, `test_deck_i1_check` and the digest: 394 passed.
+- **Sabotage, each red then restored (5):**
+  - no check;
+  - no session read;
+  - input epochs ignored;
+  - a fresh-only check, so the running job is lost;
+  - a second snapshot read, which turns the one-snapshot test red.
+  - Two of these stayed green on the first try (the session read was None; a kick joining the same running job looked like a follow); the tests were tightened.
+
 ## 2026-10-27 — The quality filter's inputs, frozen per run (models-lead addendum D2); deck pipeline v5
 
 Gates: models-lead's ruling D2 (B-DK-4..6 provenance), via head-eng. Field names agreed with models-eng (their changes: `viewer_team`; null, not absent, for an unseeded asset or a None position; coverage = the returned cards' assets plus the holdings; the optional `protected` included). It adds one per-run key to the pack's run header; no route, schema, flag or knob change. `DECK_PIPELINE_VERSION` 4 → 5 (stacked on #487's v4): `_run_trade_job` records the inputs, and `_quality_filter_inputs` is in `DECK_PIPELINE_IGNORED`. The deck's shape doesn't change. models-eng reviews the bump. Server only; D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

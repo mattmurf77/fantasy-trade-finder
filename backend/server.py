@@ -3370,13 +3370,16 @@ def _prepared_job_matches(job):
         and prepared_trade_read_guard.valid(sys.modules[__name__], guard))
 
 
-def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
+def _trade_job_public_view(job: dict, *, page_start: int | None = None, snap=None) -> dict:
     """Shape returned to the mobile app by /api/trades/generate + /status.
     Hides internal-only fields like the cache key. Call OUTSIDE the job lock
     with a copied snapshot: one current history projection owns every card.
     `page_start`: the served slice's start index for a paged serve
     (_trade_job_page_view), None for the legacy cumulative body, which
-    `deck_i1_check` counts only once the job is complete."""
+    `deck_i1_check` counts only once the job is complete. `snap`: the
+    caller's roster snapshot for S0's serve rules (_trade_current_snapshot's
+    first part), so one read feeds its freshness check and this serve; None
+    reads one."""
     out = {
         "job_id":          job["job_id"],
         "status":          job["status"],
@@ -3459,7 +3462,7 @@ def _trade_job_public_view(job: dict, *, page_start: int | None = None) -> dict:
         checked = out["cards"]
         out["cards"], block, past_bound = _roster_serve_rules(
             out["cards"], league_id, job.get("league_user_id") or user_id, job["job_id"],
-            report=i1_report)
+            snap=snap, report=i1_report)
         if not block:
             kept = {id(c) for c in out["cards"]}
             withdrawn = [c for c in checked if id(c) not in kept]
@@ -4007,7 +4010,7 @@ def _trade_page_size() -> int:
         return 30
 
 
-def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
+def _trade_job_page_view(job: dict, cursor: int, search_id=None, snap=None) -> dict:
     """E2 opt-in paging: `page=1` on /generate (cursor 0), `cursor` on /status.
 
     `job` is a SHALLOW snapshot taken under the job lock; call outside it. The
@@ -4037,7 +4040,8 @@ def _trade_job_page_view(job: dict, cursor: int, search_id=None) -> dict:
     start = 0 if replace else cursor
     end = len(raw) if replace else min(len(raw), cursor + _trade_page_size())
     served = [] if job.get("status") == "error" else raw[start:end]
-    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start)
+    out = _trade_job_public_view({**job, "cards": copy.deepcopy(served)}, page_start=start,
+                                 snap=snap)
     if out["status"] == "error" or "wait_reason" in out:     # S0 §3b withhold: cursor holds
         out.update(cards=[], cursor=cursor, total_ready=0, replace=False)
     else:
@@ -7003,15 +7007,27 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
                   and job.get("page_scope") == scope and not _trade_job_revoked(job)
                   and job.get("status") != "error" else None)
     inputs = None
+    snapshot = []                         # P1's serve read, once per rebase, shared below
+
+    def current():
+        if not snapshot:
+            snapshot.append(_trade_current_snapshot(league_id, scoring_format))
+        return snapshot[0]
     if (row is not None and row["deck_job_id"] != deck_id
             and (finished is None or (newest is not None and row["deck_job_id"] == newest["job_id"]))):
         inputs = _trade_page_request_inputs(sess, league_id)
         served = _serve_trade_page_for(
-            sess, row, _trade_current_snapshot(league_id, scoring_format), sess_token=sess_token,
+            sess, row, current(), sess_token=sess_token,
             league_id=league_id, scoring_format=scoring_format,
             fairness_threshold=fairness_threshold, rebase=True, **inputs)
         if served is not None:
             return {**served, "deck_id": served["job_id"], "rebased": True}
+    if newest is not None:
+        # #484 QA P3-2: the scope's newer job is followed (case 2) only when it
+        # would back a page serve; a stale one falls to the end or the kick.
+        inputs = inputs or _trade_page_request_inputs(sess, league_id)
+        if not _trade_rebase_job_current(sess, newest, fairness_threshold, inputs, current()):
+            newest = None
     if newest is None:
         if finished is not None:
             end = _trade_deck_end(finished, deck, row, key, league_id, scoring_format)
@@ -7044,7 +7060,33 @@ def _trade_deck_rebase(sess: Mapping, sess_token: str, deck_id: str, cursor: int
                 return {**finished, "deck_id": deck_id, "pool_exhausted": True}
             return {**base, "deck_id": deck_id}   # joined a job outside the scope: ask again
         newest = kicked
-    return {**_trade_job_page_view(newest, 0), "deck_id": newest["job_id"], "rebased": True}
+    snap = current()[0] if snapshot and snapshot[0] else None
+    return {**_trade_job_page_view(newest, 0, snap=snap), "deck_id": newest["job_id"],
+            "rebased": True}
+
+
+def _trade_rebase_job_current(sess: Mapping, job: dict, fairness_threshold, inputs: Mapping,
+                              current) -> bool:
+    """#484 QA P3-2: may a rebase follow the scope's newer job (case 2)? Only
+    when it would back a page serve (_serve_trade_page_for's check): no input
+    changed since the request's epochs, and the job is fresh, or a matching
+    running one, against the same snapshot (`current`, P1's serve read) and
+    the session's read. With no snapshot (a failed read, or trade_i1_mode 0),
+    or one with no stored rows (status "missing": its fp says nothing about the
+    job's rosters), nothing proves it stale (A2): it's followed, as before, and
+    the page view's own checks (revocation, policy, S0's serve rules, which
+    gate-miss a missing read) still decide what it sends."""
+    if any(token.revoked for token in inputs["input_epochs"]):
+        return False
+    if current is None or current[0].status == "missing":
+        return True
+    fingerprints = (current[0].fp, current[1])
+    session_read = sess.get("roster_fetch_started_at")
+    args = (job, fairness_threshold, inputs["outlook_value"], None,
+            inputs["presentation_capture"], inputs["request_signature"], fingerprints)
+    with _trade_jobs_lock:
+        return bool(_trade_job_is_fresh(*args, session_read=session_read)
+                    or _trade_running_matches(*args, session_read=session_read))
 
 
 def _trade_deck_end(finished: dict, deck: dict, row: dict | None, key, league_id: str,
