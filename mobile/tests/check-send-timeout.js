@@ -8,7 +8,8 @@
 //
 //   A. The client constant equals the server worst case, with each term parsed
 //      from the backend files (provider timeouts, MFL spacing, the calls each
-//      propose core makes). A new provider call in a core goes red here.
+//      propose core makes). A new provider call in a core goes red here. The
+//      overhaul's batch timeout is capped at gunicorn's --timeout (render.yaml).
 //   B. The three calls run on the long timeout, through the real api/client.ts
 //      under a fake clock; every other call keeps its old timeout.
 //   C. A timeout, a dropped connection, the server's *_outcome_unknown and a
@@ -310,6 +311,7 @@ function firstCatchIf(sf, tryStmt) {
       'backend/mfl_service.py:129', 'backend/mfl_service.py:441', 'backend/mfl_service.py:401',
       'backend/mfl_write.py:63', 'backend/mfl_write.py:58', 'backend/espn_write.py:80',
       '_mfl_propose_core', '_espn_propose_core', '= 76 s', '= 45 s',
+      'render.yaml:16', '--timeout 120',
     ];
     const missing = cites.filter((c) => !src.includes(c));
     expect(!missing.length, `missing from the comment: ${missing.join(', ')}`);
@@ -318,11 +320,25 @@ function firstCatchIf(sf, tryStmt) {
     }
   });
 
-  await check('A5. overhaulSendTimeoutMs = (offers × worst case + margin) s; a missing count is one offer', () => {
-    const w = O.SERVER_SEND_WORST_CASE_S, m = O.SEND_TIMEOUT_MARGIN_S;
-    for (const n of [1, 3, 5, 12]) {
-      expect(O.overhaulSendTimeoutMs(n) === (n * w + m) * 1000, `overhaulSendTimeoutMs(${n}) = ${O.overhaulSendTimeoutMs(n)}`);
+  await check('A5. GUNICORN_TIMEOUT_S = the web service\'s `--timeout N` in render.yaml; one propose fits under it uncapped', () => {
+    const yaml = fs.readFileSync(path.resolve(__dirname, '..', '..', 'render.yaml'), 'utf8');
+    const web = /-\s*type:\s*web\b[\s\S]*?startCommand:\s*([^\n]+)/.exec(yaml);
+    expect(web, 'no `type: web` service with a startCommand in render.yaml');
+    const t = /--timeout[ =](\d+)/.exec(web[1]);
+    expect(t, `the web startCommand sets no --timeout: ${web[1].trim()}`);
+    expect(O.GUNICORN_TIMEOUT_S === Number(t[1]), `GUNICORN_TIMEOUT_S = ${O.GUNICORN_TIMEOUT_S}, render.yaml --timeout ${t[1]}`);
+    expect(O.SERVER_SEND_WORST_CASE_S <= O.GUNICORN_TIMEOUT_S,
+      `one propose (${O.SERVER_SEND_WORST_CASE_S} s) outlives the server ceiling (${O.GUNICORN_TIMEOUT_S} s): PLATFORM_SEND_TIMEOUT_MS needs the cap too`);
+  });
+
+  await check('A6. overhaulSendTimeoutMs = (min(offers × worst case, ceiling) + margin) s; 10 offers = the cap; a missing count is one offer', () => {
+    const w = O.SERVER_SEND_WORST_CASE_S, m = O.SEND_TIMEOUT_MARGIN_S, cap = O.GUNICORN_TIMEOUT_S;
+    for (const n of [1, 2, 3, 5, 10, 12]) {
+      expect(O.overhaulSendTimeoutMs(n) === (Math.min(n * w, cap) + m) * 1000, `overhaulSendTimeoutMs(${n}) = ${O.overhaulSendTimeoutMs(n)}`);
     }
+    expect(O.overhaulSendTimeoutMs(10) === (cap + m) * 1000,
+      `overhaulSendTimeoutMs(10) = ${O.overhaulSendTimeoutMs(10)} ms, want the cap ${(cap + m) * 1000} ms`);
+    expect(O.overhaulSendTimeoutMs(10) === 135_000, `overhaulSendTimeoutMs(10) = ${O.overhaulSendTimeoutMs(10)}, the documented cap is 135000`);
     expect(O.overhaulSendTimeoutMs(1) === O.PLATFORM_SEND_TIMEOUT_MS, 'one offer must equal the single-send timeout');
     for (const n of [0, -2, NaN, undefined]) {
       expect(O.overhaulSendTimeoutMs(n) === O.PLATFORM_SEND_TIMEOUT_MS, `overhaulSendTimeoutMs(${n}) must fall back to one offer`);

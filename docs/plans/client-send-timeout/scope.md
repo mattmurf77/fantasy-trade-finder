@@ -30,7 +30,9 @@ The app gives every request 15 s (`DEFAULT_TIMEOUT_MS`, `mobile/src/api/client.t
 
    One constant covers both platforms, so it is MFL's 76 s, plus a 15 s margin (one `DEFAULT_TIMEOUT_MS`, for the mobile round trip and the server's database work) = **91 s**. urllib's timeout is per socket operation, not per request, so a provider that stalls at two stages can run longer. The app then shows "couldn't confirm", which is the safe answer.
 
-   The overhaul send (`POST /api/overhauls/{id}/send`) is **one request for N sends**: `overhaul_send_route` (`backend/overhaul_api.py:950`) loops over the batch, calling the propose core once per offer (:1029). So `overhaulSendTimeoutMs(n) = (n × 76 + 15) s`, with n = the prepare's `counts.offers`. Sleeper's core, which an overhaul on a Sleeper league reaches, is at most 70 s (rosters 15 + traded_picks 15 + league meta 10 + drafts 15 + write 15), so the 76 s per offer covers it.
+   The overhaul send (`POST /api/overhauls/{id}/send`) is **one request for N sends**: `overhaul_send_route` (`backend/overhaul_api.py:950`) loops over the batch, calling the propose core once per offer (:1029). Sleeper's core, which an overhaul on a Sleeper league reaches, is at most 70 s (rosters 15 + traded_picks 15 + league meta 10 + drafts 15 + write 15), so the 76 s per offer covers it.
+
+   That per-offer sum is capped at the server's request ceiling, `GUNICORN_TIMEOUT_S = 120` (gunicorn `--timeout 120`, `render.yaml:16`, review change 2026-10-28). So `overhaulSendTimeoutMs(n) = (min(n × 76, 120) + 15) s`, with n = the prepare's `counts.offers`: 91 s for one offer, 135 s for two or more. Uncapped, 10 offers would have meant a 13-minute wait. `PLATFORM_SEND_TIMEOUT_MS` needs no cap, because 76 s is under 120 s. The guard asserts both against `render.yaml`.
 
    Every other call keeps its timeout. The `api/client.ts` change is additive: an optional `timeoutMs` in `RequestOptions`, used in place of `timeoutForRequest(...)` at the two places that read it.
 2. **An unknown outcome says "couldn't confirm", never "try again".** `isSendOutcomeUnknown(err)` is true for our timeout, no HTTP answer (status 0, or fetch's network error), the server's `espn_outcome_unknown` / `mfl_outcome_unknown` (#513), the global 500 `internal_error` (an unhandled exception can be raised after the provider took the write), and a 5xx with no error code (a gateway page). Every structured error keeps its own handling. `SendInEspnButton` / `SendInMflButton` check it first: title "Check before resending", message "Couldn’t confirm whether this trade reached ESPN. Check ESPN before sending it again." (MFL likewise), buttons OK and Open ESPN / Open MFL. The copy lives in `mobile/src/utils/sendOutcomeCopy.ts` and is a **placeholder pending marketing** (copy routes head-eng → head-bizops → marketing-lead).
@@ -38,6 +40,12 @@ The app gives every request 15 s (`DEFAULT_TIMEOUT_MS`, `mobile/src/api/client.t
 4. **No automatic retry of a POST.** Unchanged: `canRetry` in `api/client.ts` is GET-only. It is now pinned. The one POST replay that exists, the 409 `session_not_initialized` backoff, is safe because that guard raises before the route runs; it is pinned as the only one.
 
 Out of scope: Sleeper's own single send (`propose`), the server (PR #513), and the button staying tappable after an unknown outcome. The message tells the user to check first; a dedicated "check ESPN" state is a product call.
+
+**Known limits**
+- **An overhaul batch whose sends run past 120 s.** What happens depends on the gunicorn worker class:
+  - Under the sync worker (the E1 rollback command, `docs/runbook.md` § The gthread switch), the batch is killed mid-loop server-side at 120 s. On a later Refresh, the 300 s zombie sweep (`overhaul_service.stuck_outcome`, `overhaul_api.py:1098`) turns the attempt that was `sending` into `outcome_unknown` and any never-dispatched `queued` ones into `stale`. The plan screen already shows both.
+  - Under today's `--threads 4` (gthread, #398, 2026-10-25), gunicorn's `--timeout` is a worker heartbeat, not a per-request limit, so the batch keeps sending after the client stops waiting at 135 s. The plan shows each attempt as it resolves.
+  - Either way nothing is resent. A server-side batching limit is out of scope here.
 
 ## 1. Analytics scope
 
@@ -53,8 +61,8 @@ Out of scope: Sleeper's own single send (`propose`), the server (PR #513), and t
 
 ## 3. Evidence scope
 
-- [x] **Structural guard:** `mobile/tests/check-send-timeout.js` (`npm run test:send-timeout`), 19 checks. It executes the real `api/client.ts`, `sendOutcome.ts`, `sendInEspn.ts`, `sendInMfl.ts`, `overhaul.ts` and `sendOutcomeCopy.ts` under a fake clock with a scripted `fetch`:
-  - A: the constant equals the server sum, every term parsed from the backend files; each propose core makes exactly the counted provider calls on their default timeouts (a new provider call goes red); the comment cites every term.
+- [x] **Structural guard:** `mobile/tests/check-send-timeout.js` (`npm run test:send-timeout`), 20 checks. It executes the real `api/client.ts`, `sendOutcome.ts`, `sendInEspn.ts`, `sendInMfl.ts`, `overhaul.ts` and `sendOutcomeCopy.ts` under a fake clock with a scripted `fetch`:
+  - A: the constant equals the server sum, every term parsed from the backend files; each propose core makes exactly the counted provider calls on their default timeouts (a new provider call goes red); the comment cites every term; `GUNICORN_TIMEOUT_S` equals the web service's `--timeout` parsed from `render.yaml`, one propose fits under it, and `overhaulSendTimeoutMs(10)` equals the cap (135 s).
   - B: each send is still waiting at 15 s and times out at its long timeout; link-status GETs, prepare-send, refresh and a plain POST still time out at 15 s.
   - C: a timeout or a network drop on each send is outcome-unknown; 18 server answers classified through the real client; the copy.
   - D: both buttons and the overhaul summary branch on it first, with no resend in that branch.
@@ -75,7 +83,7 @@ Out of scope: Sleeper's own single send (`propose`), the server (PR #513), and t
   6. Airplane mode right after tapping Send (MFL league). Expected: the same check-before-resending alert, not the generic error.
   7. Normal network: send one MFL trade. Expected: "Trade sent" as before, with no delay added.
   8. Regression, normal network: with an MFL sign-in removed (Settings → Disconnect MFL sign-in), tap Send. Expected: the existing "Sign in with MFL" prompt, unchanged. A trade with a moved player still shows its ownership refusal, not the new alert.
-  9. Overhaul (only if `overhaul.enabled` is turned on for testing; it is OFF for launch): with Very Bad Network on, tap **Send all offers**. Expected: the app lands on the plan with the "Couldn’t confirm whether these offers reached {platform}" alert; each sent offer shows Sending / Sent, awaiting reply / Send status unknown, and there is no Send next tier on those packages. After Refresh with the network back, the platform shows each offer at most once.
+  9. Overhaul (only if `overhaul.enabled` is turned on for testing; it is OFF for launch): with Very Bad Network on, tap **Send all offers** on a batch of two or more offers. Expected: the spinner gives up after at most about 2¼ minutes (135 s), then the app lands on the plan with the "Couldn’t confirm whether these offers reached {platform}" alert; each sent offer shows Sending / Sent, awaiting reply / Send status unknown, and there is no Send next tier on those packages. After Refresh with the network back, the platform shows each offer at most once.
 - [ ] Waived: n/a.
 - `testID`s added/renamed: none.
 

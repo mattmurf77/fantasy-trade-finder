@@ -52,16 +52,29 @@ export const SERVER_SEND_WORST_CASE_S = 15 + 15 + 15 + 15 + 1 + 15; // = 76
 // provider calls.
 export const SEND_TIMEOUT_MARGIN_S = 15;
 
-/** Request timeout for POST /api/trades/propose-espn and /propose-mfl: (76 + 15) s = 91 s. */
+// Server request ceiling: gunicorn's worker timeout, `--timeout 120` in
+// render.yaml:16. Under the sync worker (the E1 rollback command,
+// docs/runbook.md § The gthread switch), a request still running at 120 s is
+// killed and the proxy answers 5xx. Under today's `--threads 4` (gthread,
+// #398, 2026-10-25) it is a heartbeat timeout, so a long overhaul batch can
+// keep sending after 120 s. Either way, waiting longer gains the client
+// nothing: the server stores every attempt before its first provider call, and
+// the plan shows them.
+export const GUNICORN_TIMEOUT_S = 120;
+
+/** Request timeout for POST /api/trades/propose-espn and /propose-mfl:
+ *  (76 + 15) s = 91 s. 76 s is under GUNICORN_TIMEOUT_S, so no cap is needed. */
 export const PLATFORM_SEND_TIMEOUT_MS = (SERVER_SEND_WORST_CASE_S + SEND_TIMEOUT_MARGIN_S) * 1000;
 
 /** Request timeout for POST /api/overhauls/{id}/send. The server sends the
  *  batch's offers one after another inside that ONE request
  *  (`overhaul_send_route`, backend/overhaul_api.py), so each offer gets the
- *  single-send worst case: (offers × 76 + 15) s. */
+ *  single-send worst case, capped at the server ceiling:
+ *  (min(offers × 76, 120) + 15) s, which is 91 s for one offer and 135 s for
+ *  two or more. */
 export function overhaulSendTimeoutMs(offerCount: number): number {
   const offers = Number.isFinite(offerCount) && offerCount > 1 ? Math.ceil(offerCount) : 1;
-  return (offers * SERVER_SEND_WORST_CASE_S + SEND_TIMEOUT_MARGIN_S) * 1000;
+  return (Math.min(offers * SERVER_SEND_WORST_CASE_S, GUNICORN_TIMEOUT_S) + SEND_TIMEOUT_MARGIN_S) * 1000;
 }
 
 /** Error codes that mean the send may have landed: the server's own C10
