@@ -77,6 +77,7 @@ hashes belong in the initiative's evaluation evidence, not an asserted live grad
   - [Screen library (capture freshness)](#screen-library-capture-freshness)
   - [Failure symptom / lever](#failure-symptom-lever)
 - [Database](#database)
+- [Migration DDL never blocks boot](#migration-ddl-never-blocks-boot)
 - [Feature flags](#feature-flags)
 - [Trade engine flags + kill switch](#trade-engine-flags-kill-switch)
 - [Runtime tuning](#runtime-tuning)
@@ -309,6 +310,46 @@ Prereq: `brew install pngquant` (the runner falls back to `sips` downscale with 
 - **Prod:** Postgres via `DATABASE_URL`. Take a Render snapshot before destructive changes.
 - **Schema source of truth:** `backend/database.py`.
 - **Migrations:** No migration tool. `_migrate_db()` in `database.py` applies idempotent additive ALTERs and seeds `model_config` defaults via INSERT OR IGNORE on every startup. For destructive changes, write a one-off script and run it manually.
+
+---
+
+## Migration DDL never blocks boot
+
+Why this exists: on #416's deploy, the boot spent about 90 s in `init_db`.
+- `_migrate_db()` ran every listed `ALTER TABLE … ADD COLUMN` (112) and every `CREATE INDEX IF NOT EXISTS` (15) on every boot.
+- On Postgres the ALTER takes ACCESS EXCLUSIVE and the CREATE INDEX takes SHARE, both **before** checking whether the object already exists.
+- The new instance's DDL queued behind the still-serving old instance, and the old instance's queries then queued behind the DDL.
+
+How it works now (`backend/database.py`, `_SchemaSnapshot` / `_run_guarded_ddl`):
+- **Precheck.** `_migrate_db` reads each table's columns and indexes once, and skips any column or index that already exists. A normal boot therefore issues **no** ADD COLUMN and **no** CREATE INDEX. Only the two `DROP INDEX IF EXISTS` no-ops remain; they take no lock when the index is absent.
+- **Catalog reads cannot hang.** On Postgres each read runs on its own short-lived connection that first runs `SET lock_timeout = '3s'`, and that connection is closed before any DDL.
+  - A lock-busy read fails the boot with `MIGRATION_LOCK_BUSY <table>`. It does not fall back to "assume nothing exists", which would retry every column.
+  - Any other read error keeps the old fallback: that table's DDL just runs.
+- **Lock guard for missing DDL (Postgres).** Each statement runs in its own transaction after `SET LOCAL lock_timeout = '3s'`. A missing **column** also gets `SET LOCAL statement_timeout = '30s'` (ADD COLUMN is metadata-only). A missing **index** gets **no** statement_timeout, so a build that has its lock is never cancelled.
+  - On `55P03` (lock_not_available) or `57014` (query_canceled) it retries up to 10 attempts, about 1 s apart (about 40 s at most).
+  - If the table is still locked, it logs at ERROR `MIGRATION_LOCK_BUSY <table>.<col>` (or `<index>`) and **raises**, so `init_db` and the boot fail.
+  - Any other error is swallowed as before (the "already exists" race).
+- **SQLite:** same precheck. No SET, no retry.
+
+**Why it fails instead of serving:** readers need every metadata column.
+- SQLAlchemy Core `select(<table>)`, and any insert that lists every metadata column, names every declared column. Postgres rejects one that is not there yet.
+- For example, a missing `deck_impressions.evidence_tier` would fail every deck evidence write.
+- A missing `deck_candidate_sets.candidates_packed` would fail the prepared-offer reads.
+- A missing `overhaul_attempts.provider_status` would fail every overhaul status read.
+
+**Fail-boot is safe only because prod preloads.**
+- Render's default `GUNICORN_CMD_ARGS` includes `--preload`, so `init_db` runs in the gunicorn master before the port opens. A failed boot never takes traffic: the deploy fails and the old instance keeps serving.
+- **Without** `--preload`, the master opens the port first. Then a failing worker boot exits only after traffic has switched to it.
+- Making `--preload` explicit in `render.yaml` is release-lead's call.
+
+**Shipping a column or index:**
+- A deploy that adds a column goes out in a **quiet window**: low traffic, and no long-running cron or job holding the table.
+- While the guard retries (up to about 40 s), the old instance's queries on that table can stall up to 3 s per attempt, queued behind the waiting ALTER.
+- **If the boot fails with `MIGRATION_LOCK_BUSY`:** the old instance keeps serving, so nothing is down. **Redeploy** in a quieter moment.
+- **Never hand-edit the prod schema.**
+- **A new index on a large table** must be built `CREATE INDEX CONCURRENTLY` **off the boot path**, as an operator one-off or a migration script with a lock_timeout. See the C8 retention note beside `deck_impressions`' indexes in `database.py`. The boot guard only bounds the lock wait. A plain build still blocks writes for the length of the scan once it has the lock.
+- **`build.sh` imports `backend.server`**, so `init_db` also runs during the Render build. A lock-busy failure there hides behind the "Sleeper cache bake skipped" message. Read the build log, not only the deploy log.
+- **Check it landed:** the boot completes, and `\d <table>` in psql against `DATABASE_URL_PROD` shows the column or index.
 
 ---
 
