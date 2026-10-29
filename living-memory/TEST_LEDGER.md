@@ -1,3 +1,10 @@
+## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
+
+Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`fix/paywall-rise-jan2`), requested by monetization-pm (head-product authorized; the operator approved scheduling both App Store price changes for 2027-01-02 on 2026-10-28). release-lead delta-QAs it. Still dark (`monetize.paywall`). D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Change:** `_PAYWALL_PRICE_RISE_AT` = `datetime(2027, 1, 2, 4, 0, tzinfo=utc)` (was 2027-01-01 08:00Z, LA midnight). Per monetization-pm, citing Apple's start-times table, a change scheduled for 2027-01-01 starts in the US at 2027-01-01 04:00Z (11 pm ET on Dec 31), which breaks Terms §14.8; a 2027-01-02 schedule starts at 2027-01-02 04:00Z (11 pm ET / 8 pm PT on Jan 1). Apple's table renders its times client-side, so the 04:00Z figure is not independently checked here; monetization-pm's setup §3d records the time App Store Connect shows, and the constant moves if it differs. The comment block, api-reference row and cross-client-invariants SKU rows + fallback bullet say the same.
+- **Tests (`test_paywall_config.py`, 43):** both sides of the new instant (`2027-01-02T03:59:59Z` old, `04:00:00Z` new); the Jan-1 schedule's US start (`2027-01-01T04:00Z`) and the previous LA-midnight instant (`2027-01-01T08:00Z`) now serve the old prices; the constant equals 23:00 Jan 1 New York and 20:00 Jan 1 Los Angeles via `zoneinfo`, and the last second of Dec 31 in Honolulu is before it; time-zone instants (NY 23:00 Dec 31 old, LA midnight Jan 1 old, NY 22:59:59 Jan 1 old, NY 23:00 Jan 1 new, LA 20:00 Jan 1 new, Paris 00:30 Jan 1 old). 43 passed.
+- **Sabotage, each red then restored:** the old 2027-01-01 08:00Z instant → 6 red; a Jan-1 schedule's 2027-01-01 04:00Z → 9 red.
 ## 2026-10-29 — #521 QA P3s: the drafted-league retry, the retry lock-free, no retry on a pool timeout; deck pipeline v8
 
 Gates: release-lead's #521 QA (GO-with-notes), P3-1 to P3-3. Follows #521. P3-4 (the PR body) is fixed on #521 itself. No route, schema, flag or event change. Deck pipeline v8, digest `f7ed33e6ab94af03`; models-eng classifies. Only stored pages carry the version, and `trade.first_page_store` is off in prod, so nothing is invalidated there. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
@@ -178,6 +185,28 @@ Gates: release-lead's #487 QA P3-3 (owner-exclusive forfeits on a transient firs
   - no picks retry;
   - no draft retry;
   - a second retry (the fails-twice test catches it).
+
+## 2026-10-28 — Account-only sessions get `verification` (head-eng; for the 11-06 binary)
+
+Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verification.md`). Server and mobile; D-056: `FTF_SKIP_SIM_GATE=1` posture.
+
+- **The change:**
+  - `GET /api/session/ping` returns session/init's additive `verification` object, via `_session_verification(sess)`.
+  - Mobile `refreshVerification()` pings and records it only for the same, still-signed-in user.
+  - It's called from `revalidateSession`'s `NO_LEAGUE_ID` branch and after the account-only Apple sign-in.
+  - The result: an Apple-first account with no league now reads `session_verified: true`.
+- **Release-lead #524 QA (NO-GO, P1), fixed:** an unverified or demo session (session/init's 403 cases) now gets the constant unverified answer, with no lookup. Before the fix, ping told anyone who could name a user_id whether that account existed and which provider proved it (legal R28.9 row 4 / R28.14).
+  - Also from QA: the sentinel ping is no longer awaited (P3-2).
+  - `setUser` resets `verification` to null on any user_id change (an expiry then another user's sign-in).
+- **Backend:** `test_session_ping_verification.py`, 24 tests:
+  - the squatter test flipped to the constant;
+  - the exact key sets for 7 session types;
+  - 0 SQL for anonymous, unknown-token and unverified pings, with a positive control;
+  - a foreign `user_id` / `X-User-Id` ignored;
+  - a verified session reads the user row, not its own stamp.
+  - **Sabotage 11/11 red:** QA's P1 reverted, demo looked up, an extra top-level key, an extra key in the unverified answer, the query user_id answered, X-User-Id looked up, a 401-path probe, plus round 1's 4 re-run.
+- **Mobile:** `check-account-only-verification.js`, 5 AST pins (pin 3 is now unawaited; pin 5 is the `setUser` reset). **Sabotage:** 7/7 red in round 1, and 5/5 on the new and changed pins. tsc clean; `check-win-now-recovery` passes.
+- **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
