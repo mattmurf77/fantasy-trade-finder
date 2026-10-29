@@ -907,12 +907,20 @@ def test_every_picks_read_in_the_worker_is_noted(live, monkeypatch):
     assert drafts == [LEAGUE]             # handed to the owner path, never re-read
 
 
-def test_the_kickoff_reads_picks_only_for_the_stamp_and_the_preferences(live):
+@pytest.mark.parametrize("in_flight", [False, True])
+def test_the_kickoff_reads_picks_only_for_the_stamp_and_the_preferences(live, in_flight):
     """#487 QA P3-1: every draft_picks or leagues statement a kickoff issues is
     the one fingerprint read's (snapshot_ids: one picks read, one drafted
     read) or the preferences' pick share. An expected fp taken from a
-    separate read fails here, not only the snapshot_ids count."""
+    separate read fails here, not only the snapshot_ids count. In flight (the
+    session's roster refresh running) is the only path where the kickoff
+    takes an expected fp, so that case must really take one (#519 QA P3-1,
+    release-lead's variant)."""
     client, engine = live
+    if in_flight:
+        with server._sessions_lock:
+            server._sessions[TOKEN].update(roster_fetch_started_at=READ_NOW,
+                                           roster_read_rows=MEMBERS_NOW)
     sites = []
 
     def before(conn, cursor, statement, *_):
@@ -924,10 +932,13 @@ def test_the_kickoff_reads_picks_only_for_the_stamp_and_the_preferences(live):
     event.listen(engine, "before_cursor_execute", before)
     try:
         with patch.object(server, "_start_trade_job_thread", MagicMock()):
-            server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
-                                      scoring_format="1qb_ppr", opponents_total=1)
+            job_id = server._kickoff_trade_job(sess_token=TOKEN, user_id=UID, league_id=LEAGUE,
+                                               scoring_format="1qb_ppr", opponents_total=1)
+        with server._trade_jobs_lock:
+            job = dict(server._trade_jobs.get(job_id) or {})
     finally:
         event.remove(engine, "before_cursor_execute", before)
+    assert bool(job.get("roster_fp_expected")) == in_flight, sorted(job)
     assert sorted(s for s in sites if s[0] == "snapshot_ids") == [
         ("snapshot_ids", "draft_picks"), ("snapshot_ids", "leagues")]
     assert not [s for s in sites if s[0] == "other"], sites
