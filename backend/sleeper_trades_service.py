@@ -76,9 +76,11 @@ def fetch_week_transactions(
     # 18-week sweep makes this the highest-frequency Sleeper class; success
     # sampling (obs_success_sample_n) keeps its volume bounded.
     from . import api_observability as _api_obs
-    with _api_obs.observe_call("sleeper", "league.transactions",
-                               active=_opener is None,
-                               league_id=league_id, week=week) as _ob:
+    from . import sleeper_http as _sleeper_http   # S0 — the shared 429 circuit
+    with _sleeper_http.guard(league_id), \
+            _api_obs.observe_call("sleeper", "league.transactions",
+                                  active=_opener is None,
+                                  league_id=league_id, week=week) as _ob:
         with opener(request, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8")
         payload = json.loads(raw)

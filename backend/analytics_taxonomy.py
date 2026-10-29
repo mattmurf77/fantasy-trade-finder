@@ -50,6 +50,17 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # Trades
     "find_trades_tapped", "trade_card_viewed", "trade_flagged",
     "match_opened",
+    # Time to trade suggestion (addendum docs/business/analytics/
+    # 2026-10-20-time-to-suggestion-events.md v2): R2/R2b, the AC-L1 outcome
+    # of an R1 tap — exactly one of the two per `search_id`. NON_INTENT
+    # (analytics_queries.NON_INTENT_EVENTS): a system outcome echoing the tap,
+    # which already counts the user. Registered in the SAME commit as the
+    # emitters (mobile/src/state/tradeSearchTrace.ts).
+    "trade_first_card_shown", "trade_first_card_failed",
+    # deck_buffer_empty (granted, analytics-lead ruling 30): the user reached
+    # the last ready card while the deck was still building and no next page
+    # was local — an AC-L4 failure. NON_INTENT. Same commit as its emitter.
+    "deck_buffer_empty",
     # TikTok-discovery deck engine (docs/plans/tiktok-discovery/). The F1
     # /api/events derives verified, owned viewed/undo outcomes only after
     # taxonomy filtering and successful ingestion. These analytics rows
@@ -740,6 +751,13 @@ ALLOWED_CLIENT_EVENTS: frozenset[str] = frozenset({
     # invite_landing_cta, referral_attributed, referral_activated) are NOT
     # here: they land in SERVER_FIRED_EVENTS with their emitters (D-1).
     "share_link_opened",
+    # ── Minimum-version gate (B8, 2026-10-24; head-eng ruling 35 + the
+    # analytics-lead B8 grant). Registered in the SAME commit as the emitters
+    # (mobile/src/screens/UpdateGateScreen.tsx); both land in
+    # analytics_queries.NON_INTENT_EVENTS in this same commit.
+    #   update_gate_shown  — once per gate show, after the flag fetch resolves
+    #   update_gate_tapped — the Update tap (opens the App Store listing)
+    "update_gate_shown", "update_gate_tapped",
 })
 
 # ---------------------------------------------------------------------------
@@ -897,6 +915,24 @@ SERVER_FIRED_EVENTS: frozenset[str] = frozenset({
     # allowlist's prop filter, and the import-time completeness check below
     # is scoped to ALLOWED_CLIENT_EVENTS.
     "receipts_grade_run",
+    # ── S0's I-1 serve check, 2026-10-27 (analytics-lead's pre-grant, the
+    # 2026-10-26 report §2 (a); models-lead R2.4 addendum (ii)) — registered
+    # in the SAME commit as its emitter (server._emit_deck_i1_check).
+    # The C-a readout's data path: one row per job serve page that ran the
+    # check (the `[i1] serve` log point), deduped per (job, page) in-process;
+    # trade_i1_mode 0 runs no check and emits nothing. Owner = the viewer,
+    # written non-touching (touch_user=False) off the request thread; the
+    # league rides the row's `league_id` column. NON_INTENT (classified in
+    # analytics_queries in this same commit): a system outcome of a serve.
+    # Props, exactly: job_key (sha256(job_id)[:12], to de-duplicate by job),
+    # mode (strict | lenient), status (fresh | stale | unknown | missing),
+    # outcome (the log's), age_bucket (under_5m | 5m_to_1h | 1h_to_24h |
+    # over_24h | none), cards, kept, dropped_cards (distinct cards with a
+    # moved asset), dropped_give_player, dropped_give_pick,
+    # dropped_receive_player, dropped_receive_pick (cards per side x asset
+    # type), unchecked_generic, unchecked_pick_owner. No league id, no raw job
+    # id, no player ids.
+    "deck_i1_check",
 })
 
 # ---------------------------------------------------------------------------
@@ -966,7 +1002,50 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # pinned surface could not fire this event AT ALL (the CTA was gated
     # out), so a non-zero find_trades_tapped{mode:single_pin} count IS the
     # regression fix's telemetry.
-    "find_trades_tapped":   frozenset({"source", "mode"}),
+    #
+    # Time to trade suggestion (R1; addendum docs/business/analytics/
+    # 2026-10-20-time-to-suggestion-events.md v2, analytics-lead ruling 30):
+    # WIDENED with `search_id`, a client UUID minted AT THE TAP that the same
+    # search sends as /api/trades/generate's `search_id`, so the tap, its job
+    # and R2/R2b join on one key. Fires at the tap on every #339 table-A
+    # control (no longer at dispatch on the push path). Exact `source` values:
+    # absent (the deck's own Find a Trade), deck_error_retry,
+    # prefs_changed_strip, deck_summary_unpin, deck_search_all, calculator
+    # (the canvas Find a Trade), league_offer (League Summary Offer ONLY after
+    # the seam), and new: league_target (League Summary Target), usage_trends
+    # (Usage Trends Trade), deep_link (app/trades/finder), end_card_adjust
+    # (the P30 card's apply tap), and team_review (Team Review's "Find my
+    # trades" hand-off, only when a partner is scoped; granted by
+    # analytics-lead, Q-A — per Product it is OUT of the AC-L1 cells for
+    # launch and reported separately). Still INTENT.
+    "find_trades_tapped":   frozenset({"source", "mode", "search_id"}),
+    # R2 — at T1, the first frame where a real card is >= 50% visible with
+    # Like and Pass enabled; once per search_id. `ms_from_tap` is a MONOTONIC
+    # client delta (performance.now()), int. `entry_point` = the tap's R1
+    # `source`; `search_type` organic | pinned | fair_sweep; `launch_state`
+    # cold_launch | first_tap | repeat_tap; `network_type` wifi | cellular |
+    # offline | unknown (the tap's); `serve_source` device | page | cached |
+    # joined | fresh; `freshness_state` fresh | updating; `job_id`;
+    # `card_index`. No player ids, names or league-identifying values.
+    "trade_first_card_shown":  frozenset({"search_id", "ms_from_tap", "entry_point",
+                                          "search_type", "launch_state",
+                                          "network_type", "serve_source",
+                                          "freshness_state", "job_id",
+                                          "card_index"}),
+    # R2b — instead of R2. `reason` empty | error | abandoned (unmount, blur,
+    # or the app leaving `active` before a card, T4) | timeout (10,000 ms
+    # from the tap). Every R2b counts as > 200 ms in the p95 (T2).
+    "trade_first_card_failed": frozenset({"search_id", "ms_from_tap", "reason",
+                                          "entry_point", "search_type",
+                                          "launch_state", "network_type",
+                                          "serve_source"}),
+    # At most once per search_id. `deck_id` = the deck being paged (P2's, else
+    # the job's id); `cards_seen` = cards fronted so far, the empty one
+    # included; `ms_since_first_card` = monotonic ms since R2 (absent when R2
+    # had not fired yet); `network_type` at the moment.
+    "deck_buffer_empty":       frozenset({"search_id", "deck_id", "cards_seen",
+                                          "ms_since_first_card",
+                                          "network_type"}),
     # Receipts. `status` is ledger | ready — which of the two designed screen
     # states the user actually saw, so "did anyone see a number?" is
     # answerable without joining grades. `headline_bucket` is neg | flat | pos,
@@ -1124,12 +1203,14 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Matches non-match send row, NOT 'suggested').
     "sleeper_send_attempted":  frozenset({"surface", "give_n", "receive_n",
                                           "from_deck", "has_target"}),
-    # `error_code` is a CLOSED enum: the 15 server codes of
+    # `error_code` is a CLOSED enum: the 17 server codes of
     # /api/trades/propose (incl. #413's sleeper_pick_unmapped |
     # sleeper_pick_not_owned and #428's sleeper_pick_untradable) plus
-    # network | timeout | unknown. 18 values, forever (17 → 18 on
-    # 2026-09-08). `kind` is SleeperWriteError.kind, present only on
-    # sleeper_rejected / sleeper_write_failed.
+    # network | timeout | unknown. 20 values, forever (18 → 20 on
+    # 2026-10-26, I-2 #411 asset_not_owned | counterparty_asset_not_owned).
+    # `kind` is SleeperWriteError.kind, present only on
+    # sleeper_rejected / sleeper_write_failed — or `roster_read` (I-2 R3):
+    # the live rosters read failed, so nothing was sent; not a write failure.
     "sleeper_send_failed":     frozenset({"surface", "error_code", "status",
                                           "kind", "give_n", "receive_n",
                                           "from_deck"}),
@@ -1638,9 +1719,11 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # selected. NO player ids, NO names, NO league id (that rides the envelope
     # column), and NO device platform — that is a user_events COLUMN
     # derived server-side (the NULL-`platform` incident).
+    # R1 widening (time to suggestion, addendum v2): + `search_id`, the same
+    # client UUID as the tap's find_trades_tapped {source: calculator}.
     "calc_find_a_trade_tapped":    frozenset({"path",
                                               "give_count", "receive_count",
-                                              "has_partner"}),
+                                              "has_partner", "search_id"}),
     # The ✓ cell's outcome (#384 W6-A / D-152). `queued` is a BOOLEAN — did
     # the server record the package as a like. `reason` is present ONLY on
     # `queued: false` and is a LOW-CARDINALITY enum: the six server refusal
@@ -1748,6 +1831,13 @@ CLIENT_EVENT_PROPS: dict[str, frozenset[str]] = {
     # Projected is the only path that runs the outlook simulation, so this
     # row is also the denominator for that request's cost.
     "standings_segment_changed":   frozenset({"segment"}),
+    # ── Minimum-version gate (B8, 2026-10-24) ────────────────────────────
+    # Both props are version INTS (major*10000 + minor*100 + patch, see
+    # docs/cross-client-invariants.md): `min_version` is the served
+    # app_min_version, `app_version_int` the build's own. No version string,
+    # no ids, no device platform (a user_events COLUMN, never a prop).
+    "update_gate_shown":           frozenset({"min_version", "app_version_int"}),
+    "update_gate_tapped":          frozenset({"min_version", "app_version_int"}),
 }
 
 

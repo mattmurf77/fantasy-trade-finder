@@ -424,7 +424,7 @@ assert(
 
 // ═══ 9 — the n23 pair: one platform claim, two beats ═══════════════════════
 //
-// "Passwords never leave your phone" is true on Sleeper only: MFL POSTs the
+// "We never see your password" is true on Sleeper only: MFL POSTs the
 // password to /api/mfl/auth-link and ESPN stores espn_s2/SWID server-side.
 // The operator vouched for the Sleeper claim, so the sentence may exist in
 // exactly one beat and the sibling must carry no password claim at all.

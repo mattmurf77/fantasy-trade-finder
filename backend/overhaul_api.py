@@ -14,7 +14,8 @@ platform's extracted propose core — `sleeper_propose` / `mfl_propose` /
 `espn_propose` — behind that platform's own send flag (`service.SEND_FLAGS`).
 `platform_rosters` is the fresh MFL/ESPN roster read; when it is absent or
 fails the snapshot is stamped `roster_source: session` and refresh never
-terminalizes an attempt from it.
+terminalizes an attempt from it. Since I-2 (R3), prepare-send on a send
+platform refuses such a snapshot outright (503 `rosters_unavailable`).
 """
 from __future__ import annotations
 
@@ -30,6 +31,7 @@ from flask import jsonify, request
 
 from . import overhaul_service as service
 from . import overhaul_store as store
+from . import ownership_copy
 from .feature_flags import is_enabled
 
 log = logging.getLogger(__name__)
@@ -900,6 +902,14 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         data = body()
         rm = load_roadmap(row, roadmap_id, data)
         snapshot, rows = capture_snapshot(sess)   # R8.7 — refresh ownership before the preview
+        platform = league_platform(sess)
+        if (snapshot.get("roster_source") != "live" and row["league_id"] != "league_demo"
+                and service.handoff_mode(platform) == "send"):
+            # I-2 / platforms-pm R3: the live roster read failed. Ownership is
+            # never checked against the session-roster fallback, so nothing is
+            # prepared (no token, and the fallback snapshot is not stored).
+            msg = ownership_copy.roster_read_failed(service.PLATFORM_LABELS.get(platform, platform))
+            raise _Conflict("rosters_unavailable", msg, status=503, message=msg, kind="network")
         store.update_overhaul(row["overhaul_id"], snapshot=snapshot,
                               recovery=compute_recovery(sess, row["settings"], snapshot, rows))
         row = store.get_overhaul(row["overhaul_id"])
@@ -976,7 +986,29 @@ def install(app, *, require_session, read_denial, write_denial, active_format, l
         by_id = {o["offer_id"]: o for o in store.list_offers(row["overhaul_id"])}
         receipt = receipt_for(sess, row, rm, selected, by_id, with_legality=False, caps=caps)
         if receipt["blockers"]:
-            raise _Conflict(receipt["blockers"][0]["code"], receipt=receipt)
+            first = receipt["blockers"][0]
+            readable = None
+            if first["code"] in ("asset_not_owned", "counterparty_asset_not_owned"):
+                readable = first["message"]
+            elif first["code"] == "offer_stale":
+                # A liked offer goes stale only one way: /refresh found its
+                # give side off the caller's roster (`store.mark_stale`). The
+                # settings and model changes stale UNDECIDED offers only, and
+                # those are refused earlier as `offer_not_liked`. The receipt
+                # recomputes ownership from the same stored snapshot, so the
+                # offer's own ownership blocker names the moved assets. If
+                # there is none (the asset has since come back), the 409
+                # stays as before.
+                readable = next((b["message"] for b in receipt["blockers"]
+                                 if b.get("offer_id") == first.get("offer_id") and b.get("assets")
+                                 and b["code"] == "asset_not_owned"), None)
+            if readable:
+                # I-2: the shared readable copy as `detail` == `message`, which
+                # OverhaulSummaryScreen's errorDetail(e) shows. Other blocker
+                # messages can still name raw ids, so they keep the client's
+                # own fallback copy.
+                raise _Conflict(first["code"], readable, receipt=receipt, message=readable)
+            raise _Conflict(first["code"], receipt=receipt)
         package_of = {oid: p["package_id"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}
         tier_of = {oid: t["tier"] for p in rm["packages"] for t in p["tiers"] for oid in t["offer_ids"]}
         batch_id = service.new_id("bt_")
