@@ -52,12 +52,13 @@ run in its pack's run["filter_inputs"] (#492), v FILTER_INPUTS_VERSION:
                    as NaN or inf, recorded null. Breakup and filler read
                    such a value order-dependently, so a card holding one is
                    not auditable for them. B-DK-6 still checks it: a NaN
-                   reads exactly as None there, and a coerced +-inf (a
-                   holding the filter counted toward the cap, or an incoming
-                   piece whose bar it made inf) can only lower the audit's
-                   count below the filter's, so a served card's verdict
-                   can't flip (release-lead's #515 QA: mismatches on dropped
-                   cards only).
+                   reads exactly as None there, and on a served card a
+                   coerced +-inf (a holding the filter counted toward the
+                   cap, or an incoming piece whose bar it made inf) can only
+                   lower the audit's count below the filter's, so its
+                   verdict can't flip. That holds for served cards only, the
+                   ones audited (release-lead's #515 QA: mismatches on
+                   dropped cards only).
   position         {asset id: position}, null for None.
   lineup_slots     the league's starting slots as the filter read them;
                    position_caps() of them None (unknown) means the filter
