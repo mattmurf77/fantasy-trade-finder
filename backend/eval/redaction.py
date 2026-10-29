@@ -35,6 +35,7 @@ import tempfile
 from collections.abc import Mapping
 
 from backend import value_model
+from backend.eval.contract import REDACTED_PARTNER_PREFIX
 
 # A concurrent append (the nightly fit) between the read and the replace is
 # retried this many times before giving up (the scrub's job then retries).
@@ -55,11 +56,26 @@ def _may_hold(line: str, tokens: Mapping[str, str]) -> bool:
     return any(pid and (pid in line or (tail and pid.startswith(tail))) for pid in tokens)
 
 
+def check_tokens(tokens: Mapping[str, str]) -> None:
+    """Refuse a mis-built map (#542 QA P3-1): every token must be a
+    redaction token (contract.REDACTED_PARTNER_PREFIX) and not itself a key,
+    or a map like {"u7": "u70"} would re-key a deleted user's pairs onto a
+    live user, a made-up rate. The ValueError names a count, never an id."""
+    bad = sum(1 for token in tokens.values()
+              if not (isinstance(token, str) and token.startswith(REDACTED_PARTNER_PREFIX))
+              or token in tokens)
+    if bad:
+        raise ValueError(f"{bad} of {len(tokens)} map value(s) aren't redaction tokens "
+                         f"({REDACTED_PARTNER_PREFIX!r}, not a key of the map)")
+
+
 def redact_partner_rates(rates: Mapping, tokens: Mapping[str, str]) -> tuple[dict, int]:
     """(`rates` without the keys whose viewer `tokens` maps, and with the
     keys whose partner it maps re-keyed to that token, the number of keys
     deleted or re-keyed). Values are kept. A re-keyed pair already present
-    under the token keeps the rate it has."""
+    under the token keeps the rate it has. Raises ValueError on a map
+    check_tokens refuses."""
+    check_tokens(tokens)
     out, rekeyed, changed = {}, [], 0
     for key, rate in rates.items():
         viewer, sep, partner = str(key).partition("|")
@@ -87,8 +103,11 @@ def redact_model_store(tokens: Mapping[str, str], path: str | None = None) -> in
     loader skips such lines, so serving is unchanged (head-eng's #529 check,
     (a)); others are kept as they are. Idempotent: a re-run with the same map
     changes nothing. Raises when the store keeps changing under it, so the
-    scrub retries."""
-    path = path or value_model.models_path()
+    scrub retries, and on a map check_tokens refuses. A symlinked path is
+    resolved, so the file rewritten is the target, never the link (#542 QA
+    P3-2). The temp file is fsynced before the replace."""
+    check_tokens(tokens)
+    path = os.path.realpath(path or value_model.models_path())
     if not tokens or not os.path.exists(path):
         return 0
     for _ in range(_ATTEMPTS):
@@ -123,9 +142,11 @@ def redact_model_store(tokens: Mapping[str, str], path: str | None = None) -> in
         mode = stat.S_IMODE(os.stat(path).st_mode)
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".redact")
         try:
-            os.fchmod(fd, mode)                # mkstemp's is 0600
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:   # closes fd on any failure
+                os.fchmod(fh.fileno(), mode)                   # mkstemp's is 0600
                 fh.write("".join(f"{line}\n" for line in out))
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp, path)
         except BaseException:
             if os.path.exists(tmp):
