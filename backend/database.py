@@ -7519,7 +7519,7 @@ def record_deck_withdrawals(rows: list[dict]) -> int:
 
 
 def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
-                          at: str, withdrawn=None) -> None:
+                          at: str, withdrawn=None) -> bool:
     """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
     (the value core, prepared adoption), one transaction. Its rows were
     written at build (tier NULL, the page_store marker), so the delivery
@@ -7528,7 +7528,9 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
     first delivery wins) and never a ghost's. The serve's withdrawals land in
     the same transaction, each card_index from its row and served_before from
     its delivered_at before this stamp: both are recorded or neither.
-    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut")."""
+    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut").
+    Returns False when it delivered cards of a deck with no row at all: their
+    evidence is nowhere (no rows, no pack), so eval can't see them."""
     i = deck_impressions_table
     withdrawn = dict(withdrawn or {})
     delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
@@ -7548,6 +7550,8 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
              "impression_id": iid,
              "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
             for iid in withdrawn_ids if iid in found])
+        return not delivered_ids or conn.execute(
+            select(literal(1)).where(i.c.deck_job_id == deck_job_id).limit(1)).first() is not None
 
 
 def load_delivered_impression_ids(impression_ids) -> set:
