@@ -1,3 +1,14 @@
+## 2026-10-28 — A live stamp on a deck with no evidence is logged (#517 QA P3-2, models-eng)
+
+Gates: #517 QA P3-2 and models-eng's ask for a server-side count of decks eval can't see. A diagnostic log line only; no route, schema, flag, event or behaviour change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **The case:** a deferred deck whose page row was stored without its evidence blob and that has no pack. After its job leaves, its deliveries take the live-stamp path, which stamps and withdraws only rows that exist. So its cards reach eval nowhere, and an outcome on one is a G3 orphan.
+- **What the common P3-2 shape does instead:** a first delivery after the job left on a truncated stored deck is an S1b partial run (rows and withdrawals, no pack, by design). Eval sees it.
+- **The signal:**
+  - `database.stamp_live_deliveries` now returns False when it delivered cards of a deck with no row at all: one indexed `LIMIT 1` probe, and only when there are cards.
+  - `_deck_live_stamp` logs it at ERROR: `deck-evidence <deck_job_id>: n delivered cards of a deck with no evidence (no rows, no pack); eval can't see them`. It carries no user id.
+- **Tests:** in `test_packed_evidence.py`, the return value (a deck with rows, one with none, no cards) and the ERROR line (logged only with no rows, with no user id). 3 sabotages red: always True, the empty-delivery guard dropped, the check inverted. Packed, deferred and page-store suites: 349 passed.
+
 ## 2026-10-28 — #530 QA P3s: the failed-read path's signature, "missing" read and running None stamp pinned; docstring
 
 Gates: release-lead's #530 QA (GO-with-notes), three P3 test gaps and a docstring nit. Follows #530. Tests and one docstring; no behaviour, route, schema, flag or knob change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
