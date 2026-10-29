@@ -876,3 +876,81 @@ def test_help_documents_the_exit_codes(capsys):
     for line in ("0  PASS", "1  FAIL", "2  a refused database or a ReadOnlyViolation",
                  "3  INCOMPLETE", "4  an unexpected error"):
         assert line in out
+
+
+# ---------------------------------------------------------------------------
+# #503 QA follow-ups; models-lead F3 / F4; #515's market_coerced
+# ---------------------------------------------------------------------------
+
+def _clean_market(job, idx):
+    return {a: v for i in idx for side in shape(None, job, i) for a, v in side.items()}
+
+
+def test_a_card_holding_a_coerced_value_is_not_auditable_for_breakup_and_filler():
+    """#515: the filter saw NaN/inf there, recorded null and listed in
+    market_coerced. Breakup and filler read it order-dependently, so they
+    can't be checked; B-DK-6 reads it as None and still checks the card."""
+    db = make_db()
+    give, receive = shape("breakup", "d", 1)
+    market = {**_clean_market("d", (0,)), **dict.fromkeys(give), **receive}
+    deck(db, "d", 2, {1: row("d", 1, give, receive)},
+         record={"market": market, "market_coerced": sorted(give)})
+    r = run(db)
+    for name in ("breakup", "filler"):
+        assert (r.rules[name]["audited"], r.rules[name]["not_auditable"]) == (1, 1), name
+    assert r.rules["redundant"]["audited"] == 2 and r.filter_inputs == {"recorded": 1}
+
+
+@pytest.mark.parametrize("over", [
+    {"market": {"d-g0": "2000"}},             # #503 QA P3-2: a string crashed the read
+    {"market": {"d-g0": True}},               # and a bool read as 1.0
+    {"market_coerced": "d-g0"},
+    {"market_coerced": [5]},
+], ids=["string", "bool", "coerced_not_list", "coerced_not_str"])
+def test_a_record_with_a_malformed_value_is_record_failed(over):
+    db = make_db()
+    deck(db, "d", 2, record=over)
+    r = run(db)
+    assert r.filter_inputs == {"record_failed": 1}
+    assert r.rules["breakup"]["status"] == NOT_AUDITABLE
+
+
+def test_an_asset_with_a_market_but_no_position_is_not_auditable():
+    """#503 QA P3-1: coverage needs both halves of the record."""
+    db = make_db()
+    market = _clean_market("d", (0, 1))
+    positions = dict.fromkeys(market, "WR")
+    del positions["d-r1"]
+    deck(db, "d", 2, record={"market": market, "position": positions})
+    for name in ("breakup", "filler", "redundant"):
+        t = run(db).rules[name]
+        assert (t["audited"], t["not_auditable"]) == (1, 1), name
+
+
+def test_exemptions_are_split_by_deck_type():
+    """models-lead F3: a protected card is exempt with or without a record;
+    the split shows how much of a PASS rests on each."""
+    db = make_db()
+    deck(db, "rec", 2, record={"protected": [th(1)]})
+    deck(db, "row", 2, {1: row("row", 1, likes_you=True)})
+    r = run(db)
+    for name in ("breakup", "filler", "redundant"):
+        assert r.rules[name]["protected_by_deck"] == {"recorded": 1, "no_record": 1}, name
+    assert "B-DK-4..6 exempt (protected) cards by deck (F3): recorded 1, no record 1." in render(r)
+
+
+def test_live_evidence_decks_cut_inside_the_window_are_counted_not_checked():
+    """models-lead F4: D3's serve-time re-cap runs only on packed decks, so a
+    live-evidence deck with a never-delivered withdrawal in its first W
+    cards is counted, never certified; one cut past W, or a packed deck, is
+    not."""
+    db = make_db()
+    deck(db, "cut", W + 2)
+    withdraw(db, "cut", 5, 0, reason="disposition_cut")
+    deck(db, "late", W + 2)
+    withdraw(db, "late", W + 1, 0, reason="disposition_cut")
+    deck(db, "packed", W + 2, record={})
+    withdraw(db, "packed", 5, 0, reason="disposition_cut")
+    r = run(db)
+    assert r.rules["repeat"]["after_cut_not_checked"] == 1
+    assert "B-DK-7 after-cut: not checked (1): live-evidence (no-pack) decks" in render(r)

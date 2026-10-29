@@ -43,9 +43,21 @@ run in its pack's run["filter_inputs"] (#492), v FILTER_INPUTS_VERSION:
                    and counted (skipped_decks filter_not_run), for every rule.
   market           {asset id: the filter's elo_to_value(seed) value}, null
                    for an unseeded asset (the filter's None), passed to the
-                   rules as recorded; NaN tokens are read as NaN. An asset
-                   absent from it (or from `position`) is one the filter
-                   never saw: its card is not auditable for B-DK-4..6.
+                   rules as recorded; NaN tokens are read as NaN (a v5
+                   record). A value that is neither null nor a number makes
+                   the record record_failed. An asset absent from it (or
+                   from `position`) is one the filter never saw: its card is
+                   not auditable for B-DK-4..6.
+  market_coerced   optional (#515): the str ids whose value the filter saw
+                   as NaN or inf, recorded null. Breakup and filler read
+                   such a value order-dependently, so a card holding one is
+                   not auditable for them. B-DK-6 still checks it: a NaN
+                   reads exactly as None there, and a coerced +-inf (a
+                   holding the filter counted toward the cap, or an incoming
+                   piece whose bar it made inf) can only lower the audit's
+                   count below the filter's, so a served card's verdict
+                   can't flip (release-lead's #515 QA: mismatches on dropped
+                   cards only).
   position         {asset id: position}, null for None.
   lineup_slots     the league's starting slots as the filter read them;
                    position_caps() of them None (unknown) means the filter
@@ -69,7 +81,8 @@ pinned, opponent, intent, presentation-exempt and demo decks, and any deck
 without a pack). Only a recorded deck's cards are audited for B-DK-4..6; on
 the rest they are not auditable, never a pass. The valuation_json markets
 are not read: approximate values can't certify a zero bar (D2 (c)).
-B-DK-7 needs only the cards' ids, so it audits every Trades deck; a deck
+B-DK-7 needs only the cards' ids, so it audits every Trades deck the filter
+ran on (filter_not_run decks are skipped for every rule); a deck
 without a record takes protection from its row: features_json likes_you,
 standing_offer (the standing_offer_reason) and wildcard, and the
 source_like_impression_id column, where UNRECORDED_PROTECTION (injected and
@@ -79,6 +92,17 @@ fatigue retest card is a false positive (check its trade_hash against
 deck_suppressions.retest_trade_hash). A deck without a record is read on the
 assumption the flag was on (live since FILTERS_LIVE_AT, D-207); a --since
 before that adds a note.
+
+What a PASS certifies (models-lead F3): zero violations among the
+non-protected audit-set cards, and no non-protected card left unchecked. A
+protected card is exempt with or without a record (the filter never checks
+it), so the B-DK-4..6 exemptions are split by deck (protected_by_deck:
+recorded / no_record) and printed, so a PASS resting on exemptions shows.
+B-DK-7 certifies packed decks: a live-evidence (no-pack) deck's serve-time
+cut can pull a deferred card into its window, which D3's re-cap doesn't
+cover, so those with a never-delivered withdrawal inside their first
+REPEAT_WINDOW cards are counted as after_cut_not_checked and printed
+"B-DK-7 after-cut: not checked (n)" (models-lead F4); n > 0 goes to head-eng.
 
 Per rule: violations, audited cards (the rule ran on them), protected cards
 (exempt), not auditable cards, the bar 0, a status, and up to LIST_CAP
@@ -141,7 +165,7 @@ from collections import Counter
 from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 
-from sqlalchemy import inspect, select
+from sqlalchemy import Integer, String, column, inspect, select, table
 
 from backend.database import deck_impressions_table
 from backend.deck_quality import (
@@ -150,7 +174,7 @@ from backend.deck_quality import (
 )
 from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER,
-    UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, _json_dict, load_decks,
+    UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, WITHDRAWALS_TABLE, _json_dict, load_decks,
 )
 from backend.eval.flip_read import (
     _PACK_ROWS, FAIL, LIST_CAP, PASS, ReadOnlyViolation, _chunks, _iso, _Parser, _redact,
@@ -169,6 +193,9 @@ FILTER_INPUTS_VERSION = 1
 RECORDED, RECORD_FAILED, PACK_WITHOUT_RECORD, NO_PACK = (
     "recorded", "record_failed", "pack_without_record", "no_pack")
 FILTER_NOT_RUN = "filter_not_run"
+# F4: the never-delivered withdrawals of live-evidence decks (deck_card_withdrawals).
+_CUT_ROWS = table(WITHDRAWALS_TABLE, column("deck_job_id", String), column("card_index", Integer),
+                  column("served_before", Integer), column("first_withdrawn_at", String))
 # The protection attributes a served row records: card attribute -> features_json key.
 _RECORDED_FEATURES = {"likes_you": "likes_you", "standing_offer_reason": "standing_offer",
                       "wildcard": "wildcard"}
@@ -247,6 +274,8 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
 
         repeat = _repeat(trades, sets, rows, lambda ids: _full_rows(conn, ids), set(headers),
                          protected_of, head_of)
+        repeat["after_cut_not_checked"] = len(_cut_in_window(
+            conn, [d.deck_job_id for d in trades if records[d.deck_job_id][0] == NO_PACK], as_of))
 
     card_rules = {name: _tally() for name in ("breakup", "filler", "redundant")}
     no_row = {"viewed_by_cause": Counter(), "unviewed": 0, "examples": []}
@@ -269,6 +298,7 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
             if protected_of(d, c, row):
                 for t in card_rules.values():
                     t["protected"] += 1
+                    t["protected_by_deck"]["recorded" if fi is not None else "no_record"] += 1
                 continue
             if fi is None or give is None or not all(a in fi["market"] and a in fi["position"]
                                                      for a in (*give, *receive)):
@@ -277,9 +307,16 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
                 continue
             market, position, held = fi["market"].get, fi["position"].get, fi["qb_te"]
             caps = position_caps(fi["lineup_slots"])   # None: the filter skipped B-DK-6
+            # #515: a value the filter saw as NaN/inf is recorded null; breakup and
+            # filler read it order-dependently, so they can't be checked. B-DK-6 can
+            # (module doc: a served card's verdict can't flip there).
+            coerced = not set(fi.get("market_coerced", ())).isdisjoint((*give, *receive))
+            if coerced:
+                for name in ("breakup", "filler"):
+                    card_rules[name]["not_auditable"] += 1
             for name, violated in (
-                    ("breakup", _breakup(give, receive, market)),
-                    ("filler", _filler(give, receive, market)),
+                    *(() if coerced else (("breakup", _breakup(give, receive, market)),
+                                          ("filler", _filler(give, receive, market)))),
                     ("redundant", caps is not None and (
                         _redundant_side(held.get(fi["viewer_team"], ()), give, receive,
                                         market, position, caps)
@@ -368,6 +405,22 @@ def _run_headers(conn, run_ids: list[str]) -> dict[str, dict]:
     return out
 
 
+def _cut_in_window(conn, run_ids: list[str], as_of: str) -> set[str]:
+    """F4: the run_ids with a never-delivered withdrawal (served_before 0,
+    first withdrawn by as_of) inside their first REPEAT_WINDOW cards: a
+    live-evidence deck's serve-time cut can pull a deferred card into the
+    window, and D3's re-cap doesn't run there. The smallest such build index
+    is its displayed slot, so a cut below REPEAT_WINDOW is one inside it."""
+    if not run_ids or not inspect(conn).has_table(WITHDRAWALS_TABLE):
+        return set()
+    w = _CUT_ROWS
+    return {run_id for chunk in _chunks(run_ids)
+            for (run_id,) in conn.execute(
+                select(w.c.deck_job_id).distinct()
+                .where(w.c.deck_job_id.in_(chunk), w.c.served_before == 0,
+                       w.c.card_index < REPEAT_WINDOW, w.c.first_withdrawn_at <= as_of))}
+
+
 def _miss_cards(run: dict | None) -> dict:
     """A pack's run["upgrade_miss_cards"] ({} without a pack, or when absent
     or unreadable)."""
@@ -389,7 +442,11 @@ def _filter_inputs(run: dict | None) -> tuple[str, dict | None]:
     if fi.get("filter_ran") is False:
         return FILTER_NOT_RUN, None
     held, slots = fi.get("qb_te"), fi.get("lineup_slots")
-    if (fi.get("filter_ran") is True and isinstance(fi.get("market"), dict)
+    market, coerced = fi.get("market"), fi.get("market_coerced", [])
+    if (fi.get("filter_ran") is True and isinstance(market, dict)
+            and all(v is None or (isinstance(v, (int, float)) and not isinstance(v, bool))
+                    for v in market.values())
+            and isinstance(coerced, list) and all(isinstance(a, str) for a in coerced)
             and isinstance(fi.get("position"), dict) and isinstance(fi.get("viewer_team"), str)
             and isinstance(fi.get("protected"), list) and isinstance(held, dict)
             and all(isinstance(h, list) for h in held.values())
@@ -490,7 +547,8 @@ def _repeat(trades, sets, rows, fetch, packed: set, protected_of, head_of) -> di
 
 
 def _tally() -> dict:
-    return {"violations": 0, "audited": 0, "protected": 0, "not_auditable": 0, "examples": []}
+    return {"violations": 0, "audited": 0, "protected": 0, "not_auditable": 0, "examples": [],
+            "protected_by_deck": {"recorded": 0, "no_record": 0}}   # F3
 
 
 def _where(card) -> dict:
@@ -547,6 +605,13 @@ def render(r: BdkAudit) -> str:
     if rp["incomplete_decks"]:
         lines.append(f"B-DK-7 repeat: {rp['incomplete_decks']} decks have a window card with "
                      "no full row.")
+    lines.append(f"B-DK-7 after-cut: not checked ({rp['after_cut_not_checked']}): live-evidence "
+                 f"(no-pack) decks with a never-delivered withdrawal in their first "
+                 f"{REPEAT_WINDOW} cards; D3's serve-time re-cap doesn't cover them, so B-DK-7 "
+                 "certifies packed decks only (models-lead F4: n > 0 goes to head-eng).")
+    pd = r.rules["breakup"]["protected_by_deck"]
+    lines.append(f"B-DK-4..6 exempt (protected) cards by deck (F3): recorded {pd['recorded']}, "
+                 f"no record {pd['no_record']}.")
     lines.append(f"Filter inputs (models-lead D2), audited decks by record: "
                  f"{_pairs(r.filter_inputs)}; only recorded decks are audited for B-DK-4..6.")
     nf = r.no_full_row
