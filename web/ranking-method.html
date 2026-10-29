@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>How trades are priced — Fleeced: Dynasty Trade Finder</title>
-  <meta name="description" content="Fleeced prices every trade on your board and your leaguemate's. See how, and the ways to rank: Quick set, Head-to-heads, Tiers board and more.">
+  <title>How your rankings shape trades · Fleeced: Dynasty Trade Finder</title>
+  <meta name="description" content="See how your rankings shape the trades you're shown, and the ways to rank: Quick set, Head-to-heads, Tiers board and more.">
   <link rel="canonical" href="https://fantasy-trade-finder.onrender.com/ranking-method.html">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Fleeced: Dynasty Trade Finder">
-  <meta property="og:title" content="How trades are priced — Fleeced: Dynasty Trade Finder">
-  <meta property="og:description" content="Fleeced prices every trade on your board and your leaguemate's. See how, and the ways to rank: Quick set, Head-to-heads, Tiers board and more.">
+  <meta property="og:title" content="How your rankings shape trades · Fleeced: Dynasty Trade Finder">
+  <meta property="og:description" content="See how your rankings shape the trades you're shown, and the ways to rank: Quick set, Head-to-heads, Tiers board and more.">
   <meta property="og:url" content="https://fantasy-trade-finder.onrender.com/ranking-method.html">
   <meta name="twitter:card" content="summary">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,11 +19,15 @@
   <!--
     C7 (2026-10-27): the read-more for the app's "How trades are priced" help
     sheet (TradesScreen.tsx). Informational only: the web cannot open app
-    screens, so nothing here may look tappable except body links and the
-    standard site footer (design-lead).
+    screens, so nothing here may look tappable except the standard site
+    footer (design-lead).
     One plain hairline list on the page surface, no cards, no icon wells.
-    Copy is DRAFT pending marketing approval (docs/plans/ranking-method-page/scope.md);
-    lines marked [app] in that draft must stay verbatim with the app.
+    Copy is final: marketing §6 addendum 11, 2026-10-28
+    (docs/plans/ranking-method-page/scope.md). Section 1 is the
+    operator-approved listing lines. Section 2's strings stay verbatim with
+    the app (rankChooserModel.ts / RankHomeScreen.tsx). The help sheet's
+    pricing lines are deliberately not used: boards pick which trades you're
+    shown, while values come from consensus.
   -->
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -126,12 +130,14 @@
     </header>
 
     <main>
-      <h1>How trades are priced</h1>
-      <p class="subtitle">Your rankings set the prices. Here's how it works, and the ways to rank.</p>
+      <h1>How your rankings shape trades</h1>
+      <p class="subtitle">Your rankings shape the trades you see. Here's how it works, and the ways to rank.</p>
 
-      <section aria-label="How trades are priced">
-        <p class="prose">Every trade is priced on two boards — yours and your leaguemate's. A trade surfaces when each side gives up less value on their own board than they get back; the fairness meter compares the two packages by value.</p>
-        <p class="prose">Rank more players and trades get priced off your board instead of consensus.</p>
+      <section aria-labelledby="how-your-board">
+        <h2 class="tick-label" id="how-your-board">How your board shapes your trades</h2>
+        <p class="prose">Your deck of suggested trades is built from your board and your leaguemates' boards. Until a leaguemate ranks, their side uses consensus values.</p>
+        <p class="prose">Swipe to like the trades you'd make. When a leaguemate likes the same trade, it becomes a matched trade.</p>
+        <p class="prose">Every value and every trade card is an estimate from rankings, not a guarantee.</p>
       </section>
 
       <section aria-labelledby="ways-to-rank">

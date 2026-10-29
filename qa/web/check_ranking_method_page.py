@@ -2,15 +2,22 @@
 """Structural check for web/ranking-method.html (C7, 2026-10-27).
 
 WHY THIS EXISTS. The page is the read-more for the app's "How trades are
-priced" help sheet. It drifted from the app: it recommended a trio "Journey"
-the app no longer has and never explained pricing. It also drew the methods
-as raised tiles that looked tappable on a page that cannot open any app
-screen. This pins:
+priced" help sheet, and its copy is marketing's final §6 addendum 11
+(2026-10-28). It drifted from the app: it recommended a trio "Journey" the
+app no longer has, and it drew the methods as raised tiles that looked
+tappable on a page that cannot open any app screen. This pins:
 
   APP    every [app] string is verbatim with the app source it comes from:
-         the help-sheet body (TradesScreen.tsx), the chooser model's titles,
-         roles, bodies and Quick set follow-on (rankChooserModel.ts), and
-         RankHome's "Then, if you want:" lead-in. Trends stays out.
+         the chooser model's titles, roles, bodies and Quick set follow-on
+         (rankChooserModel.ts), and RankHome's "Then, if you want:" lead-in.
+         Trends stays out.
+  COPY   addendum 11's final strings, exactly: <title>, og:title, the meta
+         and og descriptions, the H1, the subtitle, section 1's heading and
+         its three paragraphs in order.
+  NO-PRICING  none of the help sheet's pricing lines, in head or body:
+         boards pick which trades you're shown, values come from consensus.
+  TITLE  no em or en dash in <title> / og:title; both use " · ".
+  CANONICAL  the canonical and og:url are the bare page URL (no ? or #).
   OLD    the old Journey / three-option copy is gone.
   FLAT   no card construction: no raised fills, borders other than the
          hairline separator, radius, shadow, cursor:pointer or :hover.
@@ -36,7 +43,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PAGE = ROOT / "web" / "ranking-method.html"
-TRADES = ROOT / "mobile" / "src" / "screens" / "TradesScreen.tsx"
 MODEL = ROOT / "mobile" / "src" / "navigation" / "rankChooserModel.ts"
 RANK_HOME = ROOT / "mobile" / "src" / "screens" / "RankHomeScreen.tsx"
 
@@ -56,6 +62,8 @@ def js_concat(expr: str) -> str:
 
 
 src = PAGE.read_text(encoding="utf-8")
+head = re.search(r"<head\b.*?</head>", src, flags=re.S | re.I).group(0)
+head_code = re.sub(r"<!--.*?-->", "", head, flags=re.S)
 style = "\n".join(re.findall(r"<style\b[^>]*>(.*?)</style>", src, flags=re.S | re.I))
 style_code = re.sub(r"/\*.*?\*/", "", style, flags=re.S)
 body = re.search(r"<body\b.*?</body>", src, flags=re.S | re.I).group(0)
@@ -65,15 +73,6 @@ text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", body_code))).st
 flat = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", body_code))).strip()
 
 # ── APP: verbatim strings ───────────────────────────────────────────────────
-trades = TRADES.read_text(encoding="utf-8")
-m = re.search(r'title="How trades are priced"\s*body=\{(.*?)\}\s*readMoreUrl', trades, flags=re.S)
-help_body = js_concat(m.group(1)) if m else ""
-check("APP-help-body-found", bool(help_body), "could not read the HelpSheet body in TradesScreen.tsx")
-paras = [html.unescape(re.sub(r"<[^>]+>", "", p)).strip()
-         for p in re.findall(r'<p class="prose">(.*?)</p>', body_code, flags=re.S)]
-check("APP-help-body-verbatim", " ".join(paras) == help_body,
-      f"pricing prose != the help sheet body\n      page: {' '.join(paras)!r}\n      app:  {help_body!r}")
-
 model = MODEL.read_text(encoding="utf-8")
 entries = re.findall(r"\{\s*(pref:.*?key:\s*'\w+',)\s*\}", model, flags=re.S)
 app_strings = []
@@ -98,6 +97,67 @@ check("APP-verbatim[then-lead-in]", bool(lead_text) and lead_text in flat,
       f"RankHome's lead-in {lead_text!r} is not on the page")
 check("APP-trends-left-out", trends_title not in text and trends_body not in text,
       "the chooser's Trends row (a view, not a way to rank) is on the page")
+
+# ── COPY: marketing's final strings (§6 addendum 11, 2026-10-28) ───────────
+# Pinned as literals: the marketing copy file is not on main.
+TITLE = "How your rankings shape trades · Fleeced: Dynasty Trade Finder"
+DESCRIPTION = ("See how your rankings shape the trades you're shown, and the ways to rank: "
+               "Quick set, Head-to-heads, Tiers board and more.")
+S1_PROSE = [
+    "Your deck of suggested trades is built from your board and your leaguemates' boards. "
+    "Until a leaguemate ranks, their side uses consensus values.",
+    "Swipe to like the trades you'd make. When a leaguemate likes the same trade, "
+    "it becomes a matched trade.",
+    "Every value and every trade card is an estimate from rankings, not a guarantee.",
+]
+norm = lambda frag: re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", frag))).strip()
+
+
+def meta(attr: str, name: str) -> str | None:
+    m = re.search(rf'<meta {attr}="{re.escape(name)}" content="([^"]*)"', head_code)
+    return html.unescape(m.group(1)) if m else None
+
+
+title = [norm(t) for t in re.findall(r"<title>(.*?)</title>", head_code, flags=re.S)]
+check("COPY-title", title == [TITLE], f"<title> {title} != [{TITLE!r}]")
+check("COPY-og-title", meta("property", "og:title") == TITLE,
+      f"og:title {meta('property', 'og:title')!r} != {TITLE!r}")
+check("COPY-meta-description", meta("name", "description") == DESCRIPTION,
+      f"meta description {meta('name', 'description')!r} != {DESCRIPTION!r}")
+check("COPY-og-description", meta("property", "og:description") == DESCRIPTION,
+      f"og:description {meta('property', 'og:description')!r} != {DESCRIPTION!r}")
+h1 = [norm(t) for t in re.findall(r"<h1\b[^>]*>(.*?)</h1>", body_code, flags=re.S)]
+check("COPY-h1", h1 == ["How your rankings shape trades"], f"H1s on the page: {h1}")
+sub = [norm(t) for t in re.findall(r'<p class="subtitle">(.*?)</p>', body_code, flags=re.S)]
+check("COPY-subtitle",
+      sub == ["Your rankings shape the trades you see. Here's how it works, and the ways to rank."],
+      f"subtitle: {sub}")
+s1 = re.search(r'<section aria-labelledby="how-your-board">(.*?)</section>', body_code, flags=re.S)
+s1_head = re.findall(r'<h2 class="tick-label" id="how-your-board">(.*?)</h2>', s1.group(1), flags=re.S) if s1 else []
+check("COPY-s1-heading", [norm(t) for t in s1_head] == ["How your board shapes your trades"],
+      f"section 1 heading: {s1_head} (want one, in <section aria-labelledby=\"how-your-board\">)")
+s1_prose = [norm(t) for t in re.findall(r'<p class="prose">(.*?)</p>', s1.group(1), flags=re.S)] if s1 else []
+check("COPY-s1-prose", s1_prose == S1_PROSE,
+      f"section 1 paragraphs != addendum 11's three, in order\n      page: {s1_prose}")
+
+# ── NO-PRICING: the help sheet's pricing lines stay off the page ────────────
+page_text = re.sub(r"\s+", " ", html.unescape(re.sub(r"<!--.*?-->", "", src, flags=re.S))).lower()
+priced = [s for s in ("How trades are priced", "priced on two boards", "priced off your board",
+                      "set the prices", "prices every trade", "fairness meter")
+          if s.lower() in page_text]
+check("NO-PRICING", not priced, f"pricing copy on the page (head or body): {priced}")
+
+# ── TITLE: middle dot, no dash ──────────────────────────────────────────────
+titles = title + [meta("property", "og:title") or ""]
+check("TITLE-no-dash", len(titles) == 2 and all(" · " in t and not re.search("[—–]", t) for t in titles),
+      f"<title> / og:title must use ' · ' and no em/en dash: {titles}")
+
+# ── CANONICAL: query-free ───────────────────────────────────────────────────
+URL = "https://fantasy-trade-finder.onrender.com/ranking-method.html"
+canon = re.search(r'<link rel="canonical" href="([^"]*)">', head_code)
+urls = [canon.group(1) if canon else None, meta("property", "og:url")]
+check("CANONICAL-query-free", urls == [URL, URL] and not any("?" in u or "#" in u for u in urls),
+      f"canonical / og:url {urls} != {URL!r} (no ? or #)")
 
 # ── OLD: the retired copy is gone ───────────────────────────────────────────
 old = [s for s in ("Journey", "Let me set", "Guide me", "Pick the method that works best",
