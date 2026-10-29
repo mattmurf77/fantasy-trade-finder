@@ -112,6 +112,17 @@ function srcFiles(dir) {
   return out;
 }
 
+// An async suite whose run returns early, throws past its handler, or awaits
+// something that never settles would let node exit 0 mid-run: an unfinished
+// run fails instead (check-device-first-page's pattern; trades-eng, #546).
+let finished = false;
+process.on('exit', () => {
+  if (!finished) {
+    console.log('\ncheck-apple-revoke-on-delete did not finish (a check returned early, threw or hung): FAILED');
+    process.exitCode = 1;
+  }
+});
+
 (async () => {
   const section = parse(F.section);
   const auth = parse(F.auth);
@@ -324,6 +335,7 @@ function srcFiles(dir) {
     expect(t('/api/account/export', 'DELETE') === 15_000, 'a different DELETE path got the slow timeout');
   });
 
+  finished = true;
   console.log(failures === 0
     ? `\nAll Apple-revoke-on-delete checks passed (${passed}).`
     : `\n${failures} check(s) failed.`);
