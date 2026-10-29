@@ -21,7 +21,13 @@
 - item 4's `testID`;
 - no banned words.
 
-**Sabotages:** 13 of 13 red. `check-win-now.js`'s two pins were updated, and its executable web test renders the new label. The 23 suites that read the edited files all pass, and `tsc --noEmit` is clean.
+**#531 QA (release-lead, NO-GO at `05c153e5`), fixed:**
+- **P1-1:** saving picks left the calculator's ESPN note and pickers stale for up to 5 minutes. `PickAssignmentScreen`'s assign and seed `onSuccess` now invalidate `['league-picks', leagueId]`.
+- **P3s:** the toast ternary, the shop name's normalizer and the hooks' order are pinned. The banned-words check reads the strings from the source.
+- **P2-1:** the TestFlight checklist is rewritten: real-data warnings, preconditions and paths; 4b not run; the web half goes live at merge.
+- `check-b5-copy.js` is now 12 checks.
+
+**Sabotages:** 20 of 20 red. `check-win-now.js`'s two pins were updated, and its executable web test renders the new label. The 23 suites that read the edited files all pass, and `tsc --noEmit` is clean.
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 

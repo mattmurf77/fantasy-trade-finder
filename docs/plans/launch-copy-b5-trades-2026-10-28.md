@@ -22,6 +22,8 @@
 - **The link:** shown with the new note when there's a league id. It pushes `PickAssignment` (`{ leagueId }`, no season) on the root stack through `navigationRef`, as MemberEnteredMarker's correction link does.
   - None of the calculator's three hosts (FeaturedTradeWindow, TradeBuildCanvas, TradeCalculatorScreen) renders inside a `Modal`, so there's nothing to close first.
 
+**Saving picks refreshes the calculator (#531 QA P1-1):** `PickAssignmentScreen`'s assign and seed `onSuccess` handlers invalidate `['league-picks', leagueId]`, beside the `['pick-assignments']` invalidation they already make. Without that, the calculator's picks query (5-minute `staleTime`) kept the "none set up" note and missed the new picks after a save. It's draft-eng's screen, and they were told.
+
 **The toasts' reach:** `queueCalcTrade` serves both of its hosts, the shop and the calculator's ✓. Both queue the trade into @{name}'s Fleeced deck as a "likes you" card, so the new lines are true for both.
 
 ---
@@ -39,24 +41,31 @@
 
 ## 3. Evidence scope
 
-- [x] **Structural suite:** `mobile/tests/check-b5-copy.js` (`npm run test:b5-copy`), 9 checks.
+- [x] **Structural suite:** `mobile/tests/check-b5-copy.js` (`npm run test:b5-copy`), 12 checks.
   - every final string word for word, and each replaced string gone (item 3's old line stays only on its flag-off branch);
   - item 3's gates: both flags, with each hook called on every render; the data-test condition, with the server's `has_assigned_picks` line pinned too; today's line with either flag off; the root-stack navigation;
-  - item 4's button keeps its `testID`;
-  - no banned word (beta, read-only, failed, error) in the new strings.
-- [x] **Sabotages:** 13 of 13 mutations turn it red (each string, each gate, a short-circuited hook call, the navigation target).
+  - no component-level early return before the pick-flag hooks;
+  - saving picks (assign and seed `onSuccess`, `PickAssignmentScreen.tsx`) invalidates the calculator's `['league-picks', leagueId]` (#531 QA P1-1);
+  - item 4's button keeps its `testID`, each toast sits on its own `already_queued` branch, and the shop name's normalizer (`?? ''`) is pinned;
+  - no banned word (beta, read-only, failed, error) in the shipped strings, read from the source.
+- [x] **Sabotages:** 20 of 20 mutations turn it red. They cover each string and each gate, a short-circuited hook call, the navigation target, the swapped toasts, the dropped normalizer, an early return, each missing or misplaced invalidation, and a banned word.
 - [x] **Existing suites:** `check-win-now.js`'s two pins moved to the new string. Its executable web test renders the receipt, so the web string is exercised. All 23 suites that read the edited files pass, and `tsc --noEmit` is clean.
-- [x] **Manual TestFlight checklist** (operator, on the 11-06 binary):
-  1. In an ESPN league with no picks assigned, open the calculator. Expect `No draft picks are set up for this ESPN league yet.` and `Set up picks →`.
-  2. Tap the link. Expect the pick assignment grid for that league.
-  3. Assign one pick and go back to the calculator. Expect no note.
+- [x] **Manual TestFlight checklist** (operator, on the 11-06 binary).
+  - **Read this first:** steps 3 and 5–7 write real data.
+    - Step 3 saves the league's pick board, which can't be undone in the app.
+    - Steps 5–7 put a real "likes you" card in a leaguemate's Fleeced deck.
+    - Use a league and leaguemates where that's fine.
+  1. **Precondition:** an ESPN league whose pick board has never been saved. Open the calculator on the Trades landing canvas (`calc.inline_home`). Expect `No draft picks are set up for this ESPN league yet.` and `Set up picks →`.
+  2. Tap `Set up picks →`. Expect the pick assignment screen for that league, at its setup step, because the board is unsaved.
+  3. Save the board, then go back to the calculator. Expect, immediately (no wait, no pull-to-refresh), no note, and the league's picks in the calculator's pickers. (#531 QA P1-1: saving now refreshes the calculator's picks.)
   4. In a Sleeper league, open the calculator. Expect no note.
-  4b. (Only if a pick flag is ever off.) In an ESPN league, expect today's line `Draft picks aren't available for ESPN leagues.`, with no link.
-  5. In Shop, expect the primary button to read `Show it to @{their name}`. Tap it. Expect the toast `It's waiting in @{name}'s Fleeced deck.`
+  4b. **Not run:** the flag-off line (`Draft picks aren't available for ESPN leagues.`) needs a pick flag turned off in prod, which isn't done for a check. `check-b5-copy.js` covers it.
+  5. Trades → Find a trade → on a deck card, the give side's **More offers**. Expect the primary button `Show it to @{their name}`; a long name wraps rather than clipping. Tap it. Expect the toast `It's waiting in @{name}'s Fleeced deck.`
   6. Tap it again on the same offer, if it's still shown. Expect `It's already in @{name}'s Fleeced deck.`
   7. In the calculator, build a trade and tap ✓ (queue). Expect the same "waiting" toast.
-  8. With VoiceOver on, focus the shop button. Expect `Show this offer to @{name} in their Fleeced deck`.
-  9. On Win Now with an uncalibrated model, expect the receipt to start `Uncalibrated estimate ·`, in the app and on the web.
+  8. With VoiceOver on, focus the shop button. Expect `Show this offer to @{name} in their Fleeced deck`. (VoiceOver reads the link's "→" as "right arrow", like the app's other `… →` links.)
+  9. On Win Now with an uncalibrated model, expect the receipt to start `Uncalibrated estimate ·` in the app. **The web half goes live when this merges** (Render), not with the binary.
+- **Known edge, accepted:** a client that cached both pick flags on keeps showing "none set up" for an ESPN league until its next flag refresh, if `picks.assign_tradeable` is later turned off. The kill switch is for emergencies, and the flag refresh corrects it.
 - `testID`s: one new, `calc.picks-setup-link`.
 
 ## 4. Docs scope

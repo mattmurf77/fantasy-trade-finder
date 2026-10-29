@@ -50,6 +50,25 @@ check('item 3: the link needs a league and opens PickAssignment on the root stac
   assert.match(calc, /import \{ navigationRef \} from '\.\.\/navigation\/RootNav';/);
 });
 
+check('item 3: no early return before the pick-flag hooks', () => {
+  const start = calc.indexOf('export default function InLeagueCalculator(');
+  const hooks = calc.indexOf("const picksAssign = useFlag('picks.assign');");
+  assert.ok(start >= 0 && hooks > start);
+  const body = calc.slice(start, hooks);
+  assert.ok(!/\n  (?:if \([^\n]*\)\s*)?return\b/.test(body), 'a component-level return before the hooks');
+});
+check('item 3: saving picks refreshes the calculator\'s picks (#531 QA P1-1)', () => {
+  const pa = read('mobile/src/screens/PickAssignmentScreen.tsx');
+  assert.match(calc, /queryKey: \['league-picks', leagueId\]/);
+  const inv = "void queryClient.invalidateQueries({ queryKey: ['league-picks', leagueId] });";
+  assert.equal(pa.split(inv).length - 1, 2, 'invalidated in both the assign and the seed onSuccess');
+  // In the onSuccess handlers, not their onError siblings.
+  const assign = pa.slice(pa.indexOf("setToast({ msg: 'Pick updated', tone: 'success' });"));
+  assert.ok(assign.indexOf(inv) >= 0 && assign.indexOf(inv) < assign.indexOf('onError:'), 'assign onSuccess');
+  const seed = pa.slice(pa.indexOf("setToast({ msg: 'Board saved', tone: 'success' });"));
+  assert.ok(seed.indexOf(inv) >= 0 && seed.indexOf(inv) < seed.indexOf('onError:'), 'seed onSuccess');
+});
+
 check('item 4: the ShopAsset button and its VoiceOver label, word for word', () => {
   const shop = read('mobile/src/components/ShopOffersBody.tsx');
   once(shop, 'label={`Show it to @${item.counterparty_username}`}');
@@ -58,20 +77,30 @@ check('item 4: the ShopAsset button and its VoiceOver label, word for word', () 
   // The same Button as before: its testID and handler are untouched.
   assert.match(shop, /testID="shop\.like-btn"\s*\n\s*label=\{`Show it to @\$\{item\.counterparty_username\}`\}/);
 });
-check('item 4: the queue toasts, word for word', () => {
+check('item 4: the queue toasts, word for word, each on its own branch', () => {
   const q = read('mobile/src/utils/queueCalcTrade.ts');
-  once(q, "? `It's already in @${args.opponent.name}'s Fleeced deck.`");
-  once(q, ": `It's waiting in @${args.opponent.name}'s Fleeced deck.`,");
+  assert.match(q, /msg: res\?\.already_queued\s*\n\s*\? `It's already in @\$\{args\.opponent\.name\}'s Fleeced deck\.`\s*\n\s*: `It's waiting in @\$\{args\.opponent\.name\}'s Fleeced deck\.`,/);
   assert.ok(!q.includes('Queued for @') && !q.includes('Already queued for @'));
 });
+check('item 4: the shop name is normalized to a string, never undefined', () => {
+  const t = read('mobile/src/api/trades.ts');
+  const fn = t.slice(t.indexOf('function normalizeAssetIdea('));
+  assert.match(fn.slice(0, 600), /counterparty_username: String\(raw\?\.counterparty_username \?\? ''\),/);
+});
 
-check('no banned words in the new strings', () => {
+check('no banned words in the shipped strings (read from the source)', () => {
+  const shop = read('mobile/src/components/ShopOffersBody.tsx');
+  const q = read('mobile/src/utils/queueCalcTrade.ts');
   const strings = [
-    'Uncalibrated estimate', 'No draft picks are set up for this ESPN league yet.', 'Set up picks →',
-    'Show it to @name', 'Show this offer to @name in their Fleeced deck',
-    "It's waiting in @name's Fleeced deck.", "It's already in @name's Fleeced deck.",
+    ...['mobile/src/utils/winNow.ts', 'web/js/win-now.js'].map(f => read(f).match(/'Calibrated model' : '([^']+)'/)[1]),
+    calc.match(/<Text style=\{styles\.note\}>(No draft picks[^<]+)<\/Text>/)[1],
+    calc.match(/<Text style=\{styles\.noteLink\}>([^<]+)<\/Text>/)[1],
+    shop.match(/label=\{`(Show it to [^`]+)`\}/)[1],
+    shop.match(/accessibilityLabel=\{`(Show this offer [^`]+)`\}/)[1],
+    ...[...q.matchAll(/`(It's (?:already|waiting) in [^`]+)`/g)].map(m => m[1]),
   ];
-  for (const s of strings) assert.ok(!/\b(beta|read-only|failed|error)\b/i.test(s), s);
+  assert.equal(strings.length, 8);
+  for (const str of strings) assert.ok(!/\b(beta|read-only|failed|error)\b/i.test(str), str);
 });
 
 console.log(`check-b5-copy: ${checks} checks passed`);
