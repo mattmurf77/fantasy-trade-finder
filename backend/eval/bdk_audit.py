@@ -9,7 +9,7 @@ the readout.
 
   B-DK-4  breakup     deck_quality._breakup, per card
   B-DK-5  filler      deck_quality._filler, per card
-  B-DK-6  redundant   deck_quality._redundant_side: not auditable (below)
+  B-DK-6  redundant   deck_quality._redundant_side, per card
   B-DK-7  repeat      per deck: an asset in more than REPEAT_CAP of the first
                       REPEAT_WINDOW displayed cards; a breach on a short deck
                       is checked with deck_quality._repeat_cap itself
@@ -23,10 +23,12 @@ not Trades decks. pack_integrity and withdrawal_conflict decks are skipped and
 counted by reason: the loader stops before removing their never-delivered
 withdrawals, so their displayed positions can't be trusted (as blind_grade's
 served set, B5). Per deck: the first REPEAT_WINDOW non-ghost cards by
-displayed position (LoggedCard.position), plus every viewed card, "viewed"
+displayed position (LoggedCard.position, serve-time display moves included:
+data.py, D3), plus every viewed card, "viewed"
 being a `viewed` outcome joined by impression_id (LoggedCard.viewed), never a
-row's existence (U4-R3). assets_json, valuation_json, features_json and
-source_like_impression_id are read for those impression_ids, chunked.
+row's existence (U4-R3). assets_json, features_json and
+source_like_impression_id are read for those impression_ids, chunked, and
+every audited deck's pack header (its run metadata).
 
 A card with no full row (no deck_impressions row with assets_json: a packed
 card, or the upgrade miss's row built from the pack) can't be audited. A
@@ -34,37 +36,49 @@ viewed one is reported by cause (U4-R3), read from its pack's run metadata
 upgrade_miss_cards ({"<card_index>": cause}); no pack or no entry is `other`.
 It counts as not auditable for every rule, as does an unviewed one.
 
-The rule inputs, and what the evidence records at serve time:
-  give / receive   assets_json: served-time.
-  market values    valuation_json's per-asset market: the personal-market
-                   snapshot (assets.give / assets.receive rows, market_value)
-                   or the value core's evidence (assets rows, market), read
-                   by data.valuation_markets (blind_grade's parser too).
-                   Served-time but approximate: the filter priced assets with
-                   elo_to_value(seed Elo), None when unseeded; the snapshot's
-                   market_value is that age-adjusted (age_pref_value), and an
-                   unseeded asset reads a default. NULL while
-                   trade.valuation_telemetry and the market policy are off;
-                   then breakup and filler are not auditable for the card.
-  protection       features_json likes_you, standing_offer (the
-                   standing_offer_reason) and wildcard, and the
-                   source_like_impression_id column: served-time. Not recorded:
-                   UNRECORDED_PROTECTION (injected and retest are never set,
-                   owner_published is set after the filter, fatigue_retest is
-                   set but not frozen), so a fatigue retest card reads
-                   unprotected: a violation on one is a false positive (check
-                   its trade_hash against deck_suppressions.retest_trade_hash).
-  positions        features_json give_positions / receive_positions:
-                   served-time.
-  rosters, lineup  not recorded at serve time (the rosters are current-state
-                   tables; a Sleeper league's lineup template is live league
-                   meta, in no table). B-DK-6 is NOT AUDITABLE from evidence:
-                   its count is the non-protected cards it couldn't check.
-  the filter flag  not recorded per deck (features_json carries nothing; the
-                   counts in significance_diag exist only with significance
-                   capture on). The window is read whole, on the assumption
-                   the flag was on (config/features.json true; live since
-                   FILTERS_LIVE_AT, D-207); a --since before that adds a note.
+The rule inputs (models-lead addendum D2): the filter's own, frozen once per
+run in its pack's run["filter_inputs"] (#492), v FILTER_INPUTS_VERSION:
+  filter_ran       false: the filter didn't run (flag off, an empty deck, or
+                   it raised), so the deck went out unfiltered. It is skipped
+                   and counted (skipped_decks filter_not_run), for every rule.
+  market           {asset id: the filter's elo_to_value(seed) value}, null
+                   for an unseeded asset (the filter's None), passed to the
+                   rules as recorded; NaN tokens are read as NaN. An asset
+                   absent from it (or from `position`) is one the filter
+                   never saw: its card is not auditable for B-DK-4..6.
+  position         {asset id: position}, null for None.
+  lineup_slots     the league's starting slots as the filter read them;
+                   position_caps() of them None (unknown) means the filter
+                   skipped B-DK-6, which reads as a pass.
+  viewer_team,     the viewer's key and per-team QB/TE holdings: B-DK-6 reads
+  qb_te            the viewer's and the card's counterparty's (features_json
+                   partner_user_id, as str); an absent team holds nothing.
+  protected        the trade_hashes the filter exempted (is_protected at
+                   filter time; owner_published is set after the filter).
+                   A recorded deck's protection, for all four rules, is its
+                   card's trade_hash being in it.
+  repeat_head      optional (trades-eng's v6): the trade_hashes of the cards
+                   the repeat cap kept, written only when it kept fewer than
+                   REPEAT_WINDOW (it ran short), else null. B-DK-7 below.
+  give / receive   assets_json: served-time, str ids.
+The deck's record state is counted in `filter_inputs`: recorded (the shape
+above), record_failed (filter_ran true but no usable inputs: the writer's
+recording failed or the record is malformed or another version),
+pack_without_record (a pack written before #492), no_pack (live evidence:
+pinned, opponent, intent, presentation-exempt and demo decks, and any deck
+without a pack). Only a recorded deck's cards are audited for B-DK-4..6; on
+the rest they are not auditable, never a pass. The valuation_json markets
+are not read: approximate values can't certify a zero bar (D2 (c)).
+B-DK-7 needs only the cards' ids, so it audits every Trades deck; a deck
+without a record takes protection from its row: features_json likes_you,
+standing_offer (the standing_offer_reason) and wildcard, and the
+source_like_impression_id column, where UNRECORDED_PROTECTION (injected and
+retest are never set, owner_published is set after the filter,
+fatigue_retest is set but not frozen) reads unprotected: a violation on a
+fatigue retest card is a false positive (check its trade_hash against
+deck_suppressions.retest_trade_hash). A deck without a record is read on the
+assumption the flag was on (live since FILTERS_LIVE_AT, D-207); a --since
+before that adds a note.
 
 Per rule: violations, audited cards (the rule ran on them), protected cards
 (exempt), not auditable cards, the bar 0, a status, and up to LIST_CAP
@@ -82,7 +96,11 @@ better); that needs a well-formed full row for every displayed card, and a
 deck whose cards may be a prefix of what was built never qualifies: a loader
 exclusion (but a packed deck's in_flight: its pack holds every card), a
 partial_run deck, or a pack-less deck of REPEAT_WINDOW cards or more (it may
-have stopped after a publication batch, unmarked). Those stay violations. Both are counted in `explained`, split as
+have stopped after a publication batch, unmarked). Those stay violations.
+A recorded deck whose record carries repeat_head (below) needs no rows past
+the window: its breach is explained as short_deck when every unprotected
+over-cap appearance is a card the cap deferred (its trade_hash not in
+repeat_head); a list naming one of them is a violation. Both are counted in `explained`, split as
 explained_protected / explained_short_deck, with examples (`why`). A window card with no full row is not auditable and
 its deck incomplete (a breach found there still counts). The filter ran on
 the built order, ghost rows and later withdrawals included, so a served
@@ -101,7 +119,7 @@ Exit status (flip_read's scheme):
   2  a refused database or a ReadOnlyViolation (nothing on stdout), or a usage
      error, a malformed ISO 8601 --since, --until or --as-of included;
   3  INCOMPLETE: no violation found, but a rule couldn't check every card
-     (B-DK-6 never can) or a deck was skipped: not a pass;
+     (a deck without a filter record can't be, for B-DK-4..6) or a deck was skipped: not a pass;
   4  an unexpected error (a crash, not a verdict): its redacted traceback on
      stderr, nothing on stdout.
 
@@ -117,7 +135,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 import traceback
 from collections import Counter
@@ -129,11 +146,11 @@ from sqlalchemy import inspect, select
 from backend.database import deck_impressions_table
 from backend.deck_quality import (
     BREAKUP_MIN_RATIO, FILLER_FLOOR, FILLER_FRAC, PROTECTED_ATTRS, REDUNDANT_MIN_RATIO, REPEAT_CAP,
-    REPEAT_WINDOW, _breakup, _filler, _repeat_cap, is_protected,
+    REPEAT_WINDOW, _breakup, _filler, _redundant_side, _repeat_cap, is_protected, position_caps,
 )
 from backend.eval.data import (
     CALIBRATION_REFRESH, IN_FLIGHT, PACK_INTEGRITY, PACK_TABLE, PARTIAL_RUN_TIER,
-    UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, _json_dict, load_decks, valuation_markets,
+    UPGRADE_MISS_OTHER, WITHDRAWAL_CONFLICT, _json_dict, load_decks,
 )
 from backend.eval.flip_read import (
     _PACK_ROWS, FAIL, LIST_CAP, PASS, ReadOnlyViolation, _chunks, _iso, _Parser, _redact,
@@ -146,6 +163,12 @@ EXIT = {PASS: 0, FAIL: 1, INCOMPLETE: 3}
 FILTERS_LIVE_AT = "2026-10-15T01:18:00+00:00"
 # Decks whose displayed positions can't be trusted (module doc): skipped, counted.
 _UNTRUSTED = (PACK_INTEGRITY, WITHDRAWAL_CONFLICT)
+# run["filter_inputs"] (models-lead D2, #492): the version read, and a deck's
+# record states (module doc). FILTER_NOT_RUN decks are skipped, counted.
+FILTER_INPUTS_VERSION = 1
+RECORDED, RECORD_FAILED, PACK_WITHOUT_RECORD, NO_PACK = (
+    "recorded", "record_failed", "pack_without_record", "no_pack")
+FILTER_NOT_RUN = "filter_not_run"
 # The protection attributes a served row records: card attribute -> features_json key.
 _RECORDED_FEATURES = {"likes_you": "likes_you", "standing_offer_reason": "standing_offer",
                       "wildcard": "wildcard"}
@@ -162,17 +185,17 @@ RULES = {
 }
 EVIDENCE = {
     "give_receive": "assets_json (served-time)",
-    "market": "valuation_json per-asset market (served-time, approximate: age-adjusted "
-              "consensus, not the filter's elo_to_value(seed)); absent: breakup and filler "
-              "not auditable for the card",
-    "protection": "features_json likes_you / standing_offer / wildcard and the "
-                  "source_like_impression_id column (served-time); not recorded: "
-                  + ", ".join(UNRECORDED_PROTECTION) + " (a fatigue retest card reads "
-                  "unprotected: a violation on one is a false positive)",
-    "positions": "features_json give_positions / receive_positions (served-time)",
-    "rosters_lineup": "not recorded at serve time: redundant (B-DK-6) is not auditable",
-    "filter_flag": "not recorded per deck: the window is read whole, assuming "
-                   f"deck.quality_filters on (config/features.json; live since "
+    "filter_inputs": "the pack's run['filter_inputs'] (v1, models-lead D2): the market, "
+                     "positions, lineup slots, viewer and counterparty QB/TE holdings and "
+                     "protected trade_hashes the filter read; only recorded decks are "
+                     "audited for B-DK-4..6 (valuation_json is not read: D2 (c))",
+    "protection": "a recorded deck: the filter-time protected trade_hashes; otherwise "
+                  "(B-DK-7 only) features_json likes_you / standing_offer / wildcard and "
+                  "the source_like_impression_id column, where "
+                  + ", ".join(UNRECORDED_PROTECTION) + " read unprotected (a violation on "
+                  "a fatigue retest card is a false positive)",
+    "filter_flag": "filter_ran per recorded deck (false: skipped, filter_not_run); a deck "
+                   "without a record assumes deck.quality_filters on (live since "
                    f"{FILTERS_LIVE_AT})",
 }
 
@@ -183,7 +206,8 @@ class BdkAudit:
     until: str | None
     as_of: str
     decks: int                 # Trades decks audited
-    skipped_decks: dict        # PACK_INTEGRITY / WITHDRAWAL_CONFLICT -> decks
+    skipped_decks: dict        # PACK_INTEGRITY / WITHDRAWAL_CONFLICT / FILTER_NOT_RUN -> decks
+    filter_inputs: dict        # the audited decks by record state (module doc)
     audit_cards: int           # the U6 set: the window plus viewed cards past it
     viewed_past_window: int
     no_full_row: dict          # viewed by cause (U4-R3), unviewed, examples
@@ -198,47 +222,72 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
     [since, until), at or before as_of."""
     decks = load_decks(engine=engine, since=since, until=until, as_of=as_of)
     skipped = Counter(d.exclusion for d in decks if d.exclusion in _UNTRUSTED)
-    trades = [d for d in decks if d.exclusion not in (CALIBRATION_REFRESH, *_UNTRUSTED)]
-    sets = {d.deck_job_id: _audit_set(d) for d in trades}
-    cards = {job: window + past for job, (window, past) in sets.items()}
+    candidates = [d for d in decks if d.exclusion not in (CALIBRATION_REFRESH, *_UNTRUSTED)]
     with engine.connect() as conn:
+        headers = _run_headers(conn, [d.deck_job_id for d in candidates])
+        records = {d.deck_job_id: _filter_inputs(headers.get(d.deck_job_id))
+                   for d in candidates}
+        skipped.update(state for state, _ in records.values() if state == FILTER_NOT_RUN)
+        trades = [d for d in candidates if records[d.deck_job_id][0] != FILTER_NOT_RUN]
+        sets = {d.deck_job_id: _audit_set(d) for d in trades}
+        cards = {job: window + past for job, (window, past) in sets.items()}
         rows = _full_rows(conn, [c.impression_id for cs in cards.values() for c in cs])
-        misses = _miss_cards(conn, sorted(
-            job for job, cs in cards.items()
-            if any(c.viewed and c.impression_id not in rows for c in cs)))
-        repeat = _repeat(trades, sets, rows, lambda ids: _full_rows(conn, ids),
-                         _packed_runs(conn, [d.deck_job_id for d in trades]))
+
+        def protected_of(deck, card, row) -> bool:
+            """A recorded deck's filter-time protection, else the row's (module doc)."""
+            fi = records[deck.deck_job_id][1]
+            *_ids_and_partner, own = row
+            return card.trade_hash in fi["protected"] if fi is not None else own
+
+        def head_of(deck) -> set | None:
+            """A recorded deck's repeat_head as a set (module doc), else None."""
+            fi = records[deck.deck_job_id][1]
+            head = fi.get("repeat_head") if fi is not None else None
+            return set(head) if isinstance(head, list) else None
+
+        repeat = _repeat(trades, sets, rows, lambda ids: _full_rows(conn, ids), set(headers),
+                         protected_of, head_of)
 
     card_rules = {name: _tally() for name in ("breakup", "filler", "redundant")}
     no_row = {"viewed_by_cause": Counter(), "unviewed": 0, "examples": []}
     for d in trades:
+        fi = records[d.deck_job_id][1]
         for c in cards[d.deck_job_id]:
             row = rows.get(c.impression_id)
             if row is None:                       # no full row: nothing to check it with
                 for t in card_rules.values():
                     t["not_auditable"] += 1
                 if c.viewed:
-                    cause = misses.get(d.deck_job_id, {}).get(str(c.card_index),
-                                                              UPGRADE_MISS_OTHER)
+                    cause = _miss_cards(headers.get(d.deck_job_id)).get(str(c.card_index),
+                                                                         UPGRADE_MISS_OTHER)
                     no_row["viewed_by_cause"][cause] += 1
                     _example(no_row["examples"], {**_where(c), "cause": cause})
                 else:
                     no_row["unviewed"] += 1
                 continue
-            give, receive, markets, protected, _ = row
-            if protected:
+            give, receive, partner, _ = row
+            if protected_of(d, c, row):
                 for t in card_rules.values():
                     t["protected"] += 1
                 continue
-            card_rules["redundant"]["not_auditable"] += 1   # no served-time rosters / lineup
-            if give is None or not all(_is_market(markets.get(a)) for a in (*give, *receive)):
-                card_rules["breakup"]["not_auditable"] += 1
-                card_rules["filler"]["not_auditable"] += 1
+            if fi is None or give is None or not all(a in fi["market"] and a in fi["position"]
+                                                     for a in (*give, *receive)):
+                for t in card_rules.values():   # no record, or an asset it never saw
+                    t["not_auditable"] += 1
                 continue
-            for name, rule in (("breakup", _breakup), ("filler", _filler)):
+            market, position, held = fi["market"].get, fi["position"].get, fi["qb_te"]
+            caps = position_caps(fi["lineup_slots"])   # None: the filter skipped B-DK-6
+            for name, violated in (
+                    ("breakup", _breakup(give, receive, market)),
+                    ("filler", _filler(give, receive, market)),
+                    ("redundant", caps is not None and (
+                        _redundant_side(held.get(fi["viewer_team"], ()), give, receive,
+                                        market, position, caps)
+                        or _redundant_side(held.get(partner, ()), receive, give,
+                                           market, position, caps)))):
                 t = card_rules[name]
                 t["audited"] += 1
-                if rule(give, receive, markets.get):
+                if violated:
                     t["violations"] += 1
                     _example(t["examples"], _where(c))
 
@@ -259,6 +308,7 @@ def audit(engine, *, since: str, as_of: str, until: str | None = None) -> BdkAud
     return BdkAudit(
         since=since, until=until, as_of=as_of, decks=len(trades),
         skipped_decks=dict(sorted(skipped.items())),
+        filter_inputs=dict(sorted(Counter(records[d.deck_job_id][0] for d in trades).items())),
         audit_cards=sum(len(cs) for cs in cards.values()),
         viewed_past_window=sum(len(p) for _w, p in sets.values()),
         no_full_row=no_row, rules=rules, evidence=EVIDENCE, notes=notes, overall=overall)
@@ -271,13 +321,6 @@ def _audit_set(deck) -> tuple[list, list]:
     return shown[:REPEAT_WINDOW], [c for c in shown[REPEAT_WINDOW:] if c.viewed]
 
 
-def _is_market(value) -> bool:
-    """A usable served market: a finite number (a missing, null or string
-    market makes its card not auditable for the value rules, never a pass)."""
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value))
-
-
 def _ids(side) -> list[str] | None:
     """An assets_json side as str ids; None when it isn't a list (the card
     is then not auditable, never a crash)."""
@@ -285,17 +328,16 @@ def _ids(side) -> list[str] | None:
 
 
 def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
-    """impression_id -> (give, receive, markets, protected, card) for each
-    id with a full row (assets_json), read chunked. give and receive are None
-    when either side is missing, empty or not a list; markets is {} when none is recorded;
-    `card` carries the ids and the protection attributes, for
-    deck_quality._repeat_cap."""
+    """impression_id -> (give, receive, partner, protected) for each id with
+    a full row (assets_json), read chunked. give and receive are None when
+    either side is missing, empty or not a list; partner is features_json's
+    partner_user_id as str (the filter's str(target_user_id)); protected is
+    the row's recorded protection (module doc), for a deck without a record."""
     imp = deck_impressions_table
     out: dict[str, tuple] = {}
     for chunk in _chunks(ids):
         for r in conn.execute(select(imp.c.impression_id, imp.c.assets_json,
-                                     imp.c.valuation_json, imp.c.features_json,
-                                     imp.c.source_like_impression_id)
+                                     imp.c.features_json, imp.c.source_like_impression_id)
                               .where(imp.c.impression_id.in_(chunk))):
             assets = _json_dict(r.assets_json)
             if assets is None:
@@ -305,26 +347,16 @@ def _full_rows(conn, ids: list[str]) -> dict[str, tuple]:
             if not give or not receive:           # missing, not a list, or empty: unusable
                 give = receive = None
             card = SimpleNamespace(source_like_impression_id=r.source_like_impression_id,
-                                   give_player_ids=give or [], receive_player_ids=receive or [],
                                    **{a: features.get(k) for a, k in _RECORDED_FEATURES.items()})
-            out[r.impression_id] = (give, receive,
-                                    valuation_markets(_json_dict(r.valuation_json)),
-                                    is_protected(card), card)
+            out[r.impression_id] = (give, receive, str(features.get("partner_user_id")),
+                                    is_protected(card))
     return out
 
 
-def _packed_runs(conn, run_ids: list[str]) -> set[str]:
-    """The run_ids with a pack row (a pack holds every built card)."""
-    if not run_ids or not inspect(conn).has_table(PACK_TABLE):
-        return set()
-    return {run_id for chunk in _chunks(run_ids)
-            for (run_id,) in conn.execute(select(_PACK_ROWS.c.run_id)
-                                          .where(_PACK_ROWS.c.run_id.in_(chunk)))}
-
-
-def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
-    """run_id -> its pack's run["upgrade_miss_cards"] ({} when absent or
-    unreadable), for the runs with a pack row."""
+def _run_headers(conn, run_ids: list[str]) -> dict[str, dict]:
+    """run_id -> its pack's run metadata ({} when unreadable), for the runs
+    with a pack row (a pack holds every built card). JSON's NaN token reads
+    as NaN, as the filter's own value was."""
     if not run_ids or not inspect(conn).has_table(PACK_TABLE):
         return {}
     out: dict[str, dict] = {}
@@ -332,12 +364,41 @@ def _miss_cards(conn, run_ids: list[str]) -> dict[str, dict]:
         for run_id, header in conn.execute(select(_PACK_ROWS.c.run_id, _PACK_ROWS.c.header_json)
                                            .where(_PACK_ROWS.c.run_id.in_(chunk))):
             run = (_json_dict(header) or {}).get("run")
-            cards = run.get("upgrade_miss_cards") if isinstance(run, dict) else None
-            out[run_id] = cards if isinstance(cards, dict) else {}
+            out[run_id] = run if isinstance(run, dict) else {}
     return out
 
 
-def _short_deck(deck, rows, fetch, packed: bool) -> bool:
+def _miss_cards(run: dict | None) -> dict:
+    """A pack's run["upgrade_miss_cards"] ({} without a pack, or when absent
+    or unreadable)."""
+    cards = (run or {}).get("upgrade_miss_cards")
+    return cards if isinstance(cards, dict) else {}
+
+
+def _filter_inputs(run: dict | None) -> tuple[str, dict | None]:
+    """(record state, run["filter_inputs"] when RECORDED) for a deck whose
+    pack's run metadata is `run` (None: no pack). Module doc."""
+    if run is None:
+        return NO_PACK, None
+    fi = run.get("filter_inputs")
+    if fi is None:
+        return PACK_WITHOUT_RECORD, None
+    if (not isinstance(fi, dict) or type(fi.get("v")) is not int
+            or fi["v"] != FILTER_INPUTS_VERSION):
+        return RECORD_FAILED, None
+    if fi.get("filter_ran") is False:
+        return FILTER_NOT_RUN, None
+    held, slots = fi.get("qb_te"), fi.get("lineup_slots")
+    if (fi.get("filter_ran") is True and isinstance(fi.get("market"), dict)
+            and isinstance(fi.get("position"), dict) and isinstance(fi.get("viewer_team"), str)
+            and isinstance(fi.get("protected"), list) and isinstance(held, dict)
+            and all(isinstance(h, list) for h in held.values())
+            and (slots is None or isinstance(slots, list))):
+        return RECORDED, fi
+    return RECORD_FAILED, None
+
+
+def _short_deck(deck, rows, fetch, packed: bool, protected_of) -> bool:
     """Whether the deck's whole displayed order is a fixed point of
     deck_quality._repeat_cap (module doc). False when any displayed card has
     no well-formed full row, and for any deck whose cards may be only a prefix
@@ -349,7 +410,8 @@ def _short_deck(deck, rows, fetch, packed: bool) -> bool:
     REPEAT_WINDOW cards or more, never-delivered withdrawals included, which
     may have stopped after a publication batch with nothing marking it
     (complete ones read FAIL: the safe side).
-    Rows the window didn't need are fetched and added to `rows`."""
+    Rows the window didn't need are fetched and added to `rows`;
+    `protected_of(deck, card, row)` is each card's protection (module doc)."""
     if deck.exclusion is not None and not (packed and deck.exclusion == IN_FLIGHT):
         return False
     if any(c.evidence_tier == PARTIAL_RUN_TIER for c in deck.cards):
@@ -363,13 +425,19 @@ def _short_deck(deck, rows, fetch, packed: bool) -> bool:
     served = [rows.get(c.impression_id) for c in shown]
     if any(row is None or row[0] is None for row in served):
         return False
-    cards = [row[4] for row in served]
+    # _repeat_cap reads is_protected(card): likes_you carries the protection.
+    cards = [SimpleNamespace(give_player_ids=row[0], receive_player_ids=row[1],
+                             likes_you=protected_of(deck, c, row))
+             for c, row in zip(shown, served)]
     return [id(c) for c in _repeat_cap(cards)[0]] == [id(c) for c in cards]
 
 
-def _repeat(trades, sets, rows, fetch, packed: set) -> dict:
+def _repeat(trades, sets, rows, fetch, packed: set, protected_of, head_of) -> dict:
     """B-DK-7 per deck over its window (module doc). `fetch(ids)` reads more
-    full rows, for the short-deck check; `packed` is the run_ids with a pack."""
+    full rows, for the short-deck check; `packed` is the run_ids with a pack;
+    `protected_of(deck, card, row)` is a card's protection; `head_of(deck)`
+    the trade_hashes of the cap's head when it ran short (repeat_head), else
+    None."""
     t = {"violations": 0, "explained": 0, "explained_protected": 0, "explained_short_deck": 0,
          "audited": 0, "not_auditable": 0, "incomplete_decks": 0, "examples": [],
          "explained_examples": []}
@@ -378,26 +446,33 @@ def _repeat(trades, sets, rows, fetch, packed: set) -> dict:
         seen: Counter = Counter()
         at: dict[str, list[int]] = {}
         over: dict[str, list[bool]] = {}   # asset -> protected, per over-cap appearance
+        over_hash: dict[str, list] = {}    # asset -> trade_hash, per over-cap appearance
         for c in window:
             row = rows.get(c.impression_id)
             if row is None or row[0] is None:
                 t["not_auditable"] += 1
                 continue
             t["audited"] += 1
-            give, receive, _, protected, _ = row
-            assets = (*give, *receive)
+            protected = protected_of(d, c, row)
+            assets = (*row[0], *row[1])
             for a in assets:
                 if seen[a] >= REPEAT_CAP:
                     over.setdefault(a, []).append(protected)
+                    over_hash.setdefault(a, []).append(c.trade_hash)
                 at.setdefault(a, []).append(c.card_index)
             seen.update(assets)
         t["incomplete_decks"] += any((rows.get(c.impression_id) or (None,))[0] is None
                                      for c in window)
+        head = head_of(d)                  # the cap's short head (repeat_head), else None
         short = None                       # checked once per deck, only on a breach
         for asset, protected in over.items():
             why = "protected" if all(protected) else None
-            if why is None:
-                short = (_short_deck(d, rows, fetch, d.deck_job_id in packed)
+            if why is None and head is not None:   # every unprotected one was deferred
+                deferred = all(h not in head for h, p in zip(over_hash[asset], protected)
+                               if not p)
+                why = "short_deck" if deferred else None
+            elif why is None:
+                short = (_short_deck(d, rows, fetch, d.deck_job_id in packed, protected_of)
                          if short is None else short)
                 why = "short_deck" if short else None
             if why:
@@ -472,6 +547,8 @@ def render(r: BdkAudit) -> str:
     if rp["incomplete_decks"]:
         lines.append(f"B-DK-7 repeat: {rp['incomplete_decks']} decks have a window card with "
                      "no full row.")
+    lines.append(f"Filter inputs (models-lead D2), audited decks by record: "
+                 f"{_pairs(r.filter_inputs)}; only recorded decks are audited for B-DK-4..6.")
     nf = r.no_full_row
     lines.append(f"Viewed, no full row (U4-R3), by cause: {_pairs(nf['viewed_by_cause'])}; "
                  f"unviewed audit-set cards with no full row: {nf['unviewed']}")
@@ -479,7 +556,8 @@ def render(r: BdkAudit) -> str:
         lines.append("  " + ", ".join(f"{e['deck_job_id']}#{e['card_index']} ({e['cause']})"
                                       for e in nf["examples"]))
     if r.skipped_decks:
-        lines.append(f"Skipped decks (displayed positions untrustworthy; G1 / G8 signals): "
+        lines.append(f"Skipped decks (pack_integrity / withdrawal_conflict: displayed positions "
+                     f"untrustworthy, G1 / G8 signals; filter_not_run: served unfiltered): "
                      f"{_pairs(r.skipped_decks)}")
     for name, t in r.rules.items():
         if name != "repeat" and t["examples"]:
