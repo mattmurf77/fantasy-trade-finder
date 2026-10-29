@@ -3525,6 +3525,19 @@ _MODEL_CONFIG_DEFAULTS = [
     ("vc_standings_weight",       0.30, "value core windows: full weight of the points-for index; ramps linearly from week 0 to week 8"),
     ("vc_throwin_min_ratio",      2.0,  "value core: a piece too small for the junk rules may ride along only if its recipient's board values it at >= this x consensus market (and >= the asset floor)"),
     ("vc_testers_only",           1.0,  "value core rollout: 1 = serve only the tester allowlist while trade.value_core is on; 0 = everyone"),
+    # ── Minimum-version gate (B8, head-eng ruling 35) ────────────────────
+    # Served as the top-level int `app_min_version` on GET /api/feature-flags
+    # (server._app_min_version). Encoding major*10000 + minor*100 + patch
+    # (1.22.0 = 12200); 0 = OFF. Seeded 0 and insert-if-absent like every
+    # row here, so a deploy never gates anyone and never resets a raised
+    # value. release-lead's deploy-free kill switch:
+    # PUT /api/admin/config/app_min_version (docs/config-reference.md).
+    ("app_min_version",           0,    "min-version gate: builds whose version int (major*10000+minor*100+patch) is below this get a blocking Update required screen; 0 = off. Served on GET /api/feature-flags; a missing, non-integral, NaN or negative value serves 0. Writes are checked by backend/app_version_policy.py"),
+    # Where the gate's Update button goes: 1 = App Store, 0 = TestFlight,
+    # -1 = unset (the client's compiled UTC instant decides). Served as the
+    # top-level int `app_store_live` on GET /api/feature-flags; anything but
+    # exactly 0 or 1 serves -1.
+    ("app_store_live",           -1,    "min-version gate Update target: 1 = App Store, 0 = TestFlight, -1 = unset (the app's compiled fallback, App Store from 2026-11-18T08:00:00Z). Served on GET /api/feature-flags; anything but 0/1 serves -1"),
 ]
 
 
@@ -7519,7 +7532,7 @@ def record_deck_withdrawals(rows: list[dict]) -> int:
 
 
 def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delivered_ids,
-                          at: str, withdrawn=None) -> None:
+                          at: str, withdrawn=None) -> bool:
     """#417 cross-check P2-1 / P3-5: a live-mode page-scoped deck's delivery
     (the value core, prepared adoption), one transaction. Its rows were
     written at build (tier NULL, the page_store marker), so the delivery
@@ -7528,7 +7541,9 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
     first delivery wins) and never a ghost's. The serve's withdrawals land in
     the same transaction, each card_index from its row and served_before from
     its delivered_at before this stamp: both are recorded or neither.
-    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut")."""
+    `withdrawn`: {impression_id: reason} ("i1_dropped", "disposition_cut").
+    Returns False when it delivered cards of a deck with no row at all: their
+    evidence is nowhere (no rows, no pack), so eval can't see them."""
     i = deck_impressions_table
     withdrawn = dict(withdrawn or {})
     delivered_ids = [x for x in delivered_ids if isinstance(x, str)]
@@ -7548,6 +7563,8 @@ def stamp_live_deliveries(deck_job_id: str, user_id: str, league_id: str, delive
              "impression_id": iid,
              "served_before": 1 if found[iid].delivered_at is not None else 0}   # exactly 0 or 1
             for iid in withdrawn_ids if iid in found])
+        return not delivered_ids or conn.execute(
+            select(literal(1)).where(i.c.deck_job_id == deck_job_id).limit(1)).first() is not None
 
 
 def load_delivered_impression_ids(impression_ids) -> set:

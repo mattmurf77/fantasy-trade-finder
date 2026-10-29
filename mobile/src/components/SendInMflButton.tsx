@@ -9,6 +9,13 @@ import { useFlag } from '../state/useFeatureFlags';
 import { getMflLinkStatus, proposeTradeToMfl } from '../api/sendInMfl';
 import { validateTradeSend } from '../api/sendInSleeper';
 import { ApiError } from '../api/client';
+import { isSendOutcomeUnknown } from '../api/sendOutcome';
+import {
+  SEND_NOT_SENT_TITLE,
+  SEND_OUTCOME_UNKNOWN_TITLE,
+  sendNotSentFallback,
+  sendOutcomeUnknownBody,
+} from '../utils/sendOutcomeCopy';
 import type { SendSurface } from '../utils/tradeText';
 
 // "Send in MFL" — the MFL twin of SendInSleeperButton, mounted FOR MFL
@@ -121,7 +128,14 @@ export default function SendInMflButton({
       const code: string | undefined = body?.error;
       const detail: string | undefined = body?.detail || body?.message;
 
-      if (code === 'mfl_not_connected' || code === 'mfl_auth_expired') {
+      if (isSendOutcomeUnknown(err)) {
+        // Timed out, no answer, or the server's mfl_outcome_unknown: the
+        // trade may be in MFL. No Retry or Send-again here (api/sendOutcome.ts).
+        Alert.alert(SEND_OUTCOME_UNKNOWN_TITLE, sendOutcomeUnknownBody('MFL', code, detail), [
+          { text: 'OK', style: 'cancel' },
+          { text: 'Open MFL', onPress: openMfl },
+        ]);
+      } else if (code === 'mfl_not_connected' || code === 'mfl_auth_expired') {
         // Credential vanished/expired between the status check and the send
         // — open the in-flow sign-in sheet; a successful sign-in resumes
         // the send. Never a cross-surface punt to the league list.
@@ -157,10 +171,8 @@ export default function SendInMflButton({
         Alert.alert('Send in MFL', 'Sending isn’t available right now.');
       } else if (code === 'mfl_write_failed') {
         Alert.alert(
-          'MFL wouldn’t accept the send',
-          detail
-            ? `MFL rejected the request:\n\n${detail}`
-            : 'MFL rejected the request. You can still propose it on the MFL site.',
+          SEND_NOT_SENT_TITLE,
+          detail || sendNotSentFallback('MFL'),
           [
             { text: 'OK', style: 'cancel' },
             { text: 'Open MFL', onPress: openMfl },
