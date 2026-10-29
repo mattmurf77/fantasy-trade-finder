@@ -41,6 +41,7 @@ import { Icon, TickLabel } from '../../components/chalkline';
 import { NO_LEAGUE_ID, useSession, type RankMethodPref } from '../../state/useSession';
 import { useFlag } from '../../state/useFeatureFlags';
 import { useEntitlements } from '../../state/useEntitlements';
+import { useTipsOffered } from '../../state/useTipsOffered';
 import type { AccountInfo } from '../../api/auth';
 import type { NotificationPrefs } from '../../shared/types';
 import FeedbackFAB from '../../components/FeedbackFAB';
@@ -96,6 +97,9 @@ export default function SettingsHubScreen({ navigation }: any) {
   // Monetization (iap-enablement, flag `monetize.paywall`, dark). The flag
   // gates this ROW, not the Paywall route — same rule as Testing above.
   const paywallOn = useFlag('monetize.paywall');
+  // B8 #1: the tip row also needs the server to offer tips. A cache
+  // subscription that never fetches (rule 1 holds); unknown → hidden.
+  const tipsOffered = useTipsOffered();
   // Entitlements come from the zustand store, already in memory: no query, so
   // rule 1 (zero network) survives. `loaded` is what keeps rule 2: before any
   // source has answered we say NOTHING rather than printing "Free", which
@@ -311,12 +315,16 @@ export default function SettingsHubScreen({ navigation }: any) {
               preview={proLoaded ? (isPro ? 'Pro' : 'Free') : null}
               onPress={() => navigation?.navigate?.('Paywall', { source: 'settings' })}
             />
-            <NavRow
-              testID="settings-tip-row"
-              title="Support Fleeced"
-              preview="Tip jar"
-              onPress={() => navigation?.navigate?.('TipJar', { source: 'settings' })}
-            />
+            {/* The tip-jar row shows only while the server offers tips (B8 #1;
+                `tips: []` at launch); the TipJar route stays registered. */}
+            {tipsOffered ? (
+              <NavRow
+                testID="settings-tip-row"
+                title="Support Fleeced"
+                preview="Tip jar"
+                onPress={() => navigation?.navigate?.('TipJar', { source: 'settings' })}
+              />
+            ) : null}
           </>
         ) : null}
 

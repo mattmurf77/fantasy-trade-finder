@@ -287,6 +287,26 @@ Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verificati
   - **Sabotage 11/11 red:** QA's P1 reverted, demo looked up, an extra top-level key, an extra key in the unverified answer, the query user_id answered, X-User-Id looked up, a 401-path probe, plus round 1's 4 re-run.
 - **Mobile:** `check-account-only-verification.js`, 5 AST pins (pin 3 is now unawaited; pin 5 is the `setUser` reset). **Sabotage:** 7/7 red in round 1, and 5/5 on the new and changed pins. tsc clean; `check-win-now-recovery` passes.
 - **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
+## 2026-10-28 — Settings tip row: hidden unless the cached paywall config offers tips (B8 gate, off main)
+
+Gates: head-eng's extraction of #495's B8 tip-row gate after release-lead's #494 QA (with `monetize.paywall` on, a binary without the gate shows "Support Fleeced · Tip jar", which opens an empty sheet now that the server serves `tips: []`). Branch `fix/settings-tip-row-gate`. User-visible (a row hides); no route, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite, an executed check, a sabotage pass, tsc, testid-lint and a code walk.
+
+- **The change:** new `mobile/src/state/useTipsOffered.ts`, byte-identical to the brief and to the file the paywall stack (#495) carries. `tipsOffered(config)` is true only for a non-empty `tips` array. `useTipsOffered()` subscribes to `['paywall-config','ios']` with `enabled: false`, so it never fetches. Both settings surfaces call it at the top level and render `settings-tip-row` only when the flag is on AND tips are offered. The "Fleeced Pro" row and the TipJar route are unchanged.
+- **Code walk:**
+  - Flag on, `tips: []` (`backend/server.py:36105`): `useTipsOffered.ts:14` → false, so the hub's `{tipsOffered ? (` (`SettingsHubScreen.tsx:320`) and the flat screen's (`SettingsScreen.tsx:1075`) render null. The Pro row still renders.
+  - Flag on, cached config with tips: the same lines are true, and the row renders at `SettingsHubScreen.tsx:322` / `SettingsScreen.tsx:1077`. Only `PaywallScreen.tsx:132` fills that cache on this binary, so the row comes back after the paywall config has been fetched this launch.
+  - Flag off: `paywallOn ? (` (`SettingsHubScreen.tsx:307`) and `paywallEnabled ? (` (`SettingsScreen.tsx:1051`) render null, as before.
+- **`check-tipjar.js` now has 11 assertions (was 9):**
+  - §8 pins the row inside the flag gate AND the `tipsOffered` gate on both surfaces, with the hook imported and called at the top level.
+  - §8b executes `tipsOffered` on the hook file, transpiled with stubs: undefined, null, `{}` and `{tips: []}` give false; `{tips: [tip]}` gives true.
+  - §8c executes `useTipsOffered` with a stubbed `useQuery`: key `['paywall-config','ios']`, `enabled: false`.
+- **Sabotage (5), each red and then restored byte-identical:** the hub's tips gate removed (§8 red), the flat screen's tips gate removed (§8 red), the hub hook called conditionally (§8 red), `length >= 0` (§8b red), `enabled: true` (§8c red). After the restore: 11/11.
+- **Results:**
+  - `check-tipjar` 11/11, `check-paywall` 11/11, and green on `check-settings-ia`, `check-settings-testids`, `check-settings-nav`, `check-feedback-public`, `check-mascot-ram` and `check-signin-identity-labels` (every check that names a Settings screen).
+  - All 120 `mobile/tests/check-*.js`: 0 red.
+  - `tsc --noEmit`: exit 0, clean.
+  - `testid-lint OK`.
+- **TestFlight (operator):** with `monetize.paywall` on and the server serving `tips: []`, open Settings. Neither the hub (`account.settings_hub` on) nor the flat Settings (off) shows a "Support Fleeced" row, and "Fleeced Pro" still shows on both. Older installed builds without this gate still show the empty sheet (accepted by head-eng).
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
