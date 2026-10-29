@@ -14,13 +14,13 @@
 | 4 | ShopAsset primary button (`ShopOffersBody.tsx`, `shop.like-btn`) | `Send this offer` | `Show it to @{name}`; VoiceOver: `Show this offer to @{name} in their Fleeced deck` |
 | 4 | Queue toasts (`utils/queueCalcTrade.ts`) | `Queued for @{name} — it'll show in their suggestions.` / `Already queued for @{name}.` | `It's waiting in @{name}'s Fleeced deck.` / `It's already in @{name}'s Fleeced deck.` |
 
-**Item 3's gates:**
-- **When the note shows:** marketing's eng condition is "only when the league has no picks recorded".
-  - `/api/league/picks` already makes `picks_supported` a data test while `picks.assign_tradeable` is on (`server.py`, `get_league_picks`: `supported = has_assigned_picks(league_id)` for ESPN). So the note shows on `!picksSupported && picks.assign_tradeable`, which means an ESPN league with no assigned pick.
-  - With that flag off, `picks_supported` is false for every ESPN league and recorded picks aren't returned, so nothing can be checked. The note is hidden rather than make a claim that may be false.
-  - Both flags are on today.
-- **When the link shows:** it also needs `picks.assign` (the grid) and a league id. It pushes `PickAssignment` on the root stack through `navigationRef`, as MemberEnteredMarker's correction link does.
-  - None of the calculator's three hosts (FeaturedTradeWindow, TradeBuildCanvas, TradeCalculatorScreen) renders inside a `Modal`, so the push is never hidden behind one.
+**Item 3's gates** (draft-eng's answer, 10-28, plus marketing's eng condition, "only when the league has no picks recorded"):
+- **When the new note shows:** only while **both** `picks.assign` (the grid) and `picks.assign_tradeable` are on.
+  - Then `/api/league/picks` makes `picks_supported` a data test (`server.py`, `get_league_picks`: `supported = has_assigned_picks(league_id)` for ESPN). So the note shows on `!picksSupported`, which means an ESPN league with no assigned pick, and never after setup.
+  - Both hooks are called on every render.
+- **Either flag off:** today's line stays (`Draft picks aren't available for ESPN leagues.`). Then picks can't be set up or traded, so it's true. Both flags are on today.
+- **The link:** shown with the new note when there's a league id. It pushes `PickAssignment` (`{ leagueId }`, no season) on the root stack through `navigationRef`, as MemberEnteredMarker's correction link does.
+  - None of the calculator's three hosts (FeaturedTradeWindow, TradeBuildCanvas, TradeCalculatorScreen) renders inside a `Modal`, so there's nothing to close first.
 
 **The toasts' reach:** `queueCalcTrade` serves both of its hosts, the shop and the calculator's ✓. Both queue the trade into @{name}'s Fleeced deck as a "likes you" card, so the new lines are true for both.
 
@@ -35,22 +35,23 @@
 ## 2. Schema & flag scope
 
 - **Tables, columns, routes:** none.
-- **Flags:** none new. The note reads `picks.assign_tradeable` and the link reads `picks.assign`; both already exist and are on.
+- **Flags:** none new. The new note and its link read `picks.assign` and `picks.assign_tradeable`; both already exist and are on.
 
 ## 3. Evidence scope
 
-- [x] **Structural suite:** `mobile/tests/check-b5-copy.js` (`npm run test:b5-copy`), 7 checks.
-  - every final string word for word, and each old string gone;
-  - item 3's gates: the data-test condition, with the server's `has_assigned_picks` line pinned too; the link's `picks.assign` gate; the root-stack navigation;
+- [x] **Structural suite:** `mobile/tests/check-b5-copy.js` (`npm run test:b5-copy`), 9 checks.
+  - every final string word for word, and each replaced string gone (item 3's old line stays only on its flag-off branch);
+  - item 3's gates: both flags, with each hook called on every render; the data-test condition, with the server's `has_assigned_picks` line pinned too; today's line with either flag off; the root-stack navigation;
   - item 4's button keeps its `testID`;
   - no banned word (beta, read-only, failed, error) in the new strings.
-- [x] **Sabotages:** 10 of 10 mutations turn it red (each string, each gate, the navigation target).
+- [x] **Sabotages:** 13 of 13 mutations turn it red (each string, each gate, a short-circuited hook call, the navigation target).
 - [x] **Existing suites:** `check-win-now.js`'s two pins moved to the new string. Its executable web test renders the receipt, so the web string is exercised. All 23 suites that read the edited files pass, and `tsc --noEmit` is clean.
 - [x] **Manual TestFlight checklist** (operator, on the 11-06 binary):
   1. In an ESPN league with no picks assigned, open the calculator. Expect `No draft picks are set up for this ESPN league yet.` and `Set up picks →`.
   2. Tap the link. Expect the pick assignment grid for that league.
   3. Assign one pick and go back to the calculator. Expect no note.
   4. In a Sleeper league, open the calculator. Expect no note.
+  4b. (Only if a pick flag is ever off.) In an ESPN league, expect today's line `Draft picks aren't available for ESPN leagues.`, with no link.
   5. In Shop, expect the primary button to read `Show it to @{their name}`. Tap it. Expect the toast `It's waiting in @{name}'s Fleeced deck.`
   6. Tap it again on the same offer, if it's still shown. Expect `It's already in @{name}'s Fleeced deck.`
   7. In the calculator, build a trade and tap ✓ (queue). Expect the same "waiting" toast.

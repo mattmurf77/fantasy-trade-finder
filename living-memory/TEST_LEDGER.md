@@ -9,19 +9,19 @@
 - **Item 1:** Win Now's uncalibrated receipt says `Uncalibrated estimate` (mobile `utils/winNow.ts`, web `js/win-now.js`).
 - **Item 3:** the calculator's ESPN note.
   - It reads `No draft picks are set up for this ESPN league yet.` and links `Set up picks →` to PickAssignment on the root stack.
-  - It shows only on `!picksSupported && picks.assign_tradeable`, because with that flag on `picks_supported` is the server's data test (`has_assigned_picks`).
-  - The link also needs `picks.assign`.
+  - It shows only while both `picks.assign` and `picks.assign_tradeable` are on (draft-eng's gates) and `picks_supported` is false. Under those flags that's the server's data test (`has_assigned_picks`).
+  - Either flag off keeps today's line.
 - **Item 4:**
   - the shop button reads `Show it to @{name}`, with VoiceOver `Show this offer to @{name} in their Fleeced deck`;
   - the queue toasts read `It's waiting in @{name}'s Fleeced deck.` and `It's already in @{name}'s Fleeced deck.`, for both of `queueCalcTrade`'s hosts.
 
-**Mobile:** `check-b5-copy.js`, 7 checks:
+**Mobile:** `check-b5-copy.js`, 9 checks:
 - every string pinned word for word, with the old ones gone;
-- item 3's gates, including the server line;
+- item 3's gates: both flags (with no short-circuited hook), the server line, and today's line with a flag off;
 - item 4's `testID`;
 - no banned words.
 
-**Sabotages:** 10 of 10 red. `check-win-now.js`'s two pins were updated, and its executable web test renders the new label. The 23 suites that read the edited files all pass, and `tsc --noEmit` is clean.
+**Sabotages:** 13 of 13 red. `check-win-now.js`'s two pins were updated, and its executable web test renders the new label. The 23 suites that read the edited files all pass, and `tsc --noEmit` is clean.
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 

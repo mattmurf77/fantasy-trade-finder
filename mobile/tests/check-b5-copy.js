@@ -25,19 +25,27 @@ const calc = read('mobile/src/components/InLeagueCalculator.tsx');
 check('item 3: the ESPN picks note and its link, word for word', () => {
   once(calc, '<Text style={styles.note}>No draft picks are set up for this ESPN league yet.</Text>');
   once(calc, '<Text style={styles.noteLink}>Set up picks →</Text>');
-  assert.ok(!calc.includes("Draft picks aren't available for ESPN leagues."));
 });
-check('item 3: the note shows only with no picks set up (the data test, under picks.assign_tradeable)', () => {
+check("item 3: both pick flags on (draft-eng's gates), each hook called every render", () => {
+  assert.match(calc, /const picksAssign = useFlag\('picks\.assign'\);/);
   assert.match(calc, /const picksTradeable = useFlag\('picks\.assign_tradeable'\);/);
-  assert.match(calc, /\{!picksSupported && picksTradeable \? \(\s*<View style=\{styles\.picksNote\}>/);
-  // The server side of the claim: with the flag on, picks_supported is false
-  // for an ESPN league only while it has no assigned picks.
+  assert.match(calc, /const picksSetup = picksAssign && picksTradeable;/);
+  assert.ok(!/useFlag\([^)]*\)\s*&&\s*useFlag/.test(calc), 'a short-circuited hook call');
+});
+check('item 3: the new note shows only with no picks set up (the data test under both flags)', () => {
+  assert.match(calc, /\{!picksSupported && picksSetup \? \(\s*<View style=\{styles\.picksNote\}>/);
+  // The server side of the claim: with picks.assign_tradeable on,
+  // picks_supported is false for an ESPN league only while it has no
+  // assigned picks.
   const server = read('backend/server.py');
   assert.match(server, /if not supported and tradeable:\s*\n\s*supported = has_assigned_picks\(league_id\)/);
 });
-check('item 3: the link needs picks.assign and a league, and opens PickAssignment on the root stack', () => {
-  assert.match(calc, /const picksAssign = useFlag\('picks\.assign'\);/);
-  assert.match(calc, /\{picksAssign && leagueId \? \(\s*<Pressable\s+testID="calc\.picks-setup-link"/);
+check("item 3: either flag off keeps today's line", () => {
+  assert.match(calc, /\{!picksSupported && !picksSetup \? \(\s*<Text style=\{styles\.note\}>Draft picks aren't available for ESPN leagues\.<\/Text>/);
+  once(calc, "Draft picks aren't available for ESPN leagues.");
+});
+check('item 3: the link needs a league and opens PickAssignment on the root stack', () => {
+  assert.match(calc, /\{leagueId \? \(\s*<Pressable\s+testID="calc\.picks-setup-link"/);
   assert.match(calc, /if \(navigationRef\.isReady\(\)\) navigationRef\.navigate\('PickAssignment', \{ leagueId \}\);/);
   assert.match(calc, /import \{ navigationRef \} from '\.\.\/navigation\/RootNav';/);
 });
