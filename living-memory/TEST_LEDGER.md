@@ -1,3 +1,38 @@
+## 2026-10-29 — #544 QA round 2: T-10 as an allowlist of uses; SQL normalised; the Calibration deadlock documented
+
+Gates: release-lead's #544 delta re-QA (everything passes but T-10: 22 of 39 new forms outside the documented residual got through). P1-1 (narrowed) and P3-1. Still dark. No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **T-10, round 3** (`backend/tests/test_receipts_append_only.py`): an allowlist of USES, not a deny-list of writes.
+  - **What it allows:** a receipts table, or a name bound to one, may appear only:
+    - as the subject of `select` / `select_from` / `join` / `outerjoin` / `insert` / `_dialect_insert` / `exists`, or `.c` / `.insert()` / `.join()` / `.select()` / `.alias()`;
+    - as `.name` in SQL text;
+    - bound to a local name;
+    - in `_delete_deck`'s two pinned statements.
+  - **What it flags:** passing it on, returning or yielding it, storing it (tuple, dict, attribute, class body, global, module alias), a default, a star, or any other method (`.delete`, `.drop`, `getattr(t, …)`, `Delete(t)`, `drop_all(tables=[t])`).
+  - **Name strings:**
+    - Constants, `+`, `%`, `.format`, `.join`, names bound to static strings, and loop variables over name tuples all make `metadata.tables[...]`, `.get`, `getattr`, `Table`/`table` lookups references.
+    - This replaces the bare-name rule, which flagged QA's admin-counts read.
+  - **SQL text:** comments and identifier quotes are stripped; `ONLY`, a schema and `MERGE … THEN DELETE/UPDATE` are covered. `.sql` files are read too.
+  - **Pins:** the bindings of `g`, `i`, `contract_ids`, `row_ids` in `_delete_deck` are pinned. No scope nested in it may rebind them (a walrus).
+  - **Scoping as Python does it:** comprehensions are their own scope, and a name bound in a function is local to it.
+  - **Account deletion:** `accounts._delete_user_data` loops over every private table by name (`receipts_grades` among them) and reuses its loop variables, so name lookups there aren't resolved. A direct reference is still checked, and a test pins `receipts_grades` on `_ADDITIONAL_PRIVATE_TABLES`.
+  - **Residual, documented** in the test, `docs/plans/receipts/LLD.md` (T-10 and §3) and the data dictionary:
+    - a table reached through a value computed at run time across functions;
+    - a runtime `metadata.sorted_tables` search;
+    - `exec`/`eval` or a file read and executed;
+    - the ORM (waived: none in the codebase).
+- **Tests:** 103.
+  - **Caught (89 cases):** the clean tree; QA's 27 round-1 and 37 round-2 cases (the ORM pair waived); 25 more of ours (walrus in `_delete_deck`, global, module alias, yield, `.append`, `conn.info[...]`, `.join` SQL, a `--` comment, `UPDATE ONLY`, a second accounts `_del`, …). Each is caught by its intended rule.
+  - **Left alone (8):** QA's 6 false positives plus 2 of ours.
+  - **Also:** the SQL normaliser; the accounts rights path; the file inventory.
+- **0 false positives across all 60 open PRs and main** (each tree scanned).
+- **P3-1 (the Calibration deadlock), documented, to fix before the cap goes above 0:**
+  - On Postgres the session prune can deadlock with `answer_grading_card` (card, then session). Postgres aborts one side; nothing is left partial.
+  - No prune order avoids it: `fold_grading_cards` locks session, then cards. The fix is one order for the two.
+  - Written in the prune's comment and in `config-reference.md` on the cap knob.
+- **Sabotages:** the 14 deletion sabotages are still 14/14 red.
+- **Suites:** T-10, retention, receipts, blind-grading DB, deletion coverage: 265 passed.
+
 ## 2026-10-29 — #544 QA: T-10 rebuilt on the syntax tree; grades pinned in the deck's transaction; Calibration at cap 0; sessions before cards
 
 Gates: release-lead's #544 QA (deletion code correct; NOT ready on the guard). P1-1, P2-1, P2-2 and both P3s, on #544. Still dark (cap 0). No route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.

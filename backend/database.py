@@ -7314,6 +7314,13 @@ def _delete_old_grading_sessions(cutoff: str, limit: int) -> int:
         # row, so a fold racing this either waits and finds the session gone,
         # or commits first and its cards are seen by the card delete below.
         # Cards first would let a fold land cards for a session about to go.
+        # Known, to fix before the cap is turned on (#544 QA P3-1): on
+        # Postgres this can deadlock with answer_grading_card answering the
+        # session's last card, which locks the card, then the session.
+        # Postgres aborts one side, so nothing is left partial: the prune
+        # retries next tick, or the answer returns a one-off 500. No order
+        # here avoids it: the fold locks session then cards, the answer card
+        # then session. The fix is one order for those two (session first).
         n = conn.execute(delete(gs).where(gs.c.session_id.in_(ids))).rowcount or 0
         conn.execute(delete(gc).where(gc.c.session_id.in_(ids)))
         return n

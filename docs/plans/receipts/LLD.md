@@ -167,7 +167,8 @@ Additive tables in `backend/database.py` (house style: soft references, no FKs �
 # receipts_grades — APPEND-ONLY. One row per (impression, window, grader_version)
 # reaching a terminal status. Never UPDATEd, never DELETEd to correct a grade;
 # corrections = new grader_version (D-3). The one delete is legal's 365-day retention
-# cap (`_delete_deck`, 2026-10-29) and account deletion (T-10 pins both). The impression row is the preregistered prediction; this table records only
+# cap (`_delete_deck`, 2026-10-29) and account deletion (T-10 pins both; its residual,
+# not caught: run-time-computed names, exec/eval, the ORM, which the codebase doesn't use). The impression row is the preregistered prediction; this table records only
 # how consensus moved afterward.
 receipts_grades_table = Table("receipts_grades", metadata,
     Column("id",              Integer, primary_key=True, autoincrement=True),
@@ -442,7 +443,7 @@ flags off; tables inert. Mobile ships in the normal EAS cadence; server can depl
   filter stands as defense in depth), dedup-by-earliest, min-n
   gating, all-windows payload, flag-off 404s; `n == len(rows used)` (post-dedup,
   post-coverage) asserted; Wilson implementation against 3/5 → [0.231, 0.882].
-- **T-10 append-only:** no UPDATE/DELETE of a `receipts_` table anywhere in `backend/` or `scripts/` but the retention cap's two statements in `_delete_deck` and account deletion (`backend/tests/test_receipts_append_only.py`, AST-based since #544's QA).
+- **T-10 append-only:** `backend/tests/test_receipts_append_only.py` (AST-based since #544's QA; an allowlist of uses since its round 2). A receipts table, or a name bound to one, may appear anywhere in `backend/` or `scripts/` only as the subject of a read or an insert (`select`, `select_from`, `join`, `insert`, `_dialect_insert`, `exists`, `.c`, `.insert()`), as `.name` in SQL text (itself checked), bound to a local name, or in the retention cap's two pinned statements in `_delete_deck`. Account deletion removes a user's grades by name, through `accounts._ADDITIONAL_PRIVATE_TABLES`. SQL text in `.py` and `.sql` files that writes one is a finding. **Residual, not caught:** a table reached through a value computed at run time across functions, a runtime search of `metadata.sorted_tables`, code or SQL that only exists at run time (`exec`/`eval`, a file read and executed), and the ORM (a mapped class: `session.query(Grade).delete()`, `delete(Grade)`; the codebase has no ORM).
 - **Structural (`mobile/tests/check-receipts.js` + npm script):** ReceiptsScreen
   registered as root-stack push; `FeedbackFAB activeScreen="Receipts"` exactly once; all
   three window chips bound to one payload; no bare `Receipt` component name (collision
