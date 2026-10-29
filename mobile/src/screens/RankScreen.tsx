@@ -138,11 +138,9 @@ export default function RankScreen() {
   const gestureEnabled = useFlag('swipe.gesture_audit');
   // Teardown flags (default false — flag off is byte-identical):
   // S4 PRD-02 unlock-copy fixes ride the outlook-inline flag; S3 PRD-02
-  // gives the long-press info sheet a visible ⓘ twin; S2 PRD-04 ride-along
-  // promotes content-carrying faint text to dim.
+  // gives the long-press info sheet a visible ⓘ twin.
   const unlockCopyOn = useFlag('ux.outlook_inline_default');
   const menuOn = useFlag('ux.player_context_menu');
-  const cleanupOn = useFlag('visual.chalkline_cleanup');
 
   // FB #80 — explicit format switch from the header toggle. On failure the
   // local state is untouched (the toggle stays where it was) — just toast.
@@ -441,11 +439,6 @@ export default function RankScreen() {
             </Pressable>
           </View>
         ) : null}
-
-        {/* S2 PRD-04 ride-along: content-carrying hint faint → dim. */}
-        <Text style={[styles.modeHint, cleanupOn && styles.modeHintDim]}>
-          Trios · tap Rank below for more modes
-        </Text>
 
         {/* FB #80 — SF/1QB scoring-format toggle. Defaults to the selected
             league's detected format (useLeagueFormatDefault in RootNav);
@@ -918,13 +911,6 @@ const styles = StyleSheet.create({
   },
   streakNum: { ...type.data, color: chalk.base },
   streakLabel: { ...type.bodySm, color: chalk.dim },
-  modeHint: {
-    ...type.bodySm,
-    color: chalk.faint,
-    textAlign: 'center',
-    marginTop: -space.xs,
-  },
-  modeHintDim: { color: chalk.dim },
   // S3 PRD-02 — trio card wrapper hosts the absolute ⓘ twin.
   // #243: each wrap is one third of the 3-up row.
   trioCardWrap: { flex: 1, position: 'relative' },
