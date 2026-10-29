@@ -27,8 +27,9 @@
 //       bid row gated on faab and a bid; rows numbered with no gap; then
 //       the copy disclosure as the last line. The CTA passes
 //       clipboardText: row.name                                            [AST]
-//   S9  the eight NO_ADD_REASON strings verbatim; explainNoAdd and
-//       resolveAddPlatform byte-identical to 04eae95b (AC-10)              [AST]
+//   S9  the eight NO_ADD_REASON strings verbatim (the three platform
+//       bodies are #385's, LEG-M10); explainNoAdd and resolveAddPlatform
+//       byte-identical to 04eae95b (AC-10)                                 [AST]
 //   H1  both ClaimSheet hosts pass `surface` (free_agents / usage_trends)
 //       and a `leagueName` that can only name the claim league             [AST]
 //   H2  FreeAgentsScreen's render chain tests query.isError before
@@ -495,21 +496,24 @@ for (const rel of [CLAIM, FREE_AGENTS, USAGE_TRENDS]) {
   assert(drop !== -1 && drop < stepsAt && stepsAt < cta, 'S8 the steps sit between the drop section and the CTA');
 }
 
-// S9 — the non-Sleeper claim paths are byte-identical to 04eae95b
-// (#351 AC-10). Expected values copied from that commit on purpose.
+// S9 — the non-Sleeper claim paths match their pinned values (#351 AC-10).
+// Titles, `local`, explainNoAdd and resolveAddPlatform are copied from
+// 04eae95b; the espn / mfl / fleaflicker bodies are #385's (LEG-M10,
+// re-baselined 2026-10-29 for release-lead), because the 04eae95b bodies
+// are false copy that must not return.
 {
   const EXPECTED_REASONS = {
     espn: {
       title: "Can't add in ESPN leagues yet",
-      body: 'This league is imported from ESPN with read-only access, so Fantasy Trade Finder can’t make roster moves there. Open the ESPN Fantasy app to add this player.',
+      body: "Roster moves for this ESPN league can't be made from Fleeced. Open the ESPN Fantasy app to add this player.",
     },
     mfl: {
       title: "Can't add in MFL leagues yet",
-      body: 'This league is linked to MyFantasyLeague with read-only access, so Fantasy Trade Finder can’t make roster moves there. Open MFL to add this player.',
+      body: "Roster moves for this MFL league can't be made from Fleeced. Open MFL to add this player.",
     },
     fleaflicker: {
       title: "Can't add in Fleaflicker leagues yet",
-      body: 'This league is linked to Fleaflicker with read-only access, so Fantasy Trade Finder can’t make roster moves there. Open Fleaflicker to add this player.',
+      body: "Roster moves for this Fleaflicker league can't be made from Fleeced. Open Fleaflicker to add this player.",
     },
     local: {
       title: "Can't add in this league",
