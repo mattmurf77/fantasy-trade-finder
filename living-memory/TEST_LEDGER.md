@@ -15,6 +15,65 @@ Client fix only (head-eng's ruling: "(a) accept for launch, (c) a client fix aft
   2. **Partial batch:** send a batch where at least one offer goes through and at least one is refused. Expect the success buzz, the plan opens, with mixed "Sent, awaiting reply" and "Send failed" rows.
   3. **All-success batch:** send a clean batch. Expect the success buzz, every row "Sent, awaiting reply", and nothing else changed in the flow.
 
+## 2026-10-28 — Eval follow-ups: models-lead's F1–F4, E-b5 and the E-b3 hook; #501 and #503 QA P3s; #515's `market_coerced`
+
+Gates: eval code only (`backend/eval/{data,replay,scorers,contract,persistence,flip_read,bdk_audit}.py`, the new `backend/eval/redaction.py`), plus the runbook and evidence-contract lines. No route, schema, event, flag, knob or engine-module change: `value_model.py` is untouched, and the hook lives in eval. D-056: `FTF_SKIP_SIM_GATE=1` posture, and the evidence is pytest.
+
+- **F1 (re-read stability):**
+  - The loader checks only `display_moves` delivered as of the read. A malformed later move leaves a same-as_of re-read stable, and a read past that delivery is `pack_integrity`.
+  - G1 also checks every pack's whole move record (`data.display_moves_problem`), past `as_of` included, so the writer is flagged at once (`display_moves_malformed`).
+- **F2:**
+  - `EXCLUSION_RULE_VERSION` goes from 5 to 6.
+  - `LoggedOrderScorer` ranks by displayed position: `card_dict` gains the logged `position`, which the contract grants only to `logged`.
+- **F3:** B-DK-4..6 exemptions are split by deck (`protected_by_deck`: recorded / no record) and printed.
+- **F4:** "B-DK-7 after-cut: not checked (n)". n counts the live-evidence (no-pack) Trades decks with a never-delivered withdrawal inside their first `REPEAT_WINDOW` cards.
+- **E-b5:** `EvalRun.redacted_partners` is the distinct `redacted:` tokens among the window's partners, rows and packed cards alike. It's persisted and printed, a count only.
+- **E-b3:** `backend/eval/redaction.redact_model_store(tokens)`, the deletion scrub's hook.
+  - It rewrites every value-model record's `partner_rates` keys naming a deleted user, as viewer or as partner, to that user's token. Rates are kept.
+  - The write is atomic; a re-run with the same map is a no-op; the serve cache reloads.
+  - If the store keeps changing under it, it raises so the scrub retries.
+  - **Added 2026-10-29 (head-eng's check, (a) and (b)):**
+    - A torn line that may hold a deleted id is dropped and counted; that covers a whole id and a line cut off mid-id. The loader skips such lines, so serving is unchanged.
+    - The window is documented: no lock exists to share, so the scrub must call the hook before `nightly_refit` in the daily tick.
+- **Redacted partners in the B-DK audit (head-eng, 2026-10-29):** a card whose partner is a `redacted:` token is not auditable for B-DK-4..7, because the scrub removes its protection and the partner's `qb_te`. Its deck counts as incomplete for B-DK-7. The count is `redacted_cards`, printed.
+  - `_short_deck` is unchanged: a scrubbed protection can only break the fixed point, never make one.
+  - Tests: +2 audit tests (3 cases), +4 model-store cases.
+  - Sabotage, each red then restored (6): the card loop's redaction check; the repeat check; never dropping a torn line; no mid-id tail match; no render line; a substring match on the prefix.
+  - All `test_eval_*` plus `test_deck_value_model.py`: 415 passed.
+- **#529 QA (release-lead, NO-GO on CI only), 2026-10-29:** F2's logged `position` failed four `test_evidence_pack.py` guards. None of my suite lists ran that file.
+  - The codec is unchanged (PACK_VERSION 1 is frozen). `position` is rebuilt by the reader, like `impression_id`: the two contract tests exempt both (`REBUILT`), and the golden's scorer check (c) re-adds `position` to the round-tripped cards.
+  - `test_evidence_pack.py`: 50 passed. **Full `pytest backend/tests`: 9741 passed, 2 skipped.**
+- **#501 QA P3s:**
+  - An anchor not after its card is rejected.
+  - Ghost and null cases are pinned (QA's probes).
+  - G7 leaves a `pack_integrity` deck's upgrade misses to G1, as row gone already did.
+  - The `pack_integrity` doc line now says a moves-integrity pack keeps its cards merged.
+- **#503 QA P3s:**
+  - A record whose market value is neither null nor a number (or whose `market_coerced` isn't a list of str) is `record_failed`.
+  - The position half of coverage is pinned.
+  - The B-DK-7 scope line is corrected.
+- **#515's `market_coerced`:** a card holding a listed asset is not auditable for breakup and filler. B-DK-6 still checks it.
+- **Tests:**
+  - `test_eval_display_moves.py`: 33 (+7: two undelivered malformed records left to G1, F1's re-read, two ghost cases, null, the logged scorer, G7).
+  - `test_eval_bdk_audit.py`: 77 (+8: coerced, four malformed records, position coverage, F3, F4).
+  - `test_eval_redaction.py`: 3. `test_eval_redaction_model_store.py`: 5.
+  - The version pins moved to 6, and the G1 and report version strings changed.
+- **Sabotage, each red then restored (11):**
+  - F1 validating every move (4 red);
+  - no anchor-after check;
+  - no G1 whole-header check (3);
+  - G7 counting `pack_integrity` decks;
+  - the logged scorer by `card_index`;
+  - `market_coerced` ignored;
+  - no market-value check (2);
+  - F3 always "recorded";
+  - F4 without the window bound;
+  - E-b5 matching a substring;
+  - the redaction on the viewer side only (2).
+  - The clean run: 205.
+- **Eval-related suites** (`test_eval_*`, `test_value_model*`, packed and deferred evidence, blind grade, scorecard, the new redaction tests): 811 passed.
+- **B-DK-6 with a coerced ±inf** (release-lead's #515 QA): it stays audited. The null can only lower the audit's count below the filter's, so a served card's verdict can't flip; QA saw mismatches on dropped cards only.
+
 ## 2026-10-28 — Paywall price rise moves to 2027-01-02 04:00 UTC (App Store Connect's US start for a Jan-2 schedule; follow-up to #494)
 
 Gates: a value change to the merged #494 (`bef9f5db`), as its own PR off main (`fix/paywall-rise-jan2`), requested by monetization-pm (head-product authorized; the operator approved scheduling both App Store price changes for 2027-01-02 on 2026-10-28). release-lead delta-QAs it. Still dark (`monetize.paywall`). D-056: `FTF_SKIP_SIM_GATE=1` posture.
@@ -139,6 +198,25 @@ Gates: release-lead's #519 QA (GO-with-notes at `8af4189a`), P3-1 to P3-3. Follo
   - the exit drain's docstring now says the guard is defensive;
   - LLD's `deck_i1_check` line names the exit drain's restart and the refusal path;
   - #519's PR body is fixed (44 tests, the guard commit).
+
+## 2026-10-28 — Send pre-flight budget: no ESPN/MFL write starts after 30 s (release-lead QA P1-A on #527)
+
+Full gates, platforms-eng (release-lead's P1-A, due before the 11-06 iOS binary). Server only, branch `fix/send-preflight-budget`, stacked on `fix/espn-mfl-send-failures` (#513). No new code, copy, schema, flag or event. An existing 502 gains one more cause. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest.
+- **Change:**
+  - `_SEND_PREFLIGHT_BUDGET_S = 30`, with an injectable `_send_clock`.
+  - `_mfl_propose_core` / `_espn_propose_core` take `t0` at entry. Immediately before the write, a core past the budget skips it and answers its existing R3 502 (`mfl_unavailable` / `espn_unavailable`, `kind: "network"`, I-2's copy). It also logs one WARNING line.
+  - Scope: [docs/plans/c10-send-failures/scope.md](../docs/plans/c10-send-failures/scope.md) § Pre-flight budget.
+- **Tests (`backend/tests/test_send_preflight_budget.py`, 6 new):**
+  - A pin: budget + write timeout + MFL spacing < 60, for both platforms.
+  - MFL and ESPN: the mocked live read advances the injected clock. At budget + 0.01 s, the response is the unavailable code with the R3 copy word for word and `detail` == `message`. The write mock is never called, there is no `trade_sent` row, and one budget WARNING line is logged. At budget − 0.01 s, the write runs (200).
+  - Overhaul through the real MFL core: every offer past its budget becomes 5 `send_failed` attempts (never `outcome_unknown`) with `mfl_unavailable` and the R3 copy. Reservations are released and nothing is written.
+- **Sabotage, each red then restored byte-identical (`cmp`, run with `python3 -B` per G-060):**
+  - MFL guard removed → 2 red;
+  - both guards moved after the write → 3 red;
+  - budget raised to 50 → 1 red (the pin).
+- **Targeted:** 366 passed in 15 files. They are the new file, `test_c10_send_failures`, `test_espn_propose_route`, `test_mfl_propose_route`, `test_espn_write`, `test_mfl_write`, `test_i2_espn_ownership`, `test_i2_mfl_ownership`, `test_i2_overhaul`, `test_i2_sleeper_ownership`, `test_overhaul_api`, `test_overhaul_service`, `test_overhaul_store`, `test_bilateral_overhaul` and `test_mfl_trade_lifecycle`.
+- **Not run:** the full backend suite (CI runs it); live ESPN/MFL (all mocked); `tsc` / testid-lint (no mobile change). The 60 s iOS timeout is static evidence. Release-lead's TestFlight step confirms it: Network Link Conditioner, a custom 100% loss profile, then read the alert time (~60 s confirms, ~91 s refutes).
+
 ## 2026-10-27 — ESPN/MFL send failures: plain copy, raw provider bodies to logs only, outcome-unknown on post-send timeouts (C10)
 
 Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item that prevents a real-money-adjacent harm"). Server only. API surface: new 502 `espn_outcome_unknown` / `mfl_outcome_unknown`, and `detail`/`message` are now plain placeholder copy on propose-espn, propose-mfl and respond-mfl; no schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture, the evidence is pytest. Branch `fix/espn-mfl-send-failures`.
@@ -285,6 +363,56 @@ Full gates (scope `docs/plans/prelaunch-onboarding/scope-account-only-verificati
   - **Sabotage 11/11 red:** QA's P1 reverted, demo looked up, an extra top-level key, an extra key in the unverified answer, the query user_id answered, X-User-Id looked up, a 401-path probe, plus round 1's 4 re-run.
 - **Mobile:** `check-account-only-verification.js`, 5 AST pins (pin 3 is now unawaited; pin 5 is the `setUser` reset). **Sabotage:** 7/7 red in round 1, and 5/5 on the new and changed pins. tsc clean; `check-win-now-recovery` passes.
 - **Runs:** see the PR (the full `check-*.js` loop, testid-lint, backend suites).
+## 2026-10-28 — Settings tip row: hidden unless the cached paywall config offers tips (B8 gate, off main)
+
+Gates: head-eng's extraction of #495's B8 tip-row gate after release-lead's #494 QA (with `monetize.paywall` on, a binary without the gate shows "Support Fleeced · Tip jar", which opens an empty sheet now that the server serves `tips: []`). Branch `fix/settings-tip-row-gate`. User-visible (a row hides); no route, schema, flag or analytics change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is the structural suite, an executed check, a sabotage pass, tsc, testid-lint and a code walk.
+
+- **The change:** new `mobile/src/state/useTipsOffered.ts`, byte-identical to the brief and to the file the paywall stack (#495) carries. `tipsOffered(config)` is true only for a non-empty `tips` array. `useTipsOffered()` subscribes to `['paywall-config','ios']` with `enabled: false`, so it never fetches. Both settings surfaces call it at the top level and render `settings-tip-row` only when the flag is on AND tips are offered. The "Fleeced Pro" row and the TipJar route are unchanged.
+- **Code walk:**
+  - Flag on, `tips: []` (`backend/server.py:36105`): `useTipsOffered.ts:14` → false, so the hub's `{tipsOffered ? (` (`SettingsHubScreen.tsx:320`) and the flat screen's (`SettingsScreen.tsx:1075`) render null. The Pro row still renders.
+  - Flag on, cached config with tips: the same lines are true, and the row renders at `SettingsHubScreen.tsx:322` / `SettingsScreen.tsx:1077`. Only `PaywallScreen.tsx:132` fills that cache on this binary, so the row comes back after the paywall config has been fetched this launch.
+  - Flag off: `paywallOn ? (` (`SettingsHubScreen.tsx:307`) and `paywallEnabled ? (` (`SettingsScreen.tsx:1051`) render null, as before.
+- **`check-tipjar.js` now has 11 assertions (was 9):**
+  - §8 pins the row inside the flag gate AND the `tipsOffered` gate on both surfaces, with the hook imported and called at the top level.
+  - §8b executes `tipsOffered` on the hook file, transpiled with stubs: undefined, null, `{}` and `{tips: []}` give false; `{tips: [tip]}` gives true.
+  - §8c executes `useTipsOffered` with a stubbed `useQuery`: key `['paywall-config','ios']`, `enabled: false`.
+- **Sabotage (5), each red and then restored byte-identical:** the hub's tips gate removed (§8 red), the flat screen's tips gate removed (§8 red), the hub hook called conditionally (§8 red), `length >= 0` (§8b red), `enabled: true` (§8c red). After the restore: 11/11.
+- **Results:**
+  - `check-tipjar` 11/11, `check-paywall` 11/11, and green on `check-settings-ia`, `check-settings-testids`, `check-settings-nav`, `check-feedback-public`, `check-mascot-ram` and `check-signin-identity-labels` (every check that names a Settings screen).
+  - All 120 `mobile/tests/check-*.js`: 0 red.
+  - `tsc --noEmit`: exit 0, clean.
+  - `testid-lint OK`.
+- **TestFlight (operator):** with `monetize.paywall` on and the server serving `tips: []`, open Settings. Neither the hub (`account.settings_hub` on) nor the flat Settings (off) shows a "Support Fleeced" row, and "Fleeced Pro" still shows on both. Older installed builds without this gate still show the empty sheet (accepted by head-eng).
+## 2026-10-28 — B5 launch copy, trades-eng's items 1, 3, 4 (marketing-lead addendum 10)
+
+**Gates:**
+- **Full gates.** The scope block is `docs/plans/launch-copy-b5-trades-2026-10-28.md`.
+- **What changes:** copy plus one navigation link; no route, schema, flag or event change.
+- **D-056:** `FTF_SKIP_SIM_GATE=1` posture. The evidence is the structural suite, tsc, and the TestFlight checklist in the scope block.
+
+**The changes:**
+- **Item 1:** Win Now's uncalibrated receipt says `Uncalibrated estimate` (mobile `utils/winNow.ts`, web `js/win-now.js`).
+- **Item 3:** the calculator's ESPN note.
+  - It reads `No draft picks are set up for this ESPN league yet.` and links `Set up picks →` to PickAssignment on the root stack.
+  - It shows only while both `picks.assign` and `picks.assign_tradeable` are on (draft-eng's gates) and `picks_supported` is false. Under those flags that's the server's data test (`has_assigned_picks`).
+  - Either flag off keeps today's line.
+- **Item 4:**
+  - the shop button reads `Show it to @{name}`, with VoiceOver `Show this offer to @{name} in their Fleeced deck`;
+  - the queue toasts read `It's waiting in @{name}'s Fleeced deck.` and `It's already in @{name}'s Fleeced deck.`, for both of `queueCalcTrade`'s hosts.
+
+**Mobile:** `check-b5-copy.js`, 9 checks:
+- every string pinned word for word, with the old ones gone;
+- item 3's gates: both flags (with no short-circuited hook), the server line, and today's line with a flag off;
+- item 4's `testID`;
+- no banned words.
+
+**#531 QA (release-lead, NO-GO at `05c153e5`), fixed:**
+- **P1-1:** saving picks left the calculator's ESPN note and pickers stale for up to 5 minutes. `PickAssignmentScreen`'s assign and seed `onSuccess` now invalidate `['league-picks', leagueId]`.
+- **P3s:** the toast ternary, the shop name's normalizer and the hooks' order are pinned. The banned-words check reads the strings from the source.
+- **P2-1:** the TestFlight checklist is rewritten: real-data warnings, preconditions and paths; 4b not run; the web half goes live at merge.
+- `check-b5-copy.js` is now 12 checks.
+
+**Sabotages:** 20 of 20 red. `check-win-now.js`'s two pins were updated, and its executable web test renders the new label. The 23 suites that read the edited files all pass, and `tsc --noEmit` is clean.
 
 ## 2026-10-27 — Paywall config: price rise at 2027-01-01 00:00 America/Los_Angeles; `tips: []` (#494 follow-up)
 
