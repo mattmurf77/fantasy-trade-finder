@@ -1,3 +1,24 @@
+## 2026-10-27 — Link sheet: Fleaflicker-specific intro and done copy (legal R27.5), stacked on #385
+
+Fleaflicker has no send path, so `PlatformLinkSheet`'s shared "Nothing is posted to {LABEL[platform]} unless you sign in and send a trade you approve" line is wrong for it. Legal's text now renders when `platform === 'fleaflicker'`; MFL keeps #385's strings (a whitespace-insensitive diff shows additions only). Not behind a flag of its own: it is dead code until `fleaflicker.link` is turned on. D-056: no simulator; `FTF_SKIP_SIM_GATE=1` posture.
+
+- **Guard** `mobile/tests/check-fleaflicker-sheet-copy.js` (`npm run test:fleaflicker-sheet-copy`), 11 assertions:
+  - both Fleaflicker strings are legal's text verbatim (curly apostrophe in "can’t");
+  - the intro is the done step's first and last sentences;
+  - each string renders only inside the `platform === 'fleaflicker'` branch;
+  - the MFL else-branches and the MFL-only sign-in step are unchanged;
+  - "Nothing is posted" appears exactly 3 times, so no new shared send promise slips in.
+- **Sabotage, 7 of 7 red, then restored:**
+  1. intro branch dropped → 3b, 4a;
+  2. done branch dropped → 3c, 4b;
+  3. straight apostrophe → 1a, 1c, 2;
+  4. intro paraphrased → 1a, 2;
+  5. MFL intro reworded → 4a;
+  6. new shared "Nothing is posted" string → 5;
+  7. done-branch gate widened to every platform → 3c, 4b.
+- **Run:** `tsc --noEmit` clean; `testid-lint` OK; all 109 `mobile/tests/check-*.js` suites pass (108 existing + this one). Backend untouched.
+- **TestFlight (not run):** this can only be checked once `fleaflicker.link` is on, in a test build. Then link a Fleaflicker league: the input step reads "Fleaflicker leagues import team names and rosters. Trades can’t be sent to Fleaflicker from the app, so nothing is posted there." and the done step adds "Rankings, tiers, trios and trade ideas all work." before "Trades can’t…". Neither mentions signing in. An MFL link (flag `mfl.link`) still reads "Nothing is posted to MFL unless you sign in and send a trade you approve."
+
 ## 2026-10-29 — The model-store hook hardened (#542 QA P3s)
 
 Gates: eval code only (`backend/eval/redaction.py`) plus the runbook. No route, schema, event, flag, knob or engine-module change. The hook stays dark until trades-eng's scrub calls it.
