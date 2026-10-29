@@ -665,6 +665,10 @@ export async function apiRequest<T = unknown>(
       _clockMs() - startedAt,
       _leftForegroundCount !== foregroundEpoch,
     );
+    // Gate off (or a background call): thrown right here, exactly as today,
+    // with no extra async hop before the caller's own retry/backoff runs
+    // (trades-eng: check-win-now-recovery T3's fake clock depends on it).
+    if (opts.background || !_gateIsOn()) throw err;
     return _afterGateFailure<T>(err, path, opts);
   } finally {
     _noteWrite(path, opts.method || 'GET');
