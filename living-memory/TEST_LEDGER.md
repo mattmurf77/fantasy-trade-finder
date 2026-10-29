@@ -146,6 +146,43 @@ Full gates, platforms-eng lead (head-eng pre-launch triage C10, "the only C item
   - The C10 file is 89 tests (19 new): pins for each string, a banned-word sweep of every C10 copy constant, the kind split, and MFL 429 → 8d. The overhaul unknown attempts carry 8e/8f.
   - New sabotages, each red then restored: `network` falls back to the rejected line → 7 red; a curly apostrophe → 10; "failed" in a constant → 14. The earlier five re-run at 25 / 13 / 4 / 15 / 2.
   - Targeted rerun, on the same 22 files at `1a92a7ab` plus this change: 549 passed (530 + the 19 new).
+## 2026-10-28 — ESPN/MFL client send timeout: wait the server's worst case, "couldn't confirm" instead of "try again" (C10 client half)
+
+Full gates, platforms-eng worker (head-eng GO 2026-10-28, for the 11-06 iOS binary). Mobile only: no route, schema, flag or event change. D-056: `FTF_SKIP_SIM_GATE=1` posture; the evidence is an executed structural suite, a code walk and a TestFlight checklist. Branch `fix/espn-mfl-client-send-timeout`, scope [docs/plans/client-send-timeout/scope.md](../docs/plans/client-send-timeout/scope.md).
+
+- **What it pins:** propose-espn / propose-mfl wait 91 s (`PLATFORM_SEND_TIMEOUT_MS`, `mobile/src/api/sendOutcome.ts`: the server's worst case for one propose, MFL 76 s = crosswalk 15 + resolve_host 15 + rosters 15 + futureDraftPicks 15 + spacing 1 + write 15, ESPN 45 s, plus a 15 s margin). The overhaul send waits (min(n × 76, 120) + 15) s: 91 s for one offer, 135 s for two or more. The cap is `GUNICORN_TIMEOUT_S` = gunicorn's `--timeout 120` (`render.yaml:16`), a review change added the same day. Every other call is unchanged. A timeout, no answer, `*_outcome_unknown`, `internal_error` or a code-less 5xx shows `Check before resending` with OK / Open ESPN-MFL only, never "try again" or a Retry; the overhaul re-reads its attempts on the plan.
+- **Final copy (review change, same day):** marketing-lead addendum 10 items 8a/8b/8e/8f/8i, word for word with straight apostrophes, in `utils/sendOutcomeCopy.ts`:
+  - outcome-unknown body: the server's `detail` for its own code, else `Couldn't confirm whether this trade reached ESPN. Check your league's pending trades on ESPN before you send it again.` (MFL likewise);
+  - `*_write_failed`: title `Not sent`, body `detail` alone with the "rejected the request:" prefix dropped, and the 8a/8b line as the no-detail fallback;
+  - the overhaul summary line is not in marketing's set: kept, marked PENDING MARKETING.
+- **`node mobile/tests/check-send-timeout.js` (new, `npm run test:send-timeout`): 24/24, exit 0** (19 at first, 20 with the cap, 24 with the final copy). It executes the real `api/client.ts`, `sendOutcome.ts`, `sendInEspn.ts`, `sendInMfl.ts`, `overhaul.ts` and `sendOutcomeCopy.ts` under a fake clock with a scripted `fetch`:
+  - the constant equals the server sum, with every term parsed from `backend/{espn,mfl}_write.py`, `mfl_service.py` and `espn_service.py`;
+  - each propose core in `server.py` makes exactly the counted provider calls on their default timeouts;
+  - `GUNICORN_TIMEOUT_S` equals the web service's `--timeout` parsed from `render.yaml`, one propose (76 s) fits under it uncapped, and `overhaulSendTimeoutMs(10)` = 135 s, the cap;
+  - each send is still waiting at 15 s and times out at its long timeout; GETs, prepare-send, refresh and a plain POST still time out at 15 s;
+  - 18 server answers are classified through the real client;
+  - every final string is pinned word for word (C4); the body takes the server's `detail` only for its own outcome-unknown code (C5, 8 cases);
+  - a sweep of the copy module (C6): no "failed" or "error" in any literal or output, and no "nothing was sent", "try again" or "retry" in the outcome-unknown copy;
+  - the AST shows both buttons and the overhaul summary branch on the unknown case first, with no resend and buttons exactly OK + Open ESPN/MFL (so "Couldn’t send" never shows for it); `*_write_failed` → `Not sent` + `detail || sendNotSentFallback(...)`, with the old prefix gone;
+  - no POST is retried on 502/503/504/network drop (a GET control is); `session_not_initialized` is the only POST replay.
+- **Sabotage, each red then restored byte-identical (file restored from a copy or checked out again, working tree diff clean), 12 runs:**
+  - (a) the long timeout removed from propose-mfl → 1 red (B propose-mfl);
+  - (b1) a timeout classified as not-unknown → 1 red (C1);
+  - (b2) the ESPN button skips the unknown branch, so a timeout falls to the generic "Please try again" → 1 red (D ESPN);
+  - (c) gateway/network auto-retry enabled for POST → 4 red (C2, C3, E1, E3);
+  - (d) server drift, `mfl_write._HTTP_TIMEOUT` 15 → 20 → 1 red (A3);
+  - (e) server drift, a second provider read in `_espn_propose_core` → 1 red (A2);
+  - (f) the overhaul cap removed, back to (n × 76 + 15) s → 1 red (A6);
+  - (g) server drift, `render.yaml` `--timeout 120` → 90 → 1 red (A5);
+  - (h) ESPN `write_failed` "ESPN rejected the request:" prefix restored → 1 red (D ESPN write_failed);
+  - (i) a Retry button (re-calling `doPropose`) added on MFL outcome-unknown → 1 red (D MFL unknown);
+  - (j) "failed" slipped into the not-sent fallback → 2 red (C4, C6);
+  - (k) the 8e/8f body back to the curly placeholder → 2 red (C4, C5).
+- **Worker class, for the record:** with `--threads 4` (#398, 2026-10-25), gunicorn runs gthread. Its `--timeout` is a heartbeat: the gthread run loop calls `notify()` every second whatever the request threads are doing; gunicorn's config doc says that for non-sync workers it "is not tied to the length of time required to handle a single request". So today the 120 s kill only applies under the sync-worker rollback. The cap stands either way, because attempts are persisted before the first provider call and the plan shows them. The scope's known limits cover both cases.
+- **All suites (after the final copy):** `for f in tests/check-*.js` → 121/121 pass, including the new one, `check-send-button-platform`, `check-team-overhaul`, `check-apple-revoke-on-delete` (its `timeoutForRequest` probe still works) and `check-win-now-recovery` (39/39).
+- **`npx tsc --noEmit` (mobile): exit 0, after the final copy.** **`mobile/scripts/testid-lint.sh`: exit 0** ("testid-lint OK"; no testIDs added).
+- **Backend:** not run, because nothing in the backend changed. The server half (`*_outcome_unknown`) is #513's `test_c10_send_failures.py`.
+- **Manual TestFlight checklist:** scope §3, nine steps (Network Link Conditioner on an MFL and an ESPN test league, airplane mode after send, normal send, regressions, and the overhaul if it is re-enabled). **Unrun.** Every real-league send needs the operator's go at action time.
 
 ## 2026-10-28 — QA P3 follow-ups: #489 (docs claim, LLD guard counts, deadlock-safe lock test), #487 (read pins, docstring), #485 (exit-drain restart, after-write flush)
 
